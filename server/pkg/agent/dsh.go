@@ -354,6 +354,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			result.Error = withAgentStderr(result.Error, "dsh", stderrBuf.Tail())
 		}
 		result.DurationMs = time.Since(started).Milliseconds()
+		*result = withQuotaPlanLimits("dsh", *result, time.Now())
 		b.cfg.Logger.Info("dsh finished", "pid", cmd.Process.Pid, "status", result.Status,
 			"duration", time.Since(started).Round(time.Millisecond).String(), "frames", state.frameCount,
 			"invalid_frames", state.invalidFrames)

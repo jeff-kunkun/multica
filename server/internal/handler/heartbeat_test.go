@@ -133,7 +133,7 @@ func TestRecordHeartbeatLeaseThrottlesDBScheduling(t *testing.T) {
 	fake := &fakeLivenessStore{available: true, aliveOK: true}
 	scheduler := &recordingHeartbeatScheduler{}
 	h := &Handler{LivenessStore: fake, HeartbeatScheduler: scheduler}
-	lease := daemonws.NewRuntimeLease("workspace-1", "online", time.Now().Add(-2*runtimeHeartbeatDBFlushInterval), true)
+	lease := daemonws.NewRuntimeLease("workspace-1", "", "online", time.Now().Add(-2*runtimeHeartbeatDBFlushInterval), true)
 
 	if err := h.recordHeartbeatLease(context.Background(), runtimeID, lease); err != nil {
 		t.Fatalf("first recordHeartbeatLease: %v", err)
@@ -161,7 +161,7 @@ func TestRecordHeartbeatLeaseScheduleFailureKeepsStaleWatermark(t *testing.T) {
 	scheduler := &recordingHeartbeatScheduler{err: injected}
 	h := &Handler{LivenessStore: fake, HeartbeatScheduler: scheduler}
 	stale := time.Now().Add(-2 * runtimeHeartbeatDBFlushInterval)
-	lease := daemonws.NewRuntimeLease("workspace-1", "online", stale, true)
+	lease := daemonws.NewRuntimeLease("workspace-1", "", "online", stale, true)
 
 	if err := h.recordHeartbeatLease(context.Background(), runtimeID, lease); !errors.Is(err, injected) {
 		t.Fatalf("recordHeartbeatLease error = %v, want injected failure", err)
@@ -182,7 +182,7 @@ func TestRecordHeartbeatLeaseOfflineTransitionIsSynchronous(t *testing.T) {
 	h := *testHandler
 	h.LivenessStore = fake
 	h.HeartbeatScheduler = scheduler
-	lease := daemonws.NewRuntimeLease(testWorkspaceID, "offline", time.Now(), true)
+	lease := daemonws.NewRuntimeLease(testWorkspaceID, "", "offline", time.Now(), true)
 
 	if err := h.recordHeartbeatLease(context.Background(), runtimeID, lease); err != nil {
 		t.Fatalf("recordHeartbeatLease: %v", err)

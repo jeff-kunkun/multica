@@ -48,6 +48,7 @@ type RuntimeLease struct {
 	mu sync.Mutex
 
 	workspaceID     string
+	provider        string
 	status          string
 	lastSeenAt      time.Time
 	lastSeenAtValid bool
@@ -56,14 +57,16 @@ type RuntimeLease struct {
 // RuntimeLeaseState is an atomic snapshot used by the heartbeat handler.
 type RuntimeLeaseState struct {
 	WorkspaceID     string
+	Provider        string
 	Status          string
 	LastSeenAt      time.Time
 	LastSeenAtValid bool
 }
 
-func NewRuntimeLease(workspaceID, status string, lastSeenAt time.Time, lastSeenAtValid bool) *RuntimeLease {
+func NewRuntimeLease(workspaceID, provider, status string, lastSeenAt time.Time, lastSeenAtValid bool) *RuntimeLease {
 	return &RuntimeLease{
 		workspaceID:     workspaceID,
+		provider:        provider,
 		status:          status,
 		lastSeenAt:      lastSeenAt,
 		lastSeenAtValid: lastSeenAtValid,
@@ -78,6 +81,7 @@ func (l *RuntimeLease) Snapshot() RuntimeLeaseState {
 	defer l.mu.Unlock()
 	return RuntimeLeaseState{
 		WorkspaceID:     l.workspaceID,
+		Provider:        l.provider,
 		Status:          l.status,
 		LastSeenAt:      l.lastSeenAt,
 		LastSeenAtValid: l.lastSeenAtValid,
@@ -285,7 +289,7 @@ func (h *Hub) forgetRuntimeGoneSeen(eventID string) {
 // runtimeID is one of identity.RuntimeIDs (the connection's authenticated
 // scope) and return the ack payload to send back. Returning an error skips
 // the ack and is logged at debug level.
-type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
+type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot) (*protocol.DaemonHeartbeatAckPayload, error)
 
 // RPCHandler processes a generic daemon:rpc_request (MUL-4257). It dispatches
 // on method (e.g. "tasks.claim"), scoping work to identity (DaemonID +
@@ -1098,7 +1102,7 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 	// that keeps the HTTP heartbeat from putting a per-call timeout on
 	// PopPending. The natural bound is the read pump's lifetime (the conn
 	// closes if the daemon goes away) plus Redis's own server-side limits.
-	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport)
+	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport, payload.PlanLimits)
 	if err != nil {
 		slog.Warn("daemon websocket heartbeat handler failed",
 			"error", err,

@@ -1020,8 +1020,9 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 }
 
 type DaemonHeartbeatRequest struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	RuntimeID           string                       `json:"runtime_id"`
+	SupportsBatchImport bool                         `json:"supports_batch_import,omitempty"`
+	PlanLimits          *protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -1152,8 +1153,21 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	authMs = time.Since(start).Milliseconds()
 
+	planLimitsJSON, validationErr := validatePlanLimitsSnapshot(req.PlanLimits, rt.Provider)
+	if validationErr != nil {
+		outcome = "invalid_plan_limits"
+		writeError(w, http.StatusBadRequest, "invalid plan_limits")
+		return
+	}
+
 	updateStart := time.Now()
 	if err := h.recordHeartbeat(r.Context(), rt); err != nil {
+		updateMs = time.Since(updateStart).Milliseconds()
+		outcome = "error_update"
+		writeError(w, http.StatusInternalServerError, "heartbeat failed")
+		return
+	}
+	if err := h.applyStoredPlanLimits(r.Context(), rt.ID, uuidToString(rt.WorkspaceID), planLimitsJSON); err != nil {
 		updateMs = time.Since(updateStart).Milliseconds()
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
@@ -1205,15 +1219,20 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // captured each runtime's liveness state in a connection lease, so the hot
 // path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
 // fallback for a daemon that stops receiving WebSocket acknowledgements.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
 	}
+	state := lease.Snapshot()
 	// Defensive consistency assertion only: the workspace scope and lease came
 	// from the same connection-time query. This does not re-authorize against DB.
-	if !identity.AllowsWorkspace(lease.Snapshot().WorkspaceID) {
+	if !identity.AllowsWorkspace(state.WorkspaceID) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
+	}
+	planLimitsJSON, err := validatePlanLimitsSnapshot(planLimits, state.Provider)
+	if err != nil {
+		return nil, fmt.Errorf("invalid plan_limits: %w", err)
 	}
 	if err := h.recordHeartbeatLease(ctx, runtimeID, lease); err != nil {
 		if isNotFound(err) {
@@ -1223,6 +1242,13 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 			}
 			return runtimeGoneHeartbeatAck(runtimeID), nil
 		}
+		return nil, err
+	}
+	runtimeUUID, err := util.ParseUUID(runtimeID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid runtime_id: %w", err)
+	}
+	if err := h.applyStoredPlanLimits(ctx, runtimeUUID, state.WorkspaceID, planLimitsJSON); err != nil {
 		return nil, err
 	}
 	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
@@ -1250,6 +1276,26 @@ func runtimeGoneHeartbeatAck(runtimeID string) *protocol.DaemonHeartbeatAckPaylo
 // The actual DB write is delegated to h.HeartbeatScheduler so production can
 // coalesce many runtimes' bumps into one bulk UPDATE per tick. See
 // heartbeat_scheduler.go for the two implementations.
+func (h *Handler) applyStoredPlanLimits(ctx context.Context, runtimeUUID pgtype.UUID, workspaceID string, planLimitsJSON []byte) error {
+	if len(planLimitsJSON) == 0 {
+		return nil
+	}
+	updated, err := h.Queries.UpdateAgentRuntimePlanLimits(ctx, db.UpdateAgentRuntimePlanLimitsParams{
+		ID:         runtimeUUID,
+		PlanLimits: planLimitsJSON,
+	})
+	if err != nil {
+		return fmt.Errorf("update runtime plan limits: %w", err)
+	}
+	if updated > 0 && workspaceID != "" {
+		h.publish(protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
+			"runtime_id":          uuidToString(runtimeUUID),
+			"plan_limits_updated": true,
+		})
+	}
+	return nil
+}
+
 func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error {
 	return h.recordHeartbeatState(ctx, rt.ID, uuidToString(rt.ID), heartbeatLivenessState{
 		Status:          rt.Status,

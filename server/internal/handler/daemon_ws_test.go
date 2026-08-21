@@ -52,7 +52,7 @@ func TestBuildDaemonWebSocketIdentitySeedsBatchRuntimeLeases(t *testing.T) {
 			t.Fatalf("missing lease for runtime %s", runtimeID)
 		}
 		state := lease.Snapshot()
-		if state.WorkspaceID != testWorkspaceID || state.Status != "online" || !state.LastSeenAtValid {
+		if state.WorkspaceID != testWorkspaceID || state.Status != "online" || !state.LastSeenAtValid || state.Provider == "" {
 			t.Fatalf("lease %s = %+v", runtimeID, state)
 		}
 		if time.Since(state.LastSeenAt) > time.Minute {

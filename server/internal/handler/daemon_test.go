@@ -890,6 +890,91 @@ func TestDaemonHeartbeat_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	w = testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusNotFound)
 }
 
+func TestDaemonHeartbeat_StoresCredentialFreePlanLimits(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	daemonID := "plan-limits-daemon-" + uuid.New().String()
+	runtimeID := dbfx.Runtime(t, "Plan Limits Runtime", testutil.Cols{
+		"daemon_id":   daemonID,
+		"provider":    "codex",
+		"device_info": "Plan limits test",
+	})
+
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+		"runtime_id": runtimeID,
+		"plan_limits": map[string]any{
+			"provider":     "codex",
+			"status":       protocol.PlanLimitsStatusAvailable,
+			"observed_at":  int64(1_800_000_000),
+			"access_token": "must-not-be-stored",
+			"windows": []map[string]any{{
+				"name":           "primary",
+				"used_percent":   42.0,
+				"window_minutes": 300,
+				"resets_at":      int64(1_800_003_600),
+			}},
+		},
+	}, testWorkspaceID, daemonID)
+	testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusOK)
+
+	var stored []byte
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT plan_limits FROM agent_runtime WHERE id = $1
+	`, runtimeID).Scan(&stored); err != nil {
+		t.Fatalf("read stored plan limits: %v", err)
+	}
+	if bytes.Contains(stored, []byte("must-not-be-stored")) || bytes.Contains(stored, []byte("access_token")) {
+		t.Fatalf("stored plan limits contain an unapproved field: %s", stored)
+	}
+
+	var snapshot protocol.PlanLimitsSnapshot
+	if err := json.Unmarshal(stored, &snapshot); err != nil {
+		t.Fatalf("decode stored plan limits: %v", err)
+	}
+	if snapshot.Provider != "codex" || len(snapshot.Windows) != 1 || snapshot.Windows[0].UsedPercent == nil || *snapshot.Windows[0].UsedPercent != 42 {
+		t.Fatalf("stored plan limits = %+v", snapshot)
+	}
+}
+
+func TestDaemonHeartbeat_StoresExhaustedQuotaWithoutWindows(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	daemonID := "plan-limits-exhausted-" + uuid.New().String()
+	runtimeID := dbfx.Runtime(t, "Grok Exhausted Runtime", testutil.Cols{
+		"daemon_id":   daemonID,
+		"provider":    "grok",
+		"device_info": "Exhausted quota test",
+	})
+
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+		"runtime_id": runtimeID,
+		"plan_limits": map[string]any{
+			"provider":    "grok",
+			"status":      protocol.PlanLimitsStatusExhausted,
+			"observed_at": int64(1_800_000_000),
+		},
+	}, testWorkspaceID, daemonID)
+	testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusOK)
+
+	var stored []byte
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT plan_limits FROM agent_runtime WHERE id = $1
+	`, runtimeID).Scan(&stored); err != nil {
+		t.Fatalf("read stored plan limits: %v", err)
+	}
+	var snapshot protocol.PlanLimitsSnapshot
+	if err := json.Unmarshal(stored, &snapshot); err != nil {
+		t.Fatalf("decode stored plan limits: %v", err)
+	}
+	if snapshot.Provider != "grok" || snapshot.Status != protocol.PlanLimitsStatusExhausted || len(snapshot.Windows) != 0 {
+		t.Fatalf("stored plan limits = %+v", snapshot)
+	}
+}
+
 // TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError pins the receipt
 // fallback for a deletion that missed active invalidation. The connection
 // lease schedules an ID-only write, whose missing row becomes RuntimeGone
@@ -905,10 +990,10 @@ func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
 		daemonws.ClientIdentity{
 			WorkspaceID: testWorkspaceID,
 			RuntimeLeases: map[string]*daemonws.RuntimeLease{
-				missingRuntime: daemonws.NewRuntimeLease(testWorkspaceID, "online", time.Now().Add(-2*runtimeHeartbeatDBFlushInterval), true),
+				missingRuntime: daemonws.NewRuntimeLease(testWorkspaceID, "", "online", time.Now().Add(-2*runtimeHeartbeatDBFlushInterval), true),
 			},
 		},
-		missingRuntime, false)
+		missingRuntime, false, nil)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
 	}
@@ -949,10 +1034,10 @@ func TestHandleDaemonWSHeartbeat_AllowsAnyAuthorizedWorkspace(t *testing.T) {
 		daemonws.ClientIdentity{
 			WorkspaceIDs: []string{testWorkspaceID, workspaceID},
 			RuntimeLeases: map[string]*daemonws.RuntimeLease{
-				runtimeID: daemonws.NewRuntimeLease(workspaceID, "online", time.Now(), true),
+				runtimeID: daemonws.NewRuntimeLease(workspaceID, "", "online", time.Now(), true),
 			},
 		},
-		runtimeID, false)
+		runtimeID, false, nil)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
 	}

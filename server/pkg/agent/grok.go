@@ -191,6 +191,9 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 	msgStream := newGrokMessageStream(256)
 	resCh := make(chan Result, 1)
+	sendResult := func(r Result) {
+		resCh <- withQuotaPlanLimits("grok", r, time.Now())
+	}
 
 	// Grok streams interim narration and the final answer as the same
 	// agent_message_chunk type; the tracker keeps only the post-tool-call block
@@ -283,7 +286,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		if err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("grok initialize failed: %v", err)
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()})
 			return
 		}
 
@@ -300,7 +303,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		if err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("grok authentication setup failed: %v", err)
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()})
 			return
 		}
 		if _, err := c.request(runCtx, "authenticate", map[string]any{
@@ -309,7 +312,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}); err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("grok authenticate (%s) failed: %v", methodID, err)
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()})
 			return
 		}
 		b.cfg.Logger.Info("grok authenticated", "method", methodID)
@@ -336,7 +339,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				// same dead session on every later turn (GH #8116).
 				finalStatus, finalError, resumeRejected = classifyACPResumeFailure(
 					runCtx, "grok", "session/load", err, timeout, b.cfg.Logger)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
+				sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected})
 				return
 			}
 			var changed bool
@@ -359,14 +362,14 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			if err != nil {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("grok session/new failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()})
 				return
 			}
 			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
 				finalError = "grok session/new returned no session ID"
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()})
 				return
 			}
 			if effectiveModel == "" {
@@ -395,13 +398,13 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					sessionID = ""
 					resumeRejected = true
 				}
-				resCh <- Result{
+				sendResult(Result{
 					Status:         finalStatus,
 					Error:          finalError,
 					DurationMs:     time.Since(startTime).Milliseconds(),
 					SessionID:      sessionID,
 					ResumeRejected: resumeRejected,
-				}
+				})
 				return
 			}
 			b.cfg.Logger.Info("grok session model set", "model", opts.Model)
@@ -514,7 +517,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			usageMap = map[string]TokenUsage{model: u}
 		}
 
-		resCh <- Result{
+		sendResult(Result{
 			Status:         finalStatus,
 			Output:         finalOutput,
 			Error:          finalError,
@@ -522,7 +525,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			SessionID:      sessionID,
 			ResumeRejected: resumeRejected,
 			Usage:          usageMap,
-		}
+		})
 	}()
 
 	return &Session{Messages: msgStream.ch, Result: resCh}, nil

@@ -414,14 +414,14 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			usageByModel[model] = usage
 		}
 
-		resCh <- Result{
+		resCh <- withQuotaPlanLimits("antigravity", Result{
 			Status:     finalStatus,
 			Output:     finalOutput,
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  sessionID,
 			Usage:      usageByModel,
-		}
+		}, time.Now())
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
