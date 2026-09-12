@@ -117,6 +117,7 @@ import type {
   ChatSession,
   ChatSessionCreatedPayload,
   InvitationCreatedPayload,
+  DaemonHeartbeatPayload,
 } from "../types";
 
 const chatWsLogger = createLogger("chat.ws");
@@ -725,8 +726,9 @@ export interface RealtimeSyncStores {
  *
  * Per-issue events (comments, activity, reactions, subscribers) are handled
  * both here (invalidation fallback) and by per-page useWSEvent hooks (granular
- * updates). Daemon register events invalidate runtimes globally; heartbeats
- * are skipped to avoid excessive refetches.
+ * updates). Daemon register events invalidate runtimes globally. Routine
+ * heartbeats stay off the prefix path to avoid a 15s refetch storm; a
+ * plan_limits snapshot change is handled by a dedicated listener.
  *
  * @param ws - WebSocket client instance (null when not yet connected)
  * @param stores - Platform-created Zustand store instances for auth and workspace
@@ -968,6 +970,9 @@ export function useRealtimeSync(
       "reaction:added", "reaction:removed",
       "issue_reaction:added", "issue_reaction:removed",
       "subscriber:added", "subscriber:removed",
+      // Routine daemon heartbeats are high-frequency; plan_limits updates
+      // use the dedicated handler below instead of the daemon: prefix path.
+      "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated",
@@ -994,6 +999,13 @@ export function useRealtimeSync(
     // No self-event filtering: actor_id identifies the USER, not the TAB.
     // Filtering by actor_id would block other tabs of the same user.
     // Instead, both mutations and WS handlers use dedup checks to be idempotent.
+
+    const unsubDaemonHeartbeat = ws.on("daemon:heartbeat", (p) => {
+      const payload = p as DaemonHeartbeatPayload;
+      if (payload?.plan_limits_updated !== true) return;
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    });
 
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
       const payload = p as IssueUpdatedPayload;
@@ -1695,6 +1707,7 @@ export function useRealtimeSync(
 
     return () => {
       unsubAny();
+      unsubDaemonHeartbeat();
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();

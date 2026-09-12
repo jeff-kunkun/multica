@@ -189,6 +189,56 @@ describe("useRealtimeSync — ws instance change", () => {
     }
   });
 
+  it("invalidates runtime queries when a heartbeat reports new plan limits", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const heartbeat = vi
+      .mocked(ws.on)
+      .mock.calls.find((call) => call[0] === "daemon:heartbeat")?.[1];
+    expect(heartbeat).toBeDefined();
+
+    invalidateSpy.mockClear();
+    heartbeat?.(
+      { runtime_id: "rt-1", plan_limits_updated: true },
+      undefined,
+      undefined,
+    );
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: runtimeKeys.all("ws-1"),
+    });
+  });
+
+  it("does not refetch runtimes on a heartbeat without a plan-limits change", () => {
+    vi.useFakeTimers();
+    try {
+      const ws = createMockWs();
+      renderHook(() => useRealtimeSync(ws, stores), {
+        wrapper: createWrapper(qc),
+      });
+      const onAny = vi.mocked(ws.onAny).mock.calls[0]?.[0];
+      const heartbeat = vi
+        .mocked(ws.on)
+        .mock.calls.find((call) => call[0] === "daemon:heartbeat")?.[1];
+      expect(onAny).toBeDefined();
+      expect(heartbeat).toBeDefined();
+
+      invalidateSpy.mockClear();
+      onAny!({
+        type: "daemon:heartbeat",
+        payload: { runtime_id: "rt-1" },
+      } as never);
+      heartbeat?.({ runtime_id: "rt-1" }, undefined, undefined);
+      vi.advanceTimersByTime(100);
+
+      expect(invalidateSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("invalidates per-issue caches (no wsId in key) on ws instance change", () => {
     // These keys are not under the ["issues", wsId] prefix, so they need
     // their own invalidation on recovery — otherwise events missed while
