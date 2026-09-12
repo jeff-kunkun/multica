@@ -43,6 +43,21 @@ describe("displayPlanLimits", () => {
     expect(displayPlanLimits(exhausted, NOW + 24 * 60 * 60 * 1000 + 1)).toBeNull();
   });
 
+  it("keeps a window-less 429 snapshot available until it expires", () => {
+    const exhausted: PlanLimitsSnapshot = {
+      provider: "grok",
+      status: "exhausted",
+      observed_at: NOW / 1000,
+    };
+    const display = displayPlanLimits(exhausted, NOW);
+    expect(display).not.toBeNull();
+    expect(display?.windows).toEqual([]);
+  });
+
+  it("treats a missing snapshot as unavailable", () => {
+    expect(displayPlanLimits(undefined, NOW)).toBeNull();
+  });
+
   it("expires stale percentages even when the provider reset is later", () => {
     const weekly: PlanLimitsSnapshot = {
       ...SNAPSHOT,
