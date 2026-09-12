@@ -829,7 +829,21 @@
     "owner_label": "Owner",
     "unknown_runtime": "Unknown runtime",
     "model_label": "Model",
-    "model_unset": "Runtime default"
+    "model_unset": "Runtime default",
+    "quota_label": "Quota",
+    "usage_label": "Usage"
+  },
+  "quota": {
+    "title": "Quota",
+    "usage_title": "Usage · 30d",
+    "health_ok": "Healthy",
+    "health_exhausted": "Limit reached",
+    "resets_in": "resets {{when}}",
+    "used_percent": "{{percent}}% used",
+    "usage_30d": "{{tokens}} · {{cost}}",
+    "usage_empty": "No usage in 30d",
+    "tokens_label": "Tokens · 30d",
+    "cost_label": "Est. cost · 30d"
   },
   "live_peek": {
     "current_issue_label": "Now on",

@@ -12,6 +12,10 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
+vi.mock("../../common/use-viewing-timezone", () => ({
+  useViewingTimezone: () => "UTC",
+}));
+
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     agentDetail: (id: string) => `/test/agents/${id}`,
@@ -159,6 +163,48 @@ describe("AgentProfileCard — Runtime row", () => {
       expect(container.querySelector(iconSelector)).toBeInTheDocument();
     },
   );
+});
+
+describe("AgentProfileCard — Quota capsule", () => {
+  it("shows Codex rolling-window percentages on the hover card", () => {
+    mockRuntimes.current = [
+      {
+        id: "rt-1",
+        workspace_id: "ws-1",
+        daemon_id: "d-1",
+        name: "Codex (host)",
+        runtime_mode: "local",
+        provider: "codex",
+        launch_header: "",
+        status: "online",
+        device_info: "",
+        metadata: {},
+        owner_id: null,
+        visibility: "private",
+        last_seen_at: "2026-09-13T12:00:00Z",
+        created_at: "2026-09-13T12:00:00Z",
+        updated_at: "2026-09-13T12:00:00Z",
+        plan_limits: {
+          provider: "codex",
+          status: "available",
+          observed_at: Math.floor(Date.now() / 1000),
+          windows: [
+            {
+              name: "primary",
+              used_percent: 25,
+              window_minutes: 300,
+              resets_at: Math.floor(Date.now() / 1000) + 7200,
+            },
+          ],
+        },
+      },
+    ];
+    mockAgents.current = [makeAgent({ runtime_mode: "local" })];
+    renderCard();
+
+    expect(screen.getByText(enAgents.profile_card.quota_label)).toBeInTheDocument();
+    expect(screen.getByText(/5h 25%/)).toBeInTheDocument();
+  });
 });
 
 describe("AgentProfileCard — Model row", () => {

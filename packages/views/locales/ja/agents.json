@@ -707,7 +707,21 @@
     "owner_label": "オーナー",
     "unknown_runtime": "不明なランタイム",
     "model_label": "モデル",
-    "model_unset": "ランタイム既定"
+    "model_unset": "ランタイム既定",
+    "quota_label": "上限",
+    "usage_label": "使用量"
+  },
+  "quota": {
+    "title": "上限",
+    "usage_title": "使用量 · 30日",
+    "health_ok": "正常",
+    "health_exhausted": "上限到達",
+    "resets_in": "{{when}}後にリセット",
+    "used_percent": "{{percent}}% 使用済み",
+    "usage_30d": "{{tokens}} · {{cost}}",
+    "usage_empty": "過去30日の使用量はありません",
+    "tokens_label": "トークン · 30日",
+    "cost_label": "概算コスト · 30日"
   },
   "live_peek": {
     "current_issue_label": "現在の作業",

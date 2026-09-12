@@ -125,6 +125,46 @@ describe("failure reason vs raw diagnostics headings", () => {
  * gets a key added while the others lag (the i18next parity bug the
  * learnings researcher flagged).
  */
+describe("agent quota i18n parity across all 4 locales", () => {
+  const QUOTA_KEYS = [
+    "profile_card.quota_label",
+    "profile_card.usage_label",
+    "quota.title",
+    "quota.usage_title",
+    "quota.health_ok",
+    "quota.health_exhausted",
+    "quota.resets_in",
+    "quota.used_percent",
+    "quota.usage_30d",
+    "quota.usage_empty",
+    "quota.tokens_label",
+    "quota.cost_label",
+  ] as const;
+
+  it("keeps quota copy in every locale", () => {
+    for (const [name, loc] of Object.entries(LOCALES)) {
+      for (const key of QUOTA_KEYS) {
+        const parts = key.split(".");
+        let node: unknown = loc;
+        for (const part of parts) {
+          node = (node as Record<string, unknown> | undefined)?.[part];
+        }
+        expect(typeof node, `${name}: ${key} missing`).toBe("string");
+        expect(String(node).length, `${name}: ${key} empty`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("keeps interpolation tokens in resets_in, used_percent, and usage_30d", () => {
+    for (const [name, loc] of Object.entries(LOCALES)) {
+      expect(loc.quota.resets_in, `${name}: quota.resets_in`).toContain("{{when}}");
+      expect(loc.quota.used_percent, `${name}: quota.used_percent`).toContain("{{percent}}");
+      expect(loc.quota.usage_30d, `${name}: quota.usage_30d`).toContain("{{tokens}}");
+      expect(loc.quota.usage_30d, `${name}: quota.usage_30d`).toContain("{{cost}}");
+    }
+  });
+});
+
 describe("access-scope i18n parity across all 4 locales", () => {
   const accessScopeKeys = [
     "access.scope_labels.workspace",

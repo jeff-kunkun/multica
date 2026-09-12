@@ -1,0 +1,214 @@
+// @vitest-environment jsdom
+
+import type { ReactNode } from "react";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { I18nProvider } from "@multica/core/i18n/react";
+import { dashboardKeys } from "@multica/core/dashboard";
+import type { AgentRuntime, DashboardUsageByAgent, PlanLimitsSnapshot } from "@multica/core/types";
+import enCommon from "../../locales/en/common.json";
+import enAgents from "../../locales/en/agents.json";
+import { AgentQuotaCapsule, AgentQuotaMeter } from "./agent-quota-meter";
+
+const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
+const NOW = Date.UTC(2026, 8, 13, 12);
+
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("../../common/use-viewing-timezone", () => ({
+  useViewingTimezone: () => "UTC",
+}));
+
+vi.mock("@multica/core/api", () => ({
+  api: {
+    getDashboardUsageByAgent: () => Promise.resolve([]),
+  },
+}));
+
+const CODEX: PlanLimitsSnapshot = {
+  provider: "codex",
+  status: "available",
+  observed_at: NOW / 1000,
+  windows: [
+    {
+      name: "primary",
+      used_percent: 25,
+      window_minutes: 300,
+      resets_at: NOW / 1000 + 2 * 60 * 60,
+    },
+    {
+      name: "secondary",
+      used_percent: 3,
+      window_minutes: 10_080,
+      resets_at: NOW / 1000 + 6 * 24 * 60 * 60,
+    },
+  ],
+};
+
+function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
+  return {
+    id: "rt-1",
+    workspace_id: "ws-1",
+    daemon_id: "d-1",
+    name: "Codex (host)",
+    runtime_mode: "local",
+    provider: "codex",
+    launch_header: "",
+    status: "online",
+    device_info: "",
+    metadata: {},
+    owner_id: "u-1",
+    visibility: "private",
+    last_seen_at: new Date(NOW).toISOString(),
+    created_at: new Date(NOW).toISOString(),
+    updated_at: new Date(NOW).toISOString(),
+    ...overrides,
+  };
+}
+
+function renderQuota(
+  ui: ReactNode,
+  usage: DashboardUsageByAgent[] = [],
+) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  qc.setQueryData(dashboardKeys.byAgent("ws-1", 30, null, "UTC"), usage);
+  return render(
+    <QueryClientProvider client={qc}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        {ui}
+      </I18nProvider>
+    </QueryClientProvider>,
+  );
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("AgentQuotaCapsule", () => {
+  it("renders subscription window percentages and a reset countdown", () => {
+    renderQuota(
+      <AgentQuotaCapsule
+        agentId="agent-1"
+        runtime={makeRuntime({ plan_limits: CODEX })}
+        now={NOW}
+      />,
+    );
+
+    expect(screen.getByText(enAgents.profile_card.quota_label)).toBeInTheDocument();
+    expect(screen.getByText("5h 25% · 7d 3%")).toBeInTheDocument();
+    expect(
+      screen.getByText(enAgents.quota.resets_in.replace("{{when}}", "2h")),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a 429 health badge for window-less exhausted snapshots", () => {
+    renderQuota(
+      <AgentQuotaCapsule
+        agentId="agent-1"
+        runtime={makeRuntime({
+          provider: "grok",
+          plan_limits: {
+            provider: "grok",
+            status: "exhausted",
+            observed_at: NOW / 1000,
+          },
+        })}
+        now={NOW}
+      />,
+    );
+
+    expect(screen.getByText(enAgents.quota.health_exhausted)).toBeInTheDocument();
+  });
+
+  it("renders 30d token usage for metered runtimes", () => {
+    const usage: DashboardUsageByAgent[] = [
+      {
+        agent_id: "agent-1",
+        provider: "grok",
+        model: "grok-4",
+        input_tokens: 1_200_000,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        cost_usd_ticks: 34_000_000_000,
+        task_count: 4,
+      },
+    ];
+    renderQuota(
+      <AgentQuotaCapsule
+        agentId="agent-1"
+        runtime={makeRuntime({ provider: "grok" })}
+        now={NOW}
+      />,
+      usage,
+    );
+
+    expect(screen.getByText(enAgents.profile_card.usage_label)).toBeInTheDocument();
+    expect(screen.getByText(enAgents.quota.health_ok)).toBeInTheDocument();
+    expect(screen.getByText(/1\.2M/)).toBeInTheDocument();
+  });
+
+  it("hides the metered capsule when the agent has no 30d usage", () => {
+    renderQuota(
+      <AgentQuotaCapsule
+        agentId="agent-1"
+        runtime={makeRuntime({ provider: "grok" })}
+        now={NOW}
+      />,
+    );
+
+    expect(screen.queryByText(enAgents.profile_card.usage_label)).toBeNull();
+    expect(screen.queryByText(enAgents.quota.health_ok)).toBeNull();
+  });
+});
+
+describe("AgentQuotaMeter", () => {
+  it("renders progress bars for subscription windows", () => {
+    renderQuota(
+      <AgentQuotaMeter
+        agentId="agent-1"
+        runtime={makeRuntime({ plan_limits: CODEX })}
+        now={NOW}
+      />,
+    );
+
+    expect(screen.getByText(enAgents.quota.title)).toBeInTheDocument();
+    expect(screen.getByText("5h")).toBeInTheDocument();
+    expect(screen.getByText("7d")).toBeInTheDocument();
+    expect(
+      screen.getByText(enAgents.quota.used_percent.replace("{{percent}}", "25")),
+    ).toBeInTheDocument();
+  });
+
+  it("renders 30d token and cost metrics for metered runtimes", () => {
+    const usage: DashboardUsageByAgent[] = [
+      {
+        agent_id: "agent-1",
+        provider: "dsh",
+        model: "deepseek-chat",
+        input_tokens: 800_000,
+        output_tokens: 200_000,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        cost_usd_ticks: 15_000_000_000,
+        task_count: 2,
+      },
+    ];
+    renderQuota(
+      <AgentQuotaMeter
+        agentId="agent-1"
+        runtime={makeRuntime({ provider: "dsh" })}
+        now={NOW}
+      />,
+      usage,
+    );
+
+    expect(screen.getByText(enAgents.quota.usage_title)).toBeInTheDocument();
+    expect(screen.getByText("1M")).toBeInTheDocument();
+    expect(screen.getByText(enAgents.quota.health_ok)).toBeInTheDocument();
+  });
+});
