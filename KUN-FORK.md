@@ -28,6 +28,16 @@
    - 无冲突：跑构建和测试（Go 与前端各跑一次，命令以仓库 README / Makefile 为准）。
 5. 推送同步分支并开 PR：`git push -u origin sync/upstream-<日期>`，`gh pr create --base kun --title "sync: upstream main <日期>"`。PR 必须经 Reviewer 审查，由人合并。
 
+## DeepSeek Harness
+
+官方已支持 `dsh` 运行时，但桥接包还没上公共 npm（[upstream #6936](https://github.com/multica-ai/multica/issues/6936)）。自托管请用本 fork 的一键脚本：
+
+```bash
+bash scripts/setup-dsh-runtime.sh
+```
+
+说明、已知坑、给上游的反馈建议见 [docs/kun/dsh-runtime.md](docs/kun/dsh-runtime.md)。
+
 ## 边界
 
 - 不向 `multica-ai/multica` 开 PR 或 push。

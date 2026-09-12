@@ -132,7 +132,7 @@ You also need at least one AI agent CLI installed:
 - Qwen Code (`qwen` on PATH)
 - [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (`qwenpaw` on PATH; pick its model in QwenPaw's own configuration)
 - [MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) (`mcode` 0.1.2+ on PATH). Install a supported Node.js release (`>=22.19 <23` or `>=24 <27`), run `npm install --global @minimax-ai/code@latest`, then `mcode login`.
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh` on PATH with the Multica runtime profile installed; set `DEEPSEEK_API_KEY`)
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh` on PATH with the Multica runtime profile installed; set `DEEPSEEK_API_KEY`). On this fork, `bash scripts/setup-dsh-runtime.sh` builds the still-unpublished bridge and registers the `multica` profile; see [docs/kun/dsh-runtime.md](docs/kun/dsh-runtime.md) and [multica#6936](https://github.com/multica-ai/multica/issues/6936).
 
 ### b) One-command setup
 
