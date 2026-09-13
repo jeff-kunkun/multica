@@ -321,7 +321,11 @@
     "window_5h": "5시간 창",
     "window_7d": "7일 창",
     "window_primary": "현재 창",
-    "window_secondary": "보조 창"
+    "window_secondary": "보조 창",
+    "window_pro": "Pro",
+    "window_flash": "Flash",
+    "window_flash_lite": "Flash Lite",
+    "window_credits": "크레딧"
   },
   "profiles": {
     "cta": "런타임 추가",

@@ -525,8 +525,8 @@ type Daemon struct {
 	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	planLimitsMu sync.RWMutex
 	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
-	// Live Claude/Codex usage probes (cc-switch style). Throttled separately
-	// from the 15s heartbeat so we do not hammer undocumented usage APIs.
+	// Live Claude/Codex/Gemini/Grok usage probes (cc-switch style). Throttled
+	// separately from the 15s heartbeat so we do not hammer unofficial APIs.
 	planQuotaMu        sync.Mutex
 	lastPlanQuotaProbe time.Time
 	planQuotaInflight  atomic.Bool

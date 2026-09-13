@@ -321,7 +321,11 @@
     "window_5h": "5 小时窗口",
     "window_7d": "7 天窗口",
     "window_primary": "当前窗口",
-    "window_secondary": "次级窗口"
+    "window_secondary": "次级窗口",
+    "window_pro": "Pro",
+    "window_flash": "Flash",
+    "window_flash_lite": "Flash Lite",
+    "window_credits": "积分"
   },
   "profiles": {
     "cta": "添加运行时",

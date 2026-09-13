@@ -321,7 +321,11 @@
     "window_5h": "5時間ウィンドウ",
     "window_7d": "7日間ウィンドウ",
     "window_primary": "現在のウィンドウ",
-    "window_secondary": "セカンダリウィンドウ"
+    "window_secondary": "セカンダリウィンドウ",
+    "window_pro": "Pro",
+    "window_flash": "Flash",
+    "window_flash_lite": "Flash Lite",
+    "window_credits": "クレジット"
   },
   "profiles": {
     "cta": "ランタイムを追加",

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -144,5 +145,83 @@ func TestRefreshPlanQuotaRecordsClaudeSnapshot(t *testing.T) {
 	}
 	if got.Windows[0].UsedPercent == nil || *got.Windows[0].UsedPercent != 18 {
 		t.Fatalf("5h percent = %+v", got.Windows[0])
+	}
+}
+
+func TestRefreshPlanQuotaRecordsGeminiOntoAntigravity(t *testing.T) {
+	usedRemaining := 0.75
+	d := &Daemon{runtimeIndex: map[string]Runtime{
+		"agy-a":    {ID: "agy-a", Provider: "antigravity"},
+		"agy-cust": {ID: "agy-cust", Provider: "antigravity", ProfileID: "p"},
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"buckets": []map[string]any{
+				{"modelId": "gemini-2.5-pro", "remainingFraction": usedRemaining, "resetTime": "2027-01-15T04:00:00Z"},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+	d.planQuotaProbeFn = func() agent.PlanQuotaProbe {
+		return agent.PlanQuotaProbe{
+			Client:         server.Client(),
+			GeminiLoadURL:  server.URL,
+			GeminiQuotaURL: server.URL,
+			LookupKeychain: func(string) (string, bool) {
+				return `{"access_token":"tok","expiry_date":1999999999000}`, true
+			},
+			Now: func() time.Time { return time.Unix(80, 0) },
+		}
+	}
+
+	d.refreshPlanQuota()
+	got := d.planLimitsForRuntime("agy-a")
+	if got == nil || got.Provider != "antigravity" || len(got.Windows) != 1 {
+		t.Fatalf("snapshot = %+v", got)
+	}
+	if got.Windows[0].Name != "gemini_pro" || got.Windows[0].UsedPercent == nil || *got.Windows[0].UsedPercent != 25 {
+		t.Fatalf("pro window = %+v", got.Windows[0])
+	}
+	if custom := d.planLimitsForRuntime("agy-cust"); custom != nil {
+		t.Fatalf("custom inherited probe snapshot: %+v", custom)
+	}
+}
+
+func TestRefreshPlanQuotaRecordsGrokSnapshot(t *testing.T) {
+	d := &Daemon{runtimeIndex: map[string]Runtime{
+		"grok-a": {ID: "grok-a", Provider: "grok"},
+	}}
+	home := t.TempDir()
+	if err := os.MkdirAll(home+"/.grok", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(home+"/.grok/auth.json", []byte(`{
+		"https://auth.x.ai::cli": {"key":"grok-token","auth_mode":"oidc","expires_at":"2027-01-15T04:00:00Z"}
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"config": map[string]any{"creditUsagePercent": 12},
+		})
+	}))
+	t.Cleanup(server.Close)
+	d.planQuotaHome = home
+	d.planQuotaProbeFn = func() agent.PlanQuotaProbe {
+		return agent.PlanQuotaProbe{
+			Home:           home,
+			Client:         server.Client(),
+			GrokBillingURL: server.URL,
+			Now:            func() time.Time { return time.Unix(90, 0) },
+		}
+	}
+
+	d.refreshPlanQuota()
+	got := d.planLimitsForRuntime("grok-a")
+	if got == nil || got.Provider != "grok" || len(got.Windows) != 1 {
+		t.Fatalf("snapshot = %+v", got)
+	}
+	if got.Windows[0].UsedPercent == nil || *got.Windows[0].UsedPercent != 12 {
+		t.Fatalf("credits = %+v", got.Windows[0])
 	}
 }

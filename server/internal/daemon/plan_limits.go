@@ -131,14 +131,24 @@ func (d *Daemon) maybeRefreshPlanQuota() {
 
 func (d *Daemon) refreshPlanQuota() {
 	d.mu.Lock()
-	providers := make(map[string]struct{})
+	var wantClaude, wantCodex, wantGemini, wantGrok bool
 	for _, runtime := range d.runtimeIndex {
-		if runtime.ProfileID == "" && (runtime.Provider == "claude" || runtime.Provider == "codex") {
-			providers[runtime.Provider] = struct{}{}
+		if runtime.ProfileID != "" {
+			continue
+		}
+		switch runtime.Provider {
+		case "claude":
+			wantClaude = true
+		case "codex":
+			wantCodex = true
+		case "gemini", "antigravity":
+			wantGemini = true
+		case "grok":
+			wantGrok = true
 		}
 	}
 	d.mu.Unlock()
-	if len(providers) == 0 {
+	if !wantClaude && !wantCodex && !wantGemini && !wantGrok {
 		return
 	}
 
@@ -146,29 +156,47 @@ func (d *Daemon) refreshPlanQuota() {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	for provider := range providers {
-		var (
-			snapshot *protocol.PlanLimitsSnapshot
-			err      error
-		)
-		switch provider {
-		case "claude":
-			snapshot, err = probe.ProbeClaude(ctx)
-		case "codex":
-			snapshot, err = probe.ProbeCodex(ctx)
-		default:
-			continue
-		}
+	type probeJob struct {
+		name    string
+		targets []string
+		run     func() (*protocol.PlanLimitsSnapshot, error)
+	}
+	jobs := make([]probeJob, 0, 4)
+	if wantClaude {
+		jobs = append(jobs, probeJob{name: "claude", targets: []string{"claude"}, run: func() (*protocol.PlanLimitsSnapshot, error) {
+			return probe.ProbeClaude(ctx)
+		}})
+	}
+	if wantCodex {
+		jobs = append(jobs, probeJob{name: "codex", targets: []string{"codex"}, run: func() (*protocol.PlanLimitsSnapshot, error) {
+			return probe.ProbeCodex(ctx)
+		}})
+	}
+	if wantGemini {
+		jobs = append(jobs, probeJob{name: "gemini", targets: []string{"gemini", "antigravity"}, run: func() (*protocol.PlanLimitsSnapshot, error) {
+			return probe.ProbeGemini(ctx)
+		}})
+	}
+	if wantGrok {
+		jobs = append(jobs, probeJob{name: "grok", targets: []string{"grok"}, run: func() (*protocol.PlanLimitsSnapshot, error) {
+			return probe.ProbeGrok(ctx)
+		}})
+	}
+
+	for _, job := range jobs {
+		snapshot, err := job.run()
 		if err != nil {
 			if d.logger != nil {
-				d.logger.Debug("plan quota probe failed", "provider", provider, "error", err)
+				d.logger.Debug("plan quota probe failed", "provider", job.name, "error", err)
 			}
 			continue
 		}
 		if snapshot == nil {
 			continue
 		}
-		d.recordPlanLimitsForProvider(provider, snapshot)
+		for _, provider := range job.targets {
+			d.recordPlanLimitsForProvider(provider, snapshot)
+		}
 	}
 }
 

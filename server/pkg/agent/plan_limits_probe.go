@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,16 +23,17 @@ const (
 
 	claudeKeychainService = "Claude Code-credentials"
 	codexKeychainService  = "Codex Auth"
+	geminiKeychainService = "gemini-cli-oauth"
 
 	fiveHourMinutes  int64 = 300
 	sevenDayMinutes  int64 = 10_080
 	planQuotaBodyCap       = 1 << 20
 )
 
-// PlanQuotaProbe reads local Claude Code / Codex CLI credentials and queries
-// the same unofficial usage endpoints other desktop tools (e.g. cc-switch)
-// use. The snapshot is credential-free: percentages, window length, and reset
-// time only.
+// PlanQuotaProbe reads local Claude Code / Codex / Gemini CLI / Grok
+// credentials and queries the same unofficial usage endpoints other desktop
+// tools (e.g. cc-switch) use. The snapshot is credential-free: percentages,
+// window length, and reset time only.
 type PlanQuotaProbe struct {
 	Home   string
 	Client *http.Client
@@ -39,6 +41,11 @@ type PlanQuotaProbe struct {
 	// Optional URL overrides so tests can serve fixtures without the network.
 	ClaudeUsageURL string
 	CodexUsageURL  string
+	GeminiLoadURL  string
+	GeminiQuotaURL string
+	GeminiTokenURL string
+	GrokBillingURL string
+	GrokCreditsURL string
 	// LookupKeychain, when set, replaces the macOS Keychain read. Tests inject
 	// a no-op so they never shell out to `security`.
 	LookupKeychain func(service string) (string, bool)
@@ -108,11 +115,29 @@ func (p PlanQuotaProbe) ProbeCodex(ctx context.Context) (*protocol.PlanLimitsSna
 }
 
 func (p PlanQuotaProbe) getJSON(ctx context.Context, url, bearer string, extra map[string]string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	return p.doHTTP(ctx, http.MethodGet, url, bearer, extra, nil)
+}
+
+func (p PlanQuotaProbe) postJSON(ctx context.Context, url, bearer string, extra map[string]string, body []byte) ([]byte, error) {
+	headers := map[string]string{"Content-Type": "application/json"}
+	for k, v := range extra {
+		headers[k] = v
+	}
+	return p.doHTTP(ctx, http.MethodPost, url, bearer, headers, body)
+}
+
+func (p PlanQuotaProbe) doHTTP(ctx context.Context, method, url, bearer string, extra map[string]string, body []byte) ([]byte, error) {
+	var reader io.Reader
+	if len(body) > 0 {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
 	req.Header.Set("Accept", "application/json")
 	for k, v := range extra {
 		req.Header.Set(k, v)

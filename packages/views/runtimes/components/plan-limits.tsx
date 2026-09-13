@@ -41,6 +41,18 @@ export function displayPlanLimits(
 }
 
 export function planLimitWindowShortLabel(window: PlanLimitWindow): string {
+  switch (window.name) {
+    case "gemini_pro":
+      return "Pro";
+    case "gemini_flash":
+      return "Flash";
+    case "gemini_flash_lite":
+      return "Lite";
+    case "credits":
+      return "Credits";
+    default:
+      break;
+  }
   if (window.window_minutes === 300) return "5h";
   if (window.window_minutes === 10_080) return "7d";
   return window.name;
@@ -107,6 +119,18 @@ function windowLabel(
   window: PlanLimitWindow,
   t: ReturnType<typeof useT<"runtimes">>["t"],
 ): string {
+  switch (window.name) {
+    case "gemini_pro":
+      return t(($) => $.plan_limits.window_pro);
+    case "gemini_flash":
+      return t(($) => $.plan_limits.window_flash);
+    case "gemini_flash_lite":
+      return t(($) => $.plan_limits.window_flash_lite);
+    case "credits":
+      return t(($) => $.plan_limits.window_credits);
+    default:
+      break;
+  }
   if (window.window_minutes === 300) {
     return t(($) => $.plan_limits.window_5h);
   }

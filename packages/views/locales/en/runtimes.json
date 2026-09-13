@@ -334,7 +334,11 @@
     "window_5h": "5-hour window",
     "window_7d": "7-day window",
     "window_primary": "Current window",
-    "window_secondary": "Secondary window"
+    "window_secondary": "Secondary window",
+    "window_pro": "Pro",
+    "window_flash": "Flash",
+    "window_flash_lite": "Flash Lite",
+    "window_credits": "Credits"
   },
   "profiles": {
     "cta": "Add runtime",

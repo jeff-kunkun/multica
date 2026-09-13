@@ -77,6 +77,17 @@ describe("quotaWindowPercents", () => {
       "7d 3",
     ]);
   });
+
+  it("labels Gemini Pro/Flash windows for the hover capsule", () => {
+    const percents = quotaWindowPercents([
+      { name: "gemini_pro", used_percent: 12 },
+      { name: "gemini_flash", used_percent: 40 },
+    ]);
+    expect(percents.map((w) => `${w.shortLabel} ${w.used_percent}`)).toEqual([
+      "Pro 12",
+      "Flash 40",
+    ]);
+  });
 });
 
 describe("sumAgentUsage30d", () => {
