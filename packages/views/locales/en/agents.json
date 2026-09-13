@@ -518,9 +518,9 @@
     "custom_args": {
       "intro": "Add CLI arguments passed when this agent starts.",
       "antigravity_profile_label": "AGY account profile",
-      "antigravity_profile_description": "Use a separate Gemini directory to isolate this agent's Google account. The same agy binary is shared across profiles.",
+      "antigravity_profile_description": "Use a separate Gemini directory to isolate this agent's session data. Enter an absolute path; a leading ~ is not expanded and agy falls back to the default directory. The same agy binary is shared across profiles.",
       "antigravity_profile_input_label": "Gemini directory",
-      "antigravity_profile_placeholder": "~/.gemini-account2",
+      "antigravity_profile_placeholder": "/Users/you/.gemini-account2",
       "arguments_label": "Arguments",
       "arguments_description": "Each item is passed as one token. The list order is preserved.",
       "add_argument_action": "Add argument",

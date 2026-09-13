@@ -73,7 +73,7 @@ export function CustomArgsTab({
   const [entries, setEntries] = useState<ArgEntry[]>(
     argsToEntries(agent.custom_args ?? []),
   );
-  const isAntigravity = runtimeDevice?.provider.toLowerCase() === "antigravity";
+  const isAntigravity = runtimeDevice?.provider?.toLowerCase() === "antigravity";
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorValue, setEditorValue] = useState("");
   const [saving, setSaving] = useState(false);

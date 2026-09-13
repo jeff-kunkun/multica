@@ -126,18 +126,18 @@ describe("CustomArgsTab", () => {
   it("edits the isolated AGY account directory as a CLI profile", async () => {
     const user = userEvent.setup();
     const { onSave } = renderTab(
-      { custom_args: ["--gemini_dir", "~/.gemini"] },
+      { custom_args: ["--gemini_dir", "/Users/you/.gemini"] },
       undefined,
       { ...runtimeDevice, provider: "antigravity" },
     );
 
     const input = screen.getByRole("textbox", { name: /gemini directory/i });
     await user.clear(input);
-    await user.type(input, "~/.gemini-account2");
+    await user.type(input, "/Users/you/.gemini-account2");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", "~/.gemini-account2"],
+      custom_args: ["--gemini_dir", "/Users/you/.gemini-account2"],
     });
   });
 });
