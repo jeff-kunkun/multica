@@ -125,8 +125,9 @@ func ParseKimiCodingUsageJSON(body []byte, observedAt time.Time) (*protocol.Plan
 }
 
 // ParseGLMQuotaJSON maps Zhipu /api/monitor/usage/quota/limit TOKENS_LIMIT
-// (and CREDIT_LIMIT) rows onto five_hour / seven_day. TIME_LIMIT MCP rows
-// are ignored. Percentage is already used %.
+// rows onto five_hour / seven_day. TIME_LIMIT and CREDIT_LIMIT rows are
+// ignored — credit/balance quotas are not 5h/7d token windows.
+// Percentage is already used %.
 func ParseGLMQuotaJSON(body []byte, observedAt time.Time) (*protocol.PlanLimitsSnapshot, error) {
 	limits, err := extractGLMLimits(body)
 	if err != nil {
@@ -135,7 +136,7 @@ func ParseGLMQuotaJSON(body []byte, observedAt time.Time) (*protocol.PlanLimitsS
 	tokenRows := make([]glmLimitRow, 0, 2)
 	for _, row := range limits {
 		kind := strings.ToUpper(strings.TrimSpace(row.Type))
-		if kind != "TOKENS_LIMIT" && kind != "CREDIT_LIMIT" {
+		if kind != "TOKENS_LIMIT" {
 			continue
 		}
 		tokenRows = append(tokenRows, row)

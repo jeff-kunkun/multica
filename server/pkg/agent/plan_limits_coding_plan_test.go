@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestParseKimiCodingUsageJSONFiveHourAndWeekly(t *testing.T) {
@@ -44,7 +46,7 @@ func TestParseGLMQuotaJSONMapsUnitWindowsAndSkipsTimeLimit(t *testing.T) {
 			"limits": [
 				{"type": "TIME_LIMIT", "unit": 5, "number": 1, "percentage": 7.5},
 				{"type": "TOKENS_LIMIT", "unit": 3, "number": 5, "percentage": 20, "nextResetTime": 1789000000000},
-				{"type": "CREDIT_LIMIT", "unit": 6, "number": 1, "percentage": 41, "nextResetTime": 1789600000000}
+				{"type": "TOKENS_LIMIT", "unit": 6, "number": 1, "percentage": 41, "nextResetTime": 1789600000000}
 			]
 		}
 	}`), time.Unix(50, 0))
@@ -59,6 +61,44 @@ func TestParseGLMQuotaJSONMapsUnitWindowsAndSkipsTimeLimit(t *testing.T) {
 	}
 	if got.Windows[1].Name != windowSevenDay || got.Windows[1].UsedPercent == nil || *got.Windows[1].UsedPercent != 41 {
 		t.Fatalf("7d = %+v", got.Windows[1])
+	}
+}
+
+func TestParseGLMQuotaJSONIgnoresCreditLimitRows(t *testing.T) {
+	t.Parallel()
+
+	got, err := ParseGLMQuotaJSON([]byte(`{
+		"data": {"limits": [
+			{"type": "CREDIT_LIMIT", "percentage": 100, "unit": 6, "number": 1, "nextResetTime": 1800000000000},
+			{"type": "CREDIT_LIMIT", "percentage": 88},
+			{"type": "TIME_LIMIT", "percentage": 7},
+			{"type": "TOKENS_LIMIT", "percentage": 12, "unit": 3, "number": 5}
+		]}
+	}`), time.Unix(125, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Provider != "glm" || len(got.Windows) != 1 {
+		t.Fatalf("snapshot = %+v", got)
+	}
+	if got.Windows[0].Name != windowFiveHour || got.Windows[0].UsedPercent == nil || *got.Windows[0].UsedPercent != 12 {
+		t.Fatalf("5h = %+v", got.Windows[0])
+	}
+	if got.Status != protocol.PlanLimitsStatusAvailable {
+		t.Fatalf("status = %q, CREDIT_LIMIT must not mark the plan exhausted", got.Status)
+	}
+
+	creditOnly, err := ParseGLMQuotaJSON([]byte(`{
+		"data": {"limits": [
+			{"type": "CREDIT_LIMIT", "percentage": 100, "unit": 6, "number": 1},
+			{"type": "CREDIT_LIMIT", "percentage": 41}
+		]}
+	}`), time.Unix(126, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creditOnly != nil {
+		t.Fatalf("CREDIT_LIMIT-only snapshot = %+v, want nil", creditOnly)
 	}
 }
 
