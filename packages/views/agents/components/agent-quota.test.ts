@@ -90,6 +90,35 @@ describe("quotaWindowPercents", () => {
   });
 });
 
+describe("coding-plan and balance snapshots", () => {
+  it("treats remaining-balance windows as subscription quota", () => {
+    const deepseek: PlanLimitsSnapshot = {
+      provider: "dsh",
+      status: "available",
+      observed_at: NOW / 1000,
+      windows: [{ name: "balance_cny", remaining: 42.5 }],
+    };
+    expect(classifyAgentQuota(deepseek, NOW)).toBe("windows");
+  });
+
+  it("summarizes 5h/7d coding-plan percents for the capsule", () => {
+    const kimi: PlanLimitsSnapshot = {
+      provider: "kimi",
+      status: "available",
+      observed_at: NOW / 1000,
+      windows: [
+        { name: "five_hour", used_percent: 12, window_minutes: 300 },
+        { name: "seven_day", used_percent: 40, window_minutes: 10_080 },
+      ],
+    };
+    expect(classifyAgentQuota(kimi, NOW)).toBe("windows");
+    expect(quotaWindowPercents(kimi.windows!).map((w) => w.shortLabel)).toEqual([
+      "5h",
+      "7d",
+    ]);
+  });
+});
+
 describe("sumAgentUsage30d", () => {
   it("folds this agent's token rows and ignores others", () => {
     const rows: DashboardUsageByAgent[] = [

@@ -105,6 +105,49 @@ describe("AgentQuotaCapsule", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders a DeepSeek remaining balance instead of 30d tokens", () => {
+    renderQuota(
+      <AgentQuotaCapsule
+        agentId="agent-1"
+        runtime={makeRuntime({
+          provider: "dsh",
+          plan_limits: {
+            provider: "dsh",
+            status: "available",
+            observed_at: NOW / 1000,
+            windows: [{ name: "balance_cny", remaining: 42.5 }],
+          },
+        })}
+        now={NOW}
+      />,
+    );
+
+    expect(screen.getByText("¥42.5")).toBeInTheDocument();
+  });
+
+  it("renders Kimi coding-plan 5h and 7d percents", () => {
+    renderQuota(
+      <AgentQuotaCapsule
+        agentId="agent-1"
+        runtime={makeRuntime({
+          provider: "kimi",
+          plan_limits: {
+            provider: "kimi",
+            status: "available",
+            observed_at: NOW / 1000,
+            windows: [
+              { name: "five_hour", used_percent: 12, window_minutes: 300 },
+              { name: "seven_day", used_percent: 40, window_minutes: 10_080 },
+            ],
+          },
+        })}
+        now={NOW}
+      />,
+    );
+
+    expect(screen.getByText("5h 12% · 7d 40%")).toBeInTheDocument();
+  });
+
   it("renders a 429 health badge for window-less exhausted snapshots", () => {
     renderQuota(
       <AgentQuotaCapsule

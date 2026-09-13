@@ -338,7 +338,9 @@
     "window_pro": "Pro",
     "window_flash": "Flash",
     "window_flash_lite": "Flash Lite",
-    "window_credits": "Credits"
+    "window_credits": "Credits",
+    "window_balance_cny": "CNY balance",
+    "window_balance_usd": "USD balance"
   },
   "profiles": {
     "cta": "Add runtime",

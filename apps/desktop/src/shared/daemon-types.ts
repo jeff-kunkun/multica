@@ -18,6 +18,7 @@ export interface DaemonPlanLimitWindow {
   used_percent?: number;
   window_minutes?: number;
   resets_at?: number;
+  remaining?: number;
 }
 
 /** Credential-free 5h/7d snapshot from the local daemon /health overlay. */

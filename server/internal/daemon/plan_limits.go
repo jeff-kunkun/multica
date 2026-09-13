@@ -131,7 +131,7 @@ func (d *Daemon) maybeRefreshPlanQuota() {
 
 func (d *Daemon) refreshPlanQuota() {
 	d.mu.Lock()
-	var wantClaude, wantCodex, wantGemini, wantGrok bool
+	var wantClaude, wantCodex, wantGemini, wantGrok, wantKimi, wantGLM, wantMiniMax, wantDeepSeek bool
 	for _, runtime := range d.runtimeIndex {
 		if runtime.ProfileID != "" {
 			continue
@@ -145,10 +145,18 @@ func (d *Daemon) refreshPlanQuota() {
 			wantGemini = true
 		case "grok":
 			wantGrok = true
+		case "kimi":
+			wantKimi = true
+		case "glm":
+			wantGLM = true
+		case "minimax":
+			wantMiniMax = true
+		case "dsh":
+			wantDeepSeek = true
 		}
 	}
 	d.mu.Unlock()
-	if !wantClaude && !wantCodex && !wantGemini && !wantGrok {
+	if !wantClaude && !wantCodex && !wantGemini && !wantGrok && !wantKimi && !wantGLM && !wantMiniMax && !wantDeepSeek {
 		return
 	}
 
@@ -161,7 +169,7 @@ func (d *Daemon) refreshPlanQuota() {
 		targets []string
 		run     func() (*protocol.PlanLimitsSnapshot, error)
 	}
-	jobs := make([]probeJob, 0, 4)
+	jobs := make([]probeJob, 0, 8)
 	if wantClaude {
 		jobs = append(jobs, probeJob{name: "claude", targets: []string{"claude"}, run: func() (*protocol.PlanLimitsSnapshot, error) {
 			return probe.ProbeClaude(ctx)
@@ -180,6 +188,26 @@ func (d *Daemon) refreshPlanQuota() {
 	if wantGrok {
 		jobs = append(jobs, probeJob{name: "grok", targets: []string{"grok"}, run: func() (*protocol.PlanLimitsSnapshot, error) {
 			return probe.ProbeGrok(ctx)
+		}})
+	}
+	if wantKimi {
+		jobs = append(jobs, probeJob{name: "kimi", targets: []string{"kimi"}, run: func() (*protocol.PlanLimitsSnapshot, error) {
+			return probe.ProbeKimi(ctx)
+		}})
+	}
+	if wantGLM {
+		jobs = append(jobs, probeJob{name: "glm", targets: []string{"glm"}, run: func() (*protocol.PlanLimitsSnapshot, error) {
+			return probe.ProbeGLM(ctx)
+		}})
+	}
+	if wantMiniMax {
+		jobs = append(jobs, probeJob{name: "minimax", targets: []string{"minimax"}, run: func() (*protocol.PlanLimitsSnapshot, error) {
+			return probe.ProbeMiniMax(ctx)
+		}})
+	}
+	if wantDeepSeek {
+		jobs = append(jobs, probeJob{name: "dsh", targets: []string{"dsh"}, run: func() (*protocol.PlanLimitsSnapshot, error) {
+			return probe.ProbeDeepSeek(ctx)
 		}})
 	}
 
@@ -236,6 +264,10 @@ func clonePlanLimitsSnapshot(snapshot *protocol.PlanLimitsSnapshot) protocol.Pla
 		if window.ResetsAt != nil {
 			value := *window.ResetsAt
 			cloned.Windows[i].ResetsAt = &value
+		}
+		if window.Remaining != nil {
+			value := *window.Remaining
+			cloned.Windows[i].Remaining = &value
 		}
 	}
 	return cloned

@@ -63,6 +63,8 @@ export interface PlanLimitWindow {
   used_percent?: number;
   window_minutes?: number;
   resets_at?: number;
+  /** Prepaid remaining amount for `balance_cny` / `balance_usd` windows. */
+  remaining?: number;
 }
 
 /**

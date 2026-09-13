@@ -40,6 +40,16 @@ func TestValidatePlanLimitsSnapshot(t *testing.T) {
 		{name: "invalid percent", provider: "codex", mutate: func(s *protocol.PlanLimitsSnapshot) { value := 101.0; s.Windows[0].UsedPercent = &value }, wantErr: true},
 		{name: "duplicate window", provider: "codex", mutate: func(s *protocol.PlanLimitsSnapshot) { s.Windows = append(s.Windows, s.Windows[0]) }, wantErr: true},
 		{name: "exhausted without window", provider: "codex", mutate: func(s *protocol.PlanLimitsSnapshot) { s.Status = protocol.PlanLimitsStatusExhausted; s.Windows = nil }},
+		{name: "remaining balance window", provider: "dsh", mutate: func(s *protocol.PlanLimitsSnapshot) {
+			s.Provider = "dsh"
+			remaining := 12.5
+			s.Windows = []protocol.PlanLimitWindow{{Name: "balance_cny", Remaining: &remaining}}
+		}},
+		{name: "negative remaining", provider: "dsh", mutate: func(s *protocol.PlanLimitsSnapshot) {
+			s.Provider = "dsh"
+			remaining := -1.0
+			s.Windows = []protocol.PlanLimitWindow{{Name: "balance_cny", Remaining: &remaining}}
+		}, wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

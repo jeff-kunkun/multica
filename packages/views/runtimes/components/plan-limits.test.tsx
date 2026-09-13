@@ -81,6 +81,13 @@ describe("displayPlanLimits", () => {
     expect(planLimitWindowShortLabel({ name: "gemini_flash_lite", used_percent: 5 })).toBe("Lite");
     expect(planLimitWindowShortLabel({ name: "credits", used_percent: 18 })).toBe("Credits");
   });
+
+  it("labels coding-plan windows as 5h/7d and balances as currency", () => {
+    expect(planLimitWindowShortLabel({ name: "five_hour", used_percent: 12 })).toBe("5h");
+    expect(planLimitWindowShortLabel({ name: "seven_day", used_percent: 40 })).toBe("7d");
+    expect(planLimitWindowShortLabel({ name: "balance_cny", remaining: 110 })).toBe("¥");
+    expect(planLimitWindowShortLabel({ name: "balance_usd", remaining: 12.5 })).toBe("$");
+  });
 });
 
 describe("PlanLimitsCell", () => {
@@ -95,7 +102,25 @@ describe("PlanLimitsCell", () => {
       </I18nProvider>,
     );
 
-    expect(screen.getByText("42%")).toBeInTheDocument();
-    expect(screen.getByText("5h")).toBeInTheDocument();
+    expect(screen.getByText("5h 42%")).toBeInTheDocument();
+  });
+
+  it("renders a DeepSeek remaining balance", () => {
+    const runtime = {
+      plan_limits: {
+        provider: "dsh",
+        status: "available",
+        observed_at: NOW / 1000,
+        windows: [{ name: "balance_cny", remaining: 110 }],
+      },
+    } as AgentRuntime;
+
+    render(
+      <I18nProvider locale="en" resources={{ en: { runtimes: enRuntimes } }}>
+        <PlanLimitsCell runtime={runtime} now={NOW} />
+      </I18nProvider>,
+    );
+
+    expect(screen.getByText("¥110")).toBeInTheDocument();
   });
 });

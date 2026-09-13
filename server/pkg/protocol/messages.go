@@ -392,8 +392,9 @@ const (
 
 // PlanLimitsSnapshot is a credential-free view of the subscription windows
 // reported by the provider CLI running beside the daemon. Provider-specific
-// account identifiers, plan names, credits, and tokens are deliberately not
-// part of this wire shape.
+// account identifiers, plan names, API keys, and tokens are deliberately not
+// part of this wire shape. Remaining currency amounts are allowed because the
+// UI needs them to render prepaid balances (¥ / $).
 type PlanLimitsSnapshot struct {
 	Provider   string            `json:"provider"`
 	Status     string            `json:"status"`
@@ -408,6 +409,9 @@ type PlanLimitWindow struct {
 	UsedPercent   *float64 `json:"used_percent,omitempty"`
 	WindowMinutes *int64   `json:"window_minutes,omitempty"`
 	ResetsAt      *int64   `json:"resets_at,omitempty"`
+	// Remaining is a prepaid currency amount (CNY/USD). Used by balance_*
+	// windows; subscription percent windows leave it nil.
+	Remaining *float64 `json:"remaining,omitempty"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.

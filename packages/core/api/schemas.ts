@@ -1530,6 +1530,7 @@ export const PlanLimitWindowSchema = z.object({
   used_percent: z.number().min(0).max(100).optional(),
   window_minutes: z.number().positive().optional(),
   resets_at: z.number().positive().optional(),
+  remaining: z.number().min(0).optional(),
 }).loose();
 
 export const PlanLimitsSnapshotSchema = z.object({

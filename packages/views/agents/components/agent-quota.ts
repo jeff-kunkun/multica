@@ -5,7 +5,10 @@ import type {
 } from "@multica/core/types";
 import {
   displayPlanLimits,
+  formatPlanLimitRemaining,
+  isBalanceWindow,
   planLimitWindowShortLabel,
+  quotaWindowSummaryParts,
 } from "../../runtimes/components/plan-limits";
 import { estimateCost } from "../../runtimes/utils";
 
@@ -26,7 +29,11 @@ export function classifyAgentQuota(
 ): AgentQuotaKind {
   const display = displayPlanLimits(snapshot, nowMs);
   if (display) {
-    if (display.windows.some((window) => window.used_percent != null)) {
+    if (
+      display.windows.some(
+        (window) => window.used_percent != null || window.remaining != null,
+      )
+    ) {
       return "windows";
     }
     return "exhausted";
@@ -91,4 +98,10 @@ export function sumAgentUsage30d(
   return { tokens, cost };
 }
 
-export { displayPlanLimits, planLimitWindowShortLabel };
+export {
+  displayPlanLimits,
+  formatPlanLimitRemaining,
+  isBalanceWindow,
+  planLimitWindowShortLabel,
+  quotaWindowSummaryParts,
+};

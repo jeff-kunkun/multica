@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,16 +40,24 @@ type PlanQuotaProbe struct {
 	Client *http.Client
 	Now    func() time.Time
 	// Optional URL overrides so tests can serve fixtures without the network.
-	ClaudeUsageURL string
-	CodexUsageURL  string
-	GeminiLoadURL  string
-	GeminiQuotaURL string
-	GeminiTokenURL string
-	GrokBillingURL string
-	GrokCreditsURL string
+	ClaudeUsageURL     string
+	CodexUsageURL      string
+	GeminiLoadURL      string
+	GeminiQuotaURL     string
+	GeminiTokenURL     string
+	GrokBillingURL     string
+	GrokCreditsURL     string
+	KimiUsagesURL      string
+	GLMQuotaURL        string
+	MiniMaxRemainsURL  string
+	DeepSeekBalanceURL string
 	// LookupKeychain, when set, replaces the macOS Keychain read. Tests inject
 	// a no-op so they never shell out to `security`.
 	LookupKeychain func(service string) (string, bool)
+	// LookupAPIKey, when set, replaces env/file API-key discovery for coding
+	// plan and prepaid-balance probes. Tests inject a stub so ambient
+	// DEEPSEEK_API_KEY / ZHIPUAI_API_KEY cannot leak into the suite.
+	LookupAPIKey func(provider string) (string, bool)
 }
 
 func (p PlanQuotaProbe) now() time.Time {
@@ -260,6 +269,10 @@ func snapshotFromWindows(provider string, windows []protocol.PlanLimitWindow, ob
 			status = protocol.PlanLimitsStatusExhausted
 			break
 		}
+		if window.Remaining != nil && *window.Remaining <= 0 && window.UsedPercent == nil {
+			status = protocol.PlanLimitsStatusExhausted
+			break
+		}
 	}
 	snapshot := &protocol.PlanLimitsSnapshot{
 		Provider: provider,
@@ -294,6 +307,97 @@ func parseRFC3339Unix(value string) (int64, bool) {
 		return ts.Unix(), true
 	}
 	return 0, false
+}
+
+func jsonFloat(msg json.RawMessage) (float64, bool) {
+	var value float64
+	if json.Unmarshal(msg, &value) == nil {
+		return value, true
+	}
+	var text string
+	if json.Unmarshal(msg, &text) != nil {
+		return 0, false
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0, false
+	}
+	parsed, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
+}
+
+func parseFlexibleReset(msg json.RawMessage) (int64, bool) {
+	if ts, ok := jsonFloat(msg); ok && ts > 0 {
+		value := int64(ts)
+		if value > 1_000_000_000_000 {
+			return value / 1000, true
+		}
+		return value, true
+	}
+	var text string
+	if json.Unmarshal(msg, &text) != nil {
+		return 0, false
+	}
+	if ts, ok := parseRFC3339Unix(text); ok {
+		return ts, true
+	}
+	return 0, false
+}
+
+func (p PlanQuotaProbe) apiKey(provider string, envNames []string, relFiles []string) string {
+	if p.LookupAPIKey != nil {
+		key, _ := p.LookupAPIKey(provider)
+		return strings.TrimSpace(key)
+	}
+	for _, name := range envNames {
+		if key := strings.TrimSpace(os.Getenv(name)); key != "" {
+			return key
+		}
+	}
+	home := homeDir(p.Home)
+	for _, rel := range relFiles {
+		if key := readAPIKeyFile(filepath.Join(home, rel)); key != "" {
+			return key
+		}
+	}
+	return ""
+}
+
+func readAPIKeyFile(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return ""
+	}
+	if !strings.HasPrefix(text, "{") && !strings.HasPrefix(text, "[") {
+		if strings.ContainsAny(text, "\r\n") || len(text) > 512 {
+			return ""
+		}
+		return text
+	}
+	var parsed map[string]json.RawMessage
+	if json.Unmarshal([]byte(text), &parsed) != nil {
+		return ""
+	}
+	for _, key := range []string{"api_key", "apiKey", "access_token", "token", "key"} {
+		msg, ok := parsed[key]
+		if !ok {
+			continue
+		}
+		var value string
+		if json.Unmarshal(msg, &value) == nil {
+			if trimmed := strings.TrimSpace(value); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
 }
 
 func readClaudeAccessToken(home string, lookupKeychain func(string) (string, bool)) string {

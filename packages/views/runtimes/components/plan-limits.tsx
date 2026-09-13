@@ -50,12 +50,53 @@ export function planLimitWindowShortLabel(window: PlanLimitWindow): string {
       return "Lite";
     case "credits":
       return "Credits";
+    case "five_hour":
+      return "5h";
+    case "seven_day":
+      return "7d";
+    case "balance_cny":
+      return "¥";
+    case "balance_usd":
+      return "$";
     default:
       break;
   }
   if (window.window_minutes === 300) return "5h";
   if (window.window_minutes === 10_080) return "7d";
   return window.name;
+}
+
+export function isBalanceWindow(window: PlanLimitWindow): boolean {
+  return window.name === "balance_cny" || window.name === "balance_usd";
+}
+
+export function formatPlanLimitRemaining(window: PlanLimitWindow): string | null {
+  if (window.remaining == null || !isBalanceWindow(window)) return null;
+  const amount = formatMoney(window.remaining);
+  return window.name === "balance_cny" ? `¥${amount}` : `$${amount}`;
+}
+
+function formatMoney(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  const fixed = value.toFixed(2);
+  return fixed.replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+}
+
+export function quotaWindowSummaryParts(windows: PlanLimitWindow[]): string[] {
+  const parts: string[] = [];
+  for (const window of windows) {
+    const remaining = formatPlanLimitRemaining(window);
+    if (remaining) {
+      parts.push(remaining);
+      continue;
+    }
+    if (window.used_percent != null) {
+      parts.push(
+        `${planLimitWindowShortLabel(window)} ${Math.round(window.used_percent)}%`,
+      );
+    }
+  }
+  return parts;
 }
 
 function percentageTone(value: number): string {
@@ -83,11 +124,8 @@ export function PlanLimitsCell({
     return <span className="text-caption text-faint-foreground">—</span>;
   }
 
-  const percentages = display.windows.filter(
-    (window): window is PlanLimitWindow & { used_percent: number } =>
-      window.used_percent != null,
-  );
-  if (percentages.length === 0) {
+  const parts = quotaWindowSummaryParts(display.windows).slice(0, 2);
+  if (parts.length === 0) {
     return (
       <span className="truncate text-caption font-medium text-destructive">
         {t(($) => $.plan_limits.limit_reached)}
@@ -100,15 +138,12 @@ export function PlanLimitsCell({
       className="flex min-w-0 flex-col leading-tight"
       aria-label={t(($) => $.plan_limits.title)}
     >
-      {percentages.slice(0, 2).map((window) => (
+      {parts.map((part) => (
         <span
-          key={window.name}
-          className={`truncate text-caption tabular-nums ${percentageTone(window.used_percent)}`}
+          key={part}
+          className="truncate text-caption tabular-nums text-foreground"
         >
-          <span className="text-muted-foreground">
-            {planLimitWindowShortLabel(window)}
-          </span>{" "}
-          {Math.round(window.used_percent)}%
+          {part}
         </span>
       ))}
     </div>
@@ -128,6 +163,14 @@ function windowLabel(
       return t(($) => $.plan_limits.window_flash_lite);
     case "credits":
       return t(($) => $.plan_limits.window_credits);
+    case "five_hour":
+      return t(($) => $.plan_limits.window_5h);
+    case "seven_day":
+      return t(($) => $.plan_limits.window_7d);
+    case "balance_cny":
+      return t(($) => $.plan_limits.window_balance_cny);
+    case "balance_usd":
+      return t(($) => $.plan_limits.window_balance_usd);
     default:
       break;
   }
@@ -197,6 +240,7 @@ export function PlanLimitsCard({
         <div className="divide-y">
           {display.windows.map((window) => {
             const used = window.used_percent;
+            const balance = formatPlanLimitRemaining(window);
             const reset = window.resets_at
               ? timeAgo(new Date(window.resets_at * 1000).toISOString())
               : null;
@@ -206,7 +250,11 @@ export function PlanLimitsCard({
                   <span className="text-caption font-medium">
                     {windowLabel(window, t)}
                   </span>
-                  {used != null ? (
+                  {balance ? (
+                    <span className="text-caption font-semibold tabular-nums text-foreground">
+                      {balance}
+                    </span>
+                  ) : used != null ? (
                     <span
                       className={`text-caption font-semibold tabular-nums ${percentageTone(used)}`}
                     >
@@ -220,7 +268,7 @@ export function PlanLimitsCard({
                     </span>
                   )}
                 </div>
-                {used != null && (
+                {used != null && !isBalanceWindow(window) && (
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                     <div
                       className={`h-full rounded-full ${percentageBarTone(used)}`}

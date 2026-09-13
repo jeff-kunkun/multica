@@ -43,11 +43,14 @@ func validatePlanLimitsSnapshot(snapshot *protocol.PlanLimitsSnapshot, runtimePr
 			return nil, fmt.Errorf("duplicate window name")
 		}
 		seen[window.Name] = struct{}{}
-		if window.UsedPercent == nil && window.ResetsAt == nil {
+		if window.UsedPercent == nil && window.ResetsAt == nil && window.Remaining == nil {
 			return nil, fmt.Errorf("window requires usage or reset data")
 		}
 		if window.UsedPercent != nil && (math.IsNaN(*window.UsedPercent) || math.IsInf(*window.UsedPercent, 0) || *window.UsedPercent < 0 || *window.UsedPercent > 100) {
 			return nil, fmt.Errorf("used_percent must be between 0 and 100")
+		}
+		if window.Remaining != nil && (math.IsNaN(*window.Remaining) || math.IsInf(*window.Remaining, 0) || *window.Remaining < 0) {
+			return nil, fmt.Errorf("remaining must be non-negative")
 		}
 		if window.WindowMinutes != nil && (*window.WindowMinutes <= 0 || *window.WindowMinutes > maxPlanLimitWindowMinutes) {
 			return nil, fmt.Errorf("window_minutes is out of range")

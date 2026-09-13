@@ -225,3 +225,92 @@ func TestRefreshPlanQuotaRecordsGrokSnapshot(t *testing.T) {
 		t.Fatalf("credits = %+v", got.Windows[0])
 	}
 }
+
+func TestRefreshPlanQuotaRecordsKimiAndDeepSeek(t *testing.T) {
+	d := &Daemon{runtimeIndex: map[string]Runtime{
+		"kimi-a": {ID: "kimi-a", Provider: "kimi"},
+		"dsh-a":  {ID: "dsh-a", Provider: "dsh"},
+		"custom": {ID: "custom", Provider: "kimi", ProfileID: "p"},
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/kimi":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"limits": []map[string]any{{"detail": map[string]any{"limit": 100, "remaining": 25}}},
+				"usage":  map[string]any{"limit": 1000, "remaining": 800},
+			})
+		case "/deepseek":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"is_available":  true,
+				"balance_infos": []map[string]any{{"currency": "CNY", "total_balance": "42.5"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	d.planQuotaProbeFn = func() agent.PlanQuotaProbe {
+		return agent.PlanQuotaProbe{
+			Client:             server.Client(),
+			KimiUsagesURL:      server.URL + "/kimi",
+			DeepSeekBalanceURL: server.URL + "/deepseek",
+			LookupAPIKey: func(provider string) (string, bool) {
+				return "test-key-" + provider, true
+			},
+			Now: func() time.Time { return time.Unix(100, 0) },
+		}
+	}
+
+	d.refreshPlanQuota()
+	kimi := d.planLimitsForRuntime("kimi-a")
+	if kimi == nil || kimi.Provider != "kimi" || len(kimi.Windows) != 2 {
+		t.Fatalf("kimi = %+v", kimi)
+	}
+	dsh := d.planLimitsForRuntime("dsh-a")
+	if dsh == nil || dsh.Provider != "dsh" || dsh.Windows[0].Remaining == nil || *dsh.Windows[0].Remaining != 42.5 {
+		t.Fatalf("dsh = %+v", dsh)
+	}
+	if custom := d.planLimitsForRuntime("custom"); custom != nil {
+		t.Fatalf("custom inherited probe snapshot: %+v", custom)
+	}
+}
+
+func TestRefreshPlanQuotaGLMUsesRawAuthorization(t *testing.T) {
+	var gotAuth string
+	d := &Daemon{runtimeIndex: map[string]Runtime{
+		"glm-a": {ID: "glm-a", Provider: "glm"},
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"limits": []map[string]any{
+					{"type": "TOKENS_LIMIT", "unit": 3, "number": 5, "percentage": 8},
+				},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+	d.planQuotaProbeFn = func() agent.PlanQuotaProbe {
+		return agent.PlanQuotaProbe{
+			Client:      server.Client(),
+			GLMQuotaURL: server.URL,
+			LookupAPIKey: func(provider string) (string, bool) {
+				if provider == "glm" {
+					return "raw-glm-key", true
+				}
+				return "", false
+			},
+			Now: func() time.Time { return time.Unix(110, 0) },
+		}
+	}
+
+	d.refreshPlanQuota()
+	if gotAuth != "raw-glm-key" {
+		t.Fatalf("authorization = %q", gotAuth)
+	}
+	got := d.planLimitsForRuntime("glm-a")
+	if got == nil || got.Provider != "glm" || got.Windows[0].UsedPercent == nil || *got.Windows[0].UsedPercent != 8 {
+		t.Fatalf("glm = %+v", got)
+	}
+}

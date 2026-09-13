@@ -325,7 +325,9 @@
     "window_pro": "Pro",
     "window_flash": "Flash",
     "window_flash_lite": "Flash Lite",
-    "window_credits": "积分"
+    "window_credits": "积分",
+    "window_balance_cny": "人民币余额",
+    "window_balance_usd": "美元余额"
   },
   "profiles": {
     "cta": "添加运行时",

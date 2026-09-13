@@ -12,8 +12,12 @@ import {
   classifyAgentQuota,
   compactRemaining,
   displayPlanLimits,
+  formatPlanLimitRemaining,
+  isBalanceWindow,
   nearestResetAt,
+  planLimitWindowShortLabel,
   quotaWindowPercents,
+  quotaWindowSummaryParts,
   sumAgentUsage30d,
 } from "./agent-quota";
 
@@ -96,10 +100,7 @@ function WindowsCapsule({
   const percents = quotaWindowPercents(windows);
   const reset = nearestResetAt(windows);
   const remaining = reset != null ? compactRemaining(reset, now) : null;
-  const summary = percents
-    .slice(0, 2)
-    .map((window) => `${window.shortLabel} ${Math.round(window.used_percent)}%`)
-    .join(" · ");
+  const summary = quotaWindowSummaryParts(windows).slice(0, 2).join(" · ");
   const peak = percents.reduce(
     (max, window) => Math.max(max, window.used_percent),
     0,
@@ -186,32 +187,51 @@ function WindowBars({
   now: number;
 }) {
   const { t } = useT("agents");
-  const percents = quotaWindowPercents(windows);
   const reset = nearestResetAt(windows);
   const remaining = reset != null ? compactRemaining(reset, now) : null;
 
   return (
     <div className="space-y-2.5">
-      {percents.map((window) => (
-        <div key={window.name}>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-caption font-medium">{window.shortLabel}</span>
-            <span
-              className={`text-caption font-semibold tabular-nums ${percentageTone(window.used_percent)}`}
-            >
-              {t(($) => $.quota.used_percent, {
-                percent: Math.round(window.used_percent),
-              })}
-            </span>
+      {windows.map((window) => {
+        const balance = formatPlanLimitRemaining(window);
+        if (balance) {
+          return (
+            <div key={window.name}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-caption font-medium">
+                  {window.name === "balance_cny" ? "¥" : "$"}
+                </span>
+                <span className="text-caption font-semibold tabular-nums">
+                  {balance}
+                </span>
+              </div>
+            </div>
+          );
+        }
+        if (window.used_percent == null || isBalanceWindow(window)) return null;
+        return (
+          <div key={window.name}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-caption font-medium">
+                {planLimitWindowShortLabel(window)}
+              </span>
+              <span
+                className={`text-caption font-semibold tabular-nums ${percentageTone(window.used_percent)}`}
+              >
+                {t(($) => $.quota.used_percent, {
+                  percent: Math.round(window.used_percent),
+                })}
+              </span>
+            </div>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full rounded-full ${percentageBarTone(window.used_percent)}`}
+                style={{ width: `${Math.min(100, window.used_percent)}%` }}
+              />
+            </div>
           </div>
-          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className={`h-full rounded-full ${percentageBarTone(window.used_percent)}`}
-              style={{ width: `${Math.min(100, window.used_percent)}%` }}
-            />
-          </div>
-        </div>
-      ))}
+        );
+      })}
       {remaining && (
         <p className="text-caption text-muted-foreground">
           {t(($) => $.quota.resets_in, { when: remaining })}

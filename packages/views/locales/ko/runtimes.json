@@ -325,7 +325,9 @@
     "window_pro": "Pro",
     "window_flash": "Flash",
     "window_flash_lite": "Flash Lite",
-    "window_credits": "크레딧"
+    "window_credits": "크레딧",
+    "window_balance_cny": "CNY 잔액",
+    "window_balance_usd": "USD 잔액"
   },
   "profiles": {
     "cta": "런타임 추가",
