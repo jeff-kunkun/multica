@@ -525,6 +525,16 @@ type Daemon struct {
 	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	planLimitsMu sync.RWMutex
 	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
+	// Live Claude/Codex usage probes (cc-switch style). Throttled separately
+	// from the 15s heartbeat so we do not hammer undocumented usage APIs.
+	planQuotaMu        sync.Mutex
+	lastPlanQuotaProbe time.Time
+	planQuotaInflight  atomic.Bool
+	planQuotaClient    *http.Client
+	planQuotaHome      string
+	planQuotaClaudeURL string
+	planQuotaCodexURL  string
+	planQuotaProbeFn   func() agent.PlanQuotaProbe
 
 	// reconcile fans out a "re-check server state now" signal to subscribers
 	// (watchTaskCancellation, workspaceSyncLoop) so the WS connect/reconnect
@@ -4502,6 +4512,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 		return false
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
+	d.maybeRefreshPlanQuota()
 	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid))
 	if err != nil {
 		if ctx.Err() == nil {

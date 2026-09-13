@@ -1,8 +1,13 @@
 package daemon
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -64,5 +69,80 @@ func TestRecordPlanLimitsKeepsCustomProfileIsolated(t *testing.T) {
 	}
 	if got := d.planLimitsForRuntime("custom-b"); got != nil {
 		t.Fatalf("other custom runtime inherited snapshot: %+v", got)
+	}
+}
+
+func TestRecordPlanLimitsForProviderSkipsCustomProfiles(t *testing.T) {
+	t.Parallel()
+
+	used := 11.0
+	d := &Daemon{runtimeIndex: map[string]Runtime{
+		"built-in": {ID: "built-in", Provider: "claude"},
+		"custom":   {ID: "custom", Provider: "claude", ProfileID: "profile-1"},
+	}}
+	d.recordPlanLimitsForProvider("claude", &protocol.PlanLimitsSnapshot{
+		Provider:   "claude",
+		Status:     protocol.PlanLimitsStatusAvailable,
+		ObservedAt: 50,
+		Windows:    []protocol.PlanLimitWindow{{Name: "five_hour", UsedPercent: &used}},
+	})
+	if got := d.planLimitsForRuntime("built-in"); got == nil || got.Windows[0].UsedPercent == nil || *got.Windows[0].UsedPercent != 11 {
+		t.Fatalf("built-in snapshot = %+v", got)
+	}
+	if got := d.planLimitsForRuntime("custom"); got != nil {
+		t.Fatalf("custom inherited probe snapshot: %+v", got)
+	}
+}
+
+func TestPlanLimitsByProviderOmitsCustomRuntimes(t *testing.T) {
+	t.Parallel()
+
+	used := 4.0
+	d := &Daemon{runtimeIndex: map[string]Runtime{
+		"codex-a": {ID: "codex-a", Provider: "codex"},
+		"custom":  {ID: "custom", Provider: "codex", ProfileID: "p"},
+	}}
+	d.recordPlanLimits("codex-a", &protocol.PlanLimitsSnapshot{
+		Provider:   "codex",
+		Status:     protocol.PlanLimitsStatusAvailable,
+		ObservedAt: 9,
+		Windows:    []protocol.PlanLimitWindow{{Name: "primary", UsedPercent: &used}},
+	})
+	got := d.planLimitsByProvider()
+	if got == nil || got["codex"].Windows[0].UsedPercent == nil || *got["codex"].Windows[0].UsedPercent != 4 {
+		t.Fatalf("by provider = %+v", got)
+	}
+}
+
+func TestRefreshPlanQuotaRecordsClaudeSnapshot(t *testing.T) {
+	used := 18.0
+	d := &Daemon{runtimeIndex: map[string]Runtime{
+		"claude-a": {ID: "claude-a", Provider: "claude"},
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"five_hour": map[string]any{"utilization": used, "resets_at": "2027-01-15T04:00:00Z"},
+			"seven_day": map[string]any{"utilization": 2, "resets_at": "2027-01-20T12:00:00Z"},
+		})
+	}))
+	t.Cleanup(server.Close)
+	d.planQuotaProbeFn = func() agent.PlanQuotaProbe {
+		return agent.PlanQuotaProbe{
+			Client:         server.Client(),
+			ClaudeUsageURL: server.URL,
+			LookupKeychain: func(string) (string, bool) {
+				return `{"claudeAiOauth":{"accessToken":"tok"}}`, true
+			},
+			Now: func() time.Time { return time.Unix(70, 0) },
+		}
+	}
+
+	d.refreshPlanQuota()
+	got := d.planLimitsForRuntime("claude-a")
+	if got == nil || got.Provider != "claude" || len(got.Windows) != 2 {
+		t.Fatalf("snapshot = %+v", got)
+	}
+	if got.Windows[0].UsedPercent == nil || *got.Windows[0].UsedPercent != 18 {
+		t.Fatalf("5h percent = %+v", got.Windows[0])
 	}
 }

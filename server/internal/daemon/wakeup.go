@@ -305,6 +305,7 @@ func (d *Daemon) runWSHeartbeatSender(ctx context.Context, runtimeIDs []string, 
 }
 
 func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writes chan<- *wsOutbound) {
+	d.maybeRefreshPlanQuota()
 	for _, rid := range runtimeIDs {
 		if ctx.Err() != nil {
 			return

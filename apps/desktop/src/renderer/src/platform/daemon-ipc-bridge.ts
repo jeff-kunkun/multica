@@ -3,14 +3,14 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { runtimeKeys } from "@multica/core/runtimes";
-import type { AgentRuntime } from "@multica/core/types";
+import type { AgentRuntime, PlanLimitsSnapshot } from "@multica/core/types";
 
 /**
  * DesktopAPI exposes a richer DaemonStatus shape than the public AgentRuntime
  * type — we redeclare the fields we consume here to avoid coupling the bridge
  * to the desktop preload typings (which live in apps/desktop/src/preload).
  */
-interface DaemonStatusLike {
+export interface DaemonStatusLike {
   state:
     | "running"
     | "stopped"
@@ -21,17 +21,24 @@ interface DaemonStatusLike {
     | "recovery_paused"
     | "auth_expired";
   daemonId?: string;
+  planLimits?: Record<string, PlanLimitsSnapshot>;
 }
 
 /**
- * Merges a local DaemonStatus into an AgentRuntime row. Only the `status`
- * field is overridden; other fields (name, provider, last_seen_at, etc)
- * remain server-authoritative. We deliberately ignore intermediate states
- * (starting / stopping / installing_cli / cli_not_found) so the cache
- * doesn't flap during boot — if the daemon is in such a state, the runtime
- * is effectively offline anyway, and the server-side sweeper will mark it
- * within 75s.
+ * Merges a local DaemonStatus into an AgentRuntime row. Status flips stay
+ * server-compatible; plan_limits from /health overlay live Claude/Codex 5h/7d
+ * windows that official cloud APIs do not persist. Custom-profile runtimes
+ * keep the server snapshot because they may use a different provider account.
  */
+export function applyLocalDaemonStatus(
+  rt: AgentRuntime,
+  status: DaemonStatusLike,
+): AgentRuntime {
+  let next = mergeDaemonStatus(rt, status);
+  next = mergeLocalPlanLimits(next, status);
+  return next;
+}
+
 function mergeDaemonStatus(rt: AgentRuntime, status: DaemonStatusLike): AgentRuntime {
   if (
     status.state === "stopped" ||
@@ -51,6 +58,16 @@ function mergeDaemonStatus(rt: AgentRuntime, status: DaemonStatusLike): AgentRun
   return rt;
 }
 
+function mergeLocalPlanLimits(
+  rt: AgentRuntime,
+  status: DaemonStatusLike,
+): AgentRuntime {
+  if (rt.profile_id) return rt;
+  const overlay = status.planLimits?.[rt.provider];
+  if (!overlay || overlay.observed_at <= 0) return rt;
+  return { ...rt, plan_limits: overlay };
+}
+
 /**
  * Subscribes to local daemon status changes via Electron IPC and writes them
  * into the runtimes Query cache for the active workspace.
@@ -63,7 +80,7 @@ function mergeDaemonStatus(rt: AgentRuntime, status: DaemonStatusLike): AgentRun
  *
  * Same-daemon-multiple-runtimes: a single daemon can back several runtimes
  * in the same workspace (one per provider). We map across all matches so
- * every related runtime row sees the same status flip.
+ * every related runtime row sees the same status flip and quota overlay.
  */
 export function useDaemonIPCBridge(wsId: string | undefined): void {
   const qc = useQueryClient();
@@ -71,7 +88,13 @@ export function useDaemonIPCBridge(wsId: string | undefined): void {
   useEffect(() => {
     if (!wsId) return;
     if (typeof window === "undefined") return;
-    const daemonAPI = (window as unknown as { daemonAPI?: { onStatusChange?: (cb: (s: DaemonStatusLike) => void) => () => void } }).daemonAPI;
+    const daemonAPI = (
+      window as unknown as {
+        daemonAPI?: {
+          onStatusChange?: (cb: (s: DaemonStatusLike) => void) => () => void;
+        };
+      }
+    ).daemonAPI;
     if (!daemonAPI?.onStatusChange) return;
 
     const unsubscribe = daemonAPI.onStatusChange((status) => {
@@ -79,7 +102,9 @@ export function useDaemonIPCBridge(wsId: string | undefined): void {
       qc.setQueryData<AgentRuntime[]>(runtimeKeys.list(wsId), (old) => {
         if (!old) return old;
         return old.map((rt) =>
-          rt.daemon_id === status.daemonId ? mergeDaemonStatus(rt, status) : rt,
+          rt.daemon_id === status.daemonId
+            ? applyLocalDaemonStatus(rt, status)
+            : rt,
         );
       });
     });

@@ -13,6 +13,21 @@ export type DaemonState =
   // this, an auth failure silently sticks at "starting" forever — see #3512.
   | "auth_expired";
 
+export interface DaemonPlanLimitWindow {
+  name: string;
+  used_percent?: number;
+  window_minutes?: number;
+  resets_at?: number;
+}
+
+/** Credential-free 5h/7d snapshot from the local daemon /health overlay. */
+export interface DaemonPlanLimitsSnapshot {
+  provider: string;
+  status: "available" | "exhausted";
+  windows?: DaemonPlanLimitWindow[];
+  observed_at: number;
+}
+
 export interface DaemonStatus {
   state: DaemonState;
   pid?: number;
@@ -25,6 +40,12 @@ export interface DaemonStatus {
   profile?: string;
   /** Backend URL the daemon connects to. */
   serverUrl?: string;
+  /**
+   * Live Claude/Codex subscription windows from the local daemon. Official
+   * cloud APIs do not persist these, so Desktop overlays them onto runtime
+   * rows. Keyed by provider (`claude` / `codex`).
+   */
+  planLimits?: Record<string, DaemonPlanLimitsSnapshot>;
   /**
    * True when a daemon is running but in an environment the app can't control
    * — its reported OS differs from the desktop host's (e.g. a Linux daemon

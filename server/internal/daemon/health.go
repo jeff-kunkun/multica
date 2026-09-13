@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // HealthResponse is returned by the daemon's local health endpoint.
@@ -76,6 +77,11 @@ type HealthResponse struct {
 	// older consumers see no change. Diagnostic only: nothing keys off it.
 	ReloadPendingReason string            `json:"reload_pending_reason,omitempty"`
 	Workspaces          []healthWorkspace `json:"workspaces"`
+	// PlanLimits is a credential-free per-provider overlay for Desktop. Official
+	// cloud backends do not persist heartbeat snapshots, so the renderer merges
+	// this map onto local runtime rows. Omitted when empty so older clients
+	// keep parsing /health.
+	PlanLimits map[string]protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
 }
 
 type healthWorkspace struct {
@@ -347,6 +353,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 
 			ReloadPendingReason: d.reloadPending(),
 			Workspaces:          wsList,
+			PlanLimits:          d.planLimitsByProvider(),
 		}
 		if reporter, ok := d.repoCache.(interface{ Activity() repocache.Activity }); ok {
 			activity := reporter.Activity()

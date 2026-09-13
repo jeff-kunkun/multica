@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
@@ -93,6 +94,52 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	}
 	if resp.ResourceWaitTaskCount != 1 {
 		t.Errorf("ResourceWaitTaskCount: got %d, want 1", resp.ResourceWaitTaskCount)
+	}
+}
+
+func TestHealthHandlerIncludesPlanLimits(t *testing.T) {
+	t.Parallel()
+
+	used := 27.0
+	minutes := int64(300)
+	d := &Daemon{
+		cfg:          Config{DaemonID: "daemon-test"},
+		workspaces:   map[string]*workspaceState{},
+		runtimeIndex: map[string]Runtime{"codex-a": {ID: "codex-a", Provider: "codex"}},
+		logger:       slog.Default(),
+	}
+	d.ready.Store(true)
+	d.recordPlanLimits("codex-a", &protocol.PlanLimitsSnapshot{
+		Provider:   "codex",
+		Status:     protocol.PlanLimitsStatusAvailable,
+		ObservedAt: 88,
+		Windows: []protocol.PlanLimitWindow{{
+			Name:          "primary",
+			UsedPercent:   &used,
+			WindowMinutes: &minutes,
+		}},
+	})
+
+	rec := httptest.NewRecorder()
+	d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	planLimits, ok := raw["plan_limits"].(map[string]any)
+	if !ok {
+		t.Fatalf("plan_limits missing: %v", raw["plan_limits"])
+	}
+	codex, ok := planLimits["codex"].(map[string]any)
+	if !ok {
+		t.Fatalf("codex snapshot missing: %v", planLimits)
+	}
+	if codex["provider"] != "codex" {
+		t.Fatalf("provider = %v", codex["provider"])
 	}
 }
 
