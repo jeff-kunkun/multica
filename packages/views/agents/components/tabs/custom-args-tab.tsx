@@ -42,6 +42,22 @@ function formatArgForPreview(value: string): string {
   return /\s/.test(value) ? JSON.stringify(value) : value;
 }
 
+function getAntigravityProfile(args: string[]): string {
+  const flagIndex = args.findIndex((value) => value === "--gemini_dir");
+  if (flagIndex >= 0) return args[flagIndex + 1] ?? "";
+  const inline = args.find((value) => value.startsWith("--gemini_dir="));
+  return inline?.slice("--gemini_dir=".length) ?? "";
+}
+
+function setAntigravityProfile(args: string[], profile: string): string[] {
+  const next = [...args];
+  for (let index = next.length - 1; index >= 0; index -= 1) {
+    if (next[index] === "--gemini_dir") next.splice(index, 2);
+    else if (next[index]?.startsWith("--gemini_dir=")) next.splice(index, 1);
+  }
+  return profile ? [...next, "--gemini_dir", profile] : next;
+}
+
 export function CustomArgsTab({
   agent,
   runtimeDevice,
@@ -57,12 +73,14 @@ export function CustomArgsTab({
   const [entries, setEntries] = useState<ArgEntry[]>(
     argsToEntries(agent.custom_args ?? []),
   );
+  const isAntigravity = runtimeDevice?.provider.toLowerCase() === "antigravity";
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorValue, setEditorValue] = useState("");
   const [saving, setSaving] = useState(false);
   const editorInputRef = useRef<HTMLInputElement>(null);
 
   const currentArgs = entriesToArgs(entries);
+  const antigravityProfile = getAntigravityProfile(currentArgs);
   const originalArgs = agent.custom_args ?? [];
   const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
 
@@ -175,6 +193,33 @@ export function CustomArgsTab({
       <p className="max-w-2xl text-pretty text-body leading-6 text-muted-foreground">
         {t(($) => $.tab_body.custom_args.intro)}
       </p>
+
+      {isAntigravity ? (
+        <SettingsSection
+          title={t(($) => $.tab_body.custom_args.antigravity_profile_label)}
+          description={t(($) => $.tab_body.custom_args.antigravity_profile_description)}
+        >
+          <SettingsCard>
+            <div className="space-y-2 p-3">
+              <label className="text-caption font-medium" htmlFor="agy-profile-directory">
+                {t(($) => $.tab_body.custom_args.antigravity_profile_input_label)}
+              </label>
+              <Input
+                id="agy-profile-directory"
+                value={antigravityProfile}
+                onChange={(event) => {
+                  const nextArgs = setAntigravityProfile(currentArgs, event.target.value.trim());
+                  setEntries(argsToEntries(nextArgs));
+                }}
+                placeholder={t(($) => $.tab_body.custom_args.antigravity_profile_placeholder)}
+                spellCheck={false}
+                autoComplete="off"
+                className="font-mono text-caption"
+              />
+            </div>
+          </SettingsCard>
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection
         title={t(($) => $.tab_body.custom_args.arguments_label)}

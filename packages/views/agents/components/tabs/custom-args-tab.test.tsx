@@ -51,12 +51,13 @@ const runtimeDevice = {
 function renderTab(
   overrides: Partial<Agent> = {},
   onSave = vi.fn().mockResolvedValue(undefined),
+  device: RuntimeDevice = runtimeDevice,
 ) {
   const result = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <CustomArgsTab
         agent={{ ...baseAgent, ...overrides }}
-        runtimeDevice={runtimeDevice}
+        runtimeDevice={device}
         onSave={onSave}
       />
     </I18nProvider>,
@@ -120,5 +121,23 @@ describe("CustomArgsTab", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     expect(onSave).toHaveBeenCalledWith({ custom_args: ["value with spaces"] });
+  });
+
+  it("edits the isolated AGY account directory as a CLI profile", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab(
+      { custom_args: ["--gemini_dir", "~/.gemini"] },
+      undefined,
+      { ...runtimeDevice, provider: "antigravity" },
+    );
+
+    const input = screen.getByRole("textbox", { name: /gemini directory/i });
+    await user.clear(input);
+    await user.type(input, "~/.gemini-account2");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "~/.gemini-account2"],
+    });
   });
 });

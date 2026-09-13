@@ -505,6 +505,10 @@
     },
     "custom_args": {
       "intro": "添加智能体启动时传入的 CLI 参数。",
+      "antigravity_profile_label": "AGY 账号配置",
+      "antigravity_profile_description": "使用独立的 Gemini 目录隔离该智能体的 Google 账号；多个配置共用同一个 agy 二进制文件。",
+      "antigravity_profile_input_label": "Gemini 目录",
+      "antigravity_profile_placeholder": "~/.gemini-account2",
       "arguments_label": "参数",
       "arguments_description": "每一项会作为一个完整 token 传入，并保留列表顺序。",
       "add_argument_action": "添加参数",
