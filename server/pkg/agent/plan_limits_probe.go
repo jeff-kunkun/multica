@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,19 +21,25 @@ import (
 const (
 	claudeUsageURL = "https://api.anthropic.com/api/oauth/usage"
 	codexUsageURL  = "https://chatgpt.com/backend-api/wham/usage"
+	geminiLoadURL  = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+	geminiQuotaURL = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota"
+	geminiTokenURL = "https://oauth2.googleapis.com/token"
+	grokBillingURL = "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig"
 
 	claudeKeychainService = "Claude Code-credentials"
 	codexKeychainService  = "Codex Auth"
+	geminiKeychainService = "gemini-cli-oauth"
+	geminiKeychainAccount = "main-account"
 
 	fiveHourMinutes  int64 = 300
 	sevenDayMinutes  int64 = 10_080
 	planQuotaBodyCap       = 1 << 20
 )
 
-// PlanQuotaProbe reads local Claude Code / Codex CLI credentials and queries
-// the same unofficial usage endpoints other desktop tools (e.g. cc-switch)
-// use. The snapshot is credential-free: percentages, window length, and reset
-// time only.
+// PlanQuotaProbe reads local Claude Code / Codex / Gemini CLI / Grok CLI
+// credentials and queries the same unofficial usage endpoints other desktop
+// tools (e.g. cc-switch) use. The snapshot is credential-free: percentages,
+// window length, and reset time only.
 type PlanQuotaProbe struct {
 	Home   string
 	Client *http.Client
@@ -39,8 +47,13 @@ type PlanQuotaProbe struct {
 	// Optional URL overrides so tests can serve fixtures without the network.
 	ClaudeUsageURL string
 	CodexUsageURL  string
+	GeminiLoadURL  string
+	GeminiQuotaURL string
+	GeminiTokenURL string
+	GrokBillingURL string
 	// LookupKeychain, when set, replaces the macOS Keychain read. Tests inject
-	// a no-op so they never shell out to `security`.
+	// a no-op so they never shell out to `security`. Account is ignored; tests
+	// key off the service name only.
 	LookupKeychain func(service string) (string, bool)
 }
 
@@ -59,10 +72,14 @@ func (p PlanQuotaProbe) client() *http.Client {
 }
 
 func (p PlanQuotaProbe) lookupKeychain(service string) (string, bool) {
+	return p.lookupKeychainAccount(service, "")
+}
+
+func (p PlanQuotaProbe) lookupKeychainAccount(service, account string) (string, bool) {
 	if p.LookupKeychain != nil {
 		return p.LookupKeychain(service)
 	}
-	return readMacKeychainPassword(service)
+	return readMacKeychainPassword(service, account)
 }
 
 // ProbeClaude returns the live 5h/7d Claude Code subscription windows, or
@@ -108,12 +125,52 @@ func (p PlanQuotaProbe) ProbeCodex(ctx context.Context) (*protocol.PlanLimitsSna
 }
 
 func (p PlanQuotaProbe) getJSON(ctx context.Context, url, bearer string, extra map[string]string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	return p.doPlanQuotaRequest(ctx, http.MethodGet, url, bearer, "application/json", nil, extra)
+}
+
+func (p PlanQuotaProbe) postJSON(ctx context.Context, url, bearer string, payload any, extra map[string]string) ([]byte, error) {
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
-	req.Header.Set("Accept", "application/json")
+	return p.doPlanQuotaRequest(ctx, http.MethodPost, url, bearer, "application/json", body, extra)
+}
+
+func (p PlanQuotaProbe) postBytes(ctx context.Context, url, bearer, contentType string, body []byte, extra map[string]string) ([]byte, error) {
+	return p.doPlanQuotaRequest(ctx, http.MethodPost, url, bearer, contentType, body, extra)
+}
+
+type planQuotaAuthError struct {
+	status int
+}
+
+func (e planQuotaAuthError) Error() string {
+	return fmt.Sprintf("plan quota auth failed (HTTP %d)", e.status)
+}
+
+func isPlanQuotaAuthError(err error) bool {
+	var auth planQuotaAuthError
+	return errors.As(err, &auth)
+}
+
+func (p PlanQuotaProbe) doPlanQuotaRequest(ctx context.Context, method, url, bearer, contentType string, body []byte, extra map[string]string) ([]byte, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
+	if err != nil {
+		return nil, err
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if contentType == "application/json" || contentType == "" {
+		req.Header.Set("Accept", "application/json")
+	}
 	for k, v := range extra {
 		req.Header.Set(k, v)
 	}
@@ -127,7 +184,7 @@ func (p PlanQuotaProbe) getJSON(ctx context.Context, url, bearer string, extra m
 		return nil, err
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("plan quota auth failed (HTTP %d)", resp.StatusCode)
+		return nil, planQuotaAuthError{status: resp.StatusCode}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("plan quota HTTP %d", resp.StatusCode)
@@ -369,13 +426,18 @@ func homeDir(home string) string {
 	return ""
 }
 
-func readMacKeychainPassword(service string) (string, bool) {
+func readMacKeychainPassword(service, account string) (string, bool) {
 	if runtime.GOOS != "darwin" || service == "" {
 		return "", false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "security", "find-generic-password", "-s", service, "-w")
+	args := []string{"find-generic-password", "-s", service}
+	if account != "" {
+		args = append(args, "-a", account)
+	}
+	args = append(args, "-w")
+	cmd := exec.CommandContext(ctx, "security", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false

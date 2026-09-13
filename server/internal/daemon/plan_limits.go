@@ -11,6 +11,13 @@ import (
 
 const planQuotaProbeInterval = 2 * time.Minute
 
+var planQuotaProviders = map[string]bool{
+	"claude": true,
+	"codex":  true,
+	"gemini": true,
+	"grok":   true,
+}
+
 // recordPlanLimits keeps the newest provider snapshot in daemon memory until a
 // heartbeat delivers it. Built-in runtimes for the same provider share one CLI
 // account across watched workspaces, so a snapshot observed on one is copied to
@@ -133,7 +140,7 @@ func (d *Daemon) refreshPlanQuota() {
 	d.mu.Lock()
 	providers := make(map[string]struct{})
 	for _, runtime := range d.runtimeIndex {
-		if runtime.ProfileID == "" && (runtime.Provider == "claude" || runtime.Provider == "codex") {
+		if runtime.ProfileID == "" && planQuotaProviders[runtime.Provider] {
 			providers[runtime.Provider] = struct{}{}
 		}
 	}
@@ -156,6 +163,10 @@ func (d *Daemon) refreshPlanQuota() {
 			snapshot, err = probe.ProbeClaude(ctx)
 		case "codex":
 			snapshot, err = probe.ProbeCodex(ctx)
+		case "gemini":
+			snapshot, err = probe.ProbeGemini(ctx)
+		case "grok":
+			snapshot, err = probe.ProbeGrok(ctx)
 		default:
 			continue
 		}

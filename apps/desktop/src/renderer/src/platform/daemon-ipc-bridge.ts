@@ -27,8 +27,9 @@ export interface DaemonStatusLike {
 /**
  * Merges a local DaemonStatus into an AgentRuntime row. Status flips stay
  * server-compatible; plan_limits from /health overlay live Claude/Codex 5h/7d
- * windows that official cloud APIs do not persist. Custom-profile runtimes
- * keep the server snapshot because they may use a different provider account.
+ * and Gemini/Grok quota windows that official cloud APIs do not persist.
+ * Custom-profile runtimes keep the server snapshot because they may use a
+ * different provider account.
  */
 export function applyLocalDaemonStatus(
   rt: AgentRuntime,

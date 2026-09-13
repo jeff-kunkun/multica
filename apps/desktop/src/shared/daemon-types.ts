@@ -41,9 +41,9 @@ export interface DaemonStatus {
   /** Backend URL the daemon connects to. */
   serverUrl?: string;
   /**
-   * Live Claude/Codex subscription windows from the local daemon. Official
-   * cloud APIs do not persist these, so Desktop overlays them onto runtime
-   * rows. Keyed by provider (`claude` / `codex`).
+   * Live Claude/Codex/Gemini/Grok subscription windows from the local daemon.
+   * Official cloud APIs do not persist these, so Desktop overlays them onto
+   * runtime rows. Keyed by provider (`claude` / `codex` / `gemini` / `grok`).
    */
   planLimits?: Record<string, DaemonPlanLimitsSnapshot>;
   /**

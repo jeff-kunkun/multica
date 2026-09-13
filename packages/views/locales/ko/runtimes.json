@@ -315,13 +315,19 @@
     "unavailable": "한도 데이터 없음",
     "unavailable_hint": "한도 스냅샷이 아직 보고되지 않았습니다. Codex는 CLI 세션 후 보고하며, 이전 데몬과 지원되지 않는 CLI에서는 사용할 수 없습니다.",
     "unavailable_hint_claude": "Claude Code는 현재 세션 한도에 도달한 경우에만 플랜 한도를 보고합니다.",
+    "unavailable_hint_gemini": "Gemini CLI로 로그인하면 Pro / Flash 한도를 볼 수 있습니다. API 키 로그인은 공식 사용량을 조회할 수 없습니다.",
+    "unavailable_hint_grok": "Grok CLI(`grok login`)로 로그인하면 SuperGrok 크레딧을 볼 수 있습니다.",
     "limit_reached": "한도 도달",
     "used": "{{percent}}% 사용",
     "resets": "{{when}} 재설정",
     "window_5h": "5시간 창",
     "window_7d": "7일 창",
     "window_primary": "현재 창",
-    "window_secondary": "보조 창"
+    "window_secondary": "보조 창",
+    "window_gemini_pro": "Gemini Pro",
+    "window_gemini_flash": "Gemini Flash",
+    "window_gemini_flash_lite": "Gemini Flash Lite",
+    "window_credits": "Credits"
   },
   "profiles": {
     "cta": "런타임 추가",

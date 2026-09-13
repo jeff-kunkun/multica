@@ -77,6 +77,29 @@ describe("quotaWindowPercents", () => {
       "7d 3",
     ]);
   });
+
+  it("summarizes Gemini Pro/Flash and Grok credits for the capsule", () => {
+    const gemini: PlanLimitsSnapshot = {
+      provider: "gemini",
+      status: "available",
+      observed_at: NOW / 1000,
+      windows: [
+        { name: "gemini_pro", used_percent: 45 },
+        { name: "gemini_flash", used_percent: 10 },
+      ],
+    };
+    expect(
+      quotaWindowPercents(gemini.windows!).map((w) => `${w.shortLabel} ${w.used_percent}`),
+    ).toEqual(["Pro 45", "Flash 10"]);
+
+    const grok: PlanLimitsSnapshot = {
+      provider: "grok",
+      status: "available",
+      observed_at: NOW / 1000,
+      windows: [{ name: "credits", used_percent: 37, window_minutes: 10_080 }],
+    };
+    expect(quotaWindowPercents(grok.windows!).map((w) => w.shortLabel)).toEqual(["credits"]);
+  });
 });
 
 describe("sumAgentUsage30d", () => {

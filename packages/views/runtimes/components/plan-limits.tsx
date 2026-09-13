@@ -41,6 +41,18 @@ export function displayPlanLimits(
 }
 
 export function planLimitWindowShortLabel(window: PlanLimitWindow): string {
+  switch (window.name) {
+    case "gemini_pro":
+      return "Pro";
+    case "gemini_flash":
+      return "Flash";
+    case "gemini_flash_lite":
+      return "Lite";
+    case "credits":
+      return "credits";
+    default:
+      break;
+  }
   if (window.window_minutes === 300) return "5h";
   if (window.window_minutes === 10_080) return "7d";
   return window.name;
@@ -103,21 +115,47 @@ export function PlanLimitsCell({
   );
 }
 
+function unavailableHint(
+  provider: string,
+  t: ReturnType<typeof useT<"runtimes">>["t"],
+): string {
+  switch (provider) {
+    case "claude":
+      return t(($) => $.plan_limits.unavailable_hint_claude);
+    case "gemini":
+      return t(($) => $.plan_limits.unavailable_hint_gemini);
+    case "grok":
+      return t(($) => $.plan_limits.unavailable_hint_grok);
+    default:
+      return t(($) => $.plan_limits.unavailable_hint);
+  }
+}
+
 function windowLabel(
   window: PlanLimitWindow,
   t: ReturnType<typeof useT<"runtimes">>["t"],
 ): string {
+  switch (window.name) {
+    case "gemini_pro":
+      return t(($) => $.plan_limits.window_gemini_pro);
+    case "gemini_flash":
+      return t(($) => $.plan_limits.window_gemini_flash);
+    case "gemini_flash_lite":
+      return t(($) => $.plan_limits.window_gemini_flash_lite);
+    case "credits":
+      return t(($) => $.plan_limits.window_credits);
+    case "primary":
+      return t(($) => $.plan_limits.window_primary);
+    case "secondary":
+      return t(($) => $.plan_limits.window_secondary);
+    default:
+      break;
+  }
   if (window.window_minutes === 300) {
     return t(($) => $.plan_limits.window_5h);
   }
   if (window.window_minutes === 10_080) {
     return t(($) => $.plan_limits.window_7d);
-  }
-  if (window.name === "primary") {
-    return t(($) => $.plan_limits.window_primary);
-  }
-  if (window.name === "secondary") {
-    return t(($) => $.plan_limits.window_secondary);
   }
   return window.name;
 }
@@ -158,9 +196,7 @@ export function PlanLimitsCard({
             {t(($) => $.plan_limits.unavailable)}
           </p>
           <p className="mt-1 text-caption text-muted-foreground">
-            {runtime.provider === "claude"
-              ? t(($) => $.plan_limits.unavailable_hint_claude)
-              : t(($) => $.plan_limits.unavailable_hint)}
+            {unavailableHint(runtime.provider, t)}
           </p>
         </div>
       ) : display.windows.length === 0 ? (

@@ -328,13 +328,19 @@
     "unavailable": "Plan limits unavailable",
     "unavailable_hint": "No quota snapshot has been reported. Codex reports one after a CLI session; older daemons and unsupported CLIs remain unavailable.",
     "unavailable_hint_claude": "Claude Code currently reports plan limits only after it reaches a session limit.",
+    "unavailable_hint_gemini": "Sign in with Gemini CLI to show Pro and Flash quota. API-key logins cannot query official usage.",
+    "unavailable_hint_grok": "Sign in with Grok CLI (`grok login`) to show SuperGrok credits.",
     "limit_reached": "Limit reached",
     "used": "{{percent}}% used",
     "resets": "Resets {{when}}",
     "window_5h": "5-hour window",
     "window_7d": "7-day window",
     "window_primary": "Current window",
-    "window_secondary": "Secondary window"
+    "window_secondary": "Secondary window",
+    "window_gemini_pro": "Gemini Pro",
+    "window_gemini_flash": "Gemini Flash",
+    "window_gemini_flash_lite": "Gemini Flash Lite",
+    "window_credits": "Credits"
   },
   "profiles": {
     "cta": "Add runtime",

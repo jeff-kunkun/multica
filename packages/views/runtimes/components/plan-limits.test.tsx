@@ -74,6 +74,17 @@ describe("displayPlanLimits", () => {
   it("uses provider window durations for compact labels", () => {
     expect(planLimitWindowShortLabel(SNAPSHOT.windows![0]!)).toBe("5h");
   });
+
+  it("uses Gemini and Grok window names for compact labels", () => {
+    expect(planLimitWindowShortLabel({ name: "gemini_pro", used_percent: 12 })).toBe("Pro");
+    expect(planLimitWindowShortLabel({ name: "gemini_flash", used_percent: 8 })).toBe("Flash");
+    expect(planLimitWindowShortLabel({ name: "gemini_flash_lite", used_percent: 3 })).toBe("Lite");
+    expect(planLimitWindowShortLabel({
+      name: "credits",
+      used_percent: 37,
+      window_minutes: 10_080,
+    })).toBe("credits");
+  });
 });
 
 describe("PlanLimitsCell", () => {

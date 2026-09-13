@@ -66,4 +66,40 @@ describe("applyLocalDaemonStatus", () => {
     });
     expect(got.plan_limits).toBeNull();
   });
+
+  it("overlays Grok credits onto a built-in grok runtime", () => {
+    const grok: PlanLimitsSnapshot = {
+      provider: "grok",
+      status: "available",
+      observed_at: 1_800_000_000,
+      windows: [{ name: "credits", used_percent: 37, resets_at: 1_800_086_400 }],
+    };
+    const rt = makeRuntime({ id: "rt-grok", provider: "grok", plan_limits: null });
+    const got = applyLocalDaemonStatus(rt, {
+      state: "running",
+      daemonId: "daemon-1",
+      planLimits: { grok },
+    });
+    expect(got.plan_limits).toEqual(grok);
+  });
+
+  it("does not overlay Gemini quota onto a custom-profile runtime", () => {
+    const gemini: PlanLimitsSnapshot = {
+      provider: "gemini",
+      status: "available",
+      observed_at: 1_800_000_000,
+      windows: [{ name: "gemini_pro", used_percent: 12 }],
+    };
+    const rt = makeRuntime({
+      provider: "gemini",
+      profile_id: "profile-1",
+      plan_limits: null,
+    });
+    const got = applyLocalDaemonStatus(rt, {
+      state: "running",
+      daemonId: "daemon-1",
+      planLimits: { gemini },
+    });
+    expect(got.plan_limits).toBeNull();
+  });
 });

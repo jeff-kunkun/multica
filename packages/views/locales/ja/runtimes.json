@@ -315,13 +315,19 @@
     "unavailable": "上限データは利用できません",
     "unavailable_hint": "上限スナップショットはまだ報告されていません。Codex は CLI セッション後に報告しますが、古いデーモンと未対応の CLI では利用できません。",
     "unavailable_hint_claude": "Claude Code は現在、セッション上限に達した場合にのみプラン上限を報告します。",
+    "unavailable_hint_gemini": "Gemini CLI でログインすると Pro / Flash の上限を表示できます。API キーログインでは公式の使用量を照会できません。",
+    "unavailable_hint_grok": "Grok CLI（`grok login`）でログインすると SuperGrok のクレジットを表示できます。",
     "limit_reached": "上限に達しました",
     "used": "{{percent}}% 使用済み",
     "resets": "{{when}}にリセット",
     "window_5h": "5時間ウィンドウ",
     "window_7d": "7日間ウィンドウ",
     "window_primary": "現在のウィンドウ",
-    "window_secondary": "セカンダリウィンドウ"
+    "window_secondary": "セカンダリウィンドウ",
+    "window_gemini_pro": "Gemini Pro",
+    "window_gemini_flash": "Gemini Flash",
+    "window_gemini_flash_lite": "Gemini Flash Lite",
+    "window_credits": "Credits"
   },
   "profiles": {
     "cta": "ランタイムを追加",
