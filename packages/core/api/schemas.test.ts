@@ -1000,12 +1000,14 @@ describe("SquadListSchema member preview drift", () => {
     const parsed = SquadListSchema.parse([baseSquad]);
     expect(parsed[0]?.member_count).toBe(0);
     expect(parsed[0]?.member_preview).toEqual([]);
+    expect(parsed[0]?.members).toEqual([]);
   });
 
   it("defaults preview fields on a single squad response", () => {
     const parsed = SquadSchema.parse(baseSquad);
     expect(parsed.member_count).toBe(0);
     expect(parsed.member_preview).toEqual([]);
+    expect(parsed.members).toEqual([]);
   });
 
   it("preserves lightweight member preview rows", () => {
@@ -1022,6 +1024,26 @@ describe("SquadListSchema member preview drift", () => {
     expect(parsed[0]?.member_count).toBe(2);
     expect(parsed[0]?.member_preview).toHaveLength(2);
     expect(parsed[0]?.member_preview?.[0]?.role).toBe("leader");
+  });
+
+  it("preserves the full members roster beyond the preview cap", () => {
+    const members = [
+      { member_type: "agent", member_id: "agent-1", role: "leader" },
+      { member_type: "agent", member_id: "agent-2", role: "member" },
+      { member_type: "agent", member_id: "agent-3", role: "member" },
+      { member_type: "agent", member_id: "agent-4", role: "member" },
+    ];
+    const parsed = SquadListSchema.parse([
+      {
+        ...baseSquad,
+        member_count: 4,
+        member_preview: members.slice(0, 3),
+        members,
+      },
+    ]);
+    expect(parsed[0]?.members).toHaveLength(4);
+    expect(parsed[0]?.member_preview).toHaveLength(3);
+    expect(parsed[0]?.members?.[3]?.member_id).toBe("agent-4");
   });
 });
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { useAgentsViewStore } from "./view-store";
+import { EMPTY_AGENT_FILTERS, useAgentsViewStore } from "./view-store";
 import { setCurrentWorkspace } from "../../platform/workspace-storage";
 
 const flush = () => new Promise((resolve) => queueMicrotask(() => resolve(null)));
@@ -26,7 +26,11 @@ beforeAll(() => {
 
 beforeEach(() => {
   localStorage.clear();
-  useAgentsViewStore.setState({ scope: "mine" });
+  useAgentsViewStore.setState({
+    scope: "mine",
+    grouping: "none",
+    filters: { ...EMPTY_AGENT_FILTERS },
+  });
   setCurrentWorkspace(null, null);
 });
 
@@ -46,6 +50,7 @@ describe("useAgentsViewStore", () => {
     const parsed = JSON.parse(raw as string);
     expect(Object.keys(parsed.state).sort()).toEqual([
       "filters",
+      "grouping",
       "hiddenColumns",
       "scope",
       "sortDirection",
@@ -111,6 +116,7 @@ describe("useAgentsViewStore", () => {
 
     const filters = useAgentsViewStore.getState().filters;
     expect(filters.owners).toEqual([]);
+    expect(filters.squads).toEqual([]);
     expect(filters.availability).toEqual(["online"]);
   });
 
@@ -183,6 +189,124 @@ describe("useAgentsViewStore", () => {
       await flush();
 
       expect(useAgentsViewStore.getState().filters.access).toEqual([]);
+    });
+  });
+
+  describe("squad filter dimension", () => {
+    it("toggleFilter('squads', value) adds and removes squad ids and __none__", () => {
+      const { toggleFilter } = useAgentsViewStore.getState();
+      toggleFilter("squads", "squad-1");
+      expect(useAgentsViewStore.getState().filters.squads).toEqual(["squad-1"]);
+      toggleFilter("squads", "__none__");
+      expect(useAgentsViewStore.getState().filters.squads).toEqual([
+        "squad-1",
+        "__none__",
+      ]);
+      toggleFilter("squads", "squad-1");
+      expect(useAgentsViewStore.getState().filters.squads).toEqual(["__none__"]);
+    });
+
+    it("clearFilters resets squads without dropping grouping", () => {
+      const store = useAgentsViewStore.getState();
+      store.setGrouping("squad");
+      store.toggleFilter("squads", "squad-1");
+      store.clearFilters();
+      expect(useAgentsViewStore.getState().filters.squads).toEqual([]);
+      expect(useAgentsViewStore.getState().grouping).toBe("squad");
+    });
+
+    it("persists the squads filter under the workspace-namespaced key", async () => {
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      useAgentsViewStore.getState().toggleFilter("squads", "__none__");
+      await flush();
+
+      const raw = localStorage.getItem("multica_agents_view:acme");
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw as string);
+      expect(parsed.state.filters.squads).toEqual(["__none__"]);
+    });
+
+    it("backfills squads to [] when rehydrating a pre-squads payload", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { filters: { availability: ["online"] } },
+          version: 0,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().filters.squads).toEqual([]);
+    });
+  });
+
+  describe("grouping", () => {
+    it("setGrouping switches between none and squad", () => {
+      expect(useAgentsViewStore.getState().grouping).toBe("none");
+      useAgentsViewStore.getState().setGrouping("squad");
+      expect(useAgentsViewStore.getState().grouping).toBe("squad");
+      useAgentsViewStore.getState().setGrouping("none");
+      expect(useAgentsViewStore.getState().grouping).toBe("none");
+    });
+
+    it("persists grouping under the workspace-namespaced key", async () => {
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      useAgentsViewStore.getState().setGrouping("squad");
+      await flush();
+
+      const raw = localStorage.getItem("multica_agents_view:acme");
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw as string);
+      expect(parsed.state.grouping).toBe("squad");
+    });
+
+    it("rehydrates a saved grouping on workspace switch", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { grouping: "squad" },
+          version: 0,
+        }),
+      );
+      localStorage.setItem(
+        "multica_agents_view:beta",
+        JSON.stringify({
+          state: { grouping: "none" },
+          version: 0,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+      expect(useAgentsViewStore.getState().grouping).toBe("squad");
+
+      setCurrentWorkspace("beta", "ws_b");
+      await flush();
+      await flush();
+      expect(useAgentsViewStore.getState().grouping).toBe("none");
+    });
+
+    it("backfills grouping to none when rehydrating a pre-grouping payload", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { scope: "all" },
+          version: 0,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().grouping).toBe("none");
+      expect(useAgentsViewStore.getState().scope).toBe("all");
     });
   });
 });

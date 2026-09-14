@@ -36,6 +36,8 @@ type SquadResponse struct {
 	ArchivedBy    *string                      `json:"archived_by"`
 	MemberCount   int                          `json:"member_count"`
 	MemberPreview []SquadMemberPreviewResponse `json:"member_preview"`
+	// Members is the full roster. MemberPreview stays capped at 3 for hover avatars.
+	Members []SquadMemberPreviewResponse `json:"members"`
 }
 
 type SquadMemberPreviewResponse struct {
@@ -47,6 +49,7 @@ type SquadMemberPreviewResponse struct {
 type squadMemberSummary struct {
 	count   int
 	preview []SquadMemberPreviewResponse
+	members []SquadMemberPreviewResponse
 }
 
 type SquadMemberResponse struct {
@@ -75,6 +78,7 @@ func (h *Handler) squadToResponse(s db.Squad) SquadResponse {
 		ArchivedAt:    timestampToPtr(s.ArchivedAt),
 		ArchivedBy:    uuidToPtr(s.ArchivedBy),
 		MemberPreview: []SquadMemberPreviewResponse{},
+		Members:       []SquadMemberPreviewResponse{},
 	}
 }
 
@@ -91,14 +95,16 @@ func squadMemberToResponse(m db.SquadMember) SquadMemberResponse {
 
 func addSquadMemberPreview(summary *squadMemberSummary, memberType string, memberID pgtype.UUID, role string) {
 	summary.count++
-	if len(summary.preview) >= 3 {
-		return
-	}
-	summary.preview = append(summary.preview, SquadMemberPreviewResponse{
+	member := SquadMemberPreviewResponse{
 		MemberType: memberType,
 		MemberID:   uuidToString(memberID),
 		Role:       role,
-	})
+	}
+	summary.members = append(summary.members, member)
+	if len(summary.preview) >= 3 {
+		return
+	}
+	summary.preview = append(summary.preview, member)
 }
 
 func applySquadMemberSummary(resp *SquadResponse, summary *squadMemberSummary) {
@@ -106,7 +112,15 @@ func applySquadMemberSummary(resp *SquadResponse, summary *squadMemberSummary) {
 		return
 	}
 	resp.MemberCount = summary.count
-	resp.MemberPreview = summary.preview
+	resp.MemberPreview = emptySquadMemberPreview(summary.preview)
+	resp.Members = emptySquadMemberPreview(summary.members)
+}
+
+func emptySquadMemberPreview(members []SquadMemberPreviewResponse) []SquadMemberPreviewResponse {
+	if members == nil {
+		return []SquadMemberPreviewResponse{}
+	}
+	return members
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

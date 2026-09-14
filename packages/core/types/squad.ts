@@ -23,6 +23,7 @@ export interface Squad {
   archived_by: string | null;
   member_count?: number;
   member_preview?: SquadMemberPreview[];
+  members?: SquadMemberPreview[];
 }
 
 export interface SquadMember {
