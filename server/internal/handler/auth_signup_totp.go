@@ -1,17 +1,22 @@
 package handler
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 const (
@@ -23,8 +28,7 @@ const (
 
 var (
 	signupTOTPMisconfigOnce sync.Once
-	signupTOTPReplayMu      sync.Mutex
-	signupTOTPLastStep      int64
+	errSignupTOTPRejected   = errors.New("invalid or expired team 2FA code")
 )
 
 func signupTOTPSecret() (secret []byte, required bool) {
@@ -111,24 +115,30 @@ func verifySignupTOTP(secret []byte, code string, now time.Time) (step int64, ok
 	return matched, found
 }
 
-func consumeSignupTOTP(secret []byte, code string, now time.Time) bool {
-	step, ok := verifySignupTOTP(secret, code, now)
-	if !ok {
-		return false
-	}
-	signupTOTPReplayMu.Lock()
-	defer signupTOTPReplayMu.Unlock()
-	if step <= signupTOTPLastStep {
-		return false
-	}
-	signupTOTPLastStep = step
-	return true
+func signupTOTPFingerprint(secret []byte) []byte {
+	sum := sha256.Sum256(secret)
+	return sum[:]
 }
 
-func resetSignupTOTPReplayForTest() {
-	signupTOTPReplayMu.Lock()
-	signupTOTPLastStep = 0
-	signupTOTPReplayMu.Unlock()
+// consumeSignupTOTP records the matched time-step in shared storage inside the
+// caller's transaction. Unique (fingerprint, step) rejects replay after restart
+// or on another replica. A unique violation rolls back with the rest of signup.
+func consumeSignupTOTP(ctx context.Context, q *db.Queries, secret []byte, code string, now time.Time) error {
+	step, ok := verifySignupTOTP(secret, code, now)
+	if !ok {
+		return errSignupTOTPRejected
+	}
+	err := q.InsertSignupTOTPUsedStep(ctx, db.InsertSignupTOTPUsedStepParams{
+		SecretFingerprint: signupTOTPFingerprint(secret),
+		Step:              step,
+	})
+	if err != nil {
+		if isUniqueViolation(err) {
+			return errSignupTOTPRejected
+		}
+		return err
+	}
+	return nil
 }
 
 func absInt64(v int64) int64 {

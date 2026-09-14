@@ -227,11 +227,6 @@ func (h *Handler) PasswordSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if totpRequired && !consumeSignupTOTP(totpSecret, req.Totp, time.Now()) {
-		writeError(w, http.StatusUnauthorized, "invalid or expired team 2FA code")
-		return
-	}
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create user")
@@ -270,6 +265,17 @@ func (h *Handler) PasswordSignup(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
+	}
+
+	if totpRequired {
+		if err := consumeSignupTOTP(r.Context(), qtx, totpSecret, req.Totp, time.Now()); err != nil {
+			if errors.Is(err, errSignupTOTPRejected) {
+				writeError(w, http.StatusUnauthorized, "invalid or expired team 2FA code")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to create user")
+			return
+		}
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {

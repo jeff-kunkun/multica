@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // RFC 6238 Appendix B SHA-1 secret, as base32 (the encoding TOTP apps use).
@@ -49,6 +51,21 @@ func assertSignupUserAbsent(t *testing.T, email string) {
 	if !isNotFound(err) {
 		t.Fatalf("lookup %q: %v", email, err)
 	}
+}
+
+func cleanupSignupTOTPUsedSteps(t *testing.T, secret []byte) {
+	t.Helper()
+	if testPool == nil {
+		return
+	}
+	fp := signupTOTPFingerprint(secret)
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `DELETE FROM signup_totp_used_step WHERE secret_fingerprint = $1`, fp); err != nil {
+		t.Fatalf("clear signup_totp_used_step: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM signup_totp_used_step WHERE secret_fingerprint = $1`, fp)
+	})
 }
 
 func TestTOTPRFC6238SHA1SixDigits(t *testing.T) {
@@ -104,7 +121,6 @@ func TestPasswordSignupTotpUnconfiguredBackwardCompatible(t *testing.T) {
 	)
 	setPasswordAuthEnv(t, "kun", "s3cret-bootstrap", "password-auth-bootstrap@multica.ai")
 	t.Setenv(signupTOTPSecretEnv, "")
-	resetSignupTOTPReplayForTest()
 	cleanupPasswordSignupUser(t, email)
 
 	w := postPasswordSignup(username, password, email)
@@ -120,7 +136,7 @@ func TestPasswordSignupTotpMissingRejected(t *testing.T) {
 	const email = "signup-totp-missing@multica.ai"
 	setPasswordAuthEnv(t, "kun", "s3cret-bootstrap", "password-auth-bootstrap@multica.ai")
 	t.Setenv(signupTOTPSecretEnv, rfc6238TOTPSecretBase32)
-	resetSignupTOTPReplayForTest()
+	cleanupSignupTOTPUsedSteps(t, rfc6238TOTPSecret(t))
 	cleanupPasswordSignupUser(t, email)
 
 	w := postPasswordSignup("totpmiss", "correct-horse", email)
@@ -137,7 +153,7 @@ func TestPasswordSignupTotpInvalidRejected(t *testing.T) {
 	const email = "signup-totp-invalid@multica.ai"
 	setPasswordAuthEnv(t, "kun", "s3cret-bootstrap", "password-auth-bootstrap@multica.ai")
 	t.Setenv(signupTOTPSecretEnv, rfc6238TOTPSecretBase32)
-	resetSignupTOTPReplayForTest()
+	cleanupSignupTOTPUsedSteps(t, rfc6238TOTPSecret(t))
 	cleanupPasswordSignupUser(t, email)
 
 	w := postPasswordSignupTOTP("totpbad", "correct-horse", email, "000000")
@@ -158,10 +174,10 @@ func TestPasswordSignupTotpSuccess(t *testing.T) {
 	)
 	setPasswordAuthEnv(t, "kun", "s3cret-bootstrap", "password-auth-bootstrap@multica.ai")
 	t.Setenv(signupTOTPSecretEnv, rfc6238TOTPSecretBase32)
-	resetSignupTOTPReplayForTest()
+	secret := rfc6238TOTPSecret(t)
+	cleanupSignupTOTPUsedSteps(t, secret)
 	cleanupPasswordSignupUser(t, email)
 
-	secret := rfc6238TOTPSecret(t)
 	code := totpCodeAt(secret, time.Now().Unix())
 	w := postPasswordSignupTOTP(username, password, email, code)
 	if w.Code != http.StatusOK {
@@ -190,16 +206,32 @@ func TestPasswordSignupTotpReplayRejected(t *testing.T) {
 	)
 	setPasswordAuthEnv(t, "kun", "s3cret-bootstrap", "password-auth-bootstrap@multica.ai")
 	t.Setenv(signupTOTPSecretEnv, rfc6238TOTPSecretBase32)
-	resetSignupTOTPReplayForTest()
+	secret := rfc6238TOTPSecret(t)
+	cleanupSignupTOTPUsedSteps(t, secret)
 	cleanupPasswordSignupUser(t, email1)
 	cleanupPasswordSignupUser(t, email2)
 
-	secret := rfc6238TOTPSecret(t)
-	code := totpCodeAt(secret, time.Now().Unix())
+	now := time.Now()
+	code := totpCodeAt(secret, now.Unix())
+	step, ok := verifySignupTOTP(secret, code, now)
+	if !ok {
+		t.Fatal("current TOTP must verify before replay test")
+	}
 
 	w := postPasswordSignupTOTP(username1, password, email1, code)
 	if w.Code != http.StatusOK {
 		t.Fatalf("first TOTP use: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var stored int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM signup_totp_used_step WHERE secret_fingerprint = $1 AND step = $2`,
+		signupTOTPFingerprint(secret), step,
+	).Scan(&stored); err != nil {
+		t.Fatalf("lookup consumed step: %v", err)
+	}
+	if stored != 1 {
+		t.Fatalf("consumed step rows: got %d, want 1", stored)
 	}
 
 	w = postPasswordSignupTOTP(username2, password, email2, code)
@@ -207,4 +239,62 @@ func TestPasswordSignupTotpReplayRejected(t *testing.T) {
 		t.Fatalf("replayed TOTP: expected 401, got %d: %s", w.Code, w.Body.String())
 	}
 	assertSignupUserAbsent(t, email2)
+}
+
+func TestPasswordSignupTotpReplayRejectedFromSharedStore(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	const (
+		email    = "signup-totp-shared@multica.ai"
+		username = "totpshared"
+		password = "correct-horse-battery"
+	)
+	setPasswordAuthEnv(t, "kun", "s3cret-bootstrap", "password-auth-bootstrap@multica.ai")
+	t.Setenv(signupTOTPSecretEnv, rfc6238TOTPSecretBase32)
+	secret := rfc6238TOTPSecret(t)
+	cleanupSignupTOTPUsedSteps(t, secret)
+	cleanupPasswordSignupUser(t, email)
+
+	now := time.Now()
+	code := totpCodeAt(secret, now.Unix())
+	step, ok := verifySignupTOTP(secret, code, now)
+	if !ok {
+		t.Fatal("current TOTP must verify")
+	}
+
+	// Another process/replica already persisted this (secret, step). This
+	// handler has no in-memory last-step, so rejection must come from the
+	// shared unique constraint.
+	if err := testHandler.Queries.InsertSignupTOTPUsedStep(context.Background(), db.InsertSignupTOTPUsedStepParams{
+		SecretFingerprint: signupTOTPFingerprint(secret),
+		Step:              step,
+	}); err != nil {
+		t.Fatalf("seed consumed step: %v", err)
+	}
+
+	w := postPasswordSignupTOTP(username, password, email, code)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("TOTP already consumed in shared store: expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+	assertSignupUserAbsent(t, email)
+}
+
+func TestSignupTOTPUsedStepUniqueConstraint(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	secret := rfc6238TOTPSecret(t)
+	cleanupSignupTOTPUsedSteps(t, secret)
+	params := db.InsertSignupTOTPUsedStepParams{
+		SecretFingerprint: signupTOTPFingerprint(secret),
+		Step:              42,
+	}
+	if err := testHandler.Queries.InsertSignupTOTPUsedStep(context.Background(), params); err != nil {
+		t.Fatalf("first insert: %v", err)
+	}
+	err := testHandler.Queries.InsertSignupTOTPUsedStep(context.Background(), params)
+	if !isUniqueViolation(err) {
+		t.Fatalf("second insert: want unique violation, got %v", err)
+	}
 }

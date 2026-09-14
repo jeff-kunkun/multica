@@ -1240,6 +1240,12 @@ type SeatCapacityOutbox struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type SignupTotpUsedStep struct {
+	SecretFingerprint []byte             `json:"secret_fingerprint"`
+	Step              int64              `json:"step"`
+	ConsumedAt        pgtype.Timestamptz `json:"consumed_at"`
+}
+
 type Skill struct {
 	ID                   pgtype.UUID        `json:"id"`
 	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
