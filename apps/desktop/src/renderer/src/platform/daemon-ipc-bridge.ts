@@ -23,6 +23,7 @@ export interface DaemonStatusLike {
   daemonId?: string;
   planLimits?: Record<string, PlanLimitsSnapshot>;
   agyLoggedInDirs?: string[];
+  agyQuotaExhausted?: Array<{ dir: string; reset_at: number }>;
 }
 
 /**
@@ -38,6 +39,7 @@ export function applyLocalDaemonStatus(
   let next = mergeDaemonStatus(rt, status);
   next = mergeLocalPlanLimits(next, status);
   next = mergeAgyLoggedInDirs(next, status);
+  next = mergeAgyQuotaExhausted(next, status);
   return next;
 }
 
@@ -80,6 +82,20 @@ function mergeAgyLoggedInDirs(
     metadata: {
       ...rt.metadata,
       agy_logged_in_dirs: status.agyLoggedInDirs,
+    },
+  };
+}
+
+function mergeAgyQuotaExhausted(
+  rt: AgentRuntime,
+  status: DaemonStatusLike,
+): AgentRuntime {
+  if (status.agyQuotaExhausted === undefined) return rt;
+  return {
+    ...rt,
+    metadata: {
+      ...rt.metadata,
+      agy_quota_exhausted: status.agyQuotaExhausted,
     },
   };
 }

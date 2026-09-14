@@ -11,6 +11,7 @@ import {
   Save,
   Terminal,
   Trash2,
+  X,
 } from "lucide-react";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
@@ -44,8 +45,10 @@ import {
   resolveSlotDirectory,
   runtimeHomeDir,
   runtimeLoggedInDirs,
+  runtimeQuotaExhausted,
   setGeminiDir,
   slotIsSignedIn,
+  slotQuotaResetAt,
   writeAgySlotsConfig,
 } from "./agy-account-slots";
 
@@ -112,6 +115,7 @@ export function CustomArgsTab({
   const [editorValue, setEditorValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [quotaNow, setQuotaNow] = useState(() => Date.now());
   const editorInputRef = useRef<HTMLInputElement>(null);
 
   const currentArgs = entriesToArgs(entries);
@@ -129,6 +133,7 @@ export function CustomArgsTab({
   const loginPath = loginDirectory(slot, geminiDir, homeDir);
   const loginCommand = formatAgyLoginCommand(loginPath);
   const loggedInDirs = runtimeLoggedInDirs(runtimeDevice);
+  const quotaExhausted = runtimeQuotaExhausted(runtimeDevice);
   const nextAccount = nextAccountNumber(accounts);
   const canAddAccount = nextAccount <= MAX_AGY_ACCOUNT_NUMBER;
 
@@ -151,6 +156,20 @@ export function CustomArgsTab({
   useEffect(() => {
     if (editor) editorInputRef.current?.focus();
   }, [editor]);
+
+  const nextQuotaResetMs = quotaExhausted.reduce<number | null>((soonest, entry) => {
+    const at = entry.reset_at * 1000;
+    if (at <= quotaNow) return soonest;
+    if (soonest === null || at < soonest) return at;
+    return soonest;
+  }, null);
+
+  useEffect(() => {
+    if (nextQuotaResetMs === null) return;
+    const delay = Math.min(Math.max(nextQuotaResetMs - Date.now(), 0), 2_147_000_000);
+    const timer = window.setTimeout(() => setQuotaNow(Date.now()), delay);
+    return () => window.clearTimeout(timer);
+  }, [nextQuotaResetMs]);
 
   const applyGeminiDir = (profile: string) => {
     setEntries(argsToEntries(setGeminiDir(currentArgs, profile)));
@@ -355,7 +374,16 @@ export function CustomArgsTab({
                 >
                   {slots.map((item) => {
                     const selected = slot === item.id;
-                    const signedIn = slotIsSignedIn(item.directory, loggedInDirs);
+                    const quotaReset = slotQuotaResetAt(item.directory, quotaExhausted, quotaNow);
+                    const signedIn = !quotaReset && slotIsSignedIn(item.directory, loggedInDirs);
+                    const resetLabel = quotaReset
+                      ? new Date(quotaReset * 1000).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "";
                     return (
                       <div key={item.id} className="flex items-stretch gap-1">
                         <button
@@ -383,20 +411,33 @@ export function CustomArgsTab({
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="block text-body leading-5">{item.label}</span>
-                            <span className="mt-0.5 block font-normal text-caption leading-5 text-muted-foreground">
-                              {item.hint}
+                            <span
+                              className={cn(
+                                "mt-0.5 block font-normal text-caption leading-5",
+                                quotaReset ? "text-destructive" : "text-muted-foreground",
+                              )}
+                            >
+                              {quotaReset
+                                ? t(($) => $.tab_body.custom_args.slot_exhausted_hint, {
+                                    time: resetLabel,
+                                  })
+                                : item.hint}
                             </span>
                           </span>
                           <span
                             role="img"
                             aria-label={
-                              signedIn
-                                ? t(($) => $.tab_body.custom_args.slot_signed_in_aria)
-                                : t(($) => $.tab_body.custom_args.slot_signed_out_aria)
+                              quotaReset
+                                ? t(($) => $.tab_body.custom_args.slot_exhausted_aria)
+                                : signedIn
+                                  ? t(($) => $.tab_body.custom_args.slot_signed_in_aria)
+                                  : t(($) => $.tab_body.custom_args.slot_signed_out_aria)
                             }
                             className="mt-0.5 shrink-0"
                           >
-                            {signedIn ? (
+                            {quotaReset ? (
+                              <X className="size-3.5 text-destructive" aria-hidden="true" />
+                            ) : signedIn ? (
                               <Check className="size-3.5 text-success" aria-hidden="true" />
                             ) : (
                               <Circle className="size-3.5 text-muted-foreground/70" aria-hidden="true" />

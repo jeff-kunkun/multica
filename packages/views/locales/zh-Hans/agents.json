@@ -519,6 +519,8 @@
       "slot_remove_aria": "删除账号 {{n}}",
       "slot_signed_in_aria": "已登录",
       "slot_signed_out_aria": "未登录",
+      "slot_exhausted_aria": "额度用满",
+      "slot_exhausted_hint": "额度用满 · 约 {{time}} 恢复",
       "antigravity_profile_input_label": "Gemini 目录",
       "antigravity_profile_placeholder": "/Users/you/.gemini-work",
       "resolved_path_label": "目录",

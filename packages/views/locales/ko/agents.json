@@ -420,6 +420,8 @@
       "slot_remove_aria": "계정 {{n}} 삭제",
       "slot_signed_in_aria": "로그인됨",
       "slot_signed_out_aria": "로그인되지 않음",
+      "slot_exhausted_aria": "할당량 소진",
+      "slot_exhausted_hint": "할당량 소진 · {{time}}에 복구",
       "antigravity_profile_input_label": "Gemini 디렉터리",
       "antigravity_profile_placeholder": "/Users/you/.gemini-work",
       "resolved_path_label": "디렉터리",

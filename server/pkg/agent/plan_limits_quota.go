@@ -35,6 +35,7 @@ func looksLikeQuotaExhausted(text string) bool {
 		"rate_limit",
 		"quota exceeded",
 		"quota_exceeded",
+		"individual quota reached",
 		"usage limit",
 		"resource_exhausted",
 		"too many requests",

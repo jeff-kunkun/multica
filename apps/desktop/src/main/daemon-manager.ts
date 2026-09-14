@@ -183,6 +183,7 @@ interface HealthPayload {
   workspaces?: unknown[];
   plan_limits?: DaemonStatus["planLimits"];
   agy_logged_in_dirs?: string[];
+  agy_quota_exhausted?: Array<{ dir: string; reset_at: number }>;
 }
 
 async function fetchHealthAtPort(
@@ -426,6 +427,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
     externallyManaged,
     planLimits: data.plan_limits,
     agyLoggedInDirs: data.agy_logged_in_dirs,
+    agyQuotaExhausted: data.agy_quota_exhausted,
   };
 }
 

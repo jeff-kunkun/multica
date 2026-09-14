@@ -467,4 +467,38 @@ describe("CustomArgsTab", () => {
     expect(screen.queryByRole("img", { name: "Signed in" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("img", { name: "Not signed in" }).length).toBeGreaterThan(0);
   });
+
+  it("shows a quota X and restore time when the slot is exhausted", () => {
+    hideProcessHome();
+    const resetAt = Math.floor(Date.now() / 1000) + 3600;
+    renderTab({ custom_args: [] }, undefined, {
+      ...agyDeviceWithHome,
+      metadata: {
+        home_dir: "/Users/agy-host",
+        agy_logged_in_dirs: ["/Users/agy-host/.gemini"],
+        agy_quota_exhausted: [{ dir: "/Users/agy-host/.gemini", reset_at: resetAt }],
+      },
+    });
+
+    expect(screen.getByRole("img", { name: "Quota exhausted" })).toBeInTheDocument();
+    expect(screen.getByText(/quota full/i)).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Signed in" })).not.toBeInTheDocument();
+  });
+
+  it("restores the signed-in check after the quota reset time", () => {
+    hideProcessHome();
+    renderTab({ custom_args: [] }, undefined, {
+      ...agyDeviceWithHome,
+      metadata: {
+        home_dir: "/Users/agy-host",
+        agy_logged_in_dirs: ["/Users/agy-host/.gemini"],
+        agy_quota_exhausted: [
+          { dir: "/Users/agy-host/.gemini", reset_at: Math.floor(Date.now() / 1000) - 60 },
+        ],
+      },
+    });
+
+    expect(screen.queryByRole("img", { name: "Quota exhausted" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: "Signed in" })).toHaveLength(1);
+  });
 });

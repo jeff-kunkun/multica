@@ -87,6 +87,10 @@ type HealthResponse struct {
 	// runtime metadata so the settings green check updates after login without
 	// waiting for the next daemon re-register. Omitted when empty.
 	AgyLoggedInDirs []string `json:"agy_logged_in_dirs,omitempty"`
+	// AgyQuotaExhausted is a live overlay of Gemini directories whose
+	// individual quota is exhausted until reset_at. Always present (possibly
+	// empty) so Desktop can clear a recovered X without waiting for register.
+	AgyQuotaExhausted []agyQuotaExhaustedEntry `json:"agy_quota_exhausted"`
 }
 
 type healthWorkspace struct {
@@ -360,6 +364,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			Workspaces:          wsList,
 			PlanLimits:          d.planLimitsByProvider(),
 			AgyLoggedInDirs:     currentAgyLoggedInDirs(),
+			AgyQuotaExhausted:   d.agyQuotaOverlay(time.Now()),
 		}
 		if reporter, ok := d.repoCache.(interface{ Activity() repocache.Activity }); ok {
 			activity := reporter.Activity()

@@ -529,6 +529,11 @@ type Daemon struct {
 	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	planLimitsMu sync.RWMutex
 	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
+	// agyQuota tracks per-directory AGY/Antigravity individual-quota exhaustion
+	// so the same agent can fail over to another isolation slot. Guarded by
+	// agyQuotaMu; persisted under ~/.multica so a daemon restart keeps the X.
+	agyQuotaMu sync.Mutex
+	agyQuota   map[string]time.Time // gemini dir -> reset_at
 	// Live Claude/Codex/Gemini/Grok/Kimi/GLM/MiniMax/DeepSeek usage probes
 	// (cc-switch style). Throttled
 	// separately from the 15s heartbeat so we do not hammer unofficial APIs.
@@ -2859,6 +2864,14 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 // web UI can expand AGY account-slot paths. Browsers cannot read process.env.HOME.
 // Logged-in Gemini dirs ride along so the settings page can show a green check
 // without putting AGY-unknown flags in custom_args.
+func (d *Daemon) withRegistrationHostMeta(req map[string]any) map[string]any {
+	req = withHostHomeDir(req)
+	if exhausted := d.agyQuotaOverlay(time.Now()); len(exhausted) > 0 {
+		req["agy_quota_exhausted"] = exhausted
+	}
+	return req
+}
+
 func withHostHomeDir(req map[string]any) map[string]any {
 	if home, err := os.UserHomeDir(); err == nil {
 		if home = strings.TrimSpace(home); home != "" {
@@ -2977,7 +2990,7 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 		return nil, profileSig, ErrNoRuntimesToRegister
 	}
 
-	req := withHostHomeDir(map[string]any{
+	req := d.withRegistrationHostMeta(map[string]any{
 		"workspace_id":      workspaceID,
 		"daemon_id":         d.cfg.DaemonID,
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
@@ -3022,7 +3035,7 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 	if len(runtimes) == 0 {
 		return nil, ErrNoRuntimesToRegister
 	}
-	req := withHostHomeDir(map[string]any{
+	req := d.withRegistrationHostMeta(map[string]any{
 		"workspace_id":      workspaceID,
 		"daemon_id":         d.cfg.DaemonID,
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
@@ -8927,9 +8940,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Shared across the resume-retry below so the retry's transcript rows
 	// keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
+	var runtimeConfig json.RawMessage
+	if task.Agent != nil {
+		runtimeConfig = task.Agent.RuntimeConfig
+	}
+	d.applyAgyLaunchSlot(provider, &execOpts, runtimeConfig, time.Now())
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
+	}
+	for range maxAgyQuotaExhausted {
+		failover := d.agyQuotaFailover(provider, result, execOpts, runtimeConfig, time.Now())
+		if failover.PoolError != "" {
+			result.Error = failover.PoolError
+			break
+		}
+		if !failover.Retry {
+			break
+		}
+		taskLog.Warn("agy slot quota exhausted, retrying with the next isolation directory",
+			"from", agent.GeminiDirFromArgs(execOpts.CustomArgs),
+			"to", agent.GeminiDirFromArgs(failover.Opts.CustomArgs),
+		)
+		execOpts = failover.Opts
+		result, tools, err = d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
+		if err != nil {
+			return TaskResult{}, err
+		}
 	}
 
 	// retiredSessionID is the session this run was told to resume and then

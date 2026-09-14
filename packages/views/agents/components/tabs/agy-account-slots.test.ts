@@ -22,8 +22,10 @@ import {
   resolveSlotDirectory,
   runtimeHomeDir,
   runtimeLoggedInDirs,
+  runtimeQuotaExhausted,
   setGeminiDir,
   slotIsSignedIn,
+  slotQuotaResetAt,
   writeAgySlotsConfig,
 } from "./agy-account-slots";
 
@@ -229,5 +231,30 @@ describe("agy account slots", () => {
         metadata: { agy_logged_in_dirs: ["/Users/you/.gemini", "relative"] },
       }),
     ).toEqual(["/Users/you/.gemini"]);
+  });
+
+  it("reads exhausted quota dirs and treats an elapsed reset as available", () => {
+    const future = 1_800_000_000;
+    const past = 1_700_000_000;
+    expect(
+      runtimeQuotaExhausted({
+        metadata: {
+          agy_quota_exhausted: [
+            { dir: "/Users/you/.gemini", reset_at: future },
+            { dir: "relative", reset_at: future },
+            { dir: "/Users/you/.gemini-account2", reset_at: past },
+          ],
+        },
+      }),
+    ).toEqual([
+      { dir: "/Users/you/.gemini", reset_at: future },
+      { dir: "/Users/you/.gemini-account2", reset_at: past },
+    ]);
+    expect(
+      slotQuotaResetAt("/Users/you/.gemini", [{ dir: "/Users/you/.gemini", reset_at: future }], 1_799_000_000_000),
+    ).toBe(future);
+    expect(
+      slotQuotaResetAt("/Users/you/.gemini", [{ dir: "/Users/you/.gemini", reset_at: past }], 1_800_000_000_000),
+    ).toBeNull();
   });
 });

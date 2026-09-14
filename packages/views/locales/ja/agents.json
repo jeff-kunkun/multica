@@ -412,6 +412,8 @@
       "slot_remove_aria": "アカウント {{n}} を削除",
       "slot_signed_in_aria": "ログイン済み",
       "slot_signed_out_aria": "未ログイン",
+      "slot_exhausted_aria": "クォータ枯渇",
+      "slot_exhausted_hint": "クォータ満了 · {{time}} に回復",
       "antigravity_profile_input_label": "Gemini ディレクトリ",
       "antigravity_profile_placeholder": "/Users/you/.gemini-work",
       "resolved_path_label": "ディレクトリ",

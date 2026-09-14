@@ -210,7 +210,10 @@ type DaemonRegisterRequest struct {
 	// already contain an AGY/Gemini credential file. Used for the settings
 	// green check; never includes token contents.
 	AgyLoggedInDirs []string `json:"agy_logged_in_dirs"`
-	Runtimes        []struct {
+	// AgyQuotaExhausted is the host-level overlay of Gemini directories whose
+	// individual quota is exhausted until reset_at (unix seconds).
+	AgyQuotaExhausted []AgyQuotaExhaustedEntry `json:"agy_quota_exhausted"`
+	Runtimes          []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -228,6 +231,11 @@ type DaemonRegisterRequest struct {
 	} `json:"failed_profiles"`
 }
 
+type AgyQuotaExhaustedEntry struct {
+	Dir     string `json:"dir"`
+	ResetAt int64  `json:"reset_at"`
+}
+
 func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capabilities any) map[string]any {
 	meta := map[string]any{
 		"version":      version,
@@ -241,7 +249,31 @@ func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capa
 	if dirs := absoluteAgyLoggedInDirs(req.AgyLoggedInDirs); len(dirs) > 0 {
 		meta["agy_logged_in_dirs"] = dirs
 	}
+	if exhausted := absoluteAgyQuotaExhausted(req.AgyQuotaExhausted); len(exhausted) > 0 {
+		meta["agy_quota_exhausted"] = exhausted
+	}
 	return meta
+}
+
+func absoluteAgyQuotaExhausted(entries []AgyQuotaExhaustedEntry) []map[string]any {
+	out := make([]map[string]any, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
+	now := time.Now().Unix()
+	for _, entry := range entries {
+		dir := absoluteHostHomeDir(entry.Dir)
+		if dir == "" || entry.ResetAt <= now {
+			continue
+		}
+		if _, ok := seen[dir]; ok {
+			continue
+		}
+		seen[dir] = struct{}{}
+		out = append(out, map[string]any{"dir": dir, "reset_at": entry.ResetAt})
+		if len(out) >= 32 {
+			break
+		}
+	}
+	return out
 }
 
 func absoluteAgyLoggedInDirs(dirs []string) []string {

@@ -262,3 +262,45 @@ export function slotIsSignedIn(
   if (!normalized) return false;
   return loggedInDirs.some((dir) => dir.replace(/[/\\]+$/, "") === normalized);
 }
+
+export type AgyQuotaExhaustedEntry = {
+  dir: string;
+  reset_at: number;
+};
+
+function normalizeSlotDir(directory: string): string {
+  return directory.trim().replace(/[/\\]+$/, "");
+}
+
+export function runtimeQuotaExhausted(
+  runtime?: { metadata?: Record<string, unknown> } | null,
+): AgyQuotaExhaustedEntry[] {
+  const value = runtime?.metadata?.agy_quota_exhausted;
+  if (!Array.isArray(value)) return [];
+  const out: AgyQuotaExhaustedEntry[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const dir = normalizeSlotDir(String((entry as { dir?: unknown }).dir ?? ""));
+    const resetAt = (entry as { reset_at?: unknown }).reset_at;
+    const unix = typeof resetAt === "number" ? resetAt : Number(resetAt);
+    if (!isAbsoluteFsPath(dir) || !Number.isFinite(unix) || unix <= 0) continue;
+    if (seen.has(dir)) continue;
+    seen.add(dir);
+    out.push({ dir, reset_at: unix });
+  }
+  return out;
+}
+
+/** Unix seconds remaining exhausted, or null when the slot is usable again. */
+export function slotQuotaResetAt(
+  directory: string,
+  exhausted: readonly AgyQuotaExhaustedEntry[],
+  nowMs = Date.now(),
+): number | null {
+  const normalized = normalizeSlotDir(directory);
+  if (!normalized) return null;
+  const entry = exhausted.find((item) => normalizeSlotDir(item.dir) === normalized);
+  if (!entry) return null;
+  return entry.reset_at * 1000 > nowMs ? entry.reset_at : null;
+}
