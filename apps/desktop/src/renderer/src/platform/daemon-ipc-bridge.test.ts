@@ -66,4 +66,20 @@ describe("applyLocalDaemonStatus", () => {
     });
     expect(got.plan_limits).toBeNull();
   });
+
+  it("overlays live AGY login directories onto runtime metadata", () => {
+    const rt = makeRuntime({
+      provider: "antigravity",
+      metadata: { home_dir: "/Users/agy-host" },
+    });
+    const got = applyLocalDaemonStatus(rt, {
+      state: "running",
+      daemonId: "daemon-1",
+      agyLoggedInDirs: ["/Users/agy-host/.gemini-account4"],
+    });
+    expect(got.metadata).toEqual({
+      home_dir: "/Users/agy-host",
+      agy_logged_in_dirs: ["/Users/agy-host/.gemini-account4"],
+    });
+  });
 });

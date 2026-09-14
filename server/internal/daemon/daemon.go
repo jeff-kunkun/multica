@@ -2848,10 +2848,15 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 
 // withHostHomeDir stamps the daemon host's home onto a register payload so the
 // web UI can expand AGY account-slot paths. Browsers cannot read process.env.HOME.
+// Logged-in Gemini dirs ride along so the settings page can show a green check
+// without putting AGY-unknown flags in custom_args.
 func withHostHomeDir(req map[string]any) map[string]any {
 	if home, err := os.UserHomeDir(); err == nil {
 		if home = strings.TrimSpace(home); home != "" {
 			req["home_dir"] = home
+			if dirs := probeAgyLoggedInDirs(home); len(dirs) > 0 {
+				req["agy_logged_in_dirs"] = dirs
+			}
 		}
 	}
 	return req

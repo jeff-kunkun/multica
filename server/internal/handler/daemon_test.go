@@ -834,6 +834,51 @@ func TestDaemonRegister_StoresHomeDirInMetadata(t *testing.T) {
 	}
 }
 
+func TestDaemonRegister_StoresAgyLoggedInDirsInMetadata(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-agy-logins",
+		"device_name":  "test-device",
+		"home_dir":     "/Users/agy-host",
+		"agy_logged_in_dirs": []string{
+			"/Users/agy-host/.gemini",
+			"relative",
+			"/Users/agy-host/.gemini-account4",
+		},
+		"runtimes": []map[string]any{
+			{"name": "agy", "type": "antigravity", "version": "1.0.0", "status": "online"},
+		},
+	}, testWorkspaceID, "test-daemon-agy-logins")
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
+
+	var resp struct {
+		Runtimes []struct {
+			ID       string         `json:"id"`
+			Metadata map[string]any `json:"metadata"`
+		} `json:"runtimes"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Runtimes) != 1 {
+		t.Fatalf("runtimes = %d, want 1", len(resp.Runtimes))
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, resp.Runtimes[0].ID)
+	})
+	got, ok := resp.Runtimes[0].Metadata["agy_logged_in_dirs"].([]any)
+	if !ok {
+		t.Fatalf("metadata.agy_logged_in_dirs = %#v", resp.Runtimes[0].Metadata["agy_logged_in_dirs"])
+	}
+	if len(got) != 2 || got[0] != "/Users/agy-host/.gemini" || got[1] != "/Users/agy-host/.gemini-account4" {
+		t.Fatalf("agy_logged_in_dirs = %#v", got)
+	}
+}
+
 func TestDaemonRegister_IgnoresRelativeHomeDir(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

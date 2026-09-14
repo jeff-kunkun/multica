@@ -22,6 +22,7 @@ export interface DaemonStatusLike {
     | "auth_expired";
   daemonId?: string;
   planLimits?: Record<string, PlanLimitsSnapshot>;
+  agyLoggedInDirs?: string[];
 }
 
 /**
@@ -36,6 +37,7 @@ export function applyLocalDaemonStatus(
 ): AgentRuntime {
   let next = mergeDaemonStatus(rt, status);
   next = mergeLocalPlanLimits(next, status);
+  next = mergeAgyLoggedInDirs(next, status);
   return next;
 }
 
@@ -66,6 +68,20 @@ function mergeLocalPlanLimits(
   const overlay = status.planLimits?.[rt.provider];
   if (!overlay || overlay.observed_at <= 0) return rt;
   return { ...rt, plan_limits: overlay };
+}
+
+function mergeAgyLoggedInDirs(
+  rt: AgentRuntime,
+  status: DaemonStatusLike,
+): AgentRuntime {
+  if (!status.agyLoggedInDirs) return rt;
+  return {
+    ...rt,
+    metadata: {
+      ...rt.metadata,
+      agy_logged_in_dirs: status.agyLoggedInDirs,
+    },
+  };
 }
 
 /**

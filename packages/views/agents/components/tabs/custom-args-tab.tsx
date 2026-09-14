@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Check,
+  Circle,
   Copy,
   Loader2,
   Pencil,
@@ -25,17 +26,27 @@ import {
 } from "../../../settings/components/settings-layout";
 import {
   type AgyAccountSlot,
+  MAX_AGY_ACCOUNT_NUMBER,
   detectAgyAccountSlot,
   formatAgyLoginCommand,
   getGeminiDir,
   isAbsoluteFsPath,
   isGeminiDirToken,
   isIsolatedAccountSlot,
+  isNumberedAccountSlot,
   loginDirectory,
+  nextAccountNumber,
+  normalizeAccountNumbers,
+  numberedSlotId,
+  parseAccountNumber,
+  parseAgySlotsConfig,
   resolveHomeDir,
   resolveSlotDirectory,
   runtimeHomeDir,
+  runtimeLoggedInDirs,
   setGeminiDir,
+  slotIsSignedIn,
+  writeAgySlotsConfig,
 } from "./agy-account-slots";
 
 interface ArgEntry {
@@ -94,6 +105,9 @@ export function CustomArgsTab({
   const [slot, setSlot] = useState<AgyAccountSlot>(() =>
     detectAgyAccountSlot(getGeminiDir(agent.custom_args ?? [])),
   );
+  const [accounts, setAccounts] = useState<number[]>(() =>
+    parseAgySlotsConfig(agent.runtime_config, getGeminiDir(agent.custom_args ?? [])),
+  );
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorValue, setEditorValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -104,18 +118,31 @@ export function CustomArgsTab({
   const geminiDir = getGeminiDir(currentArgs);
   const homeDir = resolveHomeDir(geminiDir, runtimeHomeDir(runtimeDevice));
   const originalArgs = agent.custom_args ?? [];
-  const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
+  const originalAccounts = parseAgySlotsConfig(
+    agent.runtime_config,
+    getGeminiDir(originalArgs),
+  );
+  const argsDirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
+  const slotsDirty = JSON.stringify(accounts) !== JSON.stringify(originalAccounts);
+  const dirty = argsDirty || slotsDirty;
   const visibleEntries = visibleArgEntries(entries);
   const loginPath = loginDirectory(slot, geminiDir, homeDir);
   const loginCommand = formatAgyLoginCommand(loginPath);
-  const slotLabel =
-    slot === "account1"
+  const loggedInDirs = runtimeLoggedInDirs(runtimeDevice);
+  const nextAccount = nextAccountNumber(accounts);
+  const canAddAccount = nextAccount <= MAX_AGY_ACCOUNT_NUMBER;
+
+  const numberedSlotLabel = (account: number) =>
+    account === 1
       ? t(($) => $.tab_body.custom_args.slot_account1_label)
-      : slot === "account2"
-        ? t(($) => $.tab_body.custom_args.slot_account2_label)
-        : slot === "account3"
-          ? t(($) => $.tab_body.custom_args.slot_account3_label)
-          : t(($) => $.tab_body.custom_args.slot_custom_label);
+      : t(($) => $.tab_body.custom_args.slot_account_label, { n: account });
+  const numberedSlotHint = (account: number) =>
+    account === 1
+      ? t(($) => $.tab_body.custom_args.slot_account1_hint)
+      : t(($) => $.tab_body.custom_args.slot_account_hint, { n: account });
+  const slotLabel = isNumberedAccountSlot(slot)
+    ? numberedSlotLabel(parseAccountNumber(slot) ?? 1)
+    : t(($) => $.tab_body.custom_args.slot_custom_label);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -137,6 +164,24 @@ export function CustomArgsTab({
     setSlot(next);
     if (next === "custom") return;
     applyGeminiDir(resolveSlotDirectory(next, geminiDir, homeDir));
+  };
+
+  const addAccount = () => {
+    if (!homeDir) {
+      toast.error(t(($) => $.tab_body.custom_args.home_unresolved_toast));
+      return;
+    }
+    if (!canAddAccount) return;
+    const next = normalizeAccountNumbers([...accounts, nextAccount]);
+    setAccounts(next);
+    selectSlot(numberedSlotId(nextAccount));
+  };
+
+  const removeAccount = (account: number) => {
+    if (account <= 1) return;
+    const next = normalizeAccountNumbers(accounts.filter((n) => n !== account));
+    setAccounts(next);
+    if (parseAccountNumber(slot) === account) selectSlot("account1");
   };
 
   const startAdding = () => {
@@ -193,7 +238,14 @@ export function CustomArgsTab({
     }
     setSaving(true);
     try {
-      await onSave({ custom_args: currentArgs });
+      await onSave(
+        isAntigravity
+          ? {
+              custom_args: currentArgs,
+              runtime_config: writeAgySlotsConfig(agent.runtime_config, accounts),
+            }
+          : { custom_args: currentArgs },
+      );
       toast.success(t(($) => $.tab_body.custom_args.saved_toast));
     } catch (err) {
       toast.error(
@@ -252,28 +304,28 @@ export function CustomArgsTab({
 
   const slots: Array<{
     id: AgyAccountSlot;
+    account: number | null;
     label: string;
     hint: string;
+    directory: string;
   }> = [
+    ...accounts.map((account) => {
+      const id = numberedSlotId(account);
+      const directory = loginDirectory(id, account === 1 ? "" : resolveSlotDirectory(id, "", homeDir), homeDir);
+      return {
+        id,
+        account,
+        label: numberedSlotLabel(account),
+        hint: numberedSlotHint(account),
+        directory,
+      };
+    }),
     {
-      id: "account1",
-      label: t(($) => $.tab_body.custom_args.slot_account1_label),
-      hint: t(($) => $.tab_body.custom_args.slot_account1_hint),
-    },
-    {
-      id: "account2",
-      label: t(($) => $.tab_body.custom_args.slot_account2_label),
-      hint: t(($) => $.tab_body.custom_args.slot_account2_hint),
-    },
-    {
-      id: "account3",
-      label: t(($) => $.tab_body.custom_args.slot_account3_label),
-      hint: t(($) => $.tab_body.custom_args.slot_account3_hint),
-    },
-    {
-      id: "custom",
+      id: "custom" as const,
+      account: null,
       label: t(($) => $.tab_body.custom_args.slot_custom_label),
       hint: t(($) => $.tab_body.custom_args.slot_custom_hint),
+      directory: loginDirectory("custom", geminiDir, homeDir),
     },
   ];
 
@@ -298,40 +350,83 @@ export function CustomArgsTab({
                 >
                   {slots.map((item) => {
                     const selected = slot === item.id;
+                    const signedIn = slotIsSignedIn(item.directory, loggedInDirs);
                     return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={selected}
-                        onClick={() => selectSlot(item.id)}
-                        className={cn(
-                          "flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                          selected
-                            ? "border-foreground font-medium shadow-[inset_0_0_0_1px_var(--color-foreground)]"
-                            : "border-border hover:border-foreground/20 hover:bg-accent/30",
-                        )}
-                      >
-                        <span
-                          aria-hidden
+                      <div key={item.id} className="flex items-stretch gap-1">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          onClick={() => selectSlot(item.id)}
                           className={cn(
-                            "relative mt-0.5 inline-block size-4 shrink-0 rounded-full border-[1.5px]",
-                            selected ? "border-foreground" : "border-border",
+                            "flex min-w-0 flex-1 items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                            selected
+                              ? "border-foreground font-medium shadow-[inset_0_0_0_1px_var(--color-foreground)]"
+                              : "border-border hover:border-foreground/20 hover:bg-accent/30",
                           )}
                         >
-                          {selected ? (
-                            <span className="absolute inset-[3px] rounded-full bg-foreground" />
-                          ) : null}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-body leading-5">{item.label}</span>
-                          <span className="mt-0.5 block font-normal text-caption leading-5 text-muted-foreground">
-                            {item.hint}
+                          <span
+                            aria-hidden
+                            className={cn(
+                              "relative mt-0.5 inline-block size-4 shrink-0 rounded-full border-[1.5px]",
+                              selected ? "border-foreground" : "border-border",
+                            )}
+                          >
+                            {selected ? (
+                              <span className="absolute inset-[3px] rounded-full bg-foreground" />
+                            ) : null}
                           </span>
-                        </span>
-                      </button>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-body leading-5">{item.label}</span>
+                            <span className="mt-0.5 block font-normal text-caption leading-5 text-muted-foreground">
+                              {item.hint}
+                            </span>
+                          </span>
+                          <span
+                            role="img"
+                            aria-label={
+                              signedIn
+                                ? t(($) => $.tab_body.custom_args.slot_signed_in_aria)
+                                : t(($) => $.tab_body.custom_args.slot_signed_out_aria)
+                            }
+                            className="mt-0.5 shrink-0"
+                          >
+                            {signedIn ? (
+                              <Check className="size-3.5 text-success" aria-hidden="true" />
+                            ) : (
+                              <Circle className="size-3.5 text-muted-foreground/70" aria-hidden="true" />
+                            )}
+                          </span>
+                        </button>
+                        {item.account && item.account > 1 ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="mt-1 shrink-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => removeAccount(item.account ?? 0)}
+                            aria-label={t(($) => $.tab_body.custom_args.slot_remove_aria, {
+                              n: item.account,
+                            })}
+                          >
+                            <Trash2 className="size-3.5" aria-hidden="true" />
+                          </Button>
+                        ) : null}
+                      </div>
                     );
                   })}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={addAccount}
+                    disabled={!canAddAccount}
+                    aria-label={t(($) => $.tab_body.custom_args.slot_add_aria)}
+                  >
+                    <Plus className="size-3.5" aria-hidden="true" />
+                    {t(($) => $.tab_body.custom_args.slot_add_action)}
+                  </Button>
                 </div>
 
                 {slot === "custom" ? (

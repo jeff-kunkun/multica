@@ -205,8 +205,12 @@ type DaemonRegisterRequest struct {
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
 	// HomeDir is the daemon host's user home. The web UI cannot read
 	// process.env.HOME, so AGY account-slot presets use this absolute path.
-	HomeDir  string `json:"home_dir"`
-	Runtimes []struct {
+	HomeDir string `json:"home_dir"`
+	// AgyLoggedInDirs are absolute Gemini directories on the daemon host that
+	// already contain an AGY/Gemini credential file. Used for the settings
+	// green check; never includes token contents.
+	AgyLoggedInDirs []string `json:"agy_logged_in_dirs"`
+	Runtimes        []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -234,7 +238,30 @@ func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capa
 	if home := absoluteHostHomeDir(req.HomeDir); home != "" {
 		meta["home_dir"] = home
 	}
+	if dirs := absoluteAgyLoggedInDirs(req.AgyLoggedInDirs); len(dirs) > 0 {
+		meta["agy_logged_in_dirs"] = dirs
+	}
 	return meta
+}
+
+func absoluteAgyLoggedInDirs(dirs []string) []string {
+	out := make([]string, 0, len(dirs))
+	seen := make(map[string]struct{}, len(dirs))
+	for _, dir := range dirs {
+		abs := absoluteHostHomeDir(dir)
+		if abs == "" {
+			continue
+		}
+		if _, ok := seen[abs]; ok {
+			continue
+		}
+		seen[abs] = struct{}{}
+		out = append(out, abs)
+		if len(out) >= 32 {
+			break
+		}
+	}
+	return out
 }
 
 // absoluteHostHomeDir accepts Unix and Windows absolute paths so a Linux

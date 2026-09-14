@@ -152,6 +152,17 @@ describe("CustomArgsTab", () => {
     expect(onSave).toHaveBeenCalledWith({ custom_args: ["value with spaces"] });
   });
 
+  function agySave(
+    customArgs: string[],
+    accounts: number[] = [1, 2, 3],
+    extraConfig: Record<string, unknown> = {},
+  ) {
+    return {
+      custom_args: customArgs,
+      runtime_config: { ...extraConfig, agy_slots: { accounts } },
+    };
+  }
+
   it("does not show AGY account slots for other runtimes", () => {
     renderTab();
 
@@ -194,9 +205,9 @@ describe("CustomArgsTab", () => {
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^save$/i }));
-    expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", "/Users/agy-host/.gemini-account2"],
-    });
+    expect(onSave).toHaveBeenCalledWith(
+      agySave(["--gemini_dir", "/Users/agy-host/.gemini-account2"]),
+    );
   });
 
   it("fills an absolute Account 2 path when the current Gemini dir is ~/.gemini", async () => {
@@ -214,9 +225,9 @@ describe("CustomArgsTab", () => {
       screen.getByText("agy --gemini_dir=/Users/you/.gemini-account2"),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^save$/i }));
-    expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", "/Users/you/.gemini-account2"],
-    });
+    expect(onSave).toHaveBeenCalledWith(
+      agySave(["--gemini_dir", "/Users/you/.gemini-account2"]),
+    );
   });
 
   it("fills an absolute Account 2 path when the current Gemini dir is ~\\.gemini", async () => {
@@ -234,9 +245,9 @@ describe("CustomArgsTab", () => {
       screen.getByText("agy --gemini_dir=C:\\Users\\you\\.gemini-account2"),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^save$/i }));
-    expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", "C:\\Users\\you\\.gemini-account2"],
-    });
+    expect(onSave).toHaveBeenCalledWith(
+      agySave(["--gemini_dir", "C:\\Users\\you\\.gemini-account2"]),
+    );
   });
 
   it("does not save a tilde path when account 2 is clicked without any home source", async () => {
@@ -272,9 +283,9 @@ describe("CustomArgsTab", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
-    expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", "/Users/desktop/.gemini-account2"],
-    });
+    expect(onSave).toHaveBeenCalledWith(
+      agySave(["--gemini_dir", "/Users/desktop/.gemini-account2"]),
+    );
   });
 
   it("copies the AGY sign-in command for the selected slot", async () => {
@@ -312,9 +323,9 @@ describe("CustomArgsTab", () => {
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^save$/i }));
-    expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", "/Users/agy-host/.gemini-account3"],
-    });
+    expect(onSave).toHaveBeenCalledWith(
+      agySave(["--gemini_dir", "/Users/agy-host/.gemini-account3"]),
+    );
   });
 
   it("does not save a tilde path when account 3 is clicked without any home source", async () => {
@@ -365,8 +376,72 @@ describe("CustomArgsTab", () => {
     await user.type(input, "/Users/you/.gemini-work");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
-    expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--profile", "research", "--gemini_dir", "/Users/you/.gemini-work"],
+    expect(onSave).toHaveBeenCalledWith(
+      agySave(["--profile", "research", "--gemini_dir", "/Users/you/.gemini-work"]),
+    );
+  });
+
+  it("adds account 4 from the plus button and saves the isolated absolute path", async () => {
+    hideProcessHome();
+    const user = userEvent.setup();
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDeviceWithHome);
+
+    await user.click(screen.getByRole("button", { name: /add an isolated agy account/i }));
+
+    expect(screen.getByRole("radio", { name: /account 4/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(
+      screen.getByText("agy --gemini_dir=/Users/agy-host/.gemini-account4"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith(
+      agySave(["--gemini_dir", "/Users/agy-host/.gemini-account4"], [1, 2, 3, 4]),
+    );
+  });
+
+  it("restores persisted extra slots when the settings tab reopens", () => {
+    hideProcessHome();
+    renderTab(
+      {
+        custom_args: ["--gemini_dir", "/Users/agy-host/.gemini-account4"],
+        runtime_config: { agy_slots: { accounts: [1, 4] } },
+      },
+      undefined,
+      agyDeviceWithHome,
+    );
+
+    expect(screen.getByRole("radio", { name: /account 1/i })).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /account 2(?!\d)/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /account 4/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("shows a signed-in check when daemon metadata lists the slot directory", () => {
+    hideProcessHome();
+    renderTab({ custom_args: [] }, undefined, {
+      ...agyDeviceWithHome,
+      metadata: {
+        home_dir: "/Users/agy-host",
+        agy_logged_in_dirs: ["/Users/agy-host/.gemini"],
+      },
     });
+
+    const signedIn = screen.getAllByRole("img", { name: "Signed in" });
+    const signedOut = screen.getAllByRole("img", { name: "Not signed in" });
+    expect(signedIn).toHaveLength(1);
+    expect(signedOut.length).toBeGreaterThan(0);
+  });
+
+  it("does not show a signed-in check when no credential directories are reported", () => {
+    hideProcessHome();
+    renderTab({ custom_args: [] }, undefined, agyDeviceWithHome);
+
+    expect(screen.queryByRole("img", { name: "Signed in" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: "Not signed in" }).length).toBeGreaterThan(0);
   });
 });

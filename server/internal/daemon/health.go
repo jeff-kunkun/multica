@@ -82,6 +82,11 @@ type HealthResponse struct {
 	// this map onto local runtime rows. Omitted when empty so older clients
 	// keep parsing /health.
 	PlanLimits map[string]protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
+	// AgyLoggedInDirs is a live overlay of Gemini directories on this host that
+	// already contain an AGY/Gemini credential file. Desktop merges it onto
+	// runtime metadata so the settings green check updates after login without
+	// waiting for the next daemon re-register. Omitted when empty.
+	AgyLoggedInDirs []string `json:"agy_logged_in_dirs,omitempty"`
 }
 
 type healthWorkspace struct {
@@ -354,6 +359,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			ReloadPendingReason: d.reloadPending(),
 			Workspaces:          wsList,
 			PlanLimits:          d.planLimitsByProvider(),
+			AgyLoggedInDirs:     currentAgyLoggedInDirs(),
 		}
 		if reporter, ok := d.repoCache.(interface{ Activity() repocache.Activity }); ok {
 			activity := reporter.Activity()
