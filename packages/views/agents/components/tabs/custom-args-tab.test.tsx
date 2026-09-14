@@ -437,6 +437,29 @@ describe("CustomArgsTab", () => {
     expect(signedOut.length).toBeGreaterThan(0);
   });
 
+  it("keeps the custom row unchecked when the signed-in directory belongs to a numbered slot", () => {
+    hideProcessHome();
+    renderTab(
+      {
+        custom_args: ["--gemini_dir", "/Users/agy-host/.gemini-account4"],
+        runtime_config: { agy_slots: { accounts: [1, 4] } },
+      },
+      undefined,
+      {
+        ...agyDeviceWithHome,
+        metadata: {
+          home_dir: "/Users/agy-host",
+          agy_logged_in_dirs: ["/Users/agy-host/.gemini-account4"],
+        },
+      },
+    );
+
+    expect(screen.getAllByRole("img", { name: "Signed in" })).toHaveLength(1);
+    expect(
+      screen.getByRole("radio", { name: /custom/i }).querySelector('[aria-label="Signed in"]'),
+    ).toBeNull();
+  });
+
   it("does not show a signed-in check when no credential directories are reported", () => {
     hideProcessHome();
     renderTab({ custom_args: [] }, undefined, agyDeviceWithHome);

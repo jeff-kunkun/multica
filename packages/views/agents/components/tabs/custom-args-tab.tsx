@@ -325,7 +325,12 @@ export function CustomArgsTab({
       account: null,
       label: t(($) => $.tab_body.custom_args.slot_custom_label),
       hint: t(($) => $.tab_body.custom_args.slot_custom_hint),
-      directory: loginDirectory("custom", geminiDir, homeDir),
+      // Only claim the current Gemini dir when it is not one of the numbered
+      // slots; otherwise a logged-in numbered slot would also light this row.
+      directory:
+        detectAgyAccountSlot(geminiDir) === "custom"
+          ? loginDirectory("custom", geminiDir, homeDir)
+          : "",
     },
   ];
 
