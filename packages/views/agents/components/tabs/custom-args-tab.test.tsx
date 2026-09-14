@@ -176,6 +176,44 @@ describe("CustomArgsTab", () => {
     });
   });
 
+  it("fills an absolute Account 2 path when the current Gemini dir is ~/.gemini", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab(
+      { custom_args: ["--gemini_dir", "~/.gemini"] },
+      undefined,
+      agyDevice,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+    expect(
+      screen.getByText("agy --gemini_dir=/Users/you/.gemini-account2"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "/Users/you/.gemini-account2"],
+    });
+  });
+
+  it("fills an absolute Account 2 path when the current Gemini dir is ~\\.gemini", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("HOME", "");
+    vi.stubEnv("USERPROFILE", "C:\\Users\\you");
+    const { onSave } = renderTab(
+      { custom_args: ["--gemini_dir", "~\\.gemini"] },
+      undefined,
+      agyDevice,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+    expect(
+      screen.getByText("agy --gemini_dir=C:\\Users\\you\\.gemini-account2"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "C:\\Users\\you\\.gemini-account2"],
+    });
+  });
+
   it("uses the desktop home directory when renderer env is unavailable", async () => {
     const user = userEvent.setup();
     vi.unstubAllEnvs();

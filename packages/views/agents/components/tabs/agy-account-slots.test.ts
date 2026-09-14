@@ -75,6 +75,26 @@ describe("agy account slots", () => {
     expect(resolveHomeDir("")).toBe("/Users/env");
   });
 
+  it("expands ~/.gemini into an absolute Account 2 path using process home", () => {
+    vi.stubEnv("HOME", "/Users/you");
+    vi.stubEnv("USERPROFILE", "");
+    const home = resolveHomeDir("~/.gemini");
+    expect(home).toBe("/Users/you");
+    expect(resolveSlotDirectory("account2", "~/.gemini", home)).toBe(
+      "/Users/you/.gemini-account2",
+    );
+  });
+
+  it("expands ~\\.gemini into an absolute Account 2 path using USERPROFILE", () => {
+    vi.stubEnv("HOME", "");
+    vi.stubEnv("USERPROFILE", "C:\\Users\\you");
+    const home = resolveHomeDir("~\\.gemini");
+    expect(home).toBe("C:\\Users\\you");
+    expect(resolveSlotDirectory("account2", "~\\.gemini", home)).toBe(
+      "C:\\Users\\you\\.gemini-account2",
+    );
+  });
+
   it("builds a one-line agy login command", () => {
     expect(formatAgyLoginCommand("/Users/you/.gemini-account2")).toBe(
       "agy --gemini_dir=/Users/you/.gemini-account2",
