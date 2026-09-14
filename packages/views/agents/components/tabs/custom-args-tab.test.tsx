@@ -21,6 +21,7 @@ vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: vi.fn().mockResolvedValue(true),
 }));
 
+import { toast } from "sonner";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { CustomArgsTab } from "./custom-args-tab";
 
@@ -77,14 +78,20 @@ const agyDevice = {
   launch_header: "agy",
 } as RuntimeDevice;
 
+const agyDeviceWithHome = {
+  ...agyDevice,
+  metadata: { home_dir: "/Users/you" },
+} as RuntimeDevice;
+
 describe("CustomArgsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("HOME", "/Users/you");
+    delete (globalThis as { desktopAPI?: unknown }).desktopAPI;
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    delete (globalThis as { desktopAPI?: unknown }).desktopAPI;
   });
 
   it("renders configured arguments as a list, not persistent inputs", () => {
@@ -146,9 +153,9 @@ describe("CustomArgsTab", () => {
     expect(screen.queryByRole("radio", { name: /account 2/i })).not.toBeInTheDocument();
   });
 
-  it("fills the isolated directory when account 2 is selected and updates the preview", async () => {
+  it("fills the isolated directory from runtime home when env HOME is unavailable", async () => {
     const user = userEvent.setup();
-    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDevice);
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDeviceWithHome);
 
     expect(screen.getByRole("radio", { name: /account 1/i })).toHaveAttribute(
       "aria-checked",
@@ -176,9 +183,27 @@ describe("CustomArgsTab", () => {
     });
   });
 
+  it("does not save a tilde path when account 2 is clicked without any home source", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("HOME", "");
+    vi.stubEnv("USERPROFILE", "");
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDevice);
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+
+    expect(toast.error).toHaveBeenCalled();
+    expect(screen.getByRole("radio", { name: /account 1/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(
+      screen.queryByText("agy --gemini_dir=~/.gemini-account2"),
+    ).not.toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it("uses the desktop home directory when renderer env is unavailable", async () => {
     const user = userEvent.setup();
-    vi.unstubAllEnvs();
     Object.defineProperty(globalThis, "desktopAPI", {
       configurable: true,
       value: { homeDir: "/Users/desktop" },
@@ -194,7 +219,6 @@ describe("CustomArgsTab", () => {
     expect(onSave).toHaveBeenCalledWith({
       custom_args: ["--gemini_dir", "/Users/desktop/.gemini-account2"],
     });
-    delete (globalThis as { desktopAPI?: unknown }).desktopAPI;
   });
 
   it("copies the AGY sign-in command for the selected slot", async () => {

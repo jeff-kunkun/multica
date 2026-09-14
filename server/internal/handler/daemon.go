@@ -203,7 +203,10 @@ type DaemonRegisterRequest struct {
 	DeviceName      string   `json:"device_name"`
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
-	Runtimes        []struct {
+	// HomeDir is the daemon host's user home. The web UI cannot read
+	// process.env.HOME, so AGY account-slot presets use this absolute path.
+	HomeDir  string `json:"home_dir"`
+	Runtimes []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -219,6 +222,38 @@ type DaemonRegisterRequest struct {
 		CommandName string `json:"command_name"`
 		Reason      string `json:"reason"`
 	} `json:"failed_profiles"`
+}
+
+func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capabilities any) map[string]any {
+	meta := map[string]any{
+		"version":      version,
+		"cli_version":  req.CLIVersion,
+		"launched_by":  req.LaunchedBy,
+		"capabilities": capabilities,
+	}
+	if home := absoluteHostHomeDir(req.HomeDir); home != "" {
+		meta["home_dir"] = home
+	}
+	return meta
+}
+
+// absoluteHostHomeDir accepts Unix and Windows absolute paths so a Linux
+// API can store a Windows daemon's home without using filepath.IsAbs.
+func absoluteHostHomeDir(path string) string {
+	home := strings.TrimSpace(path)
+	if home == "" {
+		return ""
+	}
+	if strings.HasPrefix(home, "/") {
+		return home
+	}
+	if len(home) >= 3 && home[1] == ':' && (home[2] == '\\' || home[2] == '/') {
+		drive := home[0]
+		if (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z') {
+			return home
+		}
+	}
+	return ""
 }
 
 type daemonWorkspaceReposResponse struct {
@@ -482,12 +517,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// live request — the resource-save gate and the UI — decide from the
 		// same signal the claim path uses, instead of re-deriving it from a
 		// version string (MUL-5707).
-		metadata, _ := json.Marshal(map[string]any{
-			"version":      runtime.Version,
-			"cli_version":  req.CLIVersion,
-			"launched_by":  req.LaunchedBy,
-			"capabilities": requestClientCapabilities(r),
-		})
+		metadata, _ := json.Marshal(runtimeRegistrationMetadata(req, runtime.Version, requestClientCapabilities(r)))
 
 		var registered db.AgentRuntime
 		var inserted bool

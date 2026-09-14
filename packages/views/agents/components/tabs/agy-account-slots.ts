@@ -42,17 +42,33 @@ export function inferHomeDirFromGeminiPath(path: string): string | null {
   return match?.[1] || null;
 }
 
+export function runtimeHomeDir(
+  runtime?: { metadata?: Record<string, unknown> } | null,
+): string | null {
+  const value = runtime?.metadata?.home_dir;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return isAbsoluteFsPath(trimmed) ? trimmed : null;
+}
+
 export function readProcessHomeDir(): string | null {
   const desktopHome = (globalThis as { desktopAPI?: { homeDir?: unknown } }).desktopAPI?.homeDir;
-  if (typeof desktopHome === "string" && desktopHome.length > 0) return desktopHome;
+  if (typeof desktopHome === "string" && isAbsoluteFsPath(desktopHome.trim())) {
+    return desktopHome.trim();
+  }
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
     .process?.env;
   const home = env?.HOME || env?.USERPROFILE;
-  return home && home.length > 0 ? home : null;
+  return home && isAbsoluteFsPath(home) ? home : null;
 }
 
-export function resolveHomeDir(profile: string): string | null {
-  return inferHomeDirFromGeminiPath(profile) ?? readProcessHomeDir();
+export function resolveHomeDir(
+  profile: string,
+  runtimeHome?: string | null,
+): string | null {
+  const hostHome =
+    runtimeHome && isAbsoluteFsPath(runtimeHome.trim()) ? runtimeHome.trim() : null;
+  return inferHomeDirFromGeminiPath(profile) ?? hostHome ?? readProcessHomeDir();
 }
 
 export function joinHomeDir(home: string, leaf: string): string {

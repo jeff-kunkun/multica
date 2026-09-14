@@ -417,6 +417,7 @@
       "login_keychain_hint": "macOS のキーチェーンには Google ログインが 1 件だけ保存されます。ブラウザで対応するアカウントを選ばないと、アカウント 1 に戻ります。",
       "login_copy_failed_toast": "コマンドをコピーできませんでした",
       "absolute_path_required_toast": "Gemini ディレクトリは絶対パスにしてください。agy は ~ を展開しません。",
+      "home_unresolved_toast": "このコンピュータのホームフォルダを特定できないため、アカウント 2 を自動入力できません。ローカルの Multica daemon を再起動してから再試行してください。",
       "arguments_label": "引数",
       "arguments_description": "各項目は 1 つのトークンとして渡され、リストの順序が保持されます。",
       "add_argument_action": "引数を追加",

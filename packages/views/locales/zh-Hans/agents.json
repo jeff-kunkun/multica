@@ -524,6 +524,7 @@
       "login_keychain_hint": "macOS 钥匙串只存一份 Google 登录。在浏览器里选这个账号完成授权，否则会回到主号。",
       "login_copy_failed_toast": "无法复制命令",
       "absolute_path_required_toast": "Gemini 目录必须是绝对路径。agy 不会展开 ~。",
+      "home_unresolved_toast": "还拿不到这台电脑的 home 目录，没法一键填入账号 2。请重启本地 Multica daemon 后再试。",
       "arguments_label": "参数",
       "arguments_description": "每一项会作为一个完整 token 传入，并保留列表顺序。",
       "add_argument_action": "添加参数",
