@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
+import { homedir } from "node:os";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
@@ -68,6 +69,7 @@ function fetchRuntimeConfig(): RuntimeConfigResult {
 }
 
 const appInfo = fetchAppInfo();
+const homeDir = homedir();
 const runtimeConfig = fetchRuntimeConfig();
 const windowContext = readDesktopWindowContext(process.argv);
 
@@ -101,6 +103,7 @@ function subscribeToMainRendererChannel<T>(
 }
 
 const desktopAPI = {
+  homeDir,
   /** App version + normalized OS. Read once at preload time so the renderer
    *  can use it synchronously when initializing the API client. */
   appInfo,
