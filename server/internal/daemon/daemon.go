@@ -6617,9 +6617,13 @@ func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 	case "claude":
 		return sharedBriefViaClaudeFlags
 	case "openclaw", "kimi", "traecli", "qwenpaw",
-		"codebuddy", "dim", "grok", "kiro", "mcode", "qoder", "qoderclicn", "zeroclaw":
+		"codebuddy", "dim", "grok", "kiro", "qoder", "qoderclicn", "zeroclaw":
 		return sharedBriefInline
 	default:
+		// mcode is intentionally unsupported: it ignores ExecOptions.SystemPrompt
+		// and only reads cwd-scoped AGENTS.md (see mcode.go). Shared mode writes
+		// the brief under the sidecar root, so listing mcode here would start a
+		// task with no brief and no skills.
 		return sharedBriefUnsupported
 	}
 }

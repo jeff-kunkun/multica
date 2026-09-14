@@ -28,7 +28,9 @@ func TestSharedModeBriefDelivery(t *testing.T) {
 		}
 	}
 	// Disk-only readers stay refused until their own route is verified.
-	for _, p := range []string{"codex", "hermes", "cursor", "copilot", "opencode", "pi", "", "made-up"} {
+	// mcode ignores ExecOptions.SystemPrompt and only reads cwd AGENTS.md,
+	// so it must not pass the shared-mode gate (DENE-125).
+	for _, p := range []string{"codex", "hermes", "cursor", "copilot", "opencode", "pi", "mcode", "", "made-up"} {
 		if got := sharedModeBriefDelivery(p); got != sharedBriefUnsupported {
 			t.Errorf("%q = %v, want sharedBriefUnsupported", p, got)
 		}
