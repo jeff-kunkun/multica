@@ -6,13 +6,21 @@ export {
   isDesktopShell,
   pickDirectory,
   validateLocalDirectory,
+  canSetLocalDirectorySharedOverride,
+  listLocalDirectorySharedOverrides,
+  setLocalDirectorySharedOverride,
+  localDirectoryOverrideKey,
+  normalizeLocalDirectoryOverridePath,
   type PickDirectoryResult,
   type ValidateLocalDirectoryResult,
+  type LocalDirectorySharedOverride,
+  type SetLocalDirectorySharedOverrideResult,
 } from "./local-directory";
 export {
   useLocalDaemonStatus,
   type LocalDaemonStatus,
 } from "./use-local-daemon-status";
+export { useLocalDirectorySharedOverrides } from "./use-local-directory-shared-overrides";
 export {
   ScrollRestorationProvider,
   useScrollRestorationAdapter,

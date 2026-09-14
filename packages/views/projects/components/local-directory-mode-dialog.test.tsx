@@ -163,4 +163,28 @@ describe("LocalDirectoryModeDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onConfirm).toHaveBeenCalledWith("in_place");
   });
+
+  it("keeps shared selectable and explains the local override on official cloud", () => {
+    const onConfirm = vi.fn();
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <LocalDirectoryModeDialog
+          open
+          onOpenChange={() => {}}
+          path="/Volumes/Stoige/pg-game"
+          value="in_place"
+          sharedUsesLocalOverride
+          confirmLabel="Save"
+          onConfirm={onConfirm}
+        />
+      </I18nProvider>,
+    );
+
+    expect(sharedOption().hasAttribute("disabled")).toBe(false);
+    expect(screen.getByText(/does not store shared mode/i)).toBeTruthy();
+
+    fireEvent.click(sharedOption());
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onConfirm).toHaveBeenCalledWith("shared");
+  });
 });

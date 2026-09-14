@@ -77,7 +77,18 @@ type AppConfig struct {
 	// one. Releases between that fix and this signal do gate the save but say
 	// nothing, so they are treated the same way — the client cannot distinguish
 	// them, and only one of the two guesses is safe.
+	//
+	// This flag is worktree only. Shared mode has its own declaration below:
+	// official-cloud servers advertise worktree without accepting `shared`,
+	// and a client that used this flag to POST `execution_mode=shared` got 400.
 	LocalWorktreeSupported bool `json:"local_worktree_supported"`
+
+	// LocalSharedSupported tells clients this server accepts and persists
+	// local_directory `execution_mode=shared`. Official cloud rejects that
+	// enum (only in_place | worktree). Absent must fail closed: the client
+	// then stores in_place on the API and records a local daemon override
+	// so the folder still runs without the path mutex.
+	LocalSharedSupported bool `json:"local_shared_supported"`
 
 	// AgentConversationStartersSupported tells independently deployed clients
 	// that agent create/update persists conversation_starters. Older handlers
@@ -109,6 +120,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		// A property of this build, not of the deployment: if this code is
 		// running, the save gate is running with it.
 		LocalWorktreeSupported:             true,
+		LocalSharedSupported:               true,
 		AgentConversationStartersSupported: true,
 		CommentDeleteKeepRepliesSupported:  true,
 		AllowSignup:                        os.Getenv("ALLOW_SIGNUP") != "false",

@@ -302,6 +302,14 @@ function invalidateActiveProfile(): void {
   recoveryPolicy.reset();
 }
 
+/** Profile directory the current Desktop daemon reads and writes. Null until
+ *  the target API URL is known — callers must not fall back to ~/.multica. */
+export async function activeDaemonProfileDir(): Promise<string | null> {
+  const profile = await ensureActiveProfile();
+  if (!profile) return null;
+  return profileDir(profile.name);
+}
+
 function setDesiredDaemonRunning(desired: boolean, explicit = false): void {
   if (desiredDaemonRunning === desired && !explicit) return;
   desiredDaemonRunning = desired;

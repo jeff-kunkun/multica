@@ -87,6 +87,11 @@ export function AuthInitializer({
         configStore
           .getState()
           .setLocalWorktreeSupported(cfg.local_worktree_supported === true);
+        // Official cloud advertises worktree but rejects `shared`. Absent
+        // must stay false so the client never POSTs that enum.
+        configStore
+          .getState()
+          .setLocalSharedSupported(cfg.local_shared_supported === true);
         // Older agent handlers returned success while silently dropping this
         // additive field, so writes stay disabled unless the server declares
         // the persistence contract explicitly.

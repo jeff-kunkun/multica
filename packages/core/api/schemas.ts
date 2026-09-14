@@ -746,16 +746,18 @@ export interface AppConfigResponse {
   vcs_integration_available?: boolean;
   feature_flags?: Record<string, boolean>;
   /** Whether this server understands local_directory `execution_mode` and
-   * gates worktree *and* shared mode at save time. Absent on every server that
-   * predates this capability signal, which includes the ones that silently
-   * DROPPED an unknown `execution_mode` and answered 201 — the resource then
-   * ran in place (with a lock) while the user was promised isolation or a
-   * lock-free share (#7113). Servers between that fix and this signal do
-   * validate but cannot say so, and are treated as unable: the client has no
-   * way to tell them apart, and only one of the two answers is safe. The flag
-   * name is historical; it is the "server validates execution_mode" signal for
-   * every gated mode, not worktree alone. */
+   * gates worktree mode at save time. Absent on every server that predates
+   * this capability signal, which includes the ones that silently DROPPED an
+   * unknown `execution_mode` and answered 201 — the resource then ran in
+   * place (with a lock) while the user was promised isolation (#7113).
+   * Worktree only: official cloud advertises this while still rejecting
+   * `execution_mode=shared`. */
   local_worktree_supported?: boolean;
+  /** Whether this server accepts and persists `execution_mode=shared`.
+   * Official cloud omits this and 400s the enum. Absent must be treated as
+   * false: the client then stores in_place and records a local daemon
+   * override so the folder still runs without the path mutex. */
+  local_shared_supported?: boolean;
   /** Whether agent create/update persists `conversation_starters`. Older servers
    * silently ignored the unknown field, so absent must be treated as false. */
   agent_conversation_starters_supported?: boolean;
@@ -965,6 +967,7 @@ export const AppConfigSchema = z.object({
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
   local_worktree_supported: BooleanWithDefaultSchema(false),
+  local_shared_supported: BooleanWithDefaultSchema(false),
   agent_conversation_starters_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
@@ -983,6 +986,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   // Fail closed: an unreadable config must not look like a server that
   // validates execution_mode (worktree or shared).
   local_worktree_supported: false,
+  local_shared_supported: false,
   // Fail closed: old servers returned success while dropping the field.
   agent_conversation_starters_supported: false,
   // Fail closed: old servers delete a comment's replies with it.

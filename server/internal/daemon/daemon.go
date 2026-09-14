@@ -389,6 +389,10 @@ type Daemon struct {
 	skillCache *SkillBundleCache
 	logger     *slog.Logger
 
+	// localSharedOverrides is the on-disk skip-mutex map for folders stored
+	// as in_place on a server that does not accept execution_mode=shared.
+	localSharedOverrides *localSharedOverrideStore
+
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
@@ -745,6 +749,11 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+	if path, err := localSharedOverridesPath(cfg.Profile); err == nil {
+		d.localSharedOverrides = newLocalSharedOverrideStore(path)
+	} else {
+		d.localSharedOverrides = newLocalSharedOverrideStore("")
+	}
 	return d
 }
 
@@ -6034,7 +6043,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, lease *taskSlotLease
 			// exempt env root, so the directory would accumulate one env
 			// root per task forever — the exact cost the exemption was
 			// meant to trade away for a user's own files.
-			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment.RunsInUserDirectory() {
+			if assignment, _ := d.resolveLocalDirectoryAssignment(task); assignment.RunsInUserDirectory() {
 				meta.LocalDirectory = true
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
@@ -6145,7 +6154,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
 		return nil, false
 	}
-	assignment, err := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	assignment, err := d.resolveLocalDirectoryAssignment(task)
 	if err != nil {
 		taskLog.Error("local_directory: resolve resource failed", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
@@ -7971,7 +7980,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Resolve any local_directory assignment again here so runTask can plumb
 	// LocalWorkDir into execenv. handleTask already validated + locked the
 	// path for worker tasks; leader tasks intentionally skip the assignment.
-	localAssignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	localAssignment, _ := d.resolveLocalDirectoryAssignment(task)
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running

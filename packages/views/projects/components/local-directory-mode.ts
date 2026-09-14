@@ -59,9 +59,68 @@ export function worktreeUnavailableReason(
   return undefined;
 }
 
-/** Shared mode is blocked only when the server would silently drop the field. */
-export function sharedModeUnavailable(serverValidates: boolean): boolean {
-  return !serverValidates;
+/**
+ * Shared mode is blocked only when we cannot persist the intent at all:
+ * the connected server will not store `execution_mode=shared`, AND this
+ * client cannot record a local daemon override (web, or an older desktop
+ * build without the override bridge).
+ *
+ * Desktop on official cloud is the typical case that used to 400: the
+ * option stays available and the save path stores `in_place` plus a
+ * local skip-mutex override instead of POSTing `shared`.
+ */
+export function sharedModeUnavailable(opts: {
+  serverAcceptsShared: boolean;
+  canSetLocalOverride: boolean;
+}): boolean {
+  return !opts.serverAcceptsShared && !opts.canSetLocalOverride;
+}
+
+/**
+ * What to put on the API for a UI-chosen mode. Official cloud rejects
+ * `shared`, so that choice is stored as `in_place` and honoured locally.
+ */
+export function apiExecutionMode(
+  uiMode: LocalDirectoryExecutionMode,
+  serverAcceptsShared: boolean,
+): LocalDirectoryExecutionMode {
+  if (uiMode === "shared" && !serverAcceptsShared) return "in_place";
+  return uiMode;
+}
+
+/** Whether the UI choice needs a local skip-mutex override on this machine. */
+export function needsLocalSharedOverride(
+  uiMode: LocalDirectoryExecutionMode,
+  serverAcceptsShared: boolean,
+): boolean {
+  return uiMode === "shared" && !serverAcceptsShared;
+}
+
+/**
+ * What the row / editor should show. A local override upgrades stored
+ * in_place to shared; it must not hide a stored worktree (or a server
+ * that actually persisted shared).
+ */
+export function displayedExecutionMode(
+  ref: { execution_mode?: string | null },
+  localSharedOverride: boolean,
+): LocalDirectoryExecutionMode {
+  const stored = executionModeOf(ref);
+  if (stored === "worktree" || stored === "shared") return stored;
+  if (localSharedOverride) return "shared";
+  return stored;
+}
+
+/** Official-cloud (and similarly strict) rejection of the shared enum. */
+export function isSharedModeRejectedByServer(message: string): boolean {
+  const lower = message.toLowerCase();
+  if (!lower.includes("shared")) return false;
+  return (
+    lower.includes("execution_mode") ||
+    lower.includes('got "shared"') ||
+    lower.includes("got 'shared'") ||
+    lower.includes("must be")
+  );
 }
 
 /**
