@@ -9,9 +9,30 @@ export function modelIdForCapabilityLookup(
   provider: string,
   model: string,
 ): string {
-  return provider === "claude"
-    ? model.replace(CLAUDE_CONTEXT_WINDOW_TAG, "")
-    : model;
+  if (provider === "claude") {
+    return model.replace(CLAUDE_CONTEXT_WINDOW_TAG, "");
+  }
+  if (provider === "dsh") {
+    return decodeDshModelId(model);
+  }
+  return model;
+}
+
+// DSH advertises ids as encodeURIComponent(provider)+"/"+encodeURIComponent(model).
+// Decoding each slash-separated segment lets an encoded catalog id match a
+// decoded agent.model (and the reverse) so the thinking-level picker can
+// resolve the entry instead of hiding.
+function decodeDshModelId(model: string): string {
+  return model
+    .split("/")
+    .map((part) => {
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return part;
+      }
+    })
+    .join("/");
 }
 
 /**

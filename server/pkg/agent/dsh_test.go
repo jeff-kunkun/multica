@@ -25,6 +25,21 @@ func TestParseDshModelID(t *testing.T) {
 	}
 }
 
+func TestDshModelIDForLookup(t *testing.T) {
+	encoded := "deepseek-official/deepseek-v4%2Fflash"
+	decoded := "deepseek-official/deepseek-v4/flash"
+	if got := dshModelIDForLookup(encoded); got != decoded {
+		t.Fatalf("encoded lookup = %q, want %q", got, decoded)
+	}
+	if got := dshModelIDForLookup(decoded); got != decoded {
+		t.Fatalf("decoded lookup = %q, want %q", got, decoded)
+	}
+	plain := "deepseek-official/deepseek-v4-flash"
+	if got := dshModelIDForLookup(plain); got != plain {
+		t.Fatalf("plain lookup = %q, want %q", got, plain)
+	}
+}
+
 func TestBuildDshMCPServers(t *testing.T) {
 	raw := json.RawMessage(`{"mcpServers":{"files":{"command":"node","args":["server.js"],"env":{"TOKEN":"value"}},"remote":{"type":"streamable-http","url":"https://mcp.example/rpc","headers":{"Authorization":"Bearer test"}}}}`)
 	got, err := buildDshMCPServers(raw, slog.Default())
@@ -122,6 +137,120 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-cancel","status":"cance
 	result := <-session.Result
 	if result.Status != "cancelled" || result.SessionID != "session-cancel" {
 		t.Fatalf("bad cancellation result: %#v", result)
+	}
+}
+
+func TestDshBackendPrependsSystemPrompt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	capture := filepath.Join(t.TempDir(), "command.json")
+	bin := writeDshFixture(t, `
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{}}'
+IFS= read -r command
+printf '%s\n' "$command" > "$DSH_CAPTURE"
+printf '%s\n' '{"v":1,"type":"session","request_id":"task-1","session_id":"s1","resumed":false}'
+printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed","session_id":"s1","output":"ok","resume_rejected":false}'
+`)
+	t.Setenv("DSH_CAPTURE", capture)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-1", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := b.Execute(context.Background(), "say done", ExecOptions{
+		Cwd:          t.TempDir(),
+		Timeout:      5 * time.Second,
+		SystemPrompt: "RUNTIME BRIEF",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("bad result: %#v", result)
+	}
+	raw, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var command dshExecuteCommand
+	if err := json.Unmarshal(raw, &command); err != nil {
+		t.Fatalf("decode captured execute command: %v\n%s", err, raw)
+	}
+	want := "RUNTIME BRIEF\n\n---\n\nsay done"
+	if command.Prompt != want {
+		t.Fatalf("prompt = %q, want %q", command.Prompt, want)
+	}
+}
+
+func TestDshBackendEmptySystemPromptLeavesPromptUnchanged(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	capture := filepath.Join(t.TempDir(), "command.json")
+	bin := writeDshFixture(t, `
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{}}'
+IFS= read -r command
+printf '%s\n' "$command" > "$DSH_CAPTURE"
+printf '%s\n' '{"v":1,"type":"session","request_id":"task-1","session_id":"s1","resumed":false}'
+printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed","session_id":"s1","output":"ok","resume_rejected":false}'
+`)
+	t.Setenv("DSH_CAPTURE", capture)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-1", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := b.Execute(context.Background(), "say done", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("bad result: %#v", result)
+	}
+	raw, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var command dshExecuteCommand
+	if err := json.Unmarshal(raw, &command); err != nil {
+		t.Fatalf("decode captured execute command: %v\n%s", err, raw)
+	}
+	if command.Prompt != "say done" {
+		t.Fatalf("prompt = %q, want %q", command.Prompt, "say done")
+	}
+}
+
+func TestValidateThinkingLevelDshEncodedModelID(t *testing.T) {
+	catalog := Catalog{Models: []Model{{
+		ID: "deepseek-official/deepseek-v4%2Fflash",
+		Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{
+			{Value: "off", Label: "Off"},
+			{Value: "high", Label: "High"},
+			{Value: "max", Label: "Max"},
+		}},
+	}}}
+	load := func() (Catalog, error) { return catalog, nil }
+	ok, err := ValidateThinkingLevelWith(load, "dsh", "deepseek-official/deepseek-v4/flash", "high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("decoded agent.model should match the encoded catalog id")
+	}
+	ok, err = ValidateThinkingLevelWith(load, "dsh", "deepseek-official/deepseek-v4%2Fflash", "max")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("encoded agent.model should match the encoded catalog id")
 	}
 }
 

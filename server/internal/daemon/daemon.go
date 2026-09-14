@@ -6645,8 +6645,9 @@ const (
 // CODEX_HOME/AGENTS.md discovery plus the per-task home the daemon already
 // seeds) or is the route it already runs on in production
 // (providerNeedsInlineSystemPrompt) or has implemented in its backend
-// (userText = SystemPrompt + prompt). Hermes and the providers that read only
-// from the cwd stay unsupported until their own route is verified.
+// (userText = SystemPrompt + prompt), including dsh which prepends the same
+// way. Hermes and the providers that read only from the cwd stay unsupported
+// until their own route is verified.
 func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 	switch provider {
 	case "claude":
@@ -6654,7 +6655,7 @@ func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 	case "codex":
 		return sharedBriefViaCodexHome
 	case "openclaw", "kimi", "traecli", "qwenpaw",
-		"codebuddy", "dim", "grok", "kiro", "qoder", "qoderclicn", "zeroclaw":
+		"codebuddy", "dim", "grok", "dsh", "kiro", "qoder", "qoderclicn", "zeroclaw":
 		return sharedBriefInline
 	default:
 		// mcode is intentionally unsupported: it ignores ExecOptions.SystemPrompt

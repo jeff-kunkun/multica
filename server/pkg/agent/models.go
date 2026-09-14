@@ -459,10 +459,14 @@ var claudeContextWindowTagRe = regexp.MustCompile(`\[[1-9][0-9]*[km]\]$`)
 // capabilities; every other provider and malformed/unknown modifier retains
 // exact-match behavior.
 func modelIDForCapabilityLookup(providerType, model string) string {
-	if providerType != "claude" {
+	switch providerType {
+	case "claude":
+		return claudeContextWindowTagRe.ReplaceAllString(model, "")
+	case "dsh":
+		return dshModelIDForLookup(model)
+	default:
 		return model
 	}
-	return claudeContextWindowTagRe.ReplaceAllString(model, "")
 }
 
 func acceptedModelIDsForProvider(providerType string) (map[string]bool, bool) {

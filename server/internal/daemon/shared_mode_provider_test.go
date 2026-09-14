@@ -21,6 +21,18 @@ func TestSharedModeBriefDelivery(t *testing.T) {
 	if err := sharedModeProviderSupported("codex"); err != nil {
 		t.Errorf("sharedModeProviderSupported(codex) = %v, want nil", err)
 	}
+	// DSH (and grok) load AGENTS.md from cwd in the non-shared path, so they
+	// are not in providerNeedsInlineSystemPrompt. Shared mode still has to
+	// prepend SystemPrompt because the brief file sits under the sidecar.
+	if got := sharedModeBriefDelivery("dsh"); got != sharedBriefInline {
+		t.Errorf("dsh = %v, want sharedBriefInline (execute prompt prepend)", got)
+	}
+	if err := sharedModeProviderSupported("dsh"); err != nil {
+		t.Errorf("sharedModeProviderSupported(dsh) = %v, want nil", err)
+	}
+	if got := sharedModeBriefDelivery("grok"); got != sharedBriefInline {
+		t.Errorf("grok = %v, want sharedBriefInline", got)
+	}
 	// Every provider that already runs on the inline brief in production must
 	// keep working in shared mode, since inline delivery needs no cwd file.
 	for _, p := range []string{"openclaw", "kimi", "traecli", "qwenpaw"} {

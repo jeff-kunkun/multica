@@ -64,4 +64,39 @@ describe("model capability lookup", () => {
       findModelCapabilityEntry(TAGGED, "claude-sonnet-5", "claude")?.id,
     ).toBe("claude-sonnet-5");
   });
+
+  it("matches DSH catalog ids whether the slash in the model id is encoded", () => {
+    const DSH_MODELS: RuntimeModel[] = [
+      {
+        id: "deepseek-official/deepseek-v4%2Fflash",
+        label: "DeepSeek V4 Flash",
+        thinking: {
+          supported_levels: [
+            { value: "off", label: "Off" },
+            { value: "high", label: "High" },
+          ],
+        },
+      },
+    ];
+    expect(
+      modelIdForCapabilityLookup(
+        "dsh",
+        "deepseek-official/deepseek-v4%2Fflash",
+      ),
+    ).toBe("deepseek-official/deepseek-v4/flash");
+    expect(
+      findModelCapabilityEntry(
+        DSH_MODELS,
+        "deepseek-official/deepseek-v4/flash",
+        "dsh",
+      )?.id,
+    ).toBe("deepseek-official/deepseek-v4%2Fflash");
+    expect(
+      findModelCapabilityEntry(
+        DSH_MODELS,
+        "deepseek-official/deepseek-v4%2Fflash",
+        "dsh",
+      )?.thinking?.supported_levels.map((level) => level.value),
+    ).toEqual(["off", "high"]);
+  });
 });

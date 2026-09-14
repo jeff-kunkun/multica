@@ -146,6 +146,27 @@ func parseDshModelID(value string) (*dshModelSelection, error) {
 	return &dshModelSelection{Provider: provider, ID: model}, nil
 }
 
+// dshModelIDForLookup canonicalises a DSH model id for catalog matching.
+// DSH advertises ids as encodeURIComponent(provider)+"/"+encodeURIComponent(model),
+// so a persisted value may be encoded (`deepseek-official/deepseek-v4%2Fflash`)
+// or decoded (`deepseek-official/deepseek-v4/flash`). Decoding each slash-
+// separated segment makes both forms compare equal without changing the value
+// stored on the agent or sent to execute. Missing that match hides the
+// thinking-level picker for an otherwise valid DSH model.
+func dshModelIDForLookup(model string) string {
+	if model == "" {
+		return model
+	}
+	parts := strings.Split(model, "/")
+	for i, part := range parts {
+		decoded, err := url.PathUnescape(part)
+		if err == nil {
+			parts[i] = decoded
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
 func buildDshMCPServers(raw json.RawMessage, logger interface {
 	Warn(string, ...any)
 }) ([]dshMCPServer, error) {
@@ -253,9 +274,16 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	if requestID == "" {
 		requestID = "multica-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
+	userText := prompt
+	if opts.SystemPrompt != "" {
+		// DSH loads AGENTS.md from the session cwd. Shared mode writes that
+		// file under the sidecar root, so the daemon delivers the runtime
+		// brief as SystemPrompt; prepend it the same way grok/qoder do.
+		userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
+	}
 	command := dshExecuteCommand{
 		Version: DshProtocolVersion, Type: "execute", RequestID: requestID,
-		Cwd: opts.Cwd, Prompt: prompt, ResumeSessionID: opts.ResumeSessionID,
+		Cwd: opts.Cwd, Prompt: userText, ResumeSessionID: opts.ResumeSessionID,
 		Model: model, ReasoningEffort: opts.ThinkingLevel, MCPServers: mcpServers,
 	}
 	var writeMu sync.Mutex
