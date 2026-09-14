@@ -7089,6 +7089,112 @@ func TestPrepareIsolateSidecarsKeepsUserDirectoryUntouched(t *testing.T) {
 	}
 }
 
+// Shared-mode Codex cannot write AGENTS.md into the user's directory. The
+// daemon's sharedBriefViaCodexHome route therefore injects the brief at the
+// per-task CODEX_HOME, which Codex loads as global-scope AGENTS.md. This test
+// is the delivery proof, not just the allowlist: the file must land where
+// Codex will read it, and nowhere in the cwd.
+func TestPrepareIsolateSidecarsCodexDeliversBriefViaCodexHome(t *testing.T) {
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+	userDir := t.TempDir()
+	sentinel := filepath.Join(userDir, "user-file.txt")
+	if err := os.WriteFile(sentinel, []byte("keep me"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:     "ws-shared-codex",
+		TaskID:          "c0de1234-e5f6-7890-abcd-ef1234567890",
+		AgentName:       "Codex Agent",
+		Provider:        "codex",
+		LocalWorkDir:    userDir,
+		IsolateSidecars: true,
+		Task: TaskContextForEnv{
+			IssueID:   "issue-codex-shared",
+			AgentID:   "agent-1",
+			ProjectID: "project-1",
+			ProjectResources: []ProjectResourceForEnv{
+				{ID: "r1", ResourceType: "local_directory", ResourceRef: json.RawMessage(`{"local_path":"` + filepath.ToSlash(userDir) + `","daemon_id":"d1","execution_mode":"shared"}`)},
+			},
+			AgentSkills: []SkillContextForEnv{{
+				Name:    "spike-skill",
+				Content: "---\nname: spike-skill\ndescription: probe\n---\nbody\n",
+			}},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if env.WorkDir != userDir || !env.LocalDirectory {
+		t.Fatalf("WorkDir=%q LocalDirectory=%v, want the user's directory", env.WorkDir, env.LocalDirectory)
+	}
+	if env.CodexHome == "" {
+		t.Fatal("CodexHome is empty; shared-mode brief delivery has nowhere to write")
+	}
+	if env.CodexHome == userDir || strings.HasPrefix(env.CodexHome, userDir+string(os.PathSeparator)) {
+		t.Fatalf("CodexHome %q must not live inside the user's directory %q", env.CodexHome, userDir)
+	}
+
+	entries, err := os.ReadDir(userDir)
+	if err != nil {
+		t.Fatalf("read user dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "user-file.txt" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("user directory contents = %v, want only the sentinel", names)
+	}
+
+	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills", "spike-skill", "SKILL.md")); err != nil {
+		t.Errorf("Codex skill missing under CODEX_HOME: %v", err)
+	}
+
+	ctx := TaskContextForEnv{
+		IssueID:          "issue-codex-shared",
+		ProjectID:        "project-1",
+		ProjectResources: []ProjectResourceForEnv{{ID: "r1", ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://github.com/o/r"}`)}},
+		AgentSkills:      []SkillContextForEnv{{Name: "spike-skill"}},
+		SidecarRoot:      env.SidecarRoot,
+		SkillsDir:        filepath.Join(env.CodexHome, "skills"),
+	}
+	brief, err := InjectRuntimeConfig(env.CodexHome, "codex", ctx)
+	if err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	wantBriefFile := filepath.Join(env.CodexHome, "AGENTS.md")
+	if got := RuntimeConfigFilePath(env.CodexHome, "codex"); got != wantBriefFile {
+		t.Errorf("RuntimeConfigFilePath = %q, want %q", got, wantBriefFile)
+	}
+	gotBrief, err := os.ReadFile(wantBriefFile)
+	if err != nil {
+		t.Fatalf("brief file missing at CODEX_HOME/AGENTS.md: %v", err)
+	}
+	if !strings.Contains(string(gotBrief), "Multica Agent Runtime") {
+		t.Errorf("CODEX_HOME/AGENTS.md does not contain the runtime brief:\n%s", gotBrief)
+	}
+	if !strings.Contains(brief, "spike-skill") {
+		t.Errorf("brief does not list the bound skill:\n%s", brief)
+	}
+	skillsDir := filepath.ToSlash(filepath.Join(env.CodexHome, "skills"))
+	if !strings.Contains(brief, skillsDir+"/<skill>/SKILL.md") {
+		t.Errorf("brief does not point at CODEX_HOME/skills %q:\n%s", skillsDir, brief)
+	}
+	if _, err := os.Stat(filepath.Join(userDir, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Errorf("brief was written into the user's directory; stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.SidecarRoot, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Errorf("brief was written under the sidecar root instead of CODEX_HOME; stat err = %v", err)
+	}
+}
+
 // Without IsolateSidecars the flag changes nothing; and without LocalWorkDir
 // the flag is ignored, since a daemon-owned workdir is already per task.
 func TestPrepareIsolateSidecarsRequiresLocalWorkDir(t *testing.T) {

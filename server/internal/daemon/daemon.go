@@ -6630,19 +6630,29 @@ const (
 	// and finds nothing; the brief's Skills section names the sidecar skills
 	// directory instead so the agent can read SKILL.md files directly.
 	sharedBriefInline
+	// sharedBriefViaCodexHome: InjectRuntimeConfig writes the brief to
+	// {CODEX_HOME}/AGENTS.md. Codex loads that file as global-scope
+	// instructions (developers.openai.com/codex/guides/agents-md) without
+	// touching the user's cwd. Skills already live under the same home.
+	// developerInstructions stays nil so the non-shared path (cwd AGENTS.md,
+	// MUL-5392) is not duplicated when SystemPrompt is empty.
+	sharedBriefViaCodexHome
 )
 
 // sharedModeBriefDelivery is the provider table behind shared mode. A provider
 // is listed only when a sidecar-free route for the brief has been verified
-// (claude, by spike against Claude Code 2.1.270) or is the route it already
-// runs on in production (providerNeedsInlineSystemPrompt) or has implemented
-// in its backend (userText = SystemPrompt + prompt). Codex, Hermes and the
-// providers that read only from disk stay unsupported until their own route
-// is verified — codex's per-task CODEX_HOME is the obvious candidate.
+// (claude, by spike against Claude Code 2.1.270; codex, by Codex's documented
+// CODEX_HOME/AGENTS.md discovery plus the per-task home the daemon already
+// seeds) or is the route it already runs on in production
+// (providerNeedsInlineSystemPrompt) or has implemented in its backend
+// (userText = SystemPrompt + prompt). Hermes and the providers that read only
+// from the cwd stay unsupported until their own route is verified.
 func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 	switch provider {
 	case "claude":
 		return sharedBriefViaClaudeFlags
+	case "codex":
+		return sharedBriefViaCodexHome
 	case "openclaw", "kimi", "traecli", "qwenpaw",
 		"codebuddy", "dim", "grok", "kiro", "qoder", "qoderclicn", "zeroclaw":
 		return sharedBriefInline
@@ -6653,6 +6663,37 @@ func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 		// task with no brief and no skills.
 		return sharedBriefUnsupported
 	}
+}
+
+// sharedModeBriefRoot is where InjectRuntimeConfig writes the runtime brief.
+// Shared mode keeps that file out of the user's directory; Codex is the one
+// provider whose native discovery is the per-task CODEX_HOME rather than the
+// sidecar tree, so a missing home fails closed instead of writing a file
+// Codex will never read.
+func sharedModeBriefRoot(provider, sidecarRoot, codexHome, workDir string) (string, error) {
+	if sidecarRoot == "" {
+		return workDir, nil
+	}
+	if sharedModeBriefDelivery(provider) == sharedBriefViaCodexHome {
+		if strings.TrimSpace(codexHome) == "" {
+			return "", errors.New("shared mode: task CODEX_HOME is missing; cannot deliver the Codex runtime brief")
+		}
+		return codexHome, nil
+	}
+	return sidecarRoot, nil
+}
+
+// sharedModeSkillsDir is the absolute skills tree named in the shared-mode
+// brief. Empty when not in shared mode (native discovery is enough). Codex
+// hydrates skills under CODEX_HOME/skills, not the sidecar fallback path.
+func sharedModeSkillsDir(provider, sidecarRoot, codexHome string) string {
+	if sidecarRoot == "" {
+		return ""
+	}
+	if sharedModeBriefDelivery(provider) == sharedBriefViaCodexHome {
+		return filepath.Join(codexHome, "skills")
+	}
+	return execenv.SkillsDirPath(sidecarRoot, provider)
 }
 
 // sharedModeProviderSupported returns a user-facing error when provider has no
@@ -8569,18 +8610,24 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	//
 	// Shared mode keeps the daemon's files out of the user's directory, the
-	// runtime brief included: it is written under the task's sidecar root and
-	// handed to the provider from there (see sharedModeBriefDelivery). The
-	// brief also has to name the relocated sidecar paths, since the defaults it
-	// would otherwise describe are relative to a cwd that holds none of them.
-	briefRoot := env.WorkDir
+	// runtime brief included: it is written under the task's sidecar root
+	// (or, for Codex, the per-task CODEX_HOME) and handed to the provider
+	// from there (see sharedModeBriefDelivery). The brief also has to name
+	// the relocated sidecar paths, since the defaults it would otherwise
+	// describe are relative to a cwd that holds none of them.
+	briefRoot, err := sharedModeBriefRoot(provider, env.SidecarRoot, env.CodexHome, env.WorkDir)
+	if err != nil {
+		return TaskResult{}, err
+	}
 	if env.SidecarRoot != "" {
-		briefRoot = env.SidecarRoot
 		taskCtx.SidecarRoot = env.SidecarRoot
-		taskCtx.SkillsDir = execenv.SkillsDirPath(env.SidecarRoot, provider)
+		taskCtx.SkillsDir = sharedModeSkillsDir(provider, env.SidecarRoot, env.CodexHome)
 	}
 	runtimeBrief, err := execenv.InjectRuntimeConfig(briefRoot, provider, taskCtx)
 	if err != nil {
+		if env.SidecarRoot != "" && sharedModeBriefDelivery(provider) == sharedBriefViaCodexHome {
+			return TaskResult{}, fmt.Errorf("shared mode: write Codex runtime brief to CODEX_HOME: %w", err)
+		}
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
 	// An exempt turn runs in the user's directory without having queued for it,
@@ -8889,6 +8936,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			)
 		case sharedBriefInline:
 			briefInline = true
+		case sharedBriefViaCodexHome:
+			// Brief already written to {CODEX_HOME}/AGENTS.md (briefRoot above).
+			// Codex discovers that file as global-scope instructions; no extra
+			// args and no SystemPrompt inline (MUL-5392).
 		}
 	}
 	if briefInline {
