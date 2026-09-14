@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
 import type { AgentActivity } from "@multica/core/agents";
 import { renderWithI18n } from "../../test/i18n";
@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   },
   viewState: {
     scope: "all",
+    grouping: "none" as "none" | "squad",
     sortField: "lastActive" as string,
     sortDirection: "desc" as string,
     hiddenColumns: ["model", "created"] as string[],
@@ -40,8 +41,10 @@ const mocks = vi.hoisted(() => ({
       owners: [] as string[],
       models: [] as string[],
       access: [] as string[],
+      squads: [] as string[],
     },
     setScope: vi.fn(),
+    setGrouping: vi.fn(),
     toggleSort: vi.fn(),
     setSortField: vi.fn(),
     setSortDirection: vi.fn(),
@@ -49,6 +52,12 @@ const mocks = vi.hoisted(() => ({
     toggleFilter: vi.fn(),
     clearFilters: vi.fn(),
   },
+  squads: [] as Array<{
+    id: string;
+    name: string;
+    archived_at: string | null;
+    members: Array<{ member_type: string; member_id: string; role: string }>;
+  }>,
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -64,6 +73,9 @@ vi.mock("@tanstack/react-query", () => ({
     }
     if (key === "agent-run-counts") {
       return { data: mocks.runCounts, isPending: mocks.runCountsPending };
+    }
+    if (key === "squads") {
+      return { data: mocks.squads, isLoading: false, isPending: false };
     }
     return { data: [], isLoading: false, isPending: false };
   },
@@ -129,12 +141,14 @@ vi.mock("@multica/core/paths", () => ({
     newAgent: () => "/test-workspace/agents/new",
     newAgentManual: () => "/test-workspace/agents/new/manual",
     agentDetail: (id: string) => `/test-workspace/agents/${id}`,
+    squadDetail: (id: string) => `/test-workspace/squads/${id}`,
   }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
+  squadListOptions: () => ({ queryKey: ["squads"] }),
   workspaceKeys: { agents: (wsId: string) => ["agents", wsId] },
 }));
 
@@ -147,8 +161,48 @@ vi.mock("@multica/core/runtimes", () => ({
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("./agent-row-actions", () => ({ AgentRowActions: () => null }));
 vi.mock("./agent-list-toolbar", () => ({
-  AgentListToolbar: () => <div data-testid="agent-list-toolbar" />,
-  countActiveFilterDimensions: () => 0,
+  AgentListToolbar: (props: {
+    grouping: string;
+    onGroupingChange: (grouping: "none" | "squad") => void;
+    onToggleFilter: (key: string, value: string) => void;
+  }) => (
+    <div data-testid="agent-list-toolbar">
+      <button
+        type="button"
+        onClick={() => props.onGroupingChange("squad")}
+      >
+        Group by squad
+      </button>
+      <button
+        type="button"
+        onClick={() => props.onToggleFilter("squads", "sq-alpha")}
+      >
+        Filter Alpha Squad
+      </button>
+      <button
+        type="button"
+        onClick={() => props.onToggleFilter("squads", "__none__")}
+      >
+        Filter no squad
+      </button>
+    </div>
+  ),
+  countActiveFilterDimensions: (filters: {
+    availability: string[];
+    runtimes: string[];
+    owners: string[];
+    models: string[];
+    access: string[];
+    squads: string[];
+  }) =>
+    [
+      filters.availability,
+      filters.runtimes,
+      filters.owners,
+      filters.models,
+      filters.access,
+      filters.squads,
+    ].filter((dim) => dim.length > 0).length,
 }));
 vi.mock("../presence", () => ({ availabilityConfig: {} }));
 vi.mock("@multica/ui/components/ui/skeleton", () => ({
@@ -244,6 +298,7 @@ beforeEach(() => {
   mocks.activity = { byAgent: new Map(), loading: false };
   mocks.presence = { byAgent: new Map(), loading: false };
   mocks.viewState.scope = "all";
+  mocks.viewState.grouping = "none";
   mocks.viewState.sortField = "lastActive";
   mocks.viewState.sortDirection = "desc";
   mocks.viewState.hiddenColumns = ["model", "created"];
@@ -253,7 +308,11 @@ beforeEach(() => {
     owners: [],
     models: [],
     access: [],
+    squads: [],
   };
+  mocks.viewState.setGrouping = vi.fn();
+  mocks.viewState.toggleFilter = vi.fn();
+  mocks.squads = [];
 });
 
 describe("AgentsPage listReady gate", () => {
@@ -334,5 +393,93 @@ describe("AgentsPage listReady gate", () => {
 
     expect(screen.getByText("No agents yet")).toBeInTheDocument();
     expect(screen.queryByTestId("skeleton")).not.toBeInTheDocument();
+  });
+});
+
+const GAMMA = makeAgent({ id: "a-gamma", name: "Gamma Agent" });
+
+function squadFixture(
+  id: string,
+  name: string,
+  agentIds: string[],
+) {
+  return {
+    id,
+    name,
+    archived_at: null,
+    members: agentIds.map((member_id) => ({
+      member_type: "agent",
+      member_id,
+      role: "member",
+    })),
+  };
+}
+
+describe("AgentsPage squad filter and grouping", () => {
+  beforeEach(() => {
+    mocks.viewState.sortField = "name";
+    mocks.viewState.sortDirection = "asc";
+    mocks.agents = [ALPHA, BETA, GAMMA];
+    mocks.squads = [
+      squadFixture("sq-alpha", "Alpha Squad", [ALPHA.id, GAMMA.id]),
+      squadFixture("sq-beta", "Beta Squad", [GAMMA.id]),
+    ];
+  });
+
+  it("filters to a selected squad", () => {
+    mocks.viewState.filters.squads = ["sq-alpha"];
+    renderPage();
+    expect(screen.getByText("Alpha Agent")).toBeInTheDocument();
+    expect(screen.getByText("Gamma Agent")).toBeInTheDocument();
+    expect(screen.queryByText("Beta Agent")).not.toBeInTheDocument();
+  });
+
+  it("filters to agents with no squad", () => {
+    mocks.viewState.filters.squads = ["__none__"];
+    renderPage();
+    expect(screen.getByText("Beta Agent")).toBeInTheDocument();
+    expect(screen.queryByText("Alpha Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gamma Agent")).not.toBeInTheDocument();
+  });
+
+  it("wires grouping and squad filter controls to the view store", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Group by squad" }));
+    expect(mocks.viewState.setGrouping).toHaveBeenCalledWith("squad");
+    fireEvent.click(screen.getByRole("button", { name: "Filter Alpha Squad" }));
+    expect(mocks.viewState.toggleFilter).toHaveBeenCalledWith(
+      "squads",
+      "sq-alpha",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Filter no squad" }));
+    expect(mocks.viewState.toggleFilter).toHaveBeenCalledWith(
+      "squads",
+      "__none__",
+    );
+  });
+
+  it("groups by squad with sticky headers, duplicating multi-squad agents", () => {
+    mocks.viewState.grouping = "squad";
+    renderPage();
+
+    const headers = screen.getAllByTestId("agent-squad-group");
+    expect(headers.map((el) => el.getAttribute("data-squad-id"))).toEqual([
+      "sq-alpha",
+      "sq-beta",
+      "__none__",
+    ]);
+    expect(screen.getByRole("link", { name: "Alpha Squad" })).toHaveAttribute(
+      "href",
+      "/test-workspace/squads/sq-alpha",
+    );
+    expect(screen.getByRole("link", { name: "Beta Squad" })).toHaveAttribute(
+      "href",
+      "/test-workspace/squads/sq-beta",
+    );
+    expect(screen.getByText("No squad")).toBeInTheDocument();
+
+    expect(screen.getAllByText("Gamma Agent")).toHaveLength(2);
+    expect(screen.getByText("Alpha Agent")).toBeInTheDocument();
+    expect(screen.getByText("Beta Agent")).toBeInTheDocument();
   });
 });

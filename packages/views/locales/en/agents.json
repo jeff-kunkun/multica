@@ -1007,7 +1007,12 @@
     "direction_desc": "Descending",
     "section_columns": "Columns",
     "section_owner": "Owner",
-    "section_model": "Model"
+    "section_model": "Model",
+    "section_squad": "Squad",
+    "no_squad": "No squad",
+    "group_by": "Group by",
+    "grouping_none": "None",
+    "grouping_squad": "Squad"
   },
   "actions": {
     "selected_one": "{{count}} selected",

@@ -181,7 +181,14 @@ describe("access-scope i18n parity across all 4 locales", () => {
     "row_actions.set_access_bulk_partial",
   ];
 
-  const toolbarKeys = ["toolbar.section_access"];
+  const toolbarKeys = [
+    "toolbar.section_access",
+    "toolbar.section_squad",
+    "toolbar.no_squad",
+    "toolbar.group_by",
+    "toolbar.grouping_none",
+    "toolbar.grouping_squad",
+  ];
 
   const ALL_NEW_KEYS = [...accessScopeKeys, ...bulkKeys, ...toolbarKeys];
 

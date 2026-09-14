@@ -13,12 +13,13 @@ import {
   effectiveAccessScope,
   type AgentAvailability,
 } from "@multica/core/agents";
-import type { MemberWithUser } from "@multica/core/types";
+import type { MemberWithUser, Squad } from "@multica/core/types";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
   AGENT_SCOPES,
   type AgentColumnKey,
+  type AgentGrouping,
   type AgentListFilters,
   type AgentsScope,
   type AgentSortDirection,
@@ -53,6 +54,7 @@ import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { availabilityConfig } from "../presence";
 import { useT } from "../../i18n";
 import type { AgentListRow } from "./agents-page";
+import { isActiveSquad, NO_SQUAD_ID } from "./agents-page-squads";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -89,6 +91,7 @@ export function countActiveFilterDimensions(
   if (filters.owners.length > 0) count++;
   if (filters.models.length > 0) count++;
   if (filters.access.length > 0) count++;
+  if (filters.squads.length > 0) count++;
   return count;
 }
 
@@ -103,6 +106,8 @@ export function AgentListToolbar({
   filters,
   onToggleFilter,
   onClearFilters,
+  grouping,
+  onGroupingChange,
   sortField,
   sortDirection,
   onSortFieldChange,
@@ -111,6 +116,7 @@ export function AgentListToolbar({
   onToggleColumn,
   allRows,
   members,
+  squads,
   visibleCount,
 }: {
   scope: AgentsScope;
@@ -122,6 +128,8 @@ export function AgentListToolbar({
   filters: AgentListFilters;
   onToggleFilter: (key: keyof AgentListFilters, value: string) => void;
   onClearFilters: () => void;
+  grouping: AgentGrouping;
+  onGroupingChange: (grouping: AgentGrouping) => void;
   sortField: AgentSortField;
   sortDirection: AgentSortDirection;
   onSortFieldChange: (field: AgentSortField) => void;
@@ -132,6 +140,7 @@ export function AgentListToolbar({
    *  counts derive from this set. */
   allRows: AgentListRow[];
   members: MemberWithUser[];
+  squads: Squad[];
   /** Rows surviving the filters — shown as "n / total" when narrowed. */
   visibleCount: number;
 }) {
@@ -172,6 +181,19 @@ export function AgentListToolbar({
     if (oid) ownerCounts.set(oid, (ownerCounts.get(oid) ?? 0) + 1);
     const model = row.agent.model;
     if (model) modelCounts.set(model, (modelCounts.get(model) ?? 0) + 1);
+  }
+
+  const activeSquads = squads
+    .filter(isActiveSquad)
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const squadCounts = new Map<string, number>();
+  let noSquadCount = 0;
+  for (const row of allRows) {
+    if (row.squadIds.length === 0) noSquadCount += 1;
+    for (const squadId of row.squadIds) {
+      squadCounts.set(squadId, (squadCounts.get(squadId) ?? 0) + 1);
+    }
   }
 
   const SCOPE_LABELS: Record<AgentsScope, string> = {
@@ -478,6 +500,52 @@ export function AgentListToolbar({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
+            {/* Squad — multi-select including the unassigned sentinel. */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <span className="flex-1">
+                  {t(($) => $.toolbar.section_squad)}
+                </span>
+                {filters.squads.length > 0 && (
+                  <span className="text-caption font-medium text-primary">
+                    {filters.squads.length}
+                  </span>
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
+                {activeSquads.map((squad) => (
+                  <DropdownMenuCheckboxItem
+                    key={squad.id}
+                    checked={filters.squads.includes(squad.id)}
+                    onCheckedChange={() => onToggleFilter("squads", squad.id)}
+                    className={FILTER_ITEM_CLASS}
+                  >
+                    <HoverCheck checked={filters.squads.includes(squad.id)} />
+                    <ActorAvatar
+                      name={squad.name}
+                      initials={squad.name.slice(0, 2).toUpperCase()}
+                      avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
+                      isSquad
+                      size="sm"
+                    />
+                    <span className="min-w-0 truncate">{squad.name}</span>
+                    {countBadge(squadCounts.get(squad.id) ?? 0)}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                <DropdownMenuCheckboxItem
+                  checked={filters.squads.includes(NO_SQUAD_ID)}
+                  onCheckedChange={() => onToggleFilter("squads", NO_SQUAD_ID)}
+                  className={FILTER_ITEM_CLASS}
+                >
+                  <HoverCheck checked={filters.squads.includes(NO_SQUAD_ID)} />
+                  <span className="min-w-0 truncate">
+                    {t(($) => $.toolbar.no_squad)}
+                  </span>
+                  {countBadge(noSquadCount)}
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
             {/* Model — runtime-native model id (categorical column → filter) */}
             {modelCounts.size > 0 && (
               <DropdownMenuSub>
@@ -590,6 +658,34 @@ export function AgentListToolbar({
                   ) : (
                     <ArrowDown className="size-3.5" />
                   )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="border-b px-3 py-2.5">
+              <span className="text-caption font-medium text-muted-foreground">
+                {t(($) => $.toolbar.group_by)}
+              </span>
+              <div className="mt-2 flex items-center gap-1 rounded-md border p-0.5">
+                <Button
+                  type="button"
+                  variant={grouping === "none" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-7 flex-1 text-caption"
+                  aria-pressed={grouping === "none"}
+                  onClick={() => onGroupingChange("none")}
+                >
+                  {t(($) => $.toolbar.grouping_none)}
+                </Button>
+                <Button
+                  type="button"
+                  variant={grouping === "squad" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-7 flex-1 text-caption"
+                  aria-pressed={grouping === "squad"}
+                  onClick={() => onGroupingChange("squad")}
+                >
+                  {t(($) => $.toolbar.grouping_squad)}
                 </Button>
               </div>
             </div>

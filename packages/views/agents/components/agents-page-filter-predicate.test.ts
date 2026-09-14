@@ -47,6 +47,7 @@ function makeRow(
     owner: null,
     isOwnedByMe: false,
     canManage: false,
+    squadIds: [],
     ...rowOverrides,
   };
 }
@@ -178,7 +179,92 @@ describe("rowMatchesFilters — access dimension", () => {
     expect(rowMatchesFilters(localAgent, filters, "")).toBe(true);
     expect(rowMatchesFilters(cloudAgent, filters, "")).toBe(false);
   });
+});
 
+describe("rowMatchesFilters — squad dimension", () => {
+  const noFilters = EMPTY_AGENT_FILTERS;
+
+  it("empty squads filter is inactive (all rows pass)", () => {
+    const inSquad = makeRow({ id: "a" }, { squadIds: ["sq-1"] });
+    const unassigned = makeRow({ id: "b" }, { squadIds: [] });
+    expect(rowMatchesFilters(inSquad, noFilters, "")).toBe(true);
+    expect(rowMatchesFilters(unassigned, noFilters, "")).toBe(true);
+  });
+
+  it("filters to a single squad", () => {
+    const alpha = makeRow({ id: "a" }, { squadIds: ["sq-alpha"] });
+    const beta = makeRow({ id: "b" }, { squadIds: ["sq-beta"] });
+    const unassigned = makeRow({ id: "c" }, { squadIds: [] });
+    const filters: AgentListFilters = { ...noFilters, squads: ["sq-alpha"] };
+    expect(rowMatchesFilters(alpha, filters, "")).toBe(true);
+    expect(rowMatchesFilters(beta, filters, "")).toBe(false);
+    expect(rowMatchesFilters(unassigned, filters, "")).toBe(false);
+  });
+
+  it("multi-select squad filter is OR-combined", () => {
+    const alpha = makeRow({ id: "a" }, { squadIds: ["sq-alpha"] });
+    const beta = makeRow({ id: "b" }, { squadIds: ["sq-beta"] });
+    const gamma = makeRow({ id: "c" }, { squadIds: ["sq-gamma"] });
+    const filters: AgentListFilters = {
+      ...noFilters,
+      squads: ["sq-alpha", "sq-beta"],
+    };
+    expect(rowMatchesFilters(alpha, filters, "")).toBe(true);
+    expect(rowMatchesFilters(beta, filters, "")).toBe(true);
+    expect(rowMatchesFilters(gamma, filters, "")).toBe(false);
+  });
+
+  it("filters to agents in no squad via __none__", () => {
+    const assigned = makeRow({ id: "a" }, { squadIds: ["sq-alpha"] });
+    const unassigned = makeRow({ id: "b" }, { squadIds: [] });
+    const filters: AgentListFilters = { ...noFilters, squads: ["__none__"] };
+    expect(rowMatchesFilters(assigned, filters, "")).toBe(false);
+    expect(rowMatchesFilters(unassigned, filters, "")).toBe(true);
+  });
+
+  it("squad + __none__ is OR-combined", () => {
+    const alpha = makeRow({ id: "a" }, { squadIds: ["sq-alpha"] });
+    const beta = makeRow({ id: "b" }, { squadIds: ["sq-beta"] });
+    const unassigned = makeRow({ id: "c" }, { squadIds: [] });
+    const filters: AgentListFilters = {
+      ...noFilters,
+      squads: ["sq-alpha", "__none__"],
+    };
+    expect(rowMatchesFilters(alpha, filters, "")).toBe(true);
+    expect(rowMatchesFilters(unassigned, filters, "")).toBe(true);
+    expect(rowMatchesFilters(beta, filters, "")).toBe(false);
+  });
+
+  it("an agent in multiple squads matches if any selected squad hits", () => {
+    const multi = makeRow({ id: "a" }, { squadIds: ["sq-alpha", "sq-beta"] });
+    expect(
+      rowMatchesFilters(multi, { ...noFilters, squads: ["sq-beta"] }, ""),
+    ).toBe(true);
+    expect(
+      rowMatchesFilters(multi, { ...noFilters, squads: ["sq-gamma"] }, ""),
+    ).toBe(false);
+  });
+
+  it("squad filter combines with other dimensions (AND)", () => {
+    const match = makeRow(
+      { id: "a", owner_id: "user-1" },
+      { squadIds: ["sq-alpha"] },
+    );
+    const wrongOwner = makeRow(
+      { id: "b", owner_id: "user-2" },
+      { squadIds: ["sq-alpha"] },
+    );
+    const filters: AgentListFilters = {
+      ...noFilters,
+      squads: ["sq-alpha"],
+      owners: ["user-1"],
+    };
+    expect(rowMatchesFilters(match, filters, "")).toBe(true);
+    expect(rowMatchesFilters(wrongOwner, filters, "")).toBe(false);
+  });
+});
+
+describe("rowMatchesFilters — access derivation", () => {
   it("access filter value matches the same derivation as effectiveAccessScope", () => {
     // The column and the filter share one derivation — guard against drift.
     const cases: Array<{

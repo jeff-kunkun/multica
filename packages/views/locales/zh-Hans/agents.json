@@ -986,7 +986,12 @@
     "direction_desc": "降序",
     "section_columns": "列",
     "section_owner": "owner",
-    "section_model": "模型"
+    "section_model": "模型",
+    "section_squad": "小队",
+    "no_squad": "无小队",
+    "group_by": "分组方式",
+    "grouping_none": "无",
+    "grouping_squad": "小队"
   },
   "actions": {
     "selected_other": "已选 {{count}} 项",

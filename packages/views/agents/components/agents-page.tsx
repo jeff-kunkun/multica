@@ -6,6 +6,7 @@ import {
   Bot,
   Lock,
   Plus,
+  Users,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -39,6 +40,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentListOptions,
   memberListOptions,
+  squadListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
@@ -59,7 +61,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { useNavigation, useRowLink } from "../../navigation";
+import { AppLink, useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
@@ -75,6 +77,13 @@ import {
 } from "./agent-list-toolbar";
 import { useLocale, useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import {
+  buildAgentSquadsMap,
+  flattenAgentListItems,
+  GROUP_HEADER_HEIGHT,
+  rowMatchesSquadFilter,
+  type AgentSquadGroup,
+} from "./agents-page-squads";
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Same conventions as the skills/autopilots lists (see list-grid.tsx):
@@ -149,6 +158,8 @@ export interface AgentListRow {
   owner: MemberWithUser | null;
   isOwnedByMe: boolean;
   canManage: boolean;
+  /** Active squad ids this agent belongs to. Empty = no squad. */
+  squadIds: string[];
 }
 
 // Most recent activity bucket with runs, as "days ago" (0 = today).
@@ -220,6 +231,9 @@ export function rowMatchesFilters(
       ),
     )
   ) {
+    return false;
+  }
+  if (!rowMatchesSquadFilter(row.squadIds, filters.squads)) {
     return false;
   }
   return true;
@@ -324,6 +338,56 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         </Button>
       }
     />
+  );
+}
+
+function SquadGroupHeader({
+  group,
+  href,
+}: {
+  group: AgentSquadGroup<AgentListRow>;
+  href: string | null;
+}) {
+  const { t } = useT("agents");
+  const name = group.squad?.name ?? t(($) => $.toolbar.no_squad);
+  const count = group.rows.length;
+  return (
+    <div
+      role="row"
+      data-testid="agent-squad-group"
+      data-squad-id={group.id}
+      className="sticky top-9 z-[9] col-span-full flex h-9 items-center gap-2 bg-background px-3"
+    >
+      {group.squad ? (
+        <ActorAvatar
+          actorType="squad"
+          actorId={group.squad.id}
+          size="sm"
+          className="shrink-0"
+        />
+      ) : (
+        <Users
+          aria-hidden="true"
+          className="size-4 shrink-0 text-muted-foreground"
+        />
+      )}
+      {href ? (
+        <AppLink
+          href={href}
+          newTabTitle={name}
+          className="min-w-0 truncate text-caption font-medium text-foreground hover:underline"
+        >
+          {name}
+        </AppLink>
+      ) : (
+        <span className="min-w-0 truncate text-caption font-medium">
+          {name}
+        </span>
+      )}
+      <span className="ml-0.5 tabular-nums text-caption text-muted-foreground">
+        {count}
+      </span>
+    </div>
   );
 }
 
@@ -785,6 +849,9 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     runtimeListOptions(wsId),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: squads = [], isPending: squadsPending } = useQuery(
+    squadListOptions(wsId),
+  );
   const { data: runCountsRaw = [], isPending: runCountsPending } = useQuery(
     agentRunCounts30dOptions(wsId),
   );
@@ -805,6 +872,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const sortDirection = useAgentsViewStore((s) => s.sortDirection);
   const hiddenColumns = useAgentsViewStore((s) => s.hiddenColumns);
   const filters = useAgentsViewStore((s) => s.filters);
+  const grouping = useAgentsViewStore((s) => s.grouping);
+  const setGrouping = useAgentsViewStore((s) => s.setGrouping);
   const handleSort = useAgentsViewStore((s) => s.toggleSort);
   const handleSortFieldSelect = useAgentsViewStore((s) => s.setSortField);
   const setSortDirection = useAgentsViewStore((s) => s.setSortDirection);
@@ -840,6 +909,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     for (const mem of members) m.set(mem.user_id, mem);
     return m;
   }, [members]);
+
+  const agentSquadsMap = useMemo(
+    () => buildAgentSquadsMap(squads),
+    [squads],
+  );
 
   const isWorkspaceAdmin = useMemo(() => {
     if (!currentUser) return false;
@@ -889,6 +963,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         owner: agent.owner_id ? membersById.get(agent.owner_id) ?? null : null,
         isOwnedByMe: isOwner,
         canManage: isWorkspaceAdmin || isOwner,
+        squadIds: (agentSquadsMap.get(agent.id) ?? []).map((s) => s.id),
       };
     });
   }, [
@@ -901,6 +976,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     activityMap,
     runCountsById,
     isWorkspaceAdmin,
+    agentSquadsMap,
   ]);
 
   // Visible rows: local search + filters, then sort.
@@ -936,6 +1012,13 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     return filtered;
   }, [scopeRows, search, filters, sortField, sortDirection]);
 
+  const listItems = useMemo(
+    () => flattenAgentListItems(rows, squads, grouping),
+    [rows, squads, grouping],
+  );
+  const listItemsRef = useRef(listItems);
+  listItemsRef.current = listItems;
+
   const noMatchText = useMemo(() => {
     const query = search.trim();
     if (query) {
@@ -964,9 +1047,13 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   // scrollbar spans the full pane height (Linear's structure).
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const rowVirtualizer = useVirtualizer({
-    count: rows.length,
+    count: listItems.length,
     getScrollElement: () => listScrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: (index) =>
+      listItemsRef.current[index]?.kind === "header"
+        ? GROUP_HEADER_HEIGHT
+        : ROW_HEIGHT,
+    getItemKey: (index) => listItemsRef.current[index]?.key ?? index,
     overscan: 10,
   });
 
@@ -1026,10 +1113,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const needsRunCounts = sortField === "lastActive" || sortField === "runs";
   const needsActivity = sortField === "lastActive";
   const needsPresence = filters.availability.length > 0;
+  const needsSquads = grouping === "squad" || filters.squads.length > 0;
   const listReady =
     (!needsActivity || !activityLoading) &&
     (!needsRunCounts || !runCountsPending) &&
-    (!needsPresence || !presenceLoading);
+    (!needsPresence || !presenceLoading) &&
+    (!needsSquads || !squadsPending);
 
   return (
     // relative: positioning anchor for the batch toolbar (page-centered,
@@ -1059,6 +1148,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             filters={filters}
             onToggleFilter={toggleFilter}
             onClearFilters={clearFilters}
+            grouping={grouping}
+            onGroupingChange={setGrouping}
             sortField={sortField}
             sortDirection={sortDirection}
             onSortFieldChange={handleSortFieldSelect}
@@ -1067,6 +1158,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             onToggleColumn={toggleColumn}
             allRows={scopeRows}
             members={members}
+            squads={squads}
             visibleCount={rows.length}
           />
           <div
@@ -1099,11 +1191,25 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                   </div>
                 )}
                 {virtualItems.map((vi) => {
-                  const row = rows[vi.index];
-                  if (!row) return null;
+                  const item = listItems[vi.index];
+                  if (!item) return null;
+                  if (item.kind === "header") {
+                    return (
+                      <SquadGroupHeader
+                        key={item.key}
+                        group={item.group}
+                        href={
+                          item.group.squad
+                            ? paths.squadDetail(item.group.squad.id)
+                            : null
+                        }
+                      />
+                    );
+                  }
+                  const row = item.row;
                   return (
                     <ListGridRow
-                      key={row.agent.id}
+                      key={item.key}
                       className={`h-16 cursor-pointer ${
                         selectedIds.has(row.agent.id) ? "bg-accent/30" : ""
                       }`}

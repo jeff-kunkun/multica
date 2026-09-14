@@ -398,6 +398,10 @@
     },
     "custom_args": {
       "intro": "エージェントの起動時に渡す CLI 引数を追加します。",
+      "antigravity_profile_label": "AGY アカウントプロファイル",
+      "antigravity_profile_description": "別の Gemini ディレクトリを使って、このエージェントのセッションデータを分離します。絶対パスを入力してください。先頭の ~ は展開されず、agy はデフォルトのディレクトリにフォールバックします。同じ agy バイナリは複数のプロファイルで共有されます。",
+      "antigravity_profile_input_label": "Gemini ディレクトリ",
+      "antigravity_profile_placeholder": "/Users/you/.gemini-account2",
       "arguments_label": "引数",
       "arguments_description": "各項目は 1 つのトークンとして渡され、リストの順序が保持されます。",
       "add_argument_action": "引数を追加",
@@ -883,7 +887,12 @@
     "direction_desc": "降順",
     "section_columns": "列",
     "section_owner": "オーナー",
-    "section_model": "モデル"
+    "section_model": "モデル",
+    "section_squad": "スクワッド",
+    "no_squad": "スクワッドなし",
+    "group_by": "グループ化",
+    "grouping_none": "なし",
+    "grouping_squad": "スクワッド"
   },
   "creation_studio": {
     "title": "エージェントを作成",
