@@ -469,6 +469,24 @@ func modelIDForCapabilityLookup(providerType, model string) string {
 	}
 }
 
+// findModelForCapability resolves the catalog row used for thinking / tier
+// checks. The persisted model string is never rewritten.
+func findModelForCapability(providerType string, models []Model, model string) (Model, bool) {
+	if model == "" {
+		return Model{}, false
+	}
+	target := modelIDForCapabilityLookup(providerType, model)
+	for _, m := range models {
+		if modelIDForCapabilityLookup(providerType, m.ID) == target {
+			return m, true
+		}
+	}
+	if providerType == "dsh" {
+		return findDshRecoverableCatalogEntry(models, model)
+	}
+	return Model{}, false
+}
+
 func acceptedModelIDsForProvider(providerType string) (map[string]bool, bool) {
 	switch {
 	case providerType == "claude":

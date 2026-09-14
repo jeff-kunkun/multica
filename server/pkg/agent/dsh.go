@@ -167,6 +167,99 @@ func dshModelIDForLookup(model string) string {
 	return strings.Join(parts, "/")
 }
 
+// Product-name spellings DSH does not list, mapped onto the suffix it does.
+// Capability lookup only — never rewrite the persisted agent.model.
+// deepseek-v4.1-flash: official API id is deepseek-flash; dsh 0.1.5-rc.1
+// advertises deepseek-official/deepseek-flash labelled DeepSeek-V41-Flash.
+var dshModelSuffixAliases = map[string]string{
+	"deepseek-v4.1-flash": "deepseek-flash",
+}
+
+func splitDshProviderModel(model string) (prefix, suffix string, ok bool) {
+	decoded := dshModelIDForLookup(model)
+	prefix, suffix, ok = strings.Cut(decoded, "/")
+	if !ok || prefix == "" || suffix == "" {
+		return "", "", false
+	}
+	return prefix, suffix, true
+}
+
+func normalizeModelToken(value string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(value) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func thinkingValuesSignature(thinking *ModelThinking) string {
+	if thinking == nil || len(thinking.SupportedLevels) == 0 {
+		return ""
+	}
+	vals := make([]string, len(thinking.SupportedLevels))
+	for i, level := range thinking.SupportedLevels {
+		vals[i] = level.Value
+	}
+	return strings.Join(vals, "\x00")
+}
+
+// findDshRecoverableCatalogEntry resolves a persisted DSH model that is not
+// an exact catalog id. The stored agent.model is never rewritten.
+func findDshRecoverableCatalogEntry(models []Model, model string) (Model, bool) {
+	prefix, suffix, ok := splitDshProviderModel(model)
+	if !ok {
+		return Model{}, false
+	}
+	candidates := map[string]struct{}{strings.ToLower(suffix): {}}
+	if alias, aliased := dshModelSuffixAliases[strings.ToLower(suffix)]; aliased {
+		candidates[strings.ToLower(alias)] = struct{}{}
+	}
+	suffixNorm := normalizeModelToken(suffix)
+
+	var unique []Model
+	for _, entry := range models {
+		entryPrefix, entrySuffix, entryOK := splitDshProviderModel(entry.ID)
+		if !entryOK || entryPrefix != prefix {
+			continue
+		}
+		if _, hit := candidates[strings.ToLower(entrySuffix)]; hit {
+			unique = append(unique, entry)
+			continue
+		}
+		if normalizeModelToken(entrySuffix) == suffixNorm || normalizeModelToken(entry.Label) == suffixNorm {
+			unique = append(unique, entry)
+		}
+	}
+	if len(unique) == 1 {
+		return unique[0], true
+	}
+
+	var prefixed []Model
+	for _, entry := range models {
+		entryPrefix, _, entryOK := splitDshProviderModel(entry.ID)
+		if entryOK && entryPrefix == prefix {
+			prefixed = append(prefixed, entry)
+		}
+	}
+	// Require two or more same-prefix rows so this is not "borrow the first
+	// (or only) model's capabilities".
+	if len(prefixed) < 2 {
+		return Model{}, false
+	}
+	sig := thinkingValuesSignature(prefixed[0].Thinking)
+	if sig == "" {
+		return Model{}, false
+	}
+	for _, entry := range prefixed[1:] {
+		if thinkingValuesSignature(entry.Thinking) != sig {
+			return Model{}, false
+		}
+	}
+	return Model{ID: model, Label: model, Thinking: prefixed[0].Thinking}, true
+}
+
 func buildDshMCPServers(raw json.RawMessage, logger interface {
 	Warn(string, ...any)
 }) ([]dshMCPServer, error) {

@@ -254,6 +254,111 @@ func TestValidateThinkingLevelDshEncodedModelID(t *testing.T) {
 	}
 }
 
+func fieldDshThinking() *ModelThinking {
+	return &ModelThinking{
+		SupportedLevels: []ThinkingLevel{
+			{Value: "off", Label: "Off"},
+			{Value: "low", Label: "Low"},
+			{Value: "high", Label: "High"},
+			{Value: "max", Label: "Max"},
+		},
+		DefaultLevel: "high",
+	}
+}
+
+func fieldDshCatalog() []Model {
+	ids := []string{
+		"deepseek-v4-flash",
+		"deepseek-v4-flash-vision-exp",
+		"deepseek-v4-pro",
+		"deepseek-flash",
+	}
+	out := make([]Model, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, Model{
+			ID:       "deepseek-official/" + id,
+			Label:    id,
+			Thinking: fieldDshThinking(),
+		})
+	}
+	return out
+}
+
+func TestFindDshRecoverableCatalogEntryFieldModel(t *testing.T) {
+	got, ok := findDshRecoverableCatalogEntry(fieldDshCatalog(), "deepseek-official/deepseek-v4.1-flash")
+	if !ok {
+		t.Fatal("expected a recoverable catalog entry for the persisted V4.1 Flash id")
+	}
+	if got.ID != "deepseek-official/deepseek-flash" {
+		t.Fatalf("recovered id = %q, want deepseek-official/deepseek-flash", got.ID)
+	}
+}
+
+func TestFindDshRecoverableCatalogEntryLiveLabel(t *testing.T) {
+	catalog := []Model{
+		{ID: "deepseek-official/deepseek-v4-flash", Label: "DeepSeek-V4-Flash", Thinking: fieldDshThinking()},
+		{ID: "deepseek-official/deepseek-flash", Label: "DeepSeek-V41-Flash", Thinking: fieldDshThinking()},
+	}
+	got, ok := findDshRecoverableCatalogEntry(catalog, "deepseek-official/deepseek-v4.1-flash")
+	if !ok || got.ID != "deepseek-official/deepseek-flash" {
+		t.Fatalf("got %#v ok=%v", got, ok)
+	}
+}
+
+func TestFindDshRecoverableCatalogEntryDoesNotBorrowFirstModel(t *testing.T) {
+	catalog := []Model{
+		{ID: "deepseek-official/deepseek-v4-flash", Label: "deepseek-v4-flash", Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "off"}, {Value: "ultra"}}}},
+		{ID: "deepseek-official/deepseek-v4-pro", Label: "deepseek-v4-pro", Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "off"}}}},
+	}
+	if _, ok := findDshRecoverableCatalogEntry(catalog, "deepseek-official/deepseek-v4.1-flash"); ok {
+		t.Fatal("mixed thinking catalogs must fail closed")
+	}
+}
+
+func TestFindDshRecoverableCatalogEntrySingleRowFailsClosed(t *testing.T) {
+	catalog := []Model{{
+		ID: "deepseek-official/deepseek-v4-flash", Label: "deepseek-v4-flash", Thinking: fieldDshThinking(),
+	}}
+	if _, ok := findDshRecoverableCatalogEntry(catalog, "deepseek-official/deepseek-v4.1-flash"); ok {
+		t.Fatal("a single catalog row must not donate its thinking levels")
+	}
+}
+
+func TestFindDshRecoverableCatalogEntryIdenticalPrefixThinking(t *testing.T) {
+	catalog := []Model{
+		{ID: "deepseek-official/deepseek-v4-flash", Label: "deepseek-v4-flash", Thinking: fieldDshThinking()},
+		{ID: "deepseek-official/deepseek-v4-pro", Label: "deepseek-v4-pro", Thinking: fieldDshThinking()},
+	}
+	got, ok := findDshRecoverableCatalogEntry(catalog, "deepseek-official/stale-unknown-flash")
+	if !ok {
+		t.Fatal("identical same-prefix thinking should recover")
+	}
+	if got.ID != "deepseek-official/stale-unknown-flash" {
+		t.Fatalf("persisted id rewritten to %q", got.ID)
+	}
+	if thinkingValuesSignature(got.Thinking) != thinkingValuesSignature(fieldDshThinking()) {
+		t.Fatalf("unexpected thinking: %#v", got.Thinking)
+	}
+}
+
+func TestValidateThinkingLevelDshPersistedV41Flash(t *testing.T) {
+	load := func() (Catalog, error) { return Catalog{Models: fieldDshCatalog()}, nil }
+	ok, err := ValidateThinkingLevelWith(load, "dsh", "deepseek-official/deepseek-v4.1-flash", "high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("persisted deepseek-v4.1-flash should accept catalog thinking levels")
+	}
+	ok, err = ValidateThinkingLevelWith(load, "dsh", "deepseek-official/deepseek-v4.1-flash", "ultra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("unknown thinking token must still fail closed")
+	}
+}
+
 func TestDiscoverDshModels(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture")
