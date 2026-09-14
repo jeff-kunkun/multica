@@ -63,6 +63,7 @@ func backendResumeContinuityNotice(task Task) string {
 func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
+	b.WriteString(buildSharedWorkspaceBlock(opts.sharedWorkspace))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
@@ -77,6 +78,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 // common BuildPrompt(task, provider) call sites stay unchanged.
 type promptOpts struct {
 	sharedLocalDirectory    bool
+	sharedWorkspace         bool
 	worktreeReplayConflicts []string
 }
 
@@ -91,6 +93,15 @@ type PromptOption func(*promptOpts)
 // has to be told (issue #7344).
 func WithSharedLocalDirectory() PromptOption {
 	return func(o *promptOpts) { o.sharedLocalDirectory = true }
+}
+
+// WithSharedWorkspace marks a task running against a local_directory in
+// shared mode: every task on the directory runs unserialised, by the user's
+// decision, and isolation is a matter of the workspace's own conventions.
+// Distinct from WithSharedLocalDirectory, whose notice is about one exempt
+// turn skipping a lock that other tasks still hold.
+func WithSharedWorkspace() PromptOption {
+	return func(o *promptOpts) { o.sharedWorkspace = true }
 }
 
 // WithWorktreeReplayConflicts names the files whose merge this turn has to
@@ -117,6 +128,17 @@ func buildSharedLocalDirectoryBlock(shared bool) string {
 	b.WriteString("## Shared working directory\n\n")
 	b.WriteString("Your working directory is the user's own checkout, and another task on this machine may be editing it while you run. This turn deliberately neither holds nor waits for the directory lock — that is what keeps a conversation from queueing behind a long build.\n\n")
 	b.WriteString("Read freely. Treat writing the way the user treats saving a file in their own editor: reasonable for a small change they just asked for, wrong for a broad refactor, a dependency install, or a build that rewrites many files. Work that size belongs in an issue task, which is serialised against the other writers. If you do write, say so in your reply — a sibling task may be looking at the same file.\n\n")
+	return b.String()
+}
+
+func buildSharedWorkspaceBlock(shared bool) string {
+	if !shared {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Shared workspace\n\n")
+	b.WriteString("Your working directory is a shared workspace: the project owner set it to run tasks concurrently, so other tasks on this machine may be working in it right now and no task holds a lock on it. Multica keeps its own runtime files out of this directory; nothing here was written for you except by the workspace itself.\n\n")
+	b.WriteString("Follow the workspace's own conventions for isolation — typically a task-specific branch or worktree inside the sub-repository you are changing. Do not edit a shared checkout's mainline (main/dev) in place, do not run commands that rewrite files across the whole directory, and when you must change a file other tasks may also touch, say so in your reply.\n\n")
 	return b.String()
 }
 

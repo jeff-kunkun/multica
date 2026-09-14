@@ -38,7 +38,7 @@ Common resource types:
   checkout `ref`, and optional prompt-only `default_branch_hint`;
 - `local_directory` — daemon-local path context, with `resource_ref.local_path`,
   `daemon_id`, optional label, and optional `execution_mode` (`in_place`, the
-  default, or `worktree`).
+  default, `worktree`, or `shared`).
 
 ## CLI
 
@@ -57,6 +57,7 @@ multica project resource add <project-id> --type github_repo --url <github-url> 
 multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --output json
 multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --execution-mode worktree --output json
 multica project resource update <project-id> <resource-id> --execution-mode in_place --output json
+multica project resource update <project-id> <resource-id> --execution-mode shared --output json
 multica project resource update <project-id> <resource-id> --url <new-github-url> --output json
 multica project resource update <project-id> <resource-id> --ref <branch-or-sha> --output json
 multica project resource remove <project-id> <resource-id> --output json
@@ -97,6 +98,18 @@ recreated or force-moved — is left alone and the task falls back to
 A turn replays only what the user changed since that snapshot; when those edits
 conflict with the branch's own work the worktree is handed to the agent
 mid-merge and the run delivers nothing until the agent resolves it.
+
+`shared` runs the agent in the user's directory like `in_place`, but without
+the per-directory lock: tasks on the directory run concurrently, and Multica
+keeps its own per-task files (task marker, `resources.json`, skills, runtime
+brief) in the task's env root instead of the directory. Use it for a directory
+that is a container of several repositories, each with its own branch
+worktrees, where tasks already isolate themselves by convention and the lock
+only serialised them. Nothing protects two tasks that edit the same checkout at
+once — that is the trade the mode makes. The directory need not be a git
+repository. Not every runtime can run it yet: a task whose runtime has no
+sidecar-free route for the brief fails with a message naming the runtime
+(Claude Code and the inline-brief runtimes are supported; Codex is not yet).
 
 `worktree` requires the path to be a git repository with at least one commit;
 tasks fail with an explicit error otherwise. The gate is the `local-worktree-v1`

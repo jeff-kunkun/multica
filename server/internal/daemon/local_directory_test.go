@@ -180,7 +180,7 @@ func TestAcquireLocalDirectoryLockSkipsSquadLeaderTasks(t *testing.T) {
 	if leaderAssignment != nil {
 		t.Fatalf("leader assignment = %+v, want nil", leaderAssignment)
 	}
-	leaderRelease, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), leader, slog.Default())
+	leaderRelease, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), leader, slog.Default(), nil)
 	if abort {
 		t.Fatal("leader lock acquisition aborted")
 	}
@@ -191,7 +191,7 @@ func TestAcquireLocalDirectoryLockSkipsSquadLeaderTasks(t *testing.T) {
 		t.Fatalf("holder after leader skip = %q, want empty", got)
 	}
 
-	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), worker, slog.Default())
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), worker, slog.Default(), nil)
 	if abort {
 		t.Fatal("worker lock acquisition aborted")
 	}
@@ -203,7 +203,7 @@ func TestAcquireLocalDirectoryLockSkipsSquadLeaderTasks(t *testing.T) {
 		t.Fatalf("holder = %q, want %q", got, worker.ID)
 	}
 
-	leaderRelease, abort = d.acquireLocalDirectoryLockIfNeeded(context.Background(), leader, slog.Default())
+	leaderRelease, abort = d.acquireLocalDirectoryLockIfNeeded(context.Background(), leader, slog.Default(), nil)
 	if abort {
 		t.Fatal("leader lock acquisition aborted")
 	}
@@ -611,7 +611,7 @@ func TestAcquireLocalDirectoryLock_CancelDuringWait(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		rel, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), task, slog.Default())
+		rel, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), task, slog.Default(), nil)
 		done <- result{release: rel, abort: abort}
 	}()
 
@@ -698,7 +698,7 @@ func TestAcquireLocalDirectoryLock_ParentCancellationReportsWaitFailure(t *testi
 	}
 	done := make(chan result, 1)
 	go func() {
-		rel, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default())
+		rel, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default(), nil)
 		done <- result{release: rel, abort: abort}
 	}()
 
@@ -778,7 +778,7 @@ func TestAcquireLocalDirectoryLock_EarlyFailureReportsWithCancelledParent(t *tes
 
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
-			release, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default())
+			release, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default(), nil)
 			if !abort {
 				t.Fatal("expected local_directory failure to abort task")
 			}
@@ -833,6 +833,7 @@ func TestAcquireLocalDirectoryLockSkipsWorktreeMode(t *testing.T) {
 			context.Background(),
 			Task{ID: taskID, ProjectResources: resources},
 			slog.Default(),
+			nil,
 		)
 		if abort {
 			t.Fatalf("%s: acquisition aborted", taskID)
@@ -934,6 +935,7 @@ func TestAcquireLocalDirectoryLockRejectsUnknownExecutionMode(t *testing.T) {
 		context.Background(),
 		Task{ID: "t1", ProjectResources: resources},
 		slog.Default(),
+		nil,
 	)
 	if !abort {
 		t.Error("abort = false; the task was allowed to run with an unsupported mode")
@@ -1050,7 +1052,7 @@ func TestChatTaskSkipsPathMutexButKeepsAssignment(t *testing.T) {
 
 	// The coding task takes the lock and keeps it for the rest of the test —
 	// this is the 20-minute build the chat turn used to queue behind.
-	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), worker, slog.Default())
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), worker, slog.Default(), nil)
 	if abort {
 		t.Fatal("worker lock acquisition aborted")
 	}
@@ -1071,7 +1073,7 @@ func TestChatTaskSkipsPathMutexButKeepsAssignment(t *testing.T) {
 	}
 	done := make(chan acquireResult, 1)
 	go func() {
-		chatRelease, chatAbort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default())
+		chatRelease, chatAbort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default(), nil)
 		done <- acquireResult{release: chatRelease, abort: chatAbort}
 	}()
 
@@ -1132,7 +1134,7 @@ func TestChatTaskOnWorktreeResourceKeepsAssignment(t *testing.T) {
 		localPathLocks: NewLocalPathLocker(),
 		logger:         slog.Default(),
 	}
-	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default())
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default(), nil)
 	if abort {
 		t.Fatal("chat lock acquisition aborted")
 	}
@@ -1181,7 +1183,7 @@ func TestIssueTasksStillSerialiseOnPathMutex(t *testing.T) {
 		logger:             slog.Default(),
 		cancelPollInterval: time.Hour, // never poll; the test drives cancellation itself
 	}
-	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), first, slog.Default())
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), first, slog.Default(), nil)
 	if abort || release == nil {
 		t.Fatalf("first issue task failed to take the lock (abort=%v)", abort)
 	}
@@ -1192,7 +1194,7 @@ func TestIssueTasksStillSerialiseOnPathMutex(t *testing.T) {
 	blocked := make(chan struct{})
 	go func() {
 		defer close(blocked)
-		secondRelease, _ := d.acquireLocalDirectoryLockIfNeeded(ctx, second, slog.Default())
+		secondRelease, _ := d.acquireLocalDirectoryLockIfNeeded(ctx, second, slog.Default(), nil)
 		if secondRelease != nil {
 			secondRelease()
 		}
@@ -1210,4 +1212,314 @@ func TestIssueTasksStillSerialiseOnPathMutex(t *testing.T) {
 		t.Error("waiting task never reported waiting_local_directory to the server")
 	}
 	release()
+}
+
+// Shared mode exists so that tasks on one directory run at the same time; the
+// per-path mutex must not be taken at all, exactly as in worktree mode, while
+// the assignment still answers "the user's own directory" for the cwd.
+func TestAcquireLocalDirectoryLockSkipsSharedMode(t *testing.T) {
+	t.Parallel()
+
+	const daemonID = "d-mine"
+	tmp := t.TempDir()
+	raw, err := json.Marshal(localDirectoryRef{
+		LocalPath:     tmp,
+		DaemonID:      daemonID,
+		ExecutionMode: localDirectoryModeShared,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	resources := []ProjectResourceData{
+		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
+	}
+
+	assignment, err := localDirectoryAssignmentForTask(Task{ID: "t1", ProjectResources: resources}, daemonID)
+	if err != nil {
+		t.Fatalf("assignment: %v", err)
+	}
+	if !assignment.IsShared() || !assignment.SkipsPathMutex() {
+		t.Fatalf("IsShared()=%v SkipsPathMutex()=%v for execution_mode=shared, want both true",
+			assignment.IsShared(), assignment.SkipsPathMutex())
+	}
+	if assignment.UsesWorktree() {
+		t.Fatal("UsesWorktree() = true for execution_mode=shared")
+	}
+	if !assignment.RunsInUserDirectory() {
+		t.Fatal("RunsInUserDirectory() = false for execution_mode=shared; the cwd IS the user's directory")
+	}
+
+	d := &Daemon{
+		cfg:            Config{DaemonID: daemonID},
+		localPathLocks: NewLocalPathLocker(),
+		logger:         slog.Default(),
+	}
+	for _, taskID := range []string{"task-a", "task-b"} {
+		release, abort := d.acquireLocalDirectoryLockIfNeeded(
+			context.Background(),
+			Task{ID: taskID, IssueID: "issue-" + taskID, ProjectResources: resources},
+			slog.Default(),
+			nil,
+		)
+		if abort {
+			t.Fatalf("%s: acquisition aborted", taskID)
+		}
+		if release != nil {
+			t.Fatalf("%s: got a release callback, so the path mutex was taken", taskID)
+		}
+	}
+	if got := d.localPathLocks.Holder(assignment.RealPath); got != "" {
+		t.Fatalf("holder = %q, want empty: shared mode must not lock the path", got)
+	}
+}
+
+// The mode predicates are the seam every caller branches on; a table keeps
+// the three modes' answers side by side so a new mode cannot be added to one
+// predicate and forgotten in another.
+func TestLocalDirectoryModePredicates(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		mode                                 string
+		worktree, shared, skipsMutex, inUser bool
+	}{
+		{"", false, false, false, true},
+		{localDirectoryModeInPlace, false, false, false, true},
+		{localDirectoryModeWorktree, true, false, true, false},
+		{localDirectoryModeShared, false, true, true, true},
+		{"  shared  ", false, true, true, true},
+	}
+	for _, tc := range cases {
+		a := &localDirectoryAssignment{Ref: localDirectoryRef{ExecutionMode: tc.mode}}
+		if got := a.UsesWorktree(); got != tc.worktree {
+			t.Errorf("UsesWorktree(%q) = %v, want %v", tc.mode, got, tc.worktree)
+		}
+		if got := a.IsShared(); got != tc.shared {
+			t.Errorf("IsShared(%q) = %v, want %v", tc.mode, got, tc.shared)
+		}
+		if got := a.SkipsPathMutex(); got != tc.skipsMutex {
+			t.Errorf("SkipsPathMutex(%q) = %v, want %v", tc.mode, got, tc.skipsMutex)
+		}
+		if got := a.RunsInUserDirectory(); got != tc.inUser {
+			t.Errorf("RunsInUserDirectory(%q) = %v, want %v", tc.mode, got, tc.inUser)
+		}
+		if err := a.ValidateExecutionMode(); err != nil {
+			t.Errorf("ValidateExecutionMode(%q) = %v, want nil", tc.mode, err)
+		}
+	}
+	var nilAssignment *localDirectoryAssignment
+	if nilAssignment.IsShared() || nilAssignment.SkipsPathMutex() || nilAssignment.RunsInUserDirectory() {
+		t.Error("nil assignment must answer false to every predicate")
+	}
+}
+
+// A task parked on the path mutex runs nothing, so it must not hold a
+// concurrency slot: with the slot pinned, N tasks queued behind one long build
+// made the daemon look fully busy while running a single agent. The waiter
+// hands its slot back the moment it parks and takes one again when it wins
+// the lock, so the queue costs the daemon one slot, not one per waiter.
+func TestWaitingTaskReleasesItsSlotWhileParked(t *testing.T) {
+	t.Parallel()
+
+	const daemonID = "d-mine"
+	tmp := t.TempDir()
+	raw, err := json.Marshal(localDirectoryRef{LocalPath: tmp, DaemonID: daemonID})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	resources := []ProjectResourceData{
+		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
+	}
+	first := Task{ID: "issue-task-1", IssueID: "issue-1", ProjectResources: resources}
+	second := Task{ID: "issue-task-2", IssueID: "issue-2", ProjectResources: resources}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		cfg:                Config{DaemonID: daemonID},
+		client:             NewClient(srv.URL),
+		localPathLocks:     NewLocalPathLocker(),
+		logger:             slog.Default(),
+		cancelPollInterval: time.Hour,
+	}
+
+	// A one-slot daemon: the first task holds the only slot and the lock.
+	sem := newTaskSlotSemaphore(1)
+	firstLease := newTaskSlotLease(sem, <-sem, nil)
+	firstRelease, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), first, slog.Default(), firstLease)
+	if abort || firstRelease == nil {
+		t.Fatalf("first task failed to take the lock (abort=%v)", abort)
+	}
+
+	// The second task arrives with a slot of its own (a two-slot poller would
+	// have handed it one). Give it slot 7 so the index it holds afterwards is
+	// distinguishable from the first task's slot 0.
+	var woke atomic.Int32
+	secondLease := newTaskSlotLease(sem, 7, func() { woke.Add(1) })
+	type result struct {
+		release func()
+		abort   bool
+	}
+	done := make(chan result, 1)
+	go func() {
+		rel, ab := d.acquireLocalDirectoryLockIfNeeded(context.Background(), second, slog.Default(), secondLease)
+		done <- result{release: rel, abort: ab}
+	}()
+
+	// While parked, the second task's slot must be back in the pool and the
+	// poller must have been woken to claim against it.
+	var returned int
+	select {
+	case returned = <-sem:
+	case <-time.After(5 * time.Second):
+		t.Fatal("parked task never returned its slot to the pool")
+	}
+	if returned != 7 {
+		t.Fatalf("returned slot = %d, want 7 (the waiter's own slot)", returned)
+	}
+	if woke.Load() == 0 {
+		t.Error("returning the slot did not wake the poller")
+	}
+	select {
+	case <-done:
+		t.Fatal("second task proceeded while the first still held the lock")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Simulate the poller having handed that slot to a third task, then that
+	// task finishing: the waiter must not be able to proceed until a slot is
+	// actually free again.
+	firstRelease()
+	select {
+	case <-done:
+		t.Fatal("second task proceeded without a free slot")
+	case <-time.After(200 * time.Millisecond):
+	}
+	sem <- returned
+	var got result
+	select {
+	case got = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second task never won the lock after a slot freed up")
+	}
+	if got.abort || got.release == nil {
+		t.Fatalf("second task did not win the lock (abort=%v)", got.abort)
+	}
+	if secondLease.Slot() != 7 {
+		t.Fatalf("re-acquired slot = %d, want 7 (the only index in the pool)", secondLease.Slot())
+	}
+	select {
+	case s := <-sem:
+		t.Fatalf("pool still holds slot %d while the second task runs with it", s)
+	default:
+	}
+	got.release()
+	secondLease.Release()
+	select {
+	case s := <-sem:
+		if s != 7 {
+			t.Fatalf("released slot = %d, want 7", s)
+		}
+	default:
+		t.Fatal("lease release did not return the slot to the pool")
+	}
+	// The first task's lease was never released by the wait; it still holds
+	// slot 0 until its own run ends.
+	firstLease.Release()
+	if s := <-sem; s != 0 {
+		t.Fatalf("first task's released slot = %d, want 0", s)
+	}
+}
+
+// A lease that is cancelled while re-acquiring must give the lock back: the
+// task is about to fail, and a lock held by a task that never runs would
+// wedge every later waiter.
+func TestWaitingTaskCancelledDuringSlotReacquireReleasesLock(t *testing.T) {
+	t.Parallel()
+
+	const daemonID = "d-mine"
+	tmp := t.TempDir()
+	raw, err := json.Marshal(localDirectoryRef{LocalPath: tmp, DaemonID: daemonID})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	resources := []ProjectResourceData{
+		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
+	}
+	first := Task{ID: "issue-task-1", IssueID: "issue-1", ProjectResources: resources}
+	second := Task{ID: "issue-task-2", IssueID: "issue-2", ProjectResources: resources}
+
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasSuffix(req.URL.Path, "/fail") {
+			failCalls.Add(1)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		cfg:                Config{DaemonID: daemonID},
+		client:             NewClient(srv.URL),
+		localPathLocks:     NewLocalPathLocker(),
+		logger:             slog.Default(),
+		cancelPollInterval: time.Hour,
+	}
+	sem := newTaskSlotSemaphore(1)
+	firstLease := newTaskSlotLease(sem, <-sem, nil)
+	firstRelease, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), first, slog.Default(), firstLease)
+	if abort || firstRelease == nil {
+		t.Fatalf("first task failed to take the lock (abort=%v)", abort)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	secondLease := newTaskSlotLease(sem, 7, nil)
+	done := make(chan bool, 1)
+	go func() {
+		rel, ab := d.acquireLocalDirectoryLockIfNeeded(ctx, second, slog.Default(), secondLease)
+		if rel != nil {
+			rel()
+		}
+		done <- ab
+	}()
+	returned := <-sem // the waiter parked and gave its slot back
+	// Nobody returns a slot; the lock is released, so the waiter wins it and
+	// blocks on Reacquire. Cancel it there.
+	firstRelease()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case ab := <-done:
+		if !ab {
+			t.Fatal("cancelled waiter was allowed to proceed")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled waiter never returned")
+	}
+	if got := d.localPathLocks.Holder(tmp); got != "" && got != second.ID {
+		t.Fatalf("holder = %q after cancellation, want empty", got)
+	}
+	// The lock must be free for the next task.
+	release, err := d.localPathLocks.Acquire(context.Background(), realPathForTest(t, tmp), "task-3", nil)
+	if err != nil {
+		t.Fatalf("lock still held after the cancelled waiter gave up: %v", err)
+	}
+	release()
+	sem <- returned
+	if failCalls.Load() == 0 {
+		t.Error("cancelled waiter did not report the failure to the server")
+	}
+}
+
+func realPathForTest(t *testing.T, p string) string {
+	t.Helper()
+	real, err := resolveRealPath(p)
+	if err != nil {
+		t.Fatalf("resolve real path: %v", err)
+	}
+	return real
 }

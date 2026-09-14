@@ -23,6 +23,10 @@ const TaskContextMarkerRelPath = ".multica/daemon_task_context.json"
 // treating TaskContextMarkerRelPath as daemon-owned.
 const TaskContextMarkerManagedBy = "multica-daemon-task"
 
+// sidecarDirName is the env-root subdirectory that receives the cwd sidecar
+// files in shared mode (PrepareParams.IsolateSidecars).
+const sidecarDirName = "sidecar"
+
 type taskContextMarkerFile struct {
 	ManagedBy     string `json:"managed_by"`
 	AgentID       string `json:"agent_id,omitempty"`
@@ -318,6 +322,12 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 		return "", err
 	}
 	return skillsDir, nil
+}
+
+// SkillsDirPath is skillsDirPath for callers outside the package: the daemon
+// uses it to tell a shared-mode brief where the relocated skills tree is.
+func SkillsDirPath(root, provider string) string {
+	return skillsDirPath(root, provider)
 }
 
 // skillsDirPath returns the provider-native skills parent directory under

@@ -1341,6 +1341,7 @@ func TestValidateLocalDirectoryRefExecutionMode(t *testing.T) {
 		{"absent means in_place", "", ""},
 		{"explicit in_place", "in_place", "in_place"},
 		{"worktree", "worktree", "worktree"},
+		{"shared", "shared", "shared"},
 		{"surrounding whitespace is trimmed", "  worktree  ", "worktree"},
 	}
 	for _, tc := range accepted {
@@ -1367,7 +1368,7 @@ func TestValidateLocalDirectoryRefExecutionMode(t *testing.T) {
 		})
 	}
 
-	rejected := []string{"snapshot", "WORKTREE", "in-place", "true"}
+	rejected := []string{"snapshot", "WORKTREE", "in-place", "true", "SHARED", "shared_workspace"}
 	for _, mode := range rejected {
 		t.Run("rejects "+mode, func(t *testing.T) {
 			raw, err := json.Marshal(map[string]any{

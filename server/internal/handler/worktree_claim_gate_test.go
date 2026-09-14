@@ -1049,3 +1049,88 @@ func TestDaemonRegisterPersistsCapabilities(t *testing.T) {
 		assertCapable(t, id, false)
 	})
 }
+
+// Shared mode runs the same last-gate as worktree mode, for the milder failure:
+// an old daemon json-skips execution_mode, runs in place and takes the mutex,
+// which silently re-serialises the directory the user asked to share.
+func TestSharedClaimBlockReason(t *testing.T) {
+	const daemon = "daemon-a"
+
+	sharedRes := []ProjectResourceData{{
+		ID: "r1", ResourceType: "local_directory",
+		ResourceRef: localDirRef(t, "/Volumes/Storge/pg-game", daemon, "shared"),
+	}}
+
+	t.Run("blocks a runtime that does not advertise the capability", func(t *testing.T) {
+		reason := sharedClaimBlockReason(sharedRes, runtimeWithVersion(daemon, "0.4.45"), false)
+		if reason == "" {
+			t.Fatal("an outdated runtime was allowed to claim a shared-mode task")
+		}
+		if !strings.Contains(reason, "/Volumes/Storge/pg-game") || !strings.Contains(reason, "Update the Multica app") {
+			t.Errorf("reason should name the directory and tell the user to update, got: %q", reason)
+		}
+	})
+
+	t.Run("passes a runtime that advertises it", func(t *testing.T) {
+		if reason := sharedClaimBlockReason(sharedRes, runtimeWithVersion(daemon, "0.4.45"), true); reason != "" {
+			t.Fatalf("capable runtime was blocked: %q", reason)
+		}
+	})
+
+	t.Run("the worktree gate ignores a shared resource and vice versa", func(t *testing.T) {
+		if reason := worktreeClaimBlockReason(sharedRes, runtimeWithVersion(daemon, "0.1.0"), false); reason != "" {
+			t.Fatalf("worktree gate blocked a shared resource: %q", reason)
+		}
+		worktreeRes := []ProjectResourceData{{
+			ID: "r1", ResourceType: "local_directory",
+			ResourceRef: localDirRef(t, "/Users/dev/game", daemon, "worktree"),
+		}}
+		if reason := sharedClaimBlockReason(worktreeRes, runtimeWithVersion(daemon, "0.1.0"), false); reason != "" {
+			t.Fatalf("shared gate blocked a worktree resource: %q", reason)
+		}
+	})
+
+	t.Run("another daemon's shared resource is not this runtime's problem", func(t *testing.T) {
+		other := []ProjectResourceData{{
+			ID: "r1", ResourceType: "local_directory",
+			ResourceRef: localDirRef(t, "/Volumes/Storge/pg-game", "daemon-b", "shared"),
+		}}
+		if reason := sharedClaimBlockReason(other, runtimeWithVersion(daemon, "0.1.0"), false); reason != "" {
+			t.Fatalf("blocked on another daemon's resource: %q", reason)
+		}
+	})
+}
+
+// The save-time gate reads one table for every gated mode, so a mode cannot be
+// added to the validator and forgotten by the gate.
+func TestLocalDirectoryModeCapability(t *testing.T) {
+	capability, _, _, gated := localDirectoryModeCapability("worktree")
+	if !gated || capability != protocol.DaemonCapabilityLocalWorktreeV1 {
+		t.Errorf("worktree → (%q, gated=%v), want local-worktree-v1 gated", capability, gated)
+	}
+	capability, minVersion, human, gated := localDirectoryModeCapability("shared")
+	if !gated || capability != protocol.DaemonCapabilityLocalSharedV1 {
+		t.Errorf("shared → (%q, gated=%v), want local-shared-v1 gated", capability, gated)
+	}
+	if minVersion == "" || human == "" {
+		t.Errorf("shared gate must carry a display version and a human mode name, got (%q, %q)", minVersion, human)
+	}
+	for _, mode := range []string{"", "in_place"} {
+		if _, _, _, gated := localDirectoryModeCapability(mode); gated {
+			t.Errorf("%q must not be gated: every daemon implements in_place", mode)
+		}
+	}
+
+	daemon := "daemon-a"
+	rows := []db.AgentRuntime{{
+		DaemonID:   pgtype.Text{String: daemon, Valid: true},
+		LastSeenAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		Metadata:   []byte(`{"capabilities":["local-shared-v1"]}`),
+	}}
+	if !daemonAdvertisesCapability(rows, daemon, protocol.DaemonCapabilityLocalSharedV1) {
+		t.Error("a row advertising local-shared-v1 was not recognised")
+	}
+	if daemonAdvertisesCapability(rows, daemon, protocol.DaemonCapabilityLocalWorktreeV1) {
+		t.Error("a row advertising only local-shared-v1 passed the worktree check")
+	}
+}

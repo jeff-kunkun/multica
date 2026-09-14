@@ -2071,3 +2071,44 @@ func TestWorktreeReplayConflictBlock(t *testing.T) {
 		}
 	})
 }
+
+// TestSharedWorkspaceBlock covers the notice a shared-mode task gets. It is a
+// different message from the lock-exempt one: here nobody holds the lock, by
+// the owner's decision, and the guidance is about the workspace's own
+// branch-per-task conventions rather than about staying light-handed.
+func TestSharedWorkspaceBlock(t *testing.T) {
+	t.Parallel()
+
+	issue := Task{IssueID: "issue-1"}
+
+	t.Run("absent by default", func(t *testing.T) {
+		out := BuildPrompt(issue, "claude")
+		if strings.Contains(out, "Shared workspace") {
+			t.Fatalf("notice leaked into a run with no shared-mode resource:\n%s", out)
+		}
+	})
+
+	t.Run("present for a shared-mode task", func(t *testing.T) {
+		out := BuildPrompt(issue, "claude", WithSharedWorkspace())
+		if !strings.Contains(out, "## Shared workspace") {
+			t.Fatalf("notice missing:\n%s", out)
+		}
+		if !strings.Contains(out, "no task holds a lock") {
+			t.Fatalf("notice does not state that the directory is unlocked:\n%s", out)
+		}
+		if !strings.Contains(out, "Multica keeps its own runtime files out of this directory") {
+			t.Fatalf("notice does not tell the agent the sidecars are elsewhere:\n%s", out)
+		}
+		body := buildPromptBody(issue, "claude")
+		if !strings.HasPrefix(out, body) {
+			t.Fatalf("notice was not appended after the issue body:\n%s", out)
+		}
+	})
+
+	t.Run("does not double up with the lock-exempt notice", func(t *testing.T) {
+		out := BuildPrompt(issue, "claude", WithSharedWorkspace())
+		if strings.Contains(out, "Shared working directory") {
+			t.Fatalf("shared-mode task also received the lock-exempt notice:\n%s", out)
+		}
+	})
+}

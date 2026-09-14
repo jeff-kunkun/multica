@@ -20,6 +20,19 @@ const (
 	// unblocked, which let exactly such a daemon through (MUL-5707). A daemon
 	// that implements the mode says so; one that does not, cannot.
 	DaemonCapabilityLocalWorktreeV1 = "local-worktree-v1"
+	// DaemonCapabilityLocalSharedV1 advertises that the daemon implements
+	// shared mode for local_directory resources (execution_mode=shared): the
+	// task runs in the user's directory WITHOUT the per-path mutex, and every
+	// file the daemon would otherwise write into that directory lands in the
+	// task's own env root instead.
+	//
+	// Same reasoning as the worktree capability: a daemon that does not know
+	// the mode json-skips execution_mode and runs the task in place, taking the
+	// path mutex, which silently re-serialises the directory the user asked to
+	// share. That is a lost promise about concurrency rather than about
+	// isolation, so it is the milder failure — but the server still gates on
+	// the capability so the user learns at save time, not from a queue.
+	DaemonCapabilityLocalSharedV1 = "local-shared-v1"
 	// DaemonCapabilitySourceContextQuickCreateV1 advertises support for the
 	// two-section quick-create prompt that keeps a new instruction separate
 	// from immutable historical source context.

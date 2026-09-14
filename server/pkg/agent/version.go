@@ -54,6 +54,11 @@ const MinQuickCreateFieldsCLIVersion = "0.4.3"
 // through the floor and ran two tasks in the user's own directory.
 const MinLocalWorktreeCLIVersion = "0.4.24"
 
+// MinLocalSharedCLIVersion is the release that first ships execution_mode=shared
+// for local_directory resources. Display-only, like MinLocalWorktreeCLIVersion:
+// the gates read protocol.DaemonCapabilityLocalSharedV1.
+const MinLocalSharedCLIVersion = "0.4.46"
+
 // Errors returned by CheckMinCLIVersion. Callers branch on these to surface
 // "needs upgrade" vs "version not reported" with the right user message.
 var (

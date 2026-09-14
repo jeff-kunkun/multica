@@ -5453,20 +5453,21 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 				// direct Git operations cannot overlap it.
 				cache.CancelMaintenance()
 			}
-			go func(t Task, slot int) {
+			lease := newTaskSlotLease(sem, slot, func() { signalPollerWakeup(wakeup) })
+			go func(t Task, lease *taskSlotLease) {
 				defer taskWG.Done()
 				defer d.activeTasks.Add(-1)
-				defer func() {
-					// Release local capacity before waking the poller. The task's
-					// terminal callback and local cleanup have both finished at this
-					// point, so a successor that was previously blocked by agent
-					// capacity or per-(issue, agent) serialization can be claimed
-					// immediately instead of waiting for PollInterval.
-					sem <- slot
-					signalPollerWakeup(wakeup)
-				}()
-				d.handleTask(parentCtx, t, slot)
-			}(t, slot)
+				// Release local capacity before waking the poller (the lease does
+				// both). The task's terminal callback and local cleanup have both
+				// finished at this point, so a successor that was previously
+				// blocked by agent capacity or per-(issue, agent) serialization
+				// can be claimed immediately instead of waiting for PollInterval.
+				// Through the lease rather than a bare send: a task that queued
+				// for a local_directory handed its slot back while it waited and
+				// may hold a different index now, or none at all.
+				defer lease.Release()
+				d.handleTask(parentCtx, t, lease)
+			}(t, lease)
 			dispatched++
 		}
 		d.exitClaim()
@@ -5595,6 +5596,95 @@ func newTaskSlotSemaphore(maxConcurrentTasks int) chan int {
 	return sem
 }
 
+// taskSlotLease is one task's hold on a concurrency slot from the poller's
+// semaphore, made hand-back-able for the stretches where the task is parked
+// and running nothing.
+//
+// The poller claims a task only after taking a slot for it, and the slot used
+// to stay with the task until it finished — including the whole time it sat
+// in waiting_local_directory behind another task on the same in_place
+// directory. Twenty tasks queued behind one long build then pinned all twenty
+// slots, and the machine looked fully busy while running a single agent. The
+// lease lets acquireLocalDirectoryLockIfNeeded hand the slot back when the
+// wait begins and take one again when the lock is won, so a queue on one
+// directory costs the daemon one slot, not one per waiter.
+//
+// Nil-safe: a nil lease (focused tests that never went through the poller)
+// reports slot 0 and treats Release / Reacquire as no-ops. The slot index is
+// exposed to the agent as MULTICA_TASK_SLOT, so callers read Slot() after the
+// wait rather than caching the value they were dispatched with.
+type taskSlotLease struct {
+	sem    chan int
+	wakeup func()
+
+	mu   sync.Mutex
+	slot int
+	held bool
+}
+
+func newTaskSlotLease(sem chan int, slot int, wakeup func()) *taskSlotLease {
+	return &taskSlotLease{sem: sem, wakeup: wakeup, slot: slot, held: true}
+}
+
+// Slot returns the slot index currently held. After a Release without a
+// successful Reacquire it returns the last index held, which is the right
+// value for log lines and harmless for an environment no agent will launch in.
+func (l *taskSlotLease) Slot() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.slot
+}
+
+// Release returns the slot to the pool and wakes the poller so the freed
+// capacity is claimed against immediately. Idempotent: a second Release, or
+// one after a failed Reacquire, does nothing.
+func (l *taskSlotLease) Release() {
+	if l == nil || l.sem == nil {
+		return
+	}
+	l.mu.Lock()
+	if !l.held {
+		l.mu.Unlock()
+		return
+	}
+	l.held = false
+	slot := l.slot
+	l.mu.Unlock()
+	l.sem <- slot
+	if l.wakeup != nil {
+		l.wakeup()
+	}
+}
+
+// Reacquire blocks until a slot is free again or ctx ends. The index taken may
+// differ from the one released — slots are interchangeable capacity, and the
+// poller may have handed the old index to a newly claimed task meanwhile. A
+// lease that is still held returns immediately.
+func (l *taskSlotLease) Reacquire(ctx context.Context) error {
+	if l == nil || l.sem == nil {
+		return nil
+	}
+	l.mu.Lock()
+	if l.held {
+		l.mu.Unlock()
+		return nil
+	}
+	l.mu.Unlock()
+	select {
+	case slot := <-l.sem:
+		l.mu.Lock()
+		l.slot = slot
+		l.held = true
+		l.mu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // shouldInterruptAgent decides whether the running agent should be cancelled
 // based on the latest GetTaskStatus call. Pure function so the decision is
 // trivially testable; the polling goroutine in watchTaskCancellation is just
@@ -5679,7 +5769,7 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 	return cancelled
 }
 
-func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
+func (d *Daemon) handleTask(ctx context.Context, task Task, lease *taskSlotLease) {
 	d.mu.Lock()
 	rt, tracked := d.runtimeIndex[task.RuntimeID]
 	d.mu.Unlock()
@@ -5748,7 +5838,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// fires only after execenv.Prepare/Reuse has put env.WorkDir on disk,
 	// so consumers that read status==running can resolve the workdir path
 	// without racing the daemon's os.MkdirAll.
-	localRelease, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, taskLog)
+	localRelease, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, taskLog, lease)
 	if abort {
 		return
 	}
@@ -5803,7 +5893,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}()
 
-	result, err := d.runner.run(runCtx, task, provider, slot, taskLog)
+	// Slot() is read here, not at dispatch: a task that queued for a
+	// local_directory handed its slot back for the wait and holds a fresh index
+	// now (see taskSlotLease).
+	result, err := d.runner.run(runCtx, task, provider, lease.Slot(), taskLog)
 
 	// Report usage before any early return — the agent accumulates tokens
 	// whether the task completes, errors, or is cancelled mid-run by the poll
@@ -5914,7 +6007,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			// exempt env root, so the directory would accumulate one env
 			// root per task forever — the exact cost the exemption was
 			// meant to trade away for a user's own files.
-			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment != nil && !assignment.UsesWorktree() {
+			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment.RunsInUserDirectory() {
 				meta.LocalDirectory = true
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
@@ -6016,7 +6109,12 @@ func taskRunFailureReason(err error) string {
 //     lock, then return the release callback once we win.
 //  4. The blocking wait is cancelled (daemon shutdown, server-side cancel)
 //     — fail the task with the ctx error.
-func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger) (release func(), abort bool) {
+//
+// lease is the task's concurrency slot. While the task is parked on the mutex
+// the slot goes back to the pool and is taken again once the lock is won, so
+// a queue on one directory does not consume the daemon's whole capacity. nil
+// is accepted (focused tests) and simply keeps the slot.
+func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger, lease *taskSlotLease) (release func(), abort bool) {
 	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
 		return nil, false
 	}
@@ -6065,14 +6163,21 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, true
 	}
 
-	// Worktree mode is the whole point of not serialising: each task gets its
-	// own checkout of the repo inside its env root, so there is no shared
-	// mutable state on the user's path to protect. Skipping the mutex here is
-	// what lets sibling tasks on one directory run concurrently. Path
-	// validation above still applies — git needs to write worktree
-	// registrations into the user's repo.
-	if assignment.UsesWorktree() {
-		taskLog.Info("local_directory: worktree mode, skipping path mutex")
+	// Two modes skip the mutex, for two reasons. Worktree mode because each
+	// task gets its own checkout of the repo inside its env root, so there is
+	// no shared mutable state on the user's path to protect. Shared mode
+	// because the user declared the directory a shared workspace whose
+	// isolation is handled by its own conventions (per-task branches in
+	// sub-repositories), and asked the daemon to keep only its own files out
+	// of the way — which execenv does by writing them under the env root.
+	// Skipping the mutex here is what lets sibling tasks on one directory run
+	// concurrently. Path validation above still applies to both.
+	if assignment.SkipsPathMutex() {
+		if assignment.IsShared() {
+			taskLog.Info("local_directory: shared mode, skipping path mutex")
+		} else {
+			taskLog.Info("local_directory: worktree mode, skipping path mutex")
+		}
 		return nil, false
 	}
 
@@ -6125,6 +6230,10 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		// server status update below fails.
 		d.resourceWaitTasks.Add(1)
 		waitCounted = true
+		// Parked tasks run nothing, so they should hold nothing: hand the slot
+		// back so the poller can claim other work while this task queues. It is
+		// taken again after Acquire returns, below.
+		lease.Release()
 		// Rendered to the user, so it names the directory rather than its path
 		// (see localDirectoryAssignment.DisplayName). The absolute path stays in
 		// the daemon's own logs, which is where an operator debugging a wedged
@@ -6165,6 +6274,18 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		})
 	}
 	release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
+	if err == nil && waitCounted {
+		// The slot went back to the pool in onWait. Take one again before the
+		// task proceeds, holding the path lock meanwhile: the lock is what this
+		// task queued for, and letting go of it to wait for a slot would send
+		// the task to the back of the queue it just reached the front of. The
+		// cancellation watcher started in onWait still covers this wait.
+		if reErr := lease.Reacquire(waitCtx); reErr != nil {
+			release()
+			release = nil
+			err = fmt.Errorf("re-acquire task slot after local_directory wait: %w", reErr)
+		}
+	}
 	if err != nil {
 		// If the wait was cut short because the server finalized the task
 		// (terminal state) or deleted the row, the row is already in a
@@ -6434,6 +6555,59 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	default:
 		return false
 	}
+}
+
+// sharedBriefDelivery says how a provider receives the runtime brief and its
+// skills when a shared-mode task keeps every daemon-written file out of the
+// cwd (execenv.PrepareParams.IsolateSidecars).
+type sharedBriefDelivery int
+
+const (
+	// sharedBriefUnsupported: no known route. The task is refused before
+	// Prepare (sharedModeProviderSupported) rather than started blind.
+	sharedBriefUnsupported sharedBriefDelivery = iota
+	// sharedBriefViaClaudeFlags: --add-dir <sidecar root> makes Claude Code
+	// discover .claude/skills there; --append-system-prompt-file delivers the
+	// brief file written under the same root.
+	sharedBriefViaClaudeFlags
+	// sharedBriefInline: the backend prepends ExecOptions.SystemPrompt to the
+	// user prompt, the route these providers already use (or implement) for
+	// file-less brief delivery. Their native skill discovery is cwd-relative
+	// and finds nothing; the brief's Skills section names the sidecar skills
+	// directory instead so the agent can read SKILL.md files directly.
+	sharedBriefInline
+)
+
+// sharedModeBriefDelivery is the provider table behind shared mode. A provider
+// is listed only when a sidecar-free route for the brief has been verified
+// (claude, by spike against Claude Code 2.1.270) or is the route it already
+// runs on in production (providerNeedsInlineSystemPrompt) or has implemented
+// in its backend (userText = SystemPrompt + prompt). Codex, Hermes and the
+// providers that read only from disk stay unsupported until their own route
+// is verified — codex's per-task CODEX_HOME is the obvious candidate.
+func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
+	switch provider {
+	case "claude":
+		return sharedBriefViaClaudeFlags
+	case "openclaw", "kimi", "traecli", "qwenpaw",
+		"codebuddy", "dim", "grok", "kiro", "mcode", "qoder", "qoderclicn", "zeroclaw":
+		return sharedBriefInline
+	default:
+		return sharedBriefUnsupported
+	}
+}
+
+// sharedModeProviderSupported returns a user-facing error when provider has no
+// sidecar-free brief route, so a shared-mode task fails with a reason the user
+// can act on instead of running without its brief and skills.
+func sharedModeProviderSupported(provider string) error {
+	if sharedModeBriefDelivery(provider) != sharedBriefUnsupported {
+		return nil
+	}
+	return fmt.Errorf(
+		"local_directory: execution_mode %q is not yet supported for the %q runtime on this daemon; "+
+			"switch the resource to %q or %q, or run the task with a supported runtime (claude, grok, kimi, openclaw, …)",
+		localDirectoryModeShared, provider, localDirectoryModeInPlace, localDirectoryModeWorktree)
 }
 
 // gateResumeToReachableSession clears the task's prior session unless this run
@@ -8127,6 +8301,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		} else {
 			if localAssignment != nil {
 				prepParams.LocalWorkDir = localAssignment.AbsPath
+				if localAssignment.IsShared() {
+					// Fail before anything is written: a provider without a
+					// sidecar-free brief route would start with no runtime brief
+					// and no skills, and silently do the wrong work.
+					if err := sharedModeProviderSupported(provider); err != nil {
+						return TaskResult{}, err
+					}
+					prepParams.IsolateSidecars = true
+				}
 			}
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 			if err != nil {
@@ -8224,7 +8407,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// this pass Finalize would auto-commit the sidecars Prepare just wrote and
 	// deliver a branch whose only content is Multica's own runtime files — or,
 	// in place, leave them behind in the user's tree.
-	if env.LocalDirectory || env.LocalWorktree != nil {
+	//
+	// Shared mode is excluded: Prepare wrote nothing into the user's directory
+	// (every sidecar sits under env.SidecarRoot), so there is nothing to undo
+	// there, and the sidecar root itself stays with the env root for forensics
+	// the same way output/ and logs/ do.
+	if (env.LocalDirectory && env.SidecarRoot == "") || env.LocalWorktree != nil {
 		defer func() {
 			var cleanupErr error
 			if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {
@@ -8321,7 +8509,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	//
+	// Shared mode keeps the daemon's files out of the user's directory, the
+	// runtime brief included: it is written under the task's sidecar root and
+	// handed to the provider from there (see sharedModeBriefDelivery). The
+	// brief also has to name the relocated sidecar paths, since the defaults it
+	// would otherwise describe are relative to a cwd that holds none of them.
+	briefRoot := env.WorkDir
+	if env.SidecarRoot != "" {
+		briefRoot = env.SidecarRoot
+		taskCtx.SidecarRoot = env.SidecarRoot
+		taskCtx.SkillsDir = execenv.SkillsDirPath(env.SidecarRoot, provider)
+	}
+	runtimeBrief, err := execenv.InjectRuntimeConfig(briefRoot, provider, taskCtx)
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
@@ -8330,7 +8530,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// is the one thing it cannot work out from its own context — tell it.
 	// Worktree mode is excluded: there the tree is this task's private checkout.
 	var promptOptions []PromptOption
-	if localAssignment != nil && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
+	if localAssignment.IsShared() {
+		// Shared mode: every task in this directory runs unserialised, so the
+		// notice is about the workspace's conventions, not about a lock this
+		// turn happens to skip.
+		promptOptions = append(promptOptions, WithSharedWorkspace())
+	} else if localAssignment != nil && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
 		promptOptions = append(promptOptions, WithSharedLocalDirectory())
 	}
 	// Worktree mode hands this turn a tree that is mid-merge when the user's
@@ -8608,7 +8813,27 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// as always included, and a real kiro-cli 2.13.0 ACP smoke confirms it.
 	// Prepending the full runtime brief into the ACP user prompt duplicates that
 	// context and bloats every turn.
-	if providerNeedsInlineSystemPrompt(provider) {
+	// Shared mode adds a second reason for inline delivery: the brief file sits
+	// under the sidecar root, where no provider reads it from disk. Claude Code
+	// gets it as flags instead — the skills directory through --add-dir, which
+	// its project-level skill discovery honours (verified against 2.1.270; the
+	// same run showed CLAUDE.md is NOT loaded from an added directory), and the
+	// brief through --append-system-prompt-file so the file is re-read on the
+	// fresh-session retry below. Both travel as ExtraArgs, which the Claude
+	// backend forwards and which lie outside its blocked-flag set.
+	briefInline := providerNeedsInlineSystemPrompt(provider)
+	if env.SidecarRoot != "" {
+		switch sharedModeBriefDelivery(provider) {
+		case sharedBriefViaClaudeFlags:
+			execOpts.ExtraArgs = append(append([]string{}, execOpts.ExtraArgs...),
+				"--add-dir", env.SidecarRoot,
+				"--append-system-prompt-file", execenv.RuntimeConfigFilePath(env.SidecarRoot, provider),
+			)
+		case sharedBriefInline:
+			briefInline = true
+		}
+	}
+	if briefInline {
 		execOpts.SystemPrompt = runtimeBrief
 	}
 
@@ -8703,11 +8928,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		task.PriorSessionResumeUnavailable = true
 		execOpts.ResumeContinuityNotice = ""
 		taskCtx.PriorSessionResumed = false
-		if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
+		if freshBrief, briefErr := execenv.InjectRuntimeConfig(briefRoot, provider, taskCtx); briefErr != nil {
 			taskLog.Warn("execenv: re-inject cold runtime config for fresh retry failed (non-fatal)", "error", briefErr)
 		} else {
 			runtimeBrief = freshBrief
-			if providerNeedsInlineSystemPrompt(provider) {
+			if briefInline {
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}

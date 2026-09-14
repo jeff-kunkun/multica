@@ -2,6 +2,7 @@ package execenv
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -431,7 +432,11 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 		b.WriteString("\n\n")
 	}
 	if len(ctx.ProjectResources) > 0 {
-		b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
+		resourcesFile := ".multica/project/resources.json"
+		if ctx.SidecarRoot != "" {
+			resourcesFile = filepath.ToSlash(filepath.Join(ctx.SidecarRoot, ".multica", "project", "resources.json"))
+		}
+		fmt.Fprintf(b, "Project resources (also written to `%s`):\n\n", resourcesFile)
 		for _, r := range ctx.ProjectResources {
 			fmt.Fprintf(b, "- %s\n", formatProjectResource(r))
 		}
@@ -811,6 +816,13 @@ func writeSkills(b *strings.Builder, ctx TaskContextForEnv) {
 		fmt.Fprintf(b, "- **%s**\n", skill.Name)
 	}
 	b.WriteString("\n")
+	// Shared mode relocates the skills tree out of the cwd. Claude Code still
+	// discovers it (the daemon adds the sidecar root with --add-dir); every
+	// other supported runtime's discovery is cwd-relative and finds nothing,
+	// so the brief names the directory and the agent reads SKILL.md directly.
+	if ctx.SkillsDir != "" {
+		fmt.Fprintf(b, "The skill files for this task live under `%s/<skill>/SKILL.md`. If a skill is not offered to you natively, read its SKILL.md from there when you need it.\n\n", filepath.ToSlash(ctx.SkillsDir))
+	}
 	platformSlug, _ := builtinSlug(skills, platformSkillName)
 	// One recall hint for the platform skill, because it is the only listed
 	// skill whose trigger is "the platform itself" rather than a task the

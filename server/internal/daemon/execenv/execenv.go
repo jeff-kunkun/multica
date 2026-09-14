@@ -81,6 +81,16 @@ type PrepareParams struct {
 	// substituted. Used by the local_directory project_resource flow
 	// (MUL-2663). When set, the envRoot/workdir directory is not created.
 	LocalWorkDir string
+	// IsolateSidecars, together with LocalWorkDir, keeps every file Prepare
+	// would place in the agent's cwd — the task-context marker, the project
+	// resources file, the provider-native skills tree — out of the user's
+	// directory and under {envRoot}/sidecar instead; Environment.SidecarRoot
+	// reports where. This is shared mode's contract: several tasks run in
+	// the same directory at once, so files the daemon writes per task cannot
+	// live at one shared path. The daemon then hands the sidecar root to the
+	// provider by its own route (see daemon.sharedModeBriefDelivery). Ignored
+	// without LocalWorkDir: a daemon-owned workdir is already per task.
+	IsolateSidecars bool
 	// LocalWorktree, when non-nil, is the worktree-mode counterpart of
 	// LocalWorkDir: instead of running in the user's directory, the task gets
 	// its own git worktree of that repo inside envRoot and delivers its work
@@ -161,7 +171,16 @@ type TaskContextForEnv struct {
 	ProjectTitle                  string                  // human-readable project title
 	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
-	ChatSessionID                 string                  // non-empty for chat tasks
+	// SidecarRoot, when set, is where this task's sidecar files were written
+	// instead of the cwd (Environment.SidecarRoot). The brief names the
+	// absolute paths it implies — the default relative paths would point at a
+	// cwd that holds none of them.
+	SidecarRoot string
+	// SkillsDir, when set, is the absolute provider-native skills directory
+	// under SidecarRoot. The brief points the agent at it because cwd-relative
+	// skill discovery finds nothing there.
+	SkillsDir     string
+	ChatSessionID string // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
 	// "feishu", "wecom"); empty for a web/mobile chat. It names the surface in
 	// the brief's copy; what that surface can DELIVER is the separate field
@@ -282,6 +301,13 @@ type Environment struct {
 	// scratch that the GC should reclaim on the normal schedule, and the
 	// sidecar rollback that protects a user's directory is unnecessary.
 	LocalDirectory bool
+	// SidecarRoot is the per-task directory holding the files Prepare kept
+	// out of a shared-mode workdir (PrepareParams.IsolateSidecars): the task
+	// marker, project resources, provider skills and, once the daemon injects
+	// it, the runtime brief. Empty for every other flow, where those files sit
+	// in WorkDir. A non-empty value also says "the user's directory received
+	// nothing", so the local_directory cleanup pass has nothing to undo.
+	SidecarRoot string
 	// MulticaConfigRoot is the private per-task config directory exported to
 	// child CLI invocations. It prevents implicit discovery of the daemon
 	// owner's ~/.multica profile without changing the provider-facing HOME.
@@ -504,6 +530,20 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: create directory %s: %w", dir, err)
 		}
 	}
+	// Shared mode: the context files go under the env root, not the cwd. The
+	// cwd is the user's directory and is shared with concurrent tasks, so a
+	// per-task file at a fixed path there would be overwritten by the next
+	// task to start and removed by the first to finish. Worktree mode never
+	// takes this branch (LocalWorkDir is empty there): its cwd is a private
+	// checkout, and the sidecars written into it are what Finalize removes
+	// before committing.
+	sidecarRoot := ""
+	if params.LocalWorkDir != "" && params.IsolateSidecars {
+		sidecarRoot = filepath.Join(envRoot, sidecarDirName)
+		if err := os.MkdirAll(sidecarRoot, 0o755); err != nil {
+			return nil, fmt.Errorf("execenv: create sidecar root %s: %w", sidecarRoot, err)
+		}
+	}
 	multicaConfigRoot := filepath.Join(envRoot, "multica-config")
 	if err := os.MkdirAll(multicaConfigRoot, 0o700); err != nil {
 		return nil, fmt.Errorf("execenv: create task-local Multica config directory: %w", err)
@@ -557,6 +597,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		RootDir:           envRoot,
 		WorkDir:           workDir,
 		LocalDirectory:    params.LocalWorkDir != "",
+		SidecarRoot:       sidecarRoot,
 		LocalWorktree:     localWorktree,
 		MulticaConfigRoot: multicaConfigRoot,
 		logger:            logger,
@@ -602,7 +643,14 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}()
 	}
 
-	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
+	// Resolved here, after the worktree branch above has settled workDir: the
+	// sidecars follow the cwd everywhere except shared mode, where they go to
+	// the sidecar root instead.
+	contextRoot := workDir
+	if sidecarRoot != "" {
+		contextRoot = sidecarRoot
+	}
+	if err := writeContextFiles(contextRoot, params.Provider, params.Task, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
 	if err := prepareOmpMcpConfig(workDir, params.Provider, params.McpConfig, manifest); err != nil {

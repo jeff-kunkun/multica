@@ -23,9 +23,23 @@ const localDirectoryResourceType = "local_directory"
 // constants in handler/project_resource.go — keep in sync. An absent or empty
 // value means in_place, so resources created before worktree mode existed keep
 // their original behavior.
+//
+//	in_place  cwd = user's directory, one task at a time (per-path mutex).
+//	worktree  cwd = a private git worktree inside the env root, no mutex.
+//	shared    cwd = user's directory, no mutex; the daemon's own sidecar
+//	          files go to the env root instead of the user's tree.
+//
+// shared exists for directories that are not one working copy but a
+// container of many — an umbrella directory holding several repositories,
+// each with its own branch worktrees. There the mutex protects nothing the
+// user wanted protected (tasks already work on separate branches by
+// convention) while still serialising every task behind every other. The
+// mode hands isolation back to the workspace's own conventions and keeps only
+// what the daemon can guarantee: its own files never collide.
 const (
 	localDirectoryModeInPlace  = "in_place"
 	localDirectoryModeWorktree = "worktree"
+	localDirectoryModeShared   = "shared"
 )
 
 // localDirectoryRef mirrors the server-side ref shape for local_directory
@@ -57,6 +71,33 @@ type localDirectoryAssignment struct {
 // on this rather than on "is there a local_directory assignment at all".
 func (a *localDirectoryAssignment) UsesWorktree() bool {
 	return a != nil && strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeWorktree
+}
+
+// IsShared reports whether this assignment runs in shared mode: the task's cwd
+// is the user's directory, as in in_place, but no per-path mutex is taken and
+// the daemon's sidecar files are isolated into the task's env root. See the
+// mode constants for why the mode exists.
+func (a *localDirectoryAssignment) IsShared() bool {
+	return a != nil && strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeShared
+}
+
+// SkipsPathMutex reports whether tasks on this assignment run without the
+// per-path mutex. Both modes that answer yes do so for the same reason — the
+// directory holds no shared mutable state the daemon owes protection to —
+// but for different causes: worktree mode because each task gets a private
+// checkout, shared mode because the user asked the daemon to stay out of it.
+// Every caller deciding whether to serialise must branch on this, not on
+// UsesWorktree, or the shared mode looks implemented while still queueing.
+func (a *localDirectoryAssignment) SkipsPathMutex() bool {
+	return a.UsesWorktree() || a.IsShared()
+}
+
+// RunsInUserDirectory reports whether the agent's cwd is the user's own path
+// (in_place and shared) rather than a disposable checkout inside the env
+// root (worktree). Callers that decide "may the GC remove the workdir?" or
+// "must the env root outlive the task for forensics?" branch on this.
+func (a *localDirectoryAssignment) RunsInUserDirectory() bool {
+	return a != nil && !a.UsesWorktree()
 }
 
 // DisplayName is the human-facing name for this directory, safe to render in
@@ -93,14 +134,14 @@ func (a *localDirectoryAssignment) ValidateExecutionMode() error {
 		return nil
 	}
 	switch strings.TrimSpace(a.Ref.ExecutionMode) {
-	case "", localDirectoryModeInPlace, localDirectoryModeWorktree:
+	case "", localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeShared:
 		return nil
 	default:
 		return fmt.Errorf(
 			"local_directory: this daemon does not support execution_mode %q for %q "+
-				"(update the daemon, or set the resource's execution mode to %q or %q); "+
+				"(update the daemon, or set the resource's execution mode to %q, %q or %q); "+
 				"refusing to run in place, since that would modify a directory the resource asked to isolate",
-			a.Ref.ExecutionMode, a.AbsPath, localDirectoryModeInPlace, localDirectoryModeWorktree)
+			a.Ref.ExecutionMode, a.AbsPath, localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeShared)
 	}
 }
 

@@ -189,6 +189,13 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 	return content, writeRuntimeConfigFile(path, content)
 }
 
+// RuntimeConfigFilePath is runtimeConfigPath for callers outside the package:
+// the daemon passes the brief file it had InjectRuntimeConfig write under a
+// shared-mode sidecar root to the provider by path.
+func RuntimeConfigFilePath(root, provider string) string {
+	return runtimeConfigPath(root, provider)
+}
+
 // runtimeConfigPath returns the absolute path to the runtime config file that
 // InjectRuntimeConfig writes for the given provider, or "" when the provider
 // has no file-based config target. Centralising the mapping keeps Inject /

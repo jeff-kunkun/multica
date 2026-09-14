@@ -3349,11 +3349,22 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// user asked to isolate. That is the exact outcome worktree mode exists to
 	// prevent, so it fails closed here, against the version of the runtime that
 	// is actually claiming.
-	if reason := worktreeClaimBlockReason(
+	//
+	// Shared mode runs the same gate for the milder failure: an old daemon
+	// would take the mutex and serialise a directory the user asked to share.
+	reason := worktreeClaimBlockReason(
 		resp.ProjectResources,
 		runtime,
 		requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeV1),
-	); reason != "" {
+	)
+	if reason == "" {
+		reason = sharedClaimBlockReason(
+			resp.ProjectResources,
+			runtime,
+			requestHasClientCapability(r, protocol.DaemonCapabilityLocalSharedV1),
+		)
+	}
+	if reason != "" {
 		slog.Error("task claim: runtime too old for worktree mode; cancelling rather than running in place",
 			"task_id", uuidToString(task.ID),
 			"runtime_id", runtimeID,
@@ -3419,10 +3430,34 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 // project may carry one local_directory per machine, and another machine's
 // worktree resource says nothing about this one's ability to run the task.
 func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, hasWorktreeCapability bool) string {
+	return localDirectoryModeClaimBlockReason(resources, runtime, localDirectoryModeWorktree, hasWorktreeCapability,
+		"This machine's Multica runtime does not support parallel (worktree) mode, which %q is set to use. "+
+			"Update the Multica app on that machine to the latest version, then re-run this task. "+
+			"Refusing to run rather than falling back to editing the directory directly, which is what this mode exists to prevent.")
+}
+
+// sharedClaimBlockReason is worktreeClaimBlockReason for execution_mode=shared.
+// The daemon without the capability would run the task in place under the
+// per-path mutex — nothing of the user's is edited that they did not expect,
+// but the directory they asked to share is silently serialised again and the
+// queue they wanted gone comes back with no visible cause. Refusing with a
+// reason on the row is what makes the cause visible.
+func sharedClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, hasSharedCapability bool) string {
+	return localDirectoryModeClaimBlockReason(resources, runtime, localDirectoryModeShared, hasSharedCapability,
+		"This machine's Multica runtime does not support shared-workspace mode, which %q is set to use. "+
+			"Update the Multica app on that machine to the latest version, then re-run this task. "+
+			"Refusing to run rather than falling back to the exclusive in-place lock, which would silently queue tasks the resource asked to run concurrently.")
+}
+
+// localDirectoryModeClaimBlockReason is the shared body of the per-mode claim
+// gates: "" when the runtime may proceed, otherwise messageFmt rendered with
+// the resource's local_path. Only a resource in exactly mode, bound to the
+// claiming runtime's own daemon, can block.
+func localDirectoryModeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, mode string, hasCapability bool, messageFmt string) string {
 	if !runtime.DaemonID.Valid || runtime.DaemonID.String == "" {
 		return ""
 	}
-	if hasWorktreeCapability {
+	if hasCapability {
 		return ""
 	}
 	for _, res := range resources {
@@ -3433,14 +3468,10 @@ func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentR
 		if err := json.Unmarshal(res.ResourceRef, &ref); err != nil {
 			continue
 		}
-		if ref.ExecutionMode != localDirectoryModeWorktree || ref.DaemonID != runtime.DaemonID.String {
+		if ref.ExecutionMode != mode || ref.DaemonID != runtime.DaemonID.String {
 			continue
 		}
-		return fmt.Sprintf(
-			"This machine's Multica runtime does not support parallel (worktree) mode, which %q is set to use. "+
-				"Update the Multica app on that machine to the latest version, then re-run this task. "+
-				"Refusing to run rather than falling back to editing the directory directly, which is what this mode exists to prevent.",
-			ref.LocalPath)
+		return fmt.Sprintf(messageFmt, ref.LocalPath)
 	}
 	return ""
 }

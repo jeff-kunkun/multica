@@ -6974,3 +6974,142 @@ func TestReleaseLockFreesEnvRootForALaterDispatch(t *testing.T) {
 		t.Fatalf("cleanup after release: %v", err)
 	}
 }
+
+// Shared mode (PrepareParams.IsolateSidecars): several tasks run in the same
+// user directory at once, so a per-task file at a fixed path there would be
+// overwritten by the next task to start and removed by the first to finish.
+// Prepare must therefore write nothing into the user's directory and put the
+// whole sidecar tree under the env root, where the daemon can hand it to the
+// provider by path.
+func TestPrepareIsolateSidecarsKeepsUserDirectoryUntouched(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	userDir := t.TempDir()
+	sentinel := filepath.Join(userDir, "user-file.txt")
+	if err := os.WriteFile(sentinel, []byte("keep me"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:     "ws-shared",
+		TaskID:          "c1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:       "Test Agent",
+		Provider:        "claude",
+		LocalWorkDir:    userDir,
+		IsolateSidecars: true,
+		Task: TaskContextForEnv{
+			IssueID:   "issue-1",
+			AgentID:   "agent-1",
+			ProjectID: "project-1",
+			ProjectResources: []ProjectResourceForEnv{
+				{ID: "r1", ResourceType: "local_directory", ResourceRef: json.RawMessage(`{"local_path":"` + filepath.ToSlash(userDir) + `","daemon_id":"d1","execution_mode":"shared"}`)},
+			},
+			AgentSkills: []SkillContextForEnv{{
+				Name:    "spike-skill",
+				Content: "---\nname: spike-skill\ndescription: probe\n---\nbody\n",
+			}},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if env.WorkDir != userDir || !env.LocalDirectory {
+		t.Fatalf("WorkDir=%q LocalDirectory=%v, want the user's directory", env.WorkDir, env.LocalDirectory)
+	}
+	wantSidecar := filepath.Join(env.RootDir, "sidecar")
+	if env.SidecarRoot != wantSidecar {
+		t.Fatalf("SidecarRoot = %q, want %q", env.SidecarRoot, wantSidecar)
+	}
+
+	// The user's directory received nothing: only the sentinel is there.
+	entries, err := os.ReadDir(userDir)
+	if err != nil {
+		t.Fatalf("read user dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "user-file.txt" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("user directory contents = %v, want only the sentinel", names)
+	}
+
+	// Every sidecar lives under the sidecar root, at the path the provider
+	// would look for relative to a cwd — so --add-dir <sidecar root> finds it.
+	for _, rel := range []string{
+		TaskContextMarkerRelPath,
+		filepath.Join(".multica", "project", "resources.json"),
+		filepath.Join(".claude", "skills", "spike-skill", "SKILL.md"),
+	} {
+		if _, err := os.Stat(filepath.Join(env.SidecarRoot, rel)); err != nil {
+			t.Errorf("expected %s under the sidecar root: %v", rel, err)
+		}
+	}
+	if got := SkillsDirPath(env.SidecarRoot, "claude"); got != filepath.Join(env.SidecarRoot, ".claude", "skills") {
+		t.Errorf("SkillsDirPath = %q", got)
+	}
+
+	// The brief, injected at the sidecar root, names the relocated paths and
+	// the runtime config file lands there too — never in the user's directory.
+	ctx := TaskContextForEnv{
+		IssueID:          "issue-1",
+		ProjectID:        "project-1",
+		ProjectResources: []ProjectResourceForEnv{{ID: "r1", ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://github.com/o/r"}`)}},
+		AgentSkills:      []SkillContextForEnv{{Name: "spike-skill"}},
+		SidecarRoot:      env.SidecarRoot,
+		SkillsDir:        SkillsDirPath(env.SidecarRoot, "claude"),
+	}
+	brief, err := InjectRuntimeConfig(env.SidecarRoot, "claude", ctx)
+	if err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	wantBriefFile := filepath.Join(env.SidecarRoot, "CLAUDE.md")
+	if got := RuntimeConfigFilePath(env.SidecarRoot, "claude"); got != wantBriefFile {
+		t.Errorf("RuntimeConfigFilePath = %q, want %q", got, wantBriefFile)
+	}
+	if _, err := os.Stat(wantBriefFile); err != nil {
+		t.Errorf("brief file missing at the sidecar root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(userDir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Errorf("brief was written into the user's directory; stat err = %v", err)
+	}
+	resourcesPath := filepath.ToSlash(filepath.Join(env.SidecarRoot, ".multica", "project", "resources.json"))
+	if !strings.Contains(brief, "`"+resourcesPath+"`") {
+		t.Errorf("brief does not name the relocated resources file %q:\n%s", resourcesPath, brief)
+	}
+	if strings.Contains(brief, "`.multica/project/resources.json`") {
+		t.Errorf("brief still names the cwd-relative resources file the cwd does not hold:\n%s", brief)
+	}
+	skillsDir := filepath.ToSlash(filepath.Join(env.SidecarRoot, ".claude", "skills"))
+	if !strings.Contains(brief, skillsDir+"/<skill>/SKILL.md") {
+		t.Errorf("brief does not point at the relocated skills tree %q:\n%s", skillsDir, brief)
+	}
+}
+
+// Without IsolateSidecars the flag changes nothing; and without LocalWorkDir
+// the flag is ignored, since a daemon-owned workdir is already per task.
+func TestPrepareIsolateSidecarsRequiresLocalWorkDir(t *testing.T) {
+	t.Parallel()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:  t.TempDir(),
+		WorkspaceID:     "ws-shared",
+		TaskID:          "d1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:       "Test Agent",
+		Provider:        "claude",
+		IsolateSidecars: true,
+		Task:            TaskContextForEnv{IssueID: "issue-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+	if env.SidecarRoot != "" {
+		t.Fatalf("SidecarRoot = %q for a daemon-owned workdir, want empty", env.SidecarRoot)
+	}
+	if _, err := os.Stat(filepath.Join(env.WorkDir, TaskContextMarkerRelPath)); err != nil {
+		t.Fatalf("marker missing from the daemon-owned workdir: %v", err)
+	}
+}
