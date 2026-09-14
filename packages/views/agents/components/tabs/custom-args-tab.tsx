@@ -30,6 +30,7 @@ import {
   getGeminiDir,
   isAbsoluteFsPath,
   isGeminiDirToken,
+  isIsolatedAccountSlot,
   loginDirectory,
   resolveHomeDir,
   resolveSlotDirectory,
@@ -112,7 +113,9 @@ export function CustomArgsTab({
       ? t(($) => $.tab_body.custom_args.slot_account1_label)
       : slot === "account2"
         ? t(($) => $.tab_body.custom_args.slot_account2_label)
-        : t(($) => $.tab_body.custom_args.slot_custom_label);
+        : slot === "account3"
+          ? t(($) => $.tab_body.custom_args.slot_account3_label)
+          : t(($) => $.tab_body.custom_args.slot_custom_label);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -127,7 +130,7 @@ export function CustomArgsTab({
   };
 
   const selectSlot = (next: AgyAccountSlot) => {
-    if (next === "account2" && !homeDir) {
+    if (isIsolatedAccountSlot(next) && !homeDir) {
       toast.error(t(($) => $.tab_body.custom_args.home_unresolved_toast));
       return;
     }
@@ -261,6 +264,11 @@ export function CustomArgsTab({
       id: "account2",
       label: t(($) => $.tab_body.custom_args.slot_account2_label),
       hint: t(($) => $.tab_body.custom_args.slot_account2_hint),
+    },
+    {
+      id: "account3",
+      label: t(($) => $.tab_body.custom_args.slot_account3_label),
+      hint: t(($) => $.tab_body.custom_args.slot_account3_hint),
     },
     {
       id: "custom",

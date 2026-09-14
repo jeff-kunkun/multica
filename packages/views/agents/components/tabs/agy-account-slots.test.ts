@@ -2,12 +2,15 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ACCOUNT3_DIR,
+  accountSlotDirectory,
   detectAgyAccountSlot,
   expandHomePrefix,
   formatAgyLoginCommand,
   getGeminiDir,
   inferHomeDirFromGeminiPath,
   isAbsoluteFsPath,
+  isIsolatedAccountSlot,
   loginDirectory,
   resolveHomeDir,
   resolveSlotDirectory,
@@ -44,7 +47,10 @@ describe("agy account slots", () => {
     expect(detectAgyAccountSlot("~/.gemini")).toBe("account1");
     expect(detectAgyAccountSlot("/Users/you/.gemini-account2")).toBe("account2");
     expect(detectAgyAccountSlot("~/.gemini-account2")).toBe("account2");
+    expect(detectAgyAccountSlot("/Users/you/.gemini-account3")).toBe("account3");
+    expect(detectAgyAccountSlot("~/.gemini-account3")).toBe("account3");
     expect(detectAgyAccountSlot("/Users/you/.gemini-work")).toBe("custom");
+    expect(detectAgyAccountSlot("/Users/you/.gemini-account4")).toBe("custom");
   });
 
   it("expands ~ against a home directory and infers home from a Gemini path", () => {
@@ -53,6 +59,9 @@ describe("agy account slots", () => {
     );
     expect(inferHomeDirFromGeminiPath("/Users/you/.gemini")).toBe("/Users/you");
     expect(inferHomeDirFromGeminiPath("/Users/you/.gemini-account2")).toBe(
+      "/Users/you",
+    );
+    expect(inferHomeDirFromGeminiPath("/Users/you/.gemini-account3")).toBe(
       "/Users/you",
     );
     expect(isAbsoluteFsPath("/Users/you/.gemini")).toBe(true);
@@ -64,6 +73,9 @@ describe("agy account slots", () => {
     expect(resolveSlotDirectory("account1", "/ignored", "/Users/you")).toBe("");
     expect(resolveSlotDirectory("account2", "", "/Users/you")).toBe(
       "/Users/you/.gemini-account2",
+    );
+    expect(resolveSlotDirectory("account3", "", "/Users/you")).toBe(
+      "/Users/you/.gemini-account3",
     );
     expect(
       resolveSlotDirectory("custom", "~/.gemini-work", "/Users/you"),
@@ -133,5 +145,22 @@ describe("agy account slots", () => {
     expect(loginDirectory("account2", "", "/Users/you")).toBe(
       "/Users/you/.gemini-account2",
     );
+    expect(loginDirectory("account3", "", "/Users/you")).toBe(
+      "/Users/you/.gemini-account3",
+    );
+    expect(formatAgyLoginCommand("/Users/you/.gemini-account3")).toBe(
+      "agy --gemini_dir=/Users/you/.gemini-account3",
+    );
+  });
+
+  it("maps numbered preset slots onto isolated directories", () => {
+    expect(accountSlotDirectory("account1")).toBe(".gemini");
+    expect(accountSlotDirectory("account2")).toBe(".gemini-account2");
+    expect(accountSlotDirectory("account3")).toBe(ACCOUNT3_DIR);
+    expect(isIsolatedAccountSlot("account1")).toBe(false);
+    expect(isIsolatedAccountSlot("account2")).toBe(true);
+    expect(isIsolatedAccountSlot("account3")).toBe(true);
+    expect(isIsolatedAccountSlot("custom")).toBe(false);
+    expect(resolveSlotDirectory("account3", "", null)).toBe("~/.gemini-account3");
   });
 });

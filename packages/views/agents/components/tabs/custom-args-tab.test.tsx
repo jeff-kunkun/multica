@@ -159,6 +159,15 @@ describe("CustomArgsTab", () => {
     expect(screen.queryByRole("radio", { name: /account 2/i })).not.toBeInTheDocument();
   });
 
+  it("shows account 1, 2, and 3 radios for AGY", () => {
+    renderTab({ custom_args: [] }, undefined, agyDeviceWithHome);
+
+    expect(screen.getByRole("radio", { name: /account 1/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /account 2/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /account 3/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /custom/i })).toBeInTheDocument();
+  });
+
   it("fills account 2 from runtime metadata.home_dir without HOME or desktopAPI", async () => {
     hideProcessHome();
     const user = userEvent.setup();
@@ -281,6 +290,64 @@ describe("CustomArgsTab", () => {
 
     expect(copyText).toHaveBeenCalledWith(
       "agy --gemini_dir=/Users/you/.gemini-account2",
+    );
+  });
+
+  it("fills account 3 from runtime metadata.home_dir and saves the isolated path", async () => {
+    hideProcessHome();
+    const user = userEvent.setup();
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDeviceWithHome);
+
+    await user.click(screen.getByRole("radio", { name: /account 3/i }));
+
+    expect(screen.getByRole("radio", { name: /account 3/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(
+      screen.getByText("agy --gemini_dir=/Users/agy-host/.gemini-account3"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("agy --gemini_dir /Users/agy-host/.gemini-account3"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "/Users/agy-host/.gemini-account3"],
+    });
+  });
+
+  it("does not save a tilde path when account 3 is clicked without any home source", async () => {
+    hideProcessHome();
+    const user = userEvent.setup();
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDevice);
+
+    await user.click(screen.getByRole("radio", { name: /account 3/i }));
+
+    expect(toast.error).toHaveBeenCalled();
+    expect(screen.getByRole("radio", { name: /account 1/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(
+      screen.queryByText("agy --gemini_dir=~/.gemini-account3"),
+    ).not.toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("copies the AGY sign-in command for account 3", async () => {
+    const user = userEvent.setup();
+    renderTab(
+      { custom_args: ["--gemini_dir", "/Users/you/.gemini"] },
+      undefined,
+      agyDevice,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /account 3/i }));
+    await user.click(screen.getByRole("button", { name: /copy sign-in command/i }));
+
+    expect(copyText).toHaveBeenCalledWith(
+      "agy --gemini_dir=/Users/you/.gemini-account3",
     );
   });
 

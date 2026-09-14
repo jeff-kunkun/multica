@@ -1,7 +1,27 @@
-export type AgyAccountSlot = "account1" | "account2" | "custom";
+/** Preset slots shown in the UI. Append here, then add matching i18n keys. */
+export const PRESET_ACCOUNT_SLOTS = ["account1", "account2", "account3"] as const;
+
+export type AgyPresetAccountSlot = (typeof PRESET_ACCOUNT_SLOTS)[number];
+export type AgyAccountSlot = AgyPresetAccountSlot | "custom";
 
 export const ACCOUNT1_DIR = ".gemini";
 export const ACCOUNT2_DIR = ".gemini-account2";
+export const ACCOUNT3_DIR = ".gemini-account3";
+
+const PRESET_SLOT_SET = new Set<string>(PRESET_ACCOUNT_SLOTS);
+
+export function isPresetAccountSlot(slot: string): slot is AgyPresetAccountSlot {
+  return PRESET_SLOT_SET.has(slot);
+}
+
+export function isIsolatedAccountSlot(slot: AgyAccountSlot): boolean {
+  return slot !== "custom" && slot !== "account1";
+}
+
+export function accountSlotDirectory(slot: AgyPresetAccountSlot): string {
+  if (slot === "account1") return ACCOUNT1_DIR;
+  return `.gemini-${slot}`;
+}
 
 export function getGeminiDir(args: string[]): string {
   const flagIndex = args.findIndex((value) => value === "--gemini_dir");
@@ -38,7 +58,7 @@ export function inferHomeDirFromGeminiPath(path: string): string | null {
   const trimmed = path.trim();
   if (!trimmed || trimmed.startsWith("~")) return null;
   const normalized = trimmed.replace(/[/\\]+$/, "");
-  const match = normalized.match(/^(.*)[/\\]\.gemini(?:-account2)?$/);
+  const match = normalized.match(/^(.*)[/\\]\.gemini(?:-account\d+)?$/);
   return match?.[1] || null;
 }
 
@@ -85,13 +105,25 @@ export function expandHomePrefix(path: string, homeDir: string): string {
   return trimmed;
 }
 
+function slotFromBasename(base: string): AgyAccountSlot {
+  if (base === ACCOUNT1_DIR) return "account1";
+  const match = base.match(/^\.gemini-(account\d+)$/);
+  const slot = match?.[1];
+  return slot && isPresetAccountSlot(slot) ? slot : "custom";
+}
+
 export function detectAgyAccountSlot(profile: string): AgyAccountSlot {
   const trimmed = profile.trim();
   if (!trimmed) return "account1";
-  const base = pathBasename(trimmed);
-  if (trimmed === `~/${ACCOUNT1_DIR}` || base === ACCOUNT1_DIR) return "account1";
-  if (trimmed === `~/${ACCOUNT2_DIR}` || base === ACCOUNT2_DIR) return "account2";
-  return "custom";
+  return slotFromBasename(pathBasename(trimmed));
+}
+
+function resolvePresetDirectory(
+  slot: AgyPresetAccountSlot,
+  homeDir: string | null,
+): string {
+  const leaf = accountSlotDirectory(slot);
+  return homeDir ? joinHomeDir(homeDir, leaf) : `~/${leaf}`;
 }
 
 export function resolveSlotDirectory(
@@ -100,9 +132,7 @@ export function resolveSlotDirectory(
   homeDir: string | null,
 ): string {
   if (slot === "account1") return "";
-  if (slot === "account2") {
-    return homeDir ? joinHomeDir(homeDir, ACCOUNT2_DIR) : `~/${ACCOUNT2_DIR}`;
-  }
+  if (isPresetAccountSlot(slot)) return resolvePresetDirectory(slot, homeDir);
   const trimmed = customPath.trim();
   if (homeDir && (trimmed === "~" || trimmed.startsWith("~/") || trimmed.startsWith("~\\"))) {
     return expandHomePrefix(trimmed, homeDir);
@@ -116,12 +146,7 @@ export function loginDirectory(
   homeDir: string | null,
 ): string {
   if (profile && isAbsoluteFsPath(profile)) return profile;
-  if (slot === "account1") {
-    return homeDir ? joinHomeDir(homeDir, ACCOUNT1_DIR) : `~/${ACCOUNT1_DIR}`;
-  }
-  if (slot === "account2") {
-    return homeDir ? joinHomeDir(homeDir, ACCOUNT2_DIR) : `~/${ACCOUNT2_DIR}`;
-  }
+  if (isPresetAccountSlot(slot)) return resolvePresetDirectory(slot, homeDir);
   if (homeDir && (profile === "~" || profile.startsWith("~/"))) {
     return expandHomePrefix(profile, homeDir);
   }
