@@ -679,9 +679,56 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 	if opts.Cwd != "" {
 		args = append(args, "--add-dir", filepath.Clean(opts.Cwd))
 	}
-	args = append(args, filterCustomArgs(opts.ExtraArgs, antigravityBlockedArgs, logger)...)
-	args = append(args, filterCustomArgs(opts.CustomArgs, antigravityBlockedArgs, logger)...)
+	args = append(args, expandAntigravityGeminiDir(filterCustomArgs(opts.ExtraArgs, antigravityBlockedArgs, logger))...)
+	args = append(args, expandAntigravityGeminiDir(filterCustomArgs(opts.CustomArgs, antigravityBlockedArgs, logger))...)
 	return args
+}
+
+// expandAntigravityGeminiDir rewrites a leading ~ in --gemini_dir to the
+// daemon host's home directory. agy does not expand ~ itself and silently
+// falls back to the default profile, so a UI preset like ~/.gemini-account2
+// would otherwise bind the wrong account.
+func expandAntigravityGeminiDir(args []string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return args
+	}
+	return expandAntigravityGeminiDirWithHome(args, home)
+}
+
+func expandAntigravityGeminiDirWithHome(args []string, home string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--gemini_dir" {
+			out = append(out, arg)
+			if i+1 < len(args) {
+				i++
+				out = append(out, expandUserHomeDir(args[i], home))
+			}
+			continue
+		}
+		if strings.HasPrefix(arg, "--gemini_dir=") {
+			out = append(out, "--gemini_dir="+expandUserHomeDir(strings.TrimPrefix(arg, "--gemini_dir="), home))
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+func expandUserHomeDir(path, home string) string {
+	path = strings.TrimSpace(path)
+	if path == "~" {
+		return home
+	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(home, path[2:])
+	}
+	return path
 }
 
 // antigravityModelError returns an actionable error when `model` is non-empty

@@ -123,12 +123,18 @@ describe("CustomArgsTab", () => {
     expect(onSave).toHaveBeenCalledWith({ custom_args: ["value with spaces"] });
   });
 
+  const agyDevice = {
+    ...runtimeDevice,
+    provider: "antigravity",
+    launch_header: "agy",
+  } as RuntimeDevice;
+
   it("edits the isolated AGY account directory as a CLI profile", async () => {
     const user = userEvent.setup();
     const { onSave } = renderTab(
       { custom_args: ["--gemini_dir", "/Users/you/.gemini"] },
       undefined,
-      { ...runtimeDevice, provider: "antigravity" },
+      agyDevice,
     );
 
     const input = screen.getByRole("textbox", { name: /gemini directory/i });
@@ -139,5 +145,64 @@ describe("CustomArgsTab", () => {
     expect(onSave).toHaveBeenCalledWith({
       custom_args: ["--gemini_dir", "/Users/you/.gemini-account2"],
     });
+  });
+
+  it("fills the isolated directory when the Account 2 slot is clicked", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab(
+      { custom_args: ["--keep", "--gemini_dir=/Users/you/.gemini"] },
+      undefined,
+      agyDevice,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+
+    expect(screen.getByRole("textbox", { name: /gemini directory/i })).toHaveValue(
+      "/Users/you/.gemini-account2",
+    );
+    expect(screen.getByText("agy --keep --gemini_dir /Users/you/.gemini-account2")).toBeInTheDocument();
+    expect(screen.getByText("agy --gemini_dir=/Users/you/.gemini-account2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--keep", "--gemini_dir", "/Users/you/.gemini-account2"],
+    });
+  });
+
+  it("clears --gemini_dir when the Account 1 slot is clicked", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab(
+      { custom_args: ["--gemini_dir", "/Users/you/.gemini-account2"] },
+      undefined,
+      agyDevice,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /account 1/i }));
+    expect(screen.getByRole("textbox", { name: /gemini directory/i })).toHaveValue("");
+    expect(
+      screen.queryByText("agy --gemini_dir=/Users/you/.gemini-account2"),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByText("agy").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({ custom_args: [] });
+  });
+
+  it("fills the isolated directory from an empty primary slot", async () => {
+    const user = userEvent.setup();
+    renderTab({ custom_args: [] }, undefined, agyDevice);
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+    expect(screen.getByRole("textbox", { name: /gemini directory/i })).toHaveValue(
+      "~/.gemini-account2",
+    );
+    expect(screen.getByText("agy --gemini_dir ~/.gemini-account2")).toBeInTheDocument();
+    expect(screen.getByText("agy --gemini_dir=$HOME/.gemini-account2")).toBeInTheDocument();
+  });
+
+  it("does not show AGY slots for other runtimes", () => {
+    renderTab();
+    expect(screen.queryByRole("radio", { name: /account 1/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /gemini directory/i })).not.toBeInTheDocument();
   });
 });

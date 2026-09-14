@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  Check,
+  Copy,
   Loader2,
   Pencil,
   Plus,
@@ -13,12 +15,24 @@ import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { copyText } from "@multica/ui/lib/clipboard";
+import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
 import {
   SettingsCard,
   SettingsSection,
 } from "../../../settings/components/settings-layout";
+import type { AntigravitySlot } from "./antigravity-profile";
+import {
+  applyAntigravitySlot,
+  classifyAntigravitySlot,
+  displayAntigravityDirectory,
+  formatAntigravityLoginCommand,
+  getAntigravityProfile,
+  isAbsolutePath,
+  setAntigravityProfile,
+} from "./antigravity-profile";
 
 interface ArgEntry {
   id: string;
@@ -42,21 +56,7 @@ function formatArgForPreview(value: string): string {
   return /\s/.test(value) ? JSON.stringify(value) : value;
 }
 
-function getAntigravityProfile(args: string[]): string {
-  const flagIndex = args.findIndex((value) => value === "--gemini_dir");
-  if (flagIndex >= 0) return args[flagIndex + 1] ?? "";
-  const inline = args.find((value) => value.startsWith("--gemini_dir="));
-  return inline?.slice("--gemini_dir=".length) ?? "";
-}
-
-function setAntigravityProfile(args: string[], profile: string): string[] {
-  const next = [...args];
-  for (let index = next.length - 1; index >= 0; index -= 1) {
-    if (next[index] === "--gemini_dir") next.splice(index, 2);
-    else if (next[index]?.startsWith("--gemini_dir=")) next.splice(index, 1);
-  }
-  return profile ? [...next, "--gemini_dir", profile] : next;
-}
+const ANTIGRAVITY_SLOTS: AntigravitySlot[] = ["primary", "secondary", "custom"];
 
 export function CustomArgsTab({
   agent,
@@ -77,12 +77,22 @@ export function CustomArgsTab({
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorValue, setEditorValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const [agySlot, setAgySlot] = useState<AntigravitySlot>(() =>
+    classifyAntigravitySlot(getAntigravityProfile(agent.custom_args ?? [])),
+  );
+  const [loginCopied, setLoginCopied] = useState(false);
   const editorInputRef = useRef<HTMLInputElement>(null);
+  const profileInputRef = useRef<HTMLInputElement>(null);
 
   const currentArgs = entriesToArgs(entries);
   const antigravityProfile = getAntigravityProfile(currentArgs);
   const originalArgs = agent.custom_args ?? [];
   const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
+  const relativeProfile =
+    isAntigravity &&
+    antigravityProfile !== "" &&
+    !isAbsolutePath(antigravityProfile) &&
+    !antigravityProfile.startsWith("~");
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -126,6 +136,43 @@ export function CustomArgsTab({
   const removeEntry = (entryId: string) => {
     setEntries((current) => current.filter((entry) => entry.id !== entryId));
     if (editor?.kind === "edit" && editor.entryId === entryId) closeEditor();
+  };
+
+  const applyProfile = (profile: string) => {
+    setEntries(argsToEntries(setAntigravityProfile(currentArgs, profile)));
+  };
+
+  const selectAgySlot = (slot: AntigravitySlot) => {
+    setAgySlot(slot);
+    if (slot === "custom") {
+      profileInputRef.current?.focus();
+      return;
+    }
+    setEntries(argsToEntries(applyAntigravitySlot(currentArgs, slot)));
+  };
+
+  const copyLoginCommand = async (command: string) => {
+    if (await copyText(command)) {
+      setLoginCopied(true);
+      toast.success(t(($) => $.tab_body.custom_args.antigravity_guide_copied));
+      window.setTimeout(() => setLoginCopied(false), 1500);
+    } else {
+      toast.error(t(($) => $.tab_body.custom_args.antigravity_guide_copy_failed));
+    }
+  };
+
+  const slotLabel = (slot: AntigravitySlot) => {
+    if (slot === "primary") return t(($) => $.tab_body.custom_args.antigravity_slot_primary);
+    if (slot === "secondary") return t(($) => $.tab_body.custom_args.antigravity_slot_secondary);
+    return t(($) => $.tab_body.custom_args.antigravity_slot_custom);
+  };
+
+  const slotHint = (slot: AntigravitySlot) => {
+    if (slot === "primary") return t(($) => $.tab_body.custom_args.antigravity_slot_primary_hint);
+    if (slot === "secondary") {
+      return t(($) => $.tab_body.custom_args.antigravity_slot_secondary_hint);
+    }
+    return t(($) => $.tab_body.custom_args.antigravity_slot_custom_hint);
   };
 
   const handleSave = async () => {
@@ -200,22 +247,118 @@ export function CustomArgsTab({
           description={t(($) => $.tab_body.custom_args.antigravity_profile_description)}
         >
           <SettingsCard>
-            <div className="space-y-2 p-3">
-              <label className="text-caption font-medium" htmlFor="agy-profile-directory">
-                {t(($) => $.tab_body.custom_args.antigravity_profile_input_label)}
-              </label>
-              <Input
-                id="agy-profile-directory"
-                value={antigravityProfile}
-                onChange={(event) => {
-                  const nextArgs = setAntigravityProfile(currentArgs, event.target.value.trim());
-                  setEntries(argsToEntries(nextArgs));
-                }}
-                placeholder={t(($) => $.tab_body.custom_args.antigravity_profile_placeholder)}
-                spellCheck={false}
-                autoComplete="off"
-                className="font-mono text-caption"
-              />
+            <div className="space-y-3 p-3">
+              <div
+                role="radiogroup"
+                aria-label={t(($) => $.tab_body.custom_args.antigravity_slots_aria)}
+                className="grid gap-2 sm:grid-cols-3"
+              >
+                {ANTIGRAVITY_SLOTS.map((slot) => {
+                  const selected = agySlot === slot;
+                  return (
+                    <button
+                      key={slot}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      data-active={selected ? "true" : undefined}
+                      onClick={() => selectAgySlot(slot)}
+                      className={cn(
+                        "flex min-w-0 flex-col items-start gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                        "hover:bg-muted/50",
+                        selected
+                          ? "border-foreground bg-background font-medium text-foreground data-active:hover:bg-muted/50"
+                          : "border-input text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <span className="text-caption">{slotLabel(slot)}</span>
+                      <span className="text-micro font-normal text-muted-foreground">
+                        {slotHint(slot)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-caption font-medium" htmlFor="agy-profile-directory">
+                  {t(($) => $.tab_body.custom_args.antigravity_profile_input_label)}
+                </label>
+                <Input
+                  ref={profileInputRef}
+                  id="agy-profile-directory"
+                  value={antigravityProfile}
+                  onChange={(event) => {
+                    const next = event.target.value.trim();
+                    applyProfile(next);
+                    setAgySlot(classifyAntigravitySlot(next));
+                  }}
+                  placeholder={t(($) => $.tab_body.custom_args.antigravity_profile_placeholder)}
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="font-mono text-caption"
+                />
+                {agySlot === "primary" && !antigravityProfile ? (
+                  <p className="text-micro text-muted-foreground">
+                    {t(($) => $.tab_body.custom_args.antigravity_primary_path_hint)}
+                  </p>
+                ) : null}
+                {relativeProfile ? (
+                  <p className="text-micro text-destructive">
+                    {t(($) => $.tab_body.custom_args.antigravity_absolute_path_hint)}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </SettingsCard>
+
+          <SettingsCard>
+            <div className="space-y-3 p-4">
+              <div>
+                <p className="text-body font-medium">
+                  {t(($) => $.tab_body.custom_args.antigravity_guide_title)}
+                </p>
+                <p className="mt-1 text-caption text-foreground">
+                  {t(($) => $.tab_body.custom_args.antigravity_guide_account, {
+                    slot: slotLabel(agySlot),
+                  })}
+                </p>
+                <p className="mt-1 font-mono text-caption text-muted-foreground" translate="no">
+                  {displayAntigravityDirectory(antigravityProfile)}
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-caption font-medium">
+                  {t(($) => $.tab_body.custom_args.antigravity_guide_command_label)}
+                </p>
+                <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5">
+                  <code
+                    className="min-w-0 flex-1 break-all font-mono text-caption leading-5"
+                    translate="no"
+                  >
+                    {formatAntigravityLoginCommand(antigravityProfile)}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="shrink-0"
+                    onClick={() =>
+                      void copyLoginCommand(formatAntigravityLoginCommand(antigravityProfile))
+                    }
+                    aria-label={t(($) => $.tab_body.custom_args.antigravity_guide_copy_aria)}
+                  >
+                    {loginCopied ? (
+                      <Check className="size-3.5 text-success" aria-hidden="true" />
+                    ) : (
+                      <Copy className="size-3.5" aria-hidden="true" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+              <p className="text-caption leading-5 text-muted-foreground">
+                {t(($) => $.tab_body.custom_args.antigravity_guide_keychain)}
+              </p>
             </div>
           </SettingsCard>
         </SettingsSection>

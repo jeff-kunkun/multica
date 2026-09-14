@@ -282,6 +282,34 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 }
 
+func TestExpandAntigravityGeminiDir(t *testing.T) {
+	t.Parallel()
+
+	home := "/Users/you"
+	got := expandAntigravityGeminiDirWithHome([]string{
+		"--keep",
+		"--gemini_dir",
+		"~/.gemini-account2",
+		"--gemini_dir=~/.gemini",
+		"--other=~/leave",
+	}, home)
+	want := []string{
+		"--keep",
+		"--gemini_dir",
+		filepath.Join(home, ".gemini-account2"),
+		"--gemini_dir=" + filepath.Join(home, ".gemini"),
+		"--other=~/leave",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("expandAntigravityGeminiDirWithHome mismatch\n got: %v\nwant: %v", got, want)
+	}
+
+	absolute := []string{"--gemini_dir", "/opt/agy"}
+	if got := expandAntigravityGeminiDirWithHome(absolute, home); !slices.Equal(got, absolute) {
+		t.Fatalf("absolute --gemini_dir should pass through, got %v", got)
+	}
+}
+
 func TestAntigravityFormatTimeoutClampsSubSecond(t *testing.T) {
 	t.Parallel()
 	if got := antigravityFormatTimeout(0); got != "1s" {
