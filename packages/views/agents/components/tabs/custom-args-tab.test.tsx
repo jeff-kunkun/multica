@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
@@ -69,6 +69,12 @@ function renderTab(
 describe("CustomArgsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("HOME", "/Users/you");
+    vi.stubEnv("USERPROFILE", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("renders configured arguments as a list, not persistent inputs", () => {
@@ -194,10 +200,48 @@ describe("CustomArgsTab", () => {
 
     await user.click(screen.getByRole("radio", { name: /account 2/i }));
     expect(screen.getByRole("textbox", { name: /gemini directory/i })).toHaveValue(
-      "~/.gemini-account2",
+      "/Users/you/.gemini-account2",
     );
-    expect(screen.getByText("agy --gemini_dir ~/.gemini-account2")).toBeInTheDocument();
-    expect(screen.getByText("agy --gemini_dir=$HOME/.gemini-account2")).toBeInTheDocument();
+    expect(screen.getByText("agy --gemini_dir /Users/you/.gemini-account2")).toBeInTheDocument();
+    expect(screen.getByText("agy --gemini_dir=/Users/you/.gemini-account2")).toBeInTheDocument();
+  });
+
+  it("expands an existing tilde Gemini path when Account 2 is clicked", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab(
+      { custom_args: ["--keep", "--gemini_dir", "~/.gemini"] },
+      undefined,
+      agyDevice,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+
+    expect(screen.getByRole("textbox", { name: /gemini directory/i })).toHaveValue(
+      "/Users/you/.gemini-account2",
+    );
+    expect(screen.getByText("agy --keep --gemini_dir /Users/you/.gemini-account2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--keep", "--gemini_dir", "/Users/you/.gemini-account2"],
+    });
+  });
+
+  it("expands a typed tilde Gemini path when Account 2 is clicked", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDevice);
+
+    const input = screen.getByRole("textbox", { name: /gemini directory/i });
+    await user.type(input, "~/.gemini");
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+
+    expect(input).toHaveValue("/Users/you/.gemini-account2");
+    expect(screen.getByText("agy --gemini_dir /Users/you/.gemini-account2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "/Users/you/.gemini-account2"],
+    });
   });
 
   it("does not show AGY slots for other runtimes", () => {

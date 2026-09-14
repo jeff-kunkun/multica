@@ -61,6 +61,17 @@ export function inferHomeDir(profilePath: string): string | null {
   return parent || null;
 }
 
+export function readProcessHomeDir(): string | null {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env;
+  const home = env?.HOME || env?.USERPROFILE;
+  return home && home.length > 0 ? home : null;
+}
+
+export function resolveHomeDir(profilePath: string): string | null {
+  return inferHomeDir(profilePath) ?? readProcessHomeDir();
+}
+
 export function isAbsolutePath(path: string): boolean {
   const trimmed = path.trim();
   if (!trimmed || trimmed.startsWith("~")) return false;
@@ -78,7 +89,7 @@ export function classifyAntigravitySlot(profilePath: string): AntigravitySlot {
 }
 
 export function resolveSecondaryPath(currentPath: string): string {
-  const home = inferHomeDir(currentPath);
+  const home = resolveHomeDir(currentPath);
   if (home) return joinHomeDir(home, ANTIGRAVITY_SECONDARY_DIR);
   return joinHomeDir("~", ANTIGRAVITY_SECONDARY_DIR);
 }
@@ -88,11 +99,12 @@ export function resolveSlotPath(
   currentPath: string,
   customPath = currentPath,
 ): string {
+  const home = resolveHomeDir(currentPath) ?? inferHomeDir(customPath);
   if (slot === "primary") return "";
   if (slot === "secondary") {
-    return expandLeadingTilde(resolveSecondaryPath(currentPath), inferHomeDir(currentPath));
+    return expandLeadingTilde(resolveSecondaryPath(currentPath), home);
   }
-  return expandLeadingTilde(customPath, inferHomeDir(currentPath) ?? inferHomeDir(customPath));
+  return expandLeadingTilde(customPath, home);
 }
 
 export function getAntigravityProfile(args: string[]): string {
