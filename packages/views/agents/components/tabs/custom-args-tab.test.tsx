@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
@@ -17,6 +17,11 @@ vi.mock("sonner", () => ({
   },
 }));
 
+vi.mock("@multica/ui/lib/clipboard", () => ({
+  copyText: vi.fn().mockResolvedValue(true),
+}));
+
+import { copyText } from "@multica/ui/lib/clipboard";
 import { CustomArgsTab } from "./custom-args-tab";
 
 const baseAgent: Agent = {
@@ -66,9 +71,20 @@ function renderTab(
   return { ...result, onSave };
 }
 
+const agyDevice = {
+  ...runtimeDevice,
+  provider: "antigravity",
+  launch_header: "agy",
+} as RuntimeDevice;
+
 describe("CustomArgsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("HOME", "/Users/you");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("renders configured arguments as a list, not persistent inputs", () => {
@@ -123,21 +139,75 @@ describe("CustomArgsTab", () => {
     expect(onSave).toHaveBeenCalledWith({ custom_args: ["value with spaces"] });
   });
 
-  it("edits the isolated AGY account directory as a CLI profile", async () => {
+  it("does not show AGY account slots for other runtimes", () => {
+    renderTab();
+
+    expect(screen.queryByRole("radiogroup", { name: /agy account/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /account 2/i })).not.toBeInTheDocument();
+  });
+
+  it("fills the isolated directory when account 2 is selected and updates the preview", async () => {
     const user = userEvent.setup();
-    const { onSave } = renderTab(
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDevice);
+
+    expect(screen.getByRole("radio", { name: /account 1/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+
+    expect(screen.getByRole("radio", { name: /account 2/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(
+      screen.getByText("agy --gemini_dir=/Users/you/.gemini-account2"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("agy --gemini_dir /Users/you/.gemini-account2"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/macOS Keychain stores one Google login/i),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "/Users/you/.gemini-account2"],
+    });
+  });
+
+  it("copies the AGY sign-in command for the selected slot", async () => {
+    const user = userEvent.setup();
+    renderTab(
       { custom_args: ["--gemini_dir", "/Users/you/.gemini"] },
       undefined,
-      { ...runtimeDevice, provider: "antigravity" },
+      agyDevice,
     );
 
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+    await user.click(screen.getByRole("button", { name: /copy sign-in command/i }));
+
+    expect(copyText).toHaveBeenCalledWith(
+      "agy --gemini_dir=/Users/you/.gemini-account2",
+    );
+  });
+
+  it("lets custom slot edit the Gemini directory and keeps other args", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab(
+      { custom_args: ["--profile", "research", "--gemini_dir", "/Users/you/.gemini"] },
+      undefined,
+      agyDevice,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /custom/i }));
     const input = screen.getByRole("textbox", { name: /gemini directory/i });
     await user.clear(input);
-    await user.type(input, "/Users/you/.gemini-account2");
+    await user.type(input, "/Users/you/.gemini-work");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", "/Users/you/.gemini-account2"],
+      custom_args: ["--profile", "research", "--gemini_dir", "/Users/you/.gemini-work"],
     });
   });
 });
