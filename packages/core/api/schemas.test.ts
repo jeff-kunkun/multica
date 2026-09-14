@@ -55,6 +55,7 @@ import {
   RuntimeUsageListSchema,
   SendChatMessageResponseSchema,
   SquadListSchema,
+  SquadMemberListSchema,
   SquadSchema,
   SourceContextPreviewSchema,
   TimelineEntriesSchema,
@@ -1033,14 +1034,14 @@ describe("SquadListSchema member preview drift", () => {
     const parsed = SquadListSchema.parse([baseSquad]);
     expect(parsed[0]?.member_count).toBe(0);
     expect(parsed[0]?.member_preview).toEqual([]);
-    expect(parsed[0]?.members).toEqual([]);
+    expect(parsed[0]?.members).toBeUndefined();
   });
 
   it("defaults preview fields on a single squad response", () => {
     const parsed = SquadSchema.parse(baseSquad);
     expect(parsed.member_count).toBe(0);
     expect(parsed.member_preview).toEqual([]);
-    expect(parsed.members).toEqual([]);
+    expect(parsed.members).toBeUndefined();
   });
 
   it("preserves lightweight member preview rows", () => {
@@ -1077,6 +1078,56 @@ describe("SquadListSchema member preview drift", () => {
     expect(parsed[0]?.members).toHaveLength(4);
     expect(parsed[0]?.member_preview).toHaveLength(3);
     expect(parsed[0]?.members?.[3]?.member_id).toBe("agent-4");
+  });
+
+  it("keeps official-cloud list rows without a members key distinguishable from an empty roster", () => {
+    const parsed = SquadListSchema.parse([
+      {
+        ...baseSquad,
+        member_count: 8,
+        member_preview: [
+          { member_type: "agent", member_id: "agent-1", role: "member" },
+          { member_type: "agent", member_id: "agent-2", role: "member" },
+          { member_type: "agent", member_id: "agent-3", role: "member" },
+        ],
+      },
+    ]);
+    expect(parsed[0]?.member_count).toBe(8);
+    expect(parsed[0]?.member_preview).toHaveLength(3);
+    expect("members" in (parsed[0] ?? {})).toBe(false);
+    expect(parsed[0]?.members).toBeUndefined();
+  });
+});
+
+describe("SquadMemberListSchema", () => {
+  it("parses GET /api/squads/:id/members rows", () => {
+    const parsed = SquadMemberListSchema.parse([
+      {
+        id: "row-1",
+        squad_id: "squad-1",
+        member_type: "agent",
+        member_id: "agent-1",
+        role: "leader",
+        created_at: "2026-05-01T00:00:00Z",
+      },
+      {
+        id: "row-2",
+        squad_id: "squad-1",
+        member_type: "member",
+        member_id: "user-1",
+      },
+    ]);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]?.member_id).toBe("agent-1");
+    expect(parsed[1]?.role).toBe("");
+  });
+
+  it("falls back to an empty list when a row is missing member_id", () => {
+    expect(
+      SquadMemberListSchema.safeParse([
+        { id: "row-1", squad_id: "squad-1", member_type: "agent" },
+      ]).success,
+    ).toBe(false);
   });
 });
 

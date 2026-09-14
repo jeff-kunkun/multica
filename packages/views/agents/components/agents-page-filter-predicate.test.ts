@@ -222,6 +222,15 @@ describe("rowMatchesFilters — squad dimension", () => {
     expect(rowMatchesFilters(unassigned, filters, "")).toBe(true);
   });
 
+  it("does not treat unknown membership as no-squad", () => {
+    const unknown = makeRow(
+      { id: "a" },
+      { squadIds: [], squadMembershipKnown: false },
+    );
+    const filters: AgentListFilters = { ...noFilters, squads: ["__none__"] };
+    expect(rowMatchesFilters(unknown, filters, "")).toBe(false);
+  });
+
   it("squad + __none__ is OR-combined", () => {
     const alpha = makeRow({ id: "a" }, { squadIds: ["sq-alpha"] });
     const beta = makeRow({ id: "b" }, { squadIds: ["sq-beta"] });

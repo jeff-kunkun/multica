@@ -79,6 +79,13 @@ vi.mock("@tanstack/react-query", () => ({
     }
     return { data: [], isLoading: false, isPending: false };
   },
+  useQueries: ({ queries }: { queries: unknown[] }) =>
+    queries.map(() => ({
+      data: undefined,
+      isPending: false,
+      isSuccess: false,
+      isError: false,
+    })),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 
@@ -149,6 +156,9 @@ vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
   squadListOptions: () => ({ queryKey: ["squads"] }),
+  squadMembersOptions: (_wsId: string, squadId: string) => ({
+    queryKey: ["squad-members", squadId],
+  }),
   workspaceKeys: { agents: (wsId: string) => ["agents", wsId] },
 }));
 
