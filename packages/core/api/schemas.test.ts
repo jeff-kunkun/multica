@@ -1122,12 +1122,14 @@ describe("SquadMemberListSchema", () => {
     expect(parsed[1]?.role).toBe("");
   });
 
-  it("falls back to an empty list when a row is missing member_id", () => {
+  it("rejects a row missing required fields instead of parsing as an empty roster", () => {
     expect(
       SquadMemberListSchema.safeParse([
         { id: "row-1", squad_id: "squad-1", member_type: "agent" },
       ]).success,
     ).toBe(false);
+    expect(SquadMemberListSchema.safeParse({ members: [] }).success).toBe(false);
+    expect(SquadMemberListSchema.safeParse("not-an-array").success).toBe(false);
   });
 });
 

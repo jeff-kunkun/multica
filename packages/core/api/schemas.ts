@@ -82,7 +82,6 @@ import type {
   Skill,
   SkillImportResult,
   Squad,
-  SquadMember,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -2195,7 +2194,6 @@ export const SquadMemberSchema = z.object({
 }).loose();
 
 export const SquadMemberListSchema = z.array(SquadMemberSchema);
-export const EMPTY_SQUAD_MEMBER_LIST: SquadMember[] = [];
 
 // Squad member status — backs the Squad detail page's Members tab. status
 // is `string | null` (not the narrow `SquadMemberStatusValue` union) so a

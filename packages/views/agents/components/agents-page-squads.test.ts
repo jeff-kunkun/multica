@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { SquadListSchema } from "@multica/core/api/schemas";
+import { SquadListSchema, SquadMemberListSchema } from "@multica/core/api/schemas";
 import type { Squad, SquadMember } from "@multica/core/types";
 import {
   buildAgentSquadsMap,
@@ -11,6 +11,7 @@ import {
   resolveSquadRosters,
   rowMatchesSquadFilter,
   squadFilterOptionCounts,
+  type FetchedSquadMembers,
 } from "./agents-page-squads";
 
 function makeSquad(
@@ -235,6 +236,13 @@ function membersResponse(
   ];
 }
 
+/** Matches ApiClient.listSquadMembers: schema failure is query error, not []. */
+function fetchedFromMembersPayload(raw: unknown): FetchedSquadMembers {
+  const parsed = SquadMemberListSchema.safeParse(raw);
+  if (!parsed.success) return { status: "error" };
+  return { status: "success", members: parsed.data };
+}
+
 function agentRowsFromMap(
   agentIds: readonly string[],
   map: Map<string, Squad[]>,
@@ -374,6 +382,35 @@ describe("official-cloud GET /api/squads payload (no members field)", () => {
     expect(counts.bySquadId.get(GENERAL_SQUAD_ID)).toBeNull();
     expect(counts.bySquadId.get(GAME_SQUAD_ID)).toBeNull();
     expect(counts.noSquadCount).toBeNull();
+  });
+
+  it("treats a schema-invalid members 2xx as unknown, not count 0 or no-squad", () => {
+    const squads = SquadListSchema.parse(
+      officialCloudSquadListPayload(),
+    ) as Squad[];
+    const fetched = new Map([
+      [GENERAL_SQUAD_ID, fetchedFromMembersPayload({ members: [{ id: "x" }] })],
+      [
+        GAME_SQUAD_ID,
+        fetchedFromMembersPayload([{ member_type: "agent" }]),
+      ],
+    ]);
+    expect(fetched.get(GENERAL_SQUAD_ID)?.status).toBe("error");
+    expect(fetched.get(GAME_SQUAD_ID)?.status).toBe("error");
+
+    const rosters = resolveSquadRosters(squads, fetched);
+    const map = buildAgentSquadsMap(squads, rosters);
+    expect(map.size).toBe(0);
+
+    const rows = agentRowsFromMap(allAgentIds, map, false);
+    const counts = squadFilterOptionCounts(rows, squads, rosters);
+    expect(counts.bySquadId.get(GENERAL_SQUAD_ID)).toBeNull();
+    expect(counts.bySquadId.get(GAME_SQUAD_ID)).toBeNull();
+    expect(counts.noSquadCount).toBeNull();
+
+    const groups = groupRowsBySquad(rows, squads, rosters);
+    expect(groups.map((g) => g.id)).not.toContain(NO_SQUAD_ID);
+    expect(groups).toEqual([]);
   });
 
   it("prefers an inline members roster from a self-hosted fork and skips the fetch", () => {
