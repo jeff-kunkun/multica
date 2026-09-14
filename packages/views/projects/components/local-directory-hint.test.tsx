@@ -149,6 +149,30 @@ describe("LocalDirectoryHint", () => {
     expect(screen.getByText(/Users\/foo\/work/)).toBeInTheDocument();
   });
 
+  it("describes shared mode as concurrent, never in-place or isolated", async () => {
+    mockDaemonStatus.daemonId = "daemon-A";
+    mockDaemonStatus.running = true;
+    mockListResources.mockResolvedValue({
+      resources: [
+        makeLocalDirectoryResource({
+          daemon_id: "daemon-A",
+          local_path: "/Users/foo/pg-game",
+          label: "pg-game",
+          execution_mode: "shared",
+        }),
+      ],
+      total: 1,
+    });
+    renderHint("proj-1");
+    await waitFor(() => {
+      expect(screen.getByText(/shared workspace/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/in-place/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/isolated worktree/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/per-repo worktrees/i)).toBeInTheDocument();
+    expect(screen.getByText(/Users\/foo\/pg-game/)).toBeInTheDocument();
+  });
+
   it("describes an explicit in_place resource as in-place", async () => {
     mockDaemonStatus.daemonId = "daemon-A";
     mockDaemonStatus.running = true;

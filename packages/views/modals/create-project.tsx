@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, GitBranch, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
+import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, Folders, GitBranch, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
  * GitHub mark — lucide-react v1 dropped brand icons, so we inline the
@@ -74,6 +74,10 @@ import {
 import { useConfigStore } from "@multica/core/config";
 import type { LocalDirectoryExecutionMode } from "@multica/core/types";
 import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-dialog";
+import {
+  coerceLocalDirectoryMode,
+  sharedModeUnavailable,
+} from "../projects/components/local-directory-mode";
 
 /**
  * Builds the resource_ref for a local directory attached during project
@@ -227,13 +231,16 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       : !serverValidatesWorktree
         ? ("server_outdated" as const)
         : undefined;
+  const sharedUnavailable = sharedModeUnavailable(serverValidatesWorktree);
   // Preselection, not a default behavior change: when the folder is a git repo
   // and the machine has advertised that it can run worktree mode, parallel is
   // the better fit, so it starts selected — visibly, in a control the user can
   // flip in one click before creating anything. A plain folder starts on
   // direct, and so does a machine that has not advertised: it may still be able
   // to (an old row proves nothing), but choosing it FOR the user is how a
-  // rejected save would turn into a failed project creation.
+  // rejected save would turn into a failed project creation. Shared is never
+  // preselected: it is an opt-in for umbrella directories whose tasks already
+  // isolate themselves.
   //
   // `localIsGitRepo === undefined` (an older desktop build that doesn't report
   // it) preselects direct. The asymmetry is deliberate: permissive about what
@@ -244,11 +251,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       : "in_place";
   // Never submit a mode the picker would have blocked — the folder can change
   // after a mode was chosen (pick a git repo, choose worktree, then pick a
-  // plain folder), and the stale choice would fail at task time.
-  const effectiveLocalMode: LocalDirectoryExecutionMode =
-    worktreeUnavailableReason !== undefined
-      ? "in_place"
-      : (localMode ?? preselectedLocalMode);
+  // plain folder), and the stale worktree choice would fail at task time.
+  // Shared stays selected on a non-git folder: that is a valid setup.
+  const effectiveLocalMode: LocalDirectoryExecutionMode = coerceLocalDirectoryMode(
+    localMode ?? preselectedLocalMode,
+    {
+      worktreeUnavailable: worktreeUnavailableReason,
+      sharedUnavailable,
+    },
+  );
 
   const handleSourceModeChange = (mode: "repos" | "local") => {
     setSourceMode(mode);
@@ -880,6 +891,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                               >
                                 {effectiveLocalMode === "worktree" ? (
                                   <GitBranch className="size-3 shrink-0" />
+                                ) : effectiveLocalMode === "shared" ? (
+                                  <Folders className="size-3 shrink-0" />
                                 ) : (
                                   <Pencil className="size-3 shrink-0" />
                                 )}
@@ -890,7 +903,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                                 <span className="truncate">
                                   {effectiveLocalMode === "worktree"
                                     ? tProjects(($) => $.resources.mode_badge_worktree)
-                                    : tProjects(($) => $.resources.mode_badge_in_place)}
+                                    : effectiveLocalMode === "shared"
+                                      ? tProjects(($) => $.resources.mode_badge_shared)
+                                      : tProjects(($) => $.resources.mode_badge_in_place)}
                                 </span>
                               </Button>
                             }
@@ -903,6 +918,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                                 setLocalModeOpen(false);
                               }}
                               unavailableReason={worktreeUnavailableReason}
+                              sharedUnavailable={sharedUnavailable}
                             />
                           </PopoverContent>
                         </Popover>

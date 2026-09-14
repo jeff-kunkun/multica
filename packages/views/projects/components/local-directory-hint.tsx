@@ -1,13 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FolderOpen, GitBranch } from "lucide-react";
+import { FolderOpen, Folders, GitBranch } from "lucide-react";
 import { projectResourcesOptions } from "@multica/core/projects";
 import type { LocalDirectoryResourceRef, ProjectResource } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useLocalDaemonStatus } from "../../platform";
 import { useT } from "../../i18n";
 import { localDirectoryLabel } from "./local-directory-label";
+import { executionModeOf } from "./local-directory-mode";
 
 /**
  * Banner shown at the top of the issue's Activity section when the
@@ -21,6 +22,9 @@ import { localDirectoryLabel } from "./local-directory-label";
  *   isolated worktree of the repo and hands back a branch. Saying "in-place"
  *   here would be a plain factual error, and it would send the user looking
  *   for results in a directory that will not have changed (MUL-5707).
+ * - `shared`: the agent edits the folder concurrently with other tasks, and
+ *   isolation is the workspace's job (typically per-repo worktrees). Saying
+ *   "in-place" would hide that a second run will not wait.
  *
  * Rendered only on desktop: web has no daemon to compare against, so the
  * "this machine" check would always fail. Web users will see local_directory
@@ -60,31 +64,37 @@ export function LocalDirectoryHint({
       {matches.map((resource) => {
         const ref = resource.resource_ref;
         const label = localDirectoryLabel(resource);
-        // Anything other than an explicit "worktree" is in_place: the mode is
-        // absent on resources created before it existed, and an unknown value
-        // from a newer server must not claim isolation we cannot verify.
-        const isWorktree = ref.execution_mode === "worktree";
+        // Absent / unknown modes are in_place: claiming isolation or a
+        // lock-free share we cannot verify is the one wrong answer.
+        const mode = executionModeOf(ref);
+        const prefix =
+          mode === "worktree"
+            ? t(($) => $.resources.chat_hint_worktree_prefix)
+            : mode === "shared"
+              ? t(($) => $.resources.chat_hint_shared_prefix)
+              : t(($) => $.resources.chat_hint_prefix);
+        const Icon =
+          mode === "worktree" ? GitBranch : mode === "shared" ? Folders : FolderOpen;
         return (
           <div key={resource.id} className="space-y-0.5">
             <div className="flex items-center gap-2">
-              {isWorktree ? (
-                <GitBranch className="size-3 shrink-0" />
-              ) : (
-                <FolderOpen className="size-3 shrink-0" />
-              )}
+              <Icon className="size-3 shrink-0" />
               <span className="truncate">
-                {isWorktree
-                  ? t(($) => $.resources.chat_hint_worktree_prefix)
-                  : t(($) => $.resources.chat_hint_prefix)}
+                {prefix}
                 <span className="font-medium text-foreground"> {label} </span>
                 <span className="font-mono opacity-70">({ref.local_path})</span>
               </span>
             </div>
-            {/* Where the work ends up. Only worktree mode needs saying: in
-                place, the answer is the directory already named above. */}
-            {isWorktree && (
+            {/* Where the work ends up / how isolation works. in_place is the
+                directory already named above, so it needs no extra line. */}
+            {mode === "worktree" && (
               <div className="pl-5 opacity-80">
                 {t(($) => $.resources.chat_hint_worktree_note)}
+              </div>
+            )}
+            {mode === "shared" && (
+              <div className="pl-5 opacity-80">
+                {t(($) => $.resources.chat_hint_shared_note)}
               </div>
             )}
           </div>

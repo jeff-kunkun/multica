@@ -159,7 +159,14 @@ Workspace repos and project resources are not the same thing:
   future tasks; optional `resource_ref.ref` pins the default checkout ref for
   tasks in that project;
 - `local_directory` resources point at a path owned by a daemon and carry
-  local-machine assumptions.
+  local-machine assumptions. `execution_mode` is `in_place` (default: one
+  task at a time, path mutex), `worktree` (isolated git worktree per task),
+  or `shared` (cwd is the user's directory, no path mutex; sidecar files
+  live under the task env root). Use `shared` for an umbrella directory of
+  several repositories whose tasks already isolate themselves via per-repo
+  worktrees — see `references/projects.md`. An old daemon that does not
+  advertise `local-shared-v1` must not run a shared resource: it would take
+  the mutex and silently re-serialise the directory.
 
 Do not add a project resource just because `repo checkout` failed. First
 determine whether the user asked for durable project context or just a task

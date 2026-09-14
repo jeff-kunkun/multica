@@ -15,6 +15,7 @@ function renderDialog(
   overrides: {
     value?: LocalDirectoryExecutionMode;
     unavailableReason?: WorktreeUnavailableReason;
+    sharedUnavailable?: boolean;
     errorMessage?: string;
     onConfirm?: (mode: LocalDirectoryExecutionMode) => void;
   } = {},
@@ -28,6 +29,7 @@ function renderDialog(
         path="/Users/dev/work/game-client"
         value={overrides.value ?? "in_place"}
         unavailableReason={overrides.unavailableReason}
+        sharedUnavailable={overrides.sharedUnavailable}
         errorMessage={overrides.errorMessage}
         confirmLabel="Save"
         onConfirm={onConfirm}
@@ -39,6 +41,10 @@ function renderDialog(
 
 function worktreeOption(): HTMLElement {
   return screen.getAllByRole("radio")[1] as HTMLElement;
+}
+
+function sharedOption(): HTMLElement {
+  return screen.getAllByRole("radio")[2] as HTMLElement;
 }
 
 describe("LocalDirectoryModeDialog", () => {
@@ -117,5 +123,44 @@ describe("LocalDirectoryModeDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onConfirm).toHaveBeenCalledWith("worktree");
+  });
+
+  it("offers shared workspace mode and confirms it", () => {
+    const onConfirm = vi.fn();
+    renderDialog({ onConfirm });
+
+    const option = sharedOption();
+    expect(option.hasAttribute("disabled")).toBe(false);
+    expect(screen.getByText(/share this workspace/i)).toBeTruthy();
+    expect(screen.getByText(/per-repo worktrees/i)).toBeTruthy();
+
+    fireEvent.click(option);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onConfirm).toHaveBeenCalledWith("shared");
+  });
+
+  // An umbrella directory of several repos is usually not itself a git
+  // repository. Blocking worktree for that reason must not also block shared.
+  it("keeps shared selectable when the folder is not a git repository", () => {
+    const onConfirm = vi.fn();
+    renderDialog({ unavailableReason: "not_git", onConfirm });
+
+    expect(sharedOption().hasAttribute("disabled")).toBe(false);
+    fireEvent.click(sharedOption());
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onConfirm).toHaveBeenCalledWith("shared");
+  });
+
+  it("blocks shared mode when the server cannot honour it", () => {
+    const onConfirm = vi.fn();
+    renderDialog({ sharedUnavailable: true, onConfirm });
+
+    const option = sharedOption();
+    expect(option.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/too old to honour shared workspace mode/i)).toBeTruthy();
+
+    fireEvent.click(option);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onConfirm).toHaveBeenCalledWith("in_place");
   });
 });

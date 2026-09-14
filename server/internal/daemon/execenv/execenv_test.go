@@ -7113,3 +7113,91 @@ func TestPrepareIsolateSidecarsRequiresLocalWorkDir(t *testing.T) {
 		t.Fatalf("marker missing from the daemon-owned workdir: %v", err)
 	}
 }
+
+// Two shared-mode tasks on the same user directory must each keep their
+// sidecar tree under their own env root. A collision at a fixed path in the
+// user's directory is the failure this mode exists to prevent: the second
+// start would overwrite the first, and the first cleanup would remove the
+// second's files.
+func TestPrepareIsolateSidecarsConcurrentTasksStayIsolated(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	userDir := t.TempDir()
+	sentinel := filepath.Join(userDir, "user-file.txt")
+	if err := os.WriteFile(sentinel, []byte("keep me"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	prepare := func(taskID, skillName string) *Environment {
+		t.Helper()
+		env, err := Prepare(PrepareParams{
+			WorkspacesRoot:  workspacesRoot,
+			WorkspaceID:     "ws-shared-concurrent",
+			TaskID:          taskID,
+			AgentName:       "Test Agent",
+			Provider:        "claude",
+			LocalWorkDir:    userDir,
+			IsolateSidecars: true,
+			Task: TaskContextForEnv{
+				IssueID: "issue-" + taskID[:8],
+				AgentID: "agent-1",
+				AgentSkills: []SkillContextForEnv{{
+					Name:    skillName,
+					Content: "---\nname: " + skillName + "\ndescription: probe\n---\nbody\n",
+				}},
+			},
+		}, testLogger())
+		if err != nil {
+			t.Fatalf("Prepare(%s) failed: %v", taskID, err)
+		}
+		return env
+	}
+
+	first := prepare("a1b2c3d4-e5f6-7890-abcd-ef1234567890", "skill-a")
+	second := prepare("b2c3d4e5-f6a7-8901-bcde-f12345678901", "skill-b")
+	defer second.Cleanup(true)
+
+	if first.SidecarRoot == "" || second.SidecarRoot == "" {
+		t.Fatal("both tasks need a sidecar root")
+	}
+	if first.SidecarRoot == second.SidecarRoot {
+		t.Fatalf("sidecar roots collided: %q", first.SidecarRoot)
+	}
+	if first.WorkDir != userDir || second.WorkDir != userDir {
+		t.Fatalf("WorkDir drifted off the user directory: %q / %q", first.WorkDir, second.WorkDir)
+	}
+
+	entries, err := os.ReadDir(userDir)
+	if err != nil {
+		t.Fatalf("read user dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "user-file.txt" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("user directory contents = %v, want only the sentinel", names)
+	}
+
+	skillA := filepath.Join(first.SidecarRoot, ".claude", "skills", "skill-a", "SKILL.md")
+	skillB := filepath.Join(second.SidecarRoot, ".claude", "skills", "skill-b", "SKILL.md")
+	if _, err := os.Stat(skillA); err != nil {
+		t.Errorf("first task skill missing: %v", err)
+	}
+	if _, err := os.Stat(skillB); err != nil {
+		t.Errorf("second task skill missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(first.SidecarRoot, ".claude", "skills", "skill-b")); !os.IsNotExist(err) {
+		t.Error("first sidecar root contains the second task's skill")
+	}
+
+	if err := first.Cleanup(true); err != nil {
+		t.Fatalf("cleanup first: %v", err)
+	}
+	if _, err := os.Stat(skillB); err != nil {
+		t.Errorf("cleaning the first task removed the second's sidecar: %v", err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("cleaning a sidecar removed the user's file: %v", err)
+	}
+}

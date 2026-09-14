@@ -163,7 +163,8 @@ func localDirectoryModeCapability(mode string) (capability, minVersion, humanMod
 //
 // execution_mode selects how tasks share that directory: in_place (default)
 // keeps the historical one-task-at-a-time behavior, worktree gives each task an
-// isolated git worktree so tasks run concurrently.
+// isolated git worktree so tasks run concurrently, and shared runs in the
+// user's directory without the path mutex.
 type localDirectoryRef struct {
 	LocalPath     string `json:"local_path"`
 	DaemonID      string `json:"daemon_id"`

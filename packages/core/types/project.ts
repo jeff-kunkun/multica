@@ -86,11 +86,19 @@ export interface GithubRepoResourceRef {
  *   `agent/<agent>/<task>`. Continuation is decided by an ownership record in
  *   the repo, not by the branch name, so a same-named branch the user made is
  *   never adopted.
+ * - `shared`: the agent works directly in the user's directory like `in_place`,
+ *   but without the per-directory lock. Tasks run concurrently; Multica keeps
+ *   its own per-task files out of the directory. Isolation is the workspace's
+ *   job — typically each task already runs in its own per-repo worktree under
+ *   an umbrella directory of several repositories. The directory need not be a
+ *   git repository. Nothing protects two tasks that edit the same checkout.
  *
  * Absent means `in_place`: resources created before the mode existed keep their
  * original behavior, so this is optional rather than defaulted on the server.
+ * UI switches must `default` unknown values to `in_place` rather than claiming
+ * isolation or a lock-free share they cannot verify.
  */
-export type LocalDirectoryExecutionMode = "in_place" | "worktree";
+export type LocalDirectoryExecutionMode = "in_place" | "worktree" | "shared";
 
 export interface LocalDirectoryResourceRef {
   local_path: string;

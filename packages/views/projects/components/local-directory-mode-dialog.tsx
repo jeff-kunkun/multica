@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GitBranch, Pencil, TriangleAlert } from "lucide-react";
+import { Folders, GitBranch, Pencil, TriangleAlert } from "lucide-react";
 import type { LocalDirectoryExecutionMode } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -13,25 +13,9 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { useT } from "../../i18n/use-t";
+import type { WorktreeUnavailableReason } from "./local-directory-mode";
 
-/**
- * Why the worktree option may be unavailable.
- *
- * Two reasons, and neither is a guess about the machine. `not_git` the client
- * establishes by itself — the folder either has a repository to branch from or
- * it does not, and the desktop picker checked. `server_outdated` is what the
- * SERVER says about itself: whether it understands `execution_mode` at all.
- *
- * Whether the MACHINE can run the mode is deliberately absent. That is the
- * server's question, asked on every save, and a rejection comes back as
- * `errorMessage` rather than as a disabled option guessed at up front (#7113).
- * But deferring to the server is only safe once the server has said it will
- * actually check: older ones drop the field and answer 201, and the task then
- * edits the directory the user asked to isolate.
- *
- * `undefined` means available.
- */
-export type WorktreeUnavailableReason = "not_git" | "server_outdated";
+export type { WorktreeUnavailableReason } from "./local-directory-mode";
 
 interface LocalDirectoryModeDialogProps {
   open: boolean;
@@ -42,6 +26,8 @@ interface LocalDirectoryModeDialogProps {
   value: LocalDirectoryExecutionMode;
   /** Set when worktree cannot be chosen; the option renders disabled with a reason. */
   unavailableReason?: WorktreeUnavailableReason;
+  /** Set when shared cannot be chosen (server would silently drop the field). */
+  sharedUnavailable?: boolean;
   /** Server-side rejection to show inline (e.g. a 422 that only the API can detect). */
   errorMessage?: string;
   saving?: boolean;
@@ -53,10 +39,11 @@ interface LocalDirectoryModeDialogProps {
 /**
  * Mode picker for a local_directory resource.
  *
- * Deliberately does NOT surface the raw `in_place` / `worktree` identifiers as
- * the primary label. The choice a user is actually making is about how they get
- * their results back — edits appearing in their working copy versus a branch
- * they review — so the options lead with that, and the identifier is only a
+ * Deliberately does NOT surface the raw `in_place` / `worktree` / `shared`
+ * identifiers as the primary label. The choice a user is actually making is
+ * about how they get their results back — edits appearing in their working
+ * copy versus a branch they review versus concurrent work they isolate
+ * themselves — so the options lead with that, and the identifier is only a
  * secondary hint for anyone matching this against the CLI or the docs.
  */
 export function LocalDirectoryModeDialog({
@@ -65,6 +52,7 @@ export function LocalDirectoryModeDialog({
   path,
   value,
   unavailableReason,
+  sharedUnavailable,
   errorMessage,
   saving = false,
   confirmLabel,
@@ -97,6 +85,7 @@ export function LocalDirectoryModeDialog({
           value={selected}
           onChange={setSelected}
           unavailableReason={unavailableReason}
+          sharedUnavailable={sharedUnavailable}
         />
 
         {errorMessage && (
@@ -127,10 +116,11 @@ interface LocalDirectoryModeOptionsProps {
   value: LocalDirectoryExecutionMode;
   onChange: (mode: LocalDirectoryExecutionMode) => void;
   unavailableReason?: WorktreeUnavailableReason;
+  sharedUnavailable?: boolean;
 }
 
 /**
- * The two-option choice itself, without any surrounding chrome.
+ * The three-option choice itself, without any surrounding chrome.
  *
  * Shared so the dialog (editing an existing resource) and the compact picker in
  * the create-project modal offer literally the same options, copy and blocked
@@ -140,6 +130,7 @@ export function LocalDirectoryModeOptions({
   value,
   onChange,
   unavailableReason,
+  sharedUnavailable = false,
 }: LocalDirectoryModeOptionsProps) {
   const { t } = useT("projects");
   const worktreeDisabled = unavailableReason !== undefined;
@@ -169,6 +160,20 @@ export function LocalDirectoryModeOptions({
               : undefined
         }
         onSelect={() => onChange("worktree")}
+      />
+      <ModeOption
+        icon={<Folders className="size-4" />}
+        title={t(($) => $.resources.mode_shared_title)}
+        description={t(($) => $.resources.mode_shared_description)}
+        identifier="shared"
+        selected={value === "shared"}
+        disabled={sharedUnavailable}
+        disabledReason={
+          sharedUnavailable
+            ? t(($) => $.resources.mode_shared_needs_server_upgrade)
+            : undefined
+        }
+        onSelect={() => onChange("shared")}
       />
     </div>
   );

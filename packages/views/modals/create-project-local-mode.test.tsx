@@ -294,7 +294,8 @@ describe("CreateProjectModal — local directory execution mode", () => {
     await pickLocalDirectory(user);
 
     expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).toBeDisabled();
-    expect(screen.getByText(/Multica server is too old/i)).toBeInTheDocument();
+    expect(screen.getByText(/too old to execute runs in parallel/i)).toBeInTheDocument();
+    expect(screen.getByText(/too old to honour shared workspace mode/i)).toBeInTheDocument();
     // And it must not have been preselected either — that would submit a mode
     // the server would silently downgrade.
     expect(screen.getByRole("button", { name: /^Direct$/i })).toBeInTheDocument();
@@ -309,6 +310,32 @@ describe("CreateProjectModal — local directory execution mode", () => {
 
     expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).toBeDisabled();
     expect(screen.getByText(/not a git repository/i)).toBeInTheDocument();
+  });
+
+  // An umbrella directory is typically not itself a git repo. Shared must stay
+  // selectable there — blocking worktree must not also wipe the third option.
+  it("keeps shared workspace mode selectable on a non-git folder", async () => {
+    pickedIsGitRepo = false;
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    await pickLocalDirectory(user);
+
+    const shared = screen.getByRole("radio", { name: /Share this workspace/i });
+    expect(shared).not.toBeDisabled();
+    await user.click(shared);
+    expect(screen.getByRole("button", { name: /^Shared$/i })).toBeInTheDocument();
+  });
+
+  it("blocks shared mode against a server that cannot honour it", async () => {
+    serverValidatesWorktree = false;
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    await pickLocalDirectory(user);
+
+    expect(screen.getByRole("radio", { name: /Share this workspace/i })).toBeDisabled();
+    expect(screen.getByText(/too old to honour shared workspace mode/i)).toBeInTheDocument();
   });
 });
 
@@ -344,5 +371,21 @@ describe("buildLocalDirectoryResourceRef", () => {
         mode: "in_place",
       }),
     ).toEqual({ local_path: "/tmp/x", daemon_id: "d", execution_mode: "in_place" });
+  });
+
+  it("carries shared mode", () => {
+    expect(
+      buildLocalDirectoryResourceRef({
+        localPath: "/Volumes/Storge/pg-game",
+        daemonId: "daemon-1",
+        label: "pg-game",
+        mode: "shared",
+      }),
+    ).toEqual({
+      local_path: "/Volumes/Storge/pg-game",
+      daemon_id: "daemon-1",
+      label: "pg-game",
+      execution_mode: "shared",
+    });
   });
 });

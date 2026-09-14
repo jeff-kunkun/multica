@@ -6,6 +6,7 @@ import {
   ChevronRight,
   FolderGit,
   FolderOpen,
+  Folders,
   GitBranch,
   Pencil,
   Plus,
@@ -51,11 +52,13 @@ import {
   validateLocalDirectory,
   type ValidateLocalDirectoryResult,
 } from "../../platform";
-import {
-  LocalDirectoryModeDialog,
-  type WorktreeUnavailableReason,
-} from "./local-directory-mode-dialog";
+import { LocalDirectoryModeDialog } from "./local-directory-mode-dialog";
 import { localDirectoryLabel } from "./local-directory-label";
+import {
+  executionModeOf,
+  sharedModeUnavailable,
+  worktreeUnavailableReason,
+} from "./local-directory-mode";
 import { useT } from "../../i18n";
 import { githubShortLabel } from "../../common/github-url";
 
@@ -75,18 +78,6 @@ function isLocalDirectoryRef(r: ProjectResource): r is ProjectResource & {
   resource_ref: LocalDirectoryResourceRef;
 } {
   return r.resource_type === "local_directory";
-}
-
-/**
- * Reads the execution mode off a stored ref. An absent or unrecognised value is
- * reported as in_place, matching the server: the field is optional, and a mode
- * written by a newer client must not render as anything other than the
- * conservative default here.
- */
-function executionModeOf(
-  ref: LocalDirectoryResourceRef,
-): LocalDirectoryExecutionMode {
-  return ref.execution_mode === "worktree" ? "worktree" : "in_place";
 }
 
 /** Pending mode edit — either for a directory being added, or an existing row. */
@@ -538,6 +529,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
             modeDialog.isGitRepo,
             serverValidatesWorktree,
           )}
+          sharedUnavailable={sharedModeUnavailable(serverValidatesWorktree)}
           errorMessage={modeError ?? undefined}
           saving={modeSaving}
           confirmLabel={
@@ -550,29 +542,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       )}
     </div>
   );
-}
-
-/**
- * Which blocker (if any) applies to the worktree option.
- *
- * `isGitRepo === false` is a hard no — the daemon would fail every task on that
- * folder. `undefined` means we could not check (an older desktop build, or an
- * existing row whose path was validated at pick time), and is deliberately
- * permissive: the daemon re-checks authoritatively, so guessing "not a repo"
- * here would block a perfectly valid setup.
- *
- * Daemon capability is deliberately absent. It is the server's question, asked
- * on save; predicting it here is what produced an unfixable blocker for a user
- * already on the newest release (#7113). Deferring to the server does require
- * knowing it will answer, though — `serverValidates` is the server saying so.
- */
-function worktreeUnavailableReason(
-  isGitRepo: boolean | undefined,
-  serverValidates: boolean,
-): WorktreeUnavailableReason | undefined {
-  if (isGitRepo === false) return "not_git";
-  if (!serverValidates) return "server_outdated";
-  return undefined;
 }
 
 interface ResourceRowProps {
@@ -775,6 +744,21 @@ function LocalDirectoryRow({
           />
           <TooltipContent side="top">
             {t(($) => $.resources.mode_badge_worktree_tooltip)}
+          </TooltipContent>
+        </Tooltip>
+      )}
+      {mode === "shared" && !editing && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Badge variant="secondary" className="shrink-0 gap-1 font-normal">
+                <Folders className="size-3" />
+                {t(($) => $.resources.mode_badge_shared)}
+              </Badge>
+            }
+          />
+          <TooltipContent side="top">
+            {t(($) => $.resources.mode_badge_shared_tooltip)}
           </TooltipContent>
         </Tooltip>
       )}

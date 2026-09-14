@@ -743,12 +743,15 @@ export interface AppConfigResponse {
   vcs_integration_available?: boolean;
   feature_flags?: Record<string, boolean>;
   /** Whether this server understands local_directory `execution_mode` and
-   * gates worktree mode at save time. Absent on every server that predates this
-   * capability signal, which includes the ones that silently DROPPED an unknown
-   * `execution_mode` and answered 201 — the resource then ran in place while
-   * the user was promised isolation (#7113). Servers between that fix and this
-   * signal do validate but cannot say so, and are treated as unable: the client
-   * has no way to tell them apart, and only one of the two answers is safe. */
+   * gates worktree *and* shared mode at save time. Absent on every server that
+   * predates this capability signal, which includes the ones that silently
+   * DROPPED an unknown `execution_mode` and answered 201 — the resource then
+   * ran in place (with a lock) while the user was promised isolation or a
+   * lock-free share (#7113). Servers between that fix and this signal do
+   * validate but cannot say so, and are treated as unable: the client has no
+   * way to tell them apart, and only one of the two answers is safe. The flag
+   * name is historical; it is the "server validates execution_mode" signal for
+   * every gated mode, not worktree alone. */
   local_worktree_supported?: boolean;
   /** Whether agent create/update persists `conversation_starters`. Older servers
    * silently ignored the unknown field, so absent must be treated as false. */
@@ -973,7 +976,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   workspace_creation_disabled: false,
   vcs_integration_available: false,
   // Fail closed: an unreadable config must not look like a server that
-  // validates execution_mode.
+  // validates execution_mode (worktree or shared).
   local_worktree_supported: false,
   // Fail closed: old servers returned success while dropping the field.
   agent_conversation_starters_supported: false,

@@ -306,6 +306,14 @@ child of that parent — and labels each row with the issue it belongs to, which
 is how you find another agent already working on a sibling sub-issue before you
 open a second PR against the same code.
 
+`waiting_local_directory` is the `in_place` path-mutex wait. Tasks on a
+`shared` or `worktree` `local_directory` do not take that mutex, so they do
+not enter this status for the directory lock. If several tasks on an umbrella
+directory still serialise, the resource is probably still `in_place` — switch
+it to `shared` only when the workspace already isolates each task (typically
+a per-repo worktree) and you accept that two tasks editing the same checkout
+are unprotected. Full contract: `references/projects.md`.
+
 The family read returns a compact row — task, issue, agent, status, started —
 not the full execution-log record. If you need a run's detail, follow the task
 id with `multica issue run-messages`.

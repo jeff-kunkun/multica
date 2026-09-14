@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -1506,6 +1507,192 @@ func TestCreateProjectGatesWorktreeLocalDirectory(t *testing.T) {
 	lreq := newRequest("GET", "/api/projects?workspace_id="+testWorkspaceID, nil)
 	testHandler.ListProjects(lw, lreq)
 	if strings.Contains(lw.Body.String(), "Bundled worktree resource") {
+		t.Fatal("rejected create left a project behind")
+	}
+}
+
+func insertDaemonRuntimeWithCaps(t *testing.T, daemonID string, caps ...string) {
+	t.Helper()
+	if dbfx == nil {
+		t.Skip("database not available")
+	}
+	meta, err := json.Marshal(map[string]any{"capabilities": caps})
+	if err != nil {
+		t.Fatalf("marshal capabilities: %v", err)
+	}
+	dbfx.Runtime(t, "runtime-"+daemonID, testutil.Cols{
+		"daemon_id":    daemonID,
+		"runtime_mode": "local",
+		"provider":     "claude-" + daemonID,
+		"metadata":     meta,
+	})
+}
+
+func decodeErrorCode(t *testing.T, body []byte) string {
+	t.Helper()
+	var resp map[string]any
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	code, _ := resp["code"].(string)
+	return code
+}
+
+func refExecutionMode(t *testing.T, raw json.RawMessage) string {
+	t.Helper()
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("decode ref: %v", err)
+	}
+	mode, _ := fields["execution_mode"].(string)
+	return mode
+}
+
+// Shared mode is gated the same way as worktree: an old daemon json-skips
+// execution_mode, takes the path mutex, and silently re-serialises the
+// directory the user asked to share. The save-time gate has to refuse both
+// create and update, including the bundled create-project path.
+func TestSharedModeResourceCreateUpdateGatesOldRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	t.Run("create is refused when the daemon does not advertise local-shared-v1", func(t *testing.T) {
+		project := createTestProjectForResources(t, "Shared create old runtime")
+		const daemonID = "daemon-shared-create-old"
+		insertDaemonRuntimeWithCaps(t, daemonID, "local-worktree-v1")
+
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
+			"resource_type": "local_directory",
+			"resource_ref": map[string]any{
+				"local_path":     "/Volumes/Storge/pg-game",
+				"daemon_id":      daemonID,
+				"execution_mode": "shared",
+			},
+		})
+		req = withURLParam(req, "id", project.ID)
+		testHandler.CreateProjectResource(w, req)
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("CreateProjectResource shared on a worktree-only runtime: expected 422, got %d: %s",
+				w.Code, w.Body.String())
+		}
+		if got := decodeErrorCode(t, w.Body.Bytes()); got != "daemon_version_unsupported" {
+			t.Fatalf("error code = %q, want daemon_version_unsupported", got)
+		}
+	})
+
+	t.Run("create succeeds when the daemon advertises local-shared-v1", func(t *testing.T) {
+		project := createTestProjectForResources(t, "Shared create capable runtime")
+		const daemonID = "daemon-shared-create-ok"
+		insertDaemonRuntimeWithCaps(t, daemonID, "local-shared-v1")
+
+		created := createLocalDirectoryResourceFor(t, project.ID, map[string]any{
+			"local_path":     "/Volumes/Storge/pg-game",
+			"daemon_id":      daemonID,
+			"label":          "pg-game",
+			"execution_mode": "shared",
+		})
+		if got := refExecutionMode(t, created.ResourceRef); got != "shared" {
+			t.Fatalf("stored execution_mode = %q, want shared", got)
+		}
+	})
+
+	t.Run("update to shared is refused on an old runtime", func(t *testing.T) {
+		project := createTestProjectForResources(t, "Shared update old runtime")
+		const daemonID = "daemon-shared-update-old"
+		created := createLocalDirectoryResourceFor(t, project.ID, map[string]any{
+			"local_path": "/Volumes/Storge/pg-game",
+			"daemon_id":  daemonID,
+			"label":      "pg-game",
+		})
+
+		w := httptest.NewRecorder()
+		req := newRequest("PUT", "/api/projects/"+project.ID+"/resources/"+created.ID, map[string]any{
+			"resource_ref": map[string]any{
+				"local_path":     "/Volumes/Storge/pg-game",
+				"daemon_id":      daemonID,
+				"label":          "pg-game",
+				"execution_mode": "shared",
+			},
+		})
+		req = withURLParams(req, "id", project.ID, "resourceId", created.ID)
+		testHandler.UpdateProjectResource(w, req)
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("UpdateProjectResource to shared without a capable runtime: expected 422, got %d: %s",
+				w.Code, w.Body.String())
+		}
+		if got := decodeErrorCode(t, w.Body.Bytes()); got != "daemon_version_unsupported" {
+			t.Fatalf("error code = %q, want daemon_version_unsupported", got)
+		}
+	})
+
+	t.Run("update to shared succeeds on a capable runtime", func(t *testing.T) {
+		project := createTestProjectForResources(t, "Shared update capable runtime")
+		const daemonID = "daemon-shared-update-ok"
+		insertDaemonRuntimeWithCaps(t, daemonID, "local-shared-v1", "local-worktree-v1")
+		created := createLocalDirectoryResourceFor(t, project.ID, map[string]any{
+			"local_path": "/Volumes/Storge/pg-game",
+			"daemon_id":  daemonID,
+			"label":      "pg-game",
+		})
+
+		w := httptest.NewRecorder()
+		req := newRequest("PUT", "/api/projects/"+project.ID+"/resources/"+created.ID, map[string]any{
+			"resource_ref": map[string]any{
+				"local_path":     "/Volumes/Storge/pg-game",
+				"daemon_id":      daemonID,
+				"label":          "pg-game",
+				"execution_mode": "shared",
+			},
+		})
+		req = withURLParams(req, "id", project.ID, "resourceId", created.ID)
+		testHandler.UpdateProjectResource(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateProjectResource to shared: expected 200, got %d: %s",
+				w.Code, w.Body.String())
+		}
+		var updated ProjectResourceResponse
+		if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got := refExecutionMode(t, updated.ResourceRef); got != "shared" {
+			t.Fatalf("stored execution_mode = %q, want shared", got)
+		}
+	})
+}
+
+func TestCreateProjectGatesSharedLocalDirectory(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Bundled shared resource",
+		"resources": []map[string]any{
+			{
+				"resource_type": "local_directory",
+				"resource_ref": map[string]any{
+					"local_path":     "/Volumes/Storge/pg-game",
+					"daemon_id":      "daemon-with-no-runtime-row-shared",
+					"execution_mode": "shared",
+				},
+			},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("CreateProject with un-runnable shared resource: expected 422, got %d: %s",
+			w.Code, w.Body.String())
+	}
+	if got := decodeErrorCode(t, w.Body.Bytes()); got != "daemon_version_unsupported" {
+		t.Fatalf("expected the shared gate's error code, got %q", got)
+	}
+
+	lw := httptest.NewRecorder()
+	lreq := newRequest("GET", "/api/projects?workspace_id="+testWorkspaceID, nil)
+	testHandler.ListProjects(lw, lreq)
+	if strings.Contains(lw.Body.String(), "Bundled shared resource") {
 		t.Fatal("rejected create left a project behind")
 	}
 }

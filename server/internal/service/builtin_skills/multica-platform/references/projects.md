@@ -111,6 +111,29 @@ repository. Not every runtime can run it yet: a task whose runtime has no
 sidecar-free route for the brief fails with a message naming the runtime
 (Claude Code and the inline-brief runtimes are supported; Codex is not yet).
 
+When to pick `shared` rather than `worktree` or `in_place`:
+
+- The path is an umbrella directory (several git repos, each already using
+  linked worktrees per task/branch), not one working copy. `worktree` mode
+  needs the *resource path itself* to be a git repository and will fail
+  otherwise.
+- Tasks already isolate their writes by workspace convention (checkout a
+  per-task worktree under each sub-repo). Multica will not create those
+  worktrees, will not lock the umbrella path, and will not write sidecar
+  files into it.
+- You can accept two tasks colliding if they both edit the same checkout.
+  If they cannot, stay on `in_place` (serial) or bind a single repo as
+  `worktree`.
+
+The save-time and claim-time gates for `shared` are the `local-shared-v1`
+capability. An older daemon that does not advertise it would json-skip
+`execution_mode`, take the path mutex, and silently re-serialise the
+directory — the server refuses the save (HTTP 422, code
+`daemon_version_unsupported`) and cancels a claim instead. The frontend
+`local_worktree_supported` config flag is the "this server validates
+`execution_mode` at all" signal for both gated modes; a server that predates
+it would drop `shared` the same way it dropped `worktree`.
+
 `worktree` requires the path to be a git repository with at least one commit;
 tasks fail with an explicit error otherwise. The gate is the `local-worktree-v1`
 capability the daemon advertises — not its version string — and it is checked

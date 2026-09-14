@@ -25,12 +25,14 @@ interface ConfigState {
   // self-hosted operators can confirm what's deployed. Empty for dev builds
   // or servers older than this feature.
   serverVersion: string;
-  // Whether the connected server validates local_directory execution_mode.
-  // Defaults to false, and stays false for any server that does not declare it:
-  // the dangerous ones accept worktree mode, drop the field, and run the task
-  // in the user's working copy anyway (#7113). Servers that validate but
-  // predate this signal are caught by the same net — indistinguishable from
-  // here, and only one of the two answers is safe to guess.
+  // Whether the connected server validates local_directory execution_mode
+  // (worktree and shared). Defaults to false, and stays false for any server
+  // that does not declare it: the dangerous ones accept an unknown mode, drop
+  // the field, and run the task in the user's working copy with a lock anyway
+  // (#7113). Servers that validate but predate this signal are caught by the
+  // same net — indistinguishable from here, and only one of the two answers is
+  // safe to guess. The name is historical; it gates every execution_mode the
+  // server would otherwise silently drop.
   localWorktreeSupported: boolean;
   // Whether this server persists conversation_starters on agent create/update.
   // Older handlers accepted the unknown field and returned success while
