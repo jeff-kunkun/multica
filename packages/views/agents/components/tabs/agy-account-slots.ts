@@ -43,6 +43,8 @@ export function inferHomeDirFromGeminiPath(path: string): string | null {
 }
 
 export function readProcessHomeDir(): string | null {
+  const desktopHome = (globalThis as { desktopAPI?: { homeDir?: unknown } }).desktopAPI?.homeDir;
+  if (typeof desktopHome === "string" && desktopHome.length > 0) return desktopHome;
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } })
     .process?.env;
   const home = env?.HOME || env?.USERPROFILE;

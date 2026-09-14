@@ -19,6 +19,8 @@ import type {
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
 
 interface DesktopAPI {
+  /** Absolute home directory captured in the preload process. */
+  homeDir: string;
   /** App version + normalized OS, captured synchronously at preload time. */
   appInfo: {
     version: string;

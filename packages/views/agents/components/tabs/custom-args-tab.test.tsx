@@ -176,6 +176,27 @@ describe("CustomArgsTab", () => {
     });
   });
 
+  it("uses the desktop home directory when renderer env is unavailable", async () => {
+    const user = userEvent.setup();
+    vi.unstubAllEnvs();
+    Object.defineProperty(globalThis, "desktopAPI", {
+      configurable: true,
+      value: { homeDir: "/Users/desktop" },
+    });
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDevice);
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+    expect(
+      screen.getByText("agy --gemini_dir=/Users/desktop/.gemini-account2"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "/Users/desktop/.gemini-account2"],
+    });
+    delete (globalThis as { desktopAPI?: unknown }).desktopAPI;
+  });
+
   it("copies the AGY sign-in command for the selected slot", async () => {
     const user = userEvent.setup();
     renderTab(
