@@ -11,6 +11,7 @@ import {
   loginDirectory,
   resolveHomeDir,
   resolveSlotDirectory,
+  runtimeHomeDir,
   setGeminiDir,
 } from "./agy-account-slots";
 
@@ -93,6 +94,33 @@ describe("agy account slots", () => {
     expect(resolveSlotDirectory("account2", "~\\.gemini", home)).toBe(
       "C:\\Users\\you\\.gemini-account2",
     );
+  });
+
+  it("prefers runtime metadata home over process.env when the profile is empty", () => {
+    vi.stubEnv("HOME", "/Users/env");
+    expect(resolveHomeDir("", "/Users/runtime")).toBe("/Users/runtime");
+    expect(runtimeHomeDir({ metadata: { home_dir: "/Users/agy-host" } })).toBe(
+      "/Users/agy-host",
+    );
+  });
+
+  it("resolves home from runtime metadata when HOME and desktopAPI are absent", () => {
+    vi.stubEnv("HOME", "");
+    vi.stubEnv("USERPROFILE", "");
+    delete (globalThis as { desktopAPI?: unknown }).desktopAPI;
+    expect(resolveHomeDir("", "/Users/agy-host")).toBe("/Users/agy-host");
+    expect(
+      resolveSlotDirectory("account2", "", resolveHomeDir("", "/Users/agy-host")),
+    ).toBe("/Users/agy-host/.gemini-account2");
+  });
+
+  it("returns null when no profile, runtime home, or env is available", () => {
+    vi.stubEnv("HOME", "");
+    vi.stubEnv("USERPROFILE", "");
+    delete (globalThis as { desktopAPI?: unknown }).desktopAPI;
+    expect(resolveHomeDir("")).toBeNull();
+    expect(runtimeHomeDir({ metadata: { home_dir: "~" } })).toBeNull();
+    expect(resolveSlotDirectory("account2", "", null)).toBe("~/.gemini-account2");
   });
 
   it("builds a one-line agy login command", () => {

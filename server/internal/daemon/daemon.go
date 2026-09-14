@@ -2846,6 +2846,17 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 	return out
 }
 
+// withHostHomeDir stamps the daemon host's home onto a register payload so the
+// web UI can expand AGY account-slot paths. Browsers cannot read process.env.HOME.
+func withHostHomeDir(req map[string]any) map[string]any {
+	if home, err := os.UserHomeDir(); err == nil {
+		if home = strings.TrimSpace(home); home != "" {
+			req["home_dir"] = home
+		}
+	}
+	return req
+}
+
 // registerRuntimesForWorkspace registers this host's runtimes for one
 // workspace, probing the built-in agent CLIs itself. This is the entry point
 // for every standalone registration — a runtime_gone re-register, a profile
@@ -2952,7 +2963,7 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 		return nil, profileSig, ErrNoRuntimesToRegister
 	}
 
-	req := map[string]any{
+	req := withHostHomeDir(map[string]any{
 		"workspace_id":      workspaceID,
 		"daemon_id":         d.cfg.DaemonID,
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
@@ -2961,7 +2972,7 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 		"launched_by":       d.cfg.LaunchedBy,
 		"runtimes":          runtimes,
 		"failed_profiles":   failedProfiles,
-	}
+	})
 
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
@@ -2997,7 +3008,7 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 	if len(runtimes) == 0 {
 		return nil, ErrNoRuntimesToRegister
 	}
-	req := map[string]any{
+	req := withHostHomeDir(map[string]any{
 		"workspace_id":      workspaceID,
 		"daemon_id":         d.cfg.DaemonID,
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
@@ -3008,7 +3019,7 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 		// Deliberately empty: this call carries no profiles, so it must not
 		// report profile failures either.
 		"failed_profiles": []map[string]string{},
-	}
+	})
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("register builtin runtimes: %w", err)
