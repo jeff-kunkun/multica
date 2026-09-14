@@ -811,6 +811,17 @@ export class ApiClient {
     });
   }
 
+  async signupWithPassword(
+    username: string,
+    password: string,
+    email: string,
+  ): Promise<LoginResponse> {
+    return this.fetch("/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({ username, password, email }),
+    });
+  }
+
   async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {
     return this.fetch("/auth/google", {
       method: "POST",

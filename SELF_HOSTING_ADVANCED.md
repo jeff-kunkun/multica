@@ -73,6 +73,7 @@ All four must be set or the switch stays off and email login keeps working. When
 - `/api/config` reports `password_auth: true` so the web login page shows username + password.
 - `POST /auth/login` issues the same JWT and `multica_auth` cookie as email verification.
 - `POST /auth/send-code` and `POST /auth/verify-code` return 403.
+- When `ALLOW_SIGNUP` is not `false`, `/login` shows a create-account link to `/signup`, and `POST /auth/signup` creates a username + password user (bcrypt-hashed). The env bootstrap account still logs in; signed-up users log in with the username they chose. Email format is checked; signup is rate-limited with the other `/auth` routes.
 
 Wrong username or password returns 401 with a generic error. Existing sessions keep using the same JWT TTL.
 
