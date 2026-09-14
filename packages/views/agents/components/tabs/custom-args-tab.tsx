@@ -33,6 +33,7 @@ import {
   loginDirectory,
   resolveHomeDir,
   resolveSlotDirectory,
+  runtimeHomeDir,
   setGeminiDir,
 } from "./agy-account-slots";
 
@@ -100,7 +101,7 @@ export function CustomArgsTab({
 
   const currentArgs = entriesToArgs(entries);
   const geminiDir = getGeminiDir(currentArgs);
-  const homeDir = resolveHomeDir(geminiDir);
+  const homeDir = resolveHomeDir(geminiDir, runtimeHomeDir(runtimeDevice));
   const originalArgs = agent.custom_args ?? [];
   const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
   const visibleEntries = visibleArgEntries(entries);
@@ -126,6 +127,10 @@ export function CustomArgsTab({
   };
 
   const selectSlot = (next: AgyAccountSlot) => {
+    if (next === "account2" && !homeDir) {
+      toast.error(t(($) => $.tab_body.custom_args.home_unresolved_toast));
+      return;
+    }
     setSlot(next);
     if (next === "custom") return;
     applyGeminiDir(resolveSlotDirectory(next, geminiDir, homeDir));

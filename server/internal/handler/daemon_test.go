@@ -779,6 +779,97 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
 }
 
+func TestAbsoluteHostHomeDir(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"/Users/agy-host", "/Users/agy-host"},
+		{`C:\Users\agy`, `C:\Users\agy`},
+		{"D:/Users/agy", "D:/Users/agy"},
+		{"~", ""},
+		{"", ""},
+		{"relative", ""},
+		{"  /tmp  ", "/tmp"},
+	}
+	for _, tc := range cases {
+		if got := absoluteHostHomeDir(tc.in); got != tc.want {
+			t.Fatalf("absoluteHostHomeDir(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestDaemonRegister_StoresHomeDirInMetadata(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-home-dir",
+		"device_name":  "test-device",
+		"home_dir":     "/Users/agy-host",
+		"runtimes": []map[string]any{
+			{"name": "agy", "type": "antigravity", "version": "1.0.0", "status": "online"},
+		},
+	}, testWorkspaceID, "test-daemon-home-dir")
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
+
+	var resp struct {
+		Runtimes []struct {
+			ID       string         `json:"id"`
+			Metadata map[string]any `json:"metadata"`
+		} `json:"runtimes"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Runtimes) != 1 {
+		t.Fatalf("runtimes = %d, want 1", len(resp.Runtimes))
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, resp.Runtimes[0].ID)
+	})
+	if got := resp.Runtimes[0].Metadata["home_dir"]; got != "/Users/agy-host" {
+		t.Fatalf("metadata.home_dir = %#v, want /Users/agy-host", got)
+	}
+}
+
+func TestDaemonRegister_IgnoresRelativeHomeDir(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-relative-home",
+		"device_name":  "test-device",
+		"home_dir":     "~",
+		"runtimes": []map[string]any{
+			{"name": "agy", "type": "antigravity", "version": "1.0.0", "status": "online"},
+		},
+	}, testWorkspaceID, "test-daemon-relative-home")
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
+
+	var resp struct {
+		Runtimes []struct {
+			ID       string         `json:"id"`
+			Metadata map[string]any `json:"metadata"`
+		} `json:"runtimes"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Runtimes) != 1 {
+		t.Fatalf("runtimes = %d, want 1", len(resp.Runtimes))
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, resp.Runtimes[0].ID)
+	})
+	if _, ok := resp.Runtimes[0].Metadata["home_dir"]; ok {
+		t.Fatalf("relative home_dir should be dropped, got %#v", resp.Runtimes[0].Metadata)
+	}
+}
+
 func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

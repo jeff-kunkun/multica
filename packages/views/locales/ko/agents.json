@@ -425,6 +425,7 @@
       "login_keychain_hint": "macOS 키체인에는 Google 로그인이 하나만 저장됩니다. 브라우저에서 해당 계정을 선택하지 않으면 계정 1로 돌아갑니다.",
       "login_copy_failed_toast": "명령을 복사하지 못했습니다",
       "absolute_path_required_toast": "Gemini 디렉터리는 절대 경로여야 합니다. agy는 ~를 확장하지 않습니다.",
+      "home_unresolved_toast": "이 컴퓨터의 홈 폴더를 찾지 못해 계정 2를 채울 수 없습니다. 로컬 Multica daemon을 재시작한 뒤 다시 시도하세요.",
       "arguments_label": "인자",
       "arguments_description": "각 항목은 하나의 토큰으로 전달되며 목록 순서가 유지됩니다.",
       "add_argument_action": "인자 추가",
