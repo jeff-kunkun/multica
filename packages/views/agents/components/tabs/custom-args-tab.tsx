@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  Check,
+  Copy,
   Loader2,
   Pencil,
   Plus,
@@ -13,12 +15,27 @@ import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { copyText } from "@multica/ui/lib/clipboard";
+import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
 import {
   SettingsCard,
   SettingsSection,
 } from "../../../settings/components/settings-layout";
+import {
+  type AgyAccountSlot,
+  detectAgyAccountSlot,
+  formatAgyLoginCommand,
+  getGeminiDir,
+  isAbsoluteFsPath,
+  isGeminiDirToken,
+  loginDirectory,
+  resolveHomeDir,
+  resolveSlotDirectory,
+  runtimeHomeDir,
+  setGeminiDir,
+} from "./agy-account-slots";
 
 interface ArgEntry {
   id: string;
@@ -42,6 +59,21 @@ function formatArgForPreview(value: string): string {
   return /\s/.test(value) ? JSON.stringify(value) : value;
 }
 
+function visibleArgEntries(entries: ArgEntry[]): ArgEntry[] {
+  const visible: ArgEntry[] = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (!entry) continue;
+    if (entry.value === "--gemini_dir") {
+      index += 1;
+      continue;
+    }
+    if (isGeminiDirToken(entry.value)) continue;
+    visible.push(entry);
+  }
+  return visible;
+}
+
 export function CustomArgsTab({
   agent,
   runtimeDevice,
@@ -57,14 +89,32 @@ export function CustomArgsTab({
   const [entries, setEntries] = useState<ArgEntry[]>(
     argsToEntries(agent.custom_args ?? []),
   );
+  const isAntigravity = runtimeDevice?.provider?.toLowerCase() === "antigravity";
+  const [slot, setSlot] = useState<AgyAccountSlot>(() =>
+    detectAgyAccountSlot(getGeminiDir(agent.custom_args ?? [])),
+  );
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorValue, setEditorValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
   const editorInputRef = useRef<HTMLInputElement>(null);
 
   const currentArgs = entriesToArgs(entries);
+  const geminiDir = getGeminiDir(currentArgs);
+  const homeDir = resolveHomeDir(geminiDir, runtimeHomeDir(runtimeDevice));
   const originalArgs = agent.custom_args ?? [];
   const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
+  const visibleEntries = visibleArgEntries(entries);
+  const loginPath = loginDirectory(slot, geminiDir, homeDir);
+  const loginCommand = formatAgyLoginCommand(loginPath);
+  const slotLabel =
+    slot === "account1"
+      ? t(($) => $.tab_body.custom_args.slot_account1_label)
+      : slot === "account2"
+        ? t(($) => $.tab_body.custom_args.slot_account2_label)
+        : slot === "account3"
+          ? t(($) => $.tab_body.custom_args.slot_account3_label)
+        : t(($) => $.tab_body.custom_args.slot_custom_label);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -73,6 +123,20 @@ export function CustomArgsTab({
   useEffect(() => {
     if (editor) editorInputRef.current?.focus();
   }, [editor]);
+
+  const applyGeminiDir = (profile: string) => {
+    setEntries(argsToEntries(setGeminiDir(currentArgs, profile)));
+  };
+
+  const selectSlot = (next: AgyAccountSlot) => {
+    if ((next === "account2" || next === "account3") && !homeDir) {
+      toast.error(t(($) => $.tab_body.custom_args.home_unresolved_toast));
+      return;
+    }
+    setSlot(next);
+    if (next === "custom") return;
+    applyGeminiDir(resolveSlotDirectory(next, geminiDir, homeDir));
+  };
 
   const startAdding = () => {
     setEditor({ kind: "add" });
@@ -110,7 +174,22 @@ export function CustomArgsTab({
     if (editor?.kind === "edit" && editor.entryId === entryId) closeEditor();
   };
 
+  const handleCopyLogin = () => {
+    void copyText(loginCommand).then((ok) => {
+      if (!ok) {
+        toast.error(t(($) => $.tab_body.custom_args.login_copy_failed_toast));
+        return;
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   const handleSave = async () => {
+    if (isAntigravity && geminiDir && !isAbsoluteFsPath(geminiDir)) {
+      toast.error(t(($) => $.tab_body.custom_args.absolute_path_required_toast));
+      return;
+    }
     setSaving(true);
     try {
       await onSave({ custom_args: currentArgs });
@@ -170,11 +249,168 @@ export function CustomArgsTab({
     ? [launchHeader, ...currentArgs.map(formatArgForPreview)].join(" ")
     : null;
 
+  const slots: Array<{
+    id: AgyAccountSlot;
+    label: string;
+    hint: string;
+  }> = [
+    {
+      id: "account1",
+      label: t(($) => $.tab_body.custom_args.slot_account1_label),
+      hint: t(($) => $.tab_body.custom_args.slot_account1_hint),
+    },
+    {
+      id: "account2",
+      label: t(($) => $.tab_body.custom_args.slot_account2_label),
+      hint: t(($) => $.tab_body.custom_args.slot_account2_hint),
+    },
+    {
+      id: "account3",
+      label: t(($) => $.tab_body.custom_args.slot_account3_label),
+      hint: t(($) => $.tab_body.custom_args.slot_account3_hint),
+    },
+    {
+      id: "custom",
+      label: t(($) => $.tab_body.custom_args.slot_custom_label),
+      hint: t(($) => $.tab_body.custom_args.slot_custom_hint),
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <p className="max-w-2xl text-pretty text-body leading-6 text-muted-foreground">
         {t(($) => $.tab_body.custom_args.intro)}
       </p>
+
+      {isAntigravity ? (
+        <>
+          <SettingsSection
+            title={t(($) => $.tab_body.custom_args.antigravity_profile_label)}
+            description={t(($) => $.tab_body.custom_args.antigravity_profile_description)}
+          >
+            <SettingsCard>
+              <div className="space-y-3 p-3">
+                <div
+                  role="radiogroup"
+                  aria-label={t(($) => $.tab_body.custom_args.slot_group_aria)}
+                  className="grid gap-2"
+                >
+                  {slots.map((item) => {
+                    const selected = slot === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => selectSlot(item.id)}
+                        className={cn(
+                          "flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                          selected
+                            ? "border-foreground font-medium shadow-[inset_0_0_0_1px_var(--color-foreground)]"
+                            : "border-border hover:border-foreground/20 hover:bg-accent/30",
+                        )}
+                      >
+                        <span
+                          aria-hidden
+                          className={cn(
+                            "relative mt-0.5 inline-block size-4 shrink-0 rounded-full border-[1.5px]",
+                            selected ? "border-foreground" : "border-border",
+                          )}
+                        >
+                          {selected ? (
+                            <span className="absolute inset-[3px] rounded-full bg-foreground" />
+                          ) : null}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-body leading-5">{item.label}</span>
+                          <span className="mt-0.5 block font-normal text-caption leading-5 text-muted-foreground">
+                            {item.hint}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {slot === "custom" ? (
+                  <div className="space-y-2">
+                    <label
+                      className="text-caption font-medium"
+                      htmlFor="agy-profile-directory"
+                    >
+                      {t(($) => $.tab_body.custom_args.antigravity_profile_input_label)}
+                    </label>
+                    <Input
+                      id="agy-profile-directory"
+                      value={geminiDir}
+                      onChange={(event) => applyGeminiDir(event.target.value.trim())}
+                      placeholder={t(
+                        ($) => $.tab_body.custom_args.antigravity_profile_placeholder,
+                      )}
+                      spellCheck={false}
+                      autoComplete="off"
+                      className="font-mono text-caption"
+                    />
+                  </div>
+                ) : loginPath ? (
+                  <p className="text-caption leading-5 text-muted-foreground">
+                    <span className="font-medium text-foreground">
+                      {t(($) => $.tab_body.custom_args.resolved_path_label)}
+                    </span>{" "}
+                    <code className="font-mono" translate="no">
+                      {loginPath}
+                    </code>
+                  </p>
+                ) : null}
+              </div>
+            </SettingsCard>
+          </SettingsSection>
+
+          <SettingsSection title={t(($) => $.tab_body.custom_args.login_title)}>
+            <SettingsCard>
+              <div className="space-y-3 p-4">
+                <p className="text-body leading-6">
+                  {t(($) => $.tab_body.custom_args.login_bound, {
+                    slot: slotLabel,
+                    path: loginPath,
+                  })}
+                </p>
+                {loginPath ? (
+                  <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5">
+                    <code
+                      className="min-w-0 flex-1 break-all font-mono text-caption leading-5"
+                      translate="no"
+                    >
+                      {loginCommand}
+                    </code>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={handleCopyLogin}
+                      aria-label={
+                        copied
+                          ? t(($) => $.tab_body.custom_args.login_copied_aria)
+                          : t(($) => $.tab_body.custom_args.login_copy_aria)
+                      }
+                    >
+                      {copied ? (
+                        <Check className="size-3.5" aria-hidden="true" />
+                      ) : (
+                        <Copy className="size-3.5" aria-hidden="true" />
+                      )}
+                    </Button>
+                  </div>
+                ) : null}
+                <p className="text-caption leading-5 text-muted-foreground">
+                  {t(($) => $.tab_body.custom_args.login_keychain_hint)}
+                </p>
+              </div>
+            </SettingsCard>
+          </SettingsSection>
+        </>
+      ) : null}
 
       <SettingsSection
         title={t(($) => $.tab_body.custom_args.arguments_label)}
@@ -194,7 +430,7 @@ export function CustomArgsTab({
       >
         <SettingsCard>
           <div className="space-y-2 p-3">
-            {entries.length === 0 && editor?.kind !== "add" ? (
+            {visibleEntries.length === 0 && editor?.kind !== "add" ? (
               <div className="flex min-h-28 flex-col items-center justify-center px-4 py-6 text-center">
                 <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                   <Terminal className="size-4" aria-hidden="true" />
@@ -209,7 +445,7 @@ export function CustomArgsTab({
             ) : null}
 
             <div role="list" className="space-y-2">
-              {entries.map((entry, index) => (
+              {visibleEntries.map((entry, index) => (
                 <div key={entry.id} role="listitem">
                   {editor?.kind === "edit" && editor.entryId === entry.id ? (
                     renderEditor(index + 1)

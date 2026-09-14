@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
@@ -17,6 +17,12 @@ vi.mock("sonner", () => ({
   },
 }));
 
+vi.mock("@multica/ui/lib/clipboard", () => ({
+  copyText: vi.fn().mockResolvedValue(true),
+}));
+
+import { toast } from "sonner";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { CustomArgsTab } from "./custom-args-tab";
 
 const baseAgent: Agent = {
@@ -51,12 +57,13 @@ const runtimeDevice = {
 function renderTab(
   overrides: Partial<Agent> = {},
   onSave = vi.fn().mockResolvedValue(undefined),
+  device: RuntimeDevice = runtimeDevice,
 ) {
   const result = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <CustomArgsTab
         agent={{ ...baseAgent, ...overrides }}
-        runtimeDevice={runtimeDevice}
+        runtimeDevice={device}
         onSave={onSave}
       />
     </I18nProvider>,
@@ -65,9 +72,32 @@ function renderTab(
   return { ...result, onSave };
 }
 
+const agyDevice = {
+  ...runtimeDevice,
+  provider: "antigravity",
+  launch_header: "agy",
+} as RuntimeDevice;
+
+const agyDeviceWithHome = {
+  ...agyDevice,
+  metadata: { home_dir: "/Users/agy-host" },
+} as RuntimeDevice;
+
+function hideProcessHome() {
+  vi.stubEnv("HOME", "");
+  vi.stubEnv("USERPROFILE", "");
+  delete (globalThis as { desktopAPI?: unknown }).desktopAPI;
+}
+
 describe("CustomArgsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete (globalThis as { desktopAPI?: unknown }).desktopAPI;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    delete (globalThis as { desktopAPI?: unknown }).desktopAPI;
   });
 
   it("renders configured arguments as a list, not persistent inputs", () => {
@@ -120,5 +150,172 @@ describe("CustomArgsTab", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     expect(onSave).toHaveBeenCalledWith({ custom_args: ["value with spaces"] });
+  });
+
+  it("does not show AGY account slots for other runtimes", () => {
+    renderTab();
+
+    expect(screen.queryByRole("radiogroup", { name: /agy account/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /account 2/i })).not.toBeInTheDocument();
+  });
+
+  it("fills account 2 from runtime metadata.home_dir without HOME or desktopAPI", async () => {
+    hideProcessHome();
+    const user = userEvent.setup();
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDeviceWithHome);
+
+    expect(screen.getByRole("radio", { name: /account 1/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+
+    expect(screen.getByRole("radio", { name: /account 2/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(
+      screen.getByText("agy --gemini_dir=/Users/agy-host/.gemini-account2"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("agy --gemini_dir /Users/agy-host/.gemini-account2"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/macOS Keychain stores one Google login/i),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "/Users/agy-host/.gemini-account2"],
+    });
+  });
+
+  it("fills an absolute Account 2 path when the current Gemini dir is ~/.gemini", async () => {
+    vi.stubEnv("HOME", "/Users/you");
+    vi.stubEnv("USERPROFILE", "");
+    const user = userEvent.setup();
+    const { onSave } = renderTab(
+      { custom_args: ["--gemini_dir", "~/.gemini"] },
+      undefined,
+      agyDevice,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+    expect(
+      screen.getByText("agy --gemini_dir=/Users/you/.gemini-account2"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "/Users/you/.gemini-account2"],
+    });
+  });
+
+  it("fills and saves an absolute Account 3 path", async () => {
+    vi.stubEnv("HOME", "/Users/you");
+    vi.stubEnv("USERPROFILE", "");
+    const user = userEvent.setup();
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDevice);
+
+    await user.click(screen.getByRole("radio", { name: /account 3/i }));
+    expect(
+      screen.getByText("agy --gemini_dir=/Users/you/.gemini-account3"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "/Users/you/.gemini-account3"],
+    });
+  });
+
+  it("fills an absolute Account 2 path when the current Gemini dir is ~\\.gemini", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("HOME", "");
+    vi.stubEnv("USERPROFILE", "C:\\Users\\you");
+    const { onSave } = renderTab(
+      { custom_args: ["--gemini_dir", "~\\.gemini"] },
+      undefined,
+      agyDevice,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+    expect(
+      screen.getByText("agy --gemini_dir=C:\\Users\\you\\.gemini-account2"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "C:\\Users\\you\\.gemini-account2"],
+    });
+  });
+
+  it("does not save a tilde path when account 2 is clicked without any home source", async () => {
+    hideProcessHome();
+    const user = userEvent.setup();
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDevice);
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+
+    expect(toast.error).toHaveBeenCalled();
+    expect(screen.getByRole("radio", { name: /account 1/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(
+      screen.queryByText("agy --gemini_dir=~/.gemini-account2"),
+    ).not.toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("uses the desktop home directory when renderer env is unavailable", async () => {
+    hideProcessHome();
+    const user = userEvent.setup();
+    Object.defineProperty(globalThis, "desktopAPI", {
+      configurable: true,
+      value: { homeDir: "/Users/desktop" },
+    });
+    const { onSave } = renderTab({ custom_args: [] }, undefined, agyDevice);
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+    expect(
+      screen.getByText("agy --gemini_dir=/Users/desktop/.gemini-account2"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", "/Users/desktop/.gemini-account2"],
+    });
+  });
+
+  it("copies the AGY sign-in command for the selected slot", async () => {
+    const user = userEvent.setup();
+    renderTab(
+      { custom_args: ["--gemini_dir", "/Users/you/.gemini"] },
+      undefined,
+      agyDevice,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /account 2/i }));
+    await user.click(screen.getByRole("button", { name: /copy sign-in command/i }));
+
+    expect(copyText).toHaveBeenCalledWith(
+      "agy --gemini_dir=/Users/you/.gemini-account2",
+    );
+  });
+
+  it("lets custom slot edit the Gemini directory and keeps other args", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab(
+      { custom_args: ["--profile", "research", "--gemini_dir", "/Users/you/.gemini"] },
+      undefined,
+      agyDevice,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /custom/i }));
+    const input = screen.getByRole("textbox", { name: /gemini directory/i });
+    await user.clear(input);
+    await user.type(input, "/Users/you/.gemini-work");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--profile", "research", "--gemini_dir", "/Users/you/.gemini-work"],
+    });
   });
 });
