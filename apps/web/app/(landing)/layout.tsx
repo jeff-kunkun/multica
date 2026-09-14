@@ -1,4 +1,4 @@
-import { Instrument_Serif } from "next/font/google";
+import localFont from "next/font/local";
 import { LocaleProvider } from "@/features/landing/i18n";
 import { getRequestLocale } from "@/lib/request-locale";
 
@@ -8,9 +8,14 @@ import { getRequestLocale } from "@/lib/request-locale";
 // `--font-sans` in app/globals.css: the CJK tail must be overridable per
 // `<html lang>`, and a hashed next/font family can only be referenced from CSS
 // through its variable.
-const instrumentSerif = Instrument_Serif({
-  subsets: ["latin"],
+//
+// File is a latin-subset woff2 in apps/web/fonts so self-host Docker builds do
+// not fetch Google Fonts at compile time. Weight 400 matches the previous
+// `next/font/google` Instrument_Serif entry.
+const instrumentSerif = localFont({
+  src: "../../fonts/instrument-serif-latin-400-normal.woff2",
   weight: "400",
+  display: "swap",
   variable: "--font-instrument-serif",
 });
 
