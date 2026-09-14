@@ -67,13 +67,15 @@ Opt-in username + password login for private self-hosted instances. Default rema
 | `MULTICA_PASSWORD_AUTH_USERNAME` | Login username (trimmed, case-sensitive) | empty |
 | `MULTICA_PASSWORD_AUTH_PASSWORD` | Login password | empty |
 | `MULTICA_PASSWORD_AUTH_EMAIL` | Email stored on the user record (find-or-create). Use an existing user's email to keep that account. | empty |
+| `MULTICA_SIGNUP_TOTP_SECRET` | Optional shared TOTP secret (RFC 6238, base32) that gates `POST /auth/signup`. Empty keeps previous signup behavior. When set, the request must include a valid `totp` and the same time step cannot be reused. Login is not gated. | empty |
 
-All four must be set or the switch stays off and email login keeps working. When it is on:
+All four password-auth fields must be set or the switch stays off and email login keeps working. When it is on:
 
 - `/api/config` reports `password_auth: true` so the web login page shows username + password.
 - `POST /auth/login` issues the same JWT and `multica_auth` cookie as email verification.
 - `POST /auth/send-code` and `POST /auth/verify-code` return 403.
 - When `ALLOW_SIGNUP` is not `false`, `/login` shows a create-account link to `/signup`, and `POST /auth/signup` creates a username + password user (bcrypt-hashed). The env bootstrap account still logs in; signed-up users log in with the username they chose. Email format is checked; signup is rate-limited with the other `/auth` routes.
+- When `MULTICA_SIGNUP_TOTP_SECRET` is also set, `/api/config` reports `signup_totp_required: true`, `/signup` shows a team 2FA field, and missing/invalid/reused TOTP returns 401 without creating a user.
 
 Wrong username or password returns 401 with a generic error. Existing sessions keep using the same JWT TTL.
 

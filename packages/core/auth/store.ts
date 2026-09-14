@@ -46,6 +46,7 @@ export interface AuthState {
     username: string,
     password: string,
     email: string,
+    totp?: string,
   ) => Promise<User>;
   loginWithGoogle: (code: string, redirectUri: string) => Promise<User>;
   loginWithToken: (token: string) => Promise<User>;
@@ -107,11 +108,13 @@ export function createAuthStore(options: AuthStoreOptions) {
       username: string,
       password: string,
       email: string,
+      totp?: string,
     ) => {
       const { token, user } = await api.signupWithPassword(
         username,
         password,
         email,
+        totp,
       );
       if (!cookieAuth) {
         storage.setItem("multica_token", token);

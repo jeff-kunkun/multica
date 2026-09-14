@@ -37,10 +37,12 @@ export function SignupPage({
   const qc = useQueryClient();
   const passwordAuth = useConfigStore((state) => state.passwordAuth);
   const allowSignup = useConfigStore((state) => state.allowSignup);
+  const signupTotpRequired = useConfigStore((state) => state.signupTotpRequired);
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [totp, setTotp] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -69,10 +71,23 @@ export function SignupPage({
         setError(t(($) => $.errors.password_mismatch));
         return;
       }
+      if (signupTotpRequired && !totp.trim()) {
+        setError(t(($) => $.common.totp_required));
+        return;
+      }
       setLoading(true);
       setError("");
       try {
-        await useAuthStore.getState().signupWithPassword(username, password, email);
+        if (signupTotpRequired) {
+          await useAuthStore.getState().signupWithPassword(
+            username,
+            password,
+            email,
+            totp.trim(),
+          );
+        } else {
+          await useAuthStore.getState().signupWithPassword(username, password, email);
+        }
         const wsList = await api.listWorkspaces();
         qc.setQueryData(workspaceKeys.list(), wsList);
         onTokenObtained?.();
@@ -87,7 +102,7 @@ export function SignupPage({
         setLoading(false);
       }
     },
-    [username, email, password, confirmPassword, onSuccess, onTokenObtained, qc, t],
+    [username, email, password, confirmPassword, totp, signupTotpRequired, onSuccess, onTokenObtained, qc, t],
   );
 
   if (!signupEnabled) {
@@ -179,6 +194,26 @@ export function SignupPage({
                 required
               />
             </div>
+            {signupTotpRequired && (
+              <div className="space-y-2">
+                <Label htmlFor="signup-totp">{t(($) => $.common.totp)}</Label>
+                <Input
+                  id="signup-totp"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  placeholder={t(($) => $.common.totp_placeholder)}
+                  value={totp}
+                  onChange={(e) => setTotp(e.target.value)}
+                  required
+                />
+                <p className="text-body text-muted-foreground">
+                  {t(($) => $.signup.totp_description)}
+                </p>
+              </div>
+            )}
             {error && (
               <p className="text-body text-destructive">{error}</p>
             )}
@@ -191,7 +226,12 @@ export function SignupPage({
             className="w-full"
             size="lg"
             disabled={
-              loading || !username || !email || !password || !confirmPassword
+              loading ||
+              !username ||
+              !email ||
+              !password ||
+              !confirmPassword ||
+              (signupTotpRequired && !totp.trim())
             }
           >
             {loading

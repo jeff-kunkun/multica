@@ -75,6 +75,7 @@ export function AuthInitializer({
           // Absent/false on the managed cloud and older servers → section hidden.
           vcsIntegrationAvailable: cfg.vcs_integration_available === true,
           passwordAuth: cfg.password_auth === true,
+          signupTotpRequired: cfg.signup_totp_required === true,
         });
         configStore.getState().setDaemonConfig({
           daemonServerUrl: cfg.daemon_server_url,

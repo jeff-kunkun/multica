@@ -815,10 +815,16 @@ export class ApiClient {
     username: string,
     password: string,
     email: string,
+    totp?: string,
   ): Promise<LoginResponse> {
     return this.fetch("/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ username, password, email }),
+      body: JSON.stringify({
+        username,
+        password,
+        email,
+        ...(totp ? { totp } : {}),
+      }),
     });
   }
 

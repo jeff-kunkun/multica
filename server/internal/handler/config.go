@@ -29,6 +29,10 @@ type AppConfig struct {
 	// instead of an email verification code. Omitted when false so official
 	// cloud and default self-host responses keep their previous shape.
 	PasswordAuth bool `json:"password_auth,omitempty"`
+	// SignupTotpRequired tells /signup to collect a shared team TOTP code.
+	// Omitted when false so official cloud and default self-host responses
+	// keep their previous shape. The secret itself is never exposed.
+	SignupTotpRequired bool `json:"signup_totp_required,omitempty"`
 	// WorkspaceCreationDisabled mirrors the server-side
 	// DISABLE_WORKSPACE_CREATION env var so the UI can hide every
 	// "Create workspace" affordance on self-hosted instances. Omitted
@@ -129,6 +133,9 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := passwordAuthConfigured(); ok {
 		config.PasswordAuth = true
+	}
+	if _, required := signupTOTPSecret(); required {
+		config.SignupTotpRequired = true
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()

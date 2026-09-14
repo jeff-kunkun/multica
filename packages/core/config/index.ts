@@ -12,6 +12,9 @@ interface ConfigState {
   // Self-host opt-in: login page collects username + password instead of
   // an email verification code. Absent/false keeps the official email flow.
   passwordAuth: boolean;
+  // Self-host opt-in: /signup requires a shared team TOTP. Absent/false
+  // keeps the previous username + password form with no 2FA field.
+  signupTotpRequired: boolean;
   daemonServerUrl: string;
   daemonAppUrl: string;
   // Self-host gate (#3433): when true, every "Create workspace" affordance
@@ -54,6 +57,7 @@ interface ConfigState {
     workspaceCreationDisabled?: boolean;
     vcsIntegrationAvailable?: boolean;
     passwordAuth?: boolean;
+    signupTotpRequired?: boolean;
   }) => void;
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
@@ -73,6 +77,7 @@ export const configStore = createStore<ConfigState>((set) => ({
   allowSignup: true,
   googleClientId: "",
   passwordAuth: false,
+  signupTotpRequired: false,
   daemonServerUrl: "",
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
@@ -90,7 +95,8 @@ export const configStore = createStore<ConfigState>((set) => ({
     workspaceCreationDisabled = false,
     vcsIntegrationAvailable = false,
     passwordAuth = false,
-  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable, passwordAuth }),
+    signupTotpRequired = false,
+  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable, passwordAuth, signupTotpRequired }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),

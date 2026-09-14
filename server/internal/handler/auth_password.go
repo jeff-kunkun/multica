@@ -101,6 +101,9 @@ type PasswordSignupRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Email    string `json:"email"`
+	// Totp is the shared team 2FA code. Required only when
+	// MULTICA_SIGNUP_TOTP_SECRET is set; ignored when that gate is off.
+	Totp string `json:"totp,omitempty"`
 }
 
 func (h *Handler) PasswordLogin(w http.ResponseWriter, r *http.Request) {
@@ -176,6 +179,18 @@ func (h *Handler) PasswordSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	totpSecret, totpRequired := signupTOTPSecret()
+	if totpRequired {
+		if strings.TrimSpace(req.Totp) == "" {
+			writeError(w, http.StatusUnauthorized, "team 2FA code is required")
+			return
+		}
+		if _, ok := verifySignupTOTP(totpSecret, req.Totp, time.Now()); !ok {
+			writeError(w, http.StatusUnauthorized, "invalid or expired team 2FA code")
+			return
+		}
+	}
+
 	if creds, envOK := passwordAuthConfigured(); envOK && strings.EqualFold(username, creds.username) {
 		writeError(w, http.StatusConflict, "username already taken")
 		return
@@ -209,6 +224,11 @@ func (h *Handler) PasswordSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if !isNotFound(err) {
 		writeError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+
+	if totpRequired && !consumeSignupTOTP(totpSecret, req.Totp, time.Now()) {
+		writeError(w, http.StatusUnauthorized, "invalid or expired team 2FA code")
 		return
 	}
 

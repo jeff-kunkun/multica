@@ -766,6 +766,7 @@ describe("LoginPage", () => {
     expect(
       screen.getByRole("button", { name: /^sign in$/i }),
     ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/team 2fa code/i)).not.toBeInTheDocument();
   });
 
   it("calls loginWithPassword and onSuccess for a valid password login", async () => {

@@ -1245,6 +1245,20 @@ describe("dashboard + runtime usage schema drift", () => {
 // An older server deletes a comment's replies with it and omits this field,
 // so absent or malformed must parse as false: the client then promises nothing
 // about replies and keeps the legacy delete route (#8296).
+describe("AppConfigSchema signup_totp_required drift", () => {
+  it.each([
+    [undefined, false],
+    ["yes", false],
+    [true, true],
+  ])("%j parses as %s", (value, expected) => {
+    const parsed = AppConfigSchema.parse({
+      cdn_domain: "cdn.example.com",
+      signup_totp_required: value,
+    });
+    expect(parsed.signup_totp_required).toBe(expected);
+  });
+});
+
 describe("AppConfigSchema comment_delete_keep_replies_supported drift", () => {
   it.each([
     [undefined, false],
