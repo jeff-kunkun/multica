@@ -552,6 +552,14 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"grok", "future-level", true}, // exact support is checked against the daemon catalog
 		{"grok", ".hidden", false},
 		{"grok", "bad value", false},
+		{"dsh", "", true},
+		{"dsh", "off", true}, // DSH-native token; Claude/Codex spell this none
+		{"dsh", "low", true},
+		{"dsh", "high", true},
+		{"dsh", "max", true},
+		{"dsh", "future-level", true},
+		{"dsh", ".hidden", false},
+		{"dsh", "bad value", false},
 	}
 	for _, tc := range tests {
 		if got := IsKnownThinkingValue(tc.provider, tc.value); got != tc.want {

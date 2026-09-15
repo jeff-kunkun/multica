@@ -220,6 +220,48 @@ beforeEach(() => {
   mockUpdateAgent.mockResolvedValue({ ...baseAgent, model: "new-model" });
 });
 
+describe("AgentDetailPage switchable models", () => {
+  it("shows default, fallback chain and batch models in the header", async () => {
+    agentsRef.current = [
+      {
+        ...baseAgent,
+        model: "claude-opus-5",
+        switchable_models: [
+          { model: "claude-opus-5", role: "default", note: "" },
+          { model: "claude-sonnet-5", role: "fallback", note: "" },
+          { model: "gpt-6", role: "fallback", note: "" },
+          { model: "grok-5", role: "batch", note: "夜间跑批" },
+        ],
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByText("Model lineup")).toBeInTheDocument();
+    expect(screen.getByTestId("switchable-models-default")).toHaveTextContent(
+      "Defaultclaude-opus-5",
+    );
+    expect(screen.getByTestId("switchable-models-fallback")).toHaveTextContent(
+      "Fallbackclaude-sonnet-5→gpt-6",
+    );
+    expect(screen.getByTestId("switchable-models-batch")).toHaveTextContent(
+      "Batchgrok-5",
+    );
+    expect(screen.getByText("grok-5")).toHaveAttribute("title", "夜间跑批");
+  });
+
+  it("renders no lineup row when switchable_models is empty or missing", async () => {
+    agentsRef.current = [{ ...baseAgent, switchable_models: [] }];
+
+    renderPage();
+
+    expect(
+      await screen.findByRole("button", { name: "Assign work" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Model lineup")).not.toBeInTheDocument();
+  });
+});
+
 describe("AgentDetailPage direct-detail fallback", () => {
   it("does not fetch detail when the workspace list already has the agent", async () => {
     renderPage();

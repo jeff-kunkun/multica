@@ -455,6 +455,62 @@ func TestOpencodeBackendInjectsMCPConfigViaEnv(t *testing.T) {
 	}
 }
 
+// TestOpencodeBackendForwardsConfigDirWithMCP proves OPENCODE_CONFIG_DIR
+// (shared-mode sidecar pointer, set by the daemon on Config.Env) reaches the
+// child alongside OPENCODE_CONFIG_CONTENT, and that neither channel writes
+// <workdir>/opencode.json.
+func TestOpencodeBackendForwardsConfigDirWithMCP(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "opencode")
+	captureFile := filepath.Join(tempDir, "env-capture.txt")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScriptCapturingEnv()))
+
+	workDir := t.TempDir()
+	configDir := t.TempDir()
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_CAPTURE_FILE": captureFile,
+			"OPENCODE_CONFIG_DIR":   configDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:       workDir,
+		Timeout:   5 * time.Second,
+		McpConfig: json.RawMessage(`{"mcpServers":{"mcpbase":{"url":"https://mcpbase.example/mcp"}}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q; want completed", result.Status, result.Error)
+	}
+
+	captured := readCapturedEnv(t, captureFile)
+	if got := captured["OPENCODE_CONFIG_DIR"]; got != configDir {
+		t.Fatalf("OPENCODE_CONFIG_DIR = %q, want %q", got, configDir)
+	}
+	if got := captured["OPENCODE_CONFIG_CONTENT"]; !strings.Contains(got, "https://mcpbase.example/mcp") {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT lost while forwarding OPENCODE_CONFIG_DIR:\n%s", got)
+	}
+	if _, statErr := os.Stat(filepath.Join(workDir, "opencode.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("backend must not write <workdir>/opencode.json; stat err = %v", statErr)
+	}
+}
+
 // TestOpencodeBackendOmitsMCPEnvWhenEmpty asserts the no-mcp_config path
 // does NOT inject OPENCODE_CONFIG_CONTENT, so any value the user set in
 // agent.custom_env is preserved untouched. Without this, an empty
@@ -568,6 +624,7 @@ cat > /dev/null
 if [ -n "$OPENCODE_CAPTURE_FILE" ]; then
   {
     printf 'OPENCODE_CONFIG_CONTENT=%s\n' "${OPENCODE_CONFIG_CONTENT-<unset>}"
+    printf 'OPENCODE_CONFIG_DIR=%s\n' "${OPENCODE_CONFIG_DIR-<unset>}"
   } > "$OPENCODE_CAPTURE_FILE"
 fi
 printf '{"type":"step_start","timestamp":1,"sessionID":"ses_fake","part":{"type":"step-start"}}\n'

@@ -193,6 +193,29 @@ func TestAntigravityProviderError(t *testing.T) {
 	}
 }
 
+func TestBuildAntigravityArgsForwardsExtraAddDir(t *testing.T) {
+	t.Parallel()
+
+	args := buildAntigravityArgs(
+		"go",
+		"/tmp/agy.log",
+		time.Minute,
+		ExecOptions{
+			Cwd:       "/work",
+			ExtraArgs: []string{"--add-dir", "/env/sidecar"},
+		},
+		quietAntigravityLogger(),
+	)
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--add-dir /work") {
+		t.Errorf("cwd --add-dir missing: %v", args)
+	}
+	if !strings.Contains(joined, "--add-dir /env/sidecar") {
+		t.Errorf("ExtraArgs --add-dir sidecar missing: %v", args)
+	}
+}
+
 func TestBuildAntigravityArgsResume(t *testing.T) {
 	t.Parallel()
 

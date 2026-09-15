@@ -84,6 +84,12 @@ func TestClassifyRules(t *testing.T) {
 		{"rate limit", "rate limit exceeded for tier 3", ReasonAgentProviderCapacityOrRateLimit},
 		{"overloaded", "overloaded_error: please retry", ReasonAgentProviderCapacityOrRateLimit},
 		{"no capacity available", "no capacity available; try again later", ReasonAgentProviderCapacityOrRateLimit},
+		// DENE-210: GPT/Codex "Selected model is at capacity" used to hit
+		// rule 8's "selected model" witness and land in
+		// model_not_found_or_unavailable, which is not retryable.
+		{"selected model at capacity", "Selected model is at capacity. Please try a different model.", ReasonAgentProviderCapacityOrRateLimit},
+		{"selected model at capacity with stream prefix", "stream error: Selected model is at capacity. Please try a different model.", ReasonAgentProviderCapacityOrRateLimit},
+		{"selected model at capacity with named model", "turn failed: Selected model gpt-5.5 is at capacity. Please try a different model.", ReasonAgentProviderCapacityOrRateLimit},
 
 		// 6. Provider 5xx / server error.
 		{"server had an error", "the server had an error processing your request", ReasonAgentProviderServerError},
@@ -136,6 +142,7 @@ func TestClassifyRules(t *testing.T) {
 		{"model not found phrase", "the model was not found in this account", ReasonAgentModelNotFoundOrUnavailable},
 		{"unknown model", "unknown model 'foo-1.0'", ReasonAgentModelNotFoundOrUnavailable},
 		{"selected model", "the selected model is no longer supported", ReasonAgentModelNotFoundOrUnavailable},
+		{"selected model not available stays model_not_found", "Selected model gpt-5.5 is not available", ReasonAgentModelNotFoundOrUnavailable},
 		{"http 404", "HTTP 404: model endpoint not registered", ReasonAgentModelNotFoundOrUnavailable},
 		{"404 page not found", "404 page not found", ReasonAgentModelNotFoundOrUnavailable},
 
@@ -227,6 +234,11 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 		// token/context matching even when the CLI prefixes both misleadingly.
 		{"403 concurrent request limit beats auth", "Failed to authenticate. API Error: 403 You've reached your concurrent request limit. Please wait for your ongoing requests to finish and try again.", ReasonAgentProviderCapacityOrRateLimit},
 		{"access token concurrent request limit beats context", "Failed to refresh access token. API Error: 403 You've reached your concurrent request limit.", ReasonAgentProviderCapacityOrRateLimit},
+
+		// "selected model" is rule 8's unavailable-model witness; "at
+		// capacity" must win so a recoverable GPT miss is not labelled
+		// model_not_found_or_unavailable.
+		{"selected model at capacity beats model_not_found", "Selected model is at capacity. Please try a different model.", ReasonAgentProviderCapacityOrRateLimit},
 
 		// Both "429" and "rate limit" present — should still land in
 		// the capacity bucket, not the quota bucket.

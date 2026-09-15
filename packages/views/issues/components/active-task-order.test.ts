@@ -14,6 +14,14 @@ describe("active issue task display order", () => {
       .toEqual(["running", "dispatched", "parked", "queued"]);
   });
 
+  it("keeps a deferred retry with parked work, after running", () => {
+    expect(ids([
+      task("queued", "queued"),
+      task("retry", "deferred"),
+      task("running", "running"),
+    ])).toEqual(["running", "retry", "queued"]);
+  });
+
   it("matches queue priority descending, enqueue time ascending, then task ID", () => {
     expect(ids([task("new", "queued", 0, "2026-09-08T04:00:00Z"),
       task("old-b", "queued"), task("urgent", "queued", 2, "2026-09-08T05:00:00Z"),

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, Workspace } from "../types";
-import { agentListOptions, workspaceBySlugOptions } from "./queries";
+import {
+  agentListOptions,
+  squadMembersOptions,
+  workspaceBySlugOptions,
+  workspaceKeys,
+} from "./queries";
 
 function makeWorkspace(slug: string): Workspace {
   return {
@@ -63,5 +68,21 @@ describe("agentListOptions", () => {
       ]),
     ).toBe(false);
     expect(queryState([])).toBe(false);
+  });
+});
+
+describe("squadMembersOptions", () => {
+  it("keys the roster query by workspace and squad", () => {
+    const options = squadMembersOptions("ws-1", "sq-alpha");
+    expect(options.queryKey).toEqual(workspaceKeys.squadMembers("ws-1", "sq-alpha"));
+    expect(options.queryKey).toEqual([
+      "workspaces",
+      "ws-1",
+      "squads",
+      "sq-alpha",
+      "members",
+    ]);
+    expect(options.enabled).toBe(true);
+    expect(squadMembersOptions("", "sq-alpha").enabled).toBe(false);
   });
 });

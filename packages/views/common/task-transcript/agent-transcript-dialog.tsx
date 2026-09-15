@@ -800,6 +800,12 @@ export function AgentTranscriptDialog({
             {t(($) => $.transcript.status_waiting)}
           </span>
         );
+      case "deferred":
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground")}>
+            {t(($) => $.transcript.status_deferred)}
+          </span>
+        );
       default:
         return (
           <span className={cn(base, "bg-muted text-muted-foreground capitalize")}>

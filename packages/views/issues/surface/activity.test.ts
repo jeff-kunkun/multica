@@ -29,6 +29,7 @@ describe("deriveIssueSurfaceActivity", () => {
       task({ id: "queue-1", issue_id: "i-2", status: "queued" }),
       task({ id: "dispatch-1", issue_id: "i-2", status: "dispatched" }),
       task({ id: "wait-1", issue_id: "i-3", status: "waiting_local_directory" }),
+      task({ id: "retry-1", issue_id: "i-5", status: "deferred" }),
       task({ id: "done-1", issue_id: "i-4", status: "completed" }),
       task({ id: "no-issue", issue_id: undefined, status: "running" }),
     ]);
@@ -43,6 +44,10 @@ describe("deriveIssueSurfaceActivity", () => {
       isQueued: true,
     });
     expect(activity.activityByIssueId.get("i-3")).toMatchObject({
+      isWorking: false,
+      isQueued: true,
+    });
+    expect(activity.activityByIssueId.get("i-5")).toMatchObject({
       isWorking: false,
       isQueued: true,
     });
@@ -66,6 +71,15 @@ describe("selectIssueTasks", () => {
     const groups = selectIssueTasks(snapshot, "i-1");
     expect(groups.running.map((t) => t.id)).toEqual(["run-1", "run-2"]);
     expect(groups.queued.map((t) => t.id)).toEqual(["queue-1"]);
+  });
+
+  it("treats deferred as queued", () => {
+    const groups = selectIssueTasks(
+      [task({ id: "retry-1", issue_id: "i-5", status: "deferred" })],
+      "i-5",
+    );
+    expect(groups.running).toEqual([]);
+    expect(groups.queued.map((t) => t.id)).toEqual(["retry-1"]);
   });
 
   it("treats dispatched and waiting_local_directory as queued", () => {

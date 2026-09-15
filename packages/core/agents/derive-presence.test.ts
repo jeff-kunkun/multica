@@ -175,6 +175,15 @@ describe("deriveWorkloadDetail", () => {
     expect(r.queuedCount).toBe(2);
   });
 
+  it("counts deferred as queued (auto-retry waiting out backoff)", () => {
+    const r = deriveWorkloadDetail([
+      makeTask({ status: "deferred" }),
+    ]);
+    expect(r.workload).toBe("queued");
+    expect(r.runningCount).toBe(0);
+    expect(r.queuedCount).toBe(1);
+  });
+
   it("counts waiting_local_directory as queued (daemon parked on a path lock)", () => {
     // waiting_local_directory is the daemon-side "blocked on a busy
     // local_directory" hold state. It is still on the agent's plate —

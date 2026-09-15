@@ -22,6 +22,11 @@ import (
 // the prompt.
 func cursorStdinProbe(t *testing.T, prompt string) ([]string, string, Result) {
 	t.Helper()
+	return cursorStdinProbeOpts(t, prompt, ExecOptions{Timeout: 30 * time.Second})
+}
+
+func cursorStdinProbeOpts(t *testing.T, prompt string, opts ExecOptions) ([]string, string, Result) {
+	t.Helper()
 
 	dir := t.TempDir()
 	argvPath := filepath.Join(dir, "argv.txt")
@@ -43,7 +48,10 @@ printf '%%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"
 	if err != nil {
 		t.Fatalf("New(cursor): %v", err)
 	}
-	session, err := backend.Execute(t.Context(), prompt, ExecOptions{Timeout: 30 * time.Second})
+	if opts.Timeout == 0 {
+		opts.Timeout = 30 * time.Second
+	}
+	session, err := backend.Execute(t.Context(), prompt, opts)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -101,6 +109,22 @@ func TestCursorExecuteSendsPromptOnStdinNotArgv(t *testing.T) {
 		}
 	}
 
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed; error=%q", result.Status, result.Error)
+	}
+}
+
+func TestCursorExecutePrependsSystemPromptOnStdin(t *testing.T) {
+	t.Parallel()
+
+	_, stdinGot, result := cursorStdinProbeOpts(t, "do the task", ExecOptions{
+		Timeout:      30 * time.Second,
+		SystemPrompt: "RUNTIME BRIEF",
+	})
+	want := "RUNTIME BRIEF\n\n---\n\ndo the task"
+	if stdinGot != want {
+		t.Fatalf("stdin = %q, want %q", stdinGot, want)
+	}
 	if result.Status != "completed" {
 		t.Fatalf("status = %q, want completed; error=%q", result.Status, result.Error)
 	}

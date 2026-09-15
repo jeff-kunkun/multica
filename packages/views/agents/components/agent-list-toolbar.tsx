@@ -54,7 +54,12 @@ import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { availabilityConfig } from "../presence";
 import { useT } from "../../i18n";
 import type { AgentListRow } from "./agents-page";
-import { isActiveSquad, NO_SQUAD_ID } from "./agents-page-squads";
+import {
+  isActiveSquad,
+  NO_SQUAD_ID,
+  squadFilterOptionCounts,
+  type SquadRoster,
+} from "./agents-page-squads";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -117,6 +122,7 @@ export function AgentListToolbar({
   allRows,
   members,
   squads,
+  squadRosters,
   visibleCount,
 }: {
   scope: AgentsScope;
@@ -141,6 +147,7 @@ export function AgentListToolbar({
   allRows: AgentListRow[];
   members: MemberWithUser[];
   squads: Squad[];
+  squadRosters?: ReadonlyMap<string, SquadRoster>;
   /** Rows surviving the filters — shown as "n / total" when narrowed. */
   visibleCount: number;
 }) {
@@ -187,14 +194,11 @@ export function AgentListToolbar({
     .filter(isActiveSquad)
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name));
-  const squadCounts = new Map<string, number>();
-  let noSquadCount = 0;
-  for (const row of allRows) {
-    if (row.squadIds.length === 0) noSquadCount += 1;
-    for (const squadId of row.squadIds) {
-      squadCounts.set(squadId, (squadCounts.get(squadId) ?? 0) + 1);
-    }
-  }
+  const { bySquadId: squadCounts, noSquadCount } = squadFilterOptionCounts(
+    allRows,
+    squads,
+    squadRosters,
+  );
 
   const SCOPE_LABELS: Record<AgentsScope, string> = {
     mine: t(($) => $.scope.mine),
@@ -529,7 +533,8 @@ export function AgentListToolbar({
                       size="sm"
                     />
                     <span className="min-w-0 truncate">{squad.name}</span>
-                    {countBadge(squadCounts.get(squad.id) ?? 0)}
+                    {squadCounts.get(squad.id) != null &&
+                      countBadge(squadCounts.get(squad.id) ?? 0)}
                   </DropdownMenuCheckboxItem>
                 ))}
                 <DropdownMenuCheckboxItem
@@ -541,7 +546,7 @@ export function AgentListToolbar({
                   <span className="min-w-0 truncate">
                     {t(($) => $.toolbar.no_squad)}
                   </span>
-                  {countBadge(noSquadCount)}
+                  {noSquadCount != null && countBadge(noSquadCount)}
                 </DropdownMenuCheckboxItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>

@@ -685,7 +685,7 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 		return false, err
 	}
 	models := catalog.Models
-	target := modelIDForCapabilityLookup(providerType, model)
+	target := model
 	if target == "" {
 		// Default model = the entry the catalog marks as Default. If no
 		// entry is flagged, fall through to the no-match return; that
@@ -704,25 +704,14 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 			return false, nil
 		}
 	}
-	for _, m := range models {
-		// Normalise the catalog side too, not just the requested model. Claude
-		// discovery reports what the CLI would really run, and that includes
-		// the context-window tag (`claude-opus-5[1m]`), while target has
-		// already had it stripped. Comparing raw IDs would miss every tagged
-		// entry and fail the level closed, silently dropping the user's
-		// --effort (MUL-6961).
-		if modelIDForCapabilityLookup(providerType, m.ID) != target {
-			continue
-		}
-		if m.Thinking == nil {
-			return false, nil
-		}
-		for _, lvl := range m.Thinking.SupportedLevels {
-			if lvl.Value == value {
-				return true, nil
-			}
-		}
+	found, ok := findModelForCapability(providerType, models, target)
+	if !ok || found.Thinking == nil {
 		return false, nil
+	}
+	for _, lvl := range found.Thinking.SupportedLevels {
+		if lvl.Value == value {
+			return true, nil
+		}
 	}
 	return false, nil
 }

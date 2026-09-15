@@ -66,4 +66,44 @@ describe("applyLocalDaemonStatus", () => {
     });
     expect(got.plan_limits).toBeNull();
   });
+
+  it("overlays live AGY login directories onto runtime metadata", () => {
+    const rt = makeRuntime({
+      provider: "antigravity",
+      metadata: { home_dir: "/Users/agy-host" },
+    });
+    const got = applyLocalDaemonStatus(rt, {
+      state: "running",
+      daemonId: "daemon-1",
+      agyLoggedInDirs: ["/Users/agy-host/.gemini-account4"],
+    });
+    expect(got.metadata).toEqual({
+      home_dir: "/Users/agy-host",
+      agy_logged_in_dirs: ["/Users/agy-host/.gemini-account4"],
+    });
+  });
+
+  it("overlays live AGY quota exhaustion onto runtime metadata, including an empty list", () => {
+    const rt = makeRuntime({
+      provider: "antigravity",
+      metadata: {
+        home_dir: "/Users/agy-host",
+        agy_quota_exhausted: [{ dir: "/Users/agy-host/.gemini", reset_at: 1_800_000_000 }],
+      },
+    });
+    const exhausted = applyLocalDaemonStatus(rt, {
+      state: "running",
+      daemonId: "daemon-1",
+      agyQuotaExhausted: [{ dir: "/Users/agy-host/.gemini-account2", reset_at: 1_800_000_100 }],
+    });
+    expect(exhausted.metadata?.agy_quota_exhausted).toEqual([
+      { dir: "/Users/agy-host/.gemini-account2", reset_at: 1_800_000_100 },
+    ]);
+    const cleared = applyLocalDaemonStatus(rt, {
+      state: "running",
+      daemonId: "daemon-1",
+      agyQuotaExhausted: [],
+    });
+    expect(cleared.metadata?.agy_quota_exhausted).toEqual([]);
+  });
 });

@@ -32,6 +32,9 @@ export function DesktopLoginPage() {
           // Initial workspace navigation happens in routes.tsx via IndexRedirect.
         }}
         onGoogleLogin={handleGoogleLogin}
+        onSignup={() => {
+          window.desktopAPI.openExternal(`${webUrl}/signup`);
+        }}
       />
     </div>
   );

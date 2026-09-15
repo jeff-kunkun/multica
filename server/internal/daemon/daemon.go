@@ -389,6 +389,10 @@ type Daemon struct {
 	skillCache *SkillBundleCache
 	logger     *slog.Logger
 
+	// localSharedOverrides is the on-disk skip-mutex map for folders stored
+	// as in_place on a server that does not accept execution_mode=shared.
+	localSharedOverrides *localSharedOverrideStore
+
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
@@ -525,6 +529,11 @@ type Daemon struct {
 	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	planLimitsMu sync.RWMutex
 	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
+	// agyQuota tracks per-directory AGY/Antigravity individual-quota exhaustion
+	// so the same agent can fail over to another isolation slot. Guarded by
+	// agyQuotaMu; persisted under ~/.multica so a daemon restart keeps the X.
+	agyQuotaMu sync.Mutex
+	agyQuota   map[string]time.Time // gemini dir -> reset_at
 	// Live Claude/Codex/Gemini/Grok/Kimi/GLM/MiniMax/DeepSeek usage probes
 	// (cc-switch style). Throttled
 	// separately from the 15s heartbeat so we do not hammer unofficial APIs.
@@ -745,6 +754,11 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+	if path, err := localSharedOverridesPath(cfg.Profile); err == nil {
+		d.localSharedOverrides = newLocalSharedOverrideStore(path)
+	} else {
+		d.localSharedOverrides = newLocalSharedOverrideStore("")
+	}
 	return d
 }
 
@@ -2848,10 +2862,23 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 
 // withHostHomeDir stamps the daemon host's home onto a register payload so the
 // web UI can expand AGY account-slot paths. Browsers cannot read process.env.HOME.
+// Logged-in Gemini dirs ride along so the settings page can show a green check
+// without putting AGY-unknown flags in custom_args.
+func (d *Daemon) withRegistrationHostMeta(req map[string]any) map[string]any {
+	req = withHostHomeDir(req)
+	if exhausted := d.agyQuotaOverlay(time.Now()); len(exhausted) > 0 {
+		req["agy_quota_exhausted"] = exhausted
+	}
+	return req
+}
+
 func withHostHomeDir(req map[string]any) map[string]any {
 	if home, err := os.UserHomeDir(); err == nil {
 		if home = strings.TrimSpace(home); home != "" {
 			req["home_dir"] = home
+			if dirs := probeAgyLoggedInDirs(home); len(dirs) > 0 {
+				req["agy_logged_in_dirs"] = dirs
+			}
 		}
 	}
 	return req
@@ -2963,7 +2990,7 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 		return nil, profileSig, ErrNoRuntimesToRegister
 	}
 
-	req := withHostHomeDir(map[string]any{
+	req := d.withRegistrationHostMeta(map[string]any{
 		"workspace_id":      workspaceID,
 		"daemon_id":         d.cfg.DaemonID,
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
@@ -3008,7 +3035,7 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 	if len(runtimes) == 0 {
 		return nil, ErrNoRuntimesToRegister
 	}
-	req := withHostHomeDir(map[string]any{
+	req := d.withRegistrationHostMeta(map[string]any{
 		"workspace_id":      workspaceID,
 		"daemon_id":         d.cfg.DaemonID,
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
@@ -6034,7 +6061,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, lease *taskSlotLease
 			// exempt env root, so the directory would accumulate one env
 			// root per task forever — the exact cost the exemption was
 			// meant to trade away for a user's own files.
-			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment.RunsInUserDirectory() {
+			if assignment, _ := d.resolveLocalDirectoryAssignment(task); assignment.RunsInUserDirectory() {
 				meta.LocalDirectory = true
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
@@ -6145,7 +6172,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
 		return nil, false
 	}
-	assignment, err := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	assignment, err := d.resolveLocalDirectoryAssignment(task)
 	if err != nil {
 		taskLog.Error("local_directory: resolve resource failed", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
@@ -6603,21 +6630,63 @@ const (
 	// and finds nothing; the brief's Skills section names the sidecar skills
 	// directory instead so the agent can read SKILL.md files directly.
 	sharedBriefInline
+	// sharedBriefViaCodexHome: InjectRuntimeConfig writes the brief to
+	// {CODEX_HOME}/AGENTS.md. Codex loads that file as global-scope
+	// instructions (developers.openai.com/codex/guides/agents-md) without
+	// touching the user's cwd. Skills already live under the same home.
+	// developerInstructions stays nil so the non-shared path (cwd AGENTS.md,
+	// MUL-5392) is not duplicated when SystemPrompt is empty.
+	sharedBriefViaCodexHome
+	// sharedBriefViaOpencodeConfigDir: InjectRuntimeConfig writes the brief
+	// to {sidecar}/AGENTS.md and skills to {sidecar}/.opencode/skills (the
+	// default sidecar layout). The daemon also writes {sidecar}/opencode.json
+	// naming those absolute paths and exports OPENCODE_CONFIG_DIR=<sidecar>
+	// so OpenCode discovers them as an additive config directory (DENE-178
+	// CLI canary against OpenCode 1.18.30). OPENCODE_CONFIG_CONTENT (MCP)
+	// is a different variable and still merges independently.
+	sharedBriefViaOpencodeConfigDir
+	// sharedBriefViaCursorAddDir: ExtraArgs --add-dir <sidecar root> makes
+	// cursor-agent discover .cursor/skills there (DENE-187 canary against
+	// cursor-agent 2026.09.02-c22c1a3 in -p / ask mode). The same canary
+	// showed AGENTS.md in the added directory is NOT loaded, and --plugin-dir
+	// loads plugin skills but not plugin rules/*.md, so the brief still rides
+	// ExecOptions.SystemPrompt onto stdin. CURSOR_CONFIG_DIR is not used:
+	// redirecting the identity/preference directory dropped the user's model.
+	sharedBriefViaCursorAddDir
+	// sharedBriefViaAntigravityAddDir: ExtraArgs --add-dir <sidecar root>
+	// makes agy load sidecar/AGENTS.md and .agents/skills (DENE-187 canary
+	// against agy 1.2.2). --gemini_dir stays the AGY multi-account slot and
+	// is never pointed at a per-task directory.
+	sharedBriefViaAntigravityAddDir
 )
 
 // sharedModeBriefDelivery is the provider table behind shared mode. A provider
 // is listed only when a sidecar-free route for the brief has been verified
-// (claude, by spike against Claude Code 2.1.270) or is the route it already
-// runs on in production (providerNeedsInlineSystemPrompt) or has implemented
-// in its backend (userText = SystemPrompt + prompt). Codex, Hermes and the
-// providers that read only from disk stay unsupported until their own route
-// is verified — codex's per-task CODEX_HOME is the obvious candidate.
+// (claude, by spike against Claude Code 2.1.270; codex, by Codex's documented
+// CODEX_HOME/AGENTS.md discovery plus the per-task home the daemon already
+// seeds; opencode, by OPENCODE_CONFIG_DIR + instructions/skills.paths, CLI
+// canary in DENE-178; cursor, by --add-dir skills plus stdin brief prepend,
+// DENE-187 canary against cursor-agent 2026.09.02-c22c1a3; antigravity, by
+// --add-dir AGENTS.md and .agents/skills, DENE-187 canary against agy 1.2.2)
+// or is the route it already runs on in production
+// (providerNeedsInlineSystemPrompt) or has implemented in its backend
+// (userText = SystemPrompt + prompt), including dsh which prepends the same
+// way. Hermes and the providers that read only from the cwd stay unsupported
+// until their own route is verified.
 func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 	switch provider {
 	case "claude":
 		return sharedBriefViaClaudeFlags
+	case "codex":
+		return sharedBriefViaCodexHome
+	case "opencode":
+		return sharedBriefViaOpencodeConfigDir
+	case "cursor":
+		return sharedBriefViaCursorAddDir
+	case "antigravity":
+		return sharedBriefViaAntigravityAddDir
 	case "openclaw", "kimi", "traecli", "qwenpaw",
-		"codebuddy", "dim", "grok", "kiro", "qoder", "qoderclicn", "zeroclaw":
+		"codebuddy", "dim", "grok", "dsh", "kiro", "qoder", "qoderclicn", "zeroclaw":
 		return sharedBriefInline
 	default:
 		// mcode is intentionally unsupported: it ignores ExecOptions.SystemPrompt
@@ -6626,6 +6695,98 @@ func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 		// task with no brief and no skills.
 		return sharedBriefUnsupported
 	}
+}
+
+// sharedModeBriefOverlay is the ExtraArgs / SystemPrompt pair a shared-mode
+// task attaches after InjectRuntimeConfig has written the brief under the
+// sidecar (or CODEX_HOME). Empty SidecarRoot means not shared mode.
+type sharedModeBriefOverlay struct {
+	ExtraArgs   []string
+	BriefInline bool
+}
+
+func sharedModeBriefOverlayFor(provider, sidecarRoot string) sharedModeBriefOverlay {
+	if sidecarRoot == "" {
+		return sharedModeBriefOverlay{}
+	}
+	switch sharedModeBriefDelivery(provider) {
+	case sharedBriefViaClaudeFlags:
+		return sharedModeBriefOverlay{
+			ExtraArgs: []string{
+				"--add-dir", sidecarRoot,
+				"--append-system-prompt-file", execenv.RuntimeConfigFilePath(sidecarRoot, provider),
+			},
+		}
+	case sharedBriefInline:
+		return sharedModeBriefOverlay{BriefInline: true}
+	case sharedBriefViaCursorAddDir:
+		return sharedModeBriefOverlay{
+			ExtraArgs:   []string{"--add-dir", sidecarRoot},
+			BriefInline: true,
+		}
+	case sharedBriefViaAntigravityAddDir:
+		return sharedModeBriefOverlay{
+			ExtraArgs: []string{"--add-dir", sidecarRoot},
+		}
+	case sharedBriefViaCodexHome:
+		// Brief already written to {CODEX_HOME}/AGENTS.md (briefRoot).
+		// Codex discovers that file as global-scope instructions; no extra
+		// args and no SystemPrompt inline (MUL-5392).
+		return sharedModeBriefOverlay{}
+	case sharedBriefViaOpencodeConfigDir:
+		// Brief already written to {sidecar}/AGENTS.md (briefRoot).
+		// OPENCODE_CONFIG_DIR points OpenCode at {sidecar}/opencode.json,
+		// which names that file and the sidecar skills tree. No extra
+		// args and no SystemPrompt inline — OpenCode's `run` has no
+		// --prompt flag (MUL-5392).
+		return sharedModeBriefOverlay{}
+	default:
+		return sharedModeBriefOverlay{}
+	}
+}
+
+// sharedModeOpencodeConfigDir is the per-task OPENCODE_CONFIG_DIR exported to
+// the OpenCode child in shared mode. Empty outside shared mode, so non-shared
+// tasks keep any user-set OPENCODE_CONFIG_DIR from custom_env.
+func sharedModeOpencodeConfigDir(provider, sidecarRoot string) string {
+	if sidecarRoot == "" {
+		return ""
+	}
+	if sharedModeBriefDelivery(provider) != sharedBriefViaOpencodeConfigDir {
+		return ""
+	}
+	return sidecarRoot
+}
+
+// sharedModeBriefRoot is where InjectRuntimeConfig writes the runtime brief.
+// Shared mode keeps that file out of the user's directory; Codex is the one
+// provider whose native discovery is the per-task CODEX_HOME rather than the
+// sidecar tree, so a missing home fails closed instead of writing a file
+// Codex will never read.
+func sharedModeBriefRoot(provider, sidecarRoot, codexHome, workDir string) (string, error) {
+	if sidecarRoot == "" {
+		return workDir, nil
+	}
+	if sharedModeBriefDelivery(provider) == sharedBriefViaCodexHome {
+		if strings.TrimSpace(codexHome) == "" {
+			return "", errors.New("shared mode: task CODEX_HOME is missing; cannot deliver the Codex runtime brief")
+		}
+		return codexHome, nil
+	}
+	return sidecarRoot, nil
+}
+
+// sharedModeSkillsDir is the absolute skills tree named in the shared-mode
+// brief. Empty when not in shared mode (native discovery is enough). Codex
+// hydrates skills under CODEX_HOME/skills, not the sidecar fallback path.
+func sharedModeSkillsDir(provider, sidecarRoot, codexHome string) string {
+	if sidecarRoot == "" {
+		return ""
+	}
+	if sharedModeBriefDelivery(provider) == sharedBriefViaCodexHome {
+		return filepath.Join(codexHome, "skills")
+	}
+	return execenv.SkillsDirPath(sidecarRoot, provider)
 }
 
 // sharedModeProviderSupported returns a user-facing error when provider has no
@@ -7971,7 +8132,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Resolve any local_directory assignment again here so runTask can plumb
 	// LocalWorkDir into execenv. handleTask already validated + locked the
 	// path for worker tasks; leader tasks intentionally skip the assignment.
-	localAssignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	localAssignment, _ := d.resolveLocalDirectoryAssignment(task)
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
@@ -8542,18 +8703,24 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	//
 	// Shared mode keeps the daemon's files out of the user's directory, the
-	// runtime brief included: it is written under the task's sidecar root and
-	// handed to the provider from there (see sharedModeBriefDelivery). The
-	// brief also has to name the relocated sidecar paths, since the defaults it
-	// would otherwise describe are relative to a cwd that holds none of them.
-	briefRoot := env.WorkDir
+	// runtime brief included: it is written under the task's sidecar root
+	// (or, for Codex, the per-task CODEX_HOME) and handed to the provider
+	// from there (see sharedModeBriefDelivery). The brief also has to name
+	// the relocated sidecar paths, since the defaults it would otherwise
+	// describe are relative to a cwd that holds none of them.
+	briefRoot, err := sharedModeBriefRoot(provider, env.SidecarRoot, env.CodexHome, env.WorkDir)
+	if err != nil {
+		return TaskResult{}, err
+	}
 	if env.SidecarRoot != "" {
-		briefRoot = env.SidecarRoot
 		taskCtx.SidecarRoot = env.SidecarRoot
-		taskCtx.SkillsDir = execenv.SkillsDirPath(env.SidecarRoot, provider)
+		taskCtx.SkillsDir = sharedModeSkillsDir(provider, env.SidecarRoot, env.CodexHome)
 	}
 	runtimeBrief, err := execenv.InjectRuntimeConfig(briefRoot, provider, taskCtx)
 	if err != nil {
+		if env.SidecarRoot != "" && sharedModeBriefDelivery(provider) == sharedBriefViaCodexHome {
+			return TaskResult{}, fmt.Errorf("shared mode: write Codex runtime brief to CODEX_HOME: %w", err)
+		}
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
 	// An exempt turn runs in the user's directory without having queued for it,
@@ -8669,6 +8836,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	// Shared-mode OpenCode: the sidecar is an additive config directory, not
+	// a replacement for the user's global config. Set this after custom_env
+	// so a user OPENCODE_CONFIG_DIR cannot point the child away from the
+	// brief. Non-shared tasks leave the variable unset (or user-owned).
+	if dir := sharedModeOpencodeConfigDir(provider, env.SidecarRoot); dir != "" {
+		agentEnv["OPENCODE_CONFIG_DIR"] = dir
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
@@ -8850,17 +9024,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// its project-level skill discovery honours (verified against 2.1.270; the
 	// same run showed CLAUDE.md is NOT loaded from an added directory), and the
 	// brief through --append-system-prompt-file so the file is re-read on the
-	// fresh-session retry below. Both travel as ExtraArgs, which the Claude
-	// backend forwards and which lie outside its blocked-flag set.
+	// fresh-session retry below. Cursor is the same split: --add-dir loads
+	// .cursor/skills but not AGENTS.md (DENE-187), so the brief is prepended
+	// on stdin. Antigravity's --add-dir loads both AGENTS.md and
+	// .agents/skills. Overlay ExtraArgs travel on ExecOptions.ExtraArgs,
+	// which each backend forwards outside its blocked-flag set.
 	briefInline := providerNeedsInlineSystemPrompt(provider)
 	if env.SidecarRoot != "" {
-		switch sharedModeBriefDelivery(provider) {
-		case sharedBriefViaClaudeFlags:
-			execOpts.ExtraArgs = append(append([]string{}, execOpts.ExtraArgs...),
-				"--add-dir", env.SidecarRoot,
-				"--append-system-prompt-file", execenv.RuntimeConfigFilePath(env.SidecarRoot, provider),
-			)
-		case sharedBriefInline:
+		overlay := sharedModeBriefOverlayFor(provider, env.SidecarRoot)
+		if len(overlay.ExtraArgs) > 0 {
+			execOpts.ExtraArgs = append(append([]string{}, execOpts.ExtraArgs...), overlay.ExtraArgs...)
+		}
+		if overlay.BriefInline {
 			briefInline = true
 		}
 	}
@@ -8913,9 +9088,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Shared across the resume-retry below so the retry's transcript rows
 	// keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
+	var runtimeConfig json.RawMessage
+	if task.Agent != nil {
+		runtimeConfig = task.Agent.RuntimeConfig
+	}
+	d.applyAgyLaunchSlot(provider, &execOpts, runtimeConfig, time.Now())
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
+	}
+	for range maxAgyQuotaExhausted {
+		failover := d.agyQuotaFailover(provider, result, execOpts, runtimeConfig, time.Now())
+		if failover.PoolError != "" {
+			result.Error = failover.PoolError
+			break
+		}
+		if !failover.Retry {
+			break
+		}
+		taskLog.Warn("agy slot quota exhausted, retrying with the next isolation directory",
+			"from", agent.GeminiDirFromArgs(execOpts.CustomArgs),
+			"to", agent.GeminiDirFromArgs(failover.Opts.CustomArgs),
+		)
+		execOpts = failover.Opts
+		result, tools, err = d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
+		if err != nil {
+			return TaskResult{}, err
+		}
 	}
 
 	// retiredSessionID is the session this run was told to resume and then

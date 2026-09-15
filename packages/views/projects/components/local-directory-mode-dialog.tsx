@@ -26,8 +26,12 @@ interface LocalDirectoryModeDialogProps {
   value: LocalDirectoryExecutionMode;
   /** Set when worktree cannot be chosen; the option renders disabled with a reason. */
   unavailableReason?: WorktreeUnavailableReason;
-  /** Set when shared cannot be chosen (server would silently drop the field). */
+  /** Set when shared cannot be chosen (server would silently drop the field
+   *  AND this client cannot record a local daemon override). */
   sharedUnavailable?: boolean;
+  /** Set when shared is selectable but will be honoured locally, not stored
+   *  as `execution_mode=shared` on the connected server. */
+  sharedUsesLocalOverride?: boolean;
   /** Server-side rejection to show inline (e.g. a 422 that only the API can detect). */
   errorMessage?: string;
   saving?: boolean;
@@ -53,6 +57,7 @@ export function LocalDirectoryModeDialog({
   value,
   unavailableReason,
   sharedUnavailable,
+  sharedUsesLocalOverride,
   errorMessage,
   saving = false,
   confirmLabel,
@@ -86,6 +91,7 @@ export function LocalDirectoryModeDialog({
           onChange={setSelected}
           unavailableReason={unavailableReason}
           sharedUnavailable={sharedUnavailable}
+          sharedUsesLocalOverride={sharedUsesLocalOverride}
         />
 
         {errorMessage && (
@@ -117,6 +123,7 @@ interface LocalDirectoryModeOptionsProps {
   onChange: (mode: LocalDirectoryExecutionMode) => void;
   unavailableReason?: WorktreeUnavailableReason;
   sharedUnavailable?: boolean;
+  sharedUsesLocalOverride?: boolean;
 }
 
 /**
@@ -131,6 +138,7 @@ export function LocalDirectoryModeOptions({
   onChange,
   unavailableReason,
   sharedUnavailable = false,
+  sharedUsesLocalOverride = false,
 }: LocalDirectoryModeOptionsProps) {
   const { t } = useT("projects");
   const worktreeDisabled = unavailableReason !== undefined;
@@ -173,6 +181,11 @@ export function LocalDirectoryModeOptions({
             ? t(($) => $.resources.mode_shared_needs_server_upgrade)
             : undefined
         }
+        note={
+          !sharedUnavailable && sharedUsesLocalOverride
+            ? t(($) => $.resources.mode_shared_uses_local_override)
+            : undefined
+        }
         onSelect={() => onChange("shared")}
       />
     </div>
@@ -187,6 +200,7 @@ interface ModeOptionProps {
   selected: boolean;
   disabled?: boolean;
   disabledReason?: string;
+  note?: string;
   onSelect: () => void;
 }
 
@@ -198,6 +212,7 @@ function ModeOption({
   selected,
   disabled = false,
   disabledReason,
+  note,
   onSelect,
 }: ModeOptionProps) {
   return (
@@ -236,6 +251,11 @@ function ModeOption({
           <span className="mt-1.5 flex items-start gap-1.5 text-caption text-warning">
             <TriangleAlert className="size-3 mt-0.5 shrink-0" />
             <span>{disabledReason}</span>
+          </span>
+        )}
+        {!disabled && note && (
+          <span className="mt-1.5 block text-caption text-muted-foreground">
+            {note}
           </span>
         )}
       </span>

@@ -19,6 +19,7 @@ func TestPlanLimitsFromQuotaError(t *testing.T) {
 	}{
 		{name: "http 429", provider: "grok", text: "HTTP 429 rate limit exceeded", want: true},
 		{name: "quota exceeded", provider: "antigravity", text: "RESOURCE_EXHAUSTED: quota exceeded", want: true},
+		{name: "individual quota reached", provider: "antigravity", text: "Individual quota reached. Resets in 49m14s.", want: true},
 		{name: "usage limit", provider: "dsh", text: "The usage limit has been reached", want: true},
 		{name: "plain failure is unavailable", provider: "grok", text: "grok initialize failed: connection refused", want: false},
 		{name: "empty text", provider: "grok", text: "", want: false},

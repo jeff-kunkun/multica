@@ -218,6 +218,66 @@ describe("ThinkingPropRow", () => {
     expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
   });
 
+  it("shows DSH thinking levels when the persisted model id is decoded and the catalog id is encoded", async () => {
+    const DSH_MODEL: RuntimeModel = {
+      id: "deepseek-official/deepseek-v4%2Fflash",
+      label: "DeepSeek V4 Flash",
+      default: true,
+      thinking: {
+        supported_levels: [
+          { value: "off", label: "Off" },
+          { value: "low", label: "Low" },
+          { value: "high", label: "High" },
+          { value: "max", label: "Max" },
+        ],
+        default_level: "high",
+      },
+    };
+    mockInitiateListModels.mockResolvedValue(listResult([DSH_MODEL]));
+    mockGetListModelsResult.mockResolvedValue(listResult([DSH_MODEL]));
+    renderRow({
+      provider: "dsh",
+      model: "deepseek-official/deepseek-v4/flash",
+      value: "",
+    });
+
+    await screen.findByText("Thinking");
+    fireEvent.click(screen.getByRole("button"));
+    expect(await screen.findByText("Max")).toBeInTheDocument();
+  });
+
+  it("review: exposes thinking for the actual persisted DSH model", async () => {
+    const actualCatalog: RuntimeModel[] = [
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+      "deepseek-v4-pro",
+      "deepseek-flash",
+    ].map((modelId) => ({
+      id: `deepseek-official/${modelId}`,
+      label: modelId,
+      thinking: {
+        supported_levels: [
+          { value: "off", label: "Off" },
+          { value: "low", label: "Low" },
+          { value: "high", label: "High" },
+          { value: "max", label: "Max" },
+        ],
+        default_level: "high",
+      },
+    }));
+    mockInitiateListModels.mockResolvedValue(listResult(actualCatalog));
+    mockGetListModelsResult.mockResolvedValue(listResult(actualCatalog));
+    renderRow({
+      provider: "dsh",
+      model: "deepseek-official/deepseek-v4.1-flash",
+      value: "",
+    });
+    await screen.findByText("Thinking");
+    fireEvent.click(screen.getByRole("button"));
+    expect(await screen.findByText("Max")).toBeInTheDocument();
+    expect(screen.queryByText("Ultra")).toBeNull();
+  });
+
   it("hides the picker for an empty codex model — it must not borrow the Default's catalog (MUL-4347)", async () => {
     // Empty model on codex follows config.toml, which can resolve to any
     // installed model. Previewing gpt-5.6-sol's levels (the flagged Default,

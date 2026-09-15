@@ -45,8 +45,11 @@ vi.mock("@multica/core/projects", () => ({
 // A backend that predates the capability signal: the client must assume it
 // would silently drop execution_mode.
 vi.mock("@multica/core/config", () => ({
-  useConfigStore: (selector: (state: { localWorktreeSupported: boolean }) => unknown) =>
-    selector({ localWorktreeSupported: false }),
+  useConfigStore: (selector: (state: {
+    localWorktreeSupported: boolean;
+    localSharedSupported: boolean;
+  }) => unknown) =>
+    selector({ localWorktreeSupported: false, localSharedSupported: false }),
 }));
 
 vi.mock("@multica/core/runtimes", () => ({
@@ -64,6 +67,14 @@ vi.mock("../../platform/local-directory", () => ({
 }));
 vi.mock("../../platform/use-local-daemon-status", () => ({
   useLocalDaemonStatus: () => ({ daemonId: "daemon-1", deviceName: "MacBook", running: true }),
+}));
+vi.mock("../../platform/use-local-directory-shared-overrides", () => ({
+  useLocalDirectorySharedOverrides: () => ({
+    canPersist: true,
+    hasOverride: () => false,
+    setOverride: vi.fn().mockResolvedValue({ ok: true }),
+    refresh: vi.fn(),
+  }),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
