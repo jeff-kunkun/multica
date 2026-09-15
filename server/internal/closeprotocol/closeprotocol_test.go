@@ -109,6 +109,8 @@ func TestValidate_FourClosingScenes(t *testing.T) {
 			KeyNextOwnerType: OwnerMember,
 			KeyNextOwnerID:   memberID,
 			KeyWakeAction:    WakeNone,
+			KeyBlockKind:     BlockDecision,
+			KeyBlockAction:   "provide the blocking decision",
 		})
 		if err := Validate(meta, issuestatus.Blocked, "need a product decision"); err != nil {
 			t.Fatalf("scene E: %v", err)
@@ -197,6 +199,8 @@ func TestValidate_Section61Rules(t *testing.T) {
 				KeyWakeAction:    WakeNone,
 				KeyNextOwnerType: OwnerMember,
 				KeyNextOwnerID:   memberID,
+				KeyBlockKind:     BlockDecision,
+				KeyBlockAction:   "provide the blocking decision",
 			}),
 			issueStatus: issuestatus.InReview,
 			wantRule:    "blocked",
@@ -335,8 +339,14 @@ func TestValidate_BlockerFields(t *testing.T) {
 	})
 	t.Run("legacy blocked record remains readable", func(t *testing.T) {
 		meta := base(map[string]string{KeyConclusion: ConclusionBlocked, KeyStatus: issuestatus.Blocked, KeyNextOwnerType: OwnerMember, KeyNextOwnerID: memberID, KeyWakeAction: WakeNone})
-		if err := Validate(meta, issuestatus.Blocked, "legacy"); err != nil {
+		if err := ValidateLegacy(meta, issuestatus.Blocked, "legacy"); err != nil {
 			t.Fatal(err)
+		}
+	})
+	t.Run("new blocked record requires both blocker fields", func(t *testing.T) {
+		meta := base(map[string]string{KeyConclusion: ConclusionBlocked, KeyStatus: issuestatus.Blocked, KeyNextOwnerType: OwnerMember, KeyNextOwnerID: memberID, KeyWakeAction: WakeNone})
+		if err := Validate(meta, issuestatus.Blocked, "new blocked"); err == nil || rule(err) != "blocker" {
+			t.Fatalf("expected missing blocker fields error, got %v", err)
 		}
 	})
 	t.Run("action is bounded", func(t *testing.T) {

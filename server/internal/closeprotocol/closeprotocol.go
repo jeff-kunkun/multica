@@ -97,9 +97,22 @@ func Complete(meta map[string]string) bool {
 	return true
 }
 
-// Validate checks a claimed close against §6.1. issueStatus is the issue's
+// Validate checks a newly written close against §6.1. issueStatus is the
 // status after the close write; evidenceBody is the evidence comment body.
+// New blocked records must include both blocker fields.
 func Validate(meta map[string]string, issueStatus, evidenceBody string) error {
+	return validate(meta, issueStatus, evidenceBody, false)
+}
+
+// ValidateLegacy checks a close record read from storage that predates the
+// blocker-field extension. It is the explicit compatibility boundary for old
+// blocked records whose two blocker fields are both absent. Any partially
+// written extension is still rejected.
+func ValidateLegacy(meta map[string]string, issueStatus, evidenceBody string) error {
+	return validate(meta, issueStatus, evidenceBody, true)
+}
+
+func validate(meta map[string]string, issueStatus, evidenceBody string, allowLegacyBlocked bool) error {
 	if !Complete(meta) {
 		return &Error{Rule: "keys", Msg: "missing close.* keys; a comment alone is not a close"}
 	}
@@ -149,7 +162,11 @@ func Validate(meta map[string]string, issueStatus, evidenceBody string) error {
 	if at == "" {
 		return &Error{Rule: "at", Msg: "close.at is empty"}
 	}
-	if conclusion == ConclusionBlocked && hasBlockKind {
+	if conclusion == ConclusionBlocked && !hasBlockKind {
+		if !allowLegacyBlocked {
+			return &Error{Rule: "blocker", Msg: "new blocked closes require close.block_kind and close.block_action"}
+		}
+	} else if conclusion == ConclusionBlocked && hasBlockKind {
 		if !allowedBlockKind(blockKind) {
 			return &Error{Rule: "block_kind", Msg: fmt.Sprintf("close.block_kind %q is not an allowed value", blockKind)}
 		}
