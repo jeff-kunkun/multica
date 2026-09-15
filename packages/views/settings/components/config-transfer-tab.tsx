@@ -60,6 +60,7 @@ import {
   SettingsSection,
   SettingsTab,
 } from "./settings-layout";
+import { WorkspaceMigrationCard } from "./workspace-migration-card";
 
 type ImportPhase =
   | { step: "idle" }
@@ -358,6 +359,8 @@ export function ConfigTransferTab() {
           </AlertDescription>
         </Alert>
       ) : null}
+
+      <WorkspaceMigrationCard />
 
       <SettingsSection
         title={t(($) => $.config_transfer.export.title)}

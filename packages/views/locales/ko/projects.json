@@ -147,6 +147,18 @@
     "toast_local_mode_update_failed": "실행 모드를 업데이트하지 못했습니다",
     "mode_badge_in_place": "직접"
   },
+  "members": {
+    "section_header": "멤버",
+    "empty": "아직 멤버가 없습니다.",
+    "add_button": "멤버 추가",
+    "add_placeholder": "워크스페이스 멤버 추가...",
+    "no_results": "결과 없음",
+    "remove_tooltip": "제거",
+    "toast_added": "멤버를 추가했습니다",
+    "toast_add_failed": "멤버를 추가하지 못했습니다",
+    "toast_removed": "멤버를 제거했습니다",
+    "toast_remove_failed": "멤버를 제거하지 못했습니다"
+  },
   "delete_dialog": {
     "title": "프로젝트 삭제",
     "description": "프로젝트가 삭제됩니다. 태스크는 삭제되지 않지만 프로젝트 연결은 해제됩니다.",

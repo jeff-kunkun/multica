@@ -96,6 +96,7 @@ import type {
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
+  ProjectMember,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -328,6 +329,8 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
+  ProjectMemberListSchema,
+  ProjectMemberSchema,
   SquadSchema,
   SquadListSchema,
   SquadMemberListSchema,
@@ -460,6 +463,7 @@ import {
   EMPTY_JOIN_SHARE_LINK_RESPONSE,
   type IssueView,
   type IssueViewPreference,
+  type IssueViewVisibility,
   type CreateIssueViewRequest,
 } from "./schemas";
 
@@ -3714,6 +3718,46 @@ export class ApiClient {
     });
   }
 
+  async listProjectMembers(projectId: string): Promise<ProjectMember[]> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/members`);
+    const parsed = parseWithFallback<ProjectMember[] | null>(
+      raw,
+      ProjectMemberListSchema,
+      null,
+      { endpoint: "GET /api/projects/:id/members" },
+    );
+    if (parsed === null) {
+      throw new Error("GET /api/projects/:id/members failed schema validation");
+    }
+    return parsed;
+  }
+
+  async addProjectMember(
+    projectId: string,
+    data: { member_id: string },
+  ): Promise<ProjectMember> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const parsed = parseWithFallback<ProjectMember | null>(
+      raw,
+      ProjectMemberSchema,
+      null,
+      { endpoint: "POST /api/projects/:id/members" },
+    );
+    if (parsed === null) {
+      throw new Error("POST /api/projects/:id/members failed schema validation");
+    }
+    return parsed;
+  }
+
+  async removeProjectMember(projectId: string, memberId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/members/${memberId}`, {
+      method: "DELETE",
+    });
+  }
+
   // Labels
   async listLabels(resourceType: LabelResourceType = "issue"): Promise<ListLabelsResponse> {
     const raw = await this.fetch<unknown>(`/api/labels?resource_type=${resourceType}`);
@@ -4052,7 +4096,7 @@ export class ApiClient {
     id: string,
     data: {
       name?: string;
-      visibility?: "private" | "workspace";
+      visibility?: IssueViewVisibility;
       scope_variant?: string | null;
       query?: Record<string, unknown>;
       display?: Record<string, unknown>;

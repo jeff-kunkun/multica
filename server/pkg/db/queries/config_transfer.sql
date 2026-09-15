@@ -271,14 +271,14 @@ LIMIT 1;
 SELECT id, name, scope_type, scope_id, scope_variant, visibility, definition_version, query, display
 FROM issue_view
 WHERE workspace_id = $1
-  AND visibility = 'workspace'
+  AND visibility IN ('workspace', 'project')
   AND scope_type <> 'my'
 ORDER BY created_at ASC;
 
 -- name: GetWorkspaceIssueViewByIdentity :one
 SELECT * FROM issue_view
 WHERE workspace_id = $1
-  AND visibility = 'workspace'
+  AND visibility IN ('workspace', 'project')
   AND scope_type = $2
   AND scope_id IS NOT DISTINCT FROM sqlc.narg('scope_id')::uuid
   AND name = $3

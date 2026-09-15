@@ -78,6 +78,7 @@ import type {
   RuntimeModelListRequest,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  ProjectMember,
   ShareLink,
   ShareLinkInfo,
   Skill,
@@ -575,12 +576,14 @@ export const EMPTY_ISSUE_VIEW_PREFERENCE: IssueViewPreference = {
   updated_at: "",
 };
 
+export type IssueViewVisibility = "private" | "workspace" | "project";
+
 export interface CreateIssueViewRequest {
   name: string;
   scope_type: "workspace" | "my" | "project";
   scope_id?: string | null;
   scope_variant?: "assigned" | "created" | "involved" | "any" | "members" | "agents" | null;
-  visibility: "private" | "workspace";
+  visibility: IssueViewVisibility;
   definition_version: number;
   query: Record<string, unknown>;
   display: Record<string, unknown>;
@@ -1356,6 +1359,32 @@ export const SearchProjectsResponseSchema = z.object({
 
 export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
   projects: [],
+};
+
+export const ProjectMemberSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().optional().default(""),
+  project_id: z.string(),
+  member_id: z.string(),
+  added_by: z.string().nullable().optional().default(null),
+  created_at: z.string().optional().default(""),
+  name: z.string().optional().default(""),
+  email: z.string().optional().default(""),
+  avatar_url: z.string().nullable().optional().default(null),
+}).loose();
+
+export const ProjectMemberListSchema = z.array(ProjectMemberSchema);
+
+export const EMPTY_PROJECT_MEMBER: ProjectMember = {
+  id: "",
+  workspace_id: "",
+  project_id: "",
+  member_id: "",
+  added_by: null,
+  created_at: "",
+  name: "",
+  email: "",
+  avatar_url: null,
 };
 
 const IssueAssigneeGroupSchema = z.object({
