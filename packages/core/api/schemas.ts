@@ -3433,6 +3433,14 @@ export const MemberWithUserSchema = z.object({
   avatar_url: z.string().nullable().optional().default(null),
 }).loose();
 
+export {
+  ConfigBundleSchema,
+  ConfigImportReportSchema,
+  EMPTY_CONFIG_BUNDLE,
+  EMPTY_CONFIG_IMPORT_REPORT,
+} from "./config-transfer";
+export type { ConfigBundle, ConfigImportReport } from "./config-transfer";
+
 export const JoinShareLinkResponseSchema = z.object({
   member: MemberWithUserSchema,
   workspace_id: z.string(),

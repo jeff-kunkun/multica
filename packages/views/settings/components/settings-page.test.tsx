@@ -31,6 +31,7 @@ vi.mock("./quick-actions-tab", stub("QuickActionsTab"));
 vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
 vi.mock("./plugins-tab", stub("PluginsTab"));
 vi.mock("./billing-tab", stub("BillingTab"));
+vi.mock("./config-transfer-tab", stub("ConfigTransferTab"));
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ name: "Acme" }),
@@ -178,6 +179,10 @@ describe("SettingsPage information architecture", () => {
     });
     expect(
       within(issues).getByRole("link", { name: "Issue Statuses" }),
+    ).toBeInTheDocument();
+    const workspace = within(nav).getByRole("region", { name: "Workspace" });
+    expect(
+      within(workspace).getByRole("link", { name: "Export & import" }),
     ).toBeInTheDocument();
     expect(
       within(nav).queryByRole("link", { name: /^(Issue|Chat|GitHub|Labs)$/ }),

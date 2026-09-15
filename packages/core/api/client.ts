@@ -238,6 +238,15 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  parseConfigBundle,
+  parseConfigImportReport,
+  reportFromImportError,
+  importErrorInfo,
+  type ConfigBundle,
+  type ConfigImportRequest,
+  type ConfigImportResult,
+} from "./config-transfer";
+import {
   AgentTaskListSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
@@ -2618,6 +2627,41 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+  }
+
+  async exportWorkspaceConfig(workspaceId: string): Promise<ConfigBundle> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/config/export`,
+    );
+    return parseConfigBundle(raw, "GET /api/workspaces/:id/config/export");
+  }
+
+  async importWorkspaceConfig(
+    workspaceId: string,
+    data: ConfigImportRequest,
+  ): Promise<ConfigImportResult> {
+    try {
+      const raw = await this.fetch<unknown>(
+        `/api/workspaces/${workspaceId}/config/import`,
+        {
+          method: "POST",
+          body: JSON.stringify(data),
+        },
+      );
+      return {
+        report: parseConfigImportReport(
+          raw,
+          "POST /api/workspaces/:id/config/import",
+        ),
+      };
+    } catch (err) {
+      const report = reportFromImportError(err);
+      const error = importErrorInfo(err);
+      if (report && error) {
+        return { report, error };
+      }
+      throw err;
+    }
   }
 
   async listPluginInstallations(workspaceId: string): Promise<PluginInstallationListResponse> {

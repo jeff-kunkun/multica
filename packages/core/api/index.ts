@@ -16,6 +16,31 @@ export { parseWithFallback, setSchemaLogger } from "./schema";
 export type { ParseOptions } from "./schema";
 export { DuplicateIssueErrorBodySchema } from "./schemas";
 export type { DuplicateIssueErrorBody } from "./schemas";
+export {
+  CONFIG_BUNDLE_FORMAT,
+  CONFIG_BUNDLE_SCHEMA_VERSION,
+  CONFIG_ON_CONFLICT,
+  ConfigBundleSchema,
+  ConfigImportReportSchema,
+  EMPTY_CONFIG_BUNDLE,
+  EMPTY_CONFIG_IMPORT_REPORT,
+  configExportFilename,
+  parseConfigBundle,
+  parseConfigImportReport,
+  parseLocalConfigBundle,
+} from "./config-transfer";
+export type {
+  ConfigBundle,
+  ConfigImportErrorInfo,
+  ConfigImportItem,
+  ConfigImportRequest,
+  ConfigImportResult,
+  ConfigImportReport,
+  ConfigOnConflict,
+  LocalConfigBundleError,
+  SecretOmitted,
+  SecretToFill,
+} from "./config-transfer";
 export { WSClient } from "./ws-client";
 
 import type { ApiClient as ApiClientType } from "./client";

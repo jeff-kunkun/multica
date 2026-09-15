@@ -18,6 +18,7 @@ import {
   Blocks,
   CreditCard,
   Server,
+  ArrowDownUp,
 } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
@@ -44,6 +45,7 @@ import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
+import { ConfigTransferTab } from "./config-transfer-tab";
 import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
@@ -143,6 +145,13 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               ),
             ]
           : []),
+        entry(
+          "config-transfer",
+          t(($) => $.page.tabs.config_transfer),
+          ArrowDownUp,
+          <ConfigTransferTab />,
+          true,
+        ),
       ],
     },
     {
