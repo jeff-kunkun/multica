@@ -27,7 +27,9 @@ import {
 } from "../../../settings/components/settings-layout";
 import {
   type AgyAccountSlot,
+  DEFAULT_NUMBERED_ACCOUNTS,
   MAX_AGY_ACCOUNT_NUMBER,
+  accountDirectoryLeaf,
   detectAgyAccountSlot,
   formatAgyLoginCommand,
   getGeminiDir,
@@ -35,6 +37,7 @@ import {
   isGeminiDirToken,
   isIsolatedAccountSlot,
   isNumberedAccountSlot,
+  joinHomeDir,
   loginDirectory,
   nextAccountNumber,
   normalizeAccountNumbers,
@@ -552,7 +555,46 @@ export function CustomArgsTab({
             </SettingsCard>
           </SettingsSection>
         </>
-      ) : null}
+      ) : (
+        <SettingsSection
+          title={t(($) => $.tab_body.custom_args.accounts_title)}
+          description={t(($) => $.tab_body.custom_args.accounts_unbound_description)}
+        >
+          <SettingsCard>
+            <div className="space-y-3 p-4">
+              <p className="text-body leading-6">
+                {t(($) => $.tab_body.custom_args.accounts_unbound_hint)}
+              </p>
+              <ul className="space-y-2">
+                {DEFAULT_NUMBERED_ACCOUNTS.map((account) => (
+                  <li
+                    key={account}
+                    className="flex min-w-0 items-start gap-3 rounded-lg bg-muted px-3 py-2.5"
+                  >
+                    <span className="w-20 shrink-0 text-caption leading-5 text-muted-foreground">
+                      {numberedSlotLabel(account)}
+                    </span>
+                    <code
+                      className="min-w-0 flex-1 break-all font-mono text-caption leading-5"
+                      translate="no"
+                    >
+                      {formatAgyLoginCommand(
+                        joinHomeDir(
+                          runtimeHomeDir(runtimeDevice) ?? "$HOME",
+                          accountDirectoryLeaf(account),
+                        ),
+                      )}
+                    </code>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-caption leading-5 text-muted-foreground">
+                {t(($) => $.tab_body.custom_args.login_keychain_hint)}
+              </p>
+            </div>
+          </SettingsCard>
+        </SettingsSection>
+      )}
 
       <SettingsSection
         title={t(($) => $.tab_body.custom_args.arguments_label)}

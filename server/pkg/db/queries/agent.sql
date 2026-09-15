@@ -144,6 +144,7 @@ UPDATE agent SET
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    switchable_models = COALESCE(sqlc.narg('switchable_models'), switchable_models),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

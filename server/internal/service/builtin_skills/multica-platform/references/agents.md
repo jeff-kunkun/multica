@@ -32,7 +32,7 @@ editable, but no trigger path will run it — they all refuse with
 binds it again. Unbound is orthogonal to archived.
 
 `agent get` returns the persisted agent including `runtime_id`, `model`,
-`thinking_level`, `service_tier`, `custom_args`, `has_custom_env`,
+`thinking_level`, `service_tier`, `switchable_models`, `custom_args`, `has_custom_env`,
 `custom_env_key_count`, and `skills`. It never returns plaintext `custom_env`.
 
 ## Core model

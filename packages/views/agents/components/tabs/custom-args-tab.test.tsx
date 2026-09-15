@@ -170,6 +170,32 @@ describe("CustomArgsTab", () => {
     expect(screen.queryByRole("radio", { name: /account 2/i })).not.toBeInTheDocument();
   });
 
+  it("explains account slots and sign-in commands for other runtimes", () => {
+    hideProcessHome();
+    renderTab();
+
+    expect(screen.getByText("Accounts & sign-in")).toBeInTheDocument();
+    expect(screen.getByText(/only be switched when this agent runs on the Antigravity/i)).toBeInTheDocument();
+    expect(screen.getByText("agy --gemini_dir=$HOME/.gemini")).toBeInTheDocument();
+    expect(screen.getByText("agy --gemini_dir=$HOME/.gemini-account2")).toBeInTheDocument();
+    expect(screen.getByText("agy --gemini_dir=$HOME/.gemini-account3")).toBeInTheDocument();
+  });
+
+  it("uses the runtime home directory in sign-in commands for other runtimes", () => {
+    renderTab({}, undefined, {
+      ...runtimeDevice,
+      metadata: { home_dir: "/Users/host" },
+    } as RuntimeDevice);
+
+    expect(screen.getByText("agy --gemini_dir=/Users/host/.gemini-account3")).toBeInTheDocument();
+  });
+
+  it("does not show the unbound accounts explanation for AGY", () => {
+    renderTab({ custom_args: [] }, undefined, agyDeviceWithHome);
+
+    expect(screen.queryByText(/only be switched when this agent runs on the Antigravity/i)).not.toBeInTheDocument();
+  });
+
   it("shows account 1, 2, and 3 radios for AGY", () => {
     renderTab({ custom_args: [] }, undefined, agyDeviceWithHome);
 

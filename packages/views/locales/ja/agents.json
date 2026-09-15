@@ -149,7 +149,12 @@
     "runtime_required_toast": "このエージェントを実行する前にランタイムを設定してください。",
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
-    "updated": "{{when}}に更新"
+    "updated": "{{when}}に更新",
+    "switchable_models_label": "切り替え可能なモデル",
+    "switchable_role_default": "デフォルト",
+    "switchable_role_fallback": "フォールバック",
+    "switchable_role_batch": "バッチ用",
+    "accounts_entry": "アカウントとログイン"
   },
   "inspector": {
     "section_profile": "プロフィール",
@@ -422,6 +427,9 @@
       "login_copy_aria": "ログインコマンドをコピー",
       "login_copied_aria": "コピーしました",
       "login_keychain_hint": "macOS のキーチェーンには Google ログインが 1 件だけ保存されます。ブラウザで対応するアカウントを選ばないと、アカウント 1 に戻ります。",
+      "accounts_title": "アカウントとログイン",
+      "accounts_unbound_description": "アカウントスロットは、エージェントが Antigravity (agy) ランタイムで動作している場合にのみ切り替えられます。複数アカウントを使うには、まず「一般」でランタイムを変更してください。",
+      "accounts_unbound_hint": "各スロットは独立した Gemini ディレクトリです。ログインするには、Multica daemon を実行しているコンピュータのターミナルで対応するコマンドを実行します:",
       "login_copy_failed_toast": "コマンドをコピーできませんでした",
       "absolute_path_required_toast": "Gemini ディレクトリは絶対パスにしてください。agy は ~ を展開しません。",
       "home_unresolved_toast": "このコンピュータのホームフォルダを特定できないため、追加アカウントを自動入力できません。ローカルの Multica daemon を再起動してから再試行してください。",

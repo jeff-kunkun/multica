@@ -166,7 +166,12 @@
     "runtime_required_toast": "Bind a runtime before running this agent.",
     "assign_work": "Assign work",
     "more_actions_aria": "Agent actions",
-    "updated": "Updated {{when}}"
+    "updated": "Updated {{when}}",
+    "switchable_models_label": "Model lineup",
+    "switchable_role_default": "Default",
+    "switchable_role_fallback": "Fallback",
+    "switchable_role_batch": "Batch",
+    "accounts_entry": "Accounts & sign-in"
   },
   "inspector": {
     "section_profile": "Profile",
@@ -541,6 +546,9 @@
       "login_copy_aria": "Copy sign-in command",
       "login_copied_aria": "Copied",
       "login_keychain_hint": "macOS Keychain stores one Google login. Choose the matching account in the browser, or this agent will keep using account 1.",
+      "accounts_title": "Accounts & sign-in",
+      "accounts_unbound_description": "Account slots can only be switched when this agent runs on the Antigravity (agy) runtime. To use multiple accounts, change the runtime in General first.",
+      "accounts_unbound_hint": "Each slot is its own Gemini directory. To sign in, run the matching command in a terminal on the computer running the Multica daemon:",
       "login_copy_failed_toast": "Could not copy the command",
       "absolute_path_required_toast": "Gemini directory must be an absolute path. agy does not expand ~.",
       "home_unresolved_toast": "Couldn't find this computer's home folder, so the extra account can't be filled yet. Restart the local Multica daemon and try again.",

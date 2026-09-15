@@ -157,7 +157,12 @@
     "runtime_required_toast": "이 에이전트를 실행하기 전에 런타임을 연결하세요.",
     "assign_work": "작업 할당",
     "more_actions_aria": "에이전트 작업",
-    "updated": "{{when}} 업데이트됨"
+    "updated": "{{when}} 업데이트됨",
+    "switchable_models_label": "전환 가능한 모델",
+    "switchable_role_default": "기본",
+    "switchable_role_fallback": "대체",
+    "switchable_role_batch": "배치용",
+    "accounts_entry": "계정 및 로그인"
   },
   "inspector": {
     "section_profile": "프로필",
@@ -430,6 +435,9 @@
       "login_copy_aria": "로그인 명령 복사",
       "login_copied_aria": "복사됨",
       "login_keychain_hint": "macOS 키체인에는 Google 로그인이 하나만 저장됩니다. 브라우저에서 해당 계정을 선택하지 않으면 계정 1로 돌아갑니다.",
+      "accounts_title": "계정 및 로그인",
+      "accounts_unbound_description": "계정 슬롯은 에이전트가 Antigravity(agy) 런타임에서 실행될 때만 전환할 수 있습니다. 여러 계정을 쓰려면 먼저 일반에서 런타임을 변경하세요.",
+      "accounts_unbound_hint": "각 슬롯은 독립된 Gemini 디렉터리입니다. 로그인하려면 Multica daemon을 실행하는 컴퓨터의 터미널에서 해당 명령을 실행하세요:",
       "login_copy_failed_toast": "명령을 복사하지 못했습니다",
       "absolute_path_required_toast": "Gemini 디렉터리는 절대 경로여야 합니다. agy는 ~를 확장하지 않습니다.",
       "home_unresolved_toast": "이 컴퓨터의 홈 폴더를 찾지 못해 추가 계정을 채울 수 없습니다. 로컬 Multica daemon을 재시작한 뒤 다시 시도하세요.",
