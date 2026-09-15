@@ -104,7 +104,9 @@ function secretFillHref(item: SecretToFill, slug: string): string | null {
           ? "env"
           : item.field === "mcp_config"
             ? "mcp_config"
-            : item.field.startsWith("runtime_config")
+            : item.field === "custom_args"
+              ? "custom_args"
+              : item.field.startsWith("runtime_config")
               ? "runtime_config"
               : "general";
       return `${ws.agentDetail(item.target_id)}?view=${view}`;

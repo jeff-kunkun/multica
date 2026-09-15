@@ -450,6 +450,11 @@ func (st *importState) importAgents(ctx context.Context, q *db.Queries, dry bool
 			if len(args) == 0 {
 				args = []byte("[]")
 			}
+			if isNew {
+				args = restoreSecretArgs(args, nil)
+			} else {
+				args = restoreSecretArgs(args, existing.CustomArgs)
+			}
 			starters := []byte(ag.ConversationStarters)
 			if len(starters) == 0 {
 				starters = []byte("[]")
@@ -1044,10 +1049,11 @@ func (st *importState) importAutopilots(ctx context.Context, q *db.Queries, dry 
 					if err != nil {
 						return "", err
 					}
-					keepWebhook := map[string]keptWebhook{}
+					keepWebhook := map[string][]keptWebhook{}
 					for _, t := range existingTrigs {
 						if t.Kind == "webhook" {
-							keepWebhook[textOrEmpty(t.Label)] = keptWebhook{token: t.WebhookToken, signingSecret: t.SigningSecret}
+							lab := textOrEmpty(t.Label)
+							keepWebhook[lab] = append(keepWebhook[lab], keptWebhook{token: t.WebhookToken, signingSecret: t.SigningSecret})
 						}
 					}
 					if err := errors.Join(
@@ -1117,7 +1123,7 @@ type keptWebhook struct {
 	signingSecret pgtype.Text
 }
 
-func (st *importState) writeAutopilotRel(ctx context.Context, q *db.Queries, row db.Autopilot, ap ConfigAutopilot, keepWebhook map[string]keptWebhook) error {
+func (st *importState) writeAutopilotRel(ctx context.Context, q *db.Queries, row db.Autopilot, ap ConfigAutopilot, keepWebhook map[string][]keptWebhook) error {
 	for _, t := range ap.Triggers {
 		token := pgtype.Text{}
 		signingSecret := pgtype.Text{}
@@ -1126,9 +1132,14 @@ func (st *importState) writeAutopilotRel(ctx context.Context, q *db.Queries, row
 			if t.Label != nil {
 				lab = *t.Label
 			}
-			if existing, ok := keepWebhook[lab]; ok && existing.token.Valid {
-				token = existing.token
-				signingSecret = existing.signingSecret
+			// Each kept secret is consumed once: webhook_token is unique, so two
+			// triggers sharing a label must not reuse the same target token.
+			if kept := keepWebhook[lab]; len(kept) > 0 {
+				keepWebhook[lab] = kept[1:]
+				if kept[0].token.Valid {
+					token = kept[0].token
+					signingSecret = kept[0].signingSecret
+				}
 			}
 			if !token.Valid {
 				tok, err := generateImportWebhookToken()
@@ -1360,7 +1371,7 @@ func (st *importState) importIssueViews(ctx context.Context, q *db.Queries, dry 
 			return items, cerr
 		}
 		item := ConfigImportItem{SourceID: v.SourceID, Name: v.Name, Action: action}
-		query := remapViewQuery(v.Query, st)
+		query := remapViewQuery(ctx, q, v.Query, v.SourceID, st)
 		display := []byte(v.Display)
 		if len(display) == 0 {
 			display = []byte("{}")
@@ -1434,7 +1445,7 @@ func (st *importState) importIssueViews(ctx context.Context, q *db.Queries, dry 
 	return items, nil
 }
 
-func remapViewQuery(raw json.RawMessage, st *importState) []byte {
+func remapViewQuery(ctx context.Context, q *db.Queries, raw json.RawMessage, sourceID string, st *importState) []byte {
 	if len(raw) == 0 {
 		return []byte("{}")
 	}
@@ -1468,7 +1479,7 @@ func remapViewQuery(raw json.RawMessage, st *importState) []byte {
 			return
 		}
 		out := make([]any, 0, len(arr))
-		for _, v := range arr {
+		for i, v := range arr {
 			m, ok := v.(map[string]any)
 			if !ok {
 				out = append(out, v)
@@ -1476,18 +1487,25 @@ func remapViewQuery(raw json.RawMessage, st *importState) []byte {
 			}
 			typ, _ := m["type"].(string)
 			id, _ := m["id"].(string)
+			field := fmt.Sprintf("query.%s[%d]", key, i)
 			switch typ {
-			case "agent":
-				if tid, ok := st.get("agent", id); ok {
+			case "agent", "squad":
+				if tid, ok := st.get(typ, id); ok {
 					m["id"] = tid
 					out = append(out, m)
+				} else {
+					st.dropRef("issue_view", sourceID, field, typ, id, "dropped")
 				}
 			case "member":
-				if st.members[id] {
+				if st.isMember(ctx, q, id) {
 					out = append(out, m)
+				} else {
+					st.dropMember("issue_view", sourceID, field, id)
 				}
 			default:
-				out = append(out, m)
+				// Unknown actor kinds cannot be remapped; dropping them avoids
+				// writing a source-workspace ID into the target view.
+				st.dropRef("issue_view", sourceID, field, typ, id, "dropped")
 			}
 		}
 		obj[key] = out

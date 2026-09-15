@@ -362,6 +362,13 @@ func exportAgents(ctx context.Context, q *db.Queries, opts ConfigExportOptions, 
 	for _, r := range rows {
 		aid := uuidString(r.ID)
 		rc, hadToken := stripGatewayToken(r.RuntimeConfig)
+		customArgs, maskedArgs := redactSecretArgs(r.CustomArgs)
+		if maskedArgs > 0 {
+			bundle.SecretsOmitted = append(bundle.SecretsOmitted, SecretOmitted{
+				Entity: "agent", SourceID: aid, Name: r.Name, Field: "custom_args",
+				Reason: secretReasonMaterial, Hint: map[string]any{"value_count": maskedArgs},
+			})
+		}
 		if r.CustomEnvKeyCount > 0 {
 			bundle.SecretsOmitted = append(bundle.SecretsOmitted, SecretOmitted{
 				Entity: "agent", SourceID: aid, Name: r.Name, Field: "custom_env",
@@ -408,7 +415,7 @@ func exportAgents(ctx context.Context, q *db.Queries, opts ConfigExportOptions, 
 			AvatarURL:                textPtr(r.AvatarUrl),
 			RuntimeMode:              r.RuntimeMode,
 			RuntimeConfig:            rc,
-			CustomArgs:               rawOrEmpty(r.CustomArgs, "[]"),
+			CustomArgs:               rawOrEmpty(customArgs, "[]"),
 			CustomEnv:                jsonNull(),
 			McpConfig:                jsonNull(),
 			Model:                    textPtr(r.Model),

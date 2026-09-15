@@ -101,3 +101,45 @@ func TestBundleContainsSecret_AllowsNullPlaceholders(t *testing.T) {
 		t.Fatalf("null placeholders should be allowed: %v", err)
 	}
 }
+
+func TestRedactSecretArgs_MasksFlagValues(t *testing.T) {
+	raw := []byte(`["--model","opus","--api-key","LEAK_A","--token=LEAK_B","GITHUB_TOKEN=LEAK_C","--max-tokens","4096","--verbose"]`)
+	out, masked := redactSecretArgs(raw)
+	if masked != 3 {
+		t.Fatalf("masked = %d, want 3: %s", masked, out)
+	}
+	for _, leak := range []string{"LEAK_A", "LEAK_B", "LEAK_C"} {
+		if strings.Contains(string(out), leak) {
+			t.Fatalf("secret arg %s survived: %s", leak, out)
+		}
+	}
+	for _, keep := range []string{`"opus"`, `"4096"`, `"--verbose"`} {
+		if !strings.Contains(string(out), keep) {
+			t.Fatalf("non-secret arg %s was lost: %s", keep, out)
+		}
+	}
+}
+
+func TestRestoreSecretArgs_KeepsTargetValueOrDropsPair(t *testing.T) {
+	imported, _ := redactSecretArgs([]byte(`["--api-key","SRC","--token=SRC","--model","opus"]`))
+
+	restored := string(restoreSecretArgs(imported, []byte(`["--api-key","TGT_A","--token=TGT_B"]`)))
+	if restored != `["--api-key","TGT_A","--token=TGT_B","--model","opus"]` {
+		t.Fatalf("overwrite must keep target secrets: %s", restored)
+	}
+
+	created := string(restoreSecretArgs(imported, nil))
+	if created != `["--model","opus"]` {
+		t.Fatalf("new agent must drop masked pairs: %s", created)
+	}
+	if strings.Contains(created, secretArgPlaceholder) {
+		t.Fatalf("placeholder leaked into agent args: %s", created)
+	}
+}
+
+func TestKeepTargetGatewayToken_BundleWithoutGateway(t *testing.T) {
+	out := keepTargetGatewayToken(json.RawMessage(`{"mode":"local"}`), []byte(`{"gateway":{"url":"http://x","token":"TGT"}}`))
+	if !strings.Contains(string(out), `"token":"TGT"`) {
+		t.Fatalf("overwrite erased the target gateway token: %s", out)
+	}
+}

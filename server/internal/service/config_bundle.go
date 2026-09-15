@@ -573,15 +573,140 @@ func keepTargetGatewayToken(imported json.RawMessage, target []byte) json.RawMes
 		return imported
 	}
 	gw, ok := obj["gateway"].(map[string]any)
-	if !ok || gw["token"] != nil {
+	if !ok {
+		// The bundle carries no gateway block at all; replacing the target's
+		// would erase its token, so keep the target's gateway intact.
+		obj["gateway"] = tgtGW
+	} else if gw["token"] != nil {
 		return imported
+	} else {
+		gw["token"] = token
 	}
-	gw["token"] = token
 	out, err := json.Marshal(obj)
 	if err != nil {
 		return imported
 	}
 	return out
+}
+
+// secretArgPlaceholder replaces a secret value inside agent custom_args. It is
+// never written to a target agent: import restores or drops it.
+const secretArgPlaceholder = "__multica_secret_omitted__"
+
+// argFlagName returns the bare name of a CLI flag ("--api-key" -> "api-key")
+// and whether the argument looks like a flag at all.
+func argFlagName(arg string) (string, bool) {
+	if !strings.HasPrefix(arg, "-") {
+		return "", false
+	}
+	name := strings.TrimLeft(arg, "-")
+	return name, name != ""
+}
+
+// redactSecretArgs masks secret values in a custom_args JSON array. It covers
+// "--api-key=VALUE", "GITHUB_TOKEN=VALUE" and "--api-key VALUE" forms, where
+// the key is judged by secretKeyName. It returns the masked array and how many
+// values were masked.
+func redactSecretArgs(raw []byte) (json.RawMessage, int) {
+	var args []any
+	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
+		return json.RawMessage(raw), 0
+	}
+	masked := 0
+	for i := 0; i < len(args); i++ {
+		s, ok := args[i].(string)
+		if !ok {
+			continue
+		}
+		if eq := strings.Index(s, "="); eq > 0 {
+			if secretKeyName(strings.TrimLeft(s[:eq], "-")) && s[eq+1:] != "" {
+				args[i] = s[:eq+1] + secretArgPlaceholder
+				masked++
+			}
+			continue
+		}
+		name, isFlag := argFlagName(s)
+		if !isFlag || !secretKeyName(name) || i+1 >= len(args) {
+			continue
+		}
+		next, ok := args[i+1].(string)
+		if !ok || strings.HasPrefix(next, "-") {
+			continue
+		}
+		args[i+1] = secretArgPlaceholder
+		masked++
+		i++
+	}
+	if masked == 0 {
+		return json.RawMessage(raw), 0
+	}
+	out, err := json.Marshal(args)
+	if err != nil {
+		return json.RawMessage("[]"), masked
+	}
+	return out, masked
+}
+
+// restoreSecretArgs resolves placeholders in imported custom_args. A masked
+// value is taken from the target agent's args for the same key when present
+// (overwrite must not clear an existing secret); otherwise the key/value pair
+// is dropped so no placeholder reaches the agent command line.
+func restoreSecretArgs(imported []byte, target []byte) []byte {
+	if !strings.Contains(string(imported), secretArgPlaceholder) {
+		return imported
+	}
+	var args []any
+	if json.Unmarshal(imported, &args) != nil {
+		return []byte("[]")
+	}
+	var tgt []any
+	_ = json.Unmarshal(target, &tgt)
+	targetValue := func(key string) (string, bool) {
+		for j, v := range tgt {
+			s, _ := v.(string)
+			if eq := strings.Index(s, "="); eq > 0 && s[:eq] == key {
+				return s[eq+1:], true
+			}
+			if s == key && j+1 < len(tgt) {
+				if next, ok := tgt[j+1].(string); ok && !strings.HasPrefix(next, "-") {
+					return next, true
+				}
+			}
+		}
+		return "", false
+	}
+	out := make([]any, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		s, ok := args[i].(string)
+		if !ok {
+			out = append(out, args[i])
+			continue
+		}
+		if eq := strings.Index(s, "="); eq > 0 && s[eq+1:] == secretArgPlaceholder {
+			if v, ok := targetValue(s[:eq]); ok && v != secretArgPlaceholder {
+				out = append(out, s[:eq+1]+v)
+			}
+			continue
+		}
+		if i+1 < len(args) {
+			if next, ok := args[i+1].(string); ok && next == secretArgPlaceholder {
+				if v, ok := targetValue(s); ok && v != secretArgPlaceholder {
+					out = append(out, s, v)
+				}
+				i++
+				continue
+			}
+		}
+		if s == secretArgPlaceholder {
+			continue
+		}
+		out = append(out, s)
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return []byte("[]")
+	}
+	return b
 }
 
 func optionalText(s *string) pgtype.Text {

@@ -477,3 +477,119 @@ func TestWorkspaceConfigImport_SameWorkspaceRejected(t *testing.T) {
 		t.Fatalf("code=%v body=%s", resp.Map()["code"], resp.Text())
 	}
 }
+
+// Regression: secrets passed as custom_args values ("--api-key VALUE") were
+// exported in plaintext, and overwrite replaced the target's args wholesale.
+func TestWorkspaceConfigImport_CustomArgsSecretsMaskedAndPreserved(t *testing.T) {
+	src, dst := setupConfigWorkspaces(t)
+	name := "Args-" + uuid.NewString()[:8]
+	canaryArg := "CANARY_ARG_" + uuid.NewString()[:8]
+	dbfx.Agent(t, name, "", testutil.Cols{
+		"workspace_id": src,
+		"custom_args":  testutil.Raw(fmt.Sprintf(`'["--api-key","%s","--model","opus"]'::jsonb`, canaryArg)),
+		"visibility":   "workspace",
+	})
+	dstAgent := dbfx.Agent(t, name, "", testutil.Cols{
+		"workspace_id": dst,
+		"custom_args":  testutil.Raw(`'["--api-key","DST_KEY"]'::jsonb`),
+		"visibility":   "workspace",
+	})
+
+	bundle := exportBundle(t, src)
+	raw, _ := json.Marshal(bundle)
+	if strings.Contains(string(raw), canaryArg) {
+		t.Fatalf("custom_args secret leaked into the bundle")
+	}
+	omitted := false
+	for _, s := range bundle.SecretsOmitted {
+		if s.Entity == "agent" && s.Field == "custom_args" && s.Name == name {
+			omitted = true
+		}
+	}
+	if !omitted {
+		t.Fatalf("expected a custom_args secrets_omitted entry, got %+v", bundle.SecretsOmitted)
+	}
+
+	_ = importReport(t, dst, map[string]any{
+		"bundle": bundle, "dry_run": false, "on_conflict": "overwrite", "include": []string{"agents"},
+	}, http.StatusOK)
+	var args string
+	dbfx.QueryRow(t, `SELECT custom_args::text FROM agent WHERE id = $1`, dstAgent).Scan(&args)
+	if args != `["--api-key", "DST_KEY", "--model", "opus"]` {
+		t.Fatalf("overwrite custom_args = %s, want target key kept and model imported", args)
+	}
+}
+
+// Regression: kept webhook secrets were keyed by label only, so two unlabeled
+// webhook triggers reused one token and broke the unique index on overwrite.
+func TestWorkspaceConfigImport_OverwriteUnlabeledWebhooks(t *testing.T) {
+	src, dst := setupConfigWorkspaces(t)
+	suf := uuid.NewString()[:8]
+	agentName := "Hooks-" + suf
+	apTitle := "TwoHooks-" + suf
+	dstTokens := map[string]bool{}
+	for _, ws := range []string{src, dst} {
+		agent := dbfx.Agent(t, agentName, "", testutil.Cols{"workspace_id": ws, "visibility": "workspace"})
+		apID := dbfx.Insert(t, "autopilot", testutil.Cols{
+			"workspace_id": ws, "title": apTitle, "assignee_type": "agent", "assignee_id": agent,
+			"status": "paused", "execution_mode": "create_issue", "created_by_type": "member", "created_by_id": testUserID,
+		})
+		for i := 0; i < 2; i++ {
+			token := "awt_" + uuid.NewString()
+			if ws == dst {
+				dstTokens[token] = true
+			}
+			dbfx.Insert(t, "autopilot_trigger", testutil.Cols{
+				"autopilot_id": apID, "kind": "webhook", "enabled": true,
+				"webhook_token": token, "created_by_type": "member", "created_by_id": testUserID,
+			})
+		}
+	}
+
+	bundle := exportBundle(t, src)
+	_ = importReport(t, dst, map[string]any{
+		"bundle": bundle, "dry_run": false, "on_conflict": "overwrite", "include": []string{"agents", "autopilots"},
+	}, http.StatusOK)
+
+	rows := dbfx.Count(t, `SELECT count(DISTINCT tr.webhook_token) FROM autopilot_trigger tr JOIN autopilot a ON a.id = tr.autopilot_id
+		WHERE a.workspace_id = $1 AND a.title = $2 AND tr.kind = 'webhook'`, dst, apTitle)
+	if rows != 2 {
+		t.Fatalf("expected 2 distinct webhook tokens after overwrite, got %d", rows)
+	}
+	for token := range dstTokens {
+		if n := dbfx.Count(t, `SELECT count(*) FROM autopilot_trigger WHERE webhook_token = $1`, token); n != 1 {
+			t.Fatalf("overwrite did not keep target webhook token %s", token)
+		}
+	}
+}
+
+// Regression: squad actor filters in saved views kept the source squad UUID,
+// and member filters were dropped unless another entity had cached the member.
+func TestWorkspaceConfigImport_ViewActorFiltersRemapped(t *testing.T) {
+	src, dst := setupConfigWorkspaces(t)
+	suf := uuid.NewString()[:8]
+	leader := dbfx.Agent(t, "ViewLead-"+suf, "", testutil.Cols{"workspace_id": src, "visibility": "workspace"})
+	squadName := "ViewSquad-" + suf
+	srcSquad := dbfx.Squad(t, squadName, leader, testutil.Cols{"workspace_id": src})
+	viewName := "BySquad-" + suf
+	dbfx.Insert(t, "issue_view", testutil.Cols{
+		"workspace_id": src, "owner_id": testUserID, "name": viewName, "scope_type": "workspace",
+		"visibility": "workspace",
+		"query":      testutil.Raw(fmt.Sprintf(`'{"assigneeFilters":[{"type":"squad","id":"%s"},{"type":"member","id":"%s"}]}'::jsonb`, srcSquad, testUserID)),
+	})
+
+	bundle := exportBundle(t, src)
+	_ = importReport(t, dst, map[string]any{
+		"bundle": bundle, "dry_run": false, "on_conflict": "skip", "include": []string{"agents", "squads", "issue_views"},
+	}, http.StatusOK)
+
+	var dstSquad, query string
+	dbfx.QueryRow(t, `SELECT id::text FROM squad WHERE workspace_id = $1 AND name = $2`, dst, squadName).Scan(&dstSquad)
+	dbfx.QueryRow(t, `SELECT query::text FROM issue_view WHERE workspace_id = $1 AND name = $2`, dst, viewName).Scan(&query)
+	if strings.Contains(query, srcSquad) {
+		t.Fatalf("view kept the source squad id: %s", query)
+	}
+	if !strings.Contains(query, dstSquad) || !strings.Contains(query, testUserID) {
+		t.Fatalf("view filters not remapped: %s (want squad %s and member %s)", query, dstSquad, testUserID)
+	}
+}
