@@ -1,4 +1,15 @@
 import { z } from "zod";
+
+/** Structured issue-creation draft protocol payload. */
+export const IssueDraftSchema = z.object({
+  chat_session_id: z.string(),
+  workspace_id: z.string(),
+  status: z.enum(["draft", "ready", "completed", "abandoned"]),
+  revision: z.number().int().nonnegative(),
+  draft: z.unknown(),
+  issue_id: z.string().optional(),
+}).loose();
+export const IssueDraftListSchema = z.array(IssueDraftSchema);
 import type {
   Agent,
   AgentBuilderRuntimeSwitch,
