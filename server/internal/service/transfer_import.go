@@ -74,6 +74,7 @@ func ImportTransferConfig(ctx context.Context, env TransferImportEnv, req Transf
 		Profiles:       profileItems,
 		PinnedAgents:   pinnedItems,
 		RuntimesToBind: buildRuntimesToBind(ctx, env, req, cfgReport),
+		ExportGaps:     req.Manifest.ExportGaps,
 	}
 	return report, nil
 }

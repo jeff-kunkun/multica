@@ -191,6 +191,7 @@ type TransferConfigReport struct {
 	Profiles       []ConfigImportItem     `json:"profiles,omitempty"`
 	PinnedAgents   []ConfigImportItem     `json:"pinned_agents,omitempty"`
 	Warnings       []ConfigWarning        `json:"warnings,omitempty"`
+	ExportGaps     []TransferExportGap    `json:"export_gaps,omitempty"`
 }
 
 type TransferPeopleMapRow struct {
