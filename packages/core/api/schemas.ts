@@ -576,12 +576,14 @@ export const EMPTY_ISSUE_VIEW_PREFERENCE: IssueViewPreference = {
   updated_at: "",
 };
 
+export type IssueViewVisibility = "private" | "workspace" | "project";
+
 export interface CreateIssueViewRequest {
   name: string;
   scope_type: "workspace" | "my" | "project";
   scope_id?: string | null;
   scope_variant?: "assigned" | "created" | "involved" | "any" | "members" | "agents" | null;
-  visibility: "private" | "workspace";
+  visibility: IssueViewVisibility;
   definition_version: number;
   query: Record<string, unknown>;
   display: Record<string, unknown>;

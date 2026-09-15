@@ -858,6 +858,8 @@
     "visibility_label": "Visibility",
     "visibility_private": "Only visible to me",
     "visibility_workspace": "Visible to workspace members",
+    "visibility_project": "Project members",
+    "visibility_project_hint": "Visible only to members of this project, and only on this project page",
     "filters_label": "Filters",
     "custom_property": "Custom property",
     "create": "Create view",
@@ -914,7 +916,13 @@
     "manage_title": "Manage views",
     "manage_hint": "Order and visibility only affect you",
     "visible_toggle": "Show in view bar",
-    "more_label": "More views"
+    "more_label": "More views",
+    "project_shared_tag": "Project shared"
+  },
+  "manage_views": {
+    "visibility_label": "Sharing for {{name}}",
+    "visibility_project": "Project members",
+    "visibility_project_hint": "Visible only to members of this project, and only on this project page"
   },
   "plugins": {
     "panels": "Plugins",

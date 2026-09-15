@@ -2014,6 +2014,11 @@ describe("IssueViewSchema", () => {
     expect(parsed.revision).toBe(1);
   });
 
+  it("accepts the project visibility value without rejecting the view", () => {
+    const parsed = IssueViewSchema.parse({ ...valid, visibility: "project" });
+    expect(parsed.visibility).toBe("project");
+  });
+
   it("degrades a malformed list response to [] via parseWithFallback", () => {
     expect(
       parseWithFallback({ nonsense: true }, IssueViewListSchema, [], {

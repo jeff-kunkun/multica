@@ -827,6 +827,8 @@
     "visibility_label": "可见性",
     "visibility_private": "仅自己可见",
     "visibility_workspace": "工作区成员可见",
+    "visibility_project": "项目成员可见",
+    "visibility_project_hint": "仅对该项目成员可见，且只在该项目页出现",
     "filters_label": "筛选",
     "custom_property": "自定义属性",
     "create": "创建视图",
@@ -883,7 +885,13 @@
     "manage_title": "管理视图",
     "manage_hint": "排序与显隐只影响你自己",
     "visible_toggle": "在视图栏显示",
-    "more_label": "更多视图"
+    "more_label": "更多视图",
+    "project_shared_tag": "项目共享"
+  },
+  "manage_views": {
+    "visibility_label": "{{name}} 的可见性",
+    "visibility_project": "项目成员可见",
+    "visibility_project_hint": "仅对该项目成员可见，且只在该项目页出现"
   },
   "plugins": {
     "panels": "Plugins",

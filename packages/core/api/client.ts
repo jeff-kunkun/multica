@@ -463,6 +463,7 @@ import {
   EMPTY_JOIN_SHARE_LINK_RESPONSE,
   type IssueView,
   type IssueViewPreference,
+  type IssueViewVisibility,
   type CreateIssueViewRequest,
 } from "./schemas";
 
@@ -4095,7 +4096,7 @@ export class ApiClient {
     id: string,
     data: {
       name?: string;
-      visibility?: "private" | "workspace";
+      visibility?: IssueViewVisibility;
       scope_variant?: string | null;
       query?: Record<string, unknown>;
       display?: Record<string, unknown>;

@@ -827,6 +827,8 @@
     "visibility_label": "公開範囲",
     "visibility_private": "自分のみ",
     "visibility_workspace": "ワークスペースのメンバーに表示",
+    "visibility_project": "プロジェクトメンバー",
+    "visibility_project_hint": "このプロジェクトのメンバーにのみ表示され、このプロジェクトページでのみ現れます",
     "filters_label": "フィルター",
     "custom_property": "カスタムプロパティ",
     "create": "ビューを作成",
@@ -883,7 +885,13 @@
     "manage_title": "ビューを管理",
     "manage_hint": "並び順と表示設定は自分にのみ適用されます",
     "visible_toggle": "ビューバーに表示",
-    "more_label": "その他のビュー"
+    "more_label": "その他のビュー",
+    "project_shared_tag": "プロジェクト共有"
+  },
+  "manage_views": {
+    "visibility_label": "{{name}} の公開範囲",
+    "visibility_project": "プロジェクトメンバー",
+    "visibility_project_hint": "このプロジェクトのメンバーにのみ表示され、このプロジェクトページでのみ現れます"
   },
   "plugins": {
     "panels": "Plugins",
