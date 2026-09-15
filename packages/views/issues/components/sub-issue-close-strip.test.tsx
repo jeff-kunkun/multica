@@ -132,7 +132,7 @@ describe("SubIssueCloseStrip", () => {
     );
   });
 
-  it("shows who an in_review child is stuck on, the wait source, and how long", () => {
+  it("shows the in_review hand-off owner and wait source without marking it stuck", () => {
     renderWithI18n(
       <SubIssueCloseStrip
         issue={issue({
@@ -154,7 +154,7 @@ describe("SubIssueCloseStrip", () => {
     );
 
     const strip = screen.getByTestId("sub-issue-close-strip");
-    expect(strip).toHaveAttribute("data-stuck", "true");
+    expect(strip).toHaveAttribute("data-stuck", "false");
     expect(screen.getByTitle("close.next_owner")).toHaveTextContent(
       "Next: Code Reviewer",
     );
