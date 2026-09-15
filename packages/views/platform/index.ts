@@ -23,12 +23,17 @@ export {
   subscribeTransferProgress,
   fileNameFromPath,
   formatTransferBytes,
+  transferExportSourceHost,
+  TRANSFER_EXPORT_COMPLETED_KEY,
+  hasCompletedTransferExport,
+  markTransferExportCompleted,
   type TransferErrorCode,
   type TransferProgressEvent,
   type TransferImportReportView,
   type TransferRunRequest,
   type TransferRunResult,
   type TransferPickPathResult,
+  type TransferFlagStorage,
 } from "./workspace-transfer";
 export {
   useLocalDaemonStatus,

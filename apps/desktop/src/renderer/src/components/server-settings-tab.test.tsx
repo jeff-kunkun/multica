@@ -39,6 +39,8 @@ const translations = {
       confirm_autostop:
         "Auto-stop is on. Quitting will stop this machine's daemon.",
       confirm_switch_back: "Use Official cloud to switch back.",
+      confirm_export_first:
+        "Chats on official cloud do not move when you switch. Export first from Settings → Workspace → Migrate across environments.",
       confirm_cancel: "Cancel",
       confirm_action: "Switch",
       restart_title: "Fully quit and reopen",
@@ -64,12 +66,14 @@ vi.mock("@multica/views/i18n", () => ({
   }),
 }));
 
+import { TRANSFER_EXPORT_COMPLETED_KEY } from "@multica/views/platform";
 import { ServerSettingsTab } from "./server-settings-tab";
 
 describe("ServerSettingsTab", () => {
   beforeEach(() => {
     mocks.switchServer.mockReset();
     mocks.getPrefs.mockReset().mockResolvedValue({ autoStart: true, autoStop: true });
+    window.localStorage.removeItem(TRANSFER_EXPORT_COMPLETED_KEY);
 
     Object.defineProperty(window, "desktopAPI", {
       configurable: true,
@@ -134,6 +138,9 @@ describe("ServerSettingsTab", () => {
     expect(
       within(dialog).getByText("Use Official cloud to switch back."),
     ).toBeInTheDocument();
+    expect(within(dialog).getByTestId("server-switch-export-hint")).toHaveTextContent(
+      "Chats on official cloud do not move when you switch. Export first from Settings → Workspace → Migrate across environments.",
+    );
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
 
@@ -189,5 +196,18 @@ describe("ServerSettingsTab", () => {
     await waitFor(() => {
       expect(mocks.switchServer).toHaveBeenCalledWith(null);
     });
+  });
+
+  it("hides the export-first hint after a transfer pack has been saved", async () => {
+    window.localStorage.setItem(TRANSFER_EXPORT_COMPLETED_KEY, "1");
+    render(<ServerSettingsTab />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Switch" })[0]!);
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText("Switch server?")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByTestId("server-switch-export-hint"),
+    ).not.toBeInTheDocument();
   });
 });

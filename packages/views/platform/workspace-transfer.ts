@@ -147,3 +147,46 @@ export function formatTransferBytes(bytes: number): string {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
+
+/** Host shown as the V2 export source (current API server). */
+export function transferExportSourceHost(baseUrl: string): string {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    return url.host;
+  } catch {
+    return trimmed
+      .replace(/^https?:\/\//i, "")
+      .replace(/[/?#].*$/, "")
+      .trim();
+  }
+}
+
+export const TRANSFER_EXPORT_COMPLETED_KEY = "multica.transfer.export-completed";
+
+export type TransferFlagStorage = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+};
+
+function defaultFlagStorage(): TransferFlagStorage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function hasCompletedTransferExport(
+  storage: TransferFlagStorage | null = defaultFlagStorage(),
+): boolean {
+  return storage?.getItem(TRANSFER_EXPORT_COMPLETED_KEY) === "1";
+}
+
+export function markTransferExportCompleted(
+  storage: TransferFlagStorage | null = defaultFlagStorage(),
+): void {
+  storage?.setItem(TRANSFER_EXPORT_COMPLETED_KEY, "1");
+}

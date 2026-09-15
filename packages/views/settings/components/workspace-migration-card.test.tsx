@@ -45,6 +45,7 @@ vi.mock("@multica/core/api", async (importOriginal) => {
   return {
     ...actual,
     api: {
+      getBaseUrl: () => "https://api.multica.ai",
       exportWorkspaceConfig: vi.fn(),
       importWorkspaceConfig: vi.fn(),
     },
@@ -59,6 +60,7 @@ vi.mock("../../navigation", () => ({
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+import { TRANSFER_EXPORT_COMPLETED_KEY } from "../../platform";
 import { WorkspaceMigrationCard } from "./workspace-migration-card";
 import { ConfigTransferTab } from "./config-transfer-tab";
 
@@ -98,9 +100,19 @@ beforeEach(() => {
   desktop.run.mockReset();
   desktop.subscribe.mockReset();
   desktop.subscribe.mockReturnValue(() => {});
+  window.localStorage.removeItem(TRANSFER_EXPORT_COMPLETED_KEY);
 });
 
 describe("WorkspaceMigrationCard", () => {
+  it("shows the current server host and workspace as the export source", () => {
+    renderCard();
+    const source = screen.getByTestId("workspace-migration-export-source");
+    expect(source).toHaveTextContent("Will export from Acme on api.multica.ai.");
+    expect(source).toHaveTextContent(
+      "Export here first, then switch servers. After you switch to a self-hosted instance, the export source becomes that instance.",
+    );
+  });
+
   it("does not render outside the desktop shell", () => {
     desktop.isDesktop = false;
     renderCard();
@@ -136,6 +148,7 @@ describe("WorkspaceMigrationCard", () => {
     );
     expect(desktop.pickExport).toHaveBeenCalledWith("acme");
     expect(screen.getByText("Saved as acme.zip (2.0 KB)")).toBeInTheDocument();
+    expect(window.localStorage.getItem(TRANSFER_EXPORT_COMPLETED_KEY)).toBe("1");
   });
 
   it("previews a dry-run report then applies after confirmation", async () => {

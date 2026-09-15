@@ -14,6 +14,7 @@ import { useCurrentMember } from "@multica/core/permissions";
 import { projectKeys } from "@multica/core/projects/queries";
 import { propertyKeys } from "@multica/core/properties/queries";
 import { quickActionKeys } from "@multica/core/quick-actions/queries";
+import { api } from "@multica/core/api";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import {
   Alert,
@@ -36,10 +37,12 @@ import {
   fileNameFromPath,
   formatTransferBytes,
   isDesktopShell,
+  markTransferExportCompleted,
   pickTransferExportPath,
   pickTransferImportPath,
   runWorkspaceTransfer,
   subscribeTransferProgress,
+  transferExportSourceHost,
   type TransferErrorCode,
   type TransferImportReportView,
   type TransferProgressEvent,
@@ -157,6 +160,7 @@ export function WorkspaceMigrationCard() {
       }
       if (result.action !== "export") return;
       setExportResult({ path: result.outPath, bytes: result.bytes });
+      markTransferExportCompleted();
       toast.success(t(($) => $.config_transfer.migration.export_success));
     } finally {
       setBusy(false);
@@ -233,6 +237,9 @@ export function WorkspaceMigrationCard() {
     importPhase.step === "preview" || importPhase.step === "result"
       ? importPhase.report
       : null;
+  const sourceHost =
+    transferExportSourceHost(api.getBaseUrl?.() ?? "") || "—";
+  const workspaceName = workspace?.name?.trim() || slug;
 
   return (
     <SettingsSection
@@ -258,6 +265,21 @@ export function WorkspaceMigrationCard() {
               : t(($) => $.config_transfer.migration.export_button)}
           </Button>
         </SettingsRow>
+
+        <div
+          className="space-y-1 px-4 py-3"
+          data-testid="workspace-migration-export-source"
+        >
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.config_transfer.migration.export_source, {
+              host: sourceHost,
+              workspace: workspaceName,
+            })}
+          </p>
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.config_transfer.migration.export_order_hint)}
+          </p>
+        </div>
 
         {progress && importPhase.step === "idle" ? (
           <div

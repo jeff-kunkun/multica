@@ -19,6 +19,7 @@ import {
   SettingsTab,
 } from "@multica/views/settings";
 import { useT } from "@multica/views/i18n";
+import { hasCompletedTransferExport } from "@multica/views/platform";
 import {
   DEFAULT_RUNTIME_CONFIG,
   SELF_HOSTED_PRESET_URL,
@@ -114,6 +115,8 @@ export function ServerSettingsTab() {
   const displayed = config ?? DEFAULT_RUNTIME_CONFIG;
   const official = isOfficialCloudConfig(displayed);
   const selfHosted = displayed.apiUrl === SELF_HOSTED_CONFIG.apiUrl;
+  const showExportHint =
+    pending !== null && !hasCompletedTransferExport();
 
   return (
     <SettingsTab
@@ -274,6 +277,14 @@ export function ServerSettingsTab() {
               <span className="block">
                 {t(($) => $.desktop.server.confirm_switch_back)}
               </span>
+              {showExportHint ? (
+                <span
+                  className="block"
+                  data-testid="server-switch-export-hint"
+                >
+                  {t(($) => $.desktop.server.confirm_export_first)}
+                </span>
+              ) : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
