@@ -95,6 +95,7 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
       running: 0,
       dispatched: 1,
       waiting_local_directory: 2,
+      deferred: 2,
       queued: 3,
     };
     return snapshot
@@ -105,7 +106,8 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
           (t.status === "running" ||
             t.status === "queued" ||
             t.status === "dispatched" ||
-            t.status === "waiting_local_directory"),
+            t.status === "waiting_local_directory" ||
+            t.status === "deferred"),
       )
       .sort(
         (a, b) =>
@@ -804,6 +806,8 @@ function taskStatusLabel(status: AgentTask["status"], t: AgentsT): string {
       return t(($) => $.tab_body.activity.status.dispatched);
     case "waiting_local_directory":
       return t(($) => $.tab_body.activity.status.waiting_local_directory);
+    case "deferred":
+      return t(($) => $.tab_body.activity.status.deferred);
     case "running":
       return t(($) => $.tab_body.activity.status.running);
     case "completed":

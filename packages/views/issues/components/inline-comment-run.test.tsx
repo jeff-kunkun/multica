@@ -282,6 +282,17 @@ describe("InlineCommentRun", () => {
     expect(api.listTaskMessages).not.toHaveBeenCalled();
   });
 
+  it("keeps a deferred retry live with a retrying summary and no transcript fetch", () => {
+    setup(task({ status: "deferred", started_at: null, dispatched_at: null }));
+    expect(screen.getByText("Waiting to retry.")).toBeInTheDocument();
+    expect(screen.getByText("Retrying")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Retry run/ })).not.toBeInTheDocument();
+    expect(api.listTaskMessages).not.toHaveBeenCalled();
+    const elapsed = document.querySelector("[data-run-summary-row] .tabular-nums");
+    expect(elapsed?.textContent).toMatch(/\d/);
+  });
+
   it.each(["queued", "running"] as const)("confirms stopping the specific %s run before its reply", async (state) => {
     vi.mocked(api.cancelTask).mockResolvedValue(task({ status: "cancelled" }));
     setup(task({ status: state }));

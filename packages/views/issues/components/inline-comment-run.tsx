@@ -78,9 +78,12 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const retry = useRetryIssueRun(task.issue_id);
   const regionId = useId();
   // Keep one disclosure button mounted across queued, live, and historical states.
-  // Historical, collapsed runs still don't fetch transcripts.
+  // Historical, collapsed runs still don't fetch transcripts. Deferred is a
+  // backoff wait on a new task id — not a live session — so it must not
+  // subscribe as if a stream existed.
   const loadTranscript = task.status === "running" || (presentation === "inline" && expanded) || fullLogOpen;
-  const { data, isPending, isError, refetch } = useTaskMessages(task.id, active, loadTranscript);
+  const liveStream = active && task.status !== "deferred";
+  const { data, isPending, isError, refetch } = useTaskMessages(task.id, liveStream, loadTranscript);
   const items = useMemo(() => buildTimeline(data ?? []), [data]);
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, loadTranscript);
   const steps = useMemo(() => buildSteps(items), [items]);
@@ -111,13 +114,14 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const summary = task.status === "queued" ? t(($) => $.inline_run.queued)
     : task.status === "dispatched" ? t(($) => $.inline_run.starting)
     : task.status === "waiting_local_directory" ? t(($) => $.inline_run.waiting_directory)
+    : task.status === "deferred" ? t(($) => $.inline_run.retrying)
     : activitySummary;
   const showProgress = active && !hasReply;
   const activityLabel = t(($) => $.inline_run.view_activity);
   const stepLabel = steps.length > 0 ? t(($) => $.inline_run.steps, { count: steps.length }) : "";
   const stopLabel = cancel.isPending || cancel.isSuccess ? t(($) => $.inline_run.stopping) : t(($) => $.inline_run.stop);
   const transcript = fullLogOpen && <AgentTranscriptDialog open onOpenChange={setFullLogOpen}
-    task={task} items={items} agentName={name} isLive={active} finalFocus={logFromKeyboard}
+    task={task} items={items} agentName={name} isLive={liveStream} finalFocus={logFromKeyboard}
     contentState={isPending ? <p role="status" className="text-body text-muted-foreground">{t(($) => $.inline_run.loading)}</p>
       : isError ? <div role="alert" className="text-body text-destructive">{t(($) => $.inline_run.load_failed)}
         <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button>
@@ -128,7 +132,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
   </Button>;
   const stopDialog = <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
-    showRunningNote={task.status !== "queued"}
+    showRunningNote={task.status !== "queued" && task.status !== "deferred"}
     onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />;
   if (presentation === "header" && showCommentRunInHeader(run)) {
     return <span className="inline-flex shrink-0" data-comment-actions data-run-id={task.id}>
@@ -190,7 +194,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {!isPending && !isError && rows.length === 0 && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.empty)}</p>}
           {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
-          {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={active} formatText={formatText} />)}
+          {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={liveStream} formatText={formatText} />)}
           <button type="button" className="flex items-center gap-1.5 rounded-xs py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={openFullLog}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
         </div>}
@@ -251,6 +255,9 @@ function RunActivityIndicator({ status, animate }: { status: AgentTask["status"]
   }
   if (status === "waiting_local_directory") {
     return <CirclePause aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />;
+  }
+  if (status === "deferred") {
+    return <RotateCcw aria-hidden className="size-3.5 shrink-0 text-warning" />;
   }
   return <Clock3 aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />;
 }

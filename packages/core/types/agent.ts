@@ -320,10 +320,15 @@ export interface AgentTask {
   // because another task currently owns the same on-disk path lock.
   // Treated as an active (non-terminal) state alongside queued/dispatched/
   // running by every consumer that buckets tasks into "active vs done".
+  //
+  // `deferred` is an auto-retry child waiting out its backoff: `fire_at`
+  // has not arrived, so the task cannot be claimed, but it is still
+  // non-terminal (not failed / cancelled / completed).
   status:
     | "queued"
     | "dispatched"
     | "waiting_local_directory"
+    | "deferred"
     | "running"
     | "completed"
     | "failed"
