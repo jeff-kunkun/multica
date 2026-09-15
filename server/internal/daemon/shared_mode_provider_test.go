@@ -39,6 +39,18 @@ func TestSharedModeBriefDelivery(t *testing.T) {
 	if got := sharedModeBriefDelivery("grok"); got != sharedBriefInline {
 		t.Errorf("grok = %v, want sharedBriefInline", got)
 	}
+	if got := sharedModeBriefDelivery("cursor"); got != sharedBriefViaCursorAddDir {
+		t.Errorf("cursor = %v, want sharedBriefViaCursorAddDir (--add-dir skills + stdin brief)", got)
+	}
+	if err := sharedModeProviderSupported("cursor"); err != nil {
+		t.Errorf("sharedModeProviderSupported(cursor) = %v, want nil", err)
+	}
+	if got := sharedModeBriefDelivery("antigravity"); got != sharedBriefViaAntigravityAddDir {
+		t.Errorf("antigravity = %v, want sharedBriefViaAntigravityAddDir (--add-dir AGENTS.md + skills)", got)
+	}
+	if err := sharedModeProviderSupported("antigravity"); err != nil {
+		t.Errorf("sharedModeProviderSupported(antigravity) = %v, want nil", err)
+	}
 	// Every provider that already runs on the inline brief in production must
 	// keep working in shared mode, since inline delivery needs no cwd file.
 	for _, p := range []string{"openclaw", "kimi", "traecli", "qwenpaw"} {
@@ -55,7 +67,7 @@ func TestSharedModeBriefDelivery(t *testing.T) {
 	// Disk-only readers stay refused until their own route is verified.
 	// mcode ignores ExecOptions.SystemPrompt and only reads cwd AGENTS.md,
 	// so it must not pass the shared-mode gate (DENE-125).
-	for _, p := range []string{"hermes", "cursor", "copilot", "pi", "mcode", "", "made-up"} {
+	for _, p := range []string{"hermes", "copilot", "pi", "mcode", "", "made-up"} {
 		if got := sharedModeBriefDelivery(p); got != sharedBriefUnsupported {
 			t.Errorf("%q = %v, want sharedBriefUnsupported", p, got)
 		}
@@ -122,6 +134,22 @@ func TestSharedModeBriefRoot(t *testing.T) {
 	if got != workDir {
 		t.Errorf("opencode non-shared brief root = %q, want cwd %q", got, workDir)
 	}
+
+	got, err = sharedModeBriefRoot("cursor", sidecar, "", workDir)
+	if err != nil {
+		t.Fatalf("cursor shared: %v", err)
+	}
+	if got != sidecar {
+		t.Errorf("cursor shared brief root = %q, want sidecar %q", got, sidecar)
+	}
+
+	got, err = sharedModeBriefRoot("antigravity", sidecar, "", workDir)
+	if err != nil {
+		t.Fatalf("antigravity shared: %v", err)
+	}
+	if got != sidecar {
+		t.Errorf("antigravity shared brief root = %q, want sidecar %q", got, sidecar)
+	}
 }
 
 func TestSharedModeSkillsDir(t *testing.T) {
@@ -145,6 +173,12 @@ func TestSharedModeSkillsDir(t *testing.T) {
 	if got := sharedModeSkillsDir("opencode", "", ""); got != "" {
 		t.Errorf("opencode non-shared skills dir = %q, want empty (native discovery)", got)
 	}
+	if got := sharedModeSkillsDir("cursor", sidecar, ""); got != filepath.Join(sidecar, ".cursor", "skills") {
+		t.Errorf("cursor shared skills dir = %q, want sidecar .cursor/skills", got)
+	}
+	if got := sharedModeSkillsDir("antigravity", sidecar, ""); got != filepath.Join(sidecar, ".agents", "skills") {
+		t.Errorf("antigravity shared skills dir = %q, want sidecar .agents/skills", got)
+	}
 }
 
 func TestSharedModeOpencodeConfigDir(t *testing.T) {
@@ -163,4 +197,58 @@ func TestSharedModeOpencodeConfigDir(t *testing.T) {
 	if got := sharedModeOpencodeConfigDir("codex", sidecar); got != "" {
 		t.Errorf("codex OPENCODE_CONFIG_DIR = %q, want empty", got)
 	}
+}
+
+func TestSharedModeBriefOverlay(t *testing.T) {
+	t.Parallel()
+
+	sidecar := "/env/sidecar"
+
+	claude := sharedModeBriefOverlayFor("claude", sidecar)
+	if claude.BriefInline {
+		t.Error("claude overlay BriefInline = true, want false (--append-system-prompt-file)")
+	}
+	if !containsPair(claude.ExtraArgs, "--add-dir", sidecar) {
+		t.Errorf("claude ExtraArgs = %v, want --add-dir sidecar", claude.ExtraArgs)
+	}
+	if !containsPair(claude.ExtraArgs, "--append-system-prompt-file", filepath.Join(sidecar, "CLAUDE.md")) {
+		t.Errorf("claude ExtraArgs = %v, want --append-system-prompt-file sidecar/CLAUDE.md", claude.ExtraArgs)
+	}
+
+	cursor := sharedModeBriefOverlayFor("cursor", sidecar)
+	if !cursor.BriefInline {
+		t.Error("cursor overlay BriefInline = false, want true (stdin brief; --add-dir does not load AGENTS.md)")
+	}
+	if !containsPair(cursor.ExtraArgs, "--add-dir", sidecar) {
+		t.Errorf("cursor ExtraArgs = %v, want --add-dir sidecar", cursor.ExtraArgs)
+	}
+	for _, a := range cursor.ExtraArgs {
+		if a == "--plugin-dir" || a == "--append-system-prompt-file" {
+			t.Errorf("cursor ExtraArgs = %v, must not use %s", cursor.ExtraArgs, a)
+		}
+	}
+
+	agy := sharedModeBriefOverlayFor("antigravity", sidecar)
+	if agy.BriefInline {
+		t.Error("antigravity overlay BriefInline = true, want false (--add-dir loads AGENTS.md)")
+	}
+	if !containsPair(agy.ExtraArgs, "--add-dir", sidecar) {
+		t.Errorf("antigravity ExtraArgs = %v, want --add-dir sidecar", agy.ExtraArgs)
+	}
+
+	if got := sharedModeBriefOverlayFor("cursor", ""); len(got.ExtraArgs) != 0 || got.BriefInline {
+		t.Errorf("non-shared cursor overlay = %+v, want empty", got)
+	}
+	if got := sharedModeBriefOverlayFor("codex", sidecar); len(got.ExtraArgs) != 0 || got.BriefInline {
+		t.Errorf("codex overlay = %+v, want empty (CODEX_HOME/AGENTS.md)", got)
+	}
+}
+
+func containsPair(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }

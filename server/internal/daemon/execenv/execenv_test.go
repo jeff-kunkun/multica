@@ -7321,6 +7321,102 @@ func TestPrepareIsolateSidecarsOpencodeDeliversBriefViaConfigDir(t *testing.T) {
 	}
 }
 
+// Shared-mode Cursor / Antigravity keep AGENTS.md and native skills out of the
+// user's directory. The daemon then hands the sidecar root to the CLI as
+// --add-dir (plus, for Cursor, an stdin brief prepend). This test is the
+// on-disk half of that delivery proof.
+func TestPrepareIsolateSidecarsCursorAndAntigravityLayout(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		provider string
+		skillRel string
+	}{
+		{"cursor", filepath.Join(".cursor", "skills", "spike-skill", "SKILL.md")},
+		{"antigravity", filepath.Join(".agents", "skills", "spike-skill", "SKILL.md")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			workspacesRoot := t.TempDir()
+			userDir := t.TempDir()
+			sentinel := filepath.Join(userDir, "user-file.txt")
+			if err := os.WriteFile(sentinel, []byte("keep me"), 0o644); err != nil {
+				t.Fatalf("write sentinel: %v", err)
+			}
+
+			env, err := Prepare(PrepareParams{
+				WorkspacesRoot:  workspacesRoot,
+				WorkspaceID:     "ws-shared-" + tc.provider,
+				TaskID:          "c1b2c3d4-e5f6-7890-abcd-ef1234567890",
+				AgentName:       "Test Agent",
+				Provider:        tc.provider,
+				LocalWorkDir:    userDir,
+				IsolateSidecars: true,
+				Task: TaskContextForEnv{
+					IssueID:   "issue-1",
+					AgentID:   "agent-1",
+					ProjectID: "project-1",
+					ProjectResources: []ProjectResourceForEnv{
+						{ID: "r1", ResourceType: "local_directory", ResourceRef: json.RawMessage(`{"local_path":"` + filepath.ToSlash(userDir) + `","daemon_id":"d1","execution_mode":"shared"}`)},
+					},
+					AgentSkills: []SkillContextForEnv{{
+						Name:    "spike-skill",
+						Content: "---\nname: spike-skill\ndescription: probe\n---\nbody\n",
+					}},
+				},
+			}, testLogger())
+			if err != nil {
+				t.Fatalf("Prepare failed: %v", err)
+			}
+			defer env.Cleanup(true)
+
+			if env.SidecarRoot == "" {
+				t.Fatal("SidecarRoot is empty")
+			}
+			if _, err := os.Stat(filepath.Join(env.SidecarRoot, tc.skillRel)); err != nil {
+				t.Errorf("skill missing under sidecar: %v", err)
+			}
+
+			ctx := TaskContextForEnv{
+				IssueID:     "issue-1",
+				ProjectID:   "project-1",
+				AgentSkills: []SkillContextForEnv{{Name: "spike-skill"}},
+				SidecarRoot: env.SidecarRoot,
+				SkillsDir:   SkillsDirPath(env.SidecarRoot, tc.provider),
+			}
+			if _, err := InjectRuntimeConfig(env.SidecarRoot, tc.provider, ctx); err != nil {
+				t.Fatalf("InjectRuntimeConfig: %v", err)
+			}
+			wantBrief := filepath.Join(env.SidecarRoot, "AGENTS.md")
+			if got := RuntimeConfigFilePath(env.SidecarRoot, tc.provider); got != wantBrief {
+				t.Errorf("RuntimeConfigFilePath = %q, want %q", got, wantBrief)
+			}
+			gotBrief, err := os.ReadFile(wantBrief)
+			if err != nil {
+				t.Fatalf("brief missing at sidecar/AGENTS.md: %v", err)
+			}
+			if !strings.Contains(string(gotBrief), "Multica Agent Runtime") {
+				t.Errorf("sidecar/AGENTS.md does not contain the runtime brief:\n%s", gotBrief)
+			}
+			if _, err := os.Stat(filepath.Join(userDir, "AGENTS.md")); !os.IsNotExist(err) {
+				t.Errorf("brief was written into the user's directory; stat err = %v", err)
+			}
+			entries, err := os.ReadDir(userDir)
+			if err != nil {
+				t.Fatalf("read user dir: %v", err)
+			}
+			if len(entries) != 1 || entries[0].Name() != "user-file.txt" {
+				names := make([]string, 0, len(entries))
+				for _, e := range entries {
+					names = append(names, e.Name())
+				}
+				t.Fatalf("user directory contents = %v, want only the sentinel", names)
+			}
+		})
+	}
+}
+
 // Non-shared OpenCode must not grow a daemon-owned opencode.json in the
 // workdir: that file belongs to the agent/user across turns (MUL-5392).
 func TestPrepareOpencodeDoesNotWriteConfigOutsideSharedMode(t *testing.T) {

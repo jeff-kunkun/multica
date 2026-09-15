@@ -649,6 +649,10 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 // (Thinking)") on older output. Either shape ships as one exec arg, so spaces
 // and parens need no shell quoting. agy still exposes no --system-prompt;
 // runtime instructions are delivered via AGENTS.md in the task workdir.
+// Shared mode keeps that file under the sidecar and passes --add-dir
+// <sidecar> on ExtraArgs (DENE-187 canary against agy 1.2.2: both AGENTS.md
+// and .agents/skills loaded from the added directory). --gemini_dir is the
+// AGY multi-account slot and is never rewritten to a per-task directory.
 //
 // agy silently no-ops on a model string it doesn't recognise (empty output,
 // exit 0), so Execute validates opts.Model against the `agy models` catalog
