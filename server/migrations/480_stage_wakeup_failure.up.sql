@@ -1,6 +1,6 @@
 -- Observable record of stage-barrier wake failures (DENE-233 / protocol §7
 -- scan C). No FKs or cascades: cleanup is application-owned. Lookup indexes
--- land in 480–481 as concurrent single-statement builds.
+-- land in 481–482 as concurrent single-statement builds.
 CREATE TABLE stage_wakeup_failure (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL,
