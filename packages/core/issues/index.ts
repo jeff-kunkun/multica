@@ -7,6 +7,7 @@ export * from "./workdir";
 export * from "./config";
 export * from "./stores";
 export * from "./close-protocol";
+export * from "./blocker-tree";
 
 export {
   issueBehavesAs,

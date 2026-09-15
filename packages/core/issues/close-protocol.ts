@@ -41,6 +41,9 @@ export type CloseProtocolView = {
   wakeAction: string | null;
   waitingOn: string | null;
   at: string | null;
+  /** Optional blocker attribution written when conclusion=blocked. */
+  blockKind: string | null;
+  blockAction: string | null;
 };
 
 function metaString(
@@ -82,15 +85,22 @@ export function readCloseProtocol(
     wakeAction: metaString(metadata, "close.wake_action"),
     waitingOn,
     at: metaString(metadata, "close.at"),
+    blockKind: metaString(metadata, "close.block_kind"),
+    blockAction: metaString(metadata, "close.block_action"),
   };
 }
 
-/** A blocked / in_review close is still holding the stage barrier. */
+/** Whether a close record is a stage blocker.
+ *
+ * `in_review` is deliberately not enough: a normal review is an expected
+ * hand-off and only becomes a blocker when the caller derives review_overdue.
+ */
 export function closeProtocolIsStuck(
   issueStatus: string,
   conclusion: string | null,
 ): boolean {
-  if (issueStatus === "blocked" || issueStatus === "in_review") return true;
+  if (issueStatus === "blocked") return true;
+  if (issueStatus === "in_review") return false;
   return (
     conclusion === "blocked" ||
     conclusion === "awaiting_review" ||

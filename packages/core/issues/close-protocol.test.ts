@@ -139,9 +139,10 @@ describe("readCloseProtocol", () => {
 });
 
 describe("closeProtocolIsStuck", () => {
-  it("treats blocked and in_review issue status as stuck", () => {
+  it("treats blocked as stuck but ordinary in_review as a hand-off", () => {
     expect(closeProtocolIsStuck("blocked", "delivered")).toBe(true);
-    expect(closeProtocolIsStuck("in_review", null)).toBe(true);
+    expect(closeProtocolIsStuck("in_review", null)).toBe(false);
+    expect(closeProtocolIsStuck("in_review", "awaiting_review")).toBe(false);
     expect(closeProtocolIsStuck("done", "delivered")).toBe(false);
   });
 
