@@ -612,6 +612,12 @@ export interface Agent {
    * account defaults remain authoritative.
    */
   service_tier?: string;
+  /**
+   * Display-only model lineup (kun fork, DENE-200): the default model, the
+   * ordered fallback chain and models borrowable for batch work. Never used
+   * for routing. Older servers omit it; treat undefined as [].
+   */
+  switchable_models?: AgentSwitchableModel[];
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -826,6 +832,17 @@ export interface UpdateAgentRequest {
    * clears it, and a non-empty value stores a runtime-catalog ID.
    */
   service_tier?: string;
+  /** Replaces the display-only model lineup wholesale; `[]` clears it. */
+  switchable_models?: AgentSwitchableModel[];
+}
+
+export type AgentSwitchableModelRole = "default" | "fallback" | "batch";
+
+/** One entry of `Agent.switchable_models`. */
+export interface AgentSwitchableModel {
+  model: string;
+  role: AgentSwitchableModelRole;
+  note: string;
 }
 
 /**

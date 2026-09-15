@@ -191,6 +191,7 @@ func init() {
 	agentUpdateCmd.Flags().String("thinking-level", "", "New reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("service-tier", "", "New Codex execution speed: default = explicit Standard when supported by the daemon's installed Codex CLI; a catalog tier such as priority = explicit Fast. Pass an empty string to clear and inherit local Codex configuration.")
 	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
+	agentUpdateCmd.Flags().String("switchable-models", "", "Display-only model lineup as a JSON array of {\"model\",\"role\",\"note\"} objects; role is default, fallback (ordered degrade chain) or batch. Not used for routing. Pass '[]' to clear.")
 	// custom_env is intentionally NOT part of `agent update`. Use
 	// `multica agent env set <id>` — that path admits the agent owner or a
 	// workspace owner/admin, denies agent actors, and writes a persisted
@@ -787,6 +788,9 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("service-tier")
 		body["service_tier"] = v
 	}
+	if err := applySwitchableModelsFlag(cmd, body); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
@@ -810,7 +814,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --switchable-models, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -1283,6 +1287,44 @@ func parseConversationStarters(raw string) ([]agentConversationStarter, error) {
 		return nil, fmt.Errorf("--conversation-starters must contain at most 3 items")
 	}
 	return starters, nil
+}
+
+type agentSwitchableModel struct {
+	Model string `json:"model"`
+	Role  string `json:"role"`
+	Note  string `json:"note"`
+}
+
+func applySwitchableModelsFlag(cmd *cobra.Command, body map[string]any) error {
+	if !cmd.Flags().Changed("switchable-models") {
+		return nil
+	}
+	v, _ := cmd.Flags().GetString("switchable-models")
+	models, err := parseSwitchableModels(v)
+	if err != nil {
+		return err
+	}
+	body["switchable_models"] = models
+	return nil
+}
+
+// parseSwitchableModels parses --switchable-models. Like
+// --conversation-starters, [] is the explicit clear and null/empty input is
+// rejected so it cannot be mistaken for omit. The server owns field
+// validation; the CLI only checks the JSON shape.
+func parseSwitchableModels(raw string) ([]agentSwitchableModel, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.EqualFold(trimmed, "null") {
+		return nil, fmt.Errorf("--switchable-models must be a JSON array of {\"model\",\"role\",\"note\"} objects; pass '[]' to clear")
+	}
+	var models []agentSwitchableModel
+	if err := json.Unmarshal([]byte(raw), &models); err != nil {
+		return nil, fmt.Errorf("--switchable-models must be a JSON array of {\"model\",\"role\",\"note\"} objects")
+	}
+	if models == nil {
+		models = []agentSwitchableModel{}
+	}
+	return models, nil
 }
 
 // resolveCustomEnv collects the --custom-env, --custom-env-stdin, and

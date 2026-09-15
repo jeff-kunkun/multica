@@ -43,7 +43,7 @@ sed 's/^FRONTEND_PORT=.*/FRONTEND_PORT=3100/' .env.example >"$tmp_env"
 printf '\nBACKEND_PORT=9100\nSMTP_FROM_EMAIL=multica@example.com\n' >>"$tmp_env"
 printf 'MULTICA_LLM_API_KEY=llm-key-from-env\nMULTICA_LLM_BASE_URL=http://gateway.example/v1\nMULTICA_LLM_DEFAULT_MODEL=model-from-env\nMULTICA_LLM_MAX_RETRIES=3\n' >>"$tmp_env"
 printf 'DATABASE_REPLICA_URL=postgres://reader:secret@replica.example.com:5432/multica?sslmode=require\nDATABASE_REPLICA_MAX_CONNS=12\nDATABASE_REPLICA_MIN_CONNS=1\n' >>"$tmp_env"
-printf 'MULTICA_PASSWORD_AUTH=true\nMULTICA_PASSWORD_AUTH_USERNAME=admin\nMULTICA_PASSWORD_AUTH_PASSWORD=test-password\nMULTICA_PASSWORD_AUTH_EMAIL=admin@example.com\n' >>"$tmp_env"
+printf 'MULTICA_PASSWORD_AUTH=true\nMULTICA_PASSWORD_AUTH_USERNAME=admin\nMULTICA_PASSWORD_AUTH_PASSWORD=test-password\nMULTICA_PASSWORD_AUTH_EMAIL=admin@example.com\nMULTICA_SIGNUP_TOTP_SECRET=signup-totp-compose-test\n' >>"$tmp_env"
 
 config="$(
   docker compose \
@@ -73,6 +73,7 @@ require_config "$config" 'MULTICA_PASSWORD_AUTH: "true"'
 require_config "$config" 'MULTICA_PASSWORD_AUTH_USERNAME: admin'
 require_config "$config" 'MULTICA_PASSWORD_AUTH_PASSWORD: test-password'
 require_config "$config" 'MULTICA_PASSWORD_AUTH_EMAIL: admin@example.com'
+require_config "$config" 'MULTICA_SIGNUP_TOTP_SECRET: signup-totp-compose-test'
 require_config "$config" 'MULTICA_LLM_API_KEY: llm-key-from-env'
 require_config "$config" 'MULTICA_LLM_BASE_URL: http://gateway.example/v1'
 require_config "$config" 'MULTICA_LLM_DEFAULT_MODEL: model-from-env'

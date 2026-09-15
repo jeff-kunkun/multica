@@ -2,8 +2,12 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  apiExecutionMode,
   coerceLocalDirectoryMode,
+  displayedExecutionMode,
   executionModeOf,
+  isSharedModeRejectedByServer,
+  needsLocalSharedOverride,
   sharedModeUnavailable,
   worktreeUnavailableReason,
 } from "./local-directory-mode";
@@ -43,9 +47,82 @@ describe("worktreeUnavailableReason", () => {
 });
 
 describe("sharedModeUnavailable", () => {
-  it("is only the server-outdated gate — a non-git folder is the typical case", () => {
-    expect(sharedModeUnavailable(true)).toBe(false);
-    expect(sharedModeUnavailable(false)).toBe(true);
+  it("stays available on desktop even when the server rejects shared", () => {
+    expect(
+      sharedModeUnavailable({
+        serverAcceptsShared: false,
+        canSetLocalOverride: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("blocks only when neither the server nor a local override can honour it", () => {
+    expect(
+      sharedModeUnavailable({
+        serverAcceptsShared: false,
+        canSetLocalOverride: false,
+      }),
+    ).toBe(true);
+    expect(
+      sharedModeUnavailable({
+        serverAcceptsShared: true,
+        canSetLocalOverride: false,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("apiExecutionMode", () => {
+  it("sends shared only when the server declares it", () => {
+    expect(apiExecutionMode("shared", true)).toBe("shared");
+    expect(apiExecutionMode("shared", false)).toBe("in_place");
+    expect(apiExecutionMode("worktree", false)).toBe("worktree");
+    expect(apiExecutionMode("in_place", false)).toBe("in_place");
+  });
+});
+
+describe("needsLocalSharedOverride", () => {
+  it("is the official-cloud shared path: UI says shared, API cannot store it", () => {
+    expect(needsLocalSharedOverride("shared", false)).toBe(true);
+    expect(needsLocalSharedOverride("shared", true)).toBe(false);
+    expect(needsLocalSharedOverride("in_place", false)).toBe(false);
+    expect(needsLocalSharedOverride("worktree", false)).toBe(false);
+  });
+});
+
+describe("displayedExecutionMode", () => {
+  it("upgrades stored in_place to shared when a local override exists", () => {
+    expect(displayedExecutionMode({ execution_mode: "in_place" }, true)).toBe(
+      "shared",
+    );
+    expect(displayedExecutionMode({}, true)).toBe("shared");
+  });
+
+  it("does not hide a stored worktree behind a stale override", () => {
+    expect(displayedExecutionMode({ execution_mode: "worktree" }, true)).toBe(
+      "worktree",
+    );
+  });
+
+  it("keeps a server-persisted shared mode", () => {
+    expect(displayedExecutionMode({ execution_mode: "shared" }, false)).toBe(
+      "shared",
+    );
+  });
+});
+
+describe("isSharedModeRejectedByServer", () => {
+  it("recognises the official-cloud enum rejection", () => {
+    expect(
+      isSharedModeRejectedByServer(
+        'local_directory: execution_mode must be "in_place" or "worktree", got "shared"',
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores unrelated failures", () => {
+    expect(isSharedModeRejectedByServer("daemon is offline")).toBe(false);
+    expect(isSharedModeRejectedByServer("")).toBe(false);
   });
 });
 

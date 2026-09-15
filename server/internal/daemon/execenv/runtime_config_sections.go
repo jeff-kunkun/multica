@@ -817,9 +817,10 @@ func writeSkills(b *strings.Builder, ctx TaskContextForEnv) {
 	}
 	b.WriteString("\n")
 	// Shared mode relocates the skills tree out of the cwd. Claude Code still
-	// discovers it (the daemon adds the sidecar root with --add-dir); every
-	// other supported runtime's discovery is cwd-relative and finds nothing,
-	// so the brief names the directory and the agent reads SKILL.md directly.
+	// discovers it (the daemon adds the sidecar root with --add-dir); Codex
+	// discovers it from the per-task CODEX_HOME. Every other supported
+	// runtime's discovery is cwd-relative and finds nothing, so the brief
+	// names the directory and the agent reads SKILL.md directly.
 	if ctx.SkillsDir != "" {
 		fmt.Fprintf(b, "The skill files for this task live under `%s/<skill>/SKILL.md`. If a skill is not offered to you natively, read its SKILL.md from there when you need it.\n\n", filepath.ToSlash(ctx.SkillsDir))
 	}

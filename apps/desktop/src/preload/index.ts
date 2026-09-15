@@ -226,6 +226,13 @@ const desktopAPI = {
   /** Validate that a path is an existing readable+writable directory. */
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
+  listLocalDirectorySharedOverrides: () =>
+    ipcRenderer.invoke("local-directory:list-shared-overrides"),
+  setLocalDirectorySharedOverride: (input: {
+    daemonId: string;
+    localPath: string;
+    enabled: boolean;
+  }) => ipcRenderer.invoke("local-directory:set-shared-override", input),
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  The renderer should close the active tab; if it was the last tab,
    *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */

@@ -459,10 +459,32 @@ var claudeContextWindowTagRe = regexp.MustCompile(`\[[1-9][0-9]*[km]\]$`)
 // capabilities; every other provider and malformed/unknown modifier retains
 // exact-match behavior.
 func modelIDForCapabilityLookup(providerType, model string) string {
-	if providerType != "claude" {
+	switch providerType {
+	case "claude":
+		return claudeContextWindowTagRe.ReplaceAllString(model, "")
+	case "dsh":
+		return dshModelIDForLookup(model)
+	default:
 		return model
 	}
-	return claudeContextWindowTagRe.ReplaceAllString(model, "")
+}
+
+// findModelForCapability resolves the catalog row used for thinking / tier
+// checks. The persisted model string is never rewritten.
+func findModelForCapability(providerType string, models []Model, model string) (Model, bool) {
+	if model == "" {
+		return Model{}, false
+	}
+	target := modelIDForCapabilityLookup(providerType, model)
+	for _, m := range models {
+		if modelIDForCapabilityLookup(providerType, m.ID) == target {
+			return m, true
+		}
+	}
+	if providerType == "dsh" {
+		return findDshRecoverableCatalogEntry(models, model)
+	}
+	return Model{}, false
 }
 
 func acceptedModelIDsForProvider(providerType string) (map[string]bool, bool) {

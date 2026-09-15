@@ -16,6 +16,12 @@ const mockDaemonStatus = vi.hoisted(() => ({
 
 vi.mock("../../platform", () => ({
   useLocalDaemonStatus: () => mockDaemonStatus,
+  useLocalDirectorySharedOverrides: () => ({
+    canPersist: false,
+    hasOverride: () => false,
+    setOverride: vi.fn(),
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({

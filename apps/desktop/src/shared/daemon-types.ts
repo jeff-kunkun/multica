@@ -48,6 +48,16 @@ export interface DaemonStatus {
    */
   planLimits?: Record<string, DaemonPlanLimitsSnapshot>;
   /**
+   * Absolute Gemini directories on this host that already hold an AGY login.
+   * Overlay for the agent settings green check; omitted when none.
+   */
+  agyLoggedInDirs?: string[];
+  /**
+   * Gemini directories whose individual quota is exhausted until reset_at
+   * (unix seconds). Empty array clears a recovered X on Desktop.
+   */
+  agyQuotaExhausted?: Array<{ dir: string; reset_at: number }>;
+  /**
    * True when a daemon is running but in an environment the app can't control
    * — its reported OS differs from the desktop host's (e.g. a Linux daemon
    * inside WSL2 behind a Windows desktop, reachable only via localhost

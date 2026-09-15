@@ -1384,3 +1384,29 @@ describe("workspace subscription contract", () => {
     );
   });
 });
+
+// Empty-array fallback here is not a safe degrade: the agent list would treat
+// it as a known empty roster (count 0, members dumped into "no squad").
+describe("ApiClient listSquadMembers schema failure", () => {
+  it("rejects a non-array 2xx instead of returning []", async () => {
+    stubFetchJson({ members: [{ id: "row-1" }] });
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listSquadMembers("sq-1")).rejects.toThrow(
+      /failed schema validation/i,
+    );
+  });
+
+  it("rejects a 2xx row missing id/squad_id/member_id instead of returning []", async () => {
+    stubFetchJson([{ member_type: "agent" }]);
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listSquadMembers("sq-1")).rejects.toThrow(
+      /failed schema validation/i,
+    );
+  });
+
+  it("still accepts a genuine empty roster", async () => {
+    stubFetchJson([]);
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listSquadMembers("sq-1")).resolves.toEqual([]);
+  });
+});

@@ -205,8 +205,15 @@ type DaemonRegisterRequest struct {
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
 	// HomeDir is the daemon host's user home. The web UI cannot read
 	// process.env.HOME, so AGY account-slot presets use this absolute path.
-	HomeDir  string `json:"home_dir"`
-	Runtimes []struct {
+	HomeDir string `json:"home_dir"`
+	// AgyLoggedInDirs are absolute Gemini directories on the daemon host that
+	// already contain an AGY/Gemini credential file. Used for the settings
+	// green check; never includes token contents.
+	AgyLoggedInDirs []string `json:"agy_logged_in_dirs"`
+	// AgyQuotaExhausted is the host-level overlay of Gemini directories whose
+	// individual quota is exhausted until reset_at (unix seconds).
+	AgyQuotaExhausted []AgyQuotaExhaustedEntry `json:"agy_quota_exhausted"`
+	Runtimes          []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -224,6 +231,11 @@ type DaemonRegisterRequest struct {
 	} `json:"failed_profiles"`
 }
 
+type AgyQuotaExhaustedEntry struct {
+	Dir     string `json:"dir"`
+	ResetAt int64  `json:"reset_at"`
+}
+
 func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capabilities any) map[string]any {
 	meta := map[string]any{
 		"version":      version,
@@ -234,7 +246,54 @@ func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capa
 	if home := absoluteHostHomeDir(req.HomeDir); home != "" {
 		meta["home_dir"] = home
 	}
+	if dirs := absoluteAgyLoggedInDirs(req.AgyLoggedInDirs); len(dirs) > 0 {
+		meta["agy_logged_in_dirs"] = dirs
+	}
+	if exhausted := absoluteAgyQuotaExhausted(req.AgyQuotaExhausted); len(exhausted) > 0 {
+		meta["agy_quota_exhausted"] = exhausted
+	}
 	return meta
+}
+
+func absoluteAgyQuotaExhausted(entries []AgyQuotaExhaustedEntry) []map[string]any {
+	out := make([]map[string]any, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
+	now := time.Now().Unix()
+	for _, entry := range entries {
+		dir := absoluteHostHomeDir(entry.Dir)
+		if dir == "" || entry.ResetAt <= now {
+			continue
+		}
+		if _, ok := seen[dir]; ok {
+			continue
+		}
+		seen[dir] = struct{}{}
+		out = append(out, map[string]any{"dir": dir, "reset_at": entry.ResetAt})
+		if len(out) >= 32 {
+			break
+		}
+	}
+	return out
+}
+
+func absoluteAgyLoggedInDirs(dirs []string) []string {
+	out := make([]string, 0, len(dirs))
+	seen := make(map[string]struct{}, len(dirs))
+	for _, dir := range dirs {
+		abs := absoluteHostHomeDir(dir)
+		if abs == "" {
+			continue
+		}
+		if _, ok := seen[abs]; ok {
+			continue
+		}
+		seen[abs] = struct{}{}
+		out = append(out, abs)
+		if len(out) >= 32 {
+			break
+		}
+	}
+	return out
 }
 
 // absoluteHostHomeDir accepts Unix and Windows absolute paths so a Linux

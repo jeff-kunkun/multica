@@ -182,6 +182,8 @@ interface HealthPayload {
   agents?: string[];
   workspaces?: unknown[];
   plan_limits?: DaemonStatus["planLimits"];
+  agy_logged_in_dirs?: string[];
+  agy_quota_exhausted?: Array<{ dir: string; reset_at: number }>;
 }
 
 async function fetchHealthAtPort(
@@ -302,6 +304,14 @@ function invalidateActiveProfile(): void {
   recoveryPolicy.reset();
 }
 
+/** Profile directory the current Desktop daemon reads and writes. Null until
+ *  the target API URL is known — callers must not fall back to ~/.multica. */
+export async function activeDaemonProfileDir(): Promise<string | null> {
+  const profile = await ensureActiveProfile();
+  if (!profile) return null;
+  return profileDir(profile.name);
+}
+
 function setDesiredDaemonRunning(desired: boolean, explicit = false): void {
   if (desiredDaemonRunning === desired && !explicit) return;
   desiredDaemonRunning = desired;
@@ -416,6 +426,8 @@ async function fetchHealth(): Promise<DaemonStatus> {
     serverUrl: data.server_url,
     externallyManaged,
     planLimits: data.plan_limits,
+    agyLoggedInDirs: data.agy_logged_in_dirs,
+    agyQuotaExhausted: data.agy_quota_exhausted,
   };
 }
 

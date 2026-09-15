@@ -734,6 +734,9 @@ export interface AppConfigResponse {
   /** Self-host opt-in: login page uses username + password. Absent/false
    * keeps the official email verification flow. */
   password_auth?: boolean;
+  /** Self-host opt-in: /signup requires a shared team TOTP. Absent/false
+   * keeps the previous signup form with no 2FA field. */
+  signup_totp_required?: boolean;
   posthog_key?: string;
   posthog_host?: string;
   analytics_environment?: string;
@@ -746,16 +749,18 @@ export interface AppConfigResponse {
   vcs_integration_available?: boolean;
   feature_flags?: Record<string, boolean>;
   /** Whether this server understands local_directory `execution_mode` and
-   * gates worktree *and* shared mode at save time. Absent on every server that
-   * predates this capability signal, which includes the ones that silently
-   * DROPPED an unknown `execution_mode` and answered 201 — the resource then
-   * ran in place (with a lock) while the user was promised isolation or a
-   * lock-free share (#7113). Servers between that fix and this signal do
-   * validate but cannot say so, and are treated as unable: the client has no
-   * way to tell them apart, and only one of the two answers is safe. The flag
-   * name is historical; it is the "server validates execution_mode" signal for
-   * every gated mode, not worktree alone. */
+   * gates worktree mode at save time. Absent on every server that predates
+   * this capability signal, which includes the ones that silently DROPPED an
+   * unknown `execution_mode` and answered 201 — the resource then ran in
+   * place (with a lock) while the user was promised isolation (#7113).
+   * Worktree only: official cloud advertises this while still rejecting
+   * `execution_mode=shared`. */
   local_worktree_supported?: boolean;
+  /** Whether this server accepts and persists `execution_mode=shared`.
+   * Official cloud omits this and 400s the enum. Absent must be treated as
+   * false: the client then stores in_place and records a local daemon
+   * override so the folder still runs without the path mutex. */
+  local_shared_supported?: boolean;
   /** Whether agent create/update persists `conversation_starters`. Older servers
    * silently ignored the unknown field, so absent must be treated as false. */
   agent_conversation_starters_supported?: boolean;
@@ -956,6 +961,7 @@ export const AppConfigSchema = z.object({
   allow_signup: BooleanWithDefaultSchema(true),
   google_client_id: OptionalStringSchema,
   password_auth: BooleanWithDefaultSchema(false).optional(),
+  signup_totp_required: BooleanWithDefaultSchema(false),
   posthog_key: OptionalStringSchema,
   posthog_host: OptionalStringSchema,
   analytics_environment: OptionalStringSchema,
@@ -965,6 +971,7 @@ export const AppConfigSchema = z.object({
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
   local_worktree_supported: BooleanWithDefaultSchema(false),
+  local_shared_supported: BooleanWithDefaultSchema(false),
   agent_conversation_starters_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
@@ -976,6 +983,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   allow_signup: true,
   google_client_id: "",
   password_auth: false,
+  signup_totp_required: false,
   daemon_server_url: "",
   daemon_app_url: "",
   workspace_creation_disabled: false,
@@ -983,6 +991,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   // Fail closed: an unreadable config must not look like a server that
   // validates execution_mode (worktree or shared).
   local_worktree_supported: false,
+  local_shared_supported: false,
   // Fail closed: old servers returned success while dropping the field.
   agent_conversation_starters_supported: false,
   // Fail closed: old servers delete a comment's replies with it.
@@ -2127,8 +2136,9 @@ export const agentBuilderRuntimeSwitchFallback = (
 ): AgentBuilderRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
 
 // Squad list responses carry lightweight membership previews used by hover
-// cards. The preview fields are additive API fields, so older backends default
-// cleanly to no preview instead of breaking newer frontends.
+// cards. member_count / member_preview are additive and default cleanly.
+// `members` must stay optional: official cloud omits it, and defaulting to []
+// would collapse "unknown roster" into "no members".
 const SquadMemberPreviewSchema = z.object({
   member_type: z.string(),
   member_id: z.string(),
@@ -2152,7 +2162,7 @@ export const SquadSchema = z.object({
   archived_by: z.string().nullable().optional().transform((v) => v ?? null),
   member_count: z.number().default(0),
   member_preview: z.array(SquadMemberPreviewSchema).default([]),
-  members: z.array(SquadMemberPreviewSchema).default([]),
+  members: z.array(SquadMemberPreviewSchema).optional(),
 }).loose();
 
 export const SquadListSchema = z.array(SquadSchema);
@@ -2172,8 +2182,18 @@ export const EMPTY_SQUAD: Squad = {
   archived_by: null,
   member_count: 0,
   member_preview: [],
-  members: [],
 };
+
+export const SquadMemberSchema = z.object({
+  id: z.string(),
+  squad_id: z.string(),
+  member_type: z.string(),
+  member_id: z.string(),
+  role: z.string().default(""),
+  created_at: z.string().default(""),
+}).loose();
+
+export const SquadMemberListSchema = z.array(SquadMemberSchema);
 
 // Squad member status — backs the Squad detail page's Members tab. status
 // is `string | null` (not the narrow `SquadMemberStatusValue` union) so a

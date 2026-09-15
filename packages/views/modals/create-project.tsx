@@ -62,8 +62,10 @@ import { ProjectDueDatePicker } from "../projects/components/project-due-date-pi
 import { PillButton } from "../common/pill-button";
 import { githubShortLabel } from "../common/github-url";
 import {
+  canSetLocalDirectorySharedOverride,
   isDesktopShell,
   pickDirectory,
+  setLocalDirectorySharedOverride,
   validateLocalDirectory,
 } from "../platform/local-directory";
 import { useLocalDaemonStatus } from "../platform/use-local-daemon-status";
@@ -75,7 +77,10 @@ import { useConfigStore } from "@multica/core/config";
 import type { LocalDirectoryExecutionMode } from "@multica/core/types";
 import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-dialog";
 import {
+  apiExecutionMode,
   coerceLocalDirectoryMode,
+  isSharedModeRejectedByServer,
+  needsLocalSharedOverride,
   sharedModeUnavailable,
 } from "../projects/components/local-directory-mode";
 
@@ -225,13 +230,19 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // save gate drop execution_mode and answer 201, so "the backend will check"
   // is only true once the backend says it checks (#7113).
   const serverValidatesWorktree = useConfigStore((state) => state.localWorktreeSupported);
+  const serverAcceptsShared = useConfigStore((state) => state.localSharedSupported);
   const worktreeUnavailableReason =
     localIsGitRepo === false
       ? ("not_git" as const)
       : !serverValidatesWorktree
         ? ("server_outdated" as const)
         : undefined;
-  const sharedUnavailable = sharedModeUnavailable(serverValidatesWorktree);
+  const canSetLocalOverride = canSetLocalDirectorySharedOverride();
+  const sharedUnavailable = sharedModeUnavailable({
+    serverAcceptsShared,
+    canSetLocalOverride,
+  });
+  const sharedUsesLocalOverride = !serverAcceptsShared && canSetLocalOverride;
   // Preselection, not a default behavior change: when the folder is a git repo
   // and the machine has advertised that it can run worktree mode, parallel is
   // the better fit, so it starts selected — visibly, in a control the user can
@@ -354,7 +365,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             localPath: selectedLocalPath,
             daemonId: daemonStatus.daemonId,
             label: selectedLocalLabel,
-            mode: effectiveLocalMode,
+            mode: apiExecutionMode(effectiveLocalMode, serverAcceptsShared),
           }),
         },
       ];
@@ -374,15 +385,39 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         // Server attaches these in the same transaction as the project.
         resources,
       });
+      if (
+        sourceMode === "local" &&
+        selectedLocalPath &&
+        daemonStatus.daemonId &&
+        needsLocalSharedOverride(effectiveLocalMode, serverAcceptsShared)
+      ) {
+        const override = await setLocalDirectorySharedOverride({
+          daemonId: daemonStatus.daemonId,
+          localPath: selectedLocalPath,
+          enabled: true,
+        });
+        if (!override.ok) {
+          toast.error(
+            override.error ?? tProjects(($) => $.resources.toast_local_mode_update_failed),
+          );
+        } else {
+          toast.success(tProjects(($) => $.resources.toast_local_shared_via_daemon));
+        }
+      } else {
+        toast.success(t(($) => $.create_project.toast_created));
+      }
       clearDraft();
       onClose();
-      toast.success(t(($) => $.create_project.toast_created));
       router.push(wsPaths.projectDetail(project.id));
     } catch (err) {
-      toast.error(
+      const raw =
         err instanceof Error && err.message
           ? err.message
-          : t(($) => $.create_project.toast_failed),
+          : t(($) => $.create_project.toast_failed);
+      toast.error(
+        isSharedModeRejectedByServer(raw)
+          ? tProjects(($) => $.resources.mode_shared_rejected_by_server)
+          : raw,
       );
     } finally {
       setSubmitting(false);
@@ -919,6 +954,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                               }}
                               unavailableReason={worktreeUnavailableReason}
                               sharedUnavailable={sharedUnavailable}
+                              sharedUsesLocalOverride={sharedUsesLocalOverride}
                             />
                           </PopoverContent>
                         </Popover>

@@ -12,6 +12,16 @@ export type PickDirectoryResult = {
   error?: string;
 };
 
+export type LocalDirectorySharedOverride = {
+  daemonId: string;
+  localPath: string;
+};
+
+export type SetLocalDirectorySharedOverrideResult = {
+  ok: boolean;
+  error?: string;
+};
+
 export type ValidateLocalDirectoryResult = {
   ok: boolean;
   reason?:
@@ -36,6 +46,14 @@ interface DesktopLocalDirectoryAPI {
   validateLocalDirectory?: (
     path: string,
   ) => Promise<ValidateLocalDirectoryResult>;
+  listLocalDirectorySharedOverrides?: () => Promise<
+    LocalDirectorySharedOverride[]
+  >;
+  setLocalDirectorySharedOverride?: (input: {
+    daemonId: string;
+    localPath: string;
+    enabled: boolean;
+  }) => Promise<SetLocalDirectorySharedOverrideResult>;
 }
 
 function readDesktopAPI(): DesktopLocalDirectoryAPI | undefined {
@@ -67,4 +85,46 @@ export async function validateLocalDirectory(
   const api = readDesktopAPI();
   if (!api?.validateLocalDirectory) return { ok: false, reason: "unsupported" };
   return api.validateLocalDirectory(path);
+}
+
+/** True when this desktop build can persist a skip-mutex override locally. */
+export function canSetLocalDirectorySharedOverride(): boolean {
+  const api = readDesktopAPI();
+  return typeof api?.setLocalDirectorySharedOverride === "function";
+}
+
+export async function listLocalDirectorySharedOverrides(): Promise<
+  LocalDirectorySharedOverride[]
+> {
+  const api = readDesktopAPI();
+  if (!api?.listLocalDirectorySharedOverrides) return [];
+  try {
+    const rows = await api.listLocalDirectorySharedOverrides();
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function setLocalDirectorySharedOverride(input: {
+  daemonId: string;
+  localPath: string;
+  enabled: boolean;
+}): Promise<SetLocalDirectorySharedOverrideResult> {
+  const api = readDesktopAPI();
+  if (!api?.setLocalDirectorySharedOverride) {
+    return { ok: false, error: "unsupported" };
+  }
+  return api.setLocalDirectorySharedOverride(input);
+}
+
+export function localDirectoryOverrideKey(
+  daemonId: string,
+  localPath: string,
+): string {
+  return `${daemonId}\n${normalizeLocalDirectoryOverridePath(localPath)}`;
+}
+
+export function normalizeLocalDirectoryOverridePath(path: string): string {
+  return path.replace(/[\\/]+$/, "") || path;
 }

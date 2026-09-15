@@ -5,10 +5,10 @@ import { FolderOpen, Folders, GitBranch } from "lucide-react";
 import { projectResourcesOptions } from "@multica/core/projects";
 import type { LocalDirectoryResourceRef, ProjectResource } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useLocalDaemonStatus } from "../../platform";
+import { useLocalDaemonStatus, useLocalDirectorySharedOverrides } from "../../platform";
 import { useT } from "../../i18n";
 import { localDirectoryLabel } from "./local-directory-label";
-import { executionModeOf } from "./local-directory-mode";
+import { displayedExecutionMode } from "./local-directory-mode";
 
 /**
  * Banner shown at the top of the issue's Activity section when the
@@ -41,6 +41,7 @@ export function LocalDirectoryHint({
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const daemon = useLocalDaemonStatus();
+  const { hasOverride } = useLocalDirectorySharedOverrides();
   const { data: resources = [] } = useQuery({
     ...projectResourcesOptions(wsId, projectId ?? ""),
     enabled: Boolean(projectId),
@@ -66,7 +67,10 @@ export function LocalDirectoryHint({
         const label = localDirectoryLabel(resource);
         // Absent / unknown modes are in_place: claiming isolation or a
         // lock-free share we cannot verify is the one wrong answer.
-        const mode = executionModeOf(ref);
+        const mode = displayedExecutionMode(
+          ref,
+          hasOverride(ref.daemon_id, ref.local_path),
+        );
         const prefix =
           mode === "worktree"
             ? t(($) => $.resources.chat_hint_worktree_prefix)
