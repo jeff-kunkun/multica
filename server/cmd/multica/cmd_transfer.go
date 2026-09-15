@@ -153,6 +153,14 @@ func runTransferExport(cmd *cobra.Command, _ []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
+	// --workspace is the authoritative source selection for export. Resolve it
+	// before any workspace-scoped request and bind the client to the UUID so
+	// profiles without a default workspace_id work (notably Desktop).
+	workspaceID, err := resolveTransferWorkspaceID(ctx, sourceClient{api: client}, workspace)
+	if err != nil {
+		return fmt.Errorf("resolve source workspace: %w", err)
+	}
+	client.WorkspaceID = workspaceID
 
 	partial := ""
 	if !estimate && outPath != "" {

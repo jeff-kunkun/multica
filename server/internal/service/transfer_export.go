@@ -281,6 +281,27 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 		ExportGaps: gaps,
 		Stats:      stats,
 	}
+	// A transfer that silently succeeds with failed core reads is an empty
+	// shell.  Preserve 404 as the documented compatibility downgrade, but fail
+	// the export for every other gap before the caller can write a zip.
+	if len(gaps) > 0 {
+		failed := make([]string, 0, len(gaps))
+		for _, g := range gaps {
+			if g.Status == 404 && g.Reason == "read_api_missing" {
+				continue
+			}
+			if g.Status != 404 {
+				if g.Status > 0 {
+					failed = append(failed, fmt.Sprintf("%s (%s, status %d)", g.Group, g.Reason, g.Status))
+				} else {
+					failed = append(failed, fmt.Sprintf("%s (%s)", g.Group, g.Reason))
+				}
+			}
+		}
+		if len(failed) > 0 {
+			return nil, fmt.Errorf("export failed for groups: %s", strings.Join(failed, ", "))
+		}
+	}
 	return out, nil
 }
 
@@ -790,26 +811,36 @@ func sourceExportQuickActions(ctx context.Context, src TransferSourceClient, bun
 }
 
 func sourceExportIssueViews(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {
-	var rows []map[string]any
-	if err := getList(ctx, src, "/api/issue-views", &rows); err != nil {
-		gap("issue_views", err)
-		return
+	// The endpoint requires scope_type. Fetch workspace views once, then each
+	// project scope explicitly; a bare /api/issue-views request is a 400.
+	paths := []string{"/api/issue-views?scope_type=workspace"}
+	for _, project := range bundle.Entities.Projects {
+		if project.SourceID != "" {
+			paths = append(paths, "/api/issue-views?scope_type=project&scope_id="+url.QueryEscape(project.SourceID))
+		}
 	}
-	for _, raw := range rows {
-		if strField(raw, "visibility") != "workspace" {
+	for _, path := range paths {
+		var rows []map[string]any
+		if err := getList(ctx, src, path, &rows); err != nil {
+			gap("issue_views", err)
 			continue
 		}
-		bundle.Entities.IssueViews = append(bundle.Entities.IssueViews, ConfigIssueView{
-			SourceID:          strField(raw, "id"),
-			Name:              strField(raw, "name"),
-			ScopeType:         strField(raw, "scope_type"),
-			ScopeID:           strPtrField(raw, "scope_id"),
-			ScopeVariant:      strPtrField(raw, "scope_variant"),
-			Visibility:        strField(raw, "visibility"),
-			DefinitionVersion: int32(floatField(raw, "definition_version")),
-			Query:             rawField(raw, "query"),
-			Display:           rawField(raw, "display"),
-		})
+		for _, raw := range rows {
+			if strField(raw, "visibility") != "workspace" {
+				continue
+			}
+			bundle.Entities.IssueViews = append(bundle.Entities.IssueViews, ConfigIssueView{
+				SourceID:          strField(raw, "id"),
+				Name:              strField(raw, "name"),
+				ScopeType:         strField(raw, "scope_type"),
+				ScopeID:           strPtrField(raw, "scope_id"),
+				ScopeVariant:      strPtrField(raw, "scope_variant"),
+				Visibility:        strField(raw, "visibility"),
+				DefinitionVersion: int32(floatField(raw, "definition_version")),
+				Query:             rawField(raw, "query"),
+				Display:           rawField(raw, "display"),
+			})
+		}
 	}
 	bundle.Stats["issue_views"] = len(bundle.Entities.IssueViews)
 }
