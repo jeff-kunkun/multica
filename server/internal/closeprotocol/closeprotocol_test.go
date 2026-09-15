@@ -273,6 +273,30 @@ func TestValidate_WaitingOnAllowsInReviewAndBlocked(t *testing.T) {
 	}
 }
 
+func TestValidate_AtMustBeUTC(t *testing.T) {
+	meta := base(map[string]string{KeyAt: "2026-09-15T20:00:00+08:00"})
+	if err := Validate(meta, issuestatus.Done, "delivery evidence"); err == nil {
+		t.Fatal("non-UTC RFC3339 timestamp must fail")
+	} else if rule(err) != "at" {
+		t.Fatalf("rule = %q, want at", rule(err))
+	}
+}
+
+func TestValidate_MentionRequiresMarkdownMentionLink(t *testing.T) {
+	meta := base(map[string]string{
+		KeyConclusion:    ConclusionAwaitingReview,
+		KeyStatus:        issuestatus.InReview,
+		KeyNextOwnerType: OwnerAgent,
+		KeyNextOwnerID:   reviewerID,
+		KeyWakeAction:    WakeMention,
+	})
+	if err := Validate(meta, issuestatus.InReview, "mention://agent/"+reviewerID); err == nil {
+		t.Fatal("bare mention URI must not satisfy evidence requirement")
+	} else if rule(err) != "mention" {
+		t.Fatalf("rule = %q, want mention", rule(err))
+	}
+}
+
 func rule(err error) string {
 	var ce *Error
 	if errors.As(err, &ce) {

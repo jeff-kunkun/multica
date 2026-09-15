@@ -132,7 +132,8 @@ func Validate(meta map[string]string, issueStatus, evidenceBody string) error {
 	if at == "" {
 		return &Error{Rule: "at", Msg: "close.at is empty"}
 	}
-	if _, err := time.Parse(time.RFC3339, at); err != nil {
+	parsedAt, err := time.Parse(time.RFC3339, at)
+	if err != nil || parsedAt.Location() != time.UTC {
 		return &Error{Rule: "at", Msg: "close.at must be RFC3339 UTC"}
 	}
 
@@ -229,10 +230,7 @@ func evidenceMentionsOwner(body, ownerType, ownerID string) bool {
 			return true
 		}
 	}
-	// The §6.1 check is a body match on mention://(agent|squad)/<id>, which
-	// is also what the comment trigger parser requires inside a markdown link.
-	needle := "mention://" + ownerType + "/" + ownerID
-	return strings.Contains(body, needle)
+	return false
 }
 
 func evidenceNamesHuman(body string) bool {
