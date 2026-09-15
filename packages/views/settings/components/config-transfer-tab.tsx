@@ -23,7 +23,7 @@ import { autopilotKeys } from "@multica/core/autopilots/queries";
 import { issueStatusKeys } from "@multica/core/issue-statuses/queries";
 import { issueViewKeys } from "@multica/core/issue-views/queries";
 import { labelKeys } from "@multica/core/labels/queries";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { paths, useCurrentWorkspace } from "@multica/core/paths";
 import { useCurrentMember } from "@multica/core/permissions";
 import { projectKeys } from "@multica/core/projects/queries";
 import { propertyKeys } from "@multica/core/properties/queries";
@@ -88,6 +88,34 @@ function downloadJson(value: unknown, filename: string) {
 
 function secretLabel(item: SecretOmitted | SecretToFill): string {
   return [item.entity, item.name, item.field].filter(Boolean).join(" · ");
+}
+
+// The report's `path` follows the contract doc, but `/agents/:id/settings` and
+// `/settings/mcp` are not routes in web or desktop. Build the href from the
+// entity instead so the link lands on the tab where the secret is edited.
+function secretFillHref(item: SecretToFill, slug: string): string | null {
+  if (!slug) return null;
+  const ws = paths.workspace(slug);
+  switch (item.entity) {
+    case "agent": {
+      if (!item.target_id) return null;
+      const view =
+        item.field === "custom_env"
+          ? "env"
+          : item.field === "mcp_config"
+            ? "mcp_config"
+            : item.field.startsWith("runtime_config")
+              ? "runtime_config"
+              : "general";
+      return `${ws.agentDetail(item.target_id)}?view=${view}`;
+    }
+    case "workspace_mcp_server":
+      return `${ws.settings()}?tab=mcp`;
+    case "autopilot_trigger":
+      return item.target_id ? ws.autopilotDetail(item.target_id) : null;
+    default:
+      return null;
+  }
 }
 
 function conflictItems(report: ConfigImportReport): ConfigImportItem[] {
@@ -295,8 +323,9 @@ export function ConfigTransferTab() {
       });
       if (!result.error) {
         toast.success(t(($) => $.config_transfer.import.success));
-        await invalidateImportedQueries();
       }
+      // A partial failure still commits earlier batches, so refresh either way.
+      await invalidateImportedQueries();
     } catch (err) {
       toast.error(
         clientErrorMessage(err) ?? t(($) => $.config_transfer.import.failed),
@@ -610,14 +639,16 @@ export function ConfigTransferTab() {
                 </h3>
                 <SettingsCard>
                   <ul className="divide-y divide-surface-border">
-                    {preview.report.secrets_to_fill.map((item, index) => (
+                    {preview.report.secrets_to_fill.map((item, index) => {
+                      const href = secretFillHref(item, workspace?.slug ?? "");
+                      return (
                       <li
                         key={`${item.entity}-${item.field}-${item.target_id}-${index}`}
                         className="px-4 py-3 text-body"
                       >
-                        {item.path ? (
+                        {href ? (
                           <AppLink
-                            href={item.path}
+                            href={href}
                             className="font-medium text-foreground hover:underline"
                           >
                             {secretLabel(item)}
@@ -626,7 +657,8 @@ export function ConfigTransferTab() {
                           secretLabel(item)
                         )}
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 </SettingsCard>
               </div>
@@ -669,7 +701,7 @@ export function ConfigTransferTab() {
               <div className="flex justify-end">
                 <Button
                   type="button"
-                  disabled={importBusy || Boolean(preview.error && preview.error.code === "config_import_same_workspace")}
+                  disabled={importBusy || Boolean(preview.error)}
                   onClick={() => setConfirmOpen(true)}
                 >
                   {importBusy ? (

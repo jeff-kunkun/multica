@@ -26,7 +26,8 @@ vi.mock("@multica/core/api", async (importOriginal) => {
   };
 });
 
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  paths: (await importOriginal<typeof import("@multica/core/paths")>()).paths,
   useCurrentWorkspace: () => ({
     id: "ws-1",
     name: "Acme",
@@ -95,6 +96,7 @@ const previewReport = {
   secrets_to_fill: [
     {
       entity: "agent",
+      target_id: "a1",
       name: "Builder",
       field: "custom_env",
       path: "/acme/agents/a1/settings",
@@ -195,7 +197,7 @@ describe("ConfigTransferTab", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "agent · Builder · custom_env" })).toHaveAttribute(
       "href",
-      "/acme/agents/a1/settings",
+      "/acme/agents/a1?view=env",
     );
     expect(importWorkspaceConfig).toHaveBeenCalledWith(
       "ws-1",
@@ -232,6 +234,27 @@ describe("ConfigTransferTab", () => {
     expect(screen.getByText("Skipped")).toBeInTheDocument();
     expect(screen.getByText("bug")).toBeInTheDocument();
     expect(screen.getByText(/skipped · already exists/)).toBeInTheDocument();
+  });
+
+  it("blocks apply when the dry run reports a conflict error", async () => {
+    const user = userEvent.setup();
+    importWorkspaceConfig.mockResolvedValue({
+      report: conflictReport,
+      error: { code: "config_import_conflict", message: "import conflicts", status: 409 },
+    });
+    renderTab();
+
+    await user.upload(
+      screen.getByTestId("config-transfer-file"),
+      jsonFile(bundle),
+    );
+
+    expect(
+      await screen.findByText("Import stopped because of a conflict."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Import into this workspace" }),
+    ).toBeDisabled();
   });
 
   it("shows a failure alert when export fails", async () => {
