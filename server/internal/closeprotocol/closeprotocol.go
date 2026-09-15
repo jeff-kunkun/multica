@@ -4,7 +4,8 @@
 // It does not enqueue, mutate issue status, parse mentions for dispatch, or
 // change stage-barrier semantics. Callers write status, the evidence comment,
 // and the keys through existing APIs; this package only says whether a claimed
-// close is complete and consistent.
+// close is complete and consistent. Stage 3 (DENE-232) indexes
+// close.waiting_on as a reverse edge and wakes waiters from the handler.
 package closeprotocol
 
 import (

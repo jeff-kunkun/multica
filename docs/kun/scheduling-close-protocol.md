@@ -295,11 +295,12 @@ Agent 评论必须让人类不看 metadata 也能读懂。固定小标题，顺�
 | T12 | 任务失败 | 不唤醒他人；可能本票 `→ todo` | `HandleFailedTasks` | retry / delegated recovery | 扫描 B；额度类失败（案例 1.5）不得自动换模型（不变约束） |
 | T13 | Autopilot schedule/webhook/manual | autopilot 的 agent/squad leader | autopilot run | `skipped` + `failure_reason` | autopilot runs 列表，不进 issue 扫描 |
 | T14 | `close.wake_action=mention` 的证据评论 | `close.next_owner_id` | 同 T5 | 同 T5 | 扫描 D：metadata 已写但无对应 queued/running task |
-| T15 | `close.waiting_on` 指向的票进入 `done`/`cancelled` | **无人（今天）** | 无边 | 跨票等待静默 | 扫描 D 发现后 mention 本票 assignee。Stage 3 再决定是否升级成父子 stage |
+| T15 | `close.waiting_on` 指向的票进入 `done`/`cancelled` | 等待方 assignee（agent / squad leader） | server 系统评论 + `EnqueueTaskForMention` / `EnqueueTaskForSquadLeader`（`issue_waiting_on.go`，与 T1/T2 同一入队面） | warn 日志，状态已提交 | 扫描 D 补偿（Stage 4）。同一 `(issue, agent)` 已有 queued/running 则跳过 enqueue |
 
 幂等（所有入队共用）：
 
 - `HasPendingTaskForIssueAndAgent` 按 `(issue, agent, reviewed head)` 去重（`issue_child_done.go:749-757`、`issue_trigger.go:203-218`）。
+- T15 跨票等待唤醒按 `HasActiveTaskForIssueAndAgent` 去重：同一 `(issue, agent)` 已有 queued / dispatched / running / waiting_local_directory ⇒ 仍写系统评论，跳过 enqueue（`issue_waiting_on.go` `dispatchWaitingOnAssigneeTrigger`）。
 - 同线程 pending 的 mention 结果是 `coalesced`，禁止重发。
 - 扫描补偿必须先读 pending/active；已有则只写评论不 enqueue。
 
@@ -421,6 +422,8 @@ Dispatcher **禁止**在 Stage N 子票仍是 `in_review`/`blocked`/`in_progress
 
 动作：对本票 assignee（D1）或 `next_owner`（D2）发 mention。覆盖 DENE-209 等 DENE-196、以及 T14 评论 mention 被 invoke gate 挡掉。
 
+Stage 3 已把 D1 的**即时路径**接到被等票进入终态的同一条 status 写入上（`notifyWaitersOfIssueDone`）。扫描 D 仍是 Stage 4 的补偿：即时 enqueue 被吞、或 `close.at` 已过 30 分钟而等待方还没跑时，再 mention 一次，且必须先过 `HasActiveTaskForIssueAndAgent`。
+
 幂等：四个扫描共用「目标 `(issue, agent)` 已有 pending/running ⇒ 跳过 enqueue」。扫描周期建议 5–15 分钟，可挂在现有 `delegatedFailureRecoverySweepInterval` 旁路，**不要**新开 autopilot。
 
 ## 8. 哪些结论会唤醒谁（给 Dispatcher 的速查）
@@ -436,8 +439,56 @@ Dispatcher **禁止**在 Stage N 子票仍是 `in_review`/`blocked`/`in_progress
 
 DENE-230 本票走 `awaiting_review`：Reviewer 醒，布尔玛（父票）要等 PR 合并把本票打成 `done` 之后才被 Stage 1 屏障叫醒，然后才能把 DENE-231 从 `backlog` 提到 `todo`。
 
-## 9. Stage 3–5 接口预告（不在本阶段实现）
+## 9. Stage 3 已落地；Stage 4–5 仍预告
 
-- **Stage 3**：把 `close.waiting_on` 这种隐式等待改成父子 stage 或在被等票 `done` 时走扫描 D。共享同一上游、无资源冲突的工作放进同一 stage（DENE-189 Stage 1 的 190∥191 已是正确形状）。
-- **Stage 4**：实现第 7 节四扫描；Dispatcher 回合收缩为「读 `issue children` + 读 `close.*` + 晋升或短结论」。
+### 9.1 改造规则（DENE-232）
+
+同一家族、共享上游、无资源冲突 → **真实父子 stage**，不要写 `close.waiting_on`。跨家族、无法挂到同一 parent 下 → 写 `close.waiting_on`，被等票进入 `done`/`cancelled` 时由 server 叫醒等待方。
+
+| 形状 | 用什么 | 为什么 |
+| --- | --- | --- |
+| DENE-189 Stage 1：DENE-190 ∥ DENE-191 | 同一 parent、同一 `stage=1` | 共享上游（TEST 现场），无资源冲突。Stage 1 两个都 `done` 才关屏障，父票醒一次 |
+| DENE-196 卡 DENE-189 Stage 3 | 保持父子 stage；禁止把 `in_review` 当完成 | 屏障只认 `done`/`cancelled`。验收未过就该挡下一 stage |
+| DENE-209 等 DENE-196（评论 `01a0a48e-e36d-7dcf-a697-369e7d558061`） | 跨家族：DENE-209 写 `close.waiting_on=DENE-196` | DENE-209 已是 DENE-196 的 unstaged 子票，再反等父票没有 `parent_issue_id` 反边。文字等待不可观察 |
+
+改造前 / 改造后：
+
+```text
+改造前
+  DENE-209 in_review
+    评论：「等 DENE-196 教室复验」
+    无 parent 反边、无 mention://agent、无 close.waiting_on
+    DENE-196 → done 时：无人叫醒 DENE-209
+    发现停滞：靠人看评论，12 分钟级（案例 1.4 Dispatcher 手工 mention）
+
+改造后
+  同家族并行（190∥191 形状）
+    两个子票 stage=1，共享 parent
+    两个都 done → 屏障关 → T1/T2 叫醒父 assignee（已有路径）
+  跨家族等待
+    等待方 close.waiting_on = DENE-196（或 UUID）
+    DENE-196 → done/cancelled
+      → ListIssuesWaitingOn（GIN @>）
+      → 等待方系统评论 + EnqueueTaskForMention
+      → 同一 (issue, agent) 已有 queued/running ⇒ 只写评论，不 enqueue
+    停滞发现：status 写入当回合（秒级），不再等有人读评论
+```
+
+代码落点：
+
+- 查询：`server/pkg/db/queries/issue.sql` `ListIssuesWaitingOn`
+- 唤醒：`server/internal/handler/issue_waiting_on.go`
+- 挂钩：`UpdateIssue`、`BatchUpdateIssues`、`advanceIssueToDone`（与 child-done 同一批终态入口）
+- 幂等：`HasActiveTaskForIssueAndAgent`（queued / dispatched / running / waiting_local_directory）
+- 同家族跳过：等待方若是被等票的 parent，只走 stage 屏障，避免双评论
+
+Agent 写法：
+
+- 能挂到同一 parent 的，用 `--parent` + `--stage N`。共享上游且无资源冲突的放进同一 stage。
+- 不能挂的，收口时 `close.waiting_on=<identifier>`，状态保持 `in_review` / `blocked` / `in_progress`（§6.1 禁止 `done`）。
+- 被等票 `done` 时 **不要** 再 mention 等待方 assignee（server 会叫醒，mention 会双发）。
+
+### 9.2 Stage 4–5（仍未实现）
+
+- **Stage 4**：实现第 7 节四扫描（含扫描 D 的 30 分钟补偿）；Dispatcher 回合收缩为「读 `issue children` + 读 `close.*` + 晋升或短结论」。
 - **Stage 5**：在 `groupSubIssuesByStage`（`issue-detail.tsx:418-440`）旁展示：当前 stage、`close.conclusion`、`close.next_owner_*`、`close.waiting_on`、最近 `last_activity_at`。今日 UI 只有 stage 分组，没有下一唤醒者。

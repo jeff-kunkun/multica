@@ -525,6 +525,11 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"multica issue metadata set",
 				"`in_review` is not a stage terminal",
 				"Builder (PR / needs review)",
+				// DENE-232: Stage 3 waiting_on wake. Same-family waits stay
+				// parent+stage; cross-family waits get a server wake when
+				// the waited-on issue finishes, bounded by queued/running.
+				"Prefer a real parent + stage",
+				"already has a queued or running task",
 			},
 			notWant: []string{
 				// MUL-6966 phase 1 banned teaching the generic KV bag.

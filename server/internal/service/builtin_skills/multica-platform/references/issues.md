@@ -421,7 +421,7 @@ Write order — stop on the first failure:
 | `close.next_owner_type` | `agent` `squad` `member` `none` |
 | `close.next_owner_id` | UUID; `""` when type is `none` |
 | `close.wake_action` | `stage_done` `mention` `none` |
-| `close.waiting_on` | identifier such as `DENE-196`, or `""` |
+| `close.waiting_on` | identifier such as `DENE-196`, or `""`. Prefer a real parent + stage for same-family waits; server wakes the waiter on `done`/`cancelled` unless that `(issue, agent)` already has a queued or running task |
 | `close.at` | RFC3339 UTC |
 
 Decision table (first match). `needs_acceptance` means this issue's AC still

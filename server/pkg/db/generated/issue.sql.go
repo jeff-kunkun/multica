@@ -1214,6 +1214,74 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 	return items, nil
 }
 
+const listIssuesWaitingOn = `-- name: ListIssuesWaitingOn :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at FROM issue
+WHERE workspace_id = $1
+  AND (
+    metadata @> $2::jsonb
+    OR metadata @> $3::jsonb
+  )
+`
+
+type ListIssuesWaitingOnParams struct {
+	WorkspaceID         pgtype.UUID `json:"workspace_id"`
+	WaitingOnIdentifier []byte      `json:"waiting_on_identifier"`
+	WaitingOnID         []byte      `json:"waiting_on_id"`
+}
+
+// DENE-232 Stage 3: waiters in this workspace whose close.waiting_on matches
+// the waited-on issue's identifier (PREFIX-N) or its UUID. Containment uses
+// idx_issue_metadata_gin (jsonb_path_ops). Callers filter terminal / backlog
+// waiters in Go with the same status resolver as child-done.
+func (q *Queries) ListIssuesWaitingOn(ctx context.Context, arg ListIssuesWaitingOnParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listIssuesWaitingOn, arg.WorkspaceID, arg.WaitingOnIdentifier, arg.WaitingOnID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.Stage,
+			&i.Properties,
+			&i.Revision,
+			&i.LastActivityAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenIssues = `-- name: ListOpenIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
