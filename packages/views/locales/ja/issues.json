@@ -121,7 +121,9 @@
   },
   "stage": {
     "none": "ステージなし",
-    "value": "ステージ {{n}}"
+    "value": "ステージ {{n}}",
+    "blocking": "進行を阻止",
+    "queued": "待機中"
   },
   "close_protocol": {
     "missing": "プロトコル未クローズ",
@@ -131,6 +133,7 @@
     "waiting_on": "{{id}} を待機",
     "last_activity_missing": "活動時刻なし"
   },
+  "blocker_summary": { "title": "ブロック中 · 根因 {{count}} 件", "needs_you": "{{count}} 件はあなたの対応が必要", "root": "根本ブロッカー", "propagated": "サブタスクによるブロック" },
   "scope": {
     "all_label": "すべて",
     "all_description": "このワークスペースのすべてのタスク",

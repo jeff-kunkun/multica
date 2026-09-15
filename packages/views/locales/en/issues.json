@@ -123,7 +123,9 @@
   },
   "stage": {
     "none": "No stage",
-    "value": "Stage {{n}}"
+    "value": "Stage {{n}}",
+    "blocking": "Blocking",
+    "queued": "Queued"
   },
   "close_protocol": {
     "missing": "Not closed under protocol",
@@ -133,6 +135,7 @@
     "waiting_on": "Waiting on {{id}}",
     "last_activity_missing": "No activity time"
   },
+  "blocker_summary": { "title": "Blocked · {{count}} root cause(s)", "needs_you": "{{count}} need you", "root": "Root blocker", "propagated": "Blocked by a sub-issue" },
   "scope": {
     "all_label": "All",
     "all_description": "All issues in this workspace",

@@ -5,6 +5,7 @@ import {
   issueBehavesAsAny,
   issueStatusCategory,
   statusCategoryOfKey,
+  deriveBlockerTree,
 } from "@multica/core/issues";
 import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
@@ -77,6 +78,7 @@ import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { SubIssueCloseStrip } from "./sub-issue-close-strip";
+import { SubIssueBlockerBadge, SubIssueBlockerSummary } from "./sub-issue-blocker-summary";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { useNewRunIds } from "./use-run-comment-motion";
@@ -690,6 +692,7 @@ function SubIssueRow({
   childProgress,
   rowProps,
   customProperties,
+  blockerState,
 }: {
   child: Issue;
   /** The sub-issue's OWN children progress (it can itself be a parent). */
@@ -698,6 +701,7 @@ function SubIssueRow({
   rowProps: SubIssueRowProperties;
   /** Workspace custom properties the user opted into showing on rows. */
   customProperties: IssueProperty[];
+  blockerState?: { state: "ROOT" | "PROPAGATED" | "CLEAR"; rootCause?: string };
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -788,6 +792,7 @@ function SubIssueRow({
             />
           }
         />
+        <SubIssueBlockerBadge state={blockerState?.state ?? "CLEAR"} rootCause={blockerState?.rootCause} />
         <AppLink
           href={paths.issueDetail(child.id)}
           className="flex min-w-0 flex-1 items-center gap-2.5"
@@ -3183,6 +3188,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   </div>
                 </div>
 
+                <SubIssueBlockerSummary issue={issue} children={childIssues} />
+
                 {/* Inline batch toolbar — appears next to the rows when
                     selections exist, instead of as a far-away fixed bar. */}
                 <BatchActionToolbar issues={childIssues} placement="inline" />
@@ -3199,7 +3206,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             <div className="bg-muted/40 px-3 py-1 text-micro font-medium uppercase tracking-wider text-muted-foreground">
                               {groupStage == null
                                 ? t(($) => $.stage.none)
-                                : t(($) => $.stage.value, { n: groupStage })}
+                                : <>{t(($) => $.stage.value, { n: groupStage })} · {groupStage === Math.min(...groups.filter((g) => g.stage != null).map((g) => g.stage!)) ? t(($) => $.stage.blocking) : t(($) => $.stage.queued)}</>}
                             </div>
                           )}
                           {items.map((child) => (
@@ -3209,6 +3216,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                               childProgress={subIssueProgress?.get(child.id)}
                               rowProps={subIssueRowProps}
                               customProperties={subIssueCustomProps}
+                              blockerState={(() => {
+                                const node = deriveBlockerTree(issue, {
+                                  childrenByParent: new Map([[issue.id, childIssues]]),
+                                }).nodes.get(child.id);
+                                return node ? { state: node.state, rootCause: node.rootCauses[0]?.identifier } : undefined;
+                              })()}
                             />
                           ))}
                         </Fragment>

@@ -121,7 +121,9 @@
   },
   "stage": {
     "none": "단계 없음",
-    "value": "{{n}}단계"
+    "value": "{{n}}단계",
+    "blocking": "진행 차단",
+    "queued": "대기 중"
   },
   "close_protocol": {
     "missing": "프로토콜로 닫히지 않음",
@@ -131,6 +133,7 @@
     "waiting_on": "{{id}} 대기",
     "last_activity_missing": "활동 시각 없음"
   },
+  "blocker_summary": { "title": "차단됨 · 근본 원인 {{count}}개", "needs_you": "{{count}}개는 조치가 필요합니다", "root": "근본 차단", "propagated": "하위 태스크로 인해 차단됨" },
   "scope": {
     "all_label": "전체",
     "all_description": "이 워크스페이스의 모든 태스크",
