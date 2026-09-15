@@ -48,4 +48,38 @@ describe("deriveBlockerTree", () => {
     }});
     expect(deriveBlockerTree(root).userActionCount).toBe(0);
   });
+
+  it("keeps a non-terminal waiting dependency visible even when its target is clear", () => {
+    const target = issue("DENE-2");
+    const waiting = issue("DENE-1", { metadata: {
+      "close.conclusion": "blocked", "close.block_kind": "dependency", "close.waiting_on": target.identifier,
+    }});
+    const result = deriveBlockerTree(waiting, { issueByIdentifier: { [target.identifier]: target } });
+    expect(result.state).toBe("PROPAGATED");
+    expect(result.rootCauses.map((x) => x.identifier)).toContain(target.identifier);
+  });
+
+  it("retains a dependency reference when the target snapshot is missing", () => {
+    const waiting = issue("DENE-1", { metadata: { "close.waiting_on": "DENE-2" } });
+    const result = deriveBlockerTree(waiting);
+    expect(result.state).toBe("PROPAGATED");
+    expect(result.rootCauses).toEqual([{ id: "DENE-2", identifier: "DENE-2" }]);
+  });
+
+  it("attributes a terminal dependency as a wake_missed root", () => {
+    const target = issue("DENE-2", { status: "cancelled" });
+    const waiting = issue("DENE-1", { metadata: { "close.waiting_on": target.identifier } });
+    const result = deriveBlockerTree(waiting, { issueByIdentifier: { [target.identifier]: target } });
+    expect(result.state).toBe("ROOT");
+    expect(result.rootCauses.map((x) => x.id)).toEqual([waiting.id, target.id]);
+  });
+
+  it("preserves cycle attribution in the root result and node memo", () => {
+    const a = issue("DENE-1", { metadata: { "close.waiting_on": "DENE-2" } });
+    const b = issue("DENE-2", { metadata: { "close.waiting_on": "DENE-1" } });
+    const result = deriveBlockerTree(a, { issueByIdentifier: { [a.identifier]: a, [b.identifier]: b } });
+    expect(result.cycle).toBe(true);
+    expect(result.state).toBe("ROOT");
+    expect(result.nodes.get(a.id)?.cycle).toBe(true);
+  });
 });
