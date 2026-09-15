@@ -236,6 +236,33 @@ func TestValidate_Section61Rules(t *testing.T) {
 	})
 }
 
+func TestStatusMatchesIssue_DENE232Drift(t *testing.T) {
+	// DENE-232 closed with close.status=in_review / awaiting_review, then the
+	// issue moved to done. §6.1 requires equality; this is the automatic check
+	// Stage 4 asked for, not a comment-only reminder.
+	if StatusMatchesIssue(issuestatus.InReview, issuestatus.Done) {
+		t.Fatal("close.status=in_review must not match issue.status=done")
+	}
+	if !StatusMatchesIssue(issuestatus.Done, issuestatus.Done) {
+		t.Fatal("matching statuses must pass")
+	}
+	meta := base(map[string]string{
+		KeyConclusion:    ConclusionAwaitingReview,
+		KeyStatus:        issuestatus.InReview,
+		KeyWakeAction:    WakeMention,
+		KeyNextOwnerType: OwnerAgent,
+		KeyNextOwnerID:   reviewerID,
+	})
+	body := "[@reviewer](mention://agent/" + reviewerID + ")"
+	err := Validate(meta, issuestatus.Done, body)
+	if err == nil {
+		t.Fatal("Validate must reject DENE-232-style close.status drift")
+	}
+	if rule(err) != "status_matches_issue" {
+		t.Fatalf("rule = %q, want status_matches_issue", rule(err))
+	}
+}
+
 func TestValidate_AwaitingHumanDispatcher(t *testing.T) {
 	meta := base(map[string]string{
 		KeyConclusion:    ConclusionAwaitingHuman,

@@ -111,7 +111,7 @@ func Validate(meta map[string]string, issueStatus, evidenceBody string) error {
 	if !issuestatus.IsBuiltIn(status) {
 		return &Error{Rule: "status_canonical", Msg: fmt.Sprintf("close.status %q is not a canonical status key", status)}
 	}
-	if status != issueStatus {
+	if !StatusMatchesIssue(status, issueStatus) {
 		return &Error{Rule: "status_matches_issue", Msg: fmt.Sprintf("close.status %q != issue.status %q", status, issueStatus)}
 	}
 	if evidenceID == "" {
@@ -199,6 +199,13 @@ func Validate(meta map[string]string, issueStatus, evidenceBody string) error {
 	}
 
 	return nil
+}
+
+// StatusMatchesIssue is the §6.1 assertion Stage 4 must be able to check
+// automatically: close.status equals the issue's current status. DENE-232
+// drifted (close.status=in_review while the issue was already done).
+func StatusMatchesIssue(closeStatus, issueStatus string) bool {
+	return closeStatus == issueStatus
 }
 
 func allowedConclusion(v string) bool {

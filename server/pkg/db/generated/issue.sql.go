@@ -1485,6 +1485,209 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 	return items, nil
 }
 
+const listWatchdogCloseProtocolIssues = `-- name: ListWatchdogCloseProtocolIssues :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at
+FROM issue
+WHERE (
+    COALESCE(metadata->>'close.waiting_on', '') <> ''
+    OR metadata->>'close.wake_action' = 'mention'
+  )
+  AND ($1::uuid IS NULL OR workspace_id = $1)
+ORDER BY updated_at ASC
+LIMIT $2::int
+`
+
+type ListWatchdogCloseProtocolIssuesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	MaxRows     int32       `json:"max_rows"`
+}
+
+// DENE-233 scan D: explicit close.waiting_on or wake_action=mention.
+func (q *Queries) ListWatchdogCloseProtocolIssues(ctx context.Context, arg ListWatchdogCloseProtocolIssuesParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listWatchdogCloseProtocolIssues, arg.WorkspaceID, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.Stage,
+			&i.Properties,
+			&i.Revision,
+			&i.LastActivityAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWatchdogInProgressIssues = `-- name: ListWatchdogInProgressIssues :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at
+FROM issue
+WHERE status = 'in_progress'
+  AND assignee_type IN ('agent', 'squad')
+  AND COALESCE(last_activity_at, updated_at) < $1::timestamptz
+  AND ($2::uuid IS NULL OR workspace_id = $2)
+ORDER BY last_activity_at ASC
+LIMIT $3::int
+`
+
+type ListWatchdogInProgressIssuesParams struct {
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	MaxRows     int32              `json:"max_rows"`
+}
+
+// DENE-233 scan B: canonical in_progress rows with an agent/squad assignee
+// whose last_activity_at is older than stale_before.
+func (q *Queries) ListWatchdogInProgressIssues(ctx context.Context, arg ListWatchdogInProgressIssuesParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listWatchdogInProgressIssues, arg.StaleBefore, arg.WorkspaceID, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.Stage,
+			&i.Properties,
+			&i.Revision,
+			&i.LastActivityAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWatchdogParentIssues = `-- name: ListWatchdogParentIssues :many
+SELECT p.id, p.workspace_id, p.title, p.description, p.status, p.priority, p.assignee_type, p.assignee_id, p.creator_type, p.creator_id, p.parent_issue_id, p.acceptance_criteria, p.context_refs, p.position, p.due_date, p.created_at, p.updated_at, p.number, p.project_id, p.origin_type, p.origin_id, p.first_executed_at, p.start_date, p.metadata, p.stage, p.properties, p.revision, p.last_activity_at
+FROM issue p
+WHERE p.assignee_type IN ('agent', 'squad')
+  AND ($1::uuid IS NULL OR p.workspace_id = $1)
+  AND EXISTS (SELECT 1 FROM issue c WHERE c.parent_issue_id = p.id)
+ORDER BY p.updated_at ASC
+LIMIT $2::int
+`
+
+type ListWatchdogParentIssuesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	MaxRows     int32       `json:"max_rows"`
+}
+
+// DENE-233 scan A: parents with an agent/squad assignee and at least one
+// child. Status filtering (skip done/cancelled/backlog) happens in Go via
+// the same childStatusResolver child-done uses, so custom statuses inherit
+// category. workspace_id NULL scans every workspace.
+func (q *Queries) ListWatchdogParentIssues(ctx context.Context, arg ListWatchdogParentIssuesParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listWatchdogParentIssues, arg.WorkspaceID, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.Stage,
+			&i.Properties,
+			&i.Revision,
+			&i.LastActivityAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockIssueDuplicateKey = `-- name: LockIssueDuplicateKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 `

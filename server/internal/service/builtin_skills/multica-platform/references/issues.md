@@ -460,9 +460,22 @@ Role defaults:
 | Operator ship/ops delivery | `delivered` | `done` | `stage_done`, or mention the next seat if AC says so |
 | Dispatcher promoting the next stage | do not write child `close.*` | child `backlog → todo` | server enqueues. Keep the parent `in_progress` until the chain is done |
 
+A Dispatcher advancement turn is only: `multica issue children`, read `close.*`
+on the parent and the current stage's children, then either promote the next
+stage's `backlog` children to `todo` or post a short conclusion. Do not rebuild
+a panorama board (no unbounded comment history, no workspace-wide dump). Bound
+comment reads with `--roots-only --summary` then `--thread <id> --tail N`. CLI
+commands already carry `APITimeout()`; do not wait on a hung long list.
+
 Dispatcher must not promote Stage N+1 while Stage N still has a child in
 `in_review` / `blocked` / `in_progress`. Promote only when that stage's `done`
 count equals `total` (cancelled counts as done).
+
+Stage 4 compensation scans (server, every 5 minutes) mention the parent
+assignee or `close.next_owner` when a barrier closed with nobody running, an
+`in_progress` issue has been idle 30 minutes with no active task, a child-done
+wake failed, or `close.waiting_on` / `close.wake_action=mention` stalled. They
+never write `done`, never promote `backlog` children, and never change models.
 
 Checks: `close.status` equals `issue.status` and is a built-in key;
 `wake_action=stage_done` implies status in {`done`,`cancelled`} and

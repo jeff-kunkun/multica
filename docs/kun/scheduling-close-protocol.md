@@ -384,7 +384,7 @@ Dispatcher **禁止**在 Stage N 子票仍是 `in_review`/`blocked`/`in_progress
 
 ## 7. 唤醒失败的补偿扫描入口（Stage 4 实现，本页把查询写死）
 
-今天没有扫描。child-done 失败是 best-effort warn（`issue_child_done.go:67-69`）。Stage 4 实现下面四个入口；每个入口命中后的动作只能是：**一条带 `mention://agent|squad` 的评论**（或对已有 pending 的目标只写人读评论）。禁止自动 `done`，禁止自动晋升 `backlog` 子票，禁止换模型。
+Stage 4（DENE-233）实现下面四个入口，挂在 `delegatedFailureRecoverySweepInterval` 旁路（5 分钟，单轮 30 秒 timeout）。每个入口命中后的动作只能是：**一条带 `mention://agent|squad` 的评论**（或对已有 pending 的目标只写人读评论）。禁止自动 `done`，禁止自动晋升 `backlog` 子票，禁止换模型。child-done 五类失败另写入 `stage_wakeup_failure`。
 
 ### 扫描 A — stage 屏障该关未关 / 关了父票没人跑
 
@@ -488,7 +488,7 @@ Agent 写法：
 - 不能挂的，收口时 `close.waiting_on=<identifier>`，状态保持 `in_review` / `blocked` / `in_progress`（§6.1 禁止 `done`）。
 - 被等票 `done` 时 **不要** 再 mention 等待方 assignee（server 会叫醒，mention 会双发）。
 
-### 9.2 Stage 4–5（仍未实现）
+### 9.2 Stage 4（已落地，DENE-233）与 Stage 5
 
-- **Stage 4**：实现第 7 节四扫描（含扫描 D 的 30 分钟补偿）；Dispatcher 回合收缩为「读 `issue children` + 读 `close.*` + 晋升或短结论」。
+- **Stage 4**：第 7 节四扫描挂在 `delegatedFailureRecoverySweepInterval`（5 分钟）旁路，单轮 30 秒 timeout。命中后只写一条带 `mention://agent|squad` 的系统评论；目标 `(issue, agent)` 已有 queued/dispatched/running/waiting_local_directory 则跳过 enqueue。child-done 五类失败写入 `stage_wakeup_failure`。`close.status` 必须等于 `issue.status` 由 `closeprotocol.StatusMatchesIssue` 断言。Dispatcher 推进回合收缩为：读 `issue children` + 读 `close.*` + 晋升或短结论，禁止重型全景看板。
 - **Stage 5**：在 `groupSubIssuesByStage`（`issue-detail.tsx:418-440`）旁展示：当前 stage、`close.conclusion`、`close.next_owner_*`、`close.waiting_on`、最近 `last_activity_at`。今日 UI 只有 stage 分组，没有下一唤醒者。

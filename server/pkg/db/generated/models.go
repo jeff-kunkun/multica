@@ -1309,6 +1309,17 @@ type SquadMember struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type StageWakeupFailure struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
+	ChildIssueID  pgtype.UUID        `json:"child_issue_id"`
+	Kind          string             `json:"kind"`
+	Error         pgtype.Text        `json:"error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	SweptAt       pgtype.Timestamptz `json:"swept_at"`
+}
+
 type SysCronExecution struct {
 	ID           pgtype.UUID        `json:"id"`
 	JobName      string             `json:"job_name"`
