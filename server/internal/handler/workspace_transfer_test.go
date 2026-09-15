@@ -53,6 +53,36 @@ func TestTransferConfig_RejectsSecret(t *testing.T) {
 	}
 }
 
+func TestTransferConfig_EchoesExportGaps(t *testing.T) {
+	_, dst := setupConfigWorkspaces(t)
+	dry := true
+	body := map[string]any{
+		"dry_run":     dry,
+		"on_conflict": "skip",
+		"manifest": map[string]any{
+			"format":         service.TransferBundleFormat,
+			"schema_version": 1,
+			"export_gaps": []map[string]any{
+				{"group": "skills", "reason": "plugin_skills_unfiltered", "status": 503},
+			},
+		},
+		"config": map[string]any{
+			"format":         service.ConfigBundleFormat,
+			"schema_version": 1,
+			"bundle_id":      uuid.NewString(),
+			"exported_at":    "2026-09-15T00:00:00Z",
+			"source":         map[string]any{"workspace_id": uuid.NewString(), "slug": "x", "name": "x", "exported_by": testUserID},
+			"entities":       map[string]any{},
+		},
+	}
+	resp := testutil.Call(t, testHandler.ImportWorkspaceTransferConfig, transferReq("POST", "/api/workspaces/"+dst+"/transfer/config", dst, body)).Want(http.StatusOK)
+	var report service.TransferConfigReport
+	resp.JSON(&report)
+	if len(report.ExportGaps) != 1 || report.ExportGaps[0].Reason != "plugin_skills_unfiltered" || report.ExportGaps[0].Status != 503 {
+		t.Fatalf("export_gaps=%v body=%s", report.ExportGaps, resp.Text())
+	}
+}
+
 func TestTransferConfig_AgentActorForbidden(t *testing.T) {
 	_, dst := setupConfigWorkspaces(t)
 	agentID := dbfx.Agent(t, "XferActor-"+uuid.NewString()[:6], "", testutil.Cols{"workspace_id": dst})

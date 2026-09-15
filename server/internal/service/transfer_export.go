@@ -397,7 +397,7 @@ func exportConfigGroups(ctx context.Context, src TransferSourceClient, wsID stri
 		bundle.Stats["issue_properties"] = len(bundle.Entities.IssueProperties)
 	}
 
-	sourceExportSkills(ctx, src, bundle, &gaps, gap)
+	sourceExportSkills(ctx, src, wsID, bundle, &gaps, gap)
 	exportAgentsGroup(ctx, src, bundle, &gaps, gap)
 	sourceExportSquads(ctx, src, bundle, people, &gaps, gap)
 	sourceExportProjects(ctx, src, bundle, &gaps, gap)
@@ -410,17 +410,30 @@ func exportConfigGroups(ctx context.Context, src TransferSourceClient, wsID stri
 
 func bundleSettings(_ TransferSourceClient, _ string) []byte { return []byte("{}") }
 
-func sourceExportSkills(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {
+func sourceExportSkills(ctx context.Context, src TransferSourceClient, wsID string, bundle *ConfigBundle, gaps *[]TransferExportGap, gap func(string, error)) {
+	pluginSkills, pluginErr := pluginContributedSkillNames(ctx, src, wsID)
+	if pluginErr != nil {
+		g := TransferExportGap{Group: "skills", Reason: "plugin_skills_unfiltered"}
+		if st := transferStatus(pluginErr); st > 0 {
+			g.Status = st
+		}
+		*gaps = append(*gaps, g)
+		pluginSkills = nil
+	}
 	var skills []map[string]any
 	if err := getList(ctx, src, "/api/skills", &skills); err != nil {
 		gap("skills", err)
 		return
 	}
 	for _, raw := range skills {
+		name := strField(raw, "name")
+		if pluginSkills[name] {
+			continue
+		}
 		id := strField(raw, "id")
 		sk := ConfigSkill{
 			SourceID:    id,
-			Name:        strField(raw, "name"),
+			Name:        name,
 			Description: strField(raw, "description"),
 			Content:     strField(raw, "content"),
 			Config:      rawField(raw, "config"),
@@ -442,6 +455,35 @@ func sourceExportSkills(ctx context.Context, src TransferSourceClient, bundle *C
 	bundle.Stats["skills"] = len(bundle.Entities.Skills)
 }
 
+// pluginContributedSkillNames reads GET /api/workspaces/{id}/plugins and
+// returns skill names contributed by installed plugins (resources[].type ==
+// "skill", key is the workspace-unique skill name). A 503 (PluginsV1 off) or
+// any other read failure is returned so the caller can export every skill and
+// record plugin_skills_unfiltered.
+func pluginContributedSkillNames(ctx context.Context, src TransferSourceClient, wsID string) (map[string]bool, error) {
+	var plugins []map[string]any
+	if err := getList(ctx, src, "/api/workspaces/"+url.PathEscape(wsID)+"/plugins", &plugins); err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, raw := range plugins {
+		resources, _ := raw["resources"].([]any)
+		for _, r := range resources {
+			m, ok := r.(map[string]any)
+			if !ok {
+				continue
+			}
+			if strField(m, "type") != "skill" {
+				continue
+			}
+			if key := strField(m, "key"); key != "" {
+				out[key] = true
+			}
+		}
+	}
+	return out, nil
+}
+
 func exportAgentsGroup(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {
 	var agents []map[string]any
 	if err := getList(ctx, src, "/api/agents", &agents); err != nil {
@@ -451,7 +493,10 @@ func exportAgentsGroup(ctx context.Context, src TransferSourceClient, bundle *Co
 	for _, raw := range agents {
 		id := strField(raw, "id")
 		sysKey := strField(raw, "system_key")
-		if sysKey != "" && strField(raw, "kind") == "system" {
+		if strings.HasPrefix(sysKey, "agent_builder:") {
+			continue
+		}
+		if sysKey != "" {
 			bundle.Entities.SystemAgents = append(bundle.Entities.SystemAgents, ConfigSystemAgent{
 				SystemKey:             sysKey,
 				Instructions:          strField(raw, "instructions"),
