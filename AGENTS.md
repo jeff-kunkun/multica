@@ -54,8 +54,4 @@ make test             # Go tests
 make check            # Full verification pipeline
 ```
 
-## 工作单
-
-工作单住 Multica Issues，用 `multica` CLI。代码 PR 走 GitHub（`jeff-kunkun/multica`）：标题带 identifier，关单写 `Closes DENE-N`。不要再开 GitHub issue。
-
 See CLAUDE.md for the authoritative rules and common commands.
