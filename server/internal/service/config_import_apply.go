@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -486,7 +487,11 @@ func (st *importState) importAgents(ctx context.Context, q *db.Queries, dry bool
 					ID:                       id,
 					Name:                     pgtype.Text{String: name, Valid: true},
 					Description:              pgtype.Text{String: ag.Description, Valid: true},
-					RuntimeConfig:            stripped,
+					AvatarUrl:                optionalText(ag.AvatarURL),
+					Model:                    optionalText(ag.Model),
+					ThinkingLevel:            optionalText(ag.ThinkingLevel),
+					ServiceTier:              optionalText(ag.ServiceTier),
+					RuntimeConfig:            keepTargetGatewayToken(stripped, existing.RuntimeConfig),
 					RuntimeMode:              pgtype.Text{String: ag.RuntimeMode, Valid: true},
 					Visibility:               pgtype.Text{String: ag.Visibility, Valid: true},
 					PermissionMode:           pgtype.Text{String: ag.PermissionMode, Valid: true},
@@ -497,10 +502,12 @@ func (st *importState) importAgents(ctx context.Context, q *db.Queries, dry bool
 					ComposioToolkitAllowlist: ag.ComposioToolkitAllowlist,
 				})
 				if err == nil {
-					_ = q.RemoveAllAgentSkills(ctx, id)
-					_ = q.DeleteAgentLabelAssignmentsByAgent(ctx, id)
-					_ = q.DeleteAgentMcpServersByAgent(ctx, id)
-					_ = q.DeleteAgentInvocationTargets(ctx, id)
+					err = errors.Join(
+						q.RemoveAllAgentSkills(ctx, id),
+						q.DeleteAgentLabelAssignmentsByAgent(ctx, id),
+						q.DeleteAgentMcpServersByAgent(ctx, id),
+						q.DeleteAgentInvocationTargets(ctx, id),
+					)
 				}
 			}
 			if err != nil {
@@ -726,7 +733,9 @@ func (st *importState) importSquads(ctx context.Context, q *db.Queries, dry bool
 				if err != nil {
 					return "", err
 				}
-				_ = q.DeleteSquadMembersBySquad(ctx, id)
+				if err := q.DeleteSquadMembersBySquad(ctx, id); err != nil {
+					return "", err
+				}
 				_, _ = q.AddSquadMember(ctx, db.AddSquadMemberParams{
 					SquadID: row.ID, MemberType: "agent", MemberID: leader, Role: "leader",
 				})
@@ -734,6 +743,14 @@ func (st *importState) importSquads(ctx context.Context, q *db.Queries, dry bool
 			for i, m := range sq.Members {
 				if m.Role == "leader" {
 					continue
+				}
+				// A leader reassigned to an existing member keeps its old role in
+				// squad_member; inserting it again would violate the unique key
+				// and abort the whole batch transaction.
+				if m.MemberType == "agent" {
+					if tid, ok := st.get("agent", m.MemberID); ok && tid == leaderTID {
+						continue
+					}
 				}
 				var mid pgtype.UUID
 				switch m.MemberType {
@@ -1023,16 +1040,23 @@ func (st *importState) importAutopilots(ctx context.Context, q *db.Queries, dry 
 					IssueTitleTemplate: tpl, ProjectID: projectID,
 				})
 				if err == nil && action == ActionUpdated {
-					existingTrigs, _ := q.ListAutopilotTriggerIDs(ctx, id)
-					keepWebhook := map[string]pgtype.Text{}
+					existingTrigs, err := q.ListAutopilotTriggerIDs(ctx, id)
+					if err != nil {
+						return "", err
+					}
+					keepWebhook := map[string]keptWebhook{}
 					for _, t := range existingTrigs {
 						if t.Kind == "webhook" {
-							keepWebhook[textOrEmpty(t.Label)] = t.WebhookToken
+							keepWebhook[textOrEmpty(t.Label)] = keptWebhook{token: t.WebhookToken, signingSecret: t.SigningSecret}
 						}
 					}
-					_ = q.DeleteAutopilotTriggersByAutopilot(ctx, id)
-					_ = q.DeleteAutopilotSubscribersForAutopilot(ctx, id)
-					_ = q.DeleteAutopilotCollaboratorsForAutopilot(ctx, id)
+					if err := errors.Join(
+						q.DeleteAutopilotTriggersByAutopilot(ctx, id),
+						q.DeleteAutopilotSubscribersForAutopilot(ctx, id),
+						q.DeleteAutopilotCollaboratorsForAutopilot(ctx, id),
+					); err != nil {
+						return "", err
+					}
 					if err := st.writeAutopilotRel(ctx, q, row, ap, keepWebhook); err != nil {
 						return "", err
 					}
@@ -1086,18 +1110,25 @@ func (st *importState) importAutopilots(ctx context.Context, q *db.Queries, dry 
 	return items, nil
 }
 
-func (st *importState) writeAutopilotRel(ctx context.Context, q *db.Queries, row db.Autopilot, ap ConfigAutopilot, keepWebhook map[string]pgtype.Text) error {
+// keptWebhook carries a target webhook trigger's secrets across the
+// delete-and-recreate that overwrite performs.
+type keptWebhook struct {
+	token         pgtype.Text
+	signingSecret pgtype.Text
+}
+
+func (st *importState) writeAutopilotRel(ctx context.Context, q *db.Queries, row db.Autopilot, ap ConfigAutopilot, keepWebhook map[string]keptWebhook) error {
 	for _, t := range ap.Triggers {
 		token := pgtype.Text{}
+		signingSecret := pgtype.Text{}
 		if t.Kind == "webhook" {
 			lab := ""
 			if t.Label != nil {
 				lab = *t.Label
 			}
-			if keepWebhook != nil {
-				if existing, ok := keepWebhook[lab]; ok && existing.Valid {
-					token = existing
-				}
+			if existing, ok := keepWebhook[lab]; ok && existing.token.Valid {
+				token = existing.token
+				signingSecret = existing.signingSecret
 			}
 			if !token.Valid {
 				tok, err := generateImportWebhookToken()
@@ -1132,7 +1163,7 @@ func (st *importState) writeAutopilotRel(ctx context.Context, q *db.Queries, row
 		if len(t.EventFilters) > 0 && string(t.EventFilters) != "null" {
 			filters = []byte(t.EventFilters)
 		}
-		_, err := q.CreateAutopilotTrigger(ctx, db.CreateAutopilotTriggerParams{
+		trig, err := q.CreateAutopilotTrigger(ctx, db.CreateAutopilotTriggerParams{
 			AutopilotID: row.ID, Kind: t.Kind, Enabled: t.Enabled,
 			CronExpression: cron, Timezone: tz, WebhookToken: token, Label: label,
 			Provider: provider, EventFilters: filters,
@@ -1143,6 +1174,13 @@ func (st *importState) writeAutopilotRel(ctx context.Context, q *db.Queries, row
 		})
 		if err != nil {
 			return err
+		}
+		if signingSecret.Valid && signingSecret.String != "" {
+			if _, err := q.SetAutopilotTriggerSigningSecret(ctx, db.SetAutopilotTriggerSigningSecretParams{
+				ID: trig.ID, SigningSecret: signingSecret,
+			}); err != nil {
+				return err
+			}
 		}
 	}
 	for i, s := range ap.Subscribers {

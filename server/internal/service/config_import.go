@@ -129,6 +129,22 @@ func ImportWorkspaceConfig(ctx context.Context, env ConfigImportEnv, req ConfigI
 	}
 
 	dry := *req.DryRun
+	if !dry {
+		// Hold one lock transaction open for the whole apply so a concurrent
+		// import cannot interleave between batch commits.
+		lockTx, err := env.TxStarter.Begin(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("begin import lock tx: %w", err)
+		}
+		defer func() { _ = lockTx.Rollback(context.WithoutCancel(ctx)) }()
+		locked, err := env.Queries.WithTx(lockTx).TryConfigImportLock(ctx, uuidString(env.TargetID))
+		if err != nil {
+			return nil, fmt.Errorf("acquire import lock: %w", err)
+		}
+		if !locked {
+			return nil, &ImportError{Status: 409, Code: "config_import_in_progress", Msg: "another import is in progress"}
+		}
+	}
 	var conflictItems []ConfigImportBatch
 	for _, et := range order {
 		if !st.include[et] {
@@ -212,13 +228,6 @@ func (st *importState) applyBatch(ctx context.Context, et string) ([]ConfigImpor
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := st.env.Queries.WithTx(tx)
-	locked, err := q.TryConfigImportLock(ctx, uuidString(st.env.TargetID))
-	if err != nil {
-		return nil, err
-	}
-	if !locked {
-		return nil, &ImportError{Status: 409, Code: "config_import_in_progress", Msg: "another import is in progress"}
-	}
 	items, err := st.runBatch(ctx, q, et, false)
 	if err != nil {
 		return items, err

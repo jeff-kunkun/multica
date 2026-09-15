@@ -1547,17 +1547,18 @@ func (q *Queries) GetWorkspaceMcpServerByName(ctx context.Context, arg GetWorksp
 }
 
 const listAutopilotTriggerIDs = `-- name: ListAutopilotTriggerIDs :many
-SELECT id, kind, label, webhook_token
+SELECT id, kind, label, webhook_token, signing_secret
 FROM autopilot_trigger
 WHERE autopilot_id = $1
 ORDER BY created_at ASC
 `
 
 type ListAutopilotTriggerIDsRow struct {
-	ID           pgtype.UUID `json:"id"`
-	Kind         string      `json:"kind"`
-	Label        pgtype.Text `json:"label"`
-	WebhookToken pgtype.Text `json:"webhook_token"`
+	ID            pgtype.UUID `json:"id"`
+	Kind          string      `json:"kind"`
+	Label         pgtype.Text `json:"label"`
+	WebhookToken  pgtype.Text `json:"webhook_token"`
+	SigningSecret pgtype.Text `json:"signing_secret"`
 }
 
 func (q *Queries) ListAutopilotTriggerIDs(ctx context.Context, autopilotID pgtype.UUID) ([]ListAutopilotTriggerIDsRow, error) {
@@ -1574,6 +1575,7 @@ func (q *Queries) ListAutopilotTriggerIDs(ctx context.Context, autopilotID pgtyp
 			&i.Kind,
 			&i.Label,
 			&i.WebhookToken,
+			&i.SigningSecret,
 		); err != nil {
 			return nil, err
 		}
@@ -1638,8 +1640,8 @@ const tryConfigImportLock = `-- name: TryConfigImportLock :one
 SELECT pg_try_advisory_xact_lock(hashtextextended('config_import:' || $1::text, 0))
 `
 
-// Transaction-scoped lock used as a backstop inside each import batch.
-// The handler also holds a session lock for the whole apply.
+// Transaction-scoped lock taken by a dedicated transaction that stays open
+// for the whole apply, serialising imports into one workspace.
 func (q *Queries) TryConfigImportLock(ctx context.Context, dollar_1 string) (bool, error) {
 	row := q.db.QueryRow(ctx, tryConfigImportLock, dollar_1)
 	var pg_try_advisory_xact_lock bool

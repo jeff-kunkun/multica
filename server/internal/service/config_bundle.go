@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -56,8 +57,47 @@ var configEntityTypes = []string{
 
 var secretKeyDenylist = map[string]struct{}{
 	"token": {}, "secret": {}, "password": {}, "passwd": {},
-	"api_key": {}, "apikey": {}, "authorization": {},
-	"private_key": {}, "credential": {},
+	"apikey": {}, "authorization": {}, "privatekey": {},
+	"credential": {}, "credentials": {},
+}
+
+// secretKeyName reports whether a JSON key names secret material. Keys are
+// split into words on separators and camelCase boundaries, so compound names
+// such as access_token, GITHUB_TOKEN, clientSecret and x-api-key match while
+// max_tokens does not. Adjacent word pairs cover api_key / private_key.
+func secretKeyName(key string) bool {
+	var words []string
+	var cur []rune
+	flush := func() {
+		if len(cur) > 0 {
+			words = append(words, strings.ToLower(string(cur)))
+			cur = cur[:0]
+		}
+	}
+	runes := []rune(key)
+	for i, r := range runes {
+		switch {
+		case !unicode.IsLetter(r) && !unicode.IsDigit(r):
+			flush()
+		case unicode.IsUpper(r) && i > 0 && unicode.IsLower(runes[i-1]):
+			flush()
+			cur = append(cur, r)
+		default:
+			cur = append(cur, r)
+		}
+	}
+	flush()
+	for i, w := range words {
+		if _, hit := secretKeyDenylist[w]; hit {
+			return true
+		}
+		if i+1 < len(words) {
+			if _, hit := secretKeyDenylist[w+words[i+1]]; hit {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ConfigBundle is the on-wire workspace configuration package.
@@ -515,6 +555,42 @@ func stripGatewayToken(runtimeConfig []byte) (json.RawMessage, bool) {
 	return out, had
 }
 
+// keepTargetGatewayToken copies the target agent's existing gateway.token into
+// an imported runtime_config whose token was stripped, so overwrite never
+// clears a secret the bundle cannot carry.
+func keepTargetGatewayToken(imported json.RawMessage, target []byte) json.RawMessage {
+	var tgt map[string]any
+	if err := json.Unmarshal(target, &tgt); err != nil {
+		return imported
+	}
+	tgtGW, _ := tgt["gateway"].(map[string]any)
+	token, _ := tgtGW["token"].(string)
+	if token == "" {
+		return imported
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(imported, &obj); err != nil {
+		return imported
+	}
+	gw, ok := obj["gateway"].(map[string]any)
+	if !ok || gw["token"] != nil {
+		return imported
+	}
+	gw["token"] = token
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return imported
+	}
+	return out
+}
+
+func optionalText(s *string) pgtype.Text {
+	if s == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *s, Valid: true}
+}
+
 func mcpTransportFromFlags(configType string, hasCommand, hasURL bool) string {
 	declared := strings.ToLower(strings.TrimSpace(configType))
 	if declared != "" {
@@ -571,8 +647,7 @@ func sanitizeValue(v any, path string, extra *[]SecretOmitted) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, child := range t {
-			lk := strings.ToLower(k)
-			if _, hit := secretKeyDenylist[lk]; hit {
+			if secretKeyName(k) {
 				if child != nil {
 					t[k] = nil
 					*extra = append(*extra, SecretOmitted{

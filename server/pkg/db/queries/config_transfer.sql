@@ -12,8 +12,8 @@ SELECT EXISTS(
 ) AS exists;
 
 -- name: TryConfigImportLock :one
--- Transaction-scoped lock used as a backstop inside each import batch.
--- The handler also holds a session lock for the whole apply.
+-- Transaction-scoped lock taken by a dedicated transaction that stays open
+-- for the whole apply, serialising imports into one workspace.
 SELECT pg_try_advisory_xact_lock(hashtextextended('config_import:' || $1::text, 0));
 
 -- name: PatchWorkspaceConfigImport :one
@@ -249,7 +249,7 @@ LIMIT 1;
 DELETE FROM autopilot_trigger WHERE autopilot_id = $1;
 
 -- name: ListAutopilotTriggerIDs :many
-SELECT id, kind, label, webhook_token
+SELECT id, kind, label, webhook_token, signing_secret
 FROM autopilot_trigger
 WHERE autopilot_id = $1
 ORDER BY created_at ASC;

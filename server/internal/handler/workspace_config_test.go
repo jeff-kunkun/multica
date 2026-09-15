@@ -210,6 +210,74 @@ func TestWorkspaceConfigImport_OverwritePreservesCustomEnv(t *testing.T) {
 	}
 }
 
+// Regression: overwrite used to replace runtime_config wholesale (dropping the
+// target gateway token) and recreate webhook triggers without their
+// signing_secret, which silently disabled signature verification.
+func TestWorkspaceConfigImport_OverwritePreservesGatewayTokenAndSigningSecret(t *testing.T) {
+	src, dst := setupConfigWorkspaces(t)
+	suf := uuid.NewString()[:8]
+	agentName := "GW-" + suf
+	apTitle := "Hook-" + suf
+	srcAgent := dbfx.Agent(t, agentName, "", testutil.Cols{
+		"workspace_id":   src,
+		"runtime_config": testutil.Raw(`'{"mode":"gateway","gateway":{"url":"http://new","token":"SRC_GW"}}'::jsonb`),
+		"visibility":     "workspace",
+	})
+	dstAgent := dbfx.Agent(t, agentName, "", testutil.Cols{
+		"workspace_id":   dst,
+		"runtime_config": testutil.Raw(`'{"mode":"gateway","gateway":{"url":"http://old","token":"DST_GW"}}'::jsonb`),
+		"visibility":     "workspace",
+	})
+	for ws, agent := range map[string]string{src: srcAgent, dst: dstAgent} {
+		apID := dbfx.Insert(t, "autopilot", testutil.Cols{
+			"workspace_id": ws, "title": apTitle, "assignee_type": "agent", "assignee_id": agent,
+			"status": "paused", "execution_mode": "create_issue", "created_by_type": "member", "created_by_id": testUserID,
+		})
+		dbfx.Insert(t, "autopilot_trigger", testutil.Cols{
+			"autopilot_id": apID, "kind": "webhook", "enabled": true, "label": "CI",
+			"webhook_token": "awt_" + uuid.NewString(), "signing_secret": "SIG_" + ws,
+			"created_by_type": "member", "created_by_id": testUserID,
+		})
+	}
+
+	bundle := exportBundle(t, src)
+	_ = importReport(t, dst, map[string]any{
+		"bundle": bundle, "dry_run": false, "on_conflict": "overwrite", "include": []string{"agents", "autopilots"},
+	}, http.StatusOK)
+
+	var token, url string
+	dbfx.QueryRow(t, `SELECT runtime_config #>> '{gateway,token}', runtime_config #>> '{gateway,url}' FROM agent WHERE id = $1`, dstAgent).Scan(&token, &url)
+	if token != "DST_GW" || url != "http://new" {
+		t.Fatalf("overwrite gateway: token=%q url=%q, want DST_GW / http://new", token, url)
+	}
+	var secret string
+	dbfx.QueryRow(t, `SELECT COALESCE(tr.signing_secret, '') FROM autopilot_trigger tr JOIN autopilot a ON a.id = tr.autopilot_id
+		WHERE a.workspace_id = $1 AND a.title = $2 AND tr.kind = 'webhook'`, dst, apTitle).Scan(&secret)
+	if secret != "SIG_"+dst {
+		t.Fatalf("overwrite dropped target signing_secret: got %q", secret)
+	}
+}
+
+// Regression: a squad leader that is also listed as a regular agent member
+// (leader reassigned to an existing member) used to hit squad_member's unique
+// key, abort the batch transaction and roll back every squad.
+func TestWorkspaceConfigImport_SquadLeaderAlsoMember(t *testing.T) {
+	src, dst := setupConfigWorkspaces(t)
+	suf := uuid.NewString()[:8]
+	leader := dbfx.Agent(t, "Leader-"+suf, "", testutil.Cols{"workspace_id": src, "visibility": "workspace"})
+	squadName := "LeadDup-" + suf
+	squadID := dbfx.Squad(t, squadName, leader, testutil.Cols{"workspace_id": src})
+	dbfx.SquadMember(t, squadID, "agent", leader, testutil.Cols{"role": "worker"})
+
+	bundle := exportBundle(t, src)
+	_ = importReport(t, dst, map[string]any{
+		"bundle": bundle, "dry_run": false, "on_conflict": "skip", "include": []string{"agents", "squads"},
+	}, http.StatusOK)
+	if n := dbfx.Count(t, `SELECT count(*) FROM squad WHERE workspace_id = $1 AND name = $2`, dst, squadName); n != 1 {
+		t.Fatalf("expected squad imported once, got %d", n)
+	}
+}
+
 func TestWorkspaceConfigRoundTripAndConflicts(t *testing.T) {
 	src, dst := setupConfigWorkspaces(t)
 	suf := uuid.NewString()[:6]
@@ -370,6 +438,31 @@ func TestWorkspaceConfigExport_AgentActorForbidden(t *testing.T) {
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Actor-Source", "task_token")
 	testutil.Call(t, testHandler.ExportWorkspaceConfig, req).Want(http.StatusForbidden)
+}
+
+// Guards the single-apply lock: while another session holds the workspace's
+// import lock, apply is rejected before any batch runs. The lock is held for
+// the whole apply, not per batch, so a second apply cannot interleave.
+func TestWorkspaceConfigImport_ConcurrentApplyRejected(t *testing.T) {
+	src, dst := setupConfigWorkspaces(t)
+	bundle := exportBundle(t, src)
+	ctx := context.Background()
+	holder, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin lock holder: %v", err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	var locked bool
+	if err := holder.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('config_import:' || $1::text, 0))`, dst).Scan(&locked); err != nil || !locked {
+		t.Fatalf("hold import lock: locked=%v err=%v", locked, err)
+	}
+	resp := testutil.Call(t, testHandler.ImportWorkspaceConfig, configReq("POST", "/api/workspaces/"+dst+"/config/import", dst, map[string]any{
+		"bundle": bundle, "dry_run": false, "on_conflict": "skip",
+	}))
+	resp.Want(http.StatusConflict)
+	if resp.Map()["code"] != "config_import_in_progress" {
+		t.Fatalf("code=%v body=%s", resp.Map()["code"], resp.Text())
+	}
 }
 
 func TestWorkspaceConfigImport_SameWorkspaceRejected(t *testing.T) {
