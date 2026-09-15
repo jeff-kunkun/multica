@@ -441,4 +441,3 @@ DENE-230 本票走 `awaiting_review`：Reviewer 醒，布尔玛（父票）要�
 - **Stage 3**：把 `close.waiting_on` 这种隐式等待改成父子 stage 或在被等票 `done` 时走扫描 D。共享同一上游、无资源冲突的工作放进同一 stage（DENE-189 Stage 1 的 190∥191 已是正确形状）。
 - **Stage 4**：实现第 7 节四扫描；Dispatcher 回合收缩为「读 `issue children` + 读 `close.*` + 晋升或短结论」。
 - **Stage 5**：在 `groupSubIssuesByStage`（`issue-detail.tsx:418-440`）旁展示：当前 stage、`close.conclusion`、`close.next_owner_*`、`close.waiting_on`、最近 `last_activity_at`。今日 UI 只有 stage 分组，没有下一唤醒者。
-)
