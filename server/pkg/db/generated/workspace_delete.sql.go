@@ -318,6 +318,9 @@ deleted_draft_restores AS (
 deleted_agent_builder_drafts AS (
     DELETE FROM agent_builder_draft WHERE workspace_id = $1
 ),
+deleted_issue_drafts AS (
+    DELETE FROM issue_draft WHERE workspace_id = $1
+),
 deleted_comment_reactions AS (
     DELETE FROM comment_reaction WHERE workspace_id = $1
 ),

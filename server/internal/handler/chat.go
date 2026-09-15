@@ -758,6 +758,10 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete agent builder draft")
 		return
 	}
+	if err := qtx.DeleteIssueDraft(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete issue draft")
+		return
+	}
 
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,
