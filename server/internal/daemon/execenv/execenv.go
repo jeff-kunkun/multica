@@ -653,6 +653,14 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if err := writeContextFiles(contextRoot, params.Provider, params.Task, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
+	// Shared-mode OpenCode discovers the sidecar brief and skills only when
+	// OPENCODE_CONFIG_DIR points at this root and opencode.json names them.
+	// Non-shared (sidecarRoot empty) must not write a workdir opencode.json.
+	if sidecarRoot != "" && params.Provider == "opencode" {
+		if err := writeSharedOpencodeConfig(sidecarRoot); err != nil {
+			return nil, fmt.Errorf("execenv: write shared OpenCode config: %w", err)
+		}
+	}
 	if err := prepareOmpMcpConfig(workDir, params.Provider, params.McpConfig, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: prepare omp mcp config: %w", err)
 	}

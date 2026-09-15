@@ -21,6 +21,12 @@ func TestSharedModeBriefDelivery(t *testing.T) {
 	if err := sharedModeProviderSupported("codex"); err != nil {
 		t.Errorf("sharedModeProviderSupported(codex) = %v, want nil", err)
 	}
+	if got := sharedModeBriefDelivery("opencode"); got != sharedBriefViaOpencodeConfigDir {
+		t.Errorf("opencode = %v, want sharedBriefViaOpencodeConfigDir (OPENCODE_CONFIG_DIR)", got)
+	}
+	if err := sharedModeProviderSupported("opencode"); err != nil {
+		t.Errorf("sharedModeProviderSupported(opencode) = %v, want nil", err)
+	}
 	// DSH (and grok) load AGENTS.md from cwd in the non-shared path, so they
 	// are not in providerNeedsInlineSystemPrompt. Shared mode still has to
 	// prepend SystemPrompt because the brief file sits under the sidecar.
@@ -49,7 +55,7 @@ func TestSharedModeBriefDelivery(t *testing.T) {
 	// Disk-only readers stay refused until their own route is verified.
 	// mcode ignores ExecOptions.SystemPrompt and only reads cwd AGENTS.md,
 	// so it must not pass the shared-mode gate (DENE-125).
-	for _, p := range []string{"hermes", "cursor", "copilot", "opencode", "pi", "mcode", "", "made-up"} {
+	for _, p := range []string{"hermes", "cursor", "copilot", "pi", "mcode", "", "made-up"} {
 		if got := sharedModeBriefDelivery(p); got != sharedBriefUnsupported {
 			t.Errorf("%q = %v, want sharedBriefUnsupported", p, got)
 		}
@@ -100,6 +106,22 @@ func TestSharedModeBriefRoot(t *testing.T) {
 	if got != workDir {
 		t.Errorf("codex non-shared brief root = %q, want cwd %q (MUL-5392)", got, workDir)
 	}
+
+	got, err = sharedModeBriefRoot("opencode", sidecar, "", workDir)
+	if err != nil {
+		t.Fatalf("opencode shared: %v", err)
+	}
+	if got != sidecar {
+		t.Errorf("opencode shared brief root = %q, want sidecar %q", got, sidecar)
+	}
+
+	got, err = sharedModeBriefRoot("opencode", "", "", workDir)
+	if err != nil {
+		t.Fatalf("opencode non-shared: %v", err)
+	}
+	if got != workDir {
+		t.Errorf("opencode non-shared brief root = %q, want cwd %q", got, workDir)
+	}
 }
 
 func TestSharedModeSkillsDir(t *testing.T) {
@@ -116,5 +138,29 @@ func TestSharedModeSkillsDir(t *testing.T) {
 	}
 	if got := sharedModeSkillsDir("codex", "", codexHome); got != "" {
 		t.Errorf("codex non-shared skills dir = %q, want empty (native discovery)", got)
+	}
+	if got := sharedModeSkillsDir("opencode", sidecar, ""); got != filepath.Join(sidecar, ".opencode", "skills") {
+		t.Errorf("opencode shared skills dir = %q, want sidecar .opencode/skills", got)
+	}
+	if got := sharedModeSkillsDir("opencode", "", ""); got != "" {
+		t.Errorf("opencode non-shared skills dir = %q, want empty (native discovery)", got)
+	}
+}
+
+func TestSharedModeOpencodeConfigDir(t *testing.T) {
+	t.Parallel()
+
+	sidecar := "/env/sidecar"
+	if got := sharedModeOpencodeConfigDir("opencode", sidecar); got != sidecar {
+		t.Errorf("opencode shared OPENCODE_CONFIG_DIR = %q, want sidecar %q", got, sidecar)
+	}
+	if got := sharedModeOpencodeConfigDir("opencode", ""); got != "" {
+		t.Errorf("opencode non-shared OPENCODE_CONFIG_DIR = %q, want empty", got)
+	}
+	if got := sharedModeOpencodeConfigDir("claude", sidecar); got != "" {
+		t.Errorf("claude OPENCODE_CONFIG_DIR = %q, want empty", got)
+	}
+	if got := sharedModeOpencodeConfigDir("codex", sidecar); got != "" {
+		t.Errorf("codex OPENCODE_CONFIG_DIR = %q, want empty", got)
 	}
 }

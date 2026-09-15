@@ -109,7 +109,7 @@ only serialised them. Nothing protects two tasks that edit the same checkout at
 once — that is the trade the mode makes. The directory need not be a git
 repository. Not every runtime can run it yet: a task whose runtime has no
 sidecar-free route for the brief fails with a message naming the runtime
-(Claude Code, Codex, DSH, and the inline-brief runtimes are supported).
+(Claude Code, Codex, DSH, OpenCode via `OPENCODE_CONFIG_DIR`, and the inline-brief runtimes are supported).
 
 When to pick `shared` rather than `worktree` or `in_place`:
 

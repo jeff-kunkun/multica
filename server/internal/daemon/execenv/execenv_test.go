@@ -7195,6 +7195,156 @@ func TestPrepareIsolateSidecarsCodexDeliversBriefViaCodexHome(t *testing.T) {
 	}
 }
 
+// Shared-mode OpenCode cannot write AGENTS.md into the user's directory.
+// The daemon's sharedBriefViaOpencodeConfigDir route writes the brief and
+// skills under the sidecar root and a sidecar opencode.json that names those
+// absolute paths. This test is the delivery proof, not just the allowlist.
+func TestPrepareIsolateSidecarsOpencodeDeliversBriefViaConfigDir(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	userDir := t.TempDir()
+	sentinel := filepath.Join(userDir, "user-file.txt")
+	if err := os.WriteFile(sentinel, []byte("keep me"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:     "ws-shared-opencode",
+		TaskID:          "a1b2c3d4-e5f6-7890-abcd-ef1234567891",
+		AgentName:       "OpenCode Agent",
+		Provider:        "opencode",
+		LocalWorkDir:    userDir,
+		IsolateSidecars: true,
+		Task: TaskContextForEnv{
+			IssueID:   "issue-opencode-shared",
+			AgentID:   "agent-1",
+			ProjectID: "project-1",
+			ProjectResources: []ProjectResourceForEnv{
+				{ID: "r1", ResourceType: "local_directory", ResourceRef: json.RawMessage(`{"local_path":"` + filepath.ToSlash(userDir) + `","daemon_id":"d1","execution_mode":"shared"}`)},
+			},
+			AgentSkills: []SkillContextForEnv{{
+				Name:    "spike-skill",
+				Content: "---\nname: spike-skill\ndescription: probe\n---\nbody\n",
+			}},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if env.WorkDir != userDir || !env.LocalDirectory {
+		t.Fatalf("WorkDir=%q LocalDirectory=%v, want the user's directory", env.WorkDir, env.LocalDirectory)
+	}
+	if env.SidecarRoot == "" {
+		t.Fatal("SidecarRoot is empty; shared-mode OpenCode has nowhere to write")
+	}
+	if env.SidecarRoot == userDir || strings.HasPrefix(env.SidecarRoot, userDir+string(os.PathSeparator)) {
+		t.Fatalf("SidecarRoot %q must not live inside the user's directory %q", env.SidecarRoot, userDir)
+	}
+
+	entries, err := os.ReadDir(userDir)
+	if err != nil {
+		t.Fatalf("read user dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "user-file.txt" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("user directory contents = %v, want only the sentinel", names)
+	}
+
+	if _, err := os.Stat(filepath.Join(env.SidecarRoot, ".opencode", "skills", "spike-skill", "SKILL.md")); err != nil {
+		t.Errorf("OpenCode skill missing under sidecar: %v", err)
+	}
+
+	cfgPath := filepath.Join(env.SidecarRoot, sharedOpencodeConfigFile)
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("sidecar opencode.json missing: %v", err)
+	}
+	var cfg sharedOpencodeConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("unmarshal sidecar opencode.json: %v\n%s", err, raw)
+	}
+
+	ctx := TaskContextForEnv{
+		IssueID:          "issue-opencode-shared",
+		ProjectID:        "project-1",
+		ProjectResources: []ProjectResourceForEnv{{ID: "r1", ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://github.com/o/r"}`)}},
+		AgentSkills:      []SkillContextForEnv{{Name: "spike-skill"}},
+		SidecarRoot:      env.SidecarRoot,
+		SkillsDir:        SkillsDirPath(env.SidecarRoot, "opencode"),
+	}
+	brief, err := InjectRuntimeConfig(env.SidecarRoot, "opencode", ctx)
+	if err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	wantBriefFile := filepath.Join(env.SidecarRoot, "AGENTS.md")
+	if got := RuntimeConfigFilePath(env.SidecarRoot, "opencode"); got != wantBriefFile {
+		t.Errorf("RuntimeConfigFilePath = %q, want %q", got, wantBriefFile)
+	}
+	gotBrief, err := os.ReadFile(wantBriefFile)
+	if err != nil {
+		t.Fatalf("brief file missing at sidecar/AGENTS.md: %v", err)
+	}
+	if !strings.Contains(string(gotBrief), "Multica Agent Runtime") {
+		t.Errorf("sidecar/AGENTS.md does not contain the runtime brief:\n%s", gotBrief)
+	}
+	if !strings.Contains(brief, "spike-skill") {
+		t.Errorf("brief does not list the bound skill:\n%s", brief)
+	}
+
+	absSidecar, err := filepath.Abs(env.SidecarRoot)
+	if err != nil {
+		t.Fatalf("abs sidecar: %v", err)
+	}
+	wantBrief := RuntimeConfigFilePath(absSidecar, "opencode")
+	wantSkills := skillsDirPath(absSidecar, "opencode")
+	if len(cfg.Instructions) != 1 || cfg.Instructions[0] != wantBrief {
+		t.Errorf("opencode.json instructions = %#v, want [%q]", cfg.Instructions, wantBrief)
+	}
+	if len(cfg.Skills.Paths) != 1 || cfg.Skills.Paths[0] != wantSkills {
+		t.Errorf("opencode.json skills.paths = %#v, want [%q]", cfg.Skills.Paths, wantSkills)
+	}
+	if _, err := os.Stat(cfg.Instructions[0]); err != nil {
+		t.Errorf("instructions path %q is not a file OpenCode can open: %v", cfg.Instructions[0], err)
+	}
+
+	if _, err := os.Stat(filepath.Join(userDir, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Errorf("brief was written into the user's directory; stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(userDir, "opencode.json")); !os.IsNotExist(err) {
+		t.Errorf("opencode.json was written into the user's directory; stat err = %v", err)
+	}
+}
+
+// Non-shared OpenCode must not grow a daemon-owned opencode.json in the
+// workdir: that file belongs to the agent/user across turns (MUL-5392).
+func TestPrepareOpencodeDoesNotWriteConfigOutsideSharedMode(t *testing.T) {
+	t.Parallel()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-opencode",
+		TaskID:         "a1b2c3d4-aaaa-7890-abcd-ef1234567891",
+		AgentName:      "OpenCode Agent",
+		Provider:       "opencode",
+		Task:           TaskContextForEnv{IssueID: "issue-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+	if env.SidecarRoot != "" {
+		t.Fatalf("SidecarRoot = %q for a daemon-owned workdir, want empty", env.SidecarRoot)
+	}
+	if _, err := os.Stat(filepath.Join(env.WorkDir, sharedOpencodeConfigFile)); !os.IsNotExist(err) {
+		t.Fatalf("non-shared Prepare wrote workdir/opencode.json; stat err = %v", err)
+	}
+}
+
 // Without IsolateSidecars the flag changes nothing; and without LocalWorkDir
 // the flag is ignored, since a daemon-owned workdir is already per task.
 func TestPrepareIsolateSidecarsRequiresLocalWorkDir(t *testing.T) {

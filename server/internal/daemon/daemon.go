@@ -6637,13 +6637,22 @@ const (
 	// developerInstructions stays nil so the non-shared path (cwd AGENTS.md,
 	// MUL-5392) is not duplicated when SystemPrompt is empty.
 	sharedBriefViaCodexHome
+	// sharedBriefViaOpencodeConfigDir: InjectRuntimeConfig writes the brief
+	// to {sidecar}/AGENTS.md and skills to {sidecar}/.opencode/skills (the
+	// default sidecar layout). The daemon also writes {sidecar}/opencode.json
+	// naming those absolute paths and exports OPENCODE_CONFIG_DIR=<sidecar>
+	// so OpenCode discovers them as an additive config directory (DENE-178
+	// CLI canary against OpenCode 1.18.30). OPENCODE_CONFIG_CONTENT (MCP)
+	// is a different variable and still merges independently.
+	sharedBriefViaOpencodeConfigDir
 )
 
 // sharedModeBriefDelivery is the provider table behind shared mode. A provider
 // is listed only when a sidecar-free route for the brief has been verified
 // (claude, by spike against Claude Code 2.1.270; codex, by Codex's documented
 // CODEX_HOME/AGENTS.md discovery plus the per-task home the daemon already
-// seeds) or is the route it already runs on in production
+// seeds; opencode, by OPENCODE_CONFIG_DIR + instructions/skills.paths, CLI
+// canary in DENE-178) or is the route it already runs on in production
 // (providerNeedsInlineSystemPrompt) or has implemented in its backend
 // (userText = SystemPrompt + prompt), including dsh which prepends the same
 // way. Hermes and the providers that read only from the cwd stay unsupported
@@ -6654,6 +6663,8 @@ func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 		return sharedBriefViaClaudeFlags
 	case "codex":
 		return sharedBriefViaCodexHome
+	case "opencode":
+		return sharedBriefViaOpencodeConfigDir
 	case "openclaw", "kimi", "traecli", "qwenpaw",
 		"codebuddy", "dim", "grok", "dsh", "kiro", "qoder", "qoderclicn", "zeroclaw":
 		return sharedBriefInline
@@ -6664,6 +6675,19 @@ func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 		// task with no brief and no skills.
 		return sharedBriefUnsupported
 	}
+}
+
+// sharedModeOpencodeConfigDir is the per-task OPENCODE_CONFIG_DIR exported to
+// the OpenCode child in shared mode. Empty outside shared mode, so non-shared
+// tasks keep any user-set OPENCODE_CONFIG_DIR from custom_env.
+func sharedModeOpencodeConfigDir(provider, sidecarRoot string) string {
+	if sidecarRoot == "" {
+		return ""
+	}
+	if sharedModeBriefDelivery(provider) != sharedBriefViaOpencodeConfigDir {
+		return ""
+	}
+	return sidecarRoot
 }
 
 // sharedModeBriefRoot is where InjectRuntimeConfig writes the runtime brief.
@@ -8744,6 +8768,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	// Shared-mode OpenCode: the sidecar is an additive config directory, not
+	// a replacement for the user's global config. Set this after custom_env
+	// so a user OPENCODE_CONFIG_DIR cannot point the child away from the
+	// brief. Non-shared tasks leave the variable unset (or user-owned).
+	if dir := sharedModeOpencodeConfigDir(provider, env.SidecarRoot); dir != "" {
+		agentEnv["OPENCODE_CONFIG_DIR"] = dir
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
@@ -8941,6 +8972,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// Brief already written to {CODEX_HOME}/AGENTS.md (briefRoot above).
 			// Codex discovers that file as global-scope instructions; no extra
 			// args and no SystemPrompt inline (MUL-5392).
+		case sharedBriefViaOpencodeConfigDir:
+			// Brief already written to {sidecar}/AGENTS.md (briefRoot above).
+			// OPENCODE_CONFIG_DIR points OpenCode at {sidecar}/opencode.json,
+			// which names that file and the sidecar skills tree. No extra
+			// args and no SystemPrompt inline — OpenCode's `run` has no
+			// --prompt flag (MUL-5392).
 		}
 	}
 	if briefInline {
