@@ -423,6 +423,10 @@ Write order — stop on the first failure:
 | `close.wake_action` | `stage_done` `mention` `none` |
 | `close.waiting_on` | identifier such as `DENE-196`, or `""`. Prefer a real parent + stage for same-family waits; server wakes the waiter on `done`/`cancelled` unless that `(issue, agent)` already has a queued or running task |
 | `close.at` | RFC3339 UTC |
+| `close.block_kind` | `decision` `permission` `external` `dependency` `capacity`; required for new blocked closes |
+| `close.block_action` | Non-empty unblock action, at most 80 characters; required for new blocked closes |
+
+Blocked close records must write `close.block_kind` and `close.block_action` together. `dependency` additionally requires a non-empty `close.waiting_on`; `decision` and `permission` require a concrete `member`, `agent`, or `squad` next owner. Legacy blocked records that predate these two keys remain readable when both are absent. For non-blocked conclusions, the fields must be empty or absent. Human review is overdue after 24 hours without activity; `capacity` blockers do not count toward “needs you”.
 
 Decision table (first match). `needs_acceptance` means this issue's AC still
 requires Reviewer / human / device confirmation. Staged child = has a parent

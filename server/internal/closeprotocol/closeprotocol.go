@@ -28,6 +28,8 @@ const (
 	KeyWakeAction        = "close.wake_action"
 	KeyWaitingOn         = "close.waiting_on"
 	KeyAt                = "close.at"
+	KeyBlockKind         = "close.block_kind"
+	KeyBlockAction       = "close.block_action"
 )
 
 const (
@@ -44,6 +46,12 @@ const (
 	WakeStageDone = "stage_done"
 	WakeMention   = "mention"
 	WakeNone      = "none"
+
+	BlockDecision   = "decision"
+	BlockPermission = "permission"
+	BlockExternal   = "external"
+	BlockDependency = "dependency"
+	BlockCapacity   = "capacity"
 )
 
 // Keys is the eight-key close record, in write-down order after the evidence
@@ -104,6 +112,14 @@ func Validate(meta map[string]string, issueStatus, evidenceBody string) error {
 	wake := meta[KeyWakeAction]
 	waitingOn := strings.TrimSpace(meta[KeyWaitingOn])
 	at := strings.TrimSpace(meta[KeyAt])
+	blockKind, hasBlockKind := meta[KeyBlockKind]
+	blockAction, hasBlockAction := meta[KeyBlockAction]
+	// Legacy blocked records predate the two blocker fields. They remain
+	// readable when both fields are absent; a partially written extension is
+	// rejected so new records cannot silently omit one half of the contract.
+	if hasBlockKind != hasBlockAction {
+		return &Error{Rule: "blocker", Msg: "close.block_kind and close.block_action must be written together"}
+	}
 
 	if !allowedConclusion(conclusion) {
 		return &Error{Rule: "conclusion", Msg: fmt.Sprintf("close.conclusion %q is not an allowed value", conclusion)}
@@ -132,6 +148,25 @@ func Validate(meta map[string]string, issueStatus, evidenceBody string) error {
 	}
 	if at == "" {
 		return &Error{Rule: "at", Msg: "close.at is empty"}
+	}
+	if conclusion == ConclusionBlocked && hasBlockKind {
+		if !allowedBlockKind(blockKind) {
+			return &Error{Rule: "block_kind", Msg: fmt.Sprintf("close.block_kind %q is not an allowed value", blockKind)}
+		}
+		if strings.TrimSpace(blockAction) == "" {
+			return &Error{Rule: "block_action", Msg: "close.block_action is empty"}
+		}
+		if len([]rune(blockAction)) > 80 {
+			return &Error{Rule: "block_action", Msg: "close.block_action must be at most 80 characters"}
+		}
+		if blockKind == BlockDependency && waitingOn == "" {
+			return &Error{Rule: "block_kind", Msg: "dependency blockers require close.waiting_on"}
+		}
+		if (blockKind == BlockDecision || blockKind == BlockPermission) && ownerType == OwnerNone {
+			return &Error{Rule: "block_kind", Msg: "decision and permission blockers require a concrete next owner"}
+		}
+	} else if conclusion != ConclusionBlocked && hasBlockKind && (strings.TrimSpace(blockKind) != "" || strings.TrimSpace(blockAction) != "") {
+		return &Error{Rule: "blocker", Msg: "blocker fields must be empty outside conclusion=blocked"}
 	}
 	parsedAt, err := time.Parse(time.RFC3339, at)
 	if err != nil || parsedAt.Location() != time.UTC {
@@ -230,6 +265,15 @@ func allowedWake(v string) bool {
 		return true
 	}
 	return false
+}
+
+func allowedBlockKind(v string) bool {
+	switch v {
+	case BlockDecision, BlockPermission, BlockExternal, BlockDependency, BlockCapacity:
+		return true
+	default:
+		return false
+	}
 }
 
 func evidenceMentionsOwner(body, ownerType, ownerID string) bool {

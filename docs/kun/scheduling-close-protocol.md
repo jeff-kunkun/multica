@@ -1,6 +1,6 @@
 # 调度对齐：统一 close protocol（DENE-230 / Stage 1）
 
-本页是 DENE-229 长程任务的 Stage 1 契约。Stage 2（DENE-231）按本页落地，不再自行决定字段名、写入时机、收尾状态或唤醒动作。本页只定义机制与最小闭环，**不重写调度器**，不改角色权限、模型绑定、外部通知策略。
+本页是 DENE-229 长程任务的 close protocol 契约。Stage 2（DENE-231）按本页落地，不再自行决定字段名、写入时机、收尾状态或唤醒动作。本页只定义机制与最小闭环，**不重写调度器**，不改角色权限、模型绑定、外部通知策略。
 
 核对基线：`origin/kun` @ `32fd66b6e`（2026-09-15）。行号指向该提交。凡本页写「未实现」的补偿扫描，由 Stage 4（DENE-233）实现；本页把查询入口和幂等条件写死。
 
@@ -339,6 +339,10 @@ Stage 2 只做三件事：把 2.3 决策表写进 Builder/Reviewer/Operator/Disp
 | `close.wake_action` | `stage_done` `mention` `none` | 同上 | 同上 |
 | `close.waiting_on` | identifier（`DENE-196`）或 `""` | 同上 | 有跨票等待时必填，否则 `""` |
 | `close.at` | RFC3339 UTC | 同上 | 最后一键 |
+| `close.block_kind` | `decision` `permission` `external` `dependency` `capacity`；仅 blocked 收口必填 | 收尾 agent | 与 blocked 收口一并写入 |
+| `close.block_action` | 非空，最多 80 个字符；仅 blocked 收口必填 | 收尾 agent | 与 blocked 收口一并写入 |
+
+阻塞扩展校验：`conclusion=blocked` 的新记录必须同时提供上述两个字段；旧记录缺少两字段时保持可读兼容。`block_kind=dependency` 必须有非空 `close.waiting_on`，且 `decision` / `permission` 必须指定具体的 `member`、`agent` 或 `squad` 责任人。非 blocked 收口的两个字段必须为空或不存在，避免解除阻塞后残留旧原因。人类审核逾期阈值按产品决策为 24 小时；`capacity` 阻塞不计入“需要你”摘要。
 
 校验（Stage 2 测试写死）：
 
@@ -348,6 +352,7 @@ Stage 2 只做三件事：把 2.3 决策表写进 Builder/Reviewer/Operator/Disp
 - `conclusion=awaiting_review` ⇒ `close.status=in_review` 且 `wake_action=mention`。
 - `conclusion=awaiting_human` ⇒ `close.status=in_review` 且 `next_owner_type=member`（若同时 mention 了 dispatcher，允许 `next_owner_type=agent` 且 `wake_action=mention`，但 `waiting_on` 或证据里必须写出人类验收人）。
 - `conclusion=blocked` ⇒ `close.status=blocked`。
+- `conclusion=blocked` ⇒ 新记录的 `close.block_kind` / `close.block_action` 合法且动作不超过 80 个字符；`dependency` 必须配 `waiting_on`。
 - `waiting_on` 非空 ⇒ `close.status` ∈ {`in_review`,`blocked`,`in_progress`}，禁止 `done`。
 
 ### 6.2 角色收尾动作
