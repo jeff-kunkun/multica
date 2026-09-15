@@ -366,6 +366,9 @@ func TestResolveSignupEmail(t *testing.T) {
 	if _, _, ok := resolveSignupEmail("abc", "alice"); ok {
 		t.Fatal("invalid non-empty email must still be rejected")
 	}
+	if _, _, ok := resolveSignupEmail("Bob@Signup.Invalid", "alice"); ok {
+		t.Fatal("explicit placeholder-domain email must be rejected")
+	}
 }
 
 func TestPasswordSignupOptionalEmail(t *testing.T) {

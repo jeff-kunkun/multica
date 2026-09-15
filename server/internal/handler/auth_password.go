@@ -399,5 +399,10 @@ func resolveSignupEmail(raw, username string) (email string, placeholder bool, o
 		return placeholderSignupEmail(username), true, true
 	}
 	email, ok = normalizeSignupEmail(raw)
+	if ok && strings.HasSuffix(email, "@"+signupPlaceholderEmailDomain) {
+		// Reserved for synthesized placeholders; accepting it would let one
+		// user squat another username's placeholder address.
+		return "", false, false
+	}
 	return email, false, ok
 }
