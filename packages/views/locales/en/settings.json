@@ -1378,6 +1378,9 @@
     "description": "Download this workspace's configuration as JSON, then import it into another workspace to recreate agents, squads, automations, projects, and issue setup. Secrets are never written into the file — refill them after import.",
     "read_only": "You can view this page, but you cannot export or import.",
     "read_only_description": "Workspace owners and admins can export and import configuration.",
+    "unsupported_title": "This server cannot export or import configuration",
+    "unsupported": "This server does not support configuration export/import. You need a kun self-hosted instance.",
+    "unsupported_use_migration": "To migrate from official cloud, use “Migrate across environments (including chats)” above.",
     "export": {
       "title": "Export",
       "description": "Downloads a JSON bundle of this workspace's configuration.",

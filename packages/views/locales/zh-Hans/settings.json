@@ -1371,6 +1371,9 @@
     "description": "把当前工作区的配置下载为 JSON，再导入到另一个工作区，用来复刻智能体、小队、自动化、项目和任务配置。密钥不会写入文件，导入后需要手动重填。",
     "read_only": "你可以查看此页，但不能导出或导入。",
     "read_only_description": "工作区 owner 和 admin 可以导出和导入配置。",
+    "unsupported_title": "当前服务器不支持配置导出/导入",
+    "unsupported": "当前服务器不支持配置导出/导入（需要 kun 自建实例）。",
+    "unsupported_use_migration": "要从官方云搬迁，请用上面的「跨环境迁移（含对话）」。",
     "export": {
       "title": "导出",
       "description": "下载当前工作区配置的 JSON 包。",
