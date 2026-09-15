@@ -41,9 +41,24 @@
 | 源端没有 `config/export`（官方云、上游自建） | 导出端**从不调用** `config/export`，即使源端是 `kun` 也不调，保证只有一条导出代码路径。 |
 | 源端版本比 `kun` 新（官方云领先，读接口多出字段） | 导出端做字段白名单投影（第 5.2 节），多出的字段不进包，不报错。 |
 | 源端版本比 `kun` 旧或某个读接口不存在 | 该实体分组不导出，在 `manifest.export_gaps` 里登记 `{group, reason: "read_api_missing" \| "read_api_error", status}`，其余分组照常。 |
-| 源端有、目标端没有的系统智能体 `system_key` | 导入时按 V1 规则找不到即跳过，报告 `system_agent_not_in_target`。两边的 `system_key` 集合是否一致，**未确认**。 |
+| 源端有、目标端没有的系统智能体 `system_key` | 导入时按 V1 分组（`system_key` 非空且不以 `agent_builder:` 开头，见 1.3）在目标工作区找不到同键即跳过，报告 `system_agent_not_in_target`。两边的 `system_key` 集合是否一致，**未确认**。 |
+| 插件贡献技能 | V1 服务端导出按 `plugin_installation_id IS NULL` 过滤（V1 契约该行不动）。V2 CLI 走读接口，技能响应不暴露该字段。优先用 `GET /api/workspaces/{id}/plugins` 的 `resources` 反查排除（见 1.3）；该接口 503（PluginsV1 关闭）或不可用时全部导出，并在 `manifest.export_gaps` 记一条警告，导入报告必须回显。 |
 | 目标端不是 `kun` 或版本过旧 | `/transfer/*` 返回 404 时，CLI 报 `target_unsupported`，一行字说明需要 `kun` 自建实例，不做降级。 |
 | 两端都是 `kun` | 仍然走同一条客户端导出路径；V1 的同实例 `config/export` / `config/import` 保留不动，服务「同实例复刻」这个老场景。 |
+
+### 1.3 读接口侧的分组与排除
+
+V1 服务端导出有 DB 列。V2 CLI 只有读接口。下面两条是 CLI 必须遵守的判定，**不得**再用内部字段 `kind` 做任何导出分组。
+
+**系统智能体。** `kind` 是内部字段、读接口不暴露（`AgentResponse` 只有 `system_key`）。CLI 从 `GET /api/agents` 分组：
+
+- `system_key` 非空且不以 `agent_builder:` 开头 → 进 `entities.system_agents`，只投影 V1 系统智能体字段（`system_key`、`instructions`、`model`、`thinking_level`、`service_tier`、`conversation_starters`、`disabled_runtime_skills`）。
+- 无 `system_key` → 进 `entities.agents`，按普通智能体导出。
+- `agent_builder:` 前缀不会出现在该列表（读接口只回产品可见行）；即使出现也不导出。
+
+导入仍按 V1：目标工作区找不到同 `system_key` 即跳过，报告 `system_agent_not_in_target`。
+
+**插件贡献技能。** V1 服务端导出按 `plugin_installation_id IS NULL` 过滤。V2 CLI：技能读接口不暴露 `plugin_installation_id`。优先用 `GET /api/workspaces/{id}/plugins` 的 `resources` 反查：`type == "skill"`（`ResourceSkill`）的 `key` 即技能名（安装时 `name := resource.Key`），工作区内技能名唯一，名字命中任一安装的技能资源 key 则排除。该接口 503（PluginsV1 特性开关关闭）或不可用时，退化为全部导出，并在 `manifest.export_gaps` 记一条警告。警告字段落点由实现者定（建议 `export_gaps` 增 `reason: "plugin_skills_unfiltered"`，或新增 `warnings[]`），但必须能在导入报告里显示。
 
 ## 2. 实现面
 
@@ -145,8 +160,8 @@ multica transfer import --profile <目标实例登录档> --workspace <slug> --i
 | workspace | 导入者在 CLI 指定的目标工作区（必须已存在，由导入者提前创建） | 目标工作区不存在或无权限 → 404，整个导入不开始 |
 | user（成员引用） | `people.json` 里源 user 的 `email`，在目标实例查同邮箱（大小写不敏感）的 user，且该 user 是目标工作区成员 → 替换为该 user id | 按 V1 降级表处理该引用（丢弃 / 置空 / 跳过整条），报告 `unmapped_refs` 记 `ref_type: "member"`，**只回显源 id，不回显邮箱** |
 | user = 导出者本人（`manifest.source.exported_by`） | 一律映射为**导入者**，不看邮箱是否一致 | — |
-| agent（`kind = 'user'`） | V1 身份键 `name`：`transfer/config` 导入后，按 `config.json` 中该 `source_id` 的 `name` 在目标工作区查 | 对话分片里引用它的会话整条跳过，报告 `agent_unmapped`；修好后重导同一分片即可补上 |
-| agent（`kind = 'system'`） | `system_key` | 同上 |
+| 普通智能体（无 `system_key`） | V1 身份键 `name`：`transfer/config` 导入后，按 `config.json` 中该 `source_id` 的 `name` 在目标工作区查 | 对话分片里引用它的会话整条跳过，报告 `agent_unmapped`；修好后重导同一分片即可补上 |
+| 系统智能体（`system_key` 非空且不以 `agent_builder:` 开头） | `system_key` | 同上 |
 | project / squad / label / skill 等 | V1 身份键（`title` / `name` / `(resource_type, lower(name))`） | V1 降级表；会话的 `project_id` 无法映射时置空，会话照常导入 |
 | `chat_session.id` | `UUIDv5(NS_TRANSFER_CHAT_SESSION, 目标工作区 id + "/" + 源 id)` | —（永远可算） |
 | `chat_message.id` | `UUIDv5(NS_TRANSFER_CHAT_MESSAGE, 目标工作区 id + "/" + 源 id)` | 所属会话被跳过时，消息一并跳过 |
@@ -302,7 +317,10 @@ secrets_omitted.json                全包汇总（含 config.json 内的登记�
     "system_agents": { "01a0a3f2-0000-7000-8000-000000000a09": { "system_key": "mika" } },
     "projects": { "01a0a3f2-0000-7000-8000-000000000fa1": { "title": "Multica 魔改" } }
   },
-  "export_gaps": [ { "group": "issue_views", "reason": "read_api_error", "status": 500 } ],
+  "export_gaps": [
+    { "group": "issue_views", "reason": "read_api_error", "status": 500 },
+    { "group": "skills", "reason": "plugin_skills_unfiltered", "status": 503 }
+  ],
   "stats": { "chat_sessions": 212, "chat_messages": 7089, "attachments": 64, "attachment_bodies": 51, "secrets_redacted_in_content": 3 }
 }
 ```
@@ -310,6 +328,7 @@ secrets_omitted.json                全包汇总（含 config.json 内的登记�
 - `source.base_url_host` 只记主机名，不记完整 URL、不记登录档名。`server_version` 读不到时为 `"unknown"`。
 - `refs` 是对话分片解析引用所需的最小索引（源 id → 身份键），导入对话时随每个分片一起上传，服务端不需要记住 `transfer/config` 的结果。
 - `files[].sha256` 用于导入前完整性校验；任一文件校验失败，导入不开始（`transfer_bundle_corrupt`）。
+- `export_gaps[].reason` 除 `read_api_missing` / `read_api_error` 外，允许实现者新增。插件接口不可用、技能未按 1.3 过滤时必须记一条（建议 `plugin_skills_unfiltered`），且导入报告必须回显；这条不等于把整个 `skills` 组丢掉。
 - 顶层与行对象允许未知键（忽略）；缺必填键报 `transfer_bundle_invalid`。
 
 ### 6.3 行格式
@@ -435,6 +454,8 @@ secrets_omitted.json                全包汇总（含 config.json 内的登记�
 CLI（`server/cmd/multica/`）：
 
 - `transfer export` / `transfer import` 两个子命令；字段白名单投影；复用 `service` 包内的脱敏函数与 bundle 结构体；`.partial` 断点续传；`--estimate`。
+- 从 `GET /api/agents` 分组时用 `system_key`（非空且不以 `agent_builder:` 开头 → `system_agents`），不要读 `kind`。
+- 技能排除走 `GET /api/workspaces/{id}/plugins` 的 `resources`；503 / 不可用时全部导出并在 `export_gaps`（或 `warnings[]`）记警告，导入报告回显。
 - 用 `httptest` 模拟「上游形态」的读接口做导出测试，不访问真实官方云。
 - 新增 CLI 命令后同步更新 `server/internal/service/builtin_skills/*` 下相关 `references/<domain>.md`（CLAUDE.md 规则）。
 

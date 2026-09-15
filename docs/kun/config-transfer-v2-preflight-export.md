@@ -88,8 +88,8 @@
 | 缺口 | 归类 | 处理 |
 | --- | --- | --- |
 | `workspace.attribution_fail_closed` 不在 `GET /api/workspaces/{id}` | 字段缺失（非整组 `read_api_missing`） | 该字段不导出，保持目标默认值 |
-| `skill.plugin_installation_id` 不在技能读接口 | 字段缺失 | 见下行「skills」；无法从读接口排除插件技能 |
-| V1 `system_agents`（`kind = 'system'`）在产品里几乎是空集 | 契约与代码错位，见 §4 | 把 `system_key = "mika"`（`kind = 'user'`）从 agents 列表里拆到 `system_agents` |
+| `skill.plugin_installation_id` 不在技能读接口 | 字段缺失 | 技能接口不暴露归属，但可经 `GET /plugins` 的 `resources` 反查排除；仅在插件接口不可用时降级 |
+| V1 `system_agents` 若按内部字段 `kind = 'system'` 判定，在产品里几乎是空集 | 契约已改为 `system_key` 判定，见 §4 / DENE-258 | 把 `system_key` 非空且不以 `agent_builder:` 开头的行（产品上即 Mika）从 agents 列表拆到 `system_agents` |
 
 其余分组的契约导出字段都能从读接口拿到（部分需要详情接口或二次 GET，不是缺失）。
 
@@ -109,11 +109,11 @@
 | `labels`（`issue_label`） | `GET /api/labels` | 有 | 有 | `name`、`color`、`description`、`resource_type` | 无 |
 | `issue_statuses` | `GET /api/issue-statuses` | 有 | 有 | `key`、`name`、`description`、`category`、`color`、`position`、`is_system`；`archived_at` 可转 `archived` | 无。默认列表含归档态需看 query；没有则带 `archived_at` 的行仍可能出现，实现按 V1 默认跳过归档。 |
 | `issue_properties` | `GET /api/properties` | 有 | 有 | `name`、`type`、`description`、`icon`、`config`（含 `options[]`）、`position` | 无 |
-| `skills` + `files` + `label_ids` | `GET /api/skills`（无 `content`）+ `GET /api/skills/{id}`（有 `content`）+ `GET /api/skills/{id}/files` + `GET /api/skills/{id}/labels` | 有 | 有 | `name`、`description`、`content`、`config`、files `path`/`content`、label ids | **列表/详情都不返回 `plugin_installation_id`**（`skill.go:46-56, 167-178`）。V1 SQL 导出用 `plugin_installation_id IS NULL`（`config_transfer.sql:81-86`）。CLI 无法同等过滤。列表把插件技能也算进去。 |
+| `skills` + `files` + `label_ids` | `GET /api/skills`（无 `content`）+ `GET /api/skills/{id}`（有 `content`）+ `GET /api/skills/{id}/files` + `GET /api/skills/{id}/labels` | 有 | 有 | `name`、`description`、`content`、`config`、files `path`/`content`、label ids | **列表/详情都不返回 `plugin_installation_id`**（`skill.go:46-56, 167-178`）。V1 SQL 导出用 `plugin_installation_id IS NULL`（`config_transfer.sql:81-86`）。CLI 不靠该字段：用 `GET /api/workspaces/{id}/plugins` 的 `resources`（`type == "skill"` 的 `key` 即技能名）反查排除。该接口 503 / 不可用时全部导出并在 manifest 记警告。 |
 | `mcp_servers`（`workspace_mcp_server`，仅清单） | `GET /api/workspaces/{id}/mcp-servers` | 有 | 有 | `name`、`transport`（`mcpTransportOf`）。`config` write-only，符合契约 | 无 |
-| `agents`（`kind = 'user'`）+ skills + label_ids + mcp_servers + invocation_targets | `GET /api/agents`（含 skills 摘要、`invocation_targets`、`custom_args`、`runtime_config`、`disabled_runtime_skills`、`composio_toolkit_allowlist`）+ `GET /api/agents/{id}/labels` + `GET /api/agents/{id}/mcp-servers` | 有 | 有 | 契约列出的用户智能体字段都能拿到。`custom_env` 只有 `has_custom_env` / `custom_env_key_count`。`runtime_config.gateway.token` 为 `***`。`mcp_config` 可能按 `always_redact_env` / 非 owner 脱敏 | 列表只含 `kind = 'user'`（`agent.sql:1-4`），**含 Mika**。`custom_args` 可能是明文，必须走 V2 §5.2 白名单 + `redactSecretArgs`。label_ids / mcp 绑定要二次 GET。可见性：普通成员看不到别人的 private agent，导出必须用 owner/admin。 |
+| `agents`（无 `system_key`）+ skills + label_ids + mcp_servers + invocation_targets | `GET /api/agents`（含 skills 摘要、`invocation_targets`、`custom_args`、`runtime_config`、`disabled_runtime_skills`、`composio_toolkit_allowlist`）+ `GET /api/agents/{id}/labels` + `GET /api/agents/{id}/mcp-servers` | 有 | 有 | 契约列出的用户智能体字段都能拿到。`custom_env` 只有 `has_custom_env` / `custom_env_key_count`。`runtime_config.gateway.token` 为 `***`。`mcp_config` 可能按 `always_redact_env` / 非 owner 脱敏 | 列表只含产品可见行（SQL 仍是 `kind = 'user'`，`agent.sql:1-4`），**含 Mika**。CLI 分组用 `system_key`：无 `system_key` 留在 `agents`。`custom_args` 可能是明文，必须走 V2 §5.2 白名单 + `redactSecretArgs`。label_ids / mcp 绑定要二次 GET。可见性：普通成员看不到别人的 private agent，导出必须用 owner/admin。 |
 | `agent_invocation_target`（内嵌在 agents） | 随 `GET /api/agents` / `GET /api/agents/{id}` 的 `invocation_targets[]`：`target_type`、`target_id` | 有 | 有 | 覆盖。`workspace` 行 `target_id` 可空 | 无独立路由，不需要。 |
-| `system_agents`（契约：`kind = 'system'`） | 无单独列表。`GET /api/agents` 只回 `kind = 'user'`。`kind = 'system'` 的 builder 载体走 `GET /api/agent-builder/sessions`，V1 排除 | 有（同上） | 有 | 产品常量 `system_key` 集合见 §4。读接口**拿不到**「kind=system 且非 builder」的行，因为产品不创建这种行 | **契约错位**：Mika 是 `kind = 'user'` + `system_key = "mika"`，会出现在 agents 列表里，不会出现在 system_agents SQL 导出（`ExportSystemAgents` 过滤 `kind = 'system'`）。见 §4。 |
+| `system_agents`（契约：`system_key` 非空且不以 `agent_builder:` 开头） | 无单独列表。从 `GET /api/agents` 按 `system_key` 拆出。内部 `kind = 'system'` 的 builder 载体走 `GET /api/agent-builder/sessions`，不导出 | 有（同上） | 有 | 产品常量 `system_key` 集合见 §4。`AgentResponse` 有 `system_key`、没有 `kind`。读接口拿得到 Mika（`system_key = "mika"`） | **V2 CLI 可按契约分组**。V1 服务端 SQL（`ExportSystemAgents` 过滤 `kind = 'system'`）仍漏掉 Mika，那是 DENE-259 的代码缺陷，本页不改代码。见 §4。 |
 | `squads` + `members` | `GET /api/squads`（含 `members[]`：`member_type`/`member_id`/`role`） | 有 | 有 | `name`、`description`、`instructions`、`avatar_url`、`leader_id`、members | 无。`role = 'leader'` 行在列表里也有，导入时按 V1 跳过以免与创建路径重复。 |
 | `projects` + `resources` | `GET /api/projects` + `GET /api/projects/{id}/resources` | 有 | 有 | 项目字段全覆盖。`resource_type`、`resource_ref`、`label`、`position` | 无。`local_directory.daemon_id` 在 `resource_ref` JSON 里，跨实例按 V1/V2 跳过。 |
 | `autopilots` + triggers + subscribers + collaborators | `GET /api/autopilots`（含 `subscribers`）+ `GET /api/autopilots/{id}`（含 `triggers`、`collaborators`） | 有 | 有 | 契约字段覆盖。`webhook_token` 对 writer 会返回（秘密，导出必须丢掉并登记）。`signing_secret` 不在读接口 | 列表**不含** collaborators / 完整 triggers，必须逐条 GET 详情。 |
@@ -133,9 +133,9 @@
 - 导出路径只走上表读接口，**永不调用** `GET .../config/export`。
 - `issue_views` 要按 scope 枚举，不能一次 GET 无参数。
 - `autopilots` 必须 `list` + 逐条 `GET /{id}`。
-- `skills`：详情才有 `content`；无法识别插件技能时，保守做法是**全部导出**并在报告里记 `skills_may_include_plugin_owned`（待布尔玛确认是否改契约 / 是否要补字段）。不要静默丢技能。
+- `skills`：详情才有 `content`。优先用 `GET /api/workspaces/{id}/plugins` 的 `resources`（`type == "skill"` 的 `key`）反查排除插件技能；该接口 503（PluginsV1 关闭）或不可用时**全部导出**，并在 `manifest.export_gaps` 记警告（建议 `plugin_skills_unfiltered`），导入报告必须回显。不要静默丢技能。
 - `workspace.attribution_fail_closed`：不导出。
-- 智能体：`***` 与明文 `custom_args` 按 V2 §5.2 处理。
+- 智能体：从 `GET /api/agents` 按 `system_key` 分组（非空且不以 `agent_builder:` 开头 → `system_agents`）；`***` 与明文 `custom_args` 按 V2 §5.2 处理。不要读 `kind`。
 
 ---
 
@@ -150,7 +150,10 @@
 | 产品常量 | `mika` | `mika` |
 | 运行时动态 | `agent_builder:<uuid>`（每个 builder 会话一条，`kind = 'system'`） | 同左 |
 
-对契约 §1.2 `system_agent_not_in_target` 的实际影响：**几乎打不到产品智能体。** V1 的 `system_agents` 导出 SQL 要 `kind = 'system' AND system_key NOT LIKE 'agent_builder:%'`（`config_transfer.sql:129-137`），而 Mika 被明确建成 `kind = 'user'`（`builtin_agents.go:8-16`）。两边都不会用 `system_key` 去 patch Mika。
+对契约 §1.2 `system_agent_not_in_target` 的实际影响：
+
+- **V2 CLI（DENE-258 修订后）**：按 `system_key` 非空且不以 `agent_builder:` 开头分组，能把 Mika 放进 `system_agents`，导入按 `system_key` patch。
+- **V1 服务端导出（代码未改，DENE-259）**：`ExportSystemAgents` SQL 仍要 `kind = 'system' AND system_key NOT LIKE 'agent_builder:%'`（`config_transfer.sql:129-137`），而 Mika 被明确建成 `kind = 'user'`（`builtin_agents.go:8-16`），所以 V1 同实例导出仍不会用 `system_key` 去 patch Mika。
 
 ### 证据
 
@@ -163,8 +166,8 @@
 ### 对实现的影响
 
 - 官方云 → kun：不会因为「kun 多一个 mika / 官方云多一个 mika」触发 `system_agent_not_in_target`。
-- CLI 若按 V1 分组字面去找 `kind = 'system'`，`entities.system_agents` 会是 `[]`，Mika 会当普通用户智能体按 `name` 导入，**丢掉 system 指令层**。实现必须：`GET /api/agents` 里 `system_key == "mika"` 的行改放到 `system_agents`，只投影 V1 系统智能体字段（`system_key`、`instructions`、`model`、`thinking_level`、`service_tier`、`conversation_starters`、`disabled_runtime_skills`）。
-- 这是契约 §1.2「系统智能体 = kind system」与代码不一致。本页不改契约，交给布尔玛确认。
+- CLI **不得**按内部字段 `kind = 'system'` 分组：读接口不暴露 `kind`，那样 `entities.system_agents` 会是 `[]`，Mika 会当普通用户智能体按 `name` 导入，**丢掉 system 指令层**。实现必须：`GET /api/agents` 里 `system_key` 非空且不以 `agent_builder:` 开头的行改放到 `system_agents`，只投影 V1 系统智能体字段（`system_key`、`instructions`、`model`、`thinking_level`、`service_tier`、`conversation_starters`、`disabled_runtime_skills`）。产品上目前就是 `system_key == "mika"`。
+- 契约已按 DENE-258 改为 `system_key` 判定。V1 服务端 SQL 仍用 `kind = 'system'`，留给 DENE-259。
 
 ---
 
@@ -245,12 +248,12 @@
 
 1. 双 `--profile` 可用；清掉 `MULTICA_TOKEN` / `MULTICA_SERVER_URL` 再跑 transfer。
 2. `people.json` 从 `GET /api/workspaces/{id}/members` 的 `email` 填；空邮箱降级。
-3. 按第 3 节表打读接口；`attribution_fail_closed` 不导；skills 无法排除插件技能；Mika 从 agents 列表拆到 `system_agents`。
+3. 按第 3 节表打读接口；`attribution_fail_closed` 不导；skills 经 `GET /plugins` 的 `resources` 反查排除，接口不可用时全部导出并记警告；Mika（`system_key` 非空且不以 `agent_builder:` 开头）从 agents 列表拆到 `system_agents`。
 4. `system_key` 两边都是 `{mika}` + 动态 `agent_builder:*`。
 5. 正文只改写 `/api/attachments/{uuid}/download`（相对或绝对）；其它 URL 计数保留。
 6. 会话列表无分页；消息页 `limit=100`；官方云速率未确认，按 429 退避。
 
-## 契约错位（不改契约，待确认）
+## 契约错位（DENE-258 已改正文）
 
-1. V1 把系统智能体定义成 `kind = 'system'`，产品唯一的 `system_key`（`mika`）却是 `kind = 'user'`。
-2. V1 要求不导出 `plugin_installation_id IS NOT NULL` 的技能，读接口不暴露该字段。
+1. ~~V1 把系统智能体定义成 `kind = 'system'`，产品唯一的 `system_key`（`mika`）却是 `kind = 'user'`。~~ 契约改为 `system_key` 非空且不以 `agent_builder:` 开头。V1 服务端 SQL 仍按 `kind = 'system'` 导出，代码缺陷见 DENE-259。
+2. ~~V1 要求不导出 `plugin_installation_id IS NOT NULL` 的技能，读接口不暴露该字段。~~ V1 该行不动（服务端有 DB 列）。V2 CLI 经 `GET /plugins` 的 `resources` 反查排除；插件接口不可用时全部导出并记警告。
