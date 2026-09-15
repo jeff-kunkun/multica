@@ -1,13 +1,18 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -49,6 +54,11 @@ type TransferExportOpts struct {
 	ClientVersion   string
 	BaseURLHost     string
 	WorkspaceRef    string
+	// PartialDir is the <out>.partial checkpoint directory. Existing
+	// completed session shards are reused; new ones are written as they
+	// finish. Empty disables checkpointing (estimate mode).
+	PartialDir string
+	OutPath    string
 }
 
 type TransferExportFiles struct {
@@ -940,8 +950,30 @@ func exportConversations(ctx context.Context, src TransferSourceClient, opts Tra
 	sampleBytes := int64(0)
 	sampleMsgs := 0
 
+	resume := loadTransferPartial(opts.PartialDir, opts.OutPath, opts.WorkspaceRef)
+	resumeByID := map[string]TransferSessionRow{}
+	resumeMsgs := map[string][]TransferMessageRow{}
+	if resume != nil && !opts.Estimate {
+		var resumeAtts []TransferAttachmentRow
+		var resumeBlobs map[string][]byte
+		var resumeSess []TransferSessionRow
+		resumeSess, resumeMsgs, resumeAtts, resumeBlobs = loadPartialConversations(opts.PartialDir, resume.CompletedSessionIDs)
+		for _, s := range resumeSess {
+			resumeByID[s.SourceID] = s
+		}
+		atts = append(atts, resumeAtts...)
+		for k, v := range resumeBlobs {
+			blobs[k] = v
+		}
+	}
+
 	for _, raw := range sessions {
 		id := strField(raw, "id")
+		if saved, ok := resumeByID[id]; ok {
+			sessRows = append(sessRows, saved)
+			msgBySession[id] = resumeMsgs[id]
+			continue
+		}
 		title := strField(raw, "title")
 		scanned := ScanTransferContent(title)
 		if scanned.Changed {
@@ -997,6 +1029,12 @@ func exportConversations(ctx context.Context, src TransferSourceClient, opts Tra
 		atts = append(atts, msgAtts...)
 		for k, v := range msgBlobs {
 			blobs[k] = v
+		}
+		if opts.PartialDir != "" {
+			if resume == nil {
+				resume = newTransferPartialState(opts)
+			}
+			_ = persistCompletedSession(opts.PartialDir, resume, row, msgs, msgAtts, msgBlobs)
 		}
 	}
 
@@ -1107,9 +1145,15 @@ func fetchMessagePage(ctx context.Context, src TransferSourceClient, sessionID, 
 
 func exportOneAttachment(ctx context.Context, src TransferSourceClient, sessionID, messageID string, raw map[string]any) (TransferAttachmentRow, []byte, []SecretOmitted) {
 	id := strField(raw, "id")
-	filename := strField(raw, "filename")
+	origFilename := strField(raw, "filename")
 	ct := strField(raw, "content_type")
 	size := int64(floatField(raw, "size_bytes"))
+	filename := origFilename
+	var secrets []SecretOmitted
+	if scannedName := ScanTransferContent(origFilename); scannedName.Changed {
+		filename = scannedName.Text
+		secrets = append(secrets, secretOmittedFromHits("attachment", id, "filename", scannedName.Hits))
+	}
 	row := TransferAttachmentRow{
 		SourceID:      id,
 		ChatSessionID: &sessionID,
@@ -1119,29 +1163,29 @@ func exportOneAttachment(ctx context.Context, src TransferSourceClient, sessionI
 		SizeBytes:     size,
 		CreatedAt:     strField(raw, "created_at"),
 	}
-	exportBody, reason := shouldExportAttachmentBody(ct, filename, size)
+	exportBody, reason := shouldExportAttachmentBody(ct, origFilename, size)
 	if !exportBody {
 		row.BodyOmittedReason = &reason
-		return row, nil, nil
+		return row, nil, secrets
 	}
 	body, err := src.GetBytes(ctx, "/api/attachments/"+url.PathEscape(id)+"/download")
 	if err != nil {
 		r := "attachment_body_not_exported"
 		row.BodyOmittedReason = &r
-		return row, nil, nil
+		return row, nil, secrets
 	}
-	if isTextAttachment(ct, filename) {
+	if isTextAttachment(ct, origFilename) {
 		scanned := ScanTransferContent(string(body))
 		if scanned.Changed {
 			r := "content_pattern"
 			row.BodyOmittedReason = &r
-			return row, nil, []SecretOmitted{secretOmittedFromHits("attachment", id, "body", scanned.Hits)}
+			return row, nil, append(secrets, secretOmittedFromHits("attachment", id, "body", scanned.Hits))
 		}
 	}
 	sum := sha256.Sum256(body)
 	row.SHA256 = hex.EncodeToString(sum[:])
 	row.Body = "attachments/blobs/" + row.SHA256
-	return row, body, nil
+	return row, body, secrets
 }
 
 func shardConversations(sessions []TransferSessionRow, msgs map[string][]TransferMessageRow) ([][]TransferSessionRow, [][]TransferMessageRow) {
@@ -1305,4 +1349,230 @@ func peopleFromMap(m map[string]TransferPerson) []TransferPerson {
 		out = append(out, p)
 	}
 	return out
+}
+
+const transferPartialFormat = "multica.workspace-transfer.partial"
+
+type transferPartialState struct {
+	Format               string   `json:"format"`
+	OutPath              string   `json:"out_path"`
+	WorkspaceRef         string   `json:"workspace_ref"`
+	CompletedSessionIDs  []string `json:"completed_session_ids"`
+	DownloadedBlobSHA256 []string `json:"downloaded_blob_sha256,omitempty"`
+}
+
+func newTransferPartialState(opts TransferExportOpts) *transferPartialState {
+	abs, _ := filepath.Abs(opts.OutPath)
+	return &transferPartialState{
+		Format:       transferPartialFormat,
+		OutPath:      abs,
+		WorkspaceRef: opts.WorkspaceRef,
+	}
+}
+
+func loadTransferPartial(dir, outPath, workspaceRef string) *transferPartialState {
+	if dir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	if err != nil {
+		return nil
+	}
+	var st transferPartialState
+	if json.Unmarshal(data, &st) != nil {
+		return nil
+	}
+	if st.Format != transferPartialFormat {
+		return nil
+	}
+	absOut, _ := filepath.Abs(outPath)
+	if st.OutPath != "" && absOut != "" && filepath.Clean(st.OutPath) != filepath.Clean(absOut) {
+		return nil
+	}
+	if st.WorkspaceRef != "" && workspaceRef != "" && st.WorkspaceRef != workspaceRef {
+		return nil
+	}
+	return &st
+}
+
+func loadPartialConversations(dir string, completed []string) ([]TransferSessionRow, map[string][]TransferMessageRow, []TransferAttachmentRow, map[string][]byte) {
+	want := map[string]bool{}
+	for _, id := range completed {
+		if id != "" {
+			want[id] = true
+		}
+	}
+	sessRows := []TransferSessionRow{}
+	msgBySession := map[string][]TransferMessageRow{}
+	matches, _ := filepath.Glob(filepath.Join(dir, "conversations", "sessions-*.jsonl"))
+	sort.Strings(matches)
+	for _, sp := range matches {
+		rows, err := decodeTransferJSONL[TransferSessionRow](sp)
+		if err != nil {
+			continue
+		}
+		msgPath := filepath.Join(filepath.Dir(sp), strings.Replace(filepath.Base(sp), "sessions-", "messages-", 1))
+		msgs, _ := decodeTransferJSONL[TransferMessageRow](msgPath)
+		bySess := map[string][]TransferMessageRow{}
+		for _, m := range msgs {
+			bySess[m.ChatSessionID] = append(bySess[m.ChatSessionID], m)
+		}
+		for _, s := range rows {
+			if !want[s.SourceID] {
+				continue
+			}
+			sessRows = append(sessRows, s)
+			msgBySession[s.SourceID] = bySess[s.SourceID]
+		}
+	}
+	var atts []TransferAttachmentRow
+	if all, err := decodeTransferJSONL[TransferAttachmentRow](filepath.Join(dir, "attachments", "index.jsonl")); err == nil {
+		for _, a := range all {
+			if a.ChatSessionID != nil && want[*a.ChatSessionID] {
+				atts = append(atts, a)
+			}
+		}
+	}
+	blobs := map[string][]byte{}
+	entries, _ := os.ReadDir(filepath.Join(dir, "attachments", "blobs"))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, "attachments", "blobs", e.Name()))
+		if err == nil {
+			blobs[e.Name()] = b
+		}
+	}
+	return sessRows, msgBySession, atts, blobs
+}
+
+func persistCompletedSession(dir string, state *transferPartialState, sess TransferSessionRow, msgs []TransferMessageRow, atts []TransferAttachmentRow, blobs map[string][]byte) error {
+	if dir == "" || state == nil {
+		return nil
+	}
+	conv := filepath.Join(dir, "conversations")
+	if err := os.MkdirAll(conv, 0o700); err != nil {
+		return err
+	}
+	n := nextPartialShardIndex(dir)
+	if err := os.WriteFile(filepath.Join(conv, fmt.Sprintf("sessions-%04d.jsonl", n)), encodeTransferJSONL([]TransferSessionRow{sess}), 0o600); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(conv, fmt.Sprintf("messages-%04d.jsonl", n)), encodeTransferJSONL(msgs), 0o600); err != nil {
+		return err
+	}
+	if err := persistPartialAttachments(dir, atts, blobs); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, id := range state.CompletedSessionIDs {
+		seen[id] = true
+	}
+	if !seen[sess.SourceID] {
+		state.CompletedSessionIDs = append(state.CompletedSessionIDs, sess.SourceID)
+	}
+	for sha := range blobs {
+		if sha == "" {
+			continue
+		}
+		found := false
+		for _, existing := range state.DownloadedBlobSHA256 {
+			if existing == sha {
+				found = true
+				break
+			}
+		}
+		if !found {
+			state.DownloadedBlobSHA256 = append(state.DownloadedBlobSHA256, sha)
+		}
+	}
+	return writeTransferPartialState(dir, state)
+}
+
+func persistPartialAttachments(dir string, atts []TransferAttachmentRow, blobs map[string][]byte) error {
+	if len(atts) == 0 && len(blobs) == 0 {
+		return nil
+	}
+	blobDir := filepath.Join(dir, "attachments", "blobs")
+	if err := os.MkdirAll(blobDir, 0o700); err != nil {
+		return err
+	}
+	if len(atts) > 0 {
+		f, err := os.OpenFile(filepath.Join(dir, "attachments", "index.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			return err
+		}
+		if _, err := f.Write(encodeTransferJSONL(atts)); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
+		}
+	}
+	for sha, blob := range blobs {
+		if sha == "" {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(blobDir, sha), blob, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeTransferPartialState(dir string, state *transferPartialState) error {
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := filepath.Join(dir, "state.json.tmp")
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(dir, "state.json"))
+}
+
+func nextPartialShardIndex(dir string) int {
+	matches, _ := filepath.Glob(filepath.Join(dir, "conversations", "sessions-*.jsonl"))
+	max := 0
+	for _, m := range matches {
+		var n int
+		if _, err := fmt.Sscanf(filepath.Base(m), "sessions-%d.jsonl", &n); err == nil && n > max {
+			max = n
+		}
+	}
+	return max + 1
+}
+
+func encodeTransferJSONL[T any](rows []T) []byte {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	for _, row := range rows {
+		_ = enc.Encode(row)
+	}
+	return buf.Bytes()
+}
+
+func decodeTransferJSONL[T any](path string) ([]T, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	var rows []T
+	for {
+		var row T
+		if err := dec.Decode(&row); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, err
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }

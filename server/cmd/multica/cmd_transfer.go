@@ -154,6 +154,14 @@ func runTransferExport(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 
+	partial := ""
+	if !estimate && outPath != "" {
+		partial = outPath + ".partial"
+		if err := os.MkdirAll(partial, 0o700); err != nil {
+			return err
+		}
+	}
+
 	files, err := service.ExportFromSource(ctx, sourceClient{api: client}, service.TransferExportOpts{
 		Include:         parseInclude(include),
 		ExcludeArchived: excludeArchived,
@@ -162,6 +170,8 @@ func runTransferExport(cmd *cobra.Command, _ []string) error {
 		ClientVersion:   version,
 		BaseURLHost:     host,
 		WorkspaceRef:    workspace,
+		PartialDir:      partial,
+		OutPath:         outPath,
 	})
 	if err != nil {
 		return err
@@ -187,7 +197,8 @@ func writeTransferZip(outPath string, files *service.TransferExportFiles) error 
 		}
 	}
 	partial := outPath + ".partial"
-	_ = os.RemoveAll(partial)
+	// Keep a valid existing checkpoint; only remove it after the zip is
+	// atomically renamed into place.
 	if err := os.MkdirAll(partial, 0o700); err != nil {
 		return err
 	}
