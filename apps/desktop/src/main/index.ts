@@ -14,7 +14,11 @@ import { installNavigationGestures } from "./navigation-gestures";
 import { installNavigationGuard } from "./navigation-guard";
 import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
-import { loadRuntimeConfig } from "./runtime-config-loader";
+import {
+  desktopConfigPath,
+  loadRuntimeConfig,
+  switchRuntimeConfig,
+} from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
@@ -717,6 +721,26 @@ if (!gotTheLock) {
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
+    });
+
+    // Persist a server switch to ~/.multica/desktop.json. The live session
+    // keeps the boot-time config; the renderer must tell the user to fully
+    // quit (⌘Q / Ctrl+Q) and reopen before the new endpoints apply.
+    ipcMain.handle("runtime-config:switch", async (event, raw: unknown) => {
+      if (!BrowserWindow.fromWebContents(event.sender)) {
+        return { ok: false, error: "Unauthorized" };
+      }
+      const configPath = desktopConfigPath();
+      if (raw === null) {
+        return switchRuntimeConfig({ configPath, target: { type: "official" } });
+      }
+      if (typeof raw !== "string") {
+        return { ok: false, error: "Server URL must be a string" };
+      }
+      return switchRuntimeConfig({
+        configPath,
+        target: { type: "url", url: raw },
+      });
     });
 
     ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {

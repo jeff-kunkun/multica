@@ -96,6 +96,7 @@ import type {
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
+  ProjectMember,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -328,6 +329,8 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
+  ProjectMemberListSchema,
+  ProjectMemberSchema,
   SquadSchema,
   SquadListSchema,
   SquadMemberListSchema,
@@ -3710,6 +3713,46 @@ export class ApiClient {
     resourceId: string,
   ): Promise<void> {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listProjectMembers(projectId: string): Promise<ProjectMember[]> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/members`);
+    const parsed = parseWithFallback<ProjectMember[] | null>(
+      raw,
+      ProjectMemberListSchema,
+      null,
+      { endpoint: "GET /api/projects/:id/members" },
+    );
+    if (parsed === null) {
+      throw new Error("GET /api/projects/:id/members failed schema validation");
+    }
+    return parsed;
+  }
+
+  async addProjectMember(
+    projectId: string,
+    data: { member_id: string },
+  ): Promise<ProjectMember> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const parsed = parseWithFallback<ProjectMember | null>(
+      raw,
+      ProjectMemberSchema,
+      null,
+      { endpoint: "POST /api/projects/:id/members" },
+    );
+    if (parsed === null) {
+      throw new Error("POST /api/projects/:id/members failed schema validation");
+    }
+    return parsed;
+  }
+
+  async removeProjectMember(projectId: string, memberId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/members/${memberId}`, {
       method: "DELETE",
     });
   }

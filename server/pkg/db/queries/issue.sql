@@ -87,6 +87,18 @@ WHERE id = $1 AND workspace_id = $2;
 SELECT metadata, revision FROM issue
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: ListIssuesWaitingOn :many
+-- DENE-232 Stage 3: waiters in this workspace whose close.waiting_on matches
+-- the waited-on issue's identifier (PREFIX-N) or its UUID. Containment uses
+-- idx_issue_metadata_gin (jsonb_path_ops). Callers filter terminal / backlog
+-- waiters in Go with the same status resolver as child-done.
+SELECT * FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND (
+    metadata @> sqlc.arg('waiting_on_identifier')::jsonb
+    OR metadata @> sqlc.arg('waiting_on_id')::jsonb
+  );
+
 -- name: LockIssueForChannelMediaBind :one
 -- Channel media resolves after /issue creation. Hold a key-share lock while
 -- the attachment row is written so a concurrent issue delete cannot land

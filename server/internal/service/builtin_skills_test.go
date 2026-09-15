@@ -432,6 +432,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"references/projects.md",
 				"references/runtimes.md",
 				"references/skill-import.md",
+				"close protocol",
 				// Invariants deduplicated out of the eight merged bodies. Each
 				// was repeated in most of them; the router is now their only
 				// home, so losing one here loses it everywhere.
@@ -506,15 +507,35 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"--resolve-properties",
 				"display_values",
 				"`value` keeps the stored ids",
+				// DENE-231: close protocol excerpt. A comment alone is not a
+				// close; the eight close.* keys, write order, and four scenes
+				// are the runtime constraint. Status meanings stay the
+				// built-in keys already documented above — this section must
+				// not invent a parallel set.
+				"Close protocol",
+				"A comment alone is not a close",
+				"close.conclusion",
+				"close.status",
+				"close.evidence_comment_id",
+				"close.next_owner_type",
+				"close.next_owner_id",
+				"close.wake_action",
+				"close.waiting_on",
+				"close.at",
+				"multica issue metadata set",
+				"`in_review` is not a stage terminal",
+				"Builder (PR / needs review)",
+				// DENE-232: Stage 3 waiting_on wake. Same-family waits stay
+				// parent+stage; cross-family waits get a server wake when
+				// the waited-on issue finishes, bounded by queued/running.
+				"Prefer a real parent + stage",
+				"already has a queued or running task",
 			},
 			notWant: []string{
-				// MUL-6966 phase 1: this reference must not teach the KV bag
-				// at all — not as a section, not as a command, and not as a
-				// named key inside a warning. A blanket ban on the vocabulary
-				// is the contract; anything that needs the word back needs
-				// this decision revisited first.
-				"metadata",
-				"Metadata",
+				// MUL-6966 phase 1 banned teaching the generic KV bag.
+				// DENE-231 revisits that for exactly eight `close.*` keys
+				// via `multica issue metadata set`. The scratchpad, curated
+				// key list, and pr_url guidance stay banned.
 				"pr_url",
 				// A curated key list is the "recommended fields" concept the
 				// owner ruled out on MUL-5442.

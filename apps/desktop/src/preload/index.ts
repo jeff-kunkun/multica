@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
-import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type {
+  RuntimeConfigResult,
+  RuntimeConfigSwitchResult,
+} from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
   ManualUpdateCheckResult,
@@ -135,6 +138,13 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
+  /**
+   * Persist a server switch. `null` deletes desktop.json (official cloud).
+   * A string is treated as the target server URL. The live session is not
+   * updated — the renderer must require a full quit and reopen.
+   */
+  switchServer: (url: string | null): Promise<RuntimeConfigSwitchResult> =>
+    ipcRenderer.invoke("runtime-config:switch", url),
   /** Identifies whether this renderer owns the main tabbed window or a
    *  dedicated issue window, parsed from validated launch arguments. */
   windowContext,

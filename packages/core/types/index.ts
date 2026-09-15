@@ -181,6 +181,7 @@ export type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  ProjectMember,
   ProjectResource,
   ProjectResourceType,
   ProjectResourceRef,
