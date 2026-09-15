@@ -168,7 +168,7 @@ func (h *Handler) PasswordSignup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "username must be 2-32 characters of letters, numbers, dots, underscores, or hyphens")
 		return
 	}
-	email, ok := normalizeSignupEmail(req.Email)
+	email, placeholderEmail, ok := resolveSignupEmail(req.Email, username)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "a valid email address is required")
 		return
@@ -212,6 +212,12 @@ func (h *Handler) PasswordSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := h.Queries.GetUserByEmail(r.Context(), email); err == nil {
+		if placeholderEmail {
+			// Placeholder addresses are derived from the username, so a
+			// collision is a duplicate username, not a real email conflict.
+			writeError(w, http.StatusConflict, "username already taken")
+			return
+		}
 		writeError(w, http.StatusConflict, "email already registered")
 		return
 	} else if !isNotFound(err) {
@@ -247,6 +253,10 @@ func (h *Handler) PasswordSignup(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
+			if placeholderEmail {
+				writeError(w, http.StatusConflict, "username already taken")
+				return
+			}
 			writeError(w, http.StatusConflict, "email already registered")
 			return
 		}
@@ -371,4 +381,23 @@ func normalizeSignupEmail(raw string) (string, bool) {
 		return "", false
 	}
 	return email, true
+}
+
+// RFC 2606 reserved TLD. Placeholder addresses are synthesized when signup
+// email is omitted so users.email can stay NOT NULL without a migration.
+const signupPlaceholderEmailDomain = "signup.invalid"
+
+func placeholderSignupEmail(username string) string {
+	return username + "@" + signupPlaceholderEmailDomain
+}
+
+// resolveSignupEmail accepts a missing/blank email by synthesizing a
+// per-username placeholder. A non-empty value is still validated by
+// normalizeSignupEmail (which rejects empty input and domains without a dot).
+func resolveSignupEmail(raw, username string) (email string, placeholder bool, ok bool) {
+	if strings.TrimSpace(raw) == "" {
+		return placeholderSignupEmail(username), true, true
+	}
+	email, ok = normalizeSignupEmail(raw)
+	return email, false, ok
 }

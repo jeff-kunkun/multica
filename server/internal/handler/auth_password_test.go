@@ -178,17 +178,30 @@ func TestGetConfigExposesPasswordAuth(t *testing.T) {
 }
 
 func postPasswordSignup(username, password, email string) *httptest.ResponseRecorder {
-	var buf bytes.Buffer
-	json.NewEncoder(&buf).Encode(map[string]string{
+	return postPasswordSignupJSON(map[string]string{
 		"username": username,
 		"password": password,
 		"email":    email,
 	})
+}
+
+func postPasswordSignupJSON(body map[string]string) *httptest.ResponseRecorder {
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(body)
 	req := httptest.NewRequest(http.MethodPost, "/auth/signup", &buf)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	testHandler.PasswordSignup(w, req)
 	return w
+}
+
+func signupErrorMessage(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	var got map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode error body: %v (%s)", err, w.Body.String())
+	}
+	return got["error"]
 }
 
 func cleanupPasswordSignupUser(t *testing.T, email string) {
@@ -332,4 +345,94 @@ func TestNormalizeSignupEmail(t *testing.T) {
 	if _, ok := normalizeSignupEmail("Name <new.user@example.com>"); ok {
 		t.Fatal("display-name addresses must be rejected")
 	}
+	if _, ok := normalizeSignupEmail(""); ok {
+		t.Fatal("empty email must be rejected by normalizeSignupEmail")
+	}
+}
+
+func TestResolveSignupEmail(t *testing.T) {
+	got, placeholder, ok := resolveSignupEmail("", "alice")
+	if !ok || !placeholder || got != "alice@signup.invalid" {
+		t.Fatalf("blank email: got %q placeholder=%v ok=%v", got, placeholder, ok)
+	}
+	got, placeholder, ok = resolveSignupEmail("   ", "alice")
+	if !ok || !placeholder || got != "alice@signup.invalid" {
+		t.Fatalf("whitespace email: got %q placeholder=%v ok=%v", got, placeholder, ok)
+	}
+	got, placeholder, ok = resolveSignupEmail("Alice@Example.COM", "alice")
+	if !ok || placeholder || got != "alice@example.com" {
+		t.Fatalf("real email: got %q placeholder=%v ok=%v", got, placeholder, ok)
+	}
+	if _, _, ok := resolveSignupEmail("abc", "alice"); ok {
+		t.Fatal("invalid non-empty email must still be rejected")
+	}
+}
+
+func TestPasswordSignupOptionalEmail(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	setPasswordAuthEnv(t, "kun", "s3cret-bootstrap", "password-auth-bootstrap@multica.ai")
+	const password = "correct-horse-battery"
+
+	t.Run("omitted_email_field", func(t *testing.T) {
+		const username = "noemailomit"
+		cleanupPasswordSignupUser(t, placeholderSignupEmail(username))
+		w := postPasswordSignupJSON(map[string]string{
+			"username": username,
+			"password": password,
+		})
+		if w.Code != http.StatusOK {
+			t.Fatalf("omitted email: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp LoginResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode signup response: %v", err)
+		}
+		if resp.Token == "" {
+			t.Fatal("expected non-empty token")
+		}
+		if resp.User.Email != placeholderSignupEmail(username) {
+			t.Fatalf("expected placeholder email %q, got %q", placeholderSignupEmail(username), resp.User.Email)
+		}
+	})
+
+	t.Run("empty_email", func(t *testing.T) {
+		const username = "noemailempty"
+		cleanupPasswordSignupUser(t, placeholderSignupEmail(username))
+		w := postPasswordSignup(username, password, "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("empty email: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp LoginResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode signup response: %v", err)
+		}
+		if resp.User.Email != placeholderSignupEmail(username) {
+			t.Fatalf("expected placeholder email %q, got %q", placeholderSignupEmail(username), resp.User.Email)
+		}
+	})
+
+	t.Run("invalid_nonempty_email_still_400", func(t *testing.T) {
+		w := postPasswordSignup("noemailbad", password, "abc")
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("invalid email: expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("duplicate_username_is_username_taken", func(t *testing.T) {
+		const username = "noemaildup"
+		cleanupPasswordSignupUser(t, placeholderSignupEmail(username))
+		w := postPasswordSignup(username, password, "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("first signup: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		w = postPasswordSignup(username, password, "")
+		if w.Code != http.StatusConflict {
+			t.Fatalf("duplicate username: expected 409, got %d: %s", w.Code, w.Body.String())
+		}
+		if got := signupErrorMessage(t, w); got != "username already taken" {
+			t.Fatalf("duplicate username: expected %q, got %q", "username already taken", got)
+		}
+	})
 }

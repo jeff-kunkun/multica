@@ -45,7 +45,7 @@ export interface AuthState {
   signupWithPassword: (
     username: string,
     password: string,
-    email: string,
+    email?: string,
     totp?: string,
   ) => Promise<User>;
   loginWithGoogle: (code: string, redirectUri: string) => Promise<User>;
@@ -107,7 +107,7 @@ export function createAuthStore(options: AuthStoreOptions) {
     signupWithPassword: async (
       username: string,
       password: string,
-      email: string,
+      email?: string,
       totp?: string,
     ) => {
       const { token, user } = await api.signupWithPassword(

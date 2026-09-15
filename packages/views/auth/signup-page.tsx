@@ -55,10 +55,6 @@ export function SignupPage({
         setError(t(($) => $.common.username_required));
         return;
       }
-      if (!email) {
-        setError(t(($) => $.common.email_required));
-        return;
-      }
       if (!password) {
         setError(t(($) => $.common.password_required));
         return;
@@ -82,11 +78,15 @@ export function SignupPage({
           await useAuthStore.getState().signupWithPassword(
             username,
             password,
-            email,
+            email.trim(),
             totp.trim(),
           );
         } else {
-          await useAuthStore.getState().signupWithPassword(username, password, email);
+          await useAuthStore.getState().signupWithPassword(
+            username,
+            password,
+            email.trim(),
+          );
         }
         const wsList = await api.listWorkspaces();
         qc.setQueryData(workspaceKeys.list(), wsList);
@@ -159,7 +159,7 @@ export function SignupPage({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="signup-email">{t(($) => $.common.email)}</Label>
+              <Label htmlFor="signup-email">{t(($) => $.common.email_optional)}</Label>
               <Input
                 id="signup-email"
                 type="email"
@@ -167,7 +167,6 @@ export function SignupPage({
                 placeholder={t(($) => $.common.email_placeholder)}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                required
               />
             </div>
             <div className="space-y-2">
@@ -228,7 +227,6 @@ export function SignupPage({
             disabled={
               loading ||
               !username ||
-              !email ||
               !password ||
               !confirmPassword ||
               (signupTotpRequired && !totp.trim())

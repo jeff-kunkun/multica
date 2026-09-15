@@ -815,15 +815,16 @@ export class ApiClient {
   async signupWithPassword(
     username: string,
     password: string,
-    email: string,
+    email?: string,
     totp?: string,
   ): Promise<LoginResponse> {
+    const trimmedEmail = email?.trim() ?? "";
     return this.fetch("/auth/signup", {
       method: "POST",
       body: JSON.stringify({
         username,
         password,
-        email,
+        ...(trimmedEmail ? { email: trimmedEmail } : {}),
         ...(totp ? { totp } : {}),
       }),
     });

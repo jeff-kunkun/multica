@@ -100,7 +100,7 @@ describe("SignupPage", () => {
     renderWithI18n(<SignupPage onSuccess={onSuccess} />);
     expect(screen.getByText(/create your account/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/^email$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/email \(optional\)/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/confirm password/i)).toBeInTheDocument();
     expect(
@@ -126,7 +126,7 @@ describe("SignupPage", () => {
     renderWithI18n(<SignupPage onSuccess={onSuccess} />);
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/username/i), "newbie");
-    await user.type(screen.getByLabelText(/^email$/i), "newbie@example.com");
+    await user.type(screen.getByLabelText(/email \(optional\)/i), "newbie@example.com");
     await user.type(screen.getByLabelText(/^password$/i), "correct-horse");
     await user.type(screen.getByLabelText(/confirm password/i), "other-horse");
     await user.click(screen.getByRole("button", { name: /create account/i }));
@@ -143,7 +143,7 @@ describe("SignupPage", () => {
     renderWithI18n(<SignupPage onSuccess={onSuccess} />);
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/username/i), "newbie");
-    await user.type(screen.getByLabelText(/^email$/i), "newbie@example.com");
+    await user.type(screen.getByLabelText(/email \(optional\)/i), "newbie@example.com");
     await user.type(screen.getByLabelText(/^password$/i), "correct-horse");
     await user.type(screen.getByLabelText(/confirm password/i), "correct-horse");
     await user.click(screen.getByRole("button", { name: /create account/i }));
@@ -153,6 +153,27 @@ describe("SignupPage", () => {
         "newbie",
         "correct-horse",
         "newbie@example.com",
+      );
+      expect(onSuccess).toHaveBeenCalled();
+    });
+  });
+
+  it("submits without an email", async () => {
+    mockSignupWithPassword.mockResolvedValueOnce(undefined);
+    renderWithI18n(<SignupPage onSuccess={onSuccess} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/username/i), "newbie");
+    await user.type(screen.getByLabelText(/^password$/i), "correct-horse");
+    await user.type(screen.getByLabelText(/confirm password/i), "correct-horse");
+    const submit = screen.getByRole("button", { name: /create account/i });
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+
+    await waitFor(() => {
+      expect(mockSignupWithPassword).toHaveBeenCalledWith(
+        "newbie",
+        "correct-horse",
+        "",
       );
       expect(onSuccess).toHaveBeenCalled();
     });
@@ -172,7 +193,7 @@ describe("SignupPage", () => {
     renderWithI18n(<SignupPage onSuccess={onSuccess} />);
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/username/i), "newbie");
-    await user.type(screen.getByLabelText(/^email$/i), "newbie@example.com");
+    await user.type(screen.getByLabelText(/email \(optional\)/i), "newbie@example.com");
     await user.type(screen.getByLabelText(/^password$/i), "correct-horse");
     await user.type(screen.getByLabelText(/confirm password/i), "correct-horse");
     expect(
@@ -187,7 +208,7 @@ describe("SignupPage", () => {
     renderWithI18n(<SignupPage onSuccess={onSuccess} />);
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/username/i), "newbie");
-    await user.type(screen.getByLabelText(/^email$/i), "newbie@example.com");
+    await user.type(screen.getByLabelText(/email \(optional\)/i), "newbie@example.com");
     await user.type(screen.getByLabelText(/^password$/i), "correct-horse");
     await user.type(screen.getByLabelText(/confirm password/i), "correct-horse");
     await user.type(screen.getByLabelText(/team 2fa code/i), "123456");
