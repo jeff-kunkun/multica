@@ -182,6 +182,8 @@
     "prop_speed": "速度",
     "prop_visibility": "可见性",
     "prop_concurrency": "并发",
+    "prop_auto_retry": "自动重试",
+    "prop_auto_retry_hint": "关闭后，容量不足、网络抖动等失败会直接报出来，不再由平台自动重试。仍可手动重试运行。",
     "prop_owner": "所有者",
     "prop_created": "创建时间",
     "prop_updated": "更新时间",

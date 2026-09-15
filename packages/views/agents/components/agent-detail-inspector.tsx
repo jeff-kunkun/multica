@@ -11,6 +11,7 @@ import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
+  isAgentAutoRetryEnabled,
 } from "@multica/core/agents";
 import {
   isRuntimeUsableForUser,
@@ -18,6 +19,7 @@ import {
 } from "@multica/core/runtimes";
 import { isImeComposing } from "@multica/core/utils";
 import { Input } from "@multica/ui/components/ui/input";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import {
@@ -311,6 +313,19 @@ export function AgentDetailInspector({
               value={agent.max_concurrent_tasks}
               canEdit={canEdit}
               onSave={(next) => update({ max_concurrent_tasks: next })}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_auto_retry)}
+            description={t(($) => $.inspector.prop_auto_retry_hint)}
+          >
+            <Switch
+              checked={isAgentAutoRetryEnabled(agent)}
+              disabled={!canEdit}
+              onCheckedChange={(checked) => {
+                void update({ auto_retry_enabled: checked });
+              }}
+              aria-label={t(($) => $.inspector.prop_auto_retry)}
             />
           </SettingsRow>
         </SettingsCard>

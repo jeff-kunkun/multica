@@ -54,6 +54,7 @@ type Agent struct {
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	ConversationStarters  []byte      `json:"conversation_starters"`
 	SwitchableModels      []byte      `json:"switchable_models"`
+	AutoRetryEnabled      bool        `json:"auto_retry_enabled"`
 }
 
 type AgentBuilderDraft struct {

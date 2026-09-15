@@ -145,6 +145,10 @@ UPDATE agent SET
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     switchable_models = COALESCE(sqlc.narg('switchable_models'), switchable_models),
+    -- Explicit false is not NULL, so COALESCE distinguishes "omitted" from
+    -- "turned off" the same way thinking_level's two-query pattern does for
+    -- nullable text. A bool column cannot be cleared to NULL.
+    auto_retry_enabled = COALESCE(sqlc.narg('auto_retry_enabled'), auto_retry_enabled),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

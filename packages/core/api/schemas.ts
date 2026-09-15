@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type {
+  Agent,
   AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
   AgentBuilderSessionSummary,
@@ -1591,6 +1592,64 @@ export const AgentRuntimeSchema = z.object({
 }).loose();
 
 export const AgentRuntimeListSchema = z.array(AgentRuntimeSchema);
+
+export const AgentSchema: z.ZodType<Agent> = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  runtime_id: z.string().default(""),
+  runtime_bound: z.boolean().optional(),
+  runtime_availability: z.enum(["online", "unstable", "offline"]).optional(),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  instructions: z.string().default(""),
+  conversation_starters: z
+    .array(
+      z.object({
+        label: z.string().default(""),
+        prompt: z.string().default(""),
+      }).loose(),
+    )
+    .optional()
+    .catch(undefined),
+  system_key: z.string().optional(),
+  system_instructions: z.string().optional(),
+  avatar_url: z.string().nullable().default(null),
+  runtime_mode: z.string().catch("local"),
+  runtime_config: z.record(z.string(), z.unknown()).default({}),
+  custom_args: z.array(z.string()).default([]),
+  has_custom_env: z.boolean().optional(),
+  custom_env_key_count: z.number().optional(),
+  mcp_config: z.unknown().nullable().optional(),
+  mcp_config_redacted: z.boolean().optional(),
+  composio_toolkit_allowlist: z.array(z.string()).optional(),
+  composio_toolkit_allowlist_redacted: z.boolean().optional(),
+  visibility: z.string().catch("private"),
+  permission_mode: z.enum(["private", "public_to"]).catch("private"),
+  invocation_targets: z
+    .array(
+      z.object({
+        target_type: z.enum(["workspace", "member", "team"]),
+        target_id: z.string().nullable(),
+      }).loose(),
+    )
+    .default([]),
+  status: z.string().catch("idle"),
+  max_concurrent_tasks: z.number().default(1),
+  model: z.string().default(""),
+  thinking_level: z.string().optional(),
+  service_tier: z.string().optional(),
+  switchable_models: z.array(z.unknown()).optional(),
+  owner_id: z.string().nullable().default(null),
+  skills: z.array(z.unknown()).default([]),
+  disabled_runtime_skills: z.array(z.unknown()).optional(),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  archived_at: z.string().nullable().default(null),
+  archived_by: z.string().nullable().default(null),
+  // Older backends omit this field. Missing or malformed must not fail the
+  // whole agent parse; UI treats undefined as enabled (`!== false`).
+  auto_retry_enabled: z.boolean().optional().catch(undefined),
+}).loose() as z.ZodType<Agent>;
 
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas

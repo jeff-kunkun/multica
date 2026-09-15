@@ -618,6 +618,12 @@ export interface Agent {
    */
   service_tier?: string;
   /**
+   * Platform auto-retry switch (DENE-217). When `false`, FailTask /
+   * MaybeRetryFailedTask never spawn a retry child. Older backends omit
+   * the field; treat `undefined` as enabled. Only `=== false` is off.
+   */
+  auto_retry_enabled?: boolean;
+  /**
    * Display-only model lineup (kun fork, DENE-200): the default model, the
    * ordered fallback chain and models borrowable for batch work. Never used
    * for routing. Older servers omit it; treat undefined as [].
@@ -839,6 +845,11 @@ export interface UpdateAgentRequest {
   service_tier?: string;
   /** Replaces the display-only model lineup wholesale; `[]` clears it. */
   switchable_models?: AgentSwitchableModel[];
+  /**
+   * Platform auto-retry switch. Omitted preserves the saved value; `false`
+   * turns platform auto-retry off without affecting manual rerun.
+   */
+  auto_retry_enabled?: boolean;
 }
 
 export type AgentSwitchableModelRole = "default" | "fallback" | "batch";

@@ -191,6 +191,8 @@
     "prop_speed": "Speed",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
+    "prop_auto_retry": "Auto retry",
+    "prop_auto_retry_hint": "When off, failures such as capacity limits or network cuts surface immediately instead of retrying. You can still retry a run yourself.",
     "prop_owner": "Owner",
     "prop_created": "Created",
     "prop_updated": "Updated",

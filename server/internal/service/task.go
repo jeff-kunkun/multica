@@ -4700,26 +4700,29 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
-			wantRetry = true
-			// Persist the reason-aware effective budget into the child so the
-			// retry chain self-describes (e.g. provider_network → max_attempts=3),
-			// rather than leaking a contradictory attempt=N/max_attempts=2 row.
-			retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
-			// Defer this attempt when the reason's schedule calls for a backoff
-			// (provider_network's final attempt waits ~5s; capacity always waits
-			// 30s); a zero delay leaves fire_at NULL so the child is created
-			// immediately-claimable.
-			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
-				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
-			}
-			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
-				// Best-effort: a missing overlay is not retry-fatal — the child
-				// simply runs without the Composio overlay.
-				slog.Warn("fail task auto-retry: load agent for overlay failed",
+		} else {
+			agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID)
+			if aerr != nil {
+				// Fail-closed: auto_retry_enabled lives on the agent row. If
+				// we cannot read it we cannot know whether the owner turned
+				// retries off, and a retry child would also have no overlay.
+				// Skip rather than guessing the historical default (on).
+				slog.Warn("fail task auto-retry: load agent failed; skipping retry",
 					"task_id", util.UUIDToString(taskID),
 					"agent_id", util.UUIDToString(parent.AgentID), "error", aerr)
-			} else {
+			} else if retryEligible(failureReason, parent, agent) {
+				wantRetry = true
+				// Persist the reason-aware effective budget into the child so the
+				// retry chain self-describes (e.g. provider_network → max_attempts=3),
+				// rather than leaking a contradictory attempt=N/max_attempts=2 row.
+				retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
+				// Defer this attempt when the reason's schedule calls for a backoff
+				// (provider_network's final attempt waits ~5s; capacity always waits
+				// 30s); a zero delay leaves fire_at NULL so the child is created
+				// immediately-claimable.
+				if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
+					retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+				}
 				retryOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
 			}
 		}
@@ -5049,6 +5052,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 //
+// A listed reason is still not retried when the agent has auto_retry_enabled
+// off (DENE-217). That per-agent switch is evaluated in retryEligible, not
+// here, so FailTask and MaybeRetryFailedTask stay in lockstep. Manual rerun
+// (RerunIssue) does not consult this map.
+//
 // The agent_error.* exceptions are provider_network (MUL-4910) and
 // provider_capacity_or_rate_limit (DENE-210). A mid-stream provider
 // disconnect (e.g. Claude Code's "API Error: Connection closed mid-response")
@@ -5217,14 +5225,17 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 
 // retryEligible reports whether a failed task qualifies for an automatic retry
 // attempt: an infrastructure-shaped failure_reason, remaining attempt budget,
-// not an autopilot run, and linked to an issue or chat session. Shared by
-// FailTask's in-transaction retry and the orphan sweeper's MaybeRetryFailedTask
-// so both agree on which failures re-run.
-func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
+// the agent's auto-retry switch (default on), not an autopilot run, and linked
+// to an issue or chat session. Shared by FailTask's in-transaction retry and
+// the orphan sweeper's MaybeRetryFailedTask so both agree on which failures
+// re-run. Callers must load the agent before calling this; a load failure is
+// fail-closed at the call site rather than passing a zero Agent.
+func retryEligible(failureReason string, t db.AgentTaskQueue, agent db.Agent) bool {
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
-		(t.IssueID.Valid || t.ChatSessionID.Valid || isSourceContextQuickCreateTask(t))
+		(t.IssueID.Valid || t.ChatSessionID.Valid || isSourceContextQuickCreateTask(t)) &&
+		agent.AutoRetryEnabled
 }
 
 func isSourceContextQuickCreateTask(task db.AgentTaskQueue) bool {
@@ -5272,7 +5283,10 @@ func hasRunnableSuccessor(ctx context.Context, q *db.Queries, task db.AgentTaskQ
 // the new task, or nil when no retry was created.
 //
 // Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
-// its own re-run cadence and we don't want to double-fire it.
+// its own re-run cadence and we don't want to double-fire it. The per-agent
+// auto_retry_enabled switch (DENE-217) is the other non-reason gate: both
+// this sweeper and FailTask's in-transaction retry consult it via
+// retryEligible so turning the switch off cannot leave one path still retrying.
 func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
 	if parent.Status != "failed" {
 		return nil, nil
@@ -5282,6 +5296,17 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		reason = parent.FailureReason.String
 	}
 	if !retryableReasons[reason] {
+		return nil, nil
+	}
+	agent, agentErr := s.Queries.GetAgent(ctx, parent.AgentID)
+	if agentErr != nil {
+		// Fail-closed: without the agent row we cannot evaluate
+		// auto_retry_enabled, and a retry child would have no overlay either.
+		slog.Warn("task auto-retry: load agent failed; skipping retry",
+			"parent_task_id", util.UUIDToString(parent.ID),
+			"agent_id", util.UUIDToString(parent.AgentID),
+			"error", agentErr,
+		)
 		return nil, nil
 	}
 	// Use the reason-aware ceiling, not the raw max_attempts column, so an
@@ -5298,27 +5323,15 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		)
 		return nil, nil
 	}
-	// Autopilot has its own retry semantics (don't double-trigger) and a task
-	// with no issue/chat link has nowhere to report its retry — retryEligible
-	// covers both, keeping this sweeper path in sync with FailTask's in-tx retry.
-	if !retryEligible(reason, parent) {
+	// Autopilot has its own retry semantics (don't double-trigger), a task
+	// with no issue/chat link has nowhere to report its retry, and the
+	// per-agent switch may have turned auto-retry off — retryEligible covers
+	// all three, keeping this sweeper path in sync with FailTask's in-tx retry.
+	if !retryEligible(reason, parent, agent) {
 		return nil, nil
 	}
 
-	var runtimeMCPOverlay runtimeMCPOverlayData
-	agent, agentErr := s.Queries.GetAgent(ctx, parent.AgentID)
-	if agentErr != nil {
-		// Best-effort: failing to resolve the agent for the overlay is not
-		// retry-fatal. Log and continue — the daemon will reject the claim
-		// later if the agent is genuinely gone.
-		slog.Warn("task auto-retry: load agent for overlay failed",
-			"parent_task_id", util.UUIDToString(parent.ID),
-			"agent_id", util.UUIDToString(parent.AgentID),
-			"error", agentErr,
-		)
-	} else {
-		runtimeMCPOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
-	}
+	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
 	// Mirror FailTask's in-tx backoff + effective-budget persistence: defer the
 	// final provider_network attempt ~5s (and every capacity retry 30s) via
 	// fire_at (zero delay leaves fire_at NULL for an immediate child), and
@@ -5437,7 +5450,9 @@ func transferPendingSourceContextToRetry(ctx context.Context, q *db.Queries, par
 }
 
 // RerunIssue creates a fresh queued task for an agent on the issue. Used by
-// the manual rerun endpoint.
+// the manual rerun endpoint. It does not consult retryEligible or the
+// per-agent auto_retry_enabled switch — those gates apply only to platform
+// auto-retry (FailTask / MaybeRetryFailedTask).
 //
 // Target agent resolution:
 //   - sourceTaskID Valid: rerun the agent that ran that task (and reuse its

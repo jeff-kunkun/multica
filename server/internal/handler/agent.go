@@ -130,7 +130,12 @@ type AgentResponse struct {
 	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
 	Status             string                     `json:"status"`
 	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
-	Model              string                     `json:"model"`
+	// AutoRetryEnabled is the per-agent platform auto-retry switch
+	// (DENE-217). Default true. When false, FailTask and
+	// MaybeRetryFailedTask skip retryableReasons; manual rerun is
+	// unaffected.
+	AutoRetryEnabled bool   `json:"auto_retry_enabled"`
+	Model            string `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
@@ -257,6 +262,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		InvocationTargets:        []AgentInvocationTargetDTO{},
 		Status:                   a.Status,
 		MaxConcurrentTasks:       a.MaxConcurrentTasks,
+		AutoRetryEnabled:         a.AutoRetryEnabled,
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
@@ -1732,6 +1738,10 @@ type UpdateAgentRequest struct {
 	// null" (a *[]string can't, because a nil pointer is the same wire
 	// representation as both). MUL-3869.
 	ComposioToolkitAllowlist *[]string `json:"composio_toolkit_allowlist"`
+	// AutoRetryEnabled is omitted-preserves / present-sets. Explicit false
+	// is not NULL, so COALESCE in UpdateAgent can distinguish "not sent"
+	// from "turned off".
+	AutoRetryEnabled *bool `json:"auto_retry_enabled"`
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -1969,6 +1979,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		encoded, _ := json.Marshal(switchableModels)
 		params.SwitchableModels = encoded
+	}
+	if req.AutoRetryEnabled != nil {
+		params.AutoRetryEnabled = pgtype.Bool{Bool: *req.AutoRetryEnabled, Valid: true}
 	}
 	if req.AvatarURL != nil {
 		avatarURL, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, existing.AvatarUrl.String)

@@ -240,10 +240,18 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		{"non-retryable reason never retries", "agent_error.unknown", 1, 2, false},
 	}
 	for _, tc := range eligCases {
-		if got := retryEligible(tc.reason, mkTask(tc.attempt, tc.max)); got != tc.want {
+		if got := retryEligible(tc.reason, mkTask(tc.attempt, tc.max), retryEnabledAgent()); got != tc.want {
 			t.Errorf("%s: retryEligible(%q, attempt=%d/max=%d) = %v, want %v", tc.name, tc.reason, tc.attempt, tc.max, got, tc.want)
 		}
 	}
+}
+
+func retryEnabledAgent() db.Agent {
+	return db.Agent{AutoRetryEnabled: true}
+}
+
+func retryDisabledAgent() db.Agent {
+	return db.Agent{AutoRetryEnabled: false}
 }
 
 // TestProviderCapacityRetrySchedule locks in the backoff schedule for a
@@ -303,8 +311,39 @@ func TestProviderCapacityRetrySchedule(t *testing.T) {
 		{"capacity with retry disabled (max_attempts=1) never retries", 1, 1, false},
 	}
 	for _, tc := range eligCases {
-		if got := retryEligible(capReason, mkTask(tc.attempt, tc.max)); got != tc.want {
+		if got := retryEligible(capReason, mkTask(tc.attempt, tc.max), retryEnabledAgent()); got != tc.want {
 			t.Errorf("%s: retryEligible(%q, attempt=%d/max=%d) = %v, want %v", tc.name, capReason, tc.attempt, tc.max, got, tc.want)
+		}
+	}
+}
+
+// TestAgentAutoRetrySwitchGatesRetryEligible is the DENE-217 unit gate: the
+// per-agent switch sits inside retryEligible so FailTask and
+// MaybeRetryFailedTask cannot disagree. Default-on (column DEFAULT TRUE)
+// keeps the historical table-driven outcomes above; explicit false blocks
+// every retryable reason, including capacity and provider_network.
+func TestAgentAutoRetrySwitchGatesRetryEligible(t *testing.T) {
+	mkTask := func() db.AgentTaskQueue {
+		return db.AgentTaskQueue{
+			Attempt:     1,
+			MaxAttempts: 2,
+			IssueID:     pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+		}
+	}
+	reasons := []string{
+		"agent_error.provider_network",
+		"agent_error.provider_capacity_or_rate_limit",
+		"runtime_offline",
+		"timeout",
+		"codex_semantic_inactivity",
+		"skill_bundle_unavailable",
+	}
+	for _, reason := range reasons {
+		if !retryEligible(reason, mkTask(), retryEnabledAgent()) {
+			t.Errorf("default-on agent must still retry %q", reason)
+		}
+		if retryEligible(reason, mkTask(), retryDisabledAgent()) {
+			t.Errorf("auto_retry_enabled=false must not retry %q", reason)
 		}
 	}
 }
@@ -468,12 +507,12 @@ func TestOpencodeStreamEndedFailureRetries(t *testing.T) {
 					t.Errorf("resumeUnsafeFailureReason(%q) = true, want false", reason)
 				}
 				// With an attempt left, the failure produces a retry task.
-				if !retryEligible(reason, mkTask(1, 2)) {
+				if !retryEligible(reason, mkTask(1, 2), retryEnabledAgent()) {
 					t.Errorf("retryEligible(%q, attempt=1/max=2) = false, want true", reason)
 				}
 				// And still terminates once the ceiling is reached, so a
 				// deterministically broken provider cannot loop forever.
-				if retryEligible(reason, mkTask(providerNetworkMaxAttempts, 2)) {
+				if retryEligible(reason, mkTask(providerNetworkMaxAttempts, 2), retryEnabledAgent()) {
 					t.Errorf("retryEligible(%q, attempt=%d/max=2) = true, want false at the ceiling",
 						reason, providerNetworkMaxAttempts)
 				}
@@ -516,7 +555,7 @@ func TestSkillBundleFailureFromLegacyDaemonRetries(t *testing.T) {
 
 	// What an old daemon puts on the wire, and what FailTask does with it.
 	legacyReason := taskfailure.ReasonAgentUnknown.String()
-	if retryEligible(legacyReason, task) {
+	if retryEligible(legacyReason, task, retryEnabledAgent()) {
 		t.Fatal("precondition: the raw catchall must not be retryable, or this test proves nothing")
 	}
 
@@ -524,7 +563,7 @@ func TestSkillBundleFailureFromLegacyDaemonRetries(t *testing.T) {
 	if normalized != taskfailure.ReasonSkillBundleUnavailable.String() {
 		t.Fatalf("normalized reason = %q, want %q", normalized, taskfailure.ReasonSkillBundleUnavailable)
 	}
-	if !retryEligible(normalized, task) {
+	if !retryEligible(normalized, task, retryEnabledAgent()) {
 		t.Errorf("a skill-bundle failure reported by an old daemon must still be retried; got reason %q", normalized)
 	}
 
@@ -534,7 +573,7 @@ func TestSkillBundleFailureFromLegacyDaemonRetries(t *testing.T) {
 		taskfailure.ReasonSkillBundleUnavailable.String(),
 		`skill bundle unavailable: skill "x" (id=1, 10 bytes) after 30s: context deadline exceeded`,
 	).String()
-	if !retryEligible(current, task) {
+	if !retryEligible(current, task, retryEnabledAgent()) {
 		t.Errorf("a skill-bundle failure reported by a current daemon must be retried; got reason %q", current)
 	}
 }

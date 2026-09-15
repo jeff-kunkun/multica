@@ -13,6 +13,7 @@ import {
   EMPTY_TELEGRAM_INSTALLATION,
   EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
+  AgentSchema,
   AgentTaskListSchema,
   TaskMessageListSchema,
   AutopilotQuotaUsageSchema,
@@ -2380,5 +2381,52 @@ describe("TaskMessageListSchema", () => {
   it("downgrades an unknown message type instead of dropping the transcript", () => {
     const parsed = TaskMessageListSchema.parse([{ ...row, type: "video" }]);
     expect(parsed[0]?.type).toBe("text");
+  });
+});
+
+describe("AgentSchema auto_retry_enabled", () => {
+  const baseAgent = {
+    id: "agent-1",
+    workspace_id: "ws-1",
+    runtime_id: "rt-1",
+    name: "Lambda",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    runtime_mode: "local",
+    runtime_config: {},
+    custom_args: [],
+    visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
+    status: "idle",
+    max_concurrent_tasks: 1,
+    model: "",
+    owner_id: null,
+    skills: [],
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    archived_at: null,
+    archived_by: null,
+  };
+
+  it("parses when auto_retry_enabled is omitted and leaves it undefined", () => {
+    const parsed = AgentSchema.parse(baseAgent);
+    expect(parsed.id).toBe("agent-1");
+    expect(parsed.auto_retry_enabled).toBeUndefined();
+  });
+
+  it("keeps an explicit false so the UI can treat only that as off", () => {
+    const parsed = AgentSchema.parse({ ...baseAgent, auto_retry_enabled: false });
+    expect(parsed.auto_retry_enabled).toBe(false);
+  });
+
+  it("degrades a malformed auto_retry_enabled without dropping the agent", () => {
+    const parsed = AgentSchema.parse({
+      ...baseAgent,
+      auto_retry_enabled: "no",
+    });
+    expect(parsed.id).toBe("agent-1");
+    expect(parsed.auto_retry_enabled).toBeUndefined();
   });
 });
