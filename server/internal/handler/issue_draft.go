@@ -118,8 +118,16 @@ func (h *Handler) AbandonIssueDraft(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireUserID(w, r); !ok {
 		return
 	}
+	ws, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
+	if !ok {
+		return
+	}
 	sid, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "sessionId"), "chat_session_id")
 	if !ok {
+		return
+	}
+	if _, err := h.Queries.GetIssueDraftInWorkspace(r.Context(), db.GetIssueDraftInWorkspaceParams{ChatSessionID: sid, WorkspaceID: ws}); err != nil {
+		writeError(w, http.StatusNotFound, "draft not found")
 		return
 	}
 	if _, err := h.Queries.MarkIssueDraftAbandoned(r.Context(), sid); err != nil {
