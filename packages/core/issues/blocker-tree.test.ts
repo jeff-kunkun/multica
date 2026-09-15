@@ -40,6 +40,7 @@ describe("deriveBlockerTree", () => {
     const result = deriveBlockerTree(waiting, { issueByIdentifier: { [target.identifier]: target } });
     expect(result.state).toBe("ROOT");
     expect(result.derived).toBe(true);
+    expect(result.rootCauses.map((x) => x.id)).toEqual([waiting.id]);
   });
 
   it("does not count capacity blockers as requiring a human action", () => {
@@ -71,7 +72,7 @@ describe("deriveBlockerTree", () => {
     const waiting = issue("DENE-1", { metadata: { "close.waiting_on": target.identifier } });
     const result = deriveBlockerTree(waiting, { issueByIdentifier: { [target.identifier]: target } });
     expect(result.state).toBe("ROOT");
-    expect(result.rootCauses.map((x) => x.id)).toEqual([waiting.id, target.id]);
+    expect(result.rootCauses.map((x) => x.id)).toEqual([waiting.id]);
   });
 
   it("preserves cycle attribution in the root result and node memo", () => {

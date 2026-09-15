@@ -136,7 +136,12 @@ export function deriveBlockerTree(
     // waiting_on is itself an active dependency edge while the target is
     // non-terminal. Keep a reference even when its snapshot is missing or it
     // currently has no own blocker, so cross-ticket waits are never silent.
-    const waitingRef = waiting
+    // Terminal targets are already represented by this waiting node's
+    // wake-missed ROOT attribution. They are no longer actionable blockers,
+    // so do not expose the completed/cancelled target as a root cause. Keep
+    // the dependency reference only while the target is active or its
+    // snapshot is unavailable.
+    const waitingRef = waiting && (!waitingIssue || !TERMINAL.has(waitingIssue.status))
       ? (waitingIssue ? ref(waitingIssue) : { id: waiting, identifier: waiting })
       : undefined;
     const causes = [...(own ? [ref(issue)] : []), ...childResults.flatMap((child) => child.rootCauses), ...(waitingRef ? [waitingRef] : []), ...(waitingResult?.rootCauses ?? [])];
