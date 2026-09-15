@@ -2269,6 +2269,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/draft-restores/{restoreId}", h.ConsumeChatDraftRestore)
 				})
 			})
+			r.Route("/api/issue-drafts", func(r chi.Router) {
+				r.Post("/", h.CreateIssueDraft)
+				r.Get("/", h.ListIssueDrafts)
+				r.Route("/{sessionId}", func(r chi.Router) {
+					r.Patch("/", h.UpdateIssueDraft)
+					r.Post("/finalize", h.FinalizeIssueDraft)
+					r.Post("/abandon", h.AbandonIssueDraft)
+				})
+			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 			r.Get("/api/chat/pending-tasks/has-any", h.HasPendingChatTasks)
 
