@@ -1612,6 +1612,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/", h.UpdateWorkspace)
 					r.Get("/config/export", h.ExportWorkspaceConfig)
 					r.Post("/config/import", h.ImportWorkspaceConfig)
+					r.Post("/transfer/config", h.ImportWorkspaceTransferConfig)
+					r.Post("/transfer/conversations", h.ImportWorkspaceTransferConversations)
+					r.Post("/transfer/attachments", h.ImportWorkspaceTransferAttachment)
 					r.Post("/members", h.CreateInvitation)
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
