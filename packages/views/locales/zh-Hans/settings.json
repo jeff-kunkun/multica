@@ -1428,6 +1428,34 @@
       "reason_db_error": "数据库错误",
       "confirm_title": "导入这份配置？",
       "confirm_description": "这会把配置写入当前工作区。此页无法撤销。"
+    },
+    "migration": {
+      "title": "跨环境迁移（含对话）",
+      "description": "把当前工作区的配置和你的对话打成 ZIP，再到 kun 实例上导入。密钥不会写入文件。",
+      "export_button": "一键导出",
+      "export_hint": "选择保存路径。文件里有完整聊天记录，请当作敏感文件保管。",
+      "exporting": "正在导出…",
+      "export_success": "导出完成。",
+      "import_button": "一键导入",
+      "import_hint": "选择 ZIP，先预览 dry-run，确认后再写入当前工作区。",
+      "previewing": "正在预览…",
+      "applying": "正在导入…",
+      "confirm": "导入到此工作区",
+      "confirm_title": "导入这个 ZIP？",
+      "confirm_description": "这会把配置和对话写入当前工作区。此页无法撤销。",
+      "cancel": "取消",
+      "success": "导入完成。",
+      "failed": "无法迁移。",
+      "target_unsupported": "目标实例需要 kun 版本",
+      "cli_too_old": "Desktop 内置的 CLI 版本过旧",
+      "bundle_corrupt": "这个 ZIP 不是有效的迁移包。",
+      "progress_sessions": "{{done}} / {{total}} 个会话",
+      "progress_session_current": "当前会话：{{title}}",
+      "progress_attachments": "已下载 {{count}} 个附件",
+      "progress_attachments_total": "{{done}} / {{total}} 个附件",
+      "saved_as": "已保存为 {{name}}（{{size}}）",
+      "runtimes_title": "请在这台机器上为这些智能体绑定运行时。",
+      "gaps_title": "源端导出缺口"
     }
   }
 }

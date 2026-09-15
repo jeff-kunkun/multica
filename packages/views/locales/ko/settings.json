@@ -1428,6 +1428,34 @@
       "reason_db_error": "데이터베이스 오류",
       "confirm_title": "이 구성을 가져올까요?",
       "confirm_description": "현재 워크스페이스에 구성을 씁니다. 이 페이지에서는 되돌릴 수 없습니다."
+    },
+    "migration": {
+      "title": "환경 간 이전 (대화 포함)",
+      "description": "이 워크스페이스 구성과 내 대화를 ZIP으로 묶은 뒤 kun 인스턴스로 가져옵니다. 비밀 값은 파일에 쓰지 않습니다.",
+      "export_button": "ZIP으로 내보내기",
+      "export_hint": "저장 위치를 고르세요. 채팅 기록이 들어 있으니 비공개로 보관하세요.",
+      "exporting": "내보내는 중…",
+      "export_success": "내보내기가 끝났습니다.",
+      "import_button": "ZIP에서 가져오기",
+      "import_hint": "ZIP을 고르고 dry run을 확인한 다음 이 워크스페이스에 적용합니다.",
+      "previewing": "미리 보는 중…",
+      "applying": "가져오는 중…",
+      "confirm": "이 워크스페이스로 가져오기",
+      "confirm_title": "이 ZIP을 가져올까요?",
+      "confirm_description": "구성과 대화를 현재 워크스페이스에 씁니다. 이 페이지에서는 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "success": "가져오기가 끝났습니다.",
+      "failed": "이전할 수 없습니다.",
+      "target_unsupported": "대상 인스턴스는 kun 빌드여야 합니다.",
+      "cli_too_old": "Desktop에 내장된 CLI가 너무 오래되었습니다.",
+      "bundle_corrupt": "이 ZIP은 유효한 이전 번들이 아닙니다.",
+      "progress_sessions": "{{done}} / {{total}}개 세션",
+      "progress_session_current": "현재 세션: {{title}}",
+      "progress_attachments": "첨부 {{count}}개 다운로드됨",
+      "progress_attachments_total": "{{done}} / {{total}}개 첨부",
+      "saved_as": "{{name}} ({{size}})(으)로 저장됨",
+      "runtimes_title": "이 에이전트를 이 머신의 런타임에 연결하세요.",
+      "gaps_title": "원본 내보내기 공백"
     }
   }
 }

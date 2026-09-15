@@ -1435,6 +1435,34 @@
       "reason_db_error": "database error",
       "confirm_title": "Import this configuration?",
       "confirm_description": "This writes configuration into the current workspace. It cannot be undone from this page."
+    },
+    "migration": {
+      "title": "Migrate across environments (including chats)",
+      "description": "Pack this workspace's configuration and your chats into a zip, then import it on a kun instance. Secrets stay out of the zip.",
+      "export_button": "Export to zip",
+      "export_hint": "Choose where to save the zip. It includes your chat history — keep it private.",
+      "exporting": "Exporting…",
+      "export_success": "Export finished.",
+      "import_button": "Import from zip",
+      "import_hint": "Choose a zip, preview the dry run, then apply it to this workspace.",
+      "previewing": "Previewing…",
+      "applying": "Importing…",
+      "confirm": "Import into this workspace",
+      "confirm_title": "Import this zip?",
+      "confirm_description": "This writes configuration and chats into the current workspace. It cannot be undone from this page.",
+      "cancel": "Cancel",
+      "success": "Import finished.",
+      "failed": "Couldn't migrate.",
+      "target_unsupported": "The target instance needs a kun build.",
+      "cli_too_old": "The Desktop CLI is too old for transfer.",
+      "bundle_corrupt": "This zip is not a valid transfer bundle.",
+      "progress_sessions": "{{done}} / {{total}} sessions",
+      "progress_session_current": "Current session: {{title}}",
+      "progress_attachments": "{{count}} attachments downloaded",
+      "progress_attachments_total": "{{done}} / {{total}} attachments",
+      "saved_as": "Saved as {{name}} ({{size}})",
+      "runtimes_title": "Bind these agents to a runtime on this machine.",
+      "gaps_title": "Gaps from the source export"
     }
   }
 }

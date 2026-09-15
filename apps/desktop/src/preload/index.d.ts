@@ -20,6 +20,12 @@ import type {
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
+import type {
+  TransferPickPathResult,
+  TransferProgressEvent,
+  TransferRunRequest,
+  TransferRunResult,
+} from "../shared/workspace-transfer";
 
 interface DesktopAPI {
   /** Absolute home directory captured in the preload process. */
@@ -141,6 +147,14 @@ interface DesktopAPI {
   openIssueWindow: (
     request: IssueWindowRequest,
   ) => Promise<{ ok: true } | { ok: false; reason: "invalid_request" }>;
+  pickTransferExportPath: (input?: {
+    slug?: string;
+  }) => Promise<TransferPickPathResult>;
+  pickTransferImportPath: () => Promise<TransferPickPathResult>;
+  runWorkspaceTransfer: (request: TransferRunRequest) => Promise<TransferRunResult>;
+  onTransferProgress: (
+    callback: (event: TransferProgressEvent) => void,
+  ) => () => void;
 }
 
 type DaemonReauthResult =

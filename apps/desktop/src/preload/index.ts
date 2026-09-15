@@ -34,6 +34,12 @@ import {
   type MainRendererMessageChannel,
   type TabSelectionShortcutKey,
 } from "../shared/main-renderer-messages";
+import type {
+  TransferPickPathResult,
+  TransferProgressEvent,
+  TransferRunRequest,
+  TransferRunResult,
+} from "../shared/workspace-transfer";
 
 type DesktopAppInfo = {
   version: string;
@@ -275,6 +281,17 @@ const desktopAPI = {
   /** Open a validated issue-detail route in a dedicated native window. */
   openIssueWindow: (request: IssueWindowRequest) =>
     ipcRenderer.invoke("window:open-issue", request),
+  pickTransferExportPath: (input?: { slug?: string }): Promise<TransferPickPathResult> =>
+    ipcRenderer.invoke("transfer:pick-export-path", input),
+  pickTransferImportPath: (): Promise<TransferPickPathResult> =>
+    ipcRenderer.invoke("transfer:pick-import-path"),
+  runWorkspaceTransfer: (request: TransferRunRequest): Promise<TransferRunResult> =>
+    ipcRenderer.invoke("transfer:run", request),
+  onTransferProgress: (callback: (event: TransferProgressEvent) => void) => {
+    const handler = (_: unknown, payload: TransferProgressEvent) => callback(payload);
+    ipcRenderer.on("transfer:progress", handler);
+    return () => ipcRenderer.removeListener("transfer:progress", handler);
+  },
 };
 
 type DaemonReauthResult =

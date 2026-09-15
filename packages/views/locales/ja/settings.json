@@ -1428,6 +1428,34 @@
       "reason_db_error": "データベースエラー",
       "confirm_title": "この設定を読み込みますか？",
       "confirm_description": "現在のワークスペースへ設定を書き込みます。このページから元に戻せません。"
+    },
+    "migration": {
+      "title": "環境をまたぐ移行（会話を含む）",
+      "description": "このワークスペースの設定と自分の会話を ZIP にまとめ、kun インスタンスへ読み込みます。秘密情報はファイルに書き出されません。",
+      "export_button": "ZIP に書き出す",
+      "export_hint": "保存先を選びます。チャット履歴が入るので、非公開の場所に保管してください。",
+      "exporting": "書き出し中…",
+      "export_success": "書き出しが完了しました。",
+      "import_button": "ZIP から読み込む",
+      "import_hint": "ZIP を選び、dry run を確認してからこのワークスペースへ適用します。",
+      "previewing": "プレビュー中…",
+      "applying": "読み込み中…",
+      "confirm": "このワークスペースへ読み込む",
+      "confirm_title": "この ZIP を読み込みますか？",
+      "confirm_description": "設定と会話を現在のワークスペースへ書き込みます。このページから元に戻せません。",
+      "cancel": "キャンセル",
+      "success": "読み込みが完了しました。",
+      "failed": "移行できませんでした。",
+      "target_unsupported": "対象インスタンスには kun 版が必要です。",
+      "cli_too_old": "Desktop 同梱の CLI が古すぎます。",
+      "bundle_corrupt": "この ZIP は有効な移行バンドルではありません。",
+      "progress_sessions": "{{done}} / {{total}} 件のセッション",
+      "progress_session_current": "現在のセッション: {{title}}",
+      "progress_attachments": "添付ファイル {{count}} 件をダウンロード済み",
+      "progress_attachments_total": "{{done}} / {{total}} 件の添付ファイル",
+      "saved_as": "{{name}}（{{size}}）として保存しました",
+      "runtimes_title": "これらのエージェントをこのマシンのランタイムに結び付けてください。",
+      "gaps_title": "書き出し元の欠落"
     }
   }
 }

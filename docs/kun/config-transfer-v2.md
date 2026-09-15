@@ -73,6 +73,10 @@ V1 服务端导出有 DB 列。V2 CLI 只有读接口。下面两条是 CLI 必�
 
 **推荐 D**：导出逻辑放在 `multica` CLI；Desktop 以后要做按钮，调同一个 CLI 能力或同一份 Go 逻辑的封装，不另写 TS 实现。
 
+### 2.5 Desktop 按钮（壳，不另写逻辑）
+
+设置页「配置导出/导入」在 Desktop 下多一张「跨环境迁移（含对话）」卡片。按钮只是本机 `multica transfer export/import` 的壳：主进程用已有的 `resolveCliBinary()` + `--profile desktop-<host>` 登录档 spawn CLI，token 不进命令行、不进渲染进程。Web 不渲染这张卡片，也不加服务端导出端点。
+
 ### 2.2 为什么导入必须在服务端
 
 - 导入对话要写入**历史**消息：保留 `role = assistant`、原始 `created_at`、不触发智能体任务、不生成标题、不推送渠道。现有 `POST /api/chat/sessions/{id}/messages` 只会以导入者身份新建一条 user 消息并排一个任务，做不到。
@@ -426,7 +430,7 @@ secrets_omitted.json                全包汇总（含 config.json 内的登记�
 | 关闭对话密钥扫描 | 与验收断言冲突 |
 | 无法扫描的二进制附件文件体 | 无法证明不含密钥 |
 | 服务端导入会话 / 导入进度表 | 确定性 id 已经提供幂等与续传 |
-| Desktop / Web 导出按钮 | 先交付 CLI；UI 以后作为同一逻辑的壳 |
+| Desktop / Web 导出按钮 | **Desktop 按钮 = CLI 的壳，已交付**（设置页「跨环境迁移」卡片）。Web 不做按钮 |
 | 导入撤销 | 沿用 V1：配置按批次事务，对话只追加；撤销需要快照 |
 
 ## 8. 未确认项（实现前必须验证）
