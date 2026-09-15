@@ -79,7 +79,9 @@ function reviewOverdue(issue: Issue, options: BlockerTreeOptions, now: number): 
 
 function ownRoot(issue: Issue, options: BlockerTreeOptions, now: number): boolean {
   const close = readCloseProtocol(issue.metadata, issue.status);
-  if (closeProtocolWaitingOn(close.waitingOn) && lookupIssue(options, close.waitingOn!)?.status === "done") {
+  const waitingOn = closeProtocolWaitingOn(close.waitingOn);
+  const waitingIssue = waitingOn ? lookupIssue(options, waitingOn) : undefined;
+  if (waitingIssue && TERMINAL.has(waitingIssue.status)) {
     return true;
   }
   if (reviewOverdue(issue, options, now)) return true;
@@ -110,14 +112,16 @@ export function deriveBlockerTree(
   const maxDepth = options.maxDepth ?? 4;
 
   function walk(issue: Issue, ancestors: Set<string>, depth: number): BlockerTreeNode {
-    const existing = nodes.get(issue.id);
-    if (existing) return existing;
     const loop = ancestors.has(issue.id);
     if (loop || depth > maxDepth) {
+      // A cycle placeholder is authoritative for this path.  Do not allow the
+      // outer frame to memoize a propagated result over the cycle attribution.
       const result: BlockerTreeNode = { issue: ref(issue), state: loop ? "ROOT" : "CLEAR", rootCauses: loop ? [ref(issue)] : [], frontierStage: null, sideBlockers: [], userActionCount: 0, derived: loop, cycle: loop };
       nodes.set(issue.id, result);
       return result;
     }
+    const existing = nodes.get(issue.id);
+    if (existing) return existing;
     const close = readCloseProtocol(issue.metadata, issue.status);
     const own = ownRoot(issue, options, now);
     const children = lookupChildren(options, issue.id).filter((child) => !TERMINAL.has(child.status));
@@ -129,12 +133,20 @@ export function deriveBlockerTree(
     const waiting = closeProtocolWaitingOn(close.waitingOn);
     const waitingIssue = waiting ? lookupIssue(options, waiting) : undefined;
     const waitingResult = waitingIssue && !TERMINAL.has(waitingIssue.status) ? walk(waitingIssue, nextAncestors, depth + 1) : undefined;
-    const causes = [...(own ? [ref(issue)] : []), ...childResults.flatMap((child) => child.rootCauses), ...(waitingResult?.rootCauses ?? [])];
+    // waiting_on is itself an active dependency edge while the target is
+    // non-terminal. Keep a reference even when its snapshot is missing or it
+    // currently has no own blocker, so cross-ticket waits are never silent.
+    const waitingRef = waiting
+      ? (waitingIssue ? ref(waitingIssue) : { id: waiting, identifier: waiting })
+      : undefined;
+    const causes = [...(own ? [ref(issue)] : []), ...childResults.flatMap((child) => child.rootCauses), ...(waitingRef ? [waitingRef] : []), ...(waitingResult?.rootCauses ?? [])];
     const unique = [...new Map(causes.map((cause) => [cause.id, cause])).values()];
     const state: BlockerState = own ? "ROOT" : unique.length ? "PROPAGATED" : "CLEAR";
     const userActionCount = (own && ownNeedsUserAction(issue, options, now) ? 1 : 0) +
       childResults.reduce((count, child) => count + child.userActionCount, 0) +
       (waitingResult?.userActionCount ?? 0);
+    const prior = nodes.get(issue.id);
+    if (prior?.cycle) return prior;
     const result: BlockerTreeNode = { issue: ref(issue), state, rootCauses: unique, frontierStage, sideBlockers: children.filter((child) => !frontier.includes(child)).map(ref), userActionCount, derived: own && close.conclusion !== "blocked", cycle: false };
     nodes.set(issue.id, result);
     return result;
