@@ -45,14 +45,27 @@ var (
 // member-facing recovery guidance describe the actual failure.
 const concurrentRequestLimitWitness = "concurrent request limit"
 
-// modelAtCapacityWitness is GPT/Codex wording for a transient provider
-// capacity rejection ("Selected model is at capacity. Please try a different
-// model."). Rule 8 matches the broader "selected model" substring for
-// unavailable models, so this witness must win first — otherwise a recoverable
-// capacity miss is labelled model_not_found_or_unavailable and never retried.
-// Availability failures ("Selected model … is not available") do not contain
-// this phrase and still land in rule 8.
-const modelAtCapacityWitness = "at capacity"
+// modelSelectedWitness and modelAtCapacityWitness together identify GPT/Codex
+// wording for a transient provider capacity rejection ("Selected model is at
+// capacity. Please try a different model."). Rule 8 matches the broader
+// "selected model" substring for unavailable models, so this pair must win
+// first — otherwise a recoverable capacity miss is labelled
+// model_not_found_or_unavailable and never retried.
+//
+// Both halves are required (DENE-224). Matching only "at capacity" is too
+// broad: "context window at capacity" is overflow (rule 1) and "monthly usage
+// limit reached; account at capacity" is quota (rule 4). The over-broad
+// witness stole both into this retryable bucket and burned two 30s retries on
+// failures that should terminate. Do not relax this back to a single
+// substring. Unpaired phrasing is left to rules 1 and 4 in order; do not add
+// a bare "at capacity" fallback in rule 5.
+//
+// Availability failures ("Selected model … is not available") contain
+// "selected model" but not "at capacity" and still land in rule 8.
+const (
+	modelSelectedWitness   = "selected model"
+	modelAtCapacityWitness = "at capacity"
+)
 
 // Classify maps a free-form error string from the agent runtime / CLI
 // to one of the 14 agent_error.* sub-reasons. Always returns a valid
@@ -100,12 +113,18 @@ func Classify(rawError string) Reason {
 
 	// GPT/Codex "Selected model is at capacity" must beat rule 8's
 	// "selected model" witness. Same retryable capacity bucket as above.
-	case strings.Contains(lower, modelAtCapacityWitness):
+	// Both substrings are required; a lone "at capacity" is overflow or
+	// quota phrasing and must not land here (DENE-224).
+	case containsAll(lower, modelSelectedWitness, modelAtCapacityWitness):
 		return ReasonAgentProviderCapacityOrRateLimit
 
 	// 1. Context / token window overflow. Checked early so "token
 	//    limit" doesn't get swallowed by the broader "limit" / "quota"
-	//    rule below.
+	//    rule below. "context"+"at capacity" restores the DENE-211 probe
+	//    that the over-broad capacity witness stole: after the early-hit
+	//    requires "selected model" as well, this phrasing has no other
+	//    rule-1 marker ("context window limit", "token"+"limit", …) and
+	//    would otherwise fall through to unknown.
 	case containsAny(lower,
 		"context length",
 		"context_length_exceeded",
@@ -119,7 +138,8 @@ func Classify(rawError string) Reason {
 		// "token limit", "tokens per minute limit", etc., without the
 		// false positives a naive `Contains("token") || Contains("limit")`
 		// would generate.
-		strings.Contains(lower, "token") && strings.Contains(lower, "limit"):
+		strings.Contains(lower, "token") && strings.Contains(lower, "limit"),
+		strings.Contains(lower, "context") && strings.Contains(lower, modelAtCapacityWitness):
 		return ReasonAgentContextOverflow
 
 	// 2. Missing config / API key. Checked before auth because
@@ -171,6 +191,11 @@ func Classify(rawError string) Reason {
 		return ReasonAgentProviderQuotaLimit
 
 	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit.
+	//    GPT/Codex "Selected model is at capacity" is the two-substring
+	//    early-hit above, not a phrase here. Do not add a bare
+	//    "at capacity" fallback: DENE-211 showed it misfiles
+	//    "context window at capacity" (overflow) and "account at
+	//    capacity" (quota) into this retryable bucket.
 	case httpCapacityCodeRe.MatchString(lower),
 		containsAny(lower,
 			"rate limit",

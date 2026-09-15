@@ -90,6 +90,10 @@ func TestClassifyRules(t *testing.T) {
 		{"selected model at capacity", "Selected model is at capacity. Please try a different model.", ReasonAgentProviderCapacityOrRateLimit},
 		{"selected model at capacity with stream prefix", "stream error: Selected model is at capacity. Please try a different model.", ReasonAgentProviderCapacityOrRateLimit},
 		{"selected model at capacity with named model", "turn failed: Selected model gpt-5.5 is at capacity. Please try a different model.", ReasonAgentProviderCapacityOrRateLimit},
+		// DENE-224: a lone "at capacity" must not steal overflow or quota
+		// into the retryable capacity bucket.
+		{"context window at capacity stays overflow", "context window at capacity", ReasonAgentContextOverflow},
+		{"account at capacity stays quota", "monthly usage limit reached; account at capacity", ReasonAgentProviderQuotaLimit},
 
 		// 6. Provider 5xx / server error.
 		{"server had an error", "the server had an error processing your request", ReasonAgentProviderServerError},
@@ -237,8 +241,14 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 
 		// "selected model" is rule 8's unavailable-model witness; "at
 		// capacity" must win so a recoverable GPT miss is not labelled
-		// model_not_found_or_unavailable.
+		// model_not_found_or_unavailable. Both substrings are required
+		// (DENE-224): overflow and quota phrasing that only share
+		// "at capacity" keep their own buckets, and a selected-model
+		// availability miss without "at capacity" stays in rule 8.
 		{"selected model at capacity beats model_not_found", "Selected model is at capacity. Please try a different model.", ReasonAgentProviderCapacityOrRateLimit},
+		{"context window at capacity stays overflow", "context window at capacity", ReasonAgentContextOverflow},
+		{"account at capacity stays quota", "monthly usage limit reached; account at capacity", ReasonAgentProviderQuotaLimit},
+		{"selected model not available stays model_not_found", "Selected model gpt-5.5 is not available", ReasonAgentModelNotFoundOrUnavailable},
 
 		// Both "429" and "rate limit" present — should still land in
 		// the capacity bucket, not the quota bucket.
