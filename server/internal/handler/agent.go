@@ -48,6 +48,24 @@ type AgentConversationStarter struct {
 	Prompt string `json:"prompt"`
 }
 
+const (
+	maxAgentSwitchableModels          = 32
+	maxAgentSwitchableModelIDLength   = 200
+	maxAgentSwitchableModelNoteLength = 200
+)
+
+// AgentSwitchableModel is one display-only entry in an agent's model
+// lineup (kun fork, DENE-200). Dispatch never reads it: the run still uses
+// agent.model on agent.runtime_id. Model ids may belong to another CLI, so
+// they are not validated against the runtime catalog.
+type AgentSwitchableModel struct {
+	Model string `json:"model"`
+	// Role is "default" (first choice), "fallback" (ordered degrade chain)
+	// or "batch" (borrowable for batch work).
+	Role string `json:"role"`
+	Note string `json:"note"`
+}
+
 type AgentResponse struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
@@ -75,6 +93,8 @@ type AgentResponse struct {
 	// ConversationStarters are optional, agent-specific first-turn suggestions. An
 	// empty list tells clients to render their localized fallback prompts.
 	ConversationStarters []AgentConversationStarter `json:"conversation_starters"`
+	// SwitchableModels is the display-only model lineup; empty when unset.
+	SwitchableModels []AgentSwitchableModel `json:"switchable_models"`
 	// SystemKey identifies a product-defined agent (e.g. "mika"). Empty for
 	// every user- or template-created agent. The UI keys "this is maintained
 	// by Multica" off this rather than off the display name, which owners may
@@ -196,6 +216,14 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		}
 	}
 
+	switchableModels := []AgentSwitchableModel{}
+	if len(a.SwitchableModels) > 0 {
+		if err := json.Unmarshal(a.SwitchableModels, &switchableModels); err != nil {
+			slog.Warn("failed to unmarshal agent switchable_models", "agent_id", uuidToString(a.ID), "error", err)
+			switchableModels = []AgentSwitchableModel{}
+		}
+	}
+
 	// composio_toolkit_allowlist: the column is stored as TEXT[] and arrives
 	// here as a []string (sqlc). NULL and `{}` both serialize as nil through
 	// the postgres driver — both correctly mean "no toolkits", but the API
@@ -214,6 +242,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Description:              a.Description,
 		Instructions:             a.Instructions,
 		ConversationStarters:     conversationStarters,
+		SwitchableModels:         switchableModels,
 		SystemKey:                a.SystemKey.String,
 		SystemInstructions:       systemInstructionsFor(a),
 		AvatarURL:                h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
@@ -1355,6 +1384,35 @@ func normaliseAgentConversationStarters(starters []AgentConversationStarter) ([]
 	return normalised, nil
 }
 
+func normaliseAgentSwitchableModels(models []AgentSwitchableModel) ([]AgentSwitchableModel, error) {
+	if len(models) > maxAgentSwitchableModels {
+		return nil, fmt.Errorf("switchable_models must contain at most %d items", maxAgentSwitchableModels)
+	}
+
+	normalised := make([]AgentSwitchableModel, 0, len(models))
+	for i, item := range models {
+		item.Model = strings.TrimSpace(item.Model)
+		item.Role = strings.TrimSpace(item.Role)
+		item.Note = strings.TrimSpace(item.Note)
+		if item.Model == "" {
+			return nil, fmt.Errorf("switchable_models[%d].model is required", i)
+		}
+		switch item.Role {
+		case "default", "fallback", "batch":
+		default:
+			return nil, fmt.Errorf("switchable_models[%d].role must be one of default, fallback, batch", i)
+		}
+		if utf8.RuneCountInString(item.Model) > maxAgentSwitchableModelIDLength {
+			return nil, fmt.Errorf("switchable_models[%d].model must be %d characters or fewer", i, maxAgentSwitchableModelIDLength)
+		}
+		if utf8.RuneCountInString(item.Note) > maxAgentSwitchableModelNoteLength {
+			return nil, fmt.Errorf("switchable_models[%d].note must be %d characters or fewer", i, maxAgentSwitchableModelNoteLength)
+		}
+		normalised = append(normalised, item)
+	}
+	return normalised, nil
+}
+
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
@@ -1624,9 +1682,12 @@ type UpdateAgentRequest struct {
 	Description          *string                     `json:"description"`
 	Instructions         *string                     `json:"instructions"`
 	ConversationStarters *[]AgentConversationStarter `json:"conversation_starters"`
-	AvatarURL            *string                     `json:"avatar_url"`
-	RuntimeID            *string                     `json:"runtime_id"`
-	RuntimeConfig        any                         `json:"runtime_config"`
+	// SwitchableModels replaces the display-only lineup wholesale when
+	// present; `[]` clears it, omitted or null preserves it.
+	SwitchableModels *[]AgentSwitchableModel `json:"switchable_models"`
+	AvatarURL        *string                 `json:"avatar_url"`
+	RuntimeID        *string                 `json:"runtime_id"`
+	RuntimeConfig    any                     `json:"runtime_config"`
 	// custom_env is intentionally NOT updatable through this endpoint.
 	// Use `PUT /api/agents/{id}/env` for env changes — that path admits
 	// the agent owner or a workspace owner/admin, denies agent actors,
@@ -1899,6 +1960,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		encoded, _ := json.Marshal(conversationStarters)
 		params.ConversationStarters = encoded
+	}
+	if req.SwitchableModels != nil {
+		switchableModels, err := normaliseAgentSwitchableModels(*req.SwitchableModels)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		encoded, _ := json.Marshal(switchableModels)
+		params.SwitchableModels = encoded
 	}
 	if req.AvatarURL != nil {
 		avatarURL, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, existing.AvatarUrl.String)

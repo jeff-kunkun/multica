@@ -75,6 +75,7 @@ export function AuthInitializer({
           // Absent/false on the managed cloud and older servers → section hidden.
           vcsIntegrationAvailable: cfg.vcs_integration_available === true,
           passwordAuth: cfg.password_auth === true,
+          signupTotpRequired: cfg.signup_totp_required === true,
         });
         configStore.getState().setDaemonConfig({
           daemonServerUrl: cfg.daemon_server_url,
@@ -87,6 +88,11 @@ export function AuthInitializer({
         configStore
           .getState()
           .setLocalWorktreeSupported(cfg.local_worktree_supported === true);
+        // Official cloud advertises worktree but rejects `shared`. Absent
+        // must stay false so the client never POSTs that enum.
+        configStore
+          .getState()
+          .setLocalSharedSupported(cfg.local_shared_supported === true);
         // Older agent handlers returned success while silently dropping this
         // additive field, so writes stay disabled unless the server declares
         // the persistence contract explicitly.

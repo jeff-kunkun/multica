@@ -2,6 +2,12 @@ import { ipcMain, dialog, BrowserWindow } from "electron";
 import { access, stat } from "fs/promises";
 import { constants as fsConstants } from "fs";
 import { basename, dirname, isAbsolute, join } from "path";
+import { activeDaemonProfileDir } from "./daemon-manager";
+import {
+  localDirectoryOverridesPath,
+  readLocalDirectoryOverrides,
+  writeLocalDirectorySharedOverride,
+} from "./local-directory-overrides";
 
 export interface PickDirectoryResult {
   ok: boolean;
@@ -124,5 +130,36 @@ export function setupLocalDirectory(
     "local-directory:validate",
     (_event, path: string): Promise<ValidateLocalDirectoryResult> =>
       validateLocalDirectory(path),
+  );
+
+  ipcMain.handle("local-directory:list-shared-overrides", async () => {
+    const dir = await activeDaemonProfileDir();
+    if (!dir) return [];
+    try {
+      return await readLocalDirectoryOverrides(localDirectoryOverridesPath(dir));
+    } catch {
+      return [];
+    }
+  });
+
+  ipcMain.handle(
+    "local-directory:set-shared-override",
+    async (
+      _event,
+      input: { daemonId?: string; localPath?: string; enabled?: boolean },
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const dir = await activeDaemonProfileDir();
+      if (!dir) return { ok: false, error: "daemon profile is unresolved" };
+      try {
+        await writeLocalDirectorySharedOverride(localDirectoryOverridesPath(dir), {
+          daemonId: input.daemonId ?? "",
+          localPath: input.localPath ?? "",
+          enabled: input.enabled === true,
+        });
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: errorMessage(err) };
+      }
+    },
   );
 }

@@ -349,3 +349,101 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 		})
 	}
 }
+
+// TestFailTaskProviderCapacityBudget is the end-to-end guard for DENE-210:
+// FailTask must (1) grant capacity failures the raised budget, (2) persist a
+// deferred child whose fire_at carries the 30s backoff, and (3) still honour
+// max_attempts=1 as "auto-retry disabled". Unlike provider_network, the first
+// retry is also deferred — a capacity miss does not clear immediately.
+func TestFailTaskProviderCapacityBudget(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("read agent runtime: %v", err)
+	}
+
+	cases := []struct {
+		name        string
+		attempt     int32
+		maxAttempts int32
+		wantChild   bool
+		wantAttempt int32
+		wantMax     int32
+	}{
+		{"first retry is deferred with raised budget", 1, 2, true, 2, 3},
+		{"second retry is still deferred", 2, 2, true, 3, 3},
+		{"disabled budget is never revived", 1, 1, false, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var parentID pgtype.UUID
+			if err := pool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, session_id, work_dir)
+				VALUES ($1, $2, $3, 'running', 0, $4, $5, 'src-session', '/tmp/src-workdir')
+				RETURNING id
+			`, agentID, runtimeID, issueID, tc.attempt, tc.maxAttempts).Scan(&parentID); err != nil {
+				t.Fatalf("insert parent task: %v", err)
+			}
+			t.Cleanup(func() {
+				pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id = $1 OR id = $1`, parentID)
+			})
+
+			before := time.Now()
+			// Empty reason: FailTask must Classify the GPT capacity wording
+			// itself, then retry. Passing the bucket pre-labelled would skip
+			// the bug this ticket exists to fix.
+			if _, err := svc.FailTask(ctx, parentID, "Selected model is at capacity. Please try a different model.", "src-session", "/tmp/src-workdir", "", "", false, "", ""); err != nil {
+				t.Fatalf("FailTask: %v", err)
+			}
+
+			var (
+				n            int
+				childAttempt int32
+				childMax     int32
+				childStatus  string
+				fireAt       pgtype.Timestamptz
+			)
+			row := pool.QueryRow(ctx, `
+				SELECT count(*),
+					coalesce(max(attempt),0),
+					coalesce(max(max_attempts),0),
+					coalesce(max(status),''),
+					max(fire_at)
+				FROM agent_task_queue WHERE parent_task_id = $1
+			`, parentID)
+			if err := row.Scan(&n, &childAttempt, &childMax, &childStatus, &fireAt); err != nil {
+				t.Fatalf("read child: %v", err)
+			}
+			if !tc.wantChild {
+				if n != 0 {
+					t.Fatalf("expected no retry child, got %d", n)
+				}
+				return
+			}
+			if n != 1 {
+				t.Fatalf("expected exactly one retry child, got %d", n)
+			}
+			if childAttempt != tc.wantAttempt {
+				t.Errorf("child attempt = %d, want %d", childAttempt, tc.wantAttempt)
+			}
+			if childMax != tc.wantMax {
+				t.Errorf("child max_attempts = %d, want %d (self-consistent budget)", childMax, tc.wantMax)
+			}
+			if childStatus != "deferred" {
+				t.Errorf("child status = %q, want deferred", childStatus)
+			}
+			if !fireAt.Valid {
+				t.Fatal("fire_at must be set: capacity retries are deferred, not immediate")
+			}
+			gotDelay := fireAt.Time.Sub(before)
+			if gotDelay < providerCapacityRetryWait-time.Second || gotDelay > providerCapacityRetryWait+2*time.Second {
+				t.Errorf("fire_at delay = %s, want ~%s", gotDelay, providerCapacityRetryWait)
+			}
+		})
+	}
+}

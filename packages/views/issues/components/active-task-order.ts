@@ -4,7 +4,11 @@ type OrderedTask = Pick<AgentTask, "id" | "status" | "priority" | "created_at">;
 
 function phase(task: OrderedTask): number {
   if (task.status === "running") return 0;
-  if (task.status === "dispatched" || task.status === "waiting_local_directory") return 1;
+  if (
+    task.status === "dispatched" ||
+    task.status === "waiting_local_directory" ||
+    task.status === "deferred"
+  ) return 1;
   return 2;
 }
 

@@ -39,7 +39,10 @@ const mockApiIssueCliToken = vi.hoisted(() => vi.fn());
 const mockSetQueryData = vi.hoisted(() => vi.fn());
 // Mutable slice of auth state the component subscribes to.
 const mockAuthState = vi.hoisted(() => ({ expired: false }));
-const mockConfigState = vi.hoisted(() => ({ passwordAuth: false }));
+const mockConfigState = vi.hoisted(() => ({
+  passwordAuth: false,
+  allowSignup: true,
+}));
 
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
@@ -82,8 +85,13 @@ vi.mock("@multica/core/api", () => ({
 }));
 
 vi.mock("@multica/core/config", () => ({
-  useConfigStore: (selector?: (s: { passwordAuth: boolean }) => unknown) => {
-    const state = { passwordAuth: mockConfigState.passwordAuth };
+  useConfigStore: (
+    selector?: (s: { passwordAuth: boolean; allowSignup: boolean }) => unknown,
+  ) => {
+    const state = {
+      passwordAuth: mockConfigState.passwordAuth,
+      allowSignup: mockConfigState.allowSignup,
+    };
     return selector ? selector(state) : state;
   },
 }));
@@ -117,6 +125,7 @@ describe("LoginPage", () => {
     vi.clearAllMocks();
     mockAuthState.expired = false;
     mockConfigState.passwordAuth = false;
+    mockConfigState.allowSignup = true;
     // Default: no existing session (getMe rejects when no auth)
     mockApiGetMe.mockRejectedValue(new Error("unauthorized"));
     localStorage.clear();
@@ -757,6 +766,7 @@ describe("LoginPage", () => {
     expect(
       screen.getByRole("button", { name: /^sign in$/i }),
     ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/team 2fa code/i)).not.toBeInTheDocument();
   });
 
   it("calls loginWithPassword and onSuccess for a valid password login", async () => {
@@ -794,6 +804,22 @@ describe("LoginPage", () => {
       ).toBeInTheDocument();
     });
     expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("links to signup when password auth and signup are enabled", () => {
+    mockConfigState.passwordAuth = true;
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+    const link = screen.getByRole("link", { name: /create an account/i });
+    expect(link).toHaveAttribute("href", "/signup");
+  });
+
+  it("hides the signup link when signup is disabled", () => {
+    mockConfigState.passwordAuth = true;
+    mockConfigState.allowSignup = false;
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+    expect(
+      screen.queryByRole("link", { name: /create an account/i }),
+    ).not.toBeInTheDocument();
   });
 
 });

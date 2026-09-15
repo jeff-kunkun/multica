@@ -80,7 +80,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// to EOF — so we always close, on both the success and error paths.
 	writeErrCh := make(chan error, 1)
 	go func() {
-		_, err := io.WriteString(stdin, prompt)
+		_, err := io.WriteString(stdin, cursorStdinPrompt(prompt, opts))
 		closeStdin()
 		writeErrCh <- err
 	}()
@@ -1045,10 +1045,26 @@ func buildCursorArgs(opts ExecOptions, logger *slog.Logger) []string {
 		args = append(args, "--model", opts.Model)
 	}
 	// NOTE: cursor-agent CLI does not support --system-prompt or --max-turns.
-	// Instructions are injected via AGENTS.md and .cursor/skills/ files instead.
+	// Non-shared tasks inject instructions via AGENTS.md and .cursor/skills/.
+	// Shared mode prepends the brief on stdin (cursorStdinPrompt) and passes
+	// --add-dir <sidecar> on ExtraArgs so .cursor/skills is still discovered.
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}
+	args = append(args, filterCustomArgs(opts.ExtraArgs, cursorBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, cursorBlockedArgs, logger)...)
 	return args
+}
+
+// cursorStdinPrompt is the bytes written to cursor-agent's stdin. The CLI has
+// no --system-prompt (see buildCursorArgs). Shared mode therefore prepends
+// ExecOptions.SystemPrompt the same way grok/dsh do: a DENE-187 canary against
+// cursor-agent 2026.09.02-c22c1a3 showed --add-dir loads .cursor/skills from
+// the sidecar but not AGENTS.md, and --plugin-dir loads plugin skills but not
+// plugin rules. Putting the brief on argv is also unsafe on Windows (#5649).
+func cursorStdinPrompt(prompt string, opts ExecOptions) string {
+	if opts.SystemPrompt == "" {
+		return prompt
+	}
+	return opts.SystemPrompt + "\n\n---\n\n" + prompt
 }

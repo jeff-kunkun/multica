@@ -160,7 +160,12 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 //
 // For Claude:   writes {workDir}/CLAUDE.md  (skills discovered natively from .claude/skills/)
 // For CodeBuddy: writes {workDir}/CODEBUDDY.md  (CodeBuddy's native memory filename; skills discovered natively from .codebuddy/skills/)
-// For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
+// For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME).
+//
+//	Shared mode passes the per-task CODEX_HOME as workDir so Codex
+//	loads the brief as global-scope AGENTS.md without writing the
+//	user's cwd.
+//
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .opencode/skills/)
 // For CodeArts: writes {workDir}/AGENTS.md  (skills discovered natively from .codeartsdoer/skills/)

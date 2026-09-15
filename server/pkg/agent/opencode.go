@@ -89,8 +89,11 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// CLI exit 1 with a usage dump before sending anything (checked against
 	// OpenCode 1.17.7). SystemPrompt is therefore never forwarded; the runtime
 	// brief reaches the agent through the per-task AGENTS.md the daemon writes
-	// into the workdir, which OpenCode loads itself (MUL-5392). Same constraint
-	// as the DevEco backend, which was forked from this one.
+	// into the workdir, which OpenCode loads itself (MUL-5392). In shared mode
+	// that file lives under the sidecar root and the daemon exports
+	// OPENCODE_CONFIG_DIR plus a sidecar opencode.json so OpenCode still finds
+	// it (DENE-186). Same constraint as the DevEco backend, which was forked
+	// from this one.
 	if opts.MaxTurns > 0 {
 		b.cfg.Logger.Warn("opencode does not support --max-turns; ignoring", "maxTurns", opts.MaxTurns)
 	}
@@ -149,10 +152,17 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// future Multica field needs the same channel it would assemble a
 	// combined OpenCode config slice before the env append.
 	//
+	// OPENCODE_CONFIG_DIR is a different variable: in shared mode the daemon
+	// sets it to the sidecar root (additive with the user's global config)
+	// so instructions/skills.paths in the sidecar opencode.json are found.
+	// buildEnv already forwards it from Config.Env; this backend must not
+	// clear or overwrite it, and must not confuse it with OPENCODE_CONFIG_CONTENT.
+	//
 	// This deliberately leaves <workdir>/opencode.json untouched — the
 	// workdir is reused across turns for the same (agent, issue), and any
 	// agent- or user-written model / tools / permission settings in it must
-	// survive across runs.
+	// survive across runs. The shared-mode sidecar opencode.json is a
+	// different file, under the env root, not the cwd.
 	mcpContent, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
 	if err != nil {
 		cancel()

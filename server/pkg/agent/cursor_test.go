@@ -83,6 +83,45 @@ func TestBuildCursorArgsIgnoresSystemPromptAndMaxTurns(t *testing.T) {
 	}
 }
 
+func TestCursorStdinPromptPrependsSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	got := cursorStdinPrompt("do the task", ExecOptions{SystemPrompt: "RUNTIME BRIEF"})
+	want := "RUNTIME BRIEF\n\n---\n\ndo the task"
+	if got != want {
+		t.Fatalf("cursorStdinPrompt = %q, want %q", got, want)
+	}
+	if got := cursorStdinPrompt("do the task", ExecOptions{}); got != "do the task" {
+		t.Fatalf("empty SystemPrompt = %q, want the user prompt unchanged", got)
+	}
+}
+
+func TestBuildCursorArgsForwardsExtraAddDir(t *testing.T) {
+	t.Parallel()
+
+	args := buildCursorArgs(ExecOptions{
+		Cwd:       "/tmp/work",
+		ExtraArgs: []string{"--add-dir", "/env/sidecar", "--yolo"},
+	}, slog.Default())
+
+	hasAddDir := false
+	yoloCount := 0
+	for i, a := range args {
+		if a == "--add-dir" && i+1 < len(args) && args[i+1] == "/env/sidecar" {
+			hasAddDir = true
+		}
+		if a == "--yolo" {
+			yoloCount++
+		}
+	}
+	if !hasAddDir {
+		t.Fatalf("expected ExtraArgs --add-dir /env/sidecar, got %v", args)
+	}
+	if yoloCount != 1 {
+		t.Fatalf("ExtraArgs --yolo should be filtered, yoloCount=%d args=%v", yoloCount, args)
+	}
+}
+
 func TestBuildCursorArgsCustomArgs(t *testing.T) {
 	t.Parallel()
 

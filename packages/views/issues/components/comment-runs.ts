@@ -19,7 +19,7 @@ export function commentRunOutput(task: AgentTask): string | null {
 }
 
 export function isActiveCommentRun(task: AgentTask): boolean {
-  return ["queued", "dispatched", "waiting_local_directory", "running"].includes(task.status);
+  return ["queued", "dispatched", "waiting_local_directory", "deferred", "running"].includes(task.status);
 }
 
 /** Published replies own their log entry even while the agent finishes its run. */
@@ -78,6 +78,7 @@ export function buildCommentRunView(
       // Dispatch can precede receipt persistence; retain the planned anchor
       // until delivery is known, or if the run terminates before dispatch.
       const usesPlannedCoverage = source.status === "queued"
+        || source.status === "deferred"
         || (source.status === "dispatched" && !source.delivered_comment_ids?.length)
         || ((source.status === "cancelled" || source.status === "failed")
           && !source.dispatched_at && !source.started_at);

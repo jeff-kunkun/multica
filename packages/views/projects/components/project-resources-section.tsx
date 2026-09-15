@@ -49,13 +49,18 @@ import {
   isDesktopShell,
   pickDirectory,
   useLocalDaemonStatus,
+  useLocalDirectorySharedOverrides,
   validateLocalDirectory,
   type ValidateLocalDirectoryResult,
 } from "../../platform";
 import { LocalDirectoryModeDialog } from "./local-directory-mode-dialog";
 import { localDirectoryLabel } from "./local-directory-label";
 import {
+  apiExecutionMode,
+  displayedExecutionMode,
   executionModeOf,
+  isSharedModeRejectedByServer,
+  needsLocalSharedOverride,
   sharedModeUnavailable,
   worktreeUnavailableReason,
 } from "./local-directory-mode";
@@ -130,6 +135,13 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // performs that gate at all. One declared boolean, no inference — servers
   // that predate it drop execution_mode and answer 201.
   const serverValidatesWorktree = useConfigStore((state) => state.localWorktreeSupported);
+  const serverAcceptsShared = useConfigStore((state) => state.localSharedSupported);
+  const { canPersist, hasOverride, setOverride } = useLocalDirectorySharedOverrides();
+  const sharedUnavailable = sharedModeUnavailable({
+    serverAcceptsShared,
+    canSetLocalOverride: canPersist,
+  });
+  const sharedUsesLocalOverride = !serverAcceptsShared && canPersist;
   // Keyed on the resource's OWN daemon, not the machine the browser happens to
   // be on: a resource is pinned to one machine, and its mode can legitimately
   // be changed from the web app or from a different device. Using the local
@@ -258,22 +270,31 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     if (!modeDialog || modeSaving) return;
     setModeSaving(true);
     setModeError(null);
+    const apiMode = apiExecutionMode(mode, serverAcceptsShared);
+    const needOverride = needsLocalSharedOverride(mode, serverAcceptsShared);
+    const daemonId = modeDialog.daemonId ?? localDaemonId;
     try {
       if (modeDialog.resource) {
         const ref = modeDialog.resource.resource_ref;
-        if (executionModeOf(ref) === mode) {
+        const stored = executionModeOf(ref);
+        const currentlySharedLocally = hasOverride(ref.daemon_id, ref.local_path);
+        const currentDisplay = displayedExecutionMode(ref, currentlySharedLocally);
+        const apiChanged = stored !== apiMode;
+        const overrideChanged = currentlySharedLocally !== needOverride;
+        if (!apiChanged && !overrideChanged && currentDisplay === mode) {
           setModeDialog(null);
           return;
         }
-        await updateResource.mutateAsync({
-          resourceId: modeDialog.resource.id,
-          data: {
-            // Spread first so every other ref field survives the edit — the
-            // server replaces the whole ref, it does not deep-merge.
-            resource_ref: { ...ref, execution_mode: mode },
-          },
-        });
-        toast.success(t(($) => $.resources.toast_local_mode_updated));
+        if (apiChanged) {
+          await updateResource.mutateAsync({
+            resourceId: modeDialog.resource.id,
+            data: {
+              // Spread first so every other ref field survives the edit — the
+              // server replaces the whole ref, it does not deep-merge.
+              resource_ref: { ...ref, execution_mode: apiMode },
+            },
+          });
+        }
       } else {
         if (!localDaemonId) return;
         await createResource.mutateAsync({
@@ -282,9 +303,24 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
             local_path: modeDialog.path,
             daemon_id: localDaemonId,
             label: modeDialog.label ?? modeDialog.path,
-            execution_mode: mode,
+            execution_mode: apiMode,
           },
         });
+      }
+      if (daemonId) {
+        const result = await setOverride(daemonId, modeDialog.path, needOverride);
+        if (needOverride && !result.ok) {
+          setModeError(
+            result.error ?? t(($) => $.resources.toast_local_mode_update_failed),
+          );
+          return;
+        }
+      }
+      if (needOverride) {
+        toast.success(t(($) => $.resources.toast_local_shared_via_daemon));
+      } else if (modeDialog.resource) {
+        toast.success(t(($) => $.resources.toast_local_mode_updated));
+      } else {
         toast.success(t(($) => $.resources.toast_local_attached));
       }
       setModeDialog(null);
@@ -292,10 +328,14 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       // Keep the dialog open and show the reason inline: the most likely
       // failure is the server's daemon-version gate, and closing the dialog
       // would leave the user with a toast and no way to act on it.
-      setModeError(
+      const raw =
         err instanceof Error && err.message
           ? err.message
-          : t(($) => $.resources.toast_local_mode_update_failed),
+          : t(($) => $.resources.toast_local_mode_update_failed);
+      setModeError(
+        isSharedModeRejectedByServer(raw)
+          ? t(($) => $.resources.mode_shared_rejected_by_server)
+          : raw,
       );
     } finally {
       setModeSaving(false);
@@ -372,6 +412,13 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                   key={resource.id}
                   resource={resource}
                   localDaemonId={localDaemonId}
+                  localSharedOverride={
+                    isLocalDirectoryRef(resource) &&
+                    hasOverride(
+                      resource.resource_ref.daemon_id,
+                      resource.resource_ref.local_path,
+                    )
+                  }
                   canEdit={desktopMode}
                   onRemove={() => handleRemove(resource)}
                   onRenameLocalDirectory={handleRenameLocalDirectory}
@@ -380,7 +427,13 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                     setModeDialog({
                       path: target.resource_ref.local_path,
                       daemonId: target.resource_ref.daemon_id,
-                      mode: executionModeOf(target.resource_ref),
+                      mode: displayedExecutionMode(
+                        target.resource_ref,
+                        hasOverride(
+                          target.resource_ref.daemon_id,
+                          target.resource_ref.local_path,
+                        ),
+                      ),
                       // The path is already saved, so there is nothing to
                       // re-validate from the browser; the desktop check only
                       // runs at pick time. Unknown means the option stays
@@ -529,7 +582,8 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
             modeDialog.isGitRepo,
             serverValidatesWorktree,
           )}
-          sharedUnavailable={sharedModeUnavailable(serverValidatesWorktree)}
+          sharedUnavailable={sharedUnavailable}
+          sharedUsesLocalOverride={sharedUsesLocalOverride}
           errorMessage={modeError ?? undefined}
           saving={modeSaving}
           confirmLabel={
@@ -547,6 +601,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
 interface ResourceRowProps {
   resource: ProjectResource;
   localDaemonId: string | null;
+  localSharedOverride: boolean;
   canEdit: boolean;
   onRemove: () => void;
   onRenameLocalDirectory: (
@@ -561,6 +616,7 @@ interface ResourceRowProps {
 function ResourceRow({
   resource,
   localDaemonId,
+  localSharedOverride,
   canEdit,
   onRemove,
   onRenameLocalDirectory,
@@ -606,6 +662,7 @@ function ResourceRow({
       <LocalDirectoryRow
         resource={resource}
         localDaemonId={localDaemonId}
+        localSharedOverride={localSharedOverride}
         canEdit={canEdit}
         onRemove={onRemove}
         onRename={onRenameLocalDirectory}
@@ -634,6 +691,7 @@ function ResourceRow({
 interface LocalDirectoryRowProps {
   resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef };
   localDaemonId: string | null;
+  localSharedOverride: boolean;
   canEdit: boolean;
   onRemove: () => void;
   onRename: (
@@ -648,6 +706,7 @@ interface LocalDirectoryRowProps {
 function LocalDirectoryRow({
   resource,
   localDaemonId,
+  localSharedOverride,
   canEdit,
   onRemove,
   onRename,
@@ -655,7 +714,7 @@ function LocalDirectoryRow({
 }: LocalDirectoryRowProps) {
   const { t } = useT("projects");
   const ref = resource.resource_ref;
-  const mode = executionModeOf(ref);
+  const mode = displayedExecutionMode(ref, localSharedOverride);
   const display = localDirectoryLabel(resource);
   const isForeignDaemon =
     localDaemonId !== null && ref.daemon_id !== localDaemonId;

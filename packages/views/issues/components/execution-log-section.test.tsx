@@ -95,6 +95,7 @@ describe("TaskCommentCoverage", () => {
     "queued",
     "dispatched",
     "waiting_local_directory",
+    "deferred",
     "running",
     "completed",
     "failed",
@@ -317,6 +318,28 @@ describe("execution log header geometry", () => {
       </QueryClientProvider>,
     );
   }
+
+  it("keeps a deferred retry in the active list, not past", () => {
+    renderSection([
+      makeTask({
+        id: "retry",
+        status: "deferred",
+        trigger_summary: "Retrying now",
+        started_at: null,
+        completed_at: null,
+      }),
+      makeTask({
+        id: "done",
+        status: "completed",
+        trigger_summary: "Finished earlier",
+        completed_at: "2026-06-08T08:04:00Z",
+      }),
+    ]);
+    expect(screen.getByText("Retrying now")).toBeInTheDocument();
+    expect(screen.getByText("Retrying")).toBeInTheDocument();
+    expect(screen.queryByText("Finished earlier")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Show past runs \(1\)/ })).toBeInTheDocument();
+  });
 
   it("shows the running task before pending tasks in queue order", () => {
     renderSection([

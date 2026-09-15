@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
   Bot,
   Clock3,
+  KeyRound,
+  Layers,
   Lock,
   MessageSquare,
   MoreHorizontal,
@@ -18,6 +20,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Agent,
   AgentRuntime,
+  AgentSwitchableModel,
+  AgentSwitchableModelRole,
   UpdateAgentRequest,
 } from "@multica/core/types";
 import {
@@ -355,6 +359,11 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         onArchive={
           agent.system_key ? undefined : () => setConfirmArchive(true)
         }
+        onOpenAccounts={
+          canEdit.allowed && !isArchived
+            ? () => setTabNavIntent("custom_args")
+            : undefined
+        }
       />
 
       {!canEdit.allowed && (
@@ -482,6 +491,7 @@ function DetailHeader({
   onDm,
   onAssign,
   onArchive,
+  onOpenAccounts,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
@@ -498,6 +508,8 @@ function DetailHeader({
   /** Absent for Multica's built-in agents, which the server refuses to
    *  archive — the menu hides the action rather than offering a failure. */
   onArchive?: () => void;
+  /** Jumps to the tab that explains account slots and sign-in commands. */
+  onOpenAccounts?: () => void;
 }) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
@@ -558,7 +570,18 @@ function DetailHeader({
                   <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
                   {t(($) => $.detail.updated, { when: timeAgo(agent.updated_at) })}
                 </span>
+                {onOpenAccounts ? (
+                  <button
+                    type="button"
+                    onClick={onOpenAccounts}
+                    className="inline-flex items-center gap-1.5 rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+                    {t(($) => $.detail.accounts_entry)}
+                  </button>
+                ) : null}
               </div>
+              <SwitchableModelsRow models={agent.switchable_models} />
             </div>
           </div>
 
@@ -610,6 +633,73 @@ function DetailHeader({
         </div>
       </div>
     </header>
+  );
+}
+
+const SWITCHABLE_MODEL_GROUPS = [
+  { role: "default", separator: "/" },
+  { role: "fallback", separator: "→" },
+  { role: "batch", separator: "/" },
+] as const;
+
+function SwitchableModelsRow({
+  models,
+}: {
+  models: AgentSwitchableModel[] | undefined;
+}) {
+  const { t } = useT("agents");
+  const entries = Array.isArray(models)
+    ? models.filter(
+        (m) => typeof m?.model === "string" && m.model.trim().length > 0,
+      )
+    : [];
+  if (entries.length === 0) return null;
+
+  const roleLabel = (role: AgentSwitchableModelRole) => {
+    switch (role) {
+      case "default":
+        return t(($) => $.detail.switchable_role_default);
+      case "fallback":
+        return t(($) => $.detail.switchable_role_fallback);
+      case "batch":
+        return t(($) => $.detail.switchable_role_batch);
+      default:
+        return role;
+    }
+  };
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-caption text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">
+        <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        {t(($) => $.detail.switchable_models_label)}
+      </span>
+      {SWITCHABLE_MODEL_GROUPS.map(({ role, separator }) => {
+        const items = entries.filter((m) => m.role === role);
+        if (items.length === 0) return null;
+        return (
+          <span
+            key={role}
+            data-testid={`switchable-models-${role}`}
+            className="inline-flex min-w-0 flex-wrap items-center gap-1"
+          >
+            <span className="font-medium text-foreground">{roleLabel(role)}</span>
+            {items.map((m, index) => (
+              <Fragment key={`${m.model}-${index}`}>
+                {index > 0 ? <span aria-hidden="true">{separator}</span> : null}
+                <span
+                  className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-foreground"
+                  title={m.note || undefined}
+                  translate="no"
+                >
+                  {m.model}
+                </span>
+              </Fragment>
+            ))}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 

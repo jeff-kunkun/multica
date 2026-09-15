@@ -105,6 +105,16 @@ interface DesktopAPI {
      *  Drives the worktree execution-mode option in the resource UI. */
     is_git_repo?: boolean;
   }>;
+  /** Local skip-mutex overrides for folders stored as in_place on a server
+   *  that does not accept execution_mode=shared. */
+  listLocalDirectorySharedOverrides: () => Promise<
+    Array<{ daemonId: string; localPath: string }>
+  >;
+  setLocalDirectorySharedOverride: (input: {
+    daemonId: string;
+    localPath: string;
+    enabled: boolean;
+  }) => Promise<{ ok: boolean; error?: string }>;
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;

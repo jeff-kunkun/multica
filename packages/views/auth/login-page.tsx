@@ -23,6 +23,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useConfigStore } from "@multica/core/config";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
+import { paths } from "@multica/core/paths";
 import type { User } from "@multica/core/types";
 import { useT } from "../i18n";
 
@@ -58,6 +59,8 @@ interface LoginPageProps {
   onTokenObtained?: () => void;
   /** Override Google login handler (e.g. desktop opens browser externally). When provided, renders the Google button even if `google` config is omitted. */
   onGoogleLogin?: () => void;
+  /** Override the signup link (e.g. desktop opens the web signup page externally). */
+  onSignup?: () => void;
   /** Slot rendered at the bottom of the sign-in card, below the
    *  Google button. The web shell uses it for a "Prefer the desktop
    *  app?" prompt; desktop omits it (a download prompt inside the app
@@ -106,11 +109,13 @@ export function LoginPage({
   cliCallback,
   onTokenObtained,
   onGoogleLogin,
+  onSignup,
   extra,
 }: LoginPageProps) {
   const { t } = useT("auth");
   const qc = useQueryClient();
   const passwordAuth = useConfigStore((state) => state.passwordAuth);
+  const allowSignup = useConfigStore((state) => state.allowSignup);
   const [step, setStep] = useState<"email" | "code" | "cli_confirm">("email");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -562,6 +567,27 @@ export function LoginPage({
                 ? t(($) => $.signin.sending)
                 : t(($) => $.signin.continue)}
           </Button>
+          {passwordAuth && allowSignup && (
+            <p className="text-body text-muted-foreground">
+              {t(($) => $.signin.no_account)}{" "}
+              {onSignup ? (
+                <button
+                  type="button"
+                  onClick={onSignup}
+                  className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground/70"
+                >
+                  {t(($) => $.signin.create_account)}
+                </button>
+              ) : (
+                <a
+                  href={paths.signup()}
+                  className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground/70"
+                >
+                  {t(($) => $.signin.create_account)}
+                </a>
+              )}
+            </p>
+          )}
           {(google || onGoogleLogin) && (
             <Button
               type="button"

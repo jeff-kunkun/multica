@@ -531,6 +531,33 @@ func TestGetConfigDeclaresLocalWorktreeSupport(t *testing.T) {
 	}
 }
 
+// Shared is a separate declaration from worktree. Official cloud already
+// advertises worktree while rejecting execution_mode=shared; clients that
+// conflated the two POSTed shared and got 400. This build accepts shared,
+// so it has to say so independently — absent still means "do not send it".
+func TestGetConfigDeclaresLocalSharedSupport(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.LocalSharedSupported {
+		t.Fatal("this build accepts execution_mode=shared but does not advertise it; clients will never send it")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if _, ok := raw["local_shared_supported"]; !ok {
+		t.Fatal("local_shared_supported missing from the JSON body")
+	}
+}
+
 // Web/Desktop can run ahead of a manually deployed backend. Handlers that
 // predate conversation_starters ignore the unknown JSON field and still answer 200,
 // so clients must see an explicit declaration before sending either create or

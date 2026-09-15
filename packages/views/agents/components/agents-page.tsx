@@ -8,7 +8,7 @@ import {
   Plus,
   Users,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   Agent,
@@ -41,6 +41,7 @@ import {
   agentListOptions,
   memberListOptions,
   squadListOptions,
+  squadMembersOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
@@ -81,8 +82,11 @@ import {
   buildAgentSquadsMap,
   flattenAgentListItems,
   GROUP_HEADER_HEIGHT,
+  needsSquadMembersFetch,
+  resolveSquadRosters,
   rowMatchesSquadFilter,
   type AgentSquadGroup,
+  type FetchedSquadMembers,
 } from "./agents-page-squads";
 
 // Column template — single source of truth for header, rows, and skeletons.
@@ -160,6 +164,12 @@ export interface AgentListRow {
   canManage: boolean;
   /** Active squad ids this agent belongs to. Empty = no squad. */
   squadIds: string[];
+  /**
+   * False while an active squad roster is still unknown and this row is
+   * not already placed in a known squad. Empty `squadIds` then must not
+   * be treated as "no squad".
+   */
+  squadMembershipKnown?: boolean;
 }
 
 // Most recent activity bucket with runs, as "days ago" (0 = today).
@@ -233,7 +243,13 @@ export function rowMatchesFilters(
   ) {
     return false;
   }
-  if (!rowMatchesSquadFilter(row.squadIds, filters.squads)) {
+  if (
+    !rowMatchesSquadFilter(
+      row.squadIds,
+      filters.squads,
+      row.squadMembershipKnown !== false,
+    )
+  ) {
     return false;
   }
   return true;
@@ -852,6 +868,37 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const { data: squads = [], isPending: squadsPending } = useQuery(
     squadListOptions(wsId),
   );
+  const squadsNeedingRoster = useMemo(
+    () => squads.filter(needsSquadMembersFetch),
+    [squads],
+  );
+  const rosterQueryResults = useQueries({
+    queries: squadsNeedingRoster.map((squad) =>
+      squadMembersOptions(wsId, squad.id),
+    ),
+  });
+  const fetchedMembers = useMemo(() => {
+    const map = new Map<string, FetchedSquadMembers>();
+    for (let i = 0; i < squadsNeedingRoster.length; i++) {
+      const squad = squadsNeedingRoster[i];
+      const result = rosterQueryResults[i];
+      if (!squad) continue;
+      map.set(squad.id, {
+        status: result?.isError
+          ? "error"
+          : result?.isSuccess
+            ? "success"
+            : "pending",
+        members: result?.data,
+      });
+    }
+    return map;
+  }, [squadsNeedingRoster, rosterQueryResults]);
+  const squadRosters = useMemo(
+    () => resolveSquadRosters(squads, fetchedMembers),
+    [squads, fetchedMembers],
+  );
+  const rosterPending = rosterQueryResults.some((query) => query.isPending);
   const { data: runCountsRaw = [], isPending: runCountsPending } = useQuery(
     agentRunCounts30dOptions(wsId),
   );
@@ -911,9 +958,16 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   }, [members]);
 
   const agentSquadsMap = useMemo(
-    () => buildAgentSquadsMap(squads),
-    [squads],
+    () => buildAgentSquadsMap(squads, squadRosters),
+    [squads, squadRosters],
   );
+  const allActiveRostersKnown = useMemo(() => {
+    for (const squad of squads) {
+      if (squad.archived_at != null) continue;
+      if (squadRosters.get(squad.id)?.kind !== "known") return false;
+    }
+    return true;
+  }, [squads, squadRosters]);
 
   const isWorkspaceAdmin = useMemo(() => {
     if (!currentUser) return false;
@@ -964,6 +1018,9 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         isOwnedByMe: isOwner,
         canManage: isWorkspaceAdmin || isOwner,
         squadIds: (agentSquadsMap.get(agent.id) ?? []).map((s) => s.id),
+        squadMembershipKnown:
+          (agentSquadsMap.get(agent.id)?.length ?? 0) > 0 ||
+          allActiveRostersKnown,
       };
     });
   }, [
@@ -977,6 +1034,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     runCountsById,
     isWorkspaceAdmin,
     agentSquadsMap,
+    allActiveRostersKnown,
   ]);
 
   // Visible rows: local search + filters, then sort.
@@ -1013,8 +1071,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   }, [scopeRows, search, filters, sortField, sortDirection]);
 
   const listItems = useMemo(
-    () => flattenAgentListItems(rows, squads, grouping),
-    [rows, squads, grouping],
+    () => flattenAgentListItems(rows, squads, grouping, squadRosters),
+    [rows, squads, grouping, squadRosters],
   );
   const listItemsRef = useRef(listItems);
   listItemsRef.current = listItems;
@@ -1118,7 +1176,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     (!needsActivity || !activityLoading) &&
     (!needsRunCounts || !runCountsPending) &&
     (!needsPresence || !presenceLoading) &&
-    (!needsSquads || !squadsPending);
+    (!needsSquads || (!squadsPending && !rosterPending));
 
   return (
     // relative: positioning anchor for the batch toolbar (page-centered,
@@ -1159,6 +1217,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             allRows={scopeRows}
             members={members}
             squads={squads}
+            squadRosters={squadRosters}
             visibleCount={rows.length}
           />
           <div

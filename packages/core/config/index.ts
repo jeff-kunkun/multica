@@ -12,6 +12,9 @@ interface ConfigState {
   // Self-host opt-in: login page collects username + password instead of
   // an email verification code. Absent/false keeps the official email flow.
   passwordAuth: boolean;
+  // Self-host opt-in: /signup requires a shared team TOTP. Absent/false
+  // keeps the previous username + password form with no 2FA field.
+  signupTotpRequired: boolean;
   daemonServerUrl: string;
   daemonAppUrl: string;
   // Self-host gate (#3433): when true, every "Create workspace" affordance
@@ -28,15 +31,17 @@ interface ConfigState {
   // self-hosted operators can confirm what's deployed. Empty for dev builds
   // or servers older than this feature.
   serverVersion: string;
-  // Whether the connected server validates local_directory execution_mode
-  // (worktree and shared). Defaults to false, and stays false for any server
-  // that does not declare it: the dangerous ones accept an unknown mode, drop
-  // the field, and run the task in the user's working copy with a lock anyway
-  // (#7113). Servers that validate but predate this signal are caught by the
-  // same net — indistinguishable from here, and only one of the two answers is
-  // safe to guess. The name is historical; it gates every execution_mode the
-  // server would otherwise silently drop.
+  // Whether the connected server validates local_directory worktree
+  // execution_mode. Defaults to false, and stays false for any server that
+  // does not declare it: the dangerous ones accept an unknown mode, drop the
+  // field, and run the task in the user's working copy with a lock anyway
+  // (#7113). Worktree only — official cloud advertises this while still
+  // rejecting `execution_mode=shared`.
   localWorktreeSupported: boolean;
+  // Whether the connected server accepts and persists
+  // `execution_mode=shared`. Official cloud omits this. Absent must stay
+  // false so the client stores in_place and records a local daemon override.
+  localSharedSupported: boolean;
   // Whether this server persists conversation_starters on agent create/update.
   // Older handlers accepted the unknown field and returned success while
   // dropping it, so absent must fail closed.
@@ -52,6 +57,7 @@ interface ConfigState {
     workspaceCreationDisabled?: boolean;
     vcsIntegrationAvailable?: boolean;
     passwordAuth?: boolean;
+    signupTotpRequired?: boolean;
   }) => void;
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
@@ -60,6 +66,7 @@ interface ConfigState {
   setFeatureFlags: (flags?: Record<string, boolean>) => void;
   setServerVersion: (version?: string) => void;
   setLocalWorktreeSupported: (supported?: boolean) => void;
+  setLocalSharedSupported: (supported?: boolean) => void;
   setAgentConversationStartersSupported: (supported?: boolean) => void;
   setCommentDeleteKeepRepliesSupported: (supported?: boolean) => void;
 }
@@ -70,6 +77,7 @@ export const configStore = createStore<ConfigState>((set) => ({
   allowSignup: true,
   googleClientId: "",
   passwordAuth: false,
+  signupTotpRequired: false,
   daemonServerUrl: "",
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
@@ -77,6 +85,7 @@ export const configStore = createStore<ConfigState>((set) => ({
   featureFlags: {},
   serverVersion: "",
   localWorktreeSupported: false,
+  localSharedSupported: false,
   agentConversationStartersSupported: false,
   commentDeleteKeepRepliesSupported: false,
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
@@ -86,13 +95,16 @@ export const configStore = createStore<ConfigState>((set) => ({
     workspaceCreationDisabled = false,
     vcsIntegrationAvailable = false,
     passwordAuth = false,
-  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable, passwordAuth }),
+    signupTotpRequired = false,
+  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable, passwordAuth, signupTotpRequired }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
   setServerVersion: (version = "") => set({ serverVersion: version }),
   setLocalWorktreeSupported: (supported = false) =>
     set({ localWorktreeSupported: supported === true }),
+  setLocalSharedSupported: (supported = false) =>
+    set({ localSharedSupported: supported === true }),
   setAgentConversationStartersSupported: (supported = false) =>
     set({ agentConversationStartersSupported: supported === true }),
   setCommentDeleteKeepRepliesSupported: (supported = false) =>

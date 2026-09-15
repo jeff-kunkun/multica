@@ -90,9 +90,16 @@ vi.mock("@multica/core/projects", () => ({
 // Whether the connected server validates execution_mode at all. Absent on every
 // release before the worktree save gate.
 let serverValidatesWorktree = true;
+let serverAcceptsShared = true;
 vi.mock("@multica/core/config", () => ({
-  useConfigStore: (selector: (state: { localWorktreeSupported: boolean }) => unknown) =>
-    selector({ localWorktreeSupported: serverValidatesWorktree }),
+  useConfigStore: (selector: (state: {
+    localWorktreeSupported: boolean;
+    localSharedSupported: boolean;
+  }) => unknown) =>
+    selector({
+      localWorktreeSupported: serverValidatesWorktree,
+      localSharedSupported: serverAcceptsShared,
+    }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
@@ -139,6 +146,8 @@ vi.mock("../platform/local-directory", () => ({
   pickDirectory: () =>
     Promise.resolve({ ok: true, path: "/Users/dev/work/game-client", basename: "game-client" }),
   validateLocalDirectory: () => Promise.resolve({ ok: true, is_git_repo: pickedIsGitRepo }),
+  canSetLocalDirectorySharedOverride: () => true,
+  setLocalDirectorySharedOverride: vi.fn().mockResolvedValue({ ok: true }),
 }));
 vi.mock("../platform/use-local-daemon-status", () => ({
   useLocalDaemonStatus: () => ({ daemonId: "daemon-1", deviceName: "MacBook", running: true }),
@@ -181,6 +190,7 @@ describe("CreateProjectModal — local directory execution mode", () => {
     runtimeCliVersion = "9.9.9";
     runtimeWorktreeMetadata = "advertised";
     serverValidatesWorktree = true;
+    serverAcceptsShared = true;
     pickedIsGitRepo = true;
   });
 
@@ -295,9 +305,11 @@ describe("CreateProjectModal — local directory execution mode", () => {
 
     expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).toBeDisabled();
     expect(screen.getByText(/too old to execute runs in parallel/i)).toBeInTheDocument();
-    expect(screen.getByText(/too old to honour shared workspace mode/i)).toBeInTheDocument();
-    // And it must not have been preselected either — that would submit a mode
-    // the server would silently downgrade.
+    // Shared stays selectable: desktop can honour it locally even when this
+    // server would drop or reject the enum.
+    expect(screen.getByRole("radio", { name: /Share this workspace/i })).not.toBeDisabled();
+    // And worktree must not have been preselected either — that would submit a
+    // mode the server would silently downgrade.
     expect(screen.getByRole("button", { name: /^Direct$/i })).toBeInTheDocument();
   });
 
@@ -327,16 +339,21 @@ describe("CreateProjectModal — local directory execution mode", () => {
     expect(screen.getByRole("button", { name: /^Shared$/i })).toBeInTheDocument();
   });
 
-  it("blocks shared mode against a server that cannot honour it", async () => {
-    serverValidatesWorktree = false;
+  it("keeps shared selectable on official cloud that only accepts worktree", async () => {
+    serverAcceptsShared = false;
+    pickedIsGitRepo = false;
     const user = userEvent.setup();
     renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
 
     await pickLocalDirectory(user);
 
-    expect(screen.getByRole("radio", { name: /Share this workspace/i })).toBeDisabled();
-    expect(screen.getByText(/too old to honour shared workspace mode/i)).toBeInTheDocument();
+    const shared = screen.getByRole("radio", { name: /Share this workspace/i });
+    expect(shared).not.toBeDisabled();
+    expect(screen.getByText(/does not store shared mode/i)).toBeInTheDocument();
+    await user.click(shared);
+    expect(screen.getByRole("button", { name: /^Shared$/i })).toBeInTheDocument();
   });
+
 });
 
 // The payload is what the server stores and the daemon later reads; a missing

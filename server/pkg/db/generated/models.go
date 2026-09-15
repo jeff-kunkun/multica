@@ -53,6 +53,7 @@ type Agent struct {
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	ConversationStarters  []byte      `json:"conversation_starters"`
+	SwitchableModels      []byte      `json:"switchable_models"`
 }
 
 type AgentBuilderDraft struct {
@@ -1240,6 +1241,12 @@ type SeatCapacityOutbox struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type SignupTotpUsedStep struct {
+	SecretFingerprint []byte             `json:"secret_fingerprint"`
+	Step              int64              `json:"step"`
+	ConsumedAt        pgtype.Timestamptz `json:"consumed_at"`
+}
+
 type Skill struct {
 	ID                   pgtype.UUID        `json:"id"`
 	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
@@ -1430,6 +1437,14 @@ type UserComposioConnection struct {
 	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserPasswordCredential struct {
+	UserID       pgtype.UUID        `json:"user_id"`
+	Username     string             `json:"username"`
+	PasswordHash string             `json:"password_hash"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type VcsCommitStatus struct {

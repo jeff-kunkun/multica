@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
-import { commentRunOutput, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
+import { commentRunOutput, buildCommentRunView, isActiveCommentRun, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
 
 const groupCommentRuns = (...args: Parameters<typeof buildCommentRunView>) => buildCommentRunView(...args).runs;
 
@@ -264,7 +264,7 @@ describe("commentRunOutput", () => {
 });
 
 describe("standaloneCommentRuns", () => {
-  it.each(["queued", "dispatched", "running", "failed", "cancelled", "completed"] as const)("keeps an unanchored %s run visible", (status) => {
+  it.each(["queued", "dispatched", "deferred", "running", "failed", "cancelled", "completed"] as const)("keeps an unanchored %s run visible", (status) => {
     const run = task("assignment", { status, delivered_comment_ids: [] });
     expect(buildCommentRunView([run], []).standaloneRuns)
       .toEqual([{ task: run, hasReply: false }]);
@@ -322,6 +322,13 @@ describe("orderTimelineWithRuns", () => {
     const posted = comment("posted", { created_at: "2026-09-07T10:45:00Z" });
     expect(order([posted], [{ task: earlier, hasReply: false }, { task: later, hasReply: false }]))
       .toEqual(["posted", "earlier", "later"]);
+  });
+
+  it("treats a deferred retry as live, not as a finished empty run", () => {
+    const retry = task("retry", { status: "deferred", created_at: "2026-09-07T10:00:00Z" });
+    expect(isActiveCommentRun(retry)).toBe(true);
+    const posted = comment("posted", { created_at: "2026-09-07T10:45:00Z" });
+    expect(order([posted], [{ task: retry, hasReply: false }])).toEqual(["posted", "retry"]);
   });
 
   it("settles a run that ended without a reply at the time it ended", () => {
