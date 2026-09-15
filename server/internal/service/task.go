@@ -4707,8 +4707,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			// rather than leaking a contradictory attempt=N/max_attempts=2 row.
 			retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
 			// Defer this attempt when the reason's schedule calls for a backoff
-			// (provider_network's final attempt waits ~5s); a zero delay leaves
-			// fire_at NULL so the child is created immediately-claimable.
+			// (provider_network's final attempt waits ~5s; capacity always waits
+			// 30s); a zero delay leaves fire_at NULL so the child is created
+			// immediately-claimable.
 			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
 				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
 			}
@@ -5048,25 +5049,31 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 //
-// The one agent_error.* exception is provider_network: a mid-stream provider
+// The agent_error.* exceptions are provider_network (MUL-4910) and
+// provider_capacity_or_rate_limit (DENE-210). A mid-stream provider
 // disconnect (e.g. Claude Code's "API Error: Connection closed mid-response")
-// is transient infrastructure flakiness, not an agent decision. Unattended
-// issue runs otherwise terminate on it, while interactive chat only survives
-// because the CLI's own in-process retry happens to recover first — so we make
-// the platform retry it directly (MUL-4910). It is resume-safe (not in
-// resumeUnsafeFailureReason), so the retry child inherits the session and
-// continues the truncated conversation rather than restarting from scratch.
+// is transient infrastructure flakiness, not an agent decision. A provider
+// capacity miss ("Selected model is at capacity", 429/529, concurrent-request
+// limit) is the same class: the request is well-formed and the model exists,
+// the provider just has no spare compute. Unattended issue runs otherwise
+// terminate on either, so the platform retries them directly. Both are
+// resume-safe (not in resumeUnsafeFailureReason), so the retry child inherits
+// the session and continues rather than restarting from scratch. Capacity
+// retries always wait (providerCapacityRetryWait) because a limit that just
+// fired will not clear in milliseconds; provider_network still uses its
+// three-tier immediate-then-deferred schedule.
 // skill_bundle_unavailable is retryable for the same reason: the agent process
 // never started, so there is nothing to be idempotent about, and every bundle
 // that did download is already cached on disk — a retry resumes from there
 // instead of re-fetching the whole set (MUL-5370).
 var retryableReasons = map[string]bool{
-	string(taskfailure.ReasonRuntimeOffline):         true,
-	string(taskfailure.ReasonRuntimeRecovery):        true,
-	string(taskfailure.ReasonTimeout):                true,
-	"codex_semantic_inactivity":                      true,
-	string(taskfailure.ReasonAgentProviderNetwork):   true,
-	string(taskfailure.ReasonSkillBundleUnavailable): true,
+	string(taskfailure.ReasonRuntimeOffline):                   true,
+	string(taskfailure.ReasonRuntimeRecovery):                  true,
+	string(taskfailure.ReasonTimeout):                          true,
+	"codex_semantic_inactivity":                                true,
+	string(taskfailure.ReasonAgentProviderNetwork):             true,
+	string(taskfailure.ReasonAgentProviderCapacityOrRateLimit): true,
+	string(taskfailure.ReasonSkillBundleUnavailable):           true,
 }
 
 // runtime_offline retries start deferred, not queued: their positive fire_at
@@ -5079,12 +5086,22 @@ var retryableReasons = map[string]bool{
 // Transient provider stream cuts (provider_network) get a bespoke three-tier
 // schedule (MUL-4910): first run + immediate retry + one retry deferred ~5s.
 // A blip that survives the immediate retry gets a short cooldown before the
-// final attempt instead of firing back-to-back. Every other retryable reason
-// keeps the task's generic max_attempts ceiling and retries immediately.
+// final attempt instead of firing back-to-back.
+//
+// Provider capacity / rate-limit (DENE-210) also raises the ceiling to 3
+// (first run + two retries) but every retry is deferred. A capacity miss does
+// not recover in milliseconds; an immediate resend almost always collides with
+// the same limit. 30s is a conservative cooldown that still fits inside a
+// typical issue-run wait without waiting out a full provider quota window.
+//
+// Every other retryable reason keeps the task's generic max_attempts ceiling
+// and retries immediately.
 const (
 	runtimeOfflineRetryDeferral   = time.Second
 	providerNetworkMaxAttempts    = 3
 	providerNetworkFinalRetryWait = 5 * time.Second
+	providerCapacityMaxAttempts   = 3
+	providerCapacityRetryWait     = 30 * time.Second
 )
 
 // retryAttemptCeiling reports how many attempts the auto-retry path allows for
@@ -5096,27 +5113,39 @@ const (
 // .sql: "1 disables retry"), so it is never overridden — a disabled task must
 // not be revived by a raised ceiling. Callers persist this value into the retry
 // child (CreateRetryTask's max_attempts) so the row stays self-consistent:
-// provider_network's chain records attempt=3, max_attempts=3, not a
-// contradictory attempt=3, max_attempts=2 (MUL-4910).
+// provider_network and provider_capacity_or_rate_limit chains record
+// attempt=3, max_attempts=3, not a contradictory attempt=3, max_attempts=2.
 func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 	if taskMaxAttempts <= 1 {
 		return taskMaxAttempts
 	}
-	if reason == string(taskfailure.ReasonAgentProviderNetwork) && taskMaxAttempts < providerNetworkMaxAttempts {
-		return providerNetworkMaxAttempts
+	switch reason {
+	case string(taskfailure.ReasonAgentProviderNetwork):
+		if taskMaxAttempts < providerNetworkMaxAttempts {
+			return providerNetworkMaxAttempts
+		}
+	case string(taskfailure.ReasonAgentProviderCapacityOrRateLimit):
+		if taskMaxAttempts < providerCapacityMaxAttempts {
+			return providerCapacityMaxAttempts
+		}
 	}
 	return taskMaxAttempts
 }
 
 // retryDelayForAttempt reports how long to defer the NEXT attempt after a
 // failure at failedAttempt. runtime_offline always gets a positive fire_at so
-// it waits for the health-gated promotion path. provider_network's final
-// attempt is deferred ~5s; every other retry remains immediate (zero delay →
-// the child is created 'queued', claimable at once). Callers pass the returned
-// delay to CreateRetryTask via fire_at.
+// it waits for the health-gated promotion path. provider_capacity_or_rate_limit
+// always waits providerCapacityRetryWait — a capacity miss does not clear on
+// the next millisecond. provider_network's final attempt is deferred ~5s;
+// every other retry remains immediate (zero delay → the child is created
+// 'queued', claimable at once). Callers pass the returned delay to
+// CreateRetryTask via fire_at.
 func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
 	if reason == string(taskfailure.ReasonRuntimeOffline) {
 		return runtimeOfflineRetryDeferral
+	}
+	if reason == string(taskfailure.ReasonAgentProviderCapacityOrRateLimit) {
+		return providerCapacityRetryWait
 	}
 	if reason == string(taskfailure.ReasonAgentProviderNetwork) &&
 		failedAttempt >= providerNetworkMaxAttempts-1 {
@@ -5291,9 +5320,10 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		runtimeMCPOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
 	}
 	// Mirror FailTask's in-tx backoff + effective-budget persistence: defer the
-	// final provider_network attempt ~5s via fire_at (zero delay leaves fire_at
-	// NULL for an immediate child), and write the reason-aware ceiling into the
-	// child's max_attempts so the retry chain stays self-consistent.
+	// final provider_network attempt ~5s (and every capacity retry 30s) via
+	// fire_at (zero delay leaves fire_at NULL for an immediate child), and
+	// write the reason-aware ceiling into the child's max_attempts so the
+	// retry chain stays self-consistent.
 	var retryFireAt pgtype.Timestamptz
 	if delay := retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
 		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}

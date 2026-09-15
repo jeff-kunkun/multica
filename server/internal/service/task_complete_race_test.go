@@ -172,8 +172,9 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 // TestProviderNetworkRetrySchedule locks in the three-tier schedule for a
 // transient provider stream cut (MUL-4910): first run + immediate retry + one
 // retry deferred ~5s. runtime_offline uses a separate deferred marker so its
-// retry waits for a healthy runtime; other retryable reasons keep their generic
-// max_attempts=2 (single, immediate retry).
+// retry waits for a healthy runtime. Capacity has its own deferred schedule
+// (TestProviderCapacityRetrySchedule); remaining retryable reasons keep their
+// generic max_attempts=2 (single, immediate retry).
 func TestProviderNetworkRetrySchedule(t *testing.T) {
 	const provNet = "agent_error.provider_network"
 
@@ -245,6 +246,69 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 	}
 }
 
+// TestProviderCapacityRetrySchedule locks in the backoff schedule for a
+// provider capacity miss (DENE-210): first run + two deferred retries. Unlike
+// provider_network, every retry waits — a limit that just fired will not
+// clear on the next millisecond. max_attempts<=1 still disables retry.
+func TestProviderCapacityRetrySchedule(t *testing.T) {
+	const capReason = "agent_error.provider_capacity_or_rate_limit"
+
+	ceilingCases := []struct {
+		reason string
+		max    int32
+		want   int32
+	}{
+		{capReason, 2, providerCapacityMaxAttempts},
+		{capReason, 1, 1},
+		{capReason, 5, 5},
+	}
+	for _, tc := range ceilingCases {
+		if got := retryAttemptCeiling(tc.reason, tc.max); got != tc.want {
+			t.Errorf("ceiling(%q, %d) = %d, want %d", tc.reason, tc.max, got, tc.want)
+		}
+	}
+
+	delayCases := []struct {
+		failedAttempt int32
+		want          time.Duration
+	}{
+		{1, providerCapacityRetryWait},
+		{2, providerCapacityRetryWait},
+	}
+	for _, tc := range delayCases {
+		if got := retryDelayForAttempt(capReason, tc.failedAttempt); got != tc.want {
+			t.Errorf("retryDelayForAttempt(%q, %d) = %s, want %s", capReason, tc.failedAttempt, got, tc.want)
+		}
+		if got := retryDelayForAttempt(capReason, tc.failedAttempt); got <= 0 {
+			t.Errorf("retryDelayForAttempt(%q, %d) must be a positive backoff, got %s", capReason, tc.failedAttempt, got)
+		}
+	}
+
+	mkTask := func(attempt, max int32) db.AgentTaskQueue {
+		return db.AgentTaskQueue{
+			Attempt:     attempt,
+			MaxAttempts: max,
+			IssueID:     pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+		}
+	}
+	eligCases := []struct {
+		name    string
+		attempt int32
+		max     int32
+		want    bool
+	}{
+		{"capacity first run retries", 1, 2, true},
+		{"capacity second run still retries", 2, 2, true},
+		{"capacity third run is the ceiling", 3, 2, false},
+		{"capacity with retry disabled (max_attempts=1) never retries", 1, 1, false},
+	}
+	for _, tc := range eligCases {
+		if got := retryEligible(capReason, mkTask(tc.attempt, tc.max)); got != tc.want {
+			t.Errorf("%s: retryEligible(%q, attempt=%d/max=%d) = %v, want %v", tc.name, capReason, tc.attempt, tc.max, got, tc.want)
+		}
+	}
+}
+
 func TestTaskFailureClassifiers(t *testing.T) {
 	cases := []struct {
 		reason       string
@@ -257,9 +321,12 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// Transient mid-stream provider disconnect (MUL-4910): retryable, and
 		// resume-safe so the retry continues the truncated conversation.
 		{reason: "agent_error.provider_network", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
-		// Capacity/rate-limit failures keep their existing user-retry posture.
-		// Correcting a misleading auth label must not enable an automatic resend.
-		{reason: "agent_error.provider_capacity_or_rate_limit", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
+		// Capacity/rate-limit is retryable with backoff (DENE-210): the
+		// request is well-formed and the model exists, the provider just has
+		// no spare compute. Resume stays safe so the retry continues the
+		// session; the delay (not a fresh session) is what avoids colliding
+		// with the same limit.
+		{reason: "agent_error.provider_capacity_or_rate_limit", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
