@@ -123,6 +123,14 @@
     "none": "단계 없음",
     "value": "{{n}}단계"
   },
+  "close_protocol": {
+    "missing": "프로토콜로 닫히지 않음",
+    "status_drift": "close.status ≠ {{issueStatus}}",
+    "next_owner": "다음: {{name}}",
+    "next_owner_none": "다음: 없음",
+    "waiting_on": "{{id}} 대기",
+    "last_activity_missing": "활동 시각 없음"
+  },
   "scope": {
     "all_label": "전체",
     "all_description": "이 워크스페이스의 모든 태스크",
@@ -827,6 +835,8 @@
     "visibility_label": "공개 범위",
     "visibility_private": "나만 보기",
     "visibility_workspace": "워크스페이스 구성원에게 표시",
+    "visibility_project": "프로젝트 구성원",
+    "visibility_project_hint": "이 프로젝트 구성원에게만 표시되며, 이 프로젝트 페이지에서만 나타납니다",
     "filters_label": "필터",
     "custom_property": "사용자 지정 속성",
     "create": "뷰 만들기",
@@ -883,7 +893,13 @@
     "manage_title": "뷰 관리",
     "manage_hint": "순서와 표시 설정은 본인에게만 적용됩니다",
     "visible_toggle": "뷰 바에 표시",
-    "more_label": "더 많은 뷰"
+    "more_label": "더 많은 뷰",
+    "project_shared_tag": "프로젝트 공유"
+  },
+  "manage_views": {
+    "visibility_label": "{{name}}의 공개 범위",
+    "visibility_project": "프로젝트 구성원",
+    "visibility_project_hint": "이 프로젝트 구성원에게만 표시되며, 이 프로젝트 페이지에서만 나타납니다"
   },
   "plugins": {
     "panels": "Plugins",

@@ -57,6 +57,7 @@ import {
   SendChatMessageResponseSchema,
   SquadListSchema,
   SquadMemberListSchema,
+  ProjectMemberListSchema,
   SquadSchema,
   SourceContextPreviewSchema,
   TimelineEntriesSchema,
@@ -1100,6 +1101,43 @@ describe("SquadListSchema member preview drift", () => {
   });
 });
 
+describe("ProjectMemberListSchema", () => {
+  it("parses GET /api/projects/:id/members rows", () => {
+    const parsed = ProjectMemberListSchema.parse([
+      {
+        id: "row-1",
+        workspace_id: "ws-1",
+        project_id: "proj-1",
+        member_id: "user-1",
+        added_by: "user-2",
+        created_at: "2026-05-01T00:00:00Z",
+        name: "Ada",
+        email: "ada@example.test",
+        avatar_url: null,
+      },
+      {
+        id: "row-2",
+        project_id: "proj-1",
+        member_id: "user-3",
+      },
+    ]);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]?.name).toBe("Ada");
+    expect(parsed[1]?.name).toBe("");
+    expect(parsed[1]?.avatar_url).toBeNull();
+  });
+
+  it("rejects a row missing required fields instead of parsing as an empty roster", () => {
+    expect(
+      ProjectMemberListSchema.safeParse([
+        { id: "row-1", project_id: "proj-1" },
+      ]).success,
+    ).toBe(false);
+    expect(ProjectMemberListSchema.safeParse({ members: [] }).success).toBe(false);
+    expect(ProjectMemberListSchema.safeParse("not-an-array").success).toBe(false);
+  });
+});
+
 describe("SquadMemberListSchema", () => {
   it("parses GET /api/squads/:id/members rows", () => {
     const parsed = SquadMemberListSchema.parse([
@@ -1974,6 +2012,11 @@ describe("IssueViewSchema", () => {
     expect(parsed.query).toEqual({});
     expect(parsed.display).toEqual({});
     expect(parsed.revision).toBe(1);
+  });
+
+  it("accepts the project visibility value without rejecting the view", () => {
+    const parsed = IssueViewSchema.parse({ ...valid, visibility: "project" });
+    expect(parsed.visibility).toBe("project");
   });
 
   it("degrades a malformed list response to [] via parseWithFallback", () => {

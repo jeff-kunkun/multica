@@ -2553,6 +2553,52 @@ describe("IssueDetail (shared)", () => {
       expect(screen.getAllByText("Sprint 3")).toHaveLength(1);
     });
 
+    it("shows close-protocol fields and the missing-close exception on sub-issue rows", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 230,
+            identifier: "DENE-230",
+            title: "Stage 1 child",
+            stage: 1,
+            status: "done",
+            metadata: {},
+            last_activity_at: "2026-09-15T11:15:22Z",
+          }),
+          subIssue({
+            id: "child-2",
+            number: 231,
+            identifier: "DENE-231",
+            title: "Stage 2 child",
+            stage: 2,
+            status: "done",
+            last_activity_at: "2026-09-15T12:16:13Z",
+            metadata: {
+              "close.at": "2026-09-15T11:52:15Z",
+              "close.conclusion": "delivered",
+              "close.evidence_comment_id": "01a0a4e9-1c4e-75a6-8895-79f1210f494e",
+              "close.next_owner_id": "",
+              "close.next_owner_type": "none",
+              "close.status": "done",
+              "close.waiting_on": "",
+              "close.wake_action": "stage_done",
+            },
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Stage 1 child");
+      expect(screen.getByText("Not closed under protocol")).toBeInTheDocument();
+      expect(screen.getByText("delivered")).toBeInTheDocument();
+      expect(screen.getByText("Next: none")).toBeInTheDocument();
+      const strips = screen.getAllByTestId("sub-issue-close-strip");
+      expect(strips[0]).toHaveAttribute("data-close-state", "missing");
+      expect(strips[1]).toHaveAttribute("data-close-state", "ok");
+    });
+
     it("mutes the due date on done sub-issues even when past", async () => {
       mockApiObj.listChildIssues.mockResolvedValue({
         issues: [

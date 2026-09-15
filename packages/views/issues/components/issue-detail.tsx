@@ -76,6 +76,7 @@ import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueCo
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
+import { SubIssueCloseStrip } from "./sub-issue-close-strip";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { useNewRunIds } from "./use-run-comment-motion";
@@ -741,10 +742,11 @@ function SubIssueRow({
     <IssueActionsContextMenu issue={child}>
       <div
         className={cn(
-          "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
+          "flex flex-col gap-1 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
           selected && "bg-accent/30",
         )}
       >
+        <div className="flex items-center gap-2.5">
         {/* Priority ⇄ checkbox slot, mirroring the main list rows: the
             priority icon yields to the selection checkbox on hover/focus.
             Opacity (not display) swap keeps the checkbox keyboard-tabbable. */}
@@ -890,6 +892,8 @@ function SubIssueRow({
             }
           />
         )}
+        </div>
+        <SubIssueCloseStrip issue={child} />
       </div>
     </IssueActionsContextMenu>
   );
