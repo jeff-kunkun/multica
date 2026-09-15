@@ -123,6 +123,14 @@
     "none": "단계 없음",
     "value": "{{n}}단계"
   },
+  "close_protocol": {
+    "missing": "프로토콜로 닫히지 않음",
+    "status_drift": "close.status ≠ {{issueStatus}}",
+    "next_owner": "다음: {{name}}",
+    "next_owner_none": "다음: 없음",
+    "waiting_on": "{{id}} 대기",
+    "last_activity_missing": "활동 시각 없음"
+  },
   "scope": {
     "all_label": "전체",
     "all_description": "이 워크스페이스의 모든 태스크",

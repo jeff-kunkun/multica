@@ -123,6 +123,14 @@
     "none": "ステージなし",
     "value": "ステージ {{n}}"
   },
+  "close_protocol": {
+    "missing": "プロトコル未クローズ",
+    "status_drift": "close.status ≠ {{issueStatus}}",
+    "next_owner": "次: {{name}}",
+    "next_owner_none": "次: なし",
+    "waiting_on": "{{id}} を待機",
+    "last_activity_missing": "活動時刻なし"
+  },
   "scope": {
     "all_label": "すべて",
     "all_description": "このワークスペースのすべてのタスク",

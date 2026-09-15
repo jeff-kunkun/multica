@@ -123,6 +123,14 @@
     "none": "无阶段",
     "value": "阶段 {{n}}"
   },
+  "close_protocol": {
+    "missing": "未按协议收口",
+    "status_drift": "close.status ≠ {{issueStatus}}",
+    "next_owner": "下一责任人：{{name}}",
+    "next_owner_none": "下一责任人：无",
+    "waiting_on": "等待 {{id}}",
+    "last_activity_missing": "无活动时间"
+  },
   "scope": {
     "all_label": "全部",
     "all_description": "工作区内的全部任务",

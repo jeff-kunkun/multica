@@ -125,6 +125,14 @@
     "none": "No stage",
     "value": "Stage {{n}}"
   },
+  "close_protocol": {
+    "missing": "Not closed under protocol",
+    "status_drift": "close.status ≠ {{issueStatus}}",
+    "next_owner": "Next: {{name}}",
+    "next_owner_none": "Next: none",
+    "waiting_on": "Waiting on {{id}}",
+    "last_activity_missing": "No activity time"
+  },
   "scope": {
     "all_label": "All",
     "all_description": "All issues in this workspace",

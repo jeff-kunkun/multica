@@ -488,7 +488,36 @@ Agent 写法：
 - 不能挂的，收口时 `close.waiting_on=<identifier>`，状态保持 `in_review` / `blocked` / `in_progress`（§6.1 禁止 `done`）。
 - 被等票 `done` 时 **不要** 再 mention 等待方 assignee（server 会叫醒，mention 会双发）。
 
-### 9.2 Stage 4（已落地，DENE-233）与 Stage 5
+### 9.2 Stage 4（已落地，DENE-233）与 Stage 5（已落地，DENE-234）
 
 - **Stage 4**：第 7 节四扫描挂在 `delegatedFailureRecoverySweepInterval`（5 分钟）旁路，单轮 30 秒 timeout。命中后只写一条带 `mention://agent|squad` 的系统评论；目标 `(issue, agent)` 已有 queued/dispatched/running/waiting_local_directory 则跳过 enqueue。child-done 五类失败写入 `stage_wakeup_failure`。`close.status` 必须等于 `issue.status` 由 `closeprotocol.StatusMatchesIssue` 断言。Dispatcher 推进回合收缩为：读 `issue children` + 读 `close.*` + 晋升或短结论，禁止重型全景看板。
-- **Stage 5**：在 `groupSubIssuesByStage`（`issue-detail.tsx:418-440`）旁展示：当前 stage、`close.conclusion`、`close.next_owner_*`、`close.waiting_on`、最近 `last_activity_at`。今日 UI 只有 stage 分组，没有下一唤醒者。
+- **Stage 5**：在 `groupSubIssuesByStage` 旁，每个子票渲染 `SubIssueCloseStrip`（`packages/views/issues/components/sub-issue-close-strip.tsx`）：当前 stage、`close.conclusion`、下一唤醒者（`close.next_owner_type` + `close.next_owner_id`）、等待来源（`close.waiting_on`）、最近 `last_activity_at`。两种异常态显式标出，不渲染成空字段：缺 `close.*`（未按协议收口）、`close.status != issue.status`（漂移）。`blocked` / `in_review` 用 next owner + waiting_on + last_activity 表达卡在谁、卡了多久。数据源是 issue `metadata`；`issue_metadata:changed` 经 `onIssueMetadataChanged` → `patchIssueSnapshot` 写入 children cache，子票条即时刷新。独立实页验收归 Stage 6（DENE-260）。
+
+### 9.3 效率对比（DENE-229 家族，2026-09-15）
+
+数字来自本家族真实记录，Stage 6 复核。改造前对照 §1.3 / §1.4。
+
+| 项 | 改造前 | 改造后（本家族） |
+| --- | --- | --- |
+| 阶段数 | 隐式等待 + 串行文字依赖，阶段边界不可观察 | 6 个显式 stage（1–5 实现，6 独立验收）。Stage 1–4 已关屏障 |
+| Dispatcher 回合 | 7–17 分钟级全景看板；卡点要读评论才发现 | 屏障关闭后一次短回合：读 `issue children` + `close.*` + 晋升或短结论。本家族 4 次晋升（1→2、2→3、3→4、4→5） |
+| 停滞发现 | 靠人读评论。DENE-196 卡 DENE-189 Stage 3：人类问「为什么没人接手」后 Dispatcher 12 分钟才手工 mention | 即时路径秒级（T1/T2 stage 屏障、T15 `waiting_on`）；补偿扫描 5–15 分钟（Stage 4，挂现有 sweeper） |
+| 总耗时 | 文字等待可无限挂（DENE-209 等 DENE-196 无人叫醒） | 本家族 Stage 1 创建 10:47:57Z → Stage 4 `close.at` 13:04:42Z，约 2.3h 走完 4 个实现 stage（含 Fable 额度失败改派） |
+
+Stage 1 DENE-230 `metadata: {}`，是真实的「未按协议收口」样本。Stage 2–4 八键齐全且 `close.status=done` 与 issue 一致。历史漂移（DENE-232 / DENE-233 曾 `close.status=in_review` 而 issue 已 `done`）由 Stage 5 的 drift 态覆盖。
+
+### 9.4 上线与回滚（Stage 5）
+
+改动面（仅前端，不改调度器）：
+
+- `packages/core/issues/close-protocol.ts` — 读 `close.*` 八键、missing / drift 判定
+- `packages/views/issues/components/sub-issue-close-strip.tsx` — 子票条
+- `packages/views/issues/components/issue-detail.tsx` — `SubIssueRow` 挂载
+- `packages/views/locales/{en,zh-Hans,ja,ko}/issues.json` — 文案
+- 本页 §9.2–§9.4
+
+回退：squash 合入 `kun` 后，revert 该 PR（或 `git revert` 该 merge）。无 migration、无 dual-write、无 server 行为变化。`close.*` metadata 保留。
+
+回滚后行为：子票列表回到「只有 stage 分组、没有下一唤醒者 / 异常态」。调度、屏障、扫描、waiting_on 唤醒不受影响。
+
+不回滚的：Stage 1–4 的协议、扫描、waiting_on 路径。Stage 5 只是只读展示。
