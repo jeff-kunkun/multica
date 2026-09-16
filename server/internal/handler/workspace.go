@@ -103,9 +103,14 @@ type WorkspaceResponse struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix string  `json:"issue_prefix"`
-	AvatarURL   *string `json:"avatar_url"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	// IssueCounter is the workspace's issue-number watermark: the last number
+	// handed out, which deleting the top issues does not lower. It is serialized
+	// because the transfer CLI's `--renumber` offsets by it (contract §2.3), and
+	// MAX(number) is only a lower bound of it.
+	IssueCounter int32   `json:"issue_counter"`
+	AvatarURL    *string `json:"avatar_url"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
 }
 
 func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -124,17 +129,18 @@ func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		repos = []any{}
 	}
 	return WorkspaceResponse{
-		ID:          uuidToString(w.ID),
-		Name:        w.Name,
-		Slug:        w.Slug,
-		Description: textToPtr(w.Description),
-		Context:     textToPtr(w.Context),
-		Settings:    settings,
-		Repos:       repos,
-		IssuePrefix: w.IssuePrefix,
-		AvatarURL:   h.resolveAvatarURLPtr(textToPtr(w.AvatarUrl)),
-		CreatedAt:   timestampToString(w.CreatedAt),
-		UpdatedAt:   timestampToString(w.UpdatedAt),
+		ID:           uuidToString(w.ID),
+		Name:         w.Name,
+		Slug:         w.Slug,
+		Description:  textToPtr(w.Description),
+		Context:      textToPtr(w.Context),
+		Settings:     settings,
+		Repos:        repos,
+		IssuePrefix:  w.IssuePrefix,
+		IssueCounter: w.IssueCounter,
+		AvatarURL:    h.resolveAvatarURLPtr(textToPtr(w.AvatarUrl)),
+		CreatedAt:    timestampToString(w.CreatedAt),
+		UpdatedAt:    timestampToString(w.UpdatedAt),
 	}
 }
 

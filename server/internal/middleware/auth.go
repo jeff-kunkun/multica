@@ -99,16 +99,29 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// X-Task-ID. Human-only endpoints (e.g. agent env
 			// management) reject requests authenticated this way; see
 			// `actorSourceFromRequest`. MUL-2600.
+			//
+			// The token's capability scope is decided here too, from the
+			// carrier that owns it. See issueDraftReadOnlyScope below.
 			if strings.HasPrefix(tokenString, "mat_") {
 				if queries == nil {
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
 				hash := auth.HashToken(tokenString)
-				tt, err := queries.GetTaskTokenByHash(r.Context(), hash)
+				tt, err := queries.GetTaskTokenActorByHash(r.Context(), hash)
 				if err != nil {
 					slog.Warn("auth: invalid task token", "path", r.URL.Path, "error", err)
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				if isIssueDraftReadOnlyScope(tt.AgentKind, tt.AgentSystemKey) && !isReadOnlyMethod(r.Method) {
+					slog.Warn(
+						"auth: issue draft carrier attempted a write",
+						"path", r.URL.Path,
+						"method", r.Method,
+						"agent_id", uuidToString(tt.AgentID),
+					)
+					http.Error(w, `{"error":"issue draft sessions are read-only"}`, http.StatusForbidden)
 					return
 				}
 				userID := uuidToString(tt.UserID)

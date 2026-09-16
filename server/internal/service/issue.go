@@ -714,6 +714,11 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 		return analytics.SourceManual, originID, ""
 	case "autopilot":
 		return analytics.SourceAutopilot, "", originID
+	case "issue_draft":
+		// A human confirmed an aligned draft. The origin points at the
+		// alignment conversation, not at a task or a run, so there is nothing
+		// to attribute beyond "a person created this".
+		return analytics.SourceManual, "", ""
 	default:
 		slog.Warn("analytics: unknown issue origin type",
 			"origin_type", issue.OriginType.String,
