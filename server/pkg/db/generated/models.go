@@ -803,6 +803,17 @@ type IssueDependency struct {
 	Type             string      `json:"type"`
 }
 
+type IssueDraft struct {
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Status        string             `json:"status"`
+	Revision      int64              `json:"revision"`
+	Draft         []byte             `json:"draft"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssueLabel struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`

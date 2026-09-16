@@ -3120,12 +3120,16 @@ func (q *Queries) CreateSystemUserAgent(ctx context.Context, arg CreateSystemUse
 
 const deleteSystemAgentByID = `-- name: DeleteSystemAgentByID :exec
 DELETE FROM agent
-WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%'
+WHERE id = $1 AND kind = 'system'
+  AND (system_key LIKE 'agent_builder:%' OR system_key LIKE 'issue_draft:%')
 `
 
-// Builder sessions own their hidden execution agent. Deleting the session
+// Session carriers own their hidden execution agent. Deleting the session
 // removes that carrier and its task rows; the kind guard prevents this cleanup
-// path from ever deleting a user-authored agent.
+// path from ever deleting a user-authored agent, and the system_key prefixes
+// list every per-session carrier kind so the shared DeleteChatSession path can
+// clean up whichever flow created the conversation. Workspace-scoped system
+// agents (Mika) are `kind = 'user'` and already out of reach here.
 func (q *Queries) DeleteSystemAgentByID(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteSystemAgentByID, id)
 	return err
@@ -7507,6 +7511,73 @@ type RebindAgentBuilderRuntimeParams struct {
 // exactly what makes the new runtime start a fresh provider session.
 func (q *Queries) RebindAgentBuilderRuntime(ctx context.Context, arg RebindAgentBuilderRuntimeParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, rebindAgentBuilderRuntime,
+		arg.RuntimeID,
+		arg.RuntimeMode,
+		arg.Model,
+		arg.ID,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
+		&i.ConversationStarters,
+		&i.SwitchableModels,
+		&i.AutoRetryEnabled,
+	)
+	return i, err
+}
+
+const rebindIssueDraftRuntime = `-- name: RebindIssueDraftRuntime :one
+UPDATE agent
+SET runtime_id = $1,
+    runtime_mode = $2,
+    model = $3,
+    updated_at = now()
+WHERE id = $4 AND kind = 'system' AND system_key LIKE 'issue_draft:%'
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled
+`
+
+type RebindIssueDraftRuntimeParams struct {
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+	RuntimeMode string      `json:"runtime_mode"`
+	Model       pgtype.Text `json:"model"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+// Re-points an alignment carrier at another runtime mid-conversation. Same
+// contract as RebindAgentBuilderRuntime, including the model reset (model ids
+// are per-runtime) and the requirement that callers hold
+// LockChatSessionForRuntimeBind on the owning chat_session for the whole
+// transaction. chat_session.runtime_id is deliberately left stale so the new
+// runtime starts a fresh provider session instead of resuming the old one.
+func (q *Queries) RebindIssueDraftRuntime(ctx context.Context, arg RebindIssueDraftRuntimeParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, rebindIssueDraftRuntime,
 		arg.RuntimeID,
 		arg.RuntimeMode,
 		arg.Model,

@@ -133,6 +133,7 @@ FROM agent
 WHERE workspace_id = $1 AND kind = 'system'
   AND system_key IS NOT NULL AND system_key <> ''
   AND system_key NOT LIKE 'agent_builder:%'
+  AND system_key NOT LIKE 'issue_draft:%'
   AND (sqlc.arg('include_archived')::bool OR archived_at IS NULL)
 ORDER BY system_key;
 
