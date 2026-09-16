@@ -366,6 +366,18 @@ describe("IssueDraftPage stages", () => {
     );
   });
 
+  it("stays quiet on a server that predates attachment_ids", async () => {
+    // An installed desktop client can talk to a backend that never echoes the
+    // field. Reading its absence as "nothing bound" would warn on every
+    // attachment send against that backend, so the check is skipped instead.
+    mocks.sendChatMessage.mockResolvedValue({ message_id: "m12", task_id: "t12" });
+    renderPage();
+    const send = await screen.findByRole("button", { name: "send-turn-with-files" });
+    await userEvent.click(send);
+    await waitFor(() => expect(mocks.sendChatMessage).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("reports the attachments the server did not bind", async () => {
     // A silent bind failure otherwise shows up only as an assistant that never
     // mentions the file the user attached.
