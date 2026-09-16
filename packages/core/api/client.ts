@@ -2,6 +2,12 @@ import { configStore } from "../config";
 import type {
   Issue,
   IssuePriority,
+  IssueDraft,
+  IssueDraftPayload,
+  IssueDraftSession,
+  IssueDraftSummary,
+  IssueDraftFinalizeResult,
+  IssueDraftRuntimeSwitch,
   CreateIssueRequest,
   MoveIssueRequest,
   UpdateIssueRequest,
@@ -270,6 +276,15 @@ import {
   AgentRuntimeListSchema,
   AgentBuilderRuntimeSwitchSchema,
   AgentBuilderSessionSchema,
+  IssueDraftSchema,
+  IssueDraftSessionSchema,
+  IssueDraftListSchema,
+  IssueDraftFinalizeSchema,
+  IssueDraftRuntimeSwitchSchema,
+  EMPTY_ISSUE_DRAFT,
+  EMPTY_ISSUE_DRAFT_SESSION,
+  EMPTY_ISSUE_DRAFT_LIST,
+  issueDraftRuntimeSwitchFallback,
   AgentBuilderSessionListSchema,
   EMPTY_AGENT_BUILDER_SESSION_LIST,
   agentBuilderRuntimeSwitchFallback,
@@ -1627,6 +1642,120 @@ export class ApiClient {
       AgentBuilderRuntimeSwitchSchema,
       agentBuilderRuntimeSwitchFallback(data.runtime_id),
       { endpoint: "PATCH /api/agent-builder/sessions/{id}/runtime" },
+    );
+  }
+
+  /**
+   * Opens an alignment conversation: a hidden carrier, its chat session, and
+   * an empty draft, created together server-side. Nothing about an issue
+   * exists yet — `finalizeIssueDraft` is the only call that creates one.
+   */
+  async createIssueDraftSession(data: {
+    runtime_id: string;
+    model?: string;
+    draft?: Partial<IssueDraftPayload>;
+  }): Promise<IssueDraftSession> {
+    const raw = await this.fetch<unknown>("/api/issue-drafts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      IssueDraftSessionSchema,
+      EMPTY_ISSUE_DRAFT_SESSION,
+      { endpoint: "POST /api/issue-drafts" },
+    );
+  }
+
+  /**
+   * The caller's unfinished alignment conversations. They are hidden from
+   * every chat list (their carrier is `kind = 'system'`), so this is the only
+   * route back to one. A 404 means the backend predates the endpoint: degrade
+   * to "no drafts" rather than erroring the surface that lists them.
+   */
+  async listIssueDrafts(): Promise<IssueDraftSummary[]> {
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>("/api/issue-drafts");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return [];
+      throw err;
+    }
+    return parseWithFallback(
+      raw,
+      IssueDraftListSchema,
+      EMPTY_ISSUE_DRAFT_LIST,
+      { endpoint: "GET /api/issue-drafts" },
+    ).drafts;
+  }
+
+  /**
+   * Saves what the conversation has agreed so far. `expected_revision` is the
+   * revision the caller was looking at; a save built on a superseded view is
+   * rejected with 409 rather than overwriting what it never saw.
+   */
+  async updateIssueDraft(
+    sessionId: string,
+    data: {
+      draft: IssueDraftPayload;
+      status?: "draft" | "ready";
+      expected_revision: number;
+    },
+  ): Promise<IssueDraft> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${sessionId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
+      endpoint: "PATCH /api/issue-drafts/{id}",
+    });
+  }
+
+  /** Discards a draft. The conversation itself is left alone. */
+  async abandonIssueDraft(sessionId: string): Promise<IssueDraft> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-drafts/${sessionId}/abandon`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
+      endpoint: "POST /api/issue-drafts/{id}/abandon",
+    });
+  }
+
+  /**
+   * Confirms a draft into an issue. Safe to retry: the protocol creates at
+   * most one issue per draft and every repeat returns that same `issue_id`.
+   *
+   * No fallback — see IssueDraftFinalizeSchema. A 2xx means the issue exists,
+   * and the caller navigates to it, so an unparseable body must throw rather
+   * than hand the router an empty id.
+   */
+  async finalizeIssueDraft(
+    sessionId: string,
+    data: { expected_revision: number },
+  ): Promise<IssueDraftFinalizeResult> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-drafts/${sessionId}/finalize`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+    return IssueDraftFinalizeSchema.parse(raw);
+  }
+
+  /** Rebinds a live alignment conversation to another runtime. Callers must
+   *  not show the new runtime as selected until this resolves. */
+  async switchIssueDraftRuntime(
+    sessionId: string,
+    data: { runtime_id: string },
+  ): Promise<IssueDraftRuntimeSwitch> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-drafts/${sessionId}/runtime`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(
+      raw,
+      IssueDraftRuntimeSwitchSchema,
+      issueDraftRuntimeSwitchFallback(data.runtime_id),
+      { endpoint: "PATCH /api/issue-drafts/{id}/runtime" },
     );
   }
 

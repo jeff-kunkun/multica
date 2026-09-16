@@ -17,6 +17,10 @@ import type {
   ChatDraftRestoresResponse,
   ChatPendingTask,
   ChatSession,
+  IssueDraft,
+  IssueDraftRuntimeSwitch,
+  IssueDraftSession,
+  IssueDraftSummary,
   PrioritizeQueuedChatTaskResponse,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
@@ -2222,6 +2226,113 @@ export const AgentBuilderRuntimeSwitchSchema = z.object({
 export const agentBuilderRuntimeSwitchFallback = (
   requestedRuntimeID: string,
 ): AgentBuilderRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
+
+/**
+ * The structured issue an alignment draft has arrived at. Every field falls
+ * back to empty on its own: a draft written by a newer build must still
+ * restore the fields this build understands rather than discarding the
+ * conversation's work wholesale.
+ */
+export const IssueDraftPayloadSchema = z.object({
+  title: z.string().catch(""),
+  description: z.string().catch(""),
+  status: z.string().catch(""),
+  priority: z.string().catch(""),
+  assignee_type: z.string().nullish().catch(null),
+  assignee_id: z.string().nullish().catch(null),
+  project_id: z.string().nullish().catch(null),
+  parent_issue_id: z.string().nullish().catch(null),
+}).loose();
+
+/**
+ * One alignment draft.
+ *
+ * `status` deliberately has no `.catch()`: it decides whether the UI offers
+ * "confirm and create", and defaulting an unrecognised value would either
+ * offer a create the server will refuse or hide one it would accept. An
+ * unparseable draft falls back wholesale at the call site instead.
+ */
+export const IssueDraftSchema = z.object({
+  chat_session_id: z.string(),
+  workspace_id: z.string().catch(""),
+  status: z.enum(["draft", "ready", "completed", "abandoned"]),
+  revision: z.number().int().nonnegative(),
+  draft: IssueDraftPayloadSchema,
+  issue_id: z.string().nullish().catch(null),
+  created_at: z.string().catch(""),
+  updated_at: z.string().catch(""),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT: IssueDraft = {
+  chat_session_id: "",
+  workspace_id: "",
+  status: "draft",
+  revision: 0,
+  draft: {
+    title: "",
+    description: "",
+    status: "",
+    priority: "",
+  },
+  created_at: "",
+  updated_at: "",
+};
+
+export const IssueDraftSessionSchema = z.object({
+  session_id: z.string(),
+  agent_id: z.string().catch(""),
+  runtime_id: z.string().catch(""),
+  draft: IssueDraftSchema,
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_SESSION: IssueDraftSession = {
+  session_id: "",
+  agent_id: "",
+  runtime_id: "",
+  draft: EMPTY_ISSUE_DRAFT,
+};
+
+export const IssueDraftSummarySchema = IssueDraftSchema.extend({
+  title: z.string().catch(""),
+  runtime_id: z.string().catch(""),
+  last_message_content: z.string().catch(""),
+  last_message_role: z.string().catch(""),
+  last_message_at: z.string().catch(""),
+}).loose();
+
+export const IssueDraftListSchema = z.object({
+  drafts: z.array(IssueDraftSummarySchema).catch([]),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_LIST: { drafts: IssueDraftSummary[] } = {
+  drafts: [],
+};
+
+/**
+ * The result of confirming a draft.
+ *
+ * `issue_id` has no fallback on purpose. This endpoint returns 2xx only after
+ * an issue exists, and the caller navigates to that issue; an empty id would
+ * send the user to a route that cannot resolve while the issue it names is
+ * already live. An unparseable success body is a hard parse failure at the
+ * call site instead — the client re-confirms, which is safe because the
+ * protocol returns the same issue for every repeat.
+ */
+export const IssueDraftFinalizeSchema = z.object({
+  draft: IssueDraftSchema,
+  issue_id: z.string().min(1),
+}).loose();
+
+export const IssueDraftRuntimeSwitchSchema = z.object({
+  runtime_id: z.string(),
+}).loose();
+
+// Same reasoning as agentBuilderRuntimeSwitchFallback: a 2xx means the carrier
+// was rebound to the requested runtime, so reporting "unknown" would leave the
+// picker showing a runtime that no longer executes anything.
+export const issueDraftRuntimeSwitchFallback = (
+  requestedRuntimeID: string,
+): IssueDraftRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
 
 // Squad list responses carry lightweight membership previews used by hover
 // cards. member_count / member_preview are additive and default cleanly.
