@@ -8865,3 +8865,65 @@ func (q *Queries) UpdateAgentTaskSession(ctx context.Context, arg UpdateAgentTas
 	_, err := q.db.Exec(ctx, updateAgentTaskSession, arg.ID, arg.SessionID, arg.WorkDir)
 	return err
 }
+
+const updateIssueDraftCarrierInstructions = `-- name: UpdateIssueDraftCarrierInstructions :one
+UPDATE agent
+SET instructions = $1,
+    updated_at = now()
+WHERE id = $2 AND kind = 'system' AND system_key LIKE 'issue_draft:%'
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled
+`
+
+type UpdateIssueDraftCarrierInstructionsParams struct {
+	Instructions string      `json:"instructions"`
+	ID           pgtype.UUID `json:"id"`
+}
+
+// Swaps the alignment carrier's system prompt when its draft switches policy.
+// The carrier is the agent the daemon reads instructions from at claim time, so
+// this UPDATE — not the draft row — is what changes how the next reply behaves;
+// the draft row only records which policy was installed.
+//
+// Takes no lock: LockChatSessionForRuntimeBind already serialises the switch
+// against a concurrent send, and a text swap on one hidden carrier has no
+// ordering requirement of its own. The kind/system_key guard mirrors
+// RebindIssueDraftRuntime so this path can never rewrite a user-authored
+// agent's instructions.
+func (q *Queries) UpdateIssueDraftCarrierInstructions(ctx context.Context, arg UpdateIssueDraftCarrierInstructionsParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, updateIssueDraftCarrierInstructions, arg.Instructions, arg.ID)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
+		&i.ConversationStarters,
+		&i.SwitchableModels,
+		&i.AutoRetryEnabled,
+	)
+	return i, err
+}

@@ -2,8 +2,13 @@
 -- Opens the structured half of an alignment conversation. Called in the same
 -- transaction as the carrier agent and chat session it belongs to, so a draft
 -- can never exist without the conversation that owns it.
-INSERT INTO issue_draft (chat_session_id, workspace_id, draft)
-VALUES (@chat_session_id, @workspace_id, @draft)
+--
+-- policy_key / policy_version are written next to the carrier agent whose
+-- instructions were set from the same policy: the row records the prompt that
+-- actually steers this conversation, not the one the registry happens to serve
+-- when someone later asks.
+INSERT INTO issue_draft (chat_session_id, workspace_id, draft, policy_key, policy_version)
+VALUES (@chat_session_id, @workspace_id, @draft, @policy_key, @policy_version)
 RETURNING *;
 
 -- name: GetIssueDraftInWorkspace :one
@@ -44,6 +49,8 @@ SELECT d.chat_session_id,
        d.revision,
        d.draft,
        d.issue_id,
+       d.policy_key,
+       d.policy_version,
        d.created_at,
        d.updated_at,
        cs.title,
@@ -81,6 +88,24 @@ SET draft = @draft,
 WHERE chat_session_id = @chat_session_id
   AND workspace_id = @workspace_id
   AND revision = @expected_revision
+  AND status IN ('draft', 'ready')
+RETURNING *;
+
+-- name: UpdateIssueDraftPolicy :one
+-- Re-records which alignment policy a live conversation is running under,
+-- together with the version of that policy's prompt the carrier was just given.
+--
+-- Deliberately does NOT bump `revision`: revision is the optimistic-concurrency
+-- token for the draft's *content*, and switching how the carrier asks questions
+-- changes no field of it. Bumping here would reject the user's next save for a
+-- conflict they cannot see. Terminal drafts are excluded, so a policy switch
+-- racing a confirm loses rather than resurrecting a finished conversation.
+UPDATE issue_draft
+SET policy_key = @policy_key,
+    policy_version = @policy_version,
+    updated_at = now()
+WHERE chat_session_id = @chat_session_id
+  AND workspace_id = @workspace_id
   AND status IN ('draft', 'ready')
 RETURNING *;
 

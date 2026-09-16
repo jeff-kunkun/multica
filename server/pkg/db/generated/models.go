@@ -812,6 +812,8 @@ type IssueDraft struct {
 	IssueID       pgtype.UUID        `json:"issue_id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	PolicyKey     string             `json:"policy_key"`
+	PolicyVersion string             `json:"policy_version"`
 }
 
 type IssueLabel struct {

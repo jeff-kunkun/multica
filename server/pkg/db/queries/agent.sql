@@ -136,6 +136,23 @@ SET runtime_id = @runtime_id,
 WHERE id = @id AND kind = 'system' AND system_key LIKE 'issue_draft:%'
 RETURNING *;
 
+-- name: UpdateIssueDraftCarrierInstructions :one
+-- Swaps the alignment carrier's system prompt when its draft switches policy.
+-- The carrier is the agent the daemon reads instructions from at claim time, so
+-- this UPDATE — not the draft row — is what changes how the next reply behaves;
+-- the draft row only records which policy was installed.
+--
+-- Takes no lock: LockChatSessionForRuntimeBind already serialises the switch
+-- against a concurrent send, and a text swap on one hidden carrier has no
+-- ordering requirement of its own. The kind/system_key guard mirrors
+-- RebindIssueDraftRuntime so this path can never rewrite a user-authored
+-- agent's instructions.
+UPDATE agent
+SET instructions = @instructions,
+    updated_at = now()
+WHERE id = @id AND kind = 'system' AND system_key LIKE 'issue_draft:%'
+RETURNING *;
+
 -- name: UpdateAgent :one
 -- composio_toolkit_allowlist is set wholesale: the API layer is responsible
 -- for normalising the request payload to either (a) the new slug list — sent

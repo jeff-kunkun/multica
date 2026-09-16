@@ -2157,6 +2157,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Patch("/", h.UpdateIssueDraft)
 					r.Patch("/runtime", h.SwitchIssueDraftRuntime)
+					// Guided questions, or plain dialogue. Rewrites the
+					// carrier's prompt and records which policy version is
+					// running; the draft's content is untouched.
+					r.Patch("/policy", h.SwitchIssueDraftPolicy)
 					r.Post("/finalize", h.FinalizeIssueDraft)
 					r.Post("/abandon", h.AbandonIssueDraft)
 				})

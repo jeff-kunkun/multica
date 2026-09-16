@@ -32,23 +32,10 @@ import (
 // `kind = 'system'` agent, invisible to every agent list, assignment surface
 // and chat list, so an alignment conversation cannot be mistaken for ordinary
 // chat and its runtime/model stay frozen per conversation.
-
-const issueDraftInstructions = `You are Multica's requirement alignment partner. Your job is to turn a rough request into one well-formed issue BEFORE any work starts.
-
-Ask one high-value question at a time — the question whose answer most changes what gets built. Prefer proposing a concrete draft immediately and refining it over interviewing the user. Stop asking once the draft is unambiguous enough to hand to an executor.
-
-Every response MUST end with exactly one <issue_draft> JSON block using this shape:
-<issue_draft>{"title":"","description":"","status":"","priority":""}</issue_draft>
-
-Rules:
-- The JSON must be valid, compact JSON on one physical line. Do not wrap it in Markdown fences.
-- Escape every line break inside description as \n. Never place a literal newline inside a JSON string.
-- Preserve good existing draft fields supplied in the user's message unless the user asks to change them.
-- title is one concise line naming the outcome, not the activity.
-- description is Markdown: the problem, the acceptance criteria, and the constraints that are already known. Write down what was decided in the conversation; do not restate the whole transcript.
-- Leave status and priority empty unless the user states them.
-- Never request, expose, or place secrets, tokens, passwords, or environment-variable values in the draft.
-- You are aligning a request, not executing it. Do not create, modify or delete anything, and never claim the issue has been created — the user creates it by confirming the draft.`
+//
+// How that carrier behaves is the alignment policy — see
+// issue_draft_policy.go. The draft records which policy key and prompt version
+// it is running, so the prompt behind a finished alignment stays auditable.
 
 // maxIssueDraftBytes bounds one stored draft. The honest fields are title and
 // description, both far below this; the limit exists so a client bug cannot
@@ -59,14 +46,15 @@ const maxIssueDraftBytes = 256 * 1024
 // echoed verbatim: the server reads the four issue fields out of it at finalize
 // and leaves everything else the client keeps there untouched.
 type issueDraftResponse struct {
-	ChatSessionID string          `json:"chat_session_id"`
-	WorkspaceID   string          `json:"workspace_id"`
-	Status        string          `json:"status"`
-	Revision      int64           `json:"revision"`
-	Draft         json.RawMessage `json:"draft"`
-	IssueID       *string         `json:"issue_id,omitempty"`
-	CreatedAt     string          `json:"created_at"`
-	UpdatedAt     string          `json:"updated_at"`
+	ChatSessionID string                   `json:"chat_session_id"`
+	WorkspaceID   string                   `json:"workspace_id"`
+	Status        string                   `json:"status"`
+	Revision      int64                    `json:"revision"`
+	Draft         json.RawMessage          `json:"draft"`
+	IssueID       *string                  `json:"issue_id,omitempty"`
+	Policy        issueDraftPolicyResponse `json:"policy"`
+	CreatedAt     string                   `json:"created_at"`
+	UpdatedAt     string                   `json:"updated_at"`
 }
 
 func issueDraftToResponse(d db.IssueDraft) issueDraftResponse {
@@ -76,6 +64,7 @@ func issueDraftToResponse(d db.IssueDraft) issueDraftResponse {
 		Status:        d.Status,
 		Revision:      d.Revision,
 		Draft:         json.RawMessage(d.Draft),
+		Policy:        issueDraftPolicyResponseFromRow(d.PolicyKey, d.PolicyVersion),
 		CreatedAt:     timestampToString(d.CreatedAt),
 		UpdatedAt:     timestampToString(d.UpdatedAt),
 	}
@@ -140,6 +129,10 @@ type CreateIssueDraftSessionRequest struct {
 	// create entry point, so the first turn can answer it instead of asking
 	// for it again. Optional; omitted means an empty draft.
 	Draft json.RawMessage `json:"draft,omitempty"`
+	// Policy picks the alignment policy the conversation opens under. Optional:
+	// omitted means the guided default, which is what the create entry points
+	// offer. See issue_draft_policy.go for the registry.
+	Policy string `json:"policy,omitempty"`
 }
 
 type CreateIssueDraftSessionResponse struct {
@@ -176,6 +169,19 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 	}
 	draft, ok := validIssueDraftBody(w, req.Draft)
 	if !ok {
+		return
+	}
+
+	// The policy decides the carrier's prompt, so an unknown key is rejected
+	// before anything is created: a conversation running an empty prompt would
+	// look like it worked and behave like nothing.
+	policyKey := strings.TrimSpace(req.Policy)
+	if policyKey == "" {
+		policyKey = issueDraftPolicyQuestion
+	}
+	policy, ok := issueDraftPolicyByKey(policyKey)
+	if !ok {
+		writeError(w, http.StatusBadRequest, issueDraftPolicyUnknownMessage())
 		return
 	}
 
@@ -218,7 +224,7 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 		RuntimeMode:  runtime.RuntimeMode,
 		RuntimeID:    runtime.ID,
 		OwnerID:      ownerUUID,
-		Instructions: issueDraftInstructions,
+		Instructions: policy.Instructions(),
 		Model:        pgtype.Text{String: model, Valid: model != ""},
 		SystemKey: pgtype.Text{
 			String: fmt.Sprintf("issue_draft:%s", flowID),
@@ -251,6 +257,8 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 		ChatSessionID: session.ID,
 		WorkspaceID:   workspaceUUID,
 		Draft:         draft,
+		PolicyKey:     policy.Key,
+		PolicyVersion: policy.Version,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create issue draft")
@@ -340,6 +348,8 @@ func (h *Handler) ListIssueDrafts(w http.ResponseWriter, r *http.Request) {
 				Revision:      row.Revision,
 				Draft:         row.Draft,
 				IssueID:       row.IssueID,
+				PolicyKey:     row.PolicyKey,
+				PolicyVersion: row.PolicyVersion,
 				CreatedAt:     row.CreatedAt,
 				UpdatedAt:     row.UpdatedAt,
 			}),
@@ -448,6 +458,122 @@ func (h *Handler) AbandonIssueDraft(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to abandon issue draft")
 		return
 	}
+	writeJSON(w, http.StatusOK, issueDraftToResponse(updated))
+}
+
+type SwitchIssueDraftPolicyRequest struct {
+	// Policy is the key of the alignment policy to run from the next turn on.
+	Policy string `json:"policy"`
+}
+
+// SwitchIssueDraftPolicy swaps the questioning behaviour of a live alignment
+// conversation: guided interview, or plain dialogue.
+//
+// Two writes, one decision. The draft row records which policy and prompt
+// version is in force — that is the audit trail — and the carrier agent's
+// instructions are replaced with that policy's prompt, which is the only thing
+// that actually changes the next reply (the daemon reads instructions off the
+// claimed agent). Writing one without the other would either leave a session
+// behaving like its old policy while claiming the new one, or run a prompt
+// nothing points at.
+//
+// The pending-task gate mirrors the runtime switch: a reply already in flight
+// was claimed with the previous instructions, so switching under it would make
+// the next message look like the switch did not take. The client is expected to
+// stop the reply first.
+func (h *Handler) SwitchIssueDraftPolicy(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req SwitchIssueDraftPolicyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	policyKey := strings.TrimSpace(req.Policy)
+	if policyKey == "" {
+		writeError(w, http.StatusBadRequest, "policy is required")
+		return
+	}
+	// An unknown key is refused rather than defaulted: this endpoint exists to
+	// make the running prompt an explicit, auditable choice.
+	policy, ok := issueDraftPolicyByKey(policyKey)
+	if !ok {
+		writeError(w, http.StatusBadRequest, issueDraftPolicyUnknownMessage())
+		return
+	}
+
+	// Owner-scoped and carrier-checked, like every other write on a draft.
+	session, ok := h.loadIssueDraftSession(w, r, userID, workspaceID)
+	if !ok {
+		return
+	}
+	if session.Status != "active" {
+		writeError(w, http.StatusBadRequest, "chat session is archived")
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to switch issue draft policy")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Same lock as the runtime switch, and for the same reason: it serialises
+	// this against a send that is stamping a task with the carrier it read.
+	if _, err := qtx.LockChatSessionForRuntimeBind(r.Context(), session.ID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "chat session not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock chat session")
+		return
+	}
+
+	if _, err := qtx.GetPendingChatTask(r.Context(), session.ID); err == nil {
+		writeError(w, http.StatusConflict, "stop the current reply before switching policy")
+		return
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to check pending draft task")
+		return
+	}
+
+	if _, err := qtx.UpdateIssueDraftCarrierInstructions(r.Context(), db.UpdateIssueDraftCarrierInstructionsParams{
+		ID:           session.AgentID,
+		Instructions: policy.Instructions(),
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "issue draft session not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update issue draft carrier")
+		return
+	}
+
+	updated, err := qtx.UpdateIssueDraftPolicy(r.Context(), db.UpdateIssueDraftPolicyParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   session.WorkspaceID,
+		PolicyKey:     policy.Key,
+		PolicyVersion: policy.Version,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			h.writeIssueDraftWriteConflict(w, r, session, "switch policy on")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to record issue draft policy")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit issue draft policy switch")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, issueDraftToResponse(updated))
 }
 
