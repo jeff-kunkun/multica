@@ -9143,7 +9143,7 @@ UPDATE agent
 SET instructions = $1,
     updated_at = now()
 WHERE id = $2 AND kind = 'system' AND system_key LIKE 'issue_draft:%'
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id
 `
 
 type UpdateIssueDraftCarrierInstructionsParams struct {
@@ -9196,6 +9196,7 @@ func (q *Queries) UpdateIssueDraftCarrierInstructions(ctx context.Context, arg U
 		&i.ConversationStarters,
 		&i.SwitchableModels,
 		&i.AutoRetryEnabled,
+		&i.ParentAgentID,
 	)
 	return i, err
 }
