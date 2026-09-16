@@ -929,6 +929,158 @@ func TestDaemonRegister_StoresAgyQuotaExhaustedInMetadata(t *testing.T) {
 	}
 }
 
+func TestDaemonRegister_StoresAgentAccountsInMetadata(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	resetAt := time.Now().Add(time.Hour).Unix()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-agent-accounts",
+		"device_name":  "test-device",
+		"agent_accounts": []map[string]any{
+			{
+				"cli":            "dsh",
+				"account":        "default",
+				"home":           "/Users/agy-host/.dsh",
+				"base_url":       "",
+				"key_ref":        "",
+				"lever":          "env:DSH_HOME",
+				"signed_in":      true,
+				"quota_reset_at": 0,
+			},
+			{
+				"cli":            "agy",
+				"account":        "account2",
+				"home":           "/Users/agy-host/.gemini-account2",
+				"lever":          "custom_args:--gemini_dir",
+				"signed_in":      false,
+				"quota_reset_at": resetAt,
+			},
+			{
+				"cli":       "codex",
+				"account":   "default",
+				"home":      "/Users/agy-host/.codex",
+				"lever":     "",
+				"signed_in": true,
+			},
+			// Dropped: no CLI family, so the row has no identity to render.
+			{"cli": "", "account": "default", "home": "/Users/agy-host/.ghost"},
+			// Dropped: a relative home is not something the UI can show.
+			{"cli": "cursor", "account": "default", "home": "relative/.cursor"},
+		},
+		"agent_accounts_error": "broken: permission denied",
+		"runtimes": []map[string]any{
+			{"name": "agy", "type": "antigravity", "version": "1.0.0", "status": "online"},
+		},
+	}, testWorkspaceID, "test-daemon-agent-accounts")
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
+
+	var resp struct {
+		Runtimes []struct {
+			ID       string         `json:"id"`
+			Metadata map[string]any `json:"metadata"`
+		} `json:"runtimes"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Runtimes) != 1 {
+		t.Fatalf("runtimes = %d, want 1", len(resp.Runtimes))
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, resp.Runtimes[0].ID)
+	})
+
+	raw, ok := resp.Runtimes[0].Metadata["agent_accounts"].([]any)
+	if !ok {
+		t.Fatalf("metadata.agent_accounts = %#v", resp.Runtimes[0].Metadata["agent_accounts"])
+	}
+	if len(raw) != 3 {
+		t.Fatalf("agent_accounts = %#v, want the 3 renderable rows", raw)
+	}
+	first, _ := raw[0].(map[string]any)
+	for key, want := range map[string]any{
+		"cli":            "dsh",
+		"account":        "default",
+		"home":           "/Users/agy-host/.dsh",
+		"base_url":       "",
+		"key_ref":        "",
+		"lever":          "env:DSH_HOME",
+		"signed_in":      true,
+		"quota_reset_at": float64(0),
+	} {
+		if first[key] != want {
+			t.Errorf("agent_accounts[0].%s = %#v, want %#v", key, first[key], want)
+		}
+	}
+	second, _ := raw[1].(map[string]any)
+	if second["cli"] != "agy" || second["account"] != "account2" || second["signed_in"] != false {
+		t.Errorf("agent_accounts[1] = %#v", second)
+	}
+	if second["quota_reset_at"] != float64(resetAt) {
+		t.Errorf("agent_accounts[1].quota_reset_at = %#v, want %d", second["quota_reset_at"], resetAt)
+	}
+	// codex/cursor report no lever, and the key is still emitted so the surface
+	// can render the row read-only instead of guessing from a missing field.
+	third, _ := raw[2].(map[string]any)
+	if third["cli"] != "codex" || third["lever"] != "" {
+		t.Errorf("agent_accounts[2] = %#v, want a leverless codex row", third)
+	}
+	if got := resp.Runtimes[0].Metadata["agent_accounts_error"]; got != "broken: permission denied" {
+		t.Fatalf("metadata.agent_accounts_error = %#v", got)
+	}
+
+	// The three AGY-only keys keep their shape on the same payload (DENE-305-D
+	// still consumes them).
+	if _, ok := resp.Runtimes[0].Metadata["home_dir"]; ok {
+		t.Fatalf("home_dir should be absent for a daemon that sent none: %#v", resp.Runtimes[0].Metadata)
+	}
+}
+
+func TestRuntimeRegistrationMetadata_EmptyAgentAccountsIsRecorded(t *testing.T) {
+	// Presence is the channel's answer: an empty report must survive into
+	// metadata, while a daemon that never sent the field must not gain it.
+	withChannel := runtimeRegistrationMetadata(DaemonRegisterRequest{
+		AgentAccounts: []AgentAccountEntry{},
+	}, "1.0.0", nil)
+	rows, ok := withChannel["agent_accounts"].([]map[string]any)
+	if !ok || len(rows) != 0 {
+		t.Fatalf("agent_accounts = %#v, want a present, empty slice", withChannel["agent_accounts"])
+	}
+
+	withoutChannel := runtimeRegistrationMetadata(DaemonRegisterRequest{}, "1.0.0", nil)
+	if _, ok := withoutChannel["agent_accounts"]; ok {
+		t.Fatalf("an older daemon must not gain agent_accounts: %#v", withoutChannel)
+	}
+}
+
+func TestSanitizeAgentAccountsDropsUnrenderableRows(t *testing.T) {
+	expired := time.Now().Add(-time.Minute).Unix()
+	got := sanitizeAgentAccounts([]AgentAccountEntry{
+		{CLI: " dsh ", Account: " default ", Home: "/Users/host/.dsh", Lever: "env:DSH_HOME", SignedIn: true},
+		{CLI: "dsh", Account: "dupe", Home: "/Users/host/.dsh", SignedIn: false},
+		{CLI: "", Home: "/Users/host/.x"},
+		{CLI: "cursor", Home: "relative"},
+		{CLI: "codex", Home: "/Users/host/.codex", QuotaResetAt: expired},
+	})
+	if len(got) != 2 {
+		t.Fatalf("sanitized = %#v, want 2 rows", got)
+	}
+	if got[0]["cli"] != "dsh" || got[0]["account"] != "default" || got[0]["lever"] != "env:DSH_HOME" {
+		t.Fatalf("row 0 = %#v", got[0])
+	}
+	if got[0]["home"] != "/Users/host/.dsh" || got[0]["signed_in"] != true {
+		t.Fatalf("row 0 = %#v", got[0])
+	}
+	// A deadline that has already passed is "not exhausted", which this channel
+	// spells as 0 — otherwise the exhausted badge would never clear.
+	if got[1]["quota_reset_at"] != int64(0) {
+		t.Fatalf("row 1 = %#v, want quota_reset_at 0", got[1])
+	}
+}
+
 func TestDaemonRegister_IgnoresRelativeHomeDir(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

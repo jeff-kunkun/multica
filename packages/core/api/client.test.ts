@@ -2748,3 +2748,130 @@ describe("ApiClient session expiry", () => {
     expect(storage.getItem("multica_token")).toBeNull();
   });
 });
+
+describe("ApiClient issue drafts", () => {
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  const draft = {
+    chat_session_id: "session-1",
+    workspace_id: "ws-1",
+    status: "ready",
+    revision: 3,
+    draft: { title: "Align first", description: "", status: "", priority: "" },
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:01:00Z",
+  };
+
+  it("confirms a draft and reports the issue the server created", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        draft: { ...draft, status: "completed", issue_id: "issue-9" },
+        issue_id: "issue-9",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.finalizeIssueDraft("session-1", { expected_revision: 3 }),
+    ).resolves.toMatchObject({ issue_id: "issue-9" });
+
+    const call = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(call[0]).toContain("/api/issue-drafts/session-1/finalize");
+    expect(call[1].method).toBe("POST");
+    expect(JSON.parse(String(call[1].body))).toEqual({ expected_revision: 3 });
+  });
+
+  it("throws rather than reporting an empty issue id for a malformed confirm body", async () => {
+    // Every other endpoint here degrades to an empty shape, but this one must
+    // not: the caller navigates to `issue_id`, and an empty string would send
+    // the user to a route that cannot resolve while the issue it names is
+    // already live. Re-confirming is safe — the protocol returns the same
+    // issue — so throwing is the recoverable answer.
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ draft, issue_id: null }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.finalizeIssueDraft("session-1", { expected_revision: 3 }),
+    ).rejects.toThrow();
+  });
+
+  it("degrades a malformed draft body to an empty draft instead of throwing", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ session_id: 7, draft: "not an object" }))
+      .mockResolvedValueOnce(jsonResponse({ drafts: "not a list" }))
+      .mockResolvedValueOnce(jsonResponse({ chat_session_id: "session-1", status: "bogus" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.createIssueDraftSession({ runtime_id: "runtime-1" }),
+    ).resolves.toMatchObject({ session_id: "", draft: { status: "draft" } });
+    await expect(client.listIssueDrafts()).resolves.toEqual([]);
+    await expect(
+      client.updateIssueDraft("session-1", {
+        draft: { title: "t", description: "", status: "", priority: "" },
+        expected_revision: 0,
+      }),
+    ).resolves.toMatchObject({ chat_session_id: "", revision: 0 });
+  });
+
+  it("treats a 404 on the list as a backend that predates the endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: "not found" }, 404));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listIssueDrafts()).resolves.toEqual([]);
+  });
+
+  it("switches the alignment policy and reports the version the server recorded", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        ...draft,
+        policy: { key: "conversation", version: "1", guided: false },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.switchIssueDraftPolicy("session-1", { policy: "conversation" }),
+    ).resolves.toMatchObject({
+      policy: { key: "conversation", version: "1", guided: false },
+    });
+
+    const call = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(call[0]).toContain("/api/issue-drafts/session-1/policy");
+    expect(call[1].method).toBe("PATCH");
+    expect(JSON.parse(String(call[1].body))).toEqual({ policy: "conversation" });
+  });
+
+  it("reports no policy at all for a body from a backend that has none", async () => {
+    // The installed-desktop case: an older backend simply has no `policy`, and
+    // the page must read that as "nothing to switch" rather than as the guided
+    // default it would then offer to change.
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ drafts: [draft] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listIssueDrafts()).resolves.toMatchObject([
+      { policy: { key: "", version: "", guided: false } },
+    ]);
+  });
+
+  it("falls back to the requested runtime id for a malformed runtime switch body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ runtime_id: 42 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.switchIssueDraftRuntime("session-1", { runtime_id: "runtime-b" }),
+    ).resolves.toEqual({ runtime_id: "runtime-b" });
+  });
+});
