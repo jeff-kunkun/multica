@@ -487,7 +487,16 @@ func (h *Handler) attachAgentInheritance(ctx context.Context, resp *AgentRespons
 // tree at two levels without a depth column or a recursive check. A parent that
 // does not resolve is reported as not found, so a caller cannot probe for
 // agents outside their workspace by watching which error comes back.
-func (h *Handler) validateAgentParent(ctx context.Context, workspaceID string, parentAgentID string, childAgentID string) (db.Agent, string) {
+//
+// The actor must also be able to VIEW the parent. Attaching is the moment the
+// inheritance relationship is created, and every later read of the inherited
+// prompt — attachAgentInheritance, SolidifyAgent, the daemon claim path — is
+// downstream of a row written here. Gating only the reads leaves the write open:
+// a member could point their own agent at another member's private base role and
+// then solidify it to get the prompt text back in their own `instructions`. An
+// unviewable parent gets the same "not found" wording as a missing one, so this
+// endpoint does not become a probe for which private agents exist.
+func (h *Handler) validateAgentParent(ctx context.Context, workspaceID string, parentAgentID string, childAgentID string, actorType, actorID string) (db.Agent, string) {
 	parentUUID, err := util.ParseUUID(parentAgentID)
 	if err != nil {
 		return db.Agent{}, "parent_agent_id is not a valid id"
@@ -502,6 +511,9 @@ func (h *Handler) validateAgentParent(ctx context.Context, workspaceID string, p
 		WorkspaceID: wsUUID,
 	})
 	if err != nil {
+		return db.Agent{}, "parent agent not found in this workspace"
+	}
+	if !h.canAccessPrivateAgent(ctx, parent, actorType, actorID, uuidToString(parent.WorkspaceID)) {
 		return db.Agent{}, "parent agent not found in this workspace"
 	}
 	if childAgentID != "" && childAgentID == uuidToString(parent.ID) {
@@ -1861,7 +1873,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// child" arm of the rule cannot fire here.
 	var parentAgentID pgtype.UUID
 	if req.ParentAgentID != "" {
-		parent, reject := h.validateAgentParent(r.Context(), workspaceID, req.ParentAgentID, "")
+		parentActorType, parentActorID := h.resolveActor(r, ownerID, workspaceID)
+		parent, reject := h.validateAgentParent(r.Context(), workspaceID, req.ParentAgentID, "", parentActorType, parentActorID)
 		if reject != "" {
 			writeError(w, http.StatusBadRequest, reject)
 			return
@@ -2254,18 +2267,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// sentParent is keyed on the RAW field map, not on the pointer: a JSON null
 	// and an omitted key both decode to a nil pointer, and only the raw map can
 	// tell them apart. null is treated as a clear, matching the tri-state
-	// contract documented on UpdateAgentRequest.
+	// contract documented on UpdateAgentRequest. The raw value itself is not
+	// re-parsed here — the decode already rejected anything that is not a
+	// string or null, so the pointer is the only reading of it that can differ.
 	sentParent := false
 	var parentAgentID pgtype.UUID
-	if rawParent, ok := rawFields["parent_agent_id"]; ok {
+	if _, ok := rawFields["parent_agent_id"]; ok {
 		requested := ""
 		if req.ParentAgentID != nil {
 			requested = strings.TrimSpace(*req.ParentAgentID)
-		} else if !bytes.Equal(bytes.TrimSpace(rawParent), []byte("null")) {
-			requested = strings.TrimSpace(strings.Trim(string(bytes.TrimSpace(rawParent)), `"`))
 		}
 		if requested != "" {
-			parent, reject := h.validateAgentParent(r.Context(), uuidToString(existing.WorkspaceID), requested, uuidToString(existing.ID))
+			parentActorType, parentActorID := h.resolveActor(r, requestUserID(r), uuidToString(existing.WorkspaceID))
+			parent, reject := h.validateAgentParent(r.Context(), uuidToString(existing.WorkspaceID), requested, uuidToString(existing.ID), parentActorType, parentActorID)
 			if reject != "" {
 				writeError(w, http.StatusBadRequest, reject)
 				return
@@ -3051,6 +3065,19 @@ func (h *Handler) SolidifyAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "the parent agent no longer exists; detach this agent instead")
 		return
 	}
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(child.WorkspaceID))
+	// Solidifying copies the parent's prompt into a row this actor owns and can
+	// read back, so it needs the parent's VIEW permission on top of the child's
+	// manage permission. validateAgentParent refuses to create such a pair in
+	// the first place; this covers the pair that went one-sided afterwards —
+	// the base role's owner flipped it to private, or the child changed hands.
+	// Detaching without folding the text in stays available via
+	// PUT /api/agents/{id} with parent_agent_id: "".
+	if !h.canAccessPrivateAgent(r.Context(), parent, actorType, actorID, uuidToString(parent.WorkspaceID)) {
+		writeError(w, http.StatusForbidden, "you cannot read this agent's base role; detach it instead of solidifying")
+		return
+	}
 	if parent.Instructions == "" {
 		writeError(w, http.StatusConflict, "the parent agent has no instructions to inherit")
 		return
@@ -3058,7 +3085,6 @@ func (h *Handler) SolidifyAgent(w http.ResponseWriter, r *http.Request) {
 
 	effective := composeAgentInstructions(parent.Instructions, child.Instructions)
 
-	userID := requestUserID(r)
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start solidify transaction")
@@ -3139,7 +3165,6 @@ func (h *Handler) SolidifyAgent(w http.ResponseWriter, r *http.Request) {
 	parentActorType, parentActorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentStatus, wsID, parentActorType, parentActorID, map[string]any{"agent": broadcastAgentResponse(parentResps[0])})
 
-	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
 	if !h.composioMCPAppsEnabled(r.Context()) {

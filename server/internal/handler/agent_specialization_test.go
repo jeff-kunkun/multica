@@ -409,6 +409,88 @@ func TestAgentSpecializationDoesNotLeakPrivateParentPrompt(t *testing.T) {
 	})
 }
 
+// Attaching is the moment the inheritance relationship is created, so the
+// parent's view gate belongs on the WRITE, not only on the reads. Without it a
+// plain member could point an agent they own at another member's private base
+// role — GetAgent would dutifully hide inherited_instructions, and then
+// /solidify would hand the same text back inside their own `instructions`.
+func TestAgentSpecializationRefusesUnviewableParent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	wsID := dbfx.Workspace(t, "Specialization Parent Gate", "specialization-parent-gate")
+	ownerID := dbfx.User(t, "Gate Parent Owner", "gate-parent-owner@multica.test")
+	memberID := dbfx.User(t, "Gate Plain Member", "gate-plain-member@multica.test")
+	dbfx.Member(t, wsID, ownerID, "member")
+	dbfx.Member(t, wsID, memberID, "member")
+
+	runtimeID := dbfx.Runtime(t, "gate-runtime", testutil.Cols{
+		"workspace_id": wsID,
+		"owner_id":     memberID,
+		"visibility":   "public",
+	})
+	parentID := dbfx.Agent(t, "gate-private-parent", runtimeID, testutil.Cols{
+		"workspace_id":    wsID,
+		"owner_id":        ownerID,
+		"instructions":    "owner-only base prompt",
+		"visibility":      "private",
+		"permission_mode": "private",
+	})
+
+	memberReq := func(method, path string, body any) *http.Request {
+		return testutil.WithHeaders(testutil.JSONRequest(method, path, body),
+			"X-User-ID", memberID, "X-Workspace-ID", wsID)
+	}
+
+	t.Run("create cannot attach to a base role the actor cannot see", func(t *testing.T) {
+		req := memberReq(http.MethodPost, "/api/agents", map[string]any{
+			"name":            "gate-child-create",
+			"instructions":    "mine",
+			"runtime_id":      runtimeID,
+			"parent_agent_id": parentID,
+		})
+		// Same wording as a genuinely missing parent: the endpoint must not
+		// double as a probe for which private agents exist.
+		testutil.Call(t, testHandler.CreateAgent, req).Want(http.StatusBadRequest)
+	})
+
+	t.Run("update cannot attach to a base role the actor cannot see", func(t *testing.T) {
+		childID := dbfx.Agent(t, "gate-child-update", runtimeID, testutil.Cols{
+			"workspace_id": wsID,
+			"owner_id":     memberID,
+			"instructions": "mine",
+		})
+		req := testutil.WithURLParams(
+			memberReq(http.MethodPut, "/api/agents/"+childID, map[string]any{"parent_agent_id": parentID}),
+			"id", childID)
+		testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusBadRequest)
+
+		if parent, _, _ := persistedParentOf(t, childID); parent.Valid {
+			t.Errorf("parent_agent_id was written despite the refusal: %s", uuidToString(parent))
+		}
+	})
+
+	t.Run("solidify refuses a parent that went unviewable after attaching", func(t *testing.T) {
+		// Written straight to the row: the handler now refuses to create this
+		// pair, but rows can still reach it when the base role's owner flips it
+		// to private afterwards.
+		childID := dbfx.Agent(t, "gate-child-solidify", runtimeID, testutil.Cols{
+			"workspace_id":    wsID,
+			"owner_id":        memberID,
+			"instructions":    "mine",
+			"parent_agent_id": parentID,
+		})
+		req := testutil.WithURLParams(
+			memberReq(http.MethodPost, "/api/agents/"+childID+"/solidify", nil), "id", childID)
+		testutil.Call(t, testHandler.SolidifyAgent, req).Want(http.StatusForbidden)
+
+		if _, instructions, _ := persistedParentOf(t, childID); instructions != "mine" {
+			t.Errorf("instructions = %q, want the child's own text with no inherited prompt folded in", instructions)
+		}
+	})
+}
+
 // The composed prompt is the contract the daemon-side claim path and the
 // solidify endpoint share, so its edges are pinned directly rather than only
 // through a handler.
