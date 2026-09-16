@@ -187,24 +187,52 @@ describe("evaluateRelease", () => {
   });
 
   it("reports a missing release, a draft release and a required-only asset", () => {
-    expect(evaluateRelease({ artifacts: [], tag: "v0.4.58", release: null })).toEqual([
-      "release v0.4.58 was not found on GitHub",
-    ]);
+    // An installer is always present here so these cases assert only the
+    // release-shape problem; the empty-build guard has its own test below.
+    const dmg = { name: "multica-desktop-0.4.58-mac-arm64.dmg", size: 1024 };
+    const uploaded = {
+      name: "multica-desktop-0.4.58-mac-arm64.dmg",
+      size: 1024,
+      state: "uploaded",
+    };
+
+    expect(
+      evaluateRelease({ artifacts: [dmg], tag: "v0.4.58", release: null }),
+    ).toEqual(["release v0.4.58 was not found on GitHub"]);
     expect(
       evaluateRelease({
-        artifacts: [],
+        artifacts: [dmg],
         tag: "v0.4.58",
-        release: { tag_name: "v0.4.58", draft: true, assets: [] },
+        release: { tag_name: "v0.4.58", draft: true, assets: [uploaded] },
       }),
     ).toEqual(["release v0.4.58 is still a draft"]);
     expect(
       evaluateRelease({
-        artifacts: [],
+        artifacts: [dmg],
         required: ["latest-mac.yml"],
         tag: "v0.4.58",
-        release: { tag_name: "v0.4.58", draft: false, assets: [] },
+        release: { tag_name: "v0.4.58", draft: false, assets: [uploaded] },
       }),
     ).toEqual(["latest-mac.yml: required asset missing from release v0.4.58"]);
+  });
+
+  it("fails when the build produced no installer, even if every required asset is present", () => {
+    // Without this the check passes vacuously: nothing was built, so nothing is
+    // asserted, while `--require latest-mac.yml` is satisfied by a feed that
+    // points at a DMG nobody uploaded — the v0.4.56 / v0.4.57 shape.
+    const problems = evaluateRelease({
+      artifacts: [{ name: "latest-mac.yml", size: 512 }],
+      required: ["latest-mac.yml"],
+      tag: "v0.4.58",
+      release: {
+        tag_name: "v0.4.58",
+        draft: false,
+        assets: [{ name: "latest-mac.yml", size: 512, state: "uploaded" }],
+      },
+    });
+    expect(problems).toEqual([
+      "no installer among the 1 local artifact(s); nothing to verify, treat this as a packaging failure",
+    ]);
   });
 });
 

@@ -38,6 +38,12 @@ import { pathToFileURL } from "node:url";
 const ARTIFACT_NAME_RE =
   /^(multica-desktop-.*\.(dmg|zip|exe|AppImage|deb|rpm|blockmap)|latest[^/]*\.yml)$/;
 
+// The installers themselves, as opposed to the blockmaps and the update feed
+// that merely describe them. At least one must have been built locally, or
+// every assertion below has nothing to assert and the check passes on an empty
+// build — the one way a verifier like this fails open.
+const INSTALLER_NAME_RE = /\.(dmg|zip|exe|AppImage|deb|rpm)$/;
+
 const API_VERSION = "2022-11-28";
 // electron-builder nests artifacts one directory deep (`dist/mac-arm64/…`)
 // when it is given a scoped output dir, and writes straight into `dist/`
@@ -98,8 +104,19 @@ export function collectArtifacts(distDir, depth = 0, found = new Map()) {
 export function evaluateRelease({ artifacts, release, required = [], tag }) {
   const problems = [];
 
+  // Guard the vacuous pass: if the packaging step produced no installer (a
+  // renamed artifact, a changed output dir), the per-artifact loop below runs
+  // zero times and `--require latest-mac.yml` alone would still be satisfied by
+  // a feed pointing at nothing — exactly the v0.4.56 / v0.4.57 shape.
+  if (!artifacts.some((artifact) => INSTALLER_NAME_RE.test(artifact.name))) {
+    problems.push(
+      `no installer among the ${artifacts.length} local artifact(s); nothing to verify, treat this as a packaging failure`,
+    );
+  }
+
   if (release == null) {
-    return [`release ${tag} was not found on GitHub`];
+    problems.push(`release ${tag} was not found on GitHub`);
+    return problems;
   }
   if (release.draft === true) {
     // A draft is invisible to installed clients, and electron-builder's

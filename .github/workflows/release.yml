@@ -405,12 +405,9 @@ jobs:
   # is unset.
   #
   # `release` (GoReleaser) only runs on the canonical upstream repo, and a
-  # skipped dependency skips this job too. Treat `skipped` as "this repo
-  # publishes the Release itself" — the ensure-release step below creates it —
-  # and keep `failed` as a hard stop so a broken upstream release never gets
-  # Desktop assets bolted onto it. On the private line the test gate for a tag
-  # is the branch CI that produced the tagged commit, not this workflow's
-  # upstream-only `verify` job.
+  # skipped dependency skips this job too, so this job cannot simply depend on
+  # it. See the `if:` below for how "skipped because upstream-only" is told
+  # apart from "skipped because the tests are red".
   #
   # These mac packages are unsigned (ad-hoc), which is what the private line
   # ships to its own machines. Do NOT let this matrix publish mac assets on
@@ -420,7 +417,12 @@ jobs:
   # ever runs there.
   desktop:
     needs: release
-    if: ${{ always() && !cancelled() && needs.release.result != 'failure' }}
+    # Upstream, `release` succeeding is the gate: it needs `verify`, so a red
+    # test run skips `release` and must skip this job too — `result != 'failure'`
+    # alone would let a red tag publish Desktop assets. On the private line
+    # `release` is always skipped (it is owner-gated), so accept `skipped` only
+    # there; that line's test gate is the branch CI that produced the commit.
+    if: ${{ always() && !cancelled() && (needs.release.result == 'success' || (needs.release.result == 'skipped' && github.repository_owner != 'multica-ai')) }}
     strategy:
       fail-fast: false
       matrix:

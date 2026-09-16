@@ -51,7 +51,12 @@ GH_TOKEN=$(gh auth token) node scripts/verify-release-assets.mjs \
 
 ## 手工路径（仅应急 / 本机 smoke）
 
-CI 挂到没法发版时才走，且第 3 步不许省。
+CI 挂到没法发版时才走，且第 3 步不许省。这条路上还有两条 DENE-329 用两轮失败换来的纪律，CI 路径不受影响，手工路径必须守：
+
+- **构建一出炉就把产物挪出 worktree**（`cp` 到 `~/multica-releases/<tag>/` 再开始上传）。run 结束时 worktree 会被回收，产物跟着一起没——DENE-329 连栽两次都是这么丢的。
+- **先传两个大产物，最后传 `latest-mac.yml`。** 清单先上去而产物没传完，等于对所有已装客户端广播一个指向 404 的自动更新地址，比不发版更糟。顺序错了就先把清单删掉，传完产物再补。
+
+本机上传很慢：走代理到 `uploads.github.com` 实测单连接只有 ~110 KB/s，约 450 MB 的 dmg+zip 要 40–60 分钟，并行推两个文件能快近一倍。`gh release upload` 卡住时不报错也没有进度，用 `nettop -P -p <curl-pid> -l 1 -J bytes_out` 看真实字节数判断它是慢还是死了。**这就是 DENE-353 把 macOS 搬进 CI 的原因——能走 CI 就别走这里。**
 
 ```bash
 # 1. 依赖（pnpm store 暖的话是分钟级，冷装十几分钟起）
@@ -74,6 +79,25 @@ gh release upload v0.4.58 <dmg> <zip> <两个 .blockmap> <latest-mac.yml>
 - `hdiutil` 建 DMG 会被 workspace-write 沙箱拒绝，需要一次提权构建。
 - 这两点都不需要改 harness 配置或加 runtime 权限。
 
+## 产物级自检（证明修复真的进了包）
+
+核资产只证明「文件传上去了」，不证明「这个包里有本版要修的东西」。DENE-276 就是产物内容对不上：
+
+```bash
+# tag 真的指向构建用的那个 commit，且没有回退上一版
+git ls-remote origin refs/tags/v0.4.58
+git merge-base --is-ancestor <fix-sha> v0.4.58; echo exit=$?   # 期望 0
+git merge-base --is-ancestor v0.4.57 v0.4.58; echo exit=$?     # 期望 0
+
+# 装出来的 app 自报版本（内置 CLI 随 asarUnpack 落在 app.asar.unpacked 下，
+# 路径随打包配置变，别硬编码）
+CLI=$(find /Applications/Multica.app -type f -name multica -perm -u+x | head -1)
+"$CLI" --version
+plutil -extract CFBundleShortVersionString raw /Applications/Multica.app/Contents/Info.plist
+```
+
+再加一条产物级（不是源码级）的证据：在打包出来的内置 CLI 二进制里 grep 本次修复引入的标记字串。例：DENE-274 的 `read_api_missing`、`resolve source workspace: %w`；DENE-289 的 `list_has_more`、`list_shape_unknown`。
+
 ## 交付评论该写什么
 
 顺序固定，用户只读前两屏：
@@ -81,7 +105,8 @@ gh release upload v0.4.58 <dmg> <zip> <两个 .blockmap> <latest-mac.yml>
 1. **下载入口**（DMG / ZIP 直链），并说明是否 draft；
 2. **本版修了什么**：一行一个 commit sha + 票号 + 一句人话；
 3. **核资产的实际输出**：`verify-release-assets` 的逐条 `ok` 行，而不是「已发布」；
-4. **用户要重跑哪一步**：编号步骤，写清判定标准（例：「先看包体积，还是 KB 级就别导入，直接回我」）；
-5. **未决风险 / 边界**：本版没改什么、哪些算待人工测试。
+4. **产物包含修复的证据**：上面产物级自检的实际输出；
+5. **用户要重跑哪一步**：编号步骤，写清判定标准（例：「先看包体积，还是 KB 级就别导入，直接回我」）；
+6. **未决风险 / 边界**：本版没改什么、哪些算待人工测试。
 
 Gatekeeper 提示要写进步骤里：mac 包是 ad-hoc 签名、未公证（CI 与手工路径都一样），首次打开需在「系统设置 → 隐私与安全性」放行，或 `xattr -cr /Applications/Multica.app`。Developer ID 签名 + 公证是独立的后续项，需要 Apple 凭据进 CI secret，本仓现在没有。
