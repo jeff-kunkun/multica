@@ -629,6 +629,49 @@ describe("AgentAccountsTab agy slots", () => {
     expect(onSave).not.toHaveBeenCalled();
     expect(updateAgentEnv).not.toHaveBeenCalled();
   });
+
+  // Regression: an agent bound to a numbered directory its stored slot list
+  // omits — a state the retired custom-path field could save, since it wrote
+  // `--gemini_dir` without touching the list. Dropping that row left the
+  // account in effect unselectable and made every slot edit fail with
+  // "this account cannot be switched from here", losing the edit.
+  it("keeps the numbered account in effect even when the stored list omits it", async () => {
+    const AGY_ACCOUNT5 = account(
+      "agy",
+      "account5",
+      `${RUNTIME_HOME}/.gemini-account5`,
+      { lever: "custom_args:--gemini_dir" },
+    );
+    const { onSave } = renderTab({
+      device: runtimeWith("antigravity", [
+        AGY_DEFAULT,
+        AGY_ACCOUNT2,
+        AGY_ACCOUNT5,
+      ]),
+      agent: {
+        ...baseAgent,
+        custom_args: ["--gemini_dir", AGY_ACCOUNT5.home],
+        runtime_config: { agy_slots: { accounts: [1, 2, 3] } },
+      },
+    });
+
+    await openDrawer();
+    expect(screen.getByRole("radio", { name: /account5/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    // A slot edit still commits, and the write repairs the pair: the account
+    // the agent launches with is now also one it may rotate to.
+    fireEvent.click(screen.getByRole("button", { name: /remove slot 3/i }));
+    saveAndSwitch();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith({
+      runtime_config: { agy_slots: { accounts: [1, 2, 5] } },
+    });
+    expect(toast.error).not.toHaveBeenCalled();
+  });
 });
 
 // The global sweep for every namespace and locale lives in

@@ -58,7 +58,9 @@ import {
 } from "./agent-accounts-model";
 import {
   MAX_AGY_ACCOUNT_NUMBER,
+  detectAgyAccountSlot,
   getGeminiDir,
+  parseAccountNumber,
   nextAccountNumber,
   normalizeAccountNumbers,
   parseAgySlotsConfig,
@@ -153,14 +155,22 @@ export function AgentAccountsTab({
   // machine's directory listing: `runtime_config.agy_slots` is what the
   // backend rotates over, so the drawer has to edit that list. Every other CLI
   // (and any agy directory outside the numbered convention) stays as reported.
-  const originalSlots = useMemo(
-    () =>
-      parseAgySlotsConfig(
-        agent.runtime_config,
-        getGeminiDir([...(agent.custom_args ?? [])]),
-      ),
-    [agent.custom_args, agent.runtime_config],
-  );
+  const originalSlots = useMemo(() => {
+    const geminiDir = getGeminiDir([...(agent.custom_args ?? [])]);
+    const persisted = parseAgySlotsConfig(agent.runtime_config, geminiDir);
+    // The directory this agent actually launches with belongs to its own list
+    // whatever the stored list says. A stored list that omits it is a state
+    // older surfaces could save (the retired custom-path field wrote
+    // `--gemini_dir` without touching the list), and dropping the row would
+    // leave the account in effect with no row to select, no row to see, and
+    // every slot edit refused as "no target". Folding it in also repairs the
+    // pair on the next write, instead of leaving the agent bound to a
+    // directory the backend may not rotate to.
+    const bound = parseAccountNumber(detectAgyAccountSlot(geminiDir));
+    return bound === null
+      ? persisted
+      : normalizeAccountNumbers([...persisted, bound]);
+  }, [agent.custom_args, agent.runtime_config]);
   const [slots, setSlots] = useState<number[]>(originalSlots);
   const slotsDirty = JSON.stringify(slots) !== JSON.stringify(originalSlots);
 
