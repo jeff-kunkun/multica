@@ -3,8 +3,8 @@ import type { ChatMessage, IssueDraftPayload } from "../types";
 /**
  * Wire format between the alignment page and the hidden `issue_draft:*` carrier.
  *
- * The carrier's instructions are fixed server-side (issueDraftInstructions in
- * server/internal/handler/issue_draft.go) and mandate exactly one
+ * The carrier's instructions are fixed server-side (the policy registry in
+ * server/internal/handler/issue_draft_policy.go) and mandate exactly one
  * `<issue_draft>{...}</issue_draft>` block at the end of every reply, so the
  * block is a contract, not a rendering detail: it has to be parsed into the
  * preview and stripped before the message reaches the screen.
@@ -22,21 +22,46 @@ import type { ChatMessage, IssueDraftPayload } from "../types";
 
 const DRAFT_INPUT_PREFIX = "MULTICA_ISSUE_DRAFT_INPUT\n";
 
-const COMPLETE_BLOCK = /\s*<issue_draft>[\s\S]*?<\/issue_draft>/g;
-/** An unterminated block: the reply is still streaming, or the model never closed it. */
-const OPEN_BLOCK = /\s*<issue_draft>[\s\S]*$/;
+/**
+ * The two machine-readable blocks the carrier is told to emit, draft first so a
+ * still-open draft block takes the rest of the reply with it before the question
+ * block is looked for. Separate kinds because they mean different things: the
+ * draft is a partial update to a structured object, while a question is a
+ * turn-level affordance that has to disappear once it is answered.
+ */
+const DIRECTIVE_TAGS = ["issue_draft", "issue_draft_question"] as const;
+
+/** A complete `<tag>…</tag>` block, with the whitespace separating it from prose. */
+function completeBlockPattern(tag: string): RegExp {
+  return new RegExp(`\\s*<${tag}>[\\s\\S]*?</${tag}>`, "g");
+}
 
 /**
- * The guided policy's question, as its own block. Separate from the draft block
- * because the two mean different things: the draft is a partial update to a
- * structured object, while a question is a turn-level affordance that has to
- * disappear once it is answered. An unterminated question block is stripped
- * like an unterminated draft block — a streaming reply must not leak markup
- * into the transcript.
+ * An unterminated block: the reply is still streaming, or the model never
+ * closed it. Everything after the opening tag is machine-readable, so it goes
+ * too — a streaming reply must not leak markup into the transcript.
  */
-const COMPLETE_QUESTION_BLOCK =
-  /\s*<issue_draft_question>[\s\S]*?<\/issue_draft_question>/g;
-const OPEN_QUESTION_BLOCK = /\s*<issue_draft_question>[\s\S]*$/;
+function openBlockPattern(tag: string): RegExp {
+  return new RegExp(`\\s*<${tag}>[\\s\\S]*$`);
+}
+
+/** A Markdown fence: ``` or ~~~ plus whatever info string follows it. */
+const FENCE = "[\\x60\\x7e]{3,}";
+
+/**
+ * A fence that now encloses nothing. The instructions ask the model not to wrap
+ * its blocks in Markdown fences; a CLI-backed one does it anyway, and removing
+ * only the block would leave an empty code box in the transcript — the same
+ * artifact the removal exists to prevent. Only fences this pass emptied are
+ * matched, so an ordinary fenced code block in the prose survives.
+ */
+const EMPTY_FENCE_PAIR = new RegExp(
+  `\\s*${FENCE}[^\\n]*\\n(?:[ \\t]*\\n)*[ \\t]*${FENCE}[ \\t]*(?=\\n|$)`,
+  "g",
+);
+
+/** An opening fence left dangling at the end by a block that never closed. */
+const DANGLING_FENCE_OPEN = new RegExp(`\\s*${FENCE}[^\\n]*[ \\t]*$`);
 
 /** At most this many answers are offered per question. */
 const MAX_QUESTION_OPTIONS = 6;
@@ -55,7 +80,7 @@ export type IssueDraftPatch = Partial<IssueDraftPayload>;
  * final state.
  */
 export function parseIssueDraftBlock(content: string): IssueDraftPatch | null {
-  const matches = [...content.matchAll(new RegExp(COMPLETE_BLOCK))];
+  const matches = [...content.matchAll(completeBlockPattern("issue_draft"))];
   const raw = matches[matches.length - 1]?.[0];
   if (!raw) return null;
   const inner = raw.replace(/^\s*<issue_draft>/, "").replace(/<\/issue_draft>\s*$/, "");
@@ -73,12 +98,40 @@ export function parseIssueDraftBlock(content: string): IssueDraftPatch | null {
 
 /** The reply with every machine-readable block removed — what the conversation shows. */
 export function stripIssueDraftDirectives(content: string): string {
-  return content
-    .replace(new RegExp(COMPLETE_BLOCK), "")
-    .replace(OPEN_BLOCK, "")
-    .replace(new RegExp(COMPLETE_QUESTION_BLOCK), "")
-    .replace(OPEN_QUESTION_BLOCK, "")
-    .trim();
+  let out = content;
+  for (const tag of DIRECTIVE_TAGS) {
+    out = out
+      .replace(completeBlockPattern(tag), "")
+      // Only after the complete blocks are gone: "the model never closed this"
+      // means "everything after it is machine-readable" once the closed blocks
+      // after it have been taken out.
+      .replace(openBlockPattern(tag), "");
+  }
+  out = trimPartialTag(out);
+  // Either the block was fenced, or it was not: with no block removed there is
+  // nothing a fence could have been emptied by, and ordinary code stays put.
+  if (out !== content) {
+    out = out.replace(EMPTY_FENCE_PAIR, "").replace(DANGLING_FENCE_OPEN, "");
+  }
+  return out.trim();
+}
+
+/**
+ * Drops a fragment the reply was cut off in the middle of, such as
+ * `<issue_draft_quest`. It is not yet a tag, so no block pattern can see it,
+ * and a streaming reply would otherwise print the fragment.
+ */
+function trimPartialTag(content: string): string {
+  const start = content.lastIndexOf("<");
+  if (start === -1) return content;
+  const tail = content.slice(start);
+  // A complete tag of any kind ends the search; and a lone "<" is prose
+  // ("a < b"), not the start of a directive.
+  if (tail.length < 2 || tail.includes(">")) return content;
+  const isDirectiveStart = DIRECTIVE_TAGS.some((tag) =>
+    `<${tag}>`.startsWith(tail),
+  );
+  return isDirectiveStart ? content.slice(0, start) : content;
 }
 
 /** One answer the guided policy proposes for its question. */
@@ -109,7 +162,9 @@ export interface IssueDraftQuestion {
 export function parseIssueDraftQuestion(
   content: string,
 ): IssueDraftQuestion | null {
-  const matches = [...content.matchAll(new RegExp(COMPLETE_QUESTION_BLOCK))];
+  const matches = [
+    ...content.matchAll(completeBlockPattern("issue_draft_question")),
+  ];
   const raw = matches[matches.length - 1]?.[0];
   if (!raw) return null;
   const inner = raw

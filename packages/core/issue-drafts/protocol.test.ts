@@ -82,6 +82,48 @@ describe("parseIssueDraftBlock", () => {
     expect(parseIssueDraftBlock(reply)).toEqual({ title: "Dark mode" });
     expect(parseIssueDraftQuestion(reply)?.question).toBe("Who should run it?");
   });
+
+  it("reads a block the model fenced, and ignores the fields it does not own", () => {
+    expect(
+      parseIssueDraftBlock(
+        'Draft:\n\n```json\n<issue_draft>{"title":"T","assignee_id":"x","notes":7}</issue_draft>\n```',
+      ),
+    ).toEqual({ title: "T" });
+  });
+
+  it("returns null for every malformed JSON body the block might carry", () => {
+    // Each of these is "no preview update, keep the conversation": a trailing
+    // comma, a single-quoted key, a JSON array, a bare null and a truncated
+    // object are all shapes a CLI-backed model has produced at least once.
+    const bodies = [
+      '{"title":"T",}',
+      "{'title':'T'}",
+      "[1,2]",
+      "null",
+      '{"title":"T"',
+      '{"title","T"}',
+      "",
+    ];
+    for (const body of bodies) {
+      expect(parseIssueDraftBlock(`<issue_draft>${body}</issue_draft>`)).toBeNull();
+    }
+  });
+
+  it("keeps the fields it can read when the block is only partly filled in", () => {
+    // A missing field is "no opinion", not a wipe: the carrier is told to leave
+    // status and priority empty unless the user stated them.
+    expect(
+      parseIssueDraftBlock('<issue_draft>{"title":"Only a title"}</issue_draft>'),
+    ).toEqual({ title: "Only a title" });
+    expect(
+      parseIssueDraftBlock('<issue_draft>{"description":"Only a body"}</issue_draft>'),
+    ).toEqual({ description: "Only a body" });
+    expect(
+      parseIssueDraftBlock(
+        '<issue_draft>{"title":"T","status":7,"priority":null}</issue_draft>',
+      ),
+    ).toEqual({ title: "T" });
+  });
 });
 
 describe("stripIssueDraftDirectives", () => {
@@ -186,6 +228,132 @@ describe("stripIssueDraftDirectives", () => {
       "一版草稿：\n\n- **范围**：仅勾选可见条目",
     );
   });
+
+  /**
+   * The remaining shapes are the ones the instructions do not prevent and the
+   * tidy fixtures did not cover: a model that fences a machine-readable block
+   * the way it fences every other JSON payload, a stream that is cut off in the
+   * middle of the tag itself, and prose on both sides of the block. Each one
+   * ends the same way — the prose survives, no directive markup reaches the
+   * screen, and the conversation does not break.
+   */
+  it("strips a block the model wrapped in a Markdown fence", () => {
+    // The instructions say "do not wrap it in Markdown fences"; a CLI-backed
+    // model does it anyway. Removing only the block would leave an empty code
+    // box where the machine-readable half used to be.
+    const fenced = [
+      "一版草稿：",
+      "",
+      "```json",
+      '<issue_draft>{"title":"Fenced"}</issue_draft>',
+      "```",
+    ].join("\n");
+    expect(stripIssueDraftDirectives(fenced)).toBe("一版草稿：");
+
+    expect(
+      stripIssueDraftDirectives(
+        'Draft:\n\n~~~xml\n<issue_draft>{"title":"T"}</issue_draft>\n~~~\n\nAnything else?',
+      ),
+    ).toBe("Draft:\n\nAnything else?");
+  });
+
+  it("strips a fenced block that is still streaming", () => {
+    // The fence opener precedes the block, so the still-open block removal has
+    // to take the opener with it; otherwise the transcript ends in a dangling
+    // ``` that renders as an empty code box.
+    expect(
+      stripIssueDraftDirectives('Drafting…\n\n```json\n<issue_draft>{"title":"T'),
+    ).toBe("Drafting…");
+    expect(
+      stripIssueDraftDirectives(
+        'Who runs it?\n```\n<issue_draft_question>{"question":"Who runs',
+      ),
+    ).toBe("Who runs it?");
+  });
+
+  it("strips a fenced question block written above a fenced draft block", () => {
+    const reply = [
+      "对齐一下：",
+      "",
+      "```json",
+      '<issue_draft_question>{"question":"Who runs it?"}</issue_draft_question>',
+      '<issue_draft>{"title":"Dark mode"}</issue_draft>',
+      "```",
+    ].join("\n");
+    expect(stripIssueDraftDirectives(reply)).toBe("对齐一下：");
+  });
+
+  it("strips a partial opening tag at the end of a streaming reply", () => {
+    // The block patterns need a complete `<tag>`, so a stream cut mid-tag has
+    // nothing to match and would print the fragment.
+    expect(stripIssueDraftDirectives("Thinking…\n<issue_draft")).toBe("Thinking…");
+    expect(stripIssueDraftDirectives("Thinking…\n<issue_draft_quest")).toBe("Thinking…");
+    expect(stripIssueDraftDirectives("Thinking…\n<issue_draft_question")).toBe(
+      "Thinking…",
+    );
+    // A stray "<" that is not the start of a directive is the user's prose.
+    expect(stripIssueDraftDirectives("a < b")).toBe("a < b");
+  });
+
+  it("strips the block out of prose that continues after it", () => {
+    expect(
+      stripIssueDraftDirectives(
+        'p1。\n\n<issue_draft>{"title":"T"}</issue_draft>\n\np2。',
+      ),
+    ).toBe("p1。\n\np2。");
+  });
+
+  it("strips every block of a reply that mixes both kinds, several times", () => {
+    const reply = [
+      "先问一个，再给两版草稿：",
+      "",
+      '<issue_draft_question>{"question":"Which surface?"}</issue_draft_question>',
+      "",
+      '<issue_draft>{"title":"first"}</issue_draft>',
+      "换个说法：",
+      '<issue_draft_question>{"question":"Which surface, really?"}</issue_draft_question>',
+      '<issue_draft>{"title":"second"}</issue_draft>',
+    ].join("\n");
+    // The prose that framed the block group rejoins; each block takes the
+    // whitespace that separated it, and the paragraphs that owned real blank
+    // lines keep them (see the prose/both-sides case above).
+    expect(stripIssueDraftDirectives(reply)).toBe("先问一个，再给两版草稿：\n换个说法：");
+    expect(parseIssueDraftBlock(reply)).toEqual({ title: "second" });
+    expect(parseIssueDraftQuestion(reply)?.question).toBe("Which surface, really?");
+  });
+
+  it("leaves no directive markup behind for any malformed shape", () => {
+    // The contract with the whole page: a reply the client cannot parse must
+    // degrade to the prose the model wrote. Never an exception, and never a raw
+    // tag or JSON body in the bubble.
+    const shapes = [
+      "",
+      "no block here",
+      "<issue_draft>",
+      "<issue_draft></issue_draft>",
+      '<issue_draft>{"title":"unterminated',
+      "<issue_draft>not json</issue_draft>",
+      '<issue_draft>{"title":1,"description":[2]}</issue_draft>',
+      '<issue_draft_question>{"question":"q"',
+      '<issue_draft_question>{"question":}</issue_draft_question>',
+      '<issue_draft_question></issue_draft_question>',
+      '<issue_draft_question>{"question":"q","options":"none"}</issue_draft_question>',
+      'prose\n```\n<issue_draft_question>{"question":"x"',
+      'prose\n<issue_draft_question>{"question":"a\n<issue_draft>{"title":"b',
+      '<issue_draft>{"description":"the <issue_draft_question> block"}</issue_draft>',
+      '<issue_draft_question>{"question":"what does <issue_draft> mean?"}</issue_draft_question>',
+      '\r\n<issue_draft>{"title":"T"}</issue_draft>\r\n',
+      "```json\n<issue_draft>{}\n```",
+      "<issue_draft_question>",
+      "~~~\n<issue_draft>{\n~~~",
+    ];
+    for (const shape of shapes) {
+      expect(() => stripIssueDraftDirectives(shape)).not.toThrow();
+      expect(() => parseIssueDraftBlock(shape)).not.toThrow();
+      expect(() => parseIssueDraftQuestion(shape)).not.toThrow();
+      expect(stripIssueDraftDirectives(shape)).not.toContain("issue_draft");
+    }
+  });
 });
 
 /**
@@ -251,6 +419,81 @@ describe("parseIssueDraftQuestion", () => {
     expect(parseIssueDraftQuestion(block('{"question":"   "}'))).toBeNull();
     expect(parseIssueDraftQuestion(block('{"options":[]}'))).toBeNull();
   });
+
+  it("reads a question the model wrote in prose, in a fence, or with CRLF", () => {
+    // The shapes a real reply comes in. The block is parsed wherever it sits:
+    // the parser is looking for the tag, not for a tidy one-line reply.
+    expect(
+      parseIssueDraftQuestion(
+        "先说结论：默认关闭。\n\n```json\n" +
+          '<issue_draft_question>{"question":"Which surface?"}</issue_draft_question>' +
+          "\n```\n\n还有一个问题。",
+      )?.question,
+    ).toBe("Which surface?");
+    expect(
+      parseIssueDraftQuestion(
+        '开头。\r\n<issue_draft_question>{"question":"Which surface?"}</issue_draft_question>\r\n结尾。',
+      )?.question,
+    ).toBe("Which surface?");
+  });
+
+  it("never throws on a malformed block, whatever the field types are", () => {
+    const malformed = [
+      '{"question":"q","options":{"label":"A","value":"a"}}',
+      '{"question":"q","options":[null,7,"A",[],{"label":"B","value":"b"}]}',
+      '{"question":{"nested":"object"}}',
+      '{"question":"q","options":[{"label":1,"value":2}]}',
+      '{"question":"q","options":[{"label":"A","value":"a","recommended":"yes"}]}',
+      '{"question":"line one\nline two"}',
+      '[{"question":"q"}]',
+      "null",
+    ];
+    for (const json of malformed) {
+      expect(() => parseIssueDraftQuestion(block(json))).not.toThrow();
+    }
+    // A non-array options list is "a question nobody offered answers to", not a
+    // reason to lose the question: the composer is the custom answer.
+    expect(parseIssueDraftQuestion(block('{"question":"q","options":"none"}'))).toEqual({
+      question: "q",
+      options: [],
+    });
+    // Unusable options are dropped one by one; "recommended" is only true when
+    // the model literally said true.
+    expect(
+      parseIssueDraftQuestion(
+        block(
+          '{"question":"q","options":[null,7,{"label":"A","value":"a","recommended":"yes"},{"label":"B","value":"b","recommended":true}]}',
+        ),
+      ),
+    ).toEqual({
+      question: "q",
+      options: [
+        { label: "A", value: "a", recommended: false },
+        { label: "B", value: "b", recommended: true },
+      ],
+    });
+    // A question with a literal newline inside its string is repaired, like the
+    // draft block's description.
+    expect(parseIssueDraftQuestion(block('{"question":"line one\nline two"}'))?.question).toBe(
+      "line one\nline two",
+    );
+    // A JSON array is not a question block.
+    expect(parseIssueDraftQuestion(block('[{"question":"q"}]'))).toBeNull();
+    expect(parseIssueDraftQuestion(block("null"))).toBeNull();
+  });
+
+  it("is unaffected by a draft block in the same reply, whichever comes first", () => {
+    expect(
+      parseIssueDraftQuestion(
+        '<issue_draft>{"title":"T"}</issue_draft>\n<issue_draft_question>{"question":"After the draft"}</issue_draft_question>',
+      )?.question,
+    ).toBe("After the draft");
+    expect(
+      parseIssueDraftQuestion(
+        '<issue_draft_question>{"question":"Before the draft"}</issue_draft_question>\n<issue_draft>{"title":"T"}</issue_draft>',
+      )?.question,
+    ).toBe("Before the draft");
+  });
 });
 
 describe("issueDraftPendingQuestion", () => {
@@ -281,6 +524,21 @@ describe("issueDraftPendingQuestion", () => {
   it("is null for a carrier reply that asks nothing, and for empty transcripts", () => {
     expect(issueDraftPendingQuestion([assistant("m1", "Done.")])).toBeNull();
     expect(issueDraftPendingQuestion([])).toBeNull();
+  });
+
+  it("offers the chips for a fenced question and withdraws them once answered", () => {
+    // The affordance has to survive the same real-world shapes as the parser:
+    // a fenced block is still a question the user can click.
+    const fenced = assistant(
+      "m2",
+      "Which surface?\n\n```json\n" +
+        '<issue_draft_question>{"question":"Which surface?","options":[{"label":"Settings","value":"Settings","recommended":true}]}</issue_draft_question>' +
+        "\n```",
+    );
+    expect(issueDraftPendingQuestion([fenced])?.question.options).toEqual([
+      { label: "Settings", value: "Settings", recommended: true },
+    ]);
+    expect(issueDraftPendingQuestion([fenced, user("m3", "Settings")])).toBeNull();
   });
 });
 
