@@ -38,6 +38,16 @@ FOR UPDATE;
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 
+-- name: GetAgentsByIDs :many
+-- Batch id lookup used to name the base role behind each specialisation in one
+-- read (DENE-301). Archived rows are included on purpose: a child keeps
+-- pointing at a parent that was archived before it, and the child's response
+-- should still name that base role instead of silently losing it. Workspace
+-- scoping is the caller's responsibility — every id here comes from a row the
+-- same request already loaded through a workspace-scoped query.
+SELECT * FROM agent
+WHERE id = ANY(sqlc.arg('ids')::uuid[]);
+
 -- name: LockAgentForAutopilotAssignment :one
 -- Serializes creating, retargeting, or resuming an active Autopilot with
 -- Runtime teardown. Teardown takes FOR UPDATE on this same Agent row before it
@@ -53,19 +63,23 @@ WHERE id = $1 AND workspace_id = $2 AND kind = 'user'
 FOR SHARE;
 
 -- name: CreateAgent :one
+-- parent_agent_id is NULL for a base role and points at one for a
+-- specialisation (DENE-301). Depth is not a column: the handler refuses a
+-- parent that is itself a child, so the tree can only ever be two levels deep.
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     service_tier, conversation_starters,
-    composio_toolkit_allowlist, permission_mode
+    composio_toolkit_allowlist, permission_mode, parent_agent_id
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
     $17, COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
     sqlc.narg('composio_toolkit_allowlist')::text[],
-    COALESCE(sqlc.narg('permission_mode'), 'private')
+    COALESCE(sqlc.narg('permission_mode'), 'private'),
+    sqlc.narg('parent_agent_id')::uuid
 )
 RETURNING *;
 
@@ -171,6 +185,44 @@ UPDATE agent SET
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: SetAgentParentAgent :one
+-- The ONLY writer of agent.parent_agent_id. COALESCE-based UpdateAgent cannot
+-- express "clear the column" (a NULL argument there means "leave it alone"),
+-- and the three states a caller has — untouched, set, cleared — do not collapse
+-- into one nullable parameter. The handler validates the two-level rule before
+-- calling this; the statement itself is unconditional so the same query serves
+-- the create path's initial bind, a re-parent, and the solidify transaction's
+-- detach.
+UPDATE agent
+SET parent_agent_id = sqlc.narg('parent_agent_id')::uuid, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ListAgentChildren :many
+-- Base-role children for the delete guard and the solidify transaction
+-- (DENE-301). Archived specialisations are excluded: they no longer run, so
+-- they must neither block archiving the base role nor be rewritten when it is
+-- solidified. Partial index idx_agent_parent_agent_id serves this read.
+SELECT * FROM agent
+WHERE parent_agent_id = $1 AND archived_at IS NULL
+ORDER BY created_at ASC;
+
+-- name: CountAgentChildren :one
+-- Cheap existence/count probe behind the same archived filter as
+-- ListAgentChildren, for callers that only need to know whether a base role is
+-- still specialised.
+SELECT COUNT(*)::int FROM agent
+WHERE parent_agent_id = $1 AND archived_at IS NULL;
+
+-- name: CountAgentChildrenByParentIDs :many
+-- Batch form of CountAgentChildren for the agents list: the nested grouping
+-- needs a child count per base role, and one row per parent beats a query per
+-- agent on a list the UI renders on every workspace load. Parents with no
+-- children produce no row; callers default them to zero.
+SELECT parent_agent_id, COUNT(*)::int AS child_count FROM agent
+WHERE parent_agent_id = ANY(sqlc.arg('parent_ids')::uuid[]) AND archived_at IS NULL
+GROUP BY parent_agent_id;
 
 -- name: ClearAgentComposioToolkitAllowlist :one
 -- Explicit NULL-clear for composio_toolkit_allowlist. The COALESCE-based

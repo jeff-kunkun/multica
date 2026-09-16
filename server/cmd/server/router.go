@@ -2101,6 +2101,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateAgent)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
+					// Bakes the base role's prompt into this specialisation and
+					// detaches it, which is what makes the base role archivable
+					// again (DENE-301). Not a route older servers know, so a
+					// client that needs it must be talking to a server that
+					// shipped the two-level model.
+					r.Post("/solidify", h.SolidifyAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/dingtalk/groups", h.ListDingTalkGroupsForAgent)
