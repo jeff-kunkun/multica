@@ -1,4 +1,3 @@
-export { CreateIssueDraftDialog } from "./create-issue-draft-dialog";
 export { IssueDraftPage } from "./issue-draft-page";
 export {
   UnfinishedIssueDraftsBanner,

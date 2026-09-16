@@ -5,8 +5,6 @@ import { create } from "zustand";
 type ModalType =
   | "create-issue"
   | "quick-create-issue"
-  /** Requirement alignment: opens a draft conversation instead of an issue. */
-  | "create-issue-draft"
   | "create-project"
   | "create-squad"
   | "feedback"
