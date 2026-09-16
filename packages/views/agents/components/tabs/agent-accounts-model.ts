@@ -1,10 +1,11 @@
 // Domain model for the agent "accounts" tab (design C5: summary bar + drawer).
 //
 // Everything the accounts surface decides before it touches the DOM lives
-// here: parsing the daemon-reported account list, grouping it by CLI, mapping
-// per-account status, choosing one of the four page states, and turning "save
-// and switch" into the write the caller must perform. The tab and drawer
-// components (DENE-308) render this model and must not re-derive its rules.
+// here: parsing the daemon-reported account list, grouping it by CLI, folding
+// the agy numbered-slot pool into the rows the drawer shows, mapping per-account
+// status, choosing one of the four page states, and turning "save and switch"
+// into the write the caller must perform. The tab and drawer components
+// (DENE-308) render this model and must not re-derive its rules.
 //
 // Invariants from the design doc:
 // - Credential values never enter this layer. The daemon reports a `key_ref`
@@ -21,6 +22,10 @@ import {
   expandHomePrefix,
   getGeminiDir,
   isAbsoluteFsPath,
+  loginDirectory,
+  normalizeAccountNumbers,
+  numberedSlotId,
+  parseAccountNumber,
   resolveHomeDir,
   setGeminiDir,
 } from "./agy-account-slots";
@@ -380,6 +385,82 @@ export function groupAccountsByCli(accounts: readonly AgentAccount[]): AgentAcco
 /** Canonical flat order used whenever this model picks "the" account. */
 function orderedAccounts(accounts: readonly AgentAccount[]): AgentAccount[] {
   return groupAccountsByCli(accounts).flatMap((group) => group.accounts);
+}
+
+/**
+ * Slot number of a numbered account id: `default` is the CLI's own directory
+ * (slot 1), `accountN` is slot N. `null` for anything else — an unknown id
+ * belongs to no slot, which is what keeps a non-pool row from growing a
+ * remove control.
+ */
+export function accountSlotNumber(
+  account: Pick<AgentAccount, "account">,
+): number | null {
+  const id = account.account.trim();
+  if (id === DEFAULT_ACCOUNT_ID) return 1;
+  return parseAccountNumber(id);
+}
+
+/**
+ * The drawer rows of the agy group: the agent's numbered slot pool joined with
+ * the daemon's report, followed by the reported agy accounts the pool does not
+ * cover.
+ *
+ * `runtime_config.agy_slots.accounts` is agent config, not a probe of the
+ * disk — the server reads it as the pool the AGY quota failover may rotate
+ * through (`ParseAgySlotAccounts`). So a pool slot whose directory the daemon
+ * did not report is still a row: it is what "add account" just added, and the
+ * user has to be able to see and remove it before the directory exists. A pool
+ * slot the daemon DID report keeps the reported row, because its home, status
+ * and credential name are the daemon's answer and this layer must not invent a
+ * second one.
+ *
+ * Reported agy accounts outside the pool stay listed too: they exist on the
+ * machine and remain switchable, so dropping them would leave the drawer
+ * unable to show an account the summary bar can name.
+ */
+export function agyPoolAccounts(input: {
+  /** Pending pool (`runtime_config.agy_slots.accounts`). */
+  numbers: readonly number[];
+  /** The daemon's report for this runtime, every CLI. */
+  reported: readonly AgentAccount[];
+  /** Host home directory, used to resolve a slot the daemon did not report. */
+  homeDir: string | null;
+}): AgentAccount[] {
+  const reportedAgy = input.reported.filter((account) => account.cli === "agy");
+  const claimed = new Set<AgentAccount>();
+  const rows: AgentAccount[] = [];
+
+  for (const number of normalizeAccountNumbers(input.numbers)) {
+    const slot = numberedSlotId(number);
+    const directory = loginDirectory(slot, "", input.homeDir);
+    const match = reportedAgy.find((account) =>
+      sameDirectory(account.home, directory),
+    );
+    if (match) {
+      // `Set` is identity-keyed, and the parser hands out one object per row.
+      claimed.add(match);
+      rows.push(match);
+      continue;
+    }
+    rows.push({
+      cli: "agy",
+      account: number === 1 ? DEFAULT_ACCOUNT_ID : slot,
+      // Left unresolved without a host home, so the plan layer refuses to
+      // write a path instead of this layer guessing one.
+      home: normalizeDirectory(directory),
+      base_url: "",
+      key_ref: "",
+      lever: `custom_args:${GEMINI_DIR_FLAG}`,
+      signed_in: false,
+      quota_reset_at: 0,
+    });
+  }
+
+  for (const account of reportedAgy) {
+    if (!claimed.has(account)) rows.push(account);
+  }
+  return rows;
 }
 
 const PROVIDER_CLI: Record<string, AgentAccountCli> = {

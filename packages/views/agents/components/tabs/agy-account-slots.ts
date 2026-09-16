@@ -1,18 +1,19 @@
-export const ACCOUNT1_DIR = ".gemini";
-export const ACCOUNT2_DIR = ".gemini-account2";
-export const ACCOUNT3_DIR = ".gemini-account3";
+// Antigravity (agy) account directories, as paths and as agent config.
+//
+// The two halves that used to live here are gone with the AGY block that used to
+// sit in the custom-args tab (DENE-309): per-slot sign-in and quota decoration
+// (the daemon reports both on `agent_accounts` now) and the `--gemini_dir` slot
+// switcher (the accounts tab owns it). What is left is shared vocabulary the
+// accounts surface still needs: the numbered pool in `runtime_config.agy_slots`,
+// the `--gemini_dir` lever, and the ~ → host-home directory arithmetic.
 
-export const AGY_SLOTS_RUNTIME_KEY = "agy_slots";
-export const DEFAULT_NUMBERED_ACCOUNTS = [1, 2, 3] as const;
+const ACCOUNT1_DIR = ".gemini";
+const AGY_SLOTS_RUNTIME_KEY = "agy_slots";
+const DEFAULT_NUMBERED_ACCOUNTS = [1, 2, 3] as const;
 export const MAX_AGY_ACCOUNT_NUMBER = 32;
 
-export type AgyNumberedSlot = `account${number}`;
-export type AgyAccountSlot = AgyNumberedSlot | "custom";
-
-export const AGY_CREDENTIAL_RELATIVE_PATHS = [
-  "oauth_creds.json",
-  "antigravity-cli/antigravity-oauth-token",
-] as const;
+type AgyNumberedSlot = `account${number}`;
+type AgyAccountSlot = AgyNumberedSlot | "custom";
 
 const ACCOUNT_SLOT_RE = /^account(\d+)$/;
 const GEMINI_ACCOUNT_DIR_RE = /^\.gemini-(account\d+)$/;
@@ -28,20 +29,15 @@ export function numberedSlotId(account: number): AgyNumberedSlot {
   return `account${account}`;
 }
 
-export function isNumberedAccountSlot(slot: string): slot is AgyNumberedSlot {
+function isNumberedAccountSlot(slot: string): slot is AgyNumberedSlot {
   return parseAccountNumber(slot) !== null;
 }
 
-export function isIsolatedAccountSlot(slot: AgyAccountSlot): boolean {
-  const n = parseAccountNumber(slot);
-  return n !== null && n >= 2;
-}
-
-export function accountDirectoryLeaf(account: number): string {
+function accountDirectoryLeaf(account: number): string {
   return account <= 1 ? ACCOUNT1_DIR : `.gemini-account${account}`;
 }
 
-export function accountSlotDirectory(slot: AgyNumberedSlot): string {
+function accountSlotDirectory(slot: AgyNumberedSlot): string {
   const n = parseAccountNumber(slot);
   return n ? accountDirectoryLeaf(n) : ACCOUNT1_DIR;
 }
@@ -117,13 +113,13 @@ export function isAbsoluteFsPath(path: string): boolean {
   return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
 }
 
-export function pathBasename(path: string): string {
+function pathBasename(path: string): string {
   const normalized = path.replace(/[/\\]+$/, "");
   const parts = normalized.split(/[/\\]/);
   return parts[parts.length - 1] ?? "";
 }
 
-export function inferHomeDirFromGeminiPath(path: string): string | null {
+function inferHomeDirFromGeminiPath(path: string): string | null {
   const trimmed = path.trim();
   if (!trimmed || trimmed.startsWith("~")) return null;
   const normalized = trimmed.replace(/[/\\]+$/, "");
@@ -140,24 +136,7 @@ export function runtimeHomeDir(
   return isAbsoluteFsPath(trimmed) ? trimmed : null;
 }
 
-export function runtimeLoggedInDirs(
-  runtime?: { metadata?: Record<string, unknown> } | null,
-): string[] {
-  const value = runtime?.metadata?.agy_logged_in_dirs;
-  if (!Array.isArray(value)) return [];
-  const dirs: string[] = [];
-  const seen = new Set<string>();
-  for (const entry of value) {
-    if (typeof entry !== "string") continue;
-    const trimmed = entry.trim().replace(/[/\\]+$/, "");
-    if (!isAbsoluteFsPath(trimmed) || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    dirs.push(trimmed);
-  }
-  return dirs;
-}
-
-export function readProcessHomeDir(): string | null {
+function readProcessHomeDir(): string | null {
   const desktopHome = (globalThis as { desktopAPI?: { homeDir?: unknown } }).desktopAPI?.homeDir;
   if (typeof desktopHome === "string" && isAbsoluteFsPath(desktopHome.trim())) {
     return desktopHome.trim();
@@ -177,7 +156,7 @@ export function resolveHomeDir(
   return inferHomeDirFromGeminiPath(profile) ?? hostHome ?? readProcessHomeDir();
 }
 
-export function joinHomeDir(home: string, leaf: string): string {
+function joinHomeDir(home: string, leaf: string): string {
   const base = home.replace(/[/\\]+$/, "");
   const sep = base.includes("\\") && !base.includes("/") ? "\\" : "/";
   const normalizedLeaf = sep === "\\" ? leaf.replace(/\//g, "\\") : leaf;
@@ -199,7 +178,7 @@ function slotFromBasename(base: string): AgyAccountSlot {
   return slot && isNumberedAccountSlot(slot) ? slot : "custom";
 }
 
-export function detectAgyAccountSlot(profile: string): AgyAccountSlot {
+function detectAgyAccountSlot(profile: string): AgyAccountSlot {
   const trimmed = profile.trim();
   if (!trimmed) return "account1";
   return slotFromBasename(pathBasename(trimmed));
@@ -208,20 +187,6 @@ export function detectAgyAccountSlot(profile: string): AgyAccountSlot {
 function resolveNumberedDirectory(slot: AgyNumberedSlot, homeDir: string | null): string {
   const leaf = accountSlotDirectory(slot);
   return homeDir ? joinHomeDir(homeDir, leaf) : `~/${leaf}`;
-}
-
-export function resolveSlotDirectory(
-  slot: AgyAccountSlot,
-  customPath: string,
-  homeDir: string | null,
-): string {
-  if (slot === "account1") return "";
-  if (isNumberedAccountSlot(slot)) return resolveNumberedDirectory(slot, homeDir);
-  const trimmed = customPath.trim();
-  if (homeDir && (trimmed === "~" || trimmed.startsWith("~/") || trimmed.startsWith("~\\"))) {
-    return expandHomePrefix(trimmed, homeDir);
-  }
-  return trimmed;
 }
 
 export function loginDirectory(
@@ -239,68 +204,4 @@ export function loginDirectory(
 
 export function formatAgyLoginCommand(directory: string): string {
   return directory ? `agy --gemini_dir=${directory}` : "agy";
-}
-
-export function agyCredentialPaths(directory: string): string[] {
-  const trimmed = directory.trim().replace(/[/\\]+$/, "");
-  if (!trimmed) return [];
-  return AGY_CREDENTIAL_RELATIVE_PATHS.map((rel) => joinHomeDir(trimmed, rel));
-}
-
-export function directoryHasAgyCredentials(
-  directory: string,
-  exists: (path: string) => boolean,
-): boolean {
-  return agyCredentialPaths(directory).some((path) => exists(path));
-}
-
-export function slotIsSignedIn(
-  directory: string,
-  loggedInDirs: readonly string[],
-): boolean {
-  const normalized = directory.trim().replace(/[/\\]+$/, "");
-  if (!normalized) return false;
-  return loggedInDirs.some((dir) => dir.replace(/[/\\]+$/, "") === normalized);
-}
-
-export type AgyQuotaExhaustedEntry = {
-  dir: string;
-  reset_at: number;
-};
-
-function normalizeSlotDir(directory: string): string {
-  return directory.trim().replace(/[/\\]+$/, "");
-}
-
-export function runtimeQuotaExhausted(
-  runtime?: { metadata?: Record<string, unknown> } | null,
-): AgyQuotaExhaustedEntry[] {
-  const value = runtime?.metadata?.agy_quota_exhausted;
-  if (!Array.isArray(value)) return [];
-  const out: AgyQuotaExhaustedEntry[] = [];
-  const seen = new Set<string>();
-  for (const entry of value) {
-    if (!entry || typeof entry !== "object") continue;
-    const dir = normalizeSlotDir(String((entry as { dir?: unknown }).dir ?? ""));
-    const resetAt = (entry as { reset_at?: unknown }).reset_at;
-    const unix = typeof resetAt === "number" ? resetAt : Number(resetAt);
-    if (!isAbsoluteFsPath(dir) || !Number.isFinite(unix) || unix <= 0) continue;
-    if (seen.has(dir)) continue;
-    seen.add(dir);
-    out.push({ dir, reset_at: unix });
-  }
-  return out;
-}
-
-/** Unix seconds remaining exhausted, or null when the slot is usable again. */
-export function slotQuotaResetAt(
-  directory: string,
-  exhausted: readonly AgyQuotaExhaustedEntry[],
-  nowMs = Date.now(),
-): number | null {
-  const normalized = normalizeSlotDir(directory);
-  if (!normalized) return null;
-  const entry = exhausted.find((item) => normalizeSlotDir(item.dir) === normalized);
-  if (!entry) return null;
-  return entry.reset_at * 1000 > nowMs ? entry.reset_at : null;
 }

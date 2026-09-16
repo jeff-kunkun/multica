@@ -11,8 +11,10 @@ import {
   type AccountsViewState,
   type AgentAccount,
   accountLeverLabel,
+  accountSlotNumber,
   accountStatus,
   accountsViewState,
+  agyPoolAccounts,
   canManageAccounts,
   cliForProvider,
   groupAccountsByCli,
@@ -297,6 +299,95 @@ describe("groupAccountsByCli", () => {
   it("omits CLIs without accounts", () => {
     expect(groupAccountsByCli([DSH_DEFAULT]).map((group) => group.cli)).toEqual(["dsh"]);
     expect(groupAccountsByCli([])).toEqual([]);
+  });
+});
+
+describe("agyPoolAccounts", () => {
+  const agyAccounts = [AGY_DEFAULT, AGY_ACCOUNT2, DSH_DEFAULT];
+
+  it("reads a slot number off a numbered account id, and nothing else", () => {
+    expect(accountSlotNumber({ account: "default" })).toBe(1);
+    expect(accountSlotNumber({ account: "account2" })).toBe(2);
+    expect(accountSlotNumber({ account: "account10" })).toBe(10);
+    expect(accountSlotNumber({ account: "work" })).toBeNull();
+    expect(accountSlotNumber({ account: "account33" })).toBeNull();
+  });
+
+  it("joins a reported slot with the daemon's row instead of inventing one", () => {
+    const rows = agyPoolAccounts({
+      numbers: [1, 2, 3],
+      reported: agyAccounts,
+      homeDir: RUNTIME_HOME,
+    });
+
+    // Slot 1 and 2 are on disk, so their rows ARE the reported rows — same
+    // home, same status, same credential name.
+    expect(rows[0]).toBe(AGY_DEFAULT);
+    expect(rows[1]).toBe(AGY_ACCOUNT2);
+    // Slot 3 is pool config only: a row with the conventional directory and no
+    // claimed sign-in, so it can be seen and removed before it exists.
+    expect(rows[2]).toEqual({
+      cli: "agy",
+      account: "account3",
+      home: `${RUNTIME_HOME}/.gemini-account3`,
+      base_url: "",
+      key_ref: "",
+      lever: "custom_args:--gemini_dir",
+      signed_in: false,
+      quota_reset_at: 0,
+    });
+    // Another CLI's accounts never leak into the agy rows.
+    expect(rows.map((row) => row.cli)).toEqual(["agy", "agy", "agy"]);
+  });
+
+  it("leaves a slot directory unresolved rather than guessing one", () => {
+    const rows = agyPoolAccounts({
+      numbers: [1, 4],
+      reported: [],
+      homeDir: null,
+    });
+
+    // Not absolute, so `planAccountSwitch` refuses the write instead of this
+    // layer producing a path that would be wrong on the host.
+    expect(rows.map((row) => row.home)).toEqual([
+      "~/.gemini",
+      "~/.gemini-account4",
+    ]);
+    expect(rows.map((row) => row.account)).toEqual(["default", "account4"]);
+  });
+
+  it("keeps a reported account the pool dropped, so no row disappears", () => {
+    const rows = agyPoolAccounts({
+      numbers: [1, 3],
+      reported: [AGY_DEFAULT, AGY_ACCOUNT2],
+      homeDir: RUNTIME_HOME,
+    });
+
+    expect(rows.map((row) => row.account)).toEqual([
+      "default",
+      "account3",
+      "account2",
+    ]);
+    // The dropped account keeps every reported field: it still exists on the
+    // machine and remains switchable.
+    expect(rows[2]).toBe(AGY_ACCOUNT2);
+  });
+
+  it("keeps a custom directory as an extra row next to the pool", () => {
+    const custom = account({
+      cli: "agy",
+      account: "work",
+      home: `${RUNTIME_HOME}/.gemini-work`,
+      lever: "custom_args:--gemini_dir",
+    });
+
+    const rows = agyPoolAccounts({
+      numbers: [1, 2],
+      reported: [AGY_DEFAULT, custom],
+      homeDir: RUNTIME_HOME,
+    });
+
+    expect(rows.map((row) => row.account)).toEqual(["default", "account2", "work"]);
   });
 });
 

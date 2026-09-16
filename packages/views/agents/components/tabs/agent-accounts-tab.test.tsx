@@ -116,6 +116,9 @@ const CODEX_DEFAULT = account("codex", "default", `${RUNTIME_HOME}/.codex`, {
   lever: "",
 });
 
+/** The directory the pool's next free number resolves to (`accountDirectoryLeaf`). */
+const AGY_ACCOUNT4_HOME = `${RUNTIME_HOME}/.gemini-account4`;
+
 function runtimeWith(
   provider: string,
   entries: unknown,
@@ -221,6 +224,11 @@ function selectAccount(name: RegExp) {
   fireEvent.click(screen.getByRole("radio", { name }));
 }
 
+/** The agy group's own add control: the next free number in the slot pool. */
+function addSlot() {
+  return screen.getByRole("button", { name: /add the next numbered agy account/i });
+}
+
 function saveAndSwitch() {
   fireEvent.click(screen.getByRole("button", { name: /save and switch/i }));
 }
@@ -284,7 +292,8 @@ describe("AgentAccountsTab rest state", () => {
 
     const drawer = screen.getByRole("dialog", { name: /manage accounts/i });
     expect(drawer).toBeInTheDocument();
-    expect(screen.getByText("1 CLIs · 2 accounts")).toBeInTheDocument();
+    // Two reported accounts plus the seeded pool's third slot (DENE-309).
+    expect(screen.getByText("1 CLIs · 3 accounts")).toBeInTheDocument();
     // Group header carries the binding lever.
     expect(screen.getByText("--gemini_dir")).toBeInTheDocument();
     expect(
@@ -467,6 +476,113 @@ describe("AgentAccountsTab drawer", () => {
     expect(
       await screen.findByText(`--gemini_dir=${AGY_ACCOUNT2.home}`),
     ).toBeInTheDocument();
+  });
+
+  it("writes the numbered pool and the switch in one agent update", async () => {
+    const { onSave } = renderTab({
+      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+    });
+
+    await openDrawer();
+    // The footer's generic "how do I add an account" explainer is replaced by
+    // the pool's real add control for an agy group.
+    expect(
+      screen.queryByRole("button", { name: /^add account$/i }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(addSlot());
+    // Nothing is written yet: the new slot is a row the user can still drop.
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("radio", { name: /account4/ })).toBeInTheDocument();
+
+    selectAccount(/account4/);
+    fireEvent.click(
+      screen.getByRole("button", { name: /remove account 2 from this agent/i }),
+    );
+    // The dropped number keeps its row — the directory still exists — and says
+    // so, instead of vanishing as if the account were gone.
+    expect(
+      screen.getByText("Not in this agent's rotation pool"),
+    ).toBeInTheDocument();
+
+    saveAndSwitch();
+
+    // One PUT carries both halves: the agy binding in `custom_args` and the
+    // pool in `runtime_config`.
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", AGY_ACCOUNT4_HOME],
+      runtime_config: { agy_slots: { accounts: [1, 3, 4] } },
+    });
+    expect(updateAgentEnv).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unsaved pool edit out of the agent", async () => {
+    const { onSave } = renderTab({
+      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+    });
+
+    await openDrawer();
+    fireEvent.click(addSlot());
+    expect(screen.getByRole("radio", { name: /account4/ })).toBeInTheDocument();
+
+    // Closing the drawer drops the pool draft, exactly like an unsaved switch.
+    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    expect(onSave).not.toHaveBeenCalled();
+
+    await openDrawer();
+    expect(
+      screen.queryByRole("radio", { name: /account4/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /save and switch/i }),
+    ).toBeDisabled();
+  });
+
+  it("falls back to account 1 when the account in effect loses its slot", async () => {
+    const { onSave } = renderTab({
+      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+      agent: {
+        ...baseAgent,
+        custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
+      },
+    });
+
+    await openDrawer();
+    // Opening pre-selects the account in effect, so removing its row is also
+    // removing the selection.
+    expect(screen.getByRole("radio", { name: /account2/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /remove account 2 from this agent/i }),
+    );
+
+    expect(screen.getByRole("radio", { name: /default/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    saveAndSwitch();
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", AGY_DEFAULT.home],
+      runtime_config: { agy_slots: { accounts: [1, 3] } },
+    });
+  });
+
+  it("keeps the generic add explainer for a CLI with no numbered pool", async () => {
+    renderTab({ device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2]) });
+
+    await screen.findByText("DSH · default");
+    await openDrawer();
+
+    expect(
+      screen.getByRole("button", { name: /^add account$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /add the next numbered/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("sends nothing when the target is already the account in effect", async () => {

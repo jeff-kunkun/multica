@@ -40,7 +40,9 @@ import {
   type AgentAccountBinding,
   type AgentAccountCli,
   accountLeverLabel,
+  accountSlotNumber,
   accountsViewState,
+  agyPoolAccounts,
   canManageAccounts,
   cliForProvider,
   groupAccountsByCli,
@@ -49,7 +51,16 @@ import {
   planAccountSwitch,
   resolveCurrentAccount,
 } from "./agent-accounts-model";
-import { runtimeHomeDir } from "./agy-account-slots";
+import {
+  MAX_AGY_ACCOUNT_NUMBER,
+  getGeminiDir,
+  nextAccountNumber,
+  normalizeAccountNumbers,
+  parseAgySlotsConfig,
+  resolveHomeDir,
+  runtimeHomeDir,
+  writeAgySlotsConfig,
+} from "./agy-account-slots";
 import {
   AccountActivePill,
   AccountStatusPill,
@@ -109,6 +120,11 @@ function emptyEntryAccount(cli: AgentAccountCli): AgentAccount {
   };
 }
 
+/** Pool arrays are always normalized and sorted, so an element-wise compare is enough. */
+function samePool(a: readonly number[], b: readonly number[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
 export interface AgentAccountsTabProps {
   agent: Agent;
   runtimeDevice?: RuntimeDevice;
@@ -132,10 +148,42 @@ export function AgentAccountsTab({
     () => parseAgentAccounts(runtimeDevice),
     [runtimeDevice],
   );
-  const groups = useMemo(
-    () => groupAccountsByCli(parsed.accounts),
-    [parsed.accounts],
+
+  // The agy group's rows are the agent's numbered slot pool joined with the
+  // daemon's report (DENE-309): the pool is agent config, so a slot whose
+  // directory does not exist yet still has a row, and a reported account the
+  // pool does not cover keeps its row too.
+  const [slotDraft, setSlotDraft] = useState<number[] | null>(null);
+  const storedSlots = useMemo(
+    () =>
+      parseAgySlotsConfig(
+        agent.runtime_config,
+        getGeminiDir([...(agent.custom_args ?? [])]),
+      ),
+    [agent.custom_args, agent.runtime_config],
   );
+  const slots = slotDraft ?? storedSlots;
+  const slotsDirty = slotDraft !== null && !samePool(slotDraft, storedSlots);
+  const homeDir = useMemo(
+    () =>
+      resolveHomeDir(
+        getGeminiDir([...(agent.custom_args ?? [])]),
+        runtimeHomeDir(runtimeDevice),
+      ),
+    [agent.custom_args, runtimeDevice],
+  );
+
+  const rowAccounts = useMemo(() => {
+    if (!parsed.accounts.some((account) => account.cli === "agy")) {
+      return parsed.accounts;
+    }
+    return [
+      ...parsed.accounts.filter((account) => account.cli !== "agy"),
+      ...agyPoolAccounts({ numbers: slots, reported: parsed.accounts, homeDir }),
+    ];
+  }, [parsed.accounts, slots, homeDir]);
+
+  const groups = useMemo(() => groupAccountsByCli(rowAccounts), [rowAccounts]);
   const allAccounts = useMemo(
     () => groups.flatMap((group) => group.accounts),
     [groups],
@@ -194,8 +242,8 @@ export function AgentAccountsTab({
   });
 
   const current = useMemo(
-    () => resolveCurrentAccount(binding, parsed.accounts),
-    [binding, parsed.accounts],
+    () => resolveCurrentAccount(binding, rowAccounts),
+    [binding, rowAccounts],
   );
   const currentKey = current ? accountKey(current) : null;
   const others = useMemo(
@@ -228,22 +276,57 @@ export function AgentAccountsTab({
     return () => window.clearTimeout(timer);
   }, [nextResetMs]);
 
-  // A selection in the drawer is unsaved work until "save and switch" commits
-  // it, so the surrounding settings layout can guard a tab switch.
-  const dirty = drawerOpen && selectedKey !== null && selectedKey !== currentKey;
+  // A selection or a pool edit in the drawer is unsaved work until "save and
+  // switch" commits it, so the surrounding settings layout can guard a tab
+  // switch.
+  const selectionDirty = selectedKey !== null && selectedKey !== currentKey;
+  const dirty = drawerOpen && (slotsDirty || selectionDirty);
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    setSelectedKey(null);
+    // Closing drops the pool draft: nothing inside the drawer took effect.
+    setSlotDraft(null);
+  };
+
   const openDrawer = () => {
     setSelectedKey(currentKey);
+    setSlotDraft(storedSlots);
     setDrawerOpen(true);
   };
 
   const handleDrawerOpenChange = (open: boolean) => {
-    setDrawerOpen(open);
-    // Closing drops the selection: nothing inside the drawer took effect.
-    if (!open) setSelectedKey(null);
+    if (!open) {
+      closeDrawer();
+      return;
+    }
+    setDrawerOpen(true);
+  };
+
+  const nextSlot = nextAccountNumber(slots);
+  const canAddSlot = nextSlot <= MAX_AGY_ACCOUNT_NUMBER;
+
+  const addSlot = () => {
+    if (!canAddSlot) return;
+    setSlotDraft(normalizeAccountNumbers([...slots, nextSlot]));
+  };
+
+  const removeSlot = (number: number) => {
+    if (number <= 1) return;
+    setSlotDraft(normalizeAccountNumbers(slots.filter((n) => n !== number)));
+    // Dropping the row that was selected leaves nothing to switch to, so the
+    // selection falls back to account 1 — the same move the settings tab made
+    // when this control lived there.
+    const selected =
+      allAccounts.find((account) => accountKey(account) === selectedKey) ?? null;
+    if (selected && accountSlotNumber(selected) === number) {
+      const fallback =
+        allAccounts.find((account) => accountSlotNumber(account) === 1) ?? null;
+      setSelectedKey(fallback ? accountKey(fallback) : null);
+    }
   };
 
   const handleSaveAndSwitch = async () => {
@@ -251,13 +334,17 @@ export function AgentAccountsTab({
       allAccounts.find((account) => accountKey(account) === selectedKey) ??
       null;
     const plan = planAccountSwitch(binding, target, viewState);
+    // The pool is agent config like the binding is, so both ride on the same
+    // agent update: one PUT carries `custom_args` and `runtime_config`.
+    const runtimeConfig = slotsDirty
+      ? writeAgySlotsConfig(agent.runtime_config, slots)
+      : null;
 
-    if (plan.kind === "noop") {
-      setDrawerOpen(false);
-      setSelectedKey(null);
-      return;
-    }
-    if (plan.kind === "unsupported") {
+    // A switch this client cannot write stays the blocking error it was: the
+    // drawer keeps the pool draft, so the user can pick a writable row and save
+    // both edits together. With nothing selected there is no switch to fail,
+    // and the pool write goes through on its own.
+    if (plan.kind === "unsupported" && selectionDirty) {
       toast.error(
         plan.reason === "invalid_home"
           ? t(($) => $.tab_body.accounts.switch_invalid_home_toast)
@@ -265,13 +352,25 @@ export function AgentAccountsTab({
       );
       return;
     }
+    if (plan.kind === "noop" && runtimeConfig === null) {
+      closeDrawer();
+      return;
+    }
 
+    const switches = plan.kind === "custom_args" || plan.kind === "env";
     setSaving(true);
     try {
-      if (plan.kind === "custom_args") {
-        // agy's lever lives in the agent itself; the parent owns that write.
-        await onSave({ custom_args: plan.custom_args });
-      } else {
+      if (plan.kind === "custom_args" || runtimeConfig !== null) {
+        // agy's lever and its slot pool both live in the agent itself; the
+        // parent owns that write.
+        await onSave({
+          ...(plan.kind === "custom_args"
+            ? { custom_args: plan.custom_args }
+            : {}),
+          ...(runtimeConfig !== null ? { runtime_config: runtimeConfig } : {}),
+        });
+      }
+      if (plan.kind === "env") {
         // Env levers cannot ride on `PUT /api/agents/{id}` (custom_env is
         // rejected with 400 there). Re-read the map and change ONLY the target
         // key, so an unrelated variable the user set is written back as-is —
@@ -287,14 +386,15 @@ export function AgentAccountsTab({
         queryClient.setQueryData(agentEnvQueryKey(wsId, agent.id), saved);
       }
       toast.success(
-        t(($) => $.tab_body.accounts.switch_saved_toast, {
-          account: target
-            ? `${agentCliLabel(target.cli)} · ${target.account}`
-            : "",
-        }),
+        switches
+          ? t(($) => $.tab_body.accounts.switch_saved_toast, {
+              account: target
+                ? `${agentCliLabel(target.cli)} · ${target.account}`
+                : "",
+            })
+          : t(($) => $.tab_body.accounts.slot_saved_toast),
       );
-      setDrawerOpen(false);
-      setSelectedKey(null);
+      closeDrawer();
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -444,6 +544,18 @@ export function AgentAccountsTab({
             saving={saving}
             onSave={() => void handleSaveAndSwitch()}
             nowMs={nowMs}
+            // The numbered pool belongs to the agy group. An agent whose report
+            // has no agy rows has no pool to edit, so the parameter stays off.
+            slotPool={
+              groups.some((group) => group.cli === "agy")
+                ? {
+                    numbers: slots,
+                    canAdd: canAddSlot,
+                    onAdd: addSlot,
+                    onRemove: removeSlot,
+                  }
+                : undefined
+            }
           />
         </>
       ) : null}

@@ -13,7 +13,7 @@
 // effect once "save and switch" (owned by the tab) commits it.
 
 import { useState } from "react";
-import { Check, Copy, Loader2, Plus } from "lucide-react";
+import { Check, Copy, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -34,6 +34,7 @@ import {
   type AgentAccountCli,
   type AgentAccountGroup,
   accountLeverLabel,
+  accountSlotNumber,
   accountStatus,
   parseAccountLever,
 } from "./agent-accounts-model";
@@ -274,6 +275,22 @@ export interface AgentAccountDrawerProps {
   saving: boolean;
   onSave: () => void;
   nowMs: number;
+  /**
+   * Editing of the agent's numbered AGY slot pool (`runtime_config.agy_slots`),
+   * rendered inside the agy group. The pool is agent config rather than a
+   * daemon report, so the tab owns the draft and this drawer only renders and
+   * reports the intent — nothing here writes before "save and switch".
+   *
+   * Absent when the report has no agy group: no other CLI has a numbered pool.
+   */
+  slotPool?: {
+    /** Pending pool the caller writes on save. */
+    numbers: readonly number[];
+    /** False once the pool reached the server's own cap. */
+    canAdd: boolean;
+    onAdd: () => void;
+    onRemove: (number: number) => void;
+  };
 }
 
 /**
@@ -291,6 +308,7 @@ export function AgentAccountDrawer({
   saving,
   onSave,
   nowMs,
+  slotPool,
 }: AgentAccountDrawerProps) {
   const { t } = useT("agents");
   const isMobile = useIsMobile();
@@ -326,119 +344,184 @@ export function AgentAccountDrawer({
         </SheetHeader>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-          {groups.map((group) => (
-            <section key={group.cli} className="space-y-2">
-              <div className="flex min-w-0 items-baseline gap-1.5 px-0.5 text-micro tracking-wide text-faint-foreground uppercase">
-                <span className="shrink-0 font-medium">
-                  {agentCliLabel(group.cli)}
-                </span>
-                {accountLeverLabel(group.lever) ? (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <span className="truncate font-mono normal-case" translate="no">
-                      {accountLeverLabel(group.lever)}
-                    </span>
-                  </>
-                ) : null}
-              </div>
-
-              {group.switchable ? null : (
-                <p className="px-0.5 text-caption text-muted-foreground">
-                  {t(($) => $.tab_body.accounts.group_readonly_hint)}
-                </p>
-              )}
-
-              <div
-                className="overflow-hidden rounded-lg border border-border bg-background"
-                {...(group.switchable
-                  ? {
-                      role: "radiogroup" as const,
-                      "aria-label": t(
-                        ($) => $.tab_body.accounts.drawer_groups_aria,
-                        { cli: agentCliLabel(group.cli) },
-                      ),
-                    }
-                  : {})}
-              >
-                {group.accounts.map((account, index) => {
-                  const key = accountKey(account);
-                  const isCurrent =
-                    current != null && accountKey(current) === key;
-                  const isSelected = key === selectedKey;
-                  const rowClassName = cn(
-                    "flex w-full min-w-0 items-center gap-2.5 px-3 py-2.5 text-left",
-                    index > 0 && "border-t border-border",
-                    // A selected row keeps its selected background on hover —
-                    // the design's rule is that the state must stay readable
-                    // while the pointer is on it.
-                    isSelected && "bg-surface-selected hover:bg-surface-selected",
-                    !isSelected && group.switchable && "hover:bg-surface-hover",
-                    !isSelected && !group.switchable && "opacity-70",
-                  );
-                  const body = (
+          {groups.map((group) => {
+            // The numbered pool is an agy concept: its rows are the only ones
+            // keyed by a numbered directory, and its lever is the only
+            // `custom_args` lever this surface writes.
+            const pool = group.cli === "agy" ? slotPool : undefined;
+            return (
+              <section key={group.cli} className="space-y-2">
+                <div className="flex min-w-0 items-baseline gap-1.5 px-0.5 text-micro tracking-wide text-faint-foreground uppercase">
+                  <span className="shrink-0 font-medium">
+                    {agentCliLabel(group.cli)}
+                  </span>
+                  {accountLeverLabel(group.lever) ? (
                     <>
-                      <AgentCliBadge cli={account.cli} showLabel={false} />
-                      <span className="min-w-0 flex-1">
-                        <span
-                          className={cn(
-                            "block truncate text-caption",
-                            isSelected ? "font-semibold" : "font-medium",
-                          )}
-                        >
-                          {account.account}
-                        </span>
-                        <span
-                          className="block truncate font-mono text-micro text-muted-foreground"
-                          translate="no"
-                        >
-                          {account.home}
-                        </span>
+                      <span aria-hidden="true">·</span>
+                      <span className="truncate font-mono normal-case" translate="no">
+                        {accountLeverLabel(group.lever)}
                       </span>
-                      {isCurrent ? (
-                        <AccountActivePill />
-                      ) : (
-                        <AccountStatusPill account={account} nowMs={nowMs} />
-                      )}
-                      {group.switchable ? (
-                        <span
-                          aria-hidden="true"
-                          className={cn(
-                            "shrink-0 rounded-md border px-1.5 py-0.5 text-micro",
-                            isSelected
-                              ? "border-foreground/30 text-foreground"
-                              : "border-border text-muted-foreground",
-                          )}
-                        >
-                          {t(($) => $.tab_body.accounts.row_edit_action)}
-                        </span>
-                      ) : null}
                     </>
-                  );
+                  ) : null}
+                </div>
 
-                  if (!group.switchable) {
-                    return (
-                      <div key={key} className={rowClassName}>
+                {group.switchable ? null : (
+                  <p className="px-0.5 text-caption text-muted-foreground">
+                    {t(($) => $.tab_body.accounts.group_readonly_hint)}
+                  </p>
+                )}
+
+                <div
+                  className="overflow-hidden rounded-lg border border-border bg-background"
+                  {...(group.switchable
+                    ? {
+                        role: "radiogroup" as const,
+                        "aria-label": t(
+                          ($) => $.tab_body.accounts.drawer_groups_aria,
+                          { cli: agentCliLabel(group.cli) },
+                        ),
+                      }
+                    : {})}
+                >
+                  {group.accounts.map((account, index) => {
+                    const key = accountKey(account);
+                    const isCurrent =
+                      current != null && accountKey(current) === key;
+                    const isSelected = key === selectedKey;
+                    const slotNumber = pool ? accountSlotNumber(account) : null;
+                    const pooled =
+                      slotNumber !== null &&
+                      pool !== undefined &&
+                      pool.numbers.includes(slotNumber);
+                    // Account 1 is the CLI's own directory: always in the pool,
+                    // never removable.
+                    const removable = pooled && slotNumber !== null && slotNumber > 1;
+                    // A reported account the pending pool no longer covers:
+                    // still listed and switchable, but out of the rotation.
+                    const dropped =
+                      slotNumber !== null && !pooled && slotNumber > 1;
+                    const rowClassName = cn(
+                      "flex w-full min-w-0 items-center gap-2.5 px-3 py-2.5 text-left",
+                      // A selected row keeps its selected background on hover —
+                      // the design's rule is that the state must stay readable
+                      // while the pointer is on it.
+                      isSelected && "bg-surface-selected hover:bg-surface-selected",
+                      !isSelected && group.switchable && "hover:bg-surface-hover",
+                      !isSelected && !group.switchable && "opacity-70",
+                    );
+                    const body = (
+                      <>
+                        <AgentCliBadge cli={account.cli} showLabel={false} />
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              "block truncate text-caption",
+                              isSelected ? "font-semibold" : "font-medium",
+                            )}
+                          >
+                            {account.account}
+                          </span>
+                          <span
+                            className="block truncate font-mono text-micro text-muted-foreground"
+                            translate="no"
+                          >
+                            {account.home}
+                          </span>
+                          {dropped ? (
+                            <span className="block truncate text-micro text-faint-foreground">
+                              {t(($) => $.tab_body.accounts.slot_dropped_hint)}
+                            </span>
+                          ) : null}
+                        </span>
+                        {isCurrent ? (
+                          <AccountActivePill />
+                        ) : (
+                          <AccountStatusPill account={account} nowMs={nowMs} />
+                        )}
+                        {group.switchable ? (
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              "shrink-0 rounded-md border px-1.5 py-0.5 text-micro",
+                              isSelected
+                                ? "border-foreground/30 text-foreground"
+                                : "border-border text-muted-foreground",
+                            )}
+                          >
+                            {t(($) => $.tab_body.accounts.row_edit_action)}
+                          </span>
+                        ) : null}
+                      </>
+                    );
+
+                    const row = group.switchable ? (
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        onClick={() => onSelect(account)}
+                        className={cn(rowClassName, "flex-1")}
+                      >
                         {body}
+                      </button>
+                    ) : (
+                      <div className={cn(rowClassName, "flex-1")}>{body}</div>
+                    );
+
+                    // A remove control cannot live inside the row: the row is
+                    // itself a button, so the trash sits beside it, under the
+                    // same divider.
+                    return (
+                      <div
+                        key={key}
+                        className={cn(
+                          "flex w-full min-w-0 items-stretch",
+                          index > 0 && "border-t border-border",
+                        )}
+                      >
+                        {row}
+                        {removable && slotNumber !== null ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            className="me-1.5 shrink-0 self-center text-muted-foreground hover:text-destructive"
+                            onClick={() => pool?.onRemove(slotNumber)}
+                            aria-label={t(
+                              ($) => $.tab_body.accounts.slot_remove_aria,
+                              { n: slotNumber },
+                            )}
+                          >
+                            <Trash2 className="size-3.5" aria-hidden="true" />
+                          </Button>
+                        ) : null}
                       </div>
                     );
-                  }
+                  })}
+                </div>
 
-                  return (
-                    <button
-                      key={key}
+                {pool ? (
+                  <div className="space-y-1.5">
+                    <Button
                       type="button"
-                      role="radio"
-                      aria-checked={isSelected}
-                      onClick={() => onSelect(account)}
-                      className={rowClassName}
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-center"
+                      onClick={pool.onAdd}
+                      disabled={!pool.canAdd}
+                      aria-label={t(($) => $.tab_body.accounts.slot_add_aria)}
                     >
-                      {body}
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
+                      <Plus className="size-3.5" aria-hidden="true" />
+                      {t(($) => $.tab_body.accounts.slot_add_action)}
+                    </Button>
+                    <p className="px-0.5 text-caption leading-5 text-muted-foreground">
+                      {t(($) => $.tab_body.accounts.slot_pool_hint)}
+                    </p>
+                  </div>
+                ) : null}
+              </section>
+            );
+          })}
 
           {selected ? (
             <section className="space-y-2 rounded-lg border border-border bg-muted/40 p-3">
@@ -481,21 +564,26 @@ export function AgentAccountDrawer({
         </div>
 
         <SheetFooter className="flex-row items-center justify-between gap-2 border-t border-border p-4">
+          {/* A pool group owns its own add control, so the generic "how do I
+              create an account" explainer would be a second, inert button with
+              the same label. */}
+          {slotPool ? null : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              aria-expanded={adding}
+              onClick={() => setAdding((value) => !value)}
+            >
+              <Plus className="size-3.5" aria-hidden="true" />
+              {t(($) => $.tab_body.accounts.add_action)}
+            </Button>
+          )}
           <Button
             type="button"
-            variant="outline"
             size="sm"
-            className="flex-1 sm:flex-none"
-            aria-expanded={adding}
-            onClick={() => setAdding((value) => !value)}
-          >
-            <Plus className="size-3.5" aria-hidden="true" />
-            {t(($) => $.tab_body.accounts.add_action)}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            className="flex-1 sm:flex-none"
+            className={cn("flex-1 sm:flex-none", slotPool && "ms-auto")}
             disabled={!dirty || saving}
             onClick={onSave}
           >
