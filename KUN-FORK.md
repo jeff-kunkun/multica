@@ -40,7 +40,7 @@ bash scripts/setup-dsh-runtime.sh
 
 ## Desktop 发版
 
-打包发布给真机用的 Desktop 版本，走 [docs/kun/desktop-release.md](docs/kun/desktop-release.md)：版本号由 tag 推导、必须从当前 `kun` tip 构建、产物没推上 Release 就等于没发。
+打包发布给真机用的 Desktop 版本，走 [docs/kun/desktop-release.md](docs/kun/desktop-release.md)：推 tag 后由 `release.yml` 的 `desktop` job 在 GitHub runner 上打 mac / linux / windows 并上传（mac 包 ad-hoc 签名、未公证）；发布收尾必须跑 `apps/desktop/scripts/verify-release-assets.mjs` 核资产，`gh` 的退出码不算数。
 
 ## 边界
 

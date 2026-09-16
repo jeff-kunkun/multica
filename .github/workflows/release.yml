@@ -389,27 +389,86 @@ jobs:
       - name: Verify published chart
         run: helm show chart "$OCI_REGISTRY/multica" --version "$CHART_VERSION"
 
-  # Build the Desktop installers for Linux and Windows and upload them to
-  # the GitHub Release that the `release` job above just published. macOS
-  # Desktop continues to ship via the manual `release-desktop` skill so it
-  # can be signed + notarized with Apple Developer credentials that are
-  # not (yet) wired into CI.
+  # Build the Desktop installers on a native runner per platform and upload
+  # them to this tag's GitHub Release.
+  #
+  # macOS used to be excluded from this matrix and packaged by hand because
+  # signing + notarization needs Apple Developer credentials that are not
+  # wired into CI. The hand-built packages were ad-hoc signed anyway (every
+  # install runs `xattr -cr /Applications/Multica.app`), so building them
+  # here keeps the trust level identical while moving the ~230 MB upload onto
+  # runner bandwidth — the hand-run path could not finish it, which is how
+  # v0.4.56 / v0.4.57 ended up with a `latest-mac.yml` pointing at a DMG that
+  # was never uploaded (DENE-353). Developer ID signing + notarization is a
+  # separate follow-up; it needs secrets this workflow deliberately does not
+  # carry, and `scripts/package.mjs` skips notarization while `APPLE_TEAM_ID`
+  # is unset.
+  #
+  # `release` (GoReleaser) only runs on the canonical upstream repo, and a
+  # skipped dependency skips this job too. Treat `skipped` as "this repo
+  # publishes the Release itself" — the ensure-release step below creates it —
+  # and keep `failed` as a hard stop so a broken upstream release never gets
+  # Desktop assets bolted onto it. On the private line the test gate for a tag
+  # is the branch CI that produced the tagged commit, not this workflow's
+  # upstream-only `verify` job.
+  #
+  # These mac packages are unsigned (ad-hoc), which is what the private line
+  # ships to its own machines. Do NOT let this matrix publish mac assets on
+  # the canonical upstream repo: those releases carry Developer ID signed +
+  # notarized mac builds, and an ad-hoc signed feed would break Gatekeeper for
+  # every installed client. Wire the Apple credentials into this job before it
+  # ever runs there.
   desktop:
     needs: release
+    if: ${{ always() && !cancelled() && needs.release.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: linux
+            archs: "--x64 --arm64"
+            # Update feed installed clients poll. electron-builder only adds
+            # an arch suffix to Linux feeds, so x64 clients read this one.
+            update_metadata: latest-linux.yml
           - os: windows-latest
             target: win
+            archs: "--x64 --arm64"
+            update_metadata: latest.yml
+          - os: macos-latest
+            target: mac
+            # Apple Silicon only: `latest-mac.yml` is what installed clients
+            # poll, and the Intel build (channel `latest-x64`) would write a
+            # different feed. Add `--x64` here (plus its own feed name) only
+            # when an Intel package is actually wanted.
+            archs: "--arm64"
+            update_metadata: latest-mac.yml
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # No-op upstream, where GoReleaser already published this tag's
+      # Release. On the private line nothing has created it yet, and
+      # electron-builder's publisher would otherwise create it as a draft —
+      # which makes it skip every asset upload (see the `releaseType` note in
+      # apps/desktop/electron-builder.yml). `--generate-notes` gives the
+      # private line the release notes upstream gets from GoReleaser.
+      - name: Ensure the GitHub Release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes \
+              --verify-tag
+          fi
 
       - name: Install rpmbuild (Linux)
         if: matrix.target == 'linux'
@@ -445,9 +504,28 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # electron-builder's GitHub publisher reads this:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Disable code signing on Linux/Windows for now — the public
-          # release is unsigned for these platforms, the CLI carries the
-          # trust boundary. Set CSC_LINK in repo secrets to enable
-          # Windows signing later.
+          # Disable code signing on every platform for now — the public
+          # release is unsigned (ad-hoc on macOS, none on Linux/Windows), the
+          # CLI carries the trust boundary. Set CSC_LINK in repo secrets to
+          # enable Windows signing later, and the Apple credentials to enable
+          # macOS signing + notarization.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always
+        run: node scripts/package.mjs --${{ matrix.target }} ${{ matrix.archs }} --publish always
+
+      # Never trust the packaging step's exit code for "the assets are on the
+      # Release": a dropped upload connection leaves an asset in the `starter`
+      # state or drops it entirely while the publisher still exits 0, which is
+      # how v0.4.56 / v0.4.57 shipped a `latest-mac.yml` with no DMG behind it.
+      # Read the Release back through the API and assert, for every artifact
+      # this job produced, that it exists, is `uploaded`, and has the exact
+      # local byte size (DENE-353).
+      - name: Verify the uploaded release assets
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/verify-release-assets.mjs \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --dist dist \
+            --require "${{ matrix.update_metadata }}"
