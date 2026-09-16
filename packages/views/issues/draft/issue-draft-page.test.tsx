@@ -95,17 +95,34 @@ vi.mock("../../chat/components/chat-input", () => ({
   ChatInput: ({
     onSend,
     disabled,
+    uploadEnabled,
   }: {
-    onSend: (content: string, ids: undefined, commit: () => void) => void;
+    onSend: (
+      content: string,
+      ids: string[] | undefined,
+      commit: () => void,
+    ) => void;
     disabled?: boolean;
+    uploadEnabled?: boolean;
   }) => (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={() => onSend("please continue", undefined, () => {})}
-    >
-      send-turn
-    </button>
+    <div data-upload-enabled={uploadEnabled === true ? "yes" : "no"}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onSend("please continue", undefined, () => {})}
+      >
+        send-turn
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          onSend("look at this", ["att-1", "att-2"], () => {})
+        }
+      >
+        send-turn-with-files
+      </button>
+    </div>
   ),
 }));
 
@@ -307,6 +324,71 @@ describe("IssueDraftPage stages", () => {
     expect(mocks.sendChatMessage).toHaveBeenCalledWith(
       "sess-1",
       'MULTICA_ISSUE_DRAFT_INPUT\n{"user_request":"please continue","current_draft":{"title":"Dark mode","description":"Add it.","status":"","priority":""}}',
+      // A text-only turn still carries no attachment list, so the envelope the
+      // carrier receives is byte-for-byte what it was before uploads existed.
+      undefined,
+    );
+  });
+
+  it("passes the composer's attachment ids through to the chat transport", async () => {
+    // The composer uploads to the workspace and hands back ids; dropping them
+    // is what made the alignment unable to receive a single screenshot
+    // (DENE-369).
+    mocks.sendChatMessage.mockResolvedValue({
+      message_id: "m9",
+      task_id: "t9",
+      attachment_ids: ["att-1", "att-2"],
+    });
+    renderPage();
+    const send = await screen.findByRole("button", { name: "send-turn-with-files" });
+    await userEvent.click(send);
+    await waitFor(() => expect(mocks.sendChatMessage).toHaveBeenCalledTimes(1));
+    expect(mocks.sendChatMessage.mock.calls[0]?.[2]).toEqual(["att-1", "att-2"]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("reports the turn when the server binds fewer attachments than were sent", async () => {
+    // The message landed, so this is not a send failure — but the carrier is
+    // about to answer without the file, and saying nothing would make that look
+    // like the model ignoring it.
+    mocks.sendChatMessage.mockResolvedValue({
+      message_id: "m9",
+      task_id: "t9",
+      attachment_ids: ["att-1"],
+    });
+    renderPage();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "send-turn-with-files" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Message sent, but the files were not attached.",
+    );
+  });
+
+  it("does not false-alarm on a server that predates attachment_ids", async () => {
+    mocks.sendChatMessage.mockResolvedValue({ message_id: "m9", task_id: "t9" });
+    renderPage();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "send-turn-with-files" }),
+    );
+    await waitFor(() => expect(mocks.sendChatMessage).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers uploads while the runtime is online", async () => {
+    renderPage();
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-upload-enabled="yes"]'),
+      ).toBeTruthy(),
+    );
+  });
+
+  it("withdraws the upload affordance while the runtime is offline", async () => {
+    mocks.runtimes = [{ ...ONLINE_RUNTIME, status: "offline" } as RuntimeDevice];
+    renderPage();
+    await waitFor(() =>
+      expect(document.querySelector('[data-upload-enabled="no"]')).toBeTruthy(),
     );
   });
 

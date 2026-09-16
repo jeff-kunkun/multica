@@ -99,7 +99,16 @@ export interface IssueDraftSession {
   confirming: boolean;
   abandoning: boolean;
   createdIssueId: string | null;
-  send: (content: string, commitInput?: () => void) => Promise<boolean>;
+  /**
+   * Sends one turn. `attachmentIds` are the composer's uploaded files, passed
+   * straight through to the chat transport — alignment is a chat session, so
+   * screenshots and files are part of what the user is aligning about.
+   */
+  send: (
+    content: string,
+    attachmentIds?: string[],
+    commitInput?: () => void,
+  ) => Promise<boolean>;
   save: (draft: IssueDraftPayload, status?: "draft" | "ready") => Promise<boolean>;
   /**
    * Folds the carrier's latest `<issue_draft>` block into `current` and saves
@@ -291,14 +300,18 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
    * screen (MUL-5181).
    */
   const send = useCallback(
-    async (content: string, commitInput?: () => void): Promise<boolean> => {
+    async (
+      content: string,
+      attachmentIds?: string[],
+      commitInput?: () => void,
+    ): Promise<boolean> => {
       const text = content.trim();
       if (!text || !draftId || pending || sending || !draft) return false;
       setError(null);
       setSending(true);
       const wire = encodeIssueDraftInput(text, draft);
       try {
-        const result = await api.sendChatMessage(draftId, wire);
+        const result = await api.sendChatMessage(draftId, wire, attachmentIds);
         const createdAt = new Date().toISOString();
         upsertChatMessageToCaches(
           qc,
@@ -319,6 +332,17 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
           created_at: createdAt,
         });
         commitInput?.();
+        // The server reports which attachment ids it actually bound. Diff
+        // against what was asked for so a silent bind failure is visible
+        // instead of a turn the carrier answers without the screenshot. Servers
+        // that predate the field report `undefined`, which is skipped rather
+        // than read as "nothing bound".
+        if (attachmentIds && attachmentIds.length > 0 && result.attachment_ids) {
+          const bound = new Set(result.attachment_ids);
+          if (attachmentIds.some((id) => !bound.has(id))) {
+            setError(t(($) => $.alignment.attachment_bind_failed));
+          }
+        }
         void qc.invalidateQueries({ queryKey: chatKeys.messages(draftId) });
         void qc.invalidateQueries({ queryKey: chatKeys.messagesPage(draftId) });
         void qc.invalidateQueries({ queryKey: chatKeys.pendingTask(draftId) });

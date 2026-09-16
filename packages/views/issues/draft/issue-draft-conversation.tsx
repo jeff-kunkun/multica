@@ -41,9 +41,15 @@ export function IssueDraftConversation({
     | undefined;
   runtimeOnline: boolean;
   sending: boolean;
-  /** `commitInput` is the composer's clear; the owner runs it as soon as the
+  /** Mirrors `ChatInput`'s own send signature so the composer can be handed
+   *  down as-is: `attachmentIds` are what the user uploaded in this turn, and
+   *  `commitInput` is the composer's clear, which the owner runs as soon as the
    *  server accepts the message. */
-  onSend: (content: string, commitInput?: () => void) => Promise<boolean>;
+  onSend: (
+    content: string,
+    attachmentIds?: string[],
+    commitInput?: () => void,
+  ) => Promise<boolean>;
   onStop: () => void;
   error: string | null;
   /** The question the guided policy is waiting on, if any. */
@@ -161,12 +167,16 @@ export function IssueDraftConversation({
       ) : null}
 
       <ChatInput
-        onSend={(content, _attachmentIds, commitInput) =>
-          onSend(content, commitInput)
-        }
+        onSend={onSend}
         onStop={onStop}
         isRunning={pending || sending}
         disabled={!runtimeOnline}
+        // Alignment is a chat session like any other, so the composer's upload
+        // affordance is available whenever the carrier can receive a turn. Left
+        // unset it defaults to false, and paste/drag/button only type the file
+        // name into the editor — the user cannot attach the screenshot the
+        // whole alignment is about (DENE-369).
+        uploadEnabled={runtimeOnline}
         agentName={agentName}
         draftKeyOverride={draftKey}
         editorKeyOverride={draftKey}

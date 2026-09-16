@@ -984,6 +984,7 @@
     "retired_description": "It is no longer one of your unfinished drafts.",
     "load_failed": "Could not load this alignment.",
     "retry": "Retry",
+    "attachment_bind_failed": "Message sent, but the files were not attached. Please try again in a moment.",
     "send_failed": "Could not send that message.",
     "save_failed": "Could not save the draft.",
     "confirm_failed": "Could not create the issue.",
