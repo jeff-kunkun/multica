@@ -11,6 +11,7 @@ import {
   issueDraftIsCreatable,
   issueDraftListOptions,
   issueDraftStage,
+  encodeIssueDraftInput,
   findIssueDraft,
   mergeIssueDraftPayload,
   parseIssueDraftBlock,
@@ -150,6 +151,13 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
   /**
    * Sends one turn.
    *
+   * Every turn goes out as a `MULTICA_ISSUE_DRAFT_INPUT` envelope carrying the
+   * draft the user is asking about, not just their words. The carrier's
+   * instructions say to "preserve good existing draft fields supplied in the
+   * user's message" — supply nothing and the next reply rebuilds the draft from
+   * one message, dropping fields that were already agreed or edited by hand in
+   * the preview. The transcript decodes the envelope back for display.
+   *
    * `commitInput` is the composer's clear, and it runs the moment the server
    * has accepted the message and the caches render it — not after the
    * reconciling invalidations settle. Awaiting those would hold the user's text
@@ -162,8 +170,9 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
       if (!text || !draftId || pending || sending || !draft) return false;
       setError(null);
       setSending(true);
+      const wire = encodeIssueDraftInput(text, draft);
       try {
-        const result = await api.sendChatMessage(draftId, text);
+        const result = await api.sendChatMessage(draftId, wire);
         const createdAt = new Date().toISOString();
         upsertChatMessageToCaches(
           qc,
@@ -172,7 +181,7 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
             id: result.message_id,
             chat_session_id: draftId,
             role: "user",
-            content: text,
+            content: wire,
             task_id: result.task_id,
             created_at: createdAt,
           },

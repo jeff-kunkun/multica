@@ -262,6 +262,35 @@ describe("IssueDraftPage stages", () => {
     const rows = screen.getAllByTestId("transcript-row").map((row) => row.textContent);
     expect(rows).toEqual(["add dark mode", "Which surfaces?"]);
   });
+
+  it("sends every follow-up turn as an envelope carrying the current draft", async () => {
+    // The carrier is told to "preserve good existing draft fields supplied in
+    // the user's message". A turn sent as bare text supplies none, so the next
+    // reply rebuilds the draft from that one message and drops what was already
+    // agreed — including anything the user edited by hand in the preview.
+    mocks.sendChatMessage.mockResolvedValue({ message_id: "m9", task_id: "t9" });
+    renderPage();
+    const send = await screen.findByRole("button", { name: "send-turn" });
+    await userEvent.click(send);
+    await waitFor(() => expect(mocks.sendChatMessage).toHaveBeenCalledTimes(1));
+    expect(mocks.sendChatMessage).toHaveBeenCalledWith(
+      "sess-1",
+      'MULTICA_ISSUE_DRAFT_INPUT\n{"user_request":"please continue","current_draft":{"title":"Dark mode","description":"Add it.","status":"","priority":""}}',
+    );
+  });
+
+  it("still offers the structured preview once the draft is ready", async () => {
+    // A converged draft the user keeps refining produces new carrier blocks;
+    // with this disabled, retyping them by hand is the only way to apply them.
+    mocks.drafts = [draftSummary({ status: "ready" })];
+    renderPage();
+    await screen.findByText("Ready");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Generate preview/i }),
+      ).toBeEnabled(),
+    );
+  });
 });
 
 describe("IssueDraftPage confirming", () => {

@@ -209,7 +209,11 @@ export function IssueDraftPreviewPanel({
               <Button
                 variant="outline"
                 onClick={() => void onGenerate(value)}
-                disabled={!canSave || stage !== "aligning"}
+                // Available while the draft is still editable, `ready`
+                // included: a converged draft that the user keeps refining
+                // produces new carrier blocks, and refusing to fold them in
+                // would leave retyping as the only way to apply them.
+                disabled={!canSave}
               >
                 {t(($) => $.alignment.generate)}
               </Button>
