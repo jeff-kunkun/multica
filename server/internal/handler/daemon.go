@@ -4411,6 +4411,13 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// task's agent capacity or serialization key is re-claimed immediately.
 	h.TaskService.NotifyTaskFinished(*task)
 
+	// Completion-path mirror of the failure sweep inside HandleFailedTasks: a
+	// run that ended cleanly does not imply the issue reached a terminal
+	// status, and until now nothing observed that combination. Deliberately
+	// AFTER reconcileCommentsOnCompletion — that is what may enqueue the
+	// follow-up run which takes this issue off the stalled list.
+	h.TaskService.HandleCompletedTasks(r.Context(), []db.AgentTaskQueue{*task})
+
 	// Best-effort revoke of any agent task token minted at claim time.
 	// The token would naturally expire at the 24h watermark and is also
 	// cascaded on agent_task deletion, but eagerly deleting it on

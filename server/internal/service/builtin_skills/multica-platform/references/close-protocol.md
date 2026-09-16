@@ -88,6 +88,15 @@ assignee or `close.next_owner` when a barrier closed with nobody running, an
 wake failed, or `close.waiting_on` / `close.wake_action=mention` stalled. They
 never write `done`, never promote `backlog` children, and never change models.
 
+The completion path has its own compensation, fired by the run's `/complete`
+rather than by the clock: a run that ends cleanly while the issue is still
+`in_progress` with no active task behind it posts a
+`completion-stall:run-completed-without-terminal-status` system comment naming
+the assignee and the parent issue. Same discipline as the scans above — it moves
+no status and starts no run, and one issue is signalled at most once per 30
+minutes. Treat it as the patrol record that a partial delivery exists; decide
+from the deliverable whether to continue the work or close the issue out.
+
 Checks: `close.status` equals `issue.status` and is a built-in key;
 `wake_action=stage_done` implies status in {`done`,`cancelled`} and
 `conclusion=delivered`; `wake_action=mention` implies `next_owner_type` in

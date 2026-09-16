@@ -275,6 +275,16 @@ writes the literal `done` key.
 - **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
   `todo` when no active task / retry remains — that is the main server-owned
   status write on the agent-run path.
+- **Completed issue-triggered tasks** are the mirror case, and they write no
+  status at all: a run that reaches `/complete` cleanly while the issue is
+  still `in_progress` with nothing queued behind it leaves a system comment
+  carrying `completion-stall:run-completed-without-terminal-status`, naming the
+  current assignee and the parent issue. It reports the stall; it never moves
+  the issue and never starts a run, so deciding whether to continue the work or
+  close the issue out is the dispatcher's job. One issue gets at most one such
+  comment per 30 minutes. A run ending is therefore still not the issue ending,
+  and an agent that delivered part of its acceptance criteria must write the
+  status itself instead of relying on the completion path.
 
 ## Claim ownership without duplicating a run
 
