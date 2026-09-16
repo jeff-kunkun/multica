@@ -327,3 +327,60 @@ func TestCompletionStallEligible(t *testing.T) {
 		}
 	}
 }
+
+// TestHandleCompletedTasksSkipsIssuesWithOpenChildren pins the orchestration
+// case. Dispatching sub-issues and leaving the parent in_progress is the
+// documented way to record "work continues below", so the parent's own run
+// completing there is not a stall — the children are the executors.
+func TestHandleCompletedTasksSkipsIssuesWithOpenChildren(t *testing.T) {
+	ctx := context.Background()
+	fx, svc, _, agentID, runtimeID := newCompletionStallFixture(t)
+	parentID := fx.Issue(t, "Orchestrator issue", testutil.Cols{
+		"status":        "in_progress",
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	fx.Issue(t, "Dispatched child", testutil.Cols{
+		"status":          "todo",
+		"assignee_type":   "agent",
+		"assignee_id":     agentID,
+		"parent_issue_id": parentID,
+	})
+
+	completed := completedTaskFor(t, fx, agentID, runtimeID, parentID)
+	if got := svc.HandleCompletedTasks(ctx, []db.AgentTaskQueue{completed}); got != 0 {
+		t.Fatalf("HandleCompletedTasks signalled = %d, want 0 while a child is still open", got)
+	}
+	if comments := completionStallComments(t, fx, parentID); len(comments) != 0 {
+		t.Fatalf("signal comments = %d, want 0:\n%s", len(comments), strings.Join(comments, "\n"))
+	}
+}
+
+// TestHandleCompletedTasksSignalsWhenEveryChildIsTerminal is the other side of
+// the same guard: once every child is done or cancelled, the parent sitting in
+// in_progress with nothing queued is a real stall again.
+func TestHandleCompletedTasksSignalsWhenEveryChildIsTerminal(t *testing.T) {
+	ctx := context.Background()
+	fx, svc, _, agentID, runtimeID := newCompletionStallFixture(t)
+	parentID := fx.Issue(t, "Orchestrator issue", testutil.Cols{
+		"status":        "in_progress",
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	fx.Issue(t, "Delivered child", testutil.Cols{
+		"status":          "done",
+		"parent_issue_id": parentID,
+	})
+	fx.Issue(t, "Dropped child", testutil.Cols{
+		"status":          "cancelled",
+		"parent_issue_id": parentID,
+	})
+
+	completed := completedTaskFor(t, fx, agentID, runtimeID, parentID)
+	if got := svc.HandleCompletedTasks(ctx, []db.AgentTaskQueue{completed}); got != 1 {
+		t.Fatalf("HandleCompletedTasks signalled = %d, want 1 once every child is terminal", got)
+	}
+	if comments := completionStallComments(t, fx, parentID); len(comments) != 1 {
+		t.Fatalf("signal comments = %d, want 1", len(comments))
+	}
+}

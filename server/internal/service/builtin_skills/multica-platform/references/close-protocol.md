@@ -94,7 +94,9 @@ rather than by the clock: a run that ends cleanly while the issue is still
 `completion-stall:run-completed-without-terminal-status` system comment naming
 the assignee and the parent issue. Same discipline as the scans above — it moves
 no status and starts no run, and one issue is signalled at most once per 30
-minutes. Treat it as the patrol record that a partial delivery exists; decide
+minutes. A parent that still has a non-terminal child is excluded: dispatching
+sub-issues and staying `in_progress` is how "work continues below" is recorded,
+so the parent is only signalled once every child is `done` or `cancelled`. Treat it as the patrol record that a partial delivery exists; decide
 from the deliverable whether to continue the work or close the issue out.
 
 Checks: `close.status` equals `issue.status` and is a built-in key;

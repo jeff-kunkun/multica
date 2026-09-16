@@ -282,7 +282,9 @@ writes the literal `done` key.
   current assignee and the parent issue. It reports the stall; it never moves
   the issue and never starts a run, so deciding whether to continue the work or
   close the issue out is the dispatcher's job. One issue gets at most one such
-  comment per 30 minutes. A run ending is therefore still not the issue ending,
+  comment per 30 minutes, and an issue that still has a non-terminal child is
+  never signalled — dispatching sub-issues and staying `in_progress` is the
+  documented way to record that the work continues below. A run ending is therefore still not the issue ending,
   and an agent that delivered part of its acceptance criteria must write the
   status itself instead of relying on the completion path.
 

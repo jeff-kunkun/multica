@@ -109,6 +109,9 @@ func (s *TaskService) signalCompletionStall(ctx context.Context, issueKey string
 	if !completionStallEligible(effectiveStatus, hasActive) {
 		return false
 	}
+	if s.hasOpenChildren(ctx, issue) {
+		return false
+	}
 
 	recent, err := s.Queries.HasRecentWatchdogComment(ctx, db.HasRecentWatchdogCommentParams{
 		IssueID: issueID,
@@ -160,6 +163,38 @@ func (s *TaskService) signalCompletionStall(ctx context.Context, issueKey string
 		"status", issue.Status,
 	)
 	return true
+}
+
+// hasOpenChildren reports whether the issue still has a non-terminal child.
+//
+// An orchestrator that dispatches sub-issues ends its own run with the parent
+// deliberately in_progress and nothing queued on the parent row — that is the
+// documented way to record "work continues below", not a stall. Without this
+// guard every orchestration turn would emit a signal saying "no executor is
+// working on it" while its children were actively running, which is exactly
+// the noise that would make the dispatcher stop reading the marker. A parent
+// whose children later go quiet is still caught: the stagnation watchdog's
+// scan A and scan B cover that case once the parent is stale.
+//
+// Failing open (returning false on a query error) keeps the detection
+// behaviour of the failure path: a missing children read must not silence a
+// genuine stall.
+func (s *TaskService) hasOpenChildren(ctx context.Context, issue db.Issue) bool {
+	children, err := s.Queries.ListChildIssues(ctx, issue.ID)
+	if err != nil {
+		slog.Warn("completion stall: list children failed",
+			"issue_id", util.UUIDToString(issue.ID), "error", err)
+		return false
+	}
+	for _, child := range children {
+		switch issuestatus.Effective(ctx, s.Queries, child.WorkspaceID, child.Status) {
+		case issuestatus.Done, issuestatus.Cancelled:
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 // completionStallNotice renders the signal body. It names the current assignee
