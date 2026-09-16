@@ -52,6 +52,47 @@ describe("buildTransferCliArgs", () => {
     ]);
   });
 
+  // The card's default export must stay runnable on a CLI that predates the
+  // `issues` group, so the include flag is sent only for a deliberate tick
+  // (contract §9.3).
+  it("sends the issues include only when the task group was asked for", () => {
+    expect(
+      buildTransferCliArgs(PROFILE, {
+        action: "export",
+        workspace: "acme",
+        outPath: "/tmp/acme.zip",
+        includeIssues: true,
+      }),
+    ).toEqual([
+      "--profile",
+      PROFILE,
+      "transfer",
+      "export",
+      "--workspace",
+      "acme",
+      "--include",
+      "config,conversations,attachments,issues",
+      "--out",
+      "/tmp/acme.zip",
+    ]);
+    expect(
+      buildTransferCliArgs(PROFILE, {
+        action: "export",
+        workspace: "acme",
+        outPath: "/tmp/acme.zip",
+      }),
+    ).not.toContain("--include");
+    // The estimate has to measure the same package the export will write.
+    expect(
+      buildTransferCliArgs(PROFILE, {
+        action: "export",
+        workspace: "acme",
+        estimate: true,
+        includeIssues: true,
+      }),
+    ).toContain("config,conversations,attachments,issues");
+  });
+
   it("builds import args with --in and optional --dry-run", () => {
     expect(
       buildTransferCliArgs(PROFILE, {
@@ -164,6 +205,16 @@ describe("classifyTransferError", () => {
     expect(
       classifyTransferError("transfer_bundle_corrupt: sha256 mismatch for manifest.json"),
     ).toBe("transfer_bundle_corrupt");
+  });
+
+  // The one task-import refusal a user can act on, so it gets its own code
+  // instead of falling through to the raw 400 (DENE-387).
+  it("maps the non-empty target refusal", () => {
+    expect(
+      classifyTransferError(
+        'API error: 400 {"error":{"code":"transfer_issues_target_not_empty","message":"target workspace already has issues outside the bundle"}}',
+      ),
+    ).toBe("issues_target_not_empty");
   });
 });
 
@@ -292,6 +343,51 @@ describe("parseTransferImportReport", () => {
     const report = parseTransferImportReport(`{"config_report":{"stats":{}}}`);
     expect(report.autopilots).toEqual({ imported: 0 });
   });
+
+  // V3: the report answers "did my tasks arrive, and what lost a reference?".
+  // The rows themselves are one array per kind, which is unreadable in a card,
+  // so the parser flattens them to counts (contract §9.6).
+  it("reads the task counts and flattens the degraded rows", () => {
+    const report = parseTransferImportReport(`{
+  "config_report": { "stats": { "created": 2 } },
+  "issues_report": {
+    "applied": true,
+    "issues_created": 42,
+    "issues_skipped": 1,
+    "comments_created": 118,
+    "comments_skipped": 3,
+    "labels_created": 5,
+    "reactions_created": 4,
+    "subscribers_created": 90,
+    "parents_backfilled": 12,
+    "status_unmapped": [{ "entity": "issue" }, { "entity": "issue" }],
+    "assignee_unmapped": [{ "entity": "issue" }],
+    "mention_unmapped": [{ "entity": "comment" }]
+  }
+}`);
+    expect(report.issues).toEqual({
+      applied: true,
+      issuesCreated: 42,
+      issuesSkipped: 1,
+      commentsCreated: 118,
+      commentsSkipped: 3,
+      labelsCreated: 5,
+      reactionsCreated: 4,
+      subscribersCreated: 90,
+      parentsBackfilled: 12,
+      degraded: [
+        { kind: "status", count: 2 },
+        { kind: "assignee", count: 1 },
+        { kind: "mention", count: 1 },
+      ],
+    });
+  });
+
+  it("leaves the task section absent when the bundle carried no tasks", () => {
+    expect(
+      parseTransferImportReport(`{"config_report":{"stats":{}}}`).issues,
+    ).toBeUndefined();
+  });
 });
 
 describe("parseTransferEstimate / progress", () => {
@@ -364,6 +460,34 @@ describe("parseTransferRunRequest", () => {
         action: "export",
         workspace: "acme",
         outPath: "/tmp/acme.zip",
+      }),
+    ).toEqual({
+      action: "export",
+      workspace: "acme",
+      outPath: "/tmp/acme.zip",
+    });
+  });
+
+  it("carries the task-group tick and drops it when it is absent", () => {
+    expect(
+      parseTransferRunRequest({
+        action: "export",
+        workspace: "acme",
+        outPath: "/tmp/acme.zip",
+        includeIssues: true,
+      }),
+    ).toEqual({
+      action: "export",
+      workspace: "acme",
+      outPath: "/tmp/acme.zip",
+      includeIssues: true,
+    });
+    expect(
+      parseTransferRunRequest({
+        action: "export",
+        workspace: "acme",
+        outPath: "/tmp/acme.zip",
+        includeIssues: "yes",
       }),
     ).toEqual({
       action: "export",

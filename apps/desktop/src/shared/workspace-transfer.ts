@@ -2,6 +2,9 @@ export type TransferErrorCode =
   | "target_unsupported"
   | "cli_too_old"
   | "transfer_bundle_corrupt"
+  // V3: the target workspace already holds tasks outside the bundle, so the
+  // task group cannot keep its issue numbers (contract §2.2).
+  | "issues_target_not_empty"
   | "cli_not_found"
   | "cancelled"
   | "busy"
@@ -103,6 +106,41 @@ export type TransferAutopilotSummary = {
   imported: number;
 };
 
+/** What a task-group import did, per row kind (V3 contract §9.4 / §9.6). */
+export type TransferIssuesSummary = {
+  /** False on a dry run: the counts are the plan, not a write. */
+  applied: boolean;
+  issuesCreated: number;
+  issuesSkipped: number;
+  commentsCreated: number;
+  commentsSkipped: number;
+  labelsCreated: number;
+  reactionsCreated: number;
+  subscribersCreated: number;
+  parentsBackfilled: number;
+  /** Rows that lost a reference, by what could not be mapped; zero rows dropped. */
+  degraded: TransferIssuesDegradation[];
+};
+
+export type TransferIssuesDegradation = {
+  kind: TransferIssuesDegradationKind;
+  count: number;
+};
+
+export type TransferIssuesDegradationKind =
+  | "status"
+  | "assignee"
+  | "creator"
+  | "project"
+  | "author"
+  | "resolution"
+  | "property"
+  | "parent"
+  | "mention"
+  | "label"
+  | "reaction"
+  | "reparented";
+
 export type TransferImportReportView = {
   secrets_to_fill: TransferSecretToFill[];
   runtimes_to_bind: TransferRuntimeBind[];
@@ -110,10 +148,18 @@ export type TransferImportReportView = {
   stats: TransferImportStats;
   /** Absent on reports from a Desktop build older than the option switches. */
   autopilots?: TransferAutopilotSummary;
+  /** Absent when the CLI predates the `issues` group, or the bundle had none. */
+  issues?: TransferIssuesSummary;
 };
 
 export type TransferRunRequest =
-  | { action: "export"; workspace: string; outPath: string }
+  | {
+      action: "export";
+      workspace: string;
+      outPath: string;
+      /** The V3 task group (contract §9.3); absent unless the user ticked it. */
+      includeIssues?: boolean;
+    }
   | {
       action: "import";
       workspace: string;

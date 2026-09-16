@@ -182,6 +182,153 @@ describe("WorkspaceMigrationCard", () => {
     expect(window.localStorage.getItem(TRANSFER_EXPORT_COMPLETED_KEY)).toBe("1");
   });
 
+  // The task group is the one include that is off by default (contract §9.3):
+  // the zip grows several times over, the target has to be empty, and a default
+  // export keeps producing schema_version 1 that an older target can still read.
+  it("leaves the task group off until the user ticks it", async () => {
+    const user = userEvent.setup();
+    desktop.pickExport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "export",
+      outPath: "/tmp/acme.zip",
+      bytes: 2048,
+    } satisfies TransferRunResult);
+    renderCard();
+
+    const toggle = screen.getByRole("checkbox", { name: "Tasks and comments" });
+    expect(toggle).not.toBeChecked();
+    // The prerequisite is not shown before it is relevant: the target being
+    // empty only matters once the bundle carries tasks.
+    expect(
+      screen.queryByTestId("workspace-migration-include-issues-note"),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Export to zip" }));
+
+    await waitFor(() =>
+      expect(desktop.run).toHaveBeenCalledWith({
+        action: "export",
+        workspace: "acme",
+        outPath: "/tmp/acme.zip",
+      }),
+    );
+  });
+
+  // "The import was refused" is not actionable on its own: the tick has to say
+  // what the target has to look like before the run, not after the 400
+  // (contract §9.3; DENE-266 is the same mistake on the V1 card).
+  it("states the empty-workspace prerequisite as soon as the task group is ticked", async () => {
+    const user = userEvent.setup();
+    desktop.pickExport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "export",
+      outPath: "/tmp/acme.zip",
+      bytes: 2048,
+    } satisfies TransferRunResult);
+    renderCard();
+
+    await user.click(screen.getByRole("checkbox", { name: "Tasks and comments" }));
+
+    const note = screen.getByTestId("workspace-migration-include-issues-note");
+    expect(note).toHaveTextContent(
+      "The task group needs a target workspace that has no tasks at all.",
+    );
+    expect(note).toHaveTextContent("Create an empty workspace and import into that one.");
+
+    await user.click(screen.getByRole("button", { name: "Export to zip" }));
+
+    await waitFor(() =>
+      expect(desktop.run).toHaveBeenCalledWith({
+        action: "export",
+        workspace: "acme",
+        outPath: "/tmp/acme.zip",
+        includeIssues: true,
+      }),
+    );
+  });
+
+  // A bare "API error: 400" hides both the cause and the way out; the whole
+  // point of mapping the code is the next action (DENE-266 / DENE-387).
+  it("turns the non-empty target refusal into a cause and a next step", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: false,
+      code: "issues_target_not_empty",
+      message: "API error: 400 transfer_issues_target_not_empty",
+    } satisfies TransferRunResult);
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+
+    const alert = await screen.findByTestId("workspace-migration-error");
+    expect(alert).toHaveTextContent(
+      "This workspace already has tasks, so the task group was refused",
+    );
+    expect(alert).toHaveTextContent("Create an empty workspace and import there.");
+    expect(alert).toHaveTextContent("--renumber");
+    expect(alert).not.toHaveTextContent("API error: 400");
+  });
+
+  // The V3 report answers "did my tasks arrive, and did anything quietly lose a
+  // reference?" — the counts the V2 report had no fields for.
+  it("shows the task counts and the rows that lost a reference", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "import",
+      dryRun: true,
+      report: {
+        ...importReport,
+        issues: {
+          applied: false,
+          issuesCreated: 42,
+          issuesSkipped: 1,
+          commentsCreated: 118,
+          commentsSkipped: 3,
+          labelsCreated: 5,
+          reactionsCreated: 0,
+          subscribersCreated: 90,
+          parentsBackfilled: 12,
+          degraded: [
+            { kind: "status" as const, count: 2 },
+            { kind: "assignee" as const, count: 1 },
+          ],
+        },
+      },
+    });
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+
+    const block = await screen.findByTestId("workspace-migration-issues");
+    expect(block).toHaveTextContent("Tasks written");
+    expect(block).toHaveTextContent("42");
+    expect(block).toHaveTextContent("Comments skipped");
+    expect(block).toHaveTextContent("5 labels · 90 subscribers rebuilt · 12 thread links backfilled");
+    expect(block).toHaveTextContent("Status not in this workspace's catalog");
+    expect(block).toHaveTextContent("Assignee could not be mapped");
+  });
+
   it("previews a dry-run report then applies after confirmation", async () => {
     const user = userEvent.setup();
     desktop.pickImport.mockResolvedValue({

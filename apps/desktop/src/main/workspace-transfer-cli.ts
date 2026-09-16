@@ -8,6 +8,9 @@ import {
   type TransferImportOptions,
   type TransferImportReportView,
   type TransferImportStats,
+  type TransferIssuesDegradation,
+  type TransferIssuesDegradationKind,
+  type TransferIssuesSummary,
   type TransferProgressEvent,
   type TransferRunRequest,
   type TransferRunResult,
@@ -19,11 +22,19 @@ import {
   type TransferSecretToFill,
 } from "../shared/workspace-transfer";
 
+/**
+ * The card changes one include group and leaves the rest to the CLI's own
+ * default (`config,conversations,attachments`), so a default export still runs
+ * on a CLI that predates the `issues` group (contract §9.3).
+ */
+const TRANSFER_INCLUDE_WITH_ISSUES = "config,conversations,attachments,issues";
+
 export type TransferCliExportRequest = {
   action: "export";
   workspace: string;
   outPath?: string;
   estimate?: boolean;
+  includeIssues?: boolean;
 };
 
 export type TransferCliImportRequest = {
@@ -86,6 +97,9 @@ export function buildTransferCliArgs(
   }
   if (req.action === "export") {
     args.push("export", "--workspace", req.workspace);
+    if (req.includeIssues === true) {
+      args.push("--include", TRANSFER_INCLUDE_WITH_ISSUES);
+    }
     if (req.estimate === true) {
       args.push("--estimate");
       return args;
@@ -121,7 +135,12 @@ export function parseTransferRunRequest(raw: unknown): TransferRunRequest | null
     const workspace = asNonEmptyString(obj.workspace);
     const outPath = asNonEmptyString(obj.outPath);
     if (!workspace || !outPath || !isAbsolute(outPath)) return null;
-    return { action: "export", workspace, outPath };
+    return {
+      action: "export",
+      workspace,
+      outPath,
+      ...(obj.includeIssues === true ? { includeIssues: true } : {}),
+    };
   }
   if (obj.action === "import") {
     const workspace = asNonEmptyString(obj.workspace);
@@ -188,6 +207,12 @@ export function classifyTransferError(text: string): TransferErrorCode {
   const blob = text.toLowerCase();
   if (blob.includes("target_unsupported")) return "target_unsupported";
   if (blob.includes("transfer_bundle_corrupt")) return "transfer_bundle_corrupt";
+  // The target holds tasks outside the bundle, so the task group is refused
+  // before any write (contract §2.2). The card turns this into the one action
+  // that unblocks it — a fresh empty workspace — instead of a bare 400.
+  if (blob.includes("transfer_issues_target_not_empty")) {
+    return "issues_target_not_empty";
+  }
   if (
     /unknown command ["']transfer["']/.test(blob) ||
     blob.includes("unknown command transfer") ||
@@ -295,7 +320,85 @@ export function parseTransferImportReport(stdout: string): TransferImportReportV
       .filter(Boolean) as TransferExportGap[],
     stats: parseStats(statsSource),
     autopilots: parseAutopilotSummary(configReport),
+    issues: parseTransferIssuesSummary(obj),
   };
+}
+
+/**
+ * The V3 task counts. The CLI forwards the server's own `TransferIssuesReport`
+ * (contract §9.6), whose fields are snake_case; the camelCase spellings are
+ * accepted as well so the renderer's field names parse if the CLI ever mirrors
+ * them. A report with no task section means the bundle carried no tasks — the
+ * summary is undefined, not a block of zeroes the card would have to explain.
+ */
+function parseTransferIssuesSummary(
+  root: Record<string, unknown>,
+): TransferIssuesSummary | undefined {
+  const source = firstObject(root.issues_report, root.issues);
+  if (!source) return undefined;
+  const count = (...keys: string[]): number => {
+    for (const key of keys) {
+      const value = asNumber(source[key]);
+      if (value !== undefined) return value;
+    }
+    return 0;
+  };
+  return {
+    applied: source.applied === true,
+    issuesCreated: count("issues_created", "issuesCreated"),
+    issuesSkipped: count("issues_skipped", "issuesSkipped"),
+    commentsCreated: count("comments_created", "commentsCreated"),
+    commentsSkipped: count("comments_skipped", "commentsSkipped"),
+    labelsCreated: count("labels_created", "labelsCreated"),
+    reactionsCreated: count("reactions_created", "reactionsCreated"),
+    subscribersCreated: count("subscribers_created", "subscribersCreated"),
+    parentsBackfilled: count("parents_backfilled", "parentsBackfilled"),
+    degraded: parseTransferIssuesDegradations(source),
+  };
+}
+
+/**
+ * The unmapped rows arrive as one array per reference kind; the card only shows
+ * which kind lost rows and how many, so they are flattened to counts here.
+ */
+function parseTransferIssuesDegradations(
+  source: Record<string, unknown>,
+): TransferIssuesDegradation[] {
+  const rows: TransferIssuesDegradation[] = [];
+  for (const [kind, keys] of DEGRADATION_KEYS) {
+    let count = 0;
+    for (const key of keys) {
+      if (Array.isArray(source[key])) count += source[key].length;
+    }
+    if (count > 0) rows.push({ kind, count });
+  }
+  return rows;
+}
+
+const DEGRADATION_KEYS: ReadonlyArray<
+  readonly [TransferIssuesDegradationKind, readonly string[]]
+> = [
+  ["status", ["status_unmapped", "statusUnmapped"]],
+  ["assignee", ["assignee_unmapped", "assigneeUnmapped"]],
+  ["creator", ["creator_unmapped", "creatorUnmapped"]],
+  ["project", ["project_unmapped", "projectUnmapped"]],
+  ["author", ["comment_author_unmapped", "authorUnmapped"]],
+  ["resolution", ["resolution_actor_unmapped", "resolutionUnmapped"]],
+  ["property", ["property_unmapped", "propertyUnmapped"]],
+  ["parent", ["parent_unmapped", "parentUnmapped"]],
+  ["mention", ["mention_unmapped", "mentionUnmapped"]],
+  ["label", ["label_unmapped", "labelUnmapped"]],
+  ["reaction", ["reaction_actor_unmapped", "reactionUnmapped"]],
+  ["reparented", ["parent_reparented_to_ancestor", "parentReparentedToAncestor"]],
+];
+
+function firstObject(...values: unknown[]): Record<string, unknown> | null {
+  for (const value of values) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+  }
+  return null;
 }
 
 /**
@@ -377,6 +480,7 @@ export async function runTransferCli(
       action: "export",
       workspace: req.workspace,
       estimate: true,
+      includeIssues: req.includeIssues,
     });
     const estimate = await run(estimateArgs);
     if (estimate.code !== 0) {
@@ -401,6 +505,7 @@ export async function runTransferCli(
       action: "export",
       workspace: req.workspace,
       outPath: req.outPath,
+      includeIssues: req.includeIssues,
     });
     const result = await run(exportArgs);
     feedProgress.flush();

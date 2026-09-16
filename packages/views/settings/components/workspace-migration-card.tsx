@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { autopilotKeys } from "@multica/core/autopilots/queries";
@@ -54,6 +54,8 @@ import {
   type TransferErrorCode,
   type TransferImportOptions,
   type TransferImportReportView,
+  type TransferIssuesDegradationKind,
+  type TransferIssuesSummary,
   type TransferProgressEvent,
   type TransferRuntimeBind,
   type TransferRuntimeBinding,
@@ -129,6 +131,10 @@ export function WorkspaceMigrationCard() {
   const qc = useQueryClient();
 
   const [busy, setBusy] = useState(false);
+  // The V3 task group is off until the user asks for it (contract §9.3): it
+  // multiplies the zip size and the target workspace has to be empty, so a
+  // default export keeps working against a target that predates V3.
+  const [includeIssues, setIncludeIssues] = useState(false);
   // Which transfer is in flight. Preview and apply are told apart so the
   // import button never says "applying" while it is only re-running a preview
   // after a conflict-policy change (DENE-318).
@@ -185,6 +191,11 @@ export function WorkspaceMigrationCard() {
     switch (code) {
       case "target_unsupported":
         return t(($) => $.config_transfer.migration.target_unsupported);
+      case "issues_target_not_empty":
+        // Not a generic failure: the task group is refused before any write, and
+        // the way out is a fresh empty workspace (or the CLI's --renumber, whose
+        // cost the message has to state). DENE-266 is why this is not a raw 400.
+        return t(($) => $.config_transfer.migration.issues_target_not_empty);
       case "cli_too_old":
       case "cli_not_found":
         return t(($) => $.config_transfer.migration.cli_too_old);
@@ -224,6 +235,9 @@ export function WorkspaceMigrationCard() {
         action: "export",
         workspace: slug,
         outPath: picked.path,
+        // Only a deliberate tick sends the flag, so an export against a CLI
+        // that predates the `issues` group keeps working (contract §9.3).
+        ...(includeIssues ? { includeIssues: true } : {}),
       });
       if (!result.ok) {
         // The main process refuses a second transfer while one is running.
@@ -441,6 +455,50 @@ export function WorkspaceMigrationCard() {
             {t(($) => $.config_transfer.migration.export_order_hint)}
           </p>
         </div>
+
+        <SettingsRow
+          label={t(($) => $.config_transfer.migration.option_include_issues)}
+          description={t(
+            ($) => $.config_transfer.migration.option_include_issues_hint,
+          )}
+        >
+          <Checkbox
+            aria-label={t(
+              ($) => $.config_transfer.migration.option_include_issues,
+            )}
+            checked={includeIssues}
+            disabled={!canManage || busy || !slug}
+            onCheckedChange={(checked) => setIncludeIssues(checked === true)}
+          />
+        </SettingsRow>
+
+        {includeIssues ? (
+          // The prerequisite is stated where the tick happens, not after the
+          // import has already been refused (contract §9.3).
+          <div
+            className="mx-4 mb-3 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2"
+            data-testid="workspace-migration-include-issues-note"
+          >
+            <AlertTriangle
+              className="mt-0.5 size-4 shrink-0 text-warning"
+              aria-hidden="true"
+            />
+            <div className="space-y-1">
+              <p className="text-body text-foreground">
+                {t(
+                  ($) =>
+                    $.config_transfer.migration.include_issues_requires_empty_target,
+                )}
+              </p>
+              <p className="text-caption leading-5 text-muted-foreground">
+                {t(
+                  ($) =>
+                    $.config_transfer.migration.include_issues_empty_target_hint,
+                )}
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         {progress ? (
           <div
@@ -769,6 +827,8 @@ function ImportReportView({
         </div>
       </SettingsCard>
 
+      {report.issues ? <IssuesReport summary={report.issues} /> : null}
+
       {autopilots && autopilots.imported > 0 ? (
         <div
           className="space-y-1 px-4"
@@ -831,6 +891,133 @@ function ImportReportView({
           </Button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The task group's own counts (DENE-387, contract §9.4). Tasks are the one part
+ * of a migration that can arrive looking fine while having lost references — a
+ * status key the target catalog does not have, an assignee that fell back to
+ * unassigned — so the written and skipped counts are shown next to what was
+ * degraded, per kind.
+ */
+function IssuesReport({ summary }: { summary: TransferIssuesSummary }) {
+  const { t } = useT("settings");
+  const counts = [
+    {
+      key: "issues-created",
+      label: t(($) => $.config_transfer.migration.issues_created),
+      count: summary.issuesCreated,
+    },
+    {
+      key: "issues-skipped",
+      label: t(($) => $.config_transfer.migration.issues_skipped),
+      count: summary.issuesSkipped,
+    },
+    {
+      key: "comments-created",
+      label: t(($) => $.config_transfer.migration.comments_created),
+      count: summary.commentsCreated,
+    },
+    {
+      key: "comments-skipped",
+      label: t(($) => $.config_transfer.migration.comments_skipped),
+      count: summary.commentsSkipped,
+    },
+  ] as const;
+  // Only the rows that moved are worth a line; a migration of tasks with no
+  // labels should not print "0 labels".
+  const extras = [
+    summary.labelsCreated > 0
+      ? t(($) => $.config_transfer.migration.issues_labels, {
+          count: summary.labelsCreated,
+        })
+      : null,
+    summary.reactionsCreated > 0
+      ? t(($) => $.config_transfer.migration.issues_reactions, {
+          count: summary.reactionsCreated,
+        })
+      : null,
+    summary.subscribersCreated > 0
+      ? t(($) => $.config_transfer.migration.issues_subscribers, {
+          count: summary.subscribersCreated,
+        })
+      : null,
+    summary.parentsBackfilled > 0
+      ? t(($) => $.config_transfer.migration.issues_parents, {
+          count: summary.parentsBackfilled,
+        })
+      : null,
+  ].filter((line): line is string => line !== null);
+
+  const degradeLabel = (kind: TransferIssuesDegradationKind): string => {
+    switch (kind) {
+      case "status":
+        return t(($) => $.config_transfer.migration.degrade_status);
+      case "assignee":
+        return t(($) => $.config_transfer.migration.degrade_assignee);
+      case "creator":
+        return t(($) => $.config_transfer.migration.degrade_creator);
+      case "project":
+        return t(($) => $.config_transfer.migration.degrade_project);
+      case "author":
+        return t(($) => $.config_transfer.migration.degrade_author);
+      case "resolution":
+        return t(($) => $.config_transfer.migration.degrade_resolution);
+      case "property":
+        return t(($) => $.config_transfer.migration.degrade_property);
+      case "parent":
+        return t(($) => $.config_transfer.migration.degrade_parent);
+      case "mention":
+        return t(($) => $.config_transfer.migration.degrade_mention);
+      case "label":
+        return t(($) => $.config_transfer.migration.degrade_label);
+      case "reaction":
+        return t(($) => $.config_transfer.migration.degrade_reaction);
+      case "reparented":
+        return t(($) => $.config_transfer.migration.degrade_reparented);
+    }
+  };
+
+  return (
+    <div className="space-y-2" data-testid="workspace-migration-issues">
+      <h3 className="text-body font-semibold">
+        {t(($) => $.config_transfer.migration.issues_title)}
+      </h3>
+      <SettingsCard>
+        <div className="grid grid-cols-2 gap-3 px-4 py-4 sm:grid-cols-4">
+          {counts.map((item) => (
+            <div key={item.key}>
+              <p className="text-caption text-muted-foreground">{item.label}</p>
+              <p className="text-title font-medium tabular-nums">{item.count}</p>
+            </div>
+          ))}
+        </div>
+        {extras.length > 0 ? (
+          <p className="border-t border-surface-border px-4 py-3 text-caption text-muted-foreground">
+            {extras.join(" · ")}
+          </p>
+        ) : null}
+        {summary.degraded.length > 0 ? (
+          <ul className="divide-y divide-surface-border border-t border-surface-border">
+            <li className="px-4 py-2 text-caption text-muted-foreground">
+              {t(($) => $.config_transfer.migration.issues_degraded_title)}
+            </li>
+            {summary.degraded.map((row) => (
+              <li
+                key={row.kind}
+                className="flex items-center justify-between gap-3 px-4 py-2 text-body"
+              >
+                <span>{degradeLabel(row.kind)}</span>
+                <span className="tabular-nums text-muted-foreground">
+                  {row.count}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </SettingsCard>
     </div>
   );
 }
