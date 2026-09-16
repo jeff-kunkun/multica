@@ -49,17 +49,23 @@ export function SubIssueBlockerSummary({ issue, children }: { issue: Issue; chil
     for (const list of knownByParent.values()) for (const item of list) result.set(item.identifier, item);
     return result;
   }, [issue, knownByParent]);
-  const waitingIds = useMemo(() => [...new Set([...allKnown.values()]
-    .map((item) => closeProtocolWaitingOn(readCloseProtocol(item.metadata, item.status).waitingOn))
-    .filter((id): id is string => !!id && !allKnown.has(id))], [allKnown]);
+  const waitingIds = useMemo(() => {
+    const result = new Set<string>();
+    for (const item of allKnown.values()) {
+      const waitingOn = closeProtocolWaitingOn(readCloseProtocol(item.metadata, item.status).waitingOn);
+      if (waitingOn && !allKnown.has(waitingOn)) result.add(waitingOn);
+    }
+    return [...result];
+  }, [allKnown]);
   const waitingQueries = useQueries({
     queries: waitingIds.map((identifier) => issueIdentifierOptions(wsId, identifier)),
   });
   const issueByIdentifier = useMemo(() => {
     const result = new Map(allKnown);
     waitingQueries.forEach((query, index) => {
+      const identifier = waitingIds[index];
       const value = query.data;
-      if (value) result.set(waitingIds[index], value);
+      if (identifier && value) result.set(identifier, value);
     });
     return result;
   }, [allKnown, waitingIds, waitingQueries]);
@@ -81,10 +87,15 @@ export function SubIssueBlockerSummary({ issue, children }: { issue: Issue; chil
       <ul className="mt-1.5 space-y-1">
         {roots.slice(0, 5).map((root) => {
           const target = byId.get(root.id);
+          // A cross-family `waiting_on` target that no snapshot resolved —
+          // identifier query answered nothing, or has not settled yet — has no
+          // issue to key `byId` with: its ref carries the identifier in both
+          // fields. Link that identifier so the row still lists the ticket
+          // number and stays one click away from the blocker.
           return (
             <li key={root.id} className="flex min-w-0 items-center gap-1.5 text-caption">
               <CircleDot className="size-3 shrink-0 text-destructive" aria-hidden />
-              {target ? <AppLink href={paths.issueDetail(target.id)} className="truncate text-muted-foreground hover:text-foreground">{target.identifier} · {target.title}</AppLink> : <span>{root.identifier}</span>}
+              <AppLink href={paths.issueDetail(target?.id ?? root.identifier)} className="truncate text-muted-foreground hover:text-foreground">{target ? `${target.identifier} · ${target.title}` : root.identifier}</AppLink>
             </li>
           );
         })}
