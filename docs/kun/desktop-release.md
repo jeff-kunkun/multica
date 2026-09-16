@@ -9,6 +9,8 @@
 3. **构建基线必须是当下的 `kun` tip，且构建结束后要复核 tip 有没有前进。** DENE-276 的第一次构建出自 `b4865a77d`，落后 tip 4 个 commit，其中 `da4bc9bbc`(DENE-289) 恰好重写了导出路径 302 行——照那份产物发出去，用户重测会再次踩到同一个缺陷。
 4. **不在 Release 说明、评论、产物里写任何 token / 凭据 / 环境变量值。**
 5. **版本号只由 tag 决定。** `apps/desktop/scripts/package.mjs` 从 `git describe --tags --match 'v[0-9]*'` 推导版本，与 GoReleaser 给 CLI 的 `main.version` 同源。不要手改 `apps/desktop/package.json` 的 `version`。
+6. **构建一出炉就把产物挪出 worktree。** run 结束时 worktree 会被回收，产物跟着一起没。DENE-329 连栽两次：两轮都成功构建出 DMG/ZIP，都因为 run 在上传途中终止而被清理掉，Release 上只剩 `latest-mac.yml` 和 blockmap。先 `cp` 到 `~/multica-releases/<tag>/`，再开始上传。
+7. **先传两个大产物，最后传 `latest-mac.yml`。** 清单先上去而产物没传完，等于对着所有已装客户端广播一个指向 404 的自动更新地址——比不发版更糟。顺序错了就先把清单删掉，传完产物再补。
 
 ## 时间预期（先说，别让用户干等）
 
@@ -16,6 +18,9 @@
 | --- | --- | --- |
 | `pnpm install --frozen-lockfile`（11 个 workspace 包，store 全冷） | ~70 分钟 | 数分钟 |
 | `pnpm --filter @multica/desktop package` 实际打包 | ~7 分钟 | ~6 分钟 |
+| 上传 DMG + ZIP 到 GitHub Release（约 450 MB） | 40–60 分钟 | 40–60 分钟 |
+
+上传不会因为缓存变快：走代理到 uploads.github.com 实测单连接只有 ~110 KB/s，两个大产物并行推才勉强到 ~200 KB/s。并行推两个文件比串行快近一倍，**一定要并行**。`gh release upload` 卡住时不会报错也不会有进度，用 `nettop -P -p <curl-pid> -l 1 -J bytes_out` 看真实字节数，别靠感觉判断它是慢还是死了。
 
 绝大部分等待时间在装依赖，不是构建。**开工第一条评论就要把这个预期说出去**，否则用户看到的就是「打包了一个小时没打包好」。
 
