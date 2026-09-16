@@ -273,7 +273,7 @@ export async function runTransferCli(
     });
     const estimate = await run(estimateArgs);
     if (estimate.code !== 0) {
-      const code = classifyTransferError(`${estimate.stdout}\n${estimate.stderr}`);
+      const code = classifyTransferError(stripProgressLines(`${estimate.stdout}\n${estimate.stderr}`));
       if (code === "cli_too_old" || code === "target_unsupported") {
         feedProgress.flush();
         return { ok: false, code, message: trimOutput(estimate.stderr || estimate.stdout) };
@@ -298,7 +298,7 @@ export async function runTransferCli(
     const result = await run(exportArgs);
     feedProgress.flush();
     if (result.code !== 0) {
-      const code = classifyTransferError(`${result.stdout}\n${result.stderr}`);
+      const code = classifyTransferError(stripProgressLines(`${result.stdout}\n${result.stderr}`));
       return { ok: false, code, message: trimOutput(result.stderr || result.stdout) };
     }
     let bytes = 0;
@@ -322,7 +322,7 @@ export async function runTransferCli(
   const result = await run(importArgs);
   feedProgress.flush();
   if (result.code !== 0) {
-    const code = classifyTransferError(`${result.stdout}\n${result.stderr}`);
+    const code = classifyTransferError(stripProgressLines(`${result.stdout}\n${result.stderr}`));
     return { ok: false, code, message: trimOutput(result.stderr || result.stdout) };
   }
   deps.sendProgress({ phase: "finalizing" });
@@ -399,6 +399,20 @@ function parseStats(obj: Record<string, unknown>): TransferImportStats {
   };
 }
 
+// stripProgressLines drops the `{"event":"progress",...}` lines the CLI writes
+// to stderr. They feed the migration card's counters; they are not prose about
+// a failure, and an export emits one per session and per attachment, so leaving
+// them in front of the CLI's error is what pushed the actual reason past the
+// cap below (DENE-318).
+function stripProgressLines(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => parseTransferProgressLine(line) === null)
+    .join("\n");
+}
+
 function trimOutput(text: string): string {
-  return text.trim().slice(0, 2000);
+  const meaningful = stripProgressLines(text).trim();
+  // The CLI prints its error last, so an over-budget stream keeps its tail.
+  return meaningful.length > 2000 ? meaningful.slice(-2000) : meaningful;
 }

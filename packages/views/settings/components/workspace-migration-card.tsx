@@ -77,6 +77,9 @@ type ImportPhase =
  */
 type TransferConflictPolicy = "skip" | "overwrite" | "rename" | "fail";
 
+/** The transfer in flight, as the card's buttons need to describe it. */
+type TransferAction = "export" | "import-preview" | "import-apply";
+
 function secretLabel(item: {
   entity: string;
   name: string;
@@ -106,9 +109,10 @@ export function WorkspaceMigrationCard() {
   const qc = useQueryClient();
 
   const [busy, setBusy] = useState(false);
-  const [activeAction, setActiveAction] = useState<"export" | "import" | null>(
-    null,
-  );
+  // Which transfer is in flight. Preview and apply are told apart so the
+  // import button never says "applying" while it is only re-running a preview
+  // after a conflict-policy change (DENE-318).
+  const [activeAction, setActiveAction] = useState<TransferAction | null>(null);
   const [onConflict, setOnConflict] = useState<TransferConflictPolicy>("skip");
   const [progress, setProgress] = useState<TransferProgressEvent | null>(null);
   const [exportResult, setExportResult] = useState<{
@@ -133,7 +137,7 @@ export function WorkspaceMigrationCard() {
 
   if (!isDesktopShell()) return null;
 
-  function startTransfer(action: "export" | "import"): boolean {
+  function startTransfer(action: TransferAction): boolean {
     if (busyRef.current) return false;
     busyRef.current = true;
     setActiveAction(action);
@@ -222,7 +226,7 @@ export function WorkspaceMigrationCard() {
     fileName: string,
     conflict: TransferConflictPolicy,
   ) {
-    if (!slug || !startTransfer("import")) return;
+    if (!slug || !startTransfer("import-preview")) return;
     setError(null);
     setProgress({ phase: "estimating" });
     try {
@@ -259,7 +263,7 @@ export function WorkspaceMigrationCard() {
   async function handleApply() {
     if (!slug || importPhase.step !== "preview") return;
     setConfirmOpen(false);
-    if (!startTransfer("import")) return;
+    if (!startTransfer("import-apply")) return;
     setProgress({ phase: "running" });
     try {
       const result = await runWorkspaceTransfer({
@@ -388,13 +392,13 @@ export function WorkspaceMigrationCard() {
             disabled={!canManage || busy || !slug}
             onClick={() => void handleImportPick()}
           >
-            {activeAction === "import" ? (
+            {activeAction === "import-preview" || activeAction === "import-apply" ? (
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
             ) : null}
-            {activeAction === "import"
-              ? importPhase.step === "preview"
-                ? t(($) => $.config_transfer.migration.applying)
-                : t(($) => $.config_transfer.migration.previewing)
+            {activeAction === "import-apply"
+              ? t(($) => $.config_transfer.migration.applying)
+              : activeAction === "import-preview"
+                ? t(($) => $.config_transfer.migration.previewing)
               : importPhase.step === "idle"
                 ? t(($) => $.config_transfer.migration.import_button)
                 : t(($) => $.config_transfer.import.replace_file)}

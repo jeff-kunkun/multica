@@ -244,11 +244,28 @@ describe("WorkspaceMigrationCard", () => {
       }),
     );
 
-    // Switching the policy refreshes the report the user is reading.
+    // Switching the policy refreshes the report the user is reading, and the
+    // button must say so: a re-preview is not an apply (DENE-318).
+    let finishPreview: (value: TransferRunResult) => void = () => {};
+    desktop.run.mockImplementationOnce(
+      () =>
+        new Promise<TransferRunResult>((resolve) => {
+          finishPreview = resolve;
+        }),
+    );
     await user.click(
       screen.getByRole("combobox", { name: "If something already exists" }),
     );
     await user.click(await screen.findByRole("option", { name: "Overwrite" }));
+    expect(await screen.findByRole("button", { name: "Previewing…" })).toBeDisabled();
+    await act(async () => {
+      finishPreview({
+        ok: true,
+        action: "import",
+        dryRun: true,
+        report: importReport,
+      });
+    });
     await waitFor(() =>
       expect(desktop.run).toHaveBeenLastCalledWith({
         action: "import",

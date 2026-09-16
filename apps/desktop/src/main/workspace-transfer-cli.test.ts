@@ -342,3 +342,35 @@ function mockDeps(overrides: Partial<TransferCliDeps> = {}): TransferCliDeps {
     ...overrides,
   };
 }
+
+// An export emits a progress line per session and per attachment, all on the
+// same stderr the failure message is read from. Keeping them would push the
+// CLI's actual error past the message cap and show the user a wall of JSON
+// instead of the reason (DENE-318).
+describe("transfer failure messages", () => {
+  it("shows the CLI error, not the progress lines that preceded it", async () => {
+    const progress = Array.from({ length: 26 }, (_, i) =>
+      JSON.stringify({
+        event: "progress",
+        session_index: i + 1,
+        sessions_total: 26,
+        session_title: `Session number ${i + 1}`,
+        attachments_downloaded: i + 1,
+      }),
+    );
+    const stderr = `${progress.join("\n")}\nError: entity already exists: Backlog\n`;
+    const result = await runTransferCli(
+      { action: "export", workspace: "acme", outPath: "/tmp/acme.zip" },
+      {
+        resolveCli: async () => "/bin/multica",
+        profileName: async () => "profile",
+        sendProgress: () => {},
+        statSize: async () => 0,
+        runCommand: async () => ({ code: 1, stdout: "", stderr }),
+      },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toBe("Error: entity already exists: Backlog");
+  });
+});
