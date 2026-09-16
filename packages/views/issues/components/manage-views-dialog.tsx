@@ -27,8 +27,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { cn } from "@multica/ui/lib/utils";
-import type { IssueView } from "@multica/core/api/schemas";
+import type { IssueView, IssueViewVisibility } from "@multica/core/api/schemas";
+import {
+  issueViewSharingChoices,
+  parseIssueViewVisibility,
+} from "@multica/core/issue-views/visibility";
 import {
   DeleteViewConfirm,
   type ViewBarItem,
@@ -51,6 +63,7 @@ function SortableRow({
   onToggleHidden,
   onEdit,
   onDelete,
+  onChangeVisibility,
 }: {
   item: ViewBarItem;
   hidden: boolean;
@@ -59,10 +72,22 @@ function SortableRow({
   onToggleHidden: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  onChangeVisibility?: (view: IssueView, visibility: IssueViewVisibility) => void;
 }) {
   const { t } = useT("issues");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.barItemId });
+  const visibilityLabels: Record<IssueViewVisibility, string> = {
+    private: t(($) => $.save_view.visibility_private),
+    workspace: t(($) => $.save_view.visibility_workspace),
+    project: t(($) => $.manage_views.visibility_project),
+  };
+  const view = item.view;
+  const sharingChoices =
+    view && item.canManage && view.scope_type !== "my"
+      ? issueViewSharingChoices(view.scope_type)
+      : [];
+  const sharingValue = view ? parseIssueViewVisibility(view.visibility) : "private";
 
   return (
     <div
@@ -92,7 +117,43 @@ function SortableRow({
             {t(($) => $.view_bar.builtin_tag)}
           </span>
         )}
+        {view?.visibility === "project" && (
+          <span className="ml-1.5 text-caption text-muted-foreground">
+            {t(($) => $.view_bar.project_shared_tag)}
+          </span>
+        )}
       </span>
+      {sharingChoices.length > 0 && view && onChangeVisibility && (
+        <Select
+          items={sharingChoices.map((value) => ({
+            value,
+            label: visibilityLabels[value],
+          }))}
+          value={sharingValue}
+          onValueChange={(v) => {
+            if (v === "private" || v === "workspace" || v === "project") {
+              onChangeVisibility(view, v);
+            }
+          }}
+        >
+          <SelectTrigger
+            size="sm"
+            className="w-36 shrink-0"
+            aria-label={t(($) => $.manage_views.visibility_label, { name: item.label })}
+          >
+            <SelectValue>{visibilityLabels[sharingValue]}</SelectValue>
+          </SelectTrigger>
+          <SelectContent align="end">
+            <SelectGroup>
+              {sharingChoices.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {visibilityLabels[value]}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      )}
       {item.kind === "view" && item.canManage && (
         <span className="flex items-center gap-0.5">
           <Button
@@ -142,6 +203,7 @@ export function ManageViewsDialog({
   onToggleHidden,
   onEditView,
   onDeleteView,
+  onChangeVisibility,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -153,6 +215,7 @@ export function ManageViewsDialog({
   onToggleHidden: (barItemId: string, hidden: boolean) => void;
   onEditView: (view: IssueView) => void;
   onDeleteView: (view: IssueView) => Promise<void>;
+  onChangeVisibility: (view: IssueView, visibility: IssueViewVisibility) => void;
 }) {
   const { t } = useT("issues");
   const sensors = useSensors(
@@ -199,7 +262,7 @@ export function ManageViewsDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1.5">
               <Layers className="size-4" />
@@ -238,6 +301,7 @@ export function ManageViewsDialog({
                     }
                     onEdit={item.view ? () => onEditView(item.view!) : undefined}
                     onDelete={item.view ? () => setDeleting(item.view!) : undefined}
+                    onChangeVisibility={onChangeVisibility}
                   />
                 ))}
               </SortableContext>

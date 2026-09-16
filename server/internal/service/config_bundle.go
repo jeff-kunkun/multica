@@ -408,11 +408,15 @@ type ConfigImportItem struct {
 }
 
 type UnmappedRef struct {
-	Entity     string `json:"entity"`
-	SourceID   string `json:"source_id"`
-	Field      string `json:"field"`
-	RefType    string `json:"ref_type"`
-	RefID      string `json:"ref_id"`
+	Entity   string `json:"entity"`
+	SourceID string `json:"source_id"`
+	Field    string `json:"field"`
+	RefType  string `json:"ref_type"`
+	RefID    string `json:"ref_id"`
+	// Reason is the contract-level code for a V3 task-import degradation
+	// (status_key_unmapped, mention_unmapped, parent_unmapped, ...). It is
+	// empty for the V2 rows that predate it.
+	Reason     string `json:"reason,omitempty"`
 	Resolution string `json:"resolution"`
 }
 
@@ -443,6 +447,21 @@ type ConfigImportOptions struct {
 	ActivateAutopilots     bool  `json:"activate_autopilots"`
 	ApplyWorkspaceSettings *bool `json:"apply_workspace_settings"`
 	ApplyIssuePrefix       bool  `json:"apply_issue_prefix"`
+	// AutoBindRuntimes binds an imported agent to the target runtime that
+	// matches its source provider, runtime mode and custom profile name — but
+	// only when exactly one such runtime exists, so nothing is guessed
+	// (DENE-364). Nil means on: "本机环境默认都是相同的" is the migration's whole
+	// premise, and only an explicit false turns the rule off for a user who
+	// wants to place every agent by hand. Only the V2 transfer path reads it;
+	// the V1 config import has no runtime binding concept.
+	AutoBindRuntimes *bool `json:"auto_bind_runtimes,omitempty"`
+}
+
+// AutoBindRuntimesEnabled resolves the tri-state switch. An absent value is the
+// product default (on); the pointer exists only so an explicit false survives
+// the zero value of a struct decoded from JSON.
+func (o ConfigImportOptions) AutoBindRuntimesEnabled() bool {
+	return o.AutoBindRuntimes == nil || *o.AutoBindRuntimes
 }
 
 type ConfigImportRequest struct {
@@ -458,7 +477,10 @@ type ImportError struct {
 	Status int
 	Code   string
 	Msg    string
-	Report *ConfigImportReport
+	// Report is the partial report a rejected request hands back (config
+	// import, and V3's quota refusal). It is `any` so each endpoint reports
+	// its own shape; the handler only forwards it as JSON.
+	Report any
 }
 
 func (e *ImportError) Error() string { return e.Msg }

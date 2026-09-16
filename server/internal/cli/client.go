@@ -92,13 +92,35 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s returned %d: %s", e.Method, e.Path, e.StatusCode, strings.TrimSpace(e.Body))
 }
 
+const (
+	// httpErrorBodyLimit caps how much of an error response the generic paths
+	// keep. Enough for {"error": "..."} plus context, small enough that a
+	// misbehaving endpoint cannot balloon CLI memory.
+	httpErrorBodyLimit = 4096
+	// transferErrorBodyLimit applies to /transfer/* failures. Those responses
+	// put the whole import report (one item per entity, so tens of thousands of
+	// bytes for a real workspace) next to "error"/"code" in the same JSON
+	// object. Truncating it mid-object left the CLI with unparseable JSON and
+	// nothing to show the user (DENE-318), so transfer errors keep the full
+	// structured body.
+	transferErrorBodyLimit = 1 << 20
+)
+
+// errorBodyLimit picks the read cap for a failing request path.
+func errorBodyLimit(path string) int64 {
+	if strings.Contains(path, "/transfer/") {
+		return transferErrorBodyLimit
+	}
+	return httpErrorBodyLimit
+}
+
 // newHTTPError builds a *HTTPError from an error response (status >= 400),
 // reading a capped slice of the body. Every Multica API helper funnels its
 // >= 400 responses through this so the top-level FormatError / ExitCodeFor can
 // classify the failure via errors.As(err, **HTTPError) regardless of which
 // HTTP verb the command used.
 func newHTTPError(method, path string, resp *http.Response) *HTTPError {
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit(path)))
 	return &HTTPError{
 		Method:     method,
 		Path:       path,

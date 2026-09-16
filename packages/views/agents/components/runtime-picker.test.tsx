@@ -120,4 +120,53 @@ describe("RuntimePicker (creation studio)", () => {
     }
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  /**
+   * The empty-selection seed is an effect, and its caller builds `onSelect`
+   * inline — so keying the effect on the callback identity made it fire once
+   * per render of the parent. The alignment page is a parent that re-renders
+   * while it writes (a rebind invalidates its own query and its own list), so
+   * that turned one empty selection into an endless switch loop: 53 PATCHes in
+   * a second, and a navigation that never committed (DENE-319). One empty
+   * selection means one seed.
+   */
+  it("seeds an empty selection once, not once per render", () => {
+    const { rerender, onSelect } = renderPicker({ selectedRuntimeId: "" });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("rt-a");
+
+    for (let render = 0; render < 5; render += 1) {
+      rerender(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <RuntimePicker
+            runtimes={RUNTIMES}
+            members={MEMBERS}
+            currentUserId={ME}
+            selectedRuntimeId=""
+            onSelect={(id) => onSelect(id)}
+          />
+        </I18nProvider>,
+      );
+    }
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  // A parent that ignores the seed (nothing on the server left to rebind) must
+  // not be asked again just because its runtimes array is rebuilt each render.
+  it("does not reseed when only the runtimes array identity changes", () => {
+    const { rerender, onSelect } = renderPicker({ selectedRuntimeId: "" });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <RuntimePicker
+          runtimes={[...RUNTIMES]}
+          members={MEMBERS}
+          currentUserId={ME}
+          selectedRuntimeId=""
+          onSelect={onSelect}
+        />
+      </I18nProvider>,
+    );
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
 });
