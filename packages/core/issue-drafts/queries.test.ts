@@ -4,7 +4,9 @@ import type { IssueDraft, IssueDraftSession, IssueDraftSummary } from "../types"
 import {
   appendIssueDraftSummary,
   findIssueDraft,
+  issueDraftIsRecord,
   patchIssueDraftSummary,
+  unfinishedIssueDrafts,
 } from "./queries";
 
 function row(overrides: Partial<IssueDraftSummary> = {}): IssueDraftSummary {
@@ -32,6 +34,33 @@ describe("findIssueDraft", () => {
     const rows = [row({ chat_session_id: "a" }), row({ chat_session_id: "b" })];
     expect(findIssueDraft(rows, "b")?.chat_session_id).toBe("b");
     expect(findIssueDraft(rows, "missing")).toBeUndefined();
+  });
+});
+
+describe("unfinishedIssueDrafts", () => {
+  it("keeps only the alignments that still have a next turn", () => {
+    const rows = [
+      row({ chat_session_id: "open", status: "draft" }),
+      row({ chat_session_id: "ready", status: "ready" }),
+      row({ chat_session_id: "created", status: "completed", issue_id: "issue-1" }),
+      row({ chat_session_id: "dropped", status: "abandoned" }),
+    ];
+    expect(unfinishedIssueDrafts(rows).map((entry) => entry.chat_session_id)).toEqual([
+      "open",
+      "ready",
+    ]);
+  });
+});
+
+describe("issueDraftIsRecord", () => {
+  // The single list carries all four statuses (DENE-371), so "is this over" has
+  // to be a decision about the status and not about whether an issue id happens
+  // to be readable: a completed draft whose issue id never landed is still over.
+  it("calls the two terminal statuses records and the live ones not", () => {
+    expect(issueDraftIsRecord({ status: "completed" })).toBe(true);
+    expect(issueDraftIsRecord({ status: "abandoned" })).toBe(true);
+    expect(issueDraftIsRecord({ status: "draft" })).toBe(false);
+    expect(issueDraftIsRecord({ status: "ready" })).toBe(false);
   });
 });
 

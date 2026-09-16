@@ -146,13 +146,14 @@ LEFT JOIN LATERAL (
 WHERE d.workspace_id = $1
   AND cs.creator_id = $2
   AND cs.status = 'active'
-  AND d.status IN ('draft', 'ready')
+  AND d.status = ANY($3::text[])
 ORDER BY COALESCE(lm.created_at, d.updated_at) DESC
 `
 
 type ListIssueDraftsByCreatorParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	CreatorID   pgtype.UUID `json:"creator_id"`
+	Statuses    []string    `json:"statuses"`
 }
 
 type ListIssueDraftsByCreatorRow struct {
@@ -173,7 +174,8 @@ type ListIssueDraftsByCreatorRow struct {
 	LastMessageAt      pgtype.Timestamptz `json:"last_message_at"`
 }
 
-// The caller's unfinished alignment conversations, newest activity first.
+// The caller's alignment conversations in the given statuses, newest activity
+// first.
 //
 // Creator-scoped for the same reason ListAgentBuilderSessionsByCreator is: a
 // draft is a private conversation, and a workspace admin has no business
@@ -181,8 +183,15 @@ type ListIssueDraftsByCreatorRow struct {
 // ListChatSessionsByCreator either — that list is filtered against
 // `kind = 'user'` agents, and the carrier is `kind = 'system'` — so this
 // statement is the only way back into an alignment conversation.
+//
+// `statuses` is a parameter rather than the hardcoded ('draft','ready') this
+// used to be because the same rows answer two different questions: "which
+// alignments can I still act on" (the create dialog's resume banner) and
+// "which alignments have I ever had" (the chat sidebar's alignment records,
+// DENE-371). A terminal draft is a record to read back, not a draft to resume,
+// and the caller's status set is the whole of that distinction.
 func (q *Queries) ListIssueDraftsByCreator(ctx context.Context, arg ListIssueDraftsByCreatorParams) ([]ListIssueDraftsByCreatorRow, error) {
-	rows, err := q.db.Query(ctx, listIssueDraftsByCreator, arg.WorkspaceID, arg.CreatorID)
+	rows, err := q.db.Query(ctx, listIssueDraftsByCreator, arg.WorkspaceID, arg.CreatorID, arg.Statuses)
 	if err != nil {
 		return nil, err
 	}

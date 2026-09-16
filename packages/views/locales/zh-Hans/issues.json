@@ -461,6 +461,7 @@
     "project_directory_path_copied_with_branch": "已复制项目目录路径 — 任务改动位于 {{branch}} 分支",
     "workdir_path_copy_failed": "复制本地 workdir 路径失败",
     "workdir_path_unavailable": "暂无本地 workdir — 这个任务还没被本地智能体运行过",
+    "alignment_origin": "查看这场对齐",
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
     "subscription_update_failed": "无法更新订阅状态，请重试。"
   },
@@ -988,6 +989,15 @@
     "policy_version_hint": "本次对齐使用的提示词版本。创建时记录在草稿上，因此已完成的草稿仍可追溯。",
     "policy_failed": "切换对齐方式失败。",
     "question_recommended": "推荐",
-    "question_custom_hint": "也可以在下方直接用自己的话回答。"
+    "question_custom_hint": "也可以在下方直接用自己的话回答。",
+    "records_title": "对齐记录",
+    "records_status_open": "进行中",
+    "records_status_completed": "已创建",
+    "records_status_abandoned": "已放弃",
+    "record_subtitle": "这次对齐已结束，只能回看。",
+    "record_created_title": "这次对齐已产出一张任务",
+    "record_issue_link": "查看产出的任务",
+    "record_abandoned_title": "这次对齐已放弃",
+    "record_abandoned_hint": "没有产出任务。"
   }
 }

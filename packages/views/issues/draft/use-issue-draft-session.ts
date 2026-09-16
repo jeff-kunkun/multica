@@ -9,6 +9,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import {
   issueDraftCanConfirm,
   issueDraftIsCreatable,
+  issueDraftIsRecord,
   issueDraftKeys,
   issueDraftListOptions,
   issueDraftPendingQuestion,
@@ -58,11 +59,20 @@ export interface IssueDraftSession {
   /** The conversation is gone server-side; the page must leave. */
   missing: boolean;
   /**
-   * The conversation is alive but the draft is no longer one of this user's
-   * unfinished ones — it became an issue elsewhere, or was discarded. Not an
+   * The conversation is alive but the draft row is gone from this user's list —
+   * it was discarded with its conversation, or the list predates it. Not an
    * error: the page says so instead of offering actions the server refuses.
    */
   retired: boolean;
+  /**
+   * This alignment is over — it produced an issue, or was given up on. The page
+   * renders it as a record: the transcript and what was agreed, with no
+   * composer and no actions (DENE-371). This is NOT the same as `retired`:
+   * a record still has a draft, and everything it needs to be read back.
+   */
+  isRecord: boolean;
+  /** The issue this alignment produced, once it has one. */
+  producedIssueId: string | null;
   loading: boolean;
   loadFailed: boolean;
   messages: ChatMessage[];
@@ -167,6 +177,15 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
 
   const draft = row?.draft ?? null;
   const revision = row?.revision ?? null;
+  // A terminal draft is a record, not a conversation: the page reads it back
+  // and offers nothing that would need a next turn. Computed from the row (not
+  // from `stage`, which folds completed and abandoned into "aligning" because
+  // neither can be acted on) so the page can tell "over" from "still going".
+  const isRecord = row ? issueDraftIsRecord(row) : false;
+  // The issue this alignment produced. `row.issue_id` is the durable answer —
+  // it survives the refetch that drops the draft out of the live list — and
+  // the local confirm result covers the window before that refetch lands.
+  const producedIssueId = createdIssueId ?? row?.issue_id ?? null;
 
   const stage = issueDraftStage({
     status: row?.status ?? "draft",
@@ -306,7 +325,11 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
       commitInput?: () => void,
     ): Promise<boolean> => {
       const text = content.trim();
-      if (!text || !draftId || pending || sending || !draft) return false;
+      // A record has no next turn: the server refuses a save or a turn against
+      // a terminal draft, and the page does not render a composer for one —
+      // this is the same refusal one layer down, so a stale event or a test
+      // cannot make a finished alignment speak again.
+      if (!text || !draftId || pending || sending || !draft || isRecord) return false;
       setError(null);
       setSending(true);
       const wire = encodeIssueDraftInput(text, draft);
@@ -353,7 +376,7 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
         setSending(false);
       }
     },
-    [draft, draftId, pending, qc, sending, t],
+    [draft, draftId, isRecord, pending, qc, sending, t],
   );
 
   const save = useCallback(
@@ -414,7 +437,10 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
   );
 
   const confirm = useCallback(async (): Promise<boolean> => {
-    if (revision === null) return false;
+    // An already-created alignment is not confirmable again: the server answers
+    // a repeat with the issue it made, and the page's job for one is to show
+    // that issue, not to ask for another.
+    if (revision === null || isRecord) return false;
     setError(null);
     try {
       const result = await finalizeMutation.mutateAsync({
@@ -427,7 +453,7 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
       setError(err instanceof Error ? err.message : t(($) => $.alignment.confirm_failed));
       return false;
     }
-  }, [draftId, finalizeMutation, revision, t]);
+  }, [draftId, finalizeMutation, isRecord, revision, t]);
 
   const abandon = useCallback(async (): Promise<boolean> => {
     setError(null);
@@ -501,6 +527,8 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
     revision,
     missing,
     retired,
+    isRecord,
+    producedIssueId,
     loading,
     loadFailed: listQuery.isError,
     messages,

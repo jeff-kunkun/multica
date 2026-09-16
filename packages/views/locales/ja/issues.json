@@ -462,7 +462,8 @@
     "project_directory_path_copied": "プロジェクトディレクトリのパスをコピーしました",
     "project_directory_path_copied_with_branch": "プロジェクトディレクトリのパスをコピーしました — 作業は {{branch}} ブランチにあります",
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
-    "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません"
+    "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません",
+    "alignment_origin": "この課題を作ったすり合わせを見る"
   },
   "timeline": {
     "loading": "読み込み中..."
@@ -988,6 +989,15 @@
     "policy_version_hint": "この会話が使用しているプロンプトのバージョンです。開始時に記録されるため、完了したドラフトも追跡できます。",
     "policy_failed": "すり合わせの方式を切り替えられませんでした。",
     "question_recommended": "推奨",
-    "question_custom_hint": "下の入力欄に自分の言葉で答えてもかまいません。"
+    "question_custom_hint": "下の入力欄に自分の言葉で答えてもかまいません。",
+    "records_title": "すり合わせの記録",
+    "records_status_open": "進行中",
+    "records_status_completed": "作成済み",
+    "records_status_abandoned": "破棄",
+    "record_subtitle": "このすり合わせは終了しています。閲覧のみです。",
+    "record_created_title": "このすり合わせから課題が1件作成されました",
+    "record_issue_link": "作成された課題を開く",
+    "record_abandoned_title": "このすり合わせは破棄されました",
+    "record_abandoned_hint": "課題は作成されていません。"
   }
 }

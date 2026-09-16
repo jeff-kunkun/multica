@@ -467,7 +467,8 @@
     "project_directory_path_copied": "Project directory path copied",
     "project_directory_path_copied_with_branch": "Project directory path copied — work is on {{branch}}",
     "workdir_path_copy_failed": "Failed to copy workdir path",
-    "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
+    "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent",
+    "alignment_origin": "View the alignment that created this"
   },
   "timeline": {
     "loading": "Loading..."
@@ -1019,6 +1020,15 @@
     "policy_version_hint": "The prompt version this conversation is running. Recorded when the alignment started, so a finished draft stays auditable.",
     "policy_failed": "Could not switch the alignment style.",
     "question_recommended": "Recommended",
-    "question_custom_hint": "Or answer in your own words below."
+    "question_custom_hint": "Or answer in your own words below.",
+    "records_title": "Alignments",
+    "records_status_open": "In progress",
+    "records_status_completed": "Created",
+    "records_status_abandoned": "Abandoned",
+    "record_subtitle": "This alignment has finished. It is read-only.",
+    "record_created_title": "This alignment produced an issue",
+    "record_issue_link": "Open the issue",
+    "record_abandoned_title": "This alignment was given up",
+    "record_abandoned_hint": "No issue was created."
   }
 }

@@ -1287,6 +1287,12 @@ export const IssueSchema = z.object({
   // Detail-only and potentially large. A malformed additive field must not
   // erase an otherwise usable issue returned by a mixed-version server.
   source_context: IssueSourceContextSchema.optional().catch(undefined),
+  // Provenance, detail-only and additive like source_context. `.catch(undefined)`
+  // rather than a hard string: these decide whether an "open the alignment"
+  // entry is offered, and a server that sends something unexpected must cost
+  // the entry, not the whole issue. (DENE-371)
+  origin_type: z.string().optional().catch(undefined),
+  origin_id: z.string().optional().catch(undefined),
 }).loose();
 
 export const ListIssuesResponseSchema = z.object({

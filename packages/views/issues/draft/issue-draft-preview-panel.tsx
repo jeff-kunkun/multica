@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { IssueDraftPayload, IssuePriority, IssueStatus, MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import {
   AlertDialog,
@@ -17,6 +18,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
+import { AppLink } from "../../navigation";
 import { RuntimePicker } from "../../agents/components/runtime-picker";
 import { PriorityPicker } from "../components/pickers/priority-picker";
 import { StatusPicker } from "../components/pickers/status-picker";
@@ -46,6 +48,8 @@ export function IssueDraftPreviewPanel({
   currentUserId,
   switchingRuntime,
   pending,
+  readOnly: readOnlyProp,
+  producedIssueId,
   onDirtyChange,
   onSave,
   onGenerate,
@@ -69,6 +73,16 @@ export function IssueDraftPreviewPanel({
   /** A turn is running: nothing may be written while the carrier is replying. */
   pending: boolean;
   /**
+   * Render what was agreed and nothing more — the shape a FINISHED alignment is
+   * read back in (DENE-371). Every field is disabled and the whole action strip
+   * is replaced by the outcome: an alignment whose draft is terminal can be
+   * neither saved, confirmed nor abandoned, and a disabled button that can
+   * never enable is worse than no button.
+   */
+  readOnly?: boolean;
+  /** The issue this alignment produced, for the record's way across to it. */
+  producedIssueId?: string | null;
+  /**
    * Reports whether the editor holds unsaved edits. The alignment session uses
    * it to decide whether it may adopt a carrier revision on its own: an edit in
    * progress is the user's, and nothing may be written over it.
@@ -85,6 +99,7 @@ export function IssueDraftPreviewPanel({
   onSwitchRuntime: (runtimeId: string) => Promise<string | null>;
 }) {
   const { t } = useT("issues");
+  const record = readOnlyProp === true;
   const [editing, setEditing] = useState<IssueDraftPayload | null>(draft);
   const [confirmingAbandon, setConfirmingAbandon] = useState(false);
 
@@ -116,7 +131,7 @@ export function IssueDraftPreviewPanel({
   }, [dirty, onDirtyChange]);
 
   const value = editing ?? draft ?? EMPTY_DRAFT;
-  const locked = pending || confirming || stage === "created";
+  const locked = record || pending || confirming || stage === "created";
   const canSave = !locked && !saving && value.title.trim().length > 0;
   // A title is not required to generate: the carrier's block is the only place
   // a title comes from before someone types one, so gating this button on the
@@ -254,7 +269,9 @@ export function IssueDraftPreviewPanel({
       </div>
 
       <footer className="shrink-0 border-t bg-background px-5 py-3">
-        {stage === "created" ? (
+        {record ? (
+          <AlignmentRecordFooter producedIssueId={producedIssueId ?? null} />
+        ) : stage === "created" ? (
           <p className="text-body font-medium text-foreground">
             {t(($) => $.alignment.created_title)}
           </p>
@@ -341,6 +358,45 @@ export function IssueDraftPreviewPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/**
+ * The outcome of a finished alignment: what it became, and the way across to
+ * it.
+ *
+ * A record with an issue shows the link; one without is an alignment that was
+ * given up on, and saying so is the honest answer — the alternative is an
+ * empty footer that reads as a loading state. (DENE-371)
+ */
+function AlignmentRecordFooter({
+  producedIssueId,
+}: {
+  producedIssueId: string | null;
+}) {
+  const { t } = useT("issues");
+  const paths = useWorkspacePaths();
+  return (
+    <div className="space-y-2">
+      <p className="text-body font-medium text-foreground">
+        {producedIssueId
+          ? t(($) => $.alignment.record_created_title)
+          : t(($) => $.alignment.record_abandoned_title)}
+      </p>
+      {producedIssueId ? (
+        <AppLink
+          href={paths.issueDetail(producedIssueId)}
+          className="inline-flex items-center gap-1 text-body text-primary hover:underline"
+        >
+          <ExternalLink className="size-3.5" aria-hidden="true" />
+          {t(($) => $.alignment.record_issue_link)}
+        </AppLink>
+      ) : (
+        <p className="text-caption text-muted-foreground">
+          {t(($) => $.alignment.record_abandoned_hint)}
+        </p>
+      )}
     </div>
   );
 }

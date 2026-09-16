@@ -7474,7 +7474,7 @@ func IssueToMapResolved(ctx context.Context, q issuestatus.Querier, issue db.Iss
 }
 
 func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
-	return map[string]any{
+	m := map[string]any{
 		"id":           util.UUIDToString(issue.ID),
 		"workspace_id": util.UUIDToString(issue.WorkspaceID),
 		"number":       issue.Number,
@@ -7509,6 +7509,17 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"metadata":         util.JSONObjectOrEmpty(issue.Metadata),
 		"properties":       util.JSONObjectOrEmpty(issue.Properties),
 	}
+	// Mirrors handler.IssueResponse.OriginType/OriginID, which are omitempty:
+	// a row with no origin must lose the keys in BOTH renderings, or a client
+	// reading one of them sees a field the other never sends. Conditional
+	// insertion, not a nil value, is what keeps the two key sets equal.
+	if issue.OriginType.Valid {
+		m["origin_type"] = issue.OriginType.String
+	}
+	if issue.OriginID.Valid {
+		m["origin_id"] = util.UUIDToString(issue.OriginID)
+	}
+	return m
 }
 
 // IssueIdentifier renders the human-facing issue key ("MUL-42"). Callers that

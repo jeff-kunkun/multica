@@ -102,6 +102,20 @@ vi.mock("../../navigation", () => ({
     getShareableUrl: (path: string) => path,
   }),
   useBackOrReplace: () => (fallback: string) => mocks.replace(fallback),
+  // A real anchor: the record's way across to the issue it produced is a
+  // navigation, and the suite asserts on where it points rather than on a click.
+  AppLink: ({
+    href,
+    children,
+    ...rest
+  }: {
+    href: string;
+    children: React.ReactNode;
+  } & React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
 }));
 
 // The chat surfaces, the pickers and the split layout are not what this suite
@@ -785,5 +799,51 @@ describe("IssueDraftPage draft persistence", () => {
       status: "draft",
       expected_revision: 3,
     });
+  });
+});
+
+/**
+ * A finished alignment is the same page in a read-only shape (DENE-371). The
+ * read-back path is the chat sidebar's alignment records: those rows carry a
+ * terminal status, so the page must render what was agreed rather than
+ * redirect to the issue, and must not offer a next turn the server refuses.
+ */
+describe("IssueDraftPage reading a finished alignment", () => {
+  it("shows the created issue instead of a composer", async () => {
+    mocks.drafts = [draftSummary({ status: "completed", issue_id: "issue-9" })];
+    renderPage();
+
+    expect(await screen.findByText("This alignment produced an issue")).toBeTruthy();
+    const link = screen.getByRole("link", { name: /Open the issue/ });
+    expect(link.getAttribute("href")).toBe("/acme/issues/issue-9");
+    // The conversation is still the point of the record.
+    expect(screen.getByTestId("transcript")).toBeTruthy();
+    // Everything that describes a next turn is gone: the composer, the confirm,
+    // and the stage strip that would label a finished alignment "Aligning".
+    expect(screen.queryByTestId("composer")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Confirm and create/ })).toBeNull();
+    expect(screen.queryByText("Aligning")).toBeNull();
+  });
+
+  it("does not redirect away from a draft that already produced its issue", async () => {
+    // The live flow replaces the alignment URL with the created issue. Reading a
+    // record is the opposite intent — the user asked for the conversation.
+    mocks.drafts = [draftSummary({ status: "completed", issue_id: "issue-9" })];
+    renderPage();
+
+    await screen.findByText("This alignment produced an issue");
+    expect(mocks.replace).not.toHaveBeenCalledWith("/acme/issues/issue-9");
+  });
+
+  it("says a discarded alignment produced nothing", async () => {
+    mocks.drafts = [draftSummary({ status: "abandoned" })];
+    renderPage();
+
+    expect(await screen.findByText("This alignment was given up")).toBeTruthy();
+    expect(screen.getByText("No issue was created.")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Open the issue/ })).toBeNull();
+    expect(screen.queryByTestId("composer")).toBeNull();
+    // A stale event cannot make a finished alignment speak again.
+    expect(mocks.sendChatMessage).not.toHaveBeenCalled();
   });
 });

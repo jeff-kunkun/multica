@@ -462,7 +462,8 @@
     "project_directory_path_copied": "프로젝트 디렉터리 경로를 복사했습니다",
     "project_directory_path_copied_with_branch": "프로젝트 디렉터리 경로를 복사했습니다 — 작업은 {{branch}} 브랜치에 있습니다",
     "workdir_path_copy_failed": "작업 디렉터리 경로를 복사하지 못했습니다",
-    "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 태스크를 실행하지 않았습니다"
+    "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 태스크를 실행하지 않았습니다",
+    "alignment_origin": "이 이슈를 만든 정렬 보기"
   },
   "timeline": {
     "loading": "불러오는 중..."
@@ -988,6 +989,15 @@
     "policy_version_hint": "이 대화가 사용하는 프롬프트 버전입니다. 시작할 때 기록되므로 완료된 초안도 추적할 수 있습니다.",
     "policy_failed": "정렬 방식을 전환하지 못했습니다.",
     "question_recommended": "추천",
-    "question_custom_hint": "아래 입력란에 직접 답해도 됩니다."
+    "question_custom_hint": "아래 입력란에 직접 답해도 됩니다.",
+    "records_title": "정렬 기록",
+    "records_status_open": "진행 중",
+    "records_status_completed": "생성됨",
+    "records_status_abandoned": "포기됨",
+    "record_subtitle": "이 정렬은 종료되었습니다. 읽기 전용입니다.",
+    "record_created_title": "이 정렬에서 이슈 1건이 생성되었습니다",
+    "record_issue_link": "생성된 이슈 열기",
+    "record_abandoned_title": "이 정렬은 포기되었습니다",
+    "record_abandoned_hint": "생성된 이슈가 없습니다."
   }
 }

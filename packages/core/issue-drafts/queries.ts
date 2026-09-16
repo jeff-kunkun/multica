@@ -18,15 +18,24 @@ export const issueDraftKeys = {
 };
 
 /**
- * The caller's unfinished alignment conversations — and the only way back to
- * one. A draft's carrier is a `kind='system'` agent, so it is invisible to
- * every chat list; a page addressed by draft id therefore resolves its draft
- * from here.
+ * Every alignment conversation this user has in the workspace — live ones and
+ * the records of finished ones — newest activity first.
+ *
+ * A draft's carrier is a `kind='system'` agent, so it is invisible to every
+ * chat list; this list is the only route back to one, which is why it carries
+ * all four statuses in ONE cache entry. Two entries (unfinished and records)
+ * would be two answers to "what alignments do I have", and the alignment page
+ * — which has to open either kind — would then have to guess which one to
+ * believe.
+ *
+ * Consumers that only want actionable work narrow it with
+ * `unfinishedIssueDrafts`; the page itself takes the row as it comes and
+ * renders a terminal one read-only.
  */
 export function issueDraftListOptions(wsId: string) {
   return queryOptions({
     queryKey: issueDraftKeys.list(wsId),
-    queryFn: () => api.listIssueDrafts(),
+    queryFn: () => api.listIssueDrafts({ status: "all" }),
     enabled: wsId.length > 0,
     // Overrides the client-wide `staleTime: Infinity`. This list changes
     // through work done on another screen — the entry dialog opening a
@@ -35,6 +44,25 @@ export function issueDraftListOptions(wsId: string) {
     // just aligned a draft would come back to a list that still shows it.
     staleTime: 0,
   });
+}
+
+/** The two live statuses: an alignment still waiting on the user. */
+export function unfinishedIssueDrafts(
+  drafts: readonly IssueDraftSummary[],
+): IssueDraftSummary[] {
+  return drafts.filter((draft) => draft.status === "draft" || draft.status === "ready");
+}
+
+/**
+ * Whether this alignment is over — it produced an issue, or was given up on.
+ *
+ * Read off the server's status rather than inferred from a missing issue id:
+ * `completed` without a readable issue is a broken record, not a live
+ * conversation, and offering the composer for it would promise a next turn the
+ * server refuses.
+ */
+export function issueDraftIsRecord(draft: Pick<IssueDraftSummary, "status">): boolean {
+  return draft.status === "completed" || draft.status === "abandoned";
 }
 
 /** The draft with this id, or undefined while it is loading or already retired. */

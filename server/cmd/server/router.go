@@ -2161,7 +2161,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/issue-drafts", func(r chi.Router) {
 				// Alignment conversations are invisible to every chat list
 				// (their carrier is kind='system'), so this is the only route
-				// back to an unfinished one.
+				// back to one. `?status=all` widens it from "the ones I can
+				// still act on" to "every alignment I have", which is what the
+				// chat sidebar's alignment records read back (DENE-371).
 				r.Get("/", h.ListIssueDrafts)
 				r.Post("/", h.CreateIssueDraftSession)
 				r.Route("/{sessionId}", func(r chi.Router) {

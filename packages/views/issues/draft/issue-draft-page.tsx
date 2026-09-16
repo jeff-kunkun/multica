@@ -50,6 +50,12 @@ const FIRST_RUN_LAYOUT: Layout = { conversation: 70, preview: 30 };
  * conversation outlives the screen that started it: a refresh, a back/forward,
  * a reopened desktop tab and a direct link all have to land back in the same
  * alignment. Confirming is the only thing that creates an issue.
+ *
+ * A FINISHED alignment is the same page in a read-only shape (DENE-371): the
+ * transcript, what was agreed, and the issue it produced. Reusing this page
+ * rather than the chat window is what keeps the wire format decoded — both
+ * sides of the conversation are envelopes the chat window would render raw —
+ * and what puts the agreed draft beside the conversation it came out of.
  */
 export function IssueDraftPage({ draftId }: { draftId: string }) {
   const { t } = useT("issues");
@@ -63,11 +69,14 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_issue_draft_layout",
   });
+  // A record is final: there is no next turn to restyle, and the whole action
+  // strip (confirm, abandon, save) is gone with it.
+  const record = session.isRecord;
   // The header keeps one secondary entry instead of a control strip: the
   // alignment style is a setting someone reaches for deliberately, not a
   // decision to make before saying anything.
   const styleDisabled =
-    session.pending || session.stage === "creating" || session.stage === "created";
+    record || session.pending || session.stage === "creating" || session.stage === "created";
 
   const runtimesQuery = useQuery(runtimeListOptions(wsId));
   const membersQuery = useQuery(memberListOptions(wsId));
@@ -134,12 +143,16 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               {session.draft?.title.trim() || t(($) => $.alignment.title)}
             </h1>
             <p className="truncate text-caption text-muted-foreground">
-              {t(($) => $.alignment.subtitle)}
+              {record
+                ? t(($) => $.alignment.record_subtitle)
+                : t(($) => $.alignment.subtitle)}
             </p>
           </div>
           {/* No policy on the row means the backend predates policies, so
-              there is nothing to offer and no menu to open. */}
-          {session.policy.key ? (
+              there is nothing to offer and no menu to open. A record is
+              excluded for the other reason: there is no next reply for a
+              policy to steer. */}
+          {session.policy.key && !record ? (
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -166,10 +179,17 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
             </DropdownMenu>
           ) : null}
         </div>
-        <IssueDraftStageStrip
-          stage={session.stage}
-          hasTitle={!!session.draft?.title.trim()}
-        />
+        {/* The strip reads off the live stage, and a record has none — its
+            draft is `completed`/`abandoned`, which the stage helper folds into
+            "aligning" because neither can be acted on. Rendering that would
+            label a finished alignment as still in progress, so the outcome is
+            stated by the panel instead. */}
+        {!record ? (
+          <IssueDraftStageStrip
+            stage={session.stage}
+            hasTitle={!!session.draft?.title.trim()}
+          />
+        ) : null}
       </header>
 
       {session.retired ? (
@@ -198,6 +218,10 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               onStop={() => void session.stop()}
               error={session.error}
               question={session.question}
+              // A record has nothing left to say: no composer, no answer chips
+              // for a question that was already settled, and no runtime badge
+              // for a machine that will never run another turn.
+              readOnly={record}
               // A settled reply is rendered from the carrier's task transcript,
               // not from `content`, so stripping the message above is not enough
               // on its own: the transcript's text rows have to be transformed
@@ -227,6 +251,8 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               currentUserId={currentUserId}
               switchingRuntime={session.switchingRuntime}
               pending={session.pending}
+              readOnly={record}
+              producedIssueId={session.producedIssueId}
               onDirtyChange={session.setLocalDirty}
               onSave={session.save}
               onGenerate={session.generatePreview}

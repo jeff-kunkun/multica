@@ -301,7 +301,9 @@ func validIssueDraftBody(w http.ResponseWriter, raw json.RawMessage) ([]byte, bo
 	return raw, true
 }
 
-// IssueDraftSummary is one unfinished alignment conversation.
+// IssueDraftSummary is one alignment conversation, as the list endpoint
+// renders it. `status` says which kind of record it is: the two live states are
+// resume candidates, the two terminal ones are records to read back (DENE-371).
 type IssueDraftSummary struct {
 	issueDraftResponse
 	Title              string `json:"title"`
@@ -315,9 +317,27 @@ type ListIssueDraftsResponse struct {
 	Drafts []IssueDraftSummary `json:"drafts"`
 }
 
-// ListIssueDrafts returns the caller's unfinished alignment conversations.
-// This is the only way back into one: the carrier is `kind = 'system'`, so the
-// conversation is invisible to every chat surface by construction.
+// issueDraftStatusesForList maps the list's `status` filter onto the draft
+// statuses it selects. The default is the two live states — "which alignments
+// can I still act on", which is what every caller wanted before DENE-371 and
+// what an absent parameter must keep meaning. `all` adds the two terminal ones,
+// which is the record half: a conversation that produced an issue, or was
+// abandoned, is still there to be read back.
+//
+// An unrecognised value falls back to the default rather than 400: the filter
+// only ever widens or narrows a read of the caller's own rows, and a client
+// asking with a future value should see the safe subset, not an error.
+func issueDraftStatusesForList(qualifier string) []string {
+	if qualifier == "all" {
+		return []string{"draft", "ready", "completed", "abandoned"}
+	}
+	return []string{"draft", "ready"}
+}
+
+// ListIssueDrafts returns the caller's alignment conversations, narrowed by the
+// optional `status` filter. This is the only way back into one: the carrier is
+// `kind = 'system'`, so the conversation is invisible to every chat surface by
+// construction.
 func (h *Handler) ListIssueDrafts(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
@@ -332,6 +352,7 @@ func (h *Handler) ListIssueDrafts(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Queries.ListIssueDraftsByCreator(r.Context(), db.ListIssueDraftsByCreatorParams{
 		WorkspaceID: workspaceUUID,
 		CreatorID:   parseUUID(userID),
+		Statuses:    issueDraftStatusesForList(r.URL.Query().Get("status")),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issue drafts")

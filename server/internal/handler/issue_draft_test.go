@@ -387,3 +387,58 @@ func TestListIssueDraftsReturnsOnlyUnfinishedOwnDrafts(t *testing.T) {
 		t.Fatal("a confirmed draft is still offered as unfinished work")
 	}
 }
+
+// `?status=all` is the record half of the same endpoint (DENE-371): an
+// alignment that produced an issue, or was given up on, has to stay reachable
+// or the only copy of what was agreed is gone. The default list must keep
+// meaning "still actionable", so the two readings are pinned side by side.
+func TestListIssueDraftsStatusAllReturnsTerminalRecords(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cleanupIssueDraftCarriers(t)
+
+	open := startIssueDraftSession(t)
+	saveIssueDraft(t, open.SessionID, 0, "draft", map[string]any{"title": "still aligning"})
+
+	confirmed := startIssueDraftSession(t)
+	saved := saveIssueDraft(t, confirmed.SessionID, 0, "ready", map[string]any{"title": "became an issue"})
+	var finalized FinalizeIssueDraftResponse
+	testutil.Call(t, testHandler.FinalizeIssueDraft, finalizeRequest(t, confirmed.SessionID, saved.Revision)).
+		Want(http.StatusOK).JSON(&finalized)
+
+	discarded := startIssueDraftSession(t)
+	saveIssueDraft(t, discarded.SessionID, 0, "draft", map[string]any{"title": "gave up on it"})
+	testutil.Call(t, testHandler.AbandonIssueDraft, withURLParam(
+		newRequest(http.MethodPost, "/api/issue-drafts/"+discarded.SessionID+"/abandon", nil),
+		"sessionId", discarded.SessionID,
+	)).Want(http.StatusOK)
+
+	var listed ListIssueDraftsResponse
+	testutil.Call(t, testHandler.ListIssueDrafts, newRequest(http.MethodGet, "/api/issue-drafts?status=all", nil)).
+		Want(http.StatusOK).JSON(&listed)
+
+	byID := map[string]IssueDraftSummary{}
+	for _, d := range listed.Drafts {
+		byID[d.ChatSessionID] = d
+	}
+	for _, want := range []string{open.SessionID, confirmed.SessionID, discarded.SessionID} {
+		if _, ok := byID[want]; !ok {
+			t.Fatalf("alignment %s is missing from ?status=all; there is no other way back to it", want)
+		}
+	}
+	// The record carries what a reader needs to name it and to jump to its
+	// issue, which is the whole point of listing it.
+	if got := byID[confirmed.SessionID].Status; got != "completed" {
+		t.Fatalf("confirmed draft status = %q, want completed", got)
+	}
+	if got := byID[confirmed.SessionID].IssueID; got == nil || *got != finalized.IssueID {
+		t.Fatalf("confirmed draft issue_id = %v, want %q", got, finalized.IssueID)
+	}
+	if got := byID[discarded.SessionID].Status; got != "abandoned" {
+		t.Fatalf("discarded draft status = %q, want abandoned", got)
+	}
+	if got := byID[open.SessionID].Status; got != "draft" {
+		t.Fatalf("live draft status = %q, want draft", got)
+	}
+}

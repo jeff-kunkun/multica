@@ -31,6 +31,7 @@ export function IssueDraftConversation({
   onStop,
   error,
   question,
+  readOnly: readOnlyProp,
   transformContent,
 }: {
   draftId: string;
@@ -55,6 +56,14 @@ export function IssueDraftConversation({
   /** The question the guided policy is waiting on, if any. */
   question: IssueDraftQuestion | null;
   /**
+   * Render the transcript and nothing else — the shape a FINISHED alignment is
+   * read back in (DENE-371). The composer, the answer chips and the runtime
+   * badge all describe a next turn, and a record has none: the server refuses a
+   * save or a turn against a terminal draft, so offering them would promise
+   * work that cannot happen.
+   */
+  readOnly?: boolean;
+  /**
    * How to render a settled assistant turn. The list draws those from the
    * carrier's task transcript, whose text is the wire format verbatim, so the
    * owner has to hand down the same strip it applies to the message bodies.
@@ -65,6 +74,7 @@ export function IssueDraftConversation({
   const pending = !!pendingTask?.task_id;
   const draftKey = `issue-draft:${draftId}`;
   const agentName = t(($) => $.alignment.conversation_title);
+  const readOnly = readOnlyProp === true;
 
   return (
     // `@container`: this is one column of a split layout, so the shared chat
@@ -79,18 +89,20 @@ export function IssueDraftConversation({
             {t(($) => $.alignment.conversation_hint)}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground">
-          <span
-            className={cn(
-              "size-2 rounded-full",
-              runtimeOnline ? "bg-success" : "bg-muted-foreground/40",
-            )}
-            aria-hidden="true"
-          />
-          {runtimeOnline
-            ? t(($) => $.alignment.runtime_online)
-            : t(($) => $.alignment.runtime_offline)}
-        </div>
+        {!readOnly ? (
+          <div className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground">
+            <span
+              className={cn(
+                "size-2 rounded-full",
+                runtimeOnline ? "bg-success" : "bg-muted-foreground/40",
+              )}
+              aria-hidden="true"
+            />
+            {runtimeOnline
+              ? t(($) => $.alignment.runtime_online)
+              : t(($) => $.alignment.runtime_offline)}
+          </div>
+        ) : null}
       </header>
 
       {loading ? (
@@ -115,7 +127,7 @@ export function IssueDraftConversation({
         </div>
       )}
 
-      {question ? (
+      {question && !readOnly ? (
         <div className="border-t bg-muted/20 px-5 py-3">
           <div className="flex items-start gap-2">
             <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -156,7 +168,7 @@ export function IssueDraftConversation({
         </div>
       ) : null}
 
-      {error ? (
+      {error && !readOnly ? (
         <div
           role="alert"
           aria-live="polite"
@@ -166,18 +178,20 @@ export function IssueDraftConversation({
         </div>
       ) : null}
 
-      <ChatInput
-        onSend={onSend}
-        onStop={onStop}
-        isRunning={pending || sending}
-        disabled={!runtimeOnline}
-        // An alignment session is a chat session with a runtime behind it, so
-        // the upload affordance exists exactly when that runtime can answer.
-        uploadEnabled={runtimeOnline}
-        agentName={agentName}
-        draftKeyOverride={draftKey}
-        editorKeyOverride={draftKey}
-      />
+      {!readOnly ? (
+        <ChatInput
+          onSend={onSend}
+          onStop={onStop}
+          isRunning={pending || sending}
+          disabled={!runtimeOnline}
+          // An alignment session is a chat session with a runtime behind it, so
+          // the upload affordance exists exactly when that runtime can answer.
+          uploadEnabled={runtimeOnline}
+          agentName={agentName}
+          draftKeyOverride={draftKey}
+          editorKeyOverride={draftKey}
+        />
+      ) : null}
     </section>
   );
 }

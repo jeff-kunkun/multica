@@ -70,6 +70,18 @@ type IssueResponse struct {
 	ParentIssueID *string `json:"parent_issue_id"`
 	ProjectID     *string `json:"project_id"`
 	Position      float64 `json:"position"`
+	// OriginType / OriginID are the issue's provenance for platform-internal
+	// flows — autopilot runs, quick-create tasks, and requirement alignment
+	// (`origin_type='issue_draft'`, `origin_id` = the alignment's
+	// chat_session_id). Detail-only and additive: absent on a row that has no
+	// origin, and on list rows, whose query does not select the columns.
+	//
+	// Read them as a PAIR: an alignment jump-off exists only when origin_type
+	// is exactly 'issue_draft', and treating a missing field as "not from an
+	// alignment" is correct, because every write path that sets one sets both
+	// (DENE-371).
+	OriginType *string `json:"origin_type,omitempty"`
+	OriginID   *string `json:"origin_id,omitempty"`
 	// Stage groups sub-issues under the same parent into ordered barrier
 	// groups (null = unstaged). See issue_child_done.go for how a closed
 	// stage gates the child-done -> parent wake.
@@ -337,6 +349,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID:  uuidToPtr(i.ParentIssueID),
 		ProjectID:      uuidToPtr(i.ProjectID),
 		Position:       i.Position,
+		OriginType:     textToPtr(i.OriginType),
+		OriginID:       uuidToPtr(i.OriginID),
 		Stage:          int4ToPtr(i.Stage),
 		StartDate:      dateToPtr(i.StartDate),
 		DueDate:        dateToPtr(i.DueDate),

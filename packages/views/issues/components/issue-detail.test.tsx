@@ -3033,6 +3033,42 @@ describe("IssueDetail (shared)", () => {
     expect(rendered.indexOf("comment-midway")).toBeLessThan(rendered.indexOf("comment-run-reply"));
   });
 
+
+  // DENE-371: the issue → alignment jump-off. An alignment conversation is
+  // reachable from nowhere else (its carrier is a hidden system agent, so no
+  // chat list will ever show it), which makes this entry the only route back to
+  // what was agreed before the issue existed.
+  it("links back to the alignment that created this issue", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      origin_type: "issue_draft",
+      origin_id: "sess-42",
+    });
+    renderIssueDetail();
+
+    const link = await screen.findByRole("link", {
+      name: /View the alignment that created this/,
+    });
+    expect(link.getAttribute("href")).toBe("/test/issues/new/sess-42");
+  });
+
+  it("offers no alignment entry for an issue created some other way", async () => {
+    // The same origin pair is written by autopilot runs and quick-create tasks;
+    // their origin_id is not a conversation, and an entry that navigated to one
+    // would 404. Absent provenance — a list row, or an older backend — is the
+    // same answer.
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      origin_type: "autopilot",
+      origin_id: "run-7",
+    });
+    renderIssueDetail();
+
+    await screen.findByText("Implement authentication");
+    expect(
+      screen.queryByRole("link", { name: /View the alignment that created this/ }),
+    ).toBeNull();
+  });
 });
 
 describe("groupSubIssuesByStage", () => {

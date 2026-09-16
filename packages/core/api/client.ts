@@ -1716,15 +1716,23 @@ export class ApiClient {
   }
 
   /**
-   * The caller's unfinished alignment conversations. They are hidden from
-   * every chat list (their carrier is `kind = 'system'`), so this is the only
-   * route back to one. A 404 means the backend predates the endpoint: degrade
-   * to "no drafts" rather than erroring the surface that lists them.
+   * The caller's alignment conversations. They are hidden from every chat list
+   * (their carrier is `kind = 'system'`), so this is the only route back to
+   * one. A 404 means the backend predates the endpoint: degrade to "no drafts"
+   * rather than erroring the surface that lists them.
+   *
+   * `status: "all"` widens the read from "alignments I can still act on" to
+   * "every alignment I have", terminal ones included — the records the chat
+   * sidebar lists (DENE-371). The parameter is additive: a backend that
+   * predates it ignores the query string and answers with the live drafts
+   * only, which leaves the record surfaces empty rather than broken.
    */
-  async listIssueDrafts(): Promise<IssueDraftSummary[]> {
+  async listIssueDrafts(options?: { status?: "all" }): Promise<IssueDraftSummary[]> {
+    const path =
+      options?.status === "all" ? "/api/issue-drafts?status=all" : "/api/issue-drafts";
     let raw: unknown;
     try {
-      raw = await this.fetch<unknown>("/api/issue-drafts");
+      raw = await this.fetch<unknown>(path);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) return [];
       throw err;

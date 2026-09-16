@@ -35,7 +35,8 @@ WHERE chat_session_id = $1 AND workspace_id = $2
 FOR UPDATE;
 
 -- name: ListIssueDraftsByCreator :many
--- The caller's unfinished alignment conversations, newest activity first.
+-- The caller's alignment conversations in the given statuses, newest activity
+-- first.
 --
 -- Creator-scoped for the same reason ListAgentBuilderSessionsByCreator is: a
 -- draft is a private conversation, and a workspace admin has no business
@@ -43,6 +44,13 @@ FOR UPDATE;
 -- ListChatSessionsByCreator either — that list is filtered against
 -- `kind = 'user'` agents, and the carrier is `kind = 'system'` — so this
 -- statement is the only way back into an alignment conversation.
+--
+-- `statuses` is a parameter rather than the hardcoded ('draft','ready') this
+-- used to be because the same rows answer two different questions: "which
+-- alignments can I still act on" (the create dialog's resume banner) and
+-- "which alignments have I ever had" (the chat sidebar's alignment records,
+-- DENE-371). A terminal draft is a record to read back, not a draft to resume,
+-- and the caller's status set is the whole of that distinction.
 SELECT d.chat_session_id,
        d.workspace_id,
        d.status,
@@ -71,7 +79,7 @@ LEFT JOIN LATERAL (
 WHERE d.workspace_id = $1
   AND cs.creator_id = $2
   AND cs.status = 'active'
-  AND d.status IN ('draft', 'ready')
+  AND d.status = ANY(sqlc.arg('statuses')::text[])
 ORDER BY COALESCE(lm.created_at, d.updated_at) DESC;
 
 -- name: UpdateIssueDraft :one

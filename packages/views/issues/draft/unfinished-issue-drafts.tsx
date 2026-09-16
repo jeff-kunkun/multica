@@ -22,10 +22,11 @@ import { useT, useTimeAgo } from "../../i18n";
  * would otherwise silently start another one.
  *
  * A draft's carrier is a `kind='system'` agent, so it is absent from every chat
- * list; this banner and the list behind it are the only route back. One
- * unfinished draft opens directly — a chooser listing one item is a question
- * with one answer — and several open a dialog, because picking between them
- * needs to show what each one is about.
+ * list. This banner is the route back to the ones still IN PROGRESS, and the
+ * chat sidebar's alignment records (DENE-371) is the route back to all of them,
+ * finished ones included. One unfinished draft opens directly — a chooser
+ * listing one item is a question with one answer — and several open a dialog,
+ * because picking between them needs to show what each one is about.
  */
 export function UnfinishedIssueDraftsBanner({
   drafts,

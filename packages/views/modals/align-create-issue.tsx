@@ -5,7 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeftRight, Loader2, Sparkles } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueDraftListOptions, useStartIssueDraft } from "@multica/core/issue-drafts";
+import {
+  issueDraftListOptions,
+  unfinishedIssueDrafts,
+  useStartIssueDraft,
+} from "@multica/core/issue-drafts";
 import { useIssueDraftStore } from "@multica/core/issues/stores";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
@@ -153,7 +157,10 @@ export function AlignCreatePanel({
   const runtimesLoading = runtimesQuery.isLoading;
   const hasUsableRuntime = usableRuntimes.length > 0;
 
-  const drafts: IssueDraftSummary[] = draftsQuery.data ?? [];
+  // The banner offers work to RESUME, so the terminal records the same list
+  // now carries are filtered out here: "you have 2 unfinished alignments" must
+  // count the ones with a next turn in them (DENE-371).
+  const drafts: IssueDraftSummary[] = unfinishedIssueDrafts(draftsQuery.data ?? []);
   // `gate` is the coordinator-wide gate: it counts the shared pool's
   // placeholders too, so a file still uploading on the manual face keeps this
   // face's button disabled as well — the first turn binds the same pool.
