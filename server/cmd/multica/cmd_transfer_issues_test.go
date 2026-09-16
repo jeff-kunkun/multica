@@ -886,6 +886,14 @@ func (r *transferImportRecorder) server(t *testing.T, targetPrefix string) *http
 				"issue_prefix": targetPrefix, "issue_counter": counter,
 			})
 		case req.URL.Path == "/api/issues":
+			// `/api/issues` is workspace-scoped behind RequireWorkspaceMember:
+			// it reads the workspace from `?workspace_id` or X-Workspace-ID and
+			// 400s when neither is present. A fake that answers regardless would
+			// hide an import that never told the server which workspace to read.
+			if req.URL.Query().Get("workspace_id") == "" && req.Header.Get("X-Workspace-ID") == "" {
+				http.Error(w, `{"error":"invalid workspace_id"}`, http.StatusBadRequest)
+				return
+			}
 			writeJSONTest(w, r.issueList(req.URL.Query()))
 		case strings.HasSuffix(req.URL.Path, "/transfer/issues"):
 			var body map[string]any

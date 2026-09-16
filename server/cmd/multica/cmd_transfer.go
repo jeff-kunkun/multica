@@ -895,6 +895,13 @@ func fetchTransferLandedIssueNumbers(ctx context.Context, client *cli.APIClient,
 	for start := 0; start < len(ids); start += transferLandedNumberLookupChunk {
 		end := min(start+transferLandedNumberLookupChunk, len(ids))
 		q := url.Values{}
+		// `/api/issues` is the one request in the import path that is not
+		// scoped by its URL, so the target workspace has to ride in the query:
+		// the client's own workspace comes from the ambient CLI profile, which
+		// on a freshly logged-in target (the migration case, notably Desktop)
+		// is empty and 400s, and when it is set at all it names the wrong
+		// workspace. `workspace_id` outranks the X-Workspace-ID header.
+		q.Set("workspace_id", wsID)
 		q.Set("ids", strings.Join(ids[start:end], ","))
 		q.Set("limit", strconv.Itoa(transferLandedNumberLookupChunk))
 		var envelope struct {
