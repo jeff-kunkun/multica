@@ -72,6 +72,22 @@ describe("buildTransferCliArgs", () => {
     ]);
   });
 
+  it("omits --auto-bind-runtimes when the toggle is on and sends =false when off", () => {
+    const base = {
+      action: "import" as const,
+      workspace: "acme",
+      inPath: "/tmp/acme.zip",
+    };
+    // The CLI default is on, so the enabled case stays flag-free: an older
+    // CLI would reject an unknown flag (DENE-364).
+    expect(buildTransferCliArgs(PROFILE, { ...base, autoBindRuntimes: true })).not.toContain(
+      "--auto-bind-runtimes=false",
+    );
+    expect(buildTransferCliArgs(PROFILE, { ...base, autoBindRuntimes: false })).toContain(
+      "--auto-bind-runtimes=false",
+    );
+  });
+
   it("refuses an empty profile", () => {
     expect(() =>
       buildTransferCliArgs("", {
@@ -128,10 +144,71 @@ describe("parseTransferImportReport", () => {
       field: "custom_env",
     });
     expect(report.runtimes_to_bind[0]?.agent_name).toBe("Builder");
+    // A server that predates the bind report leaves the action empty and the
+    // card falls back to the plain candidate list.
+    expect(report.runtimes_to_bind[0]?.action).toBe("");
     expect(report.export_gaps[0]).toMatchObject({
       group: "plugins",
       reason: "read_api_missing",
     });
+  });
+
+  it("reads the bind outcome, candidates and reason", () => {
+    const report = parseTransferImportReport(`{
+  "runtimes_to_bind": [
+    {
+      "agent_target_id": "a1",
+      "agent_name": "Builder",
+      "provider": "claude",
+      "runtime_mode": "local",
+      "action": "candidates",
+      "auto_bind": false,
+      "candidate_ids": ["r1", "r2"],
+      "candidates": [
+        { "runtime_id": "r1", "name": "Claude (MacBook-Pro.local)", "provider": "claude", "runtime_mode": "local", "profile_name": "" },
+        { "runtime_id": "r2", "name": "Claude (MacBook-Air-5.local)", "provider": "claude", "runtime_mode": "local", "profile_name": "corp" }
+      ]
+    },
+    {
+      "agent_target_id": "a2",
+      "agent_name": "Reviewer",
+      "action": "no_candidate",
+      "reason_code": "no_runtime_for_provider",
+      "reason": "no runtime matching provider=codex"
+    },
+    {
+      "agent_target_id": "a3",
+      "agent_name": "Ops",
+      "action": "not_a_real_action",
+      "candidates": [{ "runtime_id": "r3", "name": "Codex (mac)" }]
+    }
+  ]
+}`);
+    const pick = report.runtimes_to_bind[0]!;
+    expect(pick.action).toBe("candidates");
+    expect(pick.candidate_ids).toEqual(["r1", "r2"]);
+    expect(pick.candidates).toHaveLength(2);
+    expect(pick.candidates[1]).toMatchObject({
+      runtime_id: "r2",
+      name: "Claude (MacBook-Air-5.local)",
+      profile_name: "corp",
+    });
+    expect(report.runtimes_to_bind[1]).toMatchObject({
+      action: "no_candidate",
+      reason_code: "no_runtime_for_provider",
+    });
+    // An unknown token degrades to "" so a newer server cannot silently drop
+    // the row.
+    expect(report.runtimes_to_bind[2]?.action).toBe("");
+    expect(report.runtimes_to_bind[2]?.candidates).toEqual([
+      {
+        runtime_id: "r3",
+        name: "Codex (mac)",
+        provider: "",
+        runtime_mode: "",
+        profile_name: "",
+      },
+    ]);
   });
 });
 
@@ -197,6 +274,20 @@ describe("parseTransferRunRequest", () => {
         outPath: "acme.zip",
       }),
     ).toBeNull();
+  });
+
+  it("carries autoBindRuntimes=false through, and drops the flag when it is on", () => {
+    const base = {
+      action: "import",
+      workspace: "acme",
+      inPath: "/tmp/acme.zip",
+      dryRun: false,
+    };
+    expect(parseTransferRunRequest({ ...base, autoBindRuntimes: false })).toEqual({
+      ...base,
+      autoBindRuntimes: false,
+    });
+    expect(parseTransferRunRequest({ ...base, autoBindRuntimes: true })).toEqual(base);
   });
 
   it("accepts an absolute export path", () => {

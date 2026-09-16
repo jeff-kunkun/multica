@@ -160,6 +160,62 @@ export type ConfigImportErrorInfo = {
   status: number;
 };
 
+/** One agent→runtime pair the Desktop card asks the server to bind. */
+export type TransferRuntimeBinding = {
+  agent_id: string;
+  runtime_id: string;
+};
+
+export const TransferRuntimeBindResultSchema = z
+  .object({
+    agent_id: z.string().default(""),
+    agent_name: z.string().default(""),
+    runtime_id: z.string().default(""),
+    runtime_name: z.string().default(""),
+    ok: z.boolean().default(false),
+    reason_code: z.string().default(""),
+    reason: z.string().default(""),
+  })
+  .loose();
+
+const EMPTY_TRANSFER_BIND_REPORT = {
+  applied: false,
+  bound: 0,
+  failed: 0,
+  results: [] as z.infer<typeof TransferRuntimeBindResultSchema>[],
+};
+
+export const TransferBindRuntimesReportSchema = z
+  .object({
+    applied: z.boolean().default(false),
+    bound: z.number().default(0),
+    failed: z.number().default(0),
+    results: z.array(TransferRuntimeBindResultSchema).default([]),
+  })
+  .loose();
+
+export type TransferRuntimeBindResult = z.infer<
+  typeof TransferRuntimeBindResultSchema
+>;
+export type TransferBindRuntimesReport = z.infer<
+  typeof TransferBindRuntimesReportSchema
+>;
+
+export const EMPTY_TRANSFER_BIND_RUNTIMES_REPORT: TransferBindRuntimesReport =
+  EMPTY_TRANSFER_BIND_REPORT;
+
+export function parseTransferBindRuntimesReport(
+  raw: unknown,
+  endpoint: string,
+): TransferBindRuntimesReport {
+  return parseWithFallback(
+    raw,
+    TransferBindRuntimesReportSchema,
+    EMPTY_TRANSFER_BIND_REPORT,
+    { endpoint },
+  );
+}
+
 export type ConfigImportResult = {
   report: ConfigImportReport;
   error?: ConfigImportErrorInfo;

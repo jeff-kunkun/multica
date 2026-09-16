@@ -1460,8 +1460,27 @@
       "progress_attachments": "已下载 {{count}} 个附件",
       "progress_attachments_total": "{{done}} / {{total}} 个附件",
       "saved_as": "已保存为 {{name}}（{{size}}）",
-      "runtimes_title": "请在这台机器上为这些智能体绑定运行时。",
-      "gaps_title": "源端导出缺口"
+      "runtimes_title": "运行时绑定",
+      "gaps_title": "源端导出缺口",
+      "runtimes_hint": "迁过来的智能体要能跑，得先在本机绑一个运行时。只有一个候选时自动绑；有多个候选时由你选；一个候选都没有时给出原因。",
+      "auto_bind_label": "只有一个候选运行时自动绑定",
+      "auto_bind_hint": "默认开启。关掉之后，导入完的运行时全部由你自己挑。",
+      "runtime_auto_bound": "已自动绑定到 {{runtime}}。",
+      "runtime_bound": "已绑定到 {{runtime}}。",
+      "runtime_already_bound": "本来就已经绑定到 {{runtime}}。",
+      "runtime_already_bound_unknown": "本来就已经绑定。",
+      "runtime_pick": "选择运行时",
+      "runtime_apply": "一键应用绑定",
+      "runtime_applying": "绑定中…",
+      "runtime_applied": "已绑定 {{bound}} / {{total}} 个智能体。",
+      "runtime_apply_failed": "绑定失败：{{reason}}",
+      "runtime_reason_no_runtime": "这台实例上还没有 provider={{provider}} 的运行时。先把本机 daemon 连到 {{host}}，再回来绑一次。",
+      "runtime_reason_no_runtime_generic": "这台实例上还没有匹配的运行时。先把本机 daemon 连到 {{host}}，再回来绑一次。",
+      "runtime_reason_source_unknown": "这个包里没有记录该智能体用的是哪个运行时，没法匹配。用当前版本的 Desktop 重新导出一次即可自动绑定。",
+      "runtime_reason_agent_missing": "这个智能体没有导入到目标工作区。",
+      "runtime_reason_runtime_private": "该运行时属于其他成员且为私有。",
+      "runtime_reason_runtime_unknown": "该运行时已经不在这个工作区里了。",
+      "runtime_reason_bind_failed": "服务端拒绝了这个绑定。"
     }
   }
 }

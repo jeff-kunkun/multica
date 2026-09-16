@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { autopilotKeys } from "@multica/core/autopilots/queries";
@@ -15,6 +15,7 @@ import { projectKeys } from "@multica/core/projects/queries";
 import { propertyKeys } from "@multica/core/properties/queries";
 import { quickActionKeys } from "@multica/core/quick-actions/queries";
 import { api } from "@multica/core/api";
+import { useBindTransferRuntimes } from "@multica/core/runtimes/mutations";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import {
   Alert,
@@ -32,6 +33,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { Switch } from "@multica/ui/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -50,9 +52,11 @@ import {
   runWorkspaceTransfer,
   subscribeTransferProgress,
   transferExportSourceHost,
+  type TransferBindReportView,
   type TransferErrorCode,
   type TransferImportReportView,
   type TransferProgressEvent,
+  type TransferRuntimeBind,
 } from "../../platform";
 import {
   SettingsCard,
@@ -88,17 +92,6 @@ function secretLabel(item: {
   return [item.entity, item.name, item.field].filter(Boolean).join(" · ");
 }
 
-function runtimeLabel(item: {
-  agent_name: string;
-  provider: string;
-  runtime_mode: string;
-  profile_name: string;
-}): string {
-  return [item.agent_name, item.provider, item.runtime_mode, item.profile_name]
-    .filter(Boolean)
-    .join(" · ");
-}
-
 export function WorkspaceMigrationCard() {
   const { t } = useT("settings");
   const workspace = useCurrentWorkspace();
@@ -114,6 +107,10 @@ export function WorkspaceMigrationCard() {
   // after a conflict-policy change (DENE-318).
   const [activeAction, setActiveAction] = useState<TransferAction | null>(null);
   const [onConflict, setOnConflict] = useState<TransferConflictPolicy>("skip");
+  // On by default: a migrated agent that keeps its runtime is the whole point
+  // of the feature, and the rule only ever fires on an unambiguous match
+  // (DENE-364).
+  const [autoBindRuntimes, setAutoBindRuntimes] = useState(true);
   const [progress, setProgress] = useState<TransferProgressEvent | null>(null);
   const [exportResult, setExportResult] = useState<{
     path: string;
@@ -236,6 +233,7 @@ export function WorkspaceMigrationCard() {
         inPath,
         dryRun: true,
         onConflict: conflict,
+        autoBindRuntimes,
       });
       if (!result.ok) {
         if (result.code === "busy") return;
@@ -272,6 +270,7 @@ export function WorkspaceMigrationCard() {
         inPath: importPhase.inPath,
         dryRun: false,
         onConflict,
+        autoBindRuntimes,
       });
       if (!result.ok) {
         if (result.code === "busy") return;
@@ -406,6 +405,18 @@ export function WorkspaceMigrationCard() {
         </SettingsRow>
 
         <SettingsRow
+          label={t(($) => $.config_transfer.migration.auto_bind_label)}
+          description={t(($) => $.config_transfer.migration.auto_bind_hint)}
+        >
+          <Switch
+            checked={autoBindRuntimes}
+            onCheckedChange={(value) => setAutoBindRuntimes(value === true)}
+            disabled={!canManage || busy || !slug}
+            aria-label={t(($) => $.config_transfer.migration.auto_bind_label)}
+          />
+        </SettingsRow>
+
+        <SettingsRow
           label={t(($) => $.config_transfer.import.on_conflict)}
           description={t(($) => $.config_transfer.import.on_conflict_hint)}
           size="select-wide"
@@ -452,6 +463,8 @@ export function WorkspaceMigrationCard() {
       {report ? (
         <ImportReportView
           report={report}
+          wsId={wsId}
+          host={sourceHost}
           showConfirm={importPhase.step === "preview" && !busy}
           applying={busy && importPhase.step === "preview"}
           onConfirm={() => setConfirmOpen(true)}
@@ -528,11 +541,15 @@ function ProgressLines({ progress }: { progress: TransferProgressEvent }) {
 
 function ImportReportView({
   report,
+  wsId,
+  host,
   showConfirm,
   applying,
   onConfirm,
 }: {
   report: TransferImportReportView;
+  wsId: string;
+  host: string;
   showConfirm: boolean;
   applying: boolean;
   onConfirm: () => void;
@@ -588,9 +605,10 @@ function ImportReportView({
       ) : null}
 
       {report.runtimes_to_bind.length > 0 ? (
-        <ReportList
-          title={t(($) => $.config_transfer.migration.runtimes_title)}
-          items={report.runtimes_to_bind.map(runtimeLabel)}
+        <RuntimeBindReport
+          items={report.runtimes_to_bind}
+          wsId={wsId}
+          host={host}
         />
       ) : null}
 
@@ -616,6 +634,284 @@ function ImportReportView({
         </div>
       ) : null}
     </div>
+  );
+}
+
+
+/**
+ * The runtime bindings an import produced, grouped by what the server decided:
+ * already bound, bound by the unique-candidate rule, or waiting for a pick. A
+ * row with no candidate explains itself instead of disappearing (DENE-364).
+ */
+function RuntimeBindReport({
+  items,
+  wsId,
+  host,
+}: {
+  items: TransferRuntimeBind[];
+  wsId: string;
+  host: string;
+}) {
+  const { t } = useT("settings");
+  const bind = useBindTransferRuntimes(wsId);
+  const [picks, setPicks] = useState<Record<string, string>>({});
+  const [result, setResult] = useState<TransferBindReportView | null>(null);
+
+  const boundRows = items.filter(
+    (item) => item.action === "bound" || item.action === "already_bound",
+  );
+  const pickRows = items.filter(isRuntimePickRow);
+  const blockedRows = items.filter(isRuntimeBlockedRow);
+  const legacyRows = items.filter((item) => item.action === "");
+
+  const outcomeFor = (agentId: string) =>
+    result?.results.find((row) => row.agent_id === agentId);
+
+  const chosen = pickRows
+    .map((item) => ({
+      agent_id: item.agent_target_id,
+      runtime_id: picks[item.agent_target_id] ?? "",
+    }))
+    .filter((row) => row.agent_id !== "" && row.runtime_id !== "");
+
+  function runtimeReason(item: TransferRuntimeBind): string {
+    switch (item.reason_code) {
+      case "no_runtime_for_provider":
+        return item.provider
+          ? t(($) => $.config_transfer.migration.runtime_reason_no_runtime, {
+              provider: item.provider,
+              host,
+            })
+          : t(
+              ($) => $.config_transfer.migration.runtime_reason_no_runtime_generic,
+              { host },
+            );
+      case "source_runtime_unknown":
+        return t(
+          ($) => $.config_transfer.migration.runtime_reason_source_unknown,
+        );
+      case "agent_missing":
+        return t(($) => $.config_transfer.migration.runtime_reason_agent_missing);
+      case "runtime_private":
+        return t(
+          ($) => $.config_transfer.migration.runtime_reason_runtime_private,
+        );
+      case "runtime_unknown":
+        return t(
+          ($) => $.config_transfer.migration.runtime_reason_runtime_unknown,
+        );
+      case "bind_failed":
+        return t(($) => $.config_transfer.migration.runtime_reason_bind_failed);
+      default:
+        return (
+          item.reason || t(($) => $.config_transfer.migration.failed)
+        );
+    }
+  }
+
+  async function applyPicks() {
+    if (chosen.length === 0) return;
+    setResult(null);
+    try {
+      const report = await bind.mutateAsync(chosen);
+      setResult(report);
+      if (report.failed === 0) {
+        toast.success(
+          t(($) => $.config_transfer.migration.runtime_applied, {
+            bound: report.bound,
+            total: chosen.length,
+          }),
+        );
+      } else {
+        toast.error(
+          t(($) => $.config_transfer.migration.runtime_apply_failed, {
+            reason: t(($) => $.config_transfer.migration.failed),
+          }),
+        );
+      }
+    } catch (err) {
+      toast.error(
+        t(($) => $.config_transfer.migration.runtime_apply_failed, {
+          reason: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  }
+
+  return (
+    <div className="space-y-2" data-testid="workspace-migration-runtimes">
+      <h3 className="text-body font-semibold">
+        {t(($) => $.config_transfer.migration.runtimes_title)}
+      </h3>
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.config_transfer.migration.runtimes_hint)}
+      </p>
+      <SettingsCard>
+        <ul className="divide-y divide-surface-border">
+          {boundRows.map((item) => {
+            const runtime =
+              item.bound_runtime_name || item.bound_runtime_id || "—";
+            const label =
+              item.action === "already_bound"
+                ? item.bound_runtime_name
+                  ? t(($) => $.config_transfer.migration.runtime_already_bound, {
+                      runtime,
+                    })
+                  : t(
+                      ($) =>
+                        $.config_transfer.migration.runtime_already_bound_unknown,
+                    )
+                : item.auto_bind
+                  ? t(($) => $.config_transfer.migration.runtime_auto_bound, {
+                      runtime,
+                    })
+                  : t(($) => $.config_transfer.migration.runtime_bound, {
+                      runtime,
+                    });
+            return (
+              <li
+                key={item.agent_target_id || item.agent_name}
+                className="flex items-start gap-2 px-4 py-3 text-body"
+                data-testid="workspace-migration-runtime-bound"
+              >
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+                <span>
+                  <span className="font-medium">{item.agent_name}</span>
+                  {" · "}
+                  {label}
+                </span>
+              </li>
+            );
+          })}
+
+          {pickRows.map((item) => {
+            const options = item.candidates.map((candidate) => ({
+              value: candidate.runtime_id,
+              label: [candidate.name, candidate.provider, candidate.profile_name]
+                .filter(Boolean)
+                .join(" · "),
+            }));
+            const picked = picks[item.agent_target_id] ?? "";
+            const done = outcomeFor(item.agent_target_id);
+            return (
+              <li
+                key={item.agent_target_id || item.agent_name}
+                className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                data-testid="workspace-migration-runtime-pick"
+              >
+                <div className="min-w-0">
+                  <p className="text-body font-medium">{item.agent_name}</p>
+                  {done && !done.ok ? (
+                    <p className="text-caption text-destructive">
+                      {done.reason_code
+                        ? runtimeReason({
+                            ...item,
+                            reason_code: done.reason_code,
+                            reason: done.reason,
+                          })
+                        : done.reason}
+                    </p>
+                  ) : null}
+                </div>
+                <Select
+                  items={options}
+                  value={picked}
+                  onValueChange={(value) =>
+                    setPicks((prev) => ({
+                      ...prev,
+                      [item.agent_target_id]: String(value ?? ""),
+                    }))
+                  }
+                  disabled={bind.isPending}
+                >
+                  <SelectTrigger
+                    aria-label={`${item.agent_name} ${t(($) => $.config_transfer.migration.runtime_pick)}`}
+                    className="sm:w-72"
+                  >
+                    <SelectValue
+                      placeholder={t(
+                        ($) => $.config_transfer.migration.runtime_pick,
+                      )}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {options.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </li>
+            );
+          })}
+
+          {blockedRows.map((item) => (
+            <li
+              key={item.agent_target_id || item.agent_name}
+              className="flex items-start gap-2 px-4 py-3 text-body"
+              data-testid="workspace-migration-runtime-blocked"
+            >
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+              <span>
+                <span className="font-medium">{item.agent_name}</span>
+                {" · "}
+                <span className="text-muted-foreground">
+                  {runtimeReason(item)}
+                </span>
+              </span>
+            </li>
+          ))}
+
+          {legacyRows.map((item) => (
+            <li
+              key={item.agent_target_id || item.agent_name}
+              className="px-4 py-3 text-body"
+              data-testid="workspace-migration-runtime-legacy"
+            >
+              {[item.agent_name, item.provider, item.runtime_mode, item.profile_name]
+                .filter(Boolean)
+                .join(" · ")}
+            </li>
+          ))}
+        </ul>
+      </SettingsCard>
+
+      {pickRows.length > 0 ? (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            disabled={bind.isPending || chosen.length === 0}
+            onClick={() => void applyPicks()}
+            data-testid="workspace-migration-runtime-apply"
+          >
+            {bind.isPending ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            ) : null}
+            {bind.isPending
+              ? t(($) => $.config_transfer.migration.runtime_applying)
+              : t(($) => $.config_transfer.migration.runtime_apply)}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** A row the human still has to decide: the rule refused to guess. */
+function isRuntimePickRow(item: TransferRuntimeBind): boolean {
+  return item.action === "candidates";
+}
+
+/**
+ * A row that cannot be bound. "" is a server that predates the bind report, so
+ * it is rendered as a plain list rather than as a failure.
+ */
+function isRuntimeBlockedRow(item: TransferRuntimeBind): boolean {
+  return (
+    item.action === "no_candidate" ||
+    item.action === "agent_missing" ||
+    item.action === "failed"
   );
 }
 

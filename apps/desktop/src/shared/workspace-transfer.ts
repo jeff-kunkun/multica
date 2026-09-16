@@ -23,6 +23,29 @@ export type TransferSecretToFill = {
   target_id: string;
 };
 
+export type TransferRuntimeCandidate = {
+  runtime_id: string;
+  /** Machine label the picker shows, e.g. "Claude (MacBook-Pro.local)". */
+  name: string;
+  provider: string;
+  runtime_mode: string;
+  profile_name: string;
+};
+
+/**
+ * Outcome of the three-tier bind rule. "" is what a server that predates
+ * DENE-364 sends (or omits): the card then falls back to showing the plain
+ * candidate list.
+ */
+export type TransferRuntimeBindAction =
+  | "bound"
+  | "already_bound"
+  | "candidates"
+  | "no_candidate"
+  | "agent_missing"
+  | "failed"
+  | "";
+
 export type TransferRuntimeBind = {
   agent_target_id: string;
   agent_name: string;
@@ -30,6 +53,15 @@ export type TransferRuntimeBind = {
   runtime_mode: string;
   profile_name: string;
   candidate_ids: string[];
+  candidates: TransferRuntimeCandidate[];
+  action: TransferRuntimeBindAction;
+  /** True when the unique-candidate rule picked the runtime with no human input. */
+  auto_bind: boolean;
+  bound_runtime_id: string;
+  bound_runtime_name: string;
+  /** Stable reason token; `reason` is the server's English fallback. */
+  reason_code: string;
+  reason: string;
 };
 
 export type TransferExportGap = {
@@ -61,6 +93,11 @@ export type TransferRunRequest =
       inPath: string;
       dryRun: boolean;
       onConflict?: string;
+      /**
+       * Omitted means on: the server binds a unique runtime candidate so a
+       * migrated agent is runnable straight after import (DENE-364).
+       */
+      autoBindRuntimes?: boolean;
     };
 
 export type TransferRunResult =

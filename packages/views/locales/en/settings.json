@@ -1467,8 +1467,27 @@
       "progress_attachments": "{{count}} attachments downloaded",
       "progress_attachments_total": "{{done}} / {{total}} attachments",
       "saved_as": "Saved as {{name}} ({{size}})",
-      "runtimes_title": "Bind these agents to a runtime on this machine.",
-      "gaps_title": "Gaps from the source export"
+      "runtimes_title": "Runtime bindings",
+      "gaps_title": "Gaps from the source export",
+      "runtimes_hint": "An imported agent needs a runtime on this machine before it can run. One match is bound automatically; several are yours to pick; none is explained.",
+      "auto_bind_label": "Bind automatically when exactly one runtime matches",
+      "auto_bind_hint": "On by default. Turn it off to choose every runtime yourself after the import.",
+      "runtime_auto_bound": "Bound automatically to {{runtime}}.",
+      "runtime_bound": "Bound to {{runtime}}.",
+      "runtime_already_bound": "Already bound to {{runtime}}.",
+      "runtime_already_bound_unknown": "Already bound.",
+      "runtime_pick": "Pick a runtime",
+      "runtime_apply": "Apply bindings",
+      "runtime_applying": "Binding…",
+      "runtime_applied": "Bound {{bound}} of {{total}} agents.",
+      "runtime_apply_failed": "Binding failed: {{reason}}",
+      "runtime_reason_no_runtime": "No runtime with provider={{provider}} is visible here yet. Connect this machine's daemon to {{host}}, then bind again.",
+      "runtime_reason_no_runtime_generic": "No matching runtime is visible here yet. Connect this machine's daemon to {{host}}, then bind again.",
+      "runtime_reason_source_unknown": "This zip does not record which runtime the agent used, so there is nothing to match. Export again with the current Desktop build to bind automatically.",
+      "runtime_reason_agent_missing": "The agent was not created in this workspace.",
+      "runtime_reason_runtime_private": "That runtime is private to another member.",
+      "runtime_reason_runtime_unknown": "That runtime is no longer in this workspace.",
+      "runtime_reason_bind_failed": "The server refused the binding."
     }
   }
 }

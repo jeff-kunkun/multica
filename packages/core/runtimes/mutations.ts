@@ -3,6 +3,7 @@ import { api } from "../api";
 import { runtimeKeys } from "./queries";
 import { workspaceKeys } from "../workspace/queries";
 import { agentTaskSnapshotKeys } from "../agents/queries";
+import type { TransferRuntimeBinding } from "../api/config-transfer";
 
 export function useDeleteRuntime(wsId: string) {
   const qc = useQueryClient();
@@ -61,6 +62,25 @@ export function useUpdateRuntime(wsId: string) {
       };
     }) => api.updateRuntime(runtimeId, patch),
     onSettled: () => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    },
+  });
+}
+
+// useBindTransferRuntimes applies the runtimes a human picked on the workspace
+// migration card after a cross-instance import (DENE-364). The server decides
+// per binding, so the mutation resolves with the per-row report instead of
+// throwing on a partial failure; the caller renders which rows landed.
+//
+// Invalidates the workspace agents (their runtime column and readiness change)
+// and the runtimes list (a newly used runtime shows an active agent).
+export function useBindTransferRuntimes(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (bindings: TransferRuntimeBinding[]) =>
+      api.bindTransferRuntimes(wsId, bindings),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
       qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     },
   });

@@ -247,11 +247,14 @@ import { parseWithFallback } from "./schema";
 import {
   parseConfigBundle,
   parseConfigImportReport,
+  parseTransferBindRuntimesReport,
   reportFromImportError,
   importErrorInfo,
   type ConfigBundle,
   type ConfigImportRequest,
   type ConfigImportResult,
+  type TransferBindRuntimesReport,
+  type TransferRuntimeBinding,
 } from "./config-transfer";
 import {
   AgentTaskListSchema,
@@ -2858,6 +2861,28 @@ export class ApiClient {
       }
       throw err;
     }
+  }
+
+  /**
+   * Apply the runtime bindings a human picked on the migration card. The
+   * server answers per binding, so a partial batch is a 200 with per-row
+   * results rather than an error (DENE-364).
+   */
+  async bindTransferRuntimes(
+    workspaceId: string,
+    bindings: TransferRuntimeBinding[],
+  ): Promise<TransferBindRuntimesReport> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/transfer/bind-runtimes`,
+      {
+        method: "POST",
+        body: JSON.stringify({ bindings }),
+      },
+    );
+    return parseTransferBindRuntimesReport(
+      raw,
+      "POST /api/workspaces/:id/transfer/bind-runtimes",
+    );
   }
 
   async listPluginInstallations(workspaceId: string): Promise<PluginInstallationListResponse> {

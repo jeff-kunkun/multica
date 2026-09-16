@@ -24,10 +24,14 @@ export {
   ConfigImportReportSchema,
   EMPTY_CONFIG_BUNDLE,
   EMPTY_CONFIG_IMPORT_REPORT,
+  EMPTY_TRANSFER_BIND_RUNTIMES_REPORT,
+  TransferBindRuntimesReportSchema,
+  TransferRuntimeBindResultSchema,
   configExportFilename,
   parseConfigBundle,
   parseConfigImportReport,
   parseLocalConfigBundle,
+  parseTransferBindRuntimesReport,
 } from "./config-transfer";
 export type {
   ConfigBundle,
@@ -40,6 +44,9 @@ export type {
   LocalConfigBundleError,
   SecretOmitted,
   SecretToFill,
+  TransferBindRuntimesReport,
+  TransferRuntimeBindResult,
+  TransferRuntimeBinding,
 } from "./config-transfer";
 export { WSClient } from "./ws-client";
 

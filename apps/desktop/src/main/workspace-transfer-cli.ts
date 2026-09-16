@@ -9,6 +9,8 @@ import {
   type TransferRunRequest,
   type TransferRunResult,
   type TransferRuntimeBind,
+  type TransferRuntimeBindAction,
+  type TransferRuntimeCandidate,
   type TransferSecretToFill,
 } from "../shared/workspace-transfer";
 
@@ -25,6 +27,7 @@ export type TransferCliImportRequest = {
   inPath: string;
   dryRun?: boolean;
   onConflict?: string;
+  autoBindRuntimes?: boolean;
 };
 
 export type TransferCliRequest = TransferCliExportRequest | TransferCliImportRequest;
@@ -75,6 +78,9 @@ export function buildTransferCliArgs(
   args.push("import", "--workspace", req.workspace, "--in", req.inPath);
   if (req.dryRun === true) args.push("--dry-run");
   if (req.onConflict) args.push("--on-conflict", req.onConflict);
+  // Explicit false only: the CLI default is on, and an older CLI would reject
+  // an unknown flag, so the enabled case must stay flag-free (DENE-364).
+  if (req.autoBindRuntimes === false) args.push("--auto-bind-runtimes=false");
   return args;
 }
 
@@ -98,6 +104,7 @@ export function parseTransferRunRequest(raw: unknown): TransferRunRequest | null
       inPath,
       dryRun: obj.dryRun === true,
       ...(onConflict ? { onConflict } : {}),
+      ...(obj.autoBindRuntimes === false ? { autoBindRuntimes: false } : {}),
     };
   }
   return null;
@@ -318,6 +325,7 @@ export async function runTransferCli(
     inPath: req.inPath,
     dryRun: req.dryRun,
     onConflict: req.onConflict,
+    autoBindRuntimes: req.autoBindRuntimes,
   });
   const result = await run(importArgs);
   feedProgress.flush();
@@ -366,6 +374,9 @@ function parseRuntimeBind(value: unknown): TransferRuntimeBind | null {
   const candidateIds = Array.isArray(obj.candidate_ids)
     ? obj.candidate_ids.filter((id): id is string => typeof id === "string")
     : [];
+  const candidates = Array.isArray(obj.candidates)
+    ? obj.candidates.map(parseRuntimeCandidate).filter(Boolean) as TransferRuntimeCandidate[]
+    : [];
   return {
     agent_target_id: asNonEmptyString(obj.agent_target_id) ?? "",
     agent_name: asNonEmptyString(obj.agent_name) ?? "",
@@ -373,7 +384,44 @@ function parseRuntimeBind(value: unknown): TransferRuntimeBind | null {
     runtime_mode: asNonEmptyString(obj.runtime_mode) ?? "",
     profile_name: asNonEmptyString(obj.profile_name) ?? "",
     candidate_ids: candidateIds,
+    candidates,
+    // An unknown action token degrades to "" so a newer server cannot turn a
+    // row into a silent no-render; the card treats "" as the legacy list.
+    action: parseRuntimeBindAction(obj.action),
+    auto_bind: obj.auto_bind === true,
+    bound_runtime_id: asNonEmptyString(obj.bound_runtime_id) ?? "",
+    bound_runtime_name: asNonEmptyString(obj.bound_runtime_name) ?? "",
+    reason_code: asNonEmptyString(obj.reason_code) ?? "",
+    reason: asNonEmptyString(obj.reason) ?? "",
   };
+}
+
+function parseRuntimeCandidate(value: unknown): TransferRuntimeCandidate | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const obj = value as Record<string, unknown>;
+  const runtimeId = asNonEmptyString(obj.runtime_id);
+  if (!runtimeId) return null;
+  return {
+    runtime_id: runtimeId,
+    name: asNonEmptyString(obj.name) ?? "",
+    provider: asNonEmptyString(obj.provider) ?? "",
+    runtime_mode: asNonEmptyString(obj.runtime_mode) ?? "",
+    profile_name: asNonEmptyString(obj.profile_name) ?? "",
+  };
+}
+
+function parseRuntimeBindAction(value: unknown): TransferRuntimeBindAction {
+  switch (value) {
+    case "bound":
+    case "already_bound":
+    case "candidates":
+    case "no_candidate":
+    case "agent_missing":
+    case "failed":
+      return value;
+    default:
+      return "";
+  }
 }
 
 function parseExportGap(value: unknown): TransferExportGap | null {

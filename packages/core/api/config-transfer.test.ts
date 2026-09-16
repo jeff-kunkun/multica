@@ -9,6 +9,7 @@ import {
   configExportFilename,
   parseConfigBundle,
   parseLocalConfigBundle,
+  parseTransferBindRuntimesReport,
 } from "./config-transfer";
 
 function stubFetchJson(body: unknown, status = 200) {
@@ -176,5 +177,72 @@ describe("importWorkspaceConfig schema fallback", () => {
 describe("parseConfigBundle", () => {
   it("does not throw on null", () => {
     expect(parseConfigBundle(null, "test")).toEqual(EMPTY_CONFIG_BUNDLE);
+  });
+});
+
+describe("bindTransferRuntimes schema fallback", () => {
+  it("posts the bindings and reads the per-row report", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          applied: true,
+          bound: 1,
+          failed: 1,
+          results: [
+            {
+              agent_id: "a1",
+              agent_name: "Builder",
+              runtime_id: "r1",
+              runtime_name: "Claude (mac)",
+              ok: true,
+            },
+            {
+              agent_id: "a2",
+              runtime_id: "r9",
+              ok: false,
+              reason_code: "runtime_private",
+              reason: "this runtime is not available to you",
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const report = await client.bindTransferRuntimes("ws-1", [
+      { agent_id: "a1", runtime_id: "r1" },
+      { agent_id: "a2", runtime_id: "r9" },
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/workspaces/ws-1/transfer/bind-runtimes",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          bindings: [
+            { agent_id: "a1", runtime_id: "r1" },
+            { agent_id: "a2", runtime_id: "r9" },
+          ],
+        }),
+      }),
+    );
+    expect(report.bound).toBe(1);
+    expect(report.results[0]).toMatchObject({ ok: true, runtime_name: "Claude (mac)" });
+    expect(report.results[1]).toMatchObject({
+      ok: false,
+      reason_code: "runtime_private",
+    });
+  });
+
+  it("falls back to an empty report on a malformed body", () => {
+    // Per-row results are what the card renders; a body that does not match
+    // must degrade to "nothing landed" rather than throw past the caller.
+    const report = parseTransferBindRuntimesReport(
+      { bound: "many", results: { not: "an array" } },
+      "test",
+    );
+    expect(report).toEqual({ applied: false, bound: 0, failed: 0, results: [] });
   });
 });

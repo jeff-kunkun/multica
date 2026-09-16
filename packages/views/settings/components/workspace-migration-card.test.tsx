@@ -6,6 +6,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithI18n } from "../../test/i18n";
 import type { TransferProgressEvent, TransferRunResult } from "../../platform";
 
+const bindHook = vi.hoisted(() => ({
+  mutateAsync: vi.fn(),
+  isPending: false,
+}));
+
 const desktop = vi.hoisted(() => ({
   isDesktop: true,
   pickExport: vi.fn(),
@@ -58,6 +63,13 @@ vi.mock("../../navigation", () => ({
   ),
 }));
 
+vi.mock("@multica/core/runtimes/mutations", () => ({
+  useBindTransferRuntimes: () => ({
+    mutateAsync: bindHook.mutateAsync,
+    isPending: bindHook.isPending,
+  }),
+}));
+
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { toast } from "sonner";
@@ -77,6 +89,21 @@ const importReport = {
       runtime_mode: "local",
       profile_name: "default",
       candidate_ids: ["r1"],
+      candidates: [
+        {
+          runtime_id: "r1",
+          name: "Claude (MacBook-Pro.local)",
+          provider: "claude",
+          runtime_mode: "local",
+          profile_name: "",
+        },
+      ],
+      action: "candidates" as const,
+      auto_bind: false,
+      bound_runtime_id: "",
+      bound_runtime_name: "",
+      reason_code: "",
+      reason: "",
     },
   ],
   export_gaps: [{ group: "plugins", reason: "read_api_missing", status: 404 }],
@@ -101,6 +128,8 @@ beforeEach(() => {
   desktop.run.mockReset();
   desktop.subscribe.mockReset();
   desktop.subscribe.mockReturnValue(() => {});
+  bindHook.mutateAsync.mockReset();
+  bindHook.isPending = false;
   vi.mocked(toast.error).mockClear();
   vi.mocked(toast.success).mockClear();
   window.localStorage.removeItem(TRANSFER_EXPORT_COMPLETED_KEY);
@@ -180,7 +209,12 @@ describe("WorkspaceMigrationCard", () => {
 
     expect(await screen.findByTestId("workspace-migration-report")).toBeInTheDocument();
     expect(screen.getByText("agent · Builder · custom_env")).toBeInTheDocument();
-    expect(screen.getByText("Builder · claude · local · default")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("workspace-migration-runtime-pick"),
+    ).toHaveTextContent("Builder");
+    expect(
+      screen.getByTestId("workspace-migration-runtime-apply"),
+    ).toBeInTheDocument();
     expect(screen.getByText("plugins · read_api_missing")).toBeInTheDocument();
     expect(screen.getByText("New")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
@@ -190,6 +224,7 @@ describe("WorkspaceMigrationCard", () => {
       inPath: "/tmp/acme.zip",
       dryRun: true,
       onConflict: "skip",
+      autoBindRuntimes: true,
     });
 
     await user.click(
@@ -207,6 +242,7 @@ describe("WorkspaceMigrationCard", () => {
         inPath: "/tmp/acme.zip",
         dryRun: false,
         onConflict: "skip",
+        autoBindRuntimes: true,
       }),
     );
   });
@@ -241,6 +277,7 @@ describe("WorkspaceMigrationCard", () => {
         inPath: "/tmp/acme.zip",
         dryRun: true,
         onConflict: "skip",
+        autoBindRuntimes: true,
       }),
     );
 
@@ -273,6 +310,7 @@ describe("WorkspaceMigrationCard", () => {
         inPath: "/tmp/acme.zip",
         dryRun: true,
         onConflict: "overwrite",
+        autoBindRuntimes: true,
       }),
     );
 
@@ -290,6 +328,7 @@ describe("WorkspaceMigrationCard", () => {
         inPath: "/tmp/acme.zip",
         dryRun: false,
         onConflict: "overwrite",
+        autoBindRuntimes: true,
       }),
     );
   });
@@ -459,6 +498,162 @@ describe("WorkspaceMigrationCard", () => {
         report: importReport,
       });
     });
+  });
+
+  it("reports what the bind rule decided instead of a bare candidate list", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "import",
+      dryRun: true,
+      report: {
+        ...importReport,
+        runtimes_to_bind: [
+          {
+            ...importReport.runtimes_to_bind[0]!,
+            agent_target_id: "a1",
+            agent_name: "Builder",
+            action: "bound",
+            auto_bind: true,
+            bound_runtime_id: "r1",
+            bound_runtime_name: "Claude (MacBook-Pro.local)",
+          },
+          {
+            ...importReport.runtimes_to_bind[0]!,
+            agent_target_id: "a2",
+            agent_name: "Reviewer",
+            provider: "codex",
+            candidate_ids: [],
+            candidates: [],
+            action: "no_candidate",
+            reason_code: "no_runtime_for_provider",
+            reason: "no runtime matching provider=codex",
+          },
+        ],
+      },
+    });
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+
+    const bound = await screen.findByTestId("workspace-migration-runtime-bound");
+    expect(bound).toHaveTextContent(
+      "Builder · Bound automatically to Claude (MacBook-Pro.local).",
+    );
+    expect(
+      screen.getByTestId("workspace-migration-runtime-blocked"),
+    ).toHaveTextContent("Reviewer");
+    expect(
+      screen.getByTestId("workspace-migration-runtime-blocked"),
+    ).toHaveTextContent("provider=codex");
+    // The action points at the target instance, not at the source.
+    expect(
+      screen.getByTestId("workspace-migration-runtime-blocked"),
+    ).toHaveTextContent("api.multica.ai");
+  });
+
+  it("applies every pending runtime pick in one request", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    bindHook.mutateAsync.mockResolvedValue({
+      applied: true,
+      bound: 1,
+      failed: 0,
+      results: [
+        {
+          agent_id: "a1",
+          agent_name: "Builder",
+          runtime_id: "r2",
+          runtime_name: "Claude (MacBook-Air-5.local)",
+          ok: true,
+          reason_code: "",
+          reason: "",
+        },
+      ],
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "import",
+      dryRun: false,
+      report: {
+        ...importReport,
+        runtimes_to_bind: [
+          {
+            ...importReport.runtimes_to_bind[0]!,
+            candidates: [
+              importReport.runtimes_to_bind[0]!.candidates[0]!,
+              {
+                runtime_id: "r2",
+                name: "Claude (MacBook-Air-5.local)",
+                provider: "claude",
+                runtime_mode: "local",
+                profile_name: "",
+              },
+            ],
+            candidate_ids: ["r1", "r2"],
+          },
+        ],
+      },
+    });
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+    const picker = await screen.findByTestId("workspace-migration-runtime-pick");
+    await user.click(within(picker).getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: /MacBook-Air-5/ }));
+    await user.click(screen.getByTestId("workspace-migration-runtime-apply"));
+
+    await waitFor(() =>
+      expect(bindHook.mutateAsync).toHaveBeenCalledWith([
+        { agent_id: "a1", runtime_id: "r2" },
+      ]),
+    );
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Bound 1 of 1 agents."),
+    );
+  });
+
+  it("turns auto-binding off for the import when the toggle is cleared", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "import",
+      dryRun: true,
+      report: importReport,
+    });
+    renderCard();
+
+    await user.click(
+      screen.getByRole("switch", {
+        name: "Bind automatically when exactly one runtime matches",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+
+    await waitFor(() =>
+      expect(desktop.run).toHaveBeenCalledWith({
+        action: "import",
+        workspace: "acme",
+        inPath: "/tmp/acme.zip",
+        dryRun: true,
+        onConflict: "skip",
+        autoBindRuntimes: false,
+      }),
+    );
   });
 
   it.each([

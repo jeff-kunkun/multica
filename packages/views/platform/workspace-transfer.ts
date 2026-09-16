@@ -23,6 +23,29 @@ export type TransferSecretToFill = {
   target_id: string;
 };
 
+export type TransferRuntimeCandidate = {
+  runtime_id: string;
+  /** Machine label the picker shows, e.g. "Claude (MacBook-Pro.local)". */
+  name: string;
+  provider: string;
+  runtime_mode: string;
+  profile_name: string;
+};
+
+/**
+ * Outcome of the three-tier bind rule. "" is what a server that predates
+ * DENE-364 sends (or omits): the card then falls back to showing the plain
+ * candidate list.
+ */
+export type TransferRuntimeBindAction =
+  | "bound"
+  | "already_bound"
+  | "candidates"
+  | "no_candidate"
+  | "agent_missing"
+  | "failed"
+  | "";
+
 export type TransferRuntimeBind = {
   agent_target_id: string;
   agent_name: string;
@@ -30,6 +53,34 @@ export type TransferRuntimeBind = {
   runtime_mode: string;
   profile_name: string;
   candidate_ids: string[];
+  candidates: TransferRuntimeCandidate[];
+  action: TransferRuntimeBindAction;
+  /** True when the unique-candidate rule picked the runtime with no human input. */
+  auto_bind: boolean;
+  bound_runtime_id: string;
+  bound_runtime_name: string;
+  /** Stable reason token; `reason` is the server's English fallback. */
+  reason_code: string;
+  reason: string;
+};
+
+/** One row of the per-binding result the server returns (DENE-364). */
+export type TransferRuntimeBindResult = {
+  agent_id: string;
+  agent_name: string;
+  runtime_id: string;
+  runtime_name: string;
+  ok: boolean;
+  reason_code: string;
+  reason: string;
+};
+
+/** The bind endpoint's report: a partial batch is still a success. */
+export type TransferBindReportView = {
+  applied: boolean;
+  bound: number;
+  failed: number;
+  results: TransferRuntimeBindResult[];
 };
 
 export type TransferExportGap = {
@@ -61,6 +112,7 @@ export type TransferRunRequest =
       inPath: string;
       dryRun: boolean;
       onConflict?: string;
+      autoBindRuntimes?: boolean;
     };
 
 export type TransferRunResult =
