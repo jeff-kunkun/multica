@@ -16,7 +16,7 @@ multica transfer import --profile <target-login> --workspace <slug> --in <file.z
 multica transfer bind-runtimes --profile <target-login> --workspace <slug> --bind <agent-id>=<runtime-id> [--bind …]
 ```
 
-`transfer import` options: `--activate-autopilots` (default true — imported automations start triggering), `--apply-workspace-settings` (default true), `--apply-issue-prefix` (default false, destructive), `--auto-bind-runtimes` (default true — see runtime binding below), `--renumber` (default false, see tasks below). Only a changed default is worth passing.
+`transfer import` options: `--activate-autopilots` (default true — imported automations start triggering), `--apply-workspace-settings` (default true), `--apply-issue-prefix` (default false, but `transfer import` turns it on by itself when the bundle carries the issues group and `--renumber` is not set — see tasks below; destructive), `--auto-bind-runtimes` (default true — see runtime binding below), `--renumber` (default false, see tasks below), `--on-conflict` (default `fail`; the target's own 7 seeded built-in statuses never count as conflicts, so importing into a fresh empty workspace does not 409 on them — a same-name label/agent/skill still does). Only a changed default is worth passing.
 
 `transfer export --include issues` is off by default. Turning it on is what makes the bundle `schema_version: 2`, and it prints the one precondition the caller has to meet: the target workspace must have no tasks at all.
 

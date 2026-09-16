@@ -1218,6 +1218,18 @@ func TestTransferImportIssues_RenumberNeedsYesAndWritesNumberMap(t *testing.T) {
 	if err := runImport("yes\n"); err != nil {
 		t.Fatalf("import with renumber: %v", err)
 	}
+	// DENE-408: renumber's target already holds tasks, so the kernel's
+	// empty-target guard can only skip the prefix write and append
+	// `issue_prefix_skipped_target_has_issues`. Asking for it by default bought
+	// that warning on every renumbered import and nothing else.
+	configBodies := rec.configBodies()
+	if len(configBodies) != 1 {
+		t.Fatalf("posted %d config requests, want 1", len(configBodies))
+	}
+	options, _ := configBodies[0]["options"].(map[string]any)
+	if options["apply_issue_prefix"] != false {
+		t.Fatalf("apply_issue_prefix = %v under --renumber, want false", options["apply_issue_prefix"])
+	}
 	posted := rec.posted()
 	if len(posted) != 2 {
 		t.Fatalf("posted %d issue requests, want 1 shard + 1 finalize", len(posted))

@@ -36,7 +36,9 @@ multica --profile desktop-api.multica.ai transfer export --workspace <官方云�
 
 已经导过一次、想再补一遍同一个包是可以的：重导幂等，包内任务不会重复，也不会顶高编号水位。
 
-`--renumber` 是这条前置的唯一替代：它给任务编号加一个偏移量，让它们能落进已有任务的工作区。**Desktop 卡片不提供这个选项**，只在 CLI 上，并且要敲 `yes` 确认；代价是正文与评论里写下的旧编号（`DENE-365` 这类纯文本引用）会全部指向错误的任务——这类文本引用两种场景下都不会被改写。
+`--renumber` 是这条前置的唯一替代：它给任务编号加一个偏移量，让它们能落进已有任务的工作区。**Desktop 卡片不提供这个选项**，只在 CLI 上，并且要敲 `yes` 确认；代价是正文与评论里写下的旧编号（`DENE-365` 这类纯文本引用）会全部指向错误的任务——这类文本引用两种场景下都不会被改写。走 `--renumber` 时也不再默认「采用 issue 前缀」（目标必然非空，前缀落不下去），所以两端 `identifier` 不会相同，下一节的自检只适用于空目标导入。
+
+命令行默认的冲突策略是 `--on-conflict fail`，但**目标工作区自带的 7 个系统状态不算冲突**：每个工作区一建好就 seed 了 `backlog` / `todo` / … 这 7 条，源端包里也带着同名同色的这 7 条，导入端按「目标已有即跳过」处理。所以空工作区 + 默认参数不会一上来就 409 `entity already exists: backlog`，预览报告照常出得来；真正属于用户数据的同名才吃 409（DENE-408，见下面「导入选项」表）。
 
 ### 导入后自检：两端标识符必须逐字节相同
 
@@ -106,14 +108,15 @@ multica transfer import --profile <目标档> --workspace <slug> --in ~/transfer
 
 ### 导入选项
 
-跨环境迁移的语义是复刻同一套环境，所以默认往「迁过去就能用」靠。四个选项在 CLI 与 Desktop 卡片上含义一致，默认值也一致，并且同时作用于预演和正式导入：预演报告里的数字就是按当前开关算出来的（自动绑定例外，见下）。
+跨环境迁移的语义是复刻同一套环境，所以默认往「迁过去就能用」靠。下表中前四个开关在 CLI 与 Desktop 卡片上含义一致，默认值也一致，并且同时作用于预演和正式导入：预演报告里的数字就是按当前开关算出来的（自动绑定例外，见下）。
 
 | flag | 默认 | 作用 |
 | --- | --- | --- |
 | `--activate-autopilots` | `true` | 保留源端自动化的状态：源端是 `active` 的迁过去就是 `active`。**这个默认值意味着导入一结束这些自动化就会开始触发**，会真的派任务、消耗运行时额度。写 `--activate-autopilots=false` 则全部以 `paused` 导入，等你手动放行。 |
 | `--apply-workspace-settings` | `true` | 把包里的工作区设置（上下文、仓库、归因）写进目标工作区。写 `--apply-workspace-settings=false` 则不落，目标端保留原设置。 |
-| `--apply-issue-prefix` | 跟着包走（包带 `issues` 分组时 `true`，否则 `false`） | 采用源端的 issue 前缀。会改掉目标工作区此后所有新任务的前缀。**包带 `issues` 分组时默认开启**（DENE-404）：任务分组的硬前置是「目标工作区没有任何任务」，空目标下号是原样保留的，前缀不跟过来就等于把标识符从 `DENE-1` 改成 `TGT-1`，正文与评论里的 `DENE-xxx` 引用全部指空。显式写 `--apply-issue-prefix=false` 才会关掉。仅当目标工作区还没有任何任务时才生效；有任务时跳过，并在报告里记一条 `issue_prefix_skipped_target_has_issues`。 |
+| `--apply-issue-prefix` | 跟着包走（包带 `issues` 分组时 `true`，否则 `false`） | 采用源端的 issue 前缀。会改掉目标工作区此后所有新任务的前缀。**包带 `issues` 分组时默认开启**（DENE-404）：任务分组的硬前置是「目标工作区没有任何任务」，空目标下号是原样保留的，前缀不跟过来就等于把标识符从 `DENE-1` 改成 `TGT-1`，正文与评论里的 `DENE-xxx` 引用全部指空。显式写 `--apply-issue-prefix=false` 才会关掉。仅当目标工作区还没有任何任务时才生效；有任务时跳过，并在报告里记一条 `issue_prefix_skipped_target_has_issues`；走 `--renumber` 时不再默认开启（目标必然非空）。 |
 | `--auto-bind-runtimes` | `true` | 唯一候选自动绑（DENE-364）：目标实例上有且只有一个运行时的 `provider` + `runtime_mode` + 自定义 profile 与源端一致时，直接给智能体写上这个运行时。有多个候选一律不动，留给人工点。写 `--auto-bind-runtimes=false` 则全部留给人工。**只在正式导入时写**，`--dry-run` 只出计划。 |
+| `--on-conflict` | `fail` | 目标已有同名实体时的策略：`fail` / `overwrite` / `rename` / `skip`（见 `docs/kun/config-export-import.md` §5.2）。**目标工作区自带的 7 个系统状态不算冲突**（DENE-408，见「导入任务前先建一个空工作区」），所以空工作区 + 默认参数不会误吃 409。真正属于用户数据的同名（label / 智能体 / skill 等）在 `fail` 下照旧 409，错误里带冲突实体名。Desktop 卡片上这一项的默认值是 `skip`（DENE-318），比 CLI 宽松。 |
 
 Desktop 的「跨环境迁移」卡片上有同样四个勾选项，默认值与上表一致（「采用 issue 前缀」默认勾上）；卡片看不到包里的分组，所以它**总是**把该开关显式传给 CLI，取消勾选发 `--apply-issue-prefix=false`。预览报告会写明「自动化：导入 N 条，其中 M 条已暂停」，勾上激活再应用一次，它们会立刻开始触发。
 

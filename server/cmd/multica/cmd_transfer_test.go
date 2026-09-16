@@ -641,6 +641,12 @@ func TestTransferImport_SendsImportOptionFlags(t *testing.T) {
 	if len(posted) != 2 {
 		t.Fatalf("posted %d transfer/config requests, want 2", len(posted))
 	}
+	// DENE-408 kept the default at `fail` rather than aligning it with the card:
+	// the built-ins a fresh workspace already holds are no longer read as
+	// conflicts, so `fail` stays the guard it was meant to be.
+	if got := posted[0]["on_conflict"]; got != "fail" {
+		t.Fatalf("default on_conflict = %v, want fail", got)
+	}
 	want := []map[string]any{
 		// A cross-environment move reproduces the environment: automations come
 		// across running and the workspace settings land, the prefix does not.

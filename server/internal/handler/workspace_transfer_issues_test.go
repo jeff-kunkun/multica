@@ -919,3 +919,49 @@ func TestTransferIssues_CustomStatusKeyIsPreservedAndUnknownKeyDegrades(t *testi
 		t.Fatalf("the preserved status must not be reported as unmapped: %s", resp.Text())
 	}
 }
+
+// DENE-408 end to end, with the CLI's own defaults, on the flow the runbook
+// documents: create an empty workspace, then import a bundle that carries tasks
+// into it. The config step runs with on_conflict=fail (the CLI default) and
+// apply_issue_prefix=true (what the CLI sends for a bundle carrying the issues
+// group), so it walks straight into the target's 7 platform-seeded built-in
+// statuses. While those read as conflicts the first batch 409'd and nothing
+// after it ran — no prefix, no tasks, no preview.
+//
+// identifier is `<issue_prefix>-<number>` computed at read time, so asserting
+// both against the source's own row is byte-for-byte parity for the two
+// lists the runbook tells the user to diff.
+func TestTransferImport_FreshWorkspaceKeepsSourceIdentifiers(t *testing.T) {
+	suf := uuid.NewString()[:8]
+	src := configWorkspace(t, "RunbookSrc "+suf, "runbooksrc-"+suf, "SRC")
+	dst := configWorkspace(t, "RunbookDst "+suf, "runbookdst-"+suf, "TGT")
+	dbfx.Issue(t, "the only task", testutil.Cols{"workspace_id": src, "number": 1})
+
+	bundle := exportBundle(t, src)
+	dry := false
+	testutil.Call(t, testHandler.ImportWorkspaceTransferConfig, transferReq(
+		"POST", "/api/workspaces/"+dst+"/transfer/config", dst, map[string]any{
+			"config": bundle, "dry_run": dry, "on_conflict": "fail",
+			"options": map[string]any{"apply_workspace_settings": true, "apply_issue_prefix": true},
+		})).Want(http.StatusOK)
+
+	if got := transferScanString(t, `SELECT issue_prefix FROM workspace WHERE id = $1`, dst); got != "SRC" {
+		t.Fatalf("target issue_prefix=%q, want the source's SRC: the tasks' identifiers can only match if it landed", got)
+	}
+
+	srcIssue := uuid.NewString()
+	// The ref index travels with every shard, the finalize pass included: it is
+	// what tells the empty-target gate which of the target's rows this bundle
+	// put there.
+	refs := map[string]any{
+		"members": map[string]any{testUserID: transferMemberRef(handlerTestEmail)},
+		"issues":  map[string]any{srcIssue: map[string]any{"number": 1, "identifier": "SRC-1"}},
+	}
+	row := transferIssueRow(srcIssue, 1, "the only task", testUserID, nil)
+	postTransferIssues(t, dst, transferIssueBody(refs, []map[string]any{row}, nil, nil, false)).Want(http.StatusOK)
+	postTransferIssues(t, dst, transferIssueBody(refs, nil, nil, nil, true)).Want(http.StatusOK)
+
+	if got := transferScanString(t, `SELECT number::text FROM issue WHERE workspace_id = $1`, dst); got != "1" {
+		t.Fatalf("imported number=%q, want the source's 1 (SRC-1)", got)
+	}
+}

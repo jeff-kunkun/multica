@@ -463,6 +463,8 @@ entities.issue_views[]        issue_view
 
 V1 不支持按实体类型分别指定策略；`include` 数组可以把整类实体排除在导入之外。
 
+**例外：平台自带的系统状态不算冲突**（DENE-408）。创建一个工作区时会 seed 7 条 `is_system = true` 的状态（`backlog` / `todo` / …，键即 category），源端导出里也带着它们，所以导入到一个**全新空工作区**时 `issue_statuses` 批次必然在第一行就撞上同名同 key 的行。这种「源与目标都是内置行」的配对不按冲突处理：`fail` 下记为 `skipped`（目标那 7 条名字、颜色、描述本来就与源端一致，跳过等于 overwrite 会写下的结果），`overwrite` / `skip` / `rename` 行为不变。这样 CLI 默认的 `fail` 不会被空目标误触发，护栏只对真正的用户数据（同名 label / agent / skill 等）生效。
+
 ### 5.3 身份键（判定「同一个实体」）
 
 | 实体 | 身份键 | 备注 |

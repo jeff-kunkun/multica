@@ -95,7 +95,7 @@ func init() {
 func registerTransferImportOptionFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("activate-autopilots", true, "Keep the source autopilot status; imported automations start triggering immediately (--activate-autopilots=false imports them paused)")
 	cmd.Flags().Bool("apply-workspace-settings", true, "Apply the exported workspace settings (context, repos, attribution)")
-	cmd.Flags().Bool("apply-issue-prefix", false, "Adopt the exported issue prefix. On by default for a bundle that carries the issues group, whose target must be empty: that is what keeps every `<PREFIX>-xxx` reference in the imported bodies and comments pointing at its own issue. Pass --apply-issue-prefix=false to opt out; adopting it changes the key of every future issue in the target")
+	cmd.Flags().Bool("apply-issue-prefix", false, "Adopt the exported issue prefix. On by default for a bundle that carries the issues group, whose target must be empty: that is what keeps every `<PREFIX>-xxx` reference in the imported bodies and comments pointing at its own issue. Not defaulted under --renumber, whose target already holds tasks. Pass --apply-issue-prefix=false to opt out; adopting it changes the key of every future issue in the target")
 	cmd.Flags().Bool("auto-bind-runtimes", true, "Bind each imported agent to the target runtime matching its source provider, mode and profile when exactly one exists (--auto-bind-runtimes=false leaves every agent for manual binding)")
 }
 
@@ -132,9 +132,15 @@ func transferImportOptions(cmd *cobra.Command) service.ConfigImportOptions {
 //
 // An explicit flag always wins, in both directions, so a user who wants the
 // numbers without the prefix can still say so.
-func transferImportOptionsForBundle(cmd *cobra.Command, hasIssues bool) service.ConfigImportOptions {
+//
+// `--renumber` opts out of that default (DENE-408): it exists for a target that
+// already holds tasks, which is exactly the case where the kernel's
+// empty-target guard never lets the prefix land and appends
+// `issue_prefix_skipped_target_has_issues`. Asking for the write there only
+// buys a warning on every renumbered import.
+func transferImportOptionsForBundle(cmd *cobra.Command, hasIssues, renumber bool) service.ConfigImportOptions {
 	opts := transferImportOptions(cmd)
-	if f := cmd.Flags().Lookup("apply-issue-prefix"); hasIssues && f != nil && !f.Changed {
+	if f := cmd.Flags().Lookup("apply-issue-prefix"); hasIssues && !renumber && f != nil && !f.Changed {
 		opts.ApplyIssuePrefix = true
 	}
 	return opts
@@ -512,7 +518,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	}
 	// Resolved after the bundle is in hand: whether this import creates tasks
 	// decides the issue-prefix default (DENE-404).
-	importOptions := transferImportOptionsForBundle(cmd, len(payload.IssueShards) > 0)
+	importOptions := transferImportOptionsForBundle(cmd, len(payload.IssueShards) > 0, renumber)
 
 	base := "/api/workspaces/" + url.PathEscape(wsID)
 	if payload.V1Only {
