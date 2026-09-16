@@ -82,6 +82,9 @@ import type {
   DashboardFailureByAgent,
   RuntimeUpdate,
   RuntimeModelListRequest,
+  RuntimeProviderPresetAction,
+  RuntimeProviderPresetRequest,
+  RuntimeProviderPresetTicket,
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
@@ -445,6 +448,10 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  RuntimeProviderPresetRequestSchema,
+  MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
+  RuntimeProviderPresetTicketSchema,
+  MALFORMED_RUNTIME_PROVIDER_PRESET_TICKET,
   SkillSchema,
   EMPTY_SKILL,
   SkillImportResultSchema,
@@ -2580,6 +2587,56 @@ export class ApiClient {
     requestId: string,
   ): Promise<RuntimeLocalSkillImportRequest> {
     return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
+  }
+
+  // Provider presets are the machine's own agent-CLI configuration, so this is
+  // the same park-then-poll contract as every other runtime action the server
+  // cannot perform itself: the POST enqueues one action for the runtime's
+  // daemon and answers with a ticket, the GET carries the outcome.
+  //
+  // `payload` is opaque to the server (it forwards it to the daemon unchanged)
+  // and is validated here only insofar as both ends are parsed. On an upsert it
+  // carries the API key, which is why the server's POST reply is a ticket
+  // rather than the record: echoing the body back would put the secret on a
+  // second path for nothing.
+  async initiateProviderPresetAction(
+    runtimeId: string,
+    provider: string,
+    action: RuntimeProviderPresetAction,
+    payload?: unknown,
+  ): Promise<RuntimeProviderPresetTicket> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/provider-presets`,
+      {
+        method: "POST",
+        body: JSON.stringify({ provider, action, payload }),
+      },
+    );
+    return parseWithFallback<RuntimeProviderPresetTicket>(
+      raw,
+      RuntimeProviderPresetTicketSchema,
+      MALFORMED_RUNTIME_PROVIDER_PRESET_TICKET,
+      { endpoint: "POST /api/runtimes/{id}/provider-presets" },
+    );
+  }
+
+  async getProviderPresetResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeProviderPresetRequest> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/provider-presets/${requestId}`,
+    );
+    return parseWithFallback<RuntimeProviderPresetRequest>(
+      raw,
+      RuntimeProviderPresetRequestSchema,
+      {
+        ...MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
+        id: requestId,
+        runtime_id: runtimeId,
+      },
+      { endpoint: "GET /api/runtimes/{id}/provider-presets/{requestId}" },
+    );
   }
 
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {

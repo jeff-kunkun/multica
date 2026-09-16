@@ -1,19 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueDraftListOptions, useStartIssueDraft } from "@multica/core/issue-drafts";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { isRuntimeUsableForUser, runtimeListOptions } from "@multica/core/runtimes";
-import { memberListOptions } from "@multica/core/workspace/queries";
+import {
+  isRuntimeUsableForUser,
+  runtimeDisplayName,
+  runtimeListOptions,
+} from "@multica/core/runtimes";
 import type { IssueDraftSummary } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent } from "@multica/ui/components/ui/dialog";
 import { Textarea } from "@multica/ui/components/ui/textarea";
-import { RuntimePicker } from "../../agents/components/runtime-picker";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { UnfinishedIssueDraftsBanner } from "./unfinished-issue-drafts";
@@ -26,6 +28,14 @@ import { UnfinishedIssueDraftsBanner } from "./unfinished-issue-drafts";
  * the alignment page. The conversation itself is deliberately NOT here: it is a
  * durable object that is left and resumed, and a modal cannot be refreshed
  * into, linked to, or restored as a desktop tab.
+ *
+ * Opening a conversation is one decision, so this face asks for one thing: what
+ * to align on. Which machine runs it is decided for the user — the alignment
+ * runs on the first runtime they may use, and the page's preview panel is where
+ * that choice is visible and changeable afterwards. The single case that stops
+ * the conversation from starting at all — nothing usable to run on, or the
+ * chosen machine offline — is stated outright instead of being left for the
+ * user to infer from a disabled button.
  */
 export function CreateIssueDraftDialog({
   onClose,
@@ -47,24 +57,57 @@ export function CreateIssueDraftDialog({
 
   const draftsQuery = useQuery(issueDraftListOptions(wsId));
   const runtimesQuery = useQuery(runtimeListOptions(wsId));
-  const membersQuery = useQuery(memberListOptions(wsId));
   const start = useStartIssueDraft(wsId);
 
   const runtimes = runtimesQuery.data ?? [];
-  const usableRuntimes = runtimes.filter((runtime) =>
-    isRuntimeUsableForUser(runtime, currentUserId),
+  const usableRuntimes = useMemo(
+    () =>
+      (runtimesQuery.data ?? []).filter((runtime) =>
+        isRuntimeUsableForUser(runtime, currentUserId),
+      ),
+    [runtimesQuery.data, currentUserId],
   );
-  // No seeding effect here: RuntimePicker is the sole source of truth for
-  // filling an empty selection, and it only fires while the value is empty, so
-  // a second seeding path could only disagree with it.
+
+  // Picking the runtime moved out of this dialog with the picker, but choosing
+  // one did not: the alignment has to run somewhere, and the user is never
+  // asked where. Online first, then the user's own machines, then anything
+  // else in the workspace they may use.
+  //
+  // Online has to outrank "mine", which the picker's own order did not: the
+  // list arrives ordered by `created_at` and `isRuntimeUsableForUser` says
+  // nothing about status, so "first machine I own" is really "oldest machine I
+  // own". The picker could survive seeding that one offline — the user just
+  // opened it and chose another. Here there is nothing to open, so seeding an
+  // offline machine while an online one sits in the same list would leave the
+  // dialog stating it cannot start and offering no way to fix it.
+  const seededRuntimeId = useMemo(() => {
+    const online = usableRuntimes.filter((runtime) => runtime.status === "online");
+    // Falls back to the offline set only so the message below can name a
+    // machine; submitting still requires an online one.
+    const pool = online.length > 0 ? online : usableRuntimes;
+    return (
+      (pool.find((runtime) => runtime.owner_id === currentUserId) ?? pool[0])
+        ?.id ?? ""
+    );
+  }, [usableRuntimes, currentUserId]);
+
+  // Fills an empty selection only. The picker seeded through `onSelect` as
+  // soon as runtimes arrived (over WS included); a derived seed plus this
+  // effect keeps that timing without a mounted picker to call back into.
+  useEffect(() => {
+    if (runtimeId !== "" || !seededRuntimeId) return;
+    setRuntimeId(seededRuntimeId);
+  }, [runtimeId, seededRuntimeId]);
+
   const selectedRuntime =
     runtimes.find((runtime) => runtime.id === runtimeId) ?? null;
+  const runtimeOnline = selectedRuntime?.status === "online";
+  const runtimesLoading = runtimesQuery.isLoading;
+  const hasUsableRuntime = usableRuntimes.length > 0;
 
   const drafts: IssueDraftSummary[] = draftsQuery.data ?? [];
   const canSubmit =
-    request.trim().length > 0 &&
-    selectedRuntime?.status === "online" &&
-    !start.isPending;
+    request.trim().length > 0 && runtimeOnline && !start.isPending;
 
   const resume = (draftId: string) => {
     onClose();
@@ -110,26 +153,22 @@ export function CreateIssueDraftDialog({
               onChange={(event) => setRequest(event.target.value)}
             />
 
-            <div className="space-y-2">
-              <span className="text-caption text-muted-foreground">
-                {t(($) => $.alignment.entry_runtime)}
-              </span>
-              {runtimesQuery.isLoading || usableRuntimes.length > 0 ? (
-                <RuntimePicker
-                  runtimes={runtimes}
-                  runtimesLoading={runtimesQuery.isLoading}
-                  members={membersQuery.data ?? []}
-                  currentUserId={currentUserId}
-                  selectedRuntimeId={runtimeId}
-                  onSelect={setRuntimeId}
-                  disabled={start.isPending}
-                />
-              ) : (
-                <p className="text-body text-muted-foreground">
-                  {t(($) => $.alignment.entry_no_runtime)}
-                </p>
-              )}
-            </div>
+            {!runtimesLoading && !hasUsableRuntime ? (
+              <p className="text-body text-muted-foreground">
+                {t(($) => $.alignment.entry_no_runtime)}
+              </p>
+            ) : null}
+
+            {/* A seeded but offline runtime blocks submitting, which a
+                disabled button alone never explains. Only the machines list
+                can fix it, so this stays a statement, not a second action. */}
+            {selectedRuntime && !runtimeOnline ? (
+              <p role="status" className="text-body text-destructive">
+                {t(($) => $.alignment.entry_runtime_offline, {
+                  name: runtimeDisplayName(selectedRuntime),
+                })}
+              </p>
+            ) : null}
 
             {start.isError ? (
               <p role="alert" className="text-body text-destructive">
@@ -142,7 +181,7 @@ export function CreateIssueDraftDialog({
             <Button variant="ghost" onClick={onClose} disabled={start.isPending}>
               {t(($) => $.alignment.entry_cancel)}
             </Button>
-            {usableRuntimes.length === 0 && !runtimesQuery.isLoading ? (
+            {!runtimesLoading && !hasUsableRuntime ? (
               <Button
                 render={<AppLink href={paths.runtimes()} />}
                 nativeButton={false}
