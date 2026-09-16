@@ -21,7 +21,7 @@
  *   clean  --tag <tag>                delete non-uploaded (zombie) assets
  *   upload --tag <tag> --dist <dir>   upload every asset, update feeds last
  *
- * `upload --dry-run` prints the exact `gh` invocation instead of running it.
+ * `upload --dry-run` prints the exact `gh` invocations instead of running them.
  *
  * The `gh` binary is overridable through DESKTOP_RELEASE_GH so tests can drive
  * the command with a fake executable.
@@ -316,6 +316,18 @@ export function deleteAsset({ repo, id, ghBin }) {
   return result.ok;
 }
 
+/**
+ * A numeric flag has to be rejected at the boundary: a NaN retry budget would
+ * make the check loop run zero times and report nothing at all.
+ */
+function positiveNumber(flag, value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`[assets] ${flag} needs a non-negative number, got ${value}`);
+  }
+  return parsed;
+}
+
 export function parseArgs(argv) {
   const options = {
     command: null,
@@ -357,8 +369,8 @@ export function parseArgs(argv) {
       if (flag === "--tag") options.tag = value;
       else if (flag === "--repo") options.repo = value;
       else if (flag === "--dist") options.dist = value;
-      else if (flag === "--attempts") options.attempts = Number(value);
-      else if (flag === "--delay-ms") options.delayMs = Number(value);
+      else if (flag === "--attempts") options.attempts = positiveNumber(flag, value);
+      else if (flag === "--delay-ms") options.delayMs = positiveNumber(flag, value);
       else throw new Error(`[assets] unknown flag: ${flag}`);
       continue;
     }
@@ -498,32 +510,69 @@ function cleanCommand(options) {
   return 0;
 }
 
-function uploadCommand(options) {
-  const local = orderAssetsForUpload(collectLocalAssets(options.dist));
-  const args = [
+/**
+ * Assets grouped into upload waves, payloads first and feed metadata last.
+ *
+ * The ordering has to survive `gh release upload` itself: that command uploads
+ * the files it is given with five concurrent workers, so handing it all five
+ * assets in one invocation lets the 16 KB `latest-mac.yml` finish long before
+ * the 230 MB DMG — the manifest goes live pointing at a payload that may still
+ * fail. One invocation per rank, awaited in turn, is what actually keeps the
+ * feed behind the bytes it describes.
+ */
+export function uploadWaves(assets) {
+  const waves = new Map();
+  for (const asset of orderAssetsForUpload(assets)) {
+    const rank = assetRank(asset.name);
+    if (!waves.has(rank)) waves.set(rank, []);
+    waves.get(rank).push(asset);
+  }
+  return [...waves.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([, group]) => group);
+}
+
+function uploadArgs(options, wave) {
+  return [
     "release",
     "upload",
     options.tag,
     "--repo",
     options.repo,
     "--clobber",
-    ...local.map((asset) => asset.path),
+    ...wave.map((asset) => asset.path),
   ];
+}
+
+function uploadCommand(options) {
+  const waves = uploadWaves(collectLocalAssets(options.dist));
   const ghBin = process.env.DESKTOP_RELEASE_GH || "gh";
-  if (options.dryRun) {
-    console.log(`[assets] ${ghBin} ${args.map((arg) => (arg.includes(" ") ? JSON.stringify(arg) : arg)).join(" ")}`);
-    return 0;
+  let uploaded = 0;
+
+  for (const wave of waves) {
+    const args = uploadArgs(options, wave);
+    if (options.dryRun) {
+      console.log(
+        `[assets] ${ghBin} ${args.map((arg) => (arg.includes(" ") ? JSON.stringify(arg) : arg)).join(" ")}`,
+      );
+      uploaded += wave.length;
+      continue;
+    }
+    const result = runGh(args, { ghBin });
+    if (!result.ok) {
+      console.error(
+        `[assets] gh release upload failed for ${wave.map((asset) => asset.name).join(", ")}: ${result.stderr.trim()}`,
+      );
+      return 1;
+    }
+    uploaded += wave.length;
+    console.log(
+      `[assets] uploaded ${wave.map((asset) => asset.name).join(", ")}`,
+    );
   }
-  const result = runGh(args, { ghBin });
-  if (!result.ok) {
-    console.error(`[assets] gh release upload failed: ${result.stderr.trim()}`);
-    return 1;
-  }
+
   console.log(
-    `[assets] requested upload of ${local.length} asset(s); feed metadata last: ${local
-      .slice()
-      .reverse()
-      .find((asset) => FEED_PATTERN.test(asset.name))?.name ?? "none"}`,
+    `[assets] requested upload of ${uploaded} asset(s) in ${waves.length} wave(s); feed metadata last`,
   );
   return 0;
 }

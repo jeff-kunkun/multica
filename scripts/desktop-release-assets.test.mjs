@@ -18,6 +18,7 @@ import {
   orderAssetsForUpload,
   parseArgs,
   readReleaseAssets,
+  uploadWaves,
   releaseVersionFromTag,
   zombieAssets,
 } from "./desktop-release-assets.mjs";
@@ -276,27 +277,89 @@ test("check fails on a truncated release and passes on a complete one", () => {
   }
 });
 
-test("dry-run prints the upload command with feed metadata last", () => {
+test("dry-run prints one upload command per wave, feed metadata last", () => {
   const dir = tempDir();
   try {
     const dist = join(dir, "dist");
     mkdirSync(dist);
     writeFile(join(dist, "multica-desktop-0.4.57-mac-arm64.dmg"), 128);
+    writeFile(join(dist, "multica-desktop-0.4.57-mac-arm64.dmg.blockmap"), 32);
     writeFile(join(dist, "latest-mac.yml"), 16);
     const output = execFileSync(
       process.execPath,
       [script, "upload", "--tag", "v0.4.57", "--repo", "o/r", "--dist", dist, "--dry-run"],
       { encoding: "utf-8" },
     );
-    const printed = output.trim().split("\n").pop();
-    assert.match(printed, /gh release upload v0\.4\.57 --repo o\/r --clobber/);
-    assert.ok(
-      printed.indexOf(".dmg") < printed.indexOf("latest-mac.yml"),
-      `feed metadata must be uploaded last: ${printed}`,
-    );
+    const commands = output
+      .trim()
+      .split("\n")
+      .filter((line) => line.includes("release upload"));
+    assert.equal(commands.length, 3);
+    assert.match(commands[0], /gh release upload v0\.4\.57 --repo o\/r --clobber .*\.dmg$/);
+    assert.match(commands[1], /\.dmg\.blockmap$/);
+    assert.match(commands[2], /latest-mac\.yml$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// `gh release upload` uploads its file arguments with five concurrent workers,
+// so a single invocation would let the 16 KB feed land before the 230 MB DMG.
+// This is the regression that would re-publish a manifest pointing at bytes
+// that never arrived (DENE-352).
+test("upload issues a separate gh call per wave so the feed cannot land first", () => {
+  const dir = tempDir();
+  try {
+    const dist = join(dir, "dist");
+    mkdirSync(dist);
+    writeFile(join(dist, "multica-desktop-0.4.57-mac-arm64.dmg"), 128);
+    writeFile(join(dist, "multica-desktop-0.4.57-mac-arm64.zip"), 96);
+    writeFile(join(dist, "multica-desktop-0.4.57-mac-arm64.dmg.blockmap"), 32);
+    writeFile(join(dist, "latest-mac.yml"), 16);
+    const record = join(dir, "gh-calls.log");
+    const gh = fakeGh(dir);
+    execFileSync(
+      process.execPath,
+      [script, "upload", "--tag", "v0.4.57", "--repo", "o/r", "--dist", dist],
+      {
+        encoding: "utf-8",
+        env: { ...process.env, DESKTOP_RELEASE_GH: gh, FAKE_GH_RECORD: record },
+      },
+    );
+    const calls = readFileSync(record, "utf-8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(calls.length, 3, "one gh release upload per rank");
+    const names = calls.map((call) =>
+      call.filter((arg) => arg.includes(dist)).map((arg) => arg.split("/").pop()),
+    );
+    assert.deepEqual(names[0].sort(), [
+      "multica-desktop-0.4.57-mac-arm64.dmg",
+      "multica-desktop-0.4.57-mac-arm64.zip",
+    ]);
+    assert.deepEqual(names[1], ["multica-desktop-0.4.57-mac-arm64.dmg.blockmap"]);
+    assert.deepEqual(names[2], ["latest-mac.yml"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("uploadWaves groups payloads, blockmaps and feeds in that order", () => {
+  const waves = uploadWaves([
+    { name: "latest-mac.yml" },
+    { name: "a.dmg.blockmap" },
+    { name: "a.zip" },
+    { name: "a.dmg" },
+  ]).map((wave) => wave.map((asset) => asset.name));
+  assert.deepEqual(waves, [["a.dmg", "a.zip"], ["a.dmg.blockmap"], ["latest-mac.yml"]]);
+});
+
+test("rejects a retry budget that is not a number", () => {
+  assert.throws(
+    () => parseArgs(["check", "--tag", "v0.4.57", "--attempts", "soon"]),
+    /--attempts needs a non-negative number/,
+  );
 });
 
 test("clean deletes only the assets a failed upload left behind", () => {

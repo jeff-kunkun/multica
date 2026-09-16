@@ -12,7 +12,7 @@ DENE-352 补上了第二类踩坑：**上传到一半断了，命令行却报成
 4. **一次 run 内跑完 tag → build → release → 评论。** run 退出时所有未完成的工作都会丢失，没有后台唤醒。不要把「等构建完再发」留到下一轮。
 5. **构建基线必须是当下的 `kun` tip，且构建结束后要复核 tip 有没有前进。** DENE-276 的第一次构建出自 `b4865a77d`，落后 tip 4 个 commit，其中 `da4bc9bbc`(DENE-289) 恰好重写了导出路径 302 行——照那份产物发出去，用户重测会再次踩到同一个缺陷。
 6. **（兜底路径）构建一出炉就把产物挪出 worktree。** run 结束时 worktree 会被回收，产物跟着一起没。DENE-329 连栽两次：两轮都成功构建出 DMG/ZIP，都因为 run 在上传途中终止而被清理掉，Release 上只剩 `latest-mac.yml` 和 blockmap。先 `cp` 到 `~/multica-releases/<tag>/`，再开始上传。
-7. **（兜底路径）先传两个大产物，最后传 `latest-mac.yml`。** 清单先上去而产物没传完，等于对着所有已装客户端广播一个指向 404 的自动更新地址——比不发版更糟。顺序错了就先把清单删掉，传完产物再补。CI 路径已把这条顺序固定在 `desktop-release-assets.mjs upload` 里，不要手工 `gh release upload` 拼顺序。
+7. **（兜底路径）先传两个大产物，最后传 `latest-mac.yml`。** 清单先上去而产物没传完，等于对着所有已装客户端广播一个指向 404 的自动更新地址——比不发版更糟。顺序错了就先把清单删掉，传完产物再补。CI 路径已把这条顺序固定在 `desktop-release-assets.mjs upload` 里，不要手工 `gh release upload` 拼顺序。**注意**：`gh release upload` 对传给它的文件用 5 个并发 worker 上传，一条命令里排参数顺序是没用的（537 字节的 `latest-mac.yml` 必然先于 230 MB 的 dmg 落地）。脚本因此按「产物 → blockmap → 清单」分三批、每批一条 `gh release upload`，前一批失败就不发下一批。
 8. **不在 Release 说明、评论、产物里写任何 token / 凭据 / 环境变量值。**
 9. **版本号只由 tag 决定。** `apps/desktop/scripts/package.mjs` 从 `git describe --tags --match 'v[0-9]*'` 推导版本，与 GoReleaser 给 CLI 的 `main.version` 同源。不要手改 `apps/desktop/package.json` 的 `version`。
 
@@ -32,7 +32,7 @@ git tag v0.4.58 && git push origin v0.4.58
 2. 在 `macos-14`（Apple Silicon）runner 上 `pnpm install --frozen-lockfile` + `node scripts/package.mjs --mac --arm64 --publish never`；
 3. 用 `desktop-release-assets.mjs clean` 清掉旧僵尸资产；
 4. Release 不存在时用 `gh release create --verify-tag --generate-notes` 建好（说明里带 ad-hoc 签名放行提示）；
-5. 用 `desktop-release-assets.mjs upload` 上传全部 5 个资产，**`latest-mac.yml` 最后传**（即红线 7）；
+5. 用 `desktop-release-assets.mjs upload` 分三批上传全部 5 个资产，**`latest-mac.yml` 单独一批、最后传**（即红线 7）；
 6. 用 `desktop-release-assets.mjs check --attempts 6` 逐个核对 `state=uploaded` + size + sha256，不通过就红。
 
 `--publish never` 是故意的：产物上传交给上面的脚本，才能在上传后核对；electron-builder 在 `never` 下照样写出 `latest-mac.yml` 与两个 `.blockmap`，只是不自己传。macOS 之外的 Desktop 目标仍由 `release.yml` 的 `desktop` job 负责。
