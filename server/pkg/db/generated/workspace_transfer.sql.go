@@ -126,49 +126,6 @@ func (q *Queries) GetWorkspaceMemberByEmail(ctx context.Context, arg GetWorkspac
 	return i, err
 }
 
-const listVisibleRuntimesForTransfer = `-- name: ListVisibleRuntimesForTransfer :many
-SELECT id, name, custom_name, runtime_mode, provider, profile_id
-FROM agent_runtime
-WHERE workspace_id = $1
-ORDER BY created_at ASC
-`
-
-type ListVisibleRuntimesForTransferRow struct {
-	ID          pgtype.UUID `json:"id"`
-	Name        string      `json:"name"`
-	CustomName  pgtype.Text `json:"custom_name"`
-	RuntimeMode string      `json:"runtime_mode"`
-	Provider    string      `json:"provider"`
-	ProfileID   pgtype.UUID `json:"profile_id"`
-}
-
-func (q *Queries) ListVisibleRuntimesForTransfer(ctx context.Context, workspaceID pgtype.UUID) ([]ListVisibleRuntimesForTransferRow, error) {
-	rows, err := q.db.Query(ctx, listVisibleRuntimesForTransfer, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListVisibleRuntimesForTransferRow{}
-	for rows.Next() {
-		var i ListVisibleRuntimesForTransferRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.CustomName,
-			&i.RuntimeMode,
-			&i.Provider,
-			&i.ProfileID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const transferInsertAttachment = `-- name: TransferInsertAttachment :execrows
 INSERT INTO attachment (
     id, workspace_id, chat_session_id, chat_message_id,

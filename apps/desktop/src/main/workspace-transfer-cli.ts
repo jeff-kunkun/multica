@@ -2,6 +2,7 @@ import { isAbsolute } from "path";
 import {
   EMPTY_TRANSFER_IMPORT_REPORT,
   type TransferAutopilotSummary,
+  type TransferBindRuntimesReport,
   type TransferErrorCode,
   type TransferExportGap,
   type TransferImportOptions,
@@ -11,6 +12,10 @@ import {
   type TransferRunRequest,
   type TransferRunResult,
   type TransferRuntimeBind,
+  type TransferRuntimeBindStatus,
+  type TransferRuntimeBinding,
+  type TransferRuntimeBindingOutcome,
+  type TransferRuntimeCandidate,
   type TransferSecretToFill,
 } from "../shared/workspace-transfer";
 
@@ -30,7 +35,16 @@ export type TransferCliImportRequest = {
   options?: TransferImportOptions;
 };
 
-export type TransferCliRequest = TransferCliExportRequest | TransferCliImportRequest;
+export type TransferCliBindRequest = {
+  action: "bind-runtimes";
+  workspace: string;
+  bindings: TransferRuntimeBinding[];
+};
+
+export type TransferCliRequest =
+  | TransferCliExportRequest
+  | TransferCliImportRequest
+  | TransferCliBindRequest;
 
 export type TransferCommandResult = {
   code: number;
@@ -63,6 +77,13 @@ export function buildTransferCliArgs(
     throw new Error("unresolved profile — refusing to fall back to the default CLI profile");
   }
   const args = ["--profile", profile, "transfer"];
+  if (req.action === "bind-runtimes") {
+    args.push("bind-runtimes", "--workspace", req.workspace);
+    for (const binding of req.bindings) {
+      args.push("--bind", `${binding.agentId}=${binding.runtimeId}`);
+    }
+    return args;
+  }
   if (req.action === "export") {
     args.push("export", "--workspace", req.workspace);
     if (req.estimate === true) {
@@ -86,6 +107,9 @@ export function buildTransferCliArgs(
     if (!req.options.activateAutopilots) args.push("--activate-autopilots=false");
     if (!req.options.applyWorkspaceSettings) args.push("--apply-workspace-settings=false");
     if (req.options.applyIssuePrefix) args.push("--apply-issue-prefix");
+    // The auto-bind rule is on by default on both sides, so only turning it
+    // off is worth a flag (DENE-364).
+    if (!req.options.autoBindRuntimes) args.push("--auto-bind-runtimes=false");
   }
   return args;
 }
@@ -114,7 +138,30 @@ export function parseTransferRunRequest(raw: unknown): TransferRunRequest | null
       ...(options ? { options } : {}),
     };
   }
+  if (obj.action === "bind-runtimes") {
+    const workspace = asNonEmptyString(obj.workspace);
+    if (!workspace) return null;
+    const bindings = parseTransferBindings(obj.bindings);
+    // An empty batch is a renderer bug, not a no-op transfer: refuse it here
+    // rather than spawning a CLI run that can only fail.
+    if (bindings.length === 0) return null;
+    return { action: "bind-runtimes", workspace, bindings };
+  }
   return null;
+}
+
+function parseTransferBindings(value: unknown): TransferRuntimeBinding[] {
+  if (!Array.isArray(value)) return [];
+  const out: TransferRuntimeBinding[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const obj = raw as Record<string, unknown>;
+    const agentId = asNonEmptyString(obj.agentId);
+    const runtimeId = asNonEmptyString(obj.runtimeId);
+    if (!agentId || !runtimeId) continue;
+    out.push({ agentId, runtimeId });
+  }
+  return out;
 }
 
 /**
@@ -131,6 +178,9 @@ function parseTransferImportOptions(
     activateAutopilots: obj.activateAutopilots !== false,
     applyWorkspaceSettings: obj.applyWorkspaceSettings !== false,
     applyIssuePrefix: obj.applyIssuePrefix === true,
+    // Auto-binding a single unambiguous candidate is the migration's default
+    // (DENE-364); only an explicit false turns it off.
+    autoBindRuntimes: obj.autoBindRuntimes !== false,
   };
 }
 
@@ -368,6 +418,27 @@ export async function runTransferCli(
     return { ok: true, action: "export", outPath: req.outPath, bytes };
   }
 
+  if (req.action === "bind-runtimes") {
+    deps.sendProgress({ phase: "running" });
+    const bindArgs = buildTransferCliArgs(profile, {
+      action: "bind-runtimes",
+      workspace: req.workspace,
+      bindings: req.bindings,
+    });
+    const result = await run(bindArgs);
+    feedProgress.flush();
+    if (result.code !== 0) {
+      const code = classifyTransferError(stripProgressLines(`${result.stdout}\n${result.stderr}`));
+      return { ok: false, code, message: trimOutput(result.stderr || result.stdout) };
+    }
+    deps.sendProgress({ phase: "finalizing" });
+    return {
+      ok: true,
+      action: "bind-runtimes",
+      report: parseTransferBindRuntimesReport(result.stdout),
+    };
+  }
+
   deps.sendProgress({ phase: req.dryRun ? "estimating" : "running" });
   const importArgs = buildTransferCliArgs(profile, {
     action: "import",
@@ -421,16 +492,82 @@ function parseSecretToFill(value: unknown): TransferSecretToFill | null {
 function parseRuntimeBind(value: unknown): TransferRuntimeBind | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const obj = value as Record<string, unknown>;
+  const candidates = Array.isArray(obj.candidates)
+    ? obj.candidates.map(parseRuntimeCandidate).filter(Boolean) as TransferRuntimeCandidate[]
+    : [];
   const candidateIds = Array.isArray(obj.candidate_ids)
     ? obj.candidate_ids.filter((id): id is string => typeof id === "string")
     : [];
+  // A server predating the three-tier rule sends neither status nor
+  // candidates: every row it returned was for a human to act on, so pending is
+  // the honest reading, and the bare ids still render.
+  const rawStatus = asNonEmptyString(obj.status);
+  const status: TransferRuntimeBindStatus =
+    rawStatus === "bound" || rawStatus === "no_candidate" || rawStatus === "pending"
+      ? rawStatus
+      : "pending";
+  for (const id of candidateIds) {
+    if (!candidates.some((c) => c.id === id)) {
+      candidates.push({ id, name: "", provider: "", runtime_mode: "", profile_name: "" });
+    }
+  }
   return {
     agent_target_id: asNonEmptyString(obj.agent_target_id) ?? "",
     agent_name: asNonEmptyString(obj.agent_name) ?? "",
     provider: asNonEmptyString(obj.provider) ?? "",
     runtime_mode: asNonEmptyString(obj.runtime_mode) ?? "",
     profile_name: asNonEmptyString(obj.profile_name) ?? "",
+    status,
+    reason_code: asNonEmptyString(obj.reason_code) ?? "",
+    reason: asNonEmptyString(obj.reason) ?? "",
+    bound_runtime_id: asNonEmptyString(obj.bound_runtime_id) ?? "",
+    bound_runtime_name: asNonEmptyString(obj.bound_runtime_name) ?? "",
     candidate_ids: candidateIds,
+    candidates,
+  };
+}
+
+function parseRuntimeCandidate(value: unknown): TransferRuntimeCandidate | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const obj = value as Record<string, unknown>;
+  const id = asNonEmptyString(obj.id);
+  if (!id) return null;
+  return {
+    id,
+    name: asNonEmptyString(obj.name) ?? "",
+    provider: asNonEmptyString(obj.provider) ?? "",
+    runtime_mode: asNonEmptyString(obj.runtime_mode) ?? "",
+    profile_name: asNonEmptyString(obj.profile_name) ?? "",
+  };
+}
+
+export function parseTransferBindRuntimesReport(
+  stdout: string,
+): TransferBindRuntimesReport {
+  const raw = extractJsonValue(stdout);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { applied: false, bound: 0, failed: 0, bindings: [] };
+  }
+  const obj = raw as Record<string, unknown>;
+  const bindings: TransferRuntimeBindingOutcome[] = [];
+  for (const value of firstArray(obj.bindings)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const row = value as Record<string, unknown>;
+    bindings.push({
+      agent_id: asNonEmptyString(row.agent_id) ?? "",
+      runtime_id: asNonEmptyString(row.runtime_id) ?? "",
+      agent_name: asNonEmptyString(row.agent_name) ?? "",
+      runtime_name: asNonEmptyString(row.runtime_name) ?? "",
+      bound: row.bound === true,
+      error_code: asNonEmptyString(row.error_code) ?? "",
+      error: asNonEmptyString(row.error) ?? "",
+    });
+  }
+  return {
+    applied: obj.applied === true,
+    bound: asNumber(obj.bound) ?? 0,
+    failed: asNumber(obj.failed) ?? 0,
+    bindings,
   };
 }
 

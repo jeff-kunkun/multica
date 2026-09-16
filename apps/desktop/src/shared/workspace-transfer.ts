@@ -23,13 +23,53 @@ export type TransferSecretToFill = {
   target_id: string;
 };
 
+export type TransferRuntimeCandidate = {
+  id: string;
+  name: string;
+  provider: string;
+  runtime_mode: string;
+  profile_name: string;
+};
+
+/** The three-tier result: written, waiting for a pick, or nothing to pick. */
+export type TransferRuntimeBindStatus = "bound" | "pending" | "no_candidate";
+
 export type TransferRuntimeBind = {
   agent_target_id: string;
   agent_name: string;
   provider: string;
   runtime_mode: string;
   profile_name: string;
+  status: TransferRuntimeBindStatus;
+  reason_code: string;
+  reason: string;
+  bound_runtime_id: string;
+  bound_runtime_name: string;
   candidate_ids: string[];
+  candidates: TransferRuntimeCandidate[];
+};
+
+/** One agent → runtime pick made in the migration card. */
+export type TransferRuntimeBinding = {
+  agentId: string;
+  runtimeId: string;
+};
+
+export type TransferRuntimeBindingOutcome = {
+  agent_id: string;
+  runtime_id: string;
+  agent_name: string;
+  runtime_name: string;
+  bound: boolean;
+  error_code: string;
+  error: string;
+};
+
+export type TransferBindRuntimesReport = {
+  applied: boolean;
+  bound: number;
+  failed: number;
+  bindings: TransferRuntimeBindingOutcome[];
 };
 
 export type TransferExportGap = {
@@ -48,12 +88,14 @@ export type TransferImportStats = {
 
 /**
  * What the import does with the switches the V1 transfer path never forwarded
- * (DENE-363). Absent options keep the server's own defaults.
+ * (DENE-363), plus the runtime auto-bind rule (DENE-364). Absent options keep
+ * the server's own defaults.
  */
 export type TransferImportOptions = {
   activateAutopilots: boolean;
   applyWorkspaceSettings: boolean;
   applyIssuePrefix: boolean;
+  autoBindRuntimes: boolean;
 };
 
 /** How many automations the import wrote (created, updated or renamed). */
@@ -79,6 +121,11 @@ export type TransferRunRequest =
       dryRun: boolean;
       onConflict?: string;
       options?: TransferImportOptions;
+    }
+  | {
+      action: "bind-runtimes";
+      workspace: string;
+      bindings: TransferRuntimeBinding[];
     };
 
 export type TransferRunResult =
@@ -88,6 +135,11 @@ export type TransferRunResult =
       action: "import";
       dryRun: boolean;
       report: TransferImportReportView;
+    }
+  | {
+      ok: true;
+      action: "bind-runtimes";
+      report: TransferBindRuntimesReport;
     }
   | { ok: false; code: TransferErrorCode; message: string };
 

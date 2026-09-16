@@ -1467,7 +1467,7 @@
       "progress_attachments": "{{count}} attachments downloaded",
       "progress_attachments_total": "{{done}} / {{total}} attachments",
       "saved_as": "Saved as {{name}} ({{size}})",
-      "runtimes_title": "Bind these agents to a runtime on this machine.",
+      "runtimes_title": "Runtime binding",
       "gaps_title": "Gaps from the source export",
       "option_activate_autopilots": "Activate automations after import",
       "option_activate_autopilots_hint": "Imported automations start triggering as soon as the import finishes. Untick to import them paused.",
@@ -1477,7 +1477,21 @@
       "option_apply_issue_prefix_hint": "Changes the key of every future issue here. Only applied while this workspace has no issues yet.",
       "autopilots_paused": "Automations: {{imported}} imported, {{paused}} of them paused.",
       "autopilots_active": "Automations: {{imported}} imported, triggering as soon as the import finishes.",
-      "autopilots_activate_hint": "Tick “Activate automations after import” and apply to start these straight away."
+      "autopilots_activate_hint": "Tick “Activate automations after import” and apply to start these straight away.",
+      "runtimes_hint": "Each imported agent runs on a machine. A single matching runtime is bound automatically; several are yours to pick.",
+      "runtime_bound_to": "Bound to {{runtime}}.",
+      "runtime_will_bind_to": "Will bind to {{runtime}} on import.",
+      "runtime_pick_label": "Choose a runtime",
+      "runtime_apply": "Apply bindings",
+      "runtime_applying": "Binding…",
+      "runtime_applied": "Bound {{count}} agent(s).",
+      "runtime_apply_partial": "Bound {{bound}}, {{failed}} failed.",
+      "runtime_needs_pick": "{{count}} agent(s) still need a runtime.",
+      "runtime_reason_no_runtime": "No runtime on the target instance has provider={{provider}}. Connect this machine's daemon to the target instance (or pick a runtime by hand) and bind again.",
+      "runtime_reason_provider_unknown": "This bundle carries no source runtime for the agent. Re-export it from the source environment and import again.",
+      "runtime_reason_bind_failed": "Binding failed: {{reason}}",
+      "option_auto_bind_runtimes": "Bind runtimes automatically",
+      "option_auto_bind_runtimes_hint": "When exactly one target runtime matches the source provider, mode and profile, bind the agent to it. Several candidates are always left for you to pick."
     }
   }
 }

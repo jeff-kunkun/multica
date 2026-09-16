@@ -97,6 +97,12 @@ type TransferRuntimeProfile struct {
 type TransferRuntimesFile struct {
 	Profiles     []TransferRuntimeProfile `json:"profiles"`
 	RuntimesHint []TransferRuntimeHint    `json:"runtimes_hint"`
+	// AgentHints link each exported agent to the runtime it ran on at the
+	// source, which is the only way the target can tell which provider,
+	// runtime mode and custom profile that agent expects. They live in the
+	// outer runtimes file rather than in the V1 config bundle because the link
+	// is a cross-instance fact (DENE-364).
+	AgentHints []TransferAgentRuntimeHint `json:"agent_hints"`
 }
 
 type TransferRuntimeHint struct {
@@ -105,6 +111,19 @@ type TransferRuntimeHint struct {
 	RuntimeMode     string `json:"runtime_mode,omitempty"`
 	ProfileSourceID string `json:"profile_source_id,omitempty"`
 	DisplayName     string `json:"display_name,omitempty"`
+}
+
+// TransferAgentRuntimeHint is the per-agent half of the binding hint: the
+// source runtime an agent ran on, flattened to the three facts the target
+// matches on (provider, runtime mode, custom profile display name).
+type TransferAgentRuntimeHint struct {
+	SourceAgentID   string `json:"source_agent_id"`
+	SourceRuntimeID string `json:"source_runtime_id,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	RuntimeMode     string `json:"runtime_mode,omitempty"`
+	ProfileSourceID string `json:"profile_source_id,omitempty"`
+	ProfileName     string `json:"profile_name,omitempty"`
+	RuntimeName     string `json:"runtime_name,omitempty"`
 }
 
 type TransferPreferences struct {
@@ -209,13 +228,93 @@ type TransferPeopleMapRow struct {
 	Reason       string `json:"reason,omitempty"`
 }
 
+// Runtime binding report statuses. The three-tier rule from DENE-364 lands here:
+// `bound` means the row was written, `pending` means a human still has to pick
+// (or the auto-bind switch is off), `no_candidate` means the target has nothing
+// that matches and the report explains what to connect first.
+const (
+	RuntimeBindBound       = "bound"
+	RuntimeBindPending     = "pending"
+	RuntimeBindNoCandidate = "no_candidate"
+)
+
+// Reasons a binding could not be planned. They are codes so the Desktop card
+// can render a localized, actionable sentence; `Reason` carries the same thing
+// in English for CLI and log readers.
+const (
+	// RuntimeBindReasonProviderUnknown: the bundle predates per-agent runtime
+	// hints, so the target cannot know which provider the agent expects.
+	RuntimeBindReasonProviderUnknown = "runtime_provider_unknown"
+	// RuntimeBindReasonNoRuntime: the target workspace has no runtime matching
+	// the source provider / mode / profile.
+	RuntimeBindReasonNoRuntime = "no_runtime_for_provider"
+	// RuntimeBindReasonBindFailed: a bind was attempted and the write failed
+	// (permission, missing runtime, database). Reason carries the detail.
+	RuntimeBindReasonBindFailed = "runtime_bind_failed"
+)
+
+// TransferRuntimeBind is one imported agent's runtime-binding row. It is both
+// the plan (dry run) and the outcome (a real import): `Status` moves from
+// pending to bound once the target wrote the pointer.
 type TransferRuntimeBind struct {
-	AgentTargetID string   `json:"agent_target_id,omitempty"`
-	AgentName     string   `json:"agent_name,omitempty"`
-	Provider      string   `json:"provider,omitempty"`
-	RuntimeMode   string   `json:"runtime_mode,omitempty"`
-	ProfileName   string   `json:"profile_name,omitempty"`
-	CandidateIDs  []string `json:"candidate_ids,omitempty"`
+	SourceAgentID string `json:"source_agent_id,omitempty"`
+	AgentTargetID string `json:"agent_target_id,omitempty"`
+	AgentName     string `json:"agent_name,omitempty"`
+	// Source side: what the agent ran on in the source environment.
+	Provider    string `json:"provider,omitempty"`
+	RuntimeMode string `json:"runtime_mode,omitempty"`
+	ProfileName string `json:"profile_name,omitempty"`
+	// Status is one of RuntimeBindBound / RuntimeBindPending /
+	// RuntimeBindNoCandidate.
+	Status string `json:"status"`
+	// ReasonCode / Reason explain a no_candidate row or a failed bind.
+	ReasonCode string `json:"reason_code,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	// BoundRuntimeID / BoundRuntimeName are set once Status is bound.
+	BoundRuntimeID   string `json:"bound_runtime_id,omitempty"`
+	BoundRuntimeName string `json:"bound_runtime_name,omitempty"`
+	// Candidates are the target runtimes the agent could run on. Exactly one
+	// means the auto-bind rule may act on it without guessing.
+	CandidateIDs []string                   `json:"candidate_ids,omitempty"`
+	Candidates   []TransferRuntimeCandidate `json:"candidates,omitempty"`
+}
+
+type TransferRuntimeCandidate struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Provider    string `json:"provider,omitempty"`
+	RuntimeMode string `json:"runtime_mode,omitempty"`
+	ProfileName string `json:"profile_name,omitempty"`
+}
+
+// TransferBindRuntimesRequest is the explicit binding action the Desktop card
+// sends for the agents the auto-bind rule deliberately left alone.
+type TransferBindRuntimesRequest struct {
+	Bindings []TransferRuntimeBinding `json:"bindings"`
+}
+
+type TransferRuntimeBinding struct {
+	AgentID   string `json:"agent_id"`
+	RuntimeID string `json:"runtime_id"`
+}
+
+// TransferBindRuntimesReport answers one line per requested binding so the card
+// can mark the failed rows instead of losing the successful ones.
+type TransferBindRuntimesReport struct {
+	Applied  bool                            `json:"applied"`
+	Bound    int                             `json:"bound"`
+	Failed   int                             `json:"failed"`
+	Bindings []TransferRuntimeBindingOutcome `json:"bindings"`
+}
+
+type TransferRuntimeBindingOutcome struct {
+	AgentID     string `json:"agent_id"`
+	RuntimeID   string `json:"runtime_id"`
+	AgentName   string `json:"agent_name,omitempty"`
+	RuntimeName string `json:"runtime_name,omitempty"`
+	Bound       bool   `json:"bound"`
+	ErrorCode   string `json:"error_code,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 type TransferConversationsReport struct {

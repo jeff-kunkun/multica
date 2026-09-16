@@ -36,6 +36,12 @@ export {
   type TransferRunResult,
   type TransferPickPathResult,
   type TransferFlagStorage,
+  type TransferBindRuntimesReport,
+  type TransferRuntimeBind,
+  type TransferRuntimeBindStatus,
+  type TransferRuntimeBinding,
+  type TransferRuntimeBindingOutcome,
+  type TransferRuntimeCandidate,
 } from "./workspace-transfer";
 export {
   useLocalDaemonStatus,

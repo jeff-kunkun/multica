@@ -52,9 +52,3 @@ WHERE chat_session_id = ANY(sqlc.arg('session_ids')::uuid[]);
 -- name: GetTransferChatSession :one
 SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
-
--- name: ListVisibleRuntimesForTransfer :many
-SELECT id, name, custom_name, runtime_mode, provider, profile_id
-FROM agent_runtime
-WHERE workspace_id = $1
-ORDER BY created_at ASC;

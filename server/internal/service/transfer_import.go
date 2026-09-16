@@ -68,13 +68,17 @@ func ImportTransferConfig(ctx context.Context, env TransferImportEnv, req Transf
 	if err != nil {
 		return nil, err
 	}
+	runtimeBinds, err := planRuntimeBindings(ctx, env, req, cfgReport)
+	if err != nil {
+		return nil, err
+	}
 
 	report := &TransferConfigReport{
 		ConfigReport:   cfgReport,
 		PeopleMap:      peopleRows,
 		Profiles:       profileItems,
 		PinnedAgents:   pinnedItems,
-		RuntimesToBind: buildRuntimesToBind(ctx, env, req, cfgReport),
+		RuntimesToBind: runtimeBinds,
 		ExportGaps:     req.Manifest.ExportGaps,
 	}
 	return report, nil
@@ -311,20 +315,48 @@ func importPinnedAgents(ctx context.Context, env TransferImportEnv, req Transfer
 	return items, nil
 }
 
-func buildRuntimesToBind(ctx context.Context, env TransferImportEnv, req TransferConfigRequest, cfg *ConfigImportReport) []TransferRuntimeBind {
-	runtimes, _ := env.Queries.ListVisibleRuntimesForTransfer(ctx, env.TargetID)
-	byProvider := map[string][]string{}
-	for _, rt := range runtimes {
-		byProvider[rt.Provider] = append(byProvider[rt.Provider], uuidString(rt.ID))
-	}
-	hintByName := map[string]TransferRuntimeHint{}
-	for _, h := range req.RuntimeProfiles.RuntimesHint {
-		hintByName[h.DisplayName] = h
-	}
+// planRuntimeBindings is the three-tier binding rule from DENE-364. For every
+// agent the config import wrote it resolves the source runtime the agent ran on
+// and matches it against the target runtimes the importer can see, on the three
+// facts a migration is expected to reproduce: provider, runtime mode, and
+// custom profile name.
+//
+// The plan never guesses. A single candidate is offered to the auto-bind rule
+// (the handler writes it when auto_bind_runtimes is on), several candidates
+// stay `pending` for the Desktop card to ask about, and none records a
+// readable reason instead of disappearing.
+func planRuntimeBindings(ctx context.Context, env TransferImportEnv, req TransferConfigRequest, cfg *ConfigImportReport) ([]TransferRuntimeBind, error) {
 	out := []TransferRuntimeBind{}
 	if cfg == nil {
-		return out
+		return out, nil
 	}
+
+	hintByAgent := map[string]TransferAgentRuntimeHint{}
+	for _, h := range req.RuntimeProfiles.AgentHints {
+		if h.SourceAgentID != "" {
+			hintByAgent[h.SourceAgentID] = h
+		}
+	}
+
+	// Owner-scoped visibility: a private runtime belongs to another member's
+	// machine, so it can never be a binding target for the importer even when
+	// the importer is a workspace admin (same gate the agent editor applies).
+	runtimes, err := env.Queries.ListVisibleAgentRuntimes(ctx, db.ListVisibleAgentRuntimesParams{
+		WorkspaceID: env.TargetID,
+		OwnerID:     env.ImporterID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list target runtimes: %w", err)
+	}
+	profiles, err := env.Queries.ListRuntimeProfiles(ctx, env.TargetID)
+	if err != nil {
+		return nil, fmt.Errorf("list target runtime profiles: %w", err)
+	}
+	profileName := map[string]string{}
+	for _, p := range profiles {
+		profileName[uuidString(p.ID)] = p.DisplayName
+	}
+
 	for _, batch := range cfg.Batches {
 		if batch.EntityType != "agents" {
 			continue
@@ -333,17 +365,93 @@ func buildRuntimesToBind(ctx context.Context, env TransferImportEnv, req Transfe
 			if item.Action == ActionSkipped || item.Action == ActionFailed {
 				continue
 			}
-			bind := TransferRuntimeBind{AgentTargetID: item.TargetID, AgentName: item.Name}
-			if h, ok := hintByName[item.Name]; ok {
-				bind.Provider = h.Provider
-				bind.RuntimeMode = h.RuntimeMode
-				bind.ProfileName = h.DisplayName
-				bind.CandidateIDs = byProvider[h.Provider]
-			}
-			out = append(out, bind)
+			out = append(out, planAgentRuntimeBind(req, hintByAgent, runtimes, profileName, item))
 		}
 	}
-	return out
+	return out, nil
+}
+
+func planAgentRuntimeBind(
+	req TransferConfigRequest,
+	hintByAgent map[string]TransferAgentRuntimeHint,
+	runtimes []db.AgentRuntime,
+	profileName map[string]string,
+	item ConfigImportItem,
+) TransferRuntimeBind {
+	bind := TransferRuntimeBind{
+		SourceAgentID: item.SourceID,
+		AgentTargetID: item.TargetID,
+		AgentName:     item.Name,
+		Status:        RuntimeBindNoCandidate,
+	}
+
+	hint, ok := hintByAgent[item.SourceID]
+	if !ok || hint.Provider == "" {
+		// Bundles exported before DENE-364 carry no per-agent runtime hint.
+		// Binding without knowing the provider would put an agent on a machine
+		// that cannot run it, so say why instead.
+		bind.ReasonCode = RuntimeBindReasonProviderUnknown
+		bind.Reason = "the bundle carries no source runtime for this agent; re-export it from the source environment"
+		return bind
+	}
+
+	bind.Provider = hint.Provider
+	bind.RuntimeMode = hint.RuntimeMode
+	bind.ProfileName = hint.ProfileName
+
+	for _, rt := range runtimes {
+		if rt.Provider != hint.Provider {
+			continue
+		}
+		if hint.RuntimeMode != "" && rt.RuntimeMode != hint.RuntimeMode {
+			continue
+		}
+		targetProfile := ""
+		if rt.ProfileID.Valid {
+			targetProfile = profileName[uuidString(rt.ProfileID)]
+		}
+		// Built-in runtimes carry no profile, custom ones carry exactly one, so
+		// comparing the display names covers both: an agent that ran on a
+		// built-in CLI must not be pointed at a custom profile and vice versa.
+		if targetProfile != hint.ProfileName {
+			continue
+		}
+		name := rt.Name
+		if rt.CustomName.Valid && rt.CustomName.String != "" {
+			name = rt.CustomName.String
+		}
+		bind.CandidateIDs = append(bind.CandidateIDs, uuidString(rt.ID))
+		bind.Candidates = append(bind.Candidates, TransferRuntimeCandidate{
+			ID:          uuidString(rt.ID),
+			Name:        name,
+			Provider:    rt.Provider,
+			RuntimeMode: rt.RuntimeMode,
+			ProfileName: targetProfile,
+		})
+	}
+
+	switch len(bind.Candidates) {
+	case 0:
+		bind.ReasonCode = RuntimeBindReasonNoRuntime
+		bind.Reason = noRuntimeCandidateReason(hint)
+	default:
+		bind.Status = RuntimeBindPending
+	}
+	return bind
+}
+
+// noRuntimeCandidateReason spells out the one action that fixes the gap: the
+// target instance is missing the machine the source agents ran on.
+func noRuntimeCandidateReason(hint TransferAgentRuntimeHint) string {
+	desc := "provider=" + hint.Provider
+	if hint.RuntimeMode != "" {
+		desc += " runtime_mode=" + hint.RuntimeMode
+	}
+	if hint.ProfileName != "" {
+		desc += " profile=" + hint.ProfileName
+	}
+	return "the target workspace has no runtime with " + desc +
+		"; connect this machine's daemon to the target instance (or pick another runtime) and bind again"
 }
 
 func ImportTransferConversations(ctx context.Context, env TransferImportEnv, req TransferConversationsRequest) (*TransferConversationsReport, error) {

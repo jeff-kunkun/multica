@@ -1460,7 +1460,7 @@
       "progress_attachments": "已下载 {{count}} 个附件",
       "progress_attachments_total": "{{done}} / {{total}} 个附件",
       "saved_as": "已保存为 {{name}}（{{size}}）",
-      "runtimes_title": "请在这台机器上为这些智能体绑定运行时。",
+      "runtimes_title": "运行时绑定",
       "gaps_title": "源端导出缺口",
       "option_activate_autopilots": "导入后激活自动化",
       "option_activate_autopilots_hint": "导入的自动化会立刻开始触发；不勾则先以暂停状态导入。",
@@ -1470,7 +1470,21 @@
       "option_apply_issue_prefix_hint": "会改掉此后所有新任务的编号前缀；仅当当前工作区还没有任务时生效。",
       "autopilots_paused": "自动化：导入 {{imported}} 条，其中 {{paused}} 条已暂停。",
       "autopilots_active": "自动化：导入 {{imported}} 条，导入后立刻开始触发。",
-      "autopilots_activate_hint": "勾上「导入后激活自动化」再应用一次，它们就会马上开始跑。"
+      "autopilots_activate_hint": "勾上「导入后激活自动化」再应用一次，它们就会马上开始跑。",
+      "runtimes_hint": "每个导入的智能体都要跑在某台机器上。只有一个匹配的运行时就直接绑好；有多个则留给你自己挑。",
+      "runtime_bound_to": "已绑定到 {{runtime}}。",
+      "runtime_will_bind_to": "导入时会绑定到 {{runtime}}。",
+      "runtime_pick_label": "选择运行时",
+      "runtime_apply": "应用绑定",
+      "runtime_applying": "正在绑定…",
+      "runtime_applied": "已绑定 {{count}} 个智能体。",
+      "runtime_apply_partial": "已绑定 {{bound}} 个，{{failed}} 个失败。",
+      "runtime_needs_pick": "还有 {{count}} 个智能体没选运行时。",
+      "runtime_reason_no_runtime": "目标实例上没有 provider={{provider}} 的运行时。先把本机 daemon 连到目标实例（或手动选一个运行时），再绑定一次。",
+      "runtime_reason_provider_unknown": "这个迁移包没有带该智能体的源端运行时信息。请从源环境重新导出后再导入。",
+      "runtime_reason_bind_failed": "绑定失败：{{reason}}",
+      "option_auto_bind_runtimes": "自动绑定运行时",
+      "option_auto_bind_runtimes_hint": "当目标实例上只有一个运行时的 provider、形态与自定义 profile 都与源端一致时，直接绑定。有多个候选时永远留给你自己挑。"
     }
   }
 }

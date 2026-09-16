@@ -76,7 +76,21 @@ const importReport = {
       provider: "claude",
       runtime_mode: "local",
       profile_name: "default",
+      status: "pending" as const,
+      reason_code: "",
+      reason: "",
+      bound_runtime_id: "",
+      bound_runtime_name: "",
       candidate_ids: ["r1"],
+      candidates: [
+        {
+          id: "r1",
+          name: "kunkun-mbp",
+          provider: "claude",
+          runtime_mode: "local",
+          profile_name: "default",
+        },
+      ],
     },
   ],
   export_gaps: [{ group: "plugins", reason: "read_api_missing", status: 404 }],
@@ -86,14 +100,15 @@ const importReport = {
 
 /**
  * The card's own defaults: a cross-environment import reproduces the
- * environment, so automations arrive running and workspace settings land; the
- * issue prefix stays put because adopting it changes every later issue key
- * (DENE-363).
+ * environment, so automations arrive running, the workspace settings land and a
+ * single unambiguous runtime is bound (DENE-363 / DENE-364); the issue prefix
+ * stays put because adopting it changes every later issue key.
  */
 const DEFAULT_IMPORT_OPTIONS = {
   activateAutopilots: true,
   applyWorkspaceSettings: true,
   applyIssuePrefix: false,
+  autoBindRuntimes: true,
 };
 
 function renderCard() {
@@ -193,7 +208,9 @@ describe("WorkspaceMigrationCard", () => {
 
     expect(await screen.findByTestId("workspace-migration-report")).toBeInTheDocument();
     expect(screen.getByText("agent · Builder · custom_env")).toBeInTheDocument();
-    expect(screen.getByText("Builder · claude · local · default")).toBeInTheDocument();
+    // The runtime row names the agent and its source triple separately, so the
+    // candidate picker underneath is unambiguous (DENE-364).
+    expect(screen.getByText("claude · local · default")).toBeInTheDocument();
     expect(screen.getByText("plugins · read_api_missing")).toBeInTheDocument();
     expect(screen.getByText("New")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
@@ -378,6 +395,7 @@ describe("WorkspaceMigrationCard", () => {
             activateAutopilots: false,
             applyWorkspaceSettings: true,
             applyIssuePrefix: true,
+            autoBindRuntimes: true,
           },
         }),
       ),
@@ -452,6 +470,180 @@ describe("WorkspaceMigrationCard", () => {
 
   // A Desktop build older than the switches returns a report without the
   // summary; the card must not invent a count for it.
+  // DENE-364: an agent the auto-bind rule already placed must say where it
+  // went, instead of reappearing as "please bind this" after every import.
+  it("shows the runtime the import already bound", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "import",
+      dryRun: false,
+      report: {
+        ...importReport,
+        runtimes_to_bind: [
+          {
+            ...importReport.runtimes_to_bind[0]!,
+            status: "bound" as const,
+            bound_runtime_id: "r1",
+            bound_runtime_name: "kunkun-mbp",
+          },
+        ],
+      },
+    });
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+
+    const section = await screen.findByTestId("workspace-migration-runtimes");
+    expect(section).toHaveTextContent("Bound to kunkun-mbp.");
+  });
+
+  // The other half of the rule: several candidates must become one pick, not
+  // one modal per agent, and none of them may be applied without a choice.
+  it("collects the ambiguous picks and applies them in one request", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    const ambiguous = {
+      ...importReport,
+      runtimes_to_bind: [
+        {
+          ...importReport.runtimes_to_bind[0]!,
+          candidate_ids: ["r1", "r2"],
+          candidates: [
+            {
+              id: "r1",
+              name: "kunkun-mbp",
+              provider: "claude",
+              runtime_mode: "local",
+              profile_name: "default",
+            },
+            {
+              id: "r2",
+              name: "kunkun-mini",
+              provider: "claude",
+              runtime_mode: "local",
+              profile_name: "default",
+            },
+          ],
+        },
+      ],
+    };
+    // The preview cannot bind anything (its agents do not exist yet), so the
+    // first run is the dry run and the second is the apply.
+    desktop.run.mockResolvedValueOnce({
+      ok: true,
+      action: "import",
+      dryRun: true,
+      report: ambiguous,
+    });
+    desktop.run.mockResolvedValueOnce({
+      ok: true,
+      action: "import",
+      dryRun: false,
+      report: ambiguous,
+    });
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+    await screen.findByTestId("workspace-migration-report");
+    // A preview offers no apply: nothing has been written yet.
+    expect(
+      screen.queryByRole("button", { name: "Apply bindings" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Import into this workspace" }),
+    );
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Import into this workspace" }),
+    );
+
+    // No runtime applied without a choice.
+    expect(
+      await screen.findByRole("button", { name: "Apply bindings" }),
+    ).toBeDisabled();
+
+    await user.click(screen.getByRole("combobox", { name: "Choose a runtime" }));
+    await user.click(await screen.findByRole("option", { name: "kunkun-mini" }));
+
+    desktop.run.mockResolvedValueOnce({
+      ok: true,
+      action: "bind-runtimes",
+      report: {
+        applied: true,
+        bound: 1,
+        failed: 0,
+        bindings: [
+          {
+            agent_id: "a1",
+            runtime_id: "r2",
+            agent_name: "Builder",
+            runtime_name: "kunkun-mini",
+            bound: true,
+            error_code: "",
+            error: "",
+          },
+        ],
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Apply bindings" }));
+
+    await waitFor(() =>
+      expect(desktop.run).toHaveBeenLastCalledWith({
+        action: "bind-runtimes",
+        workspace: "acme",
+        bindings: [{ agentId: "a1", runtimeId: "r2" }],
+      }),
+    );
+    expect(await screen.findByTestId("workspace-migration-runtimes")).toHaveTextContent(
+      "Bound to kunkun-mini.",
+    );
+  });
+
+  it("says what to connect when no runtime matches", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "import",
+      dryRun: false,
+      report: {
+        ...importReport,
+        runtimes_to_bind: [
+          {
+            ...importReport.runtimes_to_bind[0]!,
+            status: "no_candidate" as const,
+            reason_code: "no_runtime_for_provider",
+            reason: "the target workspace has no runtime with provider=claude",
+            candidate_ids: [],
+            candidates: [],
+          },
+        ],
+      },
+    });
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+
+    const section = await screen.findByTestId("workspace-migration-runtimes");
+    expect(section).toHaveTextContent("provider=claude");
+    expect(section).toHaveTextContent("Connect this machine's daemon");
+  });
+
   it("stays quiet when the report carries no automation summary", async () => {
     const user = userEvent.setup();
     desktop.pickImport.mockResolvedValue({

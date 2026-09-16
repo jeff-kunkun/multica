@@ -44,6 +44,17 @@ var transferImportCmd = &cobra.Command{
 	RunE:  runTransferImport,
 }
 
+// transferBindRuntimesCmd applies the runtime bindings the migration card
+// collected for the agents the auto-bind rule deliberately left alone
+// (DENE-364). It is the same write the agent editor performs, so it stays a
+// separate, explicit action rather than a second import.
+var transferBindRuntimesCmd = &cobra.Command{
+	Use:   "bind-runtimes",
+	Short: "Bind imported agents to runtimes on the target instance",
+	Args:  cobra.NoArgs,
+	RunE:  runTransferBindRuntimes,
+}
+
 func init() {
 	transferExportCmd.Flags().String("workspace", "", "Source workspace slug or id")
 	transferExportCmd.Flags().String("out", "", "Output zip path")
@@ -61,8 +72,14 @@ func init() {
 	_ = transferImportCmd.MarkFlagRequired("workspace")
 	_ = transferImportCmd.MarkFlagRequired("in")
 
+	transferBindRuntimesCmd.Flags().String("workspace", "", "Target workspace slug or id")
+	transferBindRuntimesCmd.Flags().StringArray("bind", nil, "Agent to runtime binding as <agent_id>=<runtime_id>; repeat per agent")
+	_ = transferBindRuntimesCmd.MarkFlagRequired("workspace")
+	_ = transferBindRuntimesCmd.MarkFlagRequired("bind")
+
 	transferCmd.AddCommand(transferExportCmd)
 	transferCmd.AddCommand(transferImportCmd)
+	transferCmd.AddCommand(transferBindRuntimesCmd)
 }
 
 // registerTransferImportOptionFlags declares the config-import switches
@@ -74,6 +91,7 @@ func registerTransferImportOptionFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("activate-autopilots", true, "Keep the source autopilot status; imported automations start triggering immediately (--activate-autopilots=false imports them paused)")
 	cmd.Flags().Bool("apply-workspace-settings", true, "Apply the exported workspace settings (context, repos, attribution)")
 	cmd.Flags().Bool("apply-issue-prefix", false, "Also adopt the exported issue prefix (changes the key of every future issue in the target)")
+	cmd.Flags().Bool("auto-bind-runtimes", true, "Bind each imported agent to the target runtime matching its source provider, mode and profile when exactly one exists (--auto-bind-runtimes=false leaves every agent for manual binding)")
 }
 
 // transferImportOptions reads the switches registered above. A command built
@@ -82,10 +100,15 @@ func transferImportOptions(cmd *cobra.Command) service.ConfigImportOptions {
 	activate, _ := cmd.Flags().GetBool("activate-autopilots")
 	applySettings, _ := cmd.Flags().GetBool("apply-workspace-settings")
 	applyPrefix, _ := cmd.Flags().GetBool("apply-issue-prefix")
+	autoBind := true
+	if f := cmd.Flags().Lookup("auto-bind-runtimes"); f != nil {
+		autoBind, _ = cmd.Flags().GetBool("auto-bind-runtimes")
+	}
 	return service.ConfigImportOptions{
 		ActivateAutopilots:     activate,
 		ApplyWorkspaceSettings: &applySettings,
 		ApplyIssuePrefix:       applyPrefix,
+		AutoBindRuntimes:       &autoBind,
 	}
 }
 
@@ -488,6 +511,53 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	return cli.PrintJSON(cmd.OutOrStdout(), cfgReport)
+}
+
+// runTransferBindRuntimes sends the card's picks to the target instance.
+// Parsing "-" rather than "=" in an agent UUID is impossible, so "=" is the
+// separator; a malformed pair is a usage error, not a silent skip.
+func runTransferBindRuntimes(cmd *cobra.Command, _ []string) error {
+	workspace, _ := cmd.Flags().GetString("workspace")
+	raws, _ := cmd.Flags().GetStringArray("bind")
+
+	bindings := make([]service.TransferRuntimeBinding, 0, len(raws))
+	for _, raw := range raws {
+		agentID, runtimeID, ok := strings.Cut(strings.TrimSpace(raw), "=")
+		agentID = strings.TrimSpace(agentID)
+		runtimeID = strings.TrimSpace(runtimeID)
+		if !ok || agentID == "" || runtimeID == "" {
+			return fmt.Errorf("invalid --bind %q: expected <agent_id>=<runtime_id>", raw)
+		}
+		bindings = append(bindings, service.TransferRuntimeBinding{AgentID: agentID, RuntimeID: runtimeID})
+	}
+
+	client, err := newTransferAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	wsID, err := resolveTransferWorkspaceID(ctx, sourceClient{api: client}, workspace)
+	if err != nil {
+		return err
+	}
+
+	var report service.TransferBindRuntimesReport
+	if err := client.PostJSON(ctx, "/api/workspaces/"+url.PathEscape(wsID)+"/transfer/bind-runtimes",
+		service.TransferBindRuntimesRequest{Bindings: bindings}, &report); err != nil {
+		if st := httpStatusOf(err); st == 404 {
+			return fmt.Errorf("target_unsupported: this server is not a kun instance with /transfer/* endpoints")
+		}
+		return err
+	}
+	if err := cli.PrintJSON(cmd.OutOrStdout(), report); err != nil {
+		return err
+	}
+	// A partially failed batch still exits 0: the report above carries one line
+	// per binding, and exiting non-zero would make the Desktop card throw that
+	// detail away and report the whole batch as failed.
+	return nil
 }
 
 type loadedTransfer struct {

@@ -107,8 +107,13 @@ multica transfer import --profile <目标实例登录档> --workspace <slug> --i
 | `activate_autopilots` | `--activate-autopilots` | CLI 与卡片默认 `true`；服务端缺席即 `false` | `true` 时按源状态导入，自动化导入后立即参与触发；`false` 时全部以 `paused` 写入，并在 `config_report.warnings` 里追一条 `autopilots_imported_paused`。 |
 | `apply_workspace_settings` | `--apply-workspace-settings` | `true`（服务端 `nil` 也视为 `true`） | `false` 时不写 `workspace` 批次，目标工作区设置原样保留。 |
 | `apply_issue_prefix` | `--apply-issue-prefix` | `false` | `true` 且工作区设置生效时，若目标工作区任务数为 0 则改用源端 issue 前缀，否则跳过并追一条 `issue_prefix_skipped_target_has_issues`。 |
+| `auto_bind_runtimes` | `--auto-bind-runtimes` | CLI 与卡片默认 `true`；服务端 `null` 也视为 `true` | `true` 时按第 4.4.1 节的三档规则**写入**绑定：只有一个候选的智能体直接绑好，多个候选一律不动。`false` 时只产出报告，全部留给用户点。只被 V2 `transfer/config` 读取，V1 `/config/import` 无运行时绑定概念。 |
 
-CLI 与 Desktop 迁移卡片用同一套默认值；卡片只在用户改动默认值时才把对应 flag 传给 CLI（`--activate-autopilots=false` / `--apply-workspace-settings=false` / `--apply-issue-prefix`），所以不带这些 flag 的旧 CLI 仍能跑默认导入。预览报告把 `autopilots` 批次折算成一行「自动化：导入 N 条，其中 M 条已暂停」。
+CLI 与 Desktop 迁移卡片用同一套默认值；卡片只在用户改动默认值时才把对应 flag 传给 CLI（`--activate-autopilots=false` / `--apply-workspace-settings=false` / `--apply-issue-prefix` / `--auto-bind-runtimes=false`），所以不带这些 flag 的旧 CLI 仍能跑默认导入。预览报告把 `autopilots` 批次折算成一行「自动化：导入 N 条，其中 M 条已暂停」。
+
+自动绑定只在**非 dry-run** 的 `transfer/config` 里执行，且排在配置导入提交之后：dry-run 只产出计划（每行 `status: pending`），真正的 apply 才会写 `agent.runtime_id`；绑定失败不回滚已经成功的导入，只在对应行上留下 `reason_code: runtime_bind_failed`。
+
+多候选（或用户关掉开关）的行由 `POST /api/workspaces/{id}/transfer/bind-runtimes` 收口：请求体 `{"bindings":[{"agent_id","runtime_id"}]}`，响应逐条给 `bound` / `error_code` / `error`，一条失败不影响其余。CLI 对应 `multica transfer bind-runtimes --workspace <slug> --bind <agent_id>=<runtime_id> ...`（可重复）。
 
 导入顺序固定：`transfer/config`（必须先 apply 成功）→ `transfer/conversations`（逐片）→ `transfer/attachments`（逐个）→ 最后一次 `transfer/conversations` 带 `finalize: true`，服务端只发一次工作区级聊天列表失效事件。
 
@@ -207,9 +212,27 @@ CLI 与 Desktop 迁移卡片用同一套默认值；卡片只在用户改动默�
 | 表 | 结论 | 导出字段 | 排除字段 | 理由 |
 | --- | --- | --- | --- | --- |
 | `runtime_profile` | 部分导出 | `display_name`、`protocol_family`、`command_name`、`description`、`fixed_args`（经 `redactSecretArgs`）、`visibility`、`enabled` | `id`（作 `source_id`）、`workspace_id`、`created_by`（改写为导入者）、`created_at`、`updated_at` | 换环境时用户要在新机器重装守护进程，自定义运行时定义可以省去重录。身份键暂定 `display_name`，数据库是否有唯一约束**未确认**。 |
-| `agent_runtime` | 不导出实体，只导出**绑定提示** | `runtimes_hint[]`：`{ source_runtime_id, provider, runtime_mode, profile_source_id, display_name }`（`display_name` 取 `custom_name` 否则 `name`） | `daemon_id`、`legacy_daemon_id`、`device_info`、`metadata`、`owner_id`、`status`、`last_seen_at`、`plan_limits` | 守护进程注册绑定具体机器与 daemon token，跨实例没有意义；`device_info` / `metadata` 可能含主机名与路径，不进包。 |
+| `agent_runtime` | 不导出实体，只导出**绑定提示** | `runtimes_hint[]`：`{ source_runtime_id, provider, runtime_mode, profile_source_id, display_name }`（`display_name` 取 `custom_name` 否则 `name`）；`agent_hints[]`：`{ source_agent_id, source_runtime_id, provider, runtime_mode, profile_source_id, profile_name, runtime_name }` | `daemon_id`、`legacy_daemon_id`、`device_info`、`metadata`、`owner_id`、`status`、`last_seen_at`、`plan_limits` | 守护进程注册绑定具体机器与 daemon token，跨实例没有意义；`device_info` / `metadata` 可能含主机名与路径，不进包。 |
 
-导入报告 `runtimes_to_bind[]`：每个导入的智能体给出源端 `provider` / `runtime_mode` / 自定义 profile 名，并列出目标工作区里 `provider` 相同、导入者可见的运行时作为**候选**。V2 **不自动绑定**：绑定决定智能体在哪台机器、用谁的账号跑，必须人来点。
+`agent_hints[]` 是 DENE-364 为「可执行绑定」补的**每个智能体到源运行时的链接**：导出端用 `GET /api/agents` 的 `runtime_id` 关联 `GET /api/runtimes` 的 `provider` / `runtime_mode` / `profile_id`，再把 `profile_id` 折成 `runtime_profile.display_name`。没有它，目标端只知道智能体的 `runtime_mode`，无法判断 provider 与自定义 profile，就只能猜——所以缺 `agent_hints` 的老包一律走「零候选」分支并写明原因，不猜。
+
+### 4.4.1 运行时绑定三档规则（DENE-364，kk zi 2026-09-16 口径变更）
+
+导入报告 `runtimes_to_bind[]`：每个导入的智能体一行，给出源端 `provider` / `runtime_mode` / 自定义 profile 名，并列出目标工作区里**导入者可见**（`owner_id = 导入者` 或 `visibility = public`）的运行时作为候选。候选集按 `provider` + `runtime_mode` + 自定义 profile 名三项全等匹配（内置运行时视为 profile 名为空）。
+
+| 候选数 | 行为 | 报告 |
+| --- | --- | --- |
+| 恰好 1 个 | `auto_bind_runtimes` 为真（默认）时**直接写入** `agent.runtime_id`，走与智能体编辑页相同的写入路径与权限校验（`canUseRuntimeForAgent`：他人私有运行时不可用）。 | `status: bound`，带 `bound_runtime_id` / `bound_runtime_name` |
+| 多个 | **不猜**。不写任何指针，由 Desktop 卡片一次性列出下拉让用户点完（`POST /transfer/bind-runtimes`）。 | `status: pending` + `candidates[]` / `candidate_ids[]` |
+| 0 个 | 不静默跳过，记一条可读原因。 | `status: no_candidate` + `reason_code` + `reason` |
+
+零候选的 `reason_code`：
+
+- `no_runtime_for_provider`：目标实例上没有匹配 `provider` / `runtime_mode` / profile 的运行时，`reason` 写明 `provider=xxx` 与「先把本机 daemon 连到目标实例」。
+- `runtime_provider_unknown`：包内没有该智能体的 `agent_hints`（老包），无法判断 provider，要求从源环境重新导出。
+- `runtime_bind_failed`：规则命中唯一候选但写入失败（权限、运行时消失、数据库），`reason` 带原始原因，该行仍留在 `pending` 供人工处理。
+
+自动绑定**只绑定目标实例上已经存在、导入者可见的运行时**，不创建运行时、不迁移任何凭据，只写 `agent_id → runtime_id` 引用。源端的 `runtime_mode` 也随绑定一起写回，与智能体编辑页移动运行时时的行为一致。
 
 ### 4.5 降级表（V2 新增项）
 
@@ -437,7 +460,7 @@ secrets_omitted.json                全包汇总（含 config.json 内的登记�
 | 源端删除 / 编辑消息同步到目标端 | 需要变更追踪；V2 只追加 |
 | 实时或定时双向同步 | 需要持久映射表与冲突合并 |
 | 智能体 CLI 续聊指针（`session_id` / `work_dir`）迁移 | 绑定源机器，跨机器无意义；上下文延续见第 4.6 节 |
-| 自动绑定运行时 | 决定在谁的机器与账号上执行，必须人工确认 |
+| ~~自动绑定运行时~~ | **已从排除表移除（DENE-364，kk zi 2026-09-16）**：改为第 4.4.1 节的三档规则——唯一候选自动绑、多候选不猜、零候选记原因，`auto_bind_runtimes` 默认开。仍然不做的是「自动创建 / 自动迁移运行时」本身：绑定只写 `agent_id → runtime_id` 引用，运行时必须已在目标实例上存在且导入者可见。 |
 | 密钥随包迁移、口令加密包 | 没有通用 secrets-at-rest 基础设施（沿用 V1 结论）；V2 包本身不加密，靠文件权限与提示 |
 | 关闭对话密钥扫描 | 与验收断言冲突 |
 | 无法扫描的二进制附件文件体 | 无法证明不含密钥 |

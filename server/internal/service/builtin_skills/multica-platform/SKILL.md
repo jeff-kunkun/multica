@@ -27,7 +27,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/autopilots.md` | Autopilots: schedule / webhook / manual triggers, `create_issue` vs `run_only`, why one did not fire |
 | `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`, worktree mode) |
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
-| `references/transfer.md` | `multica transfer export` / `import`, and the kun `/transfer/*` endpoints |
+| `references/transfer.md` | `multica transfer export` / `import` / `bind-runtimes`, and the kun `/transfer/*` endpoints |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
 
 Open what the task needs. A single-domain task usually needs one; a task that

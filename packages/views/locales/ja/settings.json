@@ -1460,7 +1460,7 @@
       "progress_attachments": "添付ファイル {{count}} 件をダウンロード済み",
       "progress_attachments_total": "{{done}} / {{total}} 件の添付ファイル",
       "saved_as": "{{name}}（{{size}}）として保存しました",
-      "runtimes_title": "これらのエージェントをこのマシンのランタイムに結び付けてください。",
+      "runtimes_title": "ランタイムの結び付け",
       "gaps_title": "書き出し元の欠落",
       "option_activate_autopilots": "読み込み後に自動化を有効にする",
       "option_activate_autopilots_hint": "読み込んだ自動化は読み込み完了直後から実行されます。オフにすると一時停止状態で読み込みます。",
@@ -1470,7 +1470,21 @@
       "option_apply_issue_prefix_hint": "今後作られるすべての issue のキーが変わります。このワークスペースに issue がまだ無い場合のみ適用されます。",
       "autopilots_paused": "自動化: {{imported}} 件を読み込み、うち {{paused}} 件は一時停止中です。",
       "autopilots_active": "自動化: {{imported}} 件を読み込み、読み込み完了直後から実行されます。",
-      "autopilots_activate_hint": "「読み込み後に自動化を有効にする」をオンにして再適用すると、すぐに実行が始まります。"
+      "autopilots_activate_hint": "「読み込み後に自動化を有効にする」をオンにして再適用すると、すぐに実行が始まります。",
+      "runtimes_hint": "読み込んだ各エージェントはどこかのマシンで動きます。一致するランタイムが 1 つだけなら自動で結び付け、複数ある場合は選択に委ねます。",
+      "runtime_bound_to": "{{runtime}} に結び付けました。",
+      "runtime_will_bind_to": "読み込み時に {{runtime}} へ結び付けます。",
+      "runtime_pick_label": "ランタイムを選択",
+      "runtime_apply": "結び付けを適用",
+      "runtime_applying": "結び付けています…",
+      "runtime_applied": "{{count}} 件のエージェントを結び付けました。",
+      "runtime_apply_partial": "{{bound}} 件成功、{{failed}} 件失敗しました。",
+      "runtime_needs_pick": "まだ {{count}} 件のエージェントがランタイム未選択です。",
+      "runtime_reason_no_runtime": "対象インスタンスに provider={{provider}} のランタイムがありません。まずこのマシンのデーモンを対象インスタンスへ接続するか（または手動でランタイムを選ぶ）、もう一度実行してください。",
+      "runtime_reason_provider_unknown": "このバンドルには元環境のランタイム情報が含まれていません。元環境から再エクスポートして読み込み直してください。",
+      "runtime_reason_bind_failed": "結び付けに失敗しました: {{reason}}",
+      "option_auto_bind_runtimes": "ランタイムを自動で結び付ける",
+      "option_auto_bind_runtimes_hint": "元の provider・形態・カスタムプロファイルに一致するランタイムが対象側に 1 つだけある場合、そのまま結び付けます。候補が複数あるときは必ず選択に委ねます。"
     }
   }
 }

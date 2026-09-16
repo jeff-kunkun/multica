@@ -1070,6 +1070,11 @@ func exportRuntimeProfiles(ctx context.Context, src TransferSourceClient, wsID s
 		})
 	}
 	var runtimes []map[string]any
+	runtimeByID := map[string]TransferRuntimeHint{}
+	profileNameBySourceID := map[string]string{}
+	for _, p := range out.Profiles {
+		profileNameBySourceID[p.SourceID] = p.DisplayName
+	}
 	if trunc, err := getList(ctx, src, "/api/runtimes", &runtimes); err == nil {
 		appendTransferGap(gaps, "runtimes", trunc)
 		for _, raw := range runtimes {
@@ -1077,13 +1082,47 @@ func exportRuntimeProfiles(ctx context.Context, src TransferSourceClient, wsID s
 			if name == "" {
 				name = strField(raw, "name")
 			}
-			out.RuntimesHint = append(out.RuntimesHint, TransferRuntimeHint{
+			hint := TransferRuntimeHint{
 				SourceRuntimeID: strField(raw, "id"),
 				Provider:        strField(raw, "provider"),
 				RuntimeMode:     strField(raw, "runtime_mode"),
 				ProfileSourceID: strField(raw, "profile_id"),
 				DisplayName:     name,
-			})
+			}
+			out.RuntimesHint = append(out.RuntimesHint, hint)
+			if hint.SourceRuntimeID != "" {
+				runtimeByID[hint.SourceRuntimeID] = hint
+			}
+		}
+	}
+	// Per-agent half of the same hint (DENE-364). `/api/agents` is the only
+	// place the source instance exposes which runtime each agent runs on, so
+	// the transfer reads it here to turn that id into the provider / mode /
+	// profile triple the target matches on.
+	var agents []map[string]any
+	if trunc, err := getList(ctx, src, "/api/agents", &agents); err == nil {
+		appendTransferGap(gaps, "agent_runtimes", trunc)
+		for _, raw := range agents {
+			if strField(raw, "system_key") != "" {
+				continue
+			}
+			agentID := strField(raw, "id")
+			if agentID == "" {
+				continue
+			}
+			hint := TransferAgentRuntimeHint{
+				SourceAgentID:   agentID,
+				SourceRuntimeID: strField(raw, "runtime_id"),
+				RuntimeMode:     strField(raw, "runtime_mode"),
+			}
+			if rt, ok := runtimeByID[hint.SourceRuntimeID]; ok {
+				hint.Provider = rt.Provider
+				hint.RuntimeMode = rt.RuntimeMode
+				hint.ProfileSourceID = rt.ProfileSourceID
+				hint.ProfileName = profileNameBySourceID[rt.ProfileSourceID]
+				hint.RuntimeName = rt.DisplayName
+			}
+			out.AgentHints = append(out.AgentHints, hint)
 		}
 	}
 	return out, nil

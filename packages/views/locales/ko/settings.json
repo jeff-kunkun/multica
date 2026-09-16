@@ -1460,7 +1460,7 @@
       "progress_attachments": "첨부 {{count}}개 다운로드됨",
       "progress_attachments_total": "{{done}} / {{total}}개 첨부",
       "saved_as": "{{name}} ({{size}})(으)로 저장됨",
-      "runtimes_title": "이 에이전트를 이 머신의 런타임에 연결하세요.",
+      "runtimes_title": "런타임 연결",
       "gaps_title": "원본 내보내기 공백",
       "option_activate_autopilots": "가져온 뒤 자동화 활성화",
       "option_activate_autopilots_hint": "가져온 자동화는 가져오기가 끝나는 즉시 실행을 시작합니다. 끄면 일시 중지 상태로 가져옵니다.",
@@ -1470,7 +1470,21 @@
       "option_apply_issue_prefix_hint": "앞으로 만들어지는 모든 이슈의 키가 바뀝니다. 이 워크스페이스에 아직 이슈가 없을 때만 적용됩니다.",
       "autopilots_paused": "자동화: {{imported}}개 가져옴, 그중 {{paused}}개는 일시 중지 상태입니다.",
       "autopilots_active": "자동화: {{imported}}개 가져옴, 가져오기가 끝나는 즉시 실행됩니다.",
-      "autopilots_activate_hint": "“가져온 뒤 자동화 활성화”를 켜고 다시 적용하면 곧바로 실행됩니다."
+      "autopilots_activate_hint": "“가져온 뒤 자동화 활성화”를 켜고 다시 적용하면 곧바로 실행됩니다.",
+      "runtimes_hint": "가져온 각 에이전트는 어느 머신에서 실행됩니다. 일치하는 런타임이 하나뿐이면 자동으로 연결하고, 여러 개면 직접 고르게 합니다.",
+      "runtime_bound_to": "{{runtime}}에 연결했습니다.",
+      "runtime_will_bind_to": "가져올 때 {{runtime}}에 연결합니다.",
+      "runtime_pick_label": "런타임 선택",
+      "runtime_apply": "연결 적용",
+      "runtime_applying": "연결하는 중…",
+      "runtime_applied": "에이전트 {{count}}개를 연결했습니다.",
+      "runtime_apply_partial": "{{bound}}개 성공, {{failed}}개 실패했습니다.",
+      "runtime_needs_pick": "아직 {{count}}개 에이전트가 런타임을 고르지 않았습니다.",
+      "runtime_reason_no_runtime": "대상 인스턴스에 provider={{provider}} 런타임이 없습니다. 먼저 이 머신의 데몬을 대상 인스턴스에 연결하거나 런타임을 직접 고른 뒤 다시 시도하세요.",
+      "runtime_reason_provider_unknown": "이 번들에는 원본 런타임 정보가 없습니다. 원본 환경에서 다시 내보낸 뒤 가져오세요.",
+      "runtime_reason_bind_failed": "연결 실패: {{reason}}",
+      "option_auto_bind_runtimes": "런타임 자동 연결",
+      "option_auto_bind_runtimes_hint": "원본의 provider·형태·사용자 지정 프로필과 일치하는 런타임이 대상에 정확히 하나일 때 연결합니다. 후보가 여러 개면 항상 직접 고르게 합니다."
     }
   }
 }

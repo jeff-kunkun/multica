@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildTransferCliArgs,
   classifyTransferError,
+  parseTransferBindRuntimesReport,
   parseTransferEstimate,
   parseTransferImportReport,
   parseTransferProgressLine,
@@ -94,6 +95,7 @@ describe("buildTransferCliArgs", () => {
           activateAutopilots: true,
           applyWorkspaceSettings: true,
           applyIssuePrefix: false,
+          autoBindRuntimes: true,
         },
       }),
     ).toEqual([
@@ -120,6 +122,7 @@ describe("buildTransferCliArgs", () => {
           activateAutopilots: false,
           applyWorkspaceSettings: false,
           applyIssuePrefix: true,
+          autoBindRuntimes: false,
         },
       }),
     ).toEqual([
@@ -137,6 +140,7 @@ describe("buildTransferCliArgs", () => {
       "--activate-autopilots=false",
       "--apply-workspace-settings=false",
       "--apply-issue-prefix",
+      "--auto-bind-runtimes=false",
     ]);
   });
 });
@@ -163,6 +167,74 @@ describe("classifyTransferError", () => {
   });
 });
 
+// DENE-364: the card applies the runtimes the auto-bind rule left alone through
+// the CLI, so the args and the parser are the only path those picks travel.
+describe("bind-runtimes", () => {
+  it("builds one --bind flag per pick", () => {
+    expect(
+      buildTransferCliArgs(PROFILE, {
+        action: "bind-runtimes",
+        workspace: "acme",
+        bindings: [
+          { agentId: "a1", runtimeId: "r1" },
+          { agentId: "a2", runtimeId: "r2" },
+        ],
+      }),
+    ).toEqual([
+      "--profile",
+      PROFILE,
+      "transfer",
+      "bind-runtimes",
+      "--workspace",
+      "acme",
+      "--bind",
+      "a1=r1",
+      "--bind",
+      "a2=r2",
+    ]);
+  });
+
+  it("accepts a well-formed batch and refuses an empty or malformed one", () => {
+    expect(
+      parseTransferRunRequest({
+        action: "bind-runtimes",
+        workspace: "acme",
+        bindings: [{ agentId: "a1", runtimeId: "r1" }],
+      }),
+    ).toEqual({
+      action: "bind-runtimes",
+      workspace: "acme",
+      bindings: [{ agentId: "a1", runtimeId: "r1" }],
+    });
+    expect(
+      parseTransferRunRequest({ action: "bind-runtimes", workspace: "acme", bindings: [] }),
+    ).toBeNull();
+    expect(
+      parseTransferRunRequest({
+        action: "bind-runtimes",
+        workspace: "acme",
+        bindings: [{ agentId: "a1" }],
+      }),
+    ).toBeNull();
+  });
+
+  it("reports one line per binding", () => {
+    const report = parseTransferBindRuntimesReport(`{
+  "applied": true,
+  "bound": 1,
+  "failed": 1,
+  "bindings": [
+    { "agent_id": "a1", "runtime_id": "r1", "agent_name": "Builder", "runtime_name": "kunkun-mbp", "bound": true },
+    { "agent_id": "a2", "runtime_id": "r9", "agent_name": "Reviewer", "bound": false, "error_code": "runtime_not_found", "error": "runtime not found in this workspace" }
+  ]
+}`);
+    expect(report.bound).toBe(1);
+    expect(report.failed).toBe(1);
+    expect(report.bindings[0]).toMatchObject({ agent_id: "a1", bound: true, runtime_name: "kunkun-mbp" });
+    expect(report.bindings[1]).toMatchObject({ agent_id: "a2", bound: false, error_code: "runtime_not_found" });
+  });
+});
+
 describe("parseTransferImportReport", () => {
   it("reads V2 config_report plus runtimes and gaps", () => {
     const report = parseTransferImportReport(`{
@@ -186,6 +258,10 @@ describe("parseTransferImportReport", () => {
       field: "custom_env",
     });
     expect(report.runtimes_to_bind[0]?.agent_name).toBe("Builder");
+    // A server predating the three-tier rule sends no status and no candidate
+    // objects; the row must still render as something to act on (DENE-364).
+    expect(report.runtimes_to_bind[0]?.status).toBe("pending");
+    expect(report.runtimes_to_bind[0]?.candidates[0]?.id).toBe("r1");
     expect(report.export_gaps[0]).toMatchObject({
       group: "plugins",
       reason: "read_api_missing",
@@ -314,6 +390,7 @@ describe("parseTransferRunRequest", () => {
         activateAutopilots: true,
         applyWorkspaceSettings: true,
         applyIssuePrefix: true,
+        autoBindRuntimes: true,
       },
     });
   });
@@ -418,6 +495,7 @@ describe("runTransferCli", () => {
           activateAutopilots: false,
           applyWorkspaceSettings: true,
           applyIssuePrefix: false,
+          autoBindRuntimes: true,
         },
       },
       deps,
