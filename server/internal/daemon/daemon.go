@@ -8868,8 +8868,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare dsh session root: %w", err)
 		}
-		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
-		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
+		applyDshTaskEnv(agentEnv, dshSessionRoot)
 	}
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
@@ -10806,6 +10805,34 @@ func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, e
 		return "", err
 	}
 	return path, nil
+}
+
+// dshPermissionModeEnv selects the DeepSeek Harness sandbox/approval posture.
+// DSH reads it in its own profile config; when unset it falls back to
+// workspace-write, whose seatbelt policy only permits writes inside the task
+// worktree. That default broke real work (DENE-329: `hdiutil create` needs a
+// disk-image device and failed with "Operation not permitted"), and every other
+// runtime the daemon launches already runs without an OS sandbox.
+const dshPermissionModeEnv = "DSH_PERMISSION_MODE"
+
+// dshPermissionModeFullAccess also sets DSH's approval mode to never, so one
+// variable covers both the sandbox and the approval prompt.
+const dshPermissionModeFullAccess = "danger-full-access"
+
+// applyDshTaskEnv adds the dsh-only variables to an env map that has already
+// had the agent's custom_env layered onto it. The session root and telemetry
+// switch are daemon-owned and unconditional; the permission mode is only a
+// default, so an agent that sets DSH_PERMISSION_MODE in custom_env (e.g. back
+// to workspace-write) keeps its own value.
+func applyDshTaskEnv(agentEnv map[string]string, sessionRoot string) {
+	if agentEnv == nil {
+		return
+	}
+	agentEnv["MULTICA_DSH_SESSION_ROOT"] = sessionRoot
+	agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
+	if _, ok := agentEnv[dshPermissionModeEnv]; !ok {
+		agentEnv[dshPermissionModeEnv] = dshPermissionModeFullAccess
+	}
 }
 
 // prepareDshTaskSessionRoot keeps DSH transcripts private to one Multica
