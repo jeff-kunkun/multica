@@ -17,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 // ---------------------------------------------------------------------------
@@ -810,6 +812,10 @@ type transferImportRecorder struct {
 	// independently of `target`: deleting the top tasks leaves the counter above
 	// MAX(number), and `--renumber` has to offset by the counter.
 	counter int32
+	// issuesReportFor answers one `/transfer/issues` request. Nil falls back to
+	// the bare `{"applied": true}` the request-shape cases need, because they
+	// never look at the answer.
+	issuesReportFor func(body map[string]any) map[string]any
 }
 
 func (r *transferImportRecorder) post(body map[string]any) {
@@ -826,6 +832,44 @@ func (r *transferImportRecorder) posted() []map[string]any {
 	return out
 }
 
+// setTarget replaces the rows `GET /api/issues` answers with. A rerun case uses
+// it to play the rows an earlier import landed.
+func (r *transferImportRecorder) setTarget(target []map[string]any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.target = target
+}
+
+// setCounter plays the watermark an earlier finalize moved.
+func (r *transferImportRecorder) setCounter(counter int32) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.counter = counter
+}
+
+// issueList answers `GET /api/issues`. The `ids` filter is the server's
+// restriction of the window to an explicit id set, which is how the import
+// reads back the rows it already landed.
+func (r *transferImportRecorder) issueList(q url.Values) map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	issues := r.target
+	if q.Has("ids") {
+		want := map[string]bool{}
+		for _, raw := range strings.Split(q.Get("ids"), ",") {
+			want[strings.TrimSpace(raw)] = true
+		}
+		filtered := make([]map[string]any, 0, len(issues))
+		for _, issue := range issues {
+			if id, _ := issue["id"].(string); want[id] {
+				filtered = append(filtered, issue)
+			}
+		}
+		issues = filtered
+	}
+	return map[string]any{"issues": issues, "total": len(issues)}
+}
+
 func (r *transferImportRecorder) server(t *testing.T, targetPrefix string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -834,12 +878,15 @@ func (r *transferImportRecorder) server(t *testing.T, targetPrefix string) *http
 		case req.URL.Path == "/api/workspaces":
 			writeJSONTest(w, []map[string]any{{"id": "ws-1", "slug": "tgt", "name": "Tgt"}})
 		case req.URL.Path == "/api/workspaces/ws-1":
+			r.mu.Lock()
+			counter := r.counter
+			r.mu.Unlock()
 			writeJSONTest(w, map[string]any{
 				"id": "ws-1", "slug": "tgt", "name": "Tgt",
-				"issue_prefix": targetPrefix, "issue_counter": r.counter,
+				"issue_prefix": targetPrefix, "issue_counter": counter,
 			})
 		case req.URL.Path == "/api/issues":
-			writeJSONTest(w, map[string]any{"issues": r.target, "total": len(r.target)})
+			writeJSONTest(w, r.issueList(req.URL.Query()))
 		case strings.HasSuffix(req.URL.Path, "/transfer/issues"):
 			var body map[string]any
 			data, _ := io.ReadAll(req.Body)
@@ -849,7 +896,13 @@ func (r *transferImportRecorder) server(t *testing.T, targetPrefix string) *http
 				return
 			}
 			r.post(body)
-			writeJSONTest(w, map[string]any{"applied": true})
+			report := map[string]any{"applied": true}
+			if r.issuesReportFor != nil {
+				if custom := r.issuesReportFor(body); custom != nil {
+					report = custom
+				}
+			}
+			writeJSONTest(w, report)
 		case strings.HasSuffix(req.URL.Path, "/transfer/config"):
 			writeJSONTest(w, map[string]any{"config_report": map[string]any{"stats": map[string]any{}}})
 		default:
@@ -1083,6 +1136,191 @@ func TestTransferImportIssues_RenumberNeedsYesAndWritesNumberMap(t *testing.T) {
 	if !strings.Contains(lines[2], "SRC-2") || !strings.Contains(lines[2], "TGT-14") {
 		t.Fatalf("number map row=%q, want SRC-2 -> TGT-14", lines[2])
 	}
+}
+
+// DENE-401: the task half of the import report has to reach stdout.
+//
+// This is the seam neither side used to test: this package discarded stdout
+// (`cmd.SetOut(io.Discard)`) while the Desktop main-process test hand-wrote an
+// `issues_report` key the CLI never produced, so a real import reported nothing
+// and the card's task section was dead code. The assertions below are on the
+// JSON the Desktop parser reads, and the numbers can only come from the answers
+// the target sent — the CLI invents none of them.
+func TestTransferImportIssues_PrintsFoldedIssuesReportToStdout(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	refs := map[string]any{
+		"issues": map[string]any{
+			"issue-a": map[string]any{"number": 1, "identifier": "SRC-1"},
+			"issue-b": map[string]any{"number": 2, "identifier": "SRC-2"},
+		},
+	}
+	issueShards := [][]map[string]any{
+		{{"source_id": "issue-a", "number": 1, "title": "one", "status": "todo", "priority": "none", "creator_type": "member", "creator_id": "user-1", "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z"}},
+		{{"source_id": "issue-b", "number": 2, "title": "two", "status": "todo", "priority": "none", "creator_type": "member", "creator_id": "user-1", "created_at": "2026-09-01T00:00:01Z", "updated_at": "2026-09-01T00:00:01Z"}},
+	}
+
+	shard := 0
+	rec := &transferImportRecorder{
+		issuesReportFor: func(body map[string]any) map[string]any {
+			if body["finalize"] == true {
+				return map[string]any{
+					"applied": true, "finalized": true,
+					"issue_counter": 42, "parents_backfilled": 3,
+					"issue_limit": map[string]any{"action": "warn", "limit": 1000, "used": 5},
+				}
+			}
+			shard++
+			return map[string]any{
+				"applied":        true,
+				"issues_created": 1,
+				// A degrade the contract promises to echo (§3.4) and the card
+				// renders as "references that lost their link".
+				"mention_unmapped_by_type": map[string]any{"member": shard},
+				"mention_unmapped": []map[string]any{{
+					"entity": "comment", "source_id": fmt.Sprintf("c-%d", shard),
+					"field": "content", "ref_type": "member", "ref_id": fmt.Sprintf("member-%d", shard),
+					"reason": "mention_unmapped", "resolution": "plain_text",
+				}},
+			}
+		},
+	}
+	srv := rec.server(t, "TGT")
+	defer srv.Close()
+
+	inPath := filepath.Join(t.TempDir(), "bundle.zip")
+	writeTransferIssuesZip(t, inPath, refs, issueShards, [][]map[string]any{{}, {}}, nil)
+
+	var stdout bytes.Buffer
+	cmd := newTransferImportTestCmd()
+	_ = cmd.Flags().Set("server-url", srv.URL)
+	_ = cmd.Flags().Set("workspace", "tgt")
+	_ = cmd.Flags().Set("in", inPath)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(io.Discard)
+	cmd.SetIn(strings.NewReader(""))
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &root); err != nil {
+		t.Fatalf("stdout is not the JSON report (%v): %q", err, stdout.String())
+	}
+	if _, ok := root["config_report"]; !ok {
+		t.Fatalf("merging the task report dropped the config half the same card parses: %v", root)
+	}
+	report, ok := root["issues_report"].(map[string]any)
+	if !ok {
+		t.Fatalf("stdout carries no issues_report; the Desktop main process parses root.issues_report and renders nothing without it: %v", root)
+	}
+	if got := report["issues_created"]; got != float64(2) {
+		t.Fatalf("issues_report.issues_created=%v, want the target's count summed over both shards (2)", got)
+	}
+	mentions, _ := report["mention_unmapped"].([]any)
+	if len(mentions) != 2 {
+		t.Fatalf("issues_report.mention_unmapped=%v, want both shards' rows concatenated", report["mention_unmapped"])
+	}
+	byType, _ := report["mention_unmapped_by_type"].(map[string]any)
+	if byType["member"] != float64(3) {
+		t.Fatalf("issues_report.mention_unmapped_by_type=%v, want per-kind sums (member: 1+2)", byType)
+	}
+	if report["finalized"] != true {
+		t.Fatalf("issues_report.finalized=%v, want the finalize pass's answer", report["finalized"])
+	}
+	if report["issue_counter"] != float64(42) {
+		t.Fatalf("issues_report.issue_counter=%v, want the finalize pass's watermark (§2.2)", report["issue_counter"])
+	}
+	limit, _ := report["issue_limit"].(map[string]any)
+	if limit["action"] != "warn" {
+		t.Fatalf("issues_report.issue_limit=%v, want the quota policy finalize echoed (§11.1)", report["issue_limit"])
+	}
+}
+
+// DENE-401: a second `--renumber` pass reports the numbers the first one
+// landed.
+//
+// The offset is always recomputed from the target's current watermark, and
+// finalize is what moved it, so the rerun computes a number well above the row
+// it is about to skip: the deterministic id collides, `ON CONFLICT DO NOTHING`
+// leaves the stored number alone, and the CSV names numbers that exist nowhere.
+// Reading the landed rows back by that same deterministic id is the only source
+// that agrees with the database.
+func TestTransferImportIssues_RenumberMapKeepsLandedNumbersOnRerun(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	refs := map[string]any{
+		"issues": map[string]any{
+			"issue-a": map[string]any{"number": 1, "identifier": "SRC-1"},
+			"issue-b": map[string]any{"number": 2, "identifier": "SRC-2"},
+		},
+	}
+	issueShards := [][]map[string]any{{
+		{"source_id": "issue-a", "number": 1, "title": "one", "status": "todo", "priority": "none", "creator_type": "member", "creator_id": "user-1", "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z"},
+		{"source_id": "issue-b", "number": 2, "title": "two", "status": "todo", "priority": "none", "creator_type": "member", "creator_id": "user-1", "created_at": "2026-09-01T00:00:01Z", "updated_at": "2026-09-01T00:00:01Z"},
+	}}
+
+	rec := &transferImportRecorder{counter: 12}
+	srv := rec.server(t, "TGT")
+	defer srv.Close()
+
+	inPath := filepath.Join(t.TempDir(), "bundle.zip")
+	writeTransferIssuesZip(t, inPath, refs, issueShards, [][]map[string]any{{}}, nil)
+
+	run := func() {
+		t.Helper()
+		cmd := newTransferImportTestCmd()
+		_ = cmd.Flags().Set("server-url", srv.URL)
+		_ = cmd.Flags().Set("workspace", "tgt")
+		_ = cmd.Flags().Set("in", inPath)
+		_ = cmd.Flags().Set("renumber", "true")
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetIn(strings.NewReader("yes\n"))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("import with renumber: %v", err)
+		}
+	}
+
+	run()
+	if got := transferNumberMapTargets(t, inPath+".number-map.csv"); strings.Join(got, ",") != "TGT-13,TGT-14" {
+		t.Fatalf("first pass wrote %v, want the offset 12 added to each source number", got)
+	}
+
+	// The first pass's finalize moved the watermark and the rows keep the
+	// numbers it gave them; the second pass reads the same bundle again.
+	rec.setCounter(14)
+	rec.setTarget([]map[string]any{
+		{"id": service.TransferIssueID("ws-1", "issue-a").String(), "number": 13},
+		{"id": service.TransferIssueID("ws-1", "issue-b").String(), "number": 14},
+	})
+	run()
+	if got := transferNumberMapTargets(t, inPath+".number-map.csv"); strings.Join(got, ",") != "TGT-13,TGT-14" {
+		t.Fatalf("rerun wrote %v, want the numbers the target actually holds (TGT-13, TGT-14) — the offset moved, the rows did not", got)
+	}
+}
+
+func transferNumberMapTargets(t *testing.T, path string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("number map not written: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("number map has no rows: %q", raw)
+	}
+	targets := make([]string, 0, len(lines)-1)
+	for _, line := range lines[1:] {
+		fields := strings.Split(line, ",")
+		if len(fields) < 3 {
+			t.Fatalf("number map row %q is not three columns", line)
+		}
+		targets = append(targets, fields[1])
+	}
+	return targets
 }
 
 // The compatibility matrix §9.2: a V2 bundle has no issues directory and a

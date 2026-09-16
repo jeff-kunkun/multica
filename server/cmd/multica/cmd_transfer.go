@@ -493,8 +493,16 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		// Land the table before the writes, so the file the confirmation points
-		// at exists even when the import fails halfway through.
-		if err := writeTransferNumberMap(numberMapPath, buildTransferNumberMap(payload, wsID, sourcePrefix, targetPrefix, offset)); err != nil {
+		// at exists even when the import fails halfway through. What the target
+		// already holds wins over the computed number: the rows are keyed by
+		// their deterministic id and `ON CONFLICT DO NOTHING` keeps the number
+		// the first run wrote, so a rerun's fresh offset — finalize moved the
+		// watermark — would name numbers that exist nowhere.
+		landed, err := fetchTransferLandedIssueNumbers(ctx, client, wsID, transferIssueNumberRefs(payload))
+		if err != nil {
+			return fmt.Errorf("read imported issue numbers: %w", err)
+		}
+		if err := writeTransferNumberMap(numberMapPath, buildTransferNumberMap(payload, wsID, sourcePrefix, targetPrefix, offset, landed)); err != nil {
 			return err
 		}
 		issueShards = renumberTransferIssues(issueShards, offset)
@@ -522,8 +530,9 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	// Issues go after config (labels, projects, agents and the status catalog
 	// must exist) and before attachments (attachment.comment_id references
 	// comment.id).
+	issuesFold := &transferIssuesReportFold{}
 	if len(payload.IssueShards) > 0 {
-		if err := uploadTransferIssueShards(ctx, client, base, payload, issueShards, dry, renumber); err != nil {
+		if err := uploadTransferIssueShards(ctx, client, base, payload, issueShards, dry, renumber, issuesFold); err != nil {
 			return err
 		}
 	}
@@ -571,7 +580,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 			}
 		}
 		if len(payload.IssueShards) > 0 {
-			if err := finalizeTransferIssues(ctx, client, base, payload, renumber); err != nil {
+			if err := finalizeTransferIssues(ctx, client, base, payload, renumber, issuesFold); err != nil {
 				return err
 			}
 		}
@@ -579,7 +588,98 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	if numberMapPath != "" {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Number mapping table written to %s\n", numberMapPath)
 	}
-	return cli.PrintJSON(cmd.OutOrStdout(), cfgReport)
+	return cli.PrintJSON(cmd.OutOrStdout(), transferImportOutput(cfgReport, issuesFold))
+}
+
+// transferIssuesReportFold folds the per-request `TransferIssuesReport` values
+// one import produces into the single report the CLI prints.
+//
+// Importing tasks is not one request: every shard answers with its own slice of
+// the truth and the finalize pass answers with the watermark, so the counts are
+// summed, the per-row degradation lists concatenated, the `mention_unmapped`
+// summary accumulated per kind, and the watermark / quota policy taken from the
+// pass that resolved them. Dropping this fold is what left the Desktop
+// migration card's task section — and every degradation the contract promises
+// to echo — empty on a real import.
+type transferIssuesReportFold struct {
+	seen   bool
+	report service.TransferIssuesReport
+}
+
+func (f *transferIssuesReportFold) add(shard service.TransferIssuesReport) {
+	f.seen = true
+	f.report.Applied = f.report.Applied || shard.Applied
+	f.report.IssuesCreated += shard.IssuesCreated
+	f.report.IssuesSkipped += shard.IssuesSkipped
+	f.report.CommentsCreated += shard.CommentsCreated
+	f.report.CommentsSkipped += shard.CommentsSkipped
+	f.report.LabelsCreated += shard.LabelsCreated
+	f.report.LabelsSkipped += shard.LabelsSkipped
+	f.report.ReactionsCreated += shard.ReactionsCreated
+	f.report.ReactionsSkipped += shard.ReactionsSkipped
+	f.report.SubscribersCreated += shard.SubscribersCreated
+	f.report.SubscribersSkipped += shard.SubscribersSkipped
+	f.report.ParentsBackfilled += shard.ParentsBackfilled
+	f.report.Finalized = f.report.Finalized || shard.Finalized
+	// The watermark only moves at finalize and the quota policy is resolved
+	// before the first write, so a shard that did not resolve them reports
+	// their zero value; keeping the last non-empty one is what lets a shard
+	// report and a finalize report share one shape.
+	if shard.IssueCounter != 0 {
+		f.report.IssueCounter = shard.IssueCounter
+	}
+	if shard.IssueLimit != nil {
+		f.report.IssueLimit = shard.IssueLimit
+	}
+	f.report.StatusUnmapped = append(f.report.StatusUnmapped, shard.StatusUnmapped...)
+	f.report.AssigneeUnmapped = append(f.report.AssigneeUnmapped, shard.AssigneeUnmapped...)
+	f.report.CreatorUnmapped = append(f.report.CreatorUnmapped, shard.CreatorUnmapped...)
+	f.report.ProjectUnmapped = append(f.report.ProjectUnmapped, shard.ProjectUnmapped...)
+	f.report.AuthorUnmapped = append(f.report.AuthorUnmapped, shard.AuthorUnmapped...)
+	f.report.ResolutionUnmapped = append(f.report.ResolutionUnmapped, shard.ResolutionUnmapped...)
+	f.report.PropertyUnmapped = append(f.report.PropertyUnmapped, shard.PropertyUnmapped...)
+	f.report.ParentUnmapped = append(f.report.ParentUnmapped, shard.ParentUnmapped...)
+	f.report.ParentReparentedToAncestor = append(f.report.ParentReparentedToAncestor, shard.ParentReparentedToAncestor...)
+	f.report.MentionUnmapped = append(f.report.MentionUnmapped, shard.MentionUnmapped...)
+	f.report.LabelUnmapped = append(f.report.LabelUnmapped, shard.LabelUnmapped...)
+	f.report.ReactionUnmapped = append(f.report.ReactionUnmapped, shard.ReactionUnmapped...)
+	for kind, count := range shard.MentionUnmappedByType {
+		if f.report.MentionUnmappedByType == nil {
+			f.report.MentionUnmappedByType = map[string]int{}
+		}
+		f.report.MentionUnmappedByType[kind] += count
+	}
+}
+
+// decodeTransferIssuesReport reads one `/transfer/issues` answer.
+//
+// It decodes into the report struct rather than `any` so the seam the Desktop
+// card parses is pinned on this side too; a body that is not the report object
+// leaves the fold empty instead of failing an import the target has already
+// committed.
+func decodeTransferIssuesReport(raw json.RawMessage) service.TransferIssuesReport {
+	var report service.TransferIssuesReport
+	_ = json.Unmarshal(raw, &report)
+	return report
+}
+
+// transferImportOutput merges the folded task report into the config report the
+// CLI forwards on stdout.
+//
+// The Desktop main process reads the task half from the root-level
+// `issues_report` key, so it is a sibling of `config_report` rather than a
+// field inside it. A bundle without an `issues` group has no task half and the
+// config report is printed untouched.
+func transferImportOutput(cfgReport any, fold *transferIssuesReportFold) any {
+	if !fold.seen {
+		return cfgReport
+	}
+	out, ok := cfgReport.(map[string]any)
+	if !ok {
+		out = map[string]any{}
+	}
+	out["issues_report"] = fold.report
+	return out
 }
 
 // uploadTransferIssueShards sends every issue shard.
@@ -593,7 +693,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 // `renumber` travels with every shard for the same reason the gate runs on
 // every shard: the flag is what lets a non-empty target accept the write at all
 // (contract §2.3), so a shard that dropped it would 400 halfway through.
-func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer, shards [][]service.TransferIssueRow, dry, renumber bool) error {
+func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer, shards [][]service.TransferIssueRow, dry, renumber bool, fold *transferIssuesReportFold) error {
 	// Relations travel in the shard that holds the rows they point at, because
 	// both reaction tables carry a real foreign key to their comment/issue.
 	commentIssue := map[string]string{}
@@ -632,13 +732,14 @@ func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base 
 		if i < len(payload.CommentShards) {
 			req.Comments = payload.CommentShards[i]
 		}
-		var report any
-		if err := client.PostJSON(ctx, base+"/transfer/issues", req, &report); err != nil {
+		var raw json.RawMessage
+		if err := client.PostJSON(ctx, base+"/transfer/issues", req, &raw); err != nil {
 			if st := httpStatusOf(err); st == 404 {
 				return fmt.Errorf("target_unsupported: this server is not a kun instance with /transfer/issues")
 			}
 			return fmt.Errorf("upload issues shard %d: %w", i+1, err)
 		}
+		fold.add(decodeTransferIssuesReport(raw))
 	}
 	return nil
 }
@@ -653,7 +754,7 @@ func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base 
 // still reads clean; sending link rows instead of whole comments is what keeps
 // a few thousand rows inside the request-body cap. `renumber` must ride along:
 // the empty-target gate runs on this request too.
-func finalizeTransferIssues(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer, renumber bool) error {
+func finalizeTransferIssues(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer, renumber bool, fold *transferIssuesReportFold) error {
 	seenIssue := map[string]bool{}
 	var issues []service.TransferIssueRow
 	for _, shard := range payload.IssueShards {
@@ -692,10 +793,11 @@ func finalizeTransferIssues(ctx context.Context, client *cli.APIClient, base str
 		return fmt.Errorf("issues finalize payload is %d bytes, over the %d byte request cap; parent pointers cannot be trimmed without flattening threads",
 			n, service.TransferConversationsMaxBytes)
 	}
-	var report any
-	if err := client.PostJSON(ctx, base+"/transfer/issues", req, &report); err != nil {
+	var raw json.RawMessage
+	if err := client.PostJSON(ctx, base+"/transfer/issues", req, &raw); err != nil {
 		return fmt.Errorf("finalize issues: %w", err)
 	}
+	fold.add(decodeTransferIssuesReport(raw))
 	return nil
 }
 
@@ -746,25 +848,88 @@ type transferNumberMapRow struct {
 	TargetIssueID    string
 }
 
-func buildTransferNumberMap(payload *loadedTransfer, wsID, sourcePrefix, targetPrefix string, offset int32) []transferNumberMapRow {
+// transferIssueNumberRef is one bundled issue in shard order, counted once.
+type transferIssueNumberRef struct {
+	sourceID string
+	number   int32
+}
+
+func transferIssueNumberRefs(payload *loadedTransfer) []transferIssueNumberRef {
 	seen := map[string]bool{}
-	var rows []transferNumberMapRow
+	var rows []transferIssueNumberRef
 	for _, shard := range payload.IssueShards {
 		for _, row := range shard {
 			if seen[row.SourceID] {
 				continue
 			}
 			seen[row.SourceID] = true
-			sourceIdentifier := payload.Manifest.Refs.Issues[row.SourceID].Identifier
-			if sourceIdentifier == "" {
-				sourceIdentifier = transferNumberIdentifier(sourcePrefix, row.Number)
-			}
-			rows = append(rows, transferNumberMapRow{
-				SourceIdentifier: sourceIdentifier,
-				TargetIdentifier: transferNumberIdentifier(targetPrefix, offset+row.Number),
-				TargetIssueID:    service.TransferIssueID(wsID, row.SourceID).String(),
-			})
+			rows = append(rows, transferIssueNumberRef{sourceID: row.SourceID, number: row.Number})
 		}
+	}
+	return rows
+}
+
+// transferLandedNumberLookupChunk bounds how many deterministic ids ride in one
+// `GET /api/issues?ids=` query. Ids are UUIDs and the whole package travels
+// together, so a query string is not where a few thousand of them belong.
+const transferLandedNumberLookupChunk = 50
+
+// fetchTransferLandedIssueNumbers resolves the deterministic ids this bundle
+// writes against the target, so `--renumber` reports the numbers the target
+// actually holds for them.
+//
+// A first import finds nothing and every row falls back to the offset. A rerun
+// finds the rows the first import landed — same deterministic id, and the
+// `ON CONFLICT DO NOTHING` write leaves their number alone — which is the only
+// source that agrees with the database once the watermark has moved past it.
+func fetchTransferLandedIssueNumbers(ctx context.Context, client *cli.APIClient, wsID string, refs []transferIssueNumberRef) (map[string]int32, error) {
+	landed := map[string]int32{}
+	if len(refs) == 0 {
+		return landed, nil
+	}
+	src := sourceClient{api: client}
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ids = append(ids, service.TransferIssueID(wsID, ref.sourceID).String())
+	}
+	for start := 0; start < len(ids); start += transferLandedNumberLookupChunk {
+		end := min(start+transferLandedNumberLookupChunk, len(ids))
+		q := url.Values{}
+		q.Set("ids", strings.Join(ids[start:end], ","))
+		q.Set("limit", strconv.Itoa(transferLandedNumberLookupChunk))
+		var envelope struct {
+			Issues []struct {
+				ID     string `json:"id"`
+				Number int32  `json:"number"`
+			} `json:"issues"`
+		}
+		if err := src.GetJSON(ctx, "/api/issues?"+q.Encode(), &envelope); err != nil {
+			return nil, err
+		}
+		for _, issue := range envelope.Issues {
+			landed[issue.ID] = issue.Number
+		}
+	}
+	return landed, nil
+}
+
+func buildTransferNumberMap(payload *loadedTransfer, wsID, sourcePrefix, targetPrefix string, offset int32, landed map[string]int32) []transferNumberMapRow {
+	var rows []transferNumberMapRow
+	for _, ref := range transferIssueNumberRefs(payload) {
+		sourceIdentifier := payload.Manifest.Refs.Issues[ref.sourceID].Identifier
+		if sourceIdentifier == "" {
+			sourceIdentifier = transferNumberIdentifier(sourcePrefix, ref.number)
+		}
+		targetID := service.TransferIssueID(wsID, ref.sourceID)
+		targetNumber := offset + ref.number
+		if number, ok := landed[targetID.String()]; ok {
+			targetNumber = number
+		}
+		rows = append(rows, transferNumberMapRow{
+			SourceIdentifier: sourceIdentifier,
+			TargetIdentifier: transferNumberIdentifier(targetPrefix, targetNumber),
+			TargetIssueID:    targetID.String(),
+		})
 	}
 	return rows
 }
