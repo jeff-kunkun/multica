@@ -1,9 +1,15 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_RUNTIME_CONFIG,
+  SELF_HOSTED_PRESET_URL,
   deriveWsUrl,
+  desktopProfileName,
+  isOfficialCloudConfig,
   parseRuntimeConfig,
   runtimeConfigFromDevEnv,
+  runtimeConfigFromServerUrl,
+  runtimeConfigHost,
 } from "./runtime-config";
 
 describe("runtime config", () => {
@@ -124,6 +130,47 @@ describe("runtime config", () => {
       wsUrl: "wss://api.test.multica.ai/ws",
       appUrl: "https://test.multica.ai",
     });
+  });
+
+  it("maps official cloud aliases to the packaged defaults", () => {
+    for (const input of [
+      "https://multica.ai",
+      "https://api.multica.ai/",
+      "https://www.multica.ai/login",
+    ]) {
+      expect(runtimeConfigFromServerUrl(input)).toEqual(DEFAULT_RUNTIME_CONFIG);
+    }
+    expect(isOfficialCloudConfig(DEFAULT_RUNTIME_CONFIG)).toBe(true);
+  });
+
+  it("derives ws and app URLs from a self-hosted origin", () => {
+    expect(runtimeConfigFromServerUrl(SELF_HOSTED_PRESET_URL)).toEqual({
+      schemaVersion: 1,
+      apiUrl: "https://ai.ferryway.cc",
+      wsUrl: "wss://ai.ferryway.cc/ws",
+      appUrl: "https://ai.ferryway.cc",
+    });
+    expect(runtimeConfigFromServerUrl("https://user:secret@ai.ferryway.cc/path?x=1")).toEqual({
+      schemaVersion: 1,
+      apiUrl: "https://ai.ferryway.cc",
+      wsUrl: "wss://ai.ferryway.cc/ws",
+      appUrl: "https://ai.ferryway.cc",
+    });
+  });
+
+  it("rejects empty, non-http, and unparseable server URLs", () => {
+    expect(() => runtimeConfigFromServerUrl("")).toThrow(/required/);
+    expect(() => runtimeConfigFromServerUrl("   ")).toThrow(/required/);
+    expect(() => runtimeConfigFromServerUrl("not a url")).toThrow(/valid http or https URL/);
+    expect(() => runtimeConfigFromServerUrl("ftp://ai.ferryway.cc")).toThrow(/http or https/);
+    expect(() => runtimeConfigFromServerUrl("file:///tmp/multica")).toThrow(/http or https/);
+  });
+
+  it("names the desktop profile after the API host", () => {
+    expect(desktopProfileName("https://api.multica.ai")).toBe("desktop-api.multica.ai");
+    expect(desktopProfileName("https://ai.ferryway.cc")).toBe("desktop-ai.ferryway.cc");
+    expect(desktopProfileName("http://localhost:8080")).toBe("desktop-localhost-8080");
+    expect(runtimeConfigHost(DEFAULT_RUNTIME_CONFIG)).toBe("multica.ai");
   });
 
   it("dev VITE_APP_URL still wins over apiUrl-derived value", () => {
