@@ -385,7 +385,7 @@ DENE-365 描述里的表名与库里的实际结构有三处出入，按实际�
 
 CLI 只能用读接口，这里有两条必须按写的方式做，否则会静默丢数据：
 
-**issue 列表分页。** `GET /api/issues` 是 `LIMIT/OFFSET`，`limit` 硬上限 100（`internal/handler/issue.go:147`）。默认不带任何过滤时返回**全部状态**（含 `done` / `cancelled`）。必须用 `?sort=created_at&dir=asc` 翻页：代码里 ORDER BY 末尾固定追加 `i.created_at DESC, i.id DESC` 作为唯一末位键（`issue.go:456`），升序翻页下新建的票排在最后、不会顶掉前面的页。用默认排序（`last_activity_at`）翻页会在导出过程中因为活动更新而重排，跨页重复或漏掉行。
+**issue 列表分页。** `GET /api/issues` 是 `LIMIT/OFFSET`，`limit` 硬上限 100（`internal/handler/issue.go:1260`，`ListIssues`）。默认不带任何过滤时返回**全部状态**（含 `done` / `cancelled`）。必须用 `?sort=created_at&dir=asc` 翻页：代码里 ORDER BY 末尾固定追加 `i.created_at DESC, i.id DESC` 作为唯一末位键（`issue.go:1569`），升序翻页下新建的票排在最后、不会顶掉前面的页。用默认排序（`last_activity_at`）翻页会在导出过程中因为活动更新而重排，跨页重复或漏掉行。
 
 **评论分页的 `since` 边界。** `GET /api/issues/{id}/comments` 默认路径返回**最新 2000 条**（`commentHardCap = 2000`），没有向前翻页的游标。超过 2000 条的 issue 必须用 `?since=<RFC3339Nano>` 反复拉：该查询是 `created_at > $3 ORDER BY created_at ASC, id ASC LIMIT 2001`（`comment.sql:61`）。
 
@@ -536,7 +536,7 @@ V2 §8 的 10 条未确认项**继续有效**，本页新增：
 4. **`GET /api/issues` 在官方云上的实际行为**：`limit` 上限、是否有速率限制、`sort=created_at` 是否被支持（本页依据的是 `kun` 的代码，官方云版本可能更旧或更新）。V2 §8.9 已有速率限制这一条，这里是它在 issue 端点上的具体化。
 5. **官方云的 `ListComments` 是否支持 `since` 参数**（8.4）。`since` 的 RFC3339Nano 回退解析注释里写着「backwards-compat with the original CLI」，说明它存在了一段时间，但官方云版本**未确认**。不支持时超过 2000 条评论的 issue 只能拿到最新 2000 条，必须在 `export_gaps` 里记 `comment_window_truncated` 并在导入报告回显。
 6. ~~`issue.properties` 的值结构~~ **已核实并写进 1.2.1**：九种属性类型、三类值形状、`actor` / `multi_actor` 藏着 actor 引用。剩下的未确认部分只有一条：**官方云的属性类型集合是否与 `kun` 一致**——若官方云多出一种 `kun` 没有的类型，导出端按白名单投影会把它丢掉，需要在 `export_gaps` 记 `property_type_unknown`。
-7. **官方云的墓碑评论行为**。`kun` 侧已核实：默认列表路径 `ListCommentsForIssue`（`comment.sql:19`）**没有** `deleted_at IS NULL` 条件，`commentToResponse`（`comment.go:122`）也把 `DeletedAt` 序列化出去，所以默认路径确实返回墓碑行，1.5 与第 4 节的父指针回填成立。官方云的版本是否一致**未确认**。若官方云过滤掉墓碑，第 4 节的回填在这些位置会断链，实现 Stage 要改用「父指针解析不到就上溯到最近的可解析祖先」而不是置空。
+7. **官方云的墓碑评论行为**。`kun` 侧已核实：默认列表路径 `ListCommentsForIssue`（`comment.sql:1`）**没有** `deleted_at IS NULL` 条件，`commentToResponse`（`comment.go:122`）也把 `DeletedAt` 序列化出去，所以默认路径确实返回墓碑行，1.5 与第 4 节的父指针回填成立。官方云的版本是否一致**未确认**。若官方云过滤掉墓碑，第 4 节的回填在这些位置会断链，实现 Stage 要改用「父指针解析不到就上溯到最近的可解析祖先」而不是置空。
 
 ## 12. 给后续 Stage 的交接清单
 
