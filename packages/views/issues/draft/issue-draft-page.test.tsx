@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -37,6 +37,21 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
   transcriptProps: {} as { transformContent?: (content: string) => string },
+  groupProps: {} as { defaultLayout?: unknown },
+  panelSizes: {} as Record<string, unknown>,
+}));
+
+// The split layout's persisted half: this suite is about what the page asks the
+// group to open with, not about the storage behind it.
+const layoutStore = vi.hoisted(() => ({
+  stored: undefined as Record<string, number> | undefined,
+}));
+
+vi.mock("react-resizable-panels", () => ({
+  useDefaultLayout: () => ({
+    defaultLayout: layoutStore.stored,
+    onLayoutChanged: vi.fn(),
+  }),
 }));
 
 vi.mock("@multica/core/api", async () => {
@@ -131,9 +146,32 @@ vi.mock("../../chat/components/chat-message-list", () => ({
   ChatMessageSkeleton: () => <div data-testid="transcript-loading" />,
 }));
 
+// The group itself is not what this suite is about, but the split it is asked
+// for is: the page hands it a first-run layout, and the panels carry the same
+// split for the path where the group is measured only after mount.
 vi.mock("@multica/ui/components/ui/resizable", () => ({
-  ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  ResizablePanel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  ResizablePanelGroup: ({
+    children,
+    defaultLayout,
+  }: {
+    children: React.ReactNode;
+    defaultLayout?: unknown;
+  }) => {
+    mocks.groupProps.defaultLayout = defaultLayout;
+    return <div>{children}</div>;
+  },
+  ResizablePanel: ({
+    children,
+    id,
+    defaultSize,
+  }: {
+    children: React.ReactNode;
+    id?: string;
+    defaultSize?: unknown;
+  }) => {
+    if (id) mocks.panelSizes[id] = defaultSize;
+    return <div>{children}</div>;
+  },
   ResizableHandle: () => <div />,
 }));
 
@@ -206,6 +244,9 @@ function renderPage() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.transcriptProps = {};
+  mocks.groupProps = {};
+  mocks.panelSizes = {};
+  layoutStore.stored = undefined;
   mocks.drafts = [draftSummary()];
   mocks.draftsError = null;
   mocks.messages = [chatMessage()];
@@ -491,19 +532,33 @@ describe("IssueDraftPage recovery", () => {
 
 /**
  * The alignment policy is the carrier's prompt, made switchable and auditable.
- * What these pin: the control reflects what the server says is running (not what
- * was clicked), the recorded prompt version is on screen, and a carrier question
- * is answerable in one click — with the composed answer going out through the
- * same envelope every other turn uses.
+ * It sits behind the header's ⋯ menu rather than on the header itself
+ * (DENE-367): a style is something reached for, not a choice to make before the
+ * first sentence. What these pin: the control is reachable, it reflects what the
+ * server says is running (not what was clicked), the recorded prompt version is
+ * on screen, and a carrier question is answerable in one click — with the
+ * composed answer going out through the same envelope every other turn uses.
  */
+async function openStyleMenu() {
+  // Base UI portals the popup, so this is a click through the primitive rather
+  // than a userEvent pointer sequence.
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More alignment options" }),
+  );
+}
+
 describe("IssueDraftPage policy", () => {
   it("shows which policy is running, with the prompt version it recorded", async () => {
     renderPage();
-    expect(await screen.findByRole("button", { name: "Guided questions" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Guided questions" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await screen.findByText("Aligning")).toBeTruthy();
+    expect(
+      screen.queryByRole("menuitemradio", { name: "Guided questions" }),
+    ).toBeNull();
+
+    await openStyleMenu();
+    expect(
+      await screen.findByRole("menuitemradio", { name: "Guided questions" }),
+    ).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText("Prompt question@1")).toBeTruthy();
   });
 
@@ -512,8 +567,10 @@ describe("IssueDraftPage policy", () => {
       ...draftSummary({ policy: { key: "conversation", version: "1", guided: false } }),
     });
     renderPage();
-    const plain = await screen.findByRole("button", { name: "Plain conversation" });
-    await userEvent.click(plain);
+    await openStyleMenu();
+    fireEvent.click(
+      await screen.findByRole("menuitemradio", { name: "Plain conversation" }),
+    );
     await waitFor(() =>
       expect(mocks.switchIssueDraftPolicy).toHaveBeenCalledWith("sess-1", {
         policy: "conversation",
@@ -524,22 +581,57 @@ describe("IssueDraftPage policy", () => {
   it("surfaces a refused switch and leaves the running policy on screen", async () => {
     mocks.switchIssueDraftPolicy.mockRejectedValue(new Error("stop the current reply first"));
     renderPage();
-    await userEvent.click(await screen.findByRole("button", { name: "Plain conversation" }));
-    expect(await screen.findByText("stop the current reply first")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Guided questions" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+    await openStyleMenu();
+    fireEvent.click(
+      await screen.findByRole("menuitemradio", { name: "Plain conversation" }),
     );
+    expect(await screen.findByText("stop the current reply first")).toBeTruthy();
+    // Selecting closes the menu so the refusal is visible; reopening must still
+    // show the style the server is running, not the one that was clicked.
+    await openStyleMenu();
+    expect(
+      await screen.findByRole("menuitemradio", { name: "Guided questions" }),
+    ).toHaveAttribute("aria-checked", "true");
   });
 
   it("offers no control at all when the backend reports no policy", async () => {
     // An installed desktop client can talk to a backend that predates policies;
-    // a switch that cannot land is worse than no switch.
+    // a switch that cannot land is worse than no switch, and an empty menu is
+    // worse than no menu.
     mocks.drafts = [draftSummary({ policy: { key: "", version: "", guided: false } })];
     renderPage();
     await screen.findByText("Aligning");
-    expect(screen.queryByRole("button", { name: "Plain conversation" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Guided questions" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "More alignment options" })).toBeNull();
+    expect(
+      screen.queryByRole("menuitemradio", { name: "Plain conversation" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("menuitemradio", { name: "Guided questions" }),
+    ).toBeNull();
+  });
+});
+
+/**
+ * The page opens conversation-first: the transcript is the point, and the
+ * structured draft is a sidecar. The stored layout keeps winning, or reopening
+ * the page would undo a divider the user dragged.
+ */
+describe("IssueDraftPage layout", () => {
+  it("opens with the conversation on the main width", async () => {
+    renderPage();
+    await screen.findByText("Aligning");
+    expect(mocks.groupProps.defaultLayout).toEqual({ conversation: 70, preview: 30 });
+    // Declared per panel too: the group derives its first layout from these
+    // when it is measured only after mount, and the two must agree.
+    expect(mocks.panelSizes.conversation).toBe("70%");
+    expect(mocks.panelSizes.preview).toBe("30%");
+  });
+
+  it("keeps a layout the user already dragged", async () => {
+    layoutStore.stored = { conversation: 22, preview: 78 };
+    renderPage();
+    await screen.findByText("Aligning");
+    expect(mocks.groupProps.defaultLayout).toEqual({ conversation: 22, preview: 78 });
   });
 });
 

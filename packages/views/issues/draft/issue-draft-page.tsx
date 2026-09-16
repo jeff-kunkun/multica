@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useDefaultLayout } from "react-resizable-panels";
-import { ArrowLeft } from "lucide-react";
+import { useDefaultLayout, type Layout } from "react-resizable-panels";
+import { ArrowLeft, MoreHorizontal } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { decodeIssueDraftInput, stripIssueDraftDirectives } from "@multica/core/issue-drafts";
@@ -12,6 +12,11 @@ import { runtimeListOptions } from "@multica/core/runtimes";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import type { ChatMessage } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -24,6 +29,19 @@ import { IssueDraftPolicyPicker } from "./issue-draft-policy-picker";
 import { IssueDraftPreviewPanel } from "./issue-draft-preview-panel";
 import { IssueDraftStageStrip } from "./issue-draft-stage-strip";
 import { useIssueDraftSession } from "./use-issue-draft-session";
+
+/**
+ * The split this page opens in before anyone has dragged the divider: the
+ * conversation takes the width, and the preview rides along as a sidecar.
+ *
+ * `useDefaultLayout` restores persisted layouts but offers no initial value of
+ * its own, and the group can arrive at its first layout two ways — from this
+ * `defaultLayout` prop, or from the panels' own `defaultSize` when the group is
+ * measured only after mount. Both are declared here, in the same numbers, so the
+ * page opens the same way either way. A layout the user has already dragged is
+ * restored by the hook and takes precedence over both.
+ */
+const FIRST_RUN_LAYOUT: Layout = { conversation: 70, preview: 30 };
 
 /**
  * One alignment conversation, addressed by its own draft id.
@@ -45,6 +63,11 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_issue_draft_layout",
   });
+  // The header keeps one secondary entry instead of a control strip: the
+  // alignment style is a setting someone reaches for deliberately, not a
+  // decision to make before saying anything.
+  const styleDisabled =
+    session.pending || session.stage === "creating" || session.stage === "created";
 
   const runtimesQuery = useQuery(runtimeListOptions(wsId));
   const membersQuery = useQuery(memberListOptions(wsId));
@@ -114,14 +137,34 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               {t(($) => $.alignment.subtitle)}
             </p>
           </div>
-          <IssueDraftPolicyPicker
-            policy={session.policy}
-            switching={session.switchingPolicy}
-            // A conversation that is mid-reply or already confirmed has no next
-            // turn to change, so the picker is not offered one.
-            disabled={session.pending || session.stage === "creating" || session.stage === "created"}
-            onChange={(policy) => void session.setPolicy(policy)}
-          />
+          {/* No policy on the row means the backend predates policies, so
+              there is nothing to offer and no menu to open. */}
+          {session.policy.key ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    aria-label={t(($) => $.alignment.more_actions)}
+                  />
+                }
+              >
+                <MoreHorizontal className="size-4" aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <IssueDraftPolicyPicker
+                  policy={session.policy}
+                  switching={session.switchingPolicy}
+                  // A conversation that is mid-reply or already confirmed has no
+                  // next turn to change, so the picker is not offered one.
+                  disabled={styleDisabled}
+                  onChange={(policy) => void session.setPolicy(policy)}
+                />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
         <IssueDraftStageStrip
           stage={session.stage}
@@ -140,10 +183,10 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
         <ResizablePanelGroup
           orientation="horizontal"
           className="min-h-0 flex-1"
-          defaultLayout={defaultLayout}
+          defaultLayout={defaultLayout ?? FIRST_RUN_LAYOUT}
           onLayoutChanged={onLayoutChanged}
         >
-          <ResizablePanel id="conversation" minSize="30%">
+          <ResizablePanel id="conversation" defaultSize="70%" minSize="30%">
             <IssueDraftConversation
               draftId={draftId}
               messages={displayMessages}
@@ -165,7 +208,7 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
           <ResizableHandle />
           <ResizablePanel
             id="preview"
-            defaultSize={420}
+            defaultSize="30%"
             minSize={340}
             groupResizeBehavior="preserve-pixel-size"
           >

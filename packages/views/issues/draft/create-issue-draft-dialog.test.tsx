@@ -79,29 +79,13 @@ vi.mock("../../navigation", () => ({
   ),
 }));
 
-// The real picker seeds an empty selection by calling `onSelect` itself, which
-// is the only reason the submit button ever enables without a click. A mock
-// that only renders a div would leave the dialog permanently unsubmittable and
-// quietly test nothing.
-vi.mock("../../agents/components/runtime-picker", async () => {
-  const React = await import("react");
-  return {
-    RuntimePicker: ({
-      onSelect,
-      selectedRuntimeId,
-      disabled,
-    }: {
-      onSelect: (id: string) => void;
-      selectedRuntimeId: string;
-      disabled?: boolean;
-    }) => {
-      React.useEffect(() => {
-        if (selectedRuntimeId === "" && !disabled) onSelect("rt-1");
-      }, [disabled, onSelect, selectedRuntimeId]);
-      return <div data-testid="runtime-picker" data-selected={selectedRuntimeId} />;
-    },
-  };
-});
+// The dialog must not mount the real picker: the runtime is chosen for the
+// user, and a picker on this face is exactly what DENE-367 removed. The stub
+// still renders a marker so `queryByTestId` can prove its absence, and it
+// deliberately seeds nothing — the dialog owns that now.
+vi.mock("../../agents/components/runtime-picker", () => ({
+  RuntimePicker: () => <div data-testid="runtime-picker" />,
+}));
 
 // The unfinished-drafts entries have their own suite; here the dialog only has
 // to route them.
@@ -143,13 +127,14 @@ function renderDialog() {
   );
 }
 
+function submitButton() {
+  return screen.getByRole("button", { name: "Start aligning" });
+}
+
 async function typeRequest(text: string) {
   const box = screen.getByPlaceholderText("What do you want done?");
-  await waitFor(() => expect(screen.getByTestId("runtime-picker")).toBeTruthy());
   await userEvent.type(box, text);
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Start aligning" })).toBeEnabled(),
-  );
+  await waitFor(() => expect(submitButton()).toBeEnabled());
 }
 
 beforeEach(() => {
@@ -211,11 +196,61 @@ describe("CreateIssueDraftDialog", () => {
 
   it("refuses to start without a request", async () => {
     renderDialog();
-    await waitFor(() => expect(screen.getByTestId("runtime-picker")).toBeTruthy());
-    await waitFor(() =>
-      expect(screen.getByTestId("runtime-picker").dataset.selected).toBe("rt-1"),
+    const box = screen.getByPlaceholderText("What do you want done?");
+    // Typing a request first is what proves the auto-selected runtime is in
+    // place; clearing it again leaves the request as the only gate, which is
+    // the one this test is about.
+    await userEvent.type(box, "x");
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+    await userEvent.clear(box);
+    await waitFor(() => expect(submitButton()).toBeDisabled());
+    expect(mocks.createIssueDraftSession).not.toHaveBeenCalled();
+  });
+
+  /**
+   * DENE-367: the entry face asks for one thing — what to align on. The runtime
+   * is chosen for the user, and the picker moves to the alignment page's
+   * preview. What must not move is the choice itself.
+   */
+  it("starts on a request alone, with no runtime picker on the face", async () => {
+    renderDialog();
+    await userEvent.type(
+      screen.getByPlaceholderText("What do you want done?"),
+      "add dark mode",
     );
-    expect(screen.getByRole("button", { name: "Start aligning" })).toBeDisabled();
+
+    // Enabled by the request alone: the runtime was seeded without a click.
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+    expect(screen.queryByTestId("runtime-picker")).toBeNull();
+  });
+
+  it("asks for a runtime only when there is none to run on", async () => {
+    mocks.runtimes = [];
+    renderDialog();
+
+    expect(
+      await screen.findByText(
+        "No online runtime is available, so the alignment agent cannot run.",
+      ),
+    ).toBeTruthy();
+    // A link, not a button: it navigates to the machines list.
+    expect(screen.getByRole("link", { name: "Connect a runtime" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start aligning" })).toBeNull();
+    expect(screen.queryByTestId("runtime-picker")).toBeNull();
+  });
+
+  it("names the offline runtime instead of only disabling submit", async () => {
+    mocks.runtimes = [{ ...ONLINE_RUNTIME, status: "offline" }];
+    renderDialog();
+
+    expect(
+      await screen.findByText("Local is offline, so the alignment cannot start."),
+    ).toBeTruthy();
+    await userEvent.type(
+      screen.getByPlaceholderText("What do you want done?"),
+      "add dark mode",
+    );
+    expect(submitButton()).toBeDisabled();
     expect(mocks.createIssueDraftSession).not.toHaveBeenCalled();
   });
 
