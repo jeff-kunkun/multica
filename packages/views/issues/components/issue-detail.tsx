@@ -1819,7 +1819,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // One blocker tree for the whole sub-issue section: the summary card and the
   // row badges read the same nodes, so a root cause on a grandchild marks its
   // row without a per-row re-derivation.
-  const blockerData = useSubIssueBlockerData(issue, childIssues);
+  // Gated on having children: the sub-issue section — and with it the card and
+  // the row badges — only renders then, and an ungated call would expand a
+  // childless issue's own `close.waiting_on` on every issue page.
+  const blockerData = useSubIssueBlockerData(childIssues.length > 0 ? issue : null, childIssues);
   // Parent's children — used to render the "x/y" progress next to the
   // "Sub-issue of …" breadcrumb under the title.
   const { data: parentChildIssues = [] } = useQuery({
