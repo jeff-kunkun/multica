@@ -1474,7 +1474,7 @@
       "option_apply_workspace_settings": "Apply workspace settings",
       "option_apply_workspace_settings_hint": "Context, repositories and attribution settings travel in the bundle and land on this workspace.",
       "option_apply_issue_prefix": "Adopt the issue prefix",
-      "option_apply_issue_prefix_hint": "Changes the key of every future issue here. Only applied while this workspace has no issues yet.",
+      "option_apply_issue_prefix_hint": "Changes the key of every future issue here. Keeps the imported bodies' `DENE-123`-style references pointing at the right issues, so leave it on unless you want this workspace's own prefix. Only applied while this workspace has no issues yet.",
       "autopilots_paused": "Automations: {{imported}} imported, {{paused}} of them paused.",
       "autopilots_active": "Automations: {{imported}} imported, triggering as soon as the import finishes.",
       "autopilots_activate_hint": "Tick “Activate automations after import” and apply to start these straight away.",

@@ -102,12 +102,13 @@ const importReport = {
  * The card's own defaults: a cross-environment import reproduces the
  * environment, so automations arrive running, the workspace settings land and a
  * single unambiguous runtime is bound (DENE-363 / DENE-364); the issue prefix
- * stays put because adopting it changes every later issue key.
+ * comes along too, because it is what keeps the imported bodies' `DENE-123`
+ * references pointing at their own issues (DENE-404).
  */
 const DEFAULT_IMPORT_OPTIONS = {
   activateAutopilots: true,
   applyWorkspaceSettings: true,
-  applyIssuePrefix: false,
+  applyIssuePrefix: true,
   autoBindRuntimes: true,
 };
 
@@ -502,7 +503,7 @@ describe("WorkspaceMigrationCard", () => {
     ).toBeChecked();
     expect(
       screen.getByRole("checkbox", { name: "Adopt the issue prefix" }),
-    ).not.toBeChecked();
+    ).toBeChecked();
 
     await user.click(screen.getByRole("button", { name: "Import from zip" }));
     await waitFor(() =>
@@ -527,6 +528,9 @@ describe("WorkspaceMigrationCard", () => {
     });
     renderCard();
 
+    // Activation goes off, the issue prefix goes off too: it starts on
+    // (DENE-404), so turning it off is the deliberate act that has to reach the
+    // run instead of being swallowed by the CLI's bundle-based default.
     await user.click(
       screen.getByRole("checkbox", { name: "Activate automations after import" }),
     );
@@ -541,7 +545,7 @@ describe("WorkspaceMigrationCard", () => {
           options: {
             activateAutopilots: false,
             applyWorkspaceSettings: true,
-            applyIssuePrefix: true,
+            applyIssuePrefix: false,
             autoBindRuntimes: true,
           },
         }),

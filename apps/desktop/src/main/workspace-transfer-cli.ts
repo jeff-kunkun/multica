@@ -117,10 +117,19 @@ export function buildTransferCliArgs(
   // (DENE-363), so only a deliberate change is sent. A CLI predating the flags
   // therefore keeps working for a default import instead of failing on an
   // unknown flag it would have obeyed anyway.
+  //
+  // The issue prefix is the exception and is always sent, both ways: its CLI
+  // default follows the bundle's issues group (DENE-404), which the card cannot
+  // see, so silence would let an unchecked box adopt the source prefix anyway.
+  // Sending the explicit value is what makes the checkbox mean what it shows.
   if (req.options) {
     if (!req.options.activateAutopilots) args.push("--activate-autopilots=false");
     if (!req.options.applyWorkspaceSettings) args.push("--apply-workspace-settings=false");
-    if (req.options.applyIssuePrefix) args.push("--apply-issue-prefix");
+    args.push(
+      req.options.applyIssuePrefix
+        ? "--apply-issue-prefix"
+        : "--apply-issue-prefix=false",
+    );
     // The auto-bind rule is on by default on both sides, so only turning it
     // off is worth a flag (DENE-364).
     if (!req.options.autoBindRuntimes) args.push("--auto-bind-runtimes=false");
@@ -196,7 +205,10 @@ function parseTransferImportOptions(
   return {
     activateAutopilots: obj.activateAutopilots !== false,
     applyWorkspaceSettings: obj.applyWorkspaceSettings !== false,
-    applyIssuePrefix: obj.applyIssuePrefix === true,
+    // Adopting the source prefix is what keeps the imported `<PREFIX>-xxx`
+    // references pointing at their own issues, so it is the migration's default
+    // (DENE-404); only an explicit false turns it off.
+    applyIssuePrefix: obj.applyIssuePrefix !== false,
     // Auto-binding a single unambiguous candidate is the migration's default
     // (DENE-364); only an explicit false turns it off.
     autoBindRuntimes: obj.autoBindRuntimes !== false,

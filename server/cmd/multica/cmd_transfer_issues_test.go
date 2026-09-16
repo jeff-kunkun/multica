@@ -807,7 +807,11 @@ func writeTransferZipFiles(t *testing.T, path string, fill func(add func(name st
 type transferImportRecorder struct {
 	mu       sync.Mutex
 	requests []map[string]any
-	target   []map[string]any
+	// configs records the `/transfer/config` bodies. They carry the import
+	// switches, which are resolved from the bundle and the flags before any
+	// task shard is sent (DENE-404).
+	configs []map[string]any
+	target  []map[string]any
 	// counter is the target's `issue_counter`. It is deliberately settable
 	// independently of `target`: deleting the top tasks leaves the counter above
 	// MAX(number), and `--renumber` has to offset by the counter.
@@ -822,6 +826,20 @@ func (r *transferImportRecorder) post(body map[string]any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.requests = append(r.requests, body)
+}
+
+func (r *transferImportRecorder) postConfig(body map[string]any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.configs = append(r.configs, body)
+}
+
+func (r *transferImportRecorder) configBodies() []map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]map[string]any, len(r.configs))
+	copy(out, r.configs)
+	return out
 }
 
 func (r *transferImportRecorder) posted() []map[string]any {
@@ -912,6 +930,14 @@ func (r *transferImportRecorder) server(t *testing.T, targetPrefix string) *http
 			}
 			writeJSONTest(w, report)
 		case strings.HasSuffix(req.URL.Path, "/transfer/config"):
+			var body map[string]any
+			data, _ := io.ReadAll(req.Body)
+			if err := json.Unmarshal(data, &body); err != nil {
+				t.Errorf("decode transfer/config body: %v", err)
+				http.Error(w, "bad", http.StatusBadRequest)
+				return
+			}
+			r.postConfig(body)
 			writeJSONTest(w, map[string]any{"config_report": map[string]any{"stats": map[string]any{}}})
 		default:
 			writeJSONTest(w, []any{})
@@ -1041,6 +1067,89 @@ func TestTransferImportIssues_WholePackageRefsAndFinalizeLinkRows(t *testing.T) 
 	if childParent != "issue-a" {
 		t.Fatalf("finalize issue link rows do not carry the child's parent: %v", finIssues)
 	}
+}
+
+// DENE-404: the V3 default parameters have to reproduce the source identifiers
+// byte for byte. The numbers survive an empty-target import because the bundle
+// carries them; the prefix does not, because it is written by the config step.
+// With `--apply-issue-prefix` off by default, an empty target kept the numbers
+// and its own prefix, so `diff` of the two identifier lists was never empty and
+// every plain-text `<PREFIX>-xxx` reference in the imported bodies pointed at
+// none of the imported tasks — with no warning to say so.
+//
+// A bundle that carries the issues group therefore turns the switch on by
+// itself, and the empty-target guard in the import kernel is what keeps this
+// from touching a target that already holds tasks. An explicit flag still wins
+// in both directions.
+func TestTransferImportIssues_AdoptsIssuePrefixByDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	refs := map[string]any{
+		"issues": map[string]any{"issue-a": map[string]any{"number": 1, "identifier": "SRC-1"}},
+	}
+	issueShards := [][]map[string]any{
+		{{"source_id": "issue-a", "number": 1, "title": "root", "status": "todo", "priority": "none", "creator_type": "member", "creator_id": "user-1", "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z"}},
+	}
+
+	// importOptions runs one import against a recording target and returns the
+	// `options` object the config step received.
+	importOptions := func(t *testing.T, path string, flags map[string]string) map[string]any {
+		t.Helper()
+		rec := &transferImportRecorder{}
+		srv := rec.server(t, "TGT")
+		defer srv.Close()
+
+		cmd := newTransferImportTestCmd()
+		_ = cmd.Flags().Set("server-url", srv.URL)
+		_ = cmd.Flags().Set("workspace", "tgt")
+		_ = cmd.Flags().Set("in", path)
+		_ = cmd.Flags().Set("dry-run", "true")
+		for name, value := range flags {
+			if err := cmd.Flags().Set(name, value); err != nil {
+				t.Fatalf("set --%s: %v", name, err)
+			}
+		}
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetIn(strings.NewReader(""))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("import with flags %v: %v", flags, err)
+		}
+		bodies := rec.configBodies()
+		if len(bodies) != 1 {
+			t.Fatalf("posted %d /transfer/config requests, want 1", len(bodies))
+		}
+		options, ok := bodies[0]["options"].(map[string]any)
+		if !ok {
+			t.Fatalf("transfer/config carries no options object: %v", bodies[0])
+		}
+		return options
+	}
+
+	t.Run("a bundle carrying tasks adopts the source prefix", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "issues.zip")
+		writeTransferIssuesZip(t, path, refs, issueShards, [][]map[string]any{{}}, nil)
+		if got := importOptions(t, path, nil)["apply_issue_prefix"]; got != true {
+			t.Fatalf("apply_issue_prefix = %v, want true: the target must read back SRC-1, not TGT-1", got)
+		}
+	})
+
+	t.Run("an explicit false still opts out", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "issues.zip")
+		writeTransferIssuesZip(t, path, refs, issueShards, [][]map[string]any{{}}, nil)
+		if got := importOptions(t, path, map[string]string{"apply-issue-prefix": "false"})["apply_issue_prefix"]; got != false {
+			t.Fatalf("apply_issue_prefix = %v, want the explicit flag to win", got)
+		}
+	})
+
+	t.Run("a bundle without the issues group stays off", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config.zip")
+		writeTransferImportZip(t, path)
+		if got := importOptions(t, path, nil)["apply_issue_prefix"]; got != false {
+			t.Fatalf("apply_issue_prefix = %v, want false for a config-only bundle", got)
+		}
+	})
 }
 
 // --renumber offsets every number by the target's `issue_counter`, refuses to

@@ -1467,7 +1467,7 @@
       "option_apply_workspace_settings": "워크스페이스 설정 적용",
       "option_apply_workspace_settings_hint": "번들에 담긴 컨텍스트, 저장소, 기여 설정을 이 워크스페이스에 반영합니다.",
       "option_apply_issue_prefix": "이슈 접두사 적용",
-      "option_apply_issue_prefix_hint": "앞으로 만들어지는 모든 이슈의 키가 바뀝니다. 이 워크스페이스에 아직 이슈가 없을 때만 적용됩니다.",
+      "option_apply_issue_prefix_hint": "앞으로 만들어지는 모든 이슈의 키가 바뀝니다. 가져온 본문과 댓글의 `DENE-123` 같은 참조를 올바른 이슈에 맞추기 위해 필요하므로, 이 워크스페이스의 접두사를 그대로 쓰려는 경우가 아니면 켜 두세요. 이 워크스페이스에 아직 이슈가 없을 때만 적용됩니다.",
       "autopilots_paused": "자동화: {{imported}}개 가져옴, 그중 {{paused}}개는 일시 중지 상태입니다.",
       "autopilots_active": "자동화: {{imported}}개 가져옴, 가져오기가 끝나는 즉시 실행됩니다.",
       "autopilots_activate_hint": "“가져온 뒤 자동화 활성화”를 켜고 다시 적용하면 곧바로 실행됩니다.",

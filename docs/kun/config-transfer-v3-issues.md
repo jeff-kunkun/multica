@@ -30,7 +30,7 @@ kk zi 2026-09-16 真机反馈（DENE-365 描述引用的评论 `01a0ab16`）：
 | # | 问题 | 结论 |
 | --- | --- | --- |
 | 1 | 逐表口径 | `issue` / `comment` / `comment_reaction` / `issue_reaction` / `issue_to_label` / issue 与 comment 附件**导出**；`activity_log`、任务运行记录、`inbox_item`、`issue_subscriber` 源行、`issue_source_context`、PR 关联、`issue_draft`、`issue_dependency` **不导出**。`issue_counter` 不是表，是 `workspace.issue_counter` 列，不搬值只顶水位。详见第 1 节。 |
-| 2 | 编号策略 | **目标工作区必须为空**（`CountWorkspaceIssues == 0`），此时 `number` 原样保留、`issue_prefix` 由 V1 已有规则一并落地、正文里的 `DENE-xxx` 自动正确。目标非空时默认 **400 拒绝** `issues` 分组；只有显式 `--renumber` 才做整体偏移，代价（正文引用全错）写在报告里。详见第 2 节。 |
+| 2 | 编号策略 | **目标工作区必须为空**（`CountWorkspaceIssues == 0`），此时 `number` 原样保留、`issue_prefix` 由 V1 已有规则一并落地、正文里的 `DENE-xxx` 自动正确。包带 `issues` 分组时 `--apply-issue-prefix` **默认开启**（DENE-404）：关掉它，空目标下号保留、前缀不保留，标识符会整体改名。目标非空时默认 **400 拒绝** `issues` 分组；只有显式 `--renumber` 才做整体偏移，代价（正文引用全错）写在报告里。详见第 2 节。 |
 | 3 | mention 重写 | 只处理 `util.MentionRe` 认识的 `member` / `agent` / `squad` / `issue` 四类。映射得到就改写 id；**映射不到一律降级为纯文本**（丢链接、留标签文字），不保留死链。理由是代码级的：残留的无法解析的根评论 mention 会让整条线程的后续路由**静默失效**。详见第 3 节。 |
 | 4 | 父子与阶段 | `issue.parent_issue_id` 和 `comment.parent_id` 都有真实外键，必须**两遍写入**：第一遍全部以 `parent = NULL` 插入，第二遍回填父指针。回填解析不到时两张表口径不同：issue 置 `NULL`，**comment 上溯到最近的包内祖先**（11.7）。`stage` / `position` 随第一遍原样写入。详见第 4 节。 |
 | 5 | 多态指派 | `assignee_type` ∈ `member` / `agent` / `squad`，复用 V2 的 people map 与 V1 的 agent / squad 身份键。映射不到降级为**未指派**并记报告行；`creator_*` 同规则，但兜底为导入者而不是空（列 NOT NULL）。同一套映射还要跑在 `issue.properties` 里 `actor` / `multi_actor` 两类属性的值上（1.2.1）——那是最容易漏的一处引用。详见第 5 节。 |
@@ -156,6 +156,16 @@ DENE-365 描述里的表名与库里的实际结构有三处出入，按实际�
 - `issue_prefix` 由 V1 的 config 分组在同一次导入里写入（前置条件相同，都是「目标无任务」），所以目标端的 `DENE` 前缀与源端一致；
 - 因此正文、评论、mention 标签里的 `DENE-240` 文本引用**自动全部正确**，一个字都不用改写;
 - 导入收尾把水位顶上去：`UPDATE workspace SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number),0) FROM issue WHERE workspace_id = $1)) WHERE id = $1`。这条语句必须在 `issues` 分组的**最后一片**写完后跑，且必须幂等（重导同一个包再跑一次结果不变）。
+
+**`apply_issue_prefix` 在 V3 路径上默认开启**（DENE-404）。V1 把它的默认值定成 `false`，理由是「会改掉目标工作区此后所有新任务的编号，属破坏性操作」——这个理由**只对非空目标成立**，而非空目标根本进不了 `issues` 分组（本节第一句）。对空目标来说，关掉它等于把上面那条结论拆掉：`number` 保留、前缀不保留 = 标识符从 `DENE-1` 变成 `TGT-1`，正文里所有纯文本引用同时指空，而导入报告里一条 warning 都没有。
+
+因此：
+
+- CLI：`transfer import` 的 `--apply-issue-prefix` 默认值**跟着包走** —— 包带 `issues` 分组时默认 `true`，不带时维持 `false`；两种情况下显式写 `--apply-issue-prefix=false` / `true` 都以显式值为准。内核里「目标有任务就跳过并告警 `issue_prefix_skipped_target_has_issues`」的守卫不变，所以非空目标不会被误伤（`--renumber` 场景即走这条）。
+- Desktop 卡片：「采用 issue 前缀」默认勾上，并且**总是显式把该开关传给 CLI**（勾上发 `--apply-issue-prefix`，取消发 `--apply-issue-prefix=false`）。卡片看不到包里的分组，保持沉默会让一个未勾的框悄悄采用源前缀。
+- 回归断言：**空目标 + 包带 `issues` 分组的默认参数导入后，两端 identifier 列表逐字节相同**（CLI 侧的单测钉住解析出的 `options.apply_issue_prefix`；端到端的 `diff -u` + `shasum -a 256` 见 DENE-390 现场）。
+
+注意 `apply_issue_prefix` 仍然挂在 `apply_workspace_settings` 之下（`config_import_apply.go` 的 `importWorkspace` 先判 `applyWorkspaceSettings()`）：显式传 `--apply-workspace-settings=false` 时前缀不会落。默认值是 `true`，所以默认参数下不冲突；这是 V1 既有语义，本票不动。
 
 为什么把「目标必须为空」定成硬前置，而不是默默偏移：一个跑了半年的工作区里，`DENE-xxx` 这类标识符散落在**几千条正文与评论**里。偏移之后这些文本引用会指向目标工作区里**另一张真实存在的票**——不是死链，是**指错**。指错的引用读起来完全正常，没有任何视觉提示，人和智能体都会照着它去改错的东西。让用户先建一个空工作区，代价是一次操作；默认偏移的代价是一整个工作区的引用静默错位。
 

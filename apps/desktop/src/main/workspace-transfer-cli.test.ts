@@ -125,8 +125,36 @@ describe("buildTransferCliArgs", () => {
   });
 
   // The card's defaults are the CLI's own defaults, so sending them would only
-  // break a CLI that predates the flags (DENE-363).
-  it("sends no option flag for the default import switches", () => {
+  // break a CLI that predates the flags (DENE-363). The issue prefix is the one
+  // exception: its CLI default follows the bundle's task group (DENE-404), which
+  // the card cannot see, so an unchecked box has to say so out loud.
+  it("sends only the issue prefix for the default import switches", () => {
+    expect(
+      buildTransferCliArgs(PROFILE, {
+        action: "import",
+        workspace: "acme",
+        inPath: "/tmp/acme.zip",
+        options: {
+          activateAutopilots: true,
+          applyWorkspaceSettings: true,
+          applyIssuePrefix: true,
+          autoBindRuntimes: true,
+        },
+      }),
+    ).toEqual([
+      "--profile",
+      PROFILE,
+      "transfer",
+      "import",
+      "--workspace",
+      "acme",
+      "--in",
+      "/tmp/acme.zip",
+      "--apply-issue-prefix",
+    ]);
+  });
+
+  it("spells out an unchecked issue prefix instead of relying on the CLI default", () => {
     expect(
       buildTransferCliArgs(PROFILE, {
         action: "import",
@@ -148,6 +176,7 @@ describe("buildTransferCliArgs", () => {
       "acme",
       "--in",
       "/tmp/acme.zip",
+      "--apply-issue-prefix=false",
     ]);
   });
 
@@ -496,6 +525,10 @@ describe("parseTransferRunRequest", () => {
     });
   });
 
+  // A renderer older than the switch sends no `options` field at all, and it
+  // still has to get the migration's defaults — including the issue prefix,
+  // without which the imported `<PREFIX>-xxx` references point at nothing
+  // (DENE-404).
   it("carries the import option switches, defaulting the ones it omits", () => {
     expect(
       parseTransferRunRequest({
@@ -503,7 +536,7 @@ describe("parseTransferRunRequest", () => {
         workspace: "acme",
         inPath: "/tmp/acme.zip",
         dryRun: true,
-        options: { applyIssuePrefix: true },
+        options: { autoBindRuntimes: false },
       }),
     ).toEqual({
       action: "import",
@@ -514,7 +547,7 @@ describe("parseTransferRunRequest", () => {
         activateAutopilots: true,
         applyWorkspaceSettings: true,
         applyIssuePrefix: true,
-        autoBindRuntimes: true,
+        autoBindRuntimes: false,
       },
     });
   });
@@ -636,6 +669,7 @@ describe("runTransferCli", () => {
       "/tmp/acme.zip",
       "--dry-run",
       "--activate-autopilots=false",
+      "--apply-issue-prefix=false",
     ]);
     expect(result.ok).toBe(true);
     if (result.ok && result.action === "import") {

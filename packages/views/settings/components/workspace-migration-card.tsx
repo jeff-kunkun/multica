@@ -88,15 +88,20 @@ type TransferConflictPolicy = "skip" | "overwrite" | "rename" | "fail";
  * Config-import switches the V2 card used to drop, which is why imported
  * automations all landed paused (DENE-363). A cross-environment import is meant
  * to reproduce the same environment, so automations arrive running and the
- * workspace settings land; the issue prefix stays untouched because adopting it
- * changes the key of every future issue in the target. The runtime rule
- * (DENE-364) is on for the same reason: with a single unambiguous candidate
- * there is nothing left to guess.
+ * workspace settings land. The runtime rule (DENE-364) is on for the same
+ * reason: with a single unambiguous candidate there is nothing left to guess.
+ *
+ * The issue prefix belongs to that same "reproduce the environment" default
+ * (DENE-404). It only lands while the target has no tasks at all — which is
+ * exactly the precondition the task group has — and it is what keeps the
+ * imported bodies' plain-text `<PREFIX>-xxx` references pointing at their own
+ * issues instead of at nothing; leaving it off renamed the workspace and made
+ * every one of those references wrong with nothing on screen saying so.
  */
 const DEFAULT_IMPORT_OPTIONS: TransferImportOptions = {
   activateAutopilots: true,
   applyWorkspaceSettings: true,
-  applyIssuePrefix: false,
+  applyIssuePrefix: true,
   autoBindRuntimes: true,
 };
 

@@ -38,6 +38,19 @@ multica --profile desktop-api.multica.ai transfer export --workspace <官方云�
 
 `--renumber` 是这条前置的唯一替代：它给任务编号加一个偏移量，让它们能落进已有任务的工作区。**Desktop 卡片不提供这个选项**，只在 CLI 上，并且要敲 `yes` 确认；代价是正文与评论里写下的旧编号（`DENE-365` 这类纯文本引用）会全部指向错误的任务——这类文本引用两种场景下都不会被改写。
 
+### 导入后自检：两端标识符必须逐字节相同
+
+空目标 + 默认参数（**默认就带上了「采用 issue 前缀」**，见下节）导入后，两端 `identifier` 列表必须完全一致——这是「正文里的 `DENE-xxx` 引用一个字都不用改写」的唯一凭据。每个档各自指向自己的服务器，所以两边各跑一次：
+
+```bash
+multica --profile <源档>   issue list --output json | jq -r '.issues[].identifier' | sort > src-identifiers.txt
+multica --profile <目标档> issue list --output json | jq -r '.issues[].identifier' | sort > dst-identifiers.txt
+diff -u src-identifiers.txt dst-identifiers.txt && echo "(no differences)"
+shasum -a 256 src-identifiers.txt dst-identifiers.txt
+```
+
+出现 `-DENE-1 … +TGT-1` 这种逐行差异，只可能是两件事：`--apply-issue-prefix` 被显式关掉了（卡片上就是「采用 issue 前缀」被取消勾选），或目标工作区在导入前并不空、前缀被守卫跳过（报告里会有 `issue_prefix_skipped_target_has_issues`）。`issue list` 默认一页 50 条，任务多时按 `has_more` / `--offset` 翻完再比。
+
 ## 一次性准备
 
 登录档命令必须你自己在本机终端敲。Agent 代跑会被拒绝（`requireHumanLocalCommand`）。
@@ -99,10 +112,10 @@ multica transfer import --profile <目标档> --workspace <slug> --in ~/transfer
 | --- | --- | --- |
 | `--activate-autopilots` | `true` | 保留源端自动化的状态：源端是 `active` 的迁过去就是 `active`。**这个默认值意味着导入一结束这些自动化就会开始触发**，会真的派任务、消耗运行时额度。写 `--activate-autopilots=false` 则全部以 `paused` 导入，等你手动放行。 |
 | `--apply-workspace-settings` | `true` | 把包里的工作区设置（上下文、仓库、归因）写进目标工作区。写 `--apply-workspace-settings=false` 则不落，目标端保留原设置。 |
-| `--apply-issue-prefix` | `false` | 采用源端的 issue 前缀。会改掉目标工作区此后所有新任务的编号，属破坏性操作，所以默认不开。仅当目标工作区还没有任何任务时才生效；有任务时跳过，并在报告里记一条 `issue_prefix_skipped_target_has_issues`。 |
+| `--apply-issue-prefix` | 跟着包走（包带 `issues` 分组时 `true`，否则 `false`） | 采用源端的 issue 前缀。会改掉目标工作区此后所有新任务的前缀。**包带 `issues` 分组时默认开启**（DENE-404）：任务分组的硬前置是「目标工作区没有任何任务」，空目标下号是原样保留的，前缀不跟过来就等于把标识符从 `DENE-1` 改成 `TGT-1`，正文与评论里的 `DENE-xxx` 引用全部指空。显式写 `--apply-issue-prefix=false` 才会关掉。仅当目标工作区还没有任何任务时才生效；有任务时跳过，并在报告里记一条 `issue_prefix_skipped_target_has_issues`。 |
 | `--auto-bind-runtimes` | `true` | 唯一候选自动绑（DENE-364）：目标实例上有且只有一个运行时的 `provider` + `runtime_mode` + 自定义 profile 与源端一致时，直接给智能体写上这个运行时。有多个候选一律不动，留给人工点。写 `--auto-bind-runtimes=false` 则全部留给人工。**只在正式导入时写**，`--dry-run` 只出计划。 |
 
-Desktop 的「跨环境迁移」卡片上有同样四个勾选项，默认值与上表一致；预览报告会写明「自动化：导入 N 条，其中 M 条已暂停」，勾上激活再应用一次，它们会立刻开始触发。
+Desktop 的「跨环境迁移」卡片上有同样四个勾选项，默认值与上表一致（「采用 issue 前缀」默认勾上）；卡片看不到包里的分组，所以它**总是**把该开关显式传给 CLI，取消勾选发 `--apply-issue-prefix=false`。预览报告会写明「自动化：导入 N 条，其中 M 条已暂停」，勾上激活再应用一次，它们会立刻开始触发。
 
 导入报告是一段 JSON。导入后必须自己做这三件事：
 

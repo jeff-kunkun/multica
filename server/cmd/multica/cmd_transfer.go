@@ -89,12 +89,13 @@ func init() {
 // registerTransferImportOptionFlags declares the config-import switches
 // `transfer import` forwards to the target. The defaults mirror the Desktop
 // migration card: moving a workspace across environments is meant to reproduce
-// the same environment, so autopilots come across running, while the issue
-// prefix stays put because adopting it changes every later issue key.
+// the same environment, so autopilots come across running. The issue prefix is
+// the one switch whose default depends on the bundle — see
+// transferImportOptionsForBundle.
 func registerTransferImportOptionFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("activate-autopilots", true, "Keep the source autopilot status; imported automations start triggering immediately (--activate-autopilots=false imports them paused)")
 	cmd.Flags().Bool("apply-workspace-settings", true, "Apply the exported workspace settings (context, repos, attribution)")
-	cmd.Flags().Bool("apply-issue-prefix", false, "Also adopt the exported issue prefix (changes the key of every future issue in the target)")
+	cmd.Flags().Bool("apply-issue-prefix", false, "Adopt the exported issue prefix. On by default for a bundle that carries the issues group, whose target must be empty: that is what keeps every `<PREFIX>-xxx` reference in the imported bodies and comments pointing at its own issue. Pass --apply-issue-prefix=false to opt out; adopting it changes the key of every future issue in the target")
 	cmd.Flags().Bool("auto-bind-runtimes", true, "Bind each imported agent to the target runtime matching its source provider, mode and profile when exactly one exists (--auto-bind-runtimes=false leaves every agent for manual binding)")
 }
 
@@ -114,6 +115,29 @@ func transferImportOptions(cmd *cobra.Command) service.ConfigImportOptions {
 		ApplyIssuePrefix:       applyPrefix,
 		AutoBindRuntimes:       &autoBind,
 	}
+}
+
+// transferImportOptionsForBundle resolves the switches for a loaded bundle.
+//
+// The issue prefix follows the task group (DENE-404). "Adopting the prefix
+// changes every later issue key, so it stays off" only holds for a non-empty
+// target: the V3 contract makes an empty target a hard precondition for the
+// issues group, and an empty target is exactly where every `<PREFIX>-xxx`
+// reference in the imported bodies and comments keeps pointing at its own issue
+// only because the prefix lands with it. Leaving the switch off there keeps the
+// numbers but renames the workspace, so the two identifier lists differ and
+// nothing on screen says why. The empty-target guard in the import kernel still
+// protects a target that already holds tasks: it skips the write and reports
+// `issue_prefix_skipped_target_has_issues`.
+//
+// An explicit flag always wins, in both directions, so a user who wants the
+// numbers without the prefix can still say so.
+func transferImportOptionsForBundle(cmd *cobra.Command, hasIssues bool) service.ConfigImportOptions {
+	opts := transferImportOptions(cmd)
+	if f := cmd.Flags().Lookup("apply-issue-prefix"); hasIssues && f != nil && !f.Changed {
+		opts.ApplyIssuePrefix = true
+	}
+	return opts
 }
 
 type sourceClient struct {
@@ -443,7 +467,6 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	dry, _ := cmd.Flags().GetBool("dry-run")
 	onConflict, _ := cmd.Flags().GetString("on-conflict")
 	renumber, _ := cmd.Flags().GetBool("renumber")
-	importOptions := transferImportOptions(cmd)
 
 	client, err := newTransferAPIClient(cmd)
 	if err != nil {
@@ -461,6 +484,9 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	// Resolved after the bundle is in hand: whether this import creates tasks
+	// decides the issue-prefix default (DENE-404).
+	importOptions := transferImportOptionsForBundle(cmd, len(payload.IssueShards) > 0)
 
 	base := "/api/workspaces/" + url.PathEscape(wsID)
 	if payload.V1Only {
