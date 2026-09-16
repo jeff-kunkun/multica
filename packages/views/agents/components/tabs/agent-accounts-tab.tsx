@@ -67,6 +67,7 @@ import {
   runtimeHomeDir,
   writeAgySlotsConfig,
 } from "./agy-account-slots";
+import { AgentProviderPresetsSection } from "./agent-provider-presets-section";
 import {
   AccountActivePill,
   AccountStatusPill,
@@ -556,6 +557,12 @@ export function AgentAccountsTab({
           />
         </>
       ) : null}
+
+      {/* Sibling block, not a nested one: the account half answers "which CLI
+          config directory is in effect", this one answers "which endpoint and
+          key does that CLI call". It has its own data source and its own view
+          states, so it renders regardless of the account half's state. */}
+      <AgentProviderPresetsSection runtimeDevice={runtimeDevice} />
     </div>
   );
 }
