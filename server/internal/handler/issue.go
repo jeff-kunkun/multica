@@ -3757,6 +3757,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// fails best-effort.
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -4214,6 +4215,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// the parent/stage notification is evaluated once against the final state
 	// after the loop (MUL-4155) rather than per-child mid-batch.
 	var childDoneCompleted []db.Issue
+	var waitingOnCompleted []db.Issue
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -4448,13 +4450,16 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// done/cancelled status still enters the stage barrier below. A literal
 		// comparison here left childDoneCompleted empty and silently skipped
 		// notifyParentsOfBatchChildDone entirely. (MUL-6243)
-		if statusChanged && issue.ParentIssueID.Valid {
+		if statusChanged {
 			prevTerminal := isTerminalChildStatus(
 				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
 			nowTerminal := isTerminalChildStatus(
 				issuestatus.Effective(r.Context(), h.Queries, issue.WorkspaceID, issue.Status))
 			if !prevTerminal && nowTerminal {
-				childDoneCompleted = append(childDoneCompleted, issue)
+				waitingOnCompleted = append(waitingOnCompleted, issue)
+				if issue.ParentIssueID.Valid {
+					childDoneCompleted = append(childDoneCompleted, issue)
+				}
 			}
 		}
 
@@ -4466,6 +4471,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// of issue_ids order (MUL-4155). Best-effort; failure does not abort the
 	// batch. Single-issue UpdateIssue is unchanged and still notifies inline.
 	h.notifyParentsOfBatchChildDone(r.Context(), childDoneCompleted)
+	h.notifyWaitersOfIssuesDone(r.Context(), waitingOnCompleted)
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})

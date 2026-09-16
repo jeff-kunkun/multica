@@ -213,7 +213,17 @@ type DaemonRegisterRequest struct {
 	// AgyQuotaExhausted is the host-level overlay of Gemini directories whose
 	// individual quota is exhausted until reset_at (unix seconds).
 	AgyQuotaExhausted []AgyQuotaExhaustedEntry `json:"agy_quota_exhausted"`
-	Runtimes          []struct {
+	// AgentAccounts is the host's read-only multi-CLI account report. Nil
+	// (field absent) means the daemon predates the channel; a non-nil empty
+	// slice means it reports accounts and found none. The two are NOT
+	// collapsed, because the account surface renders "no accounts" and "too
+	// old to know" differently. json.Unmarshal preserves the difference: []
+	// yields an empty non-nil slice, an absent key leaves nil.
+	AgentAccounts []AgentAccountEntry `json:"agent_accounts"`
+	// AgentAccountsError is the probe failure the daemon wants surfaced. Only
+	// meaningful alongside a non-nil AgentAccounts, and never required.
+	AgentAccountsError string `json:"agent_accounts_error"`
+	Runtimes           []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -236,6 +246,37 @@ type AgyQuotaExhaustedEntry struct {
 	ResetAt int64  `json:"reset_at"`
 }
 
+// AgentAccountEntry mirrors daemon.AgentAccount — one read-only CLI account row
+// the daemon reported. Mirror field: internal/daemon/agent_accounts.go
+// AgentAccount, same JSON names.
+//
+// There is deliberately no credential field. The shape can carry a directory,
+// an account id, a binding lever name and a credential-EXISTENCE bool, and
+// nothing else, so a compromised or buggy daemon cannot smuggle a key value
+// through this channel and into stored runtime metadata.
+type AgentAccountEntry struct {
+	CLI      string `json:"cli"`
+	Account  string `json:"account"`
+	Home     string `json:"home"`
+	BaseURL  string `json:"base_url"`
+	KeyRef   string `json:"key_ref"`
+	Lever    string `json:"lever"`
+	SignedIn bool   `json:"signed_in"`
+	// QuotaResetAt is unix seconds; 0 means "not known to be exhausted".
+	QuotaResetAt int64 `json:"quota_reset_at"`
+}
+
+// Stored bounds for the agent_accounts channel, matching the daemon-side caps.
+// Metadata is re-serialized onto every runtime row of the workspace, so this
+// path must not be able to grow without limit.
+const (
+	maxAgentAccounts = 32
+	// maxAgentAccountsErrorLen bounds the stored probe error, which the UI
+	// prints as a single diagnostic line. The daemon composes it from paths and
+	// os errors, so a pathological path is the realistic way it grows.
+	maxAgentAccountsErrorLen = 1024
+)
+
 func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capabilities any) map[string]any {
 	meta := map[string]any{
 		"version":      version,
@@ -252,7 +293,75 @@ func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capa
 	if exhausted := absoluteAgyQuotaExhausted(req.AgyQuotaExhausted); len(exhausted) > 0 {
 		meta["agy_quota_exhausted"] = exhausted
 	}
+	// Presence, not length, decides whether the channel is recorded: an empty
+	// report is a real answer the account surface renders as its empty state,
+	// and dropping the key would make it indistinguishable from an old daemon.
+	if req.AgentAccounts != nil {
+		meta["agent_accounts"] = sanitizeAgentAccounts(req.AgentAccounts)
+	}
+	if probeErr := truncateMetadataString(strings.TrimSpace(req.AgentAccountsError), maxAgentAccountsErrorLen); probeErr != "" {
+		meta["agent_accounts_error"] = probeErr
+	}
 	return meta
+}
+
+func truncateMetadataString(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	// Cut on a rune boundary: the tail of a multi-byte path must not leave
+	// invalid UTF-8 in the stored JSON.
+	return strings.ToValidUTF8(value[:limit], "")
+}
+
+// sanitizeAgentAccounts keeps only the rows a consumer can render, reusing the
+// same host-path rule as the AGY keys so a stored `home` is always something
+// the UI can show. Rows without a usable CLI family or home are dropped rather
+// than repaired: inventing an identity would show an account the daemon never
+// reported.
+func sanitizeAgentAccounts(entries []AgentAccountEntry) []map[string]any {
+	limit := len(entries)
+	if limit > maxAgentAccounts {
+		limit = maxAgentAccounts
+	}
+	out := make([]map[string]any, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	now := time.Now().Unix()
+	for _, entry := range entries {
+		cli := strings.TrimSpace(entry.CLI)
+		home := absoluteHostHomeDir(entry.Home)
+		if cli == "" || home == "" {
+			continue
+		}
+		// Identity is the pair, not the directory alone: two CLIs can be
+		// pointed at the same directory by different levers.
+		key := cli + "\x00" + home
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		// A deadline in the past is "no longer exhausted", which the channel
+		// spells as 0. Keeping the stale value would render an exhausted badge
+		// that never clears until the next daemon restart.
+		resetAt := entry.QuotaResetAt
+		if resetAt <= now {
+			resetAt = 0
+		}
+		out = append(out, map[string]any{
+			"cli":            cli,
+			"account":        strings.TrimSpace(entry.Account),
+			"home":           home,
+			"base_url":       strings.TrimSpace(entry.BaseURL),
+			"key_ref":        strings.TrimSpace(entry.KeyRef),
+			"lever":          strings.TrimSpace(entry.Lever),
+			"signed_in":      entry.SignedIn,
+			"quota_reset_at": resetAt,
+		})
+		if len(out) >= maxAgentAccounts {
+			break
+		}
+	}
+	return out
 }
 
 func absoluteAgyQuotaExhausted(entries []AgyQuotaExhaustedEntry) []map[string]any {

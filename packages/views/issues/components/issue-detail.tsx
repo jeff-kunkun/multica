@@ -76,6 +76,8 @@ import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueCo
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
+import { SubIssueCloseStrip } from "./sub-issue-close-strip";
+import { SubIssueBlockerBadge, SubIssueBlockerSummary, blockerBadgeState, useSubIssueBlockerData } from "./sub-issue-blocker-summary";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { useNewRunIds } from "./use-run-comment-motion";
@@ -689,6 +691,7 @@ function SubIssueRow({
   childProgress,
   rowProps,
   customProperties,
+  blockerState,
 }: {
   child: Issue;
   /** The sub-issue's OWN children progress (it can itself be a parent). */
@@ -697,6 +700,7 @@ function SubIssueRow({
   rowProps: SubIssueRowProperties;
   /** Workspace custom properties the user opted into showing on rows. */
   customProperties: IssueProperty[];
+  blockerState?: { state: "ROOT" | "PROPAGATED" | "CLEAR"; rootCause?: string };
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -741,10 +745,11 @@ function SubIssueRow({
     <IssueActionsContextMenu issue={child}>
       <div
         className={cn(
-          "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
+          "flex flex-col gap-1 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
           selected && "bg-accent/30",
         )}
       >
+        <div className="flex items-center gap-2.5">
         {/* Priority ⇄ checkbox slot, mirroring the main list rows: the
             priority icon yields to the selection checkbox on hover/focus.
             Opacity (not display) swap keeps the checkbox keyboard-tabbable. */}
@@ -786,6 +791,7 @@ function SubIssueRow({
             />
           }
         />
+        <SubIssueBlockerBadge state={blockerState?.state ?? "CLEAR"} rootCause={blockerState?.rootCause} />
         <AppLink
           href={paths.issueDetail(child.id)}
           className="flex min-w-0 flex-1 items-center gap-2.5"
@@ -890,6 +896,8 @@ function SubIssueRow({
             }
           />
         )}
+        </div>
+        <SubIssueCloseStrip issue={child} />
       </div>
     </IssueActionsContextMenu>
   );
@@ -1808,6 +1816,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // this answer, so a defaulted or stale empty array must not count as "no
   // sub-issues" (MUL-5714).
   const childCountKnown = childIssuesLoaded && !childIssuesFetching;
+  // One blocker tree for the whole sub-issue section: the summary card and the
+  // row badges read the same nodes, so a root cause on a grandchild marks its
+  // row without a per-row re-derivation.
+  // Gated on having children: the sub-issue section — and with it the card and
+  // the row badges — only renders then, and an ungated call would expand a
+  // childless issue's own `close.waiting_on` on every issue page.
+  const blockerData = useSubIssueBlockerData(childIssues.length > 0 ? issue : null, childIssues);
   // Parent's children — used to render the "x/y" progress next to the
   // "Sub-issue of …" breadcrumb under the title.
   const { data: parentChildIssues = [] } = useQuery({
@@ -3179,6 +3194,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   </div>
                 </div>
 
+                <SubIssueBlockerSummary data={blockerData} />
+
                 {/* Inline batch toolbar — appears next to the rows when
                     selections exist, instead of as a far-away fixed bar. */}
                 <BatchActionToolbar issues={childIssues} placement="inline" />
@@ -3195,7 +3212,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             <div className="bg-muted/40 px-3 py-1 text-micro font-medium uppercase tracking-wider text-muted-foreground">
                               {groupStage == null
                                 ? t(($) => $.stage.none)
-                                : t(($) => $.stage.value, { n: groupStage })}
+                                : <>{t(($) => $.stage.value, { n: groupStage })} · {groupStage === Math.min(...groups.filter((g) => g.stage != null).map((g) => g.stage!)) ? t(($) => $.stage.blocking) : t(($) => $.stage.queued)}</>}
                             </div>
                           )}
                           {items.map((child) => (
@@ -3205,6 +3222,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                               childProgress={subIssueProgress?.get(child.id)}
                               rowProps={subIssueRowProps}
                               customProperties={subIssueCustomProps}
+                              blockerState={blockerBadgeState(blockerData.tree, child.id)}
                             />
                           ))}
                         </Fragment>
