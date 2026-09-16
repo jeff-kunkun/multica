@@ -705,35 +705,6 @@ func transferEstimateOneAttachment(m map[string]any) int64 {
 	return size
 }
 
-// TransferIssueNumberWatermark returns a workspace's highest issue number. It
-// is what `transfer import --renumber` offsets its numbers by.
-//
-// The contract (§2.3) names `workspace.issue_counter` as the offset, and this
-// is deliberately not that value: no read interface serves `issue_counter`.
-// `WorkspaceResponse` does not serialize it and the router registers no
-// counter route, so the only watermark a client can observe is the largest
-// `number` it can list. The two agree whenever the top issues still exist, and
-// where they differ the counter is larger — which makes MAX(number) a lower
-// bound. Renumbered numbers are still strictly above every number already in
-// the target, and the finalize bump raises `issue_counter` to the imported
-// maximum, so the offset can only collide with a number the target allocates
-// later if its counter already sat above MAX(number) (deleted top issues) and
-// the source bundle happens to contain that exact number. That surfaces as a
-// unique-constraint error on the later create, never as a silent overwrite.
-func TransferIssueNumberWatermark(ctx context.Context, src TransferSourceClient) (int32, error) {
-	issues, _, err := fetchAllTransferIssues(ctx, src)
-	if err != nil {
-		return 0, err
-	}
-	var max int32
-	for _, raw := range issues {
-		if n := int32(floatField(raw, "number")); n > max {
-			max = n
-		}
-	}
-	return max, nil
-}
-
 // shardTransferIssues groups the rows into issue shards. The rule (contract
 // §8.2) is that one issue's comments never straddle a shard, so each shard
 // pairs `issues-000N.jsonl` with the `comments-000N.jsonl` holding exactly

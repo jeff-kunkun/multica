@@ -806,6 +806,10 @@ type transferImportRecorder struct {
 	mu       sync.Mutex
 	requests []map[string]any
 	target   []map[string]any
+	// counter is the target's `issue_counter`. It is deliberately settable
+	// independently of `target`: deleting the top tasks leaves the counter above
+	// MAX(number), and `--renumber` has to offset by the counter.
+	counter int32
 }
 
 func (r *transferImportRecorder) post(body map[string]any) {
@@ -830,7 +834,10 @@ func (r *transferImportRecorder) server(t *testing.T, targetPrefix string) *http
 		case req.URL.Path == "/api/workspaces":
 			writeJSONTest(w, []map[string]any{{"id": "ws-1", "slug": "tgt", "name": "Tgt"}})
 		case req.URL.Path == "/api/workspaces/ws-1":
-			writeJSONTest(w, map[string]any{"id": "ws-1", "slug": "tgt", "name": "Tgt", "issue_prefix": targetPrefix})
+			writeJSONTest(w, map[string]any{
+				"id": "ws-1", "slug": "tgt", "name": "Tgt",
+				"issue_prefix": targetPrefix, "issue_counter": r.counter,
+			})
 		case req.URL.Path == "/api/issues":
 			writeJSONTest(w, map[string]any{"issues": r.target, "total": len(r.target)})
 		case strings.HasSuffix(req.URL.Path, "/transfer/issues"):
@@ -975,8 +982,14 @@ func TestTransferImportIssues_WholePackageRefsAndFinalizeLinkRows(t *testing.T) 
 	}
 }
 
-// --renumber offsets every number by the target watermark, refuses to run
-// without a literal `yes`, and lands the mapping table the prompt points at.
+// --renumber offsets every number by the target's `issue_counter`, refuses to
+// run without a literal `yes`, and lands the mapping table the prompt points
+// at.
+//
+// DENE-400: the offset is the counter, not MAX(number). The fixture answers
+// `GET /api/issues` with 5 and 9 (so MAX(number) = 9) while its workspace serves
+// `issue_counter = 12`: a regression to the listing watermark offsets by 9 and
+// lands 10/11, which the expectations below reject.
 func TestTransferImportIssues_RenumberNeedsYesAndWritesNumberMap(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "mat_test-token")
@@ -993,10 +1006,13 @@ func TestTransferImportIssues_RenumberNeedsYesAndWritesNumberMap(t *testing.T) {
 	}}
 	commentShards := [][]map[string]any{{}}
 
-	rec := &transferImportRecorder{target: []map[string]any{
-		{"id": "t-5", "number": 5, "title": "existing"},
-		{"id": "t-9", "number": 9, "title": "existing"},
-	}}
+	rec := &transferImportRecorder{
+		target: []map[string]any{
+			{"id": "t-5", "number": 5, "title": "existing"},
+			{"id": "t-9", "number": 9, "title": "existing"},
+		},
+		counter: 12,
+	}
 	srv := rec.server(t, "TGT")
 	defer srv.Close()
 
@@ -1036,13 +1052,20 @@ func TestTransferImportIssues_RenumberNeedsYesAndWritesNumberMap(t *testing.T) {
 	if len(posted) != 2 {
 		t.Fatalf("posted %d issue requests, want 1 shard + 1 finalize", len(posted))
 	}
+	// Every request goes through the target's empty-workspace gate, so every
+	// request has to carry the flag; the finalize pass included.
+	for i, body := range posted {
+		if body["renumber"] != true {
+			t.Fatalf("request %d did not declare renumber, so a non-empty target would 400 it: %v", i, body)
+		}
+	}
 	rows := transferIssuesRequestBody(t, posted[0], "issues")
 	numbers := map[string]float64{}
 	for _, row := range rows {
 		numbers[row["source_id"].(string)] = row["number"].(float64)
 	}
-	if numbers["issue-a"] != 10 || numbers["issue-b"] != 11 {
-		t.Fatalf("renumbered numbers=%v, want the target watermark 9 added to each (10, 11)", numbers)
+	if numbers["issue-a"] != 13 || numbers["issue-b"] != 14 {
+		t.Fatalf("renumbered numbers=%v, want the target's issue_counter 12 added to each (13, 14)", numbers)
 	}
 
 	mapPath := inPath + ".number-map.csv"
@@ -1054,11 +1077,11 @@ func TestTransferImportIssues_RenumberNeedsYesAndWritesNumberMap(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("number map rows=%v, want a header plus one row per imported issue", lines)
 	}
-	if !strings.Contains(lines[1], "SRC-1") || !strings.Contains(lines[1], "TGT-10") {
-		t.Fatalf("number map row=%q, want SRC-1 -> TGT-10", lines[1])
+	if !strings.Contains(lines[1], "SRC-1") || !strings.Contains(lines[1], "TGT-13") {
+		t.Fatalf("number map row=%q, want SRC-1 -> TGT-13", lines[1])
 	}
-	if !strings.Contains(lines[2], "SRC-2") || !strings.Contains(lines[2], "TGT-11") {
-		t.Fatalf("number map row=%q, want SRC-2 -> TGT-11", lines[2])
+	if !strings.Contains(lines[2], "SRC-2") || !strings.Contains(lines[2], "TGT-14") {
+		t.Fatalf("number map row=%q, want SRC-2 -> TGT-14", lines[2])
 	}
 }
 

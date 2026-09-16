@@ -329,6 +329,13 @@ type TransferIssuesRequest struct {
 	Relations []TransferRelationRow `json:"relations"`
 	DryRun    *bool                 `json:"dry_run"`
 	Finalize  bool                  `json:"finalize"`
+	// Renumber declares that the caller already offset every `number` in this
+	// request above the target's issue watermark, which is the only way a
+	// non-empty target is accepted (contract §2.3). Omitting it keeps the
+	// empty-target gate at full strength: preserving the source numbers is what
+	// makes the `<prefix>-xxx` references inside bodies correct on the target
+	// (§2.2), so an unmarked non-empty import is always a mistake.
+	Renumber bool `json:"renumber"`
 }
 
 // TransferIssueLimitPolicy echoes what the entitlement provider told us about

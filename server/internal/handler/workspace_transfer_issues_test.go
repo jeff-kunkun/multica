@@ -345,6 +345,63 @@ func TestTransferIssues_RejectsNonEmptyTarget(t *testing.T) {
 	}
 }
 
+// DENE-400: the escape hatch §2.3 promises has to be reachable on the real
+// gate, not only against the CLI's fake server (which never implemented the
+// gate at all). `renumber` is the request declaring that the caller offset the
+// numbers, and it is the one thing that turns the §2.2 refusal into a write.
+//
+// Both requests carry the flag in the real flow — the shards and the finalize
+// pass — so the test drives them as two requests.
+func TestTransferIssues_RenumberAcceptsNonEmptyTarget(t *testing.T) {
+	_, dst := setupConfigWorkspaces(t)
+	// The pre-existing task is the whole point: its number is what the imported
+	// numbers must stay above, and the fake server never modelled this row.
+	dbfx.Issue(t, "pre-existing", testutil.Cols{"workspace_id": dst, "number": 7})
+
+	srcIssue := uuid.NewString()
+	refs := map[string]any{
+		"members": map[string]any{testUserID: transferMemberRef(handlerTestEmail)},
+		"issues":  map[string]any{srcIssue: map[string]any{"number": 15, "identifier": "HAN-15"}},
+	}
+	importedID := service.TransferIssueID(dst, srcIssue).String()
+
+	// Without the flag the non-empty target is still refused, and nothing lands.
+	shard := transferIssueBody(refs,
+		[]map[string]any{transferIssueRow(srcIssue, 15, "should not land", testUserID, nil)},
+		nil, nil, false)
+	resp := postTransferIssues(t, dst, shard).Want(http.StatusBadRequest)
+	if resp.Map()["code"] != "transfer_issues_target_not_empty" {
+		t.Fatalf("code=%v body=%s", resp.Map()["code"], resp.Text())
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE id = $1`, importedID); n != 0 {
+		t.Fatal("the refused shard still wrote a row")
+	}
+
+	// With it, the shard lands.
+	shard["renumber"] = true
+	postTransferIssues(t, dst, shard).Want(http.StatusOK)
+
+	// The finalize pass runs through the same gate, so it needs the flag too.
+	finalize := transferIssueBody(refs,
+		[]map[string]any{{"source_id": srcIssue, "parent_issue_id": nil}},
+		nil, nil, true)
+	finalize["renumber"] = true
+	postTransferIssues(t, dst, finalize).Want(http.StatusOK)
+
+	// The new number is strictly above every number the target already had —
+	// the invariant that keeps the workspace's own numbering allocatable.
+	existingMax := transferScanInt(t, `SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1 AND id <> $2`, dst, importedID)
+	importedNumber := transferScanInt(t, `SELECT number FROM issue WHERE id = $1`, importedID)
+	if importedNumber <= existingMax {
+		t.Fatalf("imported number=%d is not above the target's existing max %d", importedNumber, existingMax)
+	}
+	// And the watermark moved with it, so the next create cannot reuse a number
+	// this import just took.
+	if counter := transferScanInt(t, `SELECT issue_counter FROM workspace WHERE id = $1`, dst); counter < importedNumber {
+		t.Fatalf("issue_counter=%d stayed below the imported number %d", counter, importedNumber)
+	}
+}
+
 // Assertion 7 (§3.4): every mention link left in the imported text resolves on
 // the target workspace, and the one that cannot is plain text.
 func TestTransferIssues_MentionsAllResolvable(t *testing.T) {

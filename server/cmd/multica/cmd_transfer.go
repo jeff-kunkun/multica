@@ -483,7 +483,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	numberMapPath := ""
 	sourcePrefix := payload.Config.Source.IssuePrefix
 	if renumber && len(issueShards) > 0 {
-		offset, err := service.TransferIssueNumberWatermark(ctx, sourceClient{api: client})
+		offset, err := fetchTransferIssueCounter(ctx, client, wsID)
 		if err != nil {
 			return fmt.Errorf("read target issue watermark: %w", err)
 		}
@@ -523,7 +523,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	// must exist) and before attachments (attachment.comment_id references
 	// comment.id).
 	if len(payload.IssueShards) > 0 {
-		if err := uploadTransferIssueShards(ctx, client, base, payload, issueShards, dry); err != nil {
+		if err := uploadTransferIssueShards(ctx, client, base, payload, issueShards, dry, renumber); err != nil {
 			return err
 		}
 	}
@@ -571,7 +571,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 			}
 		}
 		if len(payload.IssueShards) > 0 {
-			if err := finalizeTransferIssues(ctx, client, base, payload); err != nil {
+			if err := finalizeTransferIssues(ctx, client, base, payload, renumber); err != nil {
 				return err
 			}
 		}
@@ -589,7 +589,11 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 // already wrote by looking their deterministic ids up in refs.issues, so a
 // shard that carried only its own ids would make shard 2 read shard 1's rows as
 // issues that were already there and answer 400.
-func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer, shards [][]service.TransferIssueRow, dry bool) error {
+//
+// `renumber` travels with every shard for the same reason the gate runs on
+// every shard: the flag is what lets a non-empty target accept the write at all
+// (contract §2.3), so a shard that dropped it would 400 halfway through.
+func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer, shards [][]service.TransferIssueRow, dry, renumber bool) error {
 	// Relations travel in the shard that holds the rows they point at, because
 	// both reaction tables carry a real foreign key to their comment/issue.
 	commentIssue := map[string]string{}
@@ -623,6 +627,7 @@ func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base 
 			Issues:    shards[i],
 			Relations: relationsByShard[i],
 			DryRun:    &dry,
+			Renumber:  renumber,
 		}
 		if i < len(payload.CommentShards) {
 			req.Comments = payload.CommentShards[i]
@@ -646,8 +651,9 @@ func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base 
 // parent_id) pairs. A finalize that sends an empty `comments` array leaves
 // every reply's parent NULL and silently flattens every thread while the report
 // still reads clean; sending link rows instead of whole comments is what keeps
-// a few thousand rows inside the request-body cap.
-func finalizeTransferIssues(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer) error {
+// a few thousand rows inside the request-body cap. `renumber` must ride along:
+// the empty-target gate runs on this request too.
+func finalizeTransferIssues(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer, renumber bool) error {
 	seenIssue := map[string]bool{}
 	var issues []service.TransferIssueRow
 	for _, shard := range payload.IssueShards {
@@ -680,6 +686,7 @@ func finalizeTransferIssues(ctx context.Context, client *cli.APIClient, base str
 		Comments: comments,
 		DryRun:   boolPtr(false),
 		Finalize: true,
+		Renumber: renumber,
 	}
 	if n := transferRequestBytes(req); n > service.TransferConversationsMaxBytes {
 		return fmt.Errorf("issues finalize payload is %d bytes, over the %d byte request cap; parent pointers cannot be trimmed without flattening threads",
@@ -1021,6 +1028,24 @@ func resolveTransferWorkspaceID(ctx context.Context, src sourceClient, ref strin
 		}
 	}
 	return "", fmt.Errorf("workspace %q not found", ref)
+}
+
+// fetchTransferIssueCounter reads the target's issue-number watermark, which is
+// the offset `--renumber` adds to every imported number (contract §2.3).
+//
+// The watermark is `workspace.issue_counter`, not `MAX(number)`: deleting the
+// top issues leaves the counter above the highest surviving row, and an offset
+// taken from MAX(number) would place the import inside the range the next
+// create is about to allocate — a unique-constraint failure on that later
+// create, long after this import reported success.
+func fetchTransferIssueCounter(ctx context.Context, client *cli.APIClient, wsID string) (int32, error) {
+	var ws struct {
+		IssueCounter int32 `json:"issue_counter"`
+	}
+	if err := (sourceClient{api: client}).GetJSON(ctx, "/api/workspaces/"+url.PathEscape(wsID), &ws); err != nil {
+		return 0, err
+	}
+	return ws.IssueCounter, nil
 }
 
 func postTransferAttachment(ctx context.Context, client *cli.APIClient, path string, meta service.TransferAttachmentRow, blob []byte) error {

@@ -693,11 +693,12 @@ func ImportTransferIssues(ctx context.Context, env TransferImportEnv, req Transf
 	if err != nil {
 		return nil, err
 	}
-	if foreign {
+	if foreign && !req.Renumber {
 		// Keeping the source numbers is what makes every DENE-xxx text
 		// reference inside bodies and comments correct on the target, so the
 		// import refuses a workspace that already has tasks instead of
 		// silently shifting them onto other, real issues (contract §2.2).
+		// `renumber` is the caller saying it did that shift on purpose (§2.3).
 		return nil, &ImportError{
 			Status: 400,
 			Code:   "transfer_issues_target_not_empty",
@@ -794,6 +795,10 @@ func checkTransferIssueLimit(ctx context.Context, env TransferImportEnv, req Tra
 // own numbering and prefix stay authoritative. A row this import wrote is
 // recognized by its deterministic id against the package-wide refs.issues
 // index that ships with every shard.
+//
+// The caller, not this function, decides what to do with the answer: a foreign
+// row is a 400 unless the request carries `renumber`, which is the caller
+// stating it offset every number above the target's watermark (§2.3).
 func targetWorkspaceHasForeignIssues(ctx context.Context, env TransferImportEnv, refs TransferRefs) (bool, error) {
 	ids, err := env.Queries.TransferListIssueIDs(ctx, env.TargetID)
 	if err != nil {
