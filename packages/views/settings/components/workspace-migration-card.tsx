@@ -967,7 +967,10 @@ function RuntimeBindingSection({
                         value: candidate.id,
                         label: candidate.name || candidate.id,
                       }))}
-                      value={picks[item.agent_target_id] ?? ""}
+                      // Same resolution the apply payload uses, so a row with
+                      // a single candidate shows the runtime it is about to be
+                      // bound to instead of an empty placeholder.
+                      value={selectionFor(item)}
                       onValueChange={(value) =>
                         setPicks((current) => ({
                           ...current,
