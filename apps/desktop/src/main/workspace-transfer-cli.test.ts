@@ -97,6 +97,64 @@ describe("buildTransferCliArgs", () => {
       }),
     ).toThrow(/unresolved profile/);
   });
+
+  // The card's defaults are the CLI's own defaults, so sending them would only
+  // break a CLI that predates the flags (DENE-363).
+  it("sends no option flag for the default import switches", () => {
+    expect(
+      buildTransferCliArgs(PROFILE, {
+        action: "import",
+        workspace: "acme",
+        inPath: "/tmp/acme.zip",
+        options: {
+          activateAutopilots: true,
+          applyWorkspaceSettings: true,
+          applyIssuePrefix: false,
+        },
+      }),
+    ).toEqual([
+      "--profile",
+      PROFILE,
+      "transfer",
+      "import",
+      "--workspace",
+      "acme",
+      "--in",
+      "/tmp/acme.zip",
+    ]);
+  });
+
+  it("sends only the option flags the user changed", () => {
+    expect(
+      buildTransferCliArgs(PROFILE, {
+        action: "import",
+        workspace: "acme",
+        inPath: "/tmp/acme.zip",
+        dryRun: true,
+        onConflict: "skip",
+        options: {
+          activateAutopilots: false,
+          applyWorkspaceSettings: false,
+          applyIssuePrefix: true,
+        },
+      }),
+    ).toEqual([
+      "--profile",
+      PROFILE,
+      "transfer",
+      "import",
+      "--workspace",
+      "acme",
+      "--in",
+      "/tmp/acme.zip",
+      "--dry-run",
+      "--on-conflict",
+      "skip",
+      "--activate-autopilots=false",
+      "--apply-workspace-settings=false",
+      "--apply-issue-prefix",
+    ]);
+  });
 });
 
 describe("classifyTransferError", () => {
@@ -210,6 +268,31 @@ describe("parseTransferImportReport", () => {
       },
     ]);
   });
+
+  // "The automations didn't migrate" was really "they all arrived paused"; the
+  // card can only explain that if the report says how many arrived (DENE-363).
+  it("counts the automations an import wrote, ignoring the skipped rows", () => {
+    const report = parseTransferImportReport(`{
+  "config_report": {
+    "stats": { "created": 3, "updated": 0, "renamed": 0, "skipped": 1, "failed": 0 },
+    "batches": [
+      { "entity_type": "agents", "batch_status": "committed", "items": [{ "action": "created" }] },
+      { "entity_type": "autopilots", "batch_status": "committed", "items": [
+        { "action": "created" },
+        { "action": "updated" },
+        { "action": "skipped" }
+      ] }
+    ],
+    "warnings": [{ "code": "autopilots_imported_paused", "count": 3 }]
+  }
+}`);
+    expect(report.autopilots).toEqual({ imported: 2 });
+  });
+
+  it("reports no automations when the bundle carried none", () => {
+    const report = parseTransferImportReport(`{"config_report":{"stats":{}}}`);
+    expect(report.autopilots).toEqual({ imported: 0 });
+  });
 });
 
 describe("parseTransferEstimate / progress", () => {
@@ -303,6 +386,45 @@ describe("parseTransferRunRequest", () => {
       outPath: "/tmp/acme.zip",
     });
   });
+
+  it("carries the import option switches, defaulting the ones it omits", () => {
+    expect(
+      parseTransferRunRequest({
+        action: "import",
+        workspace: "acme",
+        inPath: "/tmp/acme.zip",
+        dryRun: true,
+        options: { applyIssuePrefix: true },
+      }),
+    ).toEqual({
+      action: "import",
+      workspace: "acme",
+      inPath: "/tmp/acme.zip",
+      dryRun: true,
+      options: {
+        activateAutopilots: true,
+        applyWorkspaceSettings: true,
+        applyIssuePrefix: true,
+      },
+    });
+  });
+
+  it("ignores a malformed options payload instead of failing the import", () => {
+    expect(
+      parseTransferRunRequest({
+        action: "import",
+        workspace: "acme",
+        inPath: "/tmp/acme.zip",
+        dryRun: false,
+        options: "activate",
+      }),
+    ).toEqual({
+      action: "import",
+      workspace: "acme",
+      inPath: "/tmp/acme.zip",
+      dryRun: false,
+    });
+  });
 });
 
 describe("runTransferCli", () => {
@@ -383,6 +505,11 @@ describe("runTransferCli", () => {
         workspace: "acme",
         inPath: "/tmp/acme.zip",
         dryRun: true,
+        options: {
+          activateAutopilots: false,
+          applyWorkspaceSettings: true,
+          applyIssuePrefix: false,
+        },
       },
       deps,
     );
@@ -397,6 +524,7 @@ describe("runTransferCli", () => {
       "--in",
       "/tmp/acme.zip",
       "--dry-run",
+      "--activate-autopilots=false",
     ]);
     expect(result.ok).toBe(true);
     if (result.ok && result.action === "import") {

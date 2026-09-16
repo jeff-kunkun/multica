@@ -97,11 +97,28 @@ export type TransferImportStats = {
   failed: number;
 };
 
+/**
+ * What the import does with the switches the V1 transfer path never forwarded
+ * (DENE-363). Absent options keep the server's own defaults.
+ */
+export type TransferImportOptions = {
+  activateAutopilots: boolean;
+  applyWorkspaceSettings: boolean;
+  applyIssuePrefix: boolean;
+};
+
+/** How many automations the import wrote (created, updated or renamed). */
+export type TransferAutopilotSummary = {
+  imported: number;
+};
+
 export type TransferImportReportView = {
   secrets_to_fill: TransferSecretToFill[];
   runtimes_to_bind: TransferRuntimeBind[];
   export_gaps: TransferExportGap[];
   stats: TransferImportStats;
+  /** Absent on reports from a Desktop build older than the option switches. */
+  autopilots?: TransferAutopilotSummary;
 };
 
 export type TransferRunRequest =
@@ -113,6 +130,7 @@ export type TransferRunRequest =
       dryRun: boolean;
       onConflict?: string;
       autoBindRuntimes?: boolean;
+      options?: TransferImportOptions;
     };
 
 export type TransferRunResult =

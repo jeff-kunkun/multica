@@ -546,7 +546,179 @@ func newTransferImportTestCmd() *cobra.Command {
 	cmd.Flags().String("in", "", "")
 	cmd.Flags().Bool("dry-run", false, "")
 	cmd.Flags().String("on-conflict", "fail", "")
+	// Registered through the production helpers so this test command cannot
+	// drift from the flags `transfer import` really declares.
+	registerTransferImportRuntimeFlags(cmd)
+	registerTransferImportOptionFlags(cmd)
 	return cmd
+}
+
+// writeTransferImportZip writes the smallest V2 bundle the loader accepts: a
+// manifest and a config bundle, no conversation shards and no attachments.
+func writeTransferImportZip(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create zip: %v", err)
+	}
+	zw := zip.NewWriter(f)
+	for name, body := range map[string]string{
+		"manifest.json": `{"format":"multica.workspace-transfer","schema_version":1,"bundle_id":"b-1"}`,
+		"config.json":   `{"format":"multica.workspace-config","schema_version":1,"bundle_id":"c-1","entities":{}}`,
+	} {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip entry %s: %v", name, err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatalf("zip write %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close file: %v", err)
+	}
+}
+
+// DENE-363: the switches that decide whether migrated automations keep running
+// had no CLI flag at all, so every `transfer import` landed automations paused.
+// They must reach the target inside the request body's `options`.
+func TestTransferImport_SendsImportOptionFlags(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+	var posted []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/workspaces":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "ws-1", "slug": "src", "name": "Src"}})
+		case strings.HasSuffix(r.URL.Path, "/transfer/config"):
+			data, _ := io.ReadAll(r.Body)
+			var body map[string]any
+			if err := json.Unmarshal(data, &body); err != nil {
+				t.Errorf("decode transfer/config body: %v", err)
+			}
+			posted = append(posted, body)
+			_, _ = io.WriteString(w, `{"config_report":{"stats":{}}}`)
+		default:
+			_ = json.NewEncoder(w).Encode([]any{})
+		}
+	}))
+	defer srv.Close()
+
+	inPath := filepath.Join(t.TempDir(), "bundle.zip")
+	writeTransferImportZip(t, inPath)
+
+	runImport := func(flags map[string]string) {
+		t.Helper()
+		cmd := newTransferImportTestCmd()
+		_ = cmd.Flags().Set("server-url", srv.URL)
+		_ = cmd.Flags().Set("workspace", "src")
+		_ = cmd.Flags().Set("in", inPath)
+		_ = cmd.Flags().Set("dry-run", "true")
+		for name, value := range flags {
+			if err := cmd.Flags().Set(name, value); err != nil {
+				t.Fatalf("set --%s: %v", name, err)
+			}
+		}
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("import with flags %v: %v", flags, err)
+		}
+	}
+
+	runImport(nil)
+	runImport(map[string]string{"activate-autopilots": "false", "apply-issue-prefix": "true"})
+
+	if len(posted) != 2 {
+		t.Fatalf("posted %d transfer/config requests, want 2", len(posted))
+	}
+	want := []map[string]any{
+		// A cross-environment move reproduces the environment: automations come
+		// across running and the workspace settings land, the prefix does not.
+		{"activate_autopilots": true, "apply_workspace_settings": true, "apply_issue_prefix": false},
+		{"activate_autopilots": false, "apply_workspace_settings": true, "apply_issue_prefix": true},
+	}
+	for i, expected := range want {
+		options, ok := posted[i]["options"].(map[string]any)
+		if !ok {
+			t.Fatalf("request %d carries no options object: %v", i+1, posted[i])
+		}
+		for key, value := range expected {
+			if options[key] != value {
+				t.Fatalf("request %d options[%s] = %v, want %v (options = %v)", i+1, key, options[key], value, options)
+			}
+		}
+	}
+}
+
+// DENE-364: the automatic runtime bind is on by default, and the only way to
+// turn it off is this flag, so it must reach the target as a request field
+// rather than staying a local CLI preference.
+func TestTransferImport_SendsAutoBindRuntimesFlag(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+	var posted []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/workspaces":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "ws-1", "slug": "src", "name": "Src"}})
+		case strings.HasSuffix(r.URL.Path, "/transfer/config"):
+			data, _ := io.ReadAll(r.Body)
+			var body map[string]any
+			if err := json.Unmarshal(data, &body); err != nil {
+				t.Errorf("decode transfer/config body: %v", err)
+			}
+			posted = append(posted, body)
+			_, _ = io.WriteString(w, `{"config_report":{"stats":{}}}`)
+		default:
+			_ = json.NewEncoder(w).Encode([]any{})
+		}
+	}))
+	defer srv.Close()
+
+	inPath := filepath.Join(t.TempDir(), "bundle.zip")
+	writeTransferImportZip(t, inPath)
+
+	runImport := func(flags map[string]string) {
+		t.Helper()
+		cmd := newTransferImportTestCmd()
+		_ = cmd.Flags().Set("server-url", srv.URL)
+		_ = cmd.Flags().Set("workspace", "src")
+		_ = cmd.Flags().Set("in", inPath)
+		_ = cmd.Flags().Set("dry-run", "true")
+		for name, value := range flags {
+			if err := cmd.Flags().Set(name, value); err != nil {
+				t.Fatalf("set --%s: %v", name, err)
+			}
+		}
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("import with flags %v: %v", flags, err)
+		}
+	}
+
+	runImport(nil)
+	runImport(map[string]string{"auto-bind-runtimes": "false"})
+
+	if len(posted) != 2 {
+		t.Fatalf("posted %d transfer/config requests, want 2", len(posted))
+	}
+	if posted[0]["auto_bind_runtimes"] != true {
+		t.Fatalf("default request auto_bind_runtimes = %v, want true", posted[0]["auto_bind_runtimes"])
+	}
+	if posted[1]["auto_bind_runtimes"] != false {
+		t.Fatalf("--auto-bind-runtimes=false request = %v, want false", posted[1]["auto_bind_runtimes"])
+	}
 }
 
 // A dry-run conflict 409 is only useful if the user can read it. The response

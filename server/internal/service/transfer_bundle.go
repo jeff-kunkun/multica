@@ -165,6 +165,11 @@ type TransferConfigRequest struct {
 	SecretsOmitted  []SecretOmitted      `json:"secrets_omitted"`
 	DryRun          *bool                `json:"dry_run"`
 	OnConflict      string               `json:"on_conflict"`
+	// Options are the config-import switches the transfer path used to drop on
+	// the floor, which is why every imported autopilot landed paused (DENE-363).
+	// An absent options object keeps the zero value and therefore the behavior
+	// older clients already observe.
+	Options ConfigImportOptions `json:"options"`
 	// AutoBindRuntimes turns the unique-candidate rule into a write. Omitted
 	// (nil) means on: kk zi's 2026-09-16 call is that a migrated agent must be
 	// runnable right after import on the same machine layout, and the

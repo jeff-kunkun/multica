@@ -108,6 +108,19 @@ const importReport = {
   ],
   export_gaps: [{ group: "plugins", reason: "read_api_missing", status: 404 }],
   stats: { created: 3, updated: 1, renamed: 0, skipped: 0, failed: 0 },
+  autopilots: { imported: 2 },
+};
+
+/**
+ * The card's own defaults: a cross-environment import reproduces the
+ * environment, so automations arrive running and workspace settings land; the
+ * issue prefix stays put because adopting it changes every later issue key
+ * (DENE-363).
+ */
+const DEFAULT_IMPORT_OPTIONS = {
+  activateAutopilots: true,
+  applyWorkspaceSettings: true,
+  applyIssuePrefix: false,
 };
 
 function renderCard() {
@@ -225,6 +238,7 @@ describe("WorkspaceMigrationCard", () => {
       dryRun: true,
       onConflict: "skip",
       autoBindRuntimes: true,
+      options: DEFAULT_IMPORT_OPTIONS,
     });
 
     await user.click(
@@ -243,6 +257,7 @@ describe("WorkspaceMigrationCard", () => {
         dryRun: false,
         onConflict: "skip",
         autoBindRuntimes: true,
+        options: DEFAULT_IMPORT_OPTIONS,
       }),
     );
   });
@@ -278,6 +293,7 @@ describe("WorkspaceMigrationCard", () => {
         dryRun: true,
         onConflict: "skip",
         autoBindRuntimes: true,
+        options: DEFAULT_IMPORT_OPTIONS,
       }),
     );
 
@@ -311,6 +327,7 @@ describe("WorkspaceMigrationCard", () => {
         dryRun: true,
         onConflict: "overwrite",
         autoBindRuntimes: true,
+        options: DEFAULT_IMPORT_OPTIONS,
       }),
     );
 
@@ -329,8 +346,176 @@ describe("WorkspaceMigrationCard", () => {
         dryRun: false,
         onConflict: "overwrite",
         autoBindRuntimes: true,
+        options: DEFAULT_IMPORT_OPTIONS,
       }),
     );
+  });
+
+  // The V2 card used to drop the import switches the V1 path had, so every
+  // migrated automation landed paused and the migration looked like it never
+  // copied them (DENE-363).
+  it("starts from the migration defaults and sends them with the run", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "import",
+      dryRun: true,
+      report: importReport,
+    });
+    renderCard();
+
+    expect(
+      screen.getByRole("checkbox", { name: "Activate automations after import" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Apply workspace settings" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Adopt the issue prefix" }),
+    ).not.toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+    await waitFor(() =>
+      expect(desktop.run).toHaveBeenLastCalledWith(
+        expect.objectContaining({ options: DEFAULT_IMPORT_OPTIONS }),
+      ),
+    );
+  });
+
+  it("sends the switches the user changed", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "import",
+      dryRun: true,
+      report: importReport,
+    });
+    renderCard();
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Activate automations after import" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "Adopt the issue prefix" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+
+    await waitFor(() =>
+      expect(desktop.run).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          options: {
+            activateAutopilots: false,
+            applyWorkspaceSettings: true,
+            applyIssuePrefix: true,
+          },
+        }),
+      ),
+    );
+  });
+
+  // "Automations: 2 imported, 2 of them paused." is the readable form of a
+  // report a user otherwise reads as "the automations never came across",
+  // followed by the one click that starts them (DENE-363).
+  it("turns the paused automations into a readable line and a way out", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "import",
+      dryRun: true,
+      report: importReport,
+    });
+    renderCard();
+
+    // Turning activation off is what makes a run write them paused, so the
+    // report has to say how many that is.
+    await user.click(
+      screen.getByRole("checkbox", { name: "Activate automations after import" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+
+    const line = await screen.findByTestId("workspace-migration-autopilots");
+    expect(line).toHaveTextContent("Automations: 2 imported, 2 of them paused.");
+    expect(line).toHaveTextContent("start these straight away");
+
+    // Turning activation back on is the way out, and the line follows it.
+    await user.click(
+      screen.getByRole("checkbox", { name: "Activate automations after import" }),
+    );
+    expect(
+      screen.getByTestId("workspace-migration-autopilots"),
+    ).toHaveTextContent(
+      "Automations: 2 imported, triggering as soon as the import finishes.",
+    );
+    expect(
+      screen.getByTestId("workspace-migration-autopilots"),
+    ).not.toHaveTextContent("2 of them paused");
+  });
+
+  it("says automations are running when activation is on", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "import",
+      dryRun: true,
+      report: importReport,
+    });
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+
+    const line = await screen.findByTestId("workspace-migration-autopilots");
+    expect(line).toHaveTextContent(
+      "Automations: 2 imported, triggering as soon as the import finishes.",
+    );
+  });
+
+  // A Desktop build older than the switches returns a report without the
+  // summary; the card must not invent a count for it.
+  it("stays quiet when the report carries no automation summary", async () => {
+    const user = userEvent.setup();
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: true,
+      action: "import",
+      dryRun: true,
+      report: {
+        secrets_to_fill: [],
+        runtimes_to_bind: [],
+        export_gaps: [],
+        stats: { created: 0, updated: 0, renamed: 0, skipped: 0, failed: 0 },
+      },
+    });
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+    await screen.findByTestId("workspace-migration-report");
+    expect(
+      screen.queryByTestId("workspace-migration-autopilots"),
+    ).not.toBeInTheDocument();
   });
 
   // A second click while the first export is still running used to come back
@@ -652,6 +837,7 @@ describe("WorkspaceMigrationCard", () => {
         dryRun: true,
         onConflict: "skip",
         autoBindRuntimes: false,
+        options: DEFAULT_IMPORT_OPTIONS,
       }),
     );
   });

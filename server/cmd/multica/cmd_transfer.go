@@ -57,12 +57,44 @@ func init() {
 	transferImportCmd.Flags().String("in", "", "Input zip or V1 JSON path")
 	transferImportCmd.Flags().Bool("dry-run", false, "Preview without writing")
 	transferImportCmd.Flags().String("on-conflict", "fail", "Conflict policy for config entities: fail, overwrite, rename, skip")
-	transferImportCmd.Flags().Bool("auto-bind-runtimes", true, "Bind an imported agent when exactly one visible runtime matches its source provider/mode/profile (DENE-364)")
+	registerTransferImportRuntimeFlags(transferImportCmd)
+	registerTransferImportOptionFlags(transferImportCmd)
 	_ = transferImportCmd.MarkFlagRequired("workspace")
 	_ = transferImportCmd.MarkFlagRequired("in")
 
 	transferCmd.AddCommand(transferExportCmd)
 	transferCmd.AddCommand(transferImportCmd)
+}
+
+// registerTransferImportRuntimeFlags declares the runtime-bind switch. The
+// `transfer import` command and its tests register it through here so the two
+// cannot drift, the same way registerTransferImportOptionFlags works.
+func registerTransferImportRuntimeFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("auto-bind-runtimes", true, "Bind an imported agent when exactly one visible runtime matches its source provider/mode/profile (DENE-364)")
+}
+
+// registerTransferImportOptionFlags declares the config-import switches
+// `transfer import` forwards to the target. The defaults mirror the Desktop
+// migration card: moving a workspace across environments is meant to reproduce
+// the same environment, so autopilots come across running, while the issue
+// prefix stays put because adopting it changes every later issue key.
+func registerTransferImportOptionFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("activate-autopilots", true, "Keep the source autopilot status; imported automations start triggering immediately (--activate-autopilots=false imports them paused)")
+	cmd.Flags().Bool("apply-workspace-settings", true, "Apply the exported workspace settings (context, repos, attribution)")
+	cmd.Flags().Bool("apply-issue-prefix", false, "Also adopt the exported issue prefix (changes the key of every future issue in the target)")
+}
+
+// transferImportOptions reads the switches registered above. A command built
+// without them falls back to the same defaults.
+func transferImportOptions(cmd *cobra.Command) service.ConfigImportOptions {
+	activate, _ := cmd.Flags().GetBool("activate-autopilots")
+	applySettings, _ := cmd.Flags().GetBool("apply-workspace-settings")
+	applyPrefix, _ := cmd.Flags().GetBool("apply-issue-prefix")
+	return service.ConfigImportOptions{
+		ActivateAutopilots:     activate,
+		ApplyWorkspaceSettings: &applySettings,
+		ApplyIssuePrefix:       applyPrefix,
+	}
 }
 
 type sourceClient struct {
@@ -369,6 +401,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	dry, _ := cmd.Flags().GetBool("dry-run")
 	onConflict, _ := cmd.Flags().GetString("on-conflict")
 	autoBindRuntimes, _ := cmd.Flags().GetBool("auto-bind-runtimes")
+	importOptions := transferImportOptions(cmd)
 
 	client, err := newTransferAPIClient(cmd)
 	if err != nil {
@@ -390,9 +423,9 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	base := "/api/workspaces/" + url.PathEscape(wsID)
 	if payload.V1Only {
 		var report any
-		req := service.ConfigImportRequest{Bundle: payload.Config, DryRun: &dry, OnConflict: onConflict}
 		if err := client.PostJSON(ctx, base+"/transfer/config", service.TransferConfigRequest{
-			Config: req.Bundle, DryRun: &dry, OnConflict: onConflict, AutoBindRuntimes: &autoBindRuntimes,
+			Config: payload.Config, DryRun: &dry, OnConflict: onConflict, Options: importOptions,
+			AutoBindRuntimes: &autoBindRuntimes,
 		}, &report); err != nil {
 			if st := httpStatusOf(err); st == 404 {
 				return fmt.Errorf("target_unsupported: this server is not a kun instance with /transfer/* endpoints")
@@ -412,8 +445,9 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 		SecretsOmitted:  payload.Secrets,
 		DryRun:          &dry,
 		OnConflict:      onConflict,
-		// A V1 bundle carries no runtime hints, so this is inert there; the V2
-		// path is where the unique-candidate rule runs.
+		Options:         importOptions,
+		// A V1 bundle carries no runtime hints, so auto-bind is inert there;
+		// the V2 path is where the unique-candidate rule runs.
 		AutoBindRuntimes: &autoBindRuntimes,
 	}
 	if err := client.PostJSON(ctx, base+"/transfer/config", cfgReq, &cfgReport); err != nil {

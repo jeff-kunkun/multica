@@ -1480,7 +1480,16 @@
       "runtime_reason_agent_missing": "这个智能体没有导入到目标工作区。",
       "runtime_reason_runtime_private": "该运行时属于其他成员且为私有。",
       "runtime_reason_runtime_unknown": "该运行时已经不在这个工作区里了。",
-      "runtime_reason_bind_failed": "服务端拒绝了这个绑定。"
+      "runtime_reason_bind_failed": "服务端拒绝了这个绑定。",
+      "option_activate_autopilots": "导入后激活自动化",
+      "option_activate_autopilots_hint": "导入的自动化会立刻开始触发；不勾则先以暂停状态导入。",
+      "option_apply_workspace_settings": "应用工作区设置",
+      "option_apply_workspace_settings_hint": "包里的上下文、仓库与归因设置会写入当前工作区。",
+      "option_apply_issue_prefix": "采用 issue 前缀",
+      "option_apply_issue_prefix_hint": "会改掉此后所有新任务的编号前缀；仅当当前工作区还没有任务时生效。",
+      "autopilots_paused": "自动化：导入 {{imported}} 条，其中 {{paused}} 条已暂停。",
+      "autopilots_active": "自动化：导入 {{imported}} 条，导入后立刻开始触发。",
+      "autopilots_activate_hint": "勾上「导入后激活自动化」再应用一次，它们就会马上开始跑。"
     }
   }
 }

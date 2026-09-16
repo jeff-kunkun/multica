@@ -29,6 +29,8 @@ export {
   markTransferExportCompleted,
   type TransferErrorCode,
   type TransferProgressEvent,
+  type TransferImportOptions,
+  type TransferAutopilotSummary,
   type TransferImportReportView,
   type TransferRunRequest,
   type TransferRunResult,

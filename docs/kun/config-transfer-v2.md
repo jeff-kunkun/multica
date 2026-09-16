@@ -96,9 +96,19 @@ multica transfer import --profile <目标实例登录档> --workspace <slug> --i
 
 | 端点 | 作用 |
 | --- | --- |
-| `POST /api/workspaces/{id}/transfer/config` | 接收 `manifest` + `people` + `runtime_profiles` + `config`（V1 bundle），先做成员邮箱映射与 `runtime_profile` 预处理，再调用 V1 导入内核。支持 `dry_run`、`on_conflict`，响应 = V1 导入报告 + `people_map` + `runtimes_to_bind`。 |
+| `POST /api/workspaces/{id}/transfer/config` | 接收 `manifest` + `people` + `runtime_profiles` + `config`（V1 bundle），先做成员邮箱映射与 `runtime_profile` 预处理，再调用 V1 导入内核。支持 `dry_run`、`on_conflict`、`options`，响应 = V1 导入报告 + `people_map` + `runtimes_to_bind`。 |
 | `POST /api/workspaces/{id}/transfer/conversations` | 接收一个对话分片（会话 + 消息 + 本片引用索引），幂等写入。支持 `dry_run`。 |
 | `POST /api/workspaces/{id}/transfer/attachments` | `multipart/form-data`，一次一个附件：元数据 JSON + 文件体，幂等写入。 |
+
+`transfer/config` 请求体的 `options` 就是 V1 的 `ConfigImportRequest.options`，逐字段透传进导入内核（DENE-363）。整个 `options` 对象缺席时取零值，等于 DENE-363 之前的行为：自动化全部落 `paused`、工作区设置照落、issue 前缀不动，因此老客户端不受影响。
+
+| `options` 字段 | 对应 CLI flag | 默认 | 语义 |
+| --- | --- | --- | --- |
+| `activate_autopilots` | `--activate-autopilots` | CLI 与卡片默认 `true`；服务端缺席即 `false` | `true` 时按源状态导入，自动化导入后立即参与触发；`false` 时全部以 `paused` 写入，并在 `config_report.warnings` 里追一条 `autopilots_imported_paused`。 |
+| `apply_workspace_settings` | `--apply-workspace-settings` | `true`（服务端 `nil` 也视为 `true`） | `false` 时不写 `workspace` 批次，目标工作区设置原样保留。 |
+| `apply_issue_prefix` | `--apply-issue-prefix` | `false` | `true` 且工作区设置生效时，若目标工作区任务数为 0 则改用源端 issue 前缀，否则跳过并追一条 `issue_prefix_skipped_target_has_issues`。 |
+
+CLI 与 Desktop 迁移卡片用同一套默认值；卡片只在用户改动默认值时才把对应 flag 传给 CLI（`--activate-autopilots=false` / `--apply-workspace-settings=false` / `--apply-issue-prefix`），所以不带这些 flag 的旧 CLI 仍能跑默认导入。预览报告把 `autopilots` 批次折算成一行「自动化：导入 N 条，其中 M 条已暂停」。
 
 导入顺序固定：`transfer/config`（必须先 apply 成功）→ `transfer/conversations`（逐片）→ `transfer/attachments`（逐个）→ 最后一次 `transfer/conversations` 带 `finalize: true`，服务端只发一次工作区级聊天列表失效事件。
 
@@ -133,6 +143,10 @@ multica transfer import --profile <目标实例登录档> --workspace <slug> --i
 1. `comment.issue_id` 必填，评论依附于任务；任务、任务编号、状态流转、指派、活动日志都不在 V1 / V2 范围内。只迁评论不迁任务，评论无处挂载。
 2. 迁移任务是完整的数据迁移（编号冲突、`issue_counter`、多态指派、子任务、PR 关联、`activity_log`），规模和风险都是另一个量级，应单独立项（暂称 V3「任务迁移」），不塞进 V2。
 3. 用户说的「对话」在产品里对应右侧 Chat（与智能体的会话），与评论线程是两个入口。
+
+> **口径变更（kk zi 2026-09-16，DENE-365）：V3 已立项，任务与评论要迁。**
+> 本节的结论在 V2 的范围内**仍然成立**——V2 包不含任务与评论，V2 的导出与导入路径一行不改。变的是「V3 何时做」：kk zi 真机反馈「收件箱、我的任务、工作区与项目里的任务都没同步过去」后，V3 已单独立项，契约见 `docs/kun/config-transfer-v3-issues.md`。
+> 该契约与本节的衔接点：V3 把包的外层 `schema_version` 顶到 2 并新增 `issues/` 目录，`include` 分组 `issues` **默认不开**——不带它时 V3 导出器产出的仍是 `schema_version: 1` 的 V2 包。所以本页定义的包格式不失效，未升级的目标端也仍然能读日常导出的包。
 
 ### 3.4 附件文件体的范围
 
@@ -437,7 +451,9 @@ secrets_omitted.json                全包汇总（含 config.json 内的登记�
 | 不做 | 原因 / 何时再议 |
 | --- | --- |
 | 自建 → 官方云 | 官方云无导入端点，不可控；等上游接受 `/transfer/*` 再议 |
-| issue、评论、评论表情、活动日志、任务运行记录迁移 | 数据迁移而非配置 / 聊天迁移，单独立项（V3） |
+| issue、评论、评论表情、任务迁移 | 数据迁移而非配置 / 聊天迁移，单独立项。**V3 已立项并出契约**（kk zi 2026-09-16，DENE-365）：见 `docs/kun/config-transfer-v3-issues.md`。V2 本身的范围不变 |
+| 活动日志（`activity_log`）、任务运行记录迁移 | **V3 也不做**，是永久排除项而非延后项：`activity_log` 没有任何读接口，且 `details` 里嵌的是源实例运行态 id；任务运行记录同理。理由见 V3 契约第 1.2 / 1.6 节 |
+| 收件箱历史通知（`inbox_item`） | **V3 也不做**：全部由任务完成与 autopilot 配额产生，跨实例没有对应运行记录。V3 改为在导入时重建 `issue_subscriber`，让导入后的新活动能正常进收件箱。理由见 V3 契约第 6 节 |
 | 别人的聊天会话 | 读接口拿不到，且属于他人隐私 |
 | 源端删除 / 编辑消息同步到目标端 | 需要变更追踪；V2 只追加 |
 | 实时或定时双向同步 | 需要持久映射表与冲突合并 |

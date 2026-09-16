@@ -34,6 +34,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -54,6 +55,7 @@ import {
   transferExportSourceHost,
   type TransferBindReportView,
   type TransferErrorCode,
+  type TransferImportOptions,
   type TransferImportReportView,
   type TransferProgressEvent,
   type TransferRuntimeBind,
@@ -80,6 +82,19 @@ type ImportPhase =
  * of any real bundle 409 before the user can even read a preview (DENE-318).
  */
 type TransferConflictPolicy = "skip" | "overwrite" | "rename" | "fail";
+
+/**
+ * Config-import switches the V2 card used to drop, which is why imported
+ * automations all landed paused (DENE-363). A cross-environment import is meant
+ * to reproduce the same environment, so automations arrive running and the
+ * workspace settings land; the issue prefix stays untouched because adopting it
+ * changes the key of every future issue in the target.
+ */
+const DEFAULT_IMPORT_OPTIONS: TransferImportOptions = {
+  activateAutopilots: true,
+  applyWorkspaceSettings: true,
+  applyIssuePrefix: false,
+};
 
 /** The transfer in flight, as the card's buttons need to describe it. */
 type TransferAction = "export" | "import-preview" | "import-apply";
@@ -111,6 +126,9 @@ export function WorkspaceMigrationCard() {
   // of the feature, and the rule only ever fires on an unambiguous match
   // (DENE-364).
   const [autoBindRuntimes, setAutoBindRuntimes] = useState(true);
+  const [importOptions, setImportOptions] = useState<TransferImportOptions>(
+    DEFAULT_IMPORT_OPTIONS,
+  );
   const [progress, setProgress] = useState<TransferProgressEvent | null>(null);
   const [exportResult, setExportResult] = useState<{
     path: string;
@@ -234,6 +252,7 @@ export function WorkspaceMigrationCard() {
         dryRun: true,
         onConflict: conflict,
         autoBindRuntimes,
+        options: importOptions,
       });
       if (!result.ok) {
         if (result.code === "busy") return;
@@ -271,6 +290,7 @@ export function WorkspaceMigrationCard() {
         dryRun: false,
         onConflict,
         autoBindRuntimes,
+        options: importOptions,
       });
       if (!result.ok) {
         if (result.code === "busy") return;
@@ -445,6 +465,69 @@ export function WorkspaceMigrationCard() {
             </SelectContent>
           </Select>
         </SettingsRow>
+
+        <SettingsRow
+          label={t(($) => $.config_transfer.migration.option_activate_autopilots)}
+          description={t(
+            ($) => $.config_transfer.migration.option_activate_autopilots_hint,
+          )}
+        >
+          <Checkbox
+            aria-label={t(
+              ($) => $.config_transfer.migration.option_activate_autopilots,
+            )}
+            checked={importOptions.activateAutopilots}
+            disabled={!canManage || busy || !slug}
+            onCheckedChange={(checked) =>
+              setImportOptions((current) => ({
+                ...current,
+                activateAutopilots: checked === true,
+              }))
+            }
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          label={t(($) => $.config_transfer.migration.option_apply_workspace_settings)}
+          description={t(
+            ($) => $.config_transfer.migration.option_apply_workspace_settings_hint,
+          )}
+        >
+          <Checkbox
+            aria-label={t(
+              ($) => $.config_transfer.migration.option_apply_workspace_settings,
+            )}
+            checked={importOptions.applyWorkspaceSettings}
+            disabled={!canManage || busy || !slug}
+            onCheckedChange={(checked) =>
+              setImportOptions((current) => ({
+                ...current,
+                applyWorkspaceSettings: checked === true,
+              }))
+            }
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          label={t(($) => $.config_transfer.migration.option_apply_issue_prefix)}
+          description={t(
+            ($) => $.config_transfer.migration.option_apply_issue_prefix_hint,
+          )}
+        >
+          <Checkbox
+            aria-label={t(
+              ($) => $.config_transfer.migration.option_apply_issue_prefix,
+            )}
+            checked={importOptions.applyIssuePrefix}
+            disabled={!canManage || busy || !slug}
+            onCheckedChange={(checked) =>
+              setImportOptions((current) => ({
+                ...current,
+                applyIssuePrefix: checked === true,
+              }))
+            }
+          />
+        </SettingsRow>
         </SettingsCard>
       </div>
 
@@ -465,6 +548,7 @@ export function WorkspaceMigrationCard() {
           report={report}
           wsId={wsId}
           host={sourceHost}
+          activateAutopilots={importOptions.activateAutopilots}
           showConfirm={importPhase.step === "preview" && !busy}
           applying={busy && importPhase.step === "preview"}
           onConfirm={() => setConfirmOpen(true)}
@@ -543,6 +627,7 @@ function ImportReportView({
   report,
   wsId,
   host,
+  activateAutopilots,
   showConfirm,
   applying,
   onConfirm,
@@ -550,12 +635,21 @@ function ImportReportView({
   report: TransferImportReportView;
   wsId: string;
   host: string;
+  activateAutopilots: boolean;
   showConfirm: boolean;
   applying: boolean;
   onConfirm: () => void;
 }) {
   const { t } = useT("settings");
   const stats = report.stats;
+  // Reports from a Desktop build older than the option switches carry no
+  // summary; showing nothing beats showing a made-up zero.
+  const autopilots = report.autopilots;
+  // An import without activation writes every automation paused, so the switch
+  // the user is about to apply with — not the run that produced the preview —
+  // is what decides this count.
+  const pausedAutopilots =
+    autopilots && !activateAutopilots ? autopilots.imported : 0;
   return (
     <div className="space-y-4" data-testid="workspace-migration-report">
       <SettingsCard>
@@ -597,6 +691,29 @@ function ImportReportView({
         </div>
       </SettingsCard>
 
+      {autopilots && autopilots.imported > 0 ? (
+        <div
+          className="space-y-1 px-4"
+          data-testid="workspace-migration-autopilots"
+        >
+          <p className="text-body text-foreground">
+            {pausedAutopilots > 0
+              ? t(($) => $.config_transfer.migration.autopilots_paused, {
+                  imported: autopilots.imported,
+                  paused: pausedAutopilots,
+                })
+              : t(($) => $.config_transfer.migration.autopilots_active, {
+                  imported: autopilots.imported,
+                })}
+          </p>
+          {pausedAutopilots > 0 ? (
+            <p className="text-caption leading-5 text-muted-foreground">
+              {t(($) => $.config_transfer.migration.autopilots_activate_hint)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {report.secrets_to_fill.length > 0 ? (
         <ReportList
           title={t(($) => $.config_transfer.import.secrets_title)}
@@ -636,7 +753,6 @@ function ImportReportView({
     </div>
   );
 }
-
 
 /**
  * The runtime bindings an import produced, grouped by what the server decided:

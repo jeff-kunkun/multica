@@ -1480,7 +1480,16 @@
       "runtime_reason_agent_missing": "The agent was not created in this workspace.",
       "runtime_reason_runtime_private": "That runtime is private to another member.",
       "runtime_reason_runtime_unknown": "That runtime is no longer in this workspace.",
-      "runtime_reason_bind_failed": "The server refused the binding."
+      "runtime_reason_bind_failed": "The server refused the binding.",
+      "option_activate_autopilots": "가져온 뒤 자동화 활성화",
+      "option_activate_autopilots_hint": "가져온 자동화는 가져오기가 끝나는 즉시 실행을 시작합니다. 끄면 일시 중지 상태로 가져옵니다.",
+      "option_apply_workspace_settings": "워크스페이스 설정 적용",
+      "option_apply_workspace_settings_hint": "번들에 담긴 컨텍스트, 저장소, 기여 설정을 이 워크스페이스에 반영합니다.",
+      "option_apply_issue_prefix": "이슈 접두사 적용",
+      "option_apply_issue_prefix_hint": "앞으로 만들어지는 모든 이슈의 키가 바뀝니다. 이 워크스페이스에 아직 이슈가 없을 때만 적용됩니다.",
+      "autopilots_paused": "자동화: {{imported}}개 가져옴, 그중 {{paused}}개는 일시 중지 상태입니다.",
+      "autopilots_active": "자동화: {{imported}}개 가져옴, 가져오기가 끝나는 즉시 실행됩니다.",
+      "autopilots_activate_hint": "“가져온 뒤 자동화 활성화”를 켜고 다시 적용하면 곧바로 실행됩니다."
     }
   }
 }

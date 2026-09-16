@@ -1,8 +1,10 @@
 import { isAbsolute } from "path";
 import {
   EMPTY_TRANSFER_IMPORT_REPORT,
+  type TransferAutopilotSummary,
   type TransferErrorCode,
   type TransferExportGap,
+  type TransferImportOptions,
   type TransferImportReportView,
   type TransferImportStats,
   type TransferProgressEvent,
@@ -28,6 +30,7 @@ export type TransferCliImportRequest = {
   dryRun?: boolean;
   onConflict?: string;
   autoBindRuntimes?: boolean;
+  options?: TransferImportOptions;
 };
 
 export type TransferCliRequest = TransferCliExportRequest | TransferCliImportRequest;
@@ -81,6 +84,15 @@ export function buildTransferCliArgs(
   // Explicit false only: the CLI default is on, and an older CLI would reject
   // an unknown flag, so the enabled case must stay flag-free (DENE-364).
   if (req.autoBindRuntimes === false) args.push("--auto-bind-runtimes=false");
+  // The option flags default to the values the migration card starts on
+  // (DENE-363), so only a deliberate change is sent. A CLI predating the flags
+  // therefore keeps working for a default import instead of failing on an
+  // unknown flag it would have obeyed anyway.
+  if (req.options) {
+    if (!req.options.activateAutopilots) args.push("--activate-autopilots=false");
+    if (!req.options.applyWorkspaceSettings) args.push("--apply-workspace-settings=false");
+    if (req.options.applyIssuePrefix) args.push("--apply-issue-prefix");
+  }
   return args;
 }
 
@@ -98,6 +110,7 @@ export function parseTransferRunRequest(raw: unknown): TransferRunRequest | null
     const inPath = asNonEmptyString(obj.inPath);
     if (!workspace || !inPath || !isAbsolute(inPath)) return null;
     const onConflict = asNonEmptyString(obj.onConflict);
+    const options = parseTransferImportOptions(obj.options);
     return {
       action: "import",
       workspace,
@@ -105,9 +118,27 @@ export function parseTransferRunRequest(raw: unknown): TransferRunRequest | null
       dryRun: obj.dryRun === true,
       ...(onConflict ? { onConflict } : {}),
       ...(obj.autoBindRuntimes === false ? { autoBindRuntimes: false } : {}),
+      ...(options ? { options } : {}),
     };
   }
   return null;
+}
+
+/**
+ * Reads the option switches from the renderer. Absent or malformed input falls
+ * back to the product defaults, so a renderer older than the switches still
+ * gets the "migrated and usable" behavior instead of an all-off import.
+ */
+function parseTransferImportOptions(
+  value: unknown,
+): TransferImportOptions | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const obj = value as Record<string, unknown>;
+  return {
+    activateAutopilots: obj.activateAutopilots !== false,
+    applyWorkspaceSettings: obj.applyWorkspaceSettings !== false,
+    applyIssuePrefix: obj.applyIssuePrefix === true,
+  };
 }
 
 export function classifyTransferError(text: string): TransferErrorCode {
@@ -220,7 +251,33 @@ export function parseTransferImportReport(stdout: string): TransferImportReportV
       .map(parseExportGap)
       .filter(Boolean) as TransferExportGap[],
     stats: parseStats(statsSource),
+    autopilots: parseAutopilotSummary(configReport),
   };
+}
+
+/**
+ * Counts the automations a report says were imported. The card turns this into
+ * "Automations: N imported, M of them paused" — the paused half comes from the
+ * activation switch the apply will use, because a run without activation writes
+ * every one of these rows paused (DENE-363).
+ */
+function parseAutopilotSummary(
+  configReport: Record<string, unknown>,
+): TransferAutopilotSummary {
+  let imported = 0;
+  for (const rawBatch of firstArray(configReport.batches)) {
+    if (!rawBatch || typeof rawBatch !== "object" || Array.isArray(rawBatch)) continue;
+    const batch = rawBatch as Record<string, unknown>;
+    if (batch.entity_type !== "autopilots") continue;
+    for (const rawItem of firstArray(batch.items)) {
+      if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) continue;
+      const action = (rawItem as Record<string, unknown>).action;
+      if (action === "created" || action === "updated" || action === "renamed") {
+        imported += 1;
+      }
+    }
+  }
+  return { imported };
 }
 
 export function createLineParser(onLine: (line: string) => void): {
@@ -326,6 +383,7 @@ export async function runTransferCli(
     dryRun: req.dryRun,
     onConflict: req.onConflict,
     autoBindRuntimes: req.autoBindRuntimes,
+    options: req.options,
   });
   const result = await run(importArgs);
   feedProgress.flush();
