@@ -2731,7 +2731,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // carries it, so the entry costs no request and appears with the issue
   // itself. Detail-only — a list row does not select the columns — which is
   // exactly the surface this entry lives on. (DENE-371)
-  const alignmentDraftId = issueAlignmentOrigin(issue);
+  //
+  // Only for the person who held the alignment. An alignment is a private
+  // conversation and its list endpoint is creator-scoped, so for anyone else
+  // the entry would open a page that can only say the draft is gone. The issue
+  // is created by confirming the draft, so its creator IS that person.
+  const alignmentOriginId = issueAlignmentOrigin(issue);
+  const alignmentDraftId =
+    alignmentOriginId &&
+    issue?.creator_type === "member" &&
+    !!user?.id &&
+    issue.creator_id === user.id
+      ? alignmentOriginId
+      : null;
 
   // Breadcrumb shows the single most-direct container, never a fabricated chain.
   // project_id and parent_issue_id are orthogonal (a sub-issue can live in a

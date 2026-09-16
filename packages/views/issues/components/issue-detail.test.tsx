@@ -3069,6 +3069,25 @@ describe("IssueDetail (shared)", () => {
       screen.queryByRole("link", { name: /View the alignment that created this/ }),
     ).toBeNull();
   });
+
+  it("offers no alignment entry to someone who did not hold the alignment", async () => {
+    // The drafts endpoint is creator-scoped — an alignment is a private
+    // conversation — so for a teammate the entry could only open a page saying
+    // the draft is gone. The issue's creator is whoever confirmed the draft.
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      creator_type: "member",
+      creator_id: "user-2",
+      origin_type: "issue_draft",
+      origin_id: "sess-42",
+    });
+    renderIssueDetail();
+
+    await screen.findByText("Implement authentication");
+    expect(
+      screen.queryByRole("link", { name: /View the alignment that created this/ }),
+    ).toBeNull();
+  });
 });
 
 describe("groupSubIssuesByStage", () => {
