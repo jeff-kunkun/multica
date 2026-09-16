@@ -447,3 +447,62 @@ func TestGetProviderPresetRequest_HidesAnotherWorkspacesRequest(t *testing.T) {
 		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// TestInitiateProviderPresetAction_WritesAreOwnerOnly pins the gate that
+// separates reading this feature from writing it.
+//
+// A public runtime is readable by every workspace member, and `list` is a read:
+// env var names, key masks, model ids — the same inventory local skills and the
+// model list already expose. `upsert` is not. It writes into the owner's
+// .credentials.yaml and can repoint an existing apiKeyEnv at another baseURL,
+// which sends the owner's real key wherever the caller asked. So writes stay
+// with the owner, with no workspace-admin override, exactly as local-skill
+// import does.
+func TestInitiateProviderPresetAction_WritesAreOwnerOnly(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ownerID := dbfx.User(t, "preset-owner", "preset-owner@example.invalid")
+	dbfx.Member(t, testWorkspaceID, ownerID, "member")
+	runtimeID := dbfx.Runtime(t, "provider-preset-"+t.Name(), testutil.Cols{
+		"provider":   "dsh",
+		"visibility": "public",
+		"owner_id":   ownerID,
+	})
+
+	post := func(userID, action string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.InitiateProviderPresetAction(w, withURLParams(
+			newRequestAsUser(userID, http.MethodPost, "/api/runtimes/"+runtimeID+"/provider-presets", map[string]any{
+				"provider": "dsh",
+				"action":   action,
+				"payload":  json.RawMessage(providerPresetTestPayload(t, providerPresetTestKey)),
+			}),
+			"runtimeId", runtimeID,
+		))
+		return w
+	}
+
+	// testUserID is a workspace member but not the runtime's owner.
+	for _, action := range []string{
+		ProviderPresetActionUpsert,
+		ProviderPresetActionDelete,
+		ProviderPresetActionActivate,
+	} {
+		if w := post(testUserID, action); w.Code != http.StatusForbidden {
+			t.Fatalf("%s by a non-owner: expected 403, got %d: %s", action, w.Code, w.Body.String())
+		}
+	}
+
+	// Reading the same public runtime stays open to members.
+	if w := post(testUserID, ProviderPresetActionList); w.Code != http.StatusOK {
+		t.Fatalf("list by a member: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// The owner still writes.
+	if w := post(ownerID, ProviderPresetActionUpsert); w.Code != http.StatusOK {
+		t.Fatalf("upsert by the owner: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}

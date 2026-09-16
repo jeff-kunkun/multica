@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -128,6 +129,33 @@ const (
 // record.
 func providerPresetTerminal(status ProviderPresetStatus) bool {
 	return status == ProviderPresetCompleted || status == ProviderPresetFailed || status == ProviderPresetTimeout
+}
+
+// providerPresetActionWrites reports whether an action edits the host's own
+// agent configuration rather than only reading it.
+//
+// The read gate is the right one for `list`: it reports env var names, key
+// masks and model ids, which is the same capability discovery the local-skill
+// and model-list inventories expose to any member of a public runtime.
+//
+// The other three are not reads. `upsert` writes a key into the owner's
+// .credentials.yaml and can point an existing apiKeyEnv at a new baseURL —
+// which sends the owner's real key to whatever endpoint the caller named — and
+// `activate` decides which provider every agent run on that machine then uses.
+// This repository already draws that line: local-skill *import* stays
+// owner-only even for workspace owners and admins because it touches the
+// owner's files, and a private machine has no admin override at all
+// (canUseRuntimeForAgent, MUL-6126). Writing the owner's credentials is at
+// least that sensitive, so it gets the same rule.
+func providerPresetActionWrites(action string) bool {
+	return action != ProviderPresetActionList
+}
+
+// ownsRuntime reports whether member is the runtime's owner. Deliberately not
+// canEditRuntime: that one lets workspace owners and admins through, and an
+// administrative role is not consent to write someone else's credentials file.
+func ownsRuntime(member db.Member, rt db.AgentRuntime) bool {
+	return rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID)
 }
 
 func validProviderPresetAction(action string) bool {
@@ -340,7 +368,7 @@ func (s *InMemoryProviderPresetStore) Fail(_ context.Context, id string, errMsg 
 // needs it for. The refreshed list arrives through the poll.
 func (h *Handler) InitiateProviderPresetAction(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, _, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
 	if !ok {
 		return
 	}
@@ -366,6 +394,10 @@ func (h *Handler) InitiateProviderPresetAction(w http.ResponseWriter, r *http.Re
 	}
 	if !validProviderPresetAction(action) {
 		writeError(w, http.StatusBadRequest, "unsupported action")
+		return
+	}
+	if providerPresetActionWrites(action) && !ownsRuntime(member, rt) {
+		writeError(w, http.StatusForbidden, "only the runtime owner can change its provider presets")
 		return
 	}
 
