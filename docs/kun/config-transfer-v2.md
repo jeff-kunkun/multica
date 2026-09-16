@@ -87,6 +87,7 @@ multica transfer import --profile <目标实例登录档> --workspace <slug> --i
 ```
 
 - `--estimate` 只统计会话数、消息数与估算体积（第 7.1 节），不写包。
+- `--on-conflict` 默认 `fail`。目标工作区自带的 7 个系统状态（`backlog` / `todo` / …，创建时即 seed）与源端同名不算冲突，按「已存在即跳过」处理，所以空目标 + 默认参数不会误吃 409（DENE-408）；同名 label / agent / skill 这类用户数据在 `fail` 下照旧 409。
 - 包文件以 `0600` 权限写入；中间态放在 `<out>.partial/` 目录，完成后原子重命名。
 - 凭据只来自 CLI 已有的登录档，不接受命令行明文 token 参数。CLI 能否同时保存两个不同服务器的登录档，**未确认**；若不能，实现 Stage 先补「多登录档」再做本功能，不允许退化为明文 token 参数。
 
@@ -106,7 +107,7 @@ multica transfer import --profile <目标实例登录档> --workspace <slug> --i
 | --- | --- | --- | --- |
 | `activate_autopilots` | `--activate-autopilots` | CLI 与卡片默认 `true`；服务端缺席即 `false` | `true` 时按源状态导入，自动化导入后立即参与触发；`false` 时全部以 `paused` 写入，并在 `config_report.warnings` 里追一条 `autopilots_imported_paused`。 |
 | `apply_workspace_settings` | `--apply-workspace-settings` | `true`（服务端 `nil` 也视为 `true`） | `false` 时不写 `workspace` 批次，目标工作区设置原样保留。 |
-| `apply_issue_prefix` | `--apply-issue-prefix` | 内核与 V1 `/config/import`：`false`；`transfer import` 与卡片：包带 `issues` 分组时 `true`，否则 `false`（DENE-404） | `true` 且工作区设置生效时，若目标工作区任务数为 0 则改用源端 issue 前缀，否则跳过并追一条 `issue_prefix_skipped_target_has_issues`。 |
+| `apply_issue_prefix` | `--apply-issue-prefix` | 内核与 V1 `/config/import`：`false`；`transfer import` 与卡片：包带 `issues` 分组时 `true`，否则 `false`（DENE-404）；带 `--renumber` 时 `false`（DENE-408） | `true` 且工作区设置生效时，若目标工作区任务数为 0 则改用源端 issue 前缀，否则跳过并追一条 `issue_prefix_skipped_target_has_issues`。`--renumber` 的硬前置是目标非空，前缀必然落不下去，所以不再默认请求这次写入。 |
 | `auto_bind_runtimes` | `--auto-bind-runtimes` | CLI 与卡片默认 `true`；服务端 `null` 也视为 `true` | `true` 时按第 4.4.1 节的三档规则**写入**绑定：只有一个候选的智能体直接绑好，多个候选一律不动。`false` 时只产出报告，全部留给用户点。只被 V2 `transfer/config` 读取，V1 `/config/import` 无运行时绑定概念。 |
 
 CLI 与 Desktop 迁移卡片用同一套默认值；卡片只在用户改动默认值时才把对应 flag 传给 CLI（`--activate-autopilots=false` / `--apply-workspace-settings=false` / `--auto-bind-runtimes=false`），所以不带这些 flag 的旧 CLI 仍能跑默认导入。`--apply-issue-prefix` 是唯一例外（DENE-404）：它的默认值跟着包里的 `issues` 分组走，而卡片看不到包的分组，所以卡片**总是**显式传这个开关（勾上 `--apply-issue-prefix`，取消 `--apply-issue-prefix=false`）。内核默认值没变——不带这个 flag 的老客户端仍是不采用前缀。预览报告把 `autopilots` 批次折算成一行「自动化：导入 N 条，其中 M 条已暂停」。
