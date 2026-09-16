@@ -52,6 +52,8 @@
     "./issues/stores": "./issues/stores/index.ts",
     "./issues/stores/view-store-context": "./issues/stores/view-store-context.tsx",
     "./issues/stores/*": "./issues/stores/*.ts",
+    "./issue-drafts": "./issue-drafts/index.ts",
+    "./issue-drafts/*": "./issue-drafts/*.ts",
     "./inbox": "./inbox/index.ts",
     "./inbox/queries": "./inbox/queries.ts",
     "./inbox/mutations": "./inbox/mutations.ts",

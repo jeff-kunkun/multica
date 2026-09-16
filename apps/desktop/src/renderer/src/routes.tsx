@@ -7,6 +7,7 @@ import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { AiBuilderSessionPage } from "./pages/ai-builder-session-page";
+import { IssueDraftPage } from "./pages/issue-draft-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
 import {
   RuntimeDetailPage,
@@ -138,6 +139,14 @@ export const appRoutes: RouteObject[] = [
             path: "issues",
             element: <IssuesPage />,
             handle: { title: "Issues" },
+          },
+          {
+            // Requirement alignment: a conversation before an issue exists.
+            // Declared above `issues/:id` and longer than it, so the literal
+            // `new` segment can never be read as an issue identifier.
+            path: "issues/new/:draftId",
+            element: <IssueDraftPage />,
+            handle: { title: "Align Issue" },
           },
           {
             path: "issues/:id",
