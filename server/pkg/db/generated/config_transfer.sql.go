@@ -532,7 +532,7 @@ const exportIssueViews = `-- name: ExportIssueViews :many
 SELECT id, name, scope_type, scope_id, scope_variant, visibility, definition_version, query, display
 FROM issue_view
 WHERE workspace_id = $1
-  AND visibility = 'workspace'
+  AND visibility IN ('workspace', 'project')
   AND scope_type <> 'my'
 ORDER BY created_at ASC
 `
@@ -1067,6 +1067,7 @@ FROM agent
 WHERE workspace_id = $1 AND kind = 'system'
   AND system_key IS NOT NULL AND system_key <> ''
   AND system_key NOT LIKE 'agent_builder:%'
+  AND system_key NOT LIKE 'issue_draft:%'
   AND ($2::bool OR archived_at IS NULL)
 ORDER BY system_key
 `
@@ -1483,7 +1484,7 @@ func (q *Queries) GetUserAgentByName(ctx context.Context, arg GetUserAgentByName
 const getWorkspaceIssueViewByIdentity = `-- name: GetWorkspaceIssueViewByIdentity :one
 SELECT id, workspace_id, owner_id, name, scope_type, scope_id, scope_variant, visibility, definition_version, query, display, revision, created_at, updated_at FROM issue_view
 WHERE workspace_id = $1
-  AND visibility = 'workspace'
+  AND visibility IN ('workspace', 'project')
   AND scope_type = $2
   AND scope_id IS NOT DISTINCT FROM $4::uuid
   AND name = $3

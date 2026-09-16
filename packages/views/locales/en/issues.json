@@ -123,8 +123,19 @@
   },
   "stage": {
     "none": "No stage",
-    "value": "Stage {{n}}"
+    "value": "Stage {{n}}",
+    "blocking": "Blocking",
+    "queued": "Queued"
   },
+  "close_protocol": {
+    "missing": "Not closed under protocol",
+    "status_drift": "close.status ≠ {{issueStatus}}",
+    "next_owner": "Next: {{name}}",
+    "next_owner_none": "Next: none",
+    "waiting_on": "Waiting on {{id}}",
+    "last_activity_missing": "No activity time"
+  },
+  "blocker_summary": { "title": "Blocked · {{count}} root cause(s)", "needs_you": "{{count}} need you", "root": "Root blocker", "propagated": "Blocked by a sub-issue" },
   "scope": {
     "all_label": "All",
     "all_description": "All issues in this workspace",
@@ -858,6 +869,8 @@
     "visibility_label": "Visibility",
     "visibility_private": "Only visible to me",
     "visibility_workspace": "Visible to workspace members",
+    "visibility_project": "Project members",
+    "visibility_project_hint": "Visible only to members of this project, and only on this project page",
     "filters_label": "Filters",
     "custom_property": "Custom property",
     "create": "Create view",
@@ -914,7 +927,13 @@
     "manage_title": "Manage views",
     "manage_hint": "Order and visibility only affect you",
     "visible_toggle": "Show in view bar",
-    "more_label": "More views"
+    "more_label": "More views",
+    "project_shared_tag": "Project shared"
+  },
+  "manage_views": {
+    "visibility_label": "Sharing for {{name}}",
+    "visibility_project": "Project members",
+    "visibility_project_hint": "Visible only to members of this project, and only on this project page"
   },
   "plugins": {
     "panels": "Plugins",

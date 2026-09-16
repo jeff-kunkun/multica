@@ -86,11 +86,15 @@ INSERT INTO agent (
 RETURNING *;
 
 -- name: DeleteSystemAgentByID :exec
--- Builder sessions own their hidden execution agent. Deleting the session
+-- Session carriers own their hidden execution agent. Deleting the session
 -- removes that carrier and its task rows; the kind guard prevents this cleanup
--- path from ever deleting a user-authored agent.
+-- path from ever deleting a user-authored agent, and the system_key prefixes
+-- list every per-session carrier kind so the shared DeleteChatSession path can
+-- clean up whichever flow created the conversation. Workspace-scoped system
+-- agents (Mika) are `kind = 'user'` and already out of reach here.
 DELETE FROM agent
-WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%';
+WHERE id = $1 AND kind = 'system'
+  AND (system_key LIKE 'agent_builder:%' OR system_key LIKE 'issue_draft:%');
 
 -- name: RebindAgentBuilderRuntime :one
 -- Re-points a builder carrier at another runtime mid-conversation. The carrier
@@ -115,6 +119,21 @@ SET runtime_id = @runtime_id,
     model = sqlc.narg('model'),
     updated_at = now()
 WHERE id = @id AND kind = 'system' AND system_key LIKE 'agent_builder:%'
+RETURNING *;
+
+-- name: RebindIssueDraftRuntime :one
+-- Re-points an alignment carrier at another runtime mid-conversation. Same
+-- contract as RebindAgentBuilderRuntime, including the model reset (model ids
+-- are per-runtime) and the requirement that callers hold
+-- LockChatSessionForRuntimeBind on the owning chat_session for the whole
+-- transaction. chat_session.runtime_id is deliberately left stale so the new
+-- runtime starts a fresh provider session instead of resuming the old one.
+UPDATE agent
+SET runtime_id = @runtime_id,
+    runtime_mode = @runtime_mode,
+    model = sqlc.narg('model'),
+    updated_at = now()
+WHERE id = @id AND kind = 'system' AND system_key LIKE 'issue_draft:%'
 RETURNING *;
 
 -- name: UpdateAgent :one
