@@ -47,7 +47,7 @@ const GEMINI_DIR_FLAG = "--gemini_dir";
 
 const ENV_LEVER_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const CUSTOM_ARGS_LEVER_RE = /^custom_args:(--[A-Za-z0-9_-]+)$/;
-const KEY_REF_NAME_RE = /^[^\s\u0000-\u001f\u007f]{1,128}$/u;
+const MAX_KEY_REF_LENGTH = 128;
 const MAX_ERROR_LENGTH = 500;
 const MAX_BASE_URL_LENGTH = 512;
 
@@ -171,9 +171,21 @@ function asString(value: unknown): string {
  * field is the daemon's contract (DENE-306), not something this layer can
  * detect.
  */
+function isKeyRefName(value: string): boolean {
+  const chars = Array.from(value);
+  if (chars.length === 0 || chars.length > MAX_KEY_REF_LENGTH) return false;
+  // Written as a loop rather than a character class so the control-character
+  // range stays readable and does not need a `no-control-regex` exception.
+  return chars.every((char) => {
+    if (/\s/.test(char)) return false;
+    const code = char.codePointAt(0) ?? 0;
+    return code > 0x1f && code !== 0x7f;
+  });
+}
+
 function asKeyRef(value: unknown): string {
   const trimmed = asString(value);
-  return KEY_REF_NAME_RE.test(trimmed) ? trimmed : "";
+  return isKeyRefName(trimmed) ? trimmed : "";
 }
 
 function asUnixSeconds(value: unknown): number {
