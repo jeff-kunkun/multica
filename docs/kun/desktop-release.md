@@ -56,7 +56,15 @@ CI 挂到没法发版时才走，且第 3 步不许省。这条路上还有两�
 - **构建一出炉就把产物挪出 worktree**（`cp` 到 `~/multica-releases/<tag>/` 再开始上传）。run 结束时 worktree 会被回收，产物跟着一起没——DENE-329 连栽两次都是这么丢的。
 - **先传两个大产物，最后传 `latest-mac.yml`。** 清单先上去而产物没传完，等于对所有已装客户端广播一个指向 404 的自动更新地址，比不发版更糟。顺序错了就先把清单删掉，传完产物再补。
 
-本机上传很慢：走代理到 `uploads.github.com` 实测单连接只有 ~110 KB/s，约 450 MB 的 dmg+zip 要 40–60 分钟，并行推两个文件能快近一倍。`gh release upload` 卡住时不报错也没有进度，用 `nettop -P -p <curl-pid> -l 1 -J bytes_out` 看真实字节数判断它是慢还是死了。**这就是 DENE-353 把 macOS 搬进 CI 的原因——能走 CI 就别走这里。**
+本机这条路的时间预期，开工第一条评论就要说出去，否则用户看到的就是「打包了一个小时没打包好」：
+
+| 阶段 | 冷启动 | 复用缓存 |
+| --- | --- | --- |
+| `pnpm install --frozen-lockfile`（11 个 workspace 包，store 全冷） | ~70 分钟 | 数分钟 |
+| `pnpm --filter @multica/desktop package` 实际打包 | ~7 分钟 | ~6 分钟 |
+| 上传 DMG + ZIP 到 GitHub Release（约 450 MB） | 40–60 分钟 | 40–60 分钟 |
+
+绝大部分等待时间在装依赖，不是构建。上传不会因为缓存变快：走代理到 `uploads.github.com` 实测单连接只有 ~110 KB/s，约 450 MB 的 dmg+zip 要 40–60 分钟，并行推两个文件能快近一倍。`gh release upload` 卡住时不报错也没有进度，用 `nettop -P -p <curl-pid> -l 1 -J bytes_out` 看真实字节数判断它是慢还是死了。**这就是 DENE-353 把 macOS 搬进 CI 的原因——能走 CI 就别走这里。**
 
 ```bash
 # 1. 依赖（pnpm store 暖的话是分钟级，冷装十几分钟起）
