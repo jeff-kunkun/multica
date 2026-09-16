@@ -76,7 +76,7 @@ multica transfer import --profile <目标档> --workspace <slug> --in ~/transfer
 2. **`runtimes_to_bind`**  
    运行时绑的是哪台机器、谁的账号，导入不会自动绑。到目标工作区给每个智能体选一台可见的运行时。
 3. **`export_gaps`**  
-   源端哪些分组没导出或没按规则过滤。例如 `plugin_skills_unfiltered` 表示源端插件接口不可用，插件贡献的技能被整包带过来了，需要你自己核对。
+   源端哪些分组没导出或没按规则过滤。例如 `plugin_skills_unfiltered` 表示源端插件接口不可用，插件贡献的技能被整包带过来了，需要你自己核对。`issue_views_scope_capped` 与 `list_cap_reached`（源端单次请求上限已满，条目里带 `limit`）、`list_has_more`（源端还有下一页）、`list_shape_unknown`（源端返回了本项目读不懂的结构，等于整组没取到）都表示该分组列表不完整：这类分组只带回了服务端一次请求给得出的行，剩下的要你自己按提示回源端补。
 
 ## 用 Desktop 按钮迁移
 

@@ -152,15 +152,22 @@ func TestSourceExportIssueViews_FlagsScopeCap(t *testing.T) {
 	}}
 	bundle := &ConfigBundle{Entities: ConfigEntities{}, Stats: map[string]int{}}
 	var gaps []TransferExportGap
-	sourceExportIssueViews(context.Background(), src, bundle, &gaps, func(group string, err error) {
-		t.Fatalf("unexpected gap %s: %v", group, err)
-	})
+	sourceExportIssueViews(context.Background(), src, bundle, &gaps, collectGaps(&gaps))
 	if len(gaps) != 1 || gaps[0].Reason != gapReasonIssueViewsCapped || gaps[0].Group != "issue_views" {
 		t.Fatalf("gaps=%v, want one %s warning", gaps, gapReasonIssueViewsCapped)
+	}
+	if gaps[0].Limit != issueViewsScopeCap {
+		t.Fatalf("cap gap=%+v, want limit=%d so the report says where it stopped", gaps[0], issueViewsScopeCap)
 	}
 	if len(bundle.Entities.IssueViews) != issueViewsScopeCap {
 		t.Fatalf("views=%d", len(bundle.Entities.IssueViews))
 	}
+}
+
+// collectGaps mirrors the recorder exportConfigGroups installs, so these unit
+// tests observe the same gap entries a real bundle's manifest carries.
+func collectGaps(gaps *[]TransferExportGap) func(string, error) {
+	return func(group string, err error) { *gaps = append(*gaps, transferReadGap(group, err)) }
 }
 
 func TestWarningGapReason_ClassifiesReadFailuresAsFatal(t *testing.T) {
@@ -169,7 +176,10 @@ func TestWarningGapReason_ClassifiesReadFailuresAsFatal(t *testing.T) {
 			t.Errorf("reason %q must stay fatal", reason)
 		}
 	}
-	for _, reason := range []string{gapReasonPluginUnfiltered, gapReasonIssueViewsCapped} {
+	for _, reason := range []string{
+		gapReasonPluginUnfiltered, gapReasonIssueViewsCapped,
+		gapReasonListCapReached, gapReasonListHasMore, gapReasonListShapeUnknown,
+	} {
 		if !warningGapReason(reason) {
 			t.Errorf("reason %q must be a warning", reason)
 		}
@@ -229,5 +239,185 @@ func TestExportFromSource_KeepsMissingEndpointAsCompatibilityWarning(t *testing.
 	}
 	if len(files.Manifest.ExportGaps) != 1 || files.Manifest.ExportGaps[0].Reason != gapReasonReadAPIMissing {
 		t.Fatalf("gaps=%v", files.Manifest.ExportGaps)
+	}
+}
+
+// GET /api/issue-statuses answers {"statuses": [...], "categories": [...]}.
+// The envelope key list used to miss "statuses", so the export reported
+// issue_statuses=0 for a workspace that has a catalog.
+func TestGetList_DecodesIssueStatusesEnvelope(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/issue-statuses": map[string]any{
+			"statuses": []map[string]any{
+				{"id": "st-1", "key": "todo", "name": "Todo", "category": "todo"},
+				{"id": "st-2", "key": "done", "name": "Done", "category": "done"},
+			},
+			"categories": []string{"todo", "in_progress", "done"},
+			"total":      2,
+		},
+	}}
+	var rows []map[string]any
+	trunc, err := getList(context.Background(), src, "/api/issue-statuses", &rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trunc != nil {
+		t.Fatalf("unexpected truncation %+v", trunc)
+	}
+	if len(rows) != 2 || strField(rows[0], "key") != "todo" {
+		t.Fatalf("rows=%v, want the two statuses", rows)
+	}
+}
+
+// A response shape this exporter cannot read must be named, not exported as an
+// empty group.
+func TestGetList_ReportsUnknownEnvelopeShape(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/renamed": map[string]any{"rows": []map[string]any{{"id": "x"}}},
+		"/api/empty":   map[string]any{},
+	}}
+	for _, path := range []string{"/api/renamed", "/api/empty"} {
+		var rows []map[string]any
+		trunc, err := getList(context.Background(), src, path, &rows)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if trunc == nil || trunc.Reason != gapReasonListShapeUnknown {
+			t.Fatalf("%s truncation=%+v, want reason=%s", path, trunc, gapReasonListShapeUnknown)
+		}
+		if len(rows) != 0 {
+			t.Fatalf("%s decoded %d rows from an unknown shape", path, len(rows))
+		}
+	}
+}
+
+// Every list endpoint the export reads answers with an array, or with one of
+// these envelope keys (audited against the live handlers). A missing key here
+// is how the issue-status catalog silently vanished from the bundle.
+func TestGetList_RecognizesEveryEndpointEnvelope(t *testing.T) {
+	envelopes := map[string][]string{
+		"/api/labels":                               {"labels"},
+		"/api/issue-statuses":                       {"statuses"},
+		"/api/properties":                           {"properties"},
+		"/api/workspaces/ws-1/plugins":              {"plugins"},
+		"/api/projects":                             {"projects"},
+		"/api/projects/p-1/resources":               {"resources"},
+		"/api/autopilots":                           {"autopilots"},
+		"/api/quick-actions":                        {"quick_actions"},
+		"/api/workspaces/ws-1/github/installations": {"installations"},
+		"/api/workspaces/ws-1/vcs/connections":      {"connections"},
+	}
+	for path, keys := range envelopes {
+		obj := map[string]any{}
+		for _, k := range keys {
+			obj[k] = []map[string]any{{"id": "row-1"}}
+		}
+		src := &fakeTransferSource{payloads: map[string]any{path: obj}}
+		var rows []map[string]any
+		trunc, err := getList(context.Background(), src, path, &rows)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if trunc != nil {
+			t.Fatalf("%s: envelope %v not recognized: %+v", path, keys, trunc)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("%s: decoded %d rows, want 1", path, len(rows))
+		}
+	}
+}
+
+// The issue-view scope cap is the only server-side cap the export can hit
+// today; getList reports it with the row count it stopped at.
+func TestGetList_ReportsServerCapWithLimit(t *testing.T) {
+	rows := make([]map[string]any, issueViewsScopeCap)
+	for i := range rows {
+		rows[i] = map[string]any{"id": fmt.Sprintf("v-%d", i)}
+	}
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/issue-views?scope_type=workspace": rows,
+	}}
+	var got []map[string]any
+	trunc, err := getList(context.Background(), src, "/api/issue-views?scope_type=workspace", &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trunc == nil || trunc.Reason != gapReasonIssueViewsCapped || trunc.Limit != issueViewsScopeCap {
+		t.Fatalf("truncation=%+v, want %s with limit %d", trunc, gapReasonIssueViewsCapped, issueViewsScopeCap)
+	}
+	if len(got) != issueViewsScopeCap {
+		t.Fatalf("decoded %d rows, want the whole capped page to ship", len(got))
+	}
+}
+
+func TestGetList_NoTruncationBelowCapOrWithPlainArray(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/labels":      []map[string]any{{"id": "lb-1"}, {"id": "lb-2"}},
+		"/api/issue-views": []map[string]any{{"id": "v-1"}},
+	}}
+	for _, path := range []string{"/api/labels", "/api/issue-views"} {
+		var rows []map[string]any
+		trunc, err := getList(context.Background(), src, path, &rows)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if trunc != nil {
+			t.Fatalf("%s reported truncation %+v for a short list", path, trunc)
+		}
+		if len(rows) == 0 {
+			t.Fatalf("%s decoded no rows", path)
+		}
+	}
+}
+
+// An envelope that advertises another page is not a complete list, and one
+// request cannot see past it.
+func TestGetList_ReportsEnvelopeHasMore(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/things-page": map[string]any{
+			"items":    []map[string]any{{"id": "a"}},
+			"has_more": true,
+		},
+		"/api/things-cursor": map[string]any{
+			"items":       []map[string]any{{"id": "a"}},
+			"next_cursor": map[string]any{"created_at": "2026-09-01T00:00:00Z", "id": "a"},
+		},
+		"/api/things-done": map[string]any{
+			"items":       []map[string]any{{"id": "a"}},
+			"has_more":    false,
+			"next_cursor": nil,
+		},
+	}}
+	for _, path := range []string{"/api/things-page", "/api/things-cursor"} {
+		var rows []map[string]any
+		trunc, err := getList(context.Background(), src, path, &rows)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if trunc == nil || trunc.Reason != gapReasonListHasMore {
+			t.Fatalf("%s truncation=%+v, want reason=%s", path, trunc, gapReasonListHasMore)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("%s decoded %d rows, want the page it did read to ship", path, len(rows))
+		}
+	}
+	var rows []map[string]any
+	trunc, err := getList(context.Background(), src, "/api/things-done", &rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trunc != nil {
+		t.Fatalf("exhausted envelope reported truncation %+v", trunc)
+	}
+}
+
+func TestTransferReadGap_KeepsHTTPErrorVocabulary(t *testing.T) {
+	missing := transferReadGap("labels", &TransferHTTPError{Status: 404, Err: fmt.Errorf("nope")})
+	if missing.Reason != gapReasonReadAPIMissing || missing.Status != 404 || missing.Limit != 0 {
+		t.Fatalf("404 gap=%+v", missing)
+	}
+	failed := transferReadGap("labels", &TransferHTTPError{Status: 500, Err: fmt.Errorf("boom")})
+	if failed.Reason != gapReasonReadAPIError || failed.Status != 500 {
+		t.Fatalf("500 gap=%+v", failed)
 	}
 }

@@ -72,6 +72,9 @@ type TransferExportGap struct {
 	Group  string `json:"group"`
 	Reason string `json:"reason"`
 	Status int    `json:"status,omitempty"`
+	// Limit is the server-side per-request cap or page size that ended the
+	// read, set only for list_cap_reached / list_has_more gaps.
+	Limit int `json:"limit,omitempty"`
 }
 
 type TransferPerson struct {
