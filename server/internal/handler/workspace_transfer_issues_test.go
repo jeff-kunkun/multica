@@ -793,3 +793,47 @@ func assertTransferMentionsResolvable(t *testing.T, ws string) {
 		}
 	}
 }
+
+// §1.4: a status key the target catalog knows is written through unchanged,
+// and one it does not know degrades to the source category with a report row.
+//
+// The seven built-in statuses are seeded with category == key (migration 339),
+// so a case that only uses them cannot tell a preserved key from its category.
+// This one uses a custom status whose category differs.
+func TestTransferIssues_CustomStatusKeyIsPreservedAndUnknownKeyDegrades(t *testing.T) {
+	_, dst := setupConfigWorkspaces(t)
+	dbfx.Insert(t, "issue_status", testutil.Cols{
+		"workspace_id": dst, "key": "design_review", "name": "Design Review",
+		"description": "", "category": "in_progress", "color": "#111111",
+		"is_system": false, "position": 10.0,
+	})
+
+	kept, degraded := uuid.NewString(), uuid.NewString()
+	body := transferIssueBody(
+		map[string]any{"members": map[string]any{testUserID: transferMemberRef(handlerTestEmail)}},
+		[]map[string]any{
+			transferIssueRow(kept, 1, "custom status", testUserID, map[string]any{
+				"status": "design_review", "status_category": "in_progress",
+			}),
+			transferIssueRow(degraded, 2, "status the target never had", testUserID, map[string]any{
+				"status": "awaiting_legal", "status_category": "blocked",
+			}),
+		},
+		nil, nil, true)
+	resp := postTransferIssues(t, dst, body).Want(http.StatusOK)
+
+	if got := transferScanString(t, `SELECT status FROM issue WHERE id = $1`,
+		service.TransferIssueID(dst, kept).String()); got != "design_review" {
+		t.Fatalf("status=%q want %q: a key the catalog has must be written through, not replaced by its category", got, "design_review")
+	}
+	if got := transferScanString(t, `SELECT status FROM issue WHERE id = $1`,
+		service.TransferIssueID(dst, degraded).String()); got != "blocked" {
+		t.Fatalf("status=%q want %q: an unknown key degrades to the source category", got, "blocked")
+	}
+	if !strings.Contains(resp.Text(), "status_key_unmapped") {
+		t.Fatalf("the degraded status has no report row: %s", resp.Text())
+	}
+	if strings.Count(resp.Text(), "status_key_unmapped") != 1 {
+		t.Fatalf("the preserved status must not be reported as unmapped: %s", resp.Text())
+	}
+}

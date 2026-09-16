@@ -968,19 +968,24 @@ func (s *transferIssueState) propertyByName(ctx context.Context, name string) (d
 	return def, true, nil
 }
 
-// targetStatusCategory resolves a status key against the target catalog and
-// degrades to a category the catalog definitely has (contract §1.4). Writing a
-// key the catalog does not know would make the issue disappear from every
+// targetStatusKey resolves a status key against the target catalog and degrades
+// to a category the catalog definitely has (contract §1.4). Writing a key the
+// catalog does not know would make the issue disappear from every
 // status-grouped view.
-func (s *transferIssueState) targetStatusCategory(ctx context.Context, row TransferIssueRow) (string, bool, error) {
+//
+// A key the catalog DOES know is written through unchanged. Returning its
+// category instead would look correct for the seven built-ins — migration 339
+// seeds them with category == key — and silently flatten every custom status
+// onto its category for everyone else.
+func (s *transferIssueState) targetStatusKey(ctx context.Context, row TransferIssueRow) (string, bool, error) {
 	key := strings.TrimSpace(row.Status)
 	if key == "" {
 		key = "backlog"
 	}
-	if category, ok, err := s.statusCategory(ctx, key); err != nil {
+	if _, ok, err := s.statusCategory(ctx, key); err != nil {
 		return "", false, err
 	} else if ok {
-		return category, false, nil
+		return key, false, nil
 	}
 	// Unknown key: fall back to the category the source recorded, then to
 	// backlog if even that is not in the target catalog.
@@ -1157,7 +1162,7 @@ func (s *transferIssueState) planIssue(ctx context.Context, row TransferIssueRow
 		}
 	}
 
-	status, downgraded, err := s.targetStatusCategory(ctx, row)
+	status, downgraded, err := s.targetStatusKey(ctx, row)
 	if err != nil {
 		return out, err
 	}
