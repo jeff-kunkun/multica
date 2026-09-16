@@ -23,6 +23,7 @@ kk zi 2026-09-16 真机反馈（DENE-365 描述引用的评论 `01a0ab16`）：
 - fork `kun` tip `eba2fbef94`；`server/migrations/` 至 `489_issue_draft_policy`；字段以 `server/pkg/db/generated/models.go` 为准。
 - V2 实现在 `server/internal/service/transfer_{bundle,export,ids,import,redact}.go`、`server/internal/handler/workspace_transfer.go`、`server/pkg/db/queries/workspace_transfer.sql`、`server/cmd/multica/cmd_transfer.go`。
 - 本页每条结论都标注了核对到的代码位置。凡写「未确认」的地方，实现 Stage 动手前必须先验证，不得按猜测实现。
+- **第 11 节的 7 条未确认项已在 DENE-383（2026-09-17）逐条核实并改写成结论。** 那一轮的核实基线：fork `kun` tip `72420ece6f`；官方云侧用本机 `multica` CLI v0.4.57 对 `https://api.multica.ai` 的 `deneb-3029` 工作区做只读探测（未写入任何数据）；上游源码读 `upstream/main`（`7e4758ac1a`，`kun` 与它的 merge-base 是 `3551e72e76`）；库级事实读本机新建库 `multica_dene383`，`go run ./cmd/migrate up` 跑到 `489_issue_draft_policy` 后查 `pg_trigger`。核实过程中修正了第 7.1 节与第 8.4 节各一处**原文写错的事实**，见那两节。
 
 ## 0. 一页结论
 
@@ -31,13 +32,15 @@ kk zi 2026-09-16 真机反馈（DENE-365 描述引用的评论 `01a0ab16`）：
 | 1 | 逐表口径 | `issue` / `comment` / `comment_reaction` / `issue_reaction` / `issue_to_label` / issue 与 comment 附件**导出**；`activity_log`、任务运行记录、`inbox_item`、`issue_subscriber` 源行、`issue_source_context`、PR 关联、`issue_draft`、`issue_dependency` **不导出**。`issue_counter` 不是表，是 `workspace.issue_counter` 列，不搬值只顶水位。详见第 1 节。 |
 | 2 | 编号策略 | **目标工作区必须为空**（`CountWorkspaceIssues == 0`），此时 `number` 原样保留、`issue_prefix` 由 V1 已有规则一并落地、正文里的 `DENE-xxx` 自动正确。目标非空时默认 **400 拒绝** `issues` 分组；只有显式 `--renumber` 才做整体偏移，代价（正文引用全错）写在报告里。详见第 2 节。 |
 | 3 | mention 重写 | 只处理 `util.MentionRe` 认识的 `member` / `agent` / `squad` / `issue` 四类。映射得到就改写 id；**映射不到一律降级为纯文本**（丢链接、留标签文字），不保留死链。理由是代码级的：残留的无法解析的根评论 mention 会让整条线程的后续路由**静默失效**。详见第 3 节。 |
-| 4 | 父子与阶段 | `issue.parent_issue_id` 和 `comment.parent_id` 都有真实外键，必须**两遍写入**：第一遍全部以 `parent = NULL` 插入，第二遍回填父指针。`stage` / `position` 随第一遍原样写入。详见第 4 节。 |
+| 4 | 父子与阶段 | `issue.parent_issue_id` 和 `comment.parent_id` 都有真实外键，必须**两遍写入**：第一遍全部以 `parent = NULL` 插入，第二遍回填父指针。回填解析不到时两张表口径不同：issue 置 `NULL`，**comment 上溯到最近的包内祖先**（11.7）。`stage` / `position` 随第一遍原样写入。详见第 4 节。 |
 | 5 | 多态指派 | `assignee_type` ∈ `member` / `agent` / `squad`，复用 V2 的 people map 与 V1 的 agent / squad 身份键。映射不到降级为**未指派**并记报告行；`creator_*` 同规则，但兜底为导入者而不是空（列 NOT NULL）。同一套映射还要跑在 `issue.properties` 里 `actor` / `multi_actor` 两类属性的值上（1.2.1）——那是最容易漏的一处引用。详见第 5 节。 |
 | 6 | 收件箱 | **不迁 `inbox_item`**。它 100% 由任务完成与 autopilot 配额产生，跨实例没有对应运行记录。但导入时**必须重建 `issue_subscriber` 的 creator / assignee 两条**，否则导入后这些票上的新活动谁都收不到通知。详见第 6 节。 |
 | 7 | 无副作用写入 | 沿用 V2 的做法：`workspace_transfer.sql` 里加专用 `INSERT ... ON CONFLICT (id) DO NOTHING`，带显式 `id` 与 `created_at`，**不走** `CreateIssue` / `CreateComment` / `h.publish` / 事件总线。测试断言导入不产生任何 `agent_task_queue` 行。详见第 7 节。 |
 | 8 | 体积与分片 | 复用 V2 的 `TransferMessageShardMaxBytes` / `TransferConversationsMaxBytes` / `TransferAttachmentMaxBytes` 三个常量，不另立。任务分片按「一张 issue 的全部评论不跨片」聚合。详见第 8 节。 |
 | 9 | 包结构与版本 | 外层 `schema_version` 顶到 **2**，新增 `issues/` 目录与 `include` 分组 `issues`（**默认不开**）。V3 导入器必须能读 `schema_version: 1` 的 V2 包与裸 V1 JSON。详见第 9 节。 |
 | 10 | 秘密边界 | `transfer_redact.go` 的模式表原样跑在 issue 标题 / 描述 / 评论正文 / 文本附件上，一个都不减。新增两条：`issue.metadata` 与 `issue.properties` 两个 JSONB 值袋要跑 V1 兜底键名清洗。详见第 10 节。 |
+
+| 11 | 实现前的 7 项核实 | **全部有结论**（DENE-383，2026-09-17）：自建实例任务数配额默认不生效，导入不调配额检查但必须回显策略并在 `enforce` 会越线时拒绝；官方云 `GET /api/issues` 的 `limit` 静默钳 100、支持 `sort=created_at` + `direction=asc`、未观察到通用速率限制；`comments` 的 `since` 支持 RFC3339 与 RFC3339Nano；官方云属性类型集合与 `kun` 逐字相同；墓碑行为源码两侧一致但拿不到正样本，父指针按无条件上溯实现。详见第 11 节。 |
 
 一句话的模块形状：CLI 多读四组读接口、多写一个 `issues/` 目录；服务端多一个 `POST /transfer/issues` 端点；编号、父子、mention、指派的映射全部藏在这两层内部，产品其余部分一行不改。
 
@@ -70,7 +73,7 @@ DENE-365 描述里的表名与库里的实际结构有三处出入，按实际�
 | `issue_subscriber` | **不导出源行**，但导入时按规则重建 | — | 全部 | 见第 6 节。 |
 | `issue_source_context` / `issue_source_context_object_intent` | 不导出 | — | 全部 | 建票时抓的不可变上下文快照，含源实例的对象 id 与渠道消息引用；`GetIssue` 只在详情页返回（`IssueResponse.SourceContext` 标注 detail-only），列表拿不到，逐票拉一次成本高而收益是一段死引用快照。报告记一条 `source_context_not_migrated` 计数。 |
 | `issue_pull_request` / `issue_vcs_pull_request` / `github_pull_request*` | 不导出 | — | 全部 | 指向源实例的 GitHub App 安装与 VCS 连接；V1 契约本来就只迁「连接清单」不迁凭据，PR 行迁过去点不开也刷不了状态。 |
-| `issue_dependency` | 不导出 | — | 全部 | 读接口面**未确认**（`router.go` 里没看到 dependency 端点）。若实现 Stage 确认有可用读接口，按 `issue_to_label` 同样的两遍写入口径补上；确认不了就保持不导，并在报告里记 `issue_dependency_not_migrated`。 |
+| `issue_dependency` | 不导出 | — | 全部 | 读接口面**已核实：没有**（11.2）。`router.go` 全文没有注册任何 dependency 端点，CLI 拿不到这张表。保持不导，报告里记 `issue_dependency_not_migrated`。 |
 | `issue_draft` | 不导出 | — | 全部 | 未提交的草稿是本人的临时状态，且 `489_issue_draft_policy` 刚改过策略，跨实例语义不稳。 |
 | `pinned_item`（`item_type = 'issue'`） | 不导出 | — | 全部 | 个人置顶偏好，且指向源实例 issue id。V2 只迁了聊天的 `pinned_agents`，这里保持一致，不扩面。 |
 
@@ -93,7 +96,7 @@ DENE-365 描述里的表名与库里的实际结构有三处出入，按实际�
 - 任何读接口都拿不到这两列，CLI 无从导出；
 - 产品当前的「验收标准」写在 `description` 正文里（本票自己的描述就是这么写的），所以不导它们不丢用户可见内容。
 
-前端是否仍有代码路径读这两个字段，**未确认**（本次只核对了 Go 侧）。实现 Stage 若发现前端在用，按 `metadata` 同样口径补进导出字段表。
+前端是否仍有代码路径读这两个字段，**已核实：没有**（11.3）。`packages/` 与 `apps/` 的 `.ts` / `.tsx` 对这两个名字（含驼峰写法）零命中。
 
 ### 1.4 状态键解析不到时的降级
 
@@ -233,7 +236,12 @@ DENE-365 描述里的表名与库里的实际结构有三处出入，按实际�
 
 1. **第一遍**：本片全部 `issue` 以 `parent_issue_id = NULL` 插入，`stage` / `position` 原样写入；
 2. **第一遍**：本片全部 `comment` 以 `parent_id = NULL` 插入（`issue_id` 此时已存在，因为同片的 issue 先写）；
-3. **第二遍**：`finalize: true` 的最后一次请求里，用包内携带的 `(source_id, source_parent_id)` 对，把两张表的父指针一次性 `UPDATE` 回填。回填时父指针解析不到（父 issue 不在包内，或被跳过）→ 保持 `NULL` 并记报告行 `parent_unmapped`。
+3. **第二遍**：`finalize: true` 的最后一次请求里，用包内携带的 `(source_id, source_parent_id)` 对，把两张表的父指针一次性 `UPDATE` 回填。
+
+回填时父指针解析不到的处置分两种，**不要混用**：
+
+- `issue.parent_issue_id`：父 issue 不在包内（或被跳过）→ 保持 `NULL` 并记 `parent_unmapped`。issue 的父子是一层业务归属，硬挂到祖父会伪造一条不存在的从属关系。
+- `comment.parent_id`：**必须沿源端父链上溯到最近的包内祖先**，一路到根都找不到才置 `NULL` 并记 `parent_unmapped`，每次上溯记一条 `parent_reparented_to_ancestor`（带跳过的层数）。理由与实测依据见 11.7——墓碑过滤和 `commentHardCap` 截断都会让父评论落在包外，置空会把整条线程拍平。
 
 `finalize` 阶段的回填必须幂等：重导同一个包时，第二遍写的是同样的值，`UPDATE` 结果不变。
 
@@ -312,10 +320,24 @@ DENE-365 描述里的表名与库里的实际结构有三处出入，按实际�
 | `db.CreateComment` | 同一条语句里 `UPDATE issue SET updated_at = now(), revision = revision + 1, last_activity_at = GREATEST(..., now())`（`comment.sql:440`）。用它导入会把每张票的时间戳全部拍成导入时刻 | 新增专用 `TransferInsertComment`，只插 `comment`，**不碰 issue 行**。issue 的时间戳由 `TransferInsertIssue` 一次写对 |
 | `handler.CreateComment` | `h.publish(EventCommentCreated)` → WebSocket 广播 + 事件总线订阅者规则；`AutoUnresolveThreadOnReply`；`triggerTasksForComment` → mention 解析 → `agent_task_queue` 入队 | 完全不走 handler 写路径。导入端点只调 service 层的专用插入 |
 | `handler.CreateIssue` / `UpdateIssue` / `AssignIssue` | `h.publish(EventIssueCreated / EventIssueAssigned)` → 订阅者监听器 + 指派起跑 | 同上。订阅者由第 6.2 节显式重建 |
-| `entitlement` 任务数配额（`CheckIssueCreateCapacity` / `IssueLimitReachedError`） | 达上限时拒绝建票 | **未确认**：自建 `kun` 实例上该 provider 的行为需要实现 Stage 先验证。倾向结论是导入**跳过配额检查**（它是产品侧的商业化闸门，不是数据完整性约束），但若目标实例确实在跑受限档位，跳过会让工作区越过上限。实现前必须确认并在报告里回显目标端配额状态 |
+| `entitlement` 任务数配额（`CheckIssueCreateCapacity` / `IssueLimitReachedError`） | 达上限时拒绝建票 | **已核实（11.1）**：自建默认档这个 provider 是 nil，配额恒不生效。导入路径本来就不调 `CreateIssue` / `AllocateIssueNumber`，因此**也不额外调用** `CheckIssueCreateCapacity`；但必须在写入前读一次 `ResolveIssueCountPolicy` 并把 `{action, limit, used}` 回显进报告，`action == enforce` 且会越线时拒绝导入。口径见 11.1 |
 | `DownloadAttachment` / 附件上传 | 无额外副作用 | 复用 V2 的 `ImportTransferAttachment`，只是挂载列从 `chat_*` 换成 `issue_id` / `comment_id` |
 
-**触发器：已核对无。** `server/migrations/` 里没有任何 `CREATE TRIGGER ... ON issue` / `ON comment` / `ON attachment`，所以直接 `INSERT` 不会引发库级副作用。这条核对在实现 Stage 要重跑一遍（`grep -rn "CREATE TRIGGER" migrations/`），因为它是「直接写库安全」这个前提的全部依据。
+**触发器：已重新核对（DENE-383，2026-09-17），原结论的事实部分是错的，安全结论成立。**
+
+原文写「`server/migrations/` 里没有任何 `CREATE TRIGGER ... ON issue`」——**错**。真实情况：
+
+- `issue` 上有两个库级触发器：`trg_issue_delete_dirty_hourly`（`BEFORE DELETE`）与 `trg_issue_project_dirty_hourly`（`BEFORE UPDATE OF project_id`），建于 `102_task_usage_hourly_pipeline.up.sql:169` / `:226`；`243_workspace_teardown_dirty_trigger_guard.up.sql` 把 DELETE 那个重建成带 `WHEN (current_setting('multica.workspace_teardown', true) IS DISTINCT FROM 'on')` 守卫的版本。084 的 dashboard 同名系列已被 `103_drop_legacy_daily_rollups.up.sql:116`-`:119` 删除，所以只 grep `.up.sql` 里的 `CREATE TRIGGER` 会同时漏看守卫重建和后续删除，得出的数量两头都不对。
+- `comment` 与 `attachment` 上**没有**任何触发器。
+
+核实方式是跑完迁移查系统表，不是 grep：本机建库 `multica_dene383` → `DATABASE_URL=postgres://multica@localhost:5432/multica_dene383?sslmode=disable go run ./cmd/migrate up`（跑到 `489_issue_draft_policy`）→ 查 `pg_trigger` 里 `NOT tgisinternal` 的行。全库共 9 个非内部触发器，落在 `issue` 上的就是上面两个，`comment` / `attachment` 各 0 个。
+
+对 V3 的影响：
+
+- **`INSERT` 仍然安全。** 两个触发器都不挂在 INSERT 上，第 7.2 节的专用插入不会引发库级副作用——这是原结论真正要用到的部分，它成立。
+- **新增一条硬约束：`project_id` 只能在 `TransferInsertIssue` 那一条 `INSERT` 里写对，不得用「先插入、后 `UPDATE issue SET project_id = ...`」的两遍写法**，否则每张票都会触发 `trg_issue_project_dirty_hourly`，往 `task_usage_hourly_dirty` 里灌一批脏键。第 4 节的两遍写入只回填 `parent_issue_id`（`TransferBackfillIssueParent`），不碰 `project_id`，现有契约形状是安全的；实现 Stage 不要顺手把 `project_id` 挪进回填。
+- 导入失败请用事务 `ROLLBACK` 而不是 `DELETE FROM issue` 善后。真要删已提交的行时 `BEFORE DELETE` 会逐行入队脏键，属已知开销，不影响正确性。
+- 这条核对以后按同样口径重跑（查 `pg_trigger`，不是 grep），它是「直接写库安全」这个前提的全部依据。
 
 ### 7.2 专用 SQL 的形状
 
@@ -381,15 +403,26 @@ DENE-365 描述里的表名与库里的实际结构有三处出入，按实际�
 
 实际压缩率**未确认**（与 V2 §7.1 同状态）。实现 Stage 用 `--estimate` 对真实工作区跑一次并把数字记进 PR 描述。
 
-### 8.4 导出端的分页与两个真实坑
+### 8.4 导出端的分页与三个真实坑
 
-CLI 只能用读接口，这里有两条必须按写的方式做，否则会静默丢数据：
+CLI 只能用读接口，这里有三条必须按写的方式做，否则会静默丢数据。三条都在官方云上实测过，实测口径见 11.4 / 11.5：
 
-**issue 列表分页。** `GET /api/issues` 是 `LIMIT/OFFSET`，`limit` 硬上限 100（`internal/handler/issue.go:1260`，`ListIssues`）。默认不带任何过滤时返回**全部状态**（含 `done` / `cancelled`）。必须用 `?sort=created_at&dir=asc` 翻页：代码里 ORDER BY 末尾固定追加 `i.created_at DESC, i.id DESC` 作为唯一末位键（`issue.go:1569`），升序翻页下新建的票排在最后、不会顶掉前面的页。用默认排序（`last_activity_at`）翻页会在导出过程中因为活动更新而重排，跨页重复或漏掉行。
+**issue 列表分页。** `GET /api/issues` 是 `LIMIT/OFFSET`，`limit` 上限 100，且是**静默钳位**——服务端把超限值改写成 100 而不是报错（`internal/handler/issue.go:1253`、`:1260`，`ListIssues`），所以导出端不能指望靠 400 发现自己越界。响应体带 `total` / `has_more` / `limit` / `offset`。默认不带任何过滤时返回**全部状态**（含 `done` / `cancelled`）。
+
+翻页必须用 `?sort=created_at&direction=asc`。两处原文写错、这里一并纠正：
+
+- **参数名是 `direction`，不是 `dir`**（`issue.go:1357`）。写成 `dir` 会被静默忽略，落回该排序列的默认方向。
+- **不带 `sort` 时的默认排序是 `position`，不是 `last_activity_at`**（`issue.go:1310`）。`position` 由拖拽和新建改写，同样不能用来翻页；`last_activity_at` 只是它们之中更明显的一个坏选择。
+
+用 `created_at` 升序是对的：ORDER BY 末尾固定追加 `i.created_at DESC, i.id DESC` 作为唯一末位键（`issue.go:1569`），升序翻页下新建的票排在最后、不会顶掉前面的页。
+
+**`total` 不能当「导完了」的断言。** 它是一次独立计数，导出期间源端并发建票就会变。实测（2026-09-17，官方云 `api.multica.ai`，`deneb-3029` 工作区）：`--sort created_at --direction asc --limit 100` 翻 4 页拿到 **387 个互不重复的 id**（`sort | uniq -d` 为空），同一时段 `total` 从 384 涨到 390。收尾条件用 `has_more == false`，完整性用 id 集合去重来保证，不要拿 `total` 做相等断言。
 
 **评论分页的 `since` 边界。** `GET /api/issues/{id}/comments` 默认路径返回**最新 2000 条**（`commentHardCap = 2000`），没有向前翻页的游标。超过 2000 条的 issue 必须用 `?since=<RFC3339Nano>` 反复拉：该查询是 `created_at > $3 ORDER BY created_at ASC, id ASC LIMIT 2001`（`comment.sql:61`）。
 
 坑在于谓词是 `created_at > $3` 且**没有 id 作为并列键**：如果第 N 页的最后一条与下一条 `created_at` **完全相同**，以它的时间戳作为下一页的 `since` 会把那条并列的评论**永久跳过**。处置：每页取完后，把 `since` 设为**本页最后一条的 `created_at`**，并把本页已见的 comment id 记入一个集合；下一页返回的行按 id 去重后再追加。这样并列行会在下一页被重新看到并去重，不会丢。**这条不是理论风险**——批量导入或同一轮任务连发多条评论时，`created_at` 撞在同一微秒是现实情况。
+
+**导出端不得传 `fold`。** `fold=true` 会把每条**已解决**线程折叠成「根 + 结论」，其余回复根本不返回（`internal/handler/comment.go:477` 起；服务端默认 `false`，只有显式传 `true` 才折叠）。CLI 的默认列表视图是折叠的，导出端必须走不带 `fold` 的原始路径，否则已解决线程的中间评论会被静默丢光——而这正是「任务同步过去了但讨论少了一半」的成因。`fold` 与 `since` / `tail` / `roots_only` 互斥，传了会 400，所以 `since` 翻页路径天然安全。
 
 `--estimate` 与正式导出共用同一套翻页代码，避免两处对边界的理解不一致。
 
@@ -526,17 +559,107 @@ NSTransferReaction         → TransferReactionID(targetWorkspaceID, sourceID)
 13. 每处被脱敏的位置在 `secrets_omitted.json` 中恰有一条记录；含金丝雀的 `.env` 附件没有文件体。
 14. 导入端拒收：`transfer/issues` 请求体里 `metadata` 带未清洗的秘密键 → 400，且不写任何行。
 
-## 11. 未确认项（实现前必须验证）
+## 11. 已核实项（原「未确认项」）
 
-V2 §8 的 10 条未确认项**继续有效**，本页新增：
+V2 §8 的 10 条未确认项**继续有效**，不在本轮范围内。本页新增的 7 条已在 **DENE-383（2026-09-17）** 逐条核实，全部给出结论；核实基线与只读边界见开头「核对基线」一节。官方云侧只做读，未写入任何数据。
 
-1. **任务数配额在自建实例上的行为**（第 7.1 节）。导入是否跳过 `CheckIssueCreateCapacity`，取决于 `entitlement.Provider` 在自建 `kun` 上返回什么。跳过之前必须先确认默认档位不是受限档。
-2. ~~`issue_dependency` 是否有可用读接口~~ **已核实：没有。** `cmd/server/router.go` 全文没有任何 dependency 端点注册，CLI 拿不到这张表。1.2 的「不导出」结论成立，不再是未确认项。
-3. ~~前端是否仍在读 `issue.acceptance_criteria` / `context_refs`~~ **已核实：没有。** `packages/` 与 `apps/` 的 `.ts` / `.tsx` 里对这两个名字（含驼峰写法）零命中，`IssueResponse` 也不序列化它们。1.3 的「不导出不丢用户可见内容」结论成立。
-4. **`GET /api/issues` 在官方云上的实际行为**：`limit` 上限、是否有速率限制、`sort=created_at` 是否被支持（本页依据的是 `kun` 的代码，官方云版本可能更旧或更新）。V2 §8.9 已有速率限制这一条，这里是它在 issue 端点上的具体化。
-5. **官方云的 `ListComments` 是否支持 `since` 参数**（8.4）。`since` 的 RFC3339Nano 回退解析注释里写着「backwards-compat with the original CLI」，说明它存在了一段时间，但官方云版本**未确认**。不支持时超过 2000 条评论的 issue 只能拿到最新 2000 条，必须在 `export_gaps` 里记 `comment_window_truncated` 并在导入报告回显。
-6. ~~`issue.properties` 的值结构~~ **已核实并写进 1.2.1**：九种属性类型、三类值形状、`actor` / `multi_actor` 藏着 actor 引用。剩下的未确认部分只有一条：**官方云的属性类型集合是否与 `kun` 一致**——若官方云多出一种 `kun` 没有的类型，导出端按白名单投影会把它丢掉，需要在 `export_gaps` 记 `property_type_unknown`。
-7. **官方云的墓碑评论行为**。`kun` 侧已核实：默认列表路径 `ListCommentsForIssue`（`comment.sql:1`）**没有** `deleted_at IS NULL` 条件，`commentToResponse`（`comment.go:122`）也把 `DeletedAt` 序列化出去，所以默认路径确实返回墓碑行，1.5 与第 4 节的父指针回填成立。官方云的版本是否一致**未确认**。若官方云过滤掉墓碑，第 4 节的回填在这些位置会断链，实现 Stage 要改用「父指针解析不到就上溯到最近的可解析祖先」而不是置空。
+**一页结论**
+
+| # | 问题 | 结论 | 实现侧要做的事 |
+| --- | --- | --- | --- |
+| 11.1 | 自建实例的任务数配额 | 自建默认档 provider 为 nil，配额恒不生效 | 不调用配额检查，但报告必须回显策略；`enforce` 且会越线时拒绝导入 |
+| 11.2 | `issue_dependency` 读接口 | 没有 | 不导出 |
+| 11.3 | 前端是否读 `acceptance_criteria` / `context_refs` | 没有 | 不导出 |
+| 11.4 | 官方云 `GET /api/issues` | `limit` 静默钳 100；支持 `sort=created_at` + `direction=asc`；未观察到速率限制 | 按 8.4 改写后的口径翻页 |
+| 11.5 | 官方云 `GET /api/issues/{id}/comments` 的 `since` | 支持，RFC3339 与 RFC3339Nano 都收 | 按 8.4 实现去重翻页；不传 `fold` |
+| 11.6 | 官方云属性类型集合 | 与 `kun` 逐字相同（9 种） | 白名单投影安全；`property_type_unknown` 保留为防御分支 |
+| 11.7 | 官方云是否返回墓碑评论 | 源码两侧一致「返回」，但**没拿到正样本** | 父指针无条件实现「上溯最近可解析祖先」 |
+
+### 11.1 任务数配额在自建实例上的行为 — 已核实：默认不生效
+
+**结论：未配 `MULTICA_CLOUD_URL` 的自建实例上，`entitlement.Provider` 是 `nil`，`CheckIssueCreateCapacity` 恒返回 nil，任务数配额根本不存在。**
+
+- `entitlement.New` 在 `BaseURL` 为空时返回一个 `enabled` 为零值的客户端（`internal/entitlement/client.go:58`-`:60`），`Enabled()` 因此为 false（`client.go:95`）；`cmd/server/router.go:459` 只在 `entitlementClient.Enabled()` 为真时才把它挂到 `h.IssueService.Entitlements`（`router.go:462`）。provider 保持 nil。
+- provider 为 nil 时 `ResolveIssueCountPolicy` 直接返回 `ActionOff`（`internal/service/issue_limit.go:34`-`:35`），`CheckIssueCreateCapacity` 立刻返回 nil（`issue_limit.go:67`），`AllocateIssueNumber` 也不做任何计数。
+- 自建默认就是空值：`docker-compose.selfhost.yml:120` 写的是 `${MULTICA_CLOUD_URL:-}`，`.env.example:216` 为空，Helm 默认渲染出 `MULTICA_CLOUD_URL: ""`（`scripts/helm-config.test.sh:36` 就是断言这一点）。
+- **即使自建实例配了 `MULTICA_CLOUD_URL` 也基本拦不住**：Cloud 不可达、策略过期、版本回退、`observe` 档，全部 fail-open 成 `ActionOff`（`client.go:97` 的 Gate 分支表 + `issue_limit.go:44`-`:57` 的 `default` 分支）。只有「`enforce` 且 `limit > 0`」这一种组合会真的拦票。
+
+实测（本机，2026-09-17）：
+
+```
+(cd server && DATABASE_URL=postgres://multica@localhost:5432/multica_dene383?sslmode=disable \
+  go test ./internal/service -run 'IssueCountPolicy|IssueCountLimit' -count=1 -v)
+# PASS TestResolveIssueCountPolicyUsesOnlyCloudInstruction
+# PASS TestIssueCountLimitSerializesConcurrentCreatesAndDeleteFreesCapacity
+(cd server && go test ./internal/entitlement \
+  -run 'TestDefaultConfigIsDisabledAndPerformsNoIO|TestConnectedConfigValidation|TestColdFailuresFailOpen' -count=1 -v)
+# PASS（含 12 个 fail-open 子用例：unauthorized / not_found / server_error / 过期 TTL / cloud_observe_action ...）
+```
+
+前一个测试里的 `disabled := ResolveIssueCountPolicy(ctx, nil, workspaceID)` 断言就是本条结论本身（`internal/service/issue_limit_test.go:64`）。
+
+**实现口径（写死）：**
+
+1. V3 导入路径本来就不走 `CreateIssue` / `AllocateIssueNumber`，因此**不额外调用** `CheckIssueCreateCapacity`——它是商业化闸门，不是数据完整性约束。
+2. 但**不许静默越线**：写入任何行之前先读一次 `ResolveIssueCountPolicy(ctx, h.Entitlements, wsUUID)`，把 `{action, limit, used}` 写进导入报告。
+3. `action == enforce` 且 `used + 包内 issue 数 > limit` 时**拒绝整批导入**，返回报告行 `issue_limit_would_exceed`（带 `limit` / `used` / `incoming`），不写任何行。这与第 7.3 节第 6 条「目标非空则 400 且不写任何行」是同一种前置闸门。
+4. 目标端现成的只读口径是 `GET /api/workspaces/{id}/issues/limit-usage`（`internal/handler/issue_limit.go:19`，挂在 `router.go:1875`）：不 enforce 时返回 **204**，enforce 时返回 `{used, limit}`。CLI 侧做导入前预检可以直接用它，不必自己算。
+
+### 11.2 `issue_dependency` 是否有可用读接口 — 已核实：没有
+
+（沿用上一轮结论）`cmd/server/router.go` 全文没有任何 dependency 端点注册，CLI 拿不到这张表。1.2 的「不导出」结论成立。
+
+### 11.3 前端是否仍在读 `issue.acceptance_criteria` / `context_refs` — 已核实：没有
+
+（沿用上一轮结论）`packages/` 与 `apps/` 的 `.ts` / `.tsx` 里对这两个名字（含驼峰写法）零命中，`IssueResponse` 也不序列化它们。1.3 的「不导出不丢用户可见内容」结论成立。
+
+### 11.4 官方云 `GET /api/issues` 的实际行为 — 已核实
+
+只读实测（`multica` CLI v0.4.57 → `https://api.multica.ai`，`deneb-3029` 工作区，2026-09-17）加官方源码（`upstream/main` = `7e4758ac1a`）交叉验证，三问逐条：
+
+- **`limit` 上限 = 100，且静默钳位。** 官方源码 `server/internal/handler/issue.go:1263`-`:1272`（upstream）与 `kun` 的 `:1253`-`:1261` **逐字相同**：默认 100，`> 100` 直接改写成 100，不报 400。`--limit 100` 实测正常返回。CLI 自己会在 `> 100` 时客户端报错（`--limit must be between 1 and 100`），所以用 CLI 探不到服务端的钳位行为，结论来自源码。
+- **支持 `sort=created_at` + `direction=asc`。** 实测三组：`--sort created_at --direction asc` → DENE-2 起升序；`--direction desc` → 最新在前；不带 `--direction` → 默认 ASC（`issue.go:1350`-`:1352`，只有 `last_activity_at` 默认 DESC）。参数名是 `direction`，`dir` 无效，见 8.4。
+- **未观察到速率限制。** 官方 `router.go` 只在 auth（`RATE_LIMIT_AUTH`，5/min）、auth-verify（20/min）、contact-sales（5/h）、邀请、webhook、plugin API（`RATE_LIMIT_PLUGIN_API`，120/min）上挂限流中间件；`/api` 的通用业务路由链上没有任何 `middleware.RateLimit`。实测两轮：387 次串行 `issue comment list` 用时 439 s（≈0.9 req/s）零限流，仅 2 次网络超时；60 次 12 并发突发用时 6 s（≈10 req/s）零错误。
+
+**给实现 Stage 的口径**：仍然按「遇到 429 就指数退避」实现，但不要为此把导出降速到串行——10 req/s 已实测可用。V2 §8.9 那条速率限制未确认项在 issue 端点上按本条收敛。
+
+### 11.5 官方云的 `ListComments` 是否支持 `since` — 已核实：支持
+
+- 实测：`multica issue comment list <id> --since 2000-01-01T00:00:00Z` 返回全量 24 条；`--since 2026-09-16T00:00:00.000000001Z`（RFC3339**Nano**）同样被接受并正常过滤。两种精度都收。
+- 官方源码对得上：`upstream/main` 的 `server/pkg/db/queries/comment.sql:61` 就是 `ListCommentsSinceForIssue`，注释写明「Powers the CLI's `--since` agent-polling flow」，谓词 `created_at > $3 ORDER BY created_at ASC, id ASC LIMIT $4` 与 `kun` 一致。
+- 因此 8.4 的「并列 `created_at` 会被永久跳过」这个坑在官方云上**同样存在**，去重翻页是必须的，不是防御性冗余。
+- `export_gaps` 的 `comment_window_truncated` 仍然保留：它现在的触发条件不再是「云端不支持 `since`」，而是「单张 issue 评论数超 `commentHardCap = 2000` 且 `since` 翻页在导出窗口内没追平」。
+
+### 11.6 官方云的属性类型集合是否与 `kun` 一致 — 已核实：逐字相同
+
+`upstream/main:server/internal/handler/property.go:55` 与 `kun` 的同名同行**逐字相同**：
+
+```go
+var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor"}
+```
+
+九种类型没有任何差集，1.2.1 的三类值形状（标量 / 选项 id / actor 引用）对官方云成立，白名单投影不会丢类型。
+
+限制说明：探测用的官方云工作区 `property list` 返回 `[]`（该工作区没有自定义属性），所以这条是**源码级**核实，不是数据级核实；在只读约束下无法通过创建属性来验证接口拒绝面。`export_gaps` 的 `property_type_unknown` **保留**为防御分支——上游随时可能加第十种类型，而导出端是白名单投影，加了也不会报错，只会静默丢。
+
+### 11.7 官方云的墓碑评论行为 — 结论：按「返回墓碑」实现，但父指针必须无条件上溯
+
+**源码结论（两侧一致）：默认列表路径返回墓碑行。**
+
+- `upstream/main:server/pkg/db/queries/comment.sql:1` 的 `ListCommentsForIssue` **没有** `deleted_at IS NULL` 条件，与 `kun` 一致；
+- `upstream/main:server/internal/handler/comment.go` 里 `commentToResponse` 把 `DeletedAt` 序列化出去（`deleted_at,omitempty`），响应构建路径上没有任何按 `DeletedAt` 过滤的分支。
+
+**但这条拿不到正样本，必须写明。** 墓碑的产生条件是「删除一条已经有回复的评论」，而只读约束下不能在官方云制造一条。实测把 `deneb-3029` 工作区**全部 387 张 issue 的评论**拉了一遍（387 次 `issue comment list --output json`，`deleted_at` 因 `omitempty` 只在非空时出现），**零命中**——该工作区历史上没有产生过墓碑，所以既没有反例，也没有正例。CLI 的 `--workspace-id` / `MULTICA_WORKSPACE_ID` 在 Agent 运行环境下被任务上下文钉死，换工作区取样也做不到。
+
+**实现口径（写死，不依赖本条结论的对错）：第 4 节的父指针回填一律实现「上溯到最近的可解析祖先」，不置空。**
+
+理由是这条降级无论墓碑问题的答案是什么都必须存在：
+
+1. 若官方云确实过滤墓碑，被删父评论的整串回复会在回填时断链、线程被拍平——契约 §11.7 原文指定的就是这个方向；
+2. 即使返回墓碑，单张 issue 评论数超 `commentHardCap = 2000` 时默认路径只给最新 2000 条，老线程根同样会落在窗口外，父指针照样解析不到；
+3. 上溯的代价只是导入端多一次 map 查找，而置空的代价是用户永久丢失线程结构。
+
+具体规则：`parent_id` 在包内解析不到时，沿源端的父链向上找第一个**包内存在**的祖先作为新的 `parent_id`；一路到根都找不到才置空并记 `parent_unmapped`；每次发生上溯记一条 `parent_reparented_to_ancestor`，报告里给出被跳过的层数。第 7.3 节第 10 条「墓碑保序」的断言照旧，另加一条：构造一个「父评论不在包内」的线程，断言子回复挂到最近的包内祖先而不是被置空。
 
 ## 12. 给后续 Stage 的交接清单
 
@@ -544,7 +667,11 @@ V2 §8 的 10 条未确认项**继续有效**，本页新增：
 
 - `internal/service/transfer_bundle.go`：新增 `TransferIssueRow` / `TransferCommentRow` / `TransferRelationRow` / `TransferIssuesRequest` / `TransferIssuesReport`；`TransferRefs` 加 `Members` / `Squads` / `Issues` / `IssueStatuses`；`TransferBundleSchemaVersion` 改为按内容取 1 或 2。
 - `internal/service/transfer_ids.go`：新增三个命名空间与三个推导函数（9.5）。
-- `internal/service/transfer_import.go`：新增 `ImportTransferIssues`，含 mention 重写、状态降级、指派映射、两遍写入的第一遍；`finalize` 分支做父指针回填 + 顶水位 + 订阅者重建。
+- `internal/service/transfer_import.go`：新增 `ImportTransferIssues`，含 mention 重写、状态降级、指派映射、两遍写入的第一遍；`finalize` 分支做父指针回填 + 顶水位 + 订阅者重建。**comment 的父指针回填走「上溯最近包内祖先」**（4.1 / 11.7）。
+- **DENE-383 核实后新增的三条硬约束**（不照做就会踩已知坑）：
+  1. `project_id` 必须在 `TransferInsertIssue` 那一条 `INSERT` 里写对，**不得**事后 `UPDATE issue SET project_id`——`issue` 上有 `trg_issue_project_dirty_hourly`（7.1）。
+  2. 导入前读一次 `ResolveIssueCountPolicy` 并回显 `{action, limit, used}`；`enforce` 且会越线时返回 `issue_limit_would_exceed` 且不写任何行（11.1）。
+  3. 导出评论时**不得传 `fold` 参数**，否则已解决线程的中间评论会被静默丢光（8.4 / 11.5）。
 - `internal/handler/workspace_transfer.go`：新增 `ImportWorkspaceTransferIssues`，权限同 V2。
 - `cmd/server/router.go`：`POST /transfer/issues` 挂在与 V2 三个端点相同的 admin 分组内。
 - `pkg/db/queries/workspace_transfer.sql`：7.2 列出的 9 条新语句 + `TransferInsertAttachment` 加两列。**不写任何联动其他表的 CTE。**
@@ -552,7 +679,7 @@ V2 §8 的 10 条未确认项**继续有效**，本页新增：
 
 CLI（`server/cmd/multica/`）：
 
-- `transfer export` 新增 `issues` include 分组；四组读接口翻页（`GET /api/issues`、`GET /api/issues/{id}/comments`、`GET /api/issues/{id}/attachments`、`GET /api/issues/{id}/labels`），按 8.4 的两个坑实现分页。
+- `transfer export` 新增 `issues` include 分组；四组读接口翻页（`GET /api/issues`、`GET /api/issues/{id}/comments`、`GET /api/issues/{id}/attachments`、`GET /api/issues/{id}/labels`），按 8.4 的三个坑实现分页。
 - `transfer import` 新增 issues 分片上传与 `--renumber`（含 2.4 的确认提示与映射表落盘）。
 - `--estimate` 覆盖 issues（8.3）。
 - 用 `httptest` 模拟「上游形态」的读接口做导出测试，不访问真实官方云。
