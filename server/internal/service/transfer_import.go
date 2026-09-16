@@ -740,14 +740,29 @@ func ImportTransferIssues(ctx context.Context, env TransferImportEnv, req Transf
 		report.Finalized = req.Finalize
 		return report, nil
 	}
-	if err := state.write(ctx, plan); err != nil {
+	// The whole write half is one transaction, so a shard that fails halfway
+	// through rolls back instead of leaving the target holding half a task tree
+	// (contract §7.1). The reads above stay outside it: they only resolve
+	// identities and downgrades into the plan.
+	tx, err := env.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin issues tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	writeState := *state
+	writeState.env.Queries = env.Queries.WithTx(tx)
+	if err := writeState.write(ctx, plan); err != nil {
 		return nil, err
 	}
 	if req.Finalize {
-		if err := state.finalize(ctx, plan); err != nil {
+		if err := writeState.finalize(ctx, plan); err != nil {
 			return nil, err
 		}
 		report.Finalized = true
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit issues: %w", err)
 	}
 	return report, nil
 }

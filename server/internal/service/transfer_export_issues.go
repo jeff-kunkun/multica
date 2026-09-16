@@ -623,14 +623,15 @@ func scrubTransferJSONValue(v any, path string, note func(string)) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, child := range t {
+			full := joinJSONPath(path, k)
 			if secretKeyName(k) {
 				if child != nil {
 					t[k] = nil
-					note(k)
+					note(full)
 				}
 				continue
 			}
-			scrubTransferJSONValue(child, k, note)
+			scrubTransferJSONValue(child, full, note)
 		}
 	case []any:
 		for i, child := range t {

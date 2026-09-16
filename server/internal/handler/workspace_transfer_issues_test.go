@@ -345,6 +345,31 @@ func TestTransferIssues_RejectsNonEmptyTarget(t *testing.T) {
 	}
 }
 
+// DENE-401: a shard that fails halfway through leaves nothing behind.
+//
+// The write half used to run statement by statement against the pool, so a
+// failure after the issue rows landed left the target holding part of a
+// migrated task tree: the retry's `ON CONFLICT DO NOTHING` then silently
+// skipped the rows the failed run had written, and the report called it
+// finished. Contract §7.1 asks for the ROLLBACK instead.
+func TestTransferIssues_RollsBackTheWholeShardOnMidwayFailure(t *testing.T) {
+	_, dst := setupConfigWorkspaces(t)
+
+	// Two rows carrying the same number: the first insert lands, the second
+	// trips `uq_issue_workspace_number` inside the write loop, which is exactly
+	// the "failure after a row was already written" case.
+	body := transferIssueBody(nil, []map[string]any{
+		transferIssueRow("rollback-a", 1, "first", testUserID, nil),
+		transferIssueRow("rollback-b", 1, "second", testUserID, nil),
+	}, nil, nil, false)
+
+	postTransferIssues(t, dst, body).Want(http.StatusInternalServerError)
+
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE workspace_id = $1`, dst); n != 0 {
+		t.Fatalf("a failed shard left %d issue rows in the target, want 0 — the write half has to roll back whole", n)
+	}
+}
+
 // DENE-400: the escape hatch §2.3 promises has to be reachable on the real
 // gate, not only against the CLI's fake server (which never implemented the
 // gate at all). `renumber` is the request declaring that the caller offset the

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -120,6 +121,39 @@ func TestTransferPreviousMicrosecond_BacksOffOneMicrosecond(t *testing.T) {
 	}
 	if _, ok := transferPreviousMicrosecond("not-a-time"); ok {
 		t.Fatal("a malformed timestamp must not produce a cursor")
+	}
+}
+
+// DENE-401: a secret key nested inside a value bag is reported at its real
+// path.
+//
+// The recursion passed the bare key down, so `metadata.a.token` was recorded as
+// `metadata.token`. The value was nulled either way — the bag is scrubbed
+// regardless — but `secrets_omitted.json` is the only place a user can find out
+// which field lost its value, and a path naming a field that does not exist
+// points at nothing.
+func TestScrubTransferJSONBag_ReportsTheNestedSecretPath(t *testing.T) {
+	var secrets []SecretOmitted
+	out := scrubTransferJSONBag(
+		json.RawMessage(`{"a":{"token":"sk-live"},"keep":"value"}`),
+		"issue", "issue-1", "metadata", &secrets,
+	)
+	if len(secrets) != 1 {
+		t.Fatalf("secrets_omitted=%v, want the one nested secret", secrets)
+	}
+	if secrets[0].Field != "metadata.a.token" {
+		t.Fatalf("field=%q, want the full path metadata.a.token", secrets[0].Field)
+	}
+	var tree map[string]any
+	if err := json.Unmarshal(out, &tree); err != nil {
+		t.Fatalf("scrubbed bag is not JSON: %v", err)
+	}
+	nested, _ := tree["a"].(map[string]any)
+	if nested["token"] != nil {
+		t.Fatalf("the secret value survived the scrub: %v", tree)
+	}
+	if tree["keep"] != "value" {
+		t.Fatalf("the scrub dropped a neighbouring key: %v", tree)
 	}
 }
 
