@@ -111,7 +111,7 @@ Desktop 的「跨环境迁移」卡片上有同样四个勾选项，默认值与
 2. **`runtimes_to_bind`**  
    每行一个 `status`：`bound`（已经绑好，看 `bound_runtime_name`）、`pending`（有多个候选，需要你选）、`no_candidate`（目标实例上没有匹配的运行时，`reason_code` + `reason` 说明缺什么）。零候选最常见的原因是目标实例上还没有那台机器：先把本机 daemon 连到目标实例，再重跑一次导入，或在卡片上手动选一个运行时。
 3. **`export_gaps`**  
-   源端哪些分组没导出或没按规则过滤。例如 `plugin_skills_unfiltered` 表示源端插件接口不可用，插件贡献的技能被整包带过来了，需要你自己核对。`issue_views_scope_capped` 与 `list_cap_reached`（源端单次请求上限已满，条目里带 `limit`）、`list_has_more`（源端还有下一页）、`list_shape_unknown`（源端返回了本项目读不懂的结构，等于整组没取到）都表示该分组列表不完整：这类分组只带回了服务端一次请求给得出的行，剩下的要你自己按提示回源端补。
+   源端哪些分组没导出或没按规则过滤。例如 `plugin_skills_unfiltered` 表示源端插件接口不可用，插件贡献的技能被整包带过来了，需要你自己核对。`issue_views_scope_capped` 与 `list_cap_reached`（源端单次请求上限已满，条目里带 `limit`）、`list_has_more`（源端还有下一页）、`list_shape_unknown`（源端返回了本项目读不懂的结构，等于整组没取到）都表示该分组列表不完整：这类分组只带回了服务端一次请求给得出的行，剩下的要你自己按提示回源端补。`autopilot_fields_unreadable` 表示某条自动化的详情读不出任何字段（源端返回了本项目读不懂的结构），导出侧没有把它当成一条空自动化塞进包里，而是直接丢掉并记这条：这类自动化不会出现在「自动化：导入 N 条」里，需要你回源端核对后再单独补。
 
 多候选那部分也可以在命令行补：
 

@@ -491,13 +491,19 @@ const (
 	// issue on purpose. It is a sample, not a truncation, and never blocks a
 	// bundle because estimate mode writes none.
 	gapReasonCommentWindowSampled = "comment_window_sampled"
+	// gapReasonAutopilotFieldsUnreadable: the autopilot detail body carried
+	// none of the fields this exporter maps, so the row was dropped instead of
+	// exported empty for the import to skip as assignee_unmapped. The rest of
+	// the group still ships, so this is a warning, not a read failure.
+	gapReasonAutopilotFieldsUnreadable = "autopilot_fields_unreadable"
 )
 
 func warningGapReason(reason string) bool {
 	switch reason {
 	case gapReasonPluginUnfiltered, gapReasonIssueViewsCapped,
 		gapReasonListCapReached, gapReasonListHasMore, gapReasonListShapeUnknown,
-		gapReasonCommentWindowTruncated, gapReasonCommentWindowSampled:
+		gapReasonCommentWindowTruncated, gapReasonCommentWindowSampled,
+		gapReasonAutopilotFieldsUnreadable:
 		return true
 	}
 	return false
@@ -933,7 +939,7 @@ func sourceExportProjects(ctx context.Context, src TransferSourceClient, bundle 
 	bundle.Stats["projects"] = len(bundle.Entities.Projects)
 }
 
-func sourceExportAutopilots(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {
+func sourceExportAutopilots(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, gaps *[]TransferExportGap, gap func(string, error)) {
 	var rows []map[string]any
 	if trunc, err := getList(ctx, src, "/api/autopilots", &rows); err != nil {
 		gap("autopilots", err)
@@ -943,25 +949,36 @@ func sourceExportAutopilots(ctx context.Context, src TransferSourceClient, bundl
 	}
 	for _, raw := range rows {
 		id := strField(raw, "id")
+		// GET /api/autopilots/{id} wraps the autopilot body:
+		// {"autopilot": {...}, "triggers": [...], "collaborators": [...]}.
+		// Reading that envelope as the autopilot itself exported a row with
+		// every field empty, which the import then skipped as
+		// assignee_unmapped (DENE-403). Unwrap the body; triggers and
+		// collaborators stay top-level siblings. The list row is the fallback
+		// when the detail read fails or the body key is absent — it carries the
+		// same autopilot fields.
+		body := raw
 		var detail map[string]any
 		if err := src.GetJSON(ctx, "/api/autopilots/"+url.PathEscape(id), &detail); err == nil && len(detail) > 0 {
-			raw = detail
+			if nested, ok := detail["autopilot"].(map[string]any); ok && len(nested) > 0 {
+				body = nested
+			}
 		}
 		ap := ConfigAutopilot{
 			SourceID:           id,
-			Title:              strField(raw, "title"),
-			Description:        strField(raw, "description"),
-			ExecutionMode:      strField(raw, "execution_mode"),
-			IssueTitleTemplate: strPtrField(raw, "issue_title_template"),
-			Status:             strField(raw, "status"),
+			Title:              strField(body, "title"),
+			Description:        strField(body, "description"),
+			ExecutionMode:      strField(body, "execution_mode"),
+			IssueTitleTemplate: strPtrField(body, "issue_title_template"),
+			Status:             strField(body, "status"),
 		}
-		if at := strField(raw, "assignee_type"); at != "" {
-			ap.Assignee = &ConfigPolymorphicRef{Type: at, ID: strField(raw, "assignee_id")}
+		if at := strField(body, "assignee_type"); at != "" {
+			ap.Assignee = &ConfigPolymorphicRef{Type: at, ID: strField(body, "assignee_id")}
 		}
-		if pid := strField(raw, "project_id"); pid != "" {
+		if pid := strField(body, "project_id"); pid != "" {
 			ap.ProjectID = &pid
 		}
-		if trigs, ok := raw["triggers"].([]any); ok {
+		if trigs, ok := detail["triggers"].([]any); ok {
 			for _, t := range trigs {
 				m, _ := t.(map[string]any)
 				ap.Triggers = append(ap.Triggers, ConfigAutopilotTrigger{
@@ -986,21 +1003,40 @@ func sourceExportAutopilots(ctx context.Context, src TransferSourceClient, bundl
 				}
 			}
 		}
-		if subs, ok := raw["subscribers"].([]any); ok {
+		if subs, ok := body["subscribers"].([]any); ok {
 			for _, s := range subs {
 				m, _ := s.(map[string]any)
 				ap.Subscribers = append(ap.Subscribers, ConfigAutopilotPerson{UserType: strField(m, "user_type"), UserID: strField(m, "user_id")})
 			}
 		}
-		if cols, ok := raw["collaborators"].([]any); ok {
+		if cols, ok := detail["collaborators"].([]any); ok {
 			for _, s := range cols {
 				m, _ := s.(map[string]any)
 				ap.Collaborators = append(ap.Collaborators, ConfigAutopilotPerson{UserType: strField(m, "user_type"), UserID: strField(m, "user_id")})
 			}
 		}
+		if autopilotBodyUnreadable(ap) {
+			// A body this exporter cannot read reaches the target as
+			// assignee_unmapped and is skipped there. Counting it here would
+			// report an automation that never arrives, so drop the empty row
+			// and name the degradation instead.
+			*gaps = append(*gaps, TransferExportGap{Group: "autopilots", Reason: gapReasonAutopilotFieldsUnreadable})
+			continue
+		}
 		bundle.Entities.Autopilots = append(bundle.Entities.Autopilots, ap)
 	}
 	bundle.Stats["autopilots"] = len(bundle.Entities.Autopilots)
+}
+
+// autopilotBodyUnreadable reports a response body that yielded none of the
+// fields this exporter maps. Every autopilot row has a title (NOT NULL in the
+// schema) and an assignee, so an all-empty body means the source answered in a
+// shape this exporter does not read — not that the autopilot is empty.
+func autopilotBodyUnreadable(ap ConfigAutopilot) bool {
+	return ap.Title == "" && ap.Description == "" && ap.ExecutionMode == "" &&
+		ap.Status == "" && ap.IssueTitleTemplate == nil && ap.Assignee == nil &&
+		ap.ProjectID == nil && len(ap.Triggers) == 0 && len(ap.Subscribers) == 0 &&
+		len(ap.Collaborators) == 0
 }
 
 func sourceExportQuickActions(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {

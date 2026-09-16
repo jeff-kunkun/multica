@@ -174,6 +174,140 @@ func collectGaps(gaps *[]TransferExportGap) func(string, error) {
 	return func(group string, err error) { *gaps = append(*gaps, transferReadGap(group, err)) }
 }
 
+// DENE-403: GET /api/autopilots/{id} answers with the autopilot body nested
+// under "autopilot", plus triggers and collaborators as top-level siblings.
+// Reading the envelope itself as the autopilot exported a row whose every field
+// was empty, which the import then skipped as assignee_unmapped — so no
+// automation ever reached the target.
+func TestSourceExportAutopilots_UnwrapsDetailEnvelope(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/autopilots": map[string]any{
+			"autopilots": []map[string]any{{"id": "ap-1", "title": "验收自动驾驶"}},
+			"total":      1,
+		},
+		// The envelope shape server/internal/handler/autopilot.go writes.
+		"/api/autopilots/ap-1": map[string]any{
+			"autopilot": map[string]any{
+				"id":                   "ap-1",
+				"title":                "验收自动驾驶",
+				"description":          "每个工作日早晨跑一遍",
+				"status":               "active",
+				"execution_mode":       "create_issue",
+				"assignee_type":        "agent",
+				"assignee_id":          "22222222-2222-4222-8222-000000000001",
+				"project_id":           "proj-1",
+				"issue_title_template": "daily {{date}}",
+				"subscribers":          []map[string]any{{"user_type": "member", "user_id": "user-sub"}},
+			},
+			"triggers": []map[string]any{{
+				"kind": "schedule", "enabled": true,
+				"cron_expression": "0 9 * * *", "timezone": "Asia/Shanghai",
+			}},
+			"collaborators": []map[string]any{{"user_type": "member", "user_id": "user-col"}},
+		},
+	}}
+	bundle := &ConfigBundle{Entities: ConfigEntities{}, Stats: map[string]int{}}
+	var gaps []TransferExportGap
+	sourceExportAutopilots(context.Background(), src, bundle, &gaps, collectGaps(&gaps))
+
+	if len(gaps) != 0 {
+		t.Fatalf("unexpected gaps=%v", gaps)
+	}
+	if len(bundle.Entities.Autopilots) != 1 {
+		t.Fatalf("autopilots=%v", bundle.Entities.Autopilots)
+	}
+	ap := bundle.Entities.Autopilots[0]
+	if ap.Title != "验收自动驾驶" || ap.Status != "active" || ap.ExecutionMode != "create_issue" {
+		t.Fatalf("autopilot body not unwrapped: %+v", ap)
+	}
+	if ap.Description != "每个工作日早晨跑一遍" || ap.IssueTitleTemplate == nil || *ap.IssueTitleTemplate != "daily {{date}}" {
+		t.Fatalf("autopilot text fields = %+v", ap)
+	}
+	if ap.Assignee == nil || ap.Assignee.Type != "agent" || ap.Assignee.ID != "22222222-2222-4222-8222-000000000001" {
+		t.Fatalf("assignee = %+v, want the agent from the nested body", ap.Assignee)
+	}
+	if ap.ProjectID == nil || *ap.ProjectID != "proj-1" {
+		t.Fatalf("project_id = %v", ap.ProjectID)
+	}
+	// The unwrap must not take triggers/collaborators with it: they live on the
+	// envelope, one level above the body.
+	if len(ap.Triggers) != 1 || ap.Triggers[0].Kind != "schedule" ||
+		ap.Triggers[0].CronExpression == nil || *ap.Triggers[0].CronExpression != "0 9 * * *" {
+		t.Fatalf("triggers = %+v, want the schedule trigger from the envelope top level", ap.Triggers)
+	}
+	if len(ap.Collaborators) != 1 || ap.Collaborators[0].UserID != "user-col" {
+		t.Fatalf("collaborators = %+v", ap.Collaborators)
+	}
+	if len(ap.Subscribers) != 1 || ap.Subscribers[0].UserID != "user-sub" {
+		t.Fatalf("subscribers = %+v, want the nested body's subscribers", ap.Subscribers)
+	}
+	if bundle.Stats["autopilots"] != 1 {
+		t.Fatalf("stats=%v", bundle.Stats)
+	}
+}
+
+// The list row is a complete autopilot body, so a detail read that fails (or an
+// envelope key this exporter does not know) must still export the row.
+func TestSourceExportAutopilots_FallsBackToTheListRow(t *testing.T) {
+	src := &fakeTransferSource{
+		payloads: map[string]any{
+			"/api/autopilots": map[string]any{
+				"autopilots": []map[string]any{{
+					"id": "ap-1", "title": "夜跑", "status": "paused",
+					"execution_mode": "run_only", "assignee_type": "agent", "assignee_id": "ag-1",
+				}},
+				"total": 1,
+			},
+		},
+		errors: map[string]error{
+			"/api/autopilots/ap-1": &TransferHTTPError{Status: 500, Err: fmt.Errorf("boom")},
+		},
+	}
+	bundle := &ConfigBundle{Entities: ConfigEntities{}, Stats: map[string]int{}}
+	var gaps []TransferExportGap
+	sourceExportAutopilots(context.Background(), src, bundle, &gaps, collectGaps(&gaps))
+
+	if len(bundle.Entities.Autopilots) != 1 {
+		t.Fatalf("autopilots=%v", bundle.Entities.Autopilots)
+	}
+	ap := bundle.Entities.Autopilots[0]
+	if ap.Title != "夜跑" || ap.Status != "paused" || ap.Assignee == nil || ap.Assignee.ID != "ag-1" {
+		t.Fatalf("autopilot=%+v, want the list row when the detail read fails", ap)
+	}
+}
+
+// A body this exporter cannot read must not be counted as an exported
+// automation: it reaches the target as assignee_unmapped and is skipped there.
+func TestSourceExportAutopilots_NamesUnreadableBodyInsteadOfCountingIt(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/autopilots": map[string]any{
+			"autopilots": []map[string]any{{"id": "ap-1"}},
+			"total":      1,
+		},
+		"/api/autopilots/ap-1": map[string]any{
+			"autopilot":     map[string]any{"id": "ap-1"},
+			"triggers":      []map[string]any{},
+			"collaborators": []map[string]any{},
+		},
+	}}
+	bundle := &ConfigBundle{Entities: ConfigEntities{}, Stats: map[string]int{}}
+	var gaps []TransferExportGap
+	sourceExportAutopilots(context.Background(), src, bundle, &gaps, collectGaps(&gaps))
+
+	if len(bundle.Entities.Autopilots) != 0 {
+		t.Fatalf("autopilots=%v, want the unreadable row dropped", bundle.Entities.Autopilots)
+	}
+	if bundle.Stats["autopilots"] != 0 {
+		t.Fatalf("stats=%v, want no exported-automation count for a row that cannot arrive", bundle.Stats)
+	}
+	if len(gaps) != 1 || gaps[0].Group != "autopilots" || gaps[0].Reason != gapReasonAutopilotFieldsUnreadable {
+		t.Fatalf("gaps=%v, want one %s entry", gaps, gapReasonAutopilotFieldsUnreadable)
+	}
+	if !warningGapReason(gaps[0].Reason) {
+		t.Fatalf("reason %q must be a warning: the rest of the group still ships", gaps[0].Reason)
+	}
+}
+
 func TestWarningGapReason_ClassifiesReadFailuresAsFatal(t *testing.T) {
 	for _, reason := range []string{gapReasonReadAPIError, gapReasonReadAPIMissing, "something_else"} {
 		if warningGapReason(reason) {
@@ -183,6 +317,7 @@ func TestWarningGapReason_ClassifiesReadFailuresAsFatal(t *testing.T) {
 	for _, reason := range []string{
 		gapReasonPluginUnfiltered, gapReasonIssueViewsCapped,
 		gapReasonListCapReached, gapReasonListHasMore, gapReasonListShapeUnknown,
+		gapReasonAutopilotFieldsUnreadable,
 	} {
 		if !warningGapReason(reason) {
 			t.Errorf("reason %q must be a warning", reason)

@@ -264,3 +264,94 @@ func TestTransferImportAppliesIssuePrefixOption(t *testing.T) {
 		})
 	}
 }
+
+// DENE-403 end to end: the export half must hand the import half a real
+// autopilot body, not the GET /api/autopilots/{id} envelope. With the envelope
+// read as the autopilot, the bundle carried an all-empty row, the import
+// skipped it as assignee_unmapped, and the target workspace ended up with no
+// automation at all. This drives export → import → the target's autopilot row.
+func TestTransferAutopilotRoundTripKeepsSourceStatus(t *testing.T) {
+	ctx := context.Background()
+	fixture := newTransferOptionsFixture(t, nil)
+
+	suffix := time.Now().UnixNano()
+	title := fmt.Sprintf("xfer-roundtrip-ap-%d", suffix)
+	agentSourceID := uuid.NewString()
+	autopilotID := uuid.NewString()
+
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/me":              map[string]any{"id": uuid.NewString(), "email": "owner@example.com"},
+		"/api/workspaces":      []map[string]any{{"id": "ws-1", "slug": "src", "name": "Src"}},
+		"/api/workspaces/ws-1": map[string]any{"id": "ws-1", "slug": "src", "name": "Src"},
+		"/api/agents": []map[string]any{{
+			"id": agentSourceID, "name": fmt.Sprintf("xfer-agent-%d", suffix), "instructions": "do work",
+			"runtime_mode": "local", "visibility": "workspace", "permission_mode": "private",
+			"max_concurrent_tasks": 1, "runtime_config": map[string]any{},
+			"conversation_starters": []any{}, "disabled_runtime_skills": []any{},
+		}},
+		"/api/autopilots": map[string]any{"autopilots": []map[string]any{{"id": autopilotID, "title": title}}, "total": 1},
+		"/api/autopilots/" + autopilotID: map[string]any{
+			// The envelope server/internal/handler/autopilot.go writes.
+			"autopilot": map[string]any{
+				"id": autopilotID, "title": title, "description": "每个工作日早晨跑一遍",
+				"status": "active", "execution_mode": "create_issue",
+				"assignee_type": "agent", "assignee_id": agentSourceID,
+			},
+			"triggers": []map[string]any{{
+				"kind": "schedule", "enabled": true,
+				"cron_expression": "0 9 * * *", "timezone": "Asia/Shanghai",
+			}},
+			"collaborators": []map[string]any{},
+		},
+	}}
+
+	files, err := ExportFromSource(ctx, src, TransferExportOpts{Include: []string{"config"}, WorkspaceRef: "src"})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if len(files.Config.Entities.Autopilots) != 1 {
+		t.Fatalf("exported autopilots=%v", files.Config.Entities.Autopilots)
+	}
+	exported := files.Config.Entities.Autopilots[0]
+	if exported.Title != title || exported.Status != "active" || exported.ExecutionMode != "create_issue" {
+		t.Fatalf("exported autopilot = %+v, want the source body", exported)
+	}
+	if exported.Assignee == nil || exported.Assignee.Type != "agent" || exported.Assignee.ID != agentSourceID {
+		t.Fatalf("exported assignee = %+v, want %s", exported.Assignee, agentSourceID)
+	}
+	if files.Config.Stats["autopilots"] != 1 {
+		t.Fatalf("export stats=%v", files.Config.Stats)
+	}
+	if len(files.Manifest.ExportGaps) != 0 {
+		t.Fatalf("export gaps=%v", files.Manifest.ExportGaps)
+	}
+
+	applySettings := true
+	report, err := ImportTransferConfig(ctx, fixture.env, transferOptionsRequest(files.Config, ConfigImportOptions{
+		ActivateAutopilots:     true,
+		ApplyWorkspaceSettings: &applySettings,
+	}))
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	var status string
+	fixture.fx.QueryRow(t,
+		`SELECT status FROM autopilot WHERE workspace_id = $1 AND title = $2`,
+		fixture.workspace, title,
+	).Scan(&status)
+	if status != "active" {
+		t.Fatalf("target autopilot status = %q, want active (batches: %v)", status, report.ConfigReport.Batches)
+	}
+
+	var triggerCount int
+	fixture.fx.QueryRow(t,
+		`SELECT count(*) FROM autopilot_trigger tr
+		   JOIN autopilot a ON a.id = tr.autopilot_id
+		  WHERE a.workspace_id = $1 AND a.title = $2 AND tr.kind = 'schedule'`,
+		fixture.workspace, title,
+	).Scan(&triggerCount)
+	if triggerCount != 1 {
+		t.Fatalf("target schedule triggers = %d, want 1 (batches: %v)", triggerCount, report.ConfigReport.Batches)
+	}
+}
