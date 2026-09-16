@@ -191,7 +191,12 @@ function CreateIssueDialogBody({
           // due date, parent — apply to a conversation that decides those.
           <AlignCreatePanel
             onClose={onClose}
-            onSwitchMode={switchTo("manual")}
+            // Hands the untouched payload back on the way out. The alignment
+            // face reads none of it, but the manual face's parent context is
+            // per-invocation and NOT persisted in the draft store, so dropping
+            // it here would turn "Add sub issue" → align → back into a
+            // top-level issue without saying so.
+            onSwitchMode={(carry) => switchTo("manual")(carry ?? panelData)}
           />
         ) : (
           <ManualCreatePanel

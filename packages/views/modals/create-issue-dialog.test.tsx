@@ -99,7 +99,7 @@ vi.mock("./create-issue", () => ({
     onSwitchToAlign?: (carry?: Record<string, unknown> | null) => void;
   }) => (
     <div>
-      manual panel · {String(data?.anchor_comment_id ?? "ordinary")} · {data?.source_context_expanded ? "expanded" : "collapsed"}
+      manual panel · {String(data?.anchor_comment_id ?? "ordinary")} · {data?.source_context_expanded ? "expanded" : "collapsed"} · parent:{String(data?.parent_issue_id ?? "none")}
       <button type="button" onClick={() => onSwitchMode?.({ parent_issue_id: data?.parent_issue_id })}>
         switch agent
       </button>
@@ -196,6 +196,28 @@ describe("CreateIssueDialog sizing", () => {
 
     view.unmount();
     expect(mockEndIsolatedDraft).toHaveBeenCalledTimes(1);
+  });
+
+  // Parent context is the one seed that is NOT persisted in the draft store:
+  // it rides the carry channel per invocation. The alignment face reads none
+  // of it, so the shell has to hold it for the duration of the detour —
+  // otherwise "Add sub issue" → align → back silently files a top-level issue.
+  it("keeps the carried parent across a manual → align → manual round trip", () => {
+    render(
+      <CreateIssueDialog
+        onClose={vi.fn()}
+        initialMode="manual"
+        data={{ parent_issue_id: "parent-1" }}
+      />,
+    );
+
+    expect(screen.getByText(/parent:parent-1/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "switch align" }));
+    expect(screen.getByText(/align panel/)).toBeInTheDocument();
+    expect(mockSetLastMode).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "switch manual from align" }));
+    expect(screen.getByText(/parent:parent-1/)).toBeInTheDocument();
   });
 });
 
