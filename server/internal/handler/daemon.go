@@ -2275,6 +2275,62 @@ func (h *Handler) rejectClaimSkillLoad(task *db.AgentTaskQueue, err error) *clai
 	}
 }
 
+// inheritParentInstructions returns the prompt an agent actually RUNS with
+// (DENE-302): a specialisation's own instructions prefixed by its base role's,
+// composed with composeAgentInstructions — the same function the solidify
+// endpoint bakes into a child's row, so the text a user freezes and the text a
+// run dispatches with cannot drift.
+//
+// The base role is re-read on every claim and nothing is cached or snapshotted:
+// an edit on either side of the relationship reaches the agent's next task,
+// which is the point of inheriting from a live row instead of copying it at
+// attach time.
+//
+// The two failures are deliberately different, following rejectClaimSourceLoad:
+//
+//   - The read FAILED (transient: DB blip, timeout, reset). The caller must
+//     preserve the task for redelivery rather than dispatch. A swallowed error
+//     here is indistinguishable from a base role that genuinely has no prompt,
+//     so half the effective prompt would go missing with nothing to notice it.
+//   - The base role row is GONE (ErrNoRows). There is nothing left to inherit
+//     and the specialisation's own prompt still runs, so this degrades to a
+//     non-specialisation turn. It is defensive only: the agent API refuses to
+//     archive a base role that still has active specialisations and has no hard
+//     delete, so no request path produces this state.
+func (h *Handler) inheritParentInstructions(ctx context.Context, agent db.Agent) (string, error) {
+	if !agent.ParentAgentID.Valid {
+		return agent.Instructions, nil
+	}
+	parent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          agent.ParentAgentID,
+		WorkspaceID: agent.WorkspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("daemon claim: base role no longer resolves; dispatching with the specialisation's own instructions",
+				"agent_id", uuidToString(agent.ID), "parent_agent_id", uuidToString(agent.ParentAgentID))
+			return agent.Instructions, nil
+		}
+		return "", err
+	}
+	return composeAgentInstructions(parent.Instructions, agent.Instructions), nil
+}
+
+// rejectClaimParentInstructions preserves a claim whose base role prompt could
+// not be read, for the reason in rejectClaimSkillLoad: the claim-build path hit
+// a transient read, and the stale-dispatched reclaim redelivers it. Dispatching
+// the plain child prompt instead would silently drop inherited rules that the
+// agent's configuration says it has.
+func (h *Handler) rejectClaimParentInstructions(task *db.AgentTaskQueue, err error) *claimBuildFailure {
+	slog.Error("task claim: base role instructions load failed; preserving task for redelivery",
+		"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID), "error", err)
+	return &claimBuildFailure{
+		outcome: "error_parent_instructions",
+		status:  http.StatusInternalServerError,
+		message: "failed to load agent instructions",
+	}
+}
+
 // rejectClaimOnWorkspaceMismatch enforces the claim's tenant boundary against
 // the workspace that OWNS the task's context (issue / chat session / autopilot
 // / quick-create), which is the only authority for MULTICA_WORKSPACE_ID in the
@@ -2606,10 +2662,20 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
 		runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 	}
+	// Inherited prompt first, at the innermost layer (DENE-302): parent + child
+	// compose what this agent IS, and everything appended below — the Mika
+	// system layer and then the squad briefing — stacks on top of that one
+	// effective value. Composing after a squad briefing would bury the base
+	// role's rules under task context; composing here also means both squad
+	// append points (issue-bound and quick-create) share the result for free.
+	instructions, err := h.inheritParentInstructions(r.Context(), agent)
+	if err != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimParentInstructions(task, err)
+	}
 	resp.Agent = &TaskAgentData{
 		ID:                    uuidToString(agent.ID),
 		Name:                  agent.Name,
-		Instructions:          agent.Instructions,
+		Instructions:          instructions,
 		CustomEnv:             customEnv,
 		CustomArgs:            customArgs,
 		McpConfig:             mcpConfig,
@@ -2629,7 +2695,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// Composing here covers every task kind, because this is the single
 	// place a claimed task's agent payload is assembled.
 	if agent.SystemKey.String == service.MikaSystemKey {
-		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
+		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, resp.Agent.Instructions)
 	}
 	if useSkillRefs {
 		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, agent.SystemKey.String, legacySkillRedirects)
