@@ -391,6 +391,23 @@ func TestTaskFailureClassifiers(t *testing.T) {
 	}
 }
 
+// TestDSHStreamClosedRetriesViaExistingProviderNetworkBucket pins DENE-235:
+// STREAM_CLOSED classifies as provider_network, and that bucket is already
+// on retryableReasons. Do not add a new agent_error.* bucket — unknown stays
+// off the allowlist, which is why the misclassification was terminal.
+func TestDSHStreamClosedRetriesViaExistingProviderNetworkBucket(t *testing.T) {
+	reason := taskfailure.Classify("STREAM_CLOSED: SSE stream ended without [DONE]")
+	if reason != taskfailure.ReasonAgentProviderNetwork {
+		t.Fatalf("Classify(STREAM_CLOSED) = %q, want %q", reason, taskfailure.ReasonAgentProviderNetwork)
+	}
+	if !retryableReasons[string(reason)] {
+		t.Fatal("agent_error.provider_network must stay on retryableReasons; STREAM_CLOSED retries through the existing bucket, not a new one")
+	}
+	if retryableReasons[string(taskfailure.ReasonAgentUnknown)] {
+		t.Fatal("agent_error.unknown must stay off retryableReasons: that is the misclassification this fix removes")
+	}
+}
+
 // TestRuntimeCLITimeoutIsNotAutoRetried pins the retry posture for #7112. A
 // local runtime CLI that missed its preparation deadline is not transient: the
 // same host runs the same CLI on the next attempt and takes the same 8-11s to
