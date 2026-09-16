@@ -408,11 +408,15 @@ type ConfigImportItem struct {
 }
 
 type UnmappedRef struct {
-	Entity     string `json:"entity"`
-	SourceID   string `json:"source_id"`
-	Field      string `json:"field"`
-	RefType    string `json:"ref_type"`
-	RefID      string `json:"ref_id"`
+	Entity   string `json:"entity"`
+	SourceID string `json:"source_id"`
+	Field    string `json:"field"`
+	RefType  string `json:"ref_type"`
+	RefID    string `json:"ref_id"`
+	// Reason is the contract-level code for a V3 task-import degradation
+	// (status_key_unmapped, mention_unmapped, parent_unmapped, ...). It is
+	// empty for the V2 rows that predate it.
+	Reason     string `json:"reason,omitempty"`
 	Resolution string `json:"resolution"`
 }
 
@@ -473,7 +477,10 @@ type ImportError struct {
 	Status int
 	Code   string
 	Msg    string
-	Report *ConfigImportReport
+	// Report is the partial report a rejected request hands back (config
+	// import, and V3's quota refusal). It is `any` so each endpoint reports
+	// its own shape; the handler only forwards it as JSON.
+	Report any
 }
 
 func (e *ImportError) Error() string { return e.Msg }

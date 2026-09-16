@@ -126,12 +126,78 @@ func (q *Queries) GetWorkspaceMemberByEmail(ctx context.Context, arg GetWorkspac
 	return i, err
 }
 
+const transferBackfillCommentParent = `-- name: TransferBackfillCommentParent :execrows
+UPDATE comment SET parent_id = $1
+WHERE id = $2 AND workspace_id = $3
+  AND parent_id IS DISTINCT FROM $1
+`
+
+type TransferBackfillCommentParentParams struct {
+	ParentID    pgtype.UUID `json:"parent_id"`
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// The resolved value may be a further ancestor than the source parent (a
+// tombstoned or truncated parent is skipped), so this is not always the row's
+// own parent_id.
+func (q *Queries) TransferBackfillCommentParent(ctx context.Context, arg TransferBackfillCommentParentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferBackfillCommentParent, arg.ParentID, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const transferBackfillIssueParent = `-- name: TransferBackfillIssueParent :execrows
+UPDATE issue SET parent_issue_id = $1
+WHERE id = $2 AND workspace_id = $3
+  AND parent_issue_id IS DISTINCT FROM $1
+`
+
+type TransferBackfillIssueParentParams struct {
+	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
+	ID            pgtype.UUID `json:"id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+}
+
+// Second pass of the issue write. Only parent_issue_id is touched: project_id
+// must be correct in the insert, because an UPDATE of project_id fires
+// trg_issue_project_dirty_hourly.
+func (q *Queries) TransferBackfillIssueParent(ctx context.Context, arg TransferBackfillIssueParentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferBackfillIssueParent, arg.ParentIssueID, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const transferBumpIssueCounter = `-- name: TransferBumpIssueCounter :execrows
+UPDATE workspace
+SET issue_counter = GREATEST(
+    issue_counter,
+    (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)
+)
+WHERE id = $1
+`
+
+// Raises the workspace watermark to the highest imported number. Idempotent:
+// re-importing the same bundle leaves the value unchanged.
+func (q *Queries) TransferBumpIssueCounter(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, transferBumpIssueCounter, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const transferInsertAttachment = `-- name: TransferInsertAttachment :execrows
 INSERT INTO attachment (
-    id, workspace_id, chat_session_id, chat_message_id,
+    id, workspace_id, chat_session_id, chat_message_id, issue_id, comment_id,
     uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at
 ) VALUES (
     $1, $2, $10, $11,
+    $12, $13,
     $3, $4, $5, $6, $7, $8, $9
 )
 ON CONFLICT (id) DO NOTHING
@@ -149,8 +215,12 @@ type TransferInsertAttachmentParams struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
 	ChatMessageID pgtype.UUID        `json:"chat_message_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	CommentID     pgtype.UUID        `json:"comment_id"`
 }
 
+// V3 attaches the same rows to an issue or a comment instead of a chat
+// session; the three mount columns are mutually exclusive by convention.
 func (q *Queries) TransferInsertAttachment(ctx context.Context, arg TransferInsertAttachmentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, transferInsertAttachment,
 		arg.ID,
@@ -164,6 +234,8 @@ func (q *Queries) TransferInsertAttachment(ctx context.Context, arg TransferInse
 		arg.CreatedAt,
 		arg.ChatSessionID,
 		arg.ChatMessageID,
+		arg.IssueID,
+		arg.CommentID,
 	)
 	if err != nil {
 		return 0, err
@@ -257,4 +329,286 @@ func (q *Queries) TransferInsertChatSession(ctx context.Context, arg TransferIns
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const transferInsertComment = `-- name: TransferInsertComment :execrows
+INSERT INTO comment (
+    id, issue_id, workspace_id, author_type, author_id, content, type,
+    parent_id, created_at, updated_at,
+    resolved_at, resolved_by_type, resolved_by_id, deleted_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    NULL, $8, $9,
+    $10, $11, $12,
+    $13
+)
+ON CONFLICT (id) DO NOTHING
+`
+
+type TransferInsertCommentParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	AuthorType     string             `json:"author_type"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	Content        string             `json:"content"`
+	Type           string             `json:"type"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+}
+
+// Only inserts the comment row. db.CreateComment would also stamp the issue's
+// updated_at / last_activity_at with now(), which is exactly the timestamp
+// corruption the contract forbids.
+func (q *Queries) TransferInsertComment(ctx context.Context, arg TransferInsertCommentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferInsertComment,
+		arg.ID,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.AuthorType,
+		arg.AuthorID,
+		arg.Content,
+		arg.Type,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.ResolvedAt,
+		arg.ResolvedByType,
+		arg.ResolvedByID,
+		arg.DeletedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const transferInsertCommentReaction = `-- name: TransferInsertCommentReaction :execrows
+INSERT INTO comment_reaction (
+    id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (id) DO NOTHING
+`
+
+type TransferInsertCommentReactionParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	CommentID   pgtype.UUID        `json:"comment_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ActorType   string             `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	Emoji       string             `json:"emoji"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) TransferInsertCommentReaction(ctx context.Context, arg TransferInsertCommentReactionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferInsertCommentReaction,
+		arg.ID,
+		arg.CommentID,
+		arg.WorkspaceID,
+		arg.ActorType,
+		arg.ActorID,
+		arg.Emoji,
+		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const transferInsertIssue = `-- name: TransferInsertIssue :execrows
+INSERT INTO issue (
+    id, workspace_id, number, title, description, status, priority,
+    assignee_type, assignee_id, creator_type, creator_id,
+    parent_issue_id, project_id, position, stage, start_date, due_date,
+    created_at, updated_at, last_activity_at, metadata, properties
+) VALUES (
+    $1, $2, $3, $4, $13, $5, $6,
+    $14, $15, $7, $8,
+    NULL, $16, $9, $17,
+    $18, $19,
+    $10, $11, $12,
+    COALESCE($20::jsonb, '{}'::jsonb),
+    COALESCE($21::jsonb, '{}'::jsonb)
+)
+ON CONFLICT (id) DO NOTHING
+`
+
+type TransferInsertIssueParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Number         int32              `json:"number"`
+	Title          string             `json:"title"`
+	Status         string             `json:"status"`
+	Priority       string             `json:"priority"`
+	CreatorType    string             `json:"creator_type"`
+	CreatorID      pgtype.UUID        `json:"creator_id"`
+	Position       float64            `json:"position"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
+	Description    pgtype.Text        `json:"description"`
+	AssigneeType   pgtype.Text        `json:"assignee_type"`
+	AssigneeID     pgtype.UUID        `json:"assignee_id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	Stage          pgtype.Int4        `json:"stage"`
+	StartDate      pgtype.Date        `json:"start_date"`
+	DueDate        pgtype.Date        `json:"due_date"`
+	Metadata       []byte             `json:"metadata"`
+	Properties     []byte             `json:"properties"`
+}
+
+// parent_issue_id is deliberately absent: the parent row may live in a shard
+// that has not been imported yet, and the column has a real foreign key.
+func (q *Queries) TransferInsertIssue(ctx context.Context, arg TransferInsertIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferInsertIssue,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Number,
+		arg.Title,
+		arg.Status,
+		arg.Priority,
+		arg.CreatorType,
+		arg.CreatorID,
+		arg.Position,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.LastActivityAt,
+		arg.Description,
+		arg.AssigneeType,
+		arg.AssigneeID,
+		arg.ProjectID,
+		arg.Stage,
+		arg.StartDate,
+		arg.DueDate,
+		arg.Metadata,
+		arg.Properties,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const transferInsertIssueLabel = `-- name: TransferInsertIssueLabel :execrows
+INSERT INTO issue_to_label (issue_id, label_id)
+VALUES ($1, $2)
+ON CONFLICT (issue_id, label_id) DO NOTHING
+`
+
+type TransferInsertIssueLabelParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	LabelID pgtype.UUID `json:"label_id"`
+}
+
+func (q *Queries) TransferInsertIssueLabel(ctx context.Context, arg TransferInsertIssueLabelParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferInsertIssueLabel, arg.IssueID, arg.LabelID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const transferInsertIssueReaction = `-- name: TransferInsertIssueReaction :execrows
+INSERT INTO issue_reaction (
+    id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (id) DO NOTHING
+`
+
+type TransferInsertIssueReactionParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ActorType   string             `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	Emoji       string             `json:"emoji"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) TransferInsertIssueReaction(ctx context.Context, arg TransferInsertIssueReactionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferInsertIssueReaction,
+		arg.ID,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.ActorType,
+		arg.ActorID,
+		arg.Emoji,
+		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const transferInsertIssueSubscriber = `-- name: TransferInsertIssueSubscriber :execrows
+INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason, created_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (issue_id, user_type, user_id) DO NOTHING
+`
+
+type TransferInsertIssueSubscriberParams struct {
+	IssueID   pgtype.UUID        `json:"issue_id"`
+	UserType  string             `json:"user_type"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Reason    string             `json:"reason"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// The event listeners that normally write these rows never run for a transfer
+// import (no events are published), so finalize rebuilds the creator and
+// assignee subscriptions explicitly.
+func (q *Queries) TransferInsertIssueSubscriber(ctx context.Context, arg TransferInsertIssueSubscriberParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferInsertIssueSubscriber,
+		arg.IssueID,
+		arg.UserType,
+		arg.UserID,
+		arg.Reason,
+		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const transferListIssueIDs = `-- name: TransferListIssueIDs :many
+
+SELECT id FROM issue WHERE workspace_id = $1
+`
+
+// V3 issue transfer (DENE-385). Same shape as the chat writes above: explicit
+// id, explicit timestamps, ON CONFLICT (id) DO NOTHING, and one statement per
+// table so no write ever drags a second table along. Parent pointers are first
+// written as NULL and backfilled by the finalize pass.
+// Read helper for the V3 "target must be empty" gate. The gate cannot be a
+// plain count of issues: a package imported over several shards holds issues
+// after the first one, and the rows it wrote itself are recognized by their
+// deterministic id against the package's own refs.issues index.
+func (q *Queries) TransferListIssueIDs(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, transferListIssueIDs, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

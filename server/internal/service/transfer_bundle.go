@@ -1,16 +1,43 @@
 package service
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
-	TransferBundleFormat          = "multica.workspace-transfer"
-	TransferBundleSchemaVersion   = 1
+	TransferBundleFormat = "multica.workspace-transfer"
+	// Schema versions are taken from the bundle's content, never from the CLI
+	// version (V3 contract §9.1/§9.2): a bundle without the `issues` group is
+	// still version 1 so an un-upgraded target can read it, and only a bundle
+	// that actually carries issues is version 2.
+	TransferBundleSchemaVersionV1 = 1
+	TransferBundleSchemaVersionV2 = 2
+	// TransferBundleSchemaVersion is the newest version this code understands.
+	TransferBundleSchemaVersion   = TransferBundleSchemaVersionV2
 	TransferConversationsMaxBytes = 20 << 20
 	TransferAttachmentMaxBytes    = 25 << 20
 	TransferMessageShardMaxBytes  = 16 << 20
 	TransferMessageShardMaxRows   = 5000
 	TransferAttachmentBodyMax     = 25 << 20
 )
+
+// TransferIncludeIssues is the V3 `--include` group that turns a V2 bundle
+// into a V3 one.
+const TransferIncludeIssues = "issues"
+
+// TransferBundleSchemaVersionForContent picks the outer schema_version from
+// what the bundle carries rather than from the CLI's own version: a bundle
+// without the issues group stays readable by a target that has not upgraded
+// past V2 (contract §9.2, last row).
+func TransferBundleSchemaVersionForContent(include []string) int {
+	for _, group := range include {
+		if group == TransferIncludeIssues {
+			return TransferBundleSchemaVersionV2
+		}
+	}
+	return TransferBundleSchemaVersionV1
+}
 
 type TransferManifest struct {
 	Format        string                `json:"format"`
@@ -57,6 +84,32 @@ type TransferRefs struct {
 	Agents       map[string]TransferAgentRef `json:"agents,omitempty"`
 	SystemAgents map[string]TransferAgentRef `json:"system_agents,omitempty"`
 	Projects     map[string]TransferProjRef  `json:"projects,omitempty"`
+	// V3 refs. Members / Squads / Issues / IssueStatuses drive mention
+	// rewriting and status downgrade; IssueProperties exists because issue
+	// property values are keyed by the source workspace's property definition
+	// uuid, which the config import replaces with a fresh one on the target.
+	Members         map[string]TransferMemberRef   `json:"members,omitempty"`
+	Squads          map[string]TransferSquadRef    `json:"squads,omitempty"`
+	Issues          map[string]TransferIssueRef    `json:"issues,omitempty"`
+	IssueStatuses   map[string]string              `json:"issue_statuses,omitempty"`
+	IssueProperties map[string]TransferPropertyRef `json:"issue_properties,omitempty"`
+}
+
+type TransferMemberRef struct {
+	Email string `json:"email,omitempty"`
+}
+
+type TransferSquadRef struct {
+	Name string `json:"name,omitempty"`
+}
+
+type TransferIssueRef struct {
+	Number     int32  `json:"number,omitempty"`
+	Identifier string `json:"identifier,omitempty"`
+}
+
+type TransferPropertyRef struct {
+	Name string `json:"name,omitempty"`
 }
 
 type TransferAgentRef struct {
@@ -166,6 +219,8 @@ type TransferAttachmentRow struct {
 	SourceID          string  `json:"source_id"`
 	ChatSessionID     *string `json:"chat_session_id"`
 	ChatMessageID     *string `json:"chat_message_id"`
+	IssueID           *string `json:"issue_id"`
+	CommentID         *string `json:"comment_id"`
 	Filename          string  `json:"filename"`
 	ContentType       string  `json:"content_type"`
 	SizeBytes         int64   `json:"size_bytes"`
@@ -199,10 +254,138 @@ type TransferConversationsRequest struct {
 	Finalize bool                 `json:"finalize"`
 }
 
+// TransferIssueRow is one line of issues/issues-*.jsonl. StatusCategory rides
+// along so the import can downgrade a status key the target catalog does not
+// know without re-deriving the category from the key.
+type TransferIssueRow struct {
+	SourceID       string          `json:"source_id"`
+	Number         int32           `json:"number"`
+	Title          string          `json:"title"`
+	Description    *string         `json:"description"`
+	Status         string          `json:"status"`
+	StatusCategory string          `json:"status_category,omitempty"`
+	Priority       string          `json:"priority"`
+	AssigneeType   *string         `json:"assignee_type"`
+	AssigneeID     *string         `json:"assignee_id"`
+	CreatorType    string          `json:"creator_type"`
+	CreatorID      string          `json:"creator_id"`
+	ParentIssueID  *string         `json:"parent_issue_id"`
+	ProjectID      *string         `json:"project_id"`
+	Position       float64         `json:"position"`
+	Stage          *int32          `json:"stage"`
+	StartDate      *string         `json:"start_date"`
+	DueDate        *string         `json:"due_date"`
+	CreatedAt      string          `json:"created_at"`
+	UpdatedAt      string          `json:"updated_at"`
+	LastActivityAt string          `json:"last_activity_at"`
+	Metadata       json.RawMessage `json:"metadata"`
+	Properties     json.RawMessage `json:"properties"`
+}
+
+// TransferCommentRow is one line of issues/comments-*.jsonl. Tombstones are
+// exported with an empty content: their only job is to keep their replies on a
+// direct parent pointer instead of flattening the thread.
+type TransferCommentRow struct {
+	SourceID       string   `json:"source_id"`
+	IssueID        string   `json:"issue_id"`
+	AuthorType     string   `json:"author_type"`
+	AuthorID       string   `json:"author_id"`
+	Content        string   `json:"content"`
+	Type           string   `json:"type"`
+	ParentID       *string  `json:"parent_id"`
+	CreatedAt      string   `json:"created_at"`
+	UpdatedAt      string   `json:"updated_at"`
+	ResolvedAt     *string  `json:"resolved_at"`
+	ResolvedByType *string  `json:"resolved_by_type"`
+	ResolvedByID   *string  `json:"resolved_by_id"`
+	DeletedAt      *string  `json:"deleted_at"`
+	AttachmentIDs  []string `json:"attachment_ids"`
+}
+
+// Relation kinds carried by issues/relations.jsonl. Three shapes share one
+// JSONL file, so the import dispatches on Kind.
+const (
+	TransferRelationIssueLabel      = "issue_label"
+	TransferRelationIssueReaction   = "issue_reaction"
+	TransferRelationCommentReaction = "comment_reaction"
+)
+
+type TransferRelationRow struct {
+	Kind              string `json:"kind"`
+	IssueID           string `json:"issue_id,omitempty"`
+	CommentID         string `json:"comment_id,omitempty"`
+	LabelResourceType string `json:"label_resource_type,omitempty"`
+	LabelName         string `json:"label_name,omitempty"`
+	ActorType         string `json:"actor_type,omitempty"`
+	ActorID           string `json:"actor_id,omitempty"`
+	Emoji             string `json:"emoji,omitempty"`
+	CreatedAt         string `json:"created_at,omitempty"`
+}
+
+type TransferIssuesRequest struct {
+	Refs      TransferRefs          `json:"refs"`
+	Issues    []TransferIssueRow    `json:"issues"`
+	Comments  []TransferCommentRow  `json:"comments"`
+	Relations []TransferRelationRow `json:"relations"`
+	DryRun    *bool                 `json:"dry_run"`
+	Finalize  bool                  `json:"finalize"`
+}
+
+// TransferIssueLimitPolicy echoes what the entitlement provider told us about
+// the workspace's issue quota. It is reported even when nothing is enforced so
+// a quota rejection is never a silent line in a log.
+type TransferIssueLimitPolicy struct {
+	Action string `json:"action"`
+	Limit  int64  `json:"limit,omitempty"`
+	Used   int64  `json:"used,omitempty"`
+}
+
+type TransferIssuesReport struct {
+	Applied          bool `json:"applied"`
+	IssuesCreated    int  `json:"issues_created"`
+	IssuesSkipped    int  `json:"issues_skipped"`
+	CommentsCreated  int  `json:"comments_created"`
+	CommentsSkipped  int  `json:"comments_skipped"`
+	LabelsCreated    int  `json:"labels_created"`
+	LabelsSkipped    int  `json:"labels_skipped"`
+	ReactionsCreated int  `json:"reactions_created"`
+	ReactionsSkipped int  `json:"reactions_skipped"`
+	// SubscribersCreated counts the creator / assignee rows rebuilt at
+	// finalize; the event listeners that normally write them never run here.
+	SubscribersCreated int `json:"subscribers_created"`
+	SubscribersSkipped int `json:"subscribers_skipped"`
+	// ParentsBackfilled counts the second-pass parent pointers actually moved.
+	ParentsBackfilled int  `json:"parents_backfilled"`
+	Finalized         bool `json:"finalized"`
+	// IssueCounter is the workspace watermark after finalize.
+	IssueCounter int32 `json:"issue_counter,omitempty"`
+	// IssueLimit is the resolved quota policy, echoed before any write.
+	IssueLimit         *TransferIssueLimitPolicy `json:"issue_limit,omitempty"`
+	StatusUnmapped     []UnmappedRef             `json:"status_unmapped,omitempty"`
+	AssigneeUnmapped   []UnmappedRef             `json:"assignee_unmapped,omitempty"`
+	CreatorUnmapped    []UnmappedRef             `json:"creator_unmapped,omitempty"`
+	ProjectUnmapped    []UnmappedRef             `json:"project_unmapped,omitempty"`
+	AuthorUnmapped     []UnmappedRef             `json:"comment_author_unmapped,omitempty"`
+	ResolutionUnmapped []UnmappedRef             `json:"resolution_actor_unmapped,omitempty"`
+	PropertyUnmapped   []UnmappedRef             `json:"property_unmapped,omitempty"`
+	ParentUnmapped     []UnmappedRef             `json:"parent_unmapped,omitempty"`
+	// ParentReparentedToAncestor records each comment whose source parent was
+	// outside the bundle and that was therefore hung on a further ancestor.
+	ParentReparentedToAncestor []UnmappedRef `json:"parent_reparented_to_ancestor,omitempty"`
+	MentionUnmapped            []UnmappedRef `json:"mention_unmapped,omitempty"`
+	// MentionUnmappedByType summarizes the rows above, because a few thousand
+	// individual rows are unreadable on a terminal.
+	MentionUnmappedByType map[string]int `json:"mention_unmapped_by_type,omitempty"`
+	LabelUnmapped         []UnmappedRef  `json:"label_unmapped,omitempty"`
+	ReactionUnmapped      []UnmappedRef  `json:"reaction_actor_unmapped,omitempty"`
+}
+
 type TransferAttachmentMeta struct {
 	SourceID          string  `json:"source_id"`
 	ChatSessionID     *string `json:"chat_session_id"`
 	ChatMessageID     *string `json:"chat_message_id"`
+	IssueID           *string `json:"issue_id"`
+	CommentID         *string `json:"comment_id"`
 	Filename          string  `json:"filename"`
 	ContentType       string  `json:"content_type"`
 	SizeBytes         int64   `json:"size_bytes"`

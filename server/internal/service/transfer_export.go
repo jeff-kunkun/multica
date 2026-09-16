@@ -331,7 +331,7 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 	}
 	out.Manifest = TransferManifest{
 		Format:        TransferBundleFormat,
-		SchemaVersion: TransferBundleSchemaVersion,
+		SchemaVersion: TransferBundleSchemaVersionForContent(includeList),
 		BundleID:      uuid.NewString(),
 		ExportedAt:    now,
 		Exporter:      TransferExporterInfo{Kind: "cli", Version: opts.ClientVersion},

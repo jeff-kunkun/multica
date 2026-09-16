@@ -34,14 +34,53 @@ func (h *Handler) loadTransferEnv(w http.ResponseWriter, r *http.Request) (servi
 		return service.TransferImportEnv{}, false
 	}
 	return service.TransferImportEnv{
-		Queries:    h.Queries,
-		TxStarter:  h.TxStarter,
-		TargetID:   wsUUID,
-		TargetSlug: ws.Slug,
-		ImporterID: importer,
-		PublicURL:  h.cfg.PublicURL,
-		Storage:    h.Storage,
+		Queries:      h.Queries,
+		TxStarter:    h.TxStarter,
+		TargetID:     wsUUID,
+		TargetSlug:   ws.Slug,
+		ImporterID:   importer,
+		PublicURL:    h.cfg.PublicURL,
+		Storage:      h.Storage,
+		Entitlements: h.Entitlements,
 	}, true
+}
+
+// ImportWorkspaceTransferIssues takes one V3 task shard: issue rows, their
+// comments, and the relation rows (labels, reactions) that hang off them.
+//
+// It writes through the dedicated transfer statements only, so importing
+// history never allocates a number, publishes an issue event, or enqueues a
+// task. The only broadcast is the single workspace-level invalidation at
+// finalize, which makes clients refetch the issue list.
+func (h *Handler) ImportWorkspaceTransferIssues(w http.ResponseWriter, r *http.Request) {
+	env, ok := h.loadTransferEnv(w, r)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, service.TransferConversationsMaxBytes)
+	var req service.TransferIssuesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "transfer_bundle_too_large", "issues payload exceeds 20 MiB")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid request body")
+		return
+	}
+	report, err := service.ImportTransferIssues(r.Context(), env, req)
+	if err != nil {
+		h.writeTransferError(w, r, err)
+		return
+	}
+	if report.Finalized {
+		if ws, werr := h.Queries.GetWorkspace(r.Context(), env.TargetID); werr == nil {
+			h.publish(protocol.EventWorkspaceUpdated, uuidToString(env.TargetID), "member", uuidToString(env.ImporterID), map[string]any{
+				"workspace": h.workspaceToResponse(ws),
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, report)
 }
 
 func (h *Handler) ImportWorkspaceTransferConfig(w http.ResponseWriter, r *http.Request) {

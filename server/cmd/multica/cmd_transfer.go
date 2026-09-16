@@ -623,7 +623,9 @@ func loadTransferZip(path string) (*loadedTransfer, error) {
 		if out.Manifest.Format != service.TransferBundleFormat {
 			return nil, fmt.Errorf("transfer_bundle_invalid: format %q", out.Manifest.Format)
 		}
-		if out.Manifest.SchemaVersion != service.TransferBundleSchemaVersion {
+		// A V3 importer must still read a V2 bundle (schema_version 1): the
+		// outer version only says whether the issues group is present.
+		if v := out.Manifest.SchemaVersion; v != service.TransferBundleSchemaVersionV1 && v != service.TransferBundleSchemaVersionV2 {
 			return nil, fmt.Errorf("transfer_bundle_version_unsupported")
 		}
 		for _, meta := range out.Manifest.Files {
