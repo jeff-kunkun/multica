@@ -19,11 +19,14 @@
 -- so a confirm can never create an issue from a draft that moved underneath it.
 --
 -- "One draft confirms into at most one issue" is enforced by the database, not
--- by this table: migration 485 adds a partial unique index on
+-- by this table: migration 486 adds a partial unique index on
 -- issue (origin_id) WHERE origin_type = 'issue_draft'. The finalize handler
--- holds a row lock here for the whole confirm, which serialises the ordinary
--- case; the index is what makes a duplicate impossible even if that handler
--- crashes between creating the issue and committing this row.
+-- takes a row lock here to decide, and again to record the result, but
+-- deliberately does NOT hold it across issue creation — IssueService.Create
+-- opens its own transaction, so holding one would make every confirm occupy two
+-- pool connections at once. The index, not the lock, is what makes a duplicate
+-- impossible: two confirms that both pass the decision step cannot both create,
+-- and the loser adopts the winner's issue.
 --
 -- No foreign key (repo rule), so deletion is explicit in application code:
 -- DeleteChatSession, the runtime teardown agent cascade, and the workspace

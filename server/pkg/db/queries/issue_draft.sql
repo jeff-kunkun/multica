@@ -19,9 +19,12 @@ WHERE chat_session_id = $1 AND workspace_id = $2;
 -- reads a concurrent confirm can interleave with — the window in which two
 -- confirms of the same draft could each create their own issue.
 --
--- Callers MUST hold this for the whole finalize transaction, including across
--- the issue create, and re-read every field from the returned row: a confirm
--- that blocked here resumes holding values it read before blocking.
+-- Callers MUST re-read every field from the returned row and decide on those
+-- values only: a confirm that blocked here resumes holding whatever it read
+-- before blocking. The lock is NOT held across the issue create — see
+-- FinalizeIssueDraft; the partial unique index on issue (origin_id) is the
+-- authority on "at most one issue per draft", and this lock only serialises the
+-- decide and record steps around it.
 SELECT * FROM issue_draft
 WHERE chat_session_id = $1 AND workspace_id = $2
 FOR UPDATE;

@@ -499,7 +499,7 @@ type FinalizeIssueDraftResponse struct {
 //  2. Create the issue, or adopt one an earlier attempt already created. "At
 //     most one issue per draft" is enforced by the database — the partial
 //     unique index on issue (origin_id) WHERE origin_type = 'issue_draft'
-//     (migration 485) — not by how long a lock is held. Two confirms that both
+//     (migration 486) — not by how long a lock is held. Two confirms that both
 //     get past step 1 cannot both create: one gets a unique violation and
 //     adopts the winner.
 //  3. Under the lock again: point the draft at that issue.
