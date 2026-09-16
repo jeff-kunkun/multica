@@ -1,0 +1,951 @@
+package handler
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
+)
+
+// Issue drafts are the alignment step that has to happen BEFORE an issue
+// exists. Creating an issue enqueues agent work, so a request that was never
+// agreed on is already executing by the time anyone reads it back. This
+// protocol gives that agreement somewhere to live: a hidden conversation plus a
+// server-owned structured draft, and exactly one endpoint — finalize — that
+// turns the agreed draft into an issue.
+//
+// The carrier mechanism is the one Agent Builder already uses: a per-session
+// `kind = 'system'` agent, invisible to every agent list, assignment surface
+// and chat list, so an alignment conversation cannot be mistaken for ordinary
+// chat and its runtime/model stay frozen per conversation.
+
+const issueDraftInstructions = `You are Multica's requirement alignment partner. Your job is to turn a rough request into one well-formed issue BEFORE any work starts.
+
+Ask one high-value question at a time — the question whose answer most changes what gets built. Prefer proposing a concrete draft immediately and refining it over interviewing the user. Stop asking once the draft is unambiguous enough to hand to an executor.
+
+Every response MUST end with exactly one <issue_draft> JSON block using this shape:
+<issue_draft>{"title":"","description":"","status":"","priority":""}</issue_draft>
+
+Rules:
+- The JSON must be valid, compact JSON on one physical line. Do not wrap it in Markdown fences.
+- Escape every line break inside description as \n. Never place a literal newline inside a JSON string.
+- Preserve good existing draft fields supplied in the user's message unless the user asks to change them.
+- title is one concise line naming the outcome, not the activity.
+- description is Markdown: the problem, the acceptance criteria, and the constraints that are already known. Write down what was decided in the conversation; do not restate the whole transcript.
+- Leave status and priority empty unless the user states them.
+- Never request, expose, or place secrets, tokens, passwords, or environment-variable values in the draft.
+- You are aligning a request, not executing it. Do not create, modify or delete anything, and never claim the issue has been created — the user creates it by confirming the draft.`
+
+// maxIssueDraftBytes bounds one stored draft. The honest fields are title and
+// description, both far below this; the limit exists so a client bug cannot
+// grow an unbounded row.
+const maxIssueDraftBytes = 256 * 1024
+
+// issueDraftResponse is the wire shape of one alignment draft. `draft` is
+// echoed verbatim: the server reads the four issue fields out of it at finalize
+// and leaves everything else the client keeps there untouched.
+type issueDraftResponse struct {
+	ChatSessionID string          `json:"chat_session_id"`
+	WorkspaceID   string          `json:"workspace_id"`
+	Status        string          `json:"status"`
+	Revision      int64           `json:"revision"`
+	Draft         json.RawMessage `json:"draft"`
+	IssueID       *string         `json:"issue_id,omitempty"`
+	CreatedAt     string          `json:"created_at"`
+	UpdatedAt     string          `json:"updated_at"`
+}
+
+func issueDraftToResponse(d db.IssueDraft) issueDraftResponse {
+	out := issueDraftResponse{
+		ChatSessionID: uuidToString(d.ChatSessionID),
+		WorkspaceID:   uuidToString(d.WorkspaceID),
+		Status:        d.Status,
+		Revision:      d.Revision,
+		Draft:         json.RawMessage(d.Draft),
+		CreatedAt:     timestampToString(d.CreatedAt),
+		UpdatedAt:     timestampToString(d.UpdatedAt),
+	}
+	if d.IssueID.Valid {
+		id := uuidToString(d.IssueID)
+		out.IssueID = &id
+	}
+	return out
+}
+
+// issueDraftPayload is the part of `draft` the server understands. Everything
+// else in the object is the client's and is never read here — but these fields
+// are a contract, not a convenience: finalize builds the issue straight out of
+// them, so an unparseable draft must fail the confirm rather than create a
+// half-meant issue.
+type issueDraftPayload struct {
+	Title         string  `json:"title"`
+	Description   string  `json:"description"`
+	Status        string  `json:"status"`
+	Priority      string  `json:"priority"`
+	AssigneeType  *string `json:"assignee_type"`
+	AssigneeID    *string `json:"assignee_id"`
+	ProjectID     *string `json:"project_id"`
+	ParentIssueID *string `json:"parent_issue_id"`
+}
+
+// isIssueDraftCarrier reports whether an agent is a hidden alignment carrier.
+// Mirrors the kind/system_key guard the SQL statements carry, so the handler
+// rejects a non-alignment session before reaching the database rather than
+// relying on an UPDATE matching zero rows.
+func isIssueDraftCarrier(agent db.Agent) bool {
+	return agent.Kind == "system" &&
+		agent.SystemKey.Valid &&
+		strings.HasPrefix(agent.SystemKey.String, "issue_draft:")
+}
+
+// loadIssueDraftSession resolves a path sessionId to a chat session the caller
+// owns AND that is an alignment carrier. Both gates are needed: without the
+// carrier check this would be a second, weaker way to hang state off — or read
+// state out of — any chat session the caller happens to own.
+func (h *Handler) loadIssueDraftSession(w http.ResponseWriter, r *http.Request, userID, workspaceID string) (db.ChatSession, bool) {
+	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, chi.URLParam(r, "sessionId"))
+	if !ok {
+		return db.ChatSession{}, false
+	}
+	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat agent")
+		return db.ChatSession{}, false
+	}
+	if !isIssueDraftCarrier(agent) {
+		writeError(w, http.StatusNotFound, "issue draft session not found")
+		return db.ChatSession{}, false
+	}
+	return session, true
+}
+
+type CreateIssueDraftSessionRequest struct {
+	RuntimeID string `json:"runtime_id"`
+	Model     string `json:"model,omitempty"`
+	// Draft seeds the conversation with what the user already typed in the
+	// create entry point, so the first turn can answer it instead of asking
+	// for it again. Optional; omitted means an empty draft.
+	Draft json.RawMessage `json:"draft,omitempty"`
+}
+
+type CreateIssueDraftSessionResponse struct {
+	SessionID string             `json:"session_id"`
+	AgentID   string             `json:"agent_id"`
+	RuntimeID string             `json:"runtime_id"`
+	Draft     issueDraftResponse `json:"draft"`
+}
+
+// CreateIssueDraftSession opens an alignment conversation and its draft in one
+// transaction.
+//
+// The chat session is created here rather than accepted from the client on
+// purpose: it is what makes "this draft belongs to this workspace and this
+// user" true by construction. A create that took a caller-supplied
+// chat_session_id would have to re-derive that on every later write, and would
+// let a draft be attached to an ordinary conversation.
+func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req CreateIssueDraftSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	runtimeID := strings.TrimSpace(req.RuntimeID)
+	if runtimeID == "" {
+		writeError(w, http.StatusBadRequest, "runtime_id is required")
+		return
+	}
+	draft, ok := validIssueDraftBody(w, req.Draft)
+	if !ok {
+		return
+	}
+
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	runtime, ok := h.resolveSessionCarrierRuntime(w, r, workspaceID, workspaceUUID, runtimeID, "an issue draft session", "start")
+	if !ok {
+		return
+	}
+
+	flowID := uuid.NewString()
+	ownerUUID := parseUUID(userID)
+	model := strings.TrimSpace(req.Model)
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start issue draft session")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// FOR KEY SHARE on the workspace row before creating the carrier's
+	// chat_session — the creator half of the #5219 delete/create protocol, so a
+	// session cannot be created into a workspace mid-delete.
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(r.Context(), workspaceUUID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		return
+	}
+
+	carrier, err := qtx.CreateAgentBuilder(r.Context(), db.CreateAgentBuilderParams{
+		WorkspaceID:  workspaceUUID,
+		Name:         fmt.Sprintf(".multica-issue-draft-%s", flowID),
+		RuntimeMode:  runtime.RuntimeMode,
+		RuntimeID:    runtime.ID,
+		OwnerID:      ownerUUID,
+		Instructions: issueDraftInstructions,
+		Model:        pgtype.Text{String: model, Valid: model != ""},
+		SystemKey: pgtype.Text{
+			String: fmt.Sprintf("issue_draft:%s", flowID),
+			Valid:  true,
+		},
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare issue draft agent")
+		return
+	}
+
+	session, err := qtx.CreateChatSession(r.Context(), db.CreateChatSessionParams{
+		ID:          dbid.NewV7(),
+		WorkspaceID: workspaceUUID,
+		AgentID:     carrier.ID,
+		CreatorID:   ownerUUID,
+		Title:       "Align a new issue",
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issue draft session")
+		return
+	}
+	session, err = qtx.MarkChatSessionExplicitlyCreated(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark issue draft session explicit")
+		return
+	}
+
+	created, err := qtx.CreateIssueDraft(r.Context(), db.CreateIssueDraftParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   workspaceUUID,
+		Draft:         draft,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issue draft")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit issue draft session")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, CreateIssueDraftSessionResponse{
+		SessionID: uuidToString(session.ID),
+		AgentID:   uuidToString(carrier.ID),
+		RuntimeID: uuidToString(carrier.RuntimeID),
+		Draft:     issueDraftToResponse(created),
+	})
+}
+
+// validIssueDraftBody normalises and bounds a client-supplied draft object.
+// Empty means "no seed", which stores the table default rather than an
+// unparseable body.
+func validIssueDraftBody(w http.ResponseWriter, raw json.RawMessage) ([]byte, bool) {
+	if len(raw) == 0 {
+		return []byte("{}"), true
+	}
+	if len(raw) > maxIssueDraftBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "draft is too large")
+		return nil, false
+	}
+	if !json.Valid(raw) {
+		writeError(w, http.StatusBadRequest, "draft must be valid JSON")
+		return nil, false
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		writeError(w, http.StatusBadRequest, "draft must be a JSON object")
+		return nil, false
+	}
+	return raw, true
+}
+
+// IssueDraftSummary is one unfinished alignment conversation.
+type IssueDraftSummary struct {
+	issueDraftResponse
+	Title              string `json:"title"`
+	RuntimeID          string `json:"runtime_id"`
+	LastMessageContent string `json:"last_message_content"`
+	LastMessageRole    string `json:"last_message_role"`
+	LastMessageAt      string `json:"last_message_at"`
+}
+
+type ListIssueDraftsResponse struct {
+	Drafts []IssueDraftSummary `json:"drafts"`
+}
+
+// ListIssueDrafts returns the caller's unfinished alignment conversations.
+// This is the only way back into one: the carrier is `kind = 'system'`, so the
+// conversation is invisible to every chat surface by construction.
+func (h *Handler) ListIssueDrafts(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.ListIssueDraftsByCreator(r.Context(), db.ListIssueDraftsByCreatorParams{
+		WorkspaceID: workspaceUUID,
+		CreatorID:   parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list issue drafts")
+		return
+	}
+
+	drafts := make([]IssueDraftSummary, 0, len(rows))
+	for _, row := range rows {
+		drafts = append(drafts, IssueDraftSummary{
+			issueDraftResponse: issueDraftToResponse(db.IssueDraft{
+				ChatSessionID: row.ChatSessionID,
+				WorkspaceID:   row.WorkspaceID,
+				Status:        row.Status,
+				Revision:      row.Revision,
+				Draft:         row.Draft,
+				IssueID:       row.IssueID,
+				CreatedAt:     row.CreatedAt,
+				UpdatedAt:     row.UpdatedAt,
+			}),
+			Title:              row.Title,
+			RuntimeID:          uuidToString(row.RuntimeID),
+			LastMessageContent: row.LastMessageContent,
+			LastMessageRole:    row.LastMessageRole,
+			LastMessageAt:      timestampToString(row.LastMessageAt),
+		})
+	}
+	writeJSON(w, http.StatusOK, ListIssueDraftsResponse{Drafts: drafts})
+}
+
+type UpdateIssueDraftRequest struct {
+	Draft json.RawMessage `json:"draft"`
+	// Status moves the alignment lifecycle. Only the two live states are
+	// writable here: 'completed' is finalize's to set and 'abandoned' is
+	// abandon's, so neither can be reached by a plain save.
+	Status string `json:"status,omitempty"`
+	// ExpectedRevision is the revision the caller was looking at. Required —
+	// a save with no opinion about what it is overwriting is exactly the
+	// lost-update this protocol exists to prevent.
+	ExpectedRevision *int64 `json:"expected_revision"`
+}
+
+// UpdateIssueDraft saves the state an alignment conversation has arrived at.
+func (h *Handler) UpdateIssueDraft(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req UpdateIssueDraftRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.ExpectedRevision == nil {
+		writeError(w, http.StatusBadRequest, "expected_revision is required")
+		return
+	}
+	if len(req.Draft) == 0 {
+		writeError(w, http.StatusBadRequest, "draft is required")
+		return
+	}
+	draft, ok := validIssueDraftBody(w, req.Draft)
+	if !ok {
+		return
+	}
+	status := req.Status
+	if status == "" {
+		status = "draft"
+	}
+	if status != "draft" && status != "ready" {
+		writeError(w, http.StatusBadRequest, "status must be draft or ready")
+		return
+	}
+
+	session, ok := h.loadIssueDraftSession(w, r, userID, workspaceID)
+	if !ok {
+		return
+	}
+
+	updated, err := h.Queries.UpdateIssueDraft(r.Context(), db.UpdateIssueDraftParams{
+		ChatSessionID:    session.ID,
+		WorkspaceID:      session.WorkspaceID,
+		Draft:            draft,
+		Status:           status,
+		ExpectedRevision: *req.ExpectedRevision,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			h.writeIssueDraftWriteConflict(w, r, session, "save")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to save issue draft")
+		return
+	}
+	writeJSON(w, http.StatusOK, issueDraftToResponse(updated))
+}
+
+// AbandonIssueDraft discards an alignment conversation's draft. The
+// conversation itself is left alone — deleting it is the ordinary chat delete,
+// which prunes this row too.
+func (h *Handler) AbandonIssueDraft(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	session, ok := h.loadIssueDraftSession(w, r, userID, workspaceID)
+	if !ok {
+		return
+	}
+
+	updated, err := h.Queries.MarkIssueDraftAbandoned(r.Context(), db.MarkIssueDraftAbandonedParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   session.WorkspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			h.writeIssueDraftWriteConflict(w, r, session, "abandon")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to abandon issue draft")
+		return
+	}
+	writeJSON(w, http.StatusOK, issueDraftToResponse(updated))
+}
+
+// writeIssueDraftWriteConflict turns a zero-row write into the reason it
+// matched nothing. The guarded UPDATEs fold three different situations into one
+// empty result — no draft, a terminal draft, a stale revision — and a client
+// that is told only "conflict" cannot decide whether to reload, navigate to the
+// created issue, or start over.
+func (h *Handler) writeIssueDraftWriteConflict(w http.ResponseWriter, r *http.Request, session db.ChatSession, verb string) {
+	current, err := h.Queries.GetIssueDraftInWorkspace(r.Context(), db.GetIssueDraftInWorkspaceParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   session.WorkspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "issue draft not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to %s issue draft", verb))
+		return
+	}
+	switch current.Status {
+	case "completed":
+		writeError(w, http.StatusConflict, "this draft has already been created as an issue")
+	case "abandoned":
+		writeError(w, http.StatusConflict, "this draft has been abandoned")
+	default:
+		writeError(w, http.StatusConflict, "this draft changed since you loaded it; reload and try again")
+	}
+}
+
+type FinalizeIssueDraftRequest struct {
+	ExpectedRevision *int64 `json:"expected_revision"`
+}
+
+type FinalizeIssueDraftResponse struct {
+	Draft   issueDraftResponse `json:"draft"`
+	IssueID string             `json:"issue_id"`
+}
+
+// FinalizeIssueDraft is the single point where an alignment conversation
+// becomes real work. It runs in three steps, each short-lived:
+//
+//  1. Under LockIssueDraftInWorkspace: decide. A completed draft answers with
+//     the issue it already made — that is what makes a double-clicked confirm,
+//     a retried request and a second tab all safe. Anything not 'ready', or at
+//     a revision the caller was not looking at, is refused here and nothing is
+//     created.
+//  2. Create the issue, or adopt one an earlier attempt already created. "At
+//     most one issue per draft" is enforced by the database — the partial
+//     unique index on issue (origin_id) WHERE origin_type = 'issue_draft'
+//     (migration 485) — not by how long a lock is held. Two confirms that both
+//     get past step 1 cannot both create: one gets a unique violation and
+//     adopts the winner.
+//  3. Under the lock again: point the draft at that issue.
+//
+// The lock is deliberately NOT held across step 2. IssueService.Create opens
+// its own transaction, so holding one here would make every confirm occupy two
+// pool connections at once for the whole of issue creation and enqueue —
+// enough concurrent confirms would deadlock on the pool rather than on each
+// other. Correctness does not need it: the unique index is the authority, and
+// step 3 re-decides under the lock on a re-read row.
+//
+// One window is accepted rather than closed: a save landing between steps 1
+// and 2 would be created from the payload validated in step 1. An alignment
+// conversation has a single editor on one screen (the same assumption
+// agent_builder_draft documents), so that save and that confirm are the same
+// person, and expected_revision already rejects a confirm from a client that
+// was looking at an older draft.
+func (h *Handler) FinalizeIssueDraft(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req FinalizeIssueDraftRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.ExpectedRevision == nil {
+		writeError(w, http.StatusBadRequest, "expected_revision is required")
+		return
+	}
+
+	session, ok := h.loadIssueDraftSession(w, r, userID, workspaceID)
+	if !ok {
+		return
+	}
+
+	ready, done, ok := h.admitIssueDraftForFinalize(w, r, session, *req.ExpectedRevision)
+	if !ok {
+		return
+	}
+	if done != nil {
+		writeJSON(w, http.StatusOK, *done)
+		return
+	}
+
+	params, ok := h.issueParamsFromDraft(w, r, workspaceID, session, ready)
+	if !ok {
+		return
+	}
+	issueID, ok := h.createIssueForDraft(w, r, session, params)
+	if !ok {
+		return
+	}
+	completed, ok := h.completeIssueDraft(w, r, session, issueID)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, *completed)
+}
+
+// admitIssueDraftForFinalize is step 1. It returns either the ready draft to
+// create from, or the response for a draft that has already been confirmed.
+func (h *Handler) admitIssueDraftForFinalize(w http.ResponseWriter, r *http.Request, session db.ChatSession, expectedRevision int64) (db.IssueDraft, *FinalizeIssueDraftResponse, bool) {
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to finalize issue draft")
+		return db.IssueDraft{}, nil, false
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	locked, err := qtx.LockIssueDraftInWorkspace(r.Context(), db.LockIssueDraftInWorkspaceParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   session.WorkspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "issue draft not found")
+			return db.IssueDraft{}, nil, false
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock issue draft")
+		return db.IssueDraft{}, nil, false
+	}
+
+	// Decided on the locked row, never on anything read before the lock: a
+	// confirm that blocked here resumes holding the pre-block values.
+	switch locked.Status {
+	case "completed":
+		if !locked.IssueID.Valid {
+			writeError(w, http.StatusInternalServerError, "completed draft has no issue")
+			return db.IssueDraft{}, nil, false
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to finalize issue draft")
+			return db.IssueDraft{}, nil, false
+		}
+		return db.IssueDraft{}, &FinalizeIssueDraftResponse{
+			Draft:   issueDraftToResponse(locked),
+			IssueID: uuidToString(locked.IssueID),
+		}, true
+	case "abandoned":
+		writeError(w, http.StatusConflict, "this draft has been abandoned")
+		return db.IssueDraft{}, nil, false
+	case "ready":
+		// The only state a confirm may act on.
+	default:
+		writeError(w, http.StatusConflict, "draft is not ready to be created")
+		return db.IssueDraft{}, nil, false
+	}
+	if locked.Revision != expectedRevision {
+		writeError(w, http.StatusConflict, "this draft changed since you loaded it; reload and try again")
+		return db.IssueDraft{}, nil, false
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to finalize issue draft")
+		return db.IssueDraft{}, nil, false
+	}
+	return locked, nil, true
+}
+
+// completeIssueDraft is step 3: point the draft at the issue that now exists
+// for it. A draft completed by a racing confirm answers with its issue, which
+// the unique index guarantees is the same one.
+func (h *Handler) completeIssueDraft(w http.ResponseWriter, r *http.Request, session db.ChatSession, issueID pgtype.UUID) (*FinalizeIssueDraftResponse, bool) {
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to complete issue draft")
+		return nil, false
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	locked, err := qtx.LockIssueDraftInWorkspace(r.Context(), db.LockIssueDraftInWorkspaceParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   session.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock issue draft")
+		return nil, false
+	}
+	completed := locked
+	if locked.Status != "completed" {
+		completed, err = qtx.MarkIssueDraftCompleted(r.Context(), db.MarkIssueDraftCompletedParams{
+			ChatSessionID: session.ID,
+			WorkspaceID:   session.WorkspaceID,
+			IssueID:       issueID,
+		})
+		if err != nil {
+			// Never swallowed: returning 200 with a zero-valued draft here
+			// would tell the client an issue was created and hand it an empty
+			// id for the issue that actually exists.
+			writeError(w, http.StatusInternalServerError, "failed to complete issue draft")
+			return nil, false
+		}
+	} else if !completed.IssueID.Valid {
+		writeError(w, http.StatusInternalServerError, "completed draft has no issue")
+		return nil, false
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit issue draft finalize")
+		return nil, false
+	}
+	return &FinalizeIssueDraftResponse{
+		Draft:   issueDraftToResponse(completed),
+		IssueID: uuidToString(completed.IssueID),
+	}, true
+}
+
+// issueParamsFromDraft validates the structured draft and resolves it into
+// create parameters. Every gate the ordinary create path applies to a
+// client-supplied field applies here too — the draft is client-supplied, and an
+// alignment conversation must not become a way to assign work to an agent the
+// caller cannot invoke.
+func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, workspaceID string, session db.ChatSession, draft db.IssueDraft) (service.IssueCreateParams, bool) {
+	var payload issueDraftPayload
+	if err := json.Unmarshal(draft.Draft, &payload); err != nil {
+		writeError(w, http.StatusBadRequest, "draft is not a valid issue draft")
+		return service.IssueCreateParams{}, false
+	}
+	payload.Title = strings.TrimSpace(payload.Title)
+	if payload.Title == "" {
+		writeError(w, http.StatusBadRequest, "draft title is required")
+		return service.IssueCreateParams{}, false
+	}
+
+	status := payload.Status
+	if status == "" {
+		status = "todo"
+	}
+	status, ok := h.resolveIssueStatusKey(w, r, session.WorkspaceID, status)
+	if !ok {
+		return service.IssueCreateParams{}, false
+	}
+	priority := payload.Priority
+	if priority == "" {
+		priority = "none"
+	}
+	if !validateIssueEnum(w, "priority", priority, validIssuePriorities) {
+		return service.IssueCreateParams{}, false
+	}
+
+	var assigneeType pgtype.Text
+	var assigneeID pgtype.UUID
+	if payload.AssigneeType != nil {
+		assigneeType = pgtype.Text{String: *payload.AssigneeType, Valid: true}
+	}
+	if payload.AssigneeID != nil {
+		id, ok := parseUUIDOrBadRequest(w, *payload.AssigneeID, "assignee_id")
+		if !ok {
+			return service.IssueCreateParams{}, false
+		}
+		assigneeID = id
+	}
+	if code, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); code != 0 {
+		writeError(w, code, msg)
+		return service.IssueCreateParams{}, false
+	}
+
+	var projectID pgtype.UUID
+	if payload.ProjectID != nil && *payload.ProjectID != "" {
+		id, ok := parseUUIDOrBadRequest(w, *payload.ProjectID, "project_id")
+		if !ok {
+			return service.IssueCreateParams{}, false
+		}
+		projectID = id
+	}
+	var parentIssueID pgtype.UUID
+	if payload.ParentIssueID != nil && *payload.ParentIssueID != "" {
+		id, ok := parseUUIDOrBadRequest(w, *payload.ParentIssueID, "parent_issue_id")
+		if !ok {
+			return service.IssueCreateParams{}, false
+		}
+		// Project membership and the parent's workspace boundary are re-checked
+		// inside IssueService.Create atomically with the create; this read only
+		// turns a cross-workspace parent into a 400 naming the field.
+		parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          id,
+			WorkspaceID: session.WorkspaceID,
+		})
+		if err != nil || !parent.ID.Valid {
+			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+			return service.IssueCreateParams{}, false
+		}
+		parentIssueID = id
+	}
+
+	return service.IssueCreateParams{
+		WorkspaceID:   session.WorkspaceID,
+		Title:         payload.Title,
+		Description:   pgtype.Text{String: payload.Description, Valid: payload.Description != ""},
+		Status:        status,
+		Priority:      priority,
+		AssigneeType:  assigneeType,
+		AssigneeID:    assigneeID,
+		CreatorType:   "member",
+		CreatorID:     session.CreatorID,
+		ParentIssueID: parentIssueID,
+		ProjectID:     projectID,
+		// The draft's conversation IS the issue's provenance: it is how the
+		// created issue points back at what was agreed, and how a crashed
+		// confirm finds its own result on the next attempt.
+		OriginType: pgtype.Text{String: "issue_draft", Valid: true},
+		OriginID:   draft.ChatSessionID,
+		// An alignment draft is confirmed deliberately, by a human who has just
+		// read it. The duplicate guard's "did you mean this existing issue"
+		// prompt belongs to the quick-create path, not here.
+		AllowDuplicate: true,
+	}, true
+}
+
+// createIssueForDraft creates the issue for a confirmed draft, or adopts the
+// one another confirm already created. The lookup is not an optimisation: it
+// is how a retried confirm — or one whose draft never got completed because
+// the process died — finds its own result instead of making a second issue.
+func (h *Handler) createIssueForDraft(w http.ResponseWriter, r *http.Request, session db.ChatSession, params service.IssueCreateParams) (pgtype.UUID, bool) {
+	existing, err := h.Queries.GetIssueByOrigin(r.Context(), db.GetIssueByOriginParams{
+		WorkspaceID: session.WorkspaceID,
+		OriginType:  params.OriginType,
+		OriginID:    params.OriginID,
+	})
+	if err == nil {
+		return existing.ID, true
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to look up issue for draft")
+		return pgtype.UUID{}, false
+	}
+
+	prefix := h.getIssuePrefix(r.Context(), session.WorkspaceID)
+	fillCreated := h.newStatusCategoryFiller(r.Context(), session.WorkspaceID)
+	analyticsAgentID := ""
+	if params.AssigneeType.Valid && params.AssigneeType.String == "agent" {
+		analyticsAgentID = uuidToString(params.AssigneeID)
+	}
+
+	result, err := h.IssueService.Create(r.Context(), params, service.IssueCreateOpts{
+		ActorID:          uuidToString(session.CreatorID),
+		AnalyticsAgentID: analyticsAgentID,
+		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
+		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, labels []db.IssueLabel) map[string]any {
+			payload := issueToResponse(issue, prefix)
+			fillCreated(&payload)
+			labelResponses := labelsToResponse(labels)
+			payload.Labels = &labelResponses
+			return map[string]any{"issue": payload}
+		},
+	})
+	if err == nil {
+		return result.Issue.ID, true
+	}
+
+	// The partial unique index rejected a second issue for this draft: another
+	// confirm won the race. The index is the authority on which issue this
+	// draft became, so adopt the winner rather than reporting a failure for a
+	// confirm whose outcome — one issue, this draft's — actually happened.
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if won, lookupErr := h.Queries.GetIssueByOrigin(r.Context(), db.GetIssueByOriginParams{
+			WorkspaceID: session.WorkspaceID,
+			OriginType:  params.OriginType,
+			OriginID:    params.OriginID,
+		}); lookupErr == nil {
+			return won.ID, true
+		}
+	}
+	writeIssueDraftCreateError(w, r, err)
+	return pgtype.UUID{}, false
+}
+
+// writeIssueDraftCreateError maps an IssueService.Create failure onto the same
+// status codes the ordinary create endpoint returns, so a draft confirm that
+// fails for an ordinary reason (archived status, project removed, issue limit)
+// says so instead of reporting a generic server error. ErrActiveDuplicate is
+// absent by construction: a draft is confirmed by a human who has just read it,
+// so the confirm passes AllowDuplicate.
+func writeIssueDraftCreateError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, service.ErrParentIssueNotFound):
+		writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+	case errors.Is(err, service.ErrProjectNotFound):
+		writeError(w, http.StatusBadRequest, "project not found in this workspace")
+	case errors.Is(err, service.ErrIssueStatusUnavailable):
+		writeError(w, http.StatusConflict,
+			"the target status was archived while this request was in flight; reload the status list and retry")
+	default:
+		if writeIssueLimitReached(w, err) {
+			return
+		}
+		slog.Warn("finalize issue draft failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to create issue from draft")
+	}
+}
+
+type SwitchIssueDraftRuntimeRequest struct {
+	RuntimeID string `json:"runtime_id"`
+}
+
+type SwitchIssueDraftRuntimeResponse struct {
+	RuntimeID string `json:"runtime_id"`
+}
+
+// SwitchIssueDraftRuntime re-points a live alignment conversation at another
+// runtime. Same contract as SwitchAgentBuilderRuntime: the carrier is what
+// stamps a chat task's runtime, so rebinding it under
+// LockChatSessionForRuntimeBind is the only way "no reply is in flight" and
+// "this conversation now runs on B" become one serialised decision.
+func (h *Handler) SwitchIssueDraftRuntime(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req SwitchIssueDraftRuntimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	runtimeID := strings.TrimSpace(req.RuntimeID)
+	if runtimeID == "" {
+		writeError(w, http.StatusBadRequest, "runtime_id is required")
+		return
+	}
+
+	session, ok := h.loadIssueDraftSession(w, r, userID, workspaceID)
+	if !ok {
+		return
+	}
+	if session.Status != "active" {
+		writeError(w, http.StatusBadRequest, "chat session is archived")
+		return
+	}
+
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	runtime, ok := h.resolveSessionCarrierRuntime(w, r, workspaceID, workspaceUUID, runtimeID, "an issue draft session", "switch")
+	if !ok {
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to switch issue draft runtime")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if _, err := qtx.LockChatSessionForRuntimeBind(r.Context(), session.ID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "chat session not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock chat session")
+		return
+	}
+	if _, err := qtx.GetPendingChatTask(r.Context(), session.ID); err == nil {
+		writeError(w, http.StatusConflict, "stop the current reply before switching runtime")
+		return
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to check pending issue draft task")
+		return
+	}
+
+	updated, err := qtx.RebindIssueDraftRuntime(r.Context(), db.RebindIssueDraftRuntimeParams{
+		ID:          session.AgentID,
+		RuntimeID:   runtime.ID,
+		RuntimeMode: runtime.RuntimeMode,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "issue draft session not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to switch issue draft runtime")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit issue draft runtime switch")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, SwitchIssueDraftRuntimeResponse{RuntimeID: uuidToString(updated.RuntimeID)})
+}
