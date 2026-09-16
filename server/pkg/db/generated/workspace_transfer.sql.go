@@ -127,23 +127,44 @@ func (q *Queries) GetWorkspaceMemberByEmail(ctx context.Context, arg GetWorkspac
 }
 
 const listVisibleRuntimesForTransfer = `-- name: ListVisibleRuntimesForTransfer :many
-SELECT id, name, custom_name, runtime_mode, provider, profile_id
-FROM agent_runtime
-WHERE workspace_id = $1
-ORDER BY created_at ASC
+SELECT r.id,
+       r.name,
+       r.custom_name,
+       r.runtime_mode,
+       r.provider,
+       r.profile_id,
+       COALESCE(p.display_name, '') AS profile_display_name
+FROM agent_runtime r
+LEFT JOIN runtime_profile p ON p.id = r.profile_id
+WHERE r.workspace_id = $1
+  AND r.owner_id IS NOT NULL
+  AND (r.owner_id = $2 OR r.visibility = 'public')
+ORDER BY r.created_at ASC
 `
 
-type ListVisibleRuntimesForTransferRow struct {
-	ID          pgtype.UUID `json:"id"`
-	Name        string      `json:"name"`
-	CustomName  pgtype.Text `json:"custom_name"`
-	RuntimeMode string      `json:"runtime_mode"`
-	Provider    string      `json:"provider"`
-	ProfileID   pgtype.UUID `json:"profile_id"`
+type ListVisibleRuntimesForTransferParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
 }
 
-func (q *Queries) ListVisibleRuntimesForTransfer(ctx context.Context, workspaceID pgtype.UUID) ([]ListVisibleRuntimesForTransferRow, error) {
-	rows, err := q.db.Query(ctx, listVisibleRuntimesForTransfer, workspaceID)
+type ListVisibleRuntimesForTransferRow struct {
+	ID                 pgtype.UUID `json:"id"`
+	Name               string      `json:"name"`
+	CustomName         pgtype.Text `json:"custom_name"`
+	RuntimeMode        string      `json:"runtime_mode"`
+	Provider           string      `json:"provider"`
+	ProfileID          pgtype.UUID `json:"profile_id"`
+	ProfileDisplayName string      `json:"profile_display_name"`
+}
+
+// The candidate set the transfer importer may bind an imported agent to.
+// Mirrors canUseRuntimeForAgent exactly: another member's private machine is
+// not a candidate, and a runtime with no owner can never be bound either (the
+// handler rejects those, so listing one would offer an unbindable candidate).
+// profile_display_name is joined because the match rule is
+// provider + runtime_mode + custom profile display name (DENE-364).
+func (q *Queries) ListVisibleRuntimesForTransfer(ctx context.Context, arg ListVisibleRuntimesForTransferParams) ([]ListVisibleRuntimesForTransferRow, error) {
+	rows, err := q.db.Query(ctx, listVisibleRuntimesForTransfer, arg.WorkspaceID, arg.OwnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +179,7 @@ func (q *Queries) ListVisibleRuntimesForTransfer(ctx context.Context, workspaceI
 			&i.RuntimeMode,
 			&i.Provider,
 			&i.ProfileID,
+			&i.ProfileDisplayName,
 		); err != nil {
 			return nil, err
 		}

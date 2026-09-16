@@ -54,7 +54,22 @@ SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListVisibleRuntimesForTransfer :many
-SELECT id, name, custom_name, runtime_mode, provider, profile_id
-FROM agent_runtime
-WHERE workspace_id = $1
-ORDER BY created_at ASC;
+-- The candidate set the transfer importer may bind an imported agent to.
+-- Mirrors canUseRuntimeForAgent exactly: another member's private machine is
+-- not a candidate, and a runtime with no owner can never be bound either (the
+-- handler rejects those, so listing one would offer an unbindable candidate).
+-- profile_display_name is joined because the match rule is
+-- provider + runtime_mode + custom profile display name (DENE-364).
+SELECT r.id,
+       r.name,
+       r.custom_name,
+       r.runtime_mode,
+       r.provider,
+       r.profile_id,
+       COALESCE(p.display_name, '') AS profile_display_name
+FROM agent_runtime r
+LEFT JOIN runtime_profile p ON p.id = r.profile_id
+WHERE r.workspace_id = $1
+  AND r.owner_id IS NOT NULL
+  AND (r.owner_id = $2 OR r.visibility = 'public')
+ORDER BY r.created_at ASC;

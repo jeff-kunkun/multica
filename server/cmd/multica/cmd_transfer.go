@@ -57,6 +57,7 @@ func init() {
 	transferImportCmd.Flags().String("in", "", "Input zip or V1 JSON path")
 	transferImportCmd.Flags().Bool("dry-run", false, "Preview without writing")
 	transferImportCmd.Flags().String("on-conflict", "fail", "Conflict policy for config entities: fail, overwrite, rename, skip")
+	transferImportCmd.Flags().Bool("auto-bind-runtimes", true, "Bind an imported agent when exactly one visible runtime matches its source provider/mode/profile (DENE-364)")
 	_ = transferImportCmd.MarkFlagRequired("workspace")
 	_ = transferImportCmd.MarkFlagRequired("in")
 
@@ -367,6 +368,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	inPath, _ := cmd.Flags().GetString("in")
 	dry, _ := cmd.Flags().GetBool("dry-run")
 	onConflict, _ := cmd.Flags().GetString("on-conflict")
+	autoBindRuntimes, _ := cmd.Flags().GetBool("auto-bind-runtimes")
 
 	client, err := newTransferAPIClient(cmd)
 	if err != nil {
@@ -390,7 +392,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 		var report any
 		req := service.ConfigImportRequest{Bundle: payload.Config, DryRun: &dry, OnConflict: onConflict}
 		if err := client.PostJSON(ctx, base+"/transfer/config", service.TransferConfigRequest{
-			Config: req.Bundle, DryRun: &dry, OnConflict: onConflict,
+			Config: req.Bundle, DryRun: &dry, OnConflict: onConflict, AutoBindRuntimes: &autoBindRuntimes,
 		}, &report); err != nil {
 			if st := httpStatusOf(err); st == 404 {
 				return fmt.Errorf("target_unsupported: this server is not a kun instance with /transfer/* endpoints")
@@ -410,6 +412,9 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 		SecretsOmitted:  payload.Secrets,
 		DryRun:          &dry,
 		OnConflict:      onConflict,
+		// A V1 bundle carries no runtime hints, so this is inert there; the V2
+		// path is where the unique-candidate rule runs.
+		AutoBindRuntimes: &autoBindRuntimes,
 	}
 	if err := client.PostJSON(ctx, base+"/transfer/config", cfgReq, &cfgReport); err != nil {
 		if st := httpStatusOf(err); st == 404 {

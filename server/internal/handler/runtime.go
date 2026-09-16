@@ -732,13 +732,26 @@ func (h *Handler) runtimeHasLiveProfile(ctx context.Context, rt db.AgentRuntime)
 // packages/core/runtimes/access.ts), so UI, API and CLI agree. See migration
 // 083 for the visibility column.
 func canUseRuntimeForAgent(member db.Member, rt db.AgentRuntime) bool {
+	return runtimeBindDeniedReason(member, rt) == ""
+}
+
+// runtimeBindDeniedReason is canUseRuntimeForAgent's reason-carrying form: ""
+// means the member may move an agent onto this runtime, anything else is the
+// code the transfer bind reports for refusing it. The transfer endpoint answers
+// with one result per binding instead of failing the whole request, and routing
+// the boolean through here keeps a single rule instead of two copies that can
+// drift (DENE-364).
+func runtimeBindDeniedReason(member db.Member, rt db.AgentRuntime) string {
 	if !rt.OwnerID.Valid {
-		return false
+		return service.TransferBindReasonRuntimeUnowned
 	}
 	if rt.Visibility == "public" {
-		return true
+		return ""
 	}
-	return uuidToString(rt.OwnerID) == uuidToString(member.UserID)
+	if uuidToString(rt.OwnerID) == uuidToString(member.UserID) {
+		return ""
+	}
+	return service.TransferBindReasonRuntimePrivate
 }
 
 // canSetRuntimeVisibility reports whether a member may flip this runtime

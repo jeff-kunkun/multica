@@ -660,12 +660,16 @@ func exportAgentsGroup(ctx context.Context, src TransferSourceClient, bundle *Co
 			continue
 		}
 		a := ConfigAgent{
-			SourceID:              id,
-			Name:                  strField(raw, "name"),
-			Description:           strField(raw, "description"),
-			Instructions:          strField(raw, "instructions"),
-			AvatarURL:             strPtrField(raw, "avatar_url"),
-			RuntimeMode:           strField(raw, "runtime_mode"),
+			SourceID:     id,
+			Name:         strField(raw, "name"),
+			Description:  strField(raw, "description"),
+			Instructions: strField(raw, "instructions"),
+			AvatarURL:    strPtrField(raw, "avatar_url"),
+			RuntimeMode:  strField(raw, "runtime_mode"),
+			// The source runtime is a hint, not an entity: runtimes_hint[]
+			// carries its provider / runtime_mode / profile, and the importer
+			// joins the two by this id (DENE-364).
+			RuntimeSourceID:       strField(raw, "runtime_id"),
 			RuntimeConfig:         rawField(raw, "runtime_config"),
 			CustomArgs:            rawField(raw, "custom_args"),
 			CustomEnv:             jsonNull(),

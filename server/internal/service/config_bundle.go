@@ -207,12 +207,17 @@ type ConfigMcpServer struct {
 }
 
 type ConfigAgent struct {
-	SourceID                 string                   `json:"source_id"`
-	Name                     string                   `json:"name"`
-	Description              string                   `json:"description"`
-	Instructions             string                   `json:"instructions"`
-	AvatarURL                *string                  `json:"avatar_url"`
-	RuntimeMode              string                   `json:"runtime_mode"`
+	SourceID     string  `json:"source_id"`
+	Name         string  `json:"name"`
+	Description  string  `json:"description"`
+	Instructions string  `json:"instructions"`
+	AvatarURL    *string `json:"avatar_url"`
+	RuntimeMode  string  `json:"runtime_mode"`
+	// RuntimeSourceID joins this agent to runtimes_hint[].source_runtime_id.
+	// Only the transfer bundle exports it; without it the importer can only
+	// guess the source provider by name, which real bundles never match
+	// (DENE-364).
+	RuntimeSourceID          string                   `json:"runtime_source_id,omitempty"`
 	RuntimeConfig            json.RawMessage          `json:"runtime_config"`
 	CustomArgs               json.RawMessage          `json:"custom_args"`
 	CustomEnv                json.RawMessage          `json:"custom_env"`

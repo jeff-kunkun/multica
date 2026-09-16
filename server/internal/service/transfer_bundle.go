@@ -165,6 +165,11 @@ type TransferConfigRequest struct {
 	SecretsOmitted  []SecretOmitted      `json:"secrets_omitted"`
 	DryRun          *bool                `json:"dry_run"`
 	OnConflict      string               `json:"on_conflict"`
+	// AutoBindRuntimes turns the unique-candidate rule into a write. Omitted
+	// (nil) means on: kk zi's 2026-09-16 call is that a migrated agent must be
+	// runnable right after import on the same machine layout, and the
+	// unique-candidate rule already refuses to guess (DENE-364).
+	AutoBindRuntimes *bool `json:"auto_bind_runtimes"`
 }
 
 type TransferConversationsRequest struct {
@@ -211,6 +216,86 @@ type TransferRuntimeBind struct {
 	RuntimeMode   string   `json:"runtime_mode,omitempty"`
 	ProfileName   string   `json:"profile_name,omitempty"`
 	CandidateIDs  []string `json:"candidate_ids,omitempty"`
+	// Candidates carries the same runtimes as CandidateIDs plus the labels the
+	// Desktop picker renders, so the card does not need a second read to offer
+	// a dropdown (DENE-364).
+	Candidates []TransferRuntimeCandidate `json:"candidates,omitempty"`
+	// Action is the outcome of the three-tier rule: bound, already_bound,
+	// candidates, no_candidate, agent_missing or failed. Older Desktop builds
+	// ignore it and keep showing the plain candidate list.
+	Action string `json:"action,omitempty"`
+	// AutoBind is true when the unique-candidate rule selected the runtime with
+	// no human pick. On a dry run it means "would bind".
+	AutoBind         bool   `json:"auto_bind,omitempty"`
+	BoundRuntimeID   string `json:"bound_runtime_id,omitempty"`
+	BoundRuntimeName string `json:"bound_runtime_name,omitempty"`
+	// ReasonCode is the stable token the client localizes; Reason is the English
+	// fallback that names the provider so the string is still useful when the
+	// client does not know the code.
+	ReasonCode string `json:"reason_code,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// TransferRuntimeCandidate is one runtime in the target workspace an imported
+// agent may be bound to.
+type TransferRuntimeCandidate struct {
+	RuntimeID   string `json:"runtime_id"`
+	Name        string `json:"name"`
+	Provider    string `json:"provider"`
+	RuntimeMode string `json:"runtime_mode"`
+	ProfileName string `json:"profile_name,omitempty"`
+}
+
+// Transfer bind outcomes.
+const (
+	TransferBindBound        = "bound"
+	TransferBindAlreadyBound = "already_bound"
+	TransferBindCandidates   = "candidates"
+	TransferBindNoCandidate  = "no_candidate"
+	TransferBindAgentMissing = "agent_missing"
+	TransferBindFailed       = "failed"
+)
+
+// Transfer bind reason codes. The Desktop card localizes these; unknown codes
+// fall back to the server's English Reason.
+const (
+	TransferBindReasonNoRuntime      = "no_runtime_for_provider"
+	TransferBindReasonSourceUnknown  = "source_runtime_unknown"
+	TransferBindReasonAgentMissing   = "agent_missing"
+	TransferBindReasonAgentUnknown   = "agent_unknown"
+	TransferBindReasonRuntimeUnknown = "runtime_unknown"
+	TransferBindReasonRuntimeUnowned = "runtime_unowned"
+	TransferBindReasonRuntimePrivate = "runtime_private"
+	TransferBindReasonBindFailed     = "bind_failed"
+)
+
+// TransferRuntimeBinding is one agent→runtime pair a client asks the server to
+// bind. Both ids are workspace-scoped UUIDs; the endpoint re-loads and
+// re-authorizes each pair before writing.
+type TransferRuntimeBinding struct {
+	AgentID   string `json:"agent_id"`
+	RuntimeID string `json:"runtime_id"`
+}
+
+type TransferBindRuntimesRequest struct {
+	Bindings []TransferRuntimeBinding `json:"bindings"`
+}
+
+type TransferRuntimeBindResult struct {
+	AgentID     string `json:"agent_id,omitempty"`
+	AgentName   string `json:"agent_name,omitempty"`
+	RuntimeID   string `json:"runtime_id,omitempty"`
+	RuntimeName string `json:"runtime_name,omitempty"`
+	Ok          bool   `json:"ok"`
+	ReasonCode  string `json:"reason_code,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+type TransferBindRuntimesReport struct {
+	Applied bool                        `json:"applied"`
+	Bound   int                         `json:"bound"`
+	Failed  int                         `json:"failed"`
+	Results []TransferRuntimeBindResult `json:"results"`
 }
 
 type TransferConversationsReport struct {

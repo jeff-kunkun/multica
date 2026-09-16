@@ -59,6 +59,31 @@ func TestExportAgentsGroup_SystemKeyWithoutKind(t *testing.T) {
 	}
 }
 
+// The importer joins an agent to its runtime hint by runtime_source_id; without
+// the export writing it, every bundle would report source_runtime_unknown and
+// nothing could be matched (DENE-364).
+func TestExportAgentsGroup_CarriesTheSourceRuntimeID(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/agents": []map[string]any{
+			{"id": "usr-1", "name": "Bot", "runtime_id": "rt-1"},
+			{"id": "usr-2", "name": "Unbound"},
+		},
+	}}
+	bundle := &ConfigBundle{Entities: ConfigEntities{}, Stats: map[string]int{}}
+	var gaps []TransferExportGap
+	exportAgentsGroup(context.Background(), src, bundle, &gaps, func(string, error) {})
+
+	if len(bundle.Entities.Agents) != 2 {
+		t.Fatalf("agents=%v", bundle.Entities.Agents)
+	}
+	if got := bundle.Entities.Agents[0].RuntimeSourceID; got != "rt-1" {
+		t.Fatalf("runtime_source_id=%q want rt-1", got)
+	}
+	if got := bundle.Entities.Agents[1].RuntimeSourceID; got != "" {
+		t.Fatalf("unbound agent runtime_source_id=%q want empty", got)
+	}
+}
+
 func TestSourceExportSkills_ExcludesPluginResources(t *testing.T) {
 	wsID := "ws-1"
 	src := &fakeTransferSource{payloads: map[string]any{

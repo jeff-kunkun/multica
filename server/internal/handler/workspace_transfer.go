@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -63,6 +66,102 @@ func (h *Handler) ImportWorkspaceTransferConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, report)
+}
+
+// BindWorkspaceTransferRuntimes applies the runtimes a human picked on the
+// migration card. The automatic rule handles the unambiguous case; this is the
+// multi-candidate path, and it answers per binding so one bad pair cannot
+// discard the rest of the user's picks (DENE-364).
+func (h *Handler) BindWorkspaceTransferRuntimes(w http.ResponseWriter, r *http.Request) {
+	env, ok := h.loadTransferEnv(w, r)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, service.ConfigBundleMaxBytes)
+	var req service.TransferBindRuntimesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "config_bundle_too_large", "bind payload exceeds 20 MiB")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid request body")
+		return
+	}
+	// loadTransferEnv already proved owner/admin membership; keep the member row
+	// for the per-runtime visibility rule below.
+	member, ok := h.workspaceMember(w, r, uuidToString(env.TargetID))
+	if !ok {
+		return
+	}
+	report := &service.TransferBindRuntimesReport{
+		Applied: true,
+		Results: make([]service.TransferRuntimeBindResult, 0, len(req.Bindings)),
+	}
+	for _, binding := range req.Bindings {
+		result := h.bindTransferRuntime(r.Context(), env, member, binding)
+		if result.Ok {
+			report.Bound++
+		} else {
+			report.Failed++
+		}
+		report.Results = append(report.Results, result)
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+// bindTransferRuntime resolves and authorizes one agent→runtime pair, then
+// writes it through the shared transfer bind. Every rejection is a result row,
+// not a request error: the ids came from the client, so one stale pick must not
+// fail the batch.
+func (h *Handler) bindTransferRuntime(ctx context.Context, env service.TransferImportEnv, member db.Member, binding service.TransferRuntimeBinding) service.TransferRuntimeBindResult {
+	result := service.TransferRuntimeBindResult{AgentID: binding.AgentID, RuntimeID: binding.RuntimeID}
+	agentUUID, err := util.ParseUUID(binding.AgentID)
+	if err != nil {
+		return rejectTransferBind(result, service.TransferBindReasonAgentUnknown, "agent_id is not a uuid")
+	}
+	existing, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          agentUUID,
+		WorkspaceID: env.TargetID,
+	})
+	if err != nil {
+		return rejectTransferBind(result, service.TransferBindReasonAgentUnknown, "agent is not in this workspace")
+	}
+	result.AgentName = existing.Name
+	runtimeUUID, err := util.ParseUUID(binding.RuntimeID)
+	if err != nil {
+		return rejectTransferBind(result, service.TransferBindReasonRuntimeUnknown, "runtime_id is not a uuid")
+	}
+	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
+		ID:          runtimeUUID,
+		WorkspaceID: env.TargetID,
+	})
+	if err != nil {
+		return rejectTransferBind(result, service.TransferBindReasonRuntimeUnknown, "runtime is not in this workspace")
+	}
+	if code := runtimeBindDeniedReason(member, runtime); code != "" {
+		return rejectTransferBind(result, code, "this runtime is not available to you")
+	}
+	if err := service.BindTransferAgentRuntime(ctx, env, existing, runtime); err != nil {
+		return rejectTransferBind(result, service.TransferBindReasonBindFailed, err.Error())
+	}
+	result.RuntimeName = runtimeDisplayName(runtime)
+	result.Ok = true
+	return result
+}
+
+func rejectTransferBind(result service.TransferRuntimeBindResult, code, reason string) service.TransferRuntimeBindResult {
+	result.Ok = false
+	result.ReasonCode = code
+	result.Reason = reason
+	return result
+}
+
+func runtimeDisplayName(rt db.AgentRuntime) string {
+	if rt.CustomName.Valid && rt.CustomName.String != "" {
+		return rt.CustomName.String
+	}
+	return rt.Name
 }
 
 func (h *Handler) ImportWorkspaceTransferConversations(w http.ResponseWriter, r *http.Request) {

@@ -1615,6 +1615,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/config/export", h.ExportWorkspaceConfig)
 					r.Post("/config/import", h.ImportWorkspaceConfig)
 					r.Post("/transfer/config", h.ImportWorkspaceTransferConfig)
+					r.Post("/transfer/bind-runtimes", h.BindWorkspaceTransferRuntimes)
 					r.Post("/transfer/conversations", h.ImportWorkspaceTransferConversations)
 					r.Post("/transfer/attachments", h.ImportWorkspaceTransferAttachment)
 					r.Post("/members", h.CreateInvitation)
