@@ -1,26 +1,30 @@
 # Workspace transfer
 
-Cross-environment export of config + chats, and import into a `kun` server.
+Cross-environment export of config + chats + tasks, and import into a `kun` server.
 
 - [CLI](#cli)
 - [Server endpoints](#server-endpoints)
+- [Tasks and comments (V3)](#tasks-and-comments-v3)
+- [Runtime binding (DENE-364)](#runtime-binding-dene-364)
 - [What is not transferred](#what-is-not-transferred)
 
 ## CLI
 
 ```bash
-multica transfer export --profile <source-login> --workspace <slug> --out <file.zip> [--include config,conversations,attachments] [--estimate] [--exclude-archived] [--no-people]
-multica transfer import --profile <target-login> --workspace <slug> --in <file.zip> [--dry-run] [--on-conflict fail|overwrite|rename|skip] [--activate-autopilots=false] [--apply-workspace-settings=false] [--apply-issue-prefix] [--auto-bind-runtimes=false]
+multica transfer export --profile <source-login> --workspace <slug> --out <file.zip> [--include config,conversations,attachments[,issues]] [--estimate] [--exclude-archived] [--no-people]
+multica transfer import --profile <target-login> --workspace <slug> --in <file.zip> [--dry-run] [--on-conflict fail|overwrite|rename|skip] [--renumber] [--activate-autopilots=false] [--apply-workspace-settings=false] [--apply-issue-prefix] [--auto-bind-runtimes=false]
 multica transfer bind-runtimes --profile <target-login> --workspace <slug> --bind <agent-id>=<runtime-id> [--bind …]
 ```
 
-`transfer import` options: `--activate-autopilots` (default true — imported automations start triggering), `--apply-workspace-settings` (default true), `--apply-issue-prefix` (default false, destructive), `--auto-bind-runtimes` (default true — see runtime binding below). Only a changed default is worth passing.
+`transfer import` options: `--activate-autopilots` (default true — imported automations start triggering), `--apply-workspace-settings` (default true), `--apply-issue-prefix` (default false, destructive), `--auto-bind-runtimes` (default true — see runtime binding below), `--renumber` (default false, see tasks below). Only a changed default is worth passing.
+
+`transfer export --include issues` is off by default. Turning it on is what makes the bundle `schema_version: 2`, and it prints the one precondition the caller has to meet: the target workspace must have no tasks at all.
 
 `transfer bind-runtimes` applies the runtimes a human picked for the agents the auto-bind rule left alone. `--bind` is repeatable and answers one line per binding; a partially failed batch still exits 0 so the caller keeps the per-binding detail.
 
 Credentials come from the selected CLI profile (`multica login` / `config set`). There is no `--token` flag. Use two profiles to talk to two servers.
 
-`--estimate` counts sessions/messages and prints a byte guess; it does not write a zip.
+`--estimate` counts sessions/messages/issues and prints a byte guess; it does not write a zip.
 
 The zip is created mode `0600`. Treat it as chat history: it contains member emails and full transcripts with secrets redacted.
 
@@ -42,18 +46,33 @@ If the target returns 404 for `/transfer/*`, the CLI reports `target_unsupported
 
 ## Server endpoints
 
-All four sit under `/api/workspaces/{id}` and require workspace owner/admin. Agent actors get 403.
+All five sit under `/api/workspaces/{id}` and require workspace owner/admin. Agent actors get 403.
 
 | Method | Path | Role |
 | --- | --- | --- |
 | `POST` | `/transfer/config` | Apply the V1 config bundle after people/email mapping and runtime-profile import. `dry_run` required. `on_conflict` is fail/overwrite/rename/skip. Carries the `options` object, including `auto_bind_runtimes`. |
+| `POST` | `/transfer/issues` | One task shard (issue rows + comment rows + relation rows + the package-wide `refs`). Idempotent by deterministic ids. `finalize: true` backfills the parent pointers, bumps the issue counter and rebuilds subscribers. |
 | `POST` | `/transfer/conversations` | One conversation shard (sessions + messages + refs). Idempotent by deterministic ids. `finalize: true` publishes one workspace chat-list invalidation. |
 | `POST` | `/transfer/attachments` | Multipart: `meta` JSON + optional `file`. Idempotent. |
 | `POST` | `/transfer/bind-runtimes` | `{"bindings":[{"agent_id","runtime_id"}]}` → one result per binding. Same gates as the agent editor: the agent must be manageable by the caller and `canUseRuntimeForAgent` must pass, so another member's private runtime is refused. |
 
-Import order: config → conversation shards → attachments → a final conversations call with `finalize: true`.
+Import order: config → issue shards → conversation shards → attachments → a final conversations call with `finalize: true` → a final issues call with `finalize: true`.
 
-History writes use dedicated `INSERT … ON CONFLICT (id) DO NOTHING` queries. They must not go through `POST /api/chat/sessions/{id}/messages` (that path enqueues a task).
+History writes use dedicated `INSERT … ON CONFLICT (id) DO NOTHING` queries. They must not go through `POST /api/chat/sessions/{id}/messages` or `POST /api/issues/{id}/comments` (both enqueue tasks and rewrite timestamps).
+
+## Tasks and comments (V3)
+
+`multica transfer export --include issues` adds `issues/issues-*.jsonl`, `issues/comments-*.jsonl` and `issues/relations.jsonl` (labels + reactions) to a bundle whose outer `schema_version` becomes 2. A bundle without the directory is still version 1 and still imports; the group is simply absent.
+
+Three rules the importer depends on, none of which fails loudly when broken:
+
+- `manifest.refs` carries five maps — `members`, `squads`, `issues`, `issue_statuses`, `issue_properties` — and **the whole package's `refs.issues` travels with every shard**. The target's "the workspace had no other tasks" gate recognizes this bundle's own rows through that index, so a shard carrying only its own ids makes the second shard read the first shard's rows as foreign and fail.
+- The final `finalize: true` request may carry no bodies, but it must re-send the whole package's link rows `(source_id, issue_id, parent_id)` for comments and `(source_id, parent_issue_id)` for issues. It is the only request that backfills parent pointers; an empty array there leaves every thread flattened and reports success.
+- Issue numbers are preserved as-is. **The target workspace must have no tasks**, or the import refuses the group with `transfer_issues_target_not_empty` and writes nothing — the source prefix and every `DENE-xxx` reference inside bodies stay correct only under that condition.
+
+`--renumber` is the escape hatch for a non-empty target: every imported number is offset by the target's number watermark (highest number already in the workspace — the server exposes no `issue_counter` read), order and relative spacing are preserved, and the import writes `<in>.number-map.csv` with one `source_identifier,target_identifier,target_issue_id` row per task. It asks for a literal `yes` first, because plain-text `<prefix>-xxx` references in descriptions and comments are **not** rewritten and will point at the wrong task; only structured `mention://issue/<uuid>` links are remapped.
+
+Comments arrive through the `since` cursor, not the default list: the cursor-less path returns the newest 2000 comments with no way to walk older ones. The exporter always sends a cursor, backs it off by one microsecond per page (the server predicate is a strict `created_at > cursor`) and dedupes by id, so comments sharing a microsecond at a page boundary are not skipped. `fold` is never sent — folding drops the middle of resolved threads.
 
 ## Runtime binding (DENE-364)
 
@@ -70,7 +89,15 @@ Binding only ever points at a runtime that already exists on the target and that
 ## What is not transferred
 
 - Other people's chats
-- Issue comments / tasks
 - Agent CLI `session_id` / `work_dir` (so the agent starts a fresh CLI session)
-- Secrets (`custom_env`, MCP configs, tokens). Chat text matching high-confidence secret patterns is replaced with `[REDACTED:<kind>]`.
+- Secrets (`custom_env`, MCP configs, tokens). Chat text, task titles/descriptions, comment bodies and their text attachments matching high-confidence secret patterns are replaced with `[REDACTED:<kind>]`; a key named like a credential inside an issue's `metadata` / `properties` has its whole value nulled.
 - Runtime **entities** (the machines themselves). Bindings are now applied automatically when unambiguous — see above — but the target must already have the runtime.
+
+Even with `--include issues`, these do not travel, and the import report says so per group:
+
+- Issue activity log (the detail page's timeline is empty; status changes are still visible because `status_change` **comments** do travel).
+- Task run history and token usage.
+- Inbox items — the target inbox is empty and fills from new activity. Creator/assignee subscriptions are rebuilt, so later activity on an imported task does reach people.
+- Source-context snapshots (tasks created from a channel message or quick action).
+- PR/VCS links, issue dependencies, issue drafts, pinned items.
+- Issue numbers are only reusable in an empty target — see `--renumber` above.

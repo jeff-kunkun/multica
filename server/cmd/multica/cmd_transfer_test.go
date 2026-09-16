@@ -545,6 +545,7 @@ func newTransferImportTestCmd() *cobra.Command {
 	cmd.Flags().String("workspace", "", "")
 	cmd.Flags().String("in", "", "")
 	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().Bool("renumber", false, "")
 	cmd.Flags().String("on-conflict", "fail", "")
 	// Registered through the production helper so this test command cannot
 	// drift from the flags `transfer import` really declares.

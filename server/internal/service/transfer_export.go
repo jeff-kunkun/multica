@@ -140,18 +140,46 @@ type TransferExportFiles struct {
 	Preferences   TransferPreferences
 	SessionShards [][]TransferSessionRow
 	MessageShards [][]TransferMessageRow
-	Attachments   []TransferAttachmentRow
-	Blobs         map[string][]byte
-	Secrets       []SecretOmitted
-	Estimate      *TransferEstimate
+	// V3 issue group. IssueShards[i] and CommentShards[i] are one shard pair:
+	// every comment in CommentShards[i] belongs to an issue in IssueShards[i].
+	IssueShards   [][]TransferIssueRow
+	CommentShards [][]TransferCommentRow
+	// Relations is one bundle-wide file (labels and reactions); the import
+	// groups it by the shard each referenced issue/comment travelled in.
+	Relations   []TransferRelationRow
+	Attachments []TransferAttachmentRow
+	Blobs       map[string][]byte
+	Secrets     []SecretOmitted
+	Estimate    *TransferEstimate
 }
 
 type TransferEstimate struct {
 	Sessions         int   `json:"sessions"`
 	Messages         int   `json:"messages"`
+	Issues           int   `json:"issues"`
+	IssueComments    int   `json:"issue_comments"`
 	Attachments      int   `json:"attachments"`
 	AttachmentBodies int   `json:"attachment_bodies"`
 	EstimatedBytes   int64 `json:"estimated_bytes"`
+}
+
+// mergeTransferEstimate adds the issue group's estimate to the conversation
+// group's, so `--estimate --include config,conversations,attachments,issues`
+// reports one number for the whole bundle and no field silently disappears
+// just because both groups ran.
+func mergeTransferEstimate(dst, src *TransferEstimate) *TransferEstimate {
+	if src == nil {
+		return dst
+	}
+	if dst == nil {
+		return src
+	}
+	dst.Issues += src.Issues
+	dst.IssueComments += src.IssueComments
+	dst.Attachments += src.Attachments
+	dst.AttachmentBodies += src.AttachmentBodies
+	dst.EstimatedBytes += src.EstimatedBytes
+	return dst
 }
 
 func includeSet(include []string) map[string]bool {
@@ -256,9 +284,13 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 	}
 
 	refs := TransferRefs{
-		Agents:       map[string]TransferAgentRef{},
-		SystemAgents: map[string]TransferAgentRef{},
-		Projects:     map[string]TransferProjRef{},
+		Agents:          map[string]TransferAgentRef{},
+		SystemAgents:    map[string]TransferAgentRef{},
+		Projects:        map[string]TransferProjRef{},
+		Members:         map[string]TransferMemberRef{},
+		Squads:          map[string]TransferSquadRef{},
+		IssueStatuses:   map[string]string{},
+		IssueProperties: map[string]TransferPropertyRef{},
 	}
 	for _, a := range bundle.Entities.Agents {
 		refs.Agents[a.SourceID] = TransferAgentRef{Name: a.Name}
@@ -268,6 +300,25 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 	}
 	for _, p := range bundle.Entities.Projects {
 		refs.Projects[p.SourceID] = TransferProjRef{Title: p.Title}
+	}
+	// The V3 maps are the import's whole basis for mention rewriting, status
+	// downgrade and property-key remapping, so they are filled from the config
+	// group that actually ships in this bundle. `--no-people` keeps member
+	// emails out of the bundle, and this map follows it rather than becoming a
+	// second, unflagged copy of the same addresses.
+	if opts.People {
+		for _, p := range people {
+			refs.Members[p.SourceUserID] = TransferMemberRef{Email: p.Email}
+		}
+	}
+	for _, s := range bundle.Entities.Squads {
+		refs.Squads[s.SourceID] = TransferSquadRef{Name: s.Name}
+	}
+	for _, st := range bundle.Entities.IssueStatuses {
+		refs.IssueStatuses[st.Key] = st.Category
+	}
+	for _, p := range bundle.Entities.IssueProperties {
+		refs.IssueProperties[p.SourceID] = TransferPropertyRef{Name: p.Name}
 	}
 
 	if inc["conversations"] {
@@ -294,6 +345,21 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 	out.People = people
 	out.Runtimes = runtimes
 	out.Preferences = prefs
+
+	if inc[TransferIncludeIssues] {
+		issues := exportIssues(ctx, src, opts, &refs)
+		gaps = append(gaps, issues.Gaps...)
+		out.IssueShards, out.CommentShards = shardTransferIssues(issues.IssueRows, issues.CommentsByIssue)
+		out.Relations = issues.Relations
+		out.Attachments = append(out.Attachments, issues.Attachments...)
+		for sha, body := range issues.Blobs {
+			out.Blobs[sha] = body
+		}
+		bundle.SecretsOmitted = append(bundle.SecretsOmitted, issues.Secrets...)
+		if opts.Estimate {
+			out.Estimate = mergeTransferEstimate(out.Estimate, issues.Estimate)
+		}
+	}
 	out.Secrets = bundle.SecretsOmitted
 
 	stats := map[string]int{}
@@ -309,6 +375,16 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 	}
 	stats["chat_sessions"] = sessCount
 	stats["chat_messages"] = msgCount
+	issueCount, commentCount := 0, 0
+	for _, shard := range out.IssueShards {
+		issueCount += len(shard)
+	}
+	for _, shard := range out.CommentShards {
+		commentCount += len(shard)
+	}
+	stats["issues"] = issueCount
+	stats["issue_comments"] = commentCount
+	stats["issue_relations"] = len(out.Relations)
 	stats["attachments"] = len(out.Attachments)
 	bodyCount := 0
 	for _, a := range out.Attachments {
@@ -406,12 +482,22 @@ const (
 	// this exporter knows how to read, so it yielded zero rows — the whole
 	// group went missing. Saying so beats exporting nothing silently.
 	gapReasonListShapeUnknown = "list_shape_unknown"
+	// gapReasonCommentWindowTruncated: one issue has more comments at a single
+	// microsecond than a `since` page can carry, so the cursor cannot advance
+	// past them. The rows read so far still ship, but the tail is known to be
+	// missing (§11.5 keeps this token for exactly this case).
+	gapReasonCommentWindowTruncated = "comment_window_truncated"
+	// gapReasonCommentWindowSampled: `--estimate` read one comments page per
+	// issue on purpose. It is a sample, not a truncation, and never blocks a
+	// bundle because estimate mode writes none.
+	gapReasonCommentWindowSampled = "comment_window_sampled"
 )
 
 func warningGapReason(reason string) bool {
 	switch reason {
 	case gapReasonPluginUnfiltered, gapReasonIssueViewsCapped,
-		gapReasonListCapReached, gapReasonListHasMore, gapReasonListShapeUnknown:
+		gapReasonListCapReached, gapReasonListHasMore, gapReasonListShapeUnknown,
+		gapReasonCommentWindowTruncated, gapReasonCommentWindowSampled:
 		return true
 	}
 	return false
@@ -1734,6 +1820,19 @@ type transferPartialState struct {
 	WorkspaceRef         string   `json:"workspace_ref"`
 	CompletedSessionIDs  []string `json:"completed_session_ids"`
 	DownloadedBlobSHA256 []string `json:"downloaded_blob_sha256,omitempty"`
+	// V3: the issues finished so far plus the comment watermark each one was
+	// read up to. An issue missing from the set is re-walked from scratch,
+	// because a single issue's comments are cheap to re-read (§8.5).
+	CompletedIssueIDs     []string                          `json:"completed_issue_ids,omitempty"`
+	IssueCommentWatermark map[string]TransferIssueWatermark `json:"issue_comment_watermark,omitempty"`
+}
+
+// TransferIssueWatermark is how far one issue's comment walk reached: the last
+// created_at it saw and the comment ids it collected, so a resumed walk can
+// tell re-read tie rows from new ones.
+type TransferIssueWatermark struct {
+	LastCreatedAt string   `json:"last_created_at,omitempty"`
+	CommentIDs    []string `json:"comment_ids,omitempty"`
 }
 
 func newTransferPartialState(opts TransferExportOpts) *transferPartialState {

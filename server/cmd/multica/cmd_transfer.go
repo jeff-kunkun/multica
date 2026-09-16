@@ -2,9 +2,11 @@ package main
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,7 +61,7 @@ var transferBindRuntimesCmd = &cobra.Command{
 func init() {
 	transferExportCmd.Flags().String("workspace", "", "Source workspace slug or id")
 	transferExportCmd.Flags().String("out", "", "Output zip path")
-	transferExportCmd.Flags().String("include", "config,conversations,attachments", "Comma-separated parts to include")
+	transferExportCmd.Flags().String("include", "config,conversations,attachments", "Comma-separated parts to include: config,conversations,attachments,issues")
 	transferExportCmd.Flags().Bool("estimate", false, "Estimate size without writing a bundle")
 	transferExportCmd.Flags().Bool("exclude-archived", false, "Skip archived chats")
 	transferExportCmd.Flags().Bool("no-people", false, "Omit people.json (member refs other than exporter will degrade)")
@@ -68,6 +71,7 @@ func init() {
 	transferImportCmd.Flags().String("in", "", "Input zip or V1 JSON path")
 	transferImportCmd.Flags().Bool("dry-run", false, "Preview without writing")
 	transferImportCmd.Flags().String("on-conflict", "fail", "Conflict policy for config entities: fail, overwrite, rename, skip")
+	transferImportCmd.Flags().Bool("renumber", false, "Offset every imported issue number by the target workspace's watermark (needs a non-empty target and asks for confirmation)")
 	registerTransferImportOptionFlags(transferImportCmd)
 	_ = transferImportCmd.MarkFlagRequired("workspace")
 	_ = transferImportCmd.MarkFlagRequired("in")
@@ -178,6 +182,15 @@ func parseInclude(raw string) []string {
 	return parts
 }
 
+func includesTransferGroup(include []string, group string) bool {
+	for _, p := range include {
+		if p == group {
+			return true
+		}
+	}
+	return false
+}
+
 // transferProgressEvent is one line of the progress protocol the Desktop
 // migration card reads off the CLI's stderr: a JSON object per line, while
 // stdout stays reserved for the command's own output. Fields are omitted when
@@ -249,6 +262,11 @@ func runTransferExport(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	fmt.Fprintln(cmd.ErrOrStderr(), "This bundle will contain full chat history and member emails. Keep it as a sensitive file; do not upload it to a public location.")
+	if includesTransferGroup(parseInclude(include), service.TransferIncludeIssues) {
+		// The issues group is not a merge: it relies on the source numbers
+		// staying authoritative, which only holds in an empty target (§2.2).
+		fmt.Fprintln(cmd.ErrOrStderr(), "The issues group requires the target workspace to have no issues at all.")
+	}
 
 	host := ""
 	if u, err := url.Parse(client.BaseURL); err == nil {
@@ -342,6 +360,15 @@ func writeTransferZip(outPath string, files *service.TransferExportFiles) error 
 		name := fmt.Sprintf("conversations/messages-%04d.jsonl", i+1)
 		put(name, marshalJSONL(shard))
 	}
+	for i, shard := range files.IssueShards {
+		put(fmt.Sprintf("issues/issues-%04d.jsonl", i+1), marshalJSONL(shard))
+		if i < len(files.CommentShards) {
+			put(fmt.Sprintf("issues/comments-%04d.jsonl", i+1), marshalJSONL(files.CommentShards[i]))
+		}
+	}
+	if len(files.Relations) > 0 {
+		put("issues/relations.jsonl", marshalJSONL(files.Relations))
+	}
 	if len(files.Attachments) > 0 {
 		put("attachments/index.jsonl", marshalJSONL(files.Attachments))
 	}
@@ -415,6 +442,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	inPath, _ := cmd.Flags().GetString("in")
 	dry, _ := cmd.Flags().GetBool("dry-run")
 	onConflict, _ := cmd.Flags().GetString("on-conflict")
+	renumber, _ := cmd.Flags().GetBool("renumber")
 	importOptions := transferImportOptions(cmd)
 
 	client, err := newTransferAPIClient(cmd)
@@ -448,6 +476,30 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 		return cli.PrintJSON(cmd.OutOrStdout(), report)
 	}
 
+	// --renumber rewrites the numbers BEFORE anything is written, and it asks
+	// for confirmation first: the offset silently invalidates every plain-text
+	// `<prefix>-xxx` reference in the imported bodies and comments (§2.3/§2.4).
+	issueShards := payload.IssueShards
+	numberMapPath := ""
+	sourcePrefix := payload.Config.Source.IssuePrefix
+	if renumber && len(issueShards) > 0 {
+		offset, err := service.TransferIssueNumberWatermark(ctx, sourceClient{api: client})
+		if err != nil {
+			return fmt.Errorf("read target issue watermark: %w", err)
+		}
+		targetPrefix := fetchTransferIssuePrefix(ctx, client, wsID)
+		numberMapPath = inPath + ".number-map.csv"
+		if err := confirmTransferRenumber(cmd, sourcePrefix, numberMapPath); err != nil {
+			return err
+		}
+		// Land the table before the writes, so the file the confirmation points
+		// at exists even when the import fails halfway through.
+		if err := writeTransferNumberMap(numberMapPath, buildTransferNumberMap(payload, wsID, sourcePrefix, targetPrefix, offset)); err != nil {
+			return err
+		}
+		issueShards = renumberTransferIssues(issueShards, offset)
+	}
+
 	var cfgReport any
 	cfgReq := service.TransferConfigRequest{
 		Manifest:        payload.Manifest,
@@ -465,6 +517,15 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("target_unsupported: this server is not a kun instance with /transfer/* endpoints")
 		}
 		return err
+	}
+
+	// Issues go after config (labels, projects, agents and the status catalog
+	// must exist) and before attachments (attachment.comment_id references
+	// comment.id).
+	if len(payload.IssueShards) > 0 {
+		if err := uploadTransferIssueShards(ctx, client, base, payload, issueShards, dry); err != nil {
+			return err
+		}
 	}
 
 	for i := range payload.SessionShards {
@@ -509,8 +570,232 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 				return fmt.Errorf("finalize conversations: %w", err)
 			}
 		}
+		if len(payload.IssueShards) > 0 {
+			if err := finalizeTransferIssues(ctx, client, base, payload); err != nil {
+				return err
+			}
+		}
+	}
+	if numberMapPath != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Number mapping table written to %s\n", numberMapPath)
 	}
 	return cli.PrintJSON(cmd.OutOrStdout(), cfgReport)
+}
+
+// uploadTransferIssueShards sends every issue shard.
+//
+// `refs` is the WHOLE package's refs on every request, not the shard's own
+// slice: the target's "no foreign issues" gate recognizes the rows this bundle
+// already wrote by looking their deterministic ids up in refs.issues, so a
+// shard that carried only its own ids would make shard 2 read shard 1's rows as
+// issues that were already there and answer 400.
+func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer, shards [][]service.TransferIssueRow, dry bool) error {
+	// Relations travel in the shard that holds the rows they point at, because
+	// both reaction tables carry a real foreign key to their comment/issue.
+	commentIssue := map[string]string{}
+	for _, shard := range payload.CommentShards {
+		for _, c := range shard {
+			commentIssue[c.SourceID] = c.IssueID
+		}
+	}
+	shardOfIssue := map[string]int{}
+	for i, shard := range payload.IssueShards {
+		for _, row := range shard {
+			shardOfIssue[row.SourceID] = i
+		}
+	}
+	relationsByShard := make([][]service.TransferRelationRow, len(shards))
+	for _, rel := range payload.Relations {
+		key := rel.IssueID
+		if rel.CommentID != "" {
+			key = commentIssue[rel.CommentID]
+		}
+		idx, ok := shardOfIssue[key]
+		if !ok || idx >= len(relationsByShard) {
+			continue
+		}
+		relationsByShard[idx] = append(relationsByShard[idx], rel)
+	}
+
+	for i := range shards {
+		req := service.TransferIssuesRequest{
+			Refs:      payload.Manifest.Refs,
+			Issues:    shards[i],
+			Relations: relationsByShard[i],
+			DryRun:    &dry,
+		}
+		if i < len(payload.CommentShards) {
+			req.Comments = payload.CommentShards[i]
+		}
+		var report any
+		if err := client.PostJSON(ctx, base+"/transfer/issues", req, &report); err != nil {
+			if st := httpStatusOf(err); st == 404 {
+				return fmt.Errorf("target_unsupported: this server is not a kun instance with /transfer/issues")
+			}
+			return fmt.Errorf("upload issues shard %d: %w", i+1, err)
+		}
+	}
+	return nil
+}
+
+// finalizeTransferIssues sends the second pass: the whole package's link rows,
+// with no bodies.
+//
+// Both parent pointers are backfilled inside this one request, so it must carry
+// the (source_id, parent_issue_id) pairs AND the (source_id, issue_id,
+// parent_id) pairs. A finalize that sends an empty `comments` array leaves
+// every reply's parent NULL and silently flattens every thread while the report
+// still reads clean; sending link rows instead of whole comments is what keeps
+// a few thousand rows inside the request-body cap.
+func finalizeTransferIssues(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer) error {
+	seenIssue := map[string]bool{}
+	var issues []service.TransferIssueRow
+	for _, shard := range payload.IssueShards {
+		for _, row := range shard {
+			if seenIssue[row.SourceID] {
+				continue
+			}
+			seenIssue[row.SourceID] = true
+			issues = append(issues, service.TransferIssueRow{SourceID: row.SourceID, ParentIssueID: row.ParentIssueID})
+		}
+	}
+	seenComment := map[string]bool{}
+	var comments []service.TransferCommentRow
+	for _, shard := range payload.CommentShards {
+		for _, row := range shard {
+			if seenComment[row.SourceID] {
+				continue
+			}
+			seenComment[row.SourceID] = true
+			comments = append(comments, service.TransferCommentRow{
+				SourceID: row.SourceID,
+				IssueID:  row.IssueID,
+				ParentID: row.ParentID,
+			})
+		}
+	}
+	req := service.TransferIssuesRequest{
+		Refs:     payload.Manifest.Refs,
+		Issues:   issues,
+		Comments: comments,
+		DryRun:   boolPtr(false),
+		Finalize: true,
+	}
+	if n := transferRequestBytes(req); n > service.TransferConversationsMaxBytes {
+		return fmt.Errorf("issues finalize payload is %d bytes, over the %d byte request cap; parent pointers cannot be trimmed without flattening threads",
+			n, service.TransferConversationsMaxBytes)
+	}
+	var report any
+	if err := client.PostJSON(ctx, base+"/transfer/issues", req, &report); err != nil {
+		return fmt.Errorf("finalize issues: %w", err)
+	}
+	return nil
+}
+
+func transferRequestBytes(req service.TransferIssuesRequest) int {
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return 0
+	}
+	return len(raw)
+}
+
+// confirmTransferRenumber is the §2.4 gate: the offset breaks every plain-text
+// number reference in the bodies, so the user has to type the word.
+func confirmTransferRenumber(cmd *cobra.Command, sourcePrefix, mapPath string) error {
+	prefix := sourcePrefix
+	if prefix == "" {
+		prefix = "<source prefix>"
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(),
+		"After the offset, every plain-text `%s-xxx` reference in descriptions and comments points at the wrong task. The mapping table is %s.\nType `yes` to continue: ",
+		prefix, mapPath)
+	line, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+	if strings.TrimSpace(line) != "yes" {
+		return fmt.Errorf("renumber cancelled: expected `yes` on stdin")
+	}
+	return nil
+}
+
+func renumberTransferIssues(shards [][]service.TransferIssueRow, offset int32) [][]service.TransferIssueRow {
+	out := make([][]service.TransferIssueRow, len(shards))
+	for i, shard := range shards {
+		rows := make([]service.TransferIssueRow, len(shard))
+		for j, row := range shard {
+			row.Number = offset + row.Number
+			rows[j] = row
+		}
+		out[i] = rows
+	}
+	return out
+}
+
+// transferNumberMapRow is one line of `<in>.number-map.csv`. A few thousand
+// rows scrolled past on a terminal are worth nothing, which is why this lands
+// in a file.
+type transferNumberMapRow struct {
+	SourceIdentifier string
+	TargetIdentifier string
+	TargetIssueID    string
+}
+
+func buildTransferNumberMap(payload *loadedTransfer, wsID, sourcePrefix, targetPrefix string, offset int32) []transferNumberMapRow {
+	seen := map[string]bool{}
+	var rows []transferNumberMapRow
+	for _, shard := range payload.IssueShards {
+		for _, row := range shard {
+			if seen[row.SourceID] {
+				continue
+			}
+			seen[row.SourceID] = true
+			sourceIdentifier := payload.Manifest.Refs.Issues[row.SourceID].Identifier
+			if sourceIdentifier == "" {
+				sourceIdentifier = transferNumberIdentifier(sourcePrefix, row.Number)
+			}
+			rows = append(rows, transferNumberMapRow{
+				SourceIdentifier: sourceIdentifier,
+				TargetIdentifier: transferNumberIdentifier(targetPrefix, offset+row.Number),
+				TargetIssueID:    service.TransferIssueID(wsID, row.SourceID).String(),
+			})
+		}
+	}
+	return rows
+}
+
+func transferNumberIdentifier(prefix string, number int32) string {
+	if prefix == "" {
+		return strconv.Itoa(int(number))
+	}
+	return prefix + "-" + strconv.Itoa(int(number))
+}
+
+func writeTransferNumberMap(path string, rows []transferNumberMapRow) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := csv.NewWriter(f)
+	if err := w.Write([]string{"source_identifier", "target_identifier", "target_issue_id"}); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := w.Write([]string{row.SourceIdentifier, row.TargetIdentifier, row.TargetIssueID}); err != nil {
+			return err
+		}
+	}
+	w.Flush()
+	return w.Error()
+}
+
+func fetchTransferIssuePrefix(ctx context.Context, client *cli.APIClient, wsID string) string {
+	var ws struct {
+		IssuePrefix string `json:"issue_prefix"`
+	}
+	if err := client.GetJSON(ctx, "/api/workspaces/"+url.PathEscape(wsID), &ws); err != nil {
+		return ""
+	}
+	return ws.IssuePrefix
 }
 
 // runTransferBindRuntimes sends the card's picks to the target instance.
@@ -570,6 +855,11 @@ type loadedTransfer struct {
 	Secrets       []service.SecretOmitted
 	SessionShards [][]service.TransferSessionRow
 	MessageShards [][]service.TransferMessageRow
+	// V3 issue group. The shard index is the pairing the exporter wrote:
+	// CommentShards[i] holds exactly the comments of the issues in IssueShards[i].
+	IssueShards   [][]service.TransferIssueRow
+	CommentShards [][]service.TransferCommentRow
+	Relations     []service.TransferRelationRow
 	Attachments   []service.TransferAttachmentRow
 	Blobs         map[string][]byte
 }
@@ -659,7 +949,7 @@ func loadTransferZip(path string) (*loadedTransfer, error) {
 	if raw, ok := files["attachments/index.jsonl"]; ok {
 		out.Attachments = decodeJSONL[service.TransferAttachmentRow](raw)
 	}
-	var sessNames, msgNames []string
+	var sessNames, msgNames, issueNames, commentNames []string
 	for name, data := range files {
 		if strings.HasPrefix(name, "attachments/blobs/") {
 			out.Blobs[strings.TrimPrefix(name, "attachments/blobs/")] = data
@@ -670,14 +960,36 @@ func loadTransferZip(path string) (*loadedTransfer, error) {
 		if strings.HasPrefix(name, "conversations/messages-") {
 			msgNames = append(msgNames, name)
 		}
+		if strings.HasPrefix(name, "issues/issues-") {
+			issueNames = append(issueNames, name)
+		}
+		if strings.HasPrefix(name, "issues/comments-") {
+			commentNames = append(commentNames, name)
+		}
 	}
 	sort.Strings(sessNames)
 	sort.Strings(msgNames)
+	sort.Strings(issueNames)
+	sort.Strings(commentNames)
 	for _, name := range sessNames {
 		out.SessionShards = append(out.SessionShards, decodeJSONL[service.TransferSessionRow](files[name]))
 	}
 	for _, name := range msgNames {
 		out.MessageShards = append(out.MessageShards, decodeJSONL[service.TransferMessageRow](files[name]))
+	}
+	for i, name := range issueNames {
+		out.IssueShards = append(out.IssueShards, decodeJSONL[service.TransferIssueRow](files[name]))
+		// The exporter always writes one comments file per issues file. A
+		// hand-made bundle may not, and a missing file means an issue with no
+		// comments rather than a corrupt package.
+		if i < len(commentNames) {
+			out.CommentShards = append(out.CommentShards, decodeJSONL[service.TransferCommentRow](files[commentNames[i]]))
+		} else {
+			out.CommentShards = append(out.CommentShards, nil)
+		}
+	}
+	if raw, ok := files["issues/relations.jsonl"]; ok {
+		out.Relations = decodeJSONL[service.TransferRelationRow](raw)
 	}
 	return out, nil
 }
@@ -718,6 +1030,8 @@ func postTransferAttachment(ctx context.Context, client *cli.APIClient, path str
 		SourceID:          meta.SourceID,
 		ChatSessionID:     meta.ChatSessionID,
 		ChatMessageID:     meta.ChatMessageID,
+		IssueID:           meta.IssueID,
+		CommentID:         meta.CommentID,
 		Filename:          meta.Filename,
 		ContentType:       meta.ContentType,
 		SizeBytes:         meta.SizeBytes,
