@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   sendChatMessage: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
+  transcriptProps: {} as { transformContent?: (content: string) => string },
 }));
 
 vi.mock("@multica/core/api", async () => {
@@ -109,15 +110,24 @@ vi.mock("../../chat/components/chat-input", () => ({
 }));
 
 vi.mock("../../chat/components/chat-message-list", () => ({
-  ChatMessageList: ({ messages }: { messages: { id: string; content: string }[] }) => (
-    <div data-testid="transcript">
-      {messages.map((message) => (
-        <p key={message.id} data-testid="transcript-row">
-          {message.content}
-        </p>
-      ))}
-    </div>
-  ),
+  ChatMessageList: ({
+    messages,
+    transformContent,
+  }: {
+    messages: { id: string; content: string }[];
+    transformContent?: (content: string) => string;
+  }) => {
+    mocks.transcriptProps.transformContent = transformContent;
+    return (
+      <div data-testid="transcript">
+        {messages.map((message) => (
+          <p key={message.id} data-testid="transcript-row">
+            {transformContent ? transformContent(message.content) : message.content}
+          </p>
+        ))}
+      </div>
+    );
+  },
   ChatMessageSkeleton: () => <div data-testid="transcript-loading" />,
 }));
 
@@ -195,6 +205,7 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.transcriptProps = {};
   mocks.drafts = [draftSummary()];
   mocks.draftsError = null;
   mocks.messages = [chatMessage()];
@@ -264,6 +275,22 @@ describe("IssueDraftPage stages", () => {
     await waitFor(() => expect(screen.getAllByTestId("transcript-row")).toHaveLength(2));
     const rows = screen.getAllByTestId("transcript-row").map((row) => row.textContent);
     expect(rows).toEqual(["add dark mode", "Which surfaces?"]);
+  });
+
+  it("strips the machine blocks on the way to the transcript, question block included", async () => {
+    // A settled reply is drawn from the carrier's task transcript, not from the
+    // message body the page already stripped, so the strip has to travel down
+    // to the list as well — otherwise the raw block comes back in the bubble
+    // (DENE-317).
+    renderPage();
+    await waitFor(() => expect(mocks.transcriptProps.transformContent).toBeTypeOf("function"));
+    const transform = mocks.transcriptProps.transformContent!;
+    expect(transform('两处已落进草稿。\n\n<issue_draft>{"title":"T"}</issue_draft>')).toBe(
+      "两处已落进草稿。",
+    );
+    expect(
+      transform('Who runs it?\n<issue_draft_question>{"question":"Who runs it?"}</issue_draft_question>'),
+    ).toBe("Who runs it?");
   });
 
   it("sends every follow-up turn as an envelope carrying the current draft", async () => {
@@ -338,6 +365,55 @@ describe("IssueDraftPage confirming", () => {
       issue_id: "issue-9",
     });
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/acme/issues/issue-9"));
+  });
+
+  it("lands on the created issue when one tick sends the confirm twice", async () => {
+    // Two presses dispatched in a single task — a scripted double click, which
+    // is how the acceptance run recorded two finalize POSTs in the same
+    // millisecond. Both answer with the same issue, and the completed draft
+    // then leaves the unfinished list, so the page has to navigate once and
+    // stay landed: a page that does not is left on the alignment URL showing
+    // "this alignment has finished" (DENE-317).
+    mocks.drafts = [draftSummary({ status: "ready" })];
+    mocks.finalizeIssueDraft.mockResolvedValue({
+      draft: draftSummary({ status: "completed", issue_id: "issue-9" }),
+      issue_id: "issue-9",
+    });
+    // The confirm retires the draft, so the follow-up refetch re-renders the
+    // page with no row while the navigation is still in flight. It lands a beat
+    // later on purpose: the render that still has the row is what the first
+    // replace comes from, and the one without it is the render that used to
+    // re-issue that replace.
+    mocks.listIssueDrafts.mockImplementation(() =>
+      mocks.finalizeIssueDraft.mock.calls.length > 0
+        ? new Promise((resolve) => setTimeout(() => resolve([]), 20))
+        : Promise.resolve(mocks.drafts),
+    );
+    renderPage();
+    const confirm = await screen.findByRole("button", { name: /Confirm and create/ });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Dark mode" })).toBeTruthy());
+    await waitFor(() => expect(confirm).toBeEnabled());
+
+    await act(async () => {
+      // Raw dispatches: RTL's fireEvent wraps each one in `act`, which flushes
+      // the disabled button between them and hides the very path under test.
+      confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    expect(mocks.finalizeIssueDraft).toHaveBeenCalledTimes(2);
+
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/acme/issues/issue-9"));
+    // The row is gone from the list: this is the re-render that used to
+    // re-issue the replace, because the effect's `paths` dependency is rebuilt
+    // on every render and a router asked to replace the same URL forever never
+    // commits. The header falls back to the unnamed-draft placeholder.
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Align a new issue" })).toBeTruthy(),
+    );
+    await act(async () => {});
+    expect(
+      mocks.replace.mock.calls.filter(([path]) => path === "/acme/issues/issue-9"),
+    ).toHaveLength(1);
   });
 
   it("keeps the draft on screen when finalize is refused", async () => {

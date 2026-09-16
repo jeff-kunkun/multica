@@ -31,6 +31,7 @@ export function IssueDraftConversation({
   onStop,
   error,
   question,
+  transformContent,
 }: {
   draftId: string;
   messages: ChatMessage[];
@@ -47,6 +48,12 @@ export function IssueDraftConversation({
   error: string | null;
   /** The question the guided policy is waiting on, if any. */
   question: IssueDraftQuestion | null;
+  /**
+   * How to render a settled assistant turn. The list draws those from the
+   * carrier's task transcript, whose text is the wire format verbatim, so the
+   * owner has to hand down the same strip it applies to the message bodies.
+   */
+  transformContent: (content: string) => string;
 }) {
   const { t } = useT("issues");
   const pending = !!pendingTask?.task_id;
@@ -87,6 +94,7 @@ export function IssueDraftConversation({
           messages={messages}
           pendingTask={pendingTask}
           availability={runtimeOnline ? "online" : "offline"}
+          transformContent={transformContent}
         />
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-8">

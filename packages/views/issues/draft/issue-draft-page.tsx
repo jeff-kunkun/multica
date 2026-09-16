@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useDefaultLayout } from "react-resizable-panels";
 import { ArrowLeft } from "lucide-react";
@@ -83,10 +83,17 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
 
   // A confirmed draft is final. Replace, for the same reason: the alignment URL
   // is no longer an unfinished draft once the issue exists.
+  //
+  // Once per issue, not once per render. `paths` is rebuilt on every render and
+  // a same-tick double click reports the same issue twice, so this effect runs
+  // again and again while the page is still on screen — and a router told to
+  // replace the same URL forty times never commits the navigation at all.
+  const navigatedToIssueRef = useRef<string | null>(null);
   useEffect(() => {
-    if (session.createdIssueId) {
-      navigation.replace(paths.issueDetail(session.createdIssueId));
-    }
+    if (!session.createdIssueId) return;
+    if (navigatedToIssueRef.current === session.createdIssueId) return;
+    navigatedToIssueRef.current = session.createdIssueId;
+    navigation.replace(paths.issueDetail(session.createdIssueId));
   }, [navigation, paths, session.createdIssueId]);
 
   if (session.missing) return null;
@@ -148,6 +155,11 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               onStop={() => void session.stop()}
               error={session.error}
               question={session.question}
+              // A settled reply is rendered from the carrier's task transcript,
+              // not from `content`, so stripping the message above is not enough
+              // on its own: the transcript's text rows have to be transformed
+              // too, or the raw block comes back (DENE-319).
+              transformContent={stripIssueDraftDirectives}
             />
           </ResizablePanel>
           <ResizableHandle />

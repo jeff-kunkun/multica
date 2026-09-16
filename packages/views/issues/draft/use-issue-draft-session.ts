@@ -107,8 +107,12 @@ export interface IssueDraftSession {
    * as one action: parsing and persisting together is what makes the preview
    * the thing the server will actually create from, rather than a rendering of
    * a message that could still change under it.
+   *
+   * Resolves with the draft that was persisted, or null when nothing was: the
+   * caller's editor has to adopt it, because what the server now holds is no
+   * longer what the editor shows.
    */
-  generatePreview: (current: IssueDraftPayload) => Promise<boolean>;
+  generatePreview: (current: IssueDraftPayload) => Promise<IssueDraftPayload | null>;
   confirm: () => Promise<boolean>;
   abandon: () => Promise<boolean>;
   switchRuntime: (runtimeId: string) => Promise<string | null>;
@@ -359,9 +363,15 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
    * `current` is the panel's editor value, not the stored draft: the user's
    * unsaved edits are part of what they are asking to have previewed, and
    * rebuilding from the stored draft would silently discard them.
+   *
+   * The merged draft is what comes back, not a bare success flag: it is now
+   * what the server holds, and the panel has no other way to learn that its own
+   * screen is stale. Without it the editor keeps `dirty` true over the old
+   * values, and the next "save draft" writes them straight back over the
+   * preview that was just generated (DENE-319).
    */
   const generatePreview = useCallback(
-    async (current: IssueDraftPayload): Promise<boolean> => {
+    async (current: IssueDraftPayload): Promise<IssueDraftPayload | null> => {
       const latest = [...messages]
         .reverse()
         .find(
@@ -373,8 +383,9 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
         current,
         latest ? parseIssueDraftBlock(latest.content) : null,
       );
-      if (!issueDraftIsCreatable(merged)) return false;
-      return save(merged, "ready");
+      if (!issueDraftIsCreatable(merged)) return null;
+      const saved = await save(merged, "ready");
+      return saved ? merged : null;
     },
     [messages, save],
   );

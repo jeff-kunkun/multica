@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { IssueDraftPayload, IssuePriority, IssueStatus, MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import {
@@ -76,8 +76,10 @@ export function IssueDraftPreviewPanel({
   onDirtyChange: (dirty: boolean) => void;
   onSave: (draft: IssueDraftPayload, status?: "draft" | "ready") => Promise<boolean>;
   /** Folds the carrier's latest draft block into what is on screen and marks it
-   *  ready — the step that turns "we agreed" into something confirmable. */
-  onGenerate: (draft: IssueDraftPayload) => Promise<boolean>;
+   *  ready — the step that turns "we agreed" into something confirmable.
+   *  Resolves with the draft the server now holds, or null when nothing was
+   *  written; the editor adopts it. */
+  onGenerate: (draft: IssueDraftPayload) => Promise<IssueDraftPayload | null>;
   onConfirm: () => Promise<boolean>;
   onAbandon: () => Promise<boolean>;
   onSwitchRuntime: (runtimeId: string) => Promise<string | null>;
@@ -86,14 +88,29 @@ export function IssueDraftPreviewPanel({
   const [editing, setEditing] = useState<IssueDraftPayload | null>(draft);
   const [confirmingAbandon, setConfirmingAbandon] = useState(false);
 
-  // The server's draft is the truth; the local copy is what the user has typed
-  // on top of it. Adopting a new revision replaces the local copy only when the
-  // user has nothing unsaved, which is what keeps a carrier reply from wiping
-  // an edit in progress.
-  const dirty = editing !== null && draft !== null && !sameDraft(editing, draft);
+  // The server revision the editor was last synchronised with. `dirty` is "the
+  // user has typed something since then", NOT "the editor differs from the
+  // server": the server moves on its own, because every carrier reply is folded
+  // into the draft as it arrives. Comparing against the live server value made
+  // that ordinary movement look like an unsaved edit — the panel froze on the
+  // seed values it mounted with, reported `dirty` forever, and that in turn
+  // blocked the fold from ever updating it again (DENE-319).
+  const [baseline, setBaseline] = useState<IssueDraftPayload | null>(draft);
+  const dirty =
+    editing !== null && baseline !== null && !sameDraft(editing, baseline);
+
+  /** Take the server's revision as both what is shown and what "clean" means. */
+  const adopt = useCallback((next: IssueDraftPayload | null) => {
+    setEditing(next);
+    setBaseline(next);
+  }, []);
+
+  // A new server revision replaces the local copy only when the user has
+  // nothing unsaved, which is what keeps a carrier reply from wiping an edit in
+  // progress.
   useEffect(() => {
-    if (!dirty) setEditing(draft);
-  }, [draft, dirty]);
+    if (!dirty) adopt(draft);
+  }, [adopt, draft, dirty]);
   useEffect(() => {
     onDirtyChange(dirty);
   }, [dirty, onDirtyChange]);
@@ -101,6 +118,52 @@ export function IssueDraftPreviewPanel({
   const value = editing ?? draft ?? EMPTY_DRAFT;
   const locked = pending || confirming || stage === "created";
   const canSave = !locked && !saving && value.title.trim().length > 0;
+  // A title is not required to generate: the carrier's block is the only place
+  // a title comes from before someone types one, so gating this button on the
+  // title deadlocks the one step that can supply it. "Nothing to fold in yet"
+  // is answered by the generate call itself, which writes nothing.
+  const canGenerate = !locked && !saving;
+  // Whether the server still has a draft to write. Once it is gone — the row
+  // was confirmed or retired — the panel is a read-only leftover, and anything
+  // it writes is a request against a draft that no longer exists.
+  const hasDraft = draft !== null;
+  // Which lifecycle state an explicit save writes back. `ready` is preserved:
+  // this button refines the words of a draft the user already converged on, and
+  // the server reads an omitted status as `draft` — so saving a tweak to a
+  // generated preview would otherwise close the confirm gate again. The fold
+  // path has held this line since DENE-279 (`planIssueDraftFold` never
+  // downgrades `ready`).
+  const saveStatus = stage === "ready" ? "ready" : "draft";
+
+  const handleGenerate = () => {
+    void onGenerate(value).then((persisted) => {
+      // Adopt what was just persisted. Leaving the pre-generate value on screen
+      // keeps `dirty` true forever, and the next "save draft" then overwrites
+      // the generated preview with it — the carrier's work, silently lost.
+      if (persisted) adopt(persisted);
+    });
+  };
+
+  const handleSave = () => {
+    void onSave(value, saveStatus).then((savedNow) => {
+      // What the server now holds is the new clean point; the server's own echo
+      // arrives as a `draft` prop and is adopted from there.
+      if (savedNow) setBaseline(value);
+    });
+  };
+
+  const handleSelectRuntime = useCallback(
+    (runtimeId: string) => {
+      if (!runtimeId || runtimeId === runtime?.id) return;
+      // The picker seeds an empty selection by itself, and this callback is
+      // what that seed lands on. With no draft on the server there is nothing
+      // to rebind, and writing anyway is a request per render against a draft
+      // the server has already retired.
+      if (locked || !hasDraft) return;
+      void onSwitchRuntime(runtimeId);
+    },
+    [hasDraft, locked, onSwitchRuntime, runtime?.id],
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l bg-muted/10">
@@ -182,10 +245,7 @@ export function IssueDraftPreviewPanel({
                 // The rebind has to commit server-side before the picker moves:
                 // showing runtime B while messages still run on A is exactly
                 // what MUL-5163 fixed in the agent builder.
-                onSelect={(runtimeId) => {
-                  if (!runtimeId || runtimeId === runtime?.id) return;
-                  void onSwitchRuntime(runtimeId);
-                }}
+                onSelect={handleSelectRuntime}
                 disabled={locked || switchingRuntime || pending}
               />
             </div>
@@ -218,18 +278,18 @@ export function IssueDraftPreviewPanel({
               </Button>
               <Button
                 variant="outline"
-                onClick={() => void onGenerate(value)}
+                onClick={handleGenerate}
                 // Available while the draft is still editable, `ready`
                 // included: a converged draft that the user keeps refining
                 // produces new carrier blocks, and refusing to fold them in
                 // would leave retyping as the only way to apply them.
-                disabled={!canSave}
+                disabled={!canGenerate}
               >
                 {t(($) => $.alignment.generate)}
               </Button>
               <Button
                 variant="outline"
-                onClick={() => void onSave(value)}
+                onClick={handleSave}
                 disabled={!canSave}
               >
                 {saving
