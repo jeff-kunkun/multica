@@ -4600,11 +4600,12 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingProviderConfig != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
+			"provider_config", resp.PendingProviderConfig != nil,
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
 		)
@@ -4615,6 +4616,11 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
+		}
+	}
+	if resp.PendingProviderConfig != nil {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			go d.handleProviderConfig(ctx, *rt, *resp.PendingProviderConfig)
 		}
 	}
 	if resp.PendingLocalSkills != nil {
@@ -4983,6 +4989,14 @@ func (d *Daemon) reportModelListResult(ctx context.Context, rt Runtime, requestI
 	})
 }
 
+// reportProviderConfigResult delivers a provider-preset report to the server
+// with the same retry semantics as the other runtime async reports.
+func (d *Daemon) reportProviderConfigResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
+	d.reportRuntimeResultWithRetry(ctx, "provider_config", rt.ID, requestID, func(ctx context.Context) error {
+		return d.client.ReportProviderConfigResult(ctx, rt.ID, requestID, payload)
+	})
+}
+
 // reportRuntimeResultWithRetry retries `fn` on 5xx / network errors and
 // stops on success, 4xx, or after exhausting runtimeReportBackoffs.
 //
@@ -5034,6 +5048,45 @@ func (d *Daemon) reportRuntimeResultWithRetry(ctx context.Context, kind, runtime
 	}
 	d.logger.Error("runtime async report exhausted retries",
 		"kind", kind, "runtime_id", runtimeID, "request_id", requestID, "error", lastErr)
+}
+
+// handleProviderConfig executes one provider-preset action against this host's
+// own agent configuration and reports the refreshed snapshot back.
+//
+// The request payload is never logged: an upsert for a provider carries the
+// API key the user just typed, and it is on its way into their credentials
+// file rather than into our logs. The log line names the request and the
+// action, which is what a failure report needs.
+func (d *Daemon) handleProviderConfig(ctx context.Context, rt Runtime, pending PendingProviderConfig) {
+	d.logger.Info("runtime provider config requested",
+		"runtime_id", rt.ID, "request_id", pending.ID,
+		"provider", pending.Provider, "action", pending.Action)
+
+	payload := map[string]any{}
+	snapshot, err := applyProviderConfig(pending.Provider, pending.Action, pending.Payload)
+	if err != nil {
+		d.logger.Warn("runtime provider config failed",
+			"runtime_id", rt.ID, "request_id", pending.ID,
+			"provider", pending.Provider, "action", pending.Action, "error", err)
+		payload["status"] = "failed"
+		// The message is returned to a browser, so it goes through the shared
+		// credential filter even though this action's own errors are built
+		// from file paths and field names: a decode or encode error is the one
+		// place a value from the body can end up inside a message.
+		payload["error"] = redact.Text(err.Error())
+	} else {
+		// Every action answers with the refreshed list, so the client can
+		// redraw from this reply alone.
+		payload["status"] = "completed"
+		payload["providers"] = snapshot.Providers
+		if snapshot.Active != nil {
+			payload["active"] = snapshot.Active
+		}
+		if snapshot.ClearedActive {
+			payload["cleared_active"] = true
+		}
+	}
+	d.reportProviderConfigResult(ctx, rt, pending.ID, payload)
 }
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.

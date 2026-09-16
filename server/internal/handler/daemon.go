@@ -1400,6 +1400,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if ack.PendingModelList != nil {
 		resp["pending_model_list"] = ack.PendingModelList
 	}
+	if ack.PendingProviderConfig != nil {
+		resp["pending_provider_config"] = ack.PendingProviderConfig
+	}
 	if ack.PendingLocalSkills != nil {
 		resp["pending_local_skills"] = ack.PendingLocalSkills
 	}
@@ -1602,7 +1605,9 @@ func (h *Handler) recordHeartbeatState(
 // HTTP slow-log can stay structured. The WS path discards them.
 type heartbeatMetrics struct {
 	ProbeModelMs, PopModelMs, ProbeSkillsMs, PopSkillsMs, ProbeImportMs, PopImportMs int64
+	ProbeProviderMs, PopProviderMs                                                   int64
 	ProbeModelTimedOut, ProbeSkillsTimedOut, ProbeImportTimedOut                     bool
+	ProbeProviderTimedOut                                                            bool
 }
 
 // processHeartbeat pulls pending actions for both HTTP and WebSocket
@@ -1667,6 +1672,38 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 			slog.Warn("model list HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeModelMs)
 		} else {
 			slog.Warn("model list HasPending failed", "error", probeModelErr, "runtime_id", runtimeID)
+		}
+	}
+
+	// Probe then claim the provider-preset queue. The claimed record is the
+	// one carrier allowed to hold an api_key: it goes straight into the ack
+	// below, and the store has already persisted the same request without it.
+	probeProviderStart := time.Now()
+	probeProviderCtx, cancelProbeProvider := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
+	hasProviderConfig, probeProviderErr := h.ProviderPresetStore.HasPending(probeProviderCtx, runtimeID)
+	cancelProbeProvider()
+	m.ProbeProviderMs = time.Since(probeProviderStart).Milliseconds()
+	switch {
+	case probeProviderErr == nil && hasProviderConfig:
+		popStart := time.Now()
+		pendingProvider, popErr := h.ProviderPresetStore.PopPending(ctx, runtimeID)
+		m.PopProviderMs = time.Since(popStart).Milliseconds()
+		if popErr != nil {
+			slog.Warn("provider preset PopPending failed", "error", popErr, "runtime_id", runtimeID)
+		} else if pendingProvider != nil {
+			ack.PendingProviderConfig = &protocol.DaemonHeartbeatPendingProviderConfig{
+				ID:       pendingProvider.ID,
+				Provider: pendingProvider.Provider,
+				Action:   pendingProvider.Action,
+				Payload:  pendingProvider.Payload,
+			}
+		}
+	case probeProviderErr != nil:
+		if errors.Is(probeProviderErr, context.DeadlineExceeded) || errors.Is(probeProviderErr, context.Canceled) {
+			m.ProbeProviderTimedOut = true
+			slog.Warn("provider preset HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeProviderMs)
+		} else {
+			slog.Warn("provider preset HasPending failed", "error", probeProviderErr, "runtime_id", runtimeID)
 		}
 	}
 
