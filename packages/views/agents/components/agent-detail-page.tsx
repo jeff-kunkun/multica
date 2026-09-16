@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -67,6 +67,13 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { AgentPresenceIndicator } from "./agent-presence-indicator";
 import { VisibilityBadge } from "./visibility-badge";
 import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
+import { SolidifyUnbindDialog } from "./solidify-unbind-dialog";
+import {
+  agentHasChildrenNames,
+  inheritedPromptReadState,
+  isAgentHasChildrenError,
+  isSpecialization,
+} from "../specialization";
 import { ExpandableDescription } from "../../common/expandable-description";
 import { useT, useTimeAgo } from "../../i18n";
 
@@ -101,9 +108,16 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // without the requested agent, use the canonical detail query to resolve
   // direct links and distinguish 403/404 from transient failures. Creation
   // hydrates this same key, so a newly-created agent renders immediately.
+  //
+  // A specialisation ALWAYS needs the detail read, even when the list already
+  // holds the row (DENE-304): the list serves the relationship but not the
+  // inherited prompt/skills, so the inheritance block would otherwise render
+  // as "nothing inherited" on a page that has a parent.
+  const listAgentIsSpecialization = isSpecialization(listAgent ?? {});
   const detailQuery = useQuery({
     ...agentDetailOptions(wsId, agentId),
-    enabled: !agentsLoading && !listAgent && !!agentId,
+    enabled:
+      !agentsLoading && (!listAgent || listAgentIsSpecialization) && !!agentId,
   });
   const detailError = detailQuery.error;
   const isForbidden =
@@ -115,9 +129,37 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // agent is deleted, but preserve it through transient network failures. A
   // still-visible list response remains authoritative in either case.
   const agent =
-    listAgent ?? (isForbidden || isNotFound ? null : detailQuery.data) ?? null;
+    (listAgentIsSpecialization
+      ? (isForbidden || isNotFound ? null : detailQuery.data) ?? listAgent
+      : listAgent ?? (isForbidden || isNotFound ? null : detailQuery.data)) ??
+    null;
+  // The base role's prompt arrives on the DETAIL read. When that read failed,
+  // the specialization's `inherited_instructions` is merely absent — which in
+  // the payload looks exactly like a base role that has no prompt. Report the
+  // read failure as a read failure instead of letting the Instructions tab
+  // state it as a fact about the base role (DENE-384); a 403 stays "ready",
+  // where the tab's "no prompt, or you don't have access to it" copy is the
+  // honest answer.
+  const inheritedPromptState = inheritedPromptReadState(listAgentIsSpecialization, {
+    succeeded: detailQuery.isSuccess,
+    failed: detailQuery.isError,
+    accessDenied: isForbidden,
+  });
   const presence: AgentPresenceDetail | null =
     agent ? presenceMap.get(agent.id) ?? null : null;
+  // Active specialisations of this agent, from the list the page already
+  // reads: the base-role view names them, and the archive guard needs their
+  // ids to offer "solidify & unbind" (DENE-304).
+  const childAgents = useMemo(
+    () =>
+      agent
+        ? agents.filter(
+            (candidate) =>
+              candidate.parent_agent_id === agent.id && !candidate.archived_at,
+          )
+        : [],
+    [agent, agents],
+  );
 
   // Permission hook MUST be called unconditionally — its `agent | null`
   // signature handles the not-found / loading case internally so the early
@@ -130,6 +172,13 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   } = useAgentPermissions(agent, wsId);
 
   const [confirmArchive, setConfirmArchive] = useState(false);
+  // Set when the archive was refused because specialisations still hang off
+  // this agent (409 agent_has_children), together with the child names that
+  // refusal carried (see `agentHasChildrenNames`).
+  const [blockedByChildren, setBlockedByChildren] = useState(false);
+  const [refusedChildNames, setRefusedChildNames] = useState<readonly string[]>(
+    [],
+  );
 
   // One-shot channel: the inspector's compact Lark status row asks the
   // overview pane to focus a tab. The pane clears it after consuming.
@@ -205,13 +254,24 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     }
   };
 
-  const handleArchive = async (id: string) => {
+  const handleArchive = async (id: string): Promise<boolean> => {
     try {
       await api.archiveAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
       toast.success(t(($) => $.detail.agent_archived_toast));
+      return true;
     } catch (e) {
+      // Base role with specialisations: the server refuses with a readable
+      // reason, and the way through is the solidify dialog (DENE-304) rather
+      // than a raw error toast. The caller must NOT navigate away in that
+      // case — the dialog is the point of the refusal.
+      if (isAgentHasChildrenError(e)) {
+        setRefusedChildNames(agentHasChildrenNames(e));
+        setBlockedByChildren(true);
+        return false;
+      }
       toast.error(e instanceof Error ? e.message : t(($) => $.detail.archive_failed_toast));
+      return false;
     }
   };
 
@@ -428,10 +488,23 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           onUpdate={handleUpdate}
           currentUserId={currentUser?.id ?? null}
           canEdit={canEdit.allowed}
+          childAgents={childAgents}
+          inheritedPromptState={inheritedPromptState}
+          onRetryInheritedPrompt={() => void detailQuery.refetch()}
           navIntent={tabNavIntent}
           onNavIntentHandled={() => setTabNavIntent(null)}
         />
       </div>
+
+      {blockedByChildren && (
+        <SolidifyUnbindDialog
+          parent={agent}
+          children={childAgents}
+          serverChildNames={refusedChildNames}
+          onClose={() => setBlockedByChildren(false)}
+          onArchived={() => navigation.push(paths.agents())}
+        />
+      )}
 
       {confirmArchive && (
         <Dialog
@@ -465,8 +538,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
                 variant="destructive"
                 onClick={() => {
                   setConfirmArchive(false);
-                  handleArchive(agent.id);
-                  navigation.push(paths.agents());
+                  // Navigate only once the archive actually happened: a
+                  // refusal (a base role that still has specialisations) has to
+                  // stay on this page, where the way out is offered.
+                  void handleArchive(agent.id).then((archived) => {
+                    if (archived) navigation.push(paths.agents());
+                  });
                 }}
               >
                 {t(($) => $.detail.archive_dialog_confirm)}

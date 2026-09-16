@@ -38,6 +38,13 @@ describe("parseTabSubject", () => {
     ["/acme/squads/sq1", { kind: "actor", actorType: "squad", id: "sq1" }],
     // Flow — /new must win over the actor detail pattern
     ["/acme/agents/new", { kind: "flow", flow: "create-agent" }],
+    // Flow — an alignment conversation is not an issue whose id is "new"
+    [
+      "/acme/issues/new/sess-1",
+      { kind: "flow", flow: "create-issue" },
+    ],
+    // ...but the bare collection route and the literal "new" are unchanged
+    ["/acme/issues/new", { kind: "issue", id: "new" }],
     // Runtime machine vs nested runtime
     ["/acme/runtimes/machine-1", { kind: "machine", machineId: "machine-1" }],
     [

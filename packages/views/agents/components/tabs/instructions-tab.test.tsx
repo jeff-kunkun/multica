@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { configStore } from "@multica/core/config";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -13,6 +13,7 @@ import enAgents from "../../../locales/en/agents.json";
 import enChat from "../../../locales/en/chat.json";
 import { NavigationProvider } from "../../../navigation";
 import type { NavigationAdapter } from "../../../navigation";
+import type { InheritedPromptState } from "../../specialization";
 import { InstructionsTab } from "./instructions-tab";
 
 const TEST_RESOURCES = {
@@ -48,10 +49,17 @@ const baseAgent: Agent = {
   archived_by: null,
 };
 
-function tab(agent: Agent, onSave = vi.fn().mockResolvedValue(undefined)) {
+function tab(
+  agent: Agent,
+  onSave = vi.fn().mockResolvedValue(undefined),
+  extra: {
+    inheritedPromptState?: InheritedPromptState;
+    onRetryInheritedPrompt?: () => void;
+  } = {},
+) {
   return (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <InstructionsTab agent={agent} onSave={onSave} />
+      <InstructionsTab agent={agent} onSave={onSave} {...extra} />
     </I18nProvider>
   );
 }
@@ -308,5 +316,169 @@ describe("InstructionsTab conversation-starters deep link", () => {
 
     expect(scrollIntoView).not.toHaveBeenCalled();
     expect(replace).not.toHaveBeenCalled();
+  });
+});
+
+// DENE-304: a specialisation's prompt has two halves, and the tab has to show
+// which half is whose. The inherited half is read-only (it is edited on the
+// base role, and the server never accepts an override), and the effective
+// prompt preview is the composed string the daemon is actually handed.
+describe("InstructionsTab inheritance", () => {
+  const specializationAgent: Agent = {
+    ...baseAgent,
+    id: "agent-spec",
+    name: "Nightly Reviewer",
+    instructions: "Only review the diff.",
+    parent_agent_id: "agent-base",
+    parent_agent_name: "Base Reviewer",
+    inherited_instructions: "Review carefully.",
+  };
+
+  it("shows the base role's prompt as a read-only block", () => {
+    render(tab(specializationAgent));
+
+    const block = screen.getByTestId("agent-inherited-prompt");
+    expect(block).toHaveTextContent("Base role prompt");
+    expect(block).toHaveTextContent(
+      /edited on "Base Reviewer", and shared by every specialization/i,
+    );
+    // The editable field is the ADDITIONAL half, not the whole prompt.
+    expect(screen.getByLabelText(/Additional instructions/i)).toHaveValue(
+      "Only review the diff.",
+    );
+  });
+
+  it("previews the composed prompt the runtime will receive", async () => {
+    const user = userEvent.setup();
+    render(tab(specializationAgent));
+
+    const preview = screen.getByTestId("agent-effective-prompt");
+    await user.click(
+      within(preview).getByRole("button", { name: /^Show$/i }),
+    );
+
+    // Compared as raw text: `toHaveTextContent` collapses whitespace, and the
+    // blank line between the halves is the point.
+    expect(screen.getByTestId("agent-effective-prompt-text").textContent).toBe(
+      "Review carefully.\n\nOnly review the diff.",
+    );
+  });
+
+  it("keeps the preview in step with an unsaved edit", async () => {
+    const user = userEvent.setup();
+    render(tab(specializationAgent));
+
+    const editor = screen.getByLabelText(/Additional instructions/i);
+    await user.clear(editor);
+    await user.type(editor, "New rules");
+
+    const preview = screen.getByTestId("agent-effective-prompt");
+    await user.click(
+      within(preview).getByRole("button", { name: /^Show$/i }),
+    );
+
+    // What is previewed is what would run — not the last saved value.
+    expect(screen.getByTestId("agent-effective-prompt-text").textContent).toBe(
+      "Review carefully.\n\nNew rules",
+    );
+  });
+
+  it("does not invent a parent half when the base role's prompt is unavailable", () => {
+    render(
+      tab({
+        ...specializationAgent,
+        inherited_instructions: "",
+      }),
+    );
+
+    expect(screen.getByTestId("agent-inherited-prompt")).toHaveTextContent(
+      /has no prompt, or you don't have access to it/i,
+    );
+  });
+
+  // DENE-384: an absent `inherited_instructions` used to be stated as a fact
+  // about the base role even when the read that carries it had failed, which
+  // read as a business conclusion and misled a real acceptance pass.
+  it("reports a failed parent read as a read failure, with a retry", async () => {
+    const user = userEvent.setup();
+    const onRetryInheritedPrompt = vi.fn();
+    render(
+      tab(
+        { ...specializationAgent, inherited_instructions: "" },
+        vi.fn().mockResolvedValue(undefined),
+        { inheritedPromptState: "failed", onRetryInheritedPrompt },
+      ),
+    );
+
+    const block = screen.getByTestId("agent-inherited-prompt");
+    expect(block).not.toHaveTextContent(
+      /has no prompt, or you don't have access to it/i,
+    );
+    expect(block).toHaveTextContent(/couldn't load the base role's prompt/i);
+
+    await user.click(screen.getByTestId("agent-inherited-prompt-retry"));
+    expect(onRetryInheritedPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the composed preview only once the parent half is known", async () => {
+    const user = userEvent.setup();
+    render(
+      tab(
+        { ...specializationAgent, inherited_instructions: "" },
+        vi.fn().mockResolvedValue(undefined),
+        { inheritedPromptState: "loading" },
+      ),
+    );
+
+    const block = screen.getByTestId("agent-inherited-prompt");
+    expect(block).not.toHaveTextContent(
+      /has no prompt, or you don't have access to it/i,
+    );
+    expect(block).toHaveTextContent(/loading the base role's prompt/i);
+
+    // "Exactly what the runtime receives" would be a lie while the parent
+    // half is still unknown — the composed text is withheld until it lands.
+    const preview = screen.getByTestId("agent-effective-prompt");
+    await user.click(within(preview).getByRole("button", { name: /^Show$/i }));
+    expect(
+      screen.queryByTestId("agent-effective-prompt-text"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-effective-prompt-unknown")).toHaveTextContent(
+      /loading the base role's prompt/i,
+    );
+  });
+
+  it("tells a base role which specialisations a prompt edit reaches", () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <InstructionsTab
+          agent={{ ...baseAgent, name: "Base Reviewer" }}
+          onSave={vi.fn().mockResolvedValue(undefined)}
+          childAgents={[
+            { ...baseAgent, id: "agent-spec", name: "Nightly Reviewer" },
+          ]}
+        />
+      </I18nProvider>,
+    );
+
+    const hint = screen.getByTestId("agent-specialization-children");
+    expect(hint).toHaveTextContent(
+      /also changes every specialization of "Base Reviewer"/i,
+    );
+    expect(hint).toHaveTextContent("Nightly Reviewer");
+  });
+
+  it("stays a plain prompt editor for a base role with no specialisations", () => {
+    render(tab({ ...baseAgent, name: "Base Reviewer" }));
+
+    expect(
+      screen.queryByTestId("agent-inherited-prompt"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agent-effective-prompt"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agent-specialization-children"),
+    ).not.toBeInTheDocument();
   });
 });

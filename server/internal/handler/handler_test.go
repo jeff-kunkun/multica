@@ -41,22 +41,36 @@ const (
 	handlerTestWorkspaceSlug = "handler-tests"
 )
 
+// exitWithoutDatabase ends the run the way a missing fixture always has —
+// green, with every DB-backed test skipped — unless the run promised a
+// database, in which case a suite that asserted nothing must not look like a
+// suite that passed. TestMain has no *testing.T, so it cannot use
+// testutil.SkipDatabase; the decision must be the same one.
+func exitWithoutDatabase(reason string) {
+	if testutil.RequireTestDatabase() {
+		fmt.Printf("database required (MULTICA_REQUIRE_TEST_DB=1) but %s\n", reason)
+		os.Exit(1)
+	}
+	fmt.Printf("Skipping tests: %s\n", reason)
+	os.Exit(0)
+}
+
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dbURL := os.Getenv("DATABASE_URL")
+	// The database is the one the run's test driver provisioned, private to
+	// this run; see scripts/test-db.sh and internal/testutil.
+	dbURL := testutil.TestDatabaseURL()
 	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+		exitWithoutDatabase("no test database is configured")
 	}
 
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
-		fmt.Printf("Skipping tests: could not connect to database: %v\n", err)
-		os.Exit(0)
+		exitWithoutDatabase(err.Error())
 	}
 	if err := pool.Ping(ctx); err != nil {
-		fmt.Printf("Skipping tests: database not reachable: %v\n", err)
 		pool.Close()
-		os.Exit(0)
+		exitWithoutDatabase(err.Error())
 	}
 
 	queries := db.New(pool)

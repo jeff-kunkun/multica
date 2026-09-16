@@ -25,6 +25,7 @@
     "runtime": "Runtime",
     "attachment": "Attachment",
     "create_agent": "Create Agent",
+    "create_issue": "Align a new issue",
     "unknown": "Unknown page"
   },
   "help": {
@@ -50,6 +51,8 @@
     "invitation_decline": "Decline",
     "log_out": "Log out",
     "new_issue": "New Issue",
+    "align_issue": "Align a Request",
+    "align_issue_hint": "Discuss and align before anything is created",
     "new_issue_shortcut": "C",
     "pinned_label": "Pinned",
     "work_group": "Work",

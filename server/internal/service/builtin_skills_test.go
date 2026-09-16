@@ -352,14 +352,16 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// These are task nouns, not section headings: a task arrives as "set up an
 	// autopilot", never as "Core model".
 	triggerWords := map[string]string{
-		"references/issues.md":       "issue",
-		"references/mentions.md":     "mention",
-		"references/agents.md":       "agent",
-		"references/squads.md":       "squad",
-		"references/autopilots.md":   "autopilot",
-		"references/projects.md":     "project",
-		"references/runtimes.md":     "runtime",
-		"references/skill-import.md": "skill import",
+		"references/issues.md":         "issue",
+		"references/close-protocol.md": "close protocol",
+		"references/mentions.md":       "mention",
+		"references/agents.md":         "agent",
+		"references/squads.md":         "squad",
+		"references/autopilots.md":     "autopilot",
+		"references/projects.md":       "project",
+		"references/runtimes.md":       "runtime",
+		"references/skill-import.md":   "skill import",
+		"references/transfer.md":       "transfer",
 	}
 
 	skill, ok := findSkill(t, PlatformSkillName)
@@ -432,6 +434,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"references/projects.md",
 				"references/runtimes.md",
 				"references/skill-import.md",
+				"close protocol",
 				// Invariants deduplicated out of the eight merged bodies. Each
 				// was repeated in most of them; the router is now their only
 				// home, so losing one here loses it everywhere.
@@ -508,13 +511,11 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"`value` keeps the stored ids",
 			},
 			notWant: []string{
-				// MUL-6966 phase 1: this reference must not teach the KV bag
-				// at all — not as a section, not as a command, and not as a
-				// named key inside a warning. A blanket ban on the vocabulary
-				// is the contract; anything that needs the word back needs
-				// this decision revisited first.
-				"metadata",
-				"Metadata",
+				// MUL-6966 phase 1 banned teaching the generic KV bag.
+				// DENE-231 revisits that for exactly the `close.*` keys
+				// via `multica issue metadata set`, which now live in
+				// references/close-protocol.md. The scratchpad, curated
+				// key list, and pr_url guidance stay banned.
 				"pr_url",
 				// A curated key list is the "recommended fields" concept the
 				// owner ruled out on MUL-5442.
@@ -523,6 +524,53 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"scratchpad for run state",
 				// Per-turn workflow the runtime brief owns; duplicating it here
 				// is how the two drift apart.
+				"Start from the trigger, not from memory",
+				"multica issue comment list <issue-id> --thread <trigger-comment-id>",
+				"multica issue comment add <issue-id> --parent <trigger-comment-id>",
+			},
+		},
+		{
+			// DENE-351 split the close protocol out of issues.md: both files
+			// were at or over the 500-line supporting-file budget, and the
+			// close contract is the one section that stands alone. The
+			// anchors below moved with the text; the ones that stayed behind
+			// are the routing rules issues.md still owns.
+			file: "references/close-protocol.md",
+			want: []string{
+				// DENE-231: close protocol excerpt. A comment alone is not a
+				// close; the `close.*` keys, write order, and four scenes
+				// are the runtime constraint. Status meanings stay the
+				// built-in keys documented in issues.md — this reference must
+				// not invent a parallel set.
+				"Close protocol",
+				"A comment alone is not a close",
+				"close.conclusion",
+				"close.status",
+				"close.evidence_comment_id",
+				"close.next_owner_type",
+				"close.next_owner_id",
+				"close.wake_action",
+				"close.waiting_on",
+				"close.at",
+				"close.block_kind",
+				"close.block_action",
+				"multica issue metadata set",
+				"`in_review` is not a stage terminal",
+				"Builder (PR / needs review)",
+				// DENE-232: cross-family waits wake the waiter on
+				// done/cancelled unless it already has live work.
+				"Prefer a real parent + stage",
+				"already has a queued or running task",
+			},
+			notWant: []string{
+				// The MUL-6966 / MUL-5442 bans on teaching the generic KV bag
+				// followed the `multica issue metadata set` text into this
+				// file. Only the `close.*` keys are sanctioned here.
+				"pr_url",
+				"High-signal keys",
+				"reuse these names so queries stay consistent",
+				"scratchpad for run state",
+				// Per-turn workflow the runtime brief owns.
 				"Start from the trigger, not from memory",
 				"multica issue comment list <issue-id> --thread <trigger-comment-id>",
 				"multica issue comment add <issue-id> --parent <trigger-comment-id>",

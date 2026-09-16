@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Cloud, Loader2, Lock, Search } from "lucide-react";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -83,18 +83,36 @@ export function RuntimePicker({
   const selectedRuntime =
     runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
 
+  // The id this picker would seed, as a string. An id, not the list: callers
+  // pass `runtimes={data ?? []}` and build `onSelect` inline, so an effect
+  // keyed on those identities re-runs on every render of the parent — and a
+  // parent that re-renders while it writes (a rebind invalidates its own
+  // query) turns one empty selection into an endless switch loop (DENE-319).
+  const seedRuntimeId = useMemo(
+    () =>
+      filteredRuntimes.find((r) => isRuntimeUsableForUser(r, currentUserId))
+        ?.id ?? "",
+    [filteredRuntimes, currentUserId],
+  );
+
+  // Read through a ref so the seed below depends only on the data it seeds
+  // from, never on the caller's callback identity.
+  const onSelectRef = useRef(onSelect);
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  });
+
   // Sole source of truth for seeding the parent's selection when it's empty
   // — first mount with no template runtime, runtimes arriving later over
   // WS, or filter toggle clearing to a set with no usable item. Only fires
   // when `selectedRuntimeId === ""` so a duplicate-mode pre-fill (template
-  // runtime) is never silently overwritten.
+  // runtime) is never silently overwritten. A parent that ignores the seed
+  // (there is nothing on the server to rebind) is not asked again on every
+  // render.
   useEffect(() => {
     if (selectedRuntimeId !== "") return;
-    const firstUsable = filteredRuntimes.find((r) =>
-      isRuntimeUsableForUser(r, currentUserId),
-    );
-    if (firstUsable) onSelect(firstUsable.id);
-  }, [filteredRuntimes, selectedRuntimeId, currentUserId, onSelect]);
+    if (seedRuntimeId) onSelectRef.current(seedRuntimeId);
+  }, [seedRuntimeId, selectedRuntimeId]);
 
   // On filter toggle, recompute the picker's selection to a usable item
   // in the new filter set. Pushes `""` when nothing matches; the seeding
