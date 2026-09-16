@@ -136,6 +136,23 @@
     "archive_dialog_cancel": "Cancel",
     "archive_dialog_confirm": "Archive"
   },
+  "specialization": {
+    "tag": "Specialization",
+    "count_one": "{{count}} specialization",
+    "count_other": "{{count}} specializations",
+    "expand_one": "Expand {{count}} specialization",
+    "expand_other": "Expand {{count}} specializations",
+    "collapse_one": "Collapse {{count}} specialization",
+    "collapse_other": "Collapse {{count}} specializations",
+    "derived_from": "from {{name}}",
+    "derive_entry": "Derive a specialization from \"{{name}}\"",
+    "base_role_label": "Base role",
+    "base_role_none": "Independent base role",
+    "base_role_hint_none": "Independent base role — it inherits nothing, and specializations can hang off it later.",
+    "base_role_inherit_prompt": "The base role's prompt is prepended to this agent's own prompt.",
+    "base_role_inherit_skills_one": "{{count}} skill is inherited read-only.",
+    "base_role_inherit_skills_other": "{{count}} skills are inherited read-only."
+  },
   "detail": {
     "back_to_agents": "Agents",
     "back_to_agents_full": "Back to agents",
@@ -1072,7 +1089,8 @@
     "no_squad": "No squad",
     "group_by": "Group by",
     "grouping_none": "None",
-    "grouping_squad": "Squad"
+    "grouping_squad": "Squad",
+    "grouping_specialization": "Base roles"
   },
   "actions": {
     "selected_one": "{{count}} selected",

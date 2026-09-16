@@ -285,6 +285,9 @@ import {
   EMPTY_ISSUE_DRAFT_SESSION,
   EMPTY_ISSUE_DRAFT_LIST,
   issueDraftRuntimeSwitchFallback,
+  AgentSchema,
+  AgentListSchema,
+  EMPTY_AGENT_LIST,
   AgentBuilderSessionListSchema,
   EMPTY_AGENT_BUILDER_SESSION_LIST,
   agentBuilderRuntimeSwitchFallback,
@@ -1518,15 +1521,50 @@ export class ApiClient {
   }
 
   // Agents
+  //
+  // Both reads go through the zod boundary (DENE-304). Installed desktop
+  // builds talk to newer servers, and the agents list is the surface the whole
+  // product is navigated from: a malformed row must degrade to the empty state
+  // rather than throw during render. The two-level specialisation fields
+  // (`parent_agent_id`, `inherited_*`, `child_count`) are optional-and-caught
+  // in AgentSchema, so a backend that predates them still yields agents.
   async listAgents(params?: { workspace_id?: string; include_archived?: boolean }): Promise<Agent[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
-    return this.fetch(`/api/agents?${search}`);
+    const raw = await this.fetch<unknown>(`/api/agents?${search}`);
+    return parseWithFallback(raw, AgentListSchema, EMPTY_AGENT_LIST, {
+      endpoint: "GET /api/agents",
+    });
   }
 
-  async getAgent(id: string): Promise<Agent> {
-    return this.fetch(`/api/agents/${id}`);
+  /**
+   * Reads one agent, including the inherited half of a specialisation
+   * (`inherited_instructions` / `inherited_skills`) that only this endpoint
+   * loads. Degrades to `null` instead of a blank-named agent when the payload
+   * fails validation; callers fall back to the list row they already hold.
+   */
+  async getAgent(id: string): Promise<Agent | null> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`);
+    return parseWithFallback<Agent | null>(raw, AgentSchema, null, {
+      endpoint: "GET /api/agents/:id",
+    });
+  }
+
+  /**
+   * Bakes a specialisation's inherited prompt into its own `instructions` and
+   * detaches it from its base role (DENE-301) — the documented escape hatch
+   * that lets the base role be archived. Server-side this is `POST
+   * /api/agents/{id}/solidify`; every refusal is a 409 with a readable reason
+   * (not a specialisation, parent gone, parent has no prompt).
+   */
+  async solidifyAgent(id: string): Promise<Agent | null> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/solidify`, {
+      method: "POST",
+    });
+    return parseWithFallback<Agent | null>(raw, AgentSchema, null, {
+      endpoint: "POST /api/agents/:id/solidify",
+    });
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {

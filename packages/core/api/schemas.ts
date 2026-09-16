@@ -1627,6 +1627,21 @@ export const AgentRuntimeSchema = z.object({
 
 export const AgentRuntimeListSchema = z.array(AgentRuntimeSchema);
 
+/**
+ * The minimal skill shape embedded in an agent payload (the list/detail batch
+ * query joins id, name, description and enabled). Lenient on purpose: the
+ * fields are display-only, so a partially-filled row must still render as a
+ * chip rather than fail the enclosing agent.
+ */
+const AgentSkillSummarySchema = z
+  .object({
+    id: z.string().default(""),
+    name: z.string().default(""),
+    description: z.string().default(""),
+    enabled: z.boolean().optional().catch(undefined),
+  })
+  .loose();
+
 export const AgentSchema: z.ZodType<Agent> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
@@ -1647,6 +1662,19 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
     .catch(undefined),
   system_key: z.string().optional(),
   system_instructions: z.string().optional(),
+  // Two-level specialisation (DENE-301). Every field is optional-and-caught:
+  // a backend that predates the feature sends none of them, and a backend that
+  // sends a malformed one must degrade THAT field rather than drop the whole
+  // agent — the list is how the product is navigated. Empty string and absent
+  // both mean "base role" for the id; see `isSpecializationAgent`.
+  parent_agent_id: z.string().optional().catch(undefined),
+  parent_agent_name: z.string().optional().catch(undefined),
+  inherited_instructions: z.string().optional().catch(undefined),
+  inherited_skills: z
+    .array(AgentSkillSummarySchema)
+    .optional()
+    .catch(undefined),
+  child_count: z.number().optional().catch(undefined),
   avatar_url: z.string().nullable().default(null),
   runtime_mode: z.string().catch("local"),
   runtime_config: z.record(z.string(), z.unknown()).default({}),
@@ -1684,6 +1712,20 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   // whole agent parse; UI treats undefined as enabled (`!== false`).
   auto_retry_enabled: z.boolean().optional().catch(undefined),
 }).loose() as z.ZodType<Agent>;
+
+export const AgentListSchema: z.ZodType<Agent[]> = z
+  .array(AgentSchema)
+  .default([]) as z.ZodType<Agent[]>;
+
+/**
+ * Degraded answers for the two agent reads the UI is built on.
+ *
+ * An empty LIST is honest: the agents page renders its empty state instead of
+ * a screen of half-parsed rows. A single agent has no honest empty object — a
+ * blank-named agent would render as a real one — so `getAgent` degrades to
+ * `null` and the caller falls back to the list row it already has.
+ */
+export const EMPTY_AGENT_LIST: Agent[] = [];
 
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas

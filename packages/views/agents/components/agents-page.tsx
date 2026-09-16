@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Bot,
+  ChevronRight,
   Lock,
   Plus,
   Users,
@@ -29,6 +30,7 @@ import {
   type AgentListFilters,
   useAgentsViewStore,
   AGENT_DEFAULT_HIDDEN_COLUMNS,
+  AGENT_GROUPINGS,
   AGENT_SCOPES,
   type AgentColumnKey,
   type AgentsScope,
@@ -72,6 +74,11 @@ import {
 } from "../../layout/collection-page";
 import { availabilityConfig } from "../presence";
 import { AgentRowActions } from "./agent-row-actions";
+import {
+  flattenSpecializationItems,
+  SPECIALIZATION_DERIVE_ROW_HEIGHT,
+} from "./agents-page-specializations";
+import { isSpecialization } from "../specialization";
 import {
   AgentListToolbar,
   countActiveFilterDimensions,
@@ -407,6 +414,41 @@ function SquadGroupHeader({
   );
 }
 
+// The entry point that makes a base role able to have specialisations at all:
+// creating one is otherwise a blank-slate form with a base-role dropdown, and
+// the intent "add a variant of THIS agent" would have to be re-stated there.
+// Navigating (rather than opening the dialog in place) keeps one create flow
+// with one submit path; the base role travels as a query param the form seeds
+// from, exactly like `?duplicate=`.
+function DeriveSpecializationRow({
+  baseName,
+  onDerive,
+}: {
+  baseName: string;
+  onDerive: () => void;
+}) {
+  const { t } = useT("agents");
+  return (
+    <div role="row" className="col-span-full px-3">
+      <button
+        type="button"
+        data-testid="agents-derive-specialization"
+        onClick={(event) => {
+          event.stopPropagation();
+          onDerive();
+        }}
+        style={{ height: SPECIALIZATION_DERIVE_ROW_HEIGHT - 4 }}
+        className="flex w-full items-center gap-1.5 rounded-md pl-8 pr-2 text-left text-caption text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+      >
+        <Plus aria-hidden="true" className="size-3 shrink-0" />
+        <span className="min-w-0 truncate">
+          {t(($) => $.specialization.derive_entry, { name: baseName })}
+        </span>
+      </button>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Cells
 // ---------------------------------------------------------------------------
@@ -445,13 +487,64 @@ function CheckboxCell({
 // documented exception to the single-line rule — agents are few and
 // identity-rich, so this is the "team roster" form (GitHub org members,
 // Slack member list).
-function NameCell({ row }: { row: AgentListRow }) {
+//
+// In the nested view (DENE-304) the same cell carries the relationship: a
+// base role gets the fold control and its `N 个特化` count, a specialisation is
+// indented behind a connector and labelled. The fold control lives here rather
+// than in its own grid track so the column template — and every other cell —
+// stays exactly what it is in the flat view.
+function NameCell({
+  row,
+  nesting,
+}: {
+  row: AgentListRow;
+  nesting?: {
+    childCount: number;
+    expanded: boolean;
+    onToggle: () => void;
+  } | null;
+}) {
   const { t } = useT("agents");
   const { agent, isOwnedByMe } = row;
   const isArchived = !!agent.archived_at;
   const isPrivate = agent.visibility === "private";
+  const isChild = isSpecialization(agent);
   return (
-    <ListGridCell className="gap-3">
+    <ListGridCell
+      className={`gap-3 ${isChild ? "relative pl-8" : ""}`}
+      data-specialization={isChild ? "true" : undefined}
+    >
+      {isChild && (
+        // Indent guide: a short elbow from the base role's avatar column down
+        // into the child's name. Decorative — the "特化" chip is what carries
+        // the relationship for screen readers.
+        <span
+          aria-hidden="true"
+          className="absolute left-3 top-0 h-1/2 w-3 rounded-bl-sm border-b border-l border-border"
+        />
+      )}
+      {nesting && (
+        <button
+          type="button"
+          aria-expanded={nesting.expanded}
+          aria-label={
+            nesting.expanded
+              ? t(($) => $.specialization.collapse, { count: nesting.childCount })
+              : t(($) => $.specialization.expand, { count: nesting.childCount })
+          }
+          data-testid="agents-specialization-toggle"
+          onClick={(event) => {
+            event.stopPropagation();
+            nesting.onToggle();
+          }}
+          className="-m-1 flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+        >
+          <ChevronRight
+            aria-hidden="true"
+            className={`size-3.5 transition-transform ${nesting.expanded ? "rotate-90" : ""}`}
+          />
+        </button>
+      )}
       <ActorAvatar
         actorType="agent"
         actorId={agent.id}
@@ -468,6 +561,22 @@ function NameCell({ row }: { row: AgentListRow }) {
           >
             {agent.name}
           </span>
+          {isChild && (
+            <span
+              data-testid="agents-specialization-chip"
+              className="shrink-0 rounded-xs border border-border px-1 text-micro text-muted-foreground"
+            >
+              {t(($) => $.specialization.tag)}
+            </span>
+          )}
+          {nesting && nesting.childCount > 0 && (
+            <span
+              data-testid="agents-specialization-count"
+              className="shrink-0 rounded-xs bg-muted px-1 text-micro tabular-nums text-muted-foreground"
+            >
+              {t(($) => $.specialization.count, { count: nesting.childCount })}
+            </span>
+          )}
           {isPrivate && !isArchived && (
             <Tooltip>
               <TooltipTrigger
@@ -484,11 +593,20 @@ function NameCell({ row }: { row: AgentListRow }) {
             </span>
           )}
         </div>
-        {agent.description ? (
-          <div className="mt-0.5 truncate text-caption text-muted-foreground">
-            {agent.description}
-          </div>
-        ) : null}
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+          {isChild && agent.parent_agent_name ? (
+            <span className="shrink-0 text-caption text-muted-foreground">
+              {t(($) => $.specialization.derived_from, {
+                name: agent.parent_agent_name,
+              })}
+            </span>
+          ) : null}
+          {agent.description ? (
+            <span className="min-w-0 truncate text-caption text-muted-foreground">
+              {agent.description}
+            </span>
+          ) : null}
+        </div>
       </div>
     </ListGridCell>
   );
@@ -911,6 +1029,20 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     new Set(),
   );
   const [search, setSearch] = useState("");
+  // Which base-role groups are folded in the nested view. Session-scoped like
+  // row selection: folding is a momentary "hide this for now", not a view
+  // preference worth persisting (the grouping mode itself is persisted).
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const toggleGroupExpanded = useCallback((groupId: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }, []);
 
   const rawScope = useAgentsViewStore((s) => s.scope);
   const scope = AGENT_SCOPES.includes(rawScope) ? rawScope : "mine";
@@ -919,7 +1051,10 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const sortDirection = useAgentsViewStore((s) => s.sortDirection);
   const hiddenColumns = useAgentsViewStore((s) => s.hiddenColumns);
   const filters = useAgentsViewStore((s) => s.filters);
-  const grouping = useAgentsViewStore((s) => s.grouping);
+  const rawGrouping = useAgentsViewStore((s) => s.grouping);
+  // A persisted value can predate (or postdate) this build's modes; fall back
+  // to the flat list rather than rendering a grouping nothing implements.
+  const grouping = AGENT_GROUPINGS.includes(rawGrouping) ? rawGrouping : "none";
   const setGrouping = useAgentsViewStore((s) => s.setGrouping);
   const handleSort = useAgentsViewStore((s) => s.toggleSort);
   const handleSortFieldSelect = useAgentsViewStore((s) => s.setSortField);
@@ -1070,10 +1205,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     return filtered;
   }, [scopeRows, search, filters, sortField, sortDirection]);
 
-  const listItems = useMemo(
-    () => flattenAgentListItems(rows, squads, grouping, squadRosters),
-    [rows, squads, grouping, squadRosters],
-  );
+  const listItems = useMemo(() => {
+    if (grouping === "specialization") {
+      return flattenSpecializationItems(rows, collapsedGroups);
+    }
+    return flattenAgentListItems(rows, squads, grouping, squadRosters);
+  }, [rows, squads, grouping, squadRosters, collapsedGroups]);
   const listItemsRef = useRef(listItems);
   listItemsRef.current = listItems;
 
@@ -1107,10 +1244,15 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const rowVirtualizer = useVirtualizer({
     count: listItems.length,
     getScrollElement: () => listScrollRef.current,
-    estimateSize: (index) =>
-      listItemsRef.current[index]?.kind === "header"
-        ? GROUP_HEADER_HEIGHT
-        : ROW_HEIGHT,
+    estimateSize: (index) => {
+      const item = listItemsRef.current[index];
+      if (item?.kind === "header" || item?.kind === "derive") {
+        return item.kind === "derive"
+          ? SPECIALIZATION_DERIVE_ROW_HEIGHT
+          : GROUP_HEADER_HEIGHT;
+      }
+      return ROW_HEIGHT;
+    },
     getItemKey: (index) => listItemsRef.current[index]?.key ?? index,
     overscan: 10,
   });
@@ -1265,10 +1407,27 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       />
                     );
                   }
+                  if (item.kind === "derive") {
+                    return (
+                      <DeriveSpecializationRow
+                        key={item.key}
+                        baseName={item.base.agent.name}
+                        onDerive={() =>
+                          navigation.push(
+                            `${paths.newAgentManual()}?parent=${encodeURIComponent(
+                              item.base.agent.id,
+                            )}`,
+                          )
+                        }
+                      />
+                    );
+                  }
                   const row = item.row;
+                  const isChild = item.kind === "specialization";
                   return (
                     <ListGridRow
                       key={item.key}
+                      data-specialization-row={isChild ? "true" : undefined}
                       className={`h-16 cursor-pointer ${
                         selectedIds.has(row.agent.id) ? "bg-accent/30" : ""
                       }`}
@@ -1278,7 +1437,18 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                         checked={selectedIds.has(row.agent.id)}
                         onToggle={() => toggleSelected(row.agent.id)}
                       />
-                      <NameCell row={row} />
+                      <NameCell
+                        row={row}
+                        nesting={
+                          item.kind === "base"
+                            ? {
+                                childCount: item.childCount,
+                                expanded: item.expanded,
+                                onToggle: () => toggleGroupExpanded(item.groupId),
+                              }
+                            : null
+                        }
+                      />
                       {isColVisible("status") ? (
                         <StatusCell row={row} />
                       ) : (

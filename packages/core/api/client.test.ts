@@ -2875,3 +2875,138 @@ describe("ApiClient issue drafts", () => {
     ).resolves.toEqual({ runtime_id: "runtime-b" });
   });
 });
+
+// DENE-304. The two-level specialisation fields are read on the agents list
+// (relationship + child_count) and on agent detail (the inherited prompt and
+// skills). Both endpoints now pass through the zod boundary, so an installed
+// desktop client talking to a drifted backend degrades instead of throwing
+// during render.
+describe("ApiClient agent specialisation reads (DENE-304)", () => {
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  it("parses the relationship fields the list serves", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse([
+        {
+          id: "agent-base",
+          name: "Base Role",
+          child_count: 2,
+        },
+        {
+          id: "agent-child",
+          name: "Variant",
+          parent_agent_id: "agent-base",
+          parent_agent_name: "Base Role",
+          child_count: 0,
+        },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const agents = await client.listAgents({ workspace_id: "ws-1" });
+
+    expect(agents[0]?.child_count).toBe(2);
+    expect(agents[0]?.parent_agent_id).toBeUndefined();
+    expect(agents[1]?.parent_agent_id).toBe("agent-base");
+    expect(agents[1]?.parent_agent_name).toBe("Base Role");
+  });
+
+  it("parses the inherited half served by agent detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          id: "agent-child",
+          name: "Variant",
+          instructions: "child half",
+          parent_agent_id: "agent-base",
+          parent_agent_name: "Base Role",
+          inherited_instructions: "parent half",
+          inherited_skills: [
+            { id: "skill-1", name: "Review", description: "how to review" },
+          ],
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const agent = await client.getAgent("agent-child");
+
+    expect(agent?.inherited_instructions).toBe("parent half");
+    expect(agent?.inherited_skills).toEqual([
+      { id: "skill-1", name: "Review", description: "how to review" },
+    ]);
+  });
+
+  it("keeps the agents list renderable when the whole payload is malformed", async () => {
+    // A list-level parse is all-or-nothing by design: half-parsed rows would
+    // render as agents with blank names. The empty list is the honest degrade.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ agents: [] })),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listAgents()).resolves.toEqual([]);
+  });
+
+  it("degrades a malformed agent detail to null, never to a blank agent", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse("not-an-agent")),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.getAgent("agent-1")).resolves.toBeNull();
+  });
+
+  it("drops only the malformed specialisation fields, keeping the agent", async () => {
+    // A newer/older backend can send a wrong type for the inherited list or
+    // the count; neither may cost the agent its other fields.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse([
+          {
+            id: "agent-child",
+            name: "Variant",
+            parent_agent_id: "agent-base",
+            inherited_instructions: 42,
+            inherited_skills: "nope",
+            child_count: "many",
+          },
+        ]),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const agents = await client.listAgents();
+    expect(agents).toHaveLength(1);
+    expect(agents[0]?.id).toBe("agent-child");
+    expect(agents[0]?.parent_agent_id).toBe("agent-base");
+    expect(agents[0]?.inherited_instructions).toBeUndefined();
+    expect(agents[0]?.inherited_skills).toBeUndefined();
+    expect(agents[0]?.child_count).toBeUndefined();
+  });
+
+  it("solidifies a specialisation through its own endpoint", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ id: "agent-child", name: "Variant" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const agent = await client.solidifyAgent("agent-child");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/agents/agent-child/solidify",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(agent?.id).toBe("agent-child");
+  });
+});

@@ -127,6 +127,19 @@
     "archive_dialog_cancel": "취소",
     "archive_dialog_confirm": "보관"
   },
+  "specialization": {
+    "tag": "특화",
+    "count_other": "특화 {{count}}개",
+    "expand_other": "특화 {{count}}개 펼치기",
+    "collapse_other": "특화 {{count}}개 접기",
+    "derived_from": "{{name}}에서 파생",
+    "derive_entry": "\"{{name}}\"에서 특화 파생",
+    "base_role_label": "베이스 역할",
+    "base_role_none": "독립 베이스 역할",
+    "base_role_hint_none": "독립 베이스 역할입니다. 아무것도 상속하지 않으며, 나중에 이 아래에 특화를 만들 수 있습니다.",
+    "base_role_inherit_prompt": "베이스 역할의 프롬프트가 이 에이전트의 프롬프트 앞에 붙습니다.",
+    "base_role_inherit_skills_other": "스킬 {{count}}개를 읽기 전용으로 상속합니다."
+  },
   "detail": {
     "back_to_agents": "에이전트",
     "back_to_agents_full": "에이전트로 돌아가기",
@@ -952,7 +965,8 @@
     "no_squad": "스쿼드 없음",
     "group_by": "그룹화",
     "grouping_none": "없음",
-    "grouping_squad": "스쿼드"
+    "grouping_squad": "스쿼드",
+    "grouping_specialization": "베이스 역할"
   },
   "creation_studio": {
     "title": "에이전트 만들기",

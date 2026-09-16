@@ -119,6 +119,19 @@
     "archive_dialog_cancel": "キャンセル",
     "archive_dialog_confirm": "アーカイブ"
   },
+  "specialization": {
+    "tag": "特化",
+    "count_other": "特化 {{count}} 件",
+    "expand_other": "特化 {{count}} 件を展開",
+    "collapse_other": "特化 {{count}} 件を折りたたむ",
+    "derived_from": "{{name}} から派生",
+    "derive_entry": "「{{name}}」から特化を作成",
+    "base_role_label": "ベースロール",
+    "base_role_none": "独立したベースロール",
+    "base_role_hint_none": "独立したベースロールです。何も継承せず、後から特化をぶら下げられます。",
+    "base_role_inherit_prompt": "ベースロールのプロンプトが、このエージェント自身のプロンプトの前に連結されます。",
+    "base_role_inherit_skills_other": "{{count}} 件のスキルを読み取り専用で継承します。"
+  },
   "detail": {
     "back_to_agents": "エージェント",
     "back_to_agents_full": "エージェントに戻る",
@@ -952,7 +965,8 @@
     "no_squad": "スクワッドなし",
     "group_by": "グループ化",
     "grouping_none": "なし",
-    "grouping_squad": "スクワッド"
+    "grouping_squad": "スクワッド",
+    "grouping_specialization": "ベースロール"
   },
   "creation_studio": {
     "title": "エージェントを作成",

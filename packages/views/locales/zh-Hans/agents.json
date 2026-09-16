@@ -127,6 +127,19 @@
     "archive_dialog_cancel": "取消",
     "archive_dialog_confirm": "归档"
   },
+  "specialization": {
+    "tag": "特化",
+    "count_other": "{{count}} 个特化",
+    "expand_other": "展开 {{count}} 个特化",
+    "collapse_other": "收起 {{count}} 个特化",
+    "derived_from": "派生自 {{name}}",
+    "derive_entry": "从「{{name}}」派生特化",
+    "base_role_label": "基础角色",
+    "base_role_none": "独立基础角色",
+    "base_role_hint_none": "独立基础角色：不继承任何内容，之后可以在它下面派生特化。",
+    "base_role_inherit_prompt": "基础角色的提示词会拼在本角色自己的提示词前面。",
+    "base_role_inherit_skills_other": "{{count}} 个 skill 会被只读继承。"
+  },
   "detail": {
     "back_to_agents": "智能体",
     "back_to_agents_full": "返回智能体列表",
@@ -1051,7 +1064,8 @@
     "no_squad": "无小队",
     "group_by": "分组方式",
     "grouping_none": "无",
-    "grouping_squad": "小队"
+    "grouping_squad": "小队",
+    "grouping_specialization": "按基础角色"
   },
   "actions": {
     "selected_other": "已选 {{count}} 项",
