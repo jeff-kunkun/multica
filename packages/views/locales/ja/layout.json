@@ -25,6 +25,7 @@
     "runtime": "ランタイム",
     "attachment": "添付ファイル",
     "create_agent": "エージェントを作成",
+    "create_issue": "新しいタスクをすり合わせ",
     "unknown": "不明なページ"
   },
   "help": {
@@ -50,6 +51,8 @@
     "invitation_decline": "辞退",
     "log_out": "ログアウト",
     "new_issue": "新規タスク",
+    "align_issue": "要件をすり合わせ",
+    "align_issue_hint": "作成前に話し合ってすり合わせる",
     "new_issue_shortcut": "C",
     "pinned_label": "ピン留め済み",
     "work_group": "仕事",

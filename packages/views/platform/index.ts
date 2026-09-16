@@ -17,6 +17,33 @@ export {
   type SetLocalDirectorySharedOverrideResult,
 } from "./local-directory";
 export {
+  pickTransferExportPath,
+  pickTransferImportPath,
+  runWorkspaceTransfer,
+  subscribeTransferProgress,
+  fileNameFromPath,
+  formatTransferBytes,
+  transferExportSourceHost,
+  TRANSFER_EXPORT_COMPLETED_KEY,
+  hasCompletedTransferExport,
+  markTransferExportCompleted,
+  type TransferErrorCode,
+  type TransferProgressEvent,
+  type TransferImportOptions,
+  type TransferAutopilotSummary,
+  type TransferImportReportView,
+  type TransferRunRequest,
+  type TransferRunResult,
+  type TransferPickPathResult,
+  type TransferFlagStorage,
+  type TransferBindRuntimesReport,
+  type TransferRuntimeBind,
+  type TransferRuntimeBindStatus,
+  type TransferRuntimeBinding,
+  type TransferRuntimeBindingOutcome,
+  type TransferRuntimeCandidate,
+} from "./workspace-transfer";
+export {
   useLocalDaemonStatus,
   type LocalDaemonStatus,
 } from "./use-local-daemon-status";

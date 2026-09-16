@@ -443,6 +443,21 @@ type ConfigImportOptions struct {
 	ActivateAutopilots     bool  `json:"activate_autopilots"`
 	ApplyWorkspaceSettings *bool `json:"apply_workspace_settings"`
 	ApplyIssuePrefix       bool  `json:"apply_issue_prefix"`
+	// AutoBindRuntimes binds an imported agent to the target runtime that
+	// matches its source provider, runtime mode and custom profile name — but
+	// only when exactly one such runtime exists, so nothing is guessed
+	// (DENE-364). Nil means on: "本机环境默认都是相同的" is the migration's whole
+	// premise, and only an explicit false turns the rule off for a user who
+	// wants to place every agent by hand. Only the V2 transfer path reads it;
+	// the V1 config import has no runtime binding concept.
+	AutoBindRuntimes *bool `json:"auto_bind_runtimes,omitempty"`
+}
+
+// AutoBindRuntimesEnabled resolves the tri-state switch. An absent value is the
+// product default (on); the pointer exists only so an explicit false survives
+// the zero value of a struct decoded from JSON.
+func (o ConfigImportOptions) AutoBindRuntimesEnabled() bool {
+	return o.AutoBindRuntimes == nil || *o.AutoBindRuntimes
 }
 
 type ConfigImportRequest struct {
