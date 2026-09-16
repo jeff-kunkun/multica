@@ -308,6 +308,9 @@ const mockApiObj = vi.hoisted(() => ({
   rerunIssue: vi.fn(),
   listTaskMessages: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
+  // Batched expansion the sub-issue blocker tree walks below the direct
+  // children (one request per nesting level, not one per parent).
+  listChildrenByParents: vi.fn().mockResolvedValue({ issues: [] }),
   getChildIssueProgress: vi.fn().mockResolvedValue({ progress: [] }),
   getAgentTaskSnapshot: vi.fn().mockResolvedValue([]),
   // The sub-issues header chip reads this narrowed to the parent issue.
@@ -706,6 +709,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    mockApiObj.listChildrenByParents.mockResolvedValue({ issues: [] });
     mockApiObj.getChildIssueProgress.mockResolvedValue({ progress: [] });
     mockApiObj.getAgentTaskSnapshot.mockResolvedValue([]);
     mockApiObj.getWorkspaceWorkingAgents.mockResolvedValue([]);
@@ -2482,6 +2486,54 @@ describe("IssueDetail (shared)", () => {
       expect(bareRow?.textContent).not.toContain("/");
     });
 
+    it("marks a row whose blocker sits on a grandchild as propagated", async () => {
+      // Regression (DENE-311): the row badge used to be derived from a
+      // one-level children map, so a grandchild root cause left its own row
+      // unmarked while the summary card listed that grandchild as a root cause.
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 11,
+            identifier: "TES-11",
+            title: "Migrate tables",
+          }),
+        ],
+      });
+      mockApiObj.listChildrenByParents.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "grandchild-1",
+            number: 12,
+            identifier: "TES-12",
+            title: "Delete the old table",
+            parent_issue_id: "child-1",
+            metadata: {
+              "close.conclusion": "blocked",
+              "close.block_kind": "decision",
+              "close.block_action": "confirm the drop",
+            },
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Migrate tables");
+      // The child neither blocks nor is written as blocked — only its
+      // grandchild is, one level below what the row used to look at.
+      await waitFor(() =>
+        expect(screen.getByTestId("sub-issue-blocker-badge")).toHaveAttribute(
+          "data-blocker-state",
+          "PROPAGATED",
+        ),
+      );
+      expect(screen.getByText("Blocked by a sub-issue TES-12")).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: "TES-12 · Delete the old table" }),
+      ).toBeInTheDocument();
+    });
+
     it("hides fields the user toggled off in the display preference", async () => {
       useSubIssueDisplayStore.setState({
         rowProperties: {
@@ -2551,6 +2603,52 @@ describe("IssueDetail (shared)", () => {
       // Chip renders only on the row that has a value for the property.
       expect(await screen.findByText("Sprint 3")).toBeInTheDocument();
       expect(screen.getAllByText("Sprint 3")).toHaveLength(1);
+    });
+
+    it("shows close-protocol fields and the missing-close exception on sub-issue rows", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 230,
+            identifier: "DENE-230",
+            title: "Stage 1 child",
+            stage: 1,
+            status: "done",
+            metadata: {},
+            last_activity_at: "2026-09-15T11:15:22Z",
+          }),
+          subIssue({
+            id: "child-2",
+            number: 231,
+            identifier: "DENE-231",
+            title: "Stage 2 child",
+            stage: 2,
+            status: "done",
+            last_activity_at: "2026-09-15T12:16:13Z",
+            metadata: {
+              "close.at": "2026-09-15T11:52:15Z",
+              "close.conclusion": "delivered",
+              "close.evidence_comment_id": "01a0a4e9-1c4e-75a6-8895-79f1210f494e",
+              "close.next_owner_id": "",
+              "close.next_owner_type": "none",
+              "close.status": "done",
+              "close.waiting_on": "",
+              "close.wake_action": "stage_done",
+            },
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Stage 1 child");
+      expect(screen.getByText("Not closed under protocol")).toBeInTheDocument();
+      expect(screen.getByText("delivered")).toBeInTheDocument();
+      expect(screen.getByText("Next: none")).toBeInTheDocument();
+      const strips = screen.getAllByTestId("sub-issue-close-strip");
+      expect(strips[0]).toHaveAttribute("data-close-state", "missing");
+      expect(strips[1]).toHaveAttribute("data-close-state", "ok");
     });
 
     it("mutes the due date on done sub-issues even when past", async () => {

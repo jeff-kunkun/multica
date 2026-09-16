@@ -29,6 +29,12 @@ function workspaceScoped(slug: string) {
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
+    // One alignment conversation. Like an agent-creation conversation, it is a
+    // durable server-side object rather than a step of the create flow: it is
+    // left, resumed and refreshed into, so it owns an address. Addressed by the
+    // carrier chat session id, which is also the draft's identity.
+    newIssueDraft: (draftId: string) =>
+      `${ws}/issues/new/${encode(draftId)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,

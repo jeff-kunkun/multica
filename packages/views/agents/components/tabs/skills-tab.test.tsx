@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -327,5 +327,59 @@ describe("SkillsTab", () => {
     expect(
       await screen.findByText("Couldn't discover runtime skills. Try again."),
     ).toBeInTheDocument();
+  });
+});
+
+// DENE-304: skills a specialisation inherits from its base role are read-only
+// in v1. They are rendered as their own locked group rather than as normal
+// rows, because the remove/toggle affordances simply do not exist for them.
+describe("SkillsTab inherited bindings", () => {
+  beforeEach(() => {
+    mockListSkills.mockResolvedValue([]);
+    mockGetSkill.mockResolvedValue(null);
+  });
+
+  it("lists inherited skills as locked chips with no remove control", async () => {
+    renderSkillsTab({
+      parent_agent_id: "agent-base",
+      parent_agent_name: "Base Agent",
+      skills: [
+        { id: "skill-own", name: "Own Skill", description: "mine" },
+      ],
+      inherited_skills: [
+        { id: "skill-inherited", name: "Inherited Skill", description: "theirs" },
+      ],
+    });
+
+    const group = await screen.findByTestId("agent-inherited-skills");
+    expect(group).toHaveTextContent("Inherited from the base role");
+    expect(group).toHaveTextContent("Inherited Skill");
+    expect(group).toHaveTextContent("Locked");
+    // Read-only means read-only: nothing in the inherited group removes it.
+    expect(
+      within(group).queryByRole("switch"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(group).queryByRole("button", { name: /remove/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not repeat a skill the agent also holds itself", async () => {
+    renderSkillsTab({
+      parent_agent_id: "agent-base",
+      skills: [{ id: "skill-both", name: "Shared Skill", description: "" }],
+      inherited_skills: [
+        { id: "skill-both", name: "Shared Skill", description: "" },
+      ],
+    });
+
+    // Nothing to inherit beyond the agent's own copy → no locked group at all.
+    expect(screen.queryByTestId("agent-inherited-skills")).toBeNull();
+  });
+
+  it("renders no inherited group for a base role", () => {
+    renderSkillsTab({ inherited_skills: [] });
+
+    expect(screen.queryByTestId("agent-inherited-skills")).toBeNull();
   });
 });

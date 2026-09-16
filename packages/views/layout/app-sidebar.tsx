@@ -24,6 +24,7 @@ import { Layers,
   Plus,
   Check,
   SquarePen,
+  Sparkles,
   X,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
@@ -34,6 +35,7 @@ import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
 import { StatusIcon } from "../issues/components/status-icon";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
+import { useModalStore } from "@multica/core/modals";
 import {
   Sidebar,
   SidebarContent,
@@ -749,6 +751,21 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 {createIssueShortcut ? (
                   <ShortcutKeycaps shortcut={createIssueShortcut} decorative className="pointer-events-none ml-auto" />
                 ) : null}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              {/* The way into requirement alignment. It sits beside "New
+                  issue" rather than replacing it: skipping alignment stays a
+                  deliberate choice, not something a user has to undo. */}
+              <SidebarMenuButton
+                className="text-muted-foreground"
+                title={t(($) => $.sidebar.align_issue_hint)}
+                onClick={() =>
+                  useModalStore.getState().open("create-issue-draft")
+                }
+              >
+                <Sparkles />
+                <span>{t(($) => $.sidebar.align_issue)}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
