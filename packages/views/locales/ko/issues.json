@@ -133,7 +133,7 @@
     "waiting_on": "{{id}} 대기",
     "last_activity_missing": "활동 시각 없음"
   },
-  "blocker_summary": { "title": "차단됨 · 근본 원인 {{count}}개", "needs_you": "{{count}}개는 조치가 필요합니다", "root": "근본 차단", "propagated": "하위 태스크로 인해 차단됨" },
+  "blocker_summary": { "title": "차단됨 · 근본 원인 {{count}}개", "needs_you": "{{count}}개는 조치가 필요합니다", "root": "근본 차단", "propagated": "하위 태스크로 인해 차단됨", "kind_decision": "결정이 필요합니다", "kind_permission": "권한이 필요합니다", "kind_external": "외부 의존성 대기 중", "kind_capacity": "용량 회복 대기 중", "kind_action": "{{kind}}: {{action}}", "kind_review_overdue": "검토 지연 · {{ago}}", "kind_wake_missed": "{{id}} 완료 후 깨우지 않음", "kind_cycle": "순환 대기" },
   "scope": {
     "all_label": "전체",
     "all_description": "이 워크스페이스의 모든 태스크",
