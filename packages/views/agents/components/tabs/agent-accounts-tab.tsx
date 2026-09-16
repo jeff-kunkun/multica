@@ -178,6 +178,17 @@ export function AgentAccountsTab({
     () => withAgySlots(parsed.accounts, slots, runtimeHome),
     [parsed.accounts, slots, runtimeHome],
   );
+  // The same list the drawer renders, but built from the SAVED slots rather
+  // than the pending edits: this is what "which account is in effect" must be
+  // answered against. A numbered slot whose directory does not exist yet is
+  // absent from the daemon's report and only exists as a synthesised row, so
+  // resolving the current account against the raw report alone would call a
+  // freshly bound slot "no matching account" while listing that very account
+  // one line below — and an unsaved slot edit must not move the summary bar.
+  const persistedAccounts = useMemo(
+    () => withAgySlots(parsed.accounts, originalSlots, runtimeHome),
+    [parsed.accounts, originalSlots, runtimeHome],
+  );
   const groups = useMemo(
     () => groupAccountsByCli(drawerAccounts),
     [drawerAccounts],
@@ -248,8 +259,8 @@ export function AgentAccountsTab({
   });
 
   const current = useMemo(
-    () => resolveCurrentAccount(binding, parsed.accounts),
-    [binding, parsed.accounts],
+    () => resolveCurrentAccount(binding, persistedAccounts),
+    [binding, persistedAccounts],
   );
   const currentKey = current ? accountKey(current) : null;
   const others = useMemo(

@@ -672,6 +672,52 @@ describe("AgentAccountsTab agy slots", () => {
     });
     expect(toast.error).not.toHaveBeenCalled();
   });
+
+  // The case above has the daemon reporting the bound directory. A slot bound
+  // straight after `add numbered account` has no directory on disk yet, so the
+  // report cannot carry it and the row exists only as the synthesised
+  // "signed out" one. Resolving the account in effect against the raw report
+  // then claimed no local account matched while listing that exact account as
+  // an "other account" one line below, and left every radio unchecked.
+  it("keeps a numbered account in effect when its directory is not on disk yet", async () => {
+    renderTab({
+      device: runtimeWith("antigravity", [AGY_DEFAULT]),
+      agent: {
+        ...baseAgent,
+        custom_args: ["--gemini_dir", `${RUNTIME_HOME}/.gemini-account4`],
+        runtime_config: { agy_slots: { accounts: [1, 4] } },
+      },
+    });
+
+    expect(await screen.findByText("Antigravity · account4")).toBeInTheDocument();
+    expect(screen.getByText("In use")).toBeInTheDocument();
+    expect(screen.queryByText(/no account on this machine/i)).toBeNull();
+
+    await openDrawer();
+    expect(screen.getByRole("radio", { name: /account4/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  // The summary bar answers "what is in effect", which only a save can change.
+  it("does not let an unsaved slot edit move the account in effect", async () => {
+    renderTab({
+      device: runtimeWith("antigravity", [AGY_DEFAULT]),
+      agent: {
+        ...baseAgent,
+        custom_args: ["--gemini_dir", `${RUNTIME_HOME}/.gemini-account4`],
+        runtime_config: { agy_slots: { accounts: [1, 4] } },
+      },
+    });
+
+    await openDrawer();
+    fireEvent.click(screen.getByRole("button", { name: /remove slot 4/i }));
+
+    // Slot 4 is gone from the pending list, but nothing is saved: the account
+    // in effect is still the one the agent launches with.
+    expect(screen.getByText("Antigravity · account4")).toBeInTheDocument();
+  });
 });
 
 // The global sweep for every namespace and locale lives in
