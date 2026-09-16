@@ -11,6 +11,10 @@ Product contracts the runtime brief does not fully encode.
 - [Sub-issues: todo starts work now, backlog parks it](#sub-issues-todo-starts-work-now-backlog-parks-it)
 - [Incorrect to correct](#incorrect-to-correct)
 
+Closing is its own contract: the eight `close.*` keys, the decision tables
+and the dispatcher promotion rules live in `references/close-protocol.md`.
+Read them there before you close anything.
+
 ## PR linking and close intent are two distinct contracts
 
 The GitHub webhook runs two separate scans over an incoming PR. They are not the
@@ -187,8 +191,10 @@ multica issue property unset <issue-id> --name Environment
 - Agents cannot create or edit property definitions (owner/admin humans only).
   If a needed property does not exist, propose it in a comment instead.
 - Where state belongs: workflow state a human should see and filter by goes in
-  a property; the stage the issue is at goes in its status; everything else —
-  what you did this run, what you found — goes in the result comment.
+  a property; the stage the issue is at goes in its status; a Close protocol
+  finish writes the eight `close.*` keys (see `references/close-protocol.md`);
+  everything else — what you did this run, what you found — goes in the result
+  comment.
 - `issue list` filters and sorts by property with the same name addressing:
 
 ```bash

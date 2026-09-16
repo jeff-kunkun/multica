@@ -38,6 +38,10 @@ bash scripts/setup-dsh-runtime.sh
 
 说明、已知坑、给上游的反馈建议见 [docs/kun/dsh-runtime.md](docs/kun/dsh-runtime.md)。
 
+## Desktop 发版
+
+打包发布给真机用的 Desktop 版本，走 [docs/kun/desktop-release.md](docs/kun/desktop-release.md)：版本号由 tag 推导、必须从当前 `kun` tip 构建、产物没推上 Release 就等于没发。
+
 ## 边界
 
 - 不向 `multica-ai/multica` 开 PR 或 push。

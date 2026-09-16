@@ -103,6 +103,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 			"error", err,
 			"child_id", uuidToString(issue.ID),
 			"parent_id", uuidToString(issue.ParentIssueID))
+		h.recordStageWakeupFailure(ctx, issue.WorkspaceID, issue.ParentIssueID, issue.ID, wakeFailLoadParent, err)
 		return
 	}
 	// Custom statuses inherit the canonical status they name, so a custom
@@ -145,6 +146,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 			"error", err,
 			"child_id", uuidToString(issue.ID),
 			"parent_id", uuidToString(parent.ID))
+		h.recordStageWakeupFailure(ctx, parent.WorkspaceID, parent.ID, issue.ID, wakeFailListSiblings, err)
 		return
 	}
 	isTerminal, err := resolveTerminalChildren(children, effective)
@@ -214,6 +216,12 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		if err != nil {
 			slog.Warn("batch child done: failed to load parent",
 				"error", err, "parent_id", uuidToString(g.parentID))
+			var ws, child pgtype.UUID
+			if len(g.children) > 0 {
+				ws = g.children[0].WorkspaceID
+				child = g.children[0].ID
+			}
+			h.recordStageWakeupFailure(ctx, ws, g.parentID, child, wakeFailLoadParent, err)
 			continue
 		}
 		// Same parent guards as the single path (see notifyParentOfChildDone).
@@ -236,6 +244,11 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		if err != nil {
 			slog.Warn("batch child done: failed to list siblings for stage barrier",
 				"error", err, "parent_id", uuidToString(parent.ID))
+			var child pgtype.UUID
+			if len(g.children) > 0 {
+				child = g.children[0].ID
+			}
+			h.recordStageWakeupFailure(ctx, parent.WorkspaceID, parent.ID, child, wakeFailListSiblings, err)
 			continue
 		}
 
@@ -385,6 +398,7 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 			"error", err,
 			"child_id", childID,
 			"parent_id", uuidToString(parent.ID))
+		h.recordStageWakeupFailure(ctx, parent.WorkspaceID, parent.ID, completed.ID, wakeFailCreateComment, err)
 		return
 	}
 	comment := created.Comment()
@@ -761,6 +775,7 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 			"error", err,
 			"parent_id", uuidToString(parent.ID),
 			"agent_id", uuidToString(parent.AssigneeID))
+		h.recordStageWakeupFailure(ctx, parent.WorkspaceID, parent.ID, pgtype.UUID{}, wakeFailEnqueueAgent, err)
 	}
 }
 
@@ -819,5 +834,6 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 			"parent_id", uuidToString(parent.ID),
 			"squad_id", uuidToString(squad.ID),
 			"leader_id", uuidToString(squad.LeaderID))
+		h.recordStageWakeupFailure(ctx, parent.WorkspaceID, parent.ID, pgtype.UUID{}, wakeFailEnqueueSquad, err)
 	}
 }

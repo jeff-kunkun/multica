@@ -1391,11 +1391,15 @@ func (st *importState) importIssueViews(ctx context.Context, q *db.Queries, dry 
 			if defVer == 0 {
 				defVer = 1
 			}
+			visibility := v.Visibility
+			if visibility == "" {
+				visibility = "private"
+			}
 			if isNew {
 				row, err := q.CreateIssueView(ctx, db.CreateIssueViewParams{
 					WorkspaceID: st.env.TargetID, OwnerID: st.env.ImporterID, Name: name,
 					ScopeType: v.ScopeType, ScopeID: mappedScope, ScopeVariant: variant,
-					Visibility: "workspace", DefinitionVersion: defVer, Query: query, Display: display,
+					Visibility: visibility, DefinitionVersion: defVer, Query: query, Display: display,
 				})
 				if err != nil {
 					return "", err
@@ -1403,7 +1407,7 @@ func (st *importState) importIssueViews(ctx context.Context, q *db.Queries, dry 
 				return uuidString(row.ID), nil
 			}
 			_, err := q.UpdateIssueView(ctx, db.UpdateIssueViewParams{
-				ID: id, WorkspaceID: st.env.TargetID, Name: name, Visibility: "workspace",
+				ID: id, WorkspaceID: st.env.TargetID, Name: name, Visibility: visibility,
 				ScopeVariant: variant, Query: query, Display: display, Revision: existing.Revision,
 			})
 			if err != nil {

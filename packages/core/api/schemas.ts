@@ -17,6 +17,11 @@ import type {
   ChatDraftRestoresResponse,
   ChatPendingTask,
   ChatSession,
+  IssueDraft,
+  IssueDraftPolicy,
+  IssueDraftRuntimeSwitch,
+  IssueDraftSession,
+  IssueDraftSummary,
   PrioritizeQueuedChatTaskResponse,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
@@ -78,6 +83,7 @@ import type {
   RuntimeModelListRequest,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  ProjectMember,
   ShareLink,
   ShareLinkInfo,
   Skill,
@@ -575,12 +581,14 @@ export const EMPTY_ISSUE_VIEW_PREFERENCE: IssueViewPreference = {
   updated_at: "",
 };
 
+export type IssueViewVisibility = "private" | "workspace" | "project";
+
 export interface CreateIssueViewRequest {
   name: string;
   scope_type: "workspace" | "my" | "project";
   scope_id?: string | null;
   scope_variant?: "assigned" | "created" | "involved" | "any" | "members" | "agents" | null;
-  visibility: "private" | "workspace";
+  visibility: IssueViewVisibility;
   definition_version: number;
   query: Record<string, unknown>;
   display: Record<string, unknown>;
@@ -1358,6 +1366,32 @@ export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
   projects: [],
 };
 
+export const ProjectMemberSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().optional().default(""),
+  project_id: z.string(),
+  member_id: z.string(),
+  added_by: z.string().nullable().optional().default(null),
+  created_at: z.string().optional().default(""),
+  name: z.string().optional().default(""),
+  email: z.string().optional().default(""),
+  avatar_url: z.string().nullable().optional().default(null),
+}).loose();
+
+export const ProjectMemberListSchema = z.array(ProjectMemberSchema);
+
+export const EMPTY_PROJECT_MEMBER: ProjectMember = {
+  id: "",
+  workspace_id: "",
+  project_id: "",
+  member_id: "",
+  added_by: null,
+  created_at: "",
+  name: "",
+  email: "",
+  avatar_url: null,
+};
+
 const IssueAssigneeGroupSchema = z.object({
   id: z.string(),
   assignee_type: z.string().nullable(),
@@ -1593,6 +1627,21 @@ export const AgentRuntimeSchema = z.object({
 
 export const AgentRuntimeListSchema = z.array(AgentRuntimeSchema);
 
+/**
+ * The minimal skill shape embedded in an agent payload (the list/detail batch
+ * query joins id, name, description and enabled). Lenient on purpose: the
+ * fields are display-only, so a partially-filled row must still render as a
+ * chip rather than fail the enclosing agent.
+ */
+const AgentSkillSummarySchema = z
+  .object({
+    id: z.string().default(""),
+    name: z.string().default(""),
+    description: z.string().default(""),
+    enabled: z.boolean().optional().catch(undefined),
+  })
+  .loose();
+
 export const AgentSchema: z.ZodType<Agent> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
@@ -1613,6 +1662,19 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
     .catch(undefined),
   system_key: z.string().optional(),
   system_instructions: z.string().optional(),
+  // Two-level specialisation (DENE-301). Every field is optional-and-caught:
+  // a backend that predates the feature sends none of them, and a backend that
+  // sends a malformed one must degrade THAT field rather than drop the whole
+  // agent — the list is how the product is navigated. Empty string and absent
+  // both mean "base role" for the id; see `isSpecializationAgent`.
+  parent_agent_id: z.string().optional().catch(undefined),
+  parent_agent_name: z.string().optional().catch(undefined),
+  inherited_instructions: z.string().optional().catch(undefined),
+  inherited_skills: z
+    .array(AgentSkillSummarySchema)
+    .optional()
+    .catch(undefined),
+  child_count: z.number().optional().catch(undefined),
   avatar_url: z.string().nullable().default(null),
   runtime_mode: z.string().catch("local"),
   runtime_config: z.record(z.string(), z.unknown()).default({}),
@@ -1650,6 +1712,32 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   // whole agent parse; UI treats undefined as enabled (`!== false`).
   auto_retry_enabled: z.boolean().optional().catch(undefined),
 }).loose() as z.ZodType<Agent>;
+
+// Malformed ROWS are dropped individually, the same way a blocked mention is
+// (MUL-4525): the agents list is how the whole product is navigated, and only
+// `id` is strictly required here — every other field defaults or catches. One
+// row without an id is an unusable row, not a reason to blank the workspace's
+// agents. A payload that is not an array at all still degrades to [].
+export const AgentListSchema: z.ZodType<Agent[]> = z
+  .array(z.unknown())
+  .catch([])
+  .default([])
+  .transform((items) =>
+    items.flatMap((item) => {
+      const parsed = AgentSchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  ) as unknown as z.ZodType<Agent[]>;
+
+/**
+ * Degraded answers for the two agent reads the UI is built on.
+ *
+ * An empty LIST is honest: the agents page renders its empty state instead of
+ * a screen of half-parsed rows. A single agent has no honest empty object — a
+ * blank-named agent would render as a real one — so `getAgent` degrades to
+ * `null` and the caller falls back to the list row it already has.
+ */
+export const EMPTY_AGENT_LIST: Agent[] = [];
 
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
@@ -2193,6 +2281,139 @@ export const AgentBuilderRuntimeSwitchSchema = z.object({
 export const agentBuilderRuntimeSwitchFallback = (
   requestedRuntimeID: string,
 ): AgentBuilderRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
+
+/**
+ * The structured issue an alignment draft has arrived at. Every field falls
+ * back to empty on its own: a draft written by a newer build must still
+ * restore the fields this build understands rather than discarding the
+ * conversation's work wholesale.
+ */
+export const IssueDraftPayloadSchema = z.object({
+  title: z.string().catch(""),
+  description: z.string().catch(""),
+  status: z.string().catch(""),
+  priority: z.string().catch(""),
+  assignee_type: z.string().nullish().catch(null),
+  assignee_id: z.string().nullish().catch(null),
+  project_id: z.string().nullish().catch(null),
+  parent_issue_id: z.string().nullish().catch(null),
+}).loose();
+
+/**
+ * The alignment policy a draft runs under.
+ *
+ * Every field has a fallback, and the fallback is deliberately "nothing is
+ * known": an installed desktop client can talk to a backend that predates
+ * policies, and reporting a key it never sent would offer a switch that cannot
+ * land. `key: ""` is that state — the page hides the control instead.
+ */
+export const IssueDraftPolicySchema = z.object({
+  key: z.string().catch(""),
+  version: z.string().catch(""),
+  guided: z.boolean().catch(false),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_POLICY: IssueDraftPolicy = {
+  key: "",
+  version: "",
+  guided: false,
+};
+
+/** The fallback shape, as the schema's own output type: `key: ""` is the
+ *  documented "this backend has no policies" state and must survive `.catch`. */
+const UNKNOWN_ISSUE_DRAFT_POLICY = { key: "", version: "", guided: false };
+
+/**
+ * One alignment draft.
+ *
+ * `status` deliberately has no `.catch()`: it decides whether the UI offers
+ * "confirm and create", and defaulting an unrecognised value would either
+ * offer a create the server will refuse or hide one it would accept. An
+ * unparseable draft falls back wholesale at the call site instead.
+ */
+export const IssueDraftSchema = z.object({
+  chat_session_id: z.string(),
+  workspace_id: z.string().catch(""),
+  status: z.enum(["draft", "ready", "completed", "abandoned"]),
+  revision: z.number().int().nonnegative(),
+  draft: IssueDraftPayloadSchema,
+  issue_id: z.string().nullish().catch(null),
+  policy: IssueDraftPolicySchema.catch(() => UNKNOWN_ISSUE_DRAFT_POLICY),
+  created_at: z.string().catch(""),
+  updated_at: z.string().catch(""),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT: IssueDraft = {
+  chat_session_id: "",
+  workspace_id: "",
+  status: "draft",
+  revision: 0,
+  draft: {
+    title: "",
+    description: "",
+    status: "",
+    priority: "",
+  },
+  policy: EMPTY_ISSUE_DRAFT_POLICY,
+  created_at: "",
+  updated_at: "",
+};
+
+export const IssueDraftSessionSchema = z.object({
+  session_id: z.string(),
+  agent_id: z.string().catch(""),
+  runtime_id: z.string().catch(""),
+  draft: IssueDraftSchema,
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_SESSION: IssueDraftSession = {
+  session_id: "",
+  agent_id: "",
+  runtime_id: "",
+  draft: EMPTY_ISSUE_DRAFT,
+};
+
+export const IssueDraftSummarySchema = IssueDraftSchema.extend({
+  title: z.string().catch(""),
+  runtime_id: z.string().catch(""),
+  last_message_content: z.string().catch(""),
+  last_message_role: z.string().catch(""),
+  last_message_at: z.string().catch(""),
+}).loose();
+
+export const IssueDraftListSchema = z.object({
+  drafts: z.array(IssueDraftSummarySchema).catch([]),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_LIST: { drafts: IssueDraftSummary[] } = {
+  drafts: [],
+};
+
+/**
+ * The result of confirming a draft.
+ *
+ * `issue_id` has no fallback on purpose. This endpoint returns 2xx only after
+ * an issue exists, and the caller navigates to that issue; an empty id would
+ * send the user to a route that cannot resolve while the issue it names is
+ * already live. An unparseable success body is a hard parse failure at the
+ * call site instead — the client re-confirms, which is safe because the
+ * protocol returns the same issue for every repeat.
+ */
+export const IssueDraftFinalizeSchema = z.object({
+  draft: IssueDraftSchema,
+  issue_id: z.string().min(1),
+}).loose();
+
+export const IssueDraftRuntimeSwitchSchema = z.object({
+  runtime_id: z.string(),
+}).loose();
+
+// Same reasoning as agentBuilderRuntimeSwitchFallback: a 2xx means the carrier
+// was rebound to the requested runtime, so reporting "unknown" would leave the
+// picker showing a runtime that no longer executes anything.
+export const issueDraftRuntimeSwitchFallback = (
+  requestedRuntimeID: string,
+): IssueDraftRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
 
 // Squad list responses carry lightweight membership previews used by hover
 // cards. member_count / member_preview are additive and default cleanly.

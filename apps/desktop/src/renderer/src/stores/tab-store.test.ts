@@ -56,6 +56,61 @@ describe("sanitizeTabPath", () => {
   });
 });
 
+describe("issue draft tabs survive restore (DENE-342)", () => {
+  const draftId = "01a0aaae-bd66-76e3-8074-a660bf29473b";
+  const draftUrl = `/acme/issues/new/${draftId}`;
+
+  it("passes an alignment url through sanitize untouched", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(sanitizeTabPath(draftUrl)).toBe(draftUrl);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("keeps the draft id out of the tab's resource identity boundary", () => {
+    // Two drafts are two tabs; the same draft reopened is the same tab.
+    expect(resourceKeyForUrl(draftUrl)).toBe(draftUrl);
+    expect(resourceKeyForUrl(`${draftUrl}?focus=preview`)).toBe(draftUrl);
+    expect(resourceKeyForUrl("/acme/issues/new/other")).not.toBe(draftUrl);
+  });
+
+  it("rehydrates a persisted alignment tab instead of dropping it", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const restored = mergePersistedTabs(
+      {
+        activeWorkspaceSlug: "acme",
+        byWorkspace: {
+          acme: {
+            activeTabId: "draft-tab",
+            tabs: [
+              {
+                id: "draft-tab",
+                url: draftUrl,
+                title: "Align Issue",
+                pinned: false,
+                history: { stack: [draftUrl], index: 0 },
+                memento: { scroll: {} },
+              },
+            ],
+          },
+        },
+      },
+      {
+        activeWorkspaceSlug: null as string | null,
+        byWorkspace: {} as Record<string, WorkspaceTabGroup>,
+      },
+    ).byWorkspace.acme;
+
+    expect(restored.tabs).toHaveLength(1);
+    expect(restored.tabs[0].url).toBe(draftUrl);
+    // The reported failure mode: the tab comes back labelled "new".
+    expect(restored.tabs[0].title).toBe("Align Issue");
+    expect(restored.activeTabId).toBe("draft-tab");
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
 describe("resourceKeyForUrl", () => {
   it("is the pathname — search and hash are view state, not identity", () => {
     expect(resourceKeyForUrl("/acme/issues")).toBe("/acme/issues");
