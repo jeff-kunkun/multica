@@ -99,7 +99,11 @@ export interface IssueDraftSession {
   confirming: boolean;
   abandoning: boolean;
   createdIssueId: string | null;
-  send: (content: string, commitInput?: () => void) => Promise<boolean>;
+  send: (
+    content: string,
+    attachmentIds?: string[],
+    commitInput?: () => void,
+  ) => Promise<boolean>;
   save: (draft: IssueDraftPayload, status?: "draft" | "ready") => Promise<boolean>;
   /**
    * Folds the carrier's latest `<issue_draft>` block into `current` and saves
@@ -289,16 +293,25 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
    * reconciling invalidations settle. Awaiting those would hold the user's text
    * in the box for three more round-trips while their message is already on
    * screen (MUL-5181).
+   *
+   * Attachments ride the same session-scoped transport as any other chat turn:
+   * the composer has already uploaded them and hands down the bound ids, so
+   * aligning a request that starts as a screenshot or a spec file works
+   * without a second upload surface (DENE-369).
    */
   const send = useCallback(
-    async (content: string, commitInput?: () => void): Promise<boolean> => {
+    async (
+      content: string,
+      attachmentIds?: string[],
+      commitInput?: () => void,
+    ): Promise<boolean> => {
       const text = content.trim();
       if (!text || !draftId || pending || sending || !draft) return false;
       setError(null);
       setSending(true);
       const wire = encodeIssueDraftInput(text, draft);
       try {
-        const result = await api.sendChatMessage(draftId, wire);
+        const result = await api.sendChatMessage(draftId, wire, attachmentIds);
         const createdAt = new Date().toISOString();
         upsertChatMessageToCaches(
           qc,
@@ -319,6 +332,16 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
           created_at: createdAt,
         });
         commitInput?.();
+        // The server reports which ids it actually bound. Diff against what we
+        // asked for so a silent bind failure is visible here rather than only
+        // as an assistant that never mentions the file. Servers that predate
+        // the field report undefined; skip rather than false-alarm.
+        if (attachmentIds && attachmentIds.length > 0 && result.attachment_ids) {
+          const bound = new Set(result.attachment_ids);
+          if (attachmentIds.some((id) => !bound.has(id))) {
+            setError(t(($) => $.alignment.attachment_bind_failed));
+          }
+        }
         void qc.invalidateQueries({ queryKey: chatKeys.messages(draftId) });
         void qc.invalidateQueries({ queryKey: chatKeys.messagesPage(draftId) });
         void qc.invalidateQueries({ queryKey: chatKeys.pendingTask(draftId) });

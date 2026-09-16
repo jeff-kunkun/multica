@@ -95,17 +95,32 @@ vi.mock("../../chat/components/chat-input", () => ({
   ChatInput: ({
     onSend,
     disabled,
+    uploadEnabled,
   }: {
-    onSend: (content: string, ids: undefined, commit: () => void) => void;
+    onSend: (
+      content: string,
+      ids: string[] | undefined,
+      commit: () => void,
+    ) => void;
     disabled?: boolean;
+    uploadEnabled?: boolean;
   }) => (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={() => onSend("please continue", undefined, () => {})}
-    >
-      send-turn
-    </button>
+    <div data-testid="composer" data-upload-enabled={String(!!uploadEnabled)}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onSend("please continue", undefined, () => {})}
+      >
+        send-turn
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onSend("look at this", ["att-1", "att-2"], () => {})}
+      >
+        send-turn-with-files
+      </button>
+    </div>
   ),
 }));
 
@@ -307,6 +322,63 @@ describe("IssueDraftPage stages", () => {
     expect(mocks.sendChatMessage).toHaveBeenCalledWith(
       "sess-1",
       'MULTICA_ISSUE_DRAFT_INPUT\n{"user_request":"please continue","current_draft":{"title":"Dark mode","description":"Add it.","status":"","priority":""}}',
+      // A text-only turn carries no attachment ids; the envelope is unchanged
+      // by the attachment path existing (DENE-369).
+      undefined,
+    );
+  });
+
+  it("forwards the composer's attachment ids to the send", async () => {
+    // The alignment composer is the chat composer, so a request that starts
+    // as a screenshot or a spec file must be alignable without a second
+    // upload surface. Before DENE-369 the page dropped the ids on the floor
+    // and the carrier only ever saw the prose.
+    mocks.sendChatMessage.mockResolvedValue({
+      message_id: "m10",
+      task_id: "t10",
+      attachment_ids: ["att-1", "att-2"],
+    });
+    renderPage();
+    const send = await screen.findByRole("button", { name: "send-turn-with-files" });
+    await userEvent.click(send);
+    await waitFor(() => expect(mocks.sendChatMessage).toHaveBeenCalledTimes(1));
+    expect(mocks.sendChatMessage.mock.calls[0]?.[2]).toEqual(["att-1", "att-2"]);
+  });
+
+  it("offers the upload affordance only while the runtime can answer", async () => {
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId("composer")).toHaveAttribute(
+        "data-upload-enabled",
+        "true",
+      ),
+    );
+  });
+
+  it("withholds the upload affordance while the runtime is offline", async () => {
+    mocks.runtimes = [{ ...ONLINE_RUNTIME, status: "offline" }];
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId("composer")).toHaveAttribute(
+        "data-upload-enabled",
+        "false",
+      ),
+    );
+  });
+
+  it("reports the attachments the server did not bind", async () => {
+    // A silent bind failure otherwise shows up only as an assistant that never
+    // mentions the file the user attached.
+    mocks.sendChatMessage.mockResolvedValue({
+      message_id: "m11",
+      task_id: "t11",
+      attachment_ids: ["att-1"],
+    });
+    renderPage();
+    const send = await screen.findByRole("button", { name: "send-turn-with-files" });
+    await userEvent.click(send);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /attachments/i,
     );
   });
 

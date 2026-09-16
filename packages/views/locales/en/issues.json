@@ -985,6 +985,7 @@
     "load_failed": "Could not load this alignment.",
     "retry": "Retry",
     "send_failed": "Could not send that message.",
+    "attachment_bind_failed": "Some attachments weren't attached to this message. Try sending them again.",
     "save_failed": "Could not save the draft.",
     "confirm_failed": "Could not create the issue.",
     "abandon_failed": "Could not discard the draft.",

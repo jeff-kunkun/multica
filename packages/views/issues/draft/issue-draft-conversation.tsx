@@ -42,8 +42,14 @@ export function IssueDraftConversation({
   runtimeOnline: boolean;
   sending: boolean;
   /** `commitInput` is the composer's clear; the owner runs it as soon as the
-   *  server accepts the message. */
-  onSend: (content: string, commitInput?: () => void) => Promise<boolean>;
+   *  server accepts the message. `attachmentIds` are already-uploaded ids the
+   *  composer hands down — a request that starts life as a screenshot or a
+   *  spec file has to be alignable without a second upload surface. */
+  onSend: (
+    content: string,
+    attachmentIds?: string[],
+    commitInput?: () => void,
+  ) => Promise<boolean>;
   onStop: () => void;
   error: string | null;
   /** The question the guided policy is waiting on, if any. */
@@ -161,12 +167,13 @@ export function IssueDraftConversation({
       ) : null}
 
       <ChatInput
-        onSend={(content, _attachmentIds, commitInput) =>
-          onSend(content, commitInput)
-        }
+        onSend={onSend}
         onStop={onStop}
         isRunning={pending || sending}
         disabled={!runtimeOnline}
+        // An alignment session is a chat session with a runtime behind it, so
+        // the upload affordance exists exactly when that runtime can answer.
+        uploadEnabled={runtimeOnline}
         agentName={agentName}
         draftKeyOverride={draftKey}
         editorKeyOverride={draftKey}
