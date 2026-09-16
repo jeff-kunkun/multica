@@ -161,6 +161,7 @@ multica transfer import --profile <目标实例登录档> --workspace <slug> --i
 | user（成员引用） | `people.json` 里源 user 的 `email`，在目标实例查同邮箱（大小写不敏感）的 user，且该 user 是目标工作区成员 → 替换为该 user id | 按 V1 降级表处理该引用（丢弃 / 置空 / 跳过整条），报告 `unmapped_refs` 记 `ref_type: "member"`，**只回显源 id，不回显邮箱** |
 | user = 导出者本人（`manifest.source.exported_by`） | 一律映射为**导入者**，不看邮箱是否一致 | — |
 | 普通智能体（无 `system_key`） | V1 身份键 `name`：`transfer/config` 导入后，按 `config.json` 中该 `source_id` 的 `name` 在目标工作区查 | 对话分片里引用它的会话整条跳过，报告 `agent_unmapped`；修好后重导同一分片即可补上 |
+| 智能体的 `runtime_id` | **不迁移**（第 4.4 节）；导出时降级为 `runtime_source_id` 绑定提示 | 目标端按三档规则绑定（第 4.4 节），零候选时报告 `no_runtime_for_provider` |
 | 系统智能体（`system_key` 非空且不以 `agent_builder:` 开头） | `system_key` | 同上 |
 | project / squad / label / skill 等 | V1 身份键（`title` / `name` / `(resource_type, lower(name))`） | V1 降级表；会话的 `project_id` 无法映射时置空，会话照常导入 |
 | `chat_session.id` | `UUIDv5(NS_TRANSFER_CHAT_SESSION, 目标工作区 id + "/" + 源 id)` | —（永远可算） |
@@ -193,9 +194,29 @@ multica transfer import --profile <目标实例登录档> --workspace <slug> --i
 | 表 | 结论 | 导出字段 | 排除字段 | 理由 |
 | --- | --- | --- | --- | --- |
 | `runtime_profile` | 部分导出 | `display_name`、`protocol_family`、`command_name`、`description`、`fixed_args`（经 `redactSecretArgs`）、`visibility`、`enabled` | `id`（作 `source_id`）、`workspace_id`、`created_by`（改写为导入者）、`created_at`、`updated_at` | 换环境时用户要在新机器重装守护进程，自定义运行时定义可以省去重录。身份键暂定 `display_name`，数据库是否有唯一约束**未确认**。 |
-| `agent_runtime` | 不导出实体，只导出**绑定提示** | `runtimes_hint[]`：`{ source_runtime_id, provider, runtime_mode, profile_source_id, display_name }`（`display_name` 取 `custom_name` 否则 `name`） | `daemon_id`、`legacy_daemon_id`、`device_info`、`metadata`、`owner_id`、`status`、`last_seen_at`、`plan_limits` | 守护进程注册绑定具体机器与 daemon token，跨实例没有意义；`device_info` / `metadata` 可能含主机名与路径，不进包。 |
+| `agent_runtime` | 不导出实体，只导出**绑定提示** | `runtimes_hint[]`：`{ source_runtime_id, provider, runtime_mode, profile_source_id, display_name }`（`display_name` 取 `custom_name` 否则 `name`）；智能体实体上加一个 `runtime_source_id` 指向 `runtimes_hint[].source_runtime_id` | `daemon_id`、`legacy_daemon_id`、`device_info`、`metadata`、`owner_id`、`status`、`last_seen_at`、`plan_limits` | 守护进程注册绑定具体机器与 daemon token，跨实例没有意义；`device_info` / `metadata` 可能含主机名与路径，不进包。 |
 
-导入报告 `runtimes_to_bind[]`：每个导入的智能体给出源端 `provider` / `runtime_mode` / 自定义 profile 名，并列出目标工作区里 `provider` 相同、导入者可见的运行时作为**候选**。V2 **不自动绑定**：绑定决定智能体在哪台机器、用谁的账号跑，必须人来点。
+> **口径变更（kk zi 2026-09-16，DENE-364）**：V2 原文写「不自动绑定，必须人来点」。kk zi 在真机反馈里明确「本机环境默认都相同……能迁移的尽量迁」，且首次迁移后 11 个智能体全部 `runtime_bound = false`、点不动。自本条起，绑定改为**可执行 + 三档规则**：
+>
+> | 候选数 | 行为 |
+> | --- | --- |
+> | 唯一候选 | **自动绑定**，报告逐条给出 `bound_runtime_id` / `bound_runtime_name` / `auto_bind: true` |
+> | 多候选 | **不猜**，报告列出 `candidates[]`，Desktop 卡片一次性下拉 + 一键应用 |
+> | 零候选 | 记 `reason_code: no_runtime_for_provider` + 可读 `reason`（含 provider），卡片给出「先把本机 daemon 连到 `<目标实例>`」 |
+>
+> 请求字段 `auto_bind_runtimes` 默认 **true**（唯一候选才自动绑，风险已被规则限住）；Desktop 卡片可关，关掉后全部候选走人工选择。
+>
+> **候选匹配规则**：源端 `provider` + `runtime_mode`（源端声明了才过滤）+ 自定义 profile `display_name` 三者都要相等。源端是内置运行时（无 profile）就不会匹配到目标端自定义 profile 的运行时，反之亦然——profile 决定 daemon 实际执行的命令，只按 provider 匹配等于悄悄换掉用户的 CLI。
+>
+> **候选可见性**：只列导入者本人可见的运行时（自己拥有的，或队友设成 `public` 的），与 `canUseRuntimeForAgent` 同一规则；无主运行时既不列也不绑。
+>
+> **绑定写入**：走与实时改绑相同的 `UpdateAgent` 窄更新（`runtime_id` + `runtime_mode`，模型已知不兼容时清空回落到新运行时默认），不新建旁路写入。自动绑定只发生在 `dry_run = false`，预览报告里 `action: bound` 表示「将会绑定」。
+>
+> **已绑定不覆盖**：智能体已有 `runtime_id`（上一轮导入或人工设过）时记 `action: already_bound`，自动绑定不会把智能体挪走。
+>
+> **人工绑定端点**：`POST /api/workspaces/{id}/transfer/bind-runtimes`，请求 `{"bindings":[{"agent_id","runtime_id"}]}`，逐条返回 `{ok, reason_code, reason}`；单条失败不影响整批。权限与 `/transfer/*` 其余端点相同（workspace owner/admin，agent actor 403），每条绑定再按运行时可见性校验。
+>
+> 兼容性：`runtimes_hint` 里没有对应项、且智能体实体没有 `runtime_source_id` 的旧包（新字段之前的 CLI 导出）按运行时 `display_name` 与智能体 `name` 相同来兜底；仍匹配不上时记 `reason_code: source_runtime_unknown`，提示用当前 Desktop 重新导出。
 
 ### 4.5 降级表（V2 新增项）
 
@@ -421,7 +442,6 @@ secrets_omitted.json                全包汇总（含 config.json 内的登记�
 | 源端删除 / 编辑消息同步到目标端 | 需要变更追踪；V2 只追加 |
 | 实时或定时双向同步 | 需要持久映射表与冲突合并 |
 | 智能体 CLI 续聊指针（`session_id` / `work_dir`）迁移 | 绑定源机器，跨机器无意义；上下文延续见第 4.6 节 |
-| 自动绑定运行时 | 决定在谁的机器与账号上执行，必须人工确认 |
 | 密钥随包迁移、口令加密包 | 没有通用 secrets-at-rest 基础设施（沿用 V1 结论）；V2 包本身不加密，靠文件权限与提示 |
 | 关闭对话密钥扫描 | 与验收断言冲突 |
 | 无法扫描的二进制附件文件体 | 无法证明不含密钥 |
