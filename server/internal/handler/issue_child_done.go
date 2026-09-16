@@ -441,6 +441,11 @@ func isTerminalChildStatus(status string) bool {
 // Unlike display-oriented Resolver callers, this side-effecting path must
 // reject unresolved custom keys: parent or sibling rows can be newer than the
 // catalog snapshot. A miss must not bypass a parked/terminal parent's guard.
+//
+// A delivery that resolves statuses in several passes (the PR mirror installs
+// statusResolverCache for exactly that) shares one catalog per workspace: the
+// pass-local map below keeps the single-pass optimization when no delivery
+// cache is installed.
 func (h *Handler) childStatusResolver(ctx context.Context) func(db.Issue) (string, error) {
 	resolvers := make(map[pgtype.UUID]*issuestatus.Resolver)
 	return func(c db.Issue) (string, error) {
@@ -449,7 +454,7 @@ func (h *Handler) childStatusResolver(ctx context.Context) func(db.Issue) (strin
 		}
 		resolver := resolvers[c.WorkspaceID]
 		if resolver == nil {
-			resolver = issuestatus.NewResolver(c.WorkspaceID)
+			resolver = h.statusResolver(ctx, c.WorkspaceID)
 			resolvers[c.WorkspaceID] = resolver
 		}
 		status := resolver.Effective(ctx, h.issueStatusCatalog(), c.Status)
@@ -461,6 +466,53 @@ func (h *Handler) childStatusResolver(ctx context.Context) func(db.Issue) (strin
 		}
 		return status, nil
 	}
+}
+
+// statusResolverCache pins one status catalog Resolver per workspace to a single
+// delivery. A PR-close delivery resolves raw statuses in three places that used
+// to build independent Resolvers — the PR close check, the child-done barrier
+// and the waiting_on wake — so one delivery with N linked issues read the
+// catalog N+1 times. Installing the cache at the mirror entry point keeps that
+// at one read per workspace no matter how many issues the delivery closes.
+//
+// Scoped deliberately to one mirror pass: a later delivery must not reuse the
+// catalogs (Resolver caches for its lifetime, and a fresh Resolver is required
+// to retry after a failed read).
+type statusResolverCache struct {
+	resolvers map[pgtype.UUID]*issuestatus.Resolver
+}
+
+type statusResolverCacheKey struct{}
+
+// withStatusResolverCache returns a ctx that carries one cache for the call it
+// wraps. Callers that resolve statuses in more than one pass and want them
+// shared install it once; nested installs are no-ops.
+func withStatusResolverCache(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(statusResolverCacheKey{}).(*statusResolverCache); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, statusResolverCacheKey{}, &statusResolverCache{
+		resolvers: make(map[pgtype.UUID]*issuestatus.Resolver),
+	})
+}
+
+// statusResolver returns this delivery's Resolver for one workspace, creating
+// it on first use. Without an installed cache every call gets a fresh Resolver,
+// which is the right scope for a single status resolution per request.
+//
+// Not safe for concurrent use, matching Resolver: the mirror passes that install
+// the cache resolve statuses sequentially.
+func (h *Handler) statusResolver(ctx context.Context, workspaceID pgtype.UUID) *issuestatus.Resolver {
+	cache, _ := ctx.Value(statusResolverCacheKey{}).(*statusResolverCache)
+	if cache == nil {
+		return issuestatus.NewResolver(workspaceID)
+	}
+	if resolver, ok := cache.resolvers[workspaceID]; ok {
+		return resolver
+	}
+	resolver := issuestatus.NewResolver(workspaceID)
+	cache.resolvers[workspaceID] = resolver
+	return resolver
 }
 
 // resolveTerminalChildren checks every status needed by the stage barrier and
