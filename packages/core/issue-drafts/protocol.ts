@@ -111,9 +111,19 @@ export function stripIssueDraftDirectives(content: string): string {
   // Either the block was fenced, or it was not: with no block removed there is
   // nothing a fence could have been emptied by, and ordinary code stays put.
   if (out !== content) {
-    out = out.replace(EMPTY_FENCE_PAIR, "").replace(DANGLING_FENCE_OPEN, "");
+    out = out.replace(EMPTY_FENCE_PAIR, "");
+    // Only when the removal left the text inside a fence nobody closed. A
+    // trailing fence with a matching opener above it closes prose the model
+    // wrote, and dropping it would leave the transcript in an open code block.
+    if (endsInsideFence(out)) out = out.replace(DANGLING_FENCE_OPEN, "");
   }
   return out.trim();
+}
+
+/** True when an odd number of fence delimiters leaves the text inside one. */
+function endsInsideFence(content: string): boolean {
+  const fences = content.match(new RegExp(`^[ \\t]*${FENCE}`, "gm"));
+  return (fences?.length ?? 0) % 2 === 1;
 }
 
 /**

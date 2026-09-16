@@ -283,6 +283,24 @@ describe("stripIssueDraftDirectives", () => {
     expect(stripIssueDraftDirectives(reply)).toBe("对齐一下：");
   });
 
+  it("keeps a code block the prose closed, even when it sits right before the block", () => {
+    // The carrier is told to put the block last, so a reply that ends on a
+    // snippet puts a closed fence directly above it. Dropping that fence as if
+    // it were the leftover of a fenced block would leave the transcript inside
+    // an open code block.
+    const reply = [
+      "这样改：",
+      "",
+      "```ts",
+      "const a = 1;",
+      "```",
+      '<issue_draft>{"title":"T"}</issue_draft>',
+    ].join("\n");
+    expect(stripIssueDraftDirectives(reply)).toBe(
+      "这样改：\n\n```ts\nconst a = 1;\n```",
+    );
+  });
+
   it("strips a partial opening tag at the end of a streaming reply", () => {
     // The block patterns need a complete `<tag>`, so a stream cut mid-tag has
     // nothing to match and would print the fragment.
