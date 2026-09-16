@@ -281,7 +281,8 @@ describe("IssueDraftPage stages", () => {
     // A settled reply is drawn from the carrier's task transcript, not from the
     // message body the page already stripped, so the strip has to travel down
     // to the list as well — otherwise the raw block comes back in the bubble
-    // (DENE-317).
+    // (DENE-317). The shapes that strip has to survive are canonical in
+    // packages/core/issue-drafts/protocol.test.ts; this is the wiring.
     renderPage();
     await waitFor(() => expect(mocks.transcriptProps.transformContent).toBeTypeOf("function"));
     const transform = mocks.transcriptProps.transformContent!;
