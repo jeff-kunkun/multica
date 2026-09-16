@@ -133,12 +133,7 @@
     "waiting_on": "等待 {{id}}",
     "last_activity_missing": "无活动时间"
   },
-  "blocker_summary": {
-    "title": "已阻塞 · {{count}} 个根因",
-    "needs_you": "其中 {{count}} 个需要你",
-    "root": "根因阻塞",
-    "propagated": "受子任务阻塞"
-  },
+  "blocker_summary": { "title": "已阻塞 · {{count}} 个根因", "needs_you": "其中 {{count}} 个需要你", "root": "根因阻塞", "propagated": "受子任务阻塞", "kind_decision": "需要你决定", "kind_permission": "需要你授权", "kind_external": "等待外部依赖", "kind_capacity": "等待额度恢复", "kind_action": "{{kind}}：{{action}}", "kind_review_overdue": "审核逾期 · {{ago}}", "kind_wake_missed": "{{id}} 已完成，未唤醒", "kind_cycle": "循环等待" },
   "scope": {
     "all_label": "全部",
     "all_description": "工作区内的全部任务",

@@ -5,7 +5,6 @@ import {
   issueBehavesAsAny,
   issueStatusCategory,
   statusCategoryOfKey,
-  deriveBlockerTree,
 } from "@multica/core/issues";
 import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
@@ -78,7 +77,7 @@ import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { SubIssueCloseStrip } from "./sub-issue-close-strip";
-import { SubIssueBlockerBadge, SubIssueBlockerSummary } from "./sub-issue-blocker-summary";
+import { SubIssueBlockerBadge, SubIssueBlockerSummary, blockerBadgeState, useSubIssueBlockerData } from "./sub-issue-blocker-summary";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { useNewRunIds } from "./use-run-comment-motion";
@@ -1817,6 +1816,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // this answer, so a defaulted or stale empty array must not count as "no
   // sub-issues" (MUL-5714).
   const childCountKnown = childIssuesLoaded && !childIssuesFetching;
+  // One blocker tree for the whole sub-issue section: the summary card and the
+  // row badges read the same nodes, so a root cause on a grandchild marks its
+  // row without a per-row re-derivation.
+  // Gated on having children: the sub-issue section — and with it the card and
+  // the row badges — only renders then, and an ungated call would expand a
+  // childless issue's own `close.waiting_on` on every issue page.
+  const blockerData = useSubIssueBlockerData(childIssues.length > 0 ? issue : null, childIssues);
   // Parent's children — used to render the "x/y" progress next to the
   // "Sub-issue of …" breadcrumb under the title.
   const { data: parentChildIssues = [] } = useQuery({
@@ -3188,7 +3194,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   </div>
                 </div>
 
-                <SubIssueBlockerSummary issue={issue} children={childIssues} />
+                <SubIssueBlockerSummary data={blockerData} />
 
                 {/* Inline batch toolbar — appears next to the rows when
                     selections exist, instead of as a far-away fixed bar. */}
@@ -3216,12 +3222,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                               childProgress={subIssueProgress?.get(child.id)}
                               rowProps={subIssueRowProps}
                               customProperties={subIssueCustomProps}
-                              blockerState={(() => {
-                                const node = deriveBlockerTree(issue, {
-                                  childrenByParent: new Map([[issue.id, childIssues]]),
-                                }).nodes.get(child.id);
-                                return node ? { state: node.state, rootCause: node.rootCauses[0]?.identifier } : undefined;
-                              })()}
+                              blockerState={blockerBadgeState(blockerData.tree, child.id)}
                             />
                           ))}
                         </Fragment>

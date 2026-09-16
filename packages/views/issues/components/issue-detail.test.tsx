@@ -308,6 +308,9 @@ const mockApiObj = vi.hoisted(() => ({
   rerunIssue: vi.fn(),
   listTaskMessages: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
+  // Batched expansion the sub-issue blocker tree walks below the direct
+  // children (one request per nesting level, not one per parent).
+  listChildrenByParents: vi.fn().mockResolvedValue({ issues: [] }),
   getChildIssueProgress: vi.fn().mockResolvedValue({ progress: [] }),
   getAgentTaskSnapshot: vi.fn().mockResolvedValue([]),
   // The sub-issues header chip reads this narrowed to the parent issue.
@@ -706,6 +709,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    mockApiObj.listChildrenByParents.mockResolvedValue({ issues: [] });
     mockApiObj.getChildIssueProgress.mockResolvedValue({ progress: [] });
     mockApiObj.getAgentTaskSnapshot.mockResolvedValue([]);
     mockApiObj.getWorkspaceWorkingAgents.mockResolvedValue([]);
@@ -2480,6 +2484,54 @@ describe("IssueDetail (shared)", () => {
       // Bare row shows no due date / no progress chip of its own.
       const bareRow = screen.getByText("Ship dashboards").closest("a");
       expect(bareRow?.textContent).not.toContain("/");
+    });
+
+    it("marks a row whose blocker sits on a grandchild as propagated", async () => {
+      // Regression (DENE-311): the row badge used to be derived from a
+      // one-level children map, so a grandchild root cause left its own row
+      // unmarked while the summary card listed that grandchild as a root cause.
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 11,
+            identifier: "TES-11",
+            title: "Migrate tables",
+          }),
+        ],
+      });
+      mockApiObj.listChildrenByParents.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "grandchild-1",
+            number: 12,
+            identifier: "TES-12",
+            title: "Delete the old table",
+            parent_issue_id: "child-1",
+            metadata: {
+              "close.conclusion": "blocked",
+              "close.block_kind": "decision",
+              "close.block_action": "confirm the drop",
+            },
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Migrate tables");
+      // The child neither blocks nor is written as blocked — only its
+      // grandchild is, one level below what the row used to look at.
+      await waitFor(() =>
+        expect(screen.getByTestId("sub-issue-blocker-badge")).toHaveAttribute(
+          "data-blocker-state",
+          "PROPAGATED",
+        ),
+      );
+      expect(screen.getByText("Blocked by a sub-issue TES-12")).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: "TES-12 · Delete the old table" }),
+      ).toBeInTheDocument();
     });
 
     it("hides fields the user toggled off in the display preference", async () => {

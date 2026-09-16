@@ -29,9 +29,25 @@ vi.mock("../../navigation", () => ({
   AppLink: ({ children, ...props }: React.ComponentProps<"a">) => <a {...props}>{children}</a>,
 }));
 
-import { SubIssueBlockerBadge, SubIssueBlockerSummary } from "./sub-issue-blocker-summary";
+// The derived review-overdue row names the owner it is waiting on. Resolving
+// that name is `useActorName`'s job and is covered by its own suite; here it
+// only has to be deterministic.
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({ getActorName: () => "Reviewer" }),
+}));
+
+import { SubIssueBlockerBadge, SubIssueBlockerSummary, useSubIssueBlockerData } from "./sub-issue-blocker-summary";
 
 afterEach(cleanup);
+
+/**
+ * Mirrors `issue-detail.tsx`: the tree is derived once by the shared hook, so
+ * the card and the sub-issue rows read the same nodes.
+ */
+function BlockerSummary({ issue: parent, subIssues }: { issue: Issue; subIssues: Issue[] }) {
+  const data = useSubIssueBlockerData(parent, subIssues);
+  return <SubIssueBlockerSummary data={data} />;
+}
 
 function issue(id: string, overrides: Partial<Issue> = {}): Issue {
   return {
@@ -109,7 +125,7 @@ describe("SubIssueBlockerSummary", () => {
       },
     });
 
-    renderWithProviders(<SubIssueBlockerSummary issue={parent} children={[child]} />);
+    renderWithProviders(<BlockerSummary issue={parent} subIssues={[child]} />);
 
     expect(screen.getByTestId("sub-issue-blocker-summary")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "DENE-2 · Needs a decision" })).toHaveAttribute("href", "/issues/child-2");
@@ -129,7 +145,7 @@ describe("SubIssueBlockerSummary", () => {
     // only reach the card through the component's own batched child query.
     const { listChildrenByParents } = installIssueApi({ childrenByParent: { [child.id]: [grandchild] } });
 
-    renderWithProviders(<SubIssueBlockerSummary issue={parent} children={[child]} />);
+    renderWithProviders(<BlockerSummary issue={parent} subIssues={[child]} />);
 
     await waitFor(() => expect(listChildrenByParents).toHaveBeenCalledWith([child.id]));
     expect(await screen.findByRole("link", { name: "DENE-3 · Deep decision" })).toHaveAttribute("href", "/issues/grandchild-3");
@@ -145,7 +161,7 @@ describe("SubIssueBlockerSummary", () => {
     const otherFamily = issue("other-410", { identifier: "DENE-410", title: "Other family root" });
     const { getIssue } = installIssueApi({ byIdentifier: { "DENE-410": otherFamily } });
 
-    renderWithProviders(<SubIssueBlockerSummary issue={parent} children={[child]} />);
+    renderWithProviders(<BlockerSummary issue={parent} subIssues={[child]} />);
 
     await waitFor(() => expect(getIssue).toHaveBeenCalledWith("DENE-410", expect.anything()));
     expect(await screen.findByRole("link", { name: "DENE-410 · Other family root" })).toHaveAttribute("href", "/issues/other-410");
@@ -163,7 +179,7 @@ describe("SubIssueBlockerSummary", () => {
     // ticket number and stay one click away from the blocker.
     const { getIssue } = installIssueApi();
 
-    renderWithProviders(<SubIssueBlockerSummary issue={parent} children={[child]} />);
+    renderWithProviders(<BlockerSummary issue={parent} subIssues={[child]} />);
 
     await waitFor(() => expect(getIssue).toHaveBeenCalledWith("DENE-410", expect.anything()));
     expect(await screen.findByRole("link", { name: "DENE-410" })).toHaveAttribute("href", "/issues/DENE-410");
@@ -171,8 +187,92 @@ describe("SubIssueBlockerSummary", () => {
 
   it("does not render the summary when there are no blockers", () => {
     installIssueApi();
-    renderWithProviders(<SubIssueBlockerSummary issue={issue("DENE-1")} children={[issue("DENE-2")]} />);
+    renderWithProviders(<BlockerSummary issue={issue("DENE-1")} subIssues={[issue("DENE-2")]} />);
     expect(screen.queryByTestId("sub-issue-blocker-summary")).not.toBeInTheDocument();
+  });
+
+  it("shows the recorded block kind and its one-line action", () => {
+    installIssueApi();
+    const parent = issue("DENE-1");
+    const child = issue("child-2", {
+      identifier: "DENE-2",
+      title: "Needs a decision",
+      parent_issue_id: parent.id,
+      metadata: {
+        "close.conclusion": "blocked",
+        "close.block_kind": "decision",
+        "close.block_action": "pick a table to migrate",
+      },
+    });
+
+    renderWithProviders(<BlockerSummary issue={parent} subIssues={[child]} />);
+
+    const action = screen.getByTestId("sub-issue-blocker-action");
+    expect(action).toHaveAttribute("data-blocker-kind", "decision");
+    expect(action).toHaveTextContent("Needs your decision: pick a table to migrate");
+    // The row may truncate; the full action stays reachable through the title.
+    expect(action).toHaveAttribute("title", "Needs your decision: pick a table to migrate");
+  });
+
+  it("generates its own copy for a review past the threshold core owns", () => {
+    installIssueApi();
+    const parent = issue("DENE-1");
+    const child = issue("child-2", {
+      identifier: "DENE-2",
+      title: "Waiting on review",
+      parent_issue_id: parent.id,
+      status: "in_review",
+      metadata: {
+        "close.conclusion": "awaiting_review",
+        "close.status": "in_review",
+        "close.next_owner_type": "member",
+        "close.next_owner_id": "member-1",
+        // 26h in review — past the 24h human threshold, no run in flight.
+        "close.at": new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString(),
+      },
+    });
+
+    renderWithProviders(<BlockerSummary issue={parent} subIssues={[child]} />);
+
+    const action = screen.getByTestId("sub-issue-blocker-action");
+    expect(action).toHaveAttribute("data-blocker-kind", "review_overdue");
+    expect(action).toHaveTextContent(/Review overdue/);
+    expect(action).toHaveTextContent(/@Reviewer/);
+    expect(screen.getByText("1 need you")).toBeInTheDocument();
+  });
+
+  it("lists a needs-you root cause before an older one that needs nobody", () => {
+    installIssueApi();
+    const parent = issue("DENE-1");
+    const waiting = issue("child-2", {
+      identifier: "DENE-2",
+      title: "Waiting on quota",
+      parent_issue_id: parent.id,
+      metadata: {
+        "close.conclusion": "blocked",
+        "close.block_kind": "capacity",
+        "close.block_action": "wait for the pool",
+        "close.at": "2026-09-01T00:00:00Z",
+      },
+    });
+    const decide = issue("child-3", {
+      identifier: "DENE-3",
+      title: "Needs a decision",
+      parent_issue_id: parent.id,
+      metadata: {
+        "close.conclusion": "blocked",
+        "close.block_kind": "decision",
+        "close.block_action": "pick a table",
+        "close.at": "2026-09-15T00:00:00Z",
+      },
+    });
+
+    renderWithProviders(<BlockerSummary issue={parent} subIssues={[waiting, decide]} />);
+
+    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
+      "DENE-3 · Needs a decision",
+      "DENE-2 · Waiting on quota",
+    ]);
   });
 
   it("renders solid and hollow badges for ROOT and PROPAGATED states", () => {

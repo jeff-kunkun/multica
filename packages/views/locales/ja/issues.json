@@ -133,12 +133,7 @@
     "waiting_on": "{{id}} を待機",
     "last_activity_missing": "活動時刻なし"
   },
-  "blocker_summary": {
-    "title": "ブロック中 · 根因 {{count}} 件",
-    "needs_you": "{{count}} 件はあなたの対応が必要",
-    "root": "根本ブロッカー",
-    "propagated": "サブタスクによるブロック"
-  },
+  "blocker_summary": { "title": "ブロック中 · 根因 {{count}} 件", "needs_you": "{{count}} 件はあなたの対応が必要", "root": "根本ブロッカー", "propagated": "サブタスクによるブロック", "kind_decision": "あなたの判断が必要", "kind_permission": "あなたの許可が必要", "kind_external": "外部依存を待機中", "kind_capacity": "枠の回復を待機中", "kind_action": "{{kind}}：{{action}}", "kind_review_overdue": "レビュー期限超過 · {{ago}}", "kind_wake_missed": "{{id}} は完了済みですが未起床", "kind_cycle": "循環待ち" },
   "scope": {
     "all_label": "すべて",
     "all_description": "このワークスペースのすべてのタスク",

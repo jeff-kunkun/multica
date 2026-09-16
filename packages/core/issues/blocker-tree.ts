@@ -1,9 +1,34 @@
 import type { Issue } from "../types";
-import { closeProtocolWaitingOn, readCloseProtocol } from "./close-protocol";
+import { closeProtocolWaitingOn, readCloseProtocol, type CloseProtocolView } from "./close-protocol";
 
 export type BlockerState = "ROOT" | "PROPAGATED" | "CLEAR";
 
 export type BlockerIssueRef = Pick<Issue, "id" | "identifier">;
+
+/** Kinds this module derives instead of reading them off `close.block_kind`. */
+export type DerivedBlockerKind = "review_overdue" | "wake_missed" | "cycle";
+
+/**
+ * Why an issue is its own blocker. `kind` is either a derived kind or the
+ * free-form `close.block_kind` string (`decision`, `permission`, `external`,
+ * `dependency`, `capacity`, or `blocked` for a recorded block without one), so
+ * consumers must keep a default branch. Everything the attribution table
+ * (`docs/kun/blocker-attribution-design.md` §3.4) needs to render a next action
+ * is resolved here, once — views never re-derive the review threshold.
+ */
+export interface BlockerAttribution {
+  kind: string;
+  /** `close.block_action` verbatim — the one-line action the closer recorded. */
+  action: string | null;
+  /** §3.3 "needs you": a human owner, or a decision/permission kind. */
+  needsUserAction: boolean;
+  nextOwnerType: string | null;
+  nextOwnerId: string | null;
+  /** `close.waiting_on`, for `dependency` and `wake_missed`. */
+  waitingOn: string | null;
+  /** `close.at` — the §3.3 "blocked longest first" tiebreak. */
+  at: string | null;
+}
 
 export interface BlockerTreeNode {
   issue: BlockerIssueRef;
@@ -15,6 +40,10 @@ export interface BlockerTreeNode {
   /** True when this node is a derived review/wake/cycle blocker. */
   derived: boolean;
   cycle: boolean;
+  /** Null when the node has no blocker of its own (PROPAGATED / CLEAR). */
+  attribution: BlockerAttribution | null;
+  /** The node's own stage — the §3.3 final tiebreak. */
+  stage: number | null;
 }
 
 export interface BlockerTreeOptions {
@@ -77,20 +106,9 @@ function reviewOverdue(issue: Issue, options: BlockerTreeOptions, now: number): 
   return now - at >= threshold;
 }
 
-function ownRoot(issue: Issue, options: BlockerTreeOptions, now: number): boolean {
-  const close = readCloseProtocol(issue.metadata, issue.status);
-  const waitingOn = closeProtocolWaitingOn(close.waitingOn);
-  const waitingIssue = waitingOn ? lookupIssue(options, waitingOn) : undefined;
-  if (waitingIssue && TERMINAL.has(waitingIssue.status)) {
-    return true;
-  }
-  if (reviewOverdue(issue, options, now)) return true;
-  return close.conclusion === "blocked" && close.blockKind !== "dependency";
-}
-
-function ownNeedsUserAction(issue: Issue, options: BlockerTreeOptions, now: number): boolean {
-  const close = readCloseProtocol(issue.metadata, issue.status);
-  if (reviewOverdue(issue, options, now)) return close.nextOwnerType === "member";
+/** §3.3 / §3.4 "needs you": a member owner, or a decision/permission kind. */
+function attributionNeedsUserAction(close: CloseProtocolView, overdue: boolean): boolean {
+  if (overdue) return close.nextOwnerType === "member";
   if (close.conclusion !== "blocked") return false;
   return close.nextOwnerType === "member" || close.blockKind === "decision" || close.blockKind === "permission";
 }
@@ -116,22 +134,28 @@ export function deriveBlockerTree(
     if (loop || depth > maxDepth) {
       // A cycle placeholder is authoritative for this path.  Do not allow the
       // outer frame to memoize a propagated result over the cycle attribution.
-      const result: BlockerTreeNode = { issue: ref(issue), state: loop ? "ROOT" : "CLEAR", rootCauses: loop ? [ref(issue)] : [], frontierStage: null, sideBlockers: [], userActionCount: 0, derived: loop, cycle: loop };
+      const result: BlockerTreeNode = { issue: ref(issue), state: loop ? "ROOT" : "CLEAR", rootCauses: loop ? [ref(issue)] : [], frontierStage: null, sideBlockers: [], userActionCount: 0, derived: loop, cycle: loop, attribution: loop ? { kind: "cycle", action: null, needsUserAction: false, nextOwnerType: null, nextOwnerId: null, waitingOn: null, at: null } : null, stage: issue.stage };
       nodes.set(issue.id, result);
       return result;
     }
     const existing = nodes.get(issue.id);
     if (existing) return existing;
     const close = readCloseProtocol(issue.metadata, issue.status);
-    const own = ownRoot(issue, options, now);
+    const waiting = closeProtocolWaitingOn(close.waitingOn);
+    const waitingIssue = waiting ? lookupIssue(options, waiting) : undefined;
+    // §3.4 precedence, first hit wins: a wait whose target already finished is
+    // a wake_missed blocker, then a review nobody picked up, then a recorded
+    // blocked conclusion. `dependency` is never its own root — the target is.
+    const wakeMissed = waitingIssue !== undefined && TERMINAL.has(waitingIssue.status);
+    const overdue = reviewOverdue(issue, options, now);
+    const own = wakeMissed || overdue || (close.conclusion === "blocked" && close.blockKind !== "dependency");
+    const needsUserAction = own && attributionNeedsUserAction(close, overdue);
     const children = lookupChildren(options, issue.id).filter((child) => !TERMINAL.has(child.status));
     const staged = children.filter((child) => child.stage !== null);
     const frontierStage = staged.length ? Math.min(...staged.map((child) => child.stage!)) : null;
     const frontier = frontierStage === null ? children : children.filter((child) => child.stage === frontierStage);
     const nextAncestors = new Set(ancestors).add(issue.id);
     const childResults = frontier.map((child) => walk(child, nextAncestors, depth + 1));
-    const waiting = closeProtocolWaitingOn(close.waitingOn);
-    const waitingIssue = waiting ? lookupIssue(options, waiting) : undefined;
     const waitingResult = waitingIssue && !TERMINAL.has(waitingIssue.status) ? walk(waitingIssue, nextAncestors, depth + 1) : undefined;
     // waiting_on is itself an active dependency edge while the target is
     // non-terminal. Keep a reference even when its snapshot is missing or it
@@ -147,15 +171,43 @@ export function deriveBlockerTree(
     const causes = [...(own ? [ref(issue)] : []), ...childResults.flatMap((child) => child.rootCauses), ...(waitingRef ? [waitingRef] : []), ...(waitingResult?.rootCauses ?? [])];
     const unique = [...new Map(causes.map((cause) => [cause.id, cause])).values()];
     const state: BlockerState = own ? "ROOT" : unique.length ? "PROPAGATED" : "CLEAR";
-    const userActionCount = (own && ownNeedsUserAction(issue, options, now) ? 1 : 0) +
+    const userActionCount = (needsUserAction ? 1 : 0) +
       childResults.reduce((count, child) => count + child.userActionCount, 0) +
       (waitingResult?.userActionCount ?? 0);
     const prior = nodes.get(issue.id);
     if (prior?.cycle) return prior;
-    const result: BlockerTreeNode = { issue: ref(issue), state, rootCauses: unique, frontierStage, sideBlockers: children.filter((child) => !frontier.includes(child)).map(ref), userActionCount, derived: own && close.conclusion !== "blocked", cycle: false };
+    const result: BlockerTreeNode = { issue: ref(issue), state, rootCauses: unique, frontierStage, sideBlockers: children.filter((child) => !frontier.includes(child)).map(ref), userActionCount, derived: own && close.conclusion !== "blocked", cycle: false, attribution: own ? { kind: wakeMissed ? "wake_missed" : overdue ? "review_overdue" : close.blockKind ?? "blocked", action: close.blockAction, needsUserAction, nextOwnerType: close.nextOwnerType, nextOwnerId: close.nextOwnerId, waitingOn: waiting, at: close.at } : null, stage: issue.stage };
     nodes.set(issue.id, result);
     return result;
   }
 
   return { ...walk(root, new Set(), 0), nodes };
+}
+
+/** Total order over numbers that treats equal infinities as equal. */
+function compareNumbers(a: number, b: number): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+/**
+ * §3.3 order for the parent summary card: whoever needs a human first, then
+ * the ticket that has been blocked longest, then the earliest stage. The
+ * design's second rule — blocking set before side blockers — is structural
+ * here: side blockers are never walked, so they cannot be root causes. Rows
+ * with no resolved node (a cross-family target no snapshot reached) sort after
+ * their group, and `sort` is stable, so they keep frontier order.
+ */
+export function orderBlockerRootCauses(tree: BlockerTreeResult): BlockerIssueRef[] {
+  const rank = (cause: BlockerIssueRef) => tree.nodes.get(cause.id)?.attribution?.needsUserAction === true ? 0 : 1;
+  const blockedSince = (cause: BlockerIssueRef) => {
+    const at = tree.nodes.get(cause.id)?.attribution?.at;
+    const parsed = at ? Date.parse(at) : Number.NaN;
+    return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+  };
+  const stage = (cause: BlockerIssueRef) => tree.nodes.get(cause.id)?.stage ?? Number.POSITIVE_INFINITY;
+  return [...tree.rootCauses].sort((a, b) =>
+    compareNumbers(rank(a), rank(b)) ||
+    compareNumbers(blockedSince(a), blockedSince(b)) ||
+    compareNumbers(stage(a), stage(b)));
 }
