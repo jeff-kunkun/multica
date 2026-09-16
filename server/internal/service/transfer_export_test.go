@@ -11,6 +11,7 @@ import (
 type fakeTransferSource struct {
 	payloads map[string]any
 	errors   map[string]error
+	bodies   map[string][]byte
 }
 
 func (f *fakeTransferSource) GetJSON(_ context.Context, path string, out any) error {
@@ -28,7 +29,10 @@ func (f *fakeTransferSource) GetJSON(_ context.Context, path string, out any) er
 	return json.Unmarshal(b, out)
 }
 
-func (f *fakeTransferSource) GetBytes(context.Context, string) ([]byte, error) {
+func (f *fakeTransferSource) GetBytes(_ context.Context, path string) ([]byte, error) {
+	if body, ok := f.bodies[path]; ok {
+		return body, nil
+	}
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -419,5 +423,98 @@ func TestTransferReadGap_KeepsHTTPErrorVocabulary(t *testing.T) {
 	failed := transferReadGap("labels", &TransferHTTPError{Status: 500, Err: fmt.Errorf("boom")})
 	if failed.Reason != gapReasonReadAPIError || failed.Status != 500 {
 		t.Fatalf("500 gap=%+v", failed)
+	}
+}
+
+// A workspace export runs for minutes. Without progress samples the Desktop
+// card sat on "0 / 26 sessions" the whole time, which is what made users think
+// it had hung and click Export again (DENE-318). Pin what the callback hears:
+// the session walk and every attachment body fetched.
+func TestExportFromSource_ReportsSessionAndAttachmentProgress(t *testing.T) {
+	pngBody := []byte("PNGDATA")
+	otherBody := []byte("PNGDATA-2")
+	src := &fakeTransferSource{
+		payloads: map[string]any{
+			"/api/me":              map[string]any{"id": "user-1", "email": "owner@example.com"},
+			"/api/workspaces":      []map[string]any{{"id": "ws-1", "slug": "src", "name": "Src"}},
+			"/api/workspaces/ws-1": map[string]any{"id": "ws-1", "slug": "src", "name": "Src"},
+			"/api/chat/sessions?status=all": []map[string]any{
+				{"id": "sess-1", "agent_id": "ag-1", "title": "Deploy", "status": "active", "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z"},
+				{"id": "sess-2", "agent_id": "ag-1", "title": "Review", "status": "active", "created_at": "2026-09-02T00:00:00Z", "updated_at": "2026-09-02T00:00:00Z"},
+			},
+			"/api/chat/sessions/sess-1/pending-task": map[string]any{},
+			"/api/chat/sessions/sess-2/pending-task": map[string]any{},
+			"/api/chat/sessions/sess-1/messages/page?limit=100": map[string]any{
+				"messages": []map[string]any{{
+					"id": "msg-1", "role": "user", "message_kind": "message", "content": "hi",
+					"created_at": "2026-09-01T00:00:01Z",
+					"attachments": []map[string]any{{
+						"id": "att-1", "filename": "shot-1.png", "content_type": "image/png",
+						"size_bytes": len(pngBody), "created_at": "2026-09-01T00:00:01Z",
+					}},
+				}},
+				"has_more": false,
+			},
+			"/api/chat/sessions/sess-2/messages/page?limit=100": map[string]any{
+				"messages": []map[string]any{{
+					"id": "msg-2", "role": "user", "message_kind": "message", "content": "yo",
+					"created_at": "2026-09-02T00:00:01Z",
+					"attachments": []map[string]any{{
+						"id": "att-2", "filename": "shot-2.png", "content_type": "image/png",
+						"size_bytes": len(otherBody), "created_at": "2026-09-02T00:00:01Z",
+					}},
+				}},
+				"has_more": false,
+			},
+		},
+		bodies: map[string][]byte{
+			"/api/attachments/att-1/download": pngBody,
+			"/api/attachments/att-2/download": otherBody,
+		},
+	}
+
+	var samples []TransferExportProgress
+	files, err := ExportFromSource(context.Background(), src, TransferExportOpts{
+		Include:      []string{"conversations", "attachments"},
+		WorkspaceRef: "src",
+		Progress:     func(p TransferExportProgress) { samples = append(samples, p) },
+	})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if len(files.Attachments) != 2 || len(files.Blobs) != 2 {
+		t.Fatalf("attachments=%d blobs=%d, want both exported so the counters mean something",
+			len(files.Attachments), len(files.Blobs))
+	}
+	if len(samples) == 0 {
+		t.Fatal("no progress samples")
+	}
+
+	if first := samples[0]; first.SessionsTotal != 2 || first.SessionIndex != 0 {
+		t.Errorf("first sample = %+v, want the session total before any session is walked", first)
+	}
+	if last := samples[len(samples)-1]; last.SessionIndex != 2 || last.SessionsTotal != 2 ||
+		last.SessionTitle != "" || last.AttachmentsDownloaded != 2 {
+		t.Errorf("last sample = %+v, want a finished walk with both attachment bodies", last)
+	}
+
+	sessionTitles := map[int]string{}
+	downloaded := []int{}
+	for _, s := range samples {
+		if s.SessionTitle != "" {
+			sessionTitles[s.SessionIndex] = s.SessionTitle
+		}
+		downloaded = append(downloaded, s.AttachmentsDownloaded)
+	}
+	if sessionTitles[1] != "Deploy" || sessionTitles[2] != "Review" {
+		t.Errorf("session titles = %v, want each session named as it starts", sessionTitles)
+	}
+	for i := 1; i < len(downloaded); i++ {
+		if downloaded[i] < downloaded[i-1] {
+			t.Fatalf("attachment count went backwards: %v", downloaded)
+		}
+	}
+	if downloaded[len(downloaded)-1] != 2 {
+		t.Errorf("attachment counter ended at %d, want 2", downloaded[len(downloaded)-1])
 	}
 }

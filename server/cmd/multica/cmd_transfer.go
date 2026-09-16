@@ -130,6 +130,61 @@ func parseInclude(raw string) []string {
 	return parts
 }
 
+// transferProgressEvent is one line of the progress protocol the Desktop
+// migration card reads off the CLI's stderr: a JSON object per line, while
+// stdout stays reserved for the command's own output. Fields are omitted when
+// they carry nothing to say, so the card never renders a "0 / 0" placeholder
+// (DENE-318).
+type transferProgressEvent struct {
+	Event         string `json:"event"`
+	SessionIndex  int    `json:"session_index,omitempty"`
+	SessionsTotal int    `json:"sessions_total,omitempty"`
+	SessionTitle  string `json:"session_title,omitempty"`
+	// AttachmentsDownloaded reports the export direction,
+	// AttachmentsUploaded the import direction. The Desktop card keeps one
+	// attachment counter for both.
+	AttachmentsDownloaded int `json:"attachments_downloaded,omitempty"`
+	AttachmentsUploaded   int `json:"attachments_uploaded,omitempty"`
+	AttachmentsTotal      int `json:"attachments_total,omitempty"`
+}
+
+type transferProgressReporter struct {
+	enc *json.Encoder
+}
+
+func newTransferProgressReporter(w io.Writer) *transferProgressReporter {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	return &transferProgressReporter{enc: enc}
+}
+
+func (r *transferProgressReporter) reportExport(p service.TransferExportProgress) {
+	r.write(transferProgressEvent{
+		Event:                 "progress",
+		SessionIndex:          p.SessionIndex,
+		SessionsTotal:         p.SessionsTotal,
+		SessionTitle:          p.SessionTitle,
+		AttachmentsDownloaded: p.AttachmentsDownloaded,
+	})
+}
+
+func (r *transferProgressReporter) reportUploaded(uploaded, total int) {
+	r.write(transferProgressEvent{
+		Event:               "progress",
+		AttachmentsUploaded: uploaded,
+		AttachmentsTotal:    total,
+	})
+}
+
+// write never fails the transfer: progress is a courtesy, and a closed stderr
+// must not abort an export that is otherwise working.
+func (r *transferProgressReporter) write(ev transferProgressEvent) {
+	if r == nil || r.enc == nil {
+		return
+	}
+	_ = r.enc.Encode(ev)
+}
+
 func runTransferExport(cmd *cobra.Command, _ []string) error {
 	workspace, _ := cmd.Flags().GetString("workspace")
 	outPath, _ := cmd.Flags().GetString("out")
@@ -180,6 +235,7 @@ func runTransferExport(cmd *cobra.Command, _ []string) error {
 		WorkspaceRef:    workspace,
 		PartialDir:      partial,
 		OutPath:         outPath,
+		Progress:        newTransferProgressReporter(cmd.ErrOrStderr()).reportExport,
 	})
 	if err != nil {
 		return err
@@ -378,7 +434,11 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	if !dry {
-		for _, att := range payload.Attachments {
+		// Attachment uploads are the long silent stretch of an import (a real
+		// workspace carries minutes' worth of them), so report each one.
+		progress := newTransferProgressReporter(cmd.ErrOrStderr())
+		progress.reportUploaded(0, len(payload.Attachments))
+		for i, att := range payload.Attachments {
 			var blob []byte
 			if att.SHA256 != "" {
 				blob = payload.Blobs[att.SHA256]
@@ -391,6 +451,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 			if err := postTransferAttachment(ctx, client, base+"/transfer/attachments", att, blob); err != nil {
 				return fmt.Errorf("upload attachment %s: %w", att.SourceID, err)
 			}
+			progress.reportUploaded(i+1, len(payload.Attachments))
 		}
 		if len(payload.SessionShards) > 0 {
 			fin := service.TransferConversationsRequest{DryRun: boolPtr(false), Finalize: true, Refs: payload.Manifest.Refs}

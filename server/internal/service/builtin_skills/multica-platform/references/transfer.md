@@ -21,6 +21,18 @@ The zip is created mode `0600`. Treat it as chat history: it contains member ema
 
 A bare V1 `multica.workspace-config` JSON file can be passed to `transfer import --in`; only `/transfer/config` runs.
 
+Both directions stream progress as JSON lines on **stderr** (stdout stays reserved for the command's own output — the zip path, or the import report), one object per line. Fields that say nothing are omitted, so a listener can render "N / M sessions" and "X / Y attachments" without guessing:
+
+```json
+{"event":"progress","sessions_total":26}
+{"event":"progress","session_index":3,"sessions_total":26,"session_title":"Deploy","attachments_downloaded":4}
+{"event":"progress","attachments_uploaded":12,"attachments_total":29}
+```
+
+Export reports the session walk and downloaded attachment bodies; import reports uploaded attachments. Attachments are discovered per message during an export, so `attachments_total` exists only for import.
+
+A `--dry-run` conflict 409 carries the whole import report next to `error`/`code`, which is why the CLI keeps the full error body for `/transfer/*` instead of its usual 4 KiB cap.
+
 If the target returns 404 for `/transfer/*`, the CLI reports `target_unsupported` — the target must be a `kun` instance.
 
 ## Server endpoints

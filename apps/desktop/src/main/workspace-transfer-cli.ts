@@ -173,7 +173,11 @@ export function parseTransferProgressLine(line: string): TransferProgressEvent |
     sessionsTotal: asNumber(obj.sessions_total),
     sessionsDone: asNumber(obj.session_index ?? obj.sessions_done),
     currentSessionTitle: asNonEmptyString(obj.session_title),
-    attachmentsDownloaded: asNumber(obj.attachments_downloaded),
+    // Imports count uploads, exports count downloads; the card shows one
+    // attachment counter either way (DENE-318).
+    attachmentsDownloaded: asNumber(
+      obj.attachments_downloaded ?? obj.attachments_uploaded,
+    ),
     attachmentsTotal: asNumber(obj.attachments_total),
   };
 }

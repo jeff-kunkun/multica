@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -32,6 +32,13 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { useT } from "../../i18n";
 import {
   fileNameFromPath,
@@ -62,6 +69,14 @@ type ImportPhase =
       report: TransferImportReportView;
     };
 
+/**
+ * How an import treats a name that already exists in the target workspace.
+ * `skip` is the default: every workspace ships issue statuses, labels and
+ * system agents, so `fail` (the CLI flag's own default) makes the first dry-run
+ * of any real bundle 409 before the user can even read a preview (DENE-318).
+ */
+type TransferConflictPolicy = "skip" | "overwrite" | "rename" | "fail";
+
 function secretLabel(item: {
   entity: string;
   name: string;
@@ -91,6 +106,10 @@ export function WorkspaceMigrationCard() {
   const qc = useQueryClient();
 
   const [busy, setBusy] = useState(false);
+  const [activeAction, setActiveAction] = useState<"export" | "import" | null>(
+    null,
+  );
+  const [onConflict, setOnConflict] = useState<TransferConflictPolicy>("skip");
   const [progress, setProgress] = useState<TransferProgressEvent | null>(null);
   const [exportResult, setExportResult] = useState<{
     path: string;
@@ -102,12 +121,32 @@ export function WorkspaceMigrationCard() {
   } | null>(null);
   const [importPhase, setImportPhase] = useState<ImportPhase>({ step: "idle" });
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // `busy` re-renders too late to swallow a double click, so the same guard
+  // lives in a ref: the second click of a double click is a no-op instead of
+  // reaching the main process and coming back as "a transfer is already
+  // running" (DENE-318).
+  const busyRef = useRef(false);
 
   useEffect(() => {
     return subscribeTransferProgress((event) => setProgress(event));
   }, []);
 
   if (!isDesktopShell()) return null;
+
+  function startTransfer(action: "export" | "import"): boolean {
+    if (busyRef.current) return false;
+    busyRef.current = true;
+    setActiveAction(action);
+    setBusy(true);
+    return true;
+  }
+
+  function finishTransfer() {
+    busyRef.current = false;
+    setActiveAction(null);
+    setBusy(false);
+    setProgress(null);
+  }
 
   function errorMessage(code: TransferErrorCode, fallback: string): string {
     switch (code) {
@@ -140,12 +179,12 @@ export function WorkspaceMigrationCard() {
   }
 
   async function handleExport() {
-    if (!slug || !canManage) return;
+    if (!slug || !canManage || busyRef.current) return;
     setError(null);
     setExportResult(null);
     const picked = await pickTransferExportPath(slug);
     if (!picked.ok) return;
-    setBusy(true);
+    if (!startTransfer("export")) return;
     setProgress({ phase: "estimating" });
     try {
       const result = await runWorkspaceTransfer({
@@ -154,6 +193,9 @@ export function WorkspaceMigrationCard() {
         outPath: picked.path,
       });
       if (!result.ok) {
+        // The main process refuses a second transfer while one is running.
+        // That is the same click, not a failure, so stay quiet.
+        if (result.code === "busy") return;
         setError({ code: result.code, fallback: result.message });
         toast.error(errorMessage(result.code, result.message));
         return;
@@ -163,48 +205,61 @@ export function WorkspaceMigrationCard() {
       markTransferExportCompleted();
       toast.success(t(($) => $.config_transfer.migration.export_success));
     } finally {
-      setBusy(false);
-      setProgress(null);
+      finishTransfer();
     }
   }
 
   async function handleImportPick() {
-    if (!slug || !canManage) return;
+    if (!slug || !canManage || busyRef.current) return;
     setError(null);
     const picked = await pickTransferImportPath();
     if (!picked.ok) return;
-    setBusy(true);
+    await runImportPreview(picked.path, picked.fileName, onConflict);
+  }
+
+  async function runImportPreview(
+    inPath: string,
+    fileName: string,
+    conflict: TransferConflictPolicy,
+  ) {
+    if (!slug || !startTransfer("import")) return;
+    setError(null);
     setProgress({ phase: "estimating" });
     try {
       const result = await runWorkspaceTransfer({
         action: "import",
         workspace: slug,
-        inPath: picked.path,
+        inPath,
         dryRun: true,
+        onConflict: conflict,
       });
       if (!result.ok) {
+        if (result.code === "busy") return;
         setImportPhase({ step: "idle" });
         setError({ code: result.code, fallback: result.message });
         toast.error(errorMessage(result.code, result.message));
         return;
       }
       if (result.action !== "import") return;
-      setImportPhase({
-        step: "preview",
-        fileName: picked.fileName,
-        inPath: picked.path,
-        report: result.report,
-      });
+      setImportPhase({ step: "preview", fileName, inPath, report: result.report });
     } finally {
-      setBusy(false);
-      setProgress(null);
+      finishTransfer();
+    }
+  }
+
+  async function handleConflictChange(next: TransferConflictPolicy) {
+    setOnConflict(next);
+    // The preview counts depend on the policy (a skip turns a conflict into a
+    // skipped row), so refresh the report the user is reading.
+    if (importPhase.step === "preview") {
+      await runImportPreview(importPhase.inPath, importPhase.fileName, next);
     }
   }
 
   async function handleApply() {
     if (!slug || importPhase.step !== "preview") return;
     setConfirmOpen(false);
-    setBusy(true);
+    if (!startTransfer("import")) return;
     setProgress({ phase: "running" });
     try {
       const result = await runWorkspaceTransfer({
@@ -212,8 +267,10 @@ export function WorkspaceMigrationCard() {
         workspace: slug,
         inPath: importPhase.inPath,
         dryRun: false,
+        onConflict,
       });
       if (!result.ok) {
+        if (result.code === "busy") return;
         setError({ code: result.code, fallback: result.message });
         toast.error(errorMessage(result.code, result.message));
         return;
@@ -228,10 +285,28 @@ export function WorkspaceMigrationCard() {
       toast.success(t(($) => $.config_transfer.migration.success));
       await invalidateImportedQueries();
     } finally {
-      setBusy(false);
-      setProgress(null);
+      finishTransfer();
     }
   }
+
+  const conflictItems = [
+    {
+      value: "fail",
+      label: t(($) => $.config_transfer.import.on_conflict_fail),
+    },
+    {
+      value: "skip",
+      label: t(($) => $.config_transfer.import.on_conflict_skip),
+    },
+    {
+      value: "rename",
+      label: t(($) => $.config_transfer.import.on_conflict_rename),
+    },
+    {
+      value: "overwrite",
+      label: t(($) => $.config_transfer.import.on_conflict_overwrite),
+    },
+  ];
 
   const report =
     importPhase.step === "preview" || importPhase.step === "result"
@@ -257,10 +332,10 @@ export function WorkspaceMigrationCard() {
             disabled={!canManage || busy || !slug}
             onClick={() => void handleExport()}
           >
-            {busy && !report ? (
+            {activeAction === "export" ? (
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
             ) : null}
-            {busy && progress && importPhase.step === "idle"
+            {activeAction === "export"
               ? t(($) => $.config_transfer.migration.exporting)
               : t(($) => $.config_transfer.migration.export_button)}
           </Button>
@@ -281,7 +356,7 @@ export function WorkspaceMigrationCard() {
           </p>
         </div>
 
-        {progress && importPhase.step === "idle" ? (
+        {progress ? (
           <div
             className="space-y-1 px-4 py-3 text-caption text-muted-foreground"
             data-testid="workspace-migration-progress"
@@ -313,15 +388,47 @@ export function WorkspaceMigrationCard() {
             disabled={!canManage || busy || !slug}
             onClick={() => void handleImportPick()}
           >
-            {busy && importPhase.step !== "result" ? (
+            {activeAction === "import" ? (
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
             ) : null}
-            {busy && importPhase.step !== "result"
-              ? t(($) => $.config_transfer.migration.previewing)
+            {activeAction === "import"
+              ? importPhase.step === "preview"
+                ? t(($) => $.config_transfer.migration.applying)
+                : t(($) => $.config_transfer.migration.previewing)
               : importPhase.step === "idle"
                 ? t(($) => $.config_transfer.migration.import_button)
                 : t(($) => $.config_transfer.import.replace_file)}
           </Button>
+        </SettingsRow>
+
+        <SettingsRow
+          label={t(($) => $.config_transfer.import.on_conflict)}
+          description={t(($) => $.config_transfer.import.on_conflict_hint)}
+          size="select-wide"
+        >
+          <Select
+            items={conflictItems}
+            value={onConflict}
+            onValueChange={(value) => {
+              if (value) {
+                void handleConflictChange(String(value) as TransferConflictPolicy);
+              }
+            }}
+            disabled={!canManage || busy || !slug}
+          >
+            <SelectTrigger
+              aria-label={t(($) => $.config_transfer.import.on_conflict)}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {conflictItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </SettingsRow>
         </SettingsCard>
       </div>

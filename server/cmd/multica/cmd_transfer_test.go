@@ -536,3 +536,154 @@ func TestTransferExport_FailsWithoutZipOnCoreReadGap(t *testing.T) {
 		t.Fatal("export wrote a zip even though a core group failed")
 	}
 }
+
+func newTransferImportTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "import", RunE: runTransferImport}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("workspace", "", "")
+	cmd.Flags().String("in", "", "")
+	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().String("on-conflict", "fail", "")
+	return cmd
+}
+
+// A dry-run conflict 409 is only useful if the user can read it. The response
+// carries the whole import report next to the message, so it is far larger than
+// the CLI's generic 4 KiB error-body cap; before DENE-318 the body was cut
+// mid-object, the JSON stopped parsing, and the server's "entity already
+// exists: Bug" was replaced by the bare generic conflict template.
+func TestTransferImport_ReportsConflictReasonFromLargeErrorBody(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	items := strings.Repeat(`{"action":"skipped","entity_type":"skills","name":"notes"},`, 300)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/workspaces":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "ws-1", "slug": "src", "name": "Src"}})
+		case strings.HasSuffix(r.URL.Path, "/transfer/config"):
+			body := `{"code":"config_import_conflict","error":"entity already exists: Bug","report":{"stats":{"skipped":1},"batches":[` +
+				strings.TrimSuffix(items, ",") + `]}}`
+			if len(body) <= 4096 {
+				t.Errorf("test body is %d bytes; it must exceed the generic cap to cover the truncation", len(body))
+			}
+			w.WriteHeader(http.StatusConflict)
+			_, _ = io.WriteString(w, body)
+		default:
+			_ = json.NewEncoder(w).Encode([]any{})
+		}
+	}))
+	defer srv.Close()
+
+	inPath := filepath.Join(t.TempDir(), "bundle.json")
+	bundle := `{"format":"multica.workspace-config","schema_version":1,"bundle_id":"b-1","entities":{}}`
+	if err := os.WriteFile(inPath, []byte(bundle), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newTransferImportTestCmd()
+	_ = cmd.Flags().Set("server-url", srv.URL)
+	_ = cmd.Flags().Set("workspace", "src")
+	_ = cmd.Flags().Set("in", inPath)
+	_ = cmd.Flags().Set("dry-run", "true")
+	_ = cmd.Flags().Set("on-conflict", "fail")
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("a conflicting dry-run must fail")
+	}
+	if got := cli.FormatError(err, false); !strings.Contains(got, "entity already exists: Bug") {
+		t.Fatalf("conflict reason was swallowed; formatted error = %q", got)
+	}
+	if got := cli.ServerErrorCode(err); got != "config_import_conflict" {
+		t.Fatalf("ServerErrorCode() = %q, want config_import_conflict", got)
+	}
+}
+
+// The Desktop card shows "0 / 26 sessions" until the CLI says otherwise, so an
+// export that never reports progress looks hung (DENE-318). Progress is JSON on
+// stderr, one object per line; stdout stays reserved for the out path.
+func TestTransferExport_WritesProgressLinesToStderr(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/me":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "user-1", "email": "owner@example.com"})
+		case r.URL.Path == "/api/workspaces":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "ws-1", "slug": "src", "name": "Src"}})
+		case r.URL.Path == "/api/workspaces/ws-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "ws-1", "slug": "src", "name": "Src"})
+		case r.URL.Path == "/api/chat/sessions":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"id": "sess-1", "agent_id": "ag-1", "title": "Deploy", "status": "active", "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z"},
+				{"id": "sess-2", "agent_id": "ag-1", "title": "Review", "status": "active", "created_at": "2026-09-02T00:00:00Z", "updated_at": "2026-09-02T00:00:00Z"},
+			})
+		case strings.HasSuffix(r.URL.Path, "/messages/page"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"messages": []map[string]any{{
+				"id": "msg-1", "role": "user", "message_kind": "message", "content": "hi",
+				"created_at": "2026-09-01T00:00:01Z",
+			}}, "has_more": false})
+		case strings.HasSuffix(r.URL.Path, "/pending-task"):
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		default:
+			_ = json.NewEncoder(w).Encode([]any{})
+		}
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "bundle.zip")
+	var stdout, stderr bytes.Buffer
+	cmd := newTransferExportTestCmd()
+	_ = cmd.Flags().Set("server-url", srv.URL)
+	_ = cmd.Flags().Set("workspace", "src")
+	_ = cmd.Flags().Set("out", out)
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+
+	var lines []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(stderr.String()), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
+			t.Fatalf("progress line %q is not JSON: %v", line, err)
+		}
+		if parsed["event"] == "progress" {
+			lines = append(lines, parsed)
+		}
+	}
+	if len(lines) == 0 {
+		t.Fatalf("no progress lines on stderr; stderr = %q", stderr.String())
+	}
+	if got := lines[0]["sessions_total"]; got != float64(2) {
+		t.Fatalf("first progress line = %v, want sessions_total 2", lines[0])
+	}
+	var indices []float64
+	for _, line := range lines {
+		if idx, ok := line["session_index"].(float64); ok {
+			indices = append(indices, idx)
+		}
+	}
+	if len(indices) < 2 || indices[0] >= indices[len(indices)-1] {
+		t.Fatalf("session_index does not advance: %v (lines=%v)", indices, lines)
+	}
+	if last := lines[len(lines)-1]; last["session_index"] != float64(2) || last["session_title"] != nil {
+		t.Fatalf("last progress line = %v, want a finished walk", last)
+	}
+	if !strings.Contains(stdout.String(), out) {
+		t.Fatalf("stdout must stay reserved for the out path, got %q", stdout.String())
+	}
+}

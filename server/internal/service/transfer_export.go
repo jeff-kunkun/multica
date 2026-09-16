@@ -109,6 +109,27 @@ type TransferExportOpts struct {
 	// finish. Empty disables checkpointing (estimate mode).
 	PartialDir string
 	OutPath    string
+	// Progress, when set, receives incremental export progress. It is called
+	// synchronously on the exporting goroutine, so a slow callback slows the
+	// export down; callers that write to a pipe should keep it cheap.
+	Progress func(TransferExportProgress)
+}
+
+// TransferExportProgress is one incremental export sample. It exists so a
+// multi-minute export is visible while it runs instead of looking hung: the
+// CLI turns each sample into a `{"event":"progress",...}` line on stderr
+// (DENE-318).
+type TransferExportProgress struct {
+	// SessionIndex is the 1-based position of the session being exported, and
+	// SessionsTotal how many the export will walk. Together they read as
+	// "3 / 26 sessions" while SessionTitle names the session in flight.
+	SessionIndex  int
+	SessionsTotal int
+	SessionTitle  string
+	// AttachmentsDownloaded counts attachment bodies fetched so far. The total
+	// is deliberately absent: attachments are discovered per message, so no
+	// honest denominator exists before the walk finishes.
+	AttachmentsDownloaded int
 }
 
 type TransferExportFiles struct {
@@ -1083,10 +1104,77 @@ func exportPinnedAgents(ctx context.Context, src TransferSourceClient, gaps *[]T
 	return out
 }
 
+// exportProgressTracker accumulates the counters behind
+// TransferExportOpts.Progress. An export walks sessions and attachments on one
+// goroutine, so the tracker needs no locking, and a nil tracker is a no-op so
+// callers can thread it through unconditionally.
+type exportProgressTracker struct {
+	emit          func(TransferExportProgress)
+	sessionsTotal int
+	sessionIndex  int
+	sessionTitle  string
+	downloaded    int
+}
+
+func newExportProgressTracker(emit func(TransferExportProgress)) *exportProgressTracker {
+	if emit == nil {
+		return nil
+	}
+	return &exportProgressTracker{emit: emit}
+}
+
+func (t *exportProgressTracker) sessions(total int) {
+	if t == nil {
+		return
+	}
+	t.sessionsTotal = total
+	t.emit(t.sample())
+}
+
+func (t *exportProgressTracker) session(index int, title string) {
+	if t == nil {
+		return
+	}
+	t.sessionIndex = index
+	t.sessionTitle = title
+	t.emit(t.sample())
+}
+
+// finish reports the walk as complete — every session visited, no session left
+// in flight — so the last sample a listener sees is not "24 / 26".
+func (t *exportProgressTracker) finish() {
+	if t == nil {
+		return
+	}
+	t.sessionIndex = t.sessionsTotal
+	t.sessionTitle = ""
+	t.emit(t.sample())
+}
+
+func (t *exportProgressTracker) attachment(downloaded bool) {
+	if t == nil {
+		return
+	}
+	if downloaded {
+		t.downloaded++
+	}
+	t.emit(t.sample())
+}
+
+func (t *exportProgressTracker) sample() TransferExportProgress {
+	return TransferExportProgress{
+		SessionIndex:          t.sessionIndex,
+		SessionsTotal:         t.sessionsTotal,
+		SessionTitle:          t.sessionTitle,
+		AttachmentsDownloaded: t.downloaded,
+	}
+}
+
 func exportConversations(ctx context.Context, src TransferSourceClient, opts TransferExportOpts) (
 	[][]TransferSessionRow, [][]TransferMessageRow, []TransferAttachmentRow, map[string][]byte, []SecretOmitted, *TransferEstimate, []TransferExportGap,
 ) {
 	gaps := []TransferExportGap{}
+	progress := newExportProgressTracker(opts.Progress)
 	var sessions []map[string]any
 	path := "/api/chat/sessions"
 	if !opts.ExcludeArchived {
@@ -1098,6 +1186,7 @@ func exportConversations(ctx context.Context, src TransferSourceClient, opts Tra
 		return nil, nil, nil, nil, nil, nil, gaps
 	}
 	appendTransferGap(&gaps, "conversations", trunc)
+	progress.sessions(len(sessions))
 
 	est := &TransferEstimate{Sessions: len(sessions)}
 	sessRows := []TransferSessionRow{}
@@ -1125,8 +1214,11 @@ func exportConversations(ctx context.Context, src TransferSourceClient, opts Tra
 		}
 	}
 
-	for _, raw := range sessions {
+	for i, raw := range sessions {
 		id := strField(raw, "id")
+		// Report position before any work: a resumed session is still one of
+		// the sessions being walked, and the counter must advance either way.
+		progress.session(i+1, strField(raw, "title"))
 		if saved, ok := resumeByID[id]; ok {
 			sessRows = append(sessRows, saved)
 			msgBySession[id] = resumeMsgs[id]
@@ -1181,7 +1273,7 @@ func exportConversations(ctx context.Context, src TransferSourceClient, opts Tra
 			continue
 		}
 
-		msgs, msgSecrets, msgAtts, msgBlobs := fetchAllMessages(ctx, src, id, opts)
+		msgs, msgSecrets, msgAtts, msgBlobs := fetchAllMessages(ctx, src, id, opts, progress)
 		msgBySession[id] = msgs
 		secrets = append(secrets, msgSecrets...)
 		atts = append(atts, msgAtts...)
@@ -1195,6 +1287,7 @@ func exportConversations(ctx context.Context, src TransferSourceClient, opts Tra
 			_ = persistCompletedSession(opts.PartialDir, resume, row, msgs, msgAtts, msgBlobs)
 		}
 	}
+	progress.finish()
 
 	if opts.Estimate {
 		avg := int64(400)
@@ -1209,7 +1302,7 @@ func exportConversations(ctx context.Context, src TransferSourceClient, opts Tra
 	return sessShards, msgShards, atts, blobs, secrets, nil, gaps
 }
 
-func fetchAllMessages(ctx context.Context, src TransferSourceClient, sessionID string, opts TransferExportOpts) ([]TransferMessageRow, []SecretOmitted, []TransferAttachmentRow, map[string][]byte) {
+func fetchAllMessages(ctx context.Context, src TransferSourceClient, sessionID string, opts TransferExportOpts, progress *exportProgressTracker) ([]TransferMessageRow, []SecretOmitted, []TransferAttachmentRow, map[string][]byte) {
 	var msgs []TransferMessageRow
 	var secrets []SecretOmitted
 	var atts []TransferAttachmentRow
@@ -1258,6 +1351,7 @@ func fetchAllMessages(ctx context.Context, src TransferSourceClient, sessionID s
 					if blob != nil && att.SHA256 != "" {
 						blobs[att.SHA256] = blob
 					}
+					progress.attachment(blob != nil)
 				}
 			}
 			msgs = append(msgs, row)

@@ -164,6 +164,28 @@ describe("parseTransferEstimate / progress", () => {
       attachmentsDownloaded: 4,
     });
   });
+
+  // Imports upload attachments instead of downloading them, and the card has
+  // one attachment counter, so the parser accepts both spellings (DENE-318).
+  it("reads the import direction's uploaded counter", () => {
+    expect(
+      parseTransferProgressLine(
+        '{"event":"progress","attachments_uploaded":3,"attachments_total":29}',
+      ),
+    ).toMatchObject({
+      phase: "running",
+      attachmentsDownloaded: 3,
+      attachmentsTotal: 29,
+    });
+  });
+
+  it("leaves counters absent when the line omits them", () => {
+    const event = parseTransferProgressLine(
+      '{"event":"progress","sessions_total":2}',
+    );
+    expect(event?.sessionsTotal).toBe(2);
+    expect(event?.attachmentsTotal).toBeUndefined();
+  });
 });
 
 describe("parseTransferRunRequest", () => {
