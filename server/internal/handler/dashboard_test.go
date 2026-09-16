@@ -91,6 +91,29 @@ func pinDayWindowClock(t *testing.T, at time.Time) time.Time {
 	return at
 }
 
+// dayStartUTC is UTC start-of-day, `daysAgo` days before `now`.
+//
+// Every `days=N` fixture in this file anchors on it instead of on PostgreSQL's
+// CURRENT_DATE. CURRENT_DATE resolves in the SESSION's TimeZone, which is the
+// shared instance's default — a property of whoever installed the server, not
+// of this repository — while the requests below open their window at start of
+// day in the VIEWER's zone (`?tz=UTC`). Fixture and window therefore sat on two
+// different calendars, and disagreed by a whole day whenever the server zone
+// had already rolled over: the same code against the same freshly migrated
+// empty database passed on America/Chicago and failed on Asia/Taipei. The
+// product never had this coupling — the Go cutoff comes from sinceFromDays
+// with an explicit *time.Location and every query slices days with an explicit
+// `AT TIME ZONE @tz` — so the zone belongs to the fixture, and it is named
+// here rather than left to the session.
+//
+// Anchoring in Go also keeps the fixture on the same clock as the cutoff
+// (dayWindowNow), which is what makes pinDayWindowClock able to pin both sides
+// to one instant.
+func dayStartUTC(now time.Time, daysAgo int) time.Time {
+	utc := now.UTC()
+	return time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -daysAgo)
+}
+
 // TestDashboardFixtureRunLandsInsideTheWindow pins what runFinishedToday
 // promises the two DB fixtures that call it: at any hour, in any zone, the
 // run it places is inside the days=1 window the endpoints open. The window is
@@ -441,6 +464,10 @@ func TestDashboardUsageDailyBucketsByViewerTimezone(t *testing.T) {
 	// One bucket at 04:00 UTC two days ago. 04:00 UTC is still the
 	// previous evening in America/Los_Angeles (UTC-7/-8), so the UTC
 	// viewer and the LA viewer must see this row under different dates.
+	// The anchor is UTC start-of-day (dayStartUTC), not the session's
+	// CURRENT_DATE: the row has to sit on the calendar day the `?tz=UTC`
+	// request below buckets by.
+	anchor := dayStartUTC(time.Now(), 2).Add(4 * time.Hour)
 	var bucketHour time.Time
 	dbfx.QueryRow(t, `
 		INSERT INTO task_usage_hourly (
@@ -449,14 +476,14 @@ func TestDashboardUsageDailyBucketsByViewerTimezone(t *testing.T) {
 			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
 		)
 		VALUES (
-			((CURRENT_DATE - 2)::timestamp + interval '4 hours') AT TIME ZONE 'UTC',
+			$4::timestamptz,
 			$1, $2, $3, NULL, 'tz-bucket-test', 'tz-bucket-model',
 			999, 0, 0, 0, 1
 		)
 		ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_key DO UPDATE
 			SET input_tokens = EXCLUDED.input_tokens
 		RETURNING bucket_hour
-	`, testWorkspaceID, runtimeID, agentID).Scan(&bucketHour)
+	`, testWorkspaceID, runtimeID, agentID, anchor).Scan(&bucketHour)
 
 	utcDate := bucketHour.UTC().Format("2006-01-02")
 	laLoc, err := time.LoadLocation("America/Los_Angeles")
@@ -523,19 +550,22 @@ func TestDashboardRunTimeDailyBucketsByViewerTimezone(t *testing.T) {
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
 
 	// completed_at at 04:00 UTC two days ago — still the prior evening in LA.
-	// started_at 10 minutes earlier so the run has a non-zero duration.
+	// started_at 10 minutes earlier so the run has a non-zero duration. UTC
+	// start-of-day (dayStartUTC), not the session's CURRENT_DATE, so the row
+	// lands on the calendar day the `?tz=UTC` request buckets by.
+	completedAnchor := dayStartUTC(time.Now(), 2).Add(4 * time.Hour)
 	var completedAt time.Time
 	var taskID string
 	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
 		VALUES (
 			$1, $2, $3, 'completed',
-			((CURRENT_DATE - 2)::timestamp + interval '3 hours 50 minutes') AT TIME ZONE 'UTC',
-			((CURRENT_DATE - 2)::timestamp + interval '4 hours') AT TIME ZONE 'UTC',
+			$4::timestamptz,
+			$5::timestamptz,
 			now()
 		)
 		RETURNING id, completed_at
-	`, agentID, issueID, runtimeID).Scan(&taskID, &completedAt)
+	`, agentID, issueID, runtimeID, completedAnchor.Add(-10*time.Minute), completedAnchor).Scan(&taskID, &completedAt)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
 
 	utcDate := completedAt.UTC().Format("2006-01-02")
@@ -1351,17 +1381,19 @@ func TestDashboardUsageDailyCrossMidnightFullPipeline(t *testing.T) {
 	// Raw task_usage at 00:30 UTC two days ago — genuinely near UTC
 	// midnight. 00:30 UTC is still the PRIOR evening (~16:30/17:30) in
 	// America/Los_Angeles (UTC-7/-8), so the UTC viewer and the LA viewer
-	// must see this row under different calendar days. Using CURRENT_DATE
-	// keeps the row inside the days=10 window without a fixed-date drift.
+	// must see this row under different calendar days. dayStartUTC keeps it
+	// inside the days=10 window without a fixed-date drift, and on UTC's
+	// calendar rather than the session's.
+	usageAnchor := dayStartUTC(time.Now(), 2).Add(30 * time.Minute)
 	var usageAt time.Time
 	dbfx.QueryRow(t, `
 		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
 		VALUES (
 			$1, 'claude', 'cross-midnight-model', 8888, 0,
-			((CURRENT_DATE - 2)::timestamp + interval '30 minutes') AT TIME ZONE 'UTC'
+			$2::timestamptz
 		)
 		RETURNING created_at
-	`, taskID).Scan(&usageAt)
+	`, taskID, usageAnchor).Scan(&usageAt)
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE model = 'cross-midnight-model'`)
 	})
@@ -1639,12 +1671,20 @@ func TestDashboardFailuresByAgentUsesExactWindow(t *testing.T) {
 	// One failure at noon YESTERDAY (UTC). days=1 means "today", so neither
 	// endpoint may count it. Noon avoids the midnight edge in either
 	// direction.
+	//
+	// "Yesterday" is UTC start-of-day (dayStartUTC) minus a day, and the
+	// clock the requests below read is pinned to the same instant, so the
+	// fixture and the window describe one moment in one zone. The row used to
+	// be anchored on the session's CURRENT_DATE while the requests pinned
+	// ?tz=UTC, which made this test's verdict depend on the PostgreSQL
+	// server's default timezone.
+	yesterday := dayStartUTC(pinDayWindowClock(t, time.Now()), 1)
 	dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id":       issueID,
 		"runtime_id":     runtimeID,
 		"status":         "failed",
-		"started_at":     testutil.Raw("((CURRENT_DATE - 1)::timestamp + interval '11 hours') AT TIME ZONE 'UTC'"),
-		"completed_at":   testutil.Raw("((CURRENT_DATE - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC'"),
+		"started_at":     yesterday.Add(11 * time.Hour),
+		"completed_at":   yesterday.Add(12 * time.Hour),
 		"failure_reason": "timeout",
 		"created_at":     testutil.Raw("now()"),
 	})
@@ -1727,11 +1767,18 @@ func TestDashboardPerAgentRollupsUseExactWindow(t *testing.T) {
 	// Seeded straight into task_usage_hourly (same shortcut as the tz-bucket
 	// test) — the rollup's own source column is task_usage.created_at, which
 	// is `now()`-defaulted and awkward to backdate.
+	//
+	// Yesterday is UTC start-of-day (dayStartUTC) minus a day, and the clock
+	// the requests below read is pinned to the same instant: both fixtures and
+	// both `?tz=UTC` windows describe one moment in one zone. Anchoring on the
+	// session's CURRENT_DATE instead made this test's verdict depend on the
+	// PostgreSQL server's default timezone.
 	const windowProvider = "exact-window-test"
 	const windowModel = "exact-window-model"
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE runtime_id = $1 AND provider = $2`, runtimeID, windowProvider)
 	})
+	yesterday := dayStartUTC(pinDayWindowClock(t, time.Now()), 1)
 	dbfx.Exec(t, `
 		INSERT INTO task_usage_hourly (
 			bucket_hour, workspace_id, runtime_id, agent_id, project_id,
@@ -1739,13 +1786,13 @@ func TestDashboardPerAgentRollupsUseExactWindow(t *testing.T) {
 			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
 		)
 		VALUES (
-			((CURRENT_DATE - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC',
+			$6::timestamptz,
 			$1, $2, $3, NULL, $4, $5,
 			7777, 0, 0, 0, 1
 		)
 		ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_key DO UPDATE
 			SET input_tokens = EXCLUDED.input_tokens
-	`, testWorkspaceID, runtimeID, agentID, windowProvider, windowModel)
+	`, testWorkspaceID, runtimeID, agentID, windowProvider, windowModel, yesterday.Add(12*time.Hour))
 
 	// A terminal task that ran for 900s and completed at noon yesterday, for
 	// the agent-runtime half. Noon keeps both fixtures clear of the midnight
@@ -1754,8 +1801,8 @@ func TestDashboardPerAgentRollupsUseExactWindow(t *testing.T) {
 		"issue_id":     issueID,
 		"runtime_id":   runtimeID,
 		"status":       "completed",
-		"started_at":   testutil.Raw("((CURRENT_DATE - 1)::timestamp + interval '11 hours 45 minutes') AT TIME ZONE 'UTC'"),
-		"completed_at": testutil.Raw("((CURRENT_DATE - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC'"),
+		"started_at":   yesterday.Add(11*time.Hour + 45*time.Minute),
+		"completed_at": yesterday.Add(12 * time.Hour),
 		"created_at":   testutil.Raw("now()"),
 	})
 
