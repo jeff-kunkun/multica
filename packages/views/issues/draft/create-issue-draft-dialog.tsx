@@ -70,18 +70,26 @@ export function CreateIssueDraftDialog({
 
   // Picking the runtime moved out of this dialog with the picker, but choosing
   // one did not: the alignment has to run somewhere, and the user is never
-  // asked where. The order is the picker's — the user's own machines first,
-  // then anything else in the workspace they may use — with one difference that
-  // used to cost a click: a workspace whose only usable machine belongs to
-  // someone else no longer needs the "all machines" filter to be found.
-  const seededRuntimeId = useMemo(
-    () =>
-      (
-        usableRuntimes.find((runtime) => runtime.owner_id === currentUserId) ??
-        usableRuntimes[0]
-      )?.id ?? "",
-    [usableRuntimes, currentUserId],
-  );
+  // asked where. Online first, then the user's own machines, then anything
+  // else in the workspace they may use.
+  //
+  // Online has to outrank "mine", which the picker's own order did not: the
+  // list arrives ordered by `created_at` and `isRuntimeUsableForUser` says
+  // nothing about status, so "first machine I own" is really "oldest machine I
+  // own". The picker could survive seeding that one offline — the user just
+  // opened it and chose another. Here there is nothing to open, so seeding an
+  // offline machine while an online one sits in the same list would leave the
+  // dialog stating it cannot start and offering no way to fix it.
+  const seededRuntimeId = useMemo(() => {
+    const online = usableRuntimes.filter((runtime) => runtime.status === "online");
+    // Falls back to the offline set only so the message below can name a
+    // machine; submitting still requires an online one.
+    const pool = online.length > 0 ? online : usableRuntimes;
+    return (
+      (pool.find((runtime) => runtime.owner_id === currentUserId) ?? pool[0])
+        ?.id ?? ""
+    );
+  }, [usableRuntimes, currentUserId]);
 
   // Fills an empty selection only. The picker seeded through `onSelect` as
   // soon as runtimes arrived (over WS included); a derived seed plus this

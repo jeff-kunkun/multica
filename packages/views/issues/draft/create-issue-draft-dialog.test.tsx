@@ -239,6 +239,48 @@ describe("CreateIssueDraftDialog", () => {
     expect(screen.queryByTestId("runtime-picker")).toBeNull();
   });
 
+  /**
+   * With no picker on this face, the seed is the only chance to land on a
+   * machine that can actually run. The list arrives ordered by creation, so an
+   * older offline machine of the user's own sorts ahead of a usable online one
+   * — and seeding that would state the alignment cannot start while a machine
+   * that could run it sits one entry away, with nothing to click.
+   */
+  it("seeds an online runtime over an older offline one the user owns", async () => {
+    mocks.runtimes = [
+      { ...ONLINE_RUNTIME, id: "rt-old", name: "Old laptop", status: "offline" },
+      { ...ONLINE_RUNTIME, id: "rt-new", name: "Desk" },
+    ];
+    renderDialog();
+    await typeRequest("add dark mode");
+    expect(screen.queryByText("Old laptop is offline, so the alignment cannot start.")).toBeNull();
+
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.runtime_id).toBe("rt-new");
+  });
+
+  it("prefers the user's own machine among the online ones", async () => {
+    mocks.runtimes = [
+      {
+        ...ONLINE_RUNTIME,
+        id: "rt-shared",
+        name: "Shared",
+        owner_id: "user-2",
+        visibility: "public",
+      } as unknown as RuntimeDevice,
+      { ...ONLINE_RUNTIME, id: "rt-mine", name: "Mine" },
+    ];
+    renderDialog();
+    await typeRequest("add dark mode");
+
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.runtime_id).toBe("rt-mine");
+  });
+
   it("names the offline runtime instead of only disabling submit", async () => {
     mocks.runtimes = [{ ...ONLINE_RUNTIME, status: "offline" }];
     renderDialog();
