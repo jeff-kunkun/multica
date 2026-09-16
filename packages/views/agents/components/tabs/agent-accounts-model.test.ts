@@ -13,6 +13,8 @@ import {
   accountLeverLabel,
   accountStatus,
   accountsViewState,
+  agySlotAccountId,
+  agySlotNumberOf,
   canManageAccounts,
   cliForProvider,
   groupAccountsByCli,
@@ -21,6 +23,7 @@ import {
   parseAgentAccounts,
   planAccountSwitch,
   resolveCurrentAccount,
+  withAgySlots,
 } from "./agent-accounts-model";
 
 const RUNTIME_HOME = "/Users/you";
@@ -297,6 +300,109 @@ describe("groupAccountsByCli", () => {
   it("omits CLIs without accounts", () => {
     expect(groupAccountsByCli([DSH_DEFAULT]).map((group) => group.cli)).toEqual(["dsh"]);
     expect(groupAccountsByCli([])).toEqual([]);
+  });
+});
+
+describe("withAgySlots", () => {
+  const AGY_CUSTOM = account({
+    cli: "agy",
+    account: "work",
+    home: `${RUNTIME_HOME}/.gemini-work`,
+    lever: "custom_args:--gemini_dir",
+  });
+  const ids = (list: readonly AgentAccount[]) => list.map((entry) => entry.account);
+
+  it("keeps a reported slot row and synthesizes the ones without a directory", () => {
+    const merged = withAgySlots([AGY_DEFAULT, AGY_ACCOUNT2], [1, 2, 3], RUNTIME_HOME);
+
+    expect(ids(groupAccountsByCli(merged)[0]!.accounts)).toEqual([
+      "default",
+      "account2",
+      "account3",
+    ]);
+    // A reported row keeps the daemon's own directory and sign-in state.
+    expect(merged[1]).toBe(AGY_ACCOUNT2);
+    const synthesized = merged.find((entry) => entry.account === "account3");
+    expect(synthesized).toEqual({
+      cli: "agy",
+      account: "account3",
+      home: `${RUNTIME_HOME}/.gemini-account3`,
+      base_url: "",
+      key_ref: "",
+      lever: "custom_args:--gemini_dir",
+      signed_in: false,
+      quota_reset_at: 0,
+    });
+  });
+
+  it("drops a numbered directory the agent's slot list does not carry", () => {
+    const merged = withAgySlots([AGY_DEFAULT, AGY_ACCOUNT2], [1], RUNTIME_HOME);
+
+    expect(ids(merged)).toEqual(["default"]);
+  });
+
+  it("always carries slot 1, even from an empty list", () => {
+    const merged = withAgySlots([AGY_CUSTOM], [], RUNTIME_HOME);
+
+    expect(ids(merged)).toEqual(["work", "default"]);
+    expect(merged[1]?.home).toBe(`${RUNTIME_HOME}/.gemini`);
+  });
+
+  it("leaves the report untouched when the machine has no AGY directory", () => {
+    // A dsh-only host must not grow a synthesized AGY group: there is no AGY
+    // surface to edit, and the drawer's add button has to stay a description.
+    const merged = withAgySlots(
+      [DSH_DEFAULT, CODEX_DEFAULT],
+      [1, 2, 3],
+      RUNTIME_HOME,
+    );
+
+    expect(merged).toEqual([DSH_DEFAULT, CODEX_DEFAULT]);
+    expect(groupAccountsByCli(merged).some((group) => group.cli === "agy")).toBe(
+      false,
+    );
+  });
+
+  it("leaves accounts outside the numbered convention and every other CLI alone", () => {
+    const merged = withAgySlots(
+      [AGY_DEFAULT, AGY_CUSTOM, DSH_DEFAULT, CODEX_DEFAULT],
+      [1, 5],
+      RUNTIME_HOME,
+    );
+
+    // The custom AGY directory and both non-agy rows pass through untouched —
+    // a custom `--gemini_dir` is a real directory an agent may be bound to, so
+    // hiding it would leave the account in effect without a row.
+    expect(merged).toContain(AGY_CUSTOM);
+    expect(merged).toContain(DSH_DEFAULT);
+    expect(merged).toContain(CODEX_DEFAULT);
+    expect(ids(merged)).toEqual(["work", "default", "default", "default", "account5"]);
+    // Inside the group `default` leads and the numbered slot sorts before the
+    // named custom directory, exactly as the group sort already did.
+    expect(ids(groupAccountsByCli(merged).find((group) => group.cli === "agy")!.accounts)).toEqual([
+      "default",
+      "account5",
+      "work",
+    ]);
+  });
+
+  it("keeps a synthesized directory relative when the host home is unknown", () => {
+    const merged = withAgySlots([AGY_DEFAULT], [1, 2], null);
+
+    // `planAccountSwitch` refuses a relative home, so an unresolved host home
+    // ends as "this account cannot be bound" rather than a guessed path.
+    expect(merged.find((entry) => entry.account === "account2")?.home).toBe(
+      ".gemini-account2",
+    );
+  });
+
+  it("names the slot directories the same way the daemon does", () => {
+    expect(agySlotAccountId(1)).toBe("default");
+    expect(agySlotAccountId(2)).toBe("account2");
+    expect(agySlotNumberOf(AGY_DEFAULT)).toBe(1);
+    expect(agySlotNumberOf(AGY_ACCOUNT2)).toBe(2);
+    expect(agySlotNumberOf(AGY_CUSTOM)).toBeNull();
+    expect(agySlotNumberOf(DSH_DEFAULT)).toBeNull();
   });
 });
 

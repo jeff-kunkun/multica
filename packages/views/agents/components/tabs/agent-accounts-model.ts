@@ -18,9 +18,14 @@
 import { parseWithFallback } from "@multica/core/api/schema";
 import { z } from "zod";
 import {
+  accountDirectoryLeaf,
   expandHomePrefix,
   getGeminiDir,
   isAbsoluteFsPath,
+  joinHomeDir,
+  normalizeAccountNumbers,
+  numberedSlotId,
+  parseAccountNumber,
   resolveHomeDir,
   setGeminiDir,
 } from "./agy-account-slots";
@@ -375,6 +380,78 @@ export function groupAccountsByCli(accounts: readonly AgentAccount[]): AgentAcco
     });
   }
   return groups;
+}
+
+/**
+ * The numbered AGY slot an account stands for, or null when it lives outside
+ * the numbered convention (`~/.gemini-accountN`). The daemon reports the CLI's
+ * own directory (`~/.gemini`) as `default`, and that is slot 1.
+ */
+export function agySlotNumberOf(account: AgentAccount): number | null {
+  if (account.cli !== "agy") return null;
+  if (account.account === DEFAULT_ACCOUNT_ID) return 1;
+  return parseAccountNumber(account.account);
+}
+
+/** Account id the daemon gives a numbered slot's directory (`default`, `account2`, …). */
+export function agySlotAccountId(slot: number): string {
+  return slot <= 1 ? DEFAULT_ACCOUNT_ID : numberedSlotId(slot);
+}
+
+/**
+ * Fold the agent's own numbered-slot list (`runtime_config.agy_slots`, the
+ * rotation allow-list the backend reads) into the daemon's account report, so
+ * the drawer edits slots instead of the machine's directory listing.
+ *
+ * A slot the daemon reported keeps its real directory, sign-in state and quota
+ * deadline. A slot with no directory on disk yet is synthesized, so a slot
+ * added a moment ago is visible — and bindable — before its directory exists;
+ * it reads as "not signed in" because nothing reported it. Accounts of the
+ * same CLI outside the numbered convention (a custom `--gemini_dir`) are left
+ * exactly as reported: they are real directories this agent can be bound to,
+ * and dropping them would leave the account in effect without a row.
+ */
+export function withAgySlots(
+  accounts: readonly AgentAccount[],
+  slots: readonly number[],
+  runtimeHome: string | null | undefined,
+): AgentAccount[] {
+  // No reported AGY directory means this machine has no AGY surface at all, so
+  // the slot list has nothing to describe — synthesizing slots here would
+  // invent an AGY group for an agent that never had one.
+  if (!accounts.some((account) => account.cli === "agy")) return [...accounts];
+
+  const home = (runtimeHome ?? "").trim();
+  const reported = new Map<number, AgentAccount>();
+  const others: AgentAccount[] = [];
+  for (const account of accounts) {
+    const slot = agySlotNumberOf(account);
+    if (slot === null || reported.has(slot)) {
+      others.push(account);
+      continue;
+    }
+    reported.set(slot, account);
+  }
+
+  const rows = normalizeAccountNumbers(slots).map((slot): AgentAccount => {
+    const account = reported.get(slot);
+    if (account) return account;
+    const leaf = accountDirectoryLeaf(slot);
+    return {
+      cli: "agy",
+      account: agySlotAccountId(slot),
+      // With no host home the leaf stays relative and `planAccountSwitch`
+      // refuses it as `invalid_home` rather than binding a guessed path.
+      home: home ? joinHomeDir(home, leaf) : leaf,
+      base_url: "",
+      key_ref: "",
+      lever: `custom_args:${GEMINI_DIR_FLAG}`,
+      signed_in: false,
+      quota_reset_at: 0,
+    };
+  });
+
+  return [...others, ...rows];
 }
 
 /** Canonical flat order used whenever this model picks "the" account. */

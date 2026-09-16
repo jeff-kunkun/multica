@@ -284,7 +284,10 @@ describe("AgentAccountsTab rest state", () => {
 
     const drawer = screen.getByRole("dialog", { name: /manage accounts/i });
     expect(drawer).toBeInTheDocument();
-    expect(screen.getByText("1 CLIs · 2 accounts")).toBeInTheDocument();
+    // This agent has no persisted slot list yet, so it seeds slots 1–3 while
+    // the daemon reported only two of those directories: slot 3 is part of the
+    // rotation list and shows up as a slot whose directory does not exist yet.
+    expect(screen.getByText("1 CLIs · 3 accounts")).toBeInTheDocument();
     // Group header carries the binding lever.
     expect(screen.getByText("--gemini_dir")).toBeInTheDocument();
     expect(
@@ -509,6 +512,122 @@ describe("AgentAccountsTab drawer", () => {
     expect(
       screen.getByRole("radio", { name: /default/ }),
     ).toHaveAttribute("aria-checked", "true");
+  });
+});
+
+// The AGY slot list is an agent field (`runtime_config.agy_slots`) the backend
+// rotates over, so the drawer's add/drop controls have to reach it — and reach
+// it in the same request as the binding, never before "save and switch".
+describe("AgentAccountsTab agy slots", () => {
+  const twoSlots: Agent = {
+    ...baseAgent,
+    custom_args: ["--gemini_dir", AGY_DEFAULT.home],
+    runtime_config: { agy_slots: { accounts: [1, 2] } },
+  };
+
+  it("adds a numbered slot and submits it with the switch in one write", async () => {
+    const { onSave } = renderTab({
+      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+      agent: twoSlots,
+    });
+
+    await openDrawer();
+    // Slot 3 has no directory on disk, so the daemon never reported it: the
+    // row exists because the agent's own slot list says it may rotate there.
+    fireEvent.click(
+      screen.getByRole("button", { name: /add numbered account/i }),
+    );
+    expect(screen.getByRole("radio", { name: /account3/ })).toBeInTheDocument();
+
+    selectAccount(/account3/);
+    saveAndSwitch();
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", `${RUNTIME_HOME}/.gemini-account3`],
+      runtime_config: { agy_slots: { accounts: [1, 2, 3] } },
+    });
+    expect(updateAgentEnv).not.toHaveBeenCalled();
+  });
+
+  it("saves a slot drop on its own, without touching the binding", async () => {
+    const { onSave } = renderTab({
+      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+      agent: {
+        ...twoSlots,
+        runtime_config: { agy_slots: { accounts: [1, 2, 3] } },
+      },
+    });
+
+    await openDrawer();
+    // Dropping a slot that is neither selected nor in effect only changes the
+    // rotation list, so the write carries no `custom_args`.
+    fireEvent.click(screen.getByRole("button", { name: /remove slot 3/i }));
+    saveAndSwitch();
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith({
+      runtime_config: { agy_slots: { accounts: [1, 2] } },
+    });
+    expect(updateAgentEnv).not.toHaveBeenCalled();
+  });
+
+  it("falls back to slot 1 when the dropped slot was the one selected", async () => {
+    const { onSave } = renderTab({
+      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+      agent: {
+        ...twoSlots,
+        custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
+      },
+    });
+
+    await openDrawer();
+    // Opening selects the account in effect, so dropping it must move the
+    // selection back to slot 1 rather than leave a row that no longer exists.
+    fireEvent.click(screen.getByRole("button", { name: /remove slot 2/i }));
+
+    expect(
+      screen.queryByRole("radio", { name: /account2/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /default/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    saveAndSwitch();
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", AGY_DEFAULT.home],
+      runtime_config: { agy_slots: { accounts: [1] } },
+    });
+  });
+
+  it("sends nothing when the drawer closes with slot edits unsaved", async () => {
+    const { onSave } = renderTab({
+      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+      agent: twoSlots,
+    });
+
+    await openDrawer();
+    fireEvent.click(
+      screen.getByRole("button", { name: /add numbered account/i }),
+    );
+    expect(
+      screen.getByRole("button", { name: /save and switch/i }),
+    ).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+
+    // Reopening starts from the agent's real slot list again.
+    await openDrawer();
+    expect(
+      screen.queryByRole("radio", { name: /account3/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /save and switch/i }),
+    ).toBeDisabled();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(updateAgentEnv).not.toHaveBeenCalled();
   });
 });
 

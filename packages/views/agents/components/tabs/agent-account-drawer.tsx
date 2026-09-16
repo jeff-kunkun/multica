@@ -10,10 +10,18 @@
 //
 // Nothing in this file performs a side effect. Picking a row is local state —
 // the design's rule is that a selection made inside the drawer only takes
-// effect once "save and switch" (owned by the tab) commits it.
+// effect once "save and switch" (owned by the tab) commits it. The AGY group's
+// "add account" and row drops are the same kind of local edit: they hand a slot
+// number to the tab, which keeps the pending list until that same button
+// commits it.
+//
+// The drawer works on the list the tab hands it, which for AGY is the agent's
+// own numbered slots (`runtime_config.agy_slots`) rather than the machine's
+// directory listing, so a slot added here appears immediately even before its
+// directory exists.
 
 import { useState } from "react";
-import { Check, Copy, Loader2, Plus } from "lucide-react";
+import { Check, Copy, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -35,6 +43,7 @@ import {
   type AgentAccountGroup,
   accountLeverLabel,
   accountStatus,
+  agySlotNumberOf,
   parseAccountLever,
 } from "./agent-accounts-model";
 import { formatAgyLoginCommand } from "./agy-account-slots";
@@ -274,6 +283,15 @@ export interface AgentAccountDrawerProps {
   saving: boolean;
   onSave: () => void;
   nowMs: number;
+  /**
+   * Numbered AGY slot `Add account` would append to this agent's slot list, or
+   * null when this agent has no AGY group to attach a slot to (and its cap is
+   * not a factor). Slots are the only account kind this client can add.
+   */
+  nextSlot: number | null;
+  onAddSlot: () => void;
+  /** Drop a numbered AGY slot. Never called with slot 1, which cannot be dropped. */
+  onRemoveSlot: (slot: number) => void;
 }
 
 /**
@@ -291,6 +309,9 @@ export function AgentAccountDrawer({
   saving,
   onSave,
   nowMs,
+  nextSlot,
+  onAddSlot,
+  onRemoveSlot,
 }: AgentAccountDrawerProps) {
   const { t } = useT("agents");
   const isMobile = useIsMobile();
@@ -365,9 +386,14 @@ export function AgentAccountDrawer({
                   const isCurrent =
                     current != null && accountKey(current) === key;
                   const isSelected = key === selectedKey;
+                  // AGY is the one CLI with a slot registry, so it is the one
+                  // group whose rows can be added to and dropped from. Slot 1
+                  // is the CLI's own directory and is always present.
+                  const slot = agySlotNumberOf(account);
+                  const removable =
+                    group.switchable && slot !== null && slot > 1;
                   const rowClassName = cn(
                     "flex w-full min-w-0 items-center gap-2.5 px-3 py-2.5 text-left",
-                    index > 0 && "border-t border-border",
                     // A selected row keeps its selected background on hover —
                     // the design's rule is that the state must stay readable
                     // while the pointer is on it.
@@ -417,23 +443,54 @@ export function AgentAccountDrawer({
 
                   if (!group.switchable) {
                     return (
-                      <div key={key} className={rowClassName}>
+                      <div
+                        key={key}
+                        className={cn(
+                          rowClassName,
+                          index > 0 && "border-t border-border",
+                        )}
+                      >
                         {body}
                       </div>
                     );
                   }
 
                   return (
-                    <button
+                    // The drop control is a sibling, not a child: a button
+                    // inside the row's radio would be invalid and would put its
+                    // label into the radio's accessible name.
+                    <div
                       key={key}
-                      type="button"
-                      role="radio"
-                      aria-checked={isSelected}
-                      onClick={() => onSelect(account)}
-                      className={rowClassName}
+                      className={cn(
+                        "flex items-stretch",
+                        index > 0 && "border-t border-border",
+                      )}
                     >
-                      {body}
-                    </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        onClick={() => onSelect(account)}
+                        className={cn(rowClassName, "flex-1")}
+                      >
+                        {body}
+                      </button>
+                      {removable && slot !== null ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="me-1.5 shrink-0 self-center text-muted-foreground hover:text-destructive"
+                          onClick={() => onRemoveSlot(slot)}
+                          aria-label={t(
+                            ($) => $.tab_body.accounts.remove_slot_aria,
+                            { n: slot },
+                          )}
+                        >
+                          <Trash2 className="size-3.5" aria-hidden="true" />
+                        </Button>
+                      ) : null}
+                    </div>
                   );
                 })}
               </div>
@@ -473,11 +530,19 @@ export function AgentAccountDrawer({
             </section>
           ) : null}
 
-          {adding ? (
-            <p className="rounded-lg border border-dashed border-border p-3 text-caption text-muted-foreground">
-              {t(($) => $.tab_body.accounts.add_hint)}
-            </p>
-          ) : null}
+          {nextSlot === null
+            ? adding
+              ? (
+                  <p className="rounded-lg border border-dashed border-border p-3 text-caption text-muted-foreground">
+                    {t(($) => $.tab_body.accounts.add_hint)}
+                  </p>
+                )
+              : null
+            : (
+                <p className="rounded-lg border border-dashed border-border p-3 text-caption text-muted-foreground">
+                  {t(($) => $.tab_body.accounts.add_slot_hint, { n: nextSlot })}
+                </p>
+              )}
         </div>
 
         <SheetFooter className="flex-row items-center justify-between gap-2 border-t border-border p-4">
@@ -486,11 +551,19 @@ export function AgentAccountDrawer({
             variant="outline"
             size="sm"
             className="flex-1 sm:flex-none"
-            aria-expanded={adding}
-            onClick={() => setAdding((value) => !value)}
+            // With an AGY group this button really extends the agent's slot
+            // list. A CLI without a slot registry has nothing to append, so the
+            // same button explains where its directories come from instead of
+            // pretending to create one.
+            aria-expanded={nextSlot === null ? adding : undefined}
+            onClick={
+              nextSlot === null ? () => setAdding((value) => !value) : onAddSlot
+            }
           >
             <Plus className="size-3.5" aria-hidden="true" />
-            {t(($) => $.tab_body.accounts.add_action)}
+            {nextSlot === null
+              ? t(($) => $.tab_body.accounts.add_action)
+              : t(($) => $.tab_body.accounts.add_slot_action)}
           </Button>
           <Button
             type="button"

@@ -16,6 +16,11 @@
 //   `custom_env`, MUL-2600), which is the only way to tell a bound DSH_HOME
 //   from an unbound one.
 //
+// The drawer edits one more agent field: `runtime_config.agy_slots`, the
+// numbered AGY directories the backend may rotate to when a quota runs out.
+// That list used to live in the custom-args tab; it moved here so the agent's
+// accounts have a single editing surface.
+//
 // Invariants from the design doc: no credential value is ever read, rendered
 // or logged (only `key_ref` names and `signed_in`); "save and switch" is the
 // only control with a side effect; and a view that is loading, empty or in
@@ -41,6 +46,7 @@ import {
   type AgentAccountCli,
   accountLeverLabel,
   accountsViewState,
+  agySlotAccountId,
   canManageAccounts,
   cliForProvider,
   groupAccountsByCli,
@@ -48,8 +54,17 @@ import {
   parseAgentAccounts,
   planAccountSwitch,
   resolveCurrentAccount,
+  withAgySlots,
 } from "./agent-accounts-model";
-import { runtimeHomeDir } from "./agy-account-slots";
+import {
+  MAX_AGY_ACCOUNT_NUMBER,
+  getGeminiDir,
+  nextAccountNumber,
+  normalizeAccountNumbers,
+  parseAgySlotsConfig,
+  runtimeHomeDir,
+  writeAgySlotsConfig,
+} from "./agy-account-slots";
 import {
   AccountActivePill,
   AccountStatusPill,
@@ -132,10 +147,39 @@ export function AgentAccountsTab({
     () => parseAgentAccounts(runtimeDevice),
     [runtimeDevice],
   );
-  const groups = useMemo(
-    () => groupAccountsByCli(parsed.accounts),
-    [parsed.accounts],
+  const runtimeHome = runtimeHomeDir(runtimeDevice);
+
+  // The AGY group is the agent's own numbered-slot list rather than the
+  // machine's directory listing: `runtime_config.agy_slots` is what the
+  // backend rotates over, so the drawer has to edit that list. Every other CLI
+  // (and any agy directory outside the numbered convention) stays as reported.
+  const originalSlots = useMemo(
+    () =>
+      parseAgySlotsConfig(
+        agent.runtime_config,
+        getGeminiDir([...(agent.custom_args ?? [])]),
+      ),
+    [agent.custom_args, agent.runtime_config],
   );
+  const [slots, setSlots] = useState<number[]>(originalSlots);
+  const slotsDirty = JSON.stringify(slots) !== JSON.stringify(originalSlots);
+
+  const drawerAccounts = useMemo(
+    () => withAgySlots(parsed.accounts, slots, runtimeHome),
+    [parsed.accounts, slots, runtimeHome],
+  );
+  const groups = useMemo(
+    () => groupAccountsByCli(drawerAccounts),
+    [drawerAccounts],
+  );
+  // Slot 1 is always in the list, so "no next slot" means either this agent has
+  // no AGY account at all (nothing to attach a slot to) or the cap is reached.
+  const nextSlotNumber = nextAccountNumber(slots);
+  const agyGroup = groups.find((group) => group.cli === "agy");
+  const nextSlot =
+    agyGroup?.switchable === true && nextSlotNumber <= MAX_AGY_ACCOUNT_NUMBER
+      ? nextSlotNumber
+      : null;
   const allAccounts = useMemo(
     () => groups.flatMap((group) => group.accounts),
     [groups],
@@ -228,9 +272,12 @@ export function AgentAccountsTab({
     return () => window.clearTimeout(timer);
   }, [nextResetMs]);
 
-  // A selection in the drawer is unsaved work until "save and switch" commits
-  // it, so the surrounding settings layout can guard a tab switch.
-  const dirty = drawerOpen && selectedKey !== null && selectedKey !== currentKey;
+  // A selection or a slot added inside the drawer is unsaved work until "save
+  // and switch" commits it, so the surrounding settings layout can guard a tab
+  // switch.
+  const dirty =
+    drawerOpen &&
+    ((selectedKey !== null && selectedKey !== currentKey) || slotsDirty);
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
@@ -242,8 +289,32 @@ export function AgentAccountsTab({
 
   const handleDrawerOpenChange = (open: boolean) => {
     setDrawerOpen(open);
-    // Closing drops the selection: nothing inside the drawer took effect.
-    if (!open) setSelectedKey(null);
+    // Closing drops the selection and any slot edit: nothing inside the drawer
+    // took effect, and the next open starts from what the agent actually has.
+    if (!open) {
+      setSelectedKey(null);
+      setSlots(originalSlots);
+    }
+  };
+
+  const slotKey = (slot: number) =>
+    accountKey({ cli: "agy", account: agySlotAccountId(slot) });
+
+  const handleAddSlot = () => {
+    if (nextSlot === null) return;
+    setSlots((current) => normalizeAccountNumbers([...current, nextSlot]));
+  };
+
+  const handleRemoveSlot = (slot: number) => {
+    // Slot 1 is the CLI's own directory and is always part of the list, so it
+    // has no removal — the same rule the slot grid had before this moved here.
+    if (slot <= 1) return;
+    setSlots((current) =>
+      normalizeAccountNumbers(current.filter((n) => n !== slot)),
+    );
+    // Removing the slot the drawer has selected drops the selection back to
+    // slot 1, which is what the agent would fall back to anyway.
+    if (selectedKey === slotKey(slot)) setSelectedKey(slotKey(1));
   };
 
   const handleSaveAndSwitch = async () => {
@@ -252,11 +323,6 @@ export function AgentAccountsTab({
       null;
     const plan = planAccountSwitch(binding, target, viewState);
 
-    if (plan.kind === "noop") {
-      setDrawerOpen(false);
-      setSelectedKey(null);
-      return;
-    }
     if (plan.kind === "unsupported") {
       toast.error(
         plan.reason === "invalid_home"
@@ -265,13 +331,15 @@ export function AgentAccountsTab({
       );
       return;
     }
+    if (plan.kind === "noop" && !slotsDirty) {
+      setDrawerOpen(false);
+      setSelectedKey(null);
+      return;
+    }
 
     setSaving(true);
     try {
-      if (plan.kind === "custom_args") {
-        // agy's lever lives in the agent itself; the parent owns that write.
-        await onSave({ custom_args: plan.custom_args });
-      } else {
+      if (plan.kind === "env") {
         // Env levers cannot ride on `PUT /api/agents/{id}` (custom_env is
         // rejected with 400 there). Re-read the map and change ONLY the target
         // key, so an unrelated variable the user set is written back as-is —
@@ -286,12 +354,29 @@ export function AgentAccountsTab({
         });
         queryClient.setQueryData(agentEnvQueryKey(wsId, agent.id), saved);
       }
+
+      // The agy binding and the slot list are both agent fields, so they leave
+      // in ONE request: the backend rotates over `runtime_config.agy_slots` and
+      // launches with `custom_args`, and committing only half of that pair
+      // would leave the agent bound to a directory it may not rotate to.
+      const updates: Partial<Agent> = {};
+      if (plan.kind === "custom_args") updates.custom_args = plan.custom_args;
+      if (slotsDirty) {
+        updates.runtime_config = writeAgySlotsConfig(
+          agent.runtime_config,
+          slots,
+        );
+      }
+      if (Object.keys(updates).length > 0) await onSave(updates);
+
       toast.success(
-        t(($) => $.tab_body.accounts.switch_saved_toast, {
-          account: target
-            ? `${agentCliLabel(target.cli)} · ${target.account}`
-            : "",
-        }),
+        plan.kind === "noop"
+          ? t(($) => $.tab_body.accounts.slots_saved_toast)
+          : t(($) => $.tab_body.accounts.switch_saved_toast, {
+              account: target
+                ? `${agentCliLabel(target.cli)} · ${target.account}`
+                : "",
+            }),
       );
       setDrawerOpen(false);
       setSelectedKey(null);
@@ -444,6 +529,9 @@ export function AgentAccountsTab({
             saving={saving}
             onSave={() => void handleSaveAndSwitch()}
             nowMs={nowMs}
+            nextSlot={nextSlot}
+            onAddSlot={handleAddSlot}
+            onRemoveSlot={handleRemoveSlot}
           />
         </>
       ) : null}
