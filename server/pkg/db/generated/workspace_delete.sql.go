@@ -300,6 +300,9 @@ deleted_hourly_dirty AS (
 deleted_hourly AS (
     DELETE FROM task_usage_hourly WHERE workspace_id = $1
 ),
+deleted_stage_wakeup_failures AS (
+    DELETE FROM stage_wakeup_failure WHERE workspace_id = $1
+),
 deleted_attachments AS (
     DELETE FROM attachment WHERE workspace_id = $1
 ),
@@ -491,6 +494,10 @@ WHERE channel_media_pending_object.workspace_id = $1
 // here is still removed by this teardown rather than by the FK cascade. The
 // former single statement combined all three with OR, which cost a full scan of
 // task_token (MUL-5999); split, each path is an index scan.
+// Stage-barrier wake failures are workspace-keyed diagnostics with no reader
+// outside the workspace being torn down (the stagnation watchdog only scans
+// unswept rows of live workspaces), and they carry no foreign key, so nothing
+// else removes them. Same no-FK chore as the tables below.
 // Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
 // than the session set because that column exists precisely so this statement
 // does not have to join through chat_session, which it deletes in this same CTE.
