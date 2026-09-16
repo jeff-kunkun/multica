@@ -1,48 +1,57 @@
 "use client";
 
 import { useMemo } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Circle, CircleDot } from "lucide-react";
 import type { Issue } from "@multica/core/types";
-import { deriveBlockerTree } from "@multica/core/issues";
-import { closeProtocolWaitingOn, readCloseProtocol } from "@multica/core/issues";
-import { childIssuesOptions, issueIdentifierOptions } from "@multica/core/issues/queries";
+import { closeProtocolWaitingOn, deriveBlockerTree, readCloseProtocol } from "@multica/core/issues";
+import { childrenByParentsOptions, issueIdentifierOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { cn } from "@multica/ui/lib/utils";
+import { isIssueIdentifier } from "@multica/ui/markdown";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
+
+/**
+ * Depth `deriveBlockerTree` walks below the parent. The fetch chain below must
+ * reach the same depth: the `children` prop covers level 1, and each batched
+ * level query covers one more. Change both together or the tree stops at a
+ * layer the card never fetched.
+ */
+const MAX_DEPTH = 4;
+
+/** Sorted + deduplicated ids of every issue in a batched children response. */
+function nextParentIds(level: ReadonlyMap<string, Issue[]> | undefined): string[] {
+  if (!level) return [];
+  const ids = new Set<string>();
+  for (const list of level.values()) for (const item of list) ids.add(item.id);
+  return [...ids].sort();
+}
 
 export function SubIssueBlockerSummary({ issue, children }: { issue: Issue; children: Issue[] }) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
   const wsId = useWorkspaceId();
-  const maxDepth = 4;
-  // Expand the already-fetched snapshot one level at a time. This keeps the
-  // component within existing child/identifier endpoints and avoids a
-  // workspace-wide issue query just to render a summary card.
-  const parentIds = useMemo(() => children.map((child) => child.id), [children]);
-  const childQueries = useQueries({ queries: parentIds.map((parentId) => childIssuesOptions(wsId, parentId)) });
-  const nextParentIds = useMemo(() => [...new Set(childQueries.flatMap((query) => query.data?.map((item) => item.id) ?? []))], [childQueries]);
-  const nextChildQueries = useQueries({ queries: nextParentIds.map((parentId) => childIssuesOptions(wsId, parentId)) });
-  const finalParentIds = useMemo(() => [...new Set(nextChildQueries.flatMap((query) => query.data?.map((item) => item.id) ?? []))], [nextChildQueries]);
-  const finalChildQueries = useQueries({ queries: finalParentIds.map((parentId) => childIssuesOptions(wsId, parentId)) });
+  const qc = useQueryClient();
+  // Expand the already-fetched snapshot one level at a time, one batched
+  // request per level rather than one per parent: this card renders on every
+  // parent issue with sub-issues, so a per-parent fan-out would cost a request
+  // per sub-issue on each visit.
+  const level1Ids = useMemo(() => [...new Set(children.map((child) => child.id))].sort(), [children]);
+  const level1 = useQuery(childrenByParentsOptions(wsId, level1Ids, qc));
+  const level2Ids = useMemo(() => nextParentIds(level1.data), [level1.data]);
+  const level2 = useQuery(childrenByParentsOptions(wsId, level2Ids, qc));
+  const level3Ids = useMemo(() => nextParentIds(level2.data), [level2.data]);
+  const level3 = useQuery(childrenByParentsOptions(wsId, level3Ids, qc));
   const knownByParent = useMemo(() => {
     const result = new Map<string, Issue[]>([[issue.id, children]]);
-    childQueries.forEach((query, index) => {
-      const parentId = parentIds[index];
-      if (parentId && query.data) result.set(parentId, query.data);
-    });
-    nextChildQueries.forEach((query, index) => {
-      const parentId = nextParentIds[index];
-      if (parentId && query.data) result.set(parentId, query.data);
-    });
-    finalChildQueries.forEach((query, index) => {
-      const parentId = finalParentIds[index];
-      if (parentId && query.data) result.set(parentId, query.data);
-    });
+    for (const level of [level1.data, level2.data, level3.data]) {
+      if (!level) continue;
+      for (const [parentId, kids] of level) result.set(parentId, kids);
+    }
     return result;
-  }, [issue.id, children, childQueries, parentIds, nextChildQueries, nextParentIds, finalChildQueries, finalParentIds]);
+  }, [issue.id, children, level1.data, level2.data, level3.data]);
   const allKnown = useMemo(() => {
     const result = new Map<string, Issue>();
     result.set(issue.identifier, issue);
@@ -53,7 +62,9 @@ export function SubIssueBlockerSummary({ issue, children }: { issue: Issue; chil
     const result = new Set<string>();
     for (const item of allKnown.values()) {
       const waitingOn = closeProtocolWaitingOn(readCloseProtocol(item.metadata, item.status).waitingOn);
-      if (waitingOn && !allKnown.has(waitingOn)) result.add(waitingOn);
+      // `close.waiting_on` is free-form metadata; only identifier-shaped values
+      // can resolve, and issueIdentifierOptions expects the caller to gate.
+      if (waitingOn && isIssueIdentifier(waitingOn) && !allKnown.has(waitingOn)) result.add(waitingOn);
     }
     return [...result];
   }, [allKnown]);
@@ -72,7 +83,7 @@ export function SubIssueBlockerSummary({ issue, children }: { issue: Issue; chil
   const tree = useMemo(() => deriveBlockerTree(issue, {
     childrenByParent: knownByParent,
     issueByIdentifier,
-    maxDepth,
+    maxDepth: MAX_DEPTH,
   }), [issue, knownByParent, issueByIdentifier]);
   const roots = tree.rootCauses;
   if (roots.length === 0 && tree.userActionCount === 0) return null;

@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  *
  * The deep (grandchild) and cross-family (`waiting_on`) root causes go through
- * the component's REAL query chain — `childIssuesOptions` per nesting layer,
- * `issueIdentifierOptions` for a foreign ticket number — instead of a
+ * the component's REAL query chain — `childrenByParentsOptions` per nesting
+ * layer, `issueIdentifierOptions` for a foreign ticket number — instead of a
  * hand-built `children` snapshot, so a regression in either expansion path, or
  * in the identifier fallback for a target that no query could resolve, fails
  * here. `@multica/core/issues/queries` is therefore intentionally not mocked.
@@ -74,23 +74,24 @@ function renderWithProviders(ui: ReactElement) {
 
 /**
  * Drives the real query options through the shared API singleton: children per
- * parent, and identifier point reads. `null` is what `issueIdentifierOptions`
+ * batch, and identifier point reads. `null` is what `issueIdentifierOptions`
  * caches for a 404, i.e. "no such ticket in this workspace".
  */
 function installIssueApi(
   stub: {
+    /** Keyed by parent id; the batched endpoint answers many parents at once. */
     childrenByParent?: Record<string, Issue[]>;
     byIdentifier?: Record<string, Issue | null>;
   } = {},
 ) {
   const childrenByParent = stub.childrenByParent ?? {};
   const byIdentifier = stub.byIdentifier ?? {};
-  const listChildIssues = vi.fn(async (id: string) => ({
-    issues: childrenByParent[id] ?? [],
+  const listChildrenByParents = vi.fn(async (parentIds: readonly string[]) => ({
+    issues: parentIds.flatMap((id) => childrenByParent[id] ?? []),
   }));
   const getIssue = vi.fn(async (identifier: string) => byIdentifier[identifier] ?? null);
-  setApiInstance({ listChildIssues, getIssue } as unknown as ApiClient);
-  return { listChildIssues, getIssue };
+  setApiInstance({ listChildrenByParents, getIssue } as unknown as ApiClient);
+  return { listChildrenByParents, getIssue };
 }
 
 describe("SubIssueBlockerSummary", () => {
@@ -125,12 +126,12 @@ describe("SubIssueBlockerSummary", () => {
       metadata: { "close.conclusion": "blocked", "close.block_kind": "decision" },
     });
     // The grandchild is deliberately absent from the `children` prop: it can
-    // only reach the card through the component's own childIssuesOptions layer.
-    const { listChildIssues } = installIssueApi({ childrenByParent: { [child.id]: [grandchild] } });
+    // only reach the card through the component's own batched child query.
+    const { listChildrenByParents } = installIssueApi({ childrenByParent: { [child.id]: [grandchild] } });
 
     renderWithProviders(<SubIssueBlockerSummary issue={parent} children={[child]} />);
 
-    await waitFor(() => expect(listChildIssues).toHaveBeenCalledWith(child.id));
+    await waitFor(() => expect(listChildrenByParents).toHaveBeenCalledWith([child.id]));
     expect(await screen.findByRole("link", { name: "DENE-3 · Deep decision" })).toHaveAttribute("href", "/issues/grandchild-3");
   });
 
