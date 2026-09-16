@@ -34,8 +34,10 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
 import { StatusIcon } from "../issues/components/status-icon";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
-import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
-import { useModalStore } from "@multica/core/modals";
+import {
+  openAlignIssue,
+  openCreateIssueWithPreference,
+} from "@multica/core/issues/stores/create-mode-store";
 import {
   Sidebar,
   SidebarContent,
@@ -756,13 +758,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarMenuItem>
               {/* The way into requirement alignment. It sits beside "New
                   issue" rather than replacing it: skipping alignment stays a
-                  deliberate choice, not something a user has to undo. */}
+                  deliberate choice, not something a user has to undo. It opens
+                  the create-issue dialog on its alignment face — the same
+                  shell, so the shared draft and uploads come with it. */}
               <SidebarMenuButton
                 className="text-muted-foreground"
                 title={t(($) => $.sidebar.align_issue_hint)}
-                onClick={() =>
-                  useModalStore.getState().open("create-issue-draft")
-                }
+                onClick={() => openAlignIssue()}
               >
                 <Sparkles />
                 <span>{t(($) => $.sidebar.align_issue)}</span>

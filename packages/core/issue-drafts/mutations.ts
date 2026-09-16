@@ -59,6 +59,13 @@ export function useStartIssueDraft(wsId: string) {
       model?: string;
       /** What the user already typed at the entry point. */
       request: string;
+      /**
+       * Attachments the request references. The draft does not exist yet when
+       * they were uploaded, so they were bound to no owner; sending their ids
+       * with the first turn is what attaches them to it. Same transport as any
+       * other chat turn (DENE-369).
+       */
+      attachmentIds?: string[];
     }): Promise<StartIssueDraftResult> => {
       const request = input.request.trim();
       const session = await api.createIssueDraftSession({
@@ -72,6 +79,7 @@ export function useStartIssueDraft(wsId: string) {
         const sent = await api.sendChatMessage(
           draftId,
           encodeIssueDraftInput(request, session.draft.draft),
+          input.attachmentIds,
         );
         // The same door every chat surface uses (MUL-5711): the send seeds the
         // caches, so the conversation shows the user's own turn immediately

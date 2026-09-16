@@ -10,6 +10,7 @@ import {
 } from "@multica/core/issues/stores/create-mode-store";
 import { AgentCreatePanel } from "./quick-create-issue";
 import { ManualCreatePanel, manualDialogContentClass } from "./create-issue";
+import { AlignCreatePanel, alignDialogContentClass } from "./align-create-issue";
 import { sourceContextPreviewOptions } from "@multica/core/issues/queries";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -23,8 +24,9 @@ import { useWorkspaceId } from "@multica/core/hooks";
  * the close→open animation cycle still fired on every toggle.
  *
  * `initialMode` comes from the modal registry (`quick-create-issue` →
- * agent, `create-issue` → manual). Subsequent switches are local state
- * only and never round-trip through the modal store.
+ * agent, `create-issue` → manual, or `create-issue` + `data.initial_mode:
+ * "align"` → the alignment face). Subsequent switches are local state only
+ * and never round-trip through the modal store.
  *
  * Carry payload: when a panel switches mode it can hand a payload up via
  * `onSwitchMode`; the shell stores it as the next panel's `data` so seeding
@@ -127,7 +129,10 @@ function CreateIssueDialogBody({
     : panelData;
 
   const switchTo = (next: CreateMode) => (carry?: Record<string, unknown> | null) => {
-    setLastMode(next);
+    // The alignment face is NOT a filing preference: remembering it would make
+    // the `c` shortcut and the sidebar's "New issue" reopen alignment for
+    // someone who only ever meant to file an issue.
+    if (next !== "align") setLastMode(next);
     setPanelData(carry ?? null);
     setMode(next);
   };
@@ -158,10 +163,12 @@ function CreateIssueDialogBody({
                 : "!h-96 sm:!max-w-xl"
               : "!max-h-[80dvh] sm:!max-w-xl",
         )
-      : cn(
-          manualDialogContentClass(isExpanded),
-          sourceContextExpanded && "!h-5/6",
-        );
+      : mode === "align"
+        ? alignDialogContentClass()
+        : cn(
+            manualDialogContentClass(isExpanded),
+            sourceContextExpanded && "!h-5/6",
+          );
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -178,10 +185,19 @@ function CreateIssueDialogBody({
             isExpanded={isExpanded}
             setIsExpanded={setIsExpanded}
           />
+        ) : mode === "align" ? (
+          // No `data`: the alignment face seeds from the shared draft (its own
+          // `align` slot) and none of the modal's seeds — project, priority,
+          // due date, parent — apply to a conversation that decides those.
+          <AlignCreatePanel
+            onClose={onClose}
+            onSwitchMode={switchTo("manual")}
+          />
         ) : (
           <ManualCreatePanel
             onClose={onClose}
             onSwitchMode={switchTo("agent")}
+            onSwitchToAlign={switchTo("align")}
             data={effectiveData}
             isExpanded={isExpanded}
             setIsExpanded={setIsExpanded}
