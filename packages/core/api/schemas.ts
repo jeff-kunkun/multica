@@ -1713,9 +1713,21 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   auto_retry_enabled: z.boolean().optional().catch(undefined),
 }).loose() as z.ZodType<Agent>;
 
+// Malformed ROWS are dropped individually, the same way a blocked mention is
+// (MUL-4525): the agents list is how the whole product is navigated, and only
+// `id` is strictly required here — every other field defaults or catches. One
+// row without an id is an unusable row, not a reason to blank the workspace's
+// agents. A payload that is not an array at all still degrades to [].
 export const AgentListSchema: z.ZodType<Agent[]> = z
-  .array(AgentSchema)
-  .default([]) as z.ZodType<Agent[]>;
+  .array(z.unknown())
+  .catch([])
+  .default([])
+  .transform((items) =>
+    items.flatMap((item) => {
+      const parsed = AgentSchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  ) as unknown as z.ZodType<Agent[]>;
 
 /**
  * Degraded answers for the two agent reads the UI is built on.

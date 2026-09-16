@@ -2944,8 +2944,8 @@ describe("ApiClient agent specialisation reads (DENE-304)", () => {
   });
 
   it("keeps the agents list renderable when the whole payload is malformed", async () => {
-    // A list-level parse is all-or-nothing by design: half-parsed rows would
-    // render as agents with blank names. The empty list is the honest degrade.
+    // Not an array at all: there is nothing to salvage, and the empty list is
+    // the honest degrade (the page renders its empty state).
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(jsonResponse({ agents: [] })),
@@ -2953,6 +2953,24 @@ describe("ApiClient agent specialisation reads (DENE-304)", () => {
 
     const client = new ApiClient("https://api.example.test");
     await expect(client.listAgents()).resolves.toEqual([]);
+  });
+
+  it("drops only the unusable row, keeping the rest of the agents list", async () => {
+    // One row without an id must not blank the surface the whole product is
+    // navigated from.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse([
+          { name: "No id at all" },
+          { id: "agent-ok", name: "Usable" },
+        ]),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const agents = await client.listAgents();
+    expect(agents.map((agent) => agent.id)).toEqual(["agent-ok"]);
   });
 
   it("degrades a malformed agent detail to null, never to a blank agent", async () => {

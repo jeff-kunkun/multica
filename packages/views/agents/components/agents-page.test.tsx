@@ -596,6 +596,30 @@ describe("AgentsPage base-role nesting", () => {
     expect(
       screen.queryByTestId("agents-derive-specialization"),
     ).not.toBeInTheDocument();
+    // The indent belongs to the nested layout, not to the agent.
+    expect(
+      screen.queryByTestId("agents-specialization-indent"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("agents-specialization-chip")).toBeInTheDocument();
+  });
+
+  it("gives a flat-fallback specialisation no fold control and no indent", () => {
+    // Only the child is visible (its base role is out of scope), so it renders
+    // as its own row. It can never hold children, and there is no parent row
+    // above it — a chevron or an indent elbow would both point at nothing.
+    mocks.agents = [VARIANT];
+    mocks.viewState.grouping = "specialization";
+
+    renderPage();
+
+    expect(screen.getByText("Variant Agent")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-specialization-toggle"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("agents-specialization-chip")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-specialization-indent"),
+    ).not.toBeInTheDocument();
   });
 
   it("derives a specialisation from the base role via the create flow", () => {

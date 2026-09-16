@@ -496,6 +496,7 @@ function CheckboxCell({
 function NameCell({
   row,
   nesting,
+  nested = false,
 }: {
   row: AgentListRow;
   nesting?: {
@@ -503,6 +504,15 @@ function NameCell({
     expanded: boolean;
     onToggle: () => void;
   } | null;
+  /**
+   * True only when this row is actually rendered UNDER its base role. The
+   * indent and its connector describe a position in the list, so they must
+   * follow the layout, not the agent: a specialisation shown in the flat list
+   * — or one whose base role a filter hid — would otherwise draw an elbow
+   * pointing at a row that is not above it. The tag and the "from X" line are
+   * facts about the agent and stay either way.
+   */
+  nested?: boolean;
 }) {
   const { t } = useT("agents");
   const { agent, isOwnedByMe } = row;
@@ -511,15 +521,16 @@ function NameCell({
   const isChild = isSpecialization(agent);
   return (
     <ListGridCell
-      className={`gap-3 ${isChild ? "relative pl-8" : ""}`}
+      className={`gap-3 ${nested ? "relative pl-8" : ""}`}
       data-specialization={isChild ? "true" : undefined}
     >
-      {isChild && (
+      {nested && (
         // Indent guide: a short elbow from the base role's avatar column down
         // into the child's name. Decorative — the "特化" chip is what carries
         // the relationship for screen readers.
         <span
           aria-hidden="true"
+          data-testid="agents-specialization-indent"
           className="absolute left-3 top-0 h-1/2 w-3 rounded-bl-sm border-b border-l border-border"
         />
       )}
@@ -1453,8 +1464,13 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       />
                       <NameCell
                         row={row}
+                        nested={isChild}
                         nesting={
-                          item.kind === "base"
+                          // A specialisation whose base role was filtered away
+                          // is emitted as its own group head, but it can never
+                          // hold children — giving it the fold control would
+                          // render a chevron that toggles nothing.
+                          item.kind === "base" && !isSpecialization(row.agent)
                             ? {
                                 childCount: item.childCount,
                                 expanded: item.expanded,
