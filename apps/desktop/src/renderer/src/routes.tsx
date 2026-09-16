@@ -7,6 +7,7 @@ import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { AiBuilderSessionPage } from "./pages/ai-builder-session-page";
+import { IssueDraftPage } from "./pages/issue-draft-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
 import {
   RuntimeDetailPage,
@@ -31,8 +32,9 @@ import { InboxPage } from "@multica/views/inbox";
 import { ChatPage } from "@multica/views/chat";
 import { SettingsPage } from "@multica/views/settings";
 import { useT } from "@multica/views/i18n";
-import { Download, Server } from "lucide-react";
+import { Download, Globe, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
+import { ServerSettingsTab } from "./components/server-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { DesktopRouteErrorPage } from "./components/route-error-page";
@@ -47,6 +49,12 @@ function DesktopSettingsRoute() {
   return (
     <SettingsPage
       extraDeviceTabs={[
+        {
+          value: "server",
+          label: t(($) => $.desktop.tabs.server),
+          icon: Globe,
+          content: <ServerSettingsTab />,
+        },
         {
           value: "daemon",
           label: t(($) => $.desktop.daemon.title),
@@ -131,6 +139,14 @@ export const appRoutes: RouteObject[] = [
             path: "issues",
             element: <IssuesPage />,
             handle: { title: "Issues" },
+          },
+          {
+            // Requirement alignment: a conversation before an issue exists.
+            // Declared above `issues/:id` and longer than it, so the literal
+            // `new` segment can never be read as an issue identifier.
+            path: "issues/new/:draftId",
+            element: <IssueDraftPage />,
+            handle: { title: "Align Issue" },
           },
           {
             path: "issues/:id",

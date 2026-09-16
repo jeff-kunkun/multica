@@ -213,7 +213,17 @@ type DaemonRegisterRequest struct {
 	// AgyQuotaExhausted is the host-level overlay of Gemini directories whose
 	// individual quota is exhausted until reset_at (unix seconds).
 	AgyQuotaExhausted []AgyQuotaExhaustedEntry `json:"agy_quota_exhausted"`
-	Runtimes          []struct {
+	// AgentAccounts is the host's read-only multi-CLI account report. Nil
+	// (field absent) means the daemon predates the channel; a non-nil empty
+	// slice means it reports accounts and found none. The two are NOT
+	// collapsed, because the account surface renders "no accounts" and "too
+	// old to know" differently. json.Unmarshal preserves the difference: []
+	// yields an empty non-nil slice, an absent key leaves nil.
+	AgentAccounts []AgentAccountEntry `json:"agent_accounts"`
+	// AgentAccountsError is the probe failure the daemon wants surfaced. Only
+	// meaningful alongside a non-nil AgentAccounts, and never required.
+	AgentAccountsError string `json:"agent_accounts_error"`
+	Runtimes           []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -236,6 +246,37 @@ type AgyQuotaExhaustedEntry struct {
 	ResetAt int64  `json:"reset_at"`
 }
 
+// AgentAccountEntry mirrors daemon.AgentAccount — one read-only CLI account row
+// the daemon reported. Mirror field: internal/daemon/agent_accounts.go
+// AgentAccount, same JSON names.
+//
+// There is deliberately no credential field. The shape can carry a directory,
+// an account id, a binding lever name and a credential-EXISTENCE bool, and
+// nothing else, so a compromised or buggy daemon cannot smuggle a key value
+// through this channel and into stored runtime metadata.
+type AgentAccountEntry struct {
+	CLI      string `json:"cli"`
+	Account  string `json:"account"`
+	Home     string `json:"home"`
+	BaseURL  string `json:"base_url"`
+	KeyRef   string `json:"key_ref"`
+	Lever    string `json:"lever"`
+	SignedIn bool   `json:"signed_in"`
+	// QuotaResetAt is unix seconds; 0 means "not known to be exhausted".
+	QuotaResetAt int64 `json:"quota_reset_at"`
+}
+
+// Stored bounds for the agent_accounts channel, matching the daemon-side caps.
+// Metadata is re-serialized onto every runtime row of the workspace, so this
+// path must not be able to grow without limit.
+const (
+	maxAgentAccounts = 32
+	// maxAgentAccountsErrorLen bounds the stored probe error, which the UI
+	// prints as a single diagnostic line. The daemon composes it from paths and
+	// os errors, so a pathological path is the realistic way it grows.
+	maxAgentAccountsErrorLen = 1024
+)
+
 func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capabilities any) map[string]any {
 	meta := map[string]any{
 		"version":      version,
@@ -252,7 +293,75 @@ func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capa
 	if exhausted := absoluteAgyQuotaExhausted(req.AgyQuotaExhausted); len(exhausted) > 0 {
 		meta["agy_quota_exhausted"] = exhausted
 	}
+	// Presence, not length, decides whether the channel is recorded: an empty
+	// report is a real answer the account surface renders as its empty state,
+	// and dropping the key would make it indistinguishable from an old daemon.
+	if req.AgentAccounts != nil {
+		meta["agent_accounts"] = sanitizeAgentAccounts(req.AgentAccounts)
+	}
+	if probeErr := truncateMetadataString(strings.TrimSpace(req.AgentAccountsError), maxAgentAccountsErrorLen); probeErr != "" {
+		meta["agent_accounts_error"] = probeErr
+	}
 	return meta
+}
+
+func truncateMetadataString(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	// Cut on a rune boundary: the tail of a multi-byte path must not leave
+	// invalid UTF-8 in the stored JSON.
+	return strings.ToValidUTF8(value[:limit], "")
+}
+
+// sanitizeAgentAccounts keeps only the rows a consumer can render, reusing the
+// same host-path rule as the AGY keys so a stored `home` is always something
+// the UI can show. Rows without a usable CLI family or home are dropped rather
+// than repaired: inventing an identity would show an account the daemon never
+// reported.
+func sanitizeAgentAccounts(entries []AgentAccountEntry) []map[string]any {
+	limit := len(entries)
+	if limit > maxAgentAccounts {
+		limit = maxAgentAccounts
+	}
+	out := make([]map[string]any, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	now := time.Now().Unix()
+	for _, entry := range entries {
+		cli := strings.TrimSpace(entry.CLI)
+		home := absoluteHostHomeDir(entry.Home)
+		if cli == "" || home == "" {
+			continue
+		}
+		// Identity is the pair, not the directory alone: two CLIs can be
+		// pointed at the same directory by different levers.
+		key := cli + "\x00" + home
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		// A deadline in the past is "no longer exhausted", which the channel
+		// spells as 0. Keeping the stale value would render an exhausted badge
+		// that never clears until the next daemon restart.
+		resetAt := entry.QuotaResetAt
+		if resetAt <= now {
+			resetAt = 0
+		}
+		out = append(out, map[string]any{
+			"cli":            cli,
+			"account":        strings.TrimSpace(entry.Account),
+			"home":           home,
+			"base_url":       strings.TrimSpace(entry.BaseURL),
+			"key_ref":        strings.TrimSpace(entry.KeyRef),
+			"lever":          strings.TrimSpace(entry.Lever),
+			"signed_in":      entry.SignedIn,
+			"quota_reset_at": resetAt,
+		})
+		if len(out) >= maxAgentAccounts {
+			break
+		}
+	}
+	return out
 }
 
 func absoluteAgyQuotaExhausted(entries []AgyQuotaExhaustedEntry) []map[string]any {
@@ -2166,6 +2275,62 @@ func (h *Handler) rejectClaimSkillLoad(task *db.AgentTaskQueue, err error) *clai
 	}
 }
 
+// inheritParentInstructions returns the prompt an agent actually RUNS with
+// (DENE-302): a specialisation's own instructions prefixed by its base role's,
+// composed with composeAgentInstructions — the same function the solidify
+// endpoint bakes into a child's row, so the text a user freezes and the text a
+// run dispatches with cannot drift.
+//
+// The base role is re-read on every claim and nothing is cached or snapshotted:
+// an edit on either side of the relationship reaches the agent's next task,
+// which is the point of inheriting from a live row instead of copying it at
+// attach time.
+//
+// The two failures are deliberately different, following rejectClaimSourceLoad:
+//
+//   - The read FAILED (transient: DB blip, timeout, reset). The caller must
+//     preserve the task for redelivery rather than dispatch. A swallowed error
+//     here is indistinguishable from a base role that genuinely has no prompt,
+//     so half the effective prompt would go missing with nothing to notice it.
+//   - The base role row is GONE (ErrNoRows). There is nothing left to inherit
+//     and the specialisation's own prompt still runs, so this degrades to a
+//     non-specialisation turn. It is defensive only: the agent API refuses to
+//     archive a base role that still has active specialisations and has no hard
+//     delete, so no request path produces this state.
+func (h *Handler) inheritParentInstructions(ctx context.Context, agent db.Agent) (string, error) {
+	if !agent.ParentAgentID.Valid {
+		return agent.Instructions, nil
+	}
+	parent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          agent.ParentAgentID,
+		WorkspaceID: agent.WorkspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("daemon claim: base role no longer resolves; dispatching with the specialisation's own instructions",
+				"agent_id", uuidToString(agent.ID), "parent_agent_id", uuidToString(agent.ParentAgentID))
+			return agent.Instructions, nil
+		}
+		return "", err
+	}
+	return composeAgentInstructions(parent.Instructions, agent.Instructions), nil
+}
+
+// rejectClaimParentInstructions preserves a claim whose base role prompt could
+// not be read, for the reason in rejectClaimSkillLoad: the claim-build path hit
+// a transient read, and the stale-dispatched reclaim redelivers it. Dispatching
+// the plain child prompt instead would silently drop inherited rules that the
+// agent's configuration says it has.
+func (h *Handler) rejectClaimParentInstructions(task *db.AgentTaskQueue, err error) *claimBuildFailure {
+	slog.Error("task claim: base role instructions load failed; preserving task for redelivery",
+		"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID), "error", err)
+	return &claimBuildFailure{
+		outcome: "error_parent_instructions",
+		status:  http.StatusInternalServerError,
+		message: "failed to load agent instructions",
+	}
+}
+
 // rejectClaimOnWorkspaceMismatch enforces the claim's tenant boundary against
 // the workspace that OWNS the task's context (issue / chat session / autopilot
 // / quick-create), which is the only authority for MULTICA_WORKSPACE_ID in the
@@ -2497,10 +2662,20 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
 		runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 	}
+	// Inherited prompt first, at the innermost layer (DENE-302): parent + child
+	// compose what this agent IS, and everything appended below — the Mika
+	// system layer and then the squad briefing — stacks on top of that one
+	// effective value. Composing after a squad briefing would bury the base
+	// role's rules under task context; composing here also means both squad
+	// append points (issue-bound and quick-create) share the result for free.
+	instructions, err := h.inheritParentInstructions(r.Context(), agent)
+	if err != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimParentInstructions(task, err)
+	}
 	resp.Agent = &TaskAgentData{
 		ID:                    uuidToString(agent.ID),
 		Name:                  agent.Name,
-		Instructions:          agent.Instructions,
+		Instructions:          instructions,
 		CustomEnv:             customEnv,
 		CustomArgs:            customArgs,
 		McpConfig:             mcpConfig,
@@ -2520,7 +2695,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// Composing here covers every task kind, because this is the single
 	// place a claimed task's agent payload is assembled.
 	if agent.SystemKey.String == service.MikaSystemKey {
-		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
+		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, resp.Agent.Instructions)
 	}
 	if useSkillRefs {
 		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, agent.SystemKey.String, legacySkillRedirects)

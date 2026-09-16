@@ -523,6 +523,34 @@ export interface Agent {
   /** Read-only product half of a system agent's prompt, served from the
    *  backend binary. Absent for ordinary agents. */
   system_instructions?: string;
+  /**
+   * Base role this agent specialises (DENE-301). Empty/absent for a base role;
+   * the tree is at most two levels deep, so a non-empty value always points at
+   * a base role. Older servers omit the field entirely — treat `undefined`
+   * exactly like the empty string.
+   */
+  parent_agent_id?: string;
+  /** Display name of `parent_agent_id`, served with the list and the detail so
+   *  the client never needs a second request to name the base role. */
+  parent_agent_name?: string;
+  /**
+   * The base role's own `instructions`, verbatim. The prompt a specialisation
+   * actually runs with is `parent + "\n\n" + own` (see
+   * `composeEffectiveInstructions`), so the detail surface shows the inherited
+   * half separately instead of letting the child's text look self-contained.
+   * Empty for a base role, and also empty when the viewer may not read the
+   * parent's prompt — the relationship itself stays visible.
+   */
+  inherited_instructions?: string;
+  /** The base role's skill bindings: read-only on the child (v1 cannot drop
+   *  one). Only the detail endpoint loads them; the list leaves it undefined. */
+  inherited_skills?: AgentSkillSummary[];
+  /**
+   * How many ACTIVE specialisations hang off this agent (0 for a
+   * specialisation, and for a base role with none). Populated on the list, so
+   * the nested view needs no per-agent request; the detail response omits it.
+   */
+  child_count?: number;
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
@@ -711,6 +739,13 @@ export interface CreateAgentRequest {
   template?: string;
   /** Workspace skill IDs attached atomically with the agent row. */
   skill_ids?: string[];
+  /**
+   * Base role to attach this agent to as a specialisation (DENE-301). Omit —
+   * or send "" — to create an independent base role. The server refuses a
+   * parent that is archived, belongs to another workspace, or is itself a
+   * specialisation ("特化角色不能再派生").
+   */
+  parent_agent_id?: string;
 }
 
 export interface AgentBuilderSession {
@@ -850,6 +885,15 @@ export interface UpdateAgentRequest {
    * turns platform auto-retry off without affecting manual rerun.
    */
   auto_retry_enabled?: boolean;
+  /**
+   * Re-parents this agent (DENE-301). Tri-state semantics:
+   *   - field omitted → no change
+   *   - "" → detach from the base role, keeping the child's own prompt
+   *     (this is what `/solidify` uses when the parent prompt is not readable)
+   *   - non-empty → attach to that base role; refused when this agent already
+   *     has children, or when the target is not a base role
+   */
+  parent_agent_id?: string | null;
 }
 
 export type AgentSwitchableModelRole = "default" | "fallback" | "batch";
