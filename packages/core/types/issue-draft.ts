@@ -26,6 +26,25 @@ export interface IssueDraftPayload {
   parent_issue_id?: string | null;
 }
 
+/**
+ * How the carrier is asking: which alignment policy this conversation runs
+ * under, and which version of that policy's prompt it was given.
+ *
+ * `version` is the audit half — it names the prompt that produced the draft, and
+ * it is read back from the draft row, so a finished alignment still reports the
+ * version it ran after the registry moved on. `key` is empty when the backend
+ * predates policies: nothing here can be switched then, and the page hides the
+ * control rather than offering a switch that cannot land.
+ */
+export interface IssueDraftPolicy {
+  key: string;
+  version: string;
+  /** Whether this policy asks the user questions — the guided `question`
+   *  policy does, `conversation` does not. The server decides, so the page
+   *  never hardcodes which key is which. */
+  guided: boolean;
+}
+
 /** One alignment draft as the server owns it. */
 export interface IssueDraft {
   /** The alignment conversation. It is also the draft's identity — one
@@ -40,6 +59,8 @@ export interface IssueDraft {
   /** The issue this draft became. Present only once status is `completed`,
    *  and stable across repeated confirms. */
   issue_id?: string | null;
+  /** The policy and prompt version in force for this conversation. */
+  policy: IssueDraftPolicy;
   created_at: string;
   updated_at: string;
 }

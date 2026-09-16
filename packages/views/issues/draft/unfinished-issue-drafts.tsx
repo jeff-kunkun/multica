@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { ChevronRight, MessageSquare } from "lucide-react";
-import { decodeIssueDraftInput, stripIssueDraftBlock } from "@multica/core/issue-drafts";
+import {
+  decodeIssueDraftInput,
+  stripIssueDraftDirectives,
+} from "@multica/core/issue-drafts";
 import type { IssueDraftSummary } from "@multica/core/types";
 import {
   Dialog,
@@ -152,5 +155,5 @@ export function issueDraftPreview(
   if (!content) return "";
   return draft.last_message_role === "user"
     ? decodeIssueDraftInput(content)
-    : stripIssueDraftBlock(content);
+    : stripIssueDraftDirectives(content);
 }

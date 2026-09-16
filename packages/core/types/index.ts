@@ -1,5 +1,5 @@
 export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext } from "./issue";
-export type { IssueDraft, IssueDraftStatus, IssueDraftPayload, IssueDraftSession, IssueDraftSummary, IssueDraftFinalizeResult, IssueDraftRuntimeSwitch } from "./issue-draft";
+export type { IssueDraft, IssueDraftStatus, IssueDraftPayload, IssueDraftPolicy, IssueDraftSession, IssueDraftSummary, IssueDraftFinalizeResult, IssueDraftRuntimeSwitch } from "./issue-draft";
 export type {
   IssueStatusCategory,
   IssueStatusEntry,

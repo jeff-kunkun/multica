@@ -1,7 +1,9 @@
 "use client";
 
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Sparkles } from "lucide-react";
+import type { IssueDraftQuestion } from "@multica/core/issue-drafts";
 import type { ChatMessage } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { ChatInput } from "../../chat/components/chat-input";
 import {
@@ -28,6 +30,7 @@ export function IssueDraftConversation({
   onSend,
   onStop,
   error,
+  question,
 }: {
   draftId: string;
   messages: ChatMessage[];
@@ -42,6 +45,8 @@ export function IssueDraftConversation({
   onSend: (content: string, commitInput?: () => void) => Promise<boolean>;
   onStop: () => void;
   error: string | null;
+  /** The question the guided policy is waiting on, if any. */
+  question: IssueDraftQuestion | null;
 }) {
   const { t } = useT("issues");
   const pending = !!pendingTask?.task_id;
@@ -95,6 +100,47 @@ export function IssueDraftConversation({
           </div>
         </div>
       )}
+
+      {question ? (
+        <div className="border-t bg-muted/20 px-5 py-3">
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <Sparkles className="size-3.5" aria-hidden="true" />
+            </span>
+            <p className="min-w-0 flex-1 text-body font-medium">
+              {question.question}
+            </p>
+          </div>
+          {question.options.length > 0 ? (
+            <div className="mt-2.5 flex flex-wrap gap-1.5 pl-7">
+              {question.options.map((option) => (
+                <Button
+                  key={option.value}
+                  type="button"
+                  size="sm"
+                  // The recommended answer is the one the carrier would pick
+                  // itself, so it reads as the default rather than as one of
+                  // several equals. It is a shortcut, not a decision: the
+                  // composer below is always the custom answer.
+                  variant={option.recommended ? "secondary" : "outline"}
+                  disabled={sending || pending || !runtimeOnline}
+                  onClick={() => void onSend(option.value)}
+                >
+                  {option.label}
+                  {option.recommended ? (
+                    <span className="text-caption text-muted-foreground">
+                      {t(($) => $.alignment.question_recommended)}
+                    </span>
+                  ) : null}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          <p className="mt-2 pl-7 text-caption text-muted-foreground">
+            {t(($) => $.alignment.question_custom_hint)}
+          </p>
+        </div>
+      ) : null}
 
       {error ? (
         <div

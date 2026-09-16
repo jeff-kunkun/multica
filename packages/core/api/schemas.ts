@@ -18,6 +18,7 @@ import type {
   ChatPendingTask,
   ChatSession,
   IssueDraft,
+  IssueDraftPolicy,
   IssueDraftRuntimeSwitch,
   IssueDraftSession,
   IssueDraftSummary,
@@ -2245,6 +2246,30 @@ export const IssueDraftPayloadSchema = z.object({
 }).loose();
 
 /**
+ * The alignment policy a draft runs under.
+ *
+ * Every field has a fallback, and the fallback is deliberately "nothing is
+ * known": an installed desktop client can talk to a backend that predates
+ * policies, and reporting a key it never sent would offer a switch that cannot
+ * land. `key: ""` is that state — the page hides the control instead.
+ */
+export const IssueDraftPolicySchema = z.object({
+  key: z.string().catch(""),
+  version: z.string().catch(""),
+  guided: z.boolean().catch(false),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_POLICY: IssueDraftPolicy = {
+  key: "",
+  version: "",
+  guided: false,
+};
+
+/** The fallback shape, as the schema's own output type: `key: ""` is the
+ *  documented "this backend has no policies" state and must survive `.catch`. */
+const UNKNOWN_ISSUE_DRAFT_POLICY = { key: "", version: "", guided: false };
+
+/**
  * One alignment draft.
  *
  * `status` deliberately has no `.catch()`: it decides whether the UI offers
@@ -2259,6 +2284,7 @@ export const IssueDraftSchema = z.object({
   revision: z.number().int().nonnegative(),
   draft: IssueDraftPayloadSchema,
   issue_id: z.string().nullish().catch(null),
+  policy: IssueDraftPolicySchema.catch(() => UNKNOWN_ISSUE_DRAFT_POLICY),
   created_at: z.string().catch(""),
   updated_at: z.string().catch(""),
 }).loose();
@@ -2274,6 +2300,7 @@ export const EMPTY_ISSUE_DRAFT: IssueDraft = {
     status: "",
     priority: "",
   },
+  policy: EMPTY_ISSUE_DRAFT_POLICY,
   created_at: "",
   updated_at: "",
 };

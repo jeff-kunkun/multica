@@ -46,6 +46,7 @@ export function IssueDraftPreviewPanel({
   currentUserId,
   switchingRuntime,
   pending,
+  onDirtyChange,
   onSave,
   onGenerate,
   onConfirm,
@@ -67,6 +68,12 @@ export function IssueDraftPreviewPanel({
   switchingRuntime: boolean;
   /** A turn is running: nothing may be written while the carrier is replying. */
   pending: boolean;
+  /**
+   * Reports whether the editor holds unsaved edits. The alignment session uses
+   * it to decide whether it may adopt a carrier revision on its own: an edit in
+   * progress is the user's, and nothing may be written over it.
+   */
+  onDirtyChange: (dirty: boolean) => void;
   onSave: (draft: IssueDraftPayload, status?: "draft" | "ready") => Promise<boolean>;
   /** Folds the carrier's latest draft block into what is on screen and marks it
    *  ready — the step that turns "we agreed" into something confirmable. */
@@ -87,6 +94,9 @@ export function IssueDraftPreviewPanel({
   useEffect(() => {
     if (!dirty) setEditing(draft);
   }, [draft, dirty]);
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
 
   const value = editing ?? draft ?? EMPTY_DRAFT;
   const locked = pending || confirming || stage === "created";

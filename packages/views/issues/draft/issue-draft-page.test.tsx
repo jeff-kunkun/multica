@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   finalizeIssueDraft: vi.fn(),
   abandonIssueDraft: vi.fn(),
   switchIssueDraftRuntime: vi.fn(),
+  switchIssueDraftPolicy: vi.fn(),
   sendChatMessage: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("@multica/core/api", async () => {
       finalizeIssueDraft: mocks.finalizeIssueDraft,
       abandonIssueDraft: mocks.abandonIssueDraft,
       switchIssueDraftRuntime: mocks.switchIssueDraftRuntime,
+      switchIssueDraftPolicy: mocks.switchIssueDraftPolicy,
       sendChatMessage: mocks.sendChatMessage,
     },
   };
@@ -147,6 +149,7 @@ function draftSummary(overrides: Partial<IssueDraftSummary> = {}): IssueDraftSum
     revision: 3,
     draft: { title: "Dark mode", description: "Add it.", status: "", priority: "" },
     issue_id: null,
+    policy: { key: "question", version: "1", guided: true },
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     title: "Align a new issue",
@@ -406,5 +409,128 @@ describe("IssueDraftPage recovery", () => {
     renderPage();
     expect(await screen.findByText("Could not load this alignment.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+});
+
+/**
+ * The alignment policy is the carrier's prompt, made switchable and auditable.
+ * What these pin: the control reflects what the server says is running (not what
+ * was clicked), the recorded prompt version is on screen, and a carrier question
+ * is answerable in one click — with the composed answer going out through the
+ * same envelope every other turn uses.
+ */
+describe("IssueDraftPage policy", () => {
+  it("shows which policy is running, with the prompt version it recorded", async () => {
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Guided questions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Guided questions" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByText("Prompt question@1")).toBeTruthy();
+  });
+
+  it("switches to plain dialogue through the server, not in local state", async () => {
+    mocks.switchIssueDraftPolicy.mockResolvedValue({
+      ...draftSummary({ policy: { key: "conversation", version: "1", guided: false } }),
+    });
+    renderPage();
+    const plain = await screen.findByRole("button", { name: "Plain conversation" });
+    await userEvent.click(plain);
+    await waitFor(() =>
+      expect(mocks.switchIssueDraftPolicy).toHaveBeenCalledWith("sess-1", {
+        policy: "conversation",
+      }),
+    );
+  });
+
+  it("surfaces a refused switch and leaves the running policy on screen", async () => {
+    mocks.switchIssueDraftPolicy.mockRejectedValue(new Error("stop the current reply first"));
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Plain conversation" }));
+    expect(await screen.findByText("stop the current reply first")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Guided questions" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("offers no control at all when the backend reports no policy", async () => {
+    // An installed desktop client can talk to a backend that predates policies;
+    // a switch that cannot land is worse than no switch.
+    mocks.drafts = [draftSummary({ policy: { key: "", version: "", guided: false } })];
+    renderPage();
+    await screen.findByText("Aligning");
+    expect(screen.queryByRole("button", { name: "Plain conversation" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Guided questions" })).toBeNull();
+  });
+});
+
+describe("IssueDraftPage questions", () => {
+  const questionReply =
+    'Who should run it?\n<issue_draft_question>{"question":"Who should run it?","options":[{"label":"A bot","value":"Assign a bot","recommended":true},{"label":"Nobody yet","value":"Leave it unassigned"}]}</issue_draft_question>\n<issue_draft>{"title":"Dark mode"}</issue_draft>';
+
+  it("renders the open question with its recommended answer marked", async () => {
+    mocks.messages = [chatMessage({ id: "m2", content: questionReply })];
+    renderPage();
+    // Twice on purpose: the carrier's own prose and the answer card, which is
+    // what makes the question answerable even when the prose omits it.
+    await waitFor(() =>
+      expect(screen.getAllByText("Who should run it?").length).toBeGreaterThan(0),
+    );
+    expect(screen.getByRole("button", { name: /A bot/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /A bot/ })).toBeTruthy();
+    expect(screen.getByText("Recommended")).toBeTruthy();
+    // The block itself must never reach the transcript.
+    expect(screen.queryByText(/issue_draft_question/)).toBeNull();
+  });
+
+  it("sends the clicked option as the user's own answer", async () => {
+    mocks.messages = [chatMessage({ id: "m2", content: questionReply })];
+    mocks.sendChatMessage.mockResolvedValue({ message_id: "m9", task_id: "t9" });
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: /Nobody yet/ }));
+    await waitFor(() => expect(mocks.sendChatMessage).toHaveBeenCalledTimes(1));
+    const [, wire] = mocks.sendChatMessage.mock.calls[0];
+    expect(wire).toContain('"user_request":"Leave it unassigned"');
+  });
+
+  it("keeps the chips out of a plain-dialogue conversation", async () => {
+    // The unguided policy does not interview, so a stray block must not turn
+    // the page back into a questionnaire.
+    mocks.drafts = [
+      draftSummary({ policy: { key: "conversation", version: "1", guided: false } }),
+    ];
+    mocks.messages = [chatMessage({ id: "m2", content: questionReply })];
+    renderPage();
+    await screen.findByText("Aligning");
+    expect(screen.queryByText("Who should run it?")).toBeNull();
+  });
+});
+
+describe("IssueDraftPage draft persistence", () => {
+  it("writes the carrier's proposal to the server draft as the conversation goes", async () => {
+    // The draft is what finalize reads. A proposal that only exists in the
+    // browser until someone presses a button is one refresh away from gone.
+    mocks.messages = [
+      chatMessage({
+        id: "m2",
+        content: 'Sure.\n<issue_draft>{"title":"Dark mode","priority":"high"}</issue_draft>',
+      }),
+    ];
+    mocks.updateIssueDraft.mockImplementation(
+      (_draftId: string, data: { draft: IssueDraftSummary["draft"] }) =>
+        Promise.resolve({
+          ...draftSummary({ revision: 4 }),
+          draft: data.draft,
+        }),
+    );
+    renderPage();
+    await waitFor(() => expect(mocks.updateIssueDraft).toHaveBeenCalledTimes(1));
+    expect(mocks.updateIssueDraft.mock.calls[0][1]).toMatchObject({
+      draft: { title: "Dark mode", description: "Add it.", priority: "high" },
+      status: "draft",
+      expected_revision: 3,
+    });
   });
 });

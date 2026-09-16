@@ -1,4 +1,4 @@
-import type { IssueDraftPayload } from "../types";
+import type { ChatMessage, IssueDraftPayload } from "../types";
 
 /**
  * Wire format between the alignment page and the hidden `issue_draft:*` carrier.
@@ -25,6 +25,21 @@ const DRAFT_INPUT_PREFIX = "MULTICA_ISSUE_DRAFT_INPUT\n";
 const COMPLETE_BLOCK = /\s*<issue_draft>[\s\S]*?<\/issue_draft>/g;
 /** An unterminated block: the reply is still streaming, or the model never closed it. */
 const OPEN_BLOCK = /\s*<issue_draft>[\s\S]*$/;
+
+/**
+ * The guided policy's question, as its own block. Separate from the draft block
+ * because the two mean different things: the draft is a partial update to a
+ * structured object, while a question is a turn-level affordance that has to
+ * disappear once it is answered. An unterminated question block is stripped
+ * like an unterminated draft block — a streaming reply must not leak markup
+ * into the transcript.
+ */
+const COMPLETE_QUESTION_BLOCK =
+  /\s*<issue_draft_question>[\s\S]*?<\/issue_draft_question>/g;
+const OPEN_QUESTION_BLOCK = /\s*<issue_draft_question>[\s\S]*$/;
+
+/** At most this many answers are offered per question. */
+const MAX_QUESTION_OPTIONS = 6;
 
 /**
  * Fields the carrier may revise. Every one is optional: the block is a partial
@@ -56,12 +71,95 @@ export function parseIssueDraftBlock(content: string): IssueDraftPatch | null {
   return patch;
 }
 
-/** The reply with every draft block removed — what the conversation shows. */
-export function stripIssueDraftBlock(content: string): string {
+/** The reply with every machine-readable block removed — what the conversation shows. */
+export function stripIssueDraftDirectives(content: string): string {
   return content
     .replace(new RegExp(COMPLETE_BLOCK), "")
     .replace(OPEN_BLOCK, "")
+    .replace(new RegExp(COMPLETE_QUESTION_BLOCK), "")
+    .replace(OPEN_QUESTION_BLOCK, "")
     .trim();
+}
+
+/** One answer the guided policy proposes for its question. */
+export interface IssueDraftQuestionOption {
+  /** Short text on the answer chip. */
+  label: string;
+  /** What sending this answer actually says, phrased as the user would. */
+  value: string;
+  /** The option the carrier would pick itself. At most one per question. */
+  recommended: boolean;
+}
+
+/** The single question an alignment turn is waiting on. */
+export interface IssueDraftQuestion {
+  question: string;
+  options: IssueDraftQuestionOption[];
+}
+
+/**
+ * The question block of a reply, parsed. Same rules as the draft block: the
+ * last complete block wins, and anything malformed means "no question" rather
+ * than a broken turn.
+ *
+ * Options are validated individually instead of all-or-nothing: a model that
+ * emits one malformed option alongside three usable ones has still asked a
+ * usable question, and the composer is always there for a free-text answer.
+ */
+export function parseIssueDraftQuestion(
+  content: string,
+): IssueDraftQuestion | null {
+  const matches = [...content.matchAll(new RegExp(COMPLETE_QUESTION_BLOCK))];
+  const raw = matches[matches.length - 1]?.[0];
+  if (!raw) return null;
+  const inner = raw
+    .replace(/^\s*<issue_draft_question>/, "")
+    .replace(/<\/issue_draft_question>\s*$/, "");
+  const parsed = parseJsonObject(inner);
+  if (!parsed) return null;
+
+  const question = parsed.question;
+  if (typeof question !== "string" || question.trim().length === 0) return null;
+
+  const options: IssueDraftQuestionOption[] = [];
+  const rawOptions = parsed.options;
+  if (Array.isArray(rawOptions)) {
+    for (const entry of rawOptions) {
+      if (options.length >= MAX_QUESTION_OPTIONS) break;
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const option = entry as Record<string, unknown>;
+      const label = option.label;
+      const value = option.value;
+      if (typeof label !== "string" || label.trim().length === 0) continue;
+      if (typeof value !== "string" || value.trim().length === 0) continue;
+      options.push({
+        label: label.trim(),
+        value: value.trim(),
+        recommended: option.recommended === true,
+      });
+    }
+  }
+  return { question: question.trim(), options };
+}
+
+/**
+ * The question the alignment is currently waiting on: the LAST message in the
+ * transcript, when the carrier wrote it and it asks something.
+ *
+ * "Last message" is the whole rule, and it is why an answered question
+ * disappears on its own — the user's next turn becomes the last message, so the
+ * chips are gone before the carrier has replied, and a reply that asks nothing
+ * clears them too. Only the last block of that message counts: a model that
+ * thinks out loud may emit two.
+ */
+export function issueDraftPendingQuestion(
+  messages: readonly ChatMessage[],
+): { messageId: string; question: IssueDraftQuestion } | null {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "assistant") return null;
+  const question = parseIssueDraftQuestion(last.content);
+  if (!question) return null;
+  return { messageId: last.id, question };
 }
 
 /** One turn: what the user asked, plus the draft they are asking about. */

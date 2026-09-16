@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@multica/core/api";
 import { chatKeys, chatMessagesOptions, pendingChatTaskOptions } from "@multica/core/chat/queries";
@@ -9,18 +9,25 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import {
   issueDraftCanConfirm,
   issueDraftIsCreatable,
+  issueDraftKeys,
   issueDraftListOptions,
+  issueDraftPendingQuestion,
   issueDraftStage,
   encodeIssueDraftInput,
   findIssueDraft,
   mergeIssueDraftPayload,
   parseIssueDraftBlock,
+  planIssueDraftFold,
   useAbandonIssueDraft,
   useFinalizeIssueDraft,
   useSaveIssueDraft,
+  useSwitchIssueDraftPolicy,
   useSwitchIssueDraftRuntime,
+  type IssueDraftPolicyKey,
+  type IssueDraftQuestion,
   type IssueDraftStage,
 } from "@multica/core/issue-drafts";
+import type { IssueDraftPolicy } from "@multica/core/types";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import type {
   ChatMessage,
@@ -32,6 +39,16 @@ import { useT } from "../../i18n";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
 const EMPTY_DRAFTS: readonly IssueDraftSummary[] = [];
+
+/**
+ * What a draft reports before the server has said anything about policies.
+ *
+ * `key: ""` is "this backend has no policies", not "the guided default": the
+ * page hides the switch on it rather than offering one that cannot land. An
+ * older backend is a real deployment shape — an installed desktop client can
+ * talk to one — so the state has to be representable, not assumed away.
+ */
+const UNKNOWN_POLICY: IssueDraftPolicy = { key: "", version: "", guided: false };
 
 export interface IssueDraftSession {
   stage: IssueDraftStage;
@@ -59,6 +76,23 @@ export interface IssueDraftSession {
   runtime: RuntimeDevice | null;
   runtimeOnline: boolean;
   switchingRuntime: boolean;
+  /**
+   * The alignment policy in force, as the server records it: which behaviour the
+   * carrier runs, and which version of its prompt it was given.
+   */
+  policy: IssueDraftPolicy;
+  switchingPolicy: boolean;
+  /**
+   * The question the carrier is waiting on, or null. Only ever set while the
+   * guided policy is running and the carrier's question is the last thing said:
+   * an answered question clears itself when the user's own turn lands.
+   */
+  question: IssueDraftQuestion | null;
+  /**
+   * Reports whether the preview panel holds unsaved edits. While it does, this
+   * hook will not adopt a carrier revision on the user's behalf.
+   */
+  setLocalDirty: (dirty: boolean) => void;
   canConfirm: boolean;
   saving: boolean;
   saved: boolean;
@@ -78,6 +112,8 @@ export interface IssueDraftSession {
   confirm: () => Promise<boolean>;
   abandon: () => Promise<boolean>;
   switchRuntime: (runtimeId: string) => Promise<string | null>;
+  /** Switches between guided questions and plain dialogue. */
+  setPolicy: (policy: IssueDraftPolicyKey) => Promise<boolean>;
   stop: () => Promise<void>;
   retry: () => void;
   clearError: () => void;
@@ -119,6 +155,7 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
   const abandonMutation = useAbandonIssueDraft(wsId);
   const finalizeMutation = useFinalizeIssueDraft(wsId);
   const runtimeMutation = useSwitchIssueDraftRuntime(wsId);
+  const policyMutation = useSwitchIssueDraftPolicy(wsId);
 
   const draft = row?.draft ?? null;
   const revision = row?.revision ?? null;
@@ -142,11 +179,96 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
   );
   const runtimeOnline = runtime?.status === "online";
 
+  const policy = row?.policy ?? UNKNOWN_POLICY;
+
+  // Which question is still open is read off the transcript, so nothing has to
+  // remember that it was answered: the user's next turn becomes the last
+  // message and the chips go with it.
+  const question = useMemo(
+    () => (policy.guided && !pending ? (issueDraftPendingQuestion(messages)?.question ?? null) : null),
+    [messages, pending, policy.guided],
+  );
+
   const canConfirm = issueDraftCanConfirm({
     stage,
     hasTitle: draft ? issueDraftIsCreatable(draft) : false,
     pending,
   });
+
+  /**
+   * Whether the preview panel holds edits the user has not saved.
+   *
+   * A ref, not state: this is read by the auto-persist effect below, and
+   * re-rendering the whole page because someone typed a character into the
+   * title would be a cost with no reader. The panel owns the answer — it is
+   * the only thing that knows what is on screen — and reports it here.
+   */
+  const localDirtyRef = useRef(false);
+  const setLocalDirty = useCallback((dirty: boolean) => {
+    localDirtyRef.current = dirty;
+  }, []);
+
+  /**
+   * The reply whose draft proposal has already been folded into the server
+   * draft. One fold per reply: the effect re-runs on every revision bump its
+   * own save causes, and without this it would write the same block forever.
+   */
+  const appliedReplyRef = useRef<string | null>(null);
+
+  /**
+   * Persists the carrier's proposal as the conversation goes.
+   *
+   * "The question was answered, so the draft changed" has to reach the server
+   * on its own: the draft is what finalize reads, and a proposal that only
+   * exists in the browser until someone presses a button is one refresh away
+   * from being lost. Two gates keep that from becoming a way to overwrite the
+   * user:
+   *
+   *   - Unsaved edits in the preview panel stop the fold entirely. The panel is
+   *     the user's own hand on the draft, and a reply must never win over it.
+   *   - A failed fold is not retried and not surfaced: the usual cause is a
+   *     revision that moved underneath (another tab saved), and the answer to
+   *     that is to re-read, which the mutation already does.
+   *
+   * The decision itself lives in `planIssueDraftFold`, where those rules are
+   * pinned by tests; this is only the wiring that carries it out.
+   */
+  useEffect(() => {
+    if (!draftId || !row) return;
+    const fold = planIssueDraftFold({
+      messages,
+      draft: row.draft,
+      status: row.status,
+      revision: row.revision,
+      localDirty: localDirtyRef.current,
+      appliedReplyId: appliedReplyRef.current,
+      busy:
+        pending || saveMutation.isPending || finalizeMutation.isPending,
+    });
+    if (!fold) return;
+    // Recorded before the write: the effect re-runs on every revision bump the
+    // write itself causes, and an unrecorded reply would be written again.
+    appliedReplyRef.current = fold.replyId;
+    void saveMutation
+      .mutateAsync({
+        draftId,
+        draft: fold.draft,
+        status: fold.status,
+        expectedRevision: row.revision,
+      })
+      .catch(() => {
+        void qc.invalidateQueries({ queryKey: issueDraftKeys.list(wsId) });
+      });
+  }, [
+    draftId,
+    finalizeMutation.isPending,
+    messages,
+    pending,
+    qc,
+    row,
+    saveMutation,
+    wsId,
+  ]);
 
   /**
    * Sends one turn.
@@ -301,6 +423,28 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
     [draftId, runtimeMutation, t],
   );
 
+  /**
+   * Switches the alignment policy. The control must not move until the server
+   * has answered: what changes is what the NEXT reply will do, and a picker that
+   * shows "plain dialogue" while the carrier is still interviewing is the same
+   * class of lie as a runtime picker that moved before the rebind (MUL-5163).
+   */
+  const setPolicy = useCallback(
+    async (next: IssueDraftPolicyKey): Promise<boolean> => {
+      setError(null);
+      try {
+        await policyMutation.mutateAsync({ draftId, policy: next });
+        return true;
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : t(($) => $.alignment.policy_failed),
+        );
+        return false;
+      }
+    },
+    [draftId, policyMutation, t],
+  );
+
   const stop = useCallback(async () => {
     const taskId = pendingQuery.data?.task_id;
     if (!taskId || !draftId) return;
@@ -334,6 +478,10 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
     runtime,
     runtimeOnline,
     switchingRuntime: runtimeMutation.isPending,
+    policy,
+    switchingPolicy: policyMutation.isPending,
+    question,
+    setLocalDirty,
     canConfirm,
     saving: saveMutation.isPending,
     saved,
@@ -346,6 +494,7 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
     confirm,
     abandon,
     switchRuntime,
+    setPolicy,
     stop,
     retry: () => {
       void listQuery.refetch();

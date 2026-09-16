@@ -220,6 +220,31 @@ export function useSwitchIssueDraftRuntime(wsId: string) {
   });
 }
 
+/**
+ * Switches how the carrier asks: guided questions, or plain dialogue.
+ *
+ * The response is applied to the list cache rather than merely invalidated for
+ * the same reason a save is: the switch is a determinate field change the user
+ * is standing in front of, and the recorded prompt version it returns is the
+ * audit value the page displays. A failure re-reads instead — a switch refused
+ * because a reply is in flight must leave the control showing what is actually
+ * running.
+ */
+export function useSwitchIssueDraftPolicy(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { draftId: string; policy: string }) =>
+      api.switchIssueDraftPolicy(input.draftId, { policy: input.policy }),
+    onSuccess: (updated) => {
+      applyDraftRow(qc, wsId, updated);
+      void qc.invalidateQueries({ queryKey: issueDraftKeys.list(wsId) });
+    },
+    onError: () => {
+      void qc.invalidateQueries({ queryKey: issueDraftKeys.list(wsId) });
+    },
+  });
+}
+
 /** The idea, kept server-side from the first moment so a lost turn loses nothing. */
 function seedDraft(request: string): Partial<IssueDraftPayload> {
   return {

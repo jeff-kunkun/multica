@@ -1,13 +1,15 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import type { IssueDraftPayload } from "../types";
+import type { ChatMessage, IssueDraftPayload } from "../types";
 import {
   decodeIssueDraftInput,
   encodeIssueDraftInput,
   issueDraftIsCreatable,
+  issueDraftPendingQuestion,
   mergeIssueDraftPayload,
   parseIssueDraftBlock,
-  stripIssueDraftBlock,
+  parseIssueDraftQuestion,
+  stripIssueDraftDirectives,
 } from "./protocol";
 
 const EMPTY: IssueDraftPayload = {
@@ -58,16 +60,127 @@ describe("parseIssueDraftBlock", () => {
   });
 });
 
-describe("stripIssueDraftBlock", () => {
+describe("stripIssueDraftDirectives", () => {
   it("removes complete and still-streaming blocks", () => {
-    expect(stripIssueDraftBlock('Done.\n<issue_draft>{"title":"T"}</issue_draft>')).toBe(
+    expect(stripIssueDraftDirectives('Done.\n<issue_draft>{"title":"T"}</issue_draft>')).toBe(
       "Done.",
     );
-    expect(stripIssueDraftBlock('Working…\n<issue_draft>{"title":"T"')).toBe("Working…");
+    expect(stripIssueDraftDirectives('Working…\n<issue_draft>{"title":"T"')).toBe("Working…");
+  });
+
+  it("removes the question block too", () => {
+    // Both blocks are machine-readable. Leaving the question block in would
+    // print raw JSON above the answer chips.
+    expect(
+      stripIssueDraftDirectives(
+        'Who runs it?\n<issue_draft_question>{"question":"Who runs it?"}</issue_draft_question>',
+      ),
+    ).toBe("Who runs it?");
+    expect(
+      stripIssueDraftDirectives(
+        'Who runs it?\n<issue_draft_question>{"question":"Who runs',
+      ),
+    ).toBe("Who runs it?");
   });
 
   it("leaves a reply with no block untouched", () => {
-    expect(stripIssueDraftBlock("Just a question?")).toBe("Just a question?");
+    expect(stripIssueDraftDirectives("Just a question?")).toBe("Just a question?");
+  });
+});
+
+/**
+ * The guided policy asks one question at a time and offers answers. The block is
+ * a contract with the server prompt, and it fails the same way the draft block
+ * does: a model that emits slightly malformed JSON must cost the chips, never
+ * the conversation.
+ */
+describe("parseIssueDraftQuestion", () => {
+  const block = (json: string) =>
+    `Who should run it?\n<issue_draft_question>${json}</issue_draft_question>`;
+
+  it("reads the question, its options and the recommended one", () => {
+    expect(
+      parseIssueDraftQuestion(
+        block(
+          '{"question":"Who runs it?","options":[{"label":"Bot","value":"Assign a bot","recommended":true},{"label":"Me","value":"Leave it unassigned"}]}',
+        ),
+      ),
+    ).toEqual({
+      question: "Who runs it?",
+      options: [
+        { label: "Bot", value: "Assign a bot", recommended: true },
+        { label: "Me", value: "Leave it unassigned", recommended: false },
+      ],
+    });
+  });
+
+  it("keeps a question that has no usable options", () => {
+    // The composer is the custom answer, so a question with nothing to click is
+    // still a question the user can answer.
+    expect(parseIssueDraftQuestion(block('{"question":"What is the deadline?"}'))).toEqual({
+      question: "What is the deadline?",
+      options: [],
+    });
+  });
+
+  it("drops unusable options instead of the whole question", () => {
+    expect(
+      parseIssueDraftQuestion(
+        block(
+          '{"question":"Which?","options":[{"label":"","value":"x"},{"label":"A","value":"  "},{"label":"B","value":"b"},7]}',
+        ),
+      ),
+    ).toEqual({
+      question: "Which?",
+      options: [{ label: "B", value: "b", recommended: false }],
+    });
+  });
+
+  it("takes the last complete block, like the draft block does", () => {
+    expect(
+      parseIssueDraftQuestion(
+        '<issue_draft_question>{"question":"First"}</issue_draft_question>\n<issue_draft_question>{"question":"Second"}</issue_draft_question>',
+      )?.question,
+    ).toBe("Second");
+  });
+
+  it("returns null for anything unusable", () => {
+    expect(parseIssueDraftQuestion("no block")).toBeNull();
+    expect(parseIssueDraftQuestion('<issue_draft_question>{"question":"streaming')).toBeNull();
+    expect(parseIssueDraftQuestion(block("not json"))).toBeNull();
+    expect(parseIssueDraftQuestion(block('{"question":"   "}'))).toBeNull();
+    expect(parseIssueDraftQuestion(block('{"options":[]}'))).toBeNull();
+  });
+});
+
+describe("issueDraftPendingQuestion", () => {
+  const assistant = (id: string, content: string): ChatMessage =>
+    ({ id, chat_session_id: "s", role: "assistant", content, created_at: "" }) as ChatMessage;
+  const user = (id: string, content: string): ChatMessage =>
+    ({ id, chat_session_id: "s", role: "user", content, created_at: "" }) as ChatMessage;
+
+  it("is the question on the last message", () => {
+    const pending = issueDraftPendingQuestion([
+      assistant("m1", "Drafting.\n<issue_draft>{}"),
+      assistant("m2", 'Which surfaces?\n<issue_draft_question>{"question":"Which surfaces?"}</issue_draft_question>'),
+    ]);
+    expect(pending?.messageId).toBe("m2");
+    expect(pending?.question.question).toBe("Which surfaces?");
+  });
+
+  it("clears itself once the user answers", () => {
+    // The user's own turn is the last message, so the chips disappear without
+    // anything having to remember that they were clicked.
+    const pending = issueDraftPendingQuestion([
+      assistant("m2", '<issue_draft_question>{"question":"Which surfaces?"}</issue_draft_question>'),
+      user("m3", "Settings and the issue list"),
+    ]);
+    expect(pending).toBeNull();
+  });
+
+  it("is null for a carrier reply that asks nothing, and for empty transcripts", () => {
+    expect(issueDraftPendingQuestion([assistant("m1", "Done.")])).toBeNull();
+    expect(issueDraftPendingQuestion([])).toBeNull();
   });
 });
 

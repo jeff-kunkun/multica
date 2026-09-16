@@ -27,6 +27,7 @@ function summary(overrides: Partial<IssueDraftSummary>): IssueDraftSummary {
     revision: 1,
     draft: { title: "", description: "", status: "", priority: "" },
     issue_id: null,
+    policy: { key: "question", version: "1", guided: true },
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     title: "Align a new issue",

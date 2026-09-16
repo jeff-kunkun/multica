@@ -133,7 +133,12 @@
     "waiting_on": "等待 {{id}}",
     "last_activity_missing": "无活动时间"
   },
-  "blocker_summary": { "title": "已阻塞 · {{count}} 个根因", "needs_you": "其中 {{count}} 个需要你", "root": "根因阻塞", "propagated": "受子任务阻塞" },
+  "blocker_summary": {
+    "title": "已阻塞 · {{count}} 个根因",
+    "needs_you": "其中 {{count}} 个需要你",
+    "root": "根因阻塞",
+    "propagated": "受子任务阻塞"
+  },
   "scope": {
     "all_label": "全部",
     "all_description": "工作区内的全部任务",
@@ -977,6 +982,14 @@
     "drafts_banner": "你有 {{count}} 条未完成的对齐",
     "drafts_title": "未完成的对齐",
     "drafts_hint": "选一条继续。",
-    "drafts_untitled": "未命名对齐"
+    "drafts_untitled": "未命名对齐",
+    "policy_label": "对齐方式",
+    "policy_guided": "引导提问",
+    "policy_plain": "普通对话",
+    "policy_version": "提示词 {{version}}",
+    "policy_version_hint": "本次对齐使用的提示词版本。创建时记录在草稿上，因此已完成的草稿仍可追溯。",
+    "policy_failed": "切换对齐方式失败。",
+    "question_recommended": "推荐",
+    "question_custom_hint": "也可以在下方直接用自己的话回答。"
   }
 }

@@ -1654,6 +1654,9 @@ export class ApiClient {
     runtime_id: string;
     model?: string;
     draft?: Partial<IssueDraftPayload>;
+    /** Which alignment policy to open under. Omitted means the guided
+     *  default; see packages/core/issue-drafts/policy.ts. */
+    policy?: string;
   }): Promise<IssueDraftSession> {
     const raw = await this.fetch<unknown>("/api/issue-drafts", {
       method: "POST",
@@ -1739,6 +1742,28 @@ export class ApiClient {
       { method: "POST", body: JSON.stringify(data) },
     );
     return IssueDraftFinalizeSchema.parse(raw);
+  }
+
+  /**
+   * Switches a live alignment conversation's policy: guided questions, or plain
+   * dialogue.
+   *
+   * The response is the updated draft, including the policy version the server
+   * recorded — the audit value, not an echo of the request. It is parsed with a
+   * fallback because a caller that cannot read the body can still re-read the
+   * list; the switch itself already committed server-side.
+   */
+  async switchIssueDraftPolicy(
+    sessionId: string,
+    data: { policy: string },
+  ): Promise<IssueDraft> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-drafts/${sessionId}/policy`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
+      endpoint: "PATCH /api/issue-drafts/{id}/policy",
+    });
   }
 
   /** Rebinds a live alignment conversation to another runtime. Callers must

@@ -2830,6 +2830,41 @@ describe("ApiClient issue drafts", () => {
     await expect(client.listIssueDrafts()).resolves.toEqual([]);
   });
 
+  it("switches the alignment policy and reports the version the server recorded", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        ...draft,
+        policy: { key: "conversation", version: "1", guided: false },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.switchIssueDraftPolicy("session-1", { policy: "conversation" }),
+    ).resolves.toMatchObject({
+      policy: { key: "conversation", version: "1", guided: false },
+    });
+
+    const call = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(call[0]).toContain("/api/issue-drafts/session-1/policy");
+    expect(call[1].method).toBe("PATCH");
+    expect(JSON.parse(String(call[1].body))).toEqual({ policy: "conversation" });
+  });
+
+  it("reports no policy at all for a body from a backend that has none", async () => {
+    // The installed-desktop case: an older backend simply has no `policy`, and
+    // the page must read that as "nothing to switch" rather than as the guided
+    // default it would then offer to change.
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ drafts: [draft] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listIssueDrafts()).resolves.toMatchObject([
+      { policy: { key: "", version: "", guided: false } },
+    ]);
+  });
+
   it("falls back to the requested runtime id for a malformed runtime switch body", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ runtime_id: 42 }));
     vi.stubGlobal("fetch", fetchMock);

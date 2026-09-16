@@ -6,7 +6,7 @@ import { useDefaultLayout } from "react-resizable-panels";
 import { ArrowLeft } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { decodeIssueDraftInput, stripIssueDraftBlock } from "@multica/core/issue-drafts";
+import { decodeIssueDraftInput, stripIssueDraftDirectives } from "@multica/core/issue-drafts";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -20,6 +20,7 @@ import {
 import { useBackOrReplace, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { IssueDraftConversation } from "./issue-draft-conversation";
+import { IssueDraftPolicyPicker } from "./issue-draft-policy-picker";
 import { IssueDraftPreviewPanel } from "./issue-draft-preview-panel";
 import { IssueDraftStageStrip } from "./issue-draft-stage-strip";
 import { useIssueDraftSession } from "./use-issue-draft-session";
@@ -63,7 +64,7 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
         content:
           message.role === "user"
             ? decodeIssueDraftInput(message.content)
-            : stripIssueDraftBlock(message.content),
+            : stripIssueDraftDirectives(message.content),
       })),
     [session.messages],
   );
@@ -98,7 +99,7 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
             <ArrowLeft className="size-4" aria-hidden="true" />
             {t(($) => $.alignment.back)}
           </Button>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="truncate text-title-sm font-semibold tracking-tight">
               {session.draft?.title.trim() || t(($) => $.alignment.title)}
             </h1>
@@ -106,6 +107,14 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               {t(($) => $.alignment.subtitle)}
             </p>
           </div>
+          <IssueDraftPolicyPicker
+            policy={session.policy}
+            switching={session.switchingPolicy}
+            // A conversation that is mid-reply or already confirmed has no next
+            // turn to change, so the picker is not offered one.
+            disabled={session.pending || session.stage === "creating" || session.stage === "created"}
+            onChange={(policy) => void session.setPolicy(policy)}
+          />
         </div>
         <IssueDraftStageStrip
           stage={session.stage}
@@ -138,6 +147,7 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               onSend={session.send}
               onStop={() => void session.stop()}
               error={session.error}
+              question={session.question}
             />
           </ResizablePanel>
           <ResizableHandle />
@@ -162,6 +172,7 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               currentUserId={currentUserId}
               switchingRuntime={session.switchingRuntime}
               pending={session.pending}
+              onDirtyChange={session.setLocalDirty}
               onSave={session.save}
               onGenerate={session.generatePreview}
               onConfirm={session.confirm}
