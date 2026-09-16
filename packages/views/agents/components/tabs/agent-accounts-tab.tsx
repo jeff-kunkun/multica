@@ -25,6 +25,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, FolderTree } from "lucide-react";
 import { toast } from "sonner";
+import { isAgentRuntimeBound } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
@@ -169,12 +170,27 @@ export function AgentAccountsTab({
     [agent.custom_args, envQuery.data, runtimeDevice],
   );
 
+  // A failed env read is not a missing override: the lever value is unknown,
+  // and `resolveCurrentAccount` would fall back to the CLI default and name the
+  // wrong account as the one in effect. The design's rule is that an
+  // untrustworthy list renders the error state, so the failure is surfaced as
+  // the page error rather than swallowed into a confident wrong answer.
+  const envErrorMessage =
+    needsEnvBinding && envQuery.isError
+      ? envQuery.error instanceof Error && envQuery.error.message
+        ? envQuery.error.message
+        : t(($) => $.tab_body.accounts.error_env_unreadable)
+      : "";
+
   const viewState = accountsViewState({
     accounts: parsed.accounts,
-    error: parsed.error,
-    // `runtimeDevice === undefined` means the runtime row has not arrived yet,
-    // and the daemon's report travels on it: there is nothing to read.
-    loading: runtimeDevice === undefined || (needsEnvBinding && envQuery.isPending),
+    error: parsed.error || envErrorMessage,
+    // The daemon's report travels on the runtime row, so a bound agent whose
+    // row has not arrived yet is still reading. An agent with no runtime bound
+    // has nothing to wait for — it falls through to the empty state.
+    loading:
+      (isAgentRuntimeBound(agent) && runtimeDevice === undefined) ||
+      (needsEnvBinding && envQuery.isPending),
   });
 
   const current = useMemo(

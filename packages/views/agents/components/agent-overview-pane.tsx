@@ -230,7 +230,9 @@ export function AgentOverviewPane({
         // owner/admin (MUL-5438) — the same rule `canEdit` encodes — so
         // showing the tab to anyone else guarantees a 403 on "Reveal & edit".
         // The server stays the boundary; this only removes a dead entry point.
-        if (tab.id === "env") return canEdit;
+        // Accounts reads the same endpoint to tell a bound lever from an
+        // unbound one, so it carries the env tab's permission rule too.
+        if (tab.id === "env" || tab.id === "accounts") return canEdit;
         if (tab.id === "runtime_config") return runtime?.provider === "openclaw";
         return true;
       }),

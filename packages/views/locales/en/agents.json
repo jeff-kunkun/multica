@@ -527,6 +527,7 @@
       "switch_invalid_home_toast": "This account has no usable directory, so it cannot be bound.",
       "error_title": "Can't read local account state",
       "error_description": "The daemon did not report an account list, so this screen cannot show which account is in effect. The accounts themselves are still on disk, and nothing here will change any account.",
+      "error_env_unreadable": "Could not read this agent's environment bindings.",
       "error_retry_action": "Retry",
       "error_daemon_action": "View daemon status",
       "empty_title": "This agent has no accounts yet",

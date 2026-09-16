@@ -286,6 +286,17 @@ describe("AgentOverviewPane Accounts tab", () => {
     renderPane([makeRuntime("dsh")], { view: "accounts" });
     expect(screen.getByText("agent-accounts-tab")).toBeInTheDocument();
   });
+
+  it("hides the Accounts tab from users who cannot manage the agent", () => {
+    // Accounts reads GET /api/agents/{id}/env to tell a bound lever from an
+    // unbound one, so it inherits the env endpoint's permission rule: showing
+    // it to anyone else guarantees a 403 and an unanswerable summary.
+    renderPane([makeRuntime("dsh")], { canEdit: false });
+    openSettings();
+    expect(
+      screen.queryByRole("tab", { name: /^Accounts$/i }),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe("AgentOverviewPane Environment tab visibility", () => {

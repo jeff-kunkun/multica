@@ -417,6 +417,7 @@
       "switch_invalid_home_toast": "이 계정에는 사용할 수 있는 디렉터리가 없어 바인딩할 수 없습니다.",
       "error_title": "로컬 계정 상태를 읽을 수 없습니다",
       "error_description": "daemon이 계정 목록을 보고하지 않아 어떤 계정이 적용 중인지 표시할 수 없습니다. 계정 자체는 디스크에 있으며, 여기서 계정을 변경하지 않습니다.",
+      "error_env_unreadable": "이 에이전트의 환경 변수 바인딩을 읽지 못했습니다.",
       "error_retry_action": "다시 시도",
       "error_daemon_action": "daemon 상태 보기",
       "empty_title": "이 에이전트에는 아직 계정이 없습니다",

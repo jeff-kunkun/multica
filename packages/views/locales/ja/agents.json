@@ -409,6 +409,7 @@
       "switch_invalid_home_toast": "このアカウントには使用できるディレクトリがないため、バインドできません。",
       "error_title": "ローカルのアカウント状態を読み取れません",
       "error_description": "daemon がアカウント一覧を報告していないため、どのアカウントが有効かを表示できません。アカウント自体はディスク上にあり、ここからアカウントを変更することはありません。",
+      "error_env_unreadable": "このエージェントの環境変数バインディングを読み取れませんでした。",
       "error_retry_action": "再試行",
       "error_daemon_action": "daemon の状態を表示",
       "empty_title": "このエージェントにはまだアカウントがありません",

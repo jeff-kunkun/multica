@@ -11,7 +11,7 @@
 
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -336,6 +336,42 @@ describe("AgentAccountsTab untrusted states keep the drawer shut", () => {
     expect(
       screen.getByText("Reading account directories and sign-in state…"),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /manage accounts/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("falls through to the empty state when the agent has no runtime bound", () => {
+    // `agent-detail-page` passes `runtime ?? undefined`, and `runtime` is null
+    // for an unbound agent as well as for a row still in flight. Without the
+    // agent's own binding signal this screen waited forever for a report no
+    // daemon was ever going to send.
+    renderTab({ agent: { ...baseAgent, runtime_id: "" }, device: undefined });
+
+    expect(
+      screen.queryByText("Reading account directories and sign-in state…"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("This agent has no accounts yet"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the error state when the env binding cannot be read", async () => {
+    // A denied or failed env read leaves the lever unknown. Treating it as "no
+    // override" would resolve the CLI's own default directory and name the
+    // wrong account as the one in effect, which is the single question this
+    // screen exists to answer.
+    getAgentEnv.mockRejectedValue(new Error("403 forbidden"));
+
+    renderTab({ device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2]) });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Can't read local account state"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText("403 forbidden")).toBeInTheDocument();
+    expect(screen.queryByText("In use")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /manage accounts/i }),
     ).not.toBeInTheDocument();

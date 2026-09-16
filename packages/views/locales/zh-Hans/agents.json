@@ -516,6 +516,7 @@
       "switch_invalid_home_toast": "这个账号没有可用的目录，无法绑定。",
       "error_title": "读不到本机账号状态",
       "error_description": "daemon 没有上报账号清单，这一屏看不到当前生效的是哪个账号。账号本身还在磁盘上，这里也不会因此改动任何账号。",
+      "error_env_unreadable": "读不到这个智能体的环境变量绑定。",
       "error_retry_action": "重试",
       "error_daemon_action": "查看 daemon 状态",
       "empty_title": "这个智能体还没有账号",
