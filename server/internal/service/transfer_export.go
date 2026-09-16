@@ -46,6 +46,71 @@ func transferStatus(err error) int {
 	return 0
 }
 
+// Export gap reasons a list read can produce. Each one means the rows in hand
+// are exported but are not provably the whole list.
+const (
+	// TransferGapListCapReached: the response filled the endpoint's
+	// server-side per-request cap, so the tail never came back.
+	TransferGapListCapReached = "list_cap_reached"
+	// TransferGapListHasMore: the envelope advertised another page
+	// (has_more / next_cursor) and only the first one was read.
+	TransferGapListHasMore = "list_has_more"
+	// TransferGapListShapeUnknown: the response was an object with no list key
+	// this exporter knows how to read, so it yielded zero rows — the whole
+	// group went missing. Saying so beats exporting nothing silently.
+	TransferGapListShapeUnknown = "list_shape_unknown"
+)
+
+// TransferListTruncation reports a list read that may have dropped rows. It is
+// not a read failure — the decoded rows are still exported — but every caller
+// records it as an export gap, because one request answered with a cap or a
+// cursor is exactly the silent truncation this exporter must not ship.
+type TransferListTruncation struct {
+	Reason string
+	Limit  int
+}
+
+func (t *TransferListTruncation) Error() string {
+	if t.Limit > 0 {
+		return fmt.Sprintf("%s (limit %d)", t.Reason, t.Limit)
+	}
+	return t.Reason
+}
+
+// transferReadGap builds the manifest gap for a list/config read. A
+// *TransferListTruncation is reported with its own reason and limit; an HTTP
+// error keeps the read_api_error / read_api_missing vocabulary.
+func transferReadGap(group string, err error) TransferExportGap {
+	var trunc *TransferListTruncation
+	if errors.As(err, &trunc) {
+		return TransferExportGap{Group: group, Reason: trunc.Reason, Limit: trunc.Limit}
+	}
+	g := TransferExportGap{Group: group, Reason: "read_api_error"}
+	switch st := transferStatus(err); {
+	case st == 404:
+		g.Reason = "read_api_missing"
+		g.Status = 404
+	case st > 0:
+		g.Status = st
+	}
+	return g
+}
+
+// noteListTruncation records a capped or paginated list read as an export gap.
+func noteListTruncation(gap func(string, error), group string, trunc *TransferListTruncation) {
+	if trunc != nil {
+		gap(group, trunc)
+	}
+}
+
+// appendTransferGap is noteListTruncation for callers that own a gap slice
+// instead of the exportConfigGroups recorder.
+func appendTransferGap(gaps *[]TransferExportGap, group string, trunc *TransferListTruncation) {
+	if trunc != nil {
+		*gaps = append(*gaps, transferReadGap(group, trunc))
+	}
+}
+
 type TransferExportOpts struct {
 	Include         []string
 	ExcludeArchived bool
@@ -148,8 +213,8 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 	runtimes := TransferRuntimesFile{}
 	prefs := TransferPreferences{}
 	if inc["config"] {
-		runtimes, _ = exportRuntimeProfiles(ctx, src, ws.ID, &bundle)
-		prefs = exportPinnedAgents(ctx, src)
+		runtimes, _ = exportRuntimeProfiles(ctx, src, ws.ID, &bundle, &gaps)
+		prefs = exportPinnedAgents(ctx, src, &gaps)
 	}
 
 	var people []TransferPerson
@@ -340,14 +405,7 @@ func fetchWorkspace(ctx context.Context, src TransferSourceClient, ref string) (
 func exportConfigGroups(ctx context.Context, src TransferSourceClient, wsID string, bundle *ConfigBundle, people map[string]TransferPerson) []TransferExportGap {
 	var gaps []TransferExportGap
 	gap := func(group string, err error) {
-		g := TransferExportGap{Group: group, Reason: "read_api_error"}
-		if st := transferStatus(err); st == 404 {
-			g.Reason = "read_api_missing"
-			g.Status = 404
-		} else if st > 0 {
-			g.Status = st
-		}
-		gaps = append(gaps, g)
+		gaps = append(gaps, transferReadGap(group, err))
 	}
 
 	bundle.Entities.Workspace = &ConfigWorkspace{
@@ -376,9 +434,10 @@ func exportConfigGroups(ctx context.Context, src TransferSourceClient, wsID stri
 	}
 
 	var labels []map[string]any
-	if err := getList(ctx, src, "/api/labels", &labels); err != nil {
+	if trunc, err := getList(ctx, src, "/api/labels", &labels); err != nil {
 		gap("labels", err)
 	} else {
+		noteListTruncation(gap, "labels", trunc)
 		for _, raw := range labels {
 			bundle.Entities.Labels = append(bundle.Entities.Labels, ConfigLabel{
 				SourceID:     strField(raw, "id"),
@@ -392,9 +451,10 @@ func exportConfigGroups(ctx context.Context, src TransferSourceClient, wsID stri
 	}
 
 	var statuses []map[string]any
-	if err := getList(ctx, src, "/api/issue-statuses", &statuses); err != nil {
+	if trunc, err := getList(ctx, src, "/api/issue-statuses", &statuses); err != nil {
 		gap("issue_statuses", err)
 	} else {
+		noteListTruncation(gap, "issue_statuses", trunc)
 		for _, raw := range statuses {
 			bundle.Entities.IssueStatuses = append(bundle.Entities.IssueStatuses, ConfigIssueStatus{
 				SourceID:    strField(raw, "id"),
@@ -411,9 +471,10 @@ func exportConfigGroups(ctx context.Context, src TransferSourceClient, wsID stri
 	}
 
 	var props []map[string]any
-	if err := getList(ctx, src, "/api/properties", &props); err != nil {
+	if trunc, err := getList(ctx, src, "/api/properties", &props); err != nil {
 		gap("issue_properties", err)
 	} else {
+		noteListTruncation(gap, "issue_properties", trunc)
 		for _, raw := range props {
 			bundle.Entities.IssueProperties = append(bundle.Entities.IssueProperties, ConfigProperty{
 				SourceID:    strField(raw, "id"),
@@ -452,9 +513,11 @@ func sourceExportSkills(ctx context.Context, src TransferSourceClient, wsID stri
 		pluginSkills = nil
 	}
 	var skills []map[string]any
-	if err := getList(ctx, src, "/api/skills", &skills); err != nil {
+	if trunc, err := getList(ctx, src, "/api/skills", &skills); err != nil {
 		gap("skills", err)
 		return
+	} else {
+		noteListTruncation(gap, "skills", trunc)
 	}
 	for _, raw := range skills {
 		name := strField(raw, "name")
@@ -470,13 +533,15 @@ func sourceExportSkills(ctx context.Context, src TransferSourceClient, wsID stri
 			Config:      rawField(raw, "config"),
 		}
 		var files []map[string]any
-		if err := getList(ctx, src, "/api/skills/"+url.PathEscape(id)+"/files", &files); err == nil {
+		if trunc, err := getList(ctx, src, "/api/skills/"+url.PathEscape(id)+"/files", &files); err == nil {
+			noteListTruncation(gap, "skills", trunc)
 			for _, f := range files {
 				sk.Files = append(sk.Files, ConfigSkillFile{Path: strField(f, "path"), Content: strField(f, "content")})
 			}
 		}
 		var labs []map[string]any
-		if err := getList(ctx, src, "/api/skills/"+url.PathEscape(id)+"/labels", &labs); err == nil {
+		if trunc, err := getList(ctx, src, "/api/skills/"+url.PathEscape(id)+"/labels", &labs); err == nil {
+			noteListTruncation(gap, "skills", trunc)
 			for _, l := range labs {
 				sk.LabelIDs = append(sk.LabelIDs, strField(l, "id"))
 			}
@@ -493,8 +558,14 @@ func sourceExportSkills(ctx context.Context, src TransferSourceClient, wsID stri
 // record plugin_skills_unfiltered.
 func pluginContributedSkillNames(ctx context.Context, src TransferSourceClient, wsID string) (map[string]bool, error) {
 	var plugins []map[string]any
-	if err := getList(ctx, src, "/api/workspaces/"+url.PathEscape(wsID)+"/plugins", &plugins); err != nil {
+	trunc, err := getList(ctx, src, "/api/workspaces/"+url.PathEscape(wsID)+"/plugins", &plugins)
+	if err != nil {
 		return nil, err
+	}
+	if trunc != nil {
+		// A capped page cannot say which skills came from plugins, so the
+		// caller exports all of them and records plugin_skills_unfiltered.
+		return nil, trunc
 	}
 	out := map[string]bool{}
 	for _, raw := range plugins {
@@ -517,9 +588,11 @@ func pluginContributedSkillNames(ctx context.Context, src TransferSourceClient, 
 
 func exportAgentsGroup(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {
 	var agents []map[string]any
-	if err := getList(ctx, src, "/api/agents", &agents); err != nil {
+	if trunc, err := getList(ctx, src, "/api/agents", &agents); err != nil {
 		gap("agents", err)
 		return
+	} else {
+		noteListTruncation(gap, "agents", trunc)
 	}
 	for _, raw := range agents {
 		id := strField(raw, "id")
@@ -614,13 +687,15 @@ func exportAgentsGroup(ctx context.Context, src TransferSourceClient, bundle *Co
 			}
 		}
 		var labs []map[string]any
-		if err := getList(ctx, src, "/api/agents/"+url.PathEscape(id)+"/labels", &labs); err == nil {
+		if trunc, err := getList(ctx, src, "/api/agents/"+url.PathEscape(id)+"/labels", &labs); err == nil {
+			noteListTruncation(gap, "agents", trunc)
 			for _, l := range labs {
 				a.LabelIDs = append(a.LabelIDs, strField(l, "id"))
 			}
 		}
 		var mcps []map[string]any
-		if err := getList(ctx, src, "/api/agents/"+url.PathEscape(id)+"/mcp-servers", &mcps); err == nil {
+		if trunc, err := getList(ctx, src, "/api/agents/"+url.PathEscape(id)+"/mcp-servers", &mcps); err == nil {
+			noteListTruncation(gap, "agents", trunc)
 			for _, m := range mcps {
 				a.McpServers = append(a.McpServers, ConfigAgentMcp{Server: strField(m, "id"), Enabled: boolField(m, "enabled")})
 			}
@@ -651,9 +726,11 @@ func stripMaskedGateway(raw json.RawMessage) json.RawMessage {
 
 func sourceExportSquads(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ map[string]TransferPerson, _ *[]TransferExportGap, gap func(string, error)) {
 	var rows []map[string]any
-	if err := getList(ctx, src, "/api/squads", &rows); err != nil {
+	if trunc, err := getList(ctx, src, "/api/squads", &rows); err != nil {
 		gap("squads", err)
 		return
+	} else {
+		noteListTruncation(gap, "squads", trunc)
 	}
 	for _, raw := range rows {
 		id := strField(raw, "id")
@@ -666,7 +743,8 @@ func sourceExportSquads(ctx context.Context, src TransferSourceClient, bundle *C
 			LeaderID:     strField(raw, "leader_id"),
 		}
 		var members []map[string]any
-		if err := getList(ctx, src, "/api/squads/"+url.PathEscape(id)+"/members", &members); err == nil {
+		if trunc, err := getList(ctx, src, "/api/squads/"+url.PathEscape(id)+"/members", &members); err == nil {
+			noteListTruncation(gap, "squads", trunc)
 			for _, m := range members {
 				role := strField(m, "role")
 				if role == "leader" {
@@ -686,9 +764,11 @@ func sourceExportSquads(ctx context.Context, src TransferSourceClient, bundle *C
 
 func sourceExportProjects(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {
 	var rows []map[string]any
-	if err := getList(ctx, src, "/api/projects", &rows); err != nil {
+	if trunc, err := getList(ctx, src, "/api/projects", &rows); err != nil {
 		gap("projects", err)
 		return
+	} else {
+		noteListTruncation(gap, "projects", trunc)
 	}
 	for _, raw := range rows {
 		id := strField(raw, "id")
@@ -704,7 +784,8 @@ func sourceExportProjects(ctx context.Context, src TransferSourceClient, bundle 
 			p.Lead = &ConfigPolymorphicRef{Type: leadType, ID: strField(raw, "lead_id")}
 		}
 		var resources []map[string]any
-		if err := getList(ctx, src, "/api/projects/"+url.PathEscape(id)+"/resources", &resources); err == nil {
+		if trunc, err := getList(ctx, src, "/api/projects/"+url.PathEscape(id)+"/resources", &resources); err == nil {
+			noteListTruncation(gap, "projects", trunc)
 			for _, r := range resources {
 				p.Resources = append(p.Resources, ConfigProjectResource{
 					ResourceType: strField(r, "resource_type"),
@@ -721,9 +802,11 @@ func sourceExportProjects(ctx context.Context, src TransferSourceClient, bundle 
 
 func sourceExportAutopilots(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {
 	var rows []map[string]any
-	if err := getList(ctx, src, "/api/autopilots", &rows); err != nil {
+	if trunc, err := getList(ctx, src, "/api/autopilots", &rows); err != nil {
 		gap("autopilots", err)
 		return
+	} else {
+		noteListTruncation(gap, "autopilots", trunc)
 	}
 	for _, raw := range rows {
 		id := strField(raw, "id")
@@ -789,9 +872,11 @@ func sourceExportAutopilots(ctx context.Context, src TransferSourceClient, bundl
 
 func sourceExportQuickActions(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {
 	var rows []map[string]any
-	if err := getList(ctx, src, "/api/quick-actions", &rows); err != nil {
+	if trunc, err := getList(ctx, src, "/api/quick-actions", &rows); err != nil {
 		gap("quick_actions", err)
 		return
+	} else {
+		noteListTruncation(gap, "quick_actions", trunc)
 	}
 	for _, raw := range rows {
 		qa := ConfigQuickAction{
@@ -821,12 +906,19 @@ func sourceExportIssueViews(ctx context.Context, src TransferSourceClient, bundl
 	}
 	for _, path := range paths {
 		var rows []map[string]any
-		if err := getList(ctx, src, path, &rows); err != nil {
+		trunc, err := getList(ctx, src, path, &rows)
+		if err != nil {
 			gap("issue_views", err)
 			continue
 		}
+		noteListTruncation(gap, "issue_views", trunc)
 		for _, raw := range rows {
-			if strField(raw, "visibility") != "workspace" {
+			// Parity with the V1 export (ExportIssueViews): workspace- and
+			// project-shared views travel; private and my-scope views stay
+			// behind. Skipping visibility='project' silently dropped every
+			// project board from the bundle.
+			visibility := strField(raw, "visibility")
+			if visibility != "workspace" && visibility != "project" {
 				continue
 			}
 			bundle.Entities.IssueViews = append(bundle.Entities.IssueViews, ConfigIssueView{
@@ -835,7 +927,7 @@ func sourceExportIssueViews(ctx context.Context, src TransferSourceClient, bundl
 				ScopeType:         strField(raw, "scope_type"),
 				ScopeID:           strPtrField(raw, "scope_id"),
 				ScopeVariant:      strPtrField(raw, "scope_variant"),
-				Visibility:        strField(raw, "visibility"),
+				Visibility:        visibility,
 				DefinitionVersion: int32(floatField(raw, "definition_version")),
 				Query:             rawField(raw, "query"),
 				Display:           rawField(raw, "display"),
@@ -848,9 +940,10 @@ func sourceExportIssueViews(ctx context.Context, src TransferSourceClient, bundl
 func sourceExportIntegrations(ctx context.Context, src TransferSourceClient, wsID string, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {
 	base := "/api/workspaces/" + url.PathEscape(wsID)
 	var mcp []map[string]any
-	if err := getList(ctx, src, base+"/mcp-servers", &mcp); err != nil {
+	if trunc, err := getList(ctx, src, base+"/mcp-servers", &mcp); err != nil {
 		gap("mcp_servers", err)
 	} else {
+		noteListTruncation(gap, "mcp_servers", trunc)
 		for _, raw := range mcp {
 			bundle.Entities.McpServers = append(bundle.Entities.McpServers, ConfigMcpServer{
 				SourceID:  strField(raw, "id"),
@@ -864,7 +957,8 @@ func sourceExportIntegrations(ctx context.Context, src TransferSourceClient, wsI
 		bundle.Stats["mcp_servers"] = len(bundle.Entities.McpServers)
 	}
 	var gh []map[string]any
-	if err := getList(ctx, src, base+"/github/installations", &gh); err == nil {
+	if trunc, err := getList(ctx, src, base+"/github/installations", &gh); err == nil {
+		noteListTruncation(gap, "github_installations", trunc)
 		for _, raw := range gh {
 			bundle.Integrations = append(bundle.Integrations, ConfigIntegration{
 				Kind: "github", AccountLogin: strField(raw, "account_login"), AccountType: strField(raw, "account_type"),
@@ -872,7 +966,8 @@ func sourceExportIntegrations(ctx context.Context, src TransferSourceClient, wsI
 		}
 	}
 	var vcs []map[string]any
-	if err := getList(ctx, src, base+"/vcs/connections", &vcs); err == nil {
+	if trunc, err := getList(ctx, src, base+"/vcs/connections", &vcs); err == nil {
+		noteListTruncation(gap, "vcs_connections", trunc)
 		for _, raw := range vcs {
 			bundle.Integrations = append(bundle.Integrations, ConfigIntegration{
 				Kind: "vcs", Provider: strField(raw, "provider"), InstanceURL: strField(raw, "instance_url"), AccountLogin: strField(raw, "account_login"),
@@ -880,7 +975,8 @@ func sourceExportIntegrations(ctx context.Context, src TransferSourceClient, wsI
 		}
 	}
 	var plugins []map[string]any
-	if err := getList(ctx, src, base+"/plugins", &plugins); err == nil {
+	if trunc, err := getList(ctx, src, base+"/plugins", &plugins); err == nil {
+		noteListTruncation(gap, "plugins", trunc)
 		for _, raw := range plugins {
 			bundle.PluginsToReinstall = append(bundle.PluginsToReinstall, ConfigPlugin{
 				PluginKey:     strField(raw, "plugin_key"),
@@ -893,7 +989,7 @@ func sourceExportIntegrations(ctx context.Context, src TransferSourceClient, wsI
 	}
 }
 
-func exportRuntimeProfiles(ctx context.Context, src TransferSourceClient, wsID string, bundle *ConfigBundle) (TransferRuntimesFile, error) {
+func exportRuntimeProfiles(ctx context.Context, src TransferSourceClient, wsID string, bundle *ConfigBundle, gaps *[]TransferExportGap) (TransferRuntimesFile, error) {
 	out := TransferRuntimesFile{}
 	var wrapped struct {
 		RuntimeProfiles []map[string]any `json:"runtime_profiles"`
@@ -927,7 +1023,8 @@ func exportRuntimeProfiles(ctx context.Context, src TransferSourceClient, wsID s
 		})
 	}
 	var runtimes []map[string]any
-	if err := getList(ctx, src, "/api/runtimes", &runtimes); err == nil {
+	if trunc, err := getList(ctx, src, "/api/runtimes", &runtimes); err == nil {
+		appendTransferGap(gaps, "runtimes", trunc)
 		for _, raw := range runtimes {
 			name := strField(raw, "custom_name")
 			if name == "" {
@@ -945,9 +1042,11 @@ func exportRuntimeProfiles(ctx context.Context, src TransferSourceClient, wsID s
 	return out, nil
 }
 
-func exportPinnedAgents(ctx context.Context, src TransferSourceClient) TransferPreferences {
+func exportPinnedAgents(ctx context.Context, src TransferSourceClient, gaps *[]TransferExportGap) TransferPreferences {
 	var rows []map[string]any
-	_ = getList(ctx, src, "/api/chat/pinned-agents", &rows)
+	if trunc, err := getList(ctx, src, "/api/chat/pinned-agents", &rows); err == nil {
+		appendTransferGap(gaps, "pinned_agents", trunc)
+	}
 	out := TransferPreferences{}
 	for _, raw := range rows {
 		out.PinnedAgents = append(out.PinnedAgents, TransferPinnedAgent{
@@ -967,10 +1066,12 @@ func exportConversations(ctx context.Context, src TransferSourceClient, opts Tra
 	if !opts.ExcludeArchived {
 		path += "?status=all"
 	}
-	if err := getList(ctx, src, path, &sessions); err != nil {
+	trunc, err := getList(ctx, src, path, &sessions)
+	if err != nil {
 		gaps = append(gaps, TransferExportGap{Group: "conversations", Reason: "read_api_error", Status: transferStatus(err)})
 		return nil, nil, nil, nil, nil, nil, gaps
 	}
+	appendTransferGap(&gaps, "conversations", trunc)
 
 	est := &TransferEstimate{Sessions: len(sessions)}
 	sessRows := []TransferSessionRow{}
@@ -1269,29 +1370,98 @@ func shardConversations(sessions []TransferSessionRow, msgs map[string][]Transfe
 	return sessShards, msgShards
 }
 
-func getList(ctx context.Context, src TransferSourceClient, path string, dest *[]map[string]any) error {
+// transferListCaps is the server-side per-request result cap of the list
+// endpoints the export reads through getList, keyed by path with the query
+// string stripped. A response that fills its cap has no room for the next row,
+// so the tail is unaccounted for and the read is reported as
+// list_cap_reached. Endpoints absent from this table have no LIMIT on their
+// result set in server/pkg/db/queries, so a full response is the whole list —
+// add an entry here when a new capped endpoint joins the export.
+var transferListCaps = map[string]int{
+	// ListIssueViewsForUser ends in `LIMIT 200` (issue_view.sql): one saved-view
+	// scope can hold more rows than the endpoint will ever return in one call.
+	"/api/issue-views": 200,
+}
+
+// listCapTruncation reports a read whose row count reached the endpoint's cap.
+func listCapTruncation(path string, rows int) *TransferListTruncation {
+	base, _, _ := strings.Cut(path, "?")
+	limit, ok := transferListCaps[base]
+	if !ok || rows < limit {
+		return nil
+	}
+	return &TransferListTruncation{Reason: TransferGapListCapReached, Limit: limit}
+}
+
+// listEnvelopeTruncation reports the pagination signals an envelope can carry.
+// getList reads exactly one response, so an envelope that says "another page
+// exists" can never be treated as the complete list.
+func listEnvelopeTruncation(obj map[string]json.RawMessage) *TransferListTruncation {
+	if v, ok := obj["has_more"]; ok {
+		var hasMore bool
+		if json.Unmarshal(v, &hasMore) == nil && hasMore {
+			return &TransferListTruncation{Reason: TransferGapListHasMore}
+		}
+	}
+	if v, ok := obj["next_cursor"]; ok && !isJSONNull(v) {
+		var cursor any
+		if json.Unmarshal(v, &cursor) == nil {
+			switch c := cursor.(type) {
+			case string:
+				if c != "" {
+					return &TransferListTruncation{Reason: TransferGapListHasMore}
+				}
+			case map[string]any:
+				if len(c) > 0 {
+					return &TransferListTruncation{Reason: TransferGapListHasMore}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// getList decodes one list response. The second result is non-nil when that
+// response may not be the whole list: the endpoint's per-request cap was
+// reached, or the envelope advertised another page. Callers record it as an
+// export gap and keep the decoded rows — reading one page and moving on is the
+// silent truncation the manifest has to account for.
+func getList(ctx context.Context, src TransferSourceClient, path string, dest *[]map[string]any) (*TransferListTruncation, error) {
 	var raw json.RawMessage
 	if err := src.GetJSON(ctx, path, &raw); err != nil {
-		return err
+		return nil, err
 	}
 	if len(raw) == 0 || string(raw) == "null" {
 		*dest = nil
-		return nil
+		return nil, nil
 	}
 	if raw[0] == '[' {
-		return json.Unmarshal(raw, dest)
+		if err := json.Unmarshal(raw, dest); err != nil {
+			return nil, err
+		}
+		return listCapTruncation(path, len(*dest)), nil
 	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		return err
+		return nil, err
 	}
-	for _, key := range []string{"items", "data", "labels", "agents", "skills", "squads", "projects", "autopilots", "quick_actions", "issue_views", "issue_statuses", "properties", "members", "mcp_servers", "runtime_profiles", "runtimes", "plugins", "installations", "connections", "messages", "resources", "files"} {
+	for _, key := range []string{"items", "data", "labels", "statuses", "agents", "skills", "squads", "projects", "autopilots", "quick_actions", "issue_views", "issue_statuses", "properties", "members", "mcp_servers", "runtime_profiles", "runtimes", "plugins", "installations", "connections", "messages", "resources", "files"} {
 		if v, ok := obj[key]; ok && len(v) > 0 && v[0] == '[' {
-			return json.Unmarshal(v, dest)
+			if err := json.Unmarshal(v, dest); err != nil {
+				return nil, err
+			}
+			if trunc := listEnvelopeTruncation(obj); trunc != nil {
+				return trunc, nil
+			}
+			return listCapTruncation(path, len(*dest)), nil
 		}
 	}
+	// No recognized list key: the endpoint renamed its envelope, or this
+	// exporter never learned it. Reporting zero rows as if they were the whole
+	// group is the failure mode that hid the issue-status catalog behind
+	// {"statuses": ...}; name it instead.
 	*dest = nil
-	return nil
+	return &TransferListTruncation{Reason: TransferGapListShapeUnknown}, nil
 }
 
 func strField(m map[string]any, k string) string {

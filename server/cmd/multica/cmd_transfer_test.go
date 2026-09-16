@@ -201,6 +201,73 @@ const (
 	partialMessageMarker = "KEEP-PARTIAL-MESSAGE"
 )
 
+// A profile with no default workspace_id (Desktop, or a freshly created
+// profile) used to leave the client unbound: /api/labels, /api/agents and
+// /api/chat/sessions were sent without X-Workspace-ID and answered for a
+// different workspace, or 400'd. --workspace <slug> is the authoritative
+// source selection, so the resolved UUID must ride on every scoped request.
+func TestTransferExport_BindsResolvedWorkspaceHeaderWithoutProfileWorkspace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	// The ambient environment of an agent run carries these; a human profile
+	// with no default workspace carries neither.
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+	const wsUUID = "0f8fad5b-d9cb-469f-a165-70867728950e"
+	var mu sync.Mutex
+	seen := map[string][]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen[r.URL.Path] = append(seen[r.URL.Path], r.Header.Get("X-Workspace-ID"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/me":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "user-1", "email": "owner@example.com", "name": "Owner"})
+		case r.URL.Path == "/api/workspaces":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": wsUUID, "slug": "src", "name": "Src", "issue_prefix": "SRC"}})
+		case r.URL.Path == "/api/workspaces/"+wsUUID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": wsUUID, "slug": "src", "name": "Src", "issue_prefix": "SRC", "settings": map[string]any{}, "repos": []any{}})
+		case r.URL.Path == "/api/labels":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "lb-1", "name": "bug", "resource_type": "issue"}})
+		case r.URL.Path == "/api/agents":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "ag-1", "name": "Bot", "instructions": "hi"}})
+		case r.URL.Path == "/api/chat/sessions":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"id": "sess-1", "agent_id": "ag-1", "title": "hello", "status": "active",
+				"created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
+			}})
+		default:
+			_ = json.NewEncoder(w).Encode([]any{})
+		}
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "bundle.zip")
+	cmd := newTransferExportTestCmd()
+	_ = cmd.Flags().Set("server-url", srv.URL)
+	// Deliberately no --workspace-id: the slug is the only source selector.
+	_ = cmd.Flags().Set("workspace", "src")
+	_ = cmd.Flags().Set("out", out)
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+
+	for _, path := range []string{"/api/labels", "/api/agents", "/api/chat/sessions", "/api/workspaces/" + wsUUID} {
+		got := seen[path]
+		if len(got) == 0 {
+			t.Fatalf("export never requested %s", path)
+		}
+		for _, h := range got {
+			if h != wsUUID {
+				t.Fatalf("%s X-Workspace-ID = %q, want the resolved workspace UUID %q (not the slug, not empty)", path, h, wsUUID)
+			}
+		}
+	}
+}
+
 func TestTransferExport_PartialResumeKeepsCompletedShards(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "mat_test-token")
