@@ -1,6 +1,17 @@
+// AGY's numbered account slots.
+//
+// `runtime_config.agy_slots` is the agent-level list of numbered Gemini
+// directories this agent may rotate to when a quota runs out; the backend
+// (`server/pkg/agent/agy_quota.go`) reads the same key, so both sides must
+// agree on its shape — hence one parse/write pair here.
+//
+// The slots themselves are host-only paths: this module derives directories
+// from the host home. It never reads a credential, and the per-directory
+// sign-in / quota state comes from the daemon's `agent_accounts` report rather
+// than from the `agy_logged_in_dirs` / `agy_quota_exhausted` metadata keys,
+// which stay on the API surface for older desktop builds.
+
 export const ACCOUNT1_DIR = ".gemini";
-export const ACCOUNT2_DIR = ".gemini-account2";
-export const ACCOUNT3_DIR = ".gemini-account3";
 
 export const AGY_SLOTS_RUNTIME_KEY = "agy_slots";
 export const DEFAULT_NUMBERED_ACCOUNTS = [1, 2, 3] as const;
@@ -8,11 +19,6 @@ export const MAX_AGY_ACCOUNT_NUMBER = 32;
 
 export type AgyNumberedSlot = `account${number}`;
 export type AgyAccountSlot = AgyNumberedSlot | "custom";
-
-export const AGY_CREDENTIAL_RELATIVE_PATHS = [
-  "oauth_creds.json",
-  "antigravity-cli/antigravity-oauth-token",
-] as const;
 
 const ACCOUNT_SLOT_RE = /^account(\d+)$/;
 const GEMINI_ACCOUNT_DIR_RE = /^\.gemini-(account\d+)$/;
@@ -32,18 +38,8 @@ export function isNumberedAccountSlot(slot: string): slot is AgyNumberedSlot {
   return parseAccountNumber(slot) !== null;
 }
 
-export function isIsolatedAccountSlot(slot: AgyAccountSlot): boolean {
-  const n = parseAccountNumber(slot);
-  return n !== null && n >= 2;
-}
-
 export function accountDirectoryLeaf(account: number): string {
   return account <= 1 ? ACCOUNT1_DIR : `.gemini-account${account}`;
-}
-
-export function accountSlotDirectory(slot: AgyNumberedSlot): string {
-  const n = parseAccountNumber(slot);
-  return n ? accountDirectoryLeaf(n) : ACCOUNT1_DIR;
 }
 
 export function nextAccountNumber(accounts: readonly number[]): number {
@@ -140,23 +136,6 @@ export function runtimeHomeDir(
   return isAbsoluteFsPath(trimmed) ? trimmed : null;
 }
 
-export function runtimeLoggedInDirs(
-  runtime?: { metadata?: Record<string, unknown> } | null,
-): string[] {
-  const value = runtime?.metadata?.agy_logged_in_dirs;
-  if (!Array.isArray(value)) return [];
-  const dirs: string[] = [];
-  const seen = new Set<string>();
-  for (const entry of value) {
-    if (typeof entry !== "string") continue;
-    const trimmed = entry.trim().replace(/[/\\]+$/, "");
-    if (!isAbsoluteFsPath(trimmed) || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    dirs.push(trimmed);
-  }
-  return dirs;
-}
-
 export function readProcessHomeDir(): string | null {
   const desktopHome = (globalThis as { desktopAPI?: { homeDir?: unknown } }).desktopAPI?.homeDir;
   if (typeof desktopHome === "string" && isAbsoluteFsPath(desktopHome.trim())) {
@@ -205,102 +184,6 @@ export function detectAgyAccountSlot(profile: string): AgyAccountSlot {
   return slotFromBasename(pathBasename(trimmed));
 }
 
-function resolveNumberedDirectory(slot: AgyNumberedSlot, homeDir: string | null): string {
-  const leaf = accountSlotDirectory(slot);
-  return homeDir ? joinHomeDir(homeDir, leaf) : `~/${leaf}`;
-}
-
-export function resolveSlotDirectory(
-  slot: AgyAccountSlot,
-  customPath: string,
-  homeDir: string | null,
-): string {
-  if (slot === "account1") return "";
-  if (isNumberedAccountSlot(slot)) return resolveNumberedDirectory(slot, homeDir);
-  const trimmed = customPath.trim();
-  if (homeDir && (trimmed === "~" || trimmed.startsWith("~/") || trimmed.startsWith("~\\"))) {
-    return expandHomePrefix(trimmed, homeDir);
-  }
-  return trimmed;
-}
-
-export function loginDirectory(
-  slot: AgyAccountSlot,
-  profile: string,
-  homeDir: string | null,
-): string {
-  if (profile && isAbsoluteFsPath(profile)) return profile;
-  if (isNumberedAccountSlot(slot)) return resolveNumberedDirectory(slot, homeDir);
-  if (homeDir && (profile === "~" || profile.startsWith("~/"))) {
-    return expandHomePrefix(profile, homeDir);
-  }
-  return profile;
-}
-
 export function formatAgyLoginCommand(directory: string): string {
   return directory ? `agy --gemini_dir=${directory}` : "agy";
-}
-
-export function agyCredentialPaths(directory: string): string[] {
-  const trimmed = directory.trim().replace(/[/\\]+$/, "");
-  if (!trimmed) return [];
-  return AGY_CREDENTIAL_RELATIVE_PATHS.map((rel) => joinHomeDir(trimmed, rel));
-}
-
-export function directoryHasAgyCredentials(
-  directory: string,
-  exists: (path: string) => boolean,
-): boolean {
-  return agyCredentialPaths(directory).some((path) => exists(path));
-}
-
-export function slotIsSignedIn(
-  directory: string,
-  loggedInDirs: readonly string[],
-): boolean {
-  const normalized = directory.trim().replace(/[/\\]+$/, "");
-  if (!normalized) return false;
-  return loggedInDirs.some((dir) => dir.replace(/[/\\]+$/, "") === normalized);
-}
-
-export type AgyQuotaExhaustedEntry = {
-  dir: string;
-  reset_at: number;
-};
-
-function normalizeSlotDir(directory: string): string {
-  return directory.trim().replace(/[/\\]+$/, "");
-}
-
-export function runtimeQuotaExhausted(
-  runtime?: { metadata?: Record<string, unknown> } | null,
-): AgyQuotaExhaustedEntry[] {
-  const value = runtime?.metadata?.agy_quota_exhausted;
-  if (!Array.isArray(value)) return [];
-  const out: AgyQuotaExhaustedEntry[] = [];
-  const seen = new Set<string>();
-  for (const entry of value) {
-    if (!entry || typeof entry !== "object") continue;
-    const dir = normalizeSlotDir(String((entry as { dir?: unknown }).dir ?? ""));
-    const resetAt = (entry as { reset_at?: unknown }).reset_at;
-    const unix = typeof resetAt === "number" ? resetAt : Number(resetAt);
-    if (!isAbsoluteFsPath(dir) || !Number.isFinite(unix) || unix <= 0) continue;
-    if (seen.has(dir)) continue;
-    seen.add(dir);
-    out.push({ dir, reset_at: unix });
-  }
-  return out;
-}
-
-/** Unix seconds remaining exhausted, or null when the slot is usable again. */
-export function slotQuotaResetAt(
-  directory: string,
-  exhausted: readonly AgyQuotaExhaustedEntry[],
-  nowMs = Date.now(),
-): number | null {
-  const normalized = normalizeSlotDir(directory);
-  if (!normalized) return null;
-  const entry = exhausted.find((item) => normalizeSlotDir(item.dir) === normalized);
-  if (!entry) return null;
-  return entry.reset_at * 1000 > nowMs ? entry.reset_at : null;
 }

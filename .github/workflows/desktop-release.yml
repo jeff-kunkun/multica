@@ -1,0 +1,210 @@
+name: Desktop Release (macOS)
+
+# Builds the macOS Desktop installers on a GitHub runner and publishes them to
+# the GitHub Release for the pushed tag.
+#
+# Why this is not another job in release.yml:
+#
+#   * That workflow's publishing jobs are gated on the canonical upstream repo
+#     (`github.repository_owner == 'multica-ai'`), and its `desktop` job needs
+#     `release`; on this fork the gate skips `release`, so the desktop job is
+#     skipped with it. Desktop releases here would never start.
+#   * Its `verify` job runs the Go suite plus govulncheck. A desktop installer
+#     has no business waiting on (or being blocked by) that pipeline.
+#
+# Why it exists at all: uploading a 230 MB DMG from a workstation does not
+# finish. The connection to uploads.github.com stalls (the release issue records
+# ~90 KB/s outbound and `POST .../assets` returning EOF), `gh release upload`
+# still exits 0, and the half-written asset is left in `state=starter` while
+# `latest-mac.yml` advertises it — which is how v0.4.56 and v0.4.57 shipped a
+# dead auto-update feed. A runner uploads inside GitHub's network, and the
+# verification step below fails the run unless every asset is really there.
+#
+# Republishing an existing tag (for example after a truncated upload) is a
+# workflow_dispatch with that tag: the checked-out commit is the tag itself, so
+# the rebuild stays the release's own baseline.
+
+on:
+  push:
+    tags:
+      # GitHub Actions uses glob patterns here, not regex. Match versioned tags
+      # broadly at the trigger layer, then enforce strict semver below.
+      - "v*.*.*"
+      - "!v*-dirty*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to rebuild and republish, e.g. v0.4.57"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# Serialize per ref: two runs publishing the same tag would fight over the same
+# asset names.
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    # The kun fork publishes macOS Desktop; upstream builds it by hand so it can
+    # be signed and notarized with Apple credentials CI does not carry. Guard
+    # the job so this workflow can never double-publish on the upstream repo.
+    if: github.repository == 'jeff-kunkun/multica'
+    # macos-14 is an Apple Silicon runner, so the arm64 package is built
+    # natively and the bundled Go CLI is built for the host it targets.
+    runs-on: macos-14
+    env:
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Resolve the release tag
+        id: meta
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-}"
+          if [[ -z "$tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tags must look like vX.Y.Z or vX.Y.Z-suffix; got '$tag'."
+            exit 1
+          fi
+          if [[ "$tag" == *-dirty* ]]; then
+            echo "::error::Refusing to release from dirty tag '$tag'."
+            exit 1
+          fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout ${{ steps.meta.outputs.tag }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+          fetch-depth: 0
+
+      # The build baseline is the tag's own tree, but a tag older than a change
+      # to the release tooling does not contain it. Take the tooling from the
+      # commit whose workflow is running (the tag itself on a tag push, the
+      # dispatched branch otherwise) so `workflow_dispatch` can backfill an
+      # older tag, and stage it outside the tree being packaged.
+      - name: Checkout the release tooling from ${{ github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .release-tools
+          sparse-checkout: scripts/desktop-release-assets.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Stage the release tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .release-tools/scripts/desktop-release-assets.mjs "$RUNNER_TEMP/desktop-release-assets.mjs"
+          echo "ASSETS_TOOL=$RUNNER_TEMP/desktop-release-assets.mjs" >> "$GITHUB_ENV"
+
+      - name: Record the build commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The version electron-builder stamps comes from `git describe` on
+          # this commit; record it so the log proves which tree was packaged.
+          echo "BUILD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "build commit: $(git rev-parse HEAD) ($(git describe --tags --match 'v[0-9]*' --always))"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # releases follow the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+
+      - name: Record Go toolchain
+        run: go version
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package macOS Desktop (arm64)
+        working-directory: apps/desktop
+        env:
+          # Ad-hoc signature, no notarization: the release carries no Apple
+          # Developer credentials, and installed clients already accept the
+          # ad-hoc build. `package.mjs` also disables notarization when
+          # APPLE_TEAM_ID is absent.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # No publisher token: publishing happens below so the upload can be
+          # verified. electron-builder still writes latest-mac.yml and the
+          # blockmaps with --publish never.
+        run: node scripts/package.mjs --mac --arm64 --publish never
+
+      - name: Drop zombie assets left by an earlier failed upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node "$ASSETS_TOOL" clean --tag "$TAG" --repo "$REPO"
+
+      - name: Ensure the release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "release $TAG already exists; its assets will be replaced"
+            exit 0
+          fi
+          gh release create "$TAG" \
+            --repo "$REPO" \
+            --verify-tag \
+            --title "Multica Desktop $TAG (kun fork)" \
+            --generate-notes \
+            --notes "macOS arm64，ad-hoc 签名、未公证。首次打开需在「系统设置 → 隐私与安全性」中放行，或执行 \`xattr -cr /Applications/Multica.app\`。资产由 Desktop Release workflow 构建并上传，上传后会逐个核对 \`state=uploaded\` 与文件大小。"
+
+      - name: Upload assets (feed metadata last)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node "$ASSETS_TOOL" upload --tag "$TAG" --repo "$REPO" --dist apps/desktop/dist
+
+      # Runs even when the upload step failed: `gh release upload` exiting 0
+      # says nothing about whether the bytes arrived, so this step is the only
+      # thing that decides whether the release is actually usable. A truncated
+      # upload must leave a red run, never a silent gap in the feed.
+      - name: Verify every asset is uploaded and matches the local build
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node "$ASSETS_TOOL" check \
+            --tag "$TAG" \
+            --repo "$REPO" \
+            --dist apps/desktop/dist \
+            --attempts 6 \
+            --delay-ms 10000
+
+      - name: Dump release asset states
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          id=$(gh api "repos/$REPO/releases/tags/$TAG" --jq .id) || exit 0
+          {
+            echo "### $TAG asset states"
+            echo '```'
+            gh api --paginate "repos/$REPO/releases/$id/assets" \
+              --jq '.[] | "\(.name)  state=\(.state)  size=\(.size)  digest=\(.digest // "-")"'
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useModalStore } from "@multica/core/modals";
 import { CreateIssueDialog } from "./create-issue-dialog";
+import { CreateIssueDraftDialog } from "../issues/draft";
 import { CreateProjectModal } from "./create-project";
 import { CreateSquadModal } from "./create-squad";
 import { FeedbackModal } from "./feedback";
@@ -38,6 +39,12 @@ export function ModalRegistry() {
           data={data}
         />
       );
+      break;
+    // Requirement alignment is a different act from filing an issue, not a mode
+    // of it: it creates a draft conversation and navigates, and the long
+    // conversation that follows lives on its own route.
+    case "create-issue-draft":
+      activeModal = <CreateIssueDraftDialog onClose={close} data={data} />;
       break;
     case "create-project":
       activeModal = <CreateProjectModal onClose={close} />;

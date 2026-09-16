@@ -125,6 +125,12 @@ provider 适配层统一了不同 AI 编程工具的启动、流式事件、取�
 
 任务的负责人是多态关系，可以指向成员、智能体或小队。新增查询、缓存 key 或实时事件时，都要保留工作区与负责人类型，不能只按资源 ID 假设全局唯一上下文。
 
+## 对齐载体与任务 token 能力范围
+
+需求对齐跑在隐藏的系统载体上（`agent.system_key = 'issue_draft:*'`），在用户确认结构化草稿之前不创建任何东西。载体和其他任务一样执行，所以它的 `mat_` 任务 token 被刻意收窄：`internal/middleware` 只放行 `GET`、`HEAD`、`OPTIONS`，其余方法一律 `403`。载体「可以说什么」是提示词的事，「可以通过 API 做什么」在凭据校验处强制执行。
+
+这条边界止于 API。agent 进程仍然在真实机器上跑真实 CLI，它的本地副作用——shell 命令、写文件、`git push`——不在服务端控制范围内。各家 provider 后端能限制的程度并不一致（Claude 系 runner 支持 `--disallowedTools`，其他家没有等价开关），因此本地这一半只能按 provider 尽力而为。不要把它描述成沙箱，也不要宣称跨 provider 强制只读：必须不可能的事，要放在 API 层。
+
 ## 接下来
 
 - [参与开发](/developers/contributing) — 本地环境、worktree 和测试位置。
