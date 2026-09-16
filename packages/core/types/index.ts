@@ -1,4 +1,5 @@
 export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext } from "./issue";
+export type { IssueDraft, IssueDraftStatus, IssueDraftPayload, IssueDraftPolicy, IssueDraftSession, IssueDraftSummary, IssueDraftFinalizeResult, IssueDraftRuntimeSwitch } from "./issue-draft";
 export type {
   IssueStatusCategory,
   IssueStatusEntry,
@@ -88,6 +89,15 @@ export type {
   RuntimeLocalSkillImportRequest,
   RuntimeLocalSkillsResult,
   RuntimeLocalSkillImportResult,
+  RuntimeProviderPresetAction,
+  RuntimeProviderPresetStatus,
+  RuntimeProviderPresetModel,
+  RuntimeProviderPreset,
+  RuntimeProviderPresetActive,
+  RuntimeProviderPresetTicket,
+  RuntimeProviderPresetRequest,
+  RuntimeProviderPresetUpsertInput,
+  RuntimeProviderPresetsResult,
   IssueUsageSummary,
   MikaBootstrapResponse,
 } from "./agent";
@@ -181,6 +191,7 @@ export type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  ProjectMember,
   ProjectResource,
   ProjectResourceType,
   ProjectResourceRef,

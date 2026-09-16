@@ -186,6 +186,12 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	}); err != nil {
 		return empty, err
 	}
+	if err := qtx.DeleteProjectMembersByMember(ctx, db.DeleteProjectMembersByMemberParams{
+		WorkspaceID: workspaceID,
+		MemberID:    userID,
+	}); err != nil {
+		return empty, err
+	}
 
 	// issue_subscriber carries no FK either (same MUL-3515 rule as the two
 	// prunes above), and MUL-5483 gave agents a path that writes member

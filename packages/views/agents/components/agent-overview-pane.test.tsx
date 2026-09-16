@@ -44,6 +44,9 @@ vi.mock("./tabs/skills-tab", () => ({
 vi.mock("./tabs/env-tab", () => ({
   EnvTab: () => <div>env-tab</div>,
 }));
+vi.mock("./tabs/agent-accounts-tab", () => ({
+  AgentAccountsTab: () => <div>agent-accounts-tab</div>,
+}));
 vi.mock("./tabs/custom-args-tab", () => ({
   CustomArgsTab: () => <div>custom-args-tab</div>,
 }));
@@ -141,7 +144,7 @@ function makeRuntime(provider: string): AgentRuntime {
 
 function renderPane(
   runtimes: AgentRuntime[],
-  { canEdit = true }: { canEdit?: boolean } = {},
+  { canEdit = true, view }: { canEdit?: boolean; view?: string } = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -151,7 +154,7 @@ function renderPane(
     replace: vi.fn(),
     back: vi.fn(),
     pathname: "/acme/agents/agent-1",
-    searchParams: new URLSearchParams(),
+    searchParams: new URLSearchParams(view ? { view } : {}),
     hash: "",
     getShareableUrl: (path) => path,
   };
@@ -262,6 +265,36 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
     openCapabilities();
     expect(
       screen.queryByRole("tab", { name: /^Integrations$/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentOverviewPane Accounts tab", () => {
+  it("registers the Accounts tab ahead of Environment and renders it", () => {
+    renderPane([makeRuntime("dsh")]);
+    openSettings();
+
+    const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(tabs.indexOf("Accounts")).toBeGreaterThan(-1);
+    expect(tabs.indexOf("Accounts")).toBeLessThan(tabs.indexOf("Environment"));
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Accounts$/i }));
+    expect(screen.getByText("agent-accounts-tab")).toBeInTheDocument();
+  });
+
+  it("opens the Accounts view from a ?view=accounts deep link", () => {
+    renderPane([makeRuntime("dsh")], { view: "accounts" });
+    expect(screen.getByText("agent-accounts-tab")).toBeInTheDocument();
+  });
+
+  it("hides the Accounts tab from users who cannot manage the agent", () => {
+    // Accounts reads GET /api/agents/{id}/env to tell a bound lever from an
+    // unbound one, so it inherits the env endpoint's permission rule: showing
+    // it to anyone else guarantees a 403 and an unanswerable summary.
+    renderPane([makeRuntime("dsh")], { canEdit: false });
+    openSettings();
+    expect(
+      screen.queryByRole("tab", { name: /^Accounts$/i }),
     ).not.toBeInTheDocument();
   });
 });
