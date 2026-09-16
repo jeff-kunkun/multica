@@ -303,6 +303,7 @@ var concurrentIndexCleanups = map[string]string{
 	"460_agent_task_queue_autopilot_run_created_at_index":       "idx_agent_task_queue_autopilot_run_created_at",
 	"465_agent_task_queue_chat_with_session_index":              "idx_agent_task_queue_chat_with_session_created_at",
 	"466_activity_log_member_assignee_frequency_index":          "idx_activity_log_member_assignee_frequency",
+	"486_issue_draft_origin_unique":                             "idx_issue_origin_issue_draft_unique",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
