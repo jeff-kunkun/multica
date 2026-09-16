@@ -229,6 +229,31 @@ func TestStageBarrierClosed_UnstagedIgnoredInStagedSet(t *testing.T) {
 	})
 }
 
+// in_review is a delivery signal in the agent brief, not a stage terminal.
+// A sole child in that status — no siblings left to wait on — must still
+// leave the barrier open (DENE-231 / close protocol §6.3). Treating it as
+// done would promote the next stage before Reviewer or human acceptance.
+func TestStageBarrierClosed_InReviewDoesNotClose(t *testing.T) {
+	t.Run("sole staged child in_review leaves the barrier open", func(t *testing.T) {
+		children := []db.Issue{child(1, "in_review")}
+		if stageBarrierClosed(children, child(1, "in_review"), literalTerminalChild) {
+			t.Fatal("in_review is not terminal; a sole staged child must not close the stage")
+		}
+	})
+	t.Run("sole unstaged child in_review leaves the implicit stage open", func(t *testing.T) {
+		children := []db.Issue{child(0, "in_review")}
+		if stageBarrierClosed(children, child(0, "in_review"), literalTerminalChild) {
+			t.Fatal("in_review is not terminal; the implicit stage must stay open")
+		}
+	})
+	t.Run("sole staged child blocked leaves the barrier open", func(t *testing.T) {
+		children := []db.Issue{child(1, "blocked")}
+		if stageBarrierClosed(children, child(1, "blocked"), literalTerminalChild) {
+			t.Fatal("blocked is not terminal; a sole staged child must not close the stage")
+		}
+	})
+}
+
 // literalTerminalChild is the pre-MUL-6243 terminal test: it reads the status
 // literal directly, with no catalog resolution. The stage-barrier logic these
 // tests cover is pure and operates on CANONICAL statuses, so pinning it with a

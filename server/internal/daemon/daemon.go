@@ -2864,10 +2864,23 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 // web UI can expand AGY account-slot paths. Browsers cannot read process.env.HOME.
 // Logged-in Gemini dirs ride along so the settings page can show a green check
 // without putting AGY-unknown flags in custom_args.
+//
+// The three AGY keys stay byte-for-byte as they were — custom-args-tab.tsx
+// still consumes home_dir / agy_logged_in_dirs / agy_quota_exhausted until the
+// account surface converges (DENE-305-D). The multi-CLI channel is additive and
+// lives in agentAccountsReport.
 func (d *Daemon) withRegistrationHostMeta(req map[string]any) map[string]any {
 	req = withHostHomeDir(req)
 	if exhausted := d.agyQuotaOverlay(time.Now()); len(exhausted) > 0 {
 		req["agy_quota_exhausted"] = exhausted
+	}
+	// agent_accounts is always written, even when empty: its presence is how a
+	// consumer tells "this host has no accounts" from "this daemon predates the
+	// channel". agent_accounts_error only joins it when the probe failed.
+	accounts, probeErr := d.agentAccountsReport(time.Now())
+	req["agent_accounts"] = accounts
+	if probeErr != "" {
+		req["agent_accounts_error"] = probeErr
 	}
 	return req
 }
