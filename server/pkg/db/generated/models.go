@@ -55,6 +55,7 @@ type Agent struct {
 	ConversationStarters  []byte      `json:"conversation_starters"`
 	SwitchableModels      []byte      `json:"switchable_models"`
 	AutoRetryEnabled      bool        `json:"auto_retry_enabled"`
+	ParentAgentID         pgtype.UUID `json:"parent_agent_id"`
 }
 
 type AgentBuilderDraft struct {
