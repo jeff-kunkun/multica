@@ -32,6 +32,7 @@ import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
+import { AgentAccountsTab } from "./tabs/agent-accounts-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { AgentMcpTab } from "./tabs/agent-mcp-tab";
@@ -56,6 +57,7 @@ export type DetailTab =
   | "integrations"
   | "general"
   | "access"
+  | "accounts"
   | "env"
   | "custom_args"
   | "runtime_config";
@@ -70,6 +72,7 @@ type SecondaryTab = {
     | "integrations"
     | "general"
     | "access"
+    | "accounts"
     | "environment"
     | "custom_args"
     | "runtime_config";
@@ -86,6 +89,7 @@ const CAPABILITY_TABS: SecondaryTab[] = [
 const SETTINGS_TABS: SecondaryTab[] = [
   { id: "general", labelKey: "general" },
   { id: "access", labelKey: "access" },
+  { id: "accounts", labelKey: "accounts" },
   { id: "env", labelKey: "environment" },
   { id: "custom_args", labelKey: "custom_args" },
   { id: "runtime_config", labelKey: "runtime_config" },
@@ -497,6 +501,14 @@ export function AgentOverviewPane({
                       currentUserId={currentUserId ?? null}
                       onDirtyChange={setActiveDirty}
                       onUpdate={onUpdate}
+                    />
+                  )}
+                  {effectiveView === "accounts" && (
+                    <AgentAccountsTab
+                      agent={agent}
+                      runtimeDevice={runtime ?? undefined}
+                      onSave={(updates) => onUpdate(agent.id, updates)}
+                      onDirtyChange={setActiveDirty}
                     />
                   )}
                   {effectiveView === "env" && (
