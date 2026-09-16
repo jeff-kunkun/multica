@@ -1,0 +1,132 @@
+"use client";
+
+import { cn } from "@multica/ui/lib/utils";
+import type { Issue } from "@multica/core/types";
+import { useActorName } from "@multica/core/workspace/hooks";
+import {
+  closeProtocolIsStuck,
+  closeProtocolNextOwnerId,
+  closeProtocolWaitingOn,
+  readCloseProtocol,
+} from "@multica/core/issues";
+import { useT, useTimeAgo } from "../../i18n";
+
+/**
+ * Per-sub-issue close-protocol strip (DENE-234 / Stage 5).
+ *
+ * Renders the five Stage 5 fields next to `groupSubIssuesByStage`: current
+ * stage, close.conclusion, next owner, waiting_on, last_activity_at. Two
+ * exception states are never silent: missing close.* keys, and close.status
+ * drifting from issue.status.
+ */
+export function SubIssueCloseStrip({ issue }: { issue: Issue }) {
+  const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
+  const { getActorName } = useActorName();
+  const close = readCloseProtocol(issue.metadata, issue.status);
+  const stuck = closeProtocolIsStuck(issue.status, close.conclusion);
+  const waitingOn = closeProtocolWaitingOn(close.waitingOn);
+  const nextOwnerId = closeProtocolNextOwnerId(
+    close.nextOwnerType,
+    close.nextOwnerId,
+  );
+
+  const state = !close.complete
+    ? "missing"
+    : close.statusDrift
+      ? "drift"
+      : "ok";
+
+  const nextOwnerLabel = (() => {
+    if (close.nextOwnerType === null) return null;
+    if (close.nextOwnerType === "none" || nextOwnerId === null) {
+      return t(($) => $.close_protocol.next_owner_none);
+    }
+    const name = getActorName(close.nextOwnerType, nextOwnerId);
+    return t(($) => $.close_protocol.next_owner, { name });
+  })();
+
+  const lastActivity = issue.last_activity_at
+    ? timeAgo(issue.last_activity_at)
+    : t(($) => $.close_protocol.last_activity_missing);
+
+  return (
+    <div
+      data-testid="sub-issue-close-strip"
+      data-close-state={state}
+      data-stuck={stuck ? "true" : "false"}
+      className={cn(
+        "flex min-w-0 flex-wrap items-center gap-1 pl-11",
+        state === "missing" && "text-destructive",
+        state === "drift" && "text-warning",
+      )}
+    >
+      <Chip
+        title="stage"
+        tone={state === "ok" ? "muted" : state}
+      >
+        {issue.stage == null
+          ? t(($) => $.stage.none)
+          : t(($) => $.stage.value, { n: issue.stage })}
+      </Chip>
+      {state === "missing" && (
+        <Chip title="close.missing" tone="missing">
+          {t(($) => $.close_protocol.missing)}
+        </Chip>
+      )}
+      {close.statusDrift && (
+        <Chip title="close.status" tone="drift">
+          {t(($) => $.close_protocol.status_drift, {
+            issueStatus: issue.status,
+          })}
+        </Chip>
+      )}
+      {close.conclusion !== null && (
+        <Chip title="close.conclusion" tone={stuck && state === "ok" ? "stuck" : "muted"}>
+          {close.conclusion}
+        </Chip>
+      )}
+      {nextOwnerLabel !== null && (
+        <Chip
+          title="close.next_owner"
+          tone={stuck && state === "ok" ? "stuck" : "muted"}
+        >
+          {nextOwnerLabel}
+        </Chip>
+      )}
+      {waitingOn !== null && (
+        <Chip title="close.waiting_on" tone={stuck && state === "ok" ? "stuck" : "muted"}>
+          {t(($) => $.close_protocol.waiting_on, { id: waitingOn })}
+        </Chip>
+      )}
+      <Chip title="last_activity_at" tone="muted">
+        {lastActivity}
+      </Chip>
+    </div>
+  );
+}
+
+function Chip({
+  title,
+  tone,
+  children,
+}: {
+  title: string;
+  tone: "muted" | "missing" | "drift" | "stuck";
+  children: string;
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        "inline-flex max-w-full items-center truncate rounded-full px-1.5 py-0.5 text-micro",
+        tone === "muted" && "bg-muted/60 text-muted-foreground",
+        tone === "missing" && "bg-destructive/10 font-medium text-destructive",
+        tone === "drift" && "bg-warning/10 font-medium text-warning",
+        tone === "stuck" && "bg-muted font-medium text-foreground",
+      )}
+    >
+      {children}
+    </span>
+  );
+}

@@ -214,8 +214,15 @@ export function buildCreateAgentRequest(options: {
   /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
   duplicateSource?: Agent | null;
+  /**
+   * Base role this agent specialises (DENE-301). Empty/omitted creates an
+   * independent base role. The caller resolves it against the loaded agents
+   * first: an id that is not a live base role must never be sent, since the
+   * server answers 400 for it.
+   */
+  parentAgentId?: string | null;
 }): CreateAgentRequest {
-  const { draft, runtimeId, template, duplicateSource } = options;
+  const { draft, runtimeId, template, duplicateSource, parentAgentId } = options;
   const request: CreateAgentRequest = {
     name: draft.name.trim(),
     description: draft.description.trim(),
@@ -239,6 +246,9 @@ export function buildCreateAgentRequest(options: {
     skill_ids: [...draft.skillIds],
     template,
   };
+  if (parentAgentId) {
+    request.parent_agent_id = parentAgentId;
+  }
   if (duplicateSource) {
     if (duplicateSource.custom_args.length > 0) {
       request.custom_args = duplicateSource.custom_args;

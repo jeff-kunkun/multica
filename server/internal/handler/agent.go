@@ -102,12 +102,34 @@ type AgentResponse struct {
 	SystemKey string `json:"system_key,omitempty"`
 	// SystemInstructions is the read-only product half of a system agent's
 	// prompt, filled from the server binary. Empty for ordinary agents.
-	SystemInstructions string          `json:"system_instructions,omitempty"`
-	AvatarURL          *string         `json:"avatar_url"`
-	RuntimeMode        string          `json:"runtime_mode"`
-	RuntimeConfig      any             `json:"runtime_config"`
-	CustomArgs         []string        `json:"custom_args"`
-	McpConfig          json.RawMessage `json:"mcp_config"`
+	SystemInstructions string `json:"system_instructions,omitempty"`
+	// ParentAgentID is empty for a base role and carries the base role's id for
+	// a specialisation (DENE-301). The tree is at most two levels deep; the
+	// server enforces that, so a non-empty value here is always a base role.
+	ParentAgentID string `json:"parent_agent_id,omitempty"`
+	// ParentAgentName is the display name of ParentAgentID, so a client can
+	// name the parent without a second request. Populated on the agents list
+	// and on agent detail. Empty for a base role.
+	ParentAgentName string `json:"parent_agent_name,omitempty"`
+	// InheritedInstructions is the parent's own `instructions`, verbatim. The
+	// effective prompt of a specialisation is parent + "\n\n" + own, so the
+	// detail surface can show which half came from the base role instead of
+	// making the child's own text look self-contained. Empty for a base role.
+	InheritedInstructions string `json:"inherited_instructions,omitempty"`
+	// InheritedSkills is the parent's skill bindings, read-only for the child
+	// (v1: a specialisation cannot drop an inherited skill). Only the detail
+	// endpoint loads them; the list leaves the field nil.
+	InheritedSkills []AgentSkillSummary `json:"inherited_skills,omitempty"`
+	// ChildCount is how many ACTIVE specialisations hang off this agent. Only a
+	// base role can have children. Archived specialisations are not counted:
+	// they no longer block archiving the base role. Populated on the agents
+	// list (0 for a specialisation); the detail response leaves it nil.
+	ChildCount    *int            `json:"child_count,omitempty"`
+	AvatarURL     *string         `json:"avatar_url"`
+	RuntimeMode   string          `json:"runtime_mode"`
+	RuntimeConfig any             `json:"runtime_config"`
+	CustomArgs    []string        `json:"custom_args"`
+	McpConfig     json.RawMessage `json:"mcp_config"`
 	// custom_env is intentionally NOT serialized on agent resources. The
 	// agent_list/get/create/update/archive/restore responses and WS events
 	// only expose coarse metadata (has_custom_env, custom_env_key_count) so
@@ -250,6 +272,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		SwitchableModels:         switchableModels,
 		SystemKey:                a.SystemKey.String,
 		SystemInstructions:       systemInstructionsFor(a),
+		ParentAgentID:            uuidToString(a.ParentAgentID),
 		AvatarURL:                h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
 		RuntimeMode:              a.RuntimeMode,
 		RuntimeConfig:            rc,
@@ -275,6 +298,234 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ArchivedAt:               timestampToPtr(a.ArchivedAt),
 		ArchivedBy:               uuidToPtr(a.ArchivedBy),
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Two-level agent specialisation (DENE-301)
+//
+// A base role has parent_agent_id IS NULL. A specialisation points at exactly
+// one base role. A specialisation can never be a parent, so the tree is at most
+// two levels deep and no cycle is expressible.
+//
+// What a specialisation inherits is only its prompt and its skills. model,
+// runtime_id, max_concurrent_tasks and permissions stay independent per agent
+// (see DENE-300 for why: per-field override on NOT NULL columns is expensive to
+// explain and to build, and "same role, different model" is already satisfied
+// when configuration is independent).
+// ---------------------------------------------------------------------------
+
+// agentInstructionSeparator joins a parent's prompt to its child's in the
+// effective prompt. Two newlines keep the two blocks visually separate in the
+// rendered prompt while staying a single string for the daemon's argv/stdin
+// path.
+const agentInstructionSeparator = "\n\n"
+
+// composeAgentInstructions is the ONE place that defines what a specialisation
+// actually runs with. Both the solidify endpoint (which bakes the result into
+// the child's own instructions) and the daemon-side claim path use it, so the
+// text a user sees frozen into the child is exactly the text the run used.
+//
+// Neither half is rewritten: an empty parent contributes nothing (not a stray
+// separator), and an empty child leaves the parent's prompt alone.
+func composeAgentInstructions(parent, child string) string {
+	if parent == "" {
+		return child
+	}
+	if child == "" {
+		return parent
+	}
+	return parent + agentInstructionSeparator + child
+}
+
+// loadAgentDisplayNames returns id -> display name for every id, skipping
+// unresolved ids. Used to name the parent of each specialisation in one read
+// instead of one read per child.
+func (h *Handler) loadAgentDisplayNames(ctx context.Context, ids []pgtype.UUID) (map[string]string, error) {
+	names := map[string]string{}
+	if len(ids) == 0 {
+		return names, nil
+	}
+	rows, err := h.Queries.GetAgentsByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		names[uuidToString(row.ID)] = row.Name
+	}
+	return names, nil
+}
+
+// enrichAgentResponsesWithRelations fills the fields a specialisation's
+// consumers need — the parent's name and, per base role, how many active
+// specialisations hang off it — for a whole list in two reads. The agents list
+// is a workspace-wide surface, so a per-agent lookup here would be the exact
+// N+1 the response contract forbids.
+func (h *Handler) enrichAgentResponsesWithRelations(ctx context.Context, resps []AgentResponse) error {
+	parentIDs := make([]pgtype.UUID, 0, len(resps))
+	ownIDs := make([]pgtype.UUID, 0, len(resps))
+	seen := map[string]struct{}{}
+	for _, resp := range resps {
+		id, err := util.ParseUUID(resp.ID)
+		if err != nil {
+			continue
+		}
+		ownIDs = append(ownIDs, id)
+		if resp.ParentAgentID == "" {
+			continue
+		}
+		parentID, err := util.ParseUUID(resp.ParentAgentID)
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[resp.ParentAgentID]; ok {
+			continue
+		}
+		seen[resp.ParentAgentID] = struct{}{}
+		parentIDs = append(parentIDs, parentID)
+	}
+
+	names, err := h.loadAgentDisplayNames(ctx, parentIDs)
+	if err != nil {
+		return err
+	}
+
+	counts := map[string]int{}
+	if len(ownIDs) > 0 {
+		rows, err := h.Queries.CountAgentChildrenByParentIDs(ctx, ownIDs)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			counts[uuidToString(row.ParentAgentID)] = int(row.ChildCount)
+		}
+	}
+
+	for i := range resps {
+		if resps[i].ParentAgentID != "" {
+			resps[i].ParentAgentName = names[resps[i].ParentAgentID]
+		}
+		// Every agent carries child_count so a client can group without
+		// branching on "is this a base role". A specialisation can never have
+		// children, and the SQL agrees: it groups by parent_agent_id, which is
+		// this agent's own id only for a base role.
+		count := counts[resps[i].ID]
+		resps[i].ChildCount = &count
+	}
+	return nil
+}
+
+// parentAgentForResponse loads the base role of a specialisation for the
+// responses that carry the inherited half of the contract (agent detail).
+// Returns false for a base role and for a parent this request cannot resolve.
+func (h *Handler) parentAgentForResponse(ctx context.Context, resp *AgentResponse) (db.Agent, bool) {
+	if resp.ParentAgentID == "" {
+		return db.Agent{}, false
+	}
+	parentID, err := util.ParseUUID(resp.ParentAgentID)
+	if err != nil {
+		return db.Agent{}, false
+	}
+	wsID, err := util.ParseUUID(resp.WorkspaceID)
+	if err != nil {
+		return db.Agent{}, false
+	}
+	parent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          parentID,
+		WorkspaceID: wsID,
+	})
+	if err != nil {
+		return db.Agent{}, false
+	}
+	return parent, true
+}
+
+// attachAgentInheritance fills the read-only half of a specialisation: the
+// parent's prompt and the parent's skills. Both are exposed verbatim rather
+// than pre-composed with the child's own values, because the client renders
+// them as a separate, non-editable block — "this came from the base role" is
+// the information, and only the parent's own rows carry it.
+//
+// The parent's prompt is subject to the SAME view gate as the parent itself.
+// A base role may be private to another member, and a child that is visible
+// must not become a window into it: the viewer still sees the relationship (the
+// id is already on the response) but not the inherited text.
+//
+// A base role returns without touching the response, so a client can treat an
+// empty inherited_instructions as "nothing is inherited" without also having to
+// check parent_agent_id.
+func (h *Handler) attachAgentInheritance(ctx context.Context, resp *AgentResponse, actorType, actorID string) error {
+	parent, ok := h.parentAgentForResponse(ctx, resp)
+	if !ok {
+		return nil
+	}
+	if !h.canAccessPrivateAgent(ctx, parent, actorType, actorID, uuidToString(parent.WorkspaceID)) {
+		return nil
+	}
+	resp.InheritedInstructions = parent.Instructions
+
+	skills, err := h.Queries.ListAgentSkillSummaries(ctx, parent.ID)
+	if err != nil {
+		return err
+	}
+	inherited := make([]AgentSkillSummary, 0, len(skills))
+	for _, s := range skills {
+		inherited = append(inherited, AgentSkillSummary{
+			ID:          uuidToString(s.ID),
+			Name:        s.Name,
+			Description: s.Description,
+			Enabled:     s.Enabled,
+		})
+	}
+	resp.InheritedSkills = inherited
+	return nil
+}
+
+// validateAgentParent enforces the two-level rule for a requested parent.
+//
+// The parent must be a base role in the same workspace: a specialisation may
+// not itself be specialised ("特化角色不能再派生"), which is what keeps the
+// tree at two levels without a depth column or a recursive check. A parent that
+// does not resolve is reported as not found, so a caller cannot probe for
+// agents outside their workspace by watching which error comes back.
+//
+// The actor must also be able to VIEW the parent. Attaching is the moment the
+// inheritance relationship is created, and every later read of the inherited
+// prompt — attachAgentInheritance, SolidifyAgent, the daemon claim path — is
+// downstream of a row written here. Gating only the reads leaves the write open:
+// a member could point their own agent at another member's private base role and
+// then solidify it to get the prompt text back in their own `instructions`. An
+// unviewable parent gets the same "not found" wording as a missing one, so this
+// endpoint does not become a probe for which private agents exist.
+func (h *Handler) validateAgentParent(ctx context.Context, workspaceID string, parentAgentID string, childAgentID string, actorType, actorID string) (db.Agent, string) {
+	parentUUID, err := util.ParseUUID(parentAgentID)
+	if err != nil {
+		return db.Agent{}, "parent_agent_id is not a valid id"
+	}
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return db.Agent{}, "workspace id is not valid"
+	}
+
+	parent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          parentUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		return db.Agent{}, "parent agent not found in this workspace"
+	}
+	if !h.canAccessPrivateAgent(ctx, parent, actorType, actorID, uuidToString(parent.WorkspaceID)) {
+		return db.Agent{}, "parent agent not found in this workspace"
+	}
+	if childAgentID != "" && childAgentID == uuidToString(parent.ID) {
+		return db.Agent{}, "an agent cannot be its own parent"
+	}
+	if parent.ArchivedAt.Valid {
+		return db.Agent{}, "the parent agent is archived; restore it before making it a base role"
+	}
+	if parent.ParentAgentID.Valid {
+		return db.Agent{}, "特化角色不能再派生：a specialisation cannot be a parent; attach this agent to a base role instead"
+	}
+	return parent, ""
 }
 
 // maskGatewayToken replaces runtime_config.gateway.token with the public
@@ -1231,6 +1482,14 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		visible = append(visible, resp)
 	}
 
+	// Nested grouping data for the specialisation tree (DENE-301): the base
+	// role behind each child, plus how many active children each base role has.
+	// Two batch reads for the whole list — the front end must not have to make a
+	// request per row to build the tree.
+	if err := h.enrichAgentResponsesWithRelations(r.Context(), visible); err != nil {
+		slog.Warn("list agents: load parent relations failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+	}
+
 	writeJSON(w, http.StatusOK, visible)
 }
 
@@ -1252,6 +1511,19 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := h.agentToResponse(agent)
+	// resp is a slice, not a pointer, so the enrichment must write through the
+	// slice element it is handed: taking the address of the local variable here
+	// would fill a copy and serve an empty parent_agent_name.
+	resps := []AgentResponse{resp}
+	if err := h.enrichAgentResponsesWithRelations(r.Context(), resps); err != nil {
+		// Non-fatal: the id is already on the response, and a viewer who can see
+		// the child but not resolve the parent still gets a usable payload.
+		slog.Warn("get agent: load parent relation failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(agent.ID))...)
+	}
+	resp = resps[0]
+	if err := h.attachAgentInheritance(r.Context(), &resp, actorType, actorID); err != nil {
+		slog.Warn("get agent: load inherited prompt/skills failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(agent.ID))...)
+	}
 	viewerRole := ""
 	if member, ok := ctxMember(r.Context()); ok {
 		viewerRole = member.Role
@@ -1341,6 +1613,10 @@ type CreateAgentRequest struct {
 	// SkillIDs are attached inside the same transaction as the agent row so a
 	// create never becomes visible in a partially configured state.
 	SkillIDs []string `json:"skill_ids"`
+	// ParentAgentID makes this agent a specialisation of an existing base role
+	// (DENE-301). Empty creates a base role. The target must be a base role in
+	// the same workspace; a specialisation cannot be specialised in turn.
+	ParentAgentID string `json:"parent_agent_id"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -1590,6 +1866,22 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Two-level specialisation (DENE-301). An empty/absent parent_agent_id
+	// creates a base role; a non-empty one must resolve to a base role in this
+	// workspace, which is what stops a specialisation from being specialised in
+	// turn. A create has no children yet, so the "parent cannot itself become a
+	// child" arm of the rule cannot fire here.
+	var parentAgentID pgtype.UUID
+	if req.ParentAgentID != "" {
+		parentActorType, parentActorID := h.resolveActor(r, ownerID, workspaceID)
+		parent, reject := h.validateAgentParent(r.Context(), workspaceID, req.ParentAgentID, "", parentActorType, parentActorID)
+		if reject != "" {
+			writeError(w, http.StatusBadRequest, reject)
+			return
+		}
+		parentAgentID = parent.ID
+	}
+
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start agent create transaction")
@@ -1619,6 +1911,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ServiceTier:              pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
 		ConversationStarters:     sp,
 		ComposioToolkitAllowlist: allowlist,
+		ParentAgentID:            parentAgentID,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -1663,6 +1956,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("create agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
 	}
+	// A freshly created agent has no children yet, so this only fills
+	// parent_agent_name + child_count=0 — the same shape ListAgents serves, so
+	// a client that inserts the create response into its list cache sees no
+	// difference between the two. Written through a slice for the same reason
+	// as GetAgent: a slice element is addressable, a local variable's copy is not.
+	resps := []AgentResponse{resp}
+	if err := h.enrichAgentResponsesWithRelations(r.Context(), resps); err != nil {
+		slog.Warn("create agent: load parent relation for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+	}
+	resp = resps[0]
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
@@ -1742,6 +2045,14 @@ type UpdateAgentRequest struct {
 	// is not NULL, so COALESCE in UpdateAgent can distinguish "not sent"
 	// from "turned off".
 	AutoRetryEnabled *bool `json:"auto_retry_enabled"`
+	// ParentAgentID re-parents this agent (DENE-301): a non-empty value attaches
+	// it to a base role, and an explicitly empty string detaches it. The field
+	// is a tri-state like thinking_level — omitted preserves, `""` clears, a
+	// value sets — which is why it is a pointer and why the raw-fields map
+	// captured at decode time is what decides whether the column is touched.
+	// Setting it on an agent that already has children is refused: that would
+	// make this row a middle level of a three-level tree.
+	ParentAgentID *string `json:"parent_agent_id"`
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -1944,6 +2255,49 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if _, ok := rawFields["custom_env"]; ok {
 		writeError(w, http.StatusBadRequest, "custom_env is no longer accepted on this endpoint; use PUT /api/agents/{id}/env (or `multica agent env set`)")
 		return
+	}
+
+	// Two-level specialisation (DENE-301). Both directions of the rule are
+	// checked here, because an update is the only way to reach either mistake:
+	// pointing this agent at a parent that is itself a child (three levels
+	// down), or giving this agent a parent while it already has children of its
+	// own (three levels up). An explicitly empty parent_agent_id detaches the
+	// specialisation and needs neither check.
+	//
+	// sentParent is keyed on the RAW field map, not on the pointer: a JSON null
+	// and an omitted key both decode to a nil pointer, and only the raw map can
+	// tell them apart. null is treated as a clear, matching the tri-state
+	// contract documented on UpdateAgentRequest. The raw value itself is not
+	// re-parsed here — the decode already rejected anything that is not a
+	// string or null, so the pointer is the only reading of it that can differ.
+	sentParent := false
+	var parentAgentID pgtype.UUID
+	if _, ok := rawFields["parent_agent_id"]; ok {
+		requested := ""
+		if req.ParentAgentID != nil {
+			requested = strings.TrimSpace(*req.ParentAgentID)
+		}
+		if requested != "" {
+			parentActorType, parentActorID := h.resolveActor(r, requestUserID(r), uuidToString(existing.WorkspaceID))
+			parent, reject := h.validateAgentParent(r.Context(), uuidToString(existing.WorkspaceID), requested, uuidToString(existing.ID), parentActorType, parentActorID)
+			if reject != "" {
+				writeError(w, http.StatusBadRequest, reject)
+				return
+			}
+			childCount, err := h.Queries.CountAgentChildren(r.Context(), existing.ID)
+			if err != nil {
+				slog.Warn("update agent: count children failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+				writeError(w, http.StatusInternalServerError, "failed to update agent")
+				return
+			}
+			if childCount > 0 {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf(
+					"this agent already has %d specialisation(s); a base role cannot itself become a specialisation", childCount))
+				return
+			}
+			parentAgentID = parent.ID
+		}
+		sentParent = true
 	}
 
 	params := db.UpdateAgentParams{
@@ -2317,6 +2671,21 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Parent binding has its own statement so that "clear" is expressible at
+	// all (see SetAgentParentAgent). Applied after the metadata update so the
+	// response reflects both in one payload.
+	if sentParent {
+		updated, err = h.Queries.SetAgentParentAgent(r.Context(), db.SetAgentParentAgentParams{
+			ID:            updated.ID,
+			ParentAgentID: parentAgentID,
+		})
+		if err != nil {
+			slog.Warn("update agent: set parent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent parent")
+			return
+		}
+	}
+
 	// Invocation targets (MUL-3963): replace wholesale when the owner touched
 	// permission. Done after the row update so a permission_mode flip and its
 	// targets land together.
@@ -2344,6 +2713,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
 	}
+	// Last wins over the response built above so a response can never show a
+	// stale parent_agent_name after a re-parent, and so child_count reflects
+	// children created since this agent was loaded.
+	updatedResps := []AgentResponse{resp}
+	if err := h.enrichAgentResponsesWithRelations(r.Context(), updatedResps); err != nil {
+		slog.Warn("update agent: load parent relation for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+	}
+	resp = updatedResps[0]
 	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(updated.WorkspaceID))...)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
@@ -2557,6 +2934,33 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A base role with active specialisations cannot be archived: the children
+	// would keep pointing at a hidden parent, and the two-level rule has no
+	// meaning once the base role is not in the tree (DENE-301). The refusal
+	// carries the children so the client can list them and offer the explicit
+	// "solidify & unbind" action — the caller must be able to see what is
+	// blocking without a second request.
+	children, err := h.Queries.ListAgentChildren(r.Context(), agent.ID)
+	if err != nil {
+		slog.Warn("list agent children failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to archive agent")
+		return
+	}
+	if len(children) > 0 {
+		childNames := make([]string, 0, len(children))
+		for _, child := range children {
+			childNames = append(childNames, child.Name)
+		}
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": fmt.Sprintf(
+				"this base role still has %d specialisation(s): %s. Solidify and unbind them first, or archive them.",
+				len(children), strings.Join(childNames, ", ")),
+			"code":     "agent_has_children",
+			"children": childNames,
+		})
+		return
+	}
+
 	userID := requestUserID(r)
 	archived, err := h.Queries.ArchiveAgent(r.Context(), db.ArchiveAgentParams{
 		ID:         agent.ID,
@@ -2624,6 +3028,150 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// SolidifyAgent bakes a specialisation's inherited prompt into the child and
+// detaches it from its base role — the documented escape hatch for "this base
+// role is going away" (DENE-301).
+//
+// The result is exactly what the child ran with: composeAgentInstructions is
+// the same function the claim path uses, so a solidified child's own
+// `instructions` equals the effective prompt it had one moment earlier. The
+// child's skills are untouched; only the prompt was ever inherited as text.
+//
+// Refusals are all 409, not 400: nothing about the request is malformed, the
+// child is simply not in a state where solidifying means anything (it has no
+// parent, or its parent has no prompt to fold in).
+func (h *Handler) SolidifyAgent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	child, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, child) {
+		return
+	}
+	if !child.ParentAgentID.Valid {
+		writeError(w, http.StatusConflict, "this agent is a base role; there is nothing to solidify")
+		return
+	}
+
+	parent, parentFound := h.parentAgentForResponse(r.Context(), &AgentResponse{
+		WorkspaceID:   uuidToString(child.WorkspaceID),
+		ParentAgentID: uuidToString(child.ParentAgentID),
+	})
+	if !parentFound {
+		writeError(w, http.StatusConflict, "the parent agent no longer exists; detach this agent instead")
+		return
+	}
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(child.WorkspaceID))
+	// Solidifying copies the parent's prompt into a row this actor owns and can
+	// read back, so it needs the parent's VIEW permission on top of the child's
+	// manage permission. validateAgentParent refuses to create such a pair in
+	// the first place; this covers the pair that went one-sided afterwards —
+	// the base role's owner flipped it to private, or the child changed hands.
+	// Detaching without folding the text in stays available via
+	// PUT /api/agents/{id} with parent_agent_id: "".
+	if !h.canAccessPrivateAgent(r.Context(), parent, actorType, actorID, uuidToString(parent.WorkspaceID)) {
+		writeError(w, http.StatusForbidden, "you cannot read this agent's base role; detach it instead of solidifying")
+		return
+	}
+	if parent.Instructions == "" {
+		writeError(w, http.StatusConflict, "the parent agent has no instructions to inherit")
+		return
+	}
+
+	effective := composeAgentInstructions(parent.Instructions, child.Instructions)
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start solidify transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Read the child again inside the transaction and FOR UPDATE: two
+	// concurrent solidify calls would otherwise both read the pre-solidify
+	// instructions, and the second write would fold the parent's prompt in
+	// twice. Locking also keeps a concurrent update's instruction edit from
+	// landing between the read and the write.
+	locked, err := qtx.GetAgentForUpdate(r.Context(), child.ID)
+	if err != nil {
+		writeError(w, http.StatusConflict, "this agent changed while solidifying; retry")
+		return
+	}
+	if !locked.ParentAgentID.Valid {
+		writeError(w, http.StatusConflict, "this agent is a base role; there is nothing to solidify")
+		return
+	}
+	effective = composeAgentInstructions(parent.Instructions, locked.Instructions)
+
+	solidified, err := qtx.UpdateAgent(r.Context(), db.UpdateAgentParams{
+		ID:           child.ID,
+		Instructions: pgtype.Text{String: effective, Valid: true},
+	})
+	if err != nil {
+		slog.Warn("solidify agent: write instructions failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to solidify agent")
+		return
+	}
+	if _, err := qtx.SetAgentParentAgent(r.Context(), db.SetAgentParentAgentParams{
+		ID:            child.ID,
+		ParentAgentID: pgtype.UUID{},
+	}); err != nil {
+		slog.Warn("solidify agent: detach parent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to solidify agent")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit solidify")
+		return
+	}
+	// Re-read after commit so the response carries the committed row rather
+	// than the values this request happened to compute.
+	solidified, err = h.Queries.GetAgent(r.Context(), child.ID)
+	if err != nil {
+		slog.Warn("solidify agent: reload failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load solidified agent")
+		return
+	}
+
+	wsID := uuidToString(solidified.WorkspaceID)
+	slog.Info("agent solidified", append(logger.RequestAttrs(r), "agent_id", id, "parent_agent_id", uuidToString(child.ParentAgentID), "workspace_id", wsID)...)
+
+	resp := h.agentToResponse(solidified)
+	if err := h.attachAgentSkills(r.Context(), &resp, solidified.ID); err != nil {
+		slog.Warn("load agent skills after solidify failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+	}
+	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, solidified.ID); err != nil {
+		slog.Warn("solidify agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+	}
+	solidifiedResps := []AgentResponse{resp}
+	if err := h.enrichAgentResponsesWithRelations(r.Context(), solidifiedResps); err != nil {
+		slog.Warn("solidify agent: load parent relation for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+	}
+	resp = solidifiedResps[0]
+	// A solidified child is a new base role, so the parent's child_count moved.
+	// The parent is not the response body here; the update event is what tells a
+	// client to re-read the list, and publishing the parent keeps a client that
+	// patches from its event stream from showing a stale count.
+	parentResps := []AgentResponse{h.agentToResponse(parent)}
+	if err := h.enrichAgentResponsesWithRelations(r.Context(), parentResps); err != nil {
+		slog.Warn("solidify agent: load parent relation failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(parent.ID))...)
+	}
+	parentActorType, parentActorID := h.resolveActor(r, userID, wsID)
+	h.publish(protocol.EventAgentStatus, wsID, parentActorType, parentActorID, map[string]any{"agent": broadcastAgentResponse(parentResps[0])})
+
+	h.publish(protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
+	redactAgentResponseForActor(&resp, actorType)
+	if !h.composioMCPAppsEnabled(r.Context()) {
+		suppressComposioToolkitAllowlist(&resp)
+	} else if uuidToString(solidified.OwnerID) != userID {
+		redactComposioToolkitAllowlist(&resp)
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

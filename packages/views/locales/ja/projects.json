@@ -147,6 +147,18 @@
     "toast_local_mode_update_failed": "実行モードを更新できませんでした",
     "mode_badge_in_place": "直接"
   },
+  "members": {
+    "section_header": "メンバー",
+    "empty": "メンバーはまだいません。",
+    "add_button": "メンバーを追加",
+    "add_placeholder": "ワークスペースのメンバーを追加...",
+    "no_results": "結果なし",
+    "remove_tooltip": "削除",
+    "toast_added": "メンバーを追加しました",
+    "toast_add_failed": "メンバーを追加できませんでした",
+    "toast_removed": "メンバーを削除しました",
+    "toast_remove_failed": "メンバーを削除できませんでした"
+  },
   "delete_dialog": {
     "title": "プロジェクトを削除",
     "description": "プロジェクトが削除されます。タスクは削除されませんが、リンクが解除されます。",
