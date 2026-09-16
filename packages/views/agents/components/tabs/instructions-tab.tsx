@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Layers, Loader2, Lock, Save } from "lucide-react";
+import { Layers, Loader2, Lock, RotateCcw, Save } from "lucide-react";
 import { useConfigStore } from "@multica/core/config";
 import { AGENT_FOCUS_CONVERSATION_STARTERS } from "@multica/core/paths";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
@@ -15,6 +15,7 @@ import {
   composeEffectiveInstructions,
   hasInheritedPrompt,
   isSpecialization,
+  type InheritedPromptState,
 } from "../../specialization";
 
 import { ConversationStartersEditor } from "../conversation-starters-editor";
@@ -27,6 +28,8 @@ export function InstructionsTab({
   onSave,
   onDirtyChange,
   childAgents = [],
+  inheritedPromptState = "ready",
+  onRetryInheritedPrompt,
 }: {
   agent: Agent;
   onSave: (updates: {
@@ -40,6 +43,16 @@ export function InstructionsTab({
    * prompt edit here reaches (DENE-304).
    */
   childAgents?: readonly Agent[];
+  /**
+   * How the read that carries `inherited_instructions` went. The page owns the
+   * query, so it is the only layer that can tell an in-flight or failed read
+   * from a base role that really has no prompt — and stating the latter when
+   * the read failed is exactly the misreport this pins down (DENE-384).
+   * Defaults to `ready` for the standalone mounts.
+   */
+  inheritedPromptState?: InheritedPromptState;
+  /** Re-runs that read; the failure state offers it as the way out. */
+  onRetryInheritedPrompt?: () => void;
 }) {
   const { t } = useT("agents");
   // Optional read: this tab is a leaf that tests mount in isolation, and its
@@ -106,10 +119,20 @@ export function InstructionsTab({
   // DETAIL endpoint, so a specialisation opened from a list that has not
   // loaded it yet renders the "nothing inherited" state rather than a blank
   // block passed off as the parent's prompt.
+  //
+  // DENE-384: "not loaded it yet" and "failed to load it" are NOT that state.
+  // The copy below never claims the base role has no prompt while the read is
+  // still in flight or has failed — the page says which of the three it is.
   const isSpecializationAgent = isSpecialization(agent);
   const inheritedInstructions = agent.inherited_instructions ?? "";
-  const hasInherited = hasInheritedPrompt(agent);
+  const inheritedPromptReady = inheritedPromptState === "ready";
+  const hasInherited = inheritedPromptReady && hasInheritedPrompt(agent);
   const parentName = agent.parent_agent_name || "";
+  const inheritedPromptStatusText = inheritedPromptReady
+    ? t(($) => $.specialization.inherited_prompt_unavailable)
+    : inheritedPromptState === "failed"
+      ? t(($) => $.specialization.inherited_prompt_failed)
+      : t(($) => $.specialization.inherited_prompt_loading);
   const effectivePrompt = composeEffectiveInstructions(
     inheritedInstructions,
     value,
@@ -290,8 +313,20 @@ export function InstructionsTab({
                 ? t(($) => $.specialization.inherited_prompt_hint, {
                     name: parentName,
                   })
-                : t(($) => $.specialization.inherited_prompt_unavailable)}
+                : inheritedPromptStatusText}
             </p>
+            {inheritedPromptState === "failed" && onRetryInheritedPrompt && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="shrink-0"
+                data-testid="agent-inherited-prompt-retry"
+                onClick={onRetryInheritedPrompt}
+              >
+                <RotateCcw aria-hidden="true" className="size-3.5" />
+                {t(($) => $.specialization.inherited_prompt_retry)}
+              </Button>
+            )}
             {hasInherited && (
               <Button
                 size="sm"
@@ -401,7 +436,18 @@ export function InstructionsTab({
             </Button>
           </div>
           {effectiveOpen &&
-            (effectivePrompt ? (
+            (!inheritedPromptReady ? (
+              // The parent half is unknown, so there is no honest composed
+              // string to preview — showing just this agent's own text as
+              // "exactly what the runtime receives" would be a lie in the
+              // same way the inherited block's copy was (DENE-384).
+              <p
+                data-testid="agent-effective-prompt-unknown"
+                className="border-t px-3 py-2.5 text-caption text-muted-foreground"
+              >
+                {inheritedPromptStatusText}
+              </p>
+            ) : effectivePrompt ? (
               <pre
                 data-testid="agent-effective-prompt-text"
                 className="max-h-80 overflow-auto border-t px-3 py-2.5 text-caption leading-6 whitespace-pre-wrap"

@@ -1,5 +1,5 @@
 import type { Agent, AgentSkillSummary } from "@multica/core/types";
-import { errorCode } from "@multica/core/api";
+import { ApiError, errorCode } from "@multica/core/api";
 
 /**
  * Two-level specialisation (DENE-301), as the client sees it.
@@ -143,6 +143,36 @@ export function hasInheritedPrompt(
 }
 
 /**
+ * How the read that carries `inherited_instructions` — the agent DETAIL
+ * endpoint, never the list — went.
+ *
+ * An absent `inherited_instructions` has three causes and the UI must not
+ * merge them: the read is still in flight, it failed, or it succeeded and the
+ * base role genuinely has no prompt (or is private to someone else). Only the
+ * last one is a fact worth stating; the first two are "not known yet"
+ * (DENE-384).
+ */
+export type InheritedPromptState = "ready" | "loading" | "failed";
+
+/**
+ * The state to render for the inheritance block, from the detail query's own
+ * flags.
+ *
+ * A 403 is NOT a failure: "you may not read the base role" is a real answer
+ * about the relationship, and it is the one thing the "no prompt, or you don't
+ * have access to it" copy is for. Everything else the read can do wrong — a
+ * 404, a 5xx, a dropped connection — is a failure and must be said as one.
+ */
+export function inheritedPromptReadState(
+  isSpecializationAgent: boolean,
+  detail: { succeeded: boolean; failed: boolean; accessDenied: boolean },
+): InheritedPromptState {
+  if (!isSpecializationAgent || detail.succeeded) return "ready";
+  if (detail.failed) return detail.accessDenied ? "ready" : "failed";
+  return "loading";
+}
+
+/**
  * The stable code the archive handler attaches when a base role still has
  * specialisations (`server/internal/handler/agent.go`). The refusal carries
  * the child names as well, but the client already holds the children — it
@@ -152,4 +182,72 @@ export const AGENT_HAS_CHILDREN_CODE = "agent_has_children";
 
 export function isAgentHasChildrenError(err: unknown): boolean {
   return errorCode(err) === AGENT_HAS_CHILDREN_CODE;
+}
+
+/**
+ * The child names the archive refusal reported, or an empty list.
+ *
+ * The refusal lists every active child of the base role, INCLUDING ones the
+ * caller cannot see — the server counts them whether or not they are in the
+ * caller's agent list. That list is therefore the honest denominator for "how
+ * many specialisations still block this archive", while the local rows are the
+ * subset the viewer can act on (DENE-384).
+ *
+ * Older backends send no `children` field; an empty list means "the server
+ * said nothing", never "the server said none" — callers fall back to the rows
+ * they hold.
+ */
+export function agentHasChildrenNames(err: unknown): string[] {
+  if (!isAgentHasChildrenError(err)) return [];
+  const body = err instanceof ApiError ? err.body : null;
+  if (!body || typeof body !== "object") return [];
+  const names = (body as { children?: unknown }).children;
+  if (!Array.isArray(names)) return [];
+  return names.filter(
+    (name): name is string => typeof name === "string" && name.length > 0,
+  );
+}
+
+/**
+ * One row of the "will be solidified and unbound" list.
+ *
+ * `agent` is null for a specialisation the server named but the viewer cannot
+ * read: there is no id to solidify, so it is listed as a fact about the
+ * blockage rather than offered as an action.
+ */
+export interface SolidifyTarget {
+  agent: Agent | null;
+  name: string;
+}
+
+/**
+ * The rows the solidify dialog must show.
+ *
+ * The refusal's names are the authoritative count. Visible children supply the
+ * avatars and the ids solidify needs; any name the viewer cannot see is kept
+ * as a name-only row instead of being silently dropped — the failure mode
+ * DENE-384 fixes, where the dialog listed fewer specialisations than the
+ * archive guard, so the user believed the work was done and the next archive
+ * was refused again. Names are the only join key the refusal carries, so a
+ * visible child is consumed by the first matching name.
+ */
+export function solidifyTargets(
+  visible: readonly Agent[],
+  serverNames: readonly string[],
+): SolidifyTarget[] {
+  if (serverNames.length === 0) {
+    return visible.map((agent) => ({ agent, name: agent.name }));
+  }
+  const remaining = [...visible];
+  const targets: SolidifyTarget[] = serverNames.map((name) => {
+    const index = remaining.findIndex((agent) => agent.name === name);
+    if (index === -1) return { agent: null, name };
+    const [agent] = remaining.splice(index, 1);
+    return { agent: agent ?? null, name };
+  });
+  // A visible child the refusal did not name (a stale list, or one that
+  // changed between the two reads) is still actionable, so it is never
+  // dropped — the dialog must not hide something the user can solidify.
+  for (const agent of remaining) targets.push({ agent, name: agent.name });
+  return targets;
 }

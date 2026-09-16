@@ -13,6 +13,7 @@ import enAgents from "../../../locales/en/agents.json";
 import enChat from "../../../locales/en/chat.json";
 import { NavigationProvider } from "../../../navigation";
 import type { NavigationAdapter } from "../../../navigation";
+import type { InheritedPromptState } from "../../specialization";
 import { InstructionsTab } from "./instructions-tab";
 
 const TEST_RESOURCES = {
@@ -48,10 +49,17 @@ const baseAgent: Agent = {
   archived_by: null,
 };
 
-function tab(agent: Agent, onSave = vi.fn().mockResolvedValue(undefined)) {
+function tab(
+  agent: Agent,
+  onSave = vi.fn().mockResolvedValue(undefined),
+  extra: {
+    inheritedPromptState?: InheritedPromptState;
+    onRetryInheritedPrompt?: () => void;
+  } = {},
+) {
   return (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <InstructionsTab agent={agent} onSave={onSave} />
+      <InstructionsTab agent={agent} onSave={onSave} {...extra} />
     </I18nProvider>
   );
 }
@@ -385,6 +393,58 @@ describe("InstructionsTab inheritance", () => {
 
     expect(screen.getByTestId("agent-inherited-prompt")).toHaveTextContent(
       /has no prompt, or you don't have access to it/i,
+    );
+  });
+
+  // DENE-384: an absent `inherited_instructions` used to be stated as a fact
+  // about the base role even when the read that carries it had failed, which
+  // read as a business conclusion and misled a real acceptance pass.
+  it("reports a failed parent read as a read failure, with a retry", async () => {
+    const user = userEvent.setup();
+    const onRetryInheritedPrompt = vi.fn();
+    render(
+      tab(
+        { ...specializationAgent, inherited_instructions: "" },
+        vi.fn().mockResolvedValue(undefined),
+        { inheritedPromptState: "failed", onRetryInheritedPrompt },
+      ),
+    );
+
+    const block = screen.getByTestId("agent-inherited-prompt");
+    expect(block).not.toHaveTextContent(
+      /has no prompt, or you don't have access to it/i,
+    );
+    expect(block).toHaveTextContent(/couldn't load the base role's prompt/i);
+
+    await user.click(screen.getByTestId("agent-inherited-prompt-retry"));
+    expect(onRetryInheritedPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the composed preview only once the parent half is known", async () => {
+    const user = userEvent.setup();
+    render(
+      tab(
+        { ...specializationAgent, inherited_instructions: "" },
+        vi.fn().mockResolvedValue(undefined),
+        { inheritedPromptState: "loading" },
+      ),
+    );
+
+    const block = screen.getByTestId("agent-inherited-prompt");
+    expect(block).not.toHaveTextContent(
+      /has no prompt, or you don't have access to it/i,
+    );
+    expect(block).toHaveTextContent(/loading the base role's prompt/i);
+
+    // "Exactly what the runtime receives" would be a lie while the parent
+    // half is still unknown — the composed text is withheld until it lands.
+    const preview = screen.getByTestId("agent-effective-prompt");
+    await user.click(within(preview).getByRole("button", { name: /^Show$/i }));
+    expect(
+      screen.queryByTestId("agent-effective-prompt-text"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-effective-prompt-unknown")).toHaveTextContent(
+      /loading the base role's prompt/i,
     );
   });
 

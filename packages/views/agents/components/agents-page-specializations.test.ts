@@ -59,8 +59,9 @@ describe("groupRowsByBaseRole", () => {
     ]);
     expect(groups[0]?.children.map((r) => r.agent.id)).toEqual(["child-1"]);
     expect(groups[0]?.count).toBe(2);
-    // A base role with no specialisations is still a group of one — that is
-    // where its "derive" entry lives.
+    // A base role with no specialisations is still a group of one; whether it
+    // renders anything group-like (a fold control, a derive entry) is the
+    // flattener's call, not the grouper's.
     expect(groups[1]?.children).toEqual([]);
     expect(groups[1]?.count).toBe(0);
   });
@@ -119,10 +120,48 @@ describe("flattenSpecializationItems", () => {
       [base, child, other],
       new Set(["base-1"]),
     );
-    expect(items.map((item) => item.kind)).toEqual(["base", "base", "derive"]);
+    // `other` has no specialisations, so it contributes one plain row and no
+    // derive entry — a folded group is not the only reason a group emits one.
+    expect(items.map((item) => item.kind)).toEqual(["base", "base"]);
     const collapsed = items[0];
     expect(collapsed?.kind === "base" && collapsed.expanded).toBe(false);
     expect(collapsed?.kind === "base" && collapsed.childCount).toBe(2);
+    expect(collapsed?.kind === "base" && collapsed.hasChildren).toBe(true);
+  });
+
+  it("gives a base role with zero specialisations a plain row", () => {
+    // DENE-384: an empty derive entry under every base role doubled the list
+    // and read as broken; the empty fold control was the same noise in a
+    // smaller box. Creating the first specialisation stays reachable from the
+    // row's menu and the create flow, so nothing is lost here.
+    const items = flattenSpecializationItems([other], new Set());
+    expect(items.map((item) => item.kind)).toEqual(["base"]);
+    const only = items[0];
+    expect(only?.kind === "base" && only.hasChildren).toBe(false);
+    expect(only?.kind === "base" && only.expanded).toBe(false);
+    expect(only?.kind === "base" && only.childCount).toBe(0);
+  });
+
+  it("still folds visible children when the server count reads zero", () => {
+    // Scope "archived" can hold a child whose parent's active count is 0. The
+    // child is on screen, so the fold control has to be there to fold it.
+    const archivedChild = row({
+      id: "child-archived",
+      parent_agent_id: "base-2",
+      archived_at: "2026-02-01T00:00:00Z",
+    });
+    const items = flattenSpecializationItems(
+      [row({ id: "base-2", name: "Base Two", child_count: 0 }), archivedChild],
+      new Set(),
+    );
+    expect(items.map((item) => item.kind)).toEqual([
+      "base",
+      "specialization",
+      "derive",
+    ]);
+    const head = items[0];
+    expect(head?.kind === "base" && head.hasChildren).toBe(true);
+    expect(head?.kind === "base" && head.expanded).toBe(true);
   });
 
   it("does not offer a derive entry on a specialisation row", () => {

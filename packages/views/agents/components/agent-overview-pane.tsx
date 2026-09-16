@@ -44,6 +44,7 @@ import { AgentOverviewSummary } from "./agent-overview-summary";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
+import type { InheritedPromptState } from "../specialization";
 
 type DetailSection = "overview" | "work" | "capabilities" | "settings";
 
@@ -136,6 +137,10 @@ interface AgentOverviewPaneProps {
   /** Active specialisations of this agent (DENE-304); the Instructions tab
    *  names them so an edit to a shared prompt is not a silent change. */
   childAgents?: readonly Agent[];
+  /** Where the base role's prompt for a specialisation came from (DENE-384). */
+  inheritedPromptState?: InheritedPromptState;
+  /** Re-reads the detail payload that carries the base role's prompt. */
+  onRetryInheritedPrompt?: () => void;
   navIntent?: DetailTab | null;
   onNavIntentHandled?: () => void;
 }
@@ -157,6 +162,8 @@ export function AgentOverviewPane({
   currentUserId,
   canEdit,
   childAgents = [],
+  inheritedPromptState = "ready",
+  onRetryInheritedPrompt,
   navIntent,
   onNavIntentHandled,
 }: AgentOverviewPaneProps) {
@@ -464,6 +471,8 @@ export function AgentOverviewPane({
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
                       childAgents={childAgents}
+                      inheritedPromptState={inheritedPromptState}
+                      onRetryInheritedPrompt={onRetryInheritedPrompt}
                     />
                   )}
                   {effectiveView === "skills" && (

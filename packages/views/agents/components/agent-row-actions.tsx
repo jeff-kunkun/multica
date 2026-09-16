@@ -37,7 +37,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
 import { AppLink, useIntentNavigate } from "../../navigation";
-import { isAgentHasChildrenError } from "../specialization";
+import { agentHasChildrenNames, isAgentHasChildrenError } from "../specialization";
 import { SolidifyUnbindDialog } from "./solidify-unbind-dialog";
 
 interface AgentRowActionsProps {
@@ -91,6 +91,12 @@ export function AgentRowActions({
   // specialisations": the row menu offers the way out instead of only
   // surfacing the refusal.
   const [blockedByChildren, setBlockedByChildren] = useState(false);
+  // The child names that refusal carried. The server counts every active
+  // child, including ones this viewer cannot see, so they — not the visible
+  // rows — decide how many rows the dialog lists (DENE-384).
+  const [refusedChildNames, setRefusedChildNames] = useState<readonly string[]>(
+    [],
+  );
 
   const isArchived = !!agent.archived_at;
   const runningCount = presence?.runningCount ?? 0;
@@ -123,6 +129,7 @@ export function AgentRowActions({
       // The refusal is readable and actionable, so it opens the dialog that
       // lists them and offers "solidify & unbind" rather than a raw toast.
       if (isAgentHasChildrenError(e)) {
+        setRefusedChildNames(agentHasChildrenNames(e));
         setBlockedByChildren(true);
         return;
       }
@@ -301,6 +308,7 @@ export function AgentRowActions({
           // them. Solidify is per child, so the dialog needs the ids — the
           // server's refusal only carries names.
           children={childAgents.filter((child) => !child.archived_at)}
+          serverChildNames={refusedChildNames}
           onClose={() => setBlockedByChildren(false)}
           onArchived={invalidateAgents}
         />

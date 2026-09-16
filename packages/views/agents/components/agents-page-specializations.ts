@@ -33,6 +33,13 @@ export type AgentSpecializationVirtualItem<T extends { agent: Agent }> =
       groupId: string;
       /** Specialisations hanging off this row (0 for a specialisation). */
       childCount: number;
+      /**
+       * True when this row has anything to fold: a server-reported count or a
+       * visible child (an archived scope can hold the latter with a zero active
+       * count). A base role with neither renders as a plain row — no fold
+       * control, no derive entry (DENE-384).
+       */
+      hasChildren: boolean;
       expanded: boolean;
     }
   | {
@@ -81,8 +88,13 @@ export function groupRowsByBaseRole<T extends { agent: Agent }>(
  *
  * A collapsed base role emits only its own row — the count chip on that row is
  * what says a group is folded, so no extra summary line is needed. An expanded
- * one ends with the derive entry: the only way to create a specialisation that
- * already points at this base role.
+ * one ends with the derive entry, under which the create flow seeds this base
+ * role.
+ *
+ * A base role with NO specialisations is deliberately indistinguishable from a
+ * standalone row (DENE-384): a fold control that folds nothing and a derive
+ * entry under every agent doubled the list's row count and read as broken. The
+ * derive action stays reachable from the row's own menu and the create flow.
  */
 export function flattenSpecializationItems<T extends { agent: Agent }>(
   rows: readonly T[],
@@ -92,13 +104,18 @@ export function flattenSpecializationItems<T extends { agent: Agent }>(
   for (const group of groupRowsByBaseRole(rows)) {
     const groupId = group.base.agent.id;
     const isBase = !isSpecialization(group.base.agent);
-    const expanded = isBase && !collapsed.has(groupId);
+    // A server count can exceed the visible children (a filter hid some) and a
+    // visible child can outlive the count (scope "archived"); either one means
+    // this row owns a group.
+    const hasChildren = group.count > 0 || group.children.length > 0;
+    const expanded = isBase && hasChildren && !collapsed.has(groupId);
     items.push({
       kind: "base",
       key: groupId,
       row: group.base,
       groupId,
       childCount: group.count,
+      hasChildren,
       expanded,
     });
     if (!expanded) continue;

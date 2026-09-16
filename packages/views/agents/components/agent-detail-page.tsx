@@ -69,6 +69,8 @@ import { VisibilityBadge } from "./visibility-badge";
 import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
 import { SolidifyUnbindDialog } from "./solidify-unbind-dialog";
 import {
+  agentHasChildrenNames,
+  inheritedPromptReadState,
   isAgentHasChildrenError,
   isSpecialization,
 } from "../specialization";
@@ -131,6 +133,18 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       ? (isForbidden || isNotFound ? null : detailQuery.data) ?? listAgent
       : listAgent ?? (isForbidden || isNotFound ? null : detailQuery.data)) ??
     null;
+  // The base role's prompt arrives on the DETAIL read. When that read failed,
+  // the specialization's `inherited_instructions` is merely absent — which in
+  // the payload looks exactly like a base role that has no prompt. Report the
+  // read failure as a read failure instead of letting the Instructions tab
+  // state it as a fact about the base role (DENE-384); a 403 stays "ready",
+  // where the tab's "no prompt, or you don't have access to it" copy is the
+  // honest answer.
+  const inheritedPromptState = inheritedPromptReadState(listAgentIsSpecialization, {
+    succeeded: detailQuery.isSuccess,
+    failed: detailQuery.isError,
+    accessDenied: isForbidden,
+  });
   const presence: AgentPresenceDetail | null =
     agent ? presenceMap.get(agent.id) ?? null : null;
   // Active specialisations of this agent, from the list the page already
@@ -159,8 +173,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
 
   const [confirmArchive, setConfirmArchive] = useState(false);
   // Set when the archive was refused because specialisations still hang off
-  // this agent (409 agent_has_children).
+  // this agent (409 agent_has_children), together with the child names that
+  // refusal carried (see `agentHasChildrenNames`).
   const [blockedByChildren, setBlockedByChildren] = useState(false);
+  const [refusedChildNames, setRefusedChildNames] = useState<readonly string[]>(
+    [],
+  );
 
   // One-shot channel: the inspector's compact Lark status row asks the
   // overview pane to focus a tab. The pane clears it after consuming.
@@ -248,6 +266,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       // than a raw error toast. The caller must NOT navigate away in that
       // case — the dialog is the point of the refusal.
       if (isAgentHasChildrenError(e)) {
+        setRefusedChildNames(agentHasChildrenNames(e));
         setBlockedByChildren(true);
         return false;
       }
@@ -470,6 +489,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           currentUserId={currentUser?.id ?? null}
           canEdit={canEdit.allowed}
           childAgents={childAgents}
+          inheritedPromptState={inheritedPromptState}
+          onRetryInheritedPrompt={() => void detailQuery.refetch()}
           navIntent={tabNavIntent}
           onNavIntentHandled={() => setTabNavIntent(null)}
         />
@@ -479,6 +500,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         <SolidifyUnbindDialog
           parent={agent}
           children={childAgents}
+          serverChildNames={refusedChildNames}
           onClose={() => setBlockedByChildren(false)}
           onArchived={() => navigation.push(paths.agents())}
         />

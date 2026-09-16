@@ -1,15 +1,20 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
+import { ApiError } from "@multica/core/api";
 import type { Agent, AgentSkillSummary } from "@multica/core/types";
 import {
   activeChildrenOf,
+  agentHasChildrenNames,
   baseRoleOptions,
   childrenOf,
   composeEffectiveInstructions,
   hasInheritedPrompt,
+  inheritedPromptReadState,
   inheritedSkillChips,
+  isAgentHasChildrenError,
   isBaseRole,
   isSpecialization,
+  solidifyTargets,
   specializationCount,
 } from "./specialization";
 
@@ -163,5 +168,141 @@ describe("hasInheritedPrompt", () => {
       hasInheritedPrompt({ parent_agent_id: "base-1", inherited_instructions: "" }),
     ).toBe(false);
     expect(hasInheritedPrompt({ parent_agent_id: "" })).toBe(false);
+  });
+});
+
+// DENE-384: the archive refusal names every active child, including ones this
+// viewer cannot see, so its names — not the visible rows — are what the
+// solidify dialog counts. The dialog test pins the rendering; this is the
+// matrix behind it.
+describe("agentHasChildrenNames", () => {
+  const refusal = (body: unknown) =>
+    new ApiError("refused", 409, "Conflict", body);
+
+  it("reads the names off an agent_has_children refusal", () => {
+    expect(
+      agentHasChildrenNames(
+        refusal({ code: "agent_has_children", children: ["One", "Two"] }),
+      ),
+    ).toEqual(["One", "Two"]);
+  });
+
+  it("returns nothing for a different refusal or a malformed body", () => {
+    // An empty list means "the server said nothing", never "the server said
+    // none", so every one of these falls back to the visible rows.
+    expect(agentHasChildrenNames(refusal({ code: "agent_has_children" }))).toEqual(
+      [],
+    );
+    expect(
+      agentHasChildrenNames(refusal({ code: "agent_has_children", children: [] })),
+    ).toEqual([]);
+    expect(
+      agentHasChildrenNames(
+        refusal({ code: "agent_has_children", children: [1, "Two", ""] }),
+      ),
+    ).toEqual(["Two"]);
+    expect(agentHasChildrenNames(refusal({ code: "something_else" }))).toEqual([]);
+    expect(agentHasChildrenNames(new Error("network"))).toEqual([]);
+  });
+
+  it("keeps the error-code check in step with the guard that opens the dialog", () => {
+    expect(isAgentHasChildrenError(refusal({ code: "agent_has_children" }))).toBe(
+      true,
+    );
+  });
+});
+
+// DENE-384: the detail read that carries the base role's prompt can be in
+// flight, failed, or genuinely empty — and the payload for all three is the
+// same absent field. Which of the three the UI states is a boundary matrix,
+// so it lives here.
+describe("inheritedPromptReadState", () => {
+  const flags = (over: Partial<{
+    succeeded: boolean;
+    failed: boolean;
+    accessDenied: boolean;
+  }>) => ({ succeeded: false, failed: false, accessDenied: false, ...over });
+
+  it("is ready as soon as the read succeeded", () => {
+    expect(inheritedPromptReadState(true, flags({ succeeded: true }))).toBe(
+      "ready",
+    );
+  });
+
+  it("is loading while the read is still in flight", () => {
+    expect(inheritedPromptReadState(true, flags({}))).toBe("loading");
+  });
+
+  it("reports a failed read as a failure", () => {
+    expect(inheritedPromptReadState(true, flags({ failed: true }))).toBe(
+      "failed",
+    );
+  });
+
+  it("keeps a 403 an answer rather than a failure", () => {
+    // "You may not read the base role" is exactly what the tab's "no prompt,
+    // or you don't have access to it" copy covers.
+    expect(
+      inheritedPromptReadState(
+        true,
+        flags({ failed: true, accessDenied: true }),
+      ),
+    ).toBe("ready");
+  });
+
+  it("asks nothing of the read for a base role", () => {
+    expect(inheritedPromptReadState(false, flags({}))).toBe("ready");
+    expect(inheritedPromptReadState(false, flags({ failed: true }))).toBe(
+      "ready",
+    );
+  });
+});
+
+describe("solidifyTargets", () => {
+  const visible = agent({ id: "child-1", name: "Nightly Variant" });
+
+  it("lists exactly the rows it was handed when the server named none", () => {
+    expect(solidifyTargets([visible], [])).toEqual([
+      { agent: visible, name: "Nightly Variant" },
+    ]);
+  });
+
+  it("keeps a name the viewer cannot see, so the count matches the guard", () => {
+    const targets = solidifyTargets(
+      [visible],
+      ["Nightly Variant", "Somebody Else's Variant"],
+    );
+    expect(targets.map((target) => target.name)).toEqual([
+      "Nightly Variant",
+      "Somebody Else's Variant",
+    ]);
+    // Only the visible one can actually be solidified — the other has no id.
+    expect(targets.map((target) => target.agent?.id ?? null)).toEqual([
+      "child-1",
+      null,
+    ]);
+  });
+
+  it("matches names one-for-one when two children share one", () => {
+    const twin = agent({ id: "child-2", name: "Nightly Variant" });
+    const targets = solidifyTargets(
+      [visible, twin],
+      ["Nightly Variant", "Nightly Variant", "Hidden Variant"],
+    );
+    expect(targets.map((target) => target.agent?.id ?? null)).toEqual([
+      "child-1",
+      "child-2",
+      null,
+    ]);
+  });
+
+  it("never drops a visible child the refusal did not name", () => {
+    // A list that changed between the archive attempt and the dialog must not
+    // hide a row the user can still act on.
+    const targets = solidifyTargets([visible], ["Only Named Variant"]);
+    expect(targets.map((target) => target.name)).toEqual([
+      "Only Named Variant",
+      "Nightly Variant",
+    ]);
   });
 });

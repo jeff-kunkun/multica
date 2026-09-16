@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Layers } from "lucide-react";
+import { EyeOff, Layers } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Agent } from "@multica/core/types";
@@ -20,6 +20,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { solidifyTargets } from "../specialization";
 
 /**
  * The escape hatch behind the archive refusal (DENE-301/304).
@@ -36,16 +37,28 @@ import { ActorAvatar } from "../../common/actor-avatar";
  * so a partial failure is reported as such instead of as one opaque error —
  * the children that WERE solidified are already detached, and the parent stays
  * unarchived because the guard is still in force for the rest.
+ *
+ * The list is driven by the refusal's own names (DENE-384) rather than by the
+ * caller's agent list: the server counts every active child, including ones
+ * the caller cannot see, so a list built from visible rows only could show
+ * fewer rows than the guard is actually blocking on.
  */
 export function SolidifyUnbindDialog({
   parent,
   children,
+  serverChildNames = [],
   onClose,
   onArchived,
 }: {
   parent: Agent;
   /** Active specialisations of `parent`, already resolved by the caller. */
   children: readonly Agent[];
+  /**
+   * Child names as the archive refusal reported them, when the caller caught
+   * one. Empty means the server named none (an older backend) — the dialog
+   * then lists exactly the rows it was handed.
+   */
+  serverChildNames?: readonly string[];
   onClose: () => void;
   /** Runs after the archive succeeded, so callers can navigate or refetch. */
   onArchived?: () => void;
@@ -55,7 +68,9 @@ export function SolidifyUnbindDialog({
   const qc = useQueryClient();
   const [working, setWorking] = useState(false);
 
-  const names = children.map((child) => child.name).join(", ");
+  const targets = solidifyTargets(children, serverChildNames);
+  const hiddenCount = targets.filter((target) => !target.agent).length;
+  const names = targets.map((target) => target.name).join(", ");
 
   const handleConfirm = async () => {
     setWorking(true);
@@ -118,7 +133,7 @@ export function SolidifyUnbindDialog({
               <AlertDialogTitle>
                 {t(($) => $.specialization.archive_block_title, {
                   name: parent.name,
-                  count: children.length,
+                  count: targets.length,
                 })}
               </AlertDialogTitle>
               <AlertDialogDescription>
@@ -133,20 +148,46 @@ export function SolidifyUnbindDialog({
             {t(($) => $.specialization.archive_block_list_title)}
           </div>
           <ul className="mt-1.5 space-y-1.5">
-            {children.map((child) => (
-              <li key={child.id} className="flex min-w-0 items-center gap-2">
-                <ActorAvatar
-                  actorType="agent"
-                  actorId={child.id}
-                  size="sm"
-                  className="shrink-0"
-                />
+            {targets.map((target, index) => (
+              <li
+                key={target.agent?.id ?? `unlisted-${index}-${target.name}`}
+                data-testid="solidify-unbind-child"
+                className="flex min-w-0 items-center gap-2"
+              >
+                {target.agent ? (
+                  <ActorAvatar
+                    actorType="agent"
+                    actorId={target.agent.id}
+                    size="sm"
+                    className="shrink-0"
+                  />
+                ) : (
+                  <EyeOff
+                    aria-hidden="true"
+                    className="size-3.5 shrink-0 text-muted-foreground"
+                  />
+                )}
                 <span className="min-w-0 truncate text-body">
-                  {child.name}
+                  {target.name}
                 </span>
+                {!target.agent && (
+                  <span className="shrink-0 text-micro text-muted-foreground">
+                    {t(($) => $.specialization.archive_block_hidden_row)}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
+          {hiddenCount > 0 && (
+            <p
+              data-testid="solidify-unbind-hidden-note"
+              className="mt-2 text-caption leading-snug text-muted-foreground"
+            >
+              {t(($) => $.specialization.archive_block_hidden_note, {
+                count: hiddenCount,
+              })}
+            </p>
+          )}
           <span className="sr-only">{names}</span>
         </div>
 

@@ -637,4 +637,25 @@ describe("AgentsPage base-role nesting", () => {
       "/test-workspace/agents/new/manual?parent=a-base",
     );
   });
+
+  // DENE-384: the empty derive entry under every base role and the fold
+  // control that folds nothing turned one agent into two rows and read as a
+  // broken list.
+  it("adds no fold control or derive entry to a base role with no specialisations", () => {
+    mocks.agents = [makeAgent({ id: "a-lonely", name: "Lonely Role" })];
+    mocks.viewState.grouping = "specialization";
+
+    renderPage();
+
+    expect(screen.getByText("Lonely Role")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-specialization-toggle"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-derive-specialization"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-specialization-count"),
+    ).not.toBeInTheDocument();
+  });
 });

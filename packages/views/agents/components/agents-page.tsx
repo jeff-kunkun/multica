@@ -1449,17 +1449,28 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                   }
                   const row = item.row;
                   const isChild = item.kind === "specialization";
+                  const isSelected = selectedIds.has(row.agent.id);
                   return (
                     <ListGridRow
                       key={item.key}
                       data-specialization-row={isChild ? "true" : undefined}
+                      // The row's own hover (`hover:bg-accent/40` on
+                      // ListGridRow) used to overwrite the selection tint and
+                      // leave a selected row looking exactly like any hovered
+                      // one (DENE-384). Selection is asserted as `data-active`
+                      // and re-stated on hover in the compound variant, which
+                      // out-specifies the shared hover rule, so a selected row
+                      // stays selected-looking while the pointer is on it.
+                      data-active={isSelected ? "true" : undefined}
                       className={`h-16 cursor-pointer ${
-                        selectedIds.has(row.agent.id) ? "bg-accent/30" : ""
+                        isSelected
+                          ? "bg-surface-selected data-active:hover:bg-surface-selected"
+                          : ""
                       }`}
                       {...rowLink(paths.agentDetail(row.agent.id), row.agent.name)}
                     >
                       <CheckboxCell
-                        checked={selectedIds.has(row.agent.id)}
+                        checked={isSelected}
                         onToggle={() => toggleSelected(row.agent.id)}
                       />
                       <NameCell
@@ -1469,8 +1480,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                           // A specialisation whose base role was filtered away
                           // is emitted as its own group head, but it can never
                           // hold children — giving it the fold control would
-                          // render a chevron that toggles nothing.
-                          item.kind === "base" && !isSpecialization(row.agent)
+                          // render a chevron that toggles nothing. The same
+                          // goes for a base role with zero specialisations
+                          // (DENE-384): nothing to fold, so nothing to show.
+                          item.kind === "base" &&
+                          !isSpecialization(row.agent) &&
+                          item.hasChildren
                             ? {
                                 childCount: item.childCount,
                                 expanded: item.expanded,

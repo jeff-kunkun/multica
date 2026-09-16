@@ -84,7 +84,10 @@ const secondChild = makeAgent({
   parent_agent_id: "agent-base",
 });
 
-function renderDialog(children: Agent[] = [firstChild, secondChild]) {
+function renderDialog(
+  children: Agent[] = [firstChild, secondChild],
+  serverChildNames: string[] = [],
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -97,6 +100,7 @@ function renderDialog(children: Agent[] = [firstChild, secondChild]) {
         <SolidifyUnbindDialog
           parent={parent}
           children={children}
+          serverChildNames={serverChildNames}
           onClose={onClose}
           onArchived={onArchived}
         />
@@ -152,6 +156,42 @@ describe("SolidifyUnbindDialog", () => {
     expect(mocks.toastSuccess).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onArchived).toHaveBeenCalledTimes(1);
+  });
+
+  // DENE-384: the guard counts every active child, including ones this viewer
+  // cannot see, so a list built from visible rows alone could show fewer rows
+  // than are actually blocking — and the second archive would be refused too.
+  it("lists one row per child the refusal reported, seen or not", async () => {
+    const user = userEvent.setup();
+    renderDialog([firstChild], ["Nightly Variant", "Hidden Variant"]);
+
+    const dialog = screen.getByTestId("solidify-unbind-dialog");
+    expect(dialog).toHaveTextContent('"Base Role" still has 2 specializations');
+    expect(screen.getAllByTestId("solidify-unbind-child")).toHaveLength(2);
+    expect(dialog).toHaveTextContent("Hidden Variant");
+    expect(screen.getByTestId("solidify-unbind-hidden-note")).toHaveTextContent(
+      /1 more specialization isn't visible to you/i,
+    );
+
+    // Only the child this viewer holds an id for can be solidified; the count
+    // and the note are what keep the user from thinking the job is done.
+    await user.click(
+      screen.getByRole("button", { name: /Solidify & unbind, then archive/i }),
+    );
+    await waitFor(() =>
+      expect(mocks.solidifyAgent.mock.calls.map((call) => call[0])).toEqual([
+        "agent-child-1",
+      ]),
+    );
+  });
+
+  it("says nothing about hidden children when the refusal named them all", () => {
+    renderDialog([firstChild, secondChild], ["Nightly Variant", "Weekly Variant"]);
+
+    expect(screen.getAllByTestId("solidify-unbind-child")).toHaveLength(2);
+    expect(
+      screen.queryByTestId("solidify-unbind-hidden-note"),
+    ).not.toBeInTheDocument();
   });
 
   it("stops at the first refusal and reports which child failed", async () => {
