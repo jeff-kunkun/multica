@@ -47,13 +47,18 @@ done
 # same isolation from one place — and this is the only layer that knows the
 # suite is a set of separate processes sharing a run.
 #
+# `--only agent` is left out on purpose: pkg/agent opens no database, and its
+# CI job runs on a runner with no Postgres service at all. Standing a database
+# up for it would turn "no server reachable" into a failed run of tests that
+# never needed one.
+#
 # MULTICA_TEST_DB_ACTIVE marks the re-exec so the nested invocation cannot
-# provision a second database.
-if [ "${MULTICA_TEST_DB_ACTIVE:-0}" != "1" ]; then
-  expect_use=1
-  [ "$only" = agent ] && expect_use=0
-  exec env MULTICA_TEST_DB_ACTIVE=1 MULTICA_TEST_DB_EXPECT_USE="$expect_use" \
-    bash "$SCRIPT_DIR/test-db.sh" -- bash "$0" "${forward[@]}"
+# provision a second database. `${forward[@]+...}` is what keeps a no-argument
+# `bash scripts/test-go.sh` — how check.sh calls it — working under `set -u` on
+# bash 3.2, where expanding an empty array is an unbound-variable error.
+if [ "$only" != agent ] && [ "${MULTICA_TEST_DB_ACTIVE:-0}" != "1" ]; then
+  exec env MULTICA_TEST_DB_ACTIVE=1 MULTICA_TEST_DB_EXPECT_USE=1 \
+    bash "$SCRIPT_DIR/test-db.sh" -- bash "$0" ${forward[@]+"${forward[@]}"}
 fi
 
 cd "$REPO_ROOT/server"

@@ -114,6 +114,18 @@ expect_provisioned_database() {
   : >"$RUN_DB_FILE"
 }
 
+# pkg/agent opens no database, and the CI job that runs it has no Postgres
+# service. Provisioning one there would fail the run on a server it never
+# needed, so `--only agent` must reach `go test` without touching psql.
+expect_no_provisioned_database() {
+  label=$1
+  if [ -s "$PSQL_CALLS_FILE" ] || [ -s "$RUN_DB_FILE" ]; then
+    echo "$label provisioned a database for a suite that reads none:" >&2
+    cat "$PSQL_CALLS_FILE" "$RUN_DB_FILE" >&2
+    exit 1
+  fi
+}
+
 # $1: case label; the rest are arguments for test-go.sh. Asserts the usage
 # exit status, the usage line, and that go was never invoked.
 expect_usage_failure() {
@@ -153,6 +165,15 @@ expect_calls "--race" "$regular_call
 $agent_call"
 expect_provisioned_database "--race"
 
+# check.sh calls the wrapper with no arguments at all. It forwards its own
+# argument list across the re-exec, and on bash 3.2 (the system bash on macOS)
+# expanding an empty array under `set -u` aborts the script before a single
+# test runs.
+PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh"
+expect_calls "no arguments" "${regular_call/ -race/}
+${agent_call/ -race/}"
+expect_provisioned_database "no arguments"
+
 PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --race --only regular
 expect_calls "--only regular" "$regular_call"
 expect_provisioned_database "--only regular"
@@ -160,7 +181,7 @@ expect_provisioned_database "--only regular"
 # Option order must not matter: CI spells it one way, humans another.
 PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --only agent --race
 expect_calls "--only agent" "$agent_call"
-expect_provisioned_database "--only agent"
+expect_no_provisioned_database "--only agent"
 
 expect_usage_failure "unknown option" --unknown
 expect_usage_failure "unknown --only scope" --only everything
