@@ -197,6 +197,13 @@ describe("resolveTabPresentation — flow and unknown", () => {
     });
   });
 
+  it("create-issue flow is a new issue, not the issue it will become", () => {
+    expect(present("/acme/issues/new/sess-1")).toEqual({
+      visual: { kind: "icon", icon: "ListTodo" },
+      title: { kind: "tab", tabKey: "create_issue" },
+    });
+  });
+
   it("unknown route uses a neutral icon and label, never Issues", () => {
     expect(present("/acme/mystery")).toEqual({
       visual: { kind: "icon", icon: "FileQuestion" },
