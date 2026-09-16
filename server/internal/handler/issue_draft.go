@@ -11,11 +11,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/logger"
-	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -77,18 +75,50 @@ func issueDraftToResponse(d db.IssueDraft) issueDraftResponse {
 
 // issueDraftPayload is the part of `draft` the server understands. Everything
 // else in the object is the client's and is never read here — but these fields
-// are a contract, not a convenience: finalize builds the issue straight out of
+// are a contract, not a convenience: finalize builds the issues straight out of
 // them, so an unparseable draft must fail the confirm rather than create a
 // half-meant issue.
+//
+// The eight flat fields describe the group's ROOT (its parent issue). Children,
+// when the alignment settled on more than one issue, come in `Children`. An
+// absent or empty `Children` is not a legacy shape to be tolerated: it is a
+// group with a single node, which is exactly what a lone issue always was.
 type issueDraftPayload struct {
-	Title         string  `json:"title"`
-	Description   string  `json:"description"`
-	Status        string  `json:"status"`
-	Priority      string  `json:"priority"`
-	AssigneeType  *string `json:"assignee_type"`
-	AssigneeID    *string `json:"assignee_id"`
-	ProjectID     *string `json:"project_id"`
-	ParentIssueID *string `json:"parent_issue_id"`
+	Title         string            `json:"title"`
+	Description   string            `json:"description"`
+	Status        string            `json:"status"`
+	Priority      string            `json:"priority"`
+	AssigneeType  *string           `json:"assignee_type"`
+	AssigneeID    *string           `json:"assignee_id"`
+	ProjectID     *string           `json:"project_id"`
+	ParentIssueID *string           `json:"parent_issue_id"`
+	Children      []issueDraftChild `json:"children"`
+}
+
+// issueDraftChild is one sub-issue of an alignment payload.
+//
+// `Key` identifies this node WITHIN this draft. The preview panel mints it once,
+// when the row first enters the draft, and every later save carries it back
+// unchanged — that is what lets the server derive the same origin_id on every
+// confirm and refuse to build the group twice. It is not a UUID and never
+// becomes one directly: the server hashes (chat_session_id, key) into the
+// node's identity, so a client cannot name an id that points at another draft.
+//
+// There is deliberately no nested children and no assignee name: a sub-issue
+// cannot have sub-issues (the stage barrier is a sibling-scoped judgement, and
+// a second level would silently fall out of it), and the model that fills this
+// block has no workspace roster to resolve a real assignee id against.
+type issueDraftChild struct {
+	Key          string  `json:"key"`
+	Title        string  `json:"title"`
+	Description  string  `json:"description"`
+	Status       string  `json:"status"`
+	Priority     string  `json:"priority"`
+	AssigneeType *string `json:"assignee_type"`
+	AssigneeID   *string `json:"assignee_id"`
+	// Stage is the barrier slot, 1-based. Absent means "no stage", i.e. the
+	// implicit single stage. Bounds are checked before anything is created.
+	Stage *int32 `json:"stage"`
 }
 
 // isIssueDraftCarrier reports whether an agent is a hidden alignment carrier.
@@ -633,37 +663,48 @@ type FinalizeIssueDraftRequest struct {
 type FinalizeIssueDraftResponse struct {
 	Draft   issueDraftResponse `json:"draft"`
 	IssueID string             `json:"issue_id"`
+	// Issues is the whole group the confirm produced, root first. Its meaning
+	// for a client that does not know the field — an older build — is simply
+	// "the group is the one issue named by issue_id", which is exactly what a
+	// group with no children is. See issueDraftCreatedIssues.
+	Issues []IssueDraftCreatedIssue `json:"issues"`
 }
 
 // FinalizeIssueDraft is the single point where an alignment conversation
 // becomes real work. It runs in three steps, each short-lived:
 //
 //  1. Under LockIssueDraftInWorkspace: decide. A completed draft answers with
-//     the issue it already made — that is what makes a double-clicked confirm,
+//     the group it already made — that is what makes a double-clicked confirm,
 //     a retried request and a second tab all safe. Anything not 'ready', or at
 //     a revision the caller was not looking at, is refused here and nothing is
 //     created.
-//  2. Create the issue, or adopt one an earlier attempt already created. "At
-//     most one issue per draft" is enforced by the database — the partial
-//     unique index on issue (origin_id) WHERE origin_type = 'issue_draft'
-//     (migration 486) — not by how long a lock is held. Two confirms that both
-//     get past step 1 cannot both create: one gets a unique violation and
-//     adopts the winner.
-//  3. Under the lock again: point the draft at that issue.
+//  2. Create the group, or adopt the one an earlier attempt already created.
+//     "At most one issue per alignment NODE" is enforced by the database — the
+//     partial unique index on issue (origin_id) WHERE origin_type =
+//     'issue_draft' (migration 486) — not by how long a lock is held. Two
+//     confirms that both get past step 1 cannot both create: the root node's
+//     origin_id is the chat session id on both sides, so one of them gets a
+//     unique violation and adopts the winner's whole group.
+//  3. Under the lock again: point the draft at the group's root.
 //
-// The lock is deliberately NOT held across step 2. IssueService.Create opens
-// its own transaction, so holding one here would make every confirm occupy two
-// pool connections at once for the whole of issue creation and enqueue —
-// enough concurrent confirms would deadlock on the pool rather than on each
-// other. Correctness does not need it: the unique index is the authority, and
-// step 3 re-decides under the lock on a re-read row.
+// The lock is deliberately NOT held across step 2. IssueService.CreateGroup
+// opens its own transaction, so holding one here would make every confirm
+// occupy two pool connections at once for the whole of issue creation and
+// enqueue — enough concurrent confirms would deadlock on the pool rather than
+// on each other. The constraint gets sharper as a group grows, not weaker:
+// a group's transaction is longer than a single issue's. Correctness does not
+// need the lock: the unique index is the authority, and step 3 re-decides under
+// the lock on a re-read row.
 //
 // One window is accepted rather than closed: a save landing between steps 1
 // and 2 would be created from the payload validated in step 1. An alignment
 // conversation has a single editor on one screen (the same assumption
 // agent_builder_draft documents), so that save and that confirm are the same
 // person, and expected_revision already rejects a confirm from a client that
-// was looking at an older draft.
+// was looking at an older draft. What that window can no longer do is produce a
+// SECOND group: re-keying every child changes the children's ids, but not the
+// root's, so the second confirm collides on the root and adopts the first
+// group.
 func (h *Handler) FinalizeIssueDraft(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
@@ -695,15 +736,15 @@ func (h *Handler) FinalizeIssueDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	params, ok := h.issueParamsFromDraft(w, r, workspaceID, session, ready)
+	group, ok := h.issueGroupParamsFromDraft(w, r, workspaceID, session, ready)
 	if !ok {
 		return
 	}
-	issueID, ok := h.createIssueForDraft(w, r, session, params)
+	issues, ok := h.createIssueGroupForDraft(w, r, session, group)
 	if !ok {
 		return
 	}
-	completed, ok := h.completeIssueDraft(w, r, session, issueID)
+	completed, ok := h.completeIssueDraft(w, r, session, issues)
 	if !ok {
 		return
 	}
@@ -746,9 +787,18 @@ func (h *Handler) admitIssueDraftForFinalize(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusInternalServerError, "failed to finalize issue draft")
 			return db.IssueDraft{}, nil, false
 		}
+		// A repeated confirm has to answer with the whole group, not just the
+		// parent: the second click of a double click must show the user what
+		// the first one showed, or the confirmation page quietly degrades from
+		// "these five issues" to "this one issue".
+		issues, ok := h.issueDraftGroupResponse(w, r, session)
+		if !ok {
+			return db.IssueDraft{}, nil, false
+		}
 		return db.IssueDraft{}, &FinalizeIssueDraftResponse{
 			Draft:   issueDraftToResponse(locked),
 			IssueID: uuidToString(locked.IssueID),
+			Issues:  issues,
 		}, true
 	case "abandoned":
 		writeError(w, http.StatusConflict, "this draft has been abandoned")
@@ -770,10 +820,13 @@ func (h *Handler) admitIssueDraftForFinalize(w http.ResponseWriter, r *http.Requ
 	return locked, nil, true
 }
 
-// completeIssueDraft is step 3: point the draft at the issue that now exists
-// for it. A draft completed by a racing confirm answers with its issue, which
-// the unique index guarantees is the same one.
-func (h *Handler) completeIssueDraft(w http.ResponseWriter, r *http.Request, session db.ChatSession, issueID pgtype.UUID) (*FinalizeIssueDraftResponse, bool) {
+// completeIssueDraft is step 3: point the draft at the group that now exists
+// for it. A draft completed by a racing confirm answers with its own group,
+// which the unique index guarantees is the same one.
+//
+// `issues` is the committed group, root first. Its root is what
+// issue_draft.issue_id records; the whole slice is what the response hands back.
+func (h *Handler) completeIssueDraft(w http.ResponseWriter, r *http.Request, session db.ChatSession, issues []db.Issue) (*FinalizeIssueDraftResponse, bool) {
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to complete issue draft")
@@ -795,7 +848,7 @@ func (h *Handler) completeIssueDraft(w http.ResponseWriter, r *http.Request, ses
 		completed, err = qtx.MarkIssueDraftCompleted(r.Context(), db.MarkIssueDraftCompletedParams{
 			ChatSessionID: session.ID,
 			WorkspaceID:   session.WorkspaceID,
-			IssueID:       issueID,
+			IssueID:       issues[0].ID,
 		})
 		if err != nil {
 			// Never swallowed: returning 200 with a zero-valued draft here
@@ -815,168 +868,8 @@ func (h *Handler) completeIssueDraft(w http.ResponseWriter, r *http.Request, ses
 	return &FinalizeIssueDraftResponse{
 		Draft:   issueDraftToResponse(completed),
 		IssueID: uuidToString(completed.IssueID),
+		Issues:  issueDraftCreatedIssues(issues, h.getIssuePrefix(r.Context(), session.WorkspaceID)),
 	}, true
-}
-
-// issueParamsFromDraft validates the structured draft and resolves it into
-// create parameters. Every gate the ordinary create path applies to a
-// client-supplied field applies here too — the draft is client-supplied, and an
-// alignment conversation must not become a way to assign work to an agent the
-// caller cannot invoke.
-func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, workspaceID string, session db.ChatSession, draft db.IssueDraft) (service.IssueCreateParams, bool) {
-	var payload issueDraftPayload
-	if err := json.Unmarshal(draft.Draft, &payload); err != nil {
-		writeError(w, http.StatusBadRequest, "draft is not a valid issue draft")
-		return service.IssueCreateParams{}, false
-	}
-	payload.Title = strings.TrimSpace(payload.Title)
-	if payload.Title == "" {
-		writeError(w, http.StatusBadRequest, "draft title is required")
-		return service.IssueCreateParams{}, false
-	}
-
-	status := payload.Status
-	if status == "" {
-		status = "todo"
-	}
-	status, ok := h.resolveIssueStatusKey(w, r, session.WorkspaceID, status)
-	if !ok {
-		return service.IssueCreateParams{}, false
-	}
-	priority := payload.Priority
-	if priority == "" {
-		priority = "none"
-	}
-	if !validateIssueEnum(w, "priority", priority, validIssuePriorities) {
-		return service.IssueCreateParams{}, false
-	}
-
-	var assigneeType pgtype.Text
-	var assigneeID pgtype.UUID
-	if payload.AssigneeType != nil {
-		assigneeType = pgtype.Text{String: *payload.AssigneeType, Valid: true}
-	}
-	if payload.AssigneeID != nil {
-		id, ok := parseUUIDOrBadRequest(w, *payload.AssigneeID, "assignee_id")
-		if !ok {
-			return service.IssueCreateParams{}, false
-		}
-		assigneeID = id
-	}
-	if code, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); code != 0 {
-		writeError(w, code, msg)
-		return service.IssueCreateParams{}, false
-	}
-
-	var projectID pgtype.UUID
-	if payload.ProjectID != nil && *payload.ProjectID != "" {
-		id, ok := parseUUIDOrBadRequest(w, *payload.ProjectID, "project_id")
-		if !ok {
-			return service.IssueCreateParams{}, false
-		}
-		projectID = id
-	}
-	var parentIssueID pgtype.UUID
-	if payload.ParentIssueID != nil && *payload.ParentIssueID != "" {
-		id, ok := parseUUIDOrBadRequest(w, *payload.ParentIssueID, "parent_issue_id")
-		if !ok {
-			return service.IssueCreateParams{}, false
-		}
-		// Project membership and the parent's workspace boundary are re-checked
-		// inside IssueService.Create atomically with the create; this read only
-		// turns a cross-workspace parent into a 400 naming the field.
-		parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-			ID:          id,
-			WorkspaceID: session.WorkspaceID,
-		})
-		if err != nil || !parent.ID.Valid {
-			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
-			return service.IssueCreateParams{}, false
-		}
-		parentIssueID = id
-	}
-
-	return service.IssueCreateParams{
-		WorkspaceID:   session.WorkspaceID,
-		Title:         payload.Title,
-		Description:   pgtype.Text{String: payload.Description, Valid: payload.Description != ""},
-		Status:        status,
-		Priority:      priority,
-		AssigneeType:  assigneeType,
-		AssigneeID:    assigneeID,
-		CreatorType:   "member",
-		CreatorID:     session.CreatorID,
-		ParentIssueID: parentIssueID,
-		ProjectID:     projectID,
-		// The draft's conversation IS the issue's provenance: it is how the
-		// created issue points back at what was agreed, and how a crashed
-		// confirm finds its own result on the next attempt.
-		OriginType: pgtype.Text{String: "issue_draft", Valid: true},
-		OriginID:   draft.ChatSessionID,
-		// An alignment draft is confirmed deliberately, by a human who has just
-		// read it. The duplicate guard's "did you mean this existing issue"
-		// prompt belongs to the quick-create path, not here.
-		AllowDuplicate: true,
-	}, true
-}
-
-// createIssueForDraft creates the issue for a confirmed draft, or adopts the
-// one another confirm already created. The lookup is not an optimisation: it
-// is how a retried confirm — or one whose draft never got completed because
-// the process died — finds its own result instead of making a second issue.
-func (h *Handler) createIssueForDraft(w http.ResponseWriter, r *http.Request, session db.ChatSession, params service.IssueCreateParams) (pgtype.UUID, bool) {
-	existing, err := h.Queries.GetIssueByOrigin(r.Context(), db.GetIssueByOriginParams{
-		WorkspaceID: session.WorkspaceID,
-		OriginType:  params.OriginType,
-		OriginID:    params.OriginID,
-	})
-	if err == nil {
-		return existing.ID, true
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, http.StatusInternalServerError, "failed to look up issue for draft")
-		return pgtype.UUID{}, false
-	}
-
-	prefix := h.getIssuePrefix(r.Context(), session.WorkspaceID)
-	fillCreated := h.newStatusCategoryFiller(r.Context(), session.WorkspaceID)
-	analyticsAgentID := ""
-	if params.AssigneeType.Valid && params.AssigneeType.String == "agent" {
-		analyticsAgentID = uuidToString(params.AssigneeID)
-	}
-
-	result, err := h.IssueService.Create(r.Context(), params, service.IssueCreateOpts{
-		ActorID:          uuidToString(session.CreatorID),
-		AnalyticsAgentID: analyticsAgentID,
-		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
-		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, labels []db.IssueLabel) map[string]any {
-			payload := issueToResponse(issue, prefix)
-			fillCreated(&payload)
-			labelResponses := labelsToResponse(labels)
-			payload.Labels = &labelResponses
-			return map[string]any{"issue": payload}
-		},
-	})
-	if err == nil {
-		return result.Issue.ID, true
-	}
-
-	// The partial unique index rejected a second issue for this draft: another
-	// confirm won the race. The index is the authority on which issue this
-	// draft became, so adopt the winner rather than reporting a failure for a
-	// confirm whose outcome — one issue, this draft's — actually happened.
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		if won, lookupErr := h.Queries.GetIssueByOrigin(r.Context(), db.GetIssueByOriginParams{
-			WorkspaceID: session.WorkspaceID,
-			OriginType:  params.OriginType,
-			OriginID:    params.OriginID,
-		}); lookupErr == nil {
-			return won.ID, true
-		}
-	}
-	writeIssueDraftCreateError(w, r, err)
-	return pgtype.UUID{}, false
 }
 
 // writeIssueDraftCreateError maps an IssueService.Create failure onto the same

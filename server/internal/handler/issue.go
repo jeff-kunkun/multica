@@ -322,8 +322,16 @@ func (h *Handler) fillStatusCategory(ctx context.Context, wsID pgtype.UUID, resp
 	h.newStatusCategoryFiller(ctx, wsID)(resp)
 }
 
+// issueIdentifier is the human-readable issue reference ("HAN-42"). It is one
+// function because it is a wire contract: the create response, the list
+// projections and the alignment confirmation have to spell an issue the same
+// way, or a person comparing two screens sees two different issues.
+func issueIdentifier(issuePrefix string, number int32) string {
+	return issuePrefix + "-" + strconv.Itoa(int(number))
+}
+
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
-	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	identifier := issueIdentifier(issuePrefix, i.Number)
 	// A built-in status IS its own category, so this costs no catalog lookup and
 	// every response carries it. A CUSTOM status is left empty here and filled
 	// in by endpoints that resolve the catalog (see the children endpoints'
@@ -370,7 +378,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 	if issuestatus.IsBuiltIn(i.Status) {
 		statusCategory = i.Status
 	}
-	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	identifier := issueIdentifier(issuePrefix, i.Number)
 	return IssueResponse{
 		ID:             uuidToString(i.ID),
 		WorkspaceID:    uuidToString(i.WorkspaceID),
@@ -439,7 +447,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 	if issuestatus.IsBuiltIn(i.Status) {
 		statusCategory = i.Status
 	}
-	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	identifier := issueIdentifier(issuePrefix, i.Number)
 	return IssueResponse{
 		ID:             uuidToString(i.ID),
 		WorkspaceID:    uuidToString(i.WorkspaceID),
