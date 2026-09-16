@@ -491,7 +491,7 @@ describe("IssueDraftPage questions", () => {
     renderPage();
     await userEvent.click(await screen.findByRole("button", { name: /Nobody yet/ }));
     await waitFor(() => expect(mocks.sendChatMessage).toHaveBeenCalledTimes(1));
-    const [, wire] = mocks.sendChatMessage.mock.calls[0];
+    const wire = mocks.sendChatMessage.mock.calls[0]?.[1];
     expect(wire).toContain('"user_request":"Leave it unassigned"');
   });
 
@@ -527,7 +527,7 @@ describe("IssueDraftPage draft persistence", () => {
     );
     renderPage();
     await waitFor(() => expect(mocks.updateIssueDraft).toHaveBeenCalledTimes(1));
-    expect(mocks.updateIssueDraft.mock.calls[0][1]).toMatchObject({
+    expect(mocks.updateIssueDraft.mock.calls[0]?.[1]).toMatchObject({
       draft: { title: "Dark mode", description: "Add it.", priority: "high" },
       status: "draft",
       expected_revision: 3,
