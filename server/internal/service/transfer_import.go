@@ -318,6 +318,7 @@ const (
 	bindReasonNoProviderMatch   = "no_provider_match"
 	bindReasonAutoBindDisabled  = "auto_bind_disabled"
 	bindReasonUnknownSourceBind = "unknown_source_runtime"
+	bindReasonWriteFailed       = "bind_failed"
 )
 
 // resolveRuntimeBinds decides, per imported agent, which runtime on the target
@@ -405,12 +406,15 @@ func resolveRuntimeBinds(ctx context.Context, env TransferImportEnv, req Transfe
 				bind.Status = RuntimeBindBound
 				bind.BoundRuntimeID = chosen.ID
 				bind.BoundRuntimeName = chosen.Name
+				// The config import has already committed by now, so a failed
+				// bind leaves that agent unbound rather than undoing the
+				// import; the report hands it back as a choice instead.
 				if !dry {
 					if err := bindTransferAgentRuntime(ctx, env, item.TargetID, chosen); err != nil {
 						bind.Status = RuntimeBindChoose
 						bind.BoundRuntimeID = ""
 						bind.BoundRuntimeName = ""
-						bind.Reason = err.Error()
+						bind.Reason = bindReasonWriteFailed
 					}
 				}
 			case len(matched) == 1:
