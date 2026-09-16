@@ -11,6 +11,7 @@ import {
   type TransferRunRequest,
   type TransferRunResult,
   type TransferRuntimeBind,
+  type TransferRuntimeCandidate,
   type TransferSecretToFill,
 } from "../shared/workspace-transfer";
 
@@ -86,6 +87,7 @@ export function buildTransferCliArgs(
     if (!req.options.activateAutopilots) args.push("--activate-autopilots=false");
     if (!req.options.applyWorkspaceSettings) args.push("--apply-workspace-settings=false");
     if (req.options.applyIssuePrefix) args.push("--apply-issue-prefix");
+    if (!req.options.autoBindRuntimes) args.push("--auto-bind-runtimes=false");
   }
   return args;
 }
@@ -131,6 +133,7 @@ function parseTransferImportOptions(
     activateAutopilots: obj.activateAutopilots !== false,
     applyWorkspaceSettings: obj.applyWorkspaceSettings !== false,
     applyIssuePrefix: obj.applyIssuePrefix === true,
+    autoBindRuntimes: obj.autoBindRuntimes !== false,
   };
 }
 
@@ -424,6 +427,7 @@ function parseRuntimeBind(value: unknown): TransferRuntimeBind | null {
   const candidateIds = Array.isArray(obj.candidate_ids)
     ? obj.candidate_ids.filter((id): id is string => typeof id === "string")
     : [];
+  const status = asNonEmptyString(obj.status);
   return {
     agent_target_id: asNonEmptyString(obj.agent_target_id) ?? "",
     agent_name: asNonEmptyString(obj.agent_name) ?? "",
@@ -431,6 +435,29 @@ function parseRuntimeBind(value: unknown): TransferRuntimeBind | null {
     runtime_mode: asNonEmptyString(obj.runtime_mode) ?? "",
     profile_name: asNonEmptyString(obj.profile_name) ?? "",
     candidate_ids: candidateIds,
+    // A server predating DENE-364 reports neither status nor candidates; the
+    // card falls back to the plain candidate list in that case.
+    status:
+      status === "bound" || status === "choose" || status === "none" ? status : undefined,
+    candidates: Array.isArray(obj.candidates)
+      ? (obj.candidates.map(parseRuntimeCandidate).filter(Boolean) as TransferRuntimeCandidate[])
+      : undefined,
+    bound_runtime_id: asNonEmptyString(obj.bound_runtime_id),
+    bound_runtime_name: asNonEmptyString(obj.bound_runtime_name),
+    reason: asNonEmptyString(obj.reason),
+  };
+}
+
+function parseRuntimeCandidate(value: unknown): TransferRuntimeCandidate | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const obj = value as Record<string, unknown>;
+  const id = asNonEmptyString(obj.id);
+  if (!id) return null;
+  return {
+    id,
+    name: asNonEmptyString(obj.name) ?? id,
+    provider: asNonEmptyString(obj.provider),
+    runtime_mode: asNonEmptyString(obj.runtime_mode),
   };
 }
 

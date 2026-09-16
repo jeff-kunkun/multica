@@ -74,6 +74,7 @@ func registerTransferImportOptionFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("activate-autopilots", true, "Keep the source autopilot status; imported automations start triggering immediately (--activate-autopilots=false imports them paused)")
 	cmd.Flags().Bool("apply-workspace-settings", true, "Apply the exported workspace settings (context, repos, attribution)")
 	cmd.Flags().Bool("apply-issue-prefix", false, "Also adopt the exported issue prefix (changes the key of every future issue in the target)")
+	cmd.Flags().Bool("auto-bind-runtimes", true, "Bind an imported agent to the target runtime that matches its source runtime, when exactly one matches (--auto-bind-runtimes=false leaves every agent unbound)")
 }
 
 // transferImportOptions reads the switches registered above. A command built
@@ -82,10 +83,18 @@ func transferImportOptions(cmd *cobra.Command) service.ConfigImportOptions {
 	activate, _ := cmd.Flags().GetBool("activate-autopilots")
 	applySettings, _ := cmd.Flags().GetBool("apply-workspace-settings")
 	applyPrefix, _ := cmd.Flags().GetBool("apply-issue-prefix")
+	// Auto-bind defaults ON, so read it through Lookup: a command built without
+	// the flag must not fall through to GetBool's false and silently import
+	// every agent unbound again (DENE-364).
+	autoBind := true
+	if cmd.Flags().Lookup("auto-bind-runtimes") != nil {
+		autoBind, _ = cmd.Flags().GetBool("auto-bind-runtimes")
+	}
 	return service.ConfigImportOptions{
 		ActivateAutopilots:     activate,
 		ApplyWorkspaceSettings: &applySettings,
 		ApplyIssuePrefix:       applyPrefix,
+		AutoBindRuntimes:       &autoBind,
 	}
 }
 

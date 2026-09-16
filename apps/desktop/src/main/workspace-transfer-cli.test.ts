@@ -94,6 +94,7 @@ describe("buildTransferCliArgs", () => {
           activateAutopilots: true,
           applyWorkspaceSettings: true,
           applyIssuePrefix: false,
+          autoBindRuntimes: true,
         },
       }),
     ).toEqual([
@@ -120,6 +121,7 @@ describe("buildTransferCliArgs", () => {
           activateAutopilots: false,
           applyWorkspaceSettings: false,
           applyIssuePrefix: true,
+          autoBindRuntimes: false,
         },
       }),
     ).toEqual([
@@ -137,6 +139,7 @@ describe("buildTransferCliArgs", () => {
       "--activate-autopilots=false",
       "--apply-workspace-settings=false",
       "--apply-issue-prefix",
+      "--auto-bind-runtimes=false",
     ]);
   });
 });
@@ -314,6 +317,7 @@ describe("parseTransferRunRequest", () => {
         activateAutopilots: true,
         applyWorkspaceSettings: true,
         applyIssuePrefix: true,
+        autoBindRuntimes: true,
       },
     });
   });
@@ -418,6 +422,7 @@ describe("runTransferCli", () => {
           activateAutopilots: false,
           applyWorkspaceSettings: true,
           applyIssuePrefix: false,
+          autoBindRuntimes: true,
         },
       },
       deps,

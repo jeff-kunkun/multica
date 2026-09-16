@@ -660,7 +660,10 @@ func exportAgentsGroup(ctx context.Context, src TransferSourceClient, bundle *Co
 			continue
 		}
 		a := ConfigAgent{
-			SourceID:              id,
+			SourceID: id,
+			// Carried so a cross-instance import can match this agent's source
+			// runtime against the target's own runtimes (DENE-364).
+			SourceRuntimeID:       strField(raw, "runtime_id"),
 			Name:                  strField(raw, "name"),
 			Description:           strField(raw, "description"),
 			Instructions:          strField(raw, "instructions"),

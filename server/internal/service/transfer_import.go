@@ -74,7 +74,7 @@ func ImportTransferConfig(ctx context.Context, env TransferImportEnv, req Transf
 		PeopleMap:      peopleRows,
 		Profiles:       profileItems,
 		PinnedAgents:   pinnedItems,
-		RuntimesToBind: buildRuntimesToBind(ctx, env, req, cfgReport),
+		RuntimesToBind: resolveRuntimeBinds(ctx, env, req, cfgReport, *req.DryRun),
 		ExportGaps:     req.Manifest.ExportGaps,
 	}
 	return report, nil
@@ -311,20 +311,66 @@ func importPinnedAgents(ctx context.Context, env TransferImportEnv, req Transfer
 	return items, nil
 }
 
-func buildRuntimesToBind(ctx context.Context, env TransferImportEnv, req TransferConfigRequest, cfg *ConfigImportReport) []TransferRuntimeBind {
-	runtimes, _ := env.Queries.ListVisibleRuntimesForTransfer(ctx, env.TargetID)
-	byProvider := map[string][]string{}
-	for _, rt := range runtimes {
-		byProvider[rt.Provider] = append(byProvider[rt.Provider], uuidString(rt.ID))
-	}
-	hintByName := map[string]TransferRuntimeHint{}
-	for _, h := range req.RuntimeProfiles.RuntimesHint {
-		hintByName[h.DisplayName] = h
-	}
+// Reason codes for a runtime bind that did not happen. The Desktop card turns
+// these into operator-facing sentences, so they stay stable machine strings.
+const (
+	bindReasonNoVisibleRuntime  = "no_visible_runtime"
+	bindReasonNoProviderMatch   = "no_provider_match"
+	bindReasonAutoBindDisabled  = "auto_bind_disabled"
+	bindReasonUnknownSourceBind = "unknown_source_runtime"
+)
+
+// resolveRuntimeBinds decides, per imported agent, which runtime on the target
+// it should run on, and — when exactly one candidate matches and auto-bind is
+// on — performs the bind (DENE-364).
+//
+// Matching walks the agent's SOURCE runtime id into runtimes_hint and compares
+// the source runtime's provider / mode / profile name against the target's own
+// runtimes. Binding on a unique match is what makes "本机环境默认都相同" land
+// usable; anything ambiguous is handed back to the operator rather than
+// guessed, because the binding decides whose machine and account the agent
+// runs on.
+func resolveRuntimeBinds(ctx context.Context, env TransferImportEnv, req TransferConfigRequest, cfg *ConfigImportReport, dry bool) []TransferRuntimeBind {
 	out := []TransferRuntimeBind{}
 	if cfg == nil {
 		return out
 	}
+	autoBind := req.Options.AutoBindRuntimesEnabled()
+
+	runtimes, err := env.Queries.ListVisibleRuntimesForTransfer(ctx, db.ListVisibleRuntimesForTransferParams{
+		WorkspaceID: env.TargetID,
+		ImporterID:  env.ImporterID,
+	})
+	if err != nil {
+		runtimes = nil
+	}
+	candidates := make([]TransferRuntimeCandidate, 0, len(runtimes))
+	for _, rt := range runtimes {
+		name := rt.Name
+		if rt.CustomName.Valid && rt.CustomName.String != "" {
+			name = rt.CustomName.String
+		}
+		candidates = append(candidates, TransferRuntimeCandidate{
+			ID:          uuidString(rt.ID),
+			Name:        name,
+			Provider:    rt.Provider,
+			RuntimeMode: rt.RuntimeMode,
+		})
+	}
+
+	hintByRuntimeID := map[string]TransferRuntimeHint{}
+	for _, h := range req.RuntimeProfiles.RuntimesHint {
+		if h.SourceRuntimeID != "" {
+			hintByRuntimeID[h.SourceRuntimeID] = h
+		}
+	}
+	sourceRuntimeByAgent := map[string]string{}
+	agentModeBySource := map[string]string{}
+	for _, a := range req.Config.Entities.Agents {
+		sourceRuntimeByAgent[a.SourceID] = a.SourceRuntimeID
+		agentModeBySource[a.SourceID] = a.RuntimeMode
+	}
+
 	for _, batch := range cfg.Batches {
 		if batch.EntityType != "agents" {
 			continue
@@ -334,16 +380,118 @@ func buildRuntimesToBind(ctx context.Context, env TransferImportEnv, req Transfe
 				continue
 			}
 			bind := TransferRuntimeBind{AgentTargetID: item.TargetID, AgentName: item.Name}
-			if h, ok := hintByName[item.Name]; ok {
-				bind.Provider = h.Provider
-				bind.RuntimeMode = h.RuntimeMode
-				bind.ProfileName = h.DisplayName
-				bind.CandidateIDs = byProvider[h.Provider]
+
+			hint, hasHint := hintByRuntimeID[sourceRuntimeByAgent[item.SourceID]]
+			if hasHint {
+				bind.Provider = hint.Provider
+				bind.RuntimeMode = hint.RuntimeMode
+				bind.ProfileName = hint.DisplayName
+			} else {
+				// Bundles written before source_runtime_id existed still carry
+				// the agent's own runtime_mode, which is enough to match when
+				// the target has a single runtime of that mode.
+				bind.RuntimeMode = agentModeBySource[item.SourceID]
+			}
+
+			matched := matchRuntimeCandidates(candidates, bind.Provider, bind.RuntimeMode, bind.ProfileName)
+			bind.Candidates = matched
+			for _, c := range matched {
+				bind.CandidateIDs = append(bind.CandidateIDs, c.ID)
+			}
+
+			switch {
+			case len(matched) == 1 && autoBind:
+				chosen := matched[0]
+				bind.Status = RuntimeBindBound
+				bind.BoundRuntimeID = chosen.ID
+				bind.BoundRuntimeName = chosen.Name
+				if !dry {
+					if err := bindTransferAgentRuntime(ctx, env, item.TargetID, chosen); err != nil {
+						bind.Status = RuntimeBindChoose
+						bind.BoundRuntimeID = ""
+						bind.BoundRuntimeName = ""
+						bind.Reason = err.Error()
+					}
+				}
+			case len(matched) == 1:
+				bind.Status = RuntimeBindChoose
+				bind.Reason = bindReasonAutoBindDisabled
+			case len(matched) > 1:
+				bind.Status = RuntimeBindChoose
+			default:
+				bind.Status = RuntimeBindNone
+				switch {
+				case len(candidates) == 0:
+					bind.Reason = bindReasonNoVisibleRuntime
+				case !hasHint && bind.RuntimeMode == "":
+					bind.Reason = bindReasonUnknownSourceBind
+				default:
+					bind.Reason = bindReasonNoProviderMatch
+				}
 			}
 			out = append(out, bind)
 		}
 	}
 	return out
+}
+
+// matchRuntimeCandidates filters the target runtimes down to the ones that can
+// carry an agent described by provider / mode / profile name. An empty
+// attribute does not filter: an older bundle that only knows the mode should
+// still resolve when the target has exactly one runtime of that mode. The
+// profile name is only applied when it narrows an otherwise ambiguous set, so
+// a renamed runtime never turns a clean single match into zero.
+func matchRuntimeCandidates(candidates []TransferRuntimeCandidate, provider, mode, profileName string) []TransferRuntimeCandidate {
+	matched := []TransferRuntimeCandidate{}
+	for _, c := range candidates {
+		if provider != "" && c.Provider != provider {
+			continue
+		}
+		if mode != "" && c.RuntimeMode != mode {
+			continue
+		}
+		matched = append(matched, c)
+	}
+	if len(matched) > 1 && profileName != "" {
+		narrowed := []TransferRuntimeCandidate{}
+		for _, c := range matched {
+			if c.Name == profileName {
+				narrowed = append(narrowed, c)
+			}
+		}
+		if len(narrowed) > 0 {
+			return narrowed
+		}
+	}
+	return matched
+}
+
+// bindTransferAgentRuntime writes the agent_id -> runtime_id reference. The
+// runtime came from ListVisibleRuntimesForTransfer, which already applied the
+// same owner/visibility rule as canUseRuntimeForAgent, and the update is scoped
+// to the import target workspace.
+func bindTransferAgentRuntime(ctx context.Context, env TransferImportEnv, agentID string, runtime TransferRuntimeCandidate) error {
+	agentUUID, err := parseUUID(agentID)
+	if err != nil {
+		return fmt.Errorf("invalid agent id")
+	}
+	runtimeUUID, err := parseUUID(runtime.ID)
+	if err != nil {
+		return fmt.Errorf("invalid runtime id")
+	}
+	rows, err := env.Queries.BindAgentRuntimeForTransfer(ctx, db.BindAgentRuntimeForTransferParams{
+		RuntimeID:   runtimeUUID,
+		RuntimeMode: runtime.RuntimeMode,
+		AgentID:     agentUUID,
+		WorkspaceID: env.TargetID,
+	})
+	if err != nil {
+		return fmt.Errorf("bind runtime: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("agent not found in target workspace")
+	}
+	return nil
 }
 
 func ImportTransferConversations(ctx context.Context, env TransferImportEnv, req TransferConversationsRequest) (*TransferConversationsReport, error) {

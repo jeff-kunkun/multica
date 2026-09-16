@@ -11,6 +11,38 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const bindAgentRuntimeForTransfer = `-- name: BindAgentRuntimeForTransfer :execrows
+UPDATE agent
+SET runtime_id = $1,
+    runtime_mode = COALESCE(NULLIF($2::text, ''), runtime_mode),
+    updated_at = NOW()
+WHERE id = $3 AND workspace_id = $4
+`
+
+type BindAgentRuntimeForTransferParams struct {
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+	RuntimeMode string      `json:"runtime_mode"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Post-import runtime binding (DENE-364). Scoped by workspace so a bind can
+// never reach outside the import target, and it only writes the
+// agent_id -> runtime_id reference plus the runtime's own mode; no credential
+// travels with a transfer bundle.
+func (q *Queries) BindAgentRuntimeForTransfer(ctx context.Context, arg BindAgentRuntimeForTransferParams) (int64, error) {
+	result, err := q.db.Exec(ctx, bindAgentRuntimeForTransfer,
+		arg.RuntimeID,
+		arg.RuntimeMode,
+		arg.AgentID,
+		arg.WorkspaceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countAgentTaskQueueByChatSessionIDs = `-- name: CountAgentTaskQueueByChatSessionIDs :one
 SELECT count(*)::bigint FROM agent_task_queue
 WHERE chat_session_id = ANY($1::uuid[])
@@ -127,11 +159,17 @@ func (q *Queries) GetWorkspaceMemberByEmail(ctx context.Context, arg GetWorkspac
 }
 
 const listVisibleRuntimesForTransfer = `-- name: ListVisibleRuntimesForTransfer :many
-SELECT id, name, custom_name, runtime_mode, provider, profile_id
+SELECT id, name, custom_name, runtime_mode, provider, profile_id, owner_id, visibility
 FROM agent_runtime
 WHERE workspace_id = $1
+  AND (owner_id = $2 OR visibility = 'public')
 ORDER BY created_at ASC
 `
+
+type ListVisibleRuntimesForTransferParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ImporterID  pgtype.UUID `json:"importer_id"`
+}
 
 type ListVisibleRuntimesForTransferRow struct {
 	ID          pgtype.UUID `json:"id"`
@@ -140,10 +178,16 @@ type ListVisibleRuntimesForTransferRow struct {
 	RuntimeMode string      `json:"runtime_mode"`
 	Provider    string      `json:"provider"`
 	ProfileID   pgtype.UUID `json:"profile_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+	Visibility  string      `json:"visibility"`
 }
 
-func (q *Queries) ListVisibleRuntimesForTransfer(ctx context.Context, workspaceID pgtype.UUID) ([]ListVisibleRuntimesForTransferRow, error) {
-	rows, err := q.db.Query(ctx, listVisibleRuntimesForTransfer, workspaceID)
+// Candidate runtimes for post-import agent binding (DENE-364). The visibility
+// predicate mirrors canUseRuntimeForAgent in internal/handler/runtime.go: a
+// runtime the importer does not own is only usable when it is public, so an
+// auto-bind can never move an agent onto another member's private runtime.
+func (q *Queries) ListVisibleRuntimesForTransfer(ctx context.Context, arg ListVisibleRuntimesForTransferParams) ([]ListVisibleRuntimesForTransferRow, error) {
+	rows, err := q.db.Query(ctx, listVisibleRuntimesForTransfer, arg.WorkspaceID, arg.ImporterID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +202,8 @@ func (q *Queries) ListVisibleRuntimesForTransfer(ctx context.Context, workspaceI
 			&i.RuntimeMode,
 			&i.Provider,
 			&i.ProfileID,
+			&i.OwnerID,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}

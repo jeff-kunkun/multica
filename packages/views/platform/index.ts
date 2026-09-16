@@ -32,6 +32,8 @@ export {
   type TransferImportOptions,
   type TransferAutopilotSummary,
   type TransferImportReportView,
+  type TransferRuntimeBind,
+  type TransferRuntimeCandidate,
   type TransferRunRequest,
   type TransferRunResult,
   type TransferPickPathResult,

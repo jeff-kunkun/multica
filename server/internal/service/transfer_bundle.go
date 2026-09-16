@@ -209,6 +209,17 @@ type TransferPeopleMapRow struct {
 	Reason       string `json:"reason,omitempty"`
 }
 
+// Runtime bind outcomes reported per imported agent (DENE-364).
+const (
+	// RuntimeBindBound means the import wrote agent_id -> runtime_id.
+	RuntimeBindBound = "bound"
+	// RuntimeBindChoose means several runtimes matched, so the import refused
+	// to guess which machine and account the agent should run on.
+	RuntimeBindChoose = "choose"
+	// RuntimeBindNone means nothing on the target could carry this agent.
+	RuntimeBindNone = "none"
+)
+
 type TransferRuntimeBind struct {
 	AgentTargetID string   `json:"agent_target_id,omitempty"`
 	AgentName     string   `json:"agent_name,omitempty"`
@@ -216,6 +227,23 @@ type TransferRuntimeBind struct {
 	RuntimeMode   string   `json:"runtime_mode,omitempty"`
 	ProfileName   string   `json:"profile_name,omitempty"`
 	CandidateIDs  []string `json:"candidate_ids,omitempty"`
+	// Status is one of RuntimeBindBound / RuntimeBindChoose / RuntimeBindNone.
+	Status string `json:"status,omitempty"`
+	// Candidates carries the labels the Desktop card needs to render a choice;
+	// CandidateIDs stays for older clients that only read the ids.
+	Candidates []TransferRuntimeCandidate `json:"candidates,omitempty"`
+	// BoundRuntimeID / BoundRuntimeName are set only when Status is bound.
+	BoundRuntimeID   string `json:"bound_runtime_id,omitempty"`
+	BoundRuntimeName string `json:"bound_runtime_name,omitempty"`
+	// Reason explains a non-bound outcome in words the operator can act on.
+	Reason string `json:"reason,omitempty"`
+}
+
+type TransferRuntimeCandidate struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Provider    string `json:"provider,omitempty"`
+	RuntimeMode string `json:"runtime_mode,omitempty"`
 }
 
 type TransferConversationsReport struct {

@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithI18n } from "../../test/i18n";
 import type { TransferProgressEvent, TransferRunResult } from "../../platform";
 
+const updateAgentMock = vi.hoisted(() => vi.fn());
+
 const desktop = vi.hoisted(() => ({
   isDesktop: true,
   pickExport: vi.fn(),
@@ -48,6 +50,7 @@ vi.mock("@multica/core/api", async (importOriginal) => {
       getBaseUrl: () => "https://api.multica.ai",
       exportWorkspaceConfig: vi.fn(),
       importWorkspaceConfig: vi.fn(),
+      updateAgent: updateAgentMock,
     },
   };
 });
@@ -77,6 +80,12 @@ const importReport = {
       runtime_mode: "local",
       profile_name: "default",
       candidate_ids: ["r1"],
+      status: "bound" as const,
+      candidates: [
+        { id: "r1", name: "MacBook", provider: "claude", runtime_mode: "local" },
+      ],
+      bound_runtime_id: "r1",
+      bound_runtime_name: "MacBook",
     },
   ],
   export_gaps: [{ group: "plugins", reason: "read_api_missing", status: 404 }],
@@ -94,6 +103,9 @@ const DEFAULT_IMPORT_OPTIONS = {
   activateAutopilots: true,
   applyWorkspaceSettings: true,
   applyIssuePrefix: false,
+  // On by default: an import that binds nothing leaves every migrated agent
+  // unable to run (DENE-364).
+  autoBindRuntimes: true,
 };
 
 function renderCard() {
@@ -378,6 +390,7 @@ describe("WorkspaceMigrationCard", () => {
             activateAutopilots: false,
             applyWorkspaceSettings: true,
             applyIssuePrefix: true,
+            autoBindRuntimes: true,
           },
         }),
       ),
@@ -665,6 +678,167 @@ describe("WorkspaceMigrationCard", () => {
     expect(await screen.findByTestId("workspace-migration-error")).toHaveTextContent(
       message,
     );
+  });
+
+  // DENE-364: V2 only listed the candidates, so every migrated agent stayed
+  // unbound and the workspace arrived with agents that could not run.
+  describe("runtime binding", () => {
+    async function importWith(binds: unknown[], dryRun: boolean) {
+      const user = userEvent.setup();
+      desktop.pickImport.mockResolvedValue({
+        ok: true,
+        path: "/tmp/acme.zip",
+        fileName: "acme.zip",
+      });
+      desktop.run.mockResolvedValue({
+        ok: true,
+        action: "import",
+        dryRun,
+        report: { ...importReport, runtimes_to_bind: binds },
+      });
+      renderCard();
+      await user.click(screen.getByRole("button", { name: "Import from zip" }));
+      if (!dryRun) {
+        await user.click(
+          await screen.findByRole("button", { name: "Import into this workspace" }),
+        );
+        const dialog = await screen.findByRole("alertdialog");
+        fireEvent.click(
+          within(dialog).getByRole("button", { name: "Import into this workspace" }),
+        );
+      }
+      return user;
+    }
+
+    it("reports what a bound agent was bound to", async () => {
+      await importWith(
+        [
+          {
+            agent_target_id: "a1",
+            agent_name: "Builder",
+            provider: "claude",
+            runtime_mode: "local",
+            profile_name: "MacBook",
+            candidate_ids: ["r1"],
+            status: "bound",
+            candidates: [{ id: "r1", name: "MacBook" }],
+            bound_runtime_id: "r1",
+            bound_runtime_name: "MacBook",
+          },
+        ],
+        false,
+      );
+      const section = await screen.findByTestId("workspace-migration-runtimes");
+      expect(section).toHaveTextContent("Bound to MacBook");
+    });
+
+    it("says a preview will bind rather than claiming it already did", async () => {
+      await importWith(
+        [
+          {
+            agent_target_id: "a1",
+            agent_name: "Builder",
+            provider: "claude",
+            runtime_mode: "local",
+            profile_name: "MacBook",
+            candidate_ids: ["r1"],
+            status: "bound",
+            candidates: [{ id: "r1", name: "MacBook" }],
+            bound_runtime_id: "r1",
+            bound_runtime_name: "MacBook",
+          },
+        ],
+        true,
+      );
+      const section = await screen.findByTestId("workspace-migration-runtimes");
+      expect(section).toHaveTextContent("Will bind to MacBook");
+      expect(section).not.toHaveTextContent("Bound to MacBook");
+    });
+
+    it("lets the operator settle an ambiguous agent in one pass", async () => {
+      updateAgentMock.mockReset();
+      updateAgentMock.mockResolvedValue({});
+      const user = await importWith(
+        [
+          {
+            agent_target_id: "a1",
+            agent_name: "Builder",
+            provider: "claude",
+            runtime_mode: "local",
+            profile_name: "",
+            candidate_ids: ["r1", "r2"],
+            status: "choose",
+            candidates: [
+              { id: "r1", name: "Mac A" },
+              { id: "r2", name: "Mac B" },
+            ],
+          },
+        ],
+        false,
+      );
+      const section = await screen.findByTestId("workspace-migration-runtimes");
+      await user.click(within(section).getByRole("combobox", { name: "Choose a runtime" }));
+      await user.click(await screen.findByRole("option", { name: "Mac B" }));
+      await user.click(within(section).getByRole("button", { name: "Bind" }));
+      await waitFor(() =>
+        expect(updateAgentMock).toHaveBeenCalledWith("a1", { runtime_id: "r2" }),
+      );
+      expect(await within(section).findByText("Bound to Mac B")).toBeInTheDocument();
+    });
+
+    it("explains an agent with nothing to bind to instead of listing nothing", async () => {
+      await importWith(
+        [
+          {
+            agent_target_id: "a1",
+            agent_name: "Builder",
+            provider: "claude",
+            runtime_mode: "local",
+            profile_name: "",
+            candidate_ids: [],
+            status: "none",
+            candidates: [],
+            reason: "no_visible_runtime",
+          },
+        ],
+        false,
+      );
+      const section = await screen.findByTestId("workspace-migration-runtimes");
+      expect(section).toHaveTextContent(
+        "No runtime on this server is available to you.",
+      );
+    });
+
+    it("sends the switch off when the operator unticks auto-bind", async () => {
+      const user = userEvent.setup();
+      desktop.pickImport.mockResolvedValue({
+        ok: true,
+        path: "/tmp/acme.zip",
+        fileName: "acme.zip",
+      });
+      desktop.run.mockResolvedValue({
+        ok: true,
+        action: "import",
+        dryRun: true,
+        report: importReport,
+      });
+      renderCard();
+
+      const checkbox = screen.getByRole("checkbox", {
+        name: "Bind runtimes automatically",
+      });
+      expect(checkbox).toBeChecked();
+      await user.click(checkbox);
+      await waitFor(() => expect(checkbox).not.toBeChecked());
+      await user.click(screen.getByRole("button", { name: "Import from zip" }));
+      await waitFor(() =>
+        expect(desktop.run).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            options: { ...DEFAULT_IMPORT_OPTIONS, autoBindRuntimes: false },
+          }),
+        ),
+      );
+    });
   });
 });
 

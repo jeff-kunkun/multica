@@ -180,7 +180,7 @@ CLI 与 Desktop 迁移卡片用同一套默认值；卡片只在用户改动默�
 | `chat_session.id` | `UUIDv5(NS_TRANSFER_CHAT_SESSION, 目标工作区 id + "/" + 源 id)` | —（永远可算） |
 | `chat_message.id` | `UUIDv5(NS_TRANSFER_CHAT_MESSAGE, 目标工作区 id + "/" + 源 id)` | 所属会话被跳过时，消息一并跳过 |
 | 聊天 `attachment.id` | `UUIDv5(NS_TRANSFER_ATTACHMENT, 目标工作区 id + "/" + 源 id)` | 所属消息被跳过时一并跳过 |
-| `agent_runtime` | **不迁移** | 导入后所有智能体 `runtime_bound = false`（与 V1 一致） |
+| `agent_runtime` | **实体不迁移**，但按第 4.4 节的三档规则绑定已有运行时 | 唯一候选自动绑定；多候选交人选；零候选报可读原因（DENE-364） |
 | `runtime_profile` | 迁移定义（第 4.4 节），身份键见下 | 冲突按 `on_conflict` |
 | `project_resource.local_directory.daemon_id` | 跨实例必然不存在 | 一律跳过该资源，报告 `daemon_not_in_target` |
 
@@ -207,9 +207,23 @@ CLI 与 Desktop 迁移卡片用同一套默认值；卡片只在用户改动默�
 | 表 | 结论 | 导出字段 | 排除字段 | 理由 |
 | --- | --- | --- | --- | --- |
 | `runtime_profile` | 部分导出 | `display_name`、`protocol_family`、`command_name`、`description`、`fixed_args`（经 `redactSecretArgs`）、`visibility`、`enabled` | `id`（作 `source_id`）、`workspace_id`、`created_by`（改写为导入者）、`created_at`、`updated_at` | 换环境时用户要在新机器重装守护进程，自定义运行时定义可以省去重录。身份键暂定 `display_name`，数据库是否有唯一约束**未确认**。 |
-| `agent_runtime` | 不导出实体，只导出**绑定提示** | `runtimes_hint[]`：`{ source_runtime_id, provider, runtime_mode, profile_source_id, display_name }`（`display_name` 取 `custom_name` 否则 `name`） | `daemon_id`、`legacy_daemon_id`、`device_info`、`metadata`、`owner_id`、`status`、`last_seen_at`、`plan_limits` | 守护进程注册绑定具体机器与 daemon token，跨实例没有意义；`device_info` / `metadata` 可能含主机名与路径，不进包。 |
+| `agent_runtime` | 不导出实体，只导出**绑定提示**；`agent` 另带 `source_runtime_id` 指向它 | `runtimes_hint[]`：`{ source_runtime_id, provider, runtime_mode, profile_source_id, display_name }`（`display_name` 取 `custom_name` 否则 `name`） | `daemon_id`、`legacy_daemon_id`、`device_info`、`metadata`、`owner_id`、`status`、`last_seen_at`、`plan_limits` | 守护进程注册绑定具体机器与 daemon token，跨实例没有意义；`device_info` / `metadata` 可能含主机名与路径，不进包。 |
 
-导入报告 `runtimes_to_bind[]`：每个导入的智能体给出源端 `provider` / `runtime_mode` / 自定义 profile 名，并列出目标工作区里 `provider` 相同、导入者可见的运行时作为**候选**。V2 **不自动绑定**：绑定决定智能体在哪台机器、用谁的账号跑，必须人来点。
+导入报告 `runtimes_to_bind[]`：每个导入的智能体给出源端 `provider` / `runtime_mode` / 自定义 profile 名，并列出目标工作区里导入者可见的候选运行时。
+
+**自动绑定规则（DENE-364，kk zi 2026-09-16 口径变更：「我本机环境默认都是相同的……能迁移的尽量迁」）。** 原先的「一律不自动绑定」已撤销，改为三档：
+
+| 候选数 | 行为 | 报告 `status` |
+| --- | --- | --- |
+| 恰好 1 个 | **自动绑定**，报告写明绑了谁到哪台 | `bound`（带 `bound_runtime_id` / `bound_runtime_name`） |
+| 多个 | **不猜**，候选交给 Desktop 卡片一次点完 | `choose`（带 `candidates[]`） |
+| 0 个 | 记一条可读原因，不静默跳过 | `none`（带 `reason`） |
+
+匹配走的是**智能体的源端运行时**，不是名字：配置包里每个 agent 带 `source_runtime_id`，在 `runtimes_hint[]` 里查出该运行时的 `provider` / `runtime_mode` / `display_name`，再与目标端运行时比对。空属性不参与过滤（老包只有 `runtime_mode` 时仍可命中唯一项）；profile 名只在候选多于一个时用来收窄，且收窄为空时不生效——目标端改过名不该把一个干净的唯一匹配变成零。
+
+候选集只取**导入者可见**的运行时（`owner_id = 导入者` 或 `visibility = 'public'`），与 `canUseRuntimeForAgent` 同一条规则：自动绑定绝不能把智能体挪到别人的机器和账号上。绑定只写 `agent_id → runtime_id` 与该运行时自己的 `runtime_mode`，不随包迁移任何凭据。
+
+开关 `auto_bind_runtimes` 默认**开**（CLI `--auto-bind-runtimes`、Desktop 卡片勾选项）。缺省视为开：唯一候选这条规则已经挡住了歧义，而「一个都不绑」正是这个开关要修的故障。`reason` 是稳定机器码（`no_visible_runtime` / `no_provider_match` / `auto_bind_disabled` / `unknown_source_runtime`），由 Desktop 卡片翻成可操作的句子。
 
 ### 4.5 降级表（V2 新增项）
 
@@ -437,7 +451,6 @@ secrets_omitted.json                全包汇总（含 config.json 内的登记�
 | 源端删除 / 编辑消息同步到目标端 | 需要变更追踪；V2 只追加 |
 | 实时或定时双向同步 | 需要持久映射表与冲突合并 |
 | 智能体 CLI 续聊指针（`session_id` / `work_dir`）迁移 | 绑定源机器，跨机器无意义；上下文延续见第 4.6 节 |
-| 自动绑定运行时 | 决定在谁的机器与账号上执行，必须人工确认 |
 | 密钥随包迁移、口令加密包 | 没有通用 secrets-at-rest 基础设施（沿用 V1 结论）；V2 包本身不加密，靠文件权限与提示 |
 | 关闭对话密钥扫描 | 与验收断言冲突 |
 | 无法扫描的二进制附件文件体 | 无法证明不含密钥 |

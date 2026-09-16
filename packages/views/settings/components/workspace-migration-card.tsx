@@ -55,6 +55,8 @@ import {
   type TransferImportOptions,
   type TransferImportReportView,
   type TransferProgressEvent,
+  type TransferRuntimeBind,
+  type TransferRuntimeCandidate,
 } from "../../platform";
 import {
   SettingsCard,
@@ -90,6 +92,10 @@ const DEFAULT_IMPORT_OPTIONS: TransferImportOptions = {
   activateAutopilots: true,
   applyWorkspaceSettings: true,
   applyIssuePrefix: false,
+  // On by default: the unique-candidate rule already refuses to guess, and an
+  // import that binds nothing leaves every migrated agent unable to run
+  // (DENE-364).
+  autoBindRuntimes: true,
 };
 
 /** The transfer in flight, as the card's buttons need to describe it. */
@@ -517,6 +523,27 @@ export function WorkspaceMigrationCard() {
             }
           />
         </SettingsRow>
+
+        <SettingsRow
+          label={t(($) => $.config_transfer.migration.option_auto_bind_runtimes)}
+          description={t(
+            ($) => $.config_transfer.migration.option_auto_bind_runtimes_hint,
+          )}
+        >
+          <Checkbox
+            aria-label={t(
+              ($) => $.config_transfer.migration.option_auto_bind_runtimes,
+            )}
+            checked={importOptions.autoBindRuntimes}
+            disabled={!canManage || busy || !slug}
+            onCheckedChange={(checked) =>
+              setImportOptions((current) => ({
+                ...current,
+                autoBindRuntimes: checked === true,
+              }))
+            }
+          />
+        </SettingsRow>
         </SettingsCard>
       </div>
 
@@ -536,6 +563,8 @@ export function WorkspaceMigrationCard() {
         <ImportReportView
           report={report}
           activateAutopilots={importOptions.activateAutopilots}
+          applied={importPhase.step === "result"}
+          onRuntimeBound={invalidateImportedQueries}
           showConfirm={importPhase.step === "preview" && !busy}
           applying={busy && importPhase.step === "preview"}
           onConfirm={() => setConfirmOpen(true)}
@@ -613,12 +642,17 @@ function ProgressLines({ progress }: { progress: TransferProgressEvent }) {
 function ImportReportView({
   report,
   activateAutopilots,
+  applied,
+  onRuntimeBound,
   showConfirm,
   applying,
   onConfirm,
 }: {
   report: TransferImportReportView;
   activateAutopilots: boolean;
+  /** False while this is still the preview, where nothing has been written. */
+  applied: boolean;
+  onRuntimeBound: () => void | Promise<void>;
   showConfirm: boolean;
   applying: boolean;
   onConfirm: () => void;
@@ -705,9 +739,10 @@ function ImportReportView({
       ) : null}
 
       {report.runtimes_to_bind.length > 0 ? (
-        <ReportList
-          title={t(($) => $.config_transfer.migration.runtimes_title)}
-          items={report.runtimes_to_bind.map(runtimeLabel)}
+        <RuntimeBindSection
+          binds={report.runtimes_to_bind}
+          applied={applied}
+          onBound={onRuntimeBound}
         />
       ) : null}
 
@@ -734,6 +769,156 @@ function ImportReportView({
       ) : null}
     </div>
   );
+}
+
+/**
+ * The post-import runtime binding block (DENE-364).
+ *
+ * The server binds an agent only when exactly one target runtime matches its
+ * source runtime — binding decides whose machine and account the agent runs on,
+ * so anything ambiguous lands here for the operator to settle in one pass
+ * instead of a dialog per agent. Rows with nothing to bind to say why.
+ */
+function RuntimeBindSection({
+  binds,
+  applied,
+  onBound,
+}: {
+  binds: TransferRuntimeBind[];
+  applied: boolean;
+  onBound: () => void | Promise<void>;
+}) {
+  const { t } = useT("settings");
+  const [choices, setChoices] = useState<Record<string, string>>({});
+  const [bound, setBound] = useState<Record<string, string>>({});
+  const [pending, setPending] = useState<string | null>(null);
+
+  async function applyBind(bind: TransferRuntimeBind, runtimeId: string) {
+    if (!bind.agent_target_id || !runtimeId) return;
+    setPending(bind.agent_target_id);
+    try {
+      await api.updateAgent(bind.agent_target_id, { runtime_id: runtimeId });
+      const name =
+        bind.candidates?.find((c: TransferRuntimeCandidate) => c.id === runtimeId)
+          ?.name ?? runtimeId;
+      setBound((current) => ({ ...current, [bind.agent_target_id]: name }));
+      await onBound();
+    } catch {
+      toast.error(t(($) => $.config_transfer.migration.runtimes_bind_failed));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <div className="space-y-2" data-testid="workspace-migration-runtimes">
+      <h3 className="text-body font-semibold">
+        {t(($) => $.config_transfer.migration.runtimes_title)}
+      </h3>
+      <SettingsCard>
+        <ul className="divide-y divide-surface-border">
+          {binds.map((bind, index) => {
+            const key = bind.agent_target_id || `${bind.agent_name}-${index}`;
+            const manualName = bound[bind.agent_target_id];
+            const candidates = bind.candidates ?? [];
+            const selected = choices[key] ?? candidates[0]?.id ?? "";
+            const boundName = manualName ?? bind.bound_runtime_name;
+            return (
+              <li key={key} className="space-y-2 px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-body">{runtimeLabel(bind)}</span>
+                  {boundName ? (
+                    <span className="text-caption text-muted-foreground">
+                      {manualName || applied
+                        ? t(($) => $.config_transfer.migration.runtimes_bound, {
+                            runtime: boundName,
+                          })
+                        : t(($) => $.config_transfer.migration.runtimes_will_bind, {
+                            runtime: boundName,
+                          })}
+                    </span>
+                  ) : null}
+                </div>
+
+                {!boundName && candidates.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      items={candidates.map((candidate) => ({
+                        value: candidate.id,
+                        label: candidateLabel(candidate),
+                      }))}
+                      value={selected}
+                      onValueChange={(value) =>
+                        setChoices((current) => ({
+                          ...current,
+                          [key]: String(value),
+                        }))
+                      }
+                    >
+                      <SelectTrigger
+                        className="w-64"
+                        aria-label={t(
+                          ($) => $.config_transfer.migration.runtimes_choose,
+                        )}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {candidates.map((candidate: TransferRuntimeCandidate) => (
+                          <SelectItem key={candidate.id} value={candidate.id}>
+                            {candidateLabel(candidate)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      // Binding writes to the target, so it only makes sense
+                      // once the import itself has been applied.
+                      disabled={!applied || pending === bind.agent_target_id}
+                      onClick={() => void applyBind(bind, selected)}
+                    >
+                      {pending === bind.agent_target_id ? (
+                        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                      ) : null}
+                      {t(($) => $.config_transfer.migration.runtimes_bind)}
+                    </Button>
+                  </div>
+                ) : null}
+
+                {!boundName && candidates.length === 0 ? (
+                  <p className="text-caption leading-5 text-muted-foreground">
+                    {runtimeBindReason(bind.reason)}
+                  </p>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      </SettingsCard>
+    </div>
+  );
+
+  function candidateLabel(candidate: TransferRuntimeCandidate): string {
+    return [candidate.name, candidate.provider, candidate.runtime_mode]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  function runtimeBindReason(reason: string | undefined): string {
+    switch (reason) {
+      case "no_visible_runtime":
+        return t(($) => $.config_transfer.migration.runtimes_reason_none_visible);
+      case "auto_bind_disabled":
+        return t(($) => $.config_transfer.migration.runtimes_reason_disabled);
+      case "unknown_source_runtime":
+        return t(($) => $.config_transfer.migration.runtimes_reason_unknown_source);
+      default:
+        return t(($) => $.config_transfer.migration.runtimes_reason_no_match);
+    }
+  }
 }
 
 function ReportList({ title, items }: { title: string; items: string[] }) {

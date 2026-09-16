@@ -59,6 +59,30 @@ func TestExportAgentsGroup_SystemKeyWithoutKind(t *testing.T) {
 	}
 }
 
+// The bundle has to say which runtime each agent ran on, or a cross-instance
+// import has nothing to match against and every agent lands unbound (DENE-364).
+func TestExportAgentsGroup_CarriesSourceRuntimeID(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/agents": []map[string]any{
+			{"id": "usr-1", "name": "Bot", "runtime_id": "rt-7", "runtime_mode": "local"},
+			{"id": "usr-2", "name": "Unbound", "runtime_mode": "cloud"},
+		},
+	}}
+	bundle := &ConfigBundle{Entities: ConfigEntities{}, Stats: map[string]int{}}
+	var gaps []TransferExportGap
+	exportAgentsGroup(context.Background(), src, bundle, &gaps, func(string, error) {})
+
+	if len(bundle.Entities.Agents) != 2 {
+		t.Fatalf("agents=%v", bundle.Entities.Agents)
+	}
+	if got := bundle.Entities.Agents[0].SourceRuntimeID; got != "rt-7" {
+		t.Fatalf("source_runtime_id = %q, want rt-7", got)
+	}
+	if got := bundle.Entities.Agents[1].SourceRuntimeID; got != "" {
+		t.Fatalf("unbound agent source_runtime_id = %q, want empty", got)
+	}
+}
+
 func TestSourceExportSkills_ExcludesPluginResources(t *testing.T) {
 	wsID := "ws-1"
 	src := &fakeTransferSource{payloads: map[string]any{

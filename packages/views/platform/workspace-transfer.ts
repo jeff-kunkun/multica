@@ -23,6 +23,16 @@ export type TransferSecretToFill = {
   target_id: string;
 };
 
+/** Outcome of the post-import runtime binding for one agent (DENE-364). */
+export type TransferRuntimeBindStatus = "bound" | "choose" | "none";
+
+export type TransferRuntimeCandidate = {
+  id: string;
+  name: string;
+  provider?: string;
+  runtime_mode?: string;
+};
+
 export type TransferRuntimeBind = {
   agent_target_id: string;
   agent_name: string;
@@ -30,6 +40,13 @@ export type TransferRuntimeBind = {
   runtime_mode: string;
   profile_name: string;
   candidate_ids: string[];
+  /** Absent on reports from a server older than the binding switch. */
+  status?: TransferRuntimeBindStatus;
+  candidates?: TransferRuntimeCandidate[];
+  bound_runtime_id?: string;
+  bound_runtime_name?: string;
+  /** Stable machine code; the card turns it into a sentence. */
+  reason?: string;
 };
 
 export type TransferExportGap = {
@@ -54,6 +71,12 @@ export type TransferImportOptions = {
   activateAutopilots: boolean;
   applyWorkspaceSettings: boolean;
   applyIssuePrefix: boolean;
+  /**
+   * Bind an imported agent to the one target runtime that matches its source
+   * runtime (DENE-364). Without it every migrated agent lands unbound, which
+   * reads as "the agents came across but nothing runs".
+   */
+  autoBindRuntimes: boolean;
 };
 
 /** How many automations the import wrote (created, updated or renamed). */

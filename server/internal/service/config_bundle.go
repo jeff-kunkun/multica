@@ -207,7 +207,12 @@ type ConfigMcpServer struct {
 }
 
 type ConfigAgent struct {
-	SourceID                 string                   `json:"source_id"`
+	SourceID string `json:"source_id"`
+	// SourceRuntimeID is the agent's runtime on the SOURCE instance. It is
+	// meaningless as an id on the target, and exists only so a cross-instance
+	// import can look the source runtime up in runtimes_hint and match its
+	// provider / mode / profile against the target's own runtimes (DENE-364).
+	SourceRuntimeID          string                   `json:"source_runtime_id,omitempty"`
 	Name                     string                   `json:"name"`
 	Description              string                   `json:"description"`
 	Instructions             string                   `json:"instructions"`
@@ -443,6 +448,18 @@ type ConfigImportOptions struct {
 	ActivateAutopilots     bool  `json:"activate_autopilots"`
 	ApplyWorkspaceSettings *bool `json:"apply_workspace_settings"`
 	ApplyIssuePrefix       bool  `json:"apply_issue_prefix"`
+	// AutoBindRuntimes binds an imported agent to the single matching runtime
+	// on the target when there is exactly one candidate (DENE-364). Absent
+	// means on: a bundle written before this switch existed still lands usable,
+	// and the unique-candidate rule is what keeps the write unambiguous.
+	AutoBindRuntimes *bool `json:"auto_bind_runtimes"`
+}
+
+// AutoBindRuntimesEnabled reports the effective auto-bind switch. Unlike the
+// DENE-363 switches, an absent value means ON, because binding nothing is the
+// broken state this option exists to fix.
+func (o ConfigImportOptions) AutoBindRuntimesEnabled() bool {
+	return o.AutoBindRuntimes == nil || *o.AutoBindRuntimes
 }
 
 type ConfigImportRequest struct {

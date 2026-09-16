@@ -54,7 +54,23 @@ SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListVisibleRuntimesForTransfer :many
-SELECT id, name, custom_name, runtime_mode, provider, profile_id
+-- Candidate runtimes for post-import agent binding (DENE-364). The visibility
+-- predicate mirrors canUseRuntimeForAgent in internal/handler/runtime.go: a
+-- runtime the importer does not own is only usable when it is public, so an
+-- auto-bind can never move an agent onto another member's private runtime.
+SELECT id, name, custom_name, runtime_mode, provider, profile_id, owner_id, visibility
 FROM agent_runtime
 WHERE workspace_id = $1
+  AND (owner_id = sqlc.arg('importer_id') OR visibility = 'public')
 ORDER BY created_at ASC;
+
+-- name: BindAgentRuntimeForTransfer :execrows
+-- Post-import runtime binding (DENE-364). Scoped by workspace so a bind can
+-- never reach outside the import target, and it only writes the
+-- agent_id -> runtime_id reference plus the runtime's own mode; no credential
+-- travels with a transfer bundle.
+UPDATE agent
+SET runtime_id = sqlc.arg('runtime_id'),
+    runtime_mode = COALESCE(NULLIF(sqlc.arg('runtime_mode')::text, ''), runtime_mode),
+    updated_at = NOW()
+WHERE id = sqlc.arg('agent_id') AND workspace_id = sqlc.arg('workspace_id');

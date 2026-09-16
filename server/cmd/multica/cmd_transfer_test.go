@@ -633,15 +633,18 @@ func TestTransferImport_SendsImportOptionFlags(t *testing.T) {
 
 	runImport(nil)
 	runImport(map[string]string{"activate-autopilots": "false", "apply-issue-prefix": "true"})
+	runImport(map[string]string{"auto-bind-runtimes": "false"})
 
-	if len(posted) != 2 {
-		t.Fatalf("posted %d transfer/config requests, want 2", len(posted))
+	if len(posted) != 3 {
+		t.Fatalf("posted %d transfer/config requests, want 3", len(posted))
 	}
 	want := []map[string]any{
 		// A cross-environment move reproduces the environment: automations come
-		// across running and the workspace settings land, the prefix does not.
-		{"activate_autopilots": true, "apply_workspace_settings": true, "apply_issue_prefix": false},
-		{"activate_autopilots": false, "apply_workspace_settings": true, "apply_issue_prefix": true},
+		// across running, the workspace settings land, agents get bound to the
+		// runtime they match, and the prefix does not travel.
+		{"activate_autopilots": true, "apply_workspace_settings": true, "apply_issue_prefix": false, "auto_bind_runtimes": true},
+		{"activate_autopilots": false, "apply_workspace_settings": true, "apply_issue_prefix": true, "auto_bind_runtimes": true},
+		{"activate_autopilots": true, "apply_workspace_settings": true, "apply_issue_prefix": false, "auto_bind_runtimes": false},
 	}
 	for i, expected := range want {
 		options, ok := posted[i]["options"].(map[string]any)
