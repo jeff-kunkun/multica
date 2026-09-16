@@ -120,10 +120,31 @@ type sourceClient struct {
 	api *cli.APIClient
 }
 
+// transferCoreReadAttempts is how many times a core read is tried before the
+// export gives up on it. 429 and 503 are treated as transient and retried with
+// exponential backoff (1+2+4+8+16+32+60 seconds), because the group cannot be
+// exported without the read.
+const transferCoreReadAttempts = 8
+
+// transferOptionalReadAttempts is the same budget for a read that powers an
+// optional subsystem. A 503 there is the source saying "this feature is off"
+// (FF_PLUGINS_V1) and a 404 says the endpoint is not in this build; both are
+// permanent, so retrying only parks the export for minutes before recording the
+// gap it was always going to record (DENE-406).
+const transferOptionalReadAttempts = 1
+
 func (s sourceClient) GetJSON(ctx context.Context, path string, out any) error {
+	return s.getJSON(ctx, path, out, transferCoreReadAttempts)
+}
+
+func (s sourceClient) GetOptionalJSON(ctx context.Context, path string, out any) error {
+	return s.getJSON(ctx, path, out, transferOptionalReadAttempts)
+}
+
+func (s sourceClient) getJSON(ctx context.Context, path string, out any, attempts int) error {
 	var err error
 	backoff := time.Second
-	for attempt := 0; attempt < 8; attempt++ {
+	for attempt := 1; attempt <= attempts; attempt++ {
 		err = wrapTransferHTTP(s.api.GetJSON(ctx, path, out))
 		st := 0
 		var te *service.TransferHTTPError
@@ -132,6 +153,11 @@ func (s sourceClient) GetJSON(ctx context.Context, path string, out any) error {
 		}
 		if st != 429 && st != 503 {
 			return err
+		}
+		if attempt == attempts {
+			// No request left to wait for: the backoff before a retry that
+			// will not happen is just a delay the user cannot see through.
+			break
 		}
 		select {
 		case <-ctx.Done():

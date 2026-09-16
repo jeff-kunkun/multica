@@ -12,6 +12,9 @@ type fakeTransferSource struct {
 	payloads map[string]any
 	errors   map[string]error
 	bodies   map[string][]byte
+	// optionalCalls records the paths read through GetOptionalJSON, so a test
+	// can pin which reads the export treats as an optional subsystem.
+	optionalCalls []string
 }
 
 func (f *fakeTransferSource) GetJSON(_ context.Context, path string, out any) error {
@@ -27,6 +30,11 @@ func (f *fakeTransferSource) GetJSON(_ context.Context, path string, out any) er
 		return err
 	}
 	return json.Unmarshal(b, out)
+}
+
+func (f *fakeTransferSource) GetOptionalJSON(ctx context.Context, path string, out any) error {
+	f.optionalCalls = append(f.optionalCalls, path)
+	return f.GetJSON(ctx, path, out)
 }
 
 func (f *fakeTransferSource) GetBytes(_ context.Context, path string) ([]byte, error) {
@@ -108,6 +116,23 @@ func TestSourceExportSkills_PluginsUnavailableExportsAllWithGap(t *testing.T) {
 	}
 	if len(gaps) != 1 || gaps[0].Reason != "plugin_skills_unfiltered" || gaps[0].Group != "skills" || gaps[0].Status != 503 {
 		t.Fatalf("gaps=%v", gaps)
+	}
+}
+
+// The plugins endpoint powers an optional subsystem, so the export has to ask
+// for the optional-read policy: the client refuses to spend its retry ladder on
+// a subsystem the source does not have, which is what made a disabled plugin
+// feature look like a three-minute hang (DENE-406).
+func TestSourceExportSkills_ReadsPluginsThroughTheOptionalClientPath(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/skills":                  []map[string]any{{"id": "sk-1", "name": "notes"}},
+		"/api/workspaces/ws-1/plugins": map[string]any{"plugins": []any{}},
+	}}
+	bundle := &ConfigBundle{Entities: ConfigEntities{}, Stats: map[string]int{}}
+	var gaps []TransferExportGap
+	sourceExportSkills(context.Background(), src, "ws-1", bundle, &gaps, collectGaps(&gaps))
+	if len(src.optionalCalls) != 1 || src.optionalCalls[0] != "/api/workspaces/ws-1/plugins" {
+		t.Fatalf("optional reads = %v, want the plugins read and only it", src.optionalCalls)
 	}
 }
 

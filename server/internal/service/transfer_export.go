@@ -21,6 +21,12 @@ import (
 
 type TransferSourceClient interface {
 	GetJSON(ctx context.Context, path string, out any) error
+	// GetOptionalJSON reads an endpoint that powers an optional subsystem — the
+	// source may simply not have it (plugins behind FF_PLUGINS_V1 is the one
+	// today). A 503 there is permanent, not transient, so the client must
+	// answer at once instead of retrying: the caller records an export gap and
+	// exports the rest of the group (DENE-406).
+	GetOptionalJSON(ctx context.Context, path string, out any) error
 	GetBytes(ctx context.Context, path string) ([]byte, error)
 }
 
@@ -94,6 +100,42 @@ func appendTransferGap(gaps *[]TransferExportGap, group string, trunc *TransferL
 	if trunc != nil {
 		*gaps = append(*gaps, transferReadGap(group, trunc))
 	}
+}
+
+// dedupeTransferAttachments collapses rows that describe the same attachment.
+//
+// A comment-held attachment keeps its issue_id, so the issue's attachment list
+// serves it a second time next to the comment read that already carried it. One
+// file must not become two `attachments/index.jsonl` rows: the duplicate costs a
+// second body download and makes `stats.attachments` — the number the migration
+// card shows — one higher than the files actually in the bundle (DENE-406).
+//
+// The row that names its comment wins, because that is the column the import
+// reconnects the attachment to its comment through, and the issue-list copy
+// carries it as NULL.
+func dedupeTransferAttachments(rows []TransferAttachmentRow) []TransferAttachmentRow {
+	if len(rows) < 2 {
+		return rows
+	}
+	seen := make(map[string]int, len(rows))
+	out := make([]TransferAttachmentRow, 0, len(rows))
+	for _, row := range rows {
+		if row.SourceID == "" {
+			// Without an id there is nothing to dedupe on; dropping the row
+			// would lose it.
+			out = append(out, row)
+			continue
+		}
+		if first, ok := seen[row.SourceID]; ok {
+			if out[first].CommentID == nil && row.CommentID != nil {
+				out[first] = row
+			}
+			continue
+		}
+		seen[row.SourceID] = len(out)
+		out = append(out, row)
+	}
+	return out
 }
 
 type TransferExportOpts struct {
@@ -361,6 +403,10 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 		}
 	}
 	out.Secrets = bundle.SecretsOmitted
+
+	// Both groups are gathered, so an attachment read twice can be collapsed
+	// before it reaches `attachments/index.jsonl` or the stats below (DENE-406).
+	out.Attachments = dedupeTransferAttachments(out.Attachments)
 
 	stats := map[string]int{}
 	for k, v := range bundle.Stats {
@@ -688,10 +734,12 @@ func sourceExportSkills(ctx context.Context, src TransferSourceClient, wsID stri
 // returns skill names contributed by installed plugins (resources[].type ==
 // "skill", key is the workspace-unique skill name). A 503 (PluginsV1 off) or
 // any other read failure is returned so the caller can export every skill and
-// record plugin_skills_unfiltered.
+// record plugin_skills_unfiltered. The read is optional, so it is not retried:
+// a disabled plugin subsystem answers 503 forever, and waiting on it only
+// parks the export for minutes before recording the same gap (DENE-406).
 func pluginContributedSkillNames(ctx context.Context, src TransferSourceClient, wsID string) (map[string]bool, error) {
 	var plugins []map[string]any
-	trunc, err := getList(ctx, src, "/api/workspaces/"+url.PathEscape(wsID)+"/plugins", &plugins)
+	trunc, err := getOptionalList(ctx, src, "/api/workspaces/"+url.PathEscape(wsID)+"/plugins", &plugins)
 	if err != nil {
 		return nil, err
 	}
@@ -1108,7 +1156,10 @@ func sourceExportIntegrations(ctx context.Context, src TransferSourceClient, wsI
 		}
 	}
 	var plugins []map[string]any
-	if trunc, err := getList(ctx, src, base+"/plugins", &plugins); err == nil {
+	// Optional subsystem, read a second time for PluginsToReinstall: with
+	// FF_PLUGINS_V1 off this 503s, and retrying would stall the export for
+	// minutes on top of the skills read that already recorded the gap.
+	if trunc, err := getOptionalList(ctx, src, base+"/plugins", &plugins); err == nil {
 		noteListTruncation(gap, "plugins", trunc)
 		for _, raw := range plugins {
 			bundle.PluginsToReinstall = append(bundle.PluginsToReinstall, ConfigPlugin{
@@ -1687,8 +1738,19 @@ func listEnvelopeTruncation(obj map[string]json.RawMessage) *TransferListTruncat
 // export gap and keep the decoded rows — reading one page and moving on is the
 // silent truncation the manifest has to account for.
 func getList(ctx context.Context, src TransferSourceClient, path string, dest *[]map[string]any) (*TransferListTruncation, error) {
+	return decodeTransferList(ctx, src.GetJSON, path, dest)
+}
+
+// getOptionalList is getList for an endpoint that powers an optional subsystem
+// (DENE-406). The read itself is not worth waiting minutes for: the caller
+// records an export gap and exports the rest of the group either way.
+func getOptionalList(ctx context.Context, src TransferSourceClient, path string, dest *[]map[string]any) (*TransferListTruncation, error) {
+	return decodeTransferList(ctx, src.GetOptionalJSON, path, dest)
+}
+
+func decodeTransferList(ctx context.Context, read func(context.Context, string, any) error, path string, dest *[]map[string]any) (*TransferListTruncation, error) {
 	var raw json.RawMessage
-	if err := src.GetJSON(ctx, path, &raw); err != nil {
+	if err := read(ctx, path, &raw); err != nil {
 		return nil, err
 	}
 	if len(raw) == 0 || string(raw) == "null" {

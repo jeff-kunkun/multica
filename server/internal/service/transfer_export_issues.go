@@ -403,8 +403,10 @@ func exportIssueComments(ctx context.Context, src TransferSourceClient, issueID 
 }
 
 // exportIssueAttachments reads the attachments mounted directly on the issue.
-// Comment attachments arrive inline on the comment rows, so they are not read
-// again here (ListAttachmentsByIssue selects `issue_id = $1` only).
+// Comment attachments arrive inline on the comment rows AND again here, because
+// ListAttachmentsByIssue filters on `issue_id` alone and a comment-held row
+// keeps its issue_id; ExportFromSource dedupes the two reads by attachment id
+// (DENE-406).
 func exportIssueAttachments(ctx context.Context, src TransferSourceClient, issueID string, exportAttachmentBodies bool) ([]TransferAttachmentRow, []SecretOmitted, map[string][]byte, *TransferListTruncation, error) {
 	var raws []map[string]any
 	trunc, err := getList(ctx, src, "/api/issues/"+url.PathEscape(issueID)+"/attachments", &raws)

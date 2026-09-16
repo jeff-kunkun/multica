@@ -11,11 +11,14 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 const (
@@ -793,5 +796,133 @@ func TestTransferExport_WritesProgressLinesToStderr(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), out) {
 		t.Fatalf("stdout must stay reserved for the out path, got %q", stdout.String())
+	}
+}
+
+// With FF_PLUGINS_V1 off the source answers 503 for
+// GET /api/workspaces/{id}/plugins — forever, because a feature flag is not a
+// transient fault. The export used to spend the core-read backoff ladder on it
+// (8 attempts, 1+2+4+8+16+32+60+60 seconds) and the user saw "export stuck for
+// three minutes" instead of a bundle carrying one recorded gap (DENE-406).
+func TestTransferExport_Plugin503RecordsGapWithoutBackoff(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+	var pluginRequests int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/workspaces/ws-1/plugins":
+			atomic.AddInt32(&pluginRequests, 1)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"error":"Plugin management is not enabled"}`)
+		case r.URL.Path == "/api/me":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "user-1", "email": "owner@example.com"})
+		case r.URL.Path == "/api/workspaces":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "ws-1", "slug": "src", "name": "Src"}})
+		case r.URL.Path == "/api/workspaces/ws-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "ws-1", "slug": "src", "name": "Src"})
+		case r.URL.Path == "/api/skills":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "sk-1", "name": "notes", "content": "x"}})
+		case r.URL.Path == "/api/labels":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "lb-1", "name": "bug"}})
+		default:
+			_ = json.NewEncoder(w).Encode([]any{})
+		}
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "bundle.zip")
+	start := time.Now()
+	if _, err := transferTestIssueCmd(t, srv, map[string]string{"out": out, "include": "config"}); err != nil {
+		t.Fatalf("a disabled optional subsystem must not abort the export: %v", err)
+	}
+	elapsed := time.Since(start)
+	// Two call sites read the endpoint — the skills filter and the
+	// plugins-to-reinstall list. Under the core-read policy each would have spent
+	// its own eight attempts and backoff ladder on the same permanent 503.
+	if got := atomic.LoadInt32(&pluginRequests); got != 2 {
+		t.Fatalf("plugins endpoint read %d times, want 2 (once per call site, no retry)", got)
+	}
+	if elapsed > 15*time.Second {
+		t.Fatalf("export took %s; a permanent 503 on an optional subsystem must not enter the retry backoff", elapsed)
+	}
+
+	entries := readTransferZipEntries(t, out)
+	var manifest struct {
+		ExportGaps []struct {
+			Group  string `json:"group"`
+			Reason string `json:"reason"`
+			Status int    `json:"status"`
+		} `json:"export_gaps"`
+		Stats map[string]int `json:"stats"`
+	}
+	decodeZipJSON(t, entries, "manifest.json", &manifest)
+	if len(manifest.ExportGaps) != 1 || manifest.ExportGaps[0].Reason != "plugin_skills_unfiltered" ||
+		manifest.ExportGaps[0].Group != "skills" || manifest.ExportGaps[0].Status != 503 {
+		t.Fatalf("export_gaps=%+v, want one plugin_skills_unfiltered entry carrying status 503", manifest.ExportGaps)
+	}
+	if manifest.Stats["skills"] != 1 || manifest.Stats["labels"] != 1 {
+		t.Fatalf("the rest of the config group must still export: stats=%v", manifest.Stats)
+	}
+}
+
+// A comment-held attachment keeps its issue_id, and
+// GET /api/issues/{id}/attachments filters on issue_id alone — so the same row
+// arrives twice: once inline on its comment, once in the issue's list. Before
+// DENE-406 that shipped two `attachments/index.jsonl` rows for one file, which
+// cost a second HTTP download and left `stats.attachments` — the number the
+// migration card shows — one higher than the files in the bundle.
+func TestTransferExport_DedupesCommentAttachmentInIndex(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+	body := []byte("PNGDATA")
+	commentAttachment := map[string]any{
+		"id": "att-1", "filename": "shot.png", "content_type": "image/png",
+		"size_bytes": len(body), "created_at": "2026-09-01T00:00:01Z",
+		"issue_id": "issue-1", "comment_id": "comment-1",
+	}
+	comment := transferTestComment("comment-1", "issue-1", "2026-09-01T00:00:01Z")
+	comment["attachments"] = []map[string]any{commentAttachment}
+	fx := &transferIssueAPIFixture{
+		issuePrefix: "SRC",
+		issues:      []map[string]any{transferTestIssue("issue-1", 1, "Bug")},
+		comments:    map[string][]map[string]any{"issue-1": {comment}},
+		// What the real endpoint answers for an attachment mounted on a comment.
+		attachments: map[string][]map[string]any{"issue-1": {commentAttachment}},
+		bodies:      map[string][]byte{"att-1": body},
+	}
+	srv := fx.server()
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "bundle.zip")
+	if _, err := transferTestIssueCmd(t, srv, map[string]string{"out": out, "include": "issues,attachments"}); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+
+	entries := readTransferZipEntries(t, out)
+	indexRows := decodeZipJSONL[service.TransferAttachmentRow](t, entries, "attachments/index.jsonl")
+	if len(indexRows) != 1 {
+		t.Fatalf("attachments/index.jsonl holds %d row(s) for one attachment: %s",
+			len(indexRows), entries["attachments/index.jsonl"])
+	}
+	if indexRows[0].CommentID == nil || *indexRows[0].CommentID != "comment-1" {
+		t.Fatalf("index row comment_id=%v, want comment-1: the surviving row has to keep the comment link", indexRows[0].CommentID)
+	}
+
+	blobs := 0
+	for name := range entries {
+		if strings.HasPrefix(name, "attachments/blobs/") {
+			blobs++
+		}
+	}
+	var manifest transferManifestRefsTest
+	decodeZipJSON(t, entries, "manifest.json", &manifest)
+	if manifest.Stats["attachments"] != 1 || blobs != 1 {
+		t.Fatalf("stats.attachments=%d with %d blob file(s); want one index row, one file and one count",
+			manifest.Stats["attachments"], blobs)
 	}
 }
