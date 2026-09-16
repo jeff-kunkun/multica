@@ -562,6 +562,19 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Prefer a real parent + stage",
 				"already has a queued or running task",
 			},
+			notWant: []string{
+				// The MUL-6966 / MUL-5442 bans on teaching the generic KV bag
+				// followed the `multica issue metadata set` text into this
+				// file. Only the `close.*` keys are sanctioned here.
+				"pr_url",
+				"High-signal keys",
+				"reuse these names so queries stay consistent",
+				"scratchpad for run state",
+				// Per-turn workflow the runtime brief owns.
+				"Start from the trigger, not from memory",
+				"multica issue comment list <issue-id> --thread <trigger-comment-id>",
+				"multica issue comment add <issue-id> --parent <trigger-comment-id>",
+			},
 		},
 		{
 			file: "references/mentions.md",
