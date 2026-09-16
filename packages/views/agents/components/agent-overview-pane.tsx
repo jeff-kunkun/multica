@@ -133,6 +133,9 @@ interface AgentOverviewPaneProps {
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   currentUserId?: string | null;
   canEdit: boolean;
+  /** Active specialisations of this agent (DENE-304); the Instructions tab
+   *  names them so an edit to a shared prompt is not a silent change. */
+  childAgents?: readonly Agent[];
   navIntent?: DetailTab | null;
   onNavIntentHandled?: () => void;
 }
@@ -153,6 +156,7 @@ export function AgentOverviewPane({
   onUpdate,
   currentUserId,
   canEdit,
+  childAgents = [],
   navIntent,
   onNavIntentHandled,
 }: AgentOverviewPaneProps) {
@@ -459,6 +463,7 @@ export function AgentOverviewPane({
                       agent={agent}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
+                      childAgents={childAgents}
                     />
                   )}
                   {effectiveView === "skills" && (

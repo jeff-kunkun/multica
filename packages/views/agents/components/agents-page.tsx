@@ -1096,6 +1096,20 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     () => buildAgentSquadsMap(squads, squadRosters),
     [squads, squadRosters],
   );
+  // Active specialisations per base role, straight off the list payload (every
+  // row carries parent_agent_id). Feeds the archive guard's "solidify &
+  // unbind" action, which needs the child ids the 409 body does not carry.
+  const childAgentsByParentId = useMemo(() => {
+    const map = new Map<string, Agent[]>();
+    for (const agent of agents) {
+      const parentId = agent.parent_agent_id ?? "";
+      if (!parentId || agent.archived_at) continue;
+      const existing = map.get(parentId);
+      if (existing) existing.push(agent);
+      else map.set(parentId, [agent]);
+    }
+    return map;
+  }, [agents]);
   const allActiveRostersKnown = useMemo(() => {
     for (const squad of squads) {
       if (squad.archived_at != null) continue;
@@ -1509,6 +1523,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                             presence={row.presence}
                             canManage={row.canManage}
                             duplicateHref={duplicateHref(row.agent)}
+                            childAgents={childAgentsByParentId.get(row.agent.id)}
                           />
                         </span>
                       </ListGridCell>

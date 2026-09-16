@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Loader2,
+  Lock,
   Plus,
   RefreshCw,
   Server,
@@ -41,6 +42,7 @@ import {
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { SkillAddDialog } from "../skill-add-dialog";
+import { inheritedSkillChips } from "../../specialization";
 import { useT } from "../../../i18n";
 
 type SelectedSkill =
@@ -143,12 +145,48 @@ export function SkillsTab({
   };
 
   const runtimeSkills = runtimeQuery.data?.skills ?? [];
+  // Inherited bindings are read-only in v1: a specialisation cannot drop a
+  // skill its base role holds. They are their own locked group so "why can't I
+  // remove this?" is answered on the page, not by a failed request.
+  const inheritedSkills = inheritedSkillChips(agent);
 
   return (
     <div className="space-y-8">
       <p className="text-body leading-6 text-muted-foreground">
         {t(($) => $.tab_body.skills.intro)}
       </p>
+
+      {inheritedSkills.length > 0 && (
+        <div data-testid="agent-inherited-skills">
+          <CapabilitySection
+            title={t(($) => $.specialization.inherited_skills_title)}
+            description={t(($) => $.specialization.inherited_skills_hint)}
+          >
+            <ul className="divide-y rounded-lg border bg-muted/30">
+              {inheritedSkills.map((skill) => (
+                <li key={skill.id} className="flex items-center gap-3 p-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-faint-foreground">
+                    <SkillIcon className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-body font-medium text-muted-foreground">
+                      {skill.name}
+                    </span>
+                    <span className="block truncate text-caption text-muted-foreground">
+                      {skill.description ||
+                        t(($) => $.tab_body.skills.no_description)}
+                    </span>
+                  </span>
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-xs border border-border px-1.5 py-0.5 text-micro text-muted-foreground">
+                    <Lock aria-hidden="true" className="size-3" />
+                    {t(($) => $.specialization.inherited_skills_locked)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CapabilitySection>
+        </div>
+      )}
 
       <CapabilitySection
         title={t(($) => $.tab_body.skills.assigned_title)}
