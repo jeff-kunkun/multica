@@ -1461,7 +1461,16 @@
       "progress_attachments_total": "{{done}} / {{total}}개 첨부",
       "saved_as": "{{name}} ({{size}})(으)로 저장됨",
       "runtimes_title": "이 에이전트를 이 머신의 런타임에 연결하세요.",
-      "gaps_title": "원본 내보내기 공백"
+      "gaps_title": "원본 내보내기 공백",
+      "option_activate_autopilots": "가져온 뒤 자동화 활성화",
+      "option_activate_autopilots_hint": "가져온 자동화는 가져오기가 끝나는 즉시 실행을 시작합니다. 끄면 일시 중지 상태로 가져옵니다.",
+      "option_apply_workspace_settings": "워크스페이스 설정 적용",
+      "option_apply_workspace_settings_hint": "번들에 담긴 컨텍스트, 저장소, 기여 설정을 이 워크스페이스에 반영합니다.",
+      "option_apply_issue_prefix": "이슈 접두사 적용",
+      "option_apply_issue_prefix_hint": "앞으로 만들어지는 모든 이슈의 키가 바뀝니다. 이 워크스페이스에 아직 이슈가 없을 때만 적용됩니다.",
+      "autopilots_paused": "자동화: {{imported}}개 가져옴, 그중 {{paused}}개는 일시 중지 상태입니다.",
+      "autopilots_active": "자동화: {{imported}}개 가져옴, 가져오기가 끝나는 즉시 실행됩니다.",
+      "autopilots_activate_hint": "“가져온 뒤 자동화 활성화”를 켜고 다시 적용하면 곧바로 실행됩니다."
     }
   }
 }

@@ -57,11 +57,36 @@ func init() {
 	transferImportCmd.Flags().String("in", "", "Input zip or V1 JSON path")
 	transferImportCmd.Flags().Bool("dry-run", false, "Preview without writing")
 	transferImportCmd.Flags().String("on-conflict", "fail", "Conflict policy for config entities: fail, overwrite, rename, skip")
+	registerTransferImportOptionFlags(transferImportCmd)
 	_ = transferImportCmd.MarkFlagRequired("workspace")
 	_ = transferImportCmd.MarkFlagRequired("in")
 
 	transferCmd.AddCommand(transferExportCmd)
 	transferCmd.AddCommand(transferImportCmd)
+}
+
+// registerTransferImportOptionFlags declares the config-import switches
+// `transfer import` forwards to the target. The defaults mirror the Desktop
+// migration card: moving a workspace across environments is meant to reproduce
+// the same environment, so autopilots come across running, while the issue
+// prefix stays put because adopting it changes every later issue key.
+func registerTransferImportOptionFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("activate-autopilots", true, "Keep the source autopilot status; imported automations start triggering immediately (--activate-autopilots=false imports them paused)")
+	cmd.Flags().Bool("apply-workspace-settings", true, "Apply the exported workspace settings (context, repos, attribution)")
+	cmd.Flags().Bool("apply-issue-prefix", false, "Also adopt the exported issue prefix (changes the key of every future issue in the target)")
+}
+
+// transferImportOptions reads the switches registered above. A command built
+// without them falls back to the same defaults.
+func transferImportOptions(cmd *cobra.Command) service.ConfigImportOptions {
+	activate, _ := cmd.Flags().GetBool("activate-autopilots")
+	applySettings, _ := cmd.Flags().GetBool("apply-workspace-settings")
+	applyPrefix, _ := cmd.Flags().GetBool("apply-issue-prefix")
+	return service.ConfigImportOptions{
+		ActivateAutopilots:     activate,
+		ApplyWorkspaceSettings: &applySettings,
+		ApplyIssuePrefix:       applyPrefix,
+	}
 }
 
 type sourceClient struct {
@@ -367,6 +392,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	inPath, _ := cmd.Flags().GetString("in")
 	dry, _ := cmd.Flags().GetBool("dry-run")
 	onConflict, _ := cmd.Flags().GetString("on-conflict")
+	importOptions := transferImportOptions(cmd)
 
 	client, err := newTransferAPIClient(cmd)
 	if err != nil {
@@ -388,9 +414,8 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	base := "/api/workspaces/" + url.PathEscape(wsID)
 	if payload.V1Only {
 		var report any
-		req := service.ConfigImportRequest{Bundle: payload.Config, DryRun: &dry, OnConflict: onConflict}
 		if err := client.PostJSON(ctx, base+"/transfer/config", service.TransferConfigRequest{
-			Config: req.Bundle, DryRun: &dry, OnConflict: onConflict,
+			Config: payload.Config, DryRun: &dry, OnConflict: onConflict, Options: importOptions,
 		}, &report); err != nil {
 			if st := httpStatusOf(err); st == 404 {
 				return fmt.Errorf("target_unsupported: this server is not a kun instance with /transfer/* endpoints")
@@ -410,6 +435,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 		SecretsOmitted:  payload.Secrets,
 		DryRun:          &dry,
 		OnConflict:      onConflict,
+		Options:         importOptions,
 	}
 	if err := client.PostJSON(ctx, base+"/transfer/config", cfgReq, &cfgReport); err != nil {
 		if st := httpStatusOf(err); st == 404 {

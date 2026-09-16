@@ -1461,7 +1461,16 @@
       "progress_attachments_total": "{{done}} / {{total}} 件の添付ファイル",
       "saved_as": "{{name}}（{{size}}）として保存しました",
       "runtimes_title": "これらのエージェントをこのマシンのランタイムに結び付けてください。",
-      "gaps_title": "書き出し元の欠落"
+      "gaps_title": "書き出し元の欠落",
+      "option_activate_autopilots": "読み込み後に自動化を有効にする",
+      "option_activate_autopilots_hint": "読み込んだ自動化は読み込み完了直後から実行されます。オフにすると一時停止状態で読み込みます。",
+      "option_apply_workspace_settings": "ワークスペース設定を適用する",
+      "option_apply_workspace_settings_hint": "バンドル内のコンテキスト、リポジトリ、アトリビューション設定をこのワークスペースへ反映します。",
+      "option_apply_issue_prefix": "issue プレフィックスを採用する",
+      "option_apply_issue_prefix_hint": "今後作られるすべての issue のキーが変わります。このワークスペースに issue がまだ無い場合のみ適用されます。",
+      "autopilots_paused": "自動化: {{imported}} 件を読み込み、うち {{paused}} 件は一時停止中です。",
+      "autopilots_active": "自動化: {{imported}} 件を読み込み、読み込み完了直後から実行されます。",
+      "autopilots_activate_hint": "「読み込み後に自動化を有効にする」をオンにして再適用すると、すぐに実行が始まります。"
     }
   }
 }

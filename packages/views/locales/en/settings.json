@@ -1468,7 +1468,16 @@
       "progress_attachments_total": "{{done}} / {{total}} attachments",
       "saved_as": "Saved as {{name}} ({{size}})",
       "runtimes_title": "Bind these agents to a runtime on this machine.",
-      "gaps_title": "Gaps from the source export"
+      "gaps_title": "Gaps from the source export",
+      "option_activate_autopilots": "Activate automations after import",
+      "option_activate_autopilots_hint": "Imported automations start triggering as soon as the import finishes. Untick to import them paused.",
+      "option_apply_workspace_settings": "Apply workspace settings",
+      "option_apply_workspace_settings_hint": "Context, repositories and attribution settings travel in the bundle and land on this workspace.",
+      "option_apply_issue_prefix": "Adopt the issue prefix",
+      "option_apply_issue_prefix_hint": "Changes the key of every future issue here. Only applied while this workspace has no issues yet.",
+      "autopilots_paused": "Automations: {{imported}} imported, {{paused}} of them paused.",
+      "autopilots_active": "Automations: {{imported}} imported, triggering as soon as the import finishes.",
+      "autopilots_activate_hint": "Tick “Activate automations after import” and apply to start these straight away."
     }
   }
 }

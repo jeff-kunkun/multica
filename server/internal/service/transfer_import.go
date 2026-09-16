@@ -46,6 +46,7 @@ func ImportTransferConfig(ctx context.Context, env TransferImportEnv, req Transf
 		Bundle:     req.Config,
 		DryRun:     req.DryRun,
 		OnConflict: req.OnConflict,
+		Options:    req.Options,
 	}
 	cfgReport, err := ImportWorkspaceConfig(ctx, ConfigImportEnv{
 		Queries:    env.Queries,

@@ -1461,7 +1461,16 @@
       "progress_attachments_total": "{{done}} / {{total}} 个附件",
       "saved_as": "已保存为 {{name}}（{{size}}）",
       "runtimes_title": "请在这台机器上为这些智能体绑定运行时。",
-      "gaps_title": "源端导出缺口"
+      "gaps_title": "源端导出缺口",
+      "option_activate_autopilots": "导入后激活自动化",
+      "option_activate_autopilots_hint": "导入的自动化会立刻开始触发；不勾则先以暂停状态导入。",
+      "option_apply_workspace_settings": "应用工作区设置",
+      "option_apply_workspace_settings_hint": "包里的上下文、仓库与归因设置会写入当前工作区。",
+      "option_apply_issue_prefix": "采用 issue 前缀",
+      "option_apply_issue_prefix_hint": "会改掉此后所有新任务的编号前缀；仅当当前工作区还没有任务时生效。",
+      "autopilots_paused": "自动化：导入 {{imported}} 条，其中 {{paused}} 条已暂停。",
+      "autopilots_active": "自动化：导入 {{imported}} 条，导入后立刻开始触发。",
+      "autopilots_activate_hint": "勾上「导入后激活自动化」再应用一次，它们就会马上开始跑。"
     }
   }
 }

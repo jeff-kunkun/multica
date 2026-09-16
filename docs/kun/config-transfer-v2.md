@@ -96,9 +96,19 @@ multica transfer import --profile <目标实例登录档> --workspace <slug> --i
 
 | 端点 | 作用 |
 | --- | --- |
-| `POST /api/workspaces/{id}/transfer/config` | 接收 `manifest` + `people` + `runtime_profiles` + `config`（V1 bundle），先做成员邮箱映射与 `runtime_profile` 预处理，再调用 V1 导入内核。支持 `dry_run`、`on_conflict`，响应 = V1 导入报告 + `people_map` + `runtimes_to_bind`。 |
+| `POST /api/workspaces/{id}/transfer/config` | 接收 `manifest` + `people` + `runtime_profiles` + `config`（V1 bundle），先做成员邮箱映射与 `runtime_profile` 预处理，再调用 V1 导入内核。支持 `dry_run`、`on_conflict`、`options`，响应 = V1 导入报告 + `people_map` + `runtimes_to_bind`。 |
 | `POST /api/workspaces/{id}/transfer/conversations` | 接收一个对话分片（会话 + 消息 + 本片引用索引），幂等写入。支持 `dry_run`。 |
 | `POST /api/workspaces/{id}/transfer/attachments` | `multipart/form-data`，一次一个附件：元数据 JSON + 文件体，幂等写入。 |
+
+`transfer/config` 请求体的 `options` 就是 V1 的 `ConfigImportRequest.options`，逐字段透传进导入内核（DENE-363）。整个 `options` 对象缺席时取零值，等于 DENE-363 之前的行为：自动化全部落 `paused`、工作区设置照落、issue 前缀不动，因此老客户端不受影响。
+
+| `options` 字段 | 对应 CLI flag | 默认 | 语义 |
+| --- | --- | --- | --- |
+| `activate_autopilots` | `--activate-autopilots` | CLI 与卡片默认 `true`；服务端缺席即 `false` | `true` 时按源状态导入，自动化导入后立即参与触发；`false` 时全部以 `paused` 写入，并在 `config_report.warnings` 里追一条 `autopilots_imported_paused`。 |
+| `apply_workspace_settings` | `--apply-workspace-settings` | `true`（服务端 `nil` 也视为 `true`） | `false` 时不写 `workspace` 批次，目标工作区设置原样保留。 |
+| `apply_issue_prefix` | `--apply-issue-prefix` | `false` | `true` 且工作区设置生效时，若目标工作区任务数为 0 则改用源端 issue 前缀，否则跳过并追一条 `issue_prefix_skipped_target_has_issues`。 |
+
+CLI 与 Desktop 迁移卡片用同一套默认值；卡片只在用户改动默认值时才把对应 flag 传给 CLI（`--activate-autopilots=false` / `--apply-workspace-settings=false` / `--apply-issue-prefix`），所以不带这些 flag 的旧 CLI 仍能跑默认导入。预览报告把 `autopilots` 批次折算成一行「自动化：导入 N 条，其中 M 条已暂停」。
 
 导入顺序固定：`transfer/config`（必须先 apply 成功）→ `transfer/conversations`（逐片）→ `transfer/attachments`（逐个）→ 最后一次 `transfer/conversations` 带 `finalize: true`，服务端只发一次工作区级聊天列表失效事件。
 
