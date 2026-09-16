@@ -409,3 +409,130 @@ func readTransferZipBytes(t *testing.T, path string) (unzipped string, raw []byt
 	}
 	return all.String(), raw
 }
+
+// A Desktop profile carries no default workspace_id, so --workspace is the
+// only source of the source workspace. Every workspace-scoped read must carry
+// the resolved UUID in X-Workspace-ID (DENE-274 regression: the export used to
+// resolve the workspace and never bind it to the client, so every
+// workspace-scoped read came back 400 and the bundle was an empty shell).
+func TestTransferExport_BindsResolvedWorkspaceToRequests(t *testing.T) {
+	const wsUUID = "01a0a3f2-0000-7000-8000-000000000fa1"
+	for _, tc := range []struct{ name, ref string }{
+		{name: "slug", ref: "src"},
+		{name: "uuid", ref: wsUUID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("MULTICA_TOKEN", "mat_test-token")
+			// The scenario under test is "profile without a default
+			// workspace_id": clear every ambient source so only --workspace can
+			// supply the workspace. Without this the assertion below passes for
+			// the wrong reason in a daemon task environment.
+			t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+			var mu sync.Mutex
+			seen := map[string][]string{}
+			requests := []string{}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				seen[r.URL.Path] = append(seen[r.URL.Path], r.Header.Get("X-Workspace-ID"))
+				requests = append(requests, r.URL.Path)
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/me":
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": "user-1", "email": "owner@example.com"})
+				case "/api/workspaces":
+					_ = json.NewEncoder(w).Encode([]map[string]any{{"id": wsUUID, "slug": "src", "name": "Src"}})
+				case "/api/workspaces/" + wsUUID:
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": wsUUID, "slug": "src", "name": "Src"})
+				case "/api/labels":
+					_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "lb-1", "name": "bug"}})
+				case "/api/agents":
+					_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "ag-1", "name": "Bot"}})
+				default:
+					_ = json.NewEncoder(w).Encode([]any{})
+				}
+			}))
+			defer srv.Close()
+
+			cmd := newTransferExportTestCmd()
+			_ = cmd.Flags().Set("server-url", srv.URL)
+			_ = cmd.Flags().Set("workspace", tc.ref)
+			_ = cmd.Flags().Set("estimate", "true")
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("export: %v", err)
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+			for _, path := range []string{"/api/labels", "/api/agents", "/api/chat/sessions"} {
+				got, ok := seen[path]
+				if !ok {
+					t.Fatalf("no request reached %s; requests: %v", path, requests)
+				}
+				if got[0] != wsUUID {
+					t.Fatalf("%s X-Workspace-ID = %q, want resolved UUID %q", path, got[0], wsUUID)
+				}
+			}
+			if got := seen["/api/issue-views"]; len(got) == 0 || got[0] != wsUUID {
+				t.Errorf("/api/issue-views X-Workspace-ID = %v, want %q", got, wsUUID)
+			}
+			for path, values := range seen {
+				if path == "/api/workspaces" {
+					continue // workspace resolution happens before the binding
+				}
+				for _, v := range values {
+					if v != wsUUID {
+						t.Errorf("%s X-Workspace-ID = %q, want %q", path, v, wsUUID)
+					}
+				}
+			}
+		})
+	}
+}
+
+// A non-404 read failure on a core group must fail the export loudly and leave
+// no zip behind; the <.out>.partial checkpoint keeps its resume semantics.
+func TestTransferExport_FailsWithoutZipOnCoreReadGap(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/me":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "user-1", "email": "owner@example.com"})
+		case "/api/workspaces":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "ws-1", "slug": "src", "name": "Src"}})
+		case "/api/workspaces/ws-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "ws-1", "slug": "src", "name": "Src"})
+		case "/api/labels":
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "workspace_id or workspace_slug is required"})
+		default:
+			_ = json.NewEncoder(w).Encode([]any{})
+		}
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "bundle.zip")
+	cmd := newTransferExportTestCmd()
+	_ = cmd.Flags().Set("server-url", srv.URL)
+	_ = cmd.Flags().Set("workspace", "src")
+	_ = cmd.Flags().Set("out", out)
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("a 400 on a core group must fail the export")
+	}
+	if !strings.Contains(err.Error(), "labels") {
+		t.Fatalf("error does not name the failed group: %v", err)
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Fatal("export wrote a zip even though a core group failed")
+	}
+}

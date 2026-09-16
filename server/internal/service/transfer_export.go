@@ -283,11 +283,17 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 	}
 	// A transfer that silently succeeds with failed core reads is an empty
 	// shell.  Preserve 404 as the documented compatibility downgrade, but fail
-	// the export for every other gap before the caller can write a zip.
+	// the export for every other read failure before the caller can write a
+	// zip.  Documented degradations that still export their whole group (an
+	// auxiliary endpoint being unavailable, a scope that hit the server's hard
+	// row cap) are warnings, not failures — the contract keeps the group.
 	if len(gaps) > 0 {
 		failed := make([]string, 0, len(gaps))
 		for _, g := range gaps {
-			if g.Status == 404 && g.Reason == "read_api_missing" {
+			if warningGapReason(g.Reason) {
+				continue
+			}
+			if g.Status == 404 && g.Reason == gapReasonReadAPIMissing {
 				continue
 			}
 			if g.Status != 404 {
@@ -303,6 +309,25 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 		}
 	}
 	return out, nil
+}
+
+// Gap reasons that are documented degradations rather than read failures:
+// the group's own read succeeded, so its data is in the bundle and only the
+// reported caveat remains.  `read_api_error` / `read_api_missing` are read
+// failures and stay fatal (except 404, the compatibility downgrade).
+const (
+	gapReasonReadAPIError     = "read_api_error"
+	gapReasonReadAPIMissing   = "read_api_missing"
+	gapReasonPluginUnfiltered = "plugin_skills_unfiltered"
+	gapReasonIssueViewsCapped = "issue_views_scope_capped"
+)
+
+func warningGapReason(reason string) bool {
+	switch reason {
+	case gapReasonPluginUnfiltered, gapReasonIssueViewsCapped:
+		return true
+	}
+	return false
 }
 
 type wsLite struct {
@@ -340,9 +365,9 @@ func fetchWorkspace(ctx context.Context, src TransferSourceClient, ref string) (
 func exportConfigGroups(ctx context.Context, src TransferSourceClient, wsID string, bundle *ConfigBundle, people map[string]TransferPerson) []TransferExportGap {
 	var gaps []TransferExportGap
 	gap := func(group string, err error) {
-		g := TransferExportGap{Group: group, Reason: "read_api_error"}
+		g := TransferExportGap{Group: group, Reason: gapReasonReadAPIError}
 		if st := transferStatus(err); st == 404 {
-			g.Reason = "read_api_missing"
+			g.Reason = gapReasonReadAPIMissing
 			g.Status = 404
 		} else if st > 0 {
 			g.Status = st
@@ -444,7 +469,7 @@ func bundleSettings(_ TransferSourceClient, _ string) []byte { return []byte("{}
 func sourceExportSkills(ctx context.Context, src TransferSourceClient, wsID string, bundle *ConfigBundle, gaps *[]TransferExportGap, gap func(string, error)) {
 	pluginSkills, pluginErr := pluginContributedSkillNames(ctx, src, wsID)
 	if pluginErr != nil {
-		g := TransferExportGap{Group: "skills", Reason: "plugin_skills_unfiltered"}
+		g := TransferExportGap{Group: "skills", Reason: gapReasonPluginUnfiltered}
 		if st := transferStatus(pluginErr); st > 0 {
 			g.Status = st
 		}
@@ -810,7 +835,14 @@ func sourceExportQuickActions(ctx context.Context, src TransferSourceClient, bun
 	bundle.Stats["quick_actions"] = len(bundle.Entities.QuickActions)
 }
 
-func sourceExportIssueViews(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {
+// issueViewsScopeCap mirrors the hard per-scope LIMIT of the read endpoint
+// (server/pkg/db/queries/issue_view.sql: "Hard response cap ... LIMIT 200").
+// The endpoint exposes no cursor, so a full page cannot be walked past; a
+// response at the cap is reported as an export gap instead of silently
+// dropping the views beyond it.
+const issueViewsScopeCap = 200
+
+func sourceExportIssueViews(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, gaps *[]TransferExportGap, gap func(string, error)) {
 	// The endpoint requires scope_type. Fetch workspace views once, then each
 	// project scope explicitly; a bare /api/issue-views request is a 400.
 	paths := []string{"/api/issue-views?scope_type=workspace"}
@@ -825,8 +857,15 @@ func sourceExportIssueViews(ctx context.Context, src TransferSourceClient, bundl
 			gap("issue_views", err)
 			continue
 		}
+		if len(rows) >= issueViewsScopeCap {
+			*gaps = append(*gaps, TransferExportGap{Group: "issue_views", Reason: gapReasonIssueViewsCapped, Status: 200})
+		}
 		for _, raw := range rows {
-			if strField(raw, "visibility") != "workspace" {
+			// Only shared views transfer. V1 exported visibility=workspace;
+			// V2 also enumerates every project scope, whose shared visibility
+			// is literally "project". Private views belong to the exporting
+			// user and follow them through V1's per-user rules, not here.
+			if v := strField(raw, "visibility"); v != "workspace" && v != "project" {
 				continue
 			}
 			bundle.Entities.IssueViews = append(bundle.Entities.IssueViews, ConfigIssueView{
