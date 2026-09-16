@@ -31,6 +31,13 @@ const (
 	// delegatedFailureRecoverySweepInterval keeps the low-probability durable
 	// recovery scan off the latency-sensitive runtime liveness path.
 	delegatedFailureRecoverySweepInterval = 5 * time.Minute
+	// stagnationWatchdogSweepInterval is the Stage 4 (DENE-233) compensation
+	// cadence. Protocol §7 allows 5–15 minutes; share the delegated-failure
+	// interval so this is not a new autopilot.
+	stagnationWatchdogSweepInterval = delegatedFailureRecoverySweepInterval
+	// stagnationWatchdogTickTimeout bounds one watchdog round so a large
+	// workspace cannot occupy the worker indefinitely (long-command timeout).
+	stagnationWatchdogTickTimeout = 30 * time.Second
 	// staleThresholdSeconds marks runtimes offline if no heartbeat for this
 	// long. The heartbeat timing derivation lives with the shared service
 	// constant so every task release path uses the same eligibility window.
@@ -174,6 +181,35 @@ func runDelegatedFailureRecoverySweeper(ctx context.Context, taskSvc *service.Ta
 	runPeriodicSweep(ctx, delegatedFailureRecoverySweepInterval, func() {
 		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
 	})
+}
+
+func runStagnationWatchdogSweeper(ctx context.Context, h *handler.Handler) {
+	runPeriodicSweep(ctx, stagnationWatchdogSweepInterval, func() {
+		sweepStagnationWatchdog(ctx, h)
+	})
+}
+
+func sweepStagnationWatchdog(ctx context.Context, h *handler.Handler) (stats runtimeSweepStageStats) {
+	if h == nil {
+		return
+	}
+	startedAt := time.Now()
+	defer func() {
+		observeRuntimeSweepStage(taskServiceMetrics(h.TaskService), obsmetrics.RuntimeSweepStageStagnationWatchdog, startedAt, stats)
+	}()
+	tickCtx, cancel := context.WithTimeout(ctx, stagnationWatchdogTickTimeout)
+	defer cancel()
+	candidates, changed := h.SweepStagnationWatchdog(tickCtx, time.Now().UTC(), pgtype.UUID{})
+	stats.candidates = candidates
+	stats.changed = changed
+	if tickCtx.Err() != nil && ctx.Err() == nil {
+		slog.Warn("stagnation watchdog: tick timed out",
+			"timeout", stagnationWatchdogTickTimeout,
+			"candidates", candidates,
+			"changed", changed,
+		)
+	}
+	return
 }
 
 func runRuntimeGCSweeper(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, metrics *obsmetrics.BusinessMetrics, publisher runtimeGCEventPublisher) {

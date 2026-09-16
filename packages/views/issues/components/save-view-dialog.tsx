@@ -38,7 +38,11 @@ import {
   useActiveIssueViewStore,
 } from "@multica/core/issue-views/active-view-store";
 import { ApiError } from "@multica/core/api/client";
-import type { CreateIssueViewRequest, IssueView } from "@multica/core/api/schemas";
+import type { CreateIssueViewRequest, IssueView, IssueViewVisibility } from "@multica/core/api/schemas";
+import {
+  issueViewSharingChoices,
+  parseIssueViewVisibility,
+} from "@multica/core/issue-views/visibility";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { propertyListOptions } from "@multica/core/properties";
 import {
@@ -479,7 +483,7 @@ export function SaveViewDialog({
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const [visibility, setVisibility] = useState<"private" | "workspace">("private");
+  const [visibility, setVisibility] = useState<IssueViewVisibility>("private");
   // Scope-layer variant (the "which tab" axis). Defaults to the tab the
   // user stood on when saving; switchable here because the dialog IS the
   // view-definition editor. scope_type itself never switches.
@@ -508,7 +512,12 @@ export function SaveViewDialog({
     setDraftStore(store);
     setName(editView?.name ?? "");
     setNameError(false);
-    setVisibility(editView?.visibility === "workspace" ? "workspace" : "private");
+    const nextVisibility = parseIssueViewVisibility(editView?.visibility);
+    setVisibility(
+      scope.kind === "project" || nextVisibility !== "project"
+        ? nextVisibility
+        : "private",
+    );
     if (scope.kind === "workspace" || scope.kind === "project") {
       const fromEdit = editView?.scope_variant;
       setVariant(
@@ -557,6 +566,12 @@ export function SaveViewDialog({
           : variant === "agents"
             ? t(($) => $.save_view.hint_project_agents, { title: projectTitle })
             : t(($) => $.save_view.hint_project, { title: projectTitle });
+
+  const visibilityLabels: Record<IssueViewVisibility, string> = {
+    private: t(($) => $.save_view.visibility_private),
+    workspace: t(($) => $.save_view.visibility_workspace),
+    project: t(($) => $.save_view.visibility_project),
+  };
 
   const create = () => {
     if (!draftStore) return;
@@ -714,38 +729,44 @@ export function SaveViewDialog({
           </div>
 
           {scope.kind !== "my" && (
-            <div className="flex items-center gap-3">
-              <Label className={ROW_LABEL}>
+            <div className="flex items-start gap-3">
+              <Label className={`${ROW_LABEL} pt-1.5`}>
                 {t(($) => $.save_view.visibility_label)}
               </Label>
-              <Select
-                items={[
-                  { value: "private", label: t(($) => $.save_view.visibility_private) },
-                  { value: "workspace", label: t(($) => $.save_view.visibility_workspace) },
-                ]}
-                value={visibility}
-                onValueChange={(v) => {
-                  if (v) setVisibility(v as "private" | "workspace");
-                }}
-              >
-                <SelectTrigger size="sm" className="w-64" aria-label={t(($) => $.save_view.visibility_label)}>
-                  <SelectValue>
-                    {visibility === "private"
-                      ? t(($) => $.save_view.visibility_private)
-                      : t(($) => $.save_view.visibility_workspace)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent align="start">
-                  <SelectGroup>
-                    <SelectItem value="private">
-                      {t(($) => $.save_view.visibility_private)}
-                    </SelectItem>
-                    <SelectItem value="workspace">
-                      {t(($) => $.save_view.visibility_workspace)}
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+              <div className="min-w-0">
+                <Select
+                  items={issueViewSharingChoices(scope.kind).map((value) => ({
+                    value,
+                    label: visibilityLabels[value],
+                  }))}
+                  value={visibility}
+                  onValueChange={(v) => {
+                    if (v === "private" || v === "workspace" || v === "project") {
+                      setVisibility(v);
+                    }
+                  }}
+                >
+                  <SelectTrigger size="sm" className="w-64" aria-label={t(($) => $.save_view.visibility_label)}>
+                    <SelectValue>
+                      {visibilityLabels[visibility]}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    <SelectGroup>
+                      {issueViewSharingChoices(scope.kind).map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {visibilityLabels[value]}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                {scope.kind === "project" && (
+                  <p className="mt-1 text-caption text-muted-foreground">
+                    {t(($) => $.save_view.visibility_project_hint)}
+                  </p>
+                )}
+              </div>
             </div>
           )}
           {scope.kind === "my" && (

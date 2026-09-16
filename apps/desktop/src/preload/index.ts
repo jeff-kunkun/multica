@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
-import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type {
+  RuntimeConfigResult,
+  RuntimeConfigSwitchResult,
+} from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
   ManualUpdateCheckResult,
@@ -31,6 +34,12 @@ import {
   type MainRendererMessageChannel,
   type TabSelectionShortcutKey,
 } from "../shared/main-renderer-messages";
+import type {
+  TransferPickPathResult,
+  TransferProgressEvent,
+  TransferRunRequest,
+  TransferRunResult,
+} from "../shared/workspace-transfer";
 
 type DesktopAppInfo = {
   version: string;
@@ -135,6 +144,13 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
+  /**
+   * Persist a server switch. `null` deletes desktop.json (official cloud).
+   * A string is treated as the target server URL. The live session is not
+   * updated — the renderer must require a full quit and reopen.
+   */
+  switchServer: (url: string | null): Promise<RuntimeConfigSwitchResult> =>
+    ipcRenderer.invoke("runtime-config:switch", url),
   /** Identifies whether this renderer owns the main tabbed window or a
    *  dedicated issue window, parsed from validated launch arguments. */
   windowContext,
@@ -265,6 +281,17 @@ const desktopAPI = {
   /** Open a validated issue-detail route in a dedicated native window. */
   openIssueWindow: (request: IssueWindowRequest) =>
     ipcRenderer.invoke("window:open-issue", request),
+  pickTransferExportPath: (input?: { slug?: string }): Promise<TransferPickPathResult> =>
+    ipcRenderer.invoke("transfer:pick-export-path", input),
+  pickTransferImportPath: (): Promise<TransferPickPathResult> =>
+    ipcRenderer.invoke("transfer:pick-import-path"),
+  runWorkspaceTransfer: (request: TransferRunRequest): Promise<TransferRunResult> =>
+    ipcRenderer.invoke("transfer:run", request),
+  onTransferProgress: (callback: (event: TransferProgressEvent) => void) => {
+    const handler = (_: unknown, payload: TransferProgressEvent) => callback(payload);
+    ipcRenderer.on("transfer:progress", handler);
+    return () => ipcRenderer.removeListener("transfer:progress", handler);
+  },
 };
 
 type DaemonReauthResult =

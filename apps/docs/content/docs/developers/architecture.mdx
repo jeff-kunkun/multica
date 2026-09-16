@@ -125,6 +125,12 @@ Business queries must be scoped by `workspace_id`, and membership is checked bef
 
 An issue's assignee is polymorphic and may point to a member, agent, or squad. New queries, cache keys, and realtime events must preserve both the workspace and assignee type instead of assuming that a resource ID is globally unique context.
 
+## Alignment carriers and task-token scope
+
+Requirement alignment runs on a hidden system carrier (`agent.system_key = 'issue_draft:*'`) and creates nothing until the user confirms the structured draft. The carrier executes like any other task, so its `mat_` task token is deliberately narrower than a normal one: `internal/middleware` allows `GET`, `HEAD`, and `OPTIONS` on it and refuses every other method with `403`. What the carrier may *say* is a prompt; what it may *do* over the API is enforced where the credential is checked.
+
+That scope stops at the API. The agent process still runs a real CLI on a real machine, so its local side effects — shell commands, file writes, `git push` — are outside the server's reach. Provider backends differ in what they can restrict (Claude-family runners accept `--disallowedTools`, others have no equivalent), which makes the local half best-effort per provider. It must not be described as a sandbox or as a cross-provider read-only guarantee: anything that has to be impossible belongs in the API layer.
+
 ## Next steps
 
 - [Contributing](/developers/contributing) — Local environments, worktrees, and test locations.
