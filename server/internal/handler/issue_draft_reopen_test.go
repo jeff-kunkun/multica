@@ -172,9 +172,9 @@ func TestReopenIssueDraftRoundAndConfirmAreIdempotent(t *testing.T) {
 		t.Fatalf("draft recorded round %d, want 1", storedRound)
 	}
 
-	// A retried reopen — a lost response, a page that reopens on load — lands
-	// on the completed row the confirm just produced. It must not advance the
-	// round a second time.
+	// A retried reopen — a lost response, a double click — lands on the
+	// completed row the confirm just produced. It must not advance the round a
+	// second time.
 	var reopenedAgain issueDraftResponse
 	testutil.Call(t, testHandler.ReopenIssueDraft, reopenRequest(t, session.SessionID)).
 		Want(http.StatusOK).JSON(&reopenedAgain)
@@ -312,6 +312,48 @@ func TestReopenIssueDraftRefusesAnAbandonedDraft(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT status FROM issue_draft WHERE chat_session_id = $1`, session.SessionID).Scan(&status)
 	if status != "abandoned" {
 		t.Fatalf("the refused reopen left the draft in %q, want abandoned", status)
+	}
+}
+
+// The list is the only row an open alignment page reads, so a continuation has
+// to be able to say which round it is on from the list alone. It used to be
+// unable to: `ListIssueDraftsByCreator` did not select the round columns, and
+// the page POSTed /reopen — a write — purely to read its own round back
+// (DENE-416).
+func TestListIssueDraftsCarriesTheRoundOfAContinuation(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cleanupIssueDraftGroup(t)
+
+	session := startIssueDraftSession(t)
+	first := roundOne(t, session.SessionID, draftChild("c1", "first child", "todo"))
+
+	var reopened issueDraftResponse
+	testutil.Call(t, testHandler.ReopenIssueDraft, reopenRequest(t, session.SessionID)).
+		Want(http.StatusOK).JSON(&reopened)
+
+	var listed ListIssueDraftsResponse
+	testutil.Call(t, testHandler.ListIssueDrafts, newRequest(http.MethodGet, "/api/issue-drafts", nil)).
+		Want(http.StatusOK).JSON(&listed)
+
+	var row *IssueDraftSummary
+	for i := range listed.Drafts {
+		if listed.Drafts[i].ChatSessionID == session.SessionID {
+			row = &listed.Drafts[i]
+			break
+		}
+	}
+	if row == nil {
+		t.Fatal("the reopened alignment is missing from the unfinished list")
+	}
+	if row.FinalizeRound != 1 {
+		t.Fatalf("the listed row reports round %d, want 1 — a continuation cannot say which round it is on",
+			row.FinalizeRound)
+	}
+	if row.FinalizedRevision == nil || *row.FinalizedRevision != first.Draft.Revision {
+		t.Fatalf("the listed row reports finalized_revision %v, want the revision the first round confirmed (%d)",
+			row.FinalizedRevision, first.Draft.Revision)
 	}
 }
 

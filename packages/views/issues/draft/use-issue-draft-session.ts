@@ -166,9 +166,10 @@ export interface IssueDraftSession {
   generatePreview: (current: IssueDraftPayload) => Promise<IssueDraftPayload | null>;
   confirm: () => Promise<boolean>;
   /**
-   * Starts another round on this alignment. Idempotent, so callers may use it
-   * both as the deliberate "continue aligning" and as the read that tells a
-   * page which round it is on.
+   * Starts another round on this alignment — the detail page's "continue
+   * aligning". Idempotent server-side, so a repeat is answered with the row as
+   * it stands rather than counting the round twice. This is a deliberate write,
+   * never a read: the round a page is on comes off its list row.
    */
   reopen: () => Promise<boolean>;
   abandon: () => Promise<boolean>;
@@ -284,42 +285,13 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
   }, [draft, draftId, groupChildren, rootIssueId]);
 
   /**
-   * Which round this page is on.
-   *
-   * `finalize_round` is the field that answers it, and the list endpoint this
-   * page reads its row from does not carry it: `ListIssueDraftsByCreator` does
-   * not select the column, so a continuation reads as round 1 forever after a
-   * reload. `POST /reopen` is the one call that returns the row with the round
-   * on it, and it is idempotent by construction — a `draft`/`ready` row is
-   * answered as it stands — which is exactly the use its handler documents
-   * ("a page that reopened on load").
-   *
-   * The answer is held for as long as the page is open, keyed by draft, because
-   * the read is a WRITE: applying it to the list cache is not enough, since the
-   * invalidation the reopen itself triggers refetches the list and answers 0
-   * again. The round is the highest of the two, so a draft whose row does carry
-   * the field (a newer backend, or the post-reopen echo) still wins.
+   * Which round this page is on. `finalize_round` counts the reopens, so the
+   * label is +1 (see `issueDraftRound`), and the list endpoint this page reads
+   * its row from carries the column, so a continuation says round 2 without a
+   * request of its own. A backend that predates the field reports round 1,
+   * which is the shape the page had before continuation existed.
    */
-  const [roundSeen, setRoundSeen] = useState<{ draftId: string; round: number } | null>(
-    null,
-  );
-  const round = Math.max(
-    issueDraftRound(row ?? {}),
-    roundSeen?.draftId === draftId ? roundSeen.round : 1,
-  );
-  const roundReadForRef = useRef<string | null>(null);
-  const reopenRow = reopenMutation.mutateAsync;
-  useEffect(() => {
-    if (!row || row.finalize_round) return;
-    if (!issueDraftIsContinuation(row)) return;
-    if (roundReadForRef.current === draftId) return;
-    roundReadForRef.current = draftId;
-    // A failed read is not surfaced: the round is a label, and the page still
-    // shows everything else it has.
-    void reopenRow(draftId)
-      .then((opened) => setRoundSeen({ draftId, round: issueDraftRound(opened) }))
-      .catch(() => {});
-  }, [draftId, reopenRow, row]);
+  const round = issueDraftRound(row ?? {});
 
   const runtime = useMemo(
     () => runtimesQuery.data?.find((device) => device.id === row?.runtime_id) ?? null,

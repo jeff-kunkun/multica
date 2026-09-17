@@ -132,6 +132,8 @@ SELECT d.chat_session_id,
        d.policy_version,
        d.created_at,
        d.updated_at,
+       d.finalize_round,
+       d.finalized_revision,
        cs.title,
        a.runtime_id,
        COALESCE(lm.content, '') AS last_message_content,
@@ -171,6 +173,8 @@ type ListIssueDraftsByCreatorRow struct {
 	PolicyVersion      string             `json:"policy_version"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	FinalizeRound      int32              `json:"finalize_round"`
+	FinalizedRevision  pgtype.Int8        `json:"finalized_revision"`
 	Title              string             `json:"title"`
 	RuntimeID          pgtype.UUID        `json:"runtime_id"`
 	LastMessageContent string             `json:"last_message_content"`
@@ -194,6 +198,11 @@ type ListIssueDraftsByCreatorRow struct {
 // "which alignments have I ever had" (the chat sidebar's alignment records,
 // DENE-371). A terminal draft is a record to read back, not a draft to resume,
 // and the caller's status set is the whole of that distinction.
+//
+// `finalize_round` / `finalized_revision` ride along because this list is the
+// only row an open alignment page reads: without them a continuation could not
+// say which round it is on, and the page had to POST /reopen — a write — purely
+// to read the round back (DENE-416).
 func (q *Queries) ListIssueDraftsByCreator(ctx context.Context, arg ListIssueDraftsByCreatorParams) ([]ListIssueDraftsByCreatorRow, error) {
 	rows, err := q.db.Query(ctx, listIssueDraftsByCreator, arg.WorkspaceID, arg.CreatorID, arg.Statuses)
 	if err != nil {
@@ -214,6 +223,8 @@ func (q *Queries) ListIssueDraftsByCreator(ctx context.Context, arg ListIssueDra
 			&i.PolicyVersion,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.FinalizeRound,
+			&i.FinalizedRevision,
 			&i.Title,
 			&i.RuntimeID,
 			&i.LastMessageContent,

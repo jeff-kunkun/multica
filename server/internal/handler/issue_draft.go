@@ -406,16 +406,18 @@ func (h *Handler) ListIssueDrafts(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		drafts = append(drafts, IssueDraftSummary{
 			issueDraftResponse: issueDraftToResponse(db.IssueDraft{
-				ChatSessionID: row.ChatSessionID,
-				WorkspaceID:   row.WorkspaceID,
-				Status:        row.Status,
-				Revision:      row.Revision,
-				Draft:         row.Draft,
-				IssueID:       row.IssueID,
-				PolicyKey:     row.PolicyKey,
-				PolicyVersion: row.PolicyVersion,
-				CreatedAt:     row.CreatedAt,
-				UpdatedAt:     row.UpdatedAt,
+				ChatSessionID:     row.ChatSessionID,
+				WorkspaceID:       row.WorkspaceID,
+				Status:            row.Status,
+				Revision:          row.Revision,
+				Draft:             row.Draft,
+				IssueID:           row.IssueID,
+				PolicyKey:         row.PolicyKey,
+				PolicyVersion:     row.PolicyVersion,
+				FinalizeRound:     row.FinalizeRound,
+				FinalizedRevision: row.FinalizedRevision,
+				CreatedAt:         row.CreatedAt,
+				UpdatedAt:         row.UpdatedAt,
 			}),
 			Title:              row.Title,
 			RuntimeID:          uuidToString(row.RuntimeID),
@@ -536,9 +538,8 @@ func (h *Handler) AbandonIssueDraft(w http.ResponseWriter, r *http.Request) {
 // "this group is already committed, adopt it".
 //
 // Idempotent by construction. Only a 'completed' row reopens, so a second call
-// (a retried request, a double click, a page that reopened on load) matches
-// nothing and answers with the row as it stands rather than counting the round
-// twice. A draft that is still 'draft' or 'ready' has an open round already and
+// (a retried request, a double click) matches nothing and answers with the row
+// as it stands rather than counting the round twice. A draft that is still 'draft' or 'ready' has an open round already and
 // is answered the same way; an abandoned one is refused, because a discarded
 // alignment does not come back to life.
 //
