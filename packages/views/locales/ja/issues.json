@@ -6,7 +6,6 @@
     "queued": "利用可能なエージェントを待っています。",
     "starting": "エージェントのセッションを準備しています。",
     "waiting_directory": "別の実行が作業ディレクトリを解放するのを待っています。",
-    "retrying": "再試行を待っています。",
     "thinking": "思考中",
     "waiting_response": "エージェントの応答を待っています。",
     "view_activity": "実行過程を表示",
@@ -19,11 +18,12 @@
     "full_log": "完全なログを開く",
     "message": "エージェントのメッセージ",
     "error": "エラー",
-    "waiting_result": "ツールの結果を待っています..."
+    "waiting_result": "ツールの結果を待っています...",
+    "retrying": "再試行を待っています。"
   },
   "status_catalog_error": {
     "title": "ステータス一覧を読み込めませんでした",
-    "hint": "これがないとステータスの絞り込みを適用できないため、タスクは表示されません。",
+    "hint": "ステータスを読み込むまでタスクを表示できません。",
     "retry": "再試行"
   },
   "source_context": {
@@ -100,7 +100,6 @@
     "breadcrumb_title": "タスク",
     "breadcrumb_workspace_fallback": "ワークスペース",
     "empty_title": "まだタスクがありません",
-    "empty_hint": "タスクを作成して始めましょう。",
     "move_failed": "タスクを移動できませんでした"
   },
   "status": {
@@ -111,6 +110,12 @@
     "done": "完了",
     "blocked": "ブロック中",
     "cancelled": "キャンセル済み"
+  },
+  "status_category": {
+    "unstarted": "未着手",
+    "started": "開始済み",
+    "done": "完了",
+    "closed": "終了"
   },
   "priority": {
     "urgent": "緊急",
@@ -125,15 +130,6 @@
     "blocking": "進行を阻止",
     "queued": "待機中"
   },
-  "close_protocol": {
-    "missing": "プロトコル未クローズ",
-    "status_drift": "close.status ≠ {{issueStatus}}",
-    "next_owner": "次: {{name}}",
-    "next_owner_none": "次: なし",
-    "waiting_on": "{{id}} を待機",
-    "last_activity_missing": "活動時刻なし"
-  },
-  "blocker_summary": { "title": "ブロック中 · 根因 {{count}} 件", "needs_you": "{{count}} 件はあなたの対応が必要", "root": "根本ブロッカー", "propagated": "サブタスクによるブロック", "kind_decision": "あなたの判断が必要", "kind_permission": "あなたの許可が必要", "kind_external": "外部依存を待機中", "kind_capacity": "枠の回復を待機中", "kind_action": "{{kind}}：{{action}}", "kind_review_overdue": "レビュー期限超過 · {{ago}}", "kind_wake_missed": "{{id}} は完了済みですが未起床", "kind_cycle": "循環待ち" },
   "scope": {
     "all_label": "すべて",
     "all_description": "このワークスペースのすべてのタスク",
@@ -150,8 +146,6 @@
     "no_labels": "まだラベルがありません",
     "no_assignee": "担当者なし",
     "no_project": "プロジェクトなし",
-    "project_tooltip": "プロジェクトで絞り込む",
-    "project_clear": "プロジェクトの絞り込みを解除",
     "section_status": "ステータス",
     "section_priority": "優先度",
     "section_assignee": "担当者",
@@ -184,7 +178,9 @@
     "active_count_other": "フィルター {{count}} 件",
     "in_view": "このビューに含まれています",
     "chip_edit": "編集",
-    "chip_save_as": "別名で保存"
+    "chip_save_as": "別名で保存",
+    "project_tooltip": "プロジェクトで絞り込む",
+    "project_clear": "プロジェクトの絞り込みを解除"
   },
   "display": {
     "tooltip": "表示設定",
@@ -329,12 +325,10 @@
     },
     "empty": {
       "assigned": {
-        "title": "割り当てられたタスクはありません",
-        "description": "ここに割り当てられたタスクがこの表示に表示されます。"
+        "title": "割り当てられたタスクはありません"
       },
       "created": {
-        "title": "作成したタスクはありません",
-        "description": "ここで作成したタスクがこの表示に表示されます。"
+        "title": "作成したタスクはありません"
       }
     },
     "search_placeholder": "タスクを検索...",
@@ -395,7 +389,6 @@
     "quick_action_blocked_body": "「{{name}}」は、あなたが実行を許可されていないエージェントで動作します。ワークスペース管理者にそのエージェントをチームへ公開してもらうか、共有エージェントへの変更を依頼してください。",
     "quick_action_blocked_ok": "了解",
     "pull_requests_loading": "読み込み中...",
-    "pull_requests_empty": "まだリンクされた Pull request がありません。このタスクの識別子を PR のブランチ名かタイトルに入れるか、本文で Closes の直後に書くと、自動的にリンクされます。",
     "pull_request_state_open": "オープン",
     "pull_request_state_draft": "ドラフト",
     "pull_request_state_merged": "マージ済み",
@@ -467,6 +460,7 @@
     "project_directory_path_copied_with_branch": "プロジェクトディレクトリのパスをコピーしました — 作業は {{branch}} ブランチにあります",
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
     "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません",
+    "pull_requests_empty_title": "関連する PR はありません。",
     "alignment_group_progress": "{{count}} 件 · 完了 {{done}} 件",
     "alignment_group_stage": "ステージ {{stage}}/{{total}}",
     "alignment_continue": "すり合わせを続ける",
@@ -619,7 +613,6 @@
   },
   "filtered_empty": {
     "title": "フィルター条件に一致するタスクがありません",
-    "hint": "フィルターを変更または解除すると、このビューのタスクが表示されます。",
     "clear_button": "フィルターを解除"
   },
   "agent_live": {
@@ -657,7 +650,6 @@
     "status_queued": "待機中",
     "status_dispatched": "開始中",
     "status_waiting_local_directory": "ローカルディレクトリ待機中",
-    "status_deferred": "再試行中",
     "status_running": "作業中",
     "status_completed": "完了",
     "status_failed": "失敗",
@@ -674,7 +666,8 @@
       "source_backfill": "バックフィルされた帰属",
       "source_unattributed": "責任メンバーを解決できません"
     },
-    "usage_total_tooltip": "このタスクのトークン使用量 — クリックで実行ごとの内訳"
+    "usage_total_tooltip": "このタスクのトークン使用量 — クリックで実行ごとの内訳",
+    "status_deferred": "再試行中"
   },
   "usage_detail": {
     "title": "使用量の内訳",
@@ -851,8 +844,6 @@
     "visibility_label": "公開範囲",
     "visibility_private": "自分のみ",
     "visibility_workspace": "ワークスペースのメンバーに表示",
-    "visibility_project": "プロジェクトメンバー",
-    "visibility_project_hint": "このプロジェクトのメンバーにのみ表示され、このプロジェクトページでのみ現れます",
     "filters_label": "フィルター",
     "custom_property": "カスタムプロパティ",
     "create": "ビューを作成",
@@ -879,7 +870,9 @@
     "variant_my_any": "何らかの関わり",
     "variant_my_assigned": "自分に割り当て",
     "variant_my_created": "自分が作成",
-    "variant_my_involved": "関与中"
+    "variant_my_involved": "関与中",
+    "visibility_project": "プロジェクトメンバー",
+    "visibility_project_hint": "このプロジェクトのメンバーにのみ表示され、このプロジェクトページでのみ現れます"
   },
   "view_selector": {
     "trigger": "ビュー",
@@ -912,11 +905,6 @@
     "more_label": "その他のビュー",
     "project_shared_tag": "プロジェクト共有"
   },
-  "manage_views": {
-    "visibility_label": "{{name}} の公開範囲",
-    "visibility_project": "プロジェクトメンバー",
-    "visibility_project_hint": "このプロジェクトのメンバーにのみ表示され、このプロジェクトページでのみ現れます"
-  },
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}} のインターフェースを読み込めませんでした。",
@@ -928,6 +916,33 @@
     "surface_loading": "{{name}} を読み込んでいます…",
     "surface_unavailable": "{{name}} のインターフェースを読み込めません。インストール済みのバージョンに含まれていない可能性があります。",
     "surface_navigated": "{{name}} がパネルを外部から読み込んだページに置き換えようとしました。停止して接続を切りました。ワークスペース管理者に知らせてください。"
+  },
+  "close_protocol": {
+    "missing": "プロトコル未クローズ",
+    "status_drift": "close.status ≠ {{issueStatus}}",
+    "next_owner": "次: {{name}}",
+    "next_owner_none": "次: なし",
+    "waiting_on": "{{id}} を待機",
+    "last_activity_missing": "活動時刻なし"
+  },
+  "blocker_summary": {
+    "title": "ブロック中 · 根因 {{count}} 件",
+    "needs_you": "{{count}} 件はあなたの対応が必要",
+    "root": "根本ブロッカー",
+    "propagated": "サブタスクによるブロック",
+    "kind_decision": "あなたの判断が必要",
+    "kind_permission": "あなたの許可が必要",
+    "kind_external": "外部依存を待機中",
+    "kind_capacity": "枠の回復を待機中",
+    "kind_action": "{{kind}}：{{action}}",
+    "kind_review_overdue": "レビュー期限超過 · {{ago}}",
+    "kind_wake_missed": "{{id}} は完了済みですが未起床",
+    "kind_cycle": "循環待ち"
+  },
+  "manage_views": {
+    "visibility_label": "{{name}} の公開範囲",
+    "visibility_project": "プロジェクトメンバー",
+    "visibility_project_hint": "このプロジェクトのメンバーにのみ表示され、このプロジェクトページでのみ現れます"
   },
   "alignment": {
     "title": "新しいタスクをすり合わせ",

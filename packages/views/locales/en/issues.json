@@ -6,7 +6,6 @@
     "queued": "Waiting for an available agent.",
     "starting": "Preparing the agent session.",
     "waiting_directory": "Waiting for another run to release the working directory.",
-    "retrying": "Waiting to retry.",
     "thinking": "Thinking",
     "waiting_response": "Waiting for the agent to respond.",
     "view_activity": "View activity",
@@ -20,11 +19,12 @@
     "full_log": "Open full log",
     "message": "Agent message",
     "error": "Error",
-    "waiting_result": "Waiting for the tool result..."
+    "waiting_result": "Waiting for the tool result...",
+    "retrying": "Waiting to retry."
   },
   "status_catalog_error": {
     "title": "Couldn't load the status list",
-    "hint": "Issues are hidden until it loads, because a status filter can't be applied without it.",
+    "hint": "Issues can't be shown until statuses load.",
     "retry": "Try again"
   },
   "source_context": {
@@ -102,7 +102,6 @@
     "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "Workspace",
     "empty_title": "No issues yet",
-    "empty_hint": "Create an issue to get started.",
     "move_failed": "Failed to move issue"
   },
   "status": {
@@ -113,6 +112,12 @@
     "done": "Done",
     "blocked": "Blocked",
     "cancelled": "Cancelled"
+  },
+  "status_category": {
+    "unstarted": "Unstarted",
+    "started": "Started",
+    "done": "Done",
+    "closed": "Closed"
   },
   "priority": {
     "urgent": "Urgent",
@@ -127,15 +132,6 @@
     "blocking": "Blocking",
     "queued": "Queued"
   },
-  "close_protocol": {
-    "missing": "Not closed under protocol",
-    "status_drift": "close.status ≠ {{issueStatus}}",
-    "next_owner": "Next: {{name}}",
-    "next_owner_none": "Next: none",
-    "waiting_on": "Waiting on {{id}}",
-    "last_activity_missing": "No activity time"
-  },
-  "blocker_summary": { "title": "Blocked · {{count}} root cause(s)", "needs_you": "{{count}} need you", "root": "Root blocker", "propagated": "Blocked by a sub-issue", "kind_decision": "Needs your decision", "kind_permission": "Needs your permission", "kind_external": "Waiting on an external dependency", "kind_capacity": "Waiting on capacity", "kind_action": "{{kind}}: {{action}}", "kind_review_overdue": "Review overdue · {{ago}}", "kind_wake_missed": "{{id}} finished without a wake-up", "kind_cycle": "Waiting in a cycle" },
   "scope": {
     "all_label": "All",
     "all_description": "All issues in this workspace",
@@ -152,8 +148,6 @@
     "no_labels": "No labels yet",
     "no_assignee": "No assignee",
     "no_project": "No project",
-    "project_tooltip": "Filter by project",
-    "project_clear": "Clear project filter",
     "section_status": "Status",
     "section_priority": "Priority",
     "section_assignee": "Assignee",
@@ -188,7 +182,9 @@
     "active_count_other": "{{count}} filters",
     "in_view": "Already in this view",
     "chip_edit": "Edit",
-    "chip_save_as": "Save as"
+    "chip_save_as": "Save as",
+    "project_tooltip": "Filter by project",
+    "project_clear": "Clear project filter"
   },
   "display": {
     "tooltip": "Display settings",
@@ -333,12 +329,10 @@
     },
     "empty": {
       "assigned": {
-        "title": "No assigned issues",
-        "description": "Issues assigned here will appear in this view."
+        "title": "No assigned issues"
       },
       "created": {
-        "title": "No created issues",
-        "description": "Issues created here will appear in this view."
+        "title": "No created issues"
       }
     },
     "search_placeholder": "Search issues...",
@@ -399,7 +393,6 @@
     "quick_action_blocked_body": "“{{name}}” runs as an agent you’re not allowed to trigger. Ask a workspace admin to make that agent available to the team, or to point this action at a shared one.",
     "quick_action_blocked_ok": "Got it",
     "pull_requests_loading": "Loading…",
-    "pull_requests_empty": "No linked pull requests yet. Put this issue's identifier in a PR's branch name or title, or write it after Closes in the PR body, to auto-link it.",
     "pull_request_state_open": "Open",
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
@@ -472,6 +465,7 @@
     "project_directory_path_copied_with_branch": "Project directory path copied — work is on {{branch}}",
     "workdir_path_copy_failed": "Failed to copy workdir path",
     "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent",
+    "pull_requests_empty_title": "No linked pull requests.",
     "alignment_group_progress": "{{count}} issue(s) · {{done}} done",
     "alignment_group_stage": "stage {{stage}}/{{total}}",
     "alignment_continue": "Continue aligning",
@@ -641,7 +635,6 @@
   },
   "filtered_empty": {
     "title": "No issues match these filters",
-    "hint": "Adjust or clear the filters to see the issues in this view.",
     "clear_button": "Clear filters"
   },
   "agent_live": {
@@ -681,7 +674,6 @@
     "status_queued": "Queued",
     "status_dispatched": "Starting",
     "status_waiting_local_directory": "Waiting for local directory",
-    "status_deferred": "Retrying",
     "status_running": "Working",
     "status_completed": "Completed",
     "status_failed": "Failed",
@@ -698,7 +690,8 @@
       "source_backfill": "Backfilled attribution",
       "source_unattributed": "No responsible member resolved"
     },
-    "usage_total_tooltip": "Token usage for this issue — click for the per-run breakdown"
+    "usage_total_tooltip": "Token usage for this issue — click for the per-run breakdown",
+    "status_deferred": "Retrying"
   },
   "usage_detail": {
     "title": "Usage breakdown",
@@ -882,8 +875,6 @@
     "visibility_label": "Visibility",
     "visibility_private": "Only visible to me",
     "visibility_workspace": "Visible to workspace members",
-    "visibility_project": "Project members",
-    "visibility_project_hint": "Visible only to members of this project, and only on this project page",
     "filters_label": "Filters",
     "custom_property": "Custom property",
     "create": "Create view",
@@ -910,7 +901,9 @@
     "variant_my_any": "Any relation",
     "variant_my_assigned": "Assigned to me",
     "variant_my_created": "Created by me",
-    "variant_my_involved": "Involved"
+    "variant_my_involved": "Involved",
+    "visibility_project": "Project members",
+    "visibility_project_hint": "Visible only to members of this project, and only on this project page"
   },
   "view_selector": {
     "trigger": "Views",
@@ -943,11 +936,6 @@
     "more_label": "More views",
     "project_shared_tag": "Project shared"
   },
-  "manage_views": {
-    "visibility_label": "Sharing for {{name}}",
-    "visibility_project": "Project members",
-    "visibility_project_hint": "Visible only to members of this project, and only on this project page"
-  },
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}} could not load its interface.",
@@ -959,6 +947,33 @@
     "surface_loading": "Loading {{name}}…",
     "surface_unavailable": "{{name}} could not load its interface. The installed version may not include it.",
     "surface_navigated": "{{name}} tried to replace its panel with a page loaded from elsewhere. It has been stopped and disconnected — tell your workspace admin."
+  },
+  "close_protocol": {
+    "missing": "Not closed under protocol",
+    "status_drift": "close.status ≠ {{issueStatus}}",
+    "next_owner": "Next: {{name}}",
+    "next_owner_none": "Next: none",
+    "waiting_on": "Waiting on {{id}}",
+    "last_activity_missing": "No activity time"
+  },
+  "blocker_summary": {
+    "title": "Blocked · {{count}} root cause(s)",
+    "needs_you": "{{count}} need you",
+    "root": "Root blocker",
+    "propagated": "Blocked by a sub-issue",
+    "kind_decision": "Needs your decision",
+    "kind_permission": "Needs your permission",
+    "kind_external": "Waiting on an external dependency",
+    "kind_capacity": "Waiting on capacity",
+    "kind_action": "{{kind}}: {{action}}",
+    "kind_review_overdue": "Review overdue · {{ago}}",
+    "kind_wake_missed": "{{id}} finished without a wake-up",
+    "kind_cycle": "Waiting in a cycle"
+  },
+  "manage_views": {
+    "visibility_label": "Sharing for {{name}}",
+    "visibility_project": "Project members",
+    "visibility_project_hint": "Visible only to members of this project, and only on this project page"
   },
   "alignment": {
     "title": "Align a new issue",

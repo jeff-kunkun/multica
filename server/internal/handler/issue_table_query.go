@@ -116,6 +116,8 @@ type issueTableQuerySpec struct {
 }
 
 type issueTableGroupSpec struct {
+	// Empty preserves the seven-value protocol used by installed clients.
+	CategoryFormat  string   `json:"category_format,omitempty"`
 	Kind            string   `json:"kind"`
 	PropertyID      string   `json:"property_id,omitempty"`
 	IncludeEmpty    bool     `json:"include_empty,omitempty"`
