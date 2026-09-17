@@ -1,9 +1,9 @@
-# 对齐能力内置：能力与策略两条轴、按入参组装、mono 退役（DENE-513 / 设计）
+# 对齐能力内置：能力与策略两条轴、按入参组装、mono 只留指针（DENE-513 / 设计）
 
 本页是 DENE-513 的落地记录，属于 DENE-512 的阶段 1。它**改**生产代码：把
 `wayfinder`、`grill`、`grilling`、`grill-frontend-look` 四个方法内置进 Multica 的
 对齐运行时，由创建入参按会话选择并组装进载体 prompt；同时在 `kun-agent-mono`
-把四份 skill 定义退役成重定向指针。
+把四份 skill 定义的正文换成重定向指针。
 
 核对基线：`origin/kun` @ `61affee412`（2026-09-17）。
 
@@ -25,9 +25,9 @@
    （`docs/design/prototypes/<screen>.html`、`INTERACTION.md`），对齐载体没有项目
    也没有仓库；wayfinder 的 tracker adapter、grilling 的 `/domain-modeling` 落盘
    同样够不着。内置的是**判据与考法**，落点是 draft 与回复附件。
-6. **mono 侧四份定义退役进 `skills/_retired/`，保留重定向指针**，并同步
-   `skill-map.html` 索引与龙珠小队角色绑定——否则 `check-skill-index.py` 与
-   `multica-skills.py drift` 会报漂移。
+6. **mono 侧正文搬走，名字留下**：四份 `SKILL.md` 留在 `skills/_shared/` 原目录，正文
+   换成重定向指针。名字的回收（移入 `skills/_retired/`、收 `skill-map.html` 与角色绑定）
+   要先把线上 Agent 的角色绑定改掉，是独立的一步——理由与那一步的四条动作见 §5。
 
 ## 1. 为什么是「能力」，不是「第四个策略」
 
@@ -121,16 +121,24 @@ ALTER TABLE issue_draft
 - 回滚 = 还原常量 + 迁移 down。记了能力 key 的草稿在旧构建上会丢掉那些片段（旧构建
   不认识这列），这正是回滚应有的样子。
 
-## 5. mono 侧退役
+## 5. mono 侧：正文搬走，名字留下
 
-`kun-agent-mono/skills/_shared/{wayfinder,grill,grilling,grill-frontend-look}/` 移入
-`skills/_retired/<name>/SKILL.md`，正文换成退役声明 + 新家指针（Multica
-`server/internal/handler/issue_draft_capability.go` 的能力 key）。同时：
+`kun-agent-mono/skills/_shared/{wayfinder,grill,grilling,grill-frontend-look}/SKILL.md`
+的正文换成重定向指针：新家文件与常量名、能力 key、选择入口，以及内置版本改写了哪几处。
+目录与名字留在原处——**不**移入 `skills/_retired/`，**不**从 `skill-map.html` 的
+`SKILLS` 数组与龙珠小队角色绑定里摘名。
 
+理由是这四个名字仍在被引用：skill 索引、`architect` / `builder` / `scout` 三个角色的绑定，
+以及 `anti-slop-frontend`、`interaction-graph`、`implement/references/frontend-readiness.md`
+的正文。直接摘名会让 `check-skill-index.py` 报 stale、`multica-skills.py drift` 报
+unresolved；而按本仓 `AGENTS.md`，角色契约要「先改线上 Agent 再 export」，那是动线上配置的
+一步，不该混在代码票里静默做掉。本票要的「一份正文、一个单源」已经达成，名字的回收是独立
+的一步：
+
+- 先改线上 Agent 的角色绑定（去掉四个名字），再 `scripts/export-multica-agents.py` 回流；
 - `skills/skill-map.html` 的 `SKILLS` 数组删掉四个名字——`check-skill-index.py` 会拿它
   和源目录对账；
-- `multica-squads/dragon-ball/agents/{architect,builder,scout}.json` 的角色绑定删掉四个
-  名字，`SQUAD.md` 重新生成——否则 `multica-skills.py drift` 报 `unresolved`；
+- 四个目录移入 `skills/_retired/`；
 - 仍在正文里点名 `/grill-frontend-look` 的 living 文档（`docs/contexts/skill-system/
   CONTEXT.md`、`docs/contexts/work-methods/CONTEXT.md` 等）改成指向新家；ADR 与研究
   记录是历史，保留原文。
