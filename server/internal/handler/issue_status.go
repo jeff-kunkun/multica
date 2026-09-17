@@ -50,6 +50,25 @@ func (h *Handler) terminalIssueStatusKeys(ctx context.Context, workspaceID pgtyp
 	})
 }
 
+// blockedIssueStatusKeys resolves the concrete status keys in the `blocked`
+// category. Used by the per-parent child roll-up so a stuck sub-issue can be
+// surfaced on its parent without expanding it.
+func (h *Handler) blockedIssueStatusKeys(ctx context.Context, workspaceID pgtype.UUID) ([]string, error) {
+	return issuestatus.ExpandCategories(ctx, h.Queries, workspaceID, []string{
+		issuestatus.Blocked,
+	})
+}
+
+// activeIssueStatusKeys resolves the status keys that mean work is actually
+// moving — in_progress and in_review. `todo` and `backlog` are deliberately
+// excluded: a queued child is not an active pipeline.
+func (h *Handler) activeIssueStatusKeys(ctx context.Context, workspaceID pgtype.UUID) ([]string, error) {
+	return issuestatus.ExpandCategories(ctx, h.Queries, workspaceID, []string{
+		issuestatus.InProgress,
+		issuestatus.InReview,
+	})
+}
+
 func issueStatusToResponse(s db.IssueStatus) IssueStatusResponse {
 	return IssueStatusResponse{
 		ID:          uuidToString(s.ID),

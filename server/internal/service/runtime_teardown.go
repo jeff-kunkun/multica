@@ -160,5 +160,8 @@ func pruneRuntimeSystemAgentChatDraftRestores(ctx context.Context, q *db.Queries
 	if err := q.DeleteChatDraftRestoresBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return err
 	}
-	return q.DeleteAgentBuilderDraftsBySystemRuntimeAgents(ctx, runtimeID)
+	if err := q.DeleteAgentBuilderDraftsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
+		return err
+	}
+	return q.DeleteIssueDraftsBySystemRuntimeAgents(ctx, runtimeID)
 }

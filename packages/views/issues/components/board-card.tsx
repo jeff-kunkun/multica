@@ -30,6 +30,11 @@ import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
+import {
+  BoardCardSubIssues,
+  BoardCardSubIssueToggle,
+} from "./board-card-sub-issues";
+import { ParentIssueBadge } from "./parent-issue-badge";
 function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
@@ -52,11 +57,17 @@ export const BoardCardContent = memo(function BoardCardContent({
   editable = false,
   childProgress,
   project,
+  expanded = false,
+  onToggleExpanded,
 }: {
   issue: Issue;
   editable?: boolean;
   childProgress?: ChildProgress;
   project?: Project;
+  /** Sub-issue accordion state. Only the draggable board card wires these —
+   *  the drag overlay and the hover card render a static copy. (DENE-444) */
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -200,6 +211,12 @@ export const BoardCardContent = memo(function BoardCardContent({
         <IssueAgentActivityIndicator issueId={issue.id} />
       </div>
 
+      {/* Row 1b: parent ownership. Sub-issues and top-level issues share a
+          column whenever "Show sub-issues" is on, so a child says what it
+          belongs to before it says what it is. Renders nothing on a parent
+          card. (DENE-480) */}
+      <ParentIssueBadge parentIssueId={issue.parent_issue_id} className="mt-1" />
+
       {/* Row 2: Title */}
       <p className="mt-1 text-body font-medium leading-snug line-clamp-2">
         {issue.title}
@@ -328,6 +345,20 @@ export const BoardCardContent = memo(function BoardCardContent({
           )}
         </div>
       )}
+
+      {/* Sub-issue accordion. Renders whenever this card has children, so
+          hiding sub-issues from the top level never costs access to them —
+          they are one click down, in place, without leaving the board. */}
+      {onToggleExpanded && childProgress && childProgress.total > 0 && (
+        <>
+          <BoardCardSubIssueToggle
+            expanded={expanded}
+            rollup={childProgress}
+            onToggle={onToggleExpanded}
+          />
+          {expanded && <BoardCardSubIssues parentId={issue.id} />}
+        </>
+      )}
     </div>
   );
 });
@@ -350,6 +381,14 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
   disableSorting?: boolean;
 }) {
   const p = useWorkspacePaths();
+  const expanded = useViewStore((s) => s.boardExpandedParents.includes(issue.id));
+  const toggleBoardParentExpanded = useViewStore(
+    (s) => s.toggleBoardParentExpanded,
+  );
+  const onToggleExpanded = useCallback(
+    () => toggleBoardParentExpanded(issue.id),
+    [issue.id, toggleBoardParentExpanded],
+  );
   const {
     attributes,
     listeners,
@@ -389,6 +428,8 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
             editable
             childProgress={childProgress}
             project={project}
+            expanded={expanded}
+            onToggleExpanded={onToggleExpanded}
           />
         </AppLink>
       </div>

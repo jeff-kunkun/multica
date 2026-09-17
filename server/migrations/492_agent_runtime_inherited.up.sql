@@ -1,0 +1,25 @@
+-- Runtime inheritance for specialisations (DENE-505).
+--
+-- A specialisation (parent_agent_id IS NOT NULL) with runtime_inherited = TRUE
+-- follows its base role's runtime profile: its own row carries a materialised
+-- copy of the base role's runtime_id, runtime_mode, runtime_config, model,
+-- thinking_level and service_tier, refreshed whenever the base role's profile
+-- changes. FALSE means the specialisation owns that configuration and a base
+-- role edit never reaches it.
+--
+-- Materialised, not resolved on read. Dispatch (the daemon claim), the runtime
+-- availability projection and every agent response already read this row's own
+-- columns; a resolved-on-read model would have to thread a parent lookup
+-- through each of them and could still hand the daemon a stale runtime_id from
+-- a queued task. Copying also makes the "switch to independent" transition
+-- lossless by construction: the child keeps exactly the values it was running
+-- with, the same way SolidifyAgent keeps an inherited prompt.
+--
+-- The flag is only meaningful on a specialisation. Every write path forces it
+-- FALSE when parent_agent_id is NULL; like the two-level rule in 487 that
+-- invariant lives in the handler rather than in a constraint.
+--
+-- DEFAULT FALSE on purpose: this migration must not silently move an existing
+-- specialisation onto its base role's runtime. Inheritance begins where the
+-- API sets it — specialisations created from now on.
+ALTER TABLE agent ADD COLUMN IF NOT EXISTS runtime_inherited BOOLEAN NOT NULL DEFAULT FALSE;

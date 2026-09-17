@@ -450,6 +450,7 @@ func exportSystemAgents(ctx context.Context, q *db.Queries, opts ConfigExportOpt
 	out := make([]ConfigSystemAgent, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, ConfigSystemAgent{
+			SourceID:              uuidString(r.ID),
 			SystemKey:             textOrEmpty(r.SystemKey),
 			Instructions:          r.Instructions,
 			Model:                 textPtr(r.Model),

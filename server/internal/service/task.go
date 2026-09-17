@@ -6605,7 +6605,60 @@ func (s *TaskService) publishAgentStatus(agent db.Agent) {
 	})
 }
 
+// agentSkillSourceIDs returns the agent ids whose ENABLED skill bindings an
+// agent runs with: its own row and, for a specialisation, its base role's
+// (DENE-302). The base role comes first, so the inherited half of the skill set
+// is a stable prefix — the same order the prompt composition uses.
+//
+// This is one extra read on the claim path, and it is deliberately not cached:
+// binding or unbinding a skill on either side of the relationship has to reach
+// the agent's next task. An agent row that no longer resolves has no base role
+// to inherit from and is not an error (the claim path has already refused a
+// task whose agent is gone); any other read failure is reported, never
+// flattened into "no parent" — that would silently shrink the skill set.
+func (s *TaskService) agentSkillSourceIDs(ctx context.Context, agentID pgtype.UUID) ([]pgtype.UUID, error) {
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return []pgtype.UUID{agentID}, nil
+		}
+		return nil, fmt.Errorf("load agent for skill inheritance: %w", err)
+	}
+	if !agent.ParentAgentID.Valid {
+		return []pgtype.UUID{agentID}, nil
+	}
+	return []pgtype.UUID{agent.ParentAgentID, agentID}, nil
+}
+
+// listAgentSkillsInUnion loads the enabled skills of every source id and
+// merges them into one deduplicated slice. A skill bound to both the base role
+// and the specialisation is ONE skill — the same row — and a specialisation
+// cannot drop an inherited skill (DENE-301), so the first source that carries
+// an id wins and later duplicates are dropped.
+func (s *TaskService) listAgentSkillsInUnion(ctx context.Context, sourceIDs []pgtype.UUID) ([]db.Skill, error) {
+	var merged []db.Skill
+	seen := make(map[string]struct{})
+	for _, sourceID := range sourceIDs {
+		skills, err := s.Queries.ListAgentSkills(ctx, sourceID)
+		if err != nil {
+			return nil, fmt.Errorf("list agent skills: %w", err)
+		}
+		for _, skill := range skills {
+			id := util.UUIDToString(skill.ID)
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			merged = append(merged, skill)
+		}
+	}
+	return merged, nil
+}
+
 // LoadAgentSkills loads an agent's skills with their files for task execution.
+// A specialisation runs with its base role's skills as well (DENE-302): the
+// effective set is the union of both rows' enabled bindings, deduplicated by
+// skill id, and the base role's half comes first.
 //
 // A read failure is REPORTED, never swallowed into a shorter skill set. Both
 // reads are all-or-nothing for the agent's entire skill set — the file load
@@ -6617,9 +6670,13 @@ func (s *TaskService) publishAgentStatus(agent db.Agent) {
 // starts on rules it is missing. Callers must settle the failure (preserve the
 // claim for redelivery, or 5xx the resolve) instead of dispatching that.
 func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, error) {
-	skills, err := s.Queries.ListAgentSkills(ctx, agentID)
+	sourceIDs, err := s.agentSkillSourceIDs(ctx, agentID)
 	if err != nil {
-		return nil, fmt.Errorf("list agent skills: %w", err)
+		return nil, err
+	}
+	skills, err := s.listAgentSkillsInUnion(ctx, sourceIDs)
+	if err != nil {
+		return nil, err
 	}
 	if len(skills) == 0 {
 		return nil, nil
@@ -6700,6 +6757,11 @@ type AgentSkillBundleRef struct {
 // authorization, so "no row" and "not allowed" are the same answer and the
 // caller reports both as not-found.
 //
+// A specialisation's base role is part of "the agent can see" (DENE-302): the
+// claim advertises the union, so a ref that only the base role carries must
+// resolve here too, or the daemon would receive a ref it can never satisfy and
+// fail the task on a skill the agent is legitimately configured with.
+//
 // This exists because the daemon resolves one skill per request (GH #4505, so
 // each download gets its own size-scaled deadline and caches independently).
 // Serving those out of the agent's full bundle set made the server redo the
@@ -6734,18 +6796,38 @@ func (s *TaskService) LoadRequestedAgentSkillBundles(ctx context.Context, agentI
 
 	var requested []AgentSkillData
 	if len(requestedIDs) > 0 {
-		skills, err := s.Queries.ListAgentSkillsByIDs(ctx, db.ListAgentSkillsByIDsParams{
-			AgentID:  agentID,
-			SkillIds: requestedIDs,
-		})
+		sourceIDs, err := s.agentSkillSourceIDs(ctx, agentID)
 		if err != nil {
-			return nil, fmt.Errorf("list agent skills by ids: %w", err)
+			return nil, err
 		}
-		if len(skills) > 0 {
+		// One scoped read per source — the agent's own bindings, then its base
+		// role's — merged by id so a skill bound on both sides is served once.
+		// Still linear in the requested refs: at most two scoped reads instead
+		// of the whole agent, which is what this path replaced.
+		var found []db.Skill
+		seen := make(map[string]struct{}, len(requestedIDs))
+		for _, sourceID := range sourceIDs {
+			skills, err := s.Queries.ListAgentSkillsByIDs(ctx, db.ListAgentSkillsByIDsParams{
+				AgentID:  sourceID,
+				SkillIds: requestedIDs,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("list agent skills by ids: %w", err)
+			}
+			for _, skill := range skills {
+				id := util.UUIDToString(skill.ID)
+				if _, ok := seen[id]; ok {
+					continue
+				}
+				seen[id] = struct{}{}
+				found = append(found, skill)
+			}
+		}
+		if len(found) > 0 {
 			// Same fail-closed rule as LoadAgentSkills: a failed file read
 			// would produce a bundle that hashes and validates like a complete
 			// one, so it must never be served.
-			loaded, err := s.skillsWithFiles(ctx, skills)
+			loaded, err := s.skillsWithFiles(ctx, found)
 			if err != nil {
 				return nil, err
 			}
@@ -7392,7 +7474,7 @@ func IssueToMapResolved(ctx context.Context, q issuestatus.Querier, issue db.Iss
 }
 
 func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
-	return map[string]any{
+	m := map[string]any{
 		"id":           util.UUIDToString(issue.ID),
 		"workspace_id": util.UUIDToString(issue.WorkspaceID),
 		"number":       issue.Number,
@@ -7427,6 +7509,17 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"metadata":         util.JSONObjectOrEmpty(issue.Metadata),
 		"properties":       util.JSONObjectOrEmpty(issue.Properties),
 	}
+	// Mirrors handler.IssueResponse.OriginType/OriginID, which are omitempty:
+	// a row with no origin must lose the keys in BOTH renderings, or a client
+	// reading one of them sees a field the other never sends. Conditional
+	// insertion, not a nil value, is what keeps the two key sets equal.
+	if issue.OriginType.Valid {
+		m["origin_type"] = issue.OriginType.String
+	}
+	if issue.OriginID.Valid {
+		m["origin_id"] = util.UUIDToString(issue.OriginID)
+	}
+	return m
 }
 
 // IssueIdentifier renders the human-facing issue key ("MUL-42"). Callers that

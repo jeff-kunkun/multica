@@ -529,11 +529,14 @@ type Daemon struct {
 	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	planLimitsMu sync.RWMutex
 	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
-	// agyQuota tracks per-directory AGY/Antigravity individual-quota exhaustion
-	// so the same agent can fail over to another isolation slot. Guarded by
-	// agyQuotaMu; persisted under ~/.multica so a daemon restart keeps the X.
-	agyQuotaMu sync.Mutex
-	agyQuota   map[string]time.Time // gemini dir -> reset_at
+	// accountQuota tracks per-directory CLI account quota exhaustion: which
+	// account directory is out of quota, and until when. AGY reads it to fail
+	// over to another isolation slot; every other CLI reads it through the
+	// `agent_accounts` channel, which is how a quota-exhausted dsh or claude
+	// account becomes visible at all (DENE-466). Guarded by accountQuotaMu;
+	// persisted under ~/.multica so a daemon restart keeps the X.
+	accountQuotaMu sync.Mutex
+	accountQuota   map[string]time.Time // account dir -> reset_at
 	// Live Claude/Codex/Gemini/Grok/Kimi/GLM/MiniMax/DeepSeek usage probes
 	// (cc-switch style). Throttled
 	// separately from the 15s heartbeat so we do not hammer unofficial APIs.
@@ -2864,10 +2867,23 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 // web UI can expand AGY account-slot paths. Browsers cannot read process.env.HOME.
 // Logged-in Gemini dirs ride along so the settings page can show a green check
 // without putting AGY-unknown flags in custom_args.
+//
+// The three AGY keys stay byte-for-byte as they were — custom-args-tab.tsx
+// still consumes home_dir / agy_logged_in_dirs / agy_quota_exhausted until the
+// account surface converges (DENE-305-D). The multi-CLI channel is additive and
+// lives in agentAccountsReport.
 func (d *Daemon) withRegistrationHostMeta(req map[string]any) map[string]any {
 	req = withHostHomeDir(req)
 	if exhausted := d.agyQuotaOverlay(time.Now()); len(exhausted) > 0 {
 		req["agy_quota_exhausted"] = exhausted
+	}
+	// agent_accounts is always written, even when empty: its presence is how a
+	// consumer tells "this host has no accounts" from "this daemon predates the
+	// channel". agent_accounts_error only joins it when the probe failed.
+	accounts, probeErr := d.agentAccountsReport(time.Now())
+	req["agent_accounts"] = accounts
+	if probeErr != "" {
+		req["agent_accounts_error"] = probeErr
 	}
 	return req
 }
@@ -4587,11 +4603,12 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingProviderConfig != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
+			"provider_config", resp.PendingProviderConfig != nil,
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
 		)
@@ -4602,6 +4619,11 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
+		}
+	}
+	if resp.PendingProviderConfig != nil {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			go d.handleProviderConfig(ctx, *rt, *resp.PendingProviderConfig)
 		}
 	}
 	if resp.PendingLocalSkills != nil {
@@ -4970,6 +4992,14 @@ func (d *Daemon) reportModelListResult(ctx context.Context, rt Runtime, requestI
 	})
 }
 
+// reportProviderConfigResult delivers a provider-preset report to the server
+// with the same retry semantics as the other runtime async reports.
+func (d *Daemon) reportProviderConfigResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
+	d.reportRuntimeResultWithRetry(ctx, "provider_config", rt.ID, requestID, func(ctx context.Context) error {
+		return d.client.ReportProviderConfigResult(ctx, rt.ID, requestID, payload)
+	})
+}
+
 // reportRuntimeResultWithRetry retries `fn` on 5xx / network errors and
 // stops on success, 4xx, or after exhausting runtimeReportBackoffs.
 //
@@ -5021,6 +5051,45 @@ func (d *Daemon) reportRuntimeResultWithRetry(ctx context.Context, kind, runtime
 	}
 	d.logger.Error("runtime async report exhausted retries",
 		"kind", kind, "runtime_id", runtimeID, "request_id", requestID, "error", lastErr)
+}
+
+// handleProviderConfig executes one provider-preset action against this host's
+// own agent configuration and reports the refreshed snapshot back.
+//
+// The request payload is never logged: an upsert for a provider carries the
+// API key the user just typed, and it is on its way into their credentials
+// file rather than into our logs. The log line names the request and the
+// action, which is what a failure report needs.
+func (d *Daemon) handleProviderConfig(ctx context.Context, rt Runtime, pending PendingProviderConfig) {
+	d.logger.Info("runtime provider config requested",
+		"runtime_id", rt.ID, "request_id", pending.ID,
+		"provider", pending.Provider, "action", pending.Action)
+
+	payload := map[string]any{}
+	snapshot, err := applyProviderConfig(pending.Provider, pending.Action, pending.Payload)
+	if err != nil {
+		d.logger.Warn("runtime provider config failed",
+			"runtime_id", rt.ID, "request_id", pending.ID,
+			"provider", pending.Provider, "action", pending.Action, "error", err)
+		payload["status"] = "failed"
+		// The message is returned to a browser, so it goes through the shared
+		// credential filter even though this action's own errors are built
+		// from file paths and field names: a decode or encode error is the one
+		// place a value from the body can end up inside a message.
+		payload["error"] = redact.Text(err.Error())
+	} else {
+		// Every action answers with the refreshed list, so the client can
+		// redraw from this reply alone.
+		payload["status"] = "completed"
+		payload["providers"] = snapshot.Providers
+		if snapshot.Active != nil {
+			payload["active"] = snapshot.Active
+		}
+		if snapshot.ClearedActive {
+			payload["cleared_active"] = true
+		}
+	}
+	d.reportProviderConfigResult(ctx, rt, pending.ID, payload)
 }
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.
@@ -8855,8 +8924,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare dsh session root: %w", err)
 		}
-		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
-		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
+		applyDshTaskEnv(agentEnv, dshSessionRoot)
 	}
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
@@ -9186,6 +9254,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
 	d.recordPlanLimits(task.RuntimeID, result.PlanLimits)
+	// Record the account-level quota hit on the SAME terminal result, and only
+	// here: the AGY path above already accounts for antigravity while it fails
+	// over, and every other CLI would otherwise have no way to learn that one of
+	// its accounts is out of quota (DENE-466). Reading it after the retries is
+	// what keeps a failure a retry recovered from out of the store.
+	d.recordRunAccountQuota(provider, agentCustomEnv, result, time.Now())
 	phaseRecorder.Mark(taskPhaseTurnCompleted)
 
 	elapsed := time.Since(taskStart).Round(time.Second)
@@ -10793,6 +10867,34 @@ func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, e
 		return "", err
 	}
 	return path, nil
+}
+
+// dshPermissionModeEnv selects the DeepSeek Harness sandbox/approval posture.
+// DSH reads it in its own profile config; when unset it falls back to
+// workspace-write, whose seatbelt policy only permits writes inside the task
+// worktree. That default broke real work (DENE-329: `hdiutil create` needs a
+// disk-image device and failed with "Operation not permitted"), and every other
+// runtime the daemon launches already runs without an OS sandbox.
+const dshPermissionModeEnv = "DSH_PERMISSION_MODE"
+
+// dshPermissionModeFullAccess also sets DSH's approval mode to never, so one
+// variable covers both the sandbox and the approval prompt.
+const dshPermissionModeFullAccess = "danger-full-access"
+
+// applyDshTaskEnv adds the dsh-only variables to an env map that has already
+// had the agent's custom_env layered onto it. The session root and telemetry
+// switch are daemon-owned and unconditional; the permission mode is only a
+// default, so an agent that sets DSH_PERMISSION_MODE in custom_env (e.g. back
+// to workspace-write) keeps its own value.
+func applyDshTaskEnv(agentEnv map[string]string, sessionRoot string) {
+	if agentEnv == nil {
+		return
+	}
+	agentEnv["MULTICA_DSH_SESSION_ROOT"] = sessionRoot
+	agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
+	if _, ok := agentEnv[dshPermissionModeEnv]; !ok {
+		agentEnv[dshPermissionModeEnv] = dshPermissionModeFullAccess
+	}
 }
 
 // prepareDshTaskSessionRoot keeps DSH transcripts private to one Multica
