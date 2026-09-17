@@ -11,7 +11,8 @@ import {
   issueDraftLandingIssueId,
   issueDraftParentIssueId,
   stripIssueDraftDirectives,
-} from "@multica/core/issue-drafts";import { useWorkspacePaths } from "@multica/core/paths";
+} from "@multica/core/issue-drafts";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import type { ChatMessage } from "@multica/core/types";
