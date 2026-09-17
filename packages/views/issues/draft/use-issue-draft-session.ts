@@ -38,6 +38,7 @@ import { useIssueDraftStore } from "@multica/core/issues/stores";
 import type { IssueDraftPolicy } from "@multica/core/types";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import type {
+  Attachment,
   ChatMessage,
   Issue,
   IssueDraftCreatedIssue,
@@ -110,6 +111,13 @@ export interface IssueDraftSession {
   loadFailed: boolean;
   messages: ChatMessage[];
   messagesLoading: boolean;
+  /**
+   * The files this alignment produced, in the order the conversation produced
+   * them. This is the set the confirm hands to the group's root, so the preview
+   * panel can say what it is about to carry instead of leaving the user to
+   * discover it on the issue afterwards (DENE-453).
+   */
+  attachments: Attachment[];
   /** A turn is running on the carrier. */
   pending: boolean;
   /** The in-flight turn, as the transcript renders it. */
@@ -314,6 +322,24 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
    * which is the shape the page had before continuation existed.
    */
   const round = issueDraftRound(row ?? {});
+
+  /**
+   * The files this alignment produced, read off the transcript rather than
+   * fetched again: `ListChatMessages` already ships each message's attachments,
+   * and both directions count — the file the user dropped in rides a user
+   * message, the prototype the carrier uploaded rides its reply. Deduplicated
+   * by id because a message list that renders the same attachment twice is one
+   * file, not two, and the panel is describing what the confirm will carry.
+   */
+  const attachments = useMemo(() => {
+    const byId = new Map<string, Attachment>();
+    for (const message of messages) {
+      for (const attachment of message.attachments ?? []) {
+        if (!byId.has(attachment.id)) byId.set(attachment.id, attachment);
+      }
+    }
+    return [...byId.values()];
+  }, [messages]);
 
   const runtime = useMemo(
     () => runtimesQuery.data?.find((device) => device.id === row?.runtime_id) ?? null,
@@ -676,6 +702,7 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
     loadFailed: listQuery.isError,
     messages,
     messagesLoading: messagesQuery.isLoading,
+    attachments,
     pending,
     pendingTask: pendingQuery.data,
     sending,

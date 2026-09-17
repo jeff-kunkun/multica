@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Loader2, Trash2 } from "lucide-react";
+import { ExternalLink, FileText, Loader2, Trash2 } from "lucide-react";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   maxIssueDraftChildStage,
@@ -10,6 +10,7 @@ import {
   sameIssueDraftChildren,
 } from "@multica/core/issue-drafts";
 import type {
+  Attachment,
   Issue,
   IssueAssigneeType,
   IssueDraftChild,
@@ -77,6 +78,7 @@ export function IssueDraftPreviewPanel({
   currentUserId,
   switchingRuntime,
   pending,
+  attachments,
   readOnly: readOnlyProp,
   producedIssueId,
   createdIssues,
@@ -106,6 +108,13 @@ export function IssueDraftPreviewPanel({
   switchingRuntime: boolean;
   /** A turn is running: nothing may be written while the carrier is replying. */
   pending: boolean;
+  /**
+   * The files this conversation produced, which the confirm hands to the ROOT
+   * issue. Absent (or empty) means the alignment touched no file at all, and
+   * the panel then says nothing about files — there is no empty state to
+   * explain, exactly as the project and assignee pickers have none (DENE-453).
+   */
+  attachments?: readonly Attachment[];
   /**
    * Render what was agreed and nothing more — the shape a FINISHED alignment is
    * read back in (DENE-371). Every field is disabled and the whole action strip
@@ -199,6 +208,11 @@ export function IssueDraftPreviewPanel({
 
   const value = editing ?? draft ?? EMPTY_DRAFT;
   const children = value.children ?? [];
+  // The reference material that will be carried, stated once so the section
+  // below and its own emptiness agree. Sorted by filename is deliberately NOT
+  // done: the caller hands these over in the order the conversation produced
+  // them, which is the order someone reading the transcript remembers.
+  const carriedAttachments = attachments ?? EMPTY_ATTACHMENTS;
   // Rows a previous round already created. They stay in `value` — the payload
   // is one object and the confirm reads it whole — but they are not offered for
   // editing: whatever is typed over one is dropped server-side, so letting the
@@ -460,6 +474,34 @@ export function IssueDraftPreviewPanel({
                 disabled={locked || switchingRuntime || pending}
               />
             </div>
+
+            {/* The files the conversation produced, which the confirm hands to
+                the ROOT issue — a screenshot someone dropped in, the prototype
+                a carrier uploaded. Rendered only when there is at least one:
+                an empty "no files" placeholder would be a section about
+                nothing, and the restraint the project and assignee pickers
+                keep is the one this panel is read in. */}
+            {carriedAttachments.length > 0 ? (
+              <div className="space-y-2 border-t pt-5">
+                <div>
+                  <h3 className="text-body font-medium">
+                    {t(($) => $.alignment.attachments_title)}
+                  </h3>
+                  <p className="mt-1 text-caption text-muted-foreground">
+                    {t(($) => $.alignment.attachments_hint, {
+                      count: carriedAttachments.length,
+                    })}
+                  </p>
+                </div>
+                <ul className="space-y-1">
+                  {carriedAttachments.map((attachment) => (
+                    <li key={attachment.id}>
+                      <CarriedFileRow attachment={attachment} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
             {isContinuation ? (
               <div className="rounded-md border bg-background p-3">
@@ -914,6 +956,66 @@ function CreatedGroupFooter({
   );
 }
 
+/**
+ * One row of the carried-files list: a thumbnail when the file is an image, a
+ * file icon when it is not, and the name either way.
+ *
+ * The row opens the file itself, at the same URL a description embeds as a
+ * markdown link — so what the panel shows and what the issue will point at can
+ * never disagree. Everything an older backend may omit is defaulted rather than
+ * assumed: `markdown_url` / `download_url` are additive fields, `content_type`
+ * is only leniently parsed (`AttachmentSchema` validates the id alone), and a
+ * row with no URL at all renders as the same row, unlinked, instead of an
+ * anchor pointing back at this page.
+ */
+function CarriedFileRow({ attachment }: { attachment: Attachment }) {
+  const filename = attachment.filename || attachment.id;
+  const href =
+    attachment.markdown_url || attachment.download_url || attachment.url || "";
+  const thumbnail = (attachment.content_type ?? "").startsWith("image/")
+    ? href
+    : "";
+  const body = (
+    <>
+      {thumbnail ? (
+        <img
+          src={thumbnail}
+          alt=""
+          className="size-8 shrink-0 rounded-sm border object-cover"
+        />
+      ) : (
+        <FileText
+          className="size-4 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
+      )}
+      <span className="min-w-0 flex-1 truncate text-caption">{filename}</span>
+      {href ? (
+        <ExternalLink
+          className="size-3.5 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
+      ) : null}
+    </>
+  );
+  const className = cn(
+    "flex min-w-0 items-center gap-2 rounded-md border bg-background px-3 py-2",
+    href && "hover:bg-muted/40",
+  );
+  if (!href) return <div className={className}>{body}</div>;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className={className}
+      title={filename}
+    >
+      {body}
+    </a>
+  );
+}
+
 function Field({
   label,
   htmlFor,
@@ -939,6 +1041,10 @@ const EMPTY_DRAFT: IssueDraftPayload = {
   status: "",
   priority: "",
 };
+
+/** A caller that does not pass attachments has an alignment that produced no
+ *  files, which is the state the section renders as nothing at all. */
+const EMPTY_ATTACHMENTS: readonly Attachment[] = [];
 
 /** A first round has nothing adopted, and the empty set is the honest default
  *  for a caller that does not know about continuation rounds at all. */

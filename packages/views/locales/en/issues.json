@@ -1009,6 +1009,8 @@
     "round_hint_empty": "Earlier rounds produced no sub-issues.",
     "built_title": "Already created",
     "built_hint": "Confirming adopts these issues untouched: their title, stage and assignee are not rewritten. Open one to change it.",
+    "attachments_title": "Reference files",
+    "attachments_hint": "After you confirm, these {{count}} files belong to the parent task. Sub-issues link them instead of uploading a copy.",
     "built_stage": "Stage {{n}}",
     "new_group_title": "Added this round",
     "new_group_hint": "Only these are created. Each sub-issue joins the same parent, in the order its stage gives.",

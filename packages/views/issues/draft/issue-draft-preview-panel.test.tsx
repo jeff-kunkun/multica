@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { useEffect } from "react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type {
+  Attachment,
   Issue,
   IssueDraftPayload,
   IssuePriority,
@@ -169,6 +170,43 @@ const MERGED: IssueDraftPayload = {
 };
 
 type PanelProps = React.ComponentProps<typeof IssueDraftPreviewPanel>;
+
+/**
+ * The two shapes the conversation can produce, as the transcript reports them:
+ * a screenshot someone dropped in, and an HTML prototype the carrier uploaded.
+ * `markdown_url` is the durable URL a body embeds; `download_url` is the
+ * click-time one this response also carries.
+ */
+function attachmentRecord(overrides: Partial<Attachment>): Attachment {
+  return {
+    id: "att-1",
+    workspace_id: "ws-1",
+    issue_id: null,
+    comment_id: null,
+    chat_session_id: "sess-1",
+    chat_message_id: "m1",
+    uploader_type: "member",
+    uploader_id: "user-1",
+    filename: "prototype.png",
+    url: "/uploads/prototype.png",
+    download_url: "/api/attachments/att-1/download",
+    markdown_url: "/api/attachments/att-1/download",
+    content_type: "image/png",
+    size_bytes: 2048,
+    created_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+const PROTOTYPE = attachmentRecord({});
+const SPEC = attachmentRecord({
+  id: "att-2",
+  filename: "spec.html",
+  content_type: "text/html",
+  url: "/uploads/spec.html",
+  download_url: "/api/attachments/att-2/download",
+  markdown_url: "/api/attachments/att-2/download",
+});
 
 function renderPanel(overrides: Partial<PanelProps> = {}) {
   const props: PanelProps = {
@@ -812,5 +850,66 @@ describe("IssueDraftPreviewPanel continuation round", () => {
     expect(
       screen.getByText("Status").closest("div")?.parentElement,
     ).not.toHaveAttribute("inert");
+  });
+});
+
+describe("IssueDraftPreviewPanel carried files", () => {
+  it("shows what the confirm hands to the parent task", () => {
+    // Both shapes are listed the same way; only the image gets a thumbnail,
+    // because a prototype is looked at and a spec is opened.
+    renderPanel({ attachments: [PROTOTYPE, SPEC] });
+    expect(screen.getByText("Reference files")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "After you confirm, these 2 files belong to the parent task. Sub-issues link them instead of uploading a copy.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("prototype.png").closest("a"),
+    ).toHaveAttribute("href", "/api/attachments/att-1/download");
+    expect(screen.getByText("spec.html").closest("a")).toHaveAttribute(
+      "href",
+      "/api/attachments/att-2/download",
+    );
+  });
+
+  it("falls back to the click-time URL when the server sends no durable one", () => {
+    // `markdown_url` is additive: an older backend omits it, and a row whose
+    // href resolved to the empty string would be a dead link.
+    renderPanel({
+      attachments: [{ ...PROTOTYPE, markdown_url: "" }],
+    });
+    expect(screen.getByText("prototype.png").closest("a")).toHaveAttribute(
+      "href",
+      "/api/attachments/att-1/download",
+    );
+  });
+
+  it("still names a file the server described with an id alone", () => {
+    // `AttachmentSchema` validates the id and passes the rest through, so a
+    // response carrying nothing else must still render: a name and no link,
+    // never an anchor back at the page it is already on.
+    renderPanel({
+      attachments: [{ id: "att-9" } as Attachment],
+    });
+    expect(screen.getByText("Reference files")).toBeTruthy();
+    expect(screen.getByText("att-9").closest("a")).toBeNull();
+  });
+
+  it("adds nothing at all when the alignment produced no files", () => {
+    // No heading, no empty-state sentence, no row: a section about nothing is
+    // what the project and assignee pickers do not have either.
+    const { container } = renderPanel({ attachments: [] });
+    expect(screen.queryByText("Reference files")).toBeNull();
+    expect(screen.queryByText(/parent task/)).toBeNull();
+    expect(screen.queryByRole("listitem")).toBeNull();
+    expect(container.querySelectorAll("img")).toHaveLength(0);
+  });
+
+  it("adds nothing when the caller never mentions files", () => {
+    // An older caller that does not know about the prop is the same statement
+    // as an alignment with no uploads.
+    renderPanel();
+    expect(screen.queryByText("Reference files")).toBeNull();
   });
 });

@@ -1120,3 +1120,51 @@ describe("IssueDraftPage continuation round", () => {
     expect(mocks.reopenIssueDraft).not.toHaveBeenCalled();
   });
 });
+
+describe("IssueDraftPage carried files", () => {
+  const prototype = {
+    id: "att-1",
+    filename: "prototype.png",
+    content_type: "image/png",
+    download_url: "/api/attachments/att-1/download",
+    markdown_url: "/api/attachments/att-1/download",
+  } as unknown as NonNullable<ChatMessage["attachments"]>[number];
+
+  const mock = {
+    id: "att-2",
+    filename: "mock.html",
+    content_type: "text/html",
+    download_url: "/api/attachments/att-2/download",
+    markdown_url: "/api/attachments/att-2/download",
+  } as unknown as NonNullable<ChatMessage["attachments"]>[number];
+
+  it("reads the files off the transcript, from both sides and once each", async () => {
+    // The user's upload rides a user message; the carrier's own prototype rides
+    // its reply. Both are files this alignment produced, and the panel is the
+    // last place that can say so before the confirm moves them to the parent.
+    // The duplicate id is what a re-render or a replayed message would produce,
+    // and one file must not become two rows.
+    mocks.drafts = [draftSummary({ draft: { ...draftSummary().draft, title: "Dark mode" } })];
+    mocks.messages = [
+      chatMessage({ id: "m1", role: "user", attachments: [prototype] }),
+      chatMessage({ id: "m2", role: "assistant", attachments: [mock, prototype] }),
+    ];
+    renderPage();
+
+    expect(await screen.findByText("Reference files")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "After you confirm, these 2 files belong to the parent task. Sub-issues link them instead of uploading a copy.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("prototype.png")).toBeTruthy();
+    expect(screen.getByText("mock.html")).toBeTruthy();
+  });
+
+  it("says nothing when no turn ever carried a file", async () => {
+    mocks.messages = [chatMessage()];
+    renderPage();
+    await screen.findByText("Aligning");
+    expect(screen.queryByText("Reference files")).toBeNull();
+  });
+});

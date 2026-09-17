@@ -253,6 +253,7 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               currentUserId={currentUserId}
               switchingRuntime={session.switchingRuntime}
               pending={session.pending}
+              attachments={session.attachments}
               readOnly={record}
               producedIssueId={session.producedIssueId}
               createdIssues={session.createdIssues}
