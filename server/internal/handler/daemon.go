@@ -3217,8 +3217,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				h.rejectClaimSourceLoad(r.Context(), task, deliveryErr, "channel task delivery", uuidToString(task.ID))
 		}
 		// A web chat can opt into the same durable project context as an
-		// issue-bound task.
-		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), cs.ProjectID, cs.WorkspaceID)
+		// issue-bound task — and, unlike an issue, it can carry several
+		// projects at once (DENE-523).
+		projectCtx, projectErr := h.resolveClaimChatProjectContext(r.Context(), cs)
 		if projectErr != nil {
 			slog.Error("chat claim: load project context failed; preserving task for redelivery",
 				"task_id", uuidToString(task.ID),

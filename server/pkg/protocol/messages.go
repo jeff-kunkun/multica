@@ -380,6 +380,12 @@ type ChatSessionUpdatedPayload struct {
 	// ProjectID is set only by the project-context update path. The double
 	// pointer distinguishes an omitted field from an explicit JSON null.
 	ProjectID **string `json:"project_id,omitempty"`
+	// ProjectIDs carries the session's FULL project set in selection order on
+	// the same path (DENE-523), so another device patches the whole set rather
+	// than the mirrored primary alone. nil on rename/pin/archive — the receiver
+	// leaves the existing set untouched — and an empty non-nil slice when the
+	// set was cleared.
+	ProjectIDs *[]string `json:"project_ids,omitempty"`
 	// Pinned is set only by the pin/unpin path; nil on a plain rename so a
 	// receiver leaves the existing pin state untouched.
 	Pinned *bool `json:"pinned,omitempty"`

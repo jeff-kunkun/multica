@@ -6238,7 +6238,7 @@ func taskRunFailureReason(err error) string {
 // a queue on one directory does not consume the daemon's whole capacity. nil
 // is accepted (focused tests) and simply keeps the slot.
 func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger, lease *taskSlotLease) (release func(), abort bool) {
-	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
+	if !task.hasProjectResources() || d.cfg.DaemonID == "" {
 		return nil, false
 	}
 	assignment, err := d.resolveLocalDirectoryAssignment(task)
@@ -8126,6 +8126,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
+		Projects:                         convertProjectsForEnv(task.projectContexts()),
 		ChatSessionID:                    task.ChatSessionID,
 		ChatChannelType:                  task.ChatChannelType,
 		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
@@ -10377,6 +10378,25 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
+		}
+	}
+	return result
+}
+
+// convertProjectsForEnv maps the claim's project set into the execenv shape.
+// task.projectContexts() has already normalised the legacy singular fields of
+// an old server into a one-entry set.
+func convertProjectsForEnv(projects []ProjectContextData) []execenv.ProjectContextForEnv {
+	if len(projects) == 0 {
+		return nil
+	}
+	result := make([]execenv.ProjectContextForEnv, len(projects))
+	for i, p := range projects {
+		result[i] = execenv.ProjectContextForEnv{
+			ID:          p.ID,
+			Title:       p.Title,
+			Description: p.Description,
+			Resources:   convertProjectResourcesForEnv(p.Resources),
 		}
 	}
 	return result

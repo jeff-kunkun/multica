@@ -51,6 +51,17 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// ProjectContextData mirrors handler.TaskProjectContextData — one project of
+// the task's project set, in priority order (DENE-523). A chat session can
+// carry several; every other surface carries at most one and the server then
+// fills both this list and the legacy singular Task.Project* fields.
+type ProjectContextData struct {
+	ID          string                `json:"id"`
+	Title       string                `json:"title"`
+	Description string                `json:"description,omitempty"`
+	Resources   []ProjectResourceData `json:"resources,omitempty"`
+}
+
 // ConnectedAppData keeps the claim-response field local to daemon types while
 // sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
@@ -93,16 +104,23 @@ type Task struct {
 	// order. Rendered into the brief's status-command line; empty (including on
 	// old servers that never send the field) keeps the brief byte-identical to
 	// the built-in-only form. IssueStatusesOmitted is the cap overflow count.
-	IssueStatuses                 []IssueStatusData      `json:"issue_statuses,omitempty"`
-	IssueStatusesOmitted          int                    `json:"issue_statuses_omitted,omitempty"`
-	ThreadName                    string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
-	Agent                         *AgentData             `json:"agent,omitempty"`
-	ConnectedApps                 []ConnectedAppData     `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
-	Repos                         []RepoData             `json:"repos,omitempty"`
-	ProjectID                     string                 `json:"project_id,omitempty"`                       // active project for this task, when present
-	ProjectTitle                  string                 `json:"project_title,omitempty"`                    // human-readable project title for context injection
-	ProjectDescription            string                 `json:"project_description,omitempty"`              // durable project-level context injected into the brief
-	ProjectResources              []ProjectResourceData  `json:"project_resources,omitempty"`                // project-scoped resources to expose to the agent
+	IssueStatuses        []IssueStatusData     `json:"issue_statuses,omitempty"`
+	IssueStatusesOmitted int                   `json:"issue_statuses_omitted,omitempty"`
+	ThreadName           string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	Agent                *AgentData            `json:"agent,omitempty"`
+	ConnectedApps        []ConnectedAppData    `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
+	Repos                []RepoData            `json:"repos,omitempty"`
+	ProjectID            string                `json:"project_id,omitempty"`          // active project for this task, when present
+	ProjectTitle         string                `json:"project_title,omitempty"`       // human-readable project title for context injection
+	ProjectDescription   string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
+	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // project-scoped resources to expose to the agent
+	// Projects is the task's project set in priority order (DENE-523) — every
+	// project a chat attached, one for the other surfaces. The singular
+	// Project* fields above mirror its first entry, so a server predating this
+	// field leaves Projects empty and the daemon renders the primary project
+	// exactly as before. Mirror field: internal/handler/agent.go
+	// AgentTaskResponse.Projects, same JSON name.
+	Projects                      []ProjectContextData   `json:"projects,omitempty"`
 	IsLeaderTask                  bool                   `json:"is_leader_task,omitempty"`                   // true when executing in the squad-leader coordinator role
 	LeaderRoleResolved            bool                   `json:"leader_role_resolved,omitempty"`             // server capability: IsLeaderTask/SquadID authoritatively answer "is this a leader run". Absent on servers predating it — those before #4951 never sent is_leader_task at all, later ones send it without this guarantee — so taskIsSquadLeader falls back to the briefing marker for both (MUL-5811)
 	PriorSessionID                string                 `json:"prior_session_id,omitempty"`                 // Claude session ID from a previous task on this issue
@@ -320,4 +338,37 @@ type PluginHookTool struct {
 	Name           string          `json:"name"`
 	Description    string          `json:"description"`
 	InputSchema    json.RawMessage `json:"input_schema,omitempty"`
+}
+
+// projectContexts returns the task's attached projects in priority order.
+//
+// projects[] is the authoritative set (DENE-523). A server predating it fills
+// only the singular Project* fields, which describe the same single project —
+// normalising here lets every consumer read one shape, and keeps an old
+// server's claim rendering exactly as it did before.
+func (t Task) projectContexts() []ProjectContextData {
+	if len(t.Projects) > 0 {
+		return t.Projects
+	}
+	if t.ProjectID == "" && len(t.ProjectResources) == 0 {
+		return nil
+	}
+	return []ProjectContextData{{
+		ID:          t.ProjectID,
+		Title:       t.ProjectTitle,
+		Description: t.ProjectDescription,
+		Resources:   t.ProjectResources,
+	}}
+}
+
+// hasProjectResources reports whether any attached project carries a resource.
+// Gates that used to ask about the single project's resources (local_directory
+// resolution, the per-path mutex) must ask about the whole set.
+func (t Task) hasProjectResources() bool {
+	for _, project := range t.projectContexts() {
+		if len(project.Resources) > 0 {
+			return true
+		}
+	}
+	return false
 }

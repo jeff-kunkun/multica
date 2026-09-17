@@ -29,8 +29,24 @@ comments do not create durable project resources.
 A project's `description` is also durable context: when an issue (or a
 quick-create task) is bound to a project, the project description is injected
 into the agent's brief under `## Project Context` and written to
-`.multica/project/resources.json` as `project_description`. Use it for
-project-wide rules/context that should apply to every task in the project.
+`.multica/project/resources.json` as that project's `project_description`. Use
+it for project-wide rules/context that should apply to every task in the
+project.
+
+A Chat can attach SEVERAL projects at once (a 2–3 project comparison or a
+cross-repo task is the common case). The brief then aggregates every attached
+project — one `### Project: <title>` subsection each with its own description
+and resources, plus the union of their `github_repo` resources in the
+Repositories list — and `.multica/project/resources.json` carries one entry per
+project under `projects[]`. Two rules follow from that:
+
+- No single project is authoritative in a multi-project Chat. When a
+  deliverable must belong to one project (creating an issue, for example),
+  infer the target from the request and the descriptions; ask the user when it
+  stays ambiguous.
+- `multica repo checkout` serves every attached project's repositories, so a
+  cross-repo task needs no extra setup. A URL attached to two projects appears
+  once.
 
 Common resource types:
 
