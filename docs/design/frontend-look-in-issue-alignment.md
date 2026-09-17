@@ -95,14 +95,11 @@ ok  	github.com/multica-ai/multica/server/internal/daemon	0.689s
 
 ### 2.3 它拿不到仓库 —— `docs/design/prototypes/<screen>.html` 不可达
 
-对齐 session 建的时候**没有传 `project_id`**（`issue_draft.go:282-288`，`CreateChatSessionParams` 只有 ID / WorkspaceID / AgentID / CreatorID / Title）。claim 时 `resolveClaimProjectContext` 拿到一个 NULL 的 project，降级到工作区仓库注册表（`server/internal/handler/project_resource.go:984-990`）。而这个工作区的注册表是空的（跑过）：
+对齐 session 建的时候**没有传 `project_id`**（`issue_draft.go:282-288`，`CreateChatSessionParams` 只有 ID / WorkspaceID / AgentID / CreatorID / Title）。claim 时 `resolveClaimProjectContext` 拿到一个 NULL 的 project，降级到工作区仓库注册表（`server/internal/handler/project_resource.go:984-990`）。
 
-```
-$ multica repo list --output json
-[]
-```
+> **终审更正（孙悟空，2026-09-17）**：本节原写「工作区注册表是空的，`multica repo list --output json` 返回 `[]`」。终审复跑该命令返回的是一条记录（`https://github.com/jeff-kunkun/multica.git`），所以**「注册表为空」这条证据不成立，已删**。不影响本节结论：对齐 session 确实不带 `project_id`（`issue_draft.go:282-288` 仍然成立），而**载体不该写仓库的真正理由是 §4.1 的第 2、3 条**——行为契约第一条明令「Do not create, modify or delete anything」（`issue_draft_policy.go:63`），且一个用完即弃的视觉参考不值一个 PR。收成物走附件的结论不变，但它是**契约结论，不是能力结论**。
 
-仓库挂在**项目**上（`github_repo` project resource）。所以今天：**对齐载体既没有项目，也没有工作区级仓库，`multica repo checkout` 无从下手。** 它连 `docs/design/` 长什么样都看不到。
+所以今天：**对齐载体没有项目上下文，且其行为契约禁止它写任何东西**，`docs/design/prototypes/<screen>.html` 这条路走不通。
 
 这条正好是 DENE-423（对齐选项目）的对偶：等对齐能选项目，载体会顺带继承 `github_repo` 和 `local_directory`。所以「写进仓库」这条路**不是不可能，是被 DENE-423 挡着**——而且就算解了，§4.1 还有别的理由不走。
 
@@ -332,3 +329,18 @@ ls  ~/multica_workspaces_.../task-b55b41d56325/codex-home/skills/ # chat 任务�
 cd server && go test ./internal/daemon -run 'TestChatTaskSkipsPathMutexButKeepsAssignment|...' -count=1 -v  # PASS
 grep -in attachment server/internal/handler/issue_draft.go        # 零命中 ← finalize 不搬附件
 ```
+
+---
+
+## 9. 与 DENE-426 的关系（终审补记）
+
+同一条反馈（「前端怎么做要进对齐」）开了两张设计票，DENE-426 的稿子 `docs/design/issue-draft-frontend-alignment.md` 已经先一步合入 `kun`（PR #142）。**两份都保留，但结论以本页为准的地方有且只有一条**，其余部分两份一致（不加结构化字段、不加第三档 policy、共享契约 bump `2`→`3`）。
+
+**分歧点：对齐能不能交付「可打开的收成物」。**
+
+- DENE-426 的前提是「对齐是一场纯文本对话，carrier 既不会给用户开窗口，用户也不会在对齐页里点 HTML」，据此把五方向 / 一屏一档整个推到实现阶段。
+- 本页 §2.1–§2.2 跑命令核实了相反的事实：chat 任务在守护进程侧走同一条 `runTask`，有真实工作目录；`multica attachment upload` 的绑定只按 `workspace_id + task_id` 过滤、与 agent kind 无关；HTML 附件在前端走 `HtmlAttachmentPreview`（`packages/views/editor/attachment.tsx:48`），是**内联 sandbox iframe + 新标签整页**，不是下载。
+
+终审复核了后两条（`HtmlAttachmentPreview` 的内联 iframe 渲染路径、`issue_draft.go` 全文零 `attachment` 命中）并确认属实。因此 **DENE-426 的那条前提被推翻**：对齐页能渲染可打开的 HTML，「收成一屏」在对齐里是可行的。
+
+落地票据此以本页的切片为准：收成物 = 对齐回复上的 HTML 附件（§3），不是纯文字说明。DENE-426 文档中依赖「纯文本对话」这一前提的段落视为已被本节取代，其余结论继续有效。
