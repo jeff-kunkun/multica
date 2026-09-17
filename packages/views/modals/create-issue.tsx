@@ -73,6 +73,10 @@ import {
 } from "@multica/core/issues/stores/issue-create-settings-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import {
+  issueDraftListOptions,
+  unfinishedIssueDrafts,
+} from "@multica/core/issue-drafts";
+import {
   useCreateCommentSubIssue,
   useCreateIssue,
   useUpdateIssue,
@@ -98,6 +102,7 @@ import {
 } from "../issues/components/pickers/custom-property-picker";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+import { UnfinishedIssueDraftsBanner } from "../issues/draft/unfinished-issue-drafts";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
@@ -340,6 +345,19 @@ export function ManualCreatePanel({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+
+  // The alignments this user left half-done are the SAME list the alignment
+  // face offers, through the same filter: switching faces must not make work in
+  // progress disappear (DENE-443). It is empty for anyone who never aligns,
+  // which is what lets it live on the filing face at all — and the finished
+  // ones stay out of here on purpose, because this dialog files things rather
+  // than browsing the archive.
+  const draftsQuery = useQuery(issueDraftListOptions(wsId));
+  const unfinishedDrafts = unfinishedIssueDrafts(draftsQuery.data ?? []);
+  const resumeDraft = (draftId: string) => {
+    onClose();
+    router.push(p.newIssueDraft(draftId));
+  };
 
   // Set the persisted draft's active mode so a later reopen (and any reader of
   // the unified draft) knows which form the user is editing in.
@@ -962,6 +980,21 @@ export function ManualCreatePanel({
                   <TooltipContent side="bottom">{t(($) => $.common.close)}</TooltipContent>
                 </Tooltip>
               </div>
+            </div>
+
+            {/* The same banner the alignment face renders, on the same data:
+                an alignment started from this dialog and then left is still
+                this user's unfinished work after they switch faces, and the way
+                back to it has to survive the switch (DENE-443). It renders
+                nothing when the list is empty, so nobody who never aligns sees
+                it. "Add one" needs no second entry here — the toolbar's
+                "Switch to align first" already is that. */}
+            <div className="px-5 shrink-0">
+              <UnfinishedIssueDraftsBanner
+                wsId={wsId}
+                drafts={unfinishedDrafts}
+                onResume={resumeDraft}
+              />
             </div>
 
             {/* Title */}

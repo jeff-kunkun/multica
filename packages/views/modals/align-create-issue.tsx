@@ -21,6 +21,7 @@ import {
   runtimeListOptions,
 } from "@multica/core/runtimes";
 import { contentReferencesAttachment, type IssueDraftSummary } from "@multica/core/types";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -35,6 +36,7 @@ import {
 import { useT } from "../i18n";
 import { UnfinishedIssueDraftsBanner } from "../issues/draft/unfinished-issue-drafts";
 import { ClearablePillButton } from "../common/pill-button";
+import { RuntimePicker } from "../agents/components/runtime-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { AppLink, useNavigation } from "../navigation";
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
@@ -54,11 +56,13 @@ import { useIssueCreateUploads } from "./use-issue-create-uploads";
  * `ContentEditor`, the same upload pool (`draft.shared.attachments`), the same
  * optional project (`draft.shared.projectId`), and the same draft store, so a
  * file, a body or a project chosen on either face survives a switch to the
- * other. Which machine runs the alignment is still decided FOR the user
- * — the page's preview panel is where that choice is visible and changeable
- * afterwards. The single case that stops the conversation from starting at all
- * — nothing usable to run on, or the chosen machine offline — is stated
- * outright instead of being left for the user to infer from a disabled button.
+ * other. Which machine runs the alignment is answered here too, next to the
+ * project: it used to be decided FOR the user, with the choice only visible on
+ * the alignment page's preview panel afterwards, which left "which CLI is this
+ * going to run on" unanswerable from the face that starts it (DENE-443). The
+ * single case that stops the conversation from starting at all — nothing usable
+ * to run on, or the chosen machine offline — is stated outright instead of
+ * being left for the user to infer from a disabled button.
  */
 export function AlignCreatePanel({
   onClose,
@@ -100,6 +104,9 @@ export function AlignCreatePanel({
 
   const draftsQuery = useQuery(issueDraftListOptions(wsId));
   const runtimesQuery = useQuery(runtimeListOptions(wsId));
+  // Same list the alignment page's preview panel reads: the picker labels each
+  // machine with its owner, which is a member lookup, not a runtime field.
+  const membersQuery = useQuery(memberListOptions(wsId));
   const start = useStartIssueDraft(wsId);
 
   const uploadGate = useUploadGate(editorRef);
@@ -134,18 +141,15 @@ export function AlignCreatePanel({
     [runtimesQuery.data, currentUserId],
   );
 
-  // Picking the runtime moved out of this face with the picker, but choosing
-  // one did not: the alignment has to run somewhere, and the user is never
-  // asked where. Online first, then the user's own machines, then anything
-  // else in the workspace they may use.
+  // An INITIAL value, not the decision: the picker below can change it, and the
+  // seed only fills a selection that is still empty. Online first, then the
+  // user's own machines, then anything else in the workspace they may use.
   //
-  // Online has to outrank "mine", which the picker's own order did not: the
+  // Online has to outrank "mine", which the picker's own order does not: the
   // list arrives ordered by `created_at` and `isRuntimeUsableForUser` says
   // nothing about status, so "first machine I own" is really "oldest machine I
-  // own". The picker could survive seeding that one offline — the user just
-  // opened it and chose another. Here there is nothing to open, so seeding an
-  // offline machine while an online one sits in the same list would leave the
-  // dialog stating it cannot start and offering no way to fix it.
+  // own". Seeding that one while an online machine sits in the same list would
+  // open the dialog stating it cannot start.
   const seededRuntimeId = useMemo(() => {
     const online = usableRuntimes.filter((runtime) => runtime.status === "online");
     // Falls back to the offline set only so the message below can name a
@@ -157,9 +161,11 @@ export function AlignCreatePanel({
     );
   }, [usableRuntimes, currentUserId]);
 
-  // Fills an empty selection only. The picker seeded through `onSelect` as
-  // soon as runtimes arrived (over WS included); a derived seed plus this
-  // effect keeps that timing without a mounted picker to call back into.
+  // Fills an empty selection only, and only until the user has made one: the
+  // picker seeds through `onSelect` as soon as runtimes arrive, and this effect
+  // runs after it (child effects flush before the parent's), so the online
+  // preference above wins the first commit and a later click wins every one
+  // after it.
   useEffect(() => {
     if (runtimeId !== "" || !seededRuntimeId) return;
     setRuntimeId(seededRuntimeId);
@@ -233,7 +239,11 @@ export function AlignCreatePanel({
           max height, and the floor keeps a content-driven card from collapsing
           the scroll area to nothing. */}
       <div className="min-h-[140px] flex-1 overflow-y-auto px-6 pt-5 pb-2">
-        <UnfinishedIssueDraftsBanner drafts={drafts} onResume={resume} />
+        <UnfinishedIssueDraftsBanner
+          wsId={wsId}
+          drafts={drafts}
+          onResume={resume}
+        />
 
         <span className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Sparkles className="size-5" aria-hidden="true" />
@@ -291,11 +301,11 @@ export function AlignCreatePanel({
       </div>
 
       <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-        {/* The attach + project pair: both are properties of the issue being
-            filed, not of the request, so they stay on the toolbar row rather
-            than in front of the one thing this face actually asks for
-            (DENE-367). `min-w-0` lets the project pill shrink first when the
-            row is tight — its own chrome caps it at 14rem either way. */}
+        {/* The attach + project + runtime trio: all three are properties of
+            what is being filed, not of the request, so they stay on the
+            toolbar row rather than in front of the one thing this face
+            actually asks for (DENE-367). `min-w-0` lets each of them shrink
+            when the row is tight. */}
         <div className="flex min-h-7 min-w-0 items-center gap-2 sm:mr-auto">
           <FileUploadButton
             size="sm"
@@ -313,6 +323,25 @@ export function AlignCreatePanel({
             }
             align="start"
           />
+          {/* The picker's own chrome is a full-width form field, so it is
+              capped here the way the pills cap themselves (14rem): a long
+              machine or owner name has to truncate inside its trigger instead
+              of owning the row and pushing the three actions out of the card.
+              `min-w-0` is what lets that truncation happen at all, and
+              `overflow-hidden` is what keeps the picker's own label row — the
+              one part of it that cannot truncate — from painting over the
+              project pill on a phone, where all three share ~150px. The
+              dropdown is portalled, so neither one clips it. */}
+          <div className="min-w-0 max-w-56 overflow-hidden">
+            <RuntimePicker
+              runtimes={runtimes}
+              runtimesLoading={runtimesLoading}
+              members={membersQuery.data ?? []}
+              currentUserId={currentUserId}
+              selectedRuntimeId={runtimeId}
+              onSelect={setRuntimeId}
+            />
+          </div>
         </div>
         {/* The way back to filing this as an issue. The body stays in the
             align slot, and the manual face keeps its own — a switch is a

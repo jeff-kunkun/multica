@@ -11,6 +11,7 @@ import enIssues from "../locales/en/issues.json";
 import enModals from "../locales/en/modals.json";
 import enEditor from "../locales/en/editor.json";
 import enProjects from "../locales/en/projects.json";
+import enAgents from "../locales/en/agents.json";
 import { AlignCreatePanel } from "./align-create-issue";
 
 /**
@@ -166,6 +167,19 @@ vi.mock("../projects/components/project-picker", () => ({
   ),
 }));
 
+// The runtime picker is deliberately NOT mocked: its rows are the "which CLI"
+// answer this face now has to offer, and the interaction that can go wrong —
+// the face's online-first seed against a click on another machine — only exists
+// with the real component. Its own suite (runtime-picker.test.tsx) covers the
+// row rendering; only the two inert leaves below are stubbed here.
+vi.mock("../common/actor-avatar", () => ({
+  ActorAvatar: () => null,
+}));
+
+vi.mock("../runtimes/components/provider-logo", () => ({
+  ProviderLogo: () => null,
+}));
+
 // Pasting happens through the editor's own upload path, which the coordinator
 // owns; the spec drives a file in through the footer button instead.
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
@@ -294,6 +308,9 @@ const TEST_RESOURCES = {
     modals: enModals,
     editor: enEditor,
     projects: enProjects,
+    // The toolbar's runtime picker is the REAL component (its rows are the
+    // face's "which CLI" answer), so its own namespace has to be loaded.
+    agents: enAgents,
   },
 };
 
@@ -326,6 +343,16 @@ function renderPanel(props: {
 
 function submitButton() {
   return screen.getByRole("button", { name: "Start aligning" });
+}
+
+/** The runtime picker's own trigger, addressed the way its suite addresses it:
+ *  the value it shows is the answer to "which CLI will this run on". */
+function runtimeTrigger(): HTMLButtonElement {
+  const element = document.querySelector<HTMLButtonElement>(
+    '[data-slot="popover-trigger"]',
+  );
+  if (!element) throw new Error("runtime picker trigger not rendered");
+  return element;
 }
 
 function editor() {
@@ -541,17 +568,47 @@ describe("AlignCreatePanel", () => {
   });
 
   /**
-   * DENE-367: the entry face asks for one thing — what to align on. The runtime
-   * is chosen for the user, and the picker moves to the alignment page's
-   * preview. What must not move is the choice itself.
+   * DENE-443 overturns DENE-367's "the runtime is chosen FOR the user": kk
+   * asked for the machine and CLI to be pickable from the entry, and the choice
+   * was already being made here — invisibly. It stays seeded, so the request is
+   * still enough to start; what changes is that the seed is now visible and the
+   * user can overrule it.
    */
-  it("starts on a request alone, with no runtime picker on the face", async () => {
+  it("seeds a runtime without a click and shows which one on the toolbar", async () => {
     renderPanel();
     await typeRequest("add dark mode");
 
     // Enabled by the request alone: the runtime was seeded without a click.
     expect(submitButton()).toBeEnabled();
-    expect(screen.queryByTestId("runtime-picker")).toBeNull();
+    expect(runtimeTrigger().textContent).toContain("Local");
+  });
+
+  /**
+   * The rows are machines, and choosing one has to be what the session starts
+   * on — including over a seed the face picked a moment earlier. This is the
+   * interplay the mocked-away picker could not have covered: the face seeds an
+   * online machine, and the picker has a seeding effect of its own.
+   */
+  it("runs the alignment on the runtime chosen from the picker", async () => {
+    mocks.runtimes = [
+      { ...ONLINE_RUNTIME, id: "rt-desk", name: "Desk", device_info: "kunkun-mac.local" },
+      { ...ONLINE_RUNTIME, id: "rt-mini", name: "Mini", device_info: "kunkun-mac.local" },
+    ];
+    renderPanel();
+    await typeRequest("add dark mode");
+
+    // Seeded for the user, online-first: "Desk" is the first machine in the list.
+    expect(runtimeTrigger().textContent).toContain("Desk");
+
+    await userEvent.click(runtimeTrigger());
+    await userEvent.click(await screen.findByRole("button", { name: /Mini/ }));
+
+    expect(runtimeTrigger().textContent).toContain("Mini");
+
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.runtime_id).toBe("rt-mini");
   });
 
   it("asks for a runtime only when there is none to run on", async () => {

@@ -52,6 +52,31 @@ const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
 // mocking that call; it resolves a plain server Attachment row.
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
+// The unfinished-alignment list is server data owned by `@multica/core`. This
+// suite only needs it to be a fixture it can set; the banner itself stays the
+// real component, because "the list survives the face switch" is exactly what
+// these specs are about.
+const mockIssueDrafts = vi.hoisted(() => ({ rows: [] as unknown[], fetches: 0 }));
+
+function draftRow(overrides: Record<string, unknown>) {
+  return {
+    chat_session_id: "sess-1",
+    workspace_id: "ws-test",
+    status: "draft",
+    revision: 1,
+    draft: { title: "", description: "", status: "", priority: "" },
+    issue_id: null,
+    policy: { key: "question", version: "1", guided: true },
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    title: "Align a new issue",
+    runtime_id: "rt-1",
+    last_message_content: "",
+    last_message_role: "",
+    last_message_at: "",
+    ...overrides,
+  };
+}
 
 const sourceContextPanelData = () => ({
   anchor_comment_id: "comment-source",
@@ -202,6 +227,7 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
     settings: () => "/ws-test/settings",
+    newIssueDraft: (id: string) => `/ws-test/issues/new/${id}`,
   }),
 }));
 
@@ -275,6 +301,24 @@ vi.mock("@multica/core/issues/mutations", () => ({
   }),
   useUpdateIssue: () => ({ mutate: vi.fn() }),
 }));
+
+// The alignment list the shared banner reads. Only the query is stubbed: the
+// `unfinishedIssueDrafts` filter and the banner stay real, so "which rows
+// count" is the product's own rule and not a test's.
+vi.mock("@multica/core/issue-drafts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@multica/core/issue-drafts")>();
+  return {
+    ...actual,
+    issueDraftListOptions: (wsId: string) => ({
+      queryKey: ["issue-drafts", wsId],
+      queryFn: () => {
+        mockIssueDrafts.fetches += 1;
+        return Promise.resolve(mockIssueDrafts.rows);
+      },
+    }),
+  };
+});
 
 vi.mock("@multica/core/labels", () => ({
   useAttachLabelToIssue: () => ({ mutateAsync: mockAttachLabel }),
@@ -509,6 +553,8 @@ vi.mock("@multica/ui/components/ui/dialog", () => ({
   DialogContent: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
   ),
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
   ),
@@ -632,6 +678,8 @@ describe("CreateIssueModal", () => {
     vi.clearAllMocks();
     mockQuickCreateStore.keepOpen = false;
     mockCreateSettingsStore.manualCreateFields = DEFAULT_MANUAL_FIELDS;
+    mockIssueDrafts.rows = [];
+    mockIssueDrafts.fetches = 0;
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
@@ -1963,7 +2011,6 @@ describe("CreateIssueModal", () => {
   // MUL-6236 — the manual panel shares the agent panel's phone treatment; it
   // is one tap away behind "Switch to Manual", so it hit the same bugs.
   describe("phone layout", () => {
-
     it("keeps every footer control a direct child of the grid container", () => {
       renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
@@ -1977,6 +2024,73 @@ describe("CreateIssueModal", () => {
       expect(footer?.className).toContain("sm:flex");
       expect(create.parentElement).toBe(footer);
       expect(create.className).toContain("justify-self-end");
+    });
+  });
+
+  /**
+   * DENE-443: the unfinished-alignment list belongs to the USER, not to one face
+   * of the create dialog. Switching to "New issue" used to hide it, which left
+   * starting over as the only thing to do with an alignment still in progress —
+   * from the face a user reaches by switching precisely because they were not
+   * done.
+   */
+  describe("unfinished alignments", () => {
+    function renderManualPanel(onClose = vi.fn()) {
+      return renderModal(
+        <ManualCreatePanel
+          onClose={onClose}
+          onSwitchMode={vi.fn()}
+          isExpanded={false}
+          setIsExpanded={vi.fn()}
+        />,
+      );
+    }
+
+    it("counts the same unfinished alignments the alignment face offers", async () => {
+      mockIssueDrafts.rows = [
+        draftRow({ chat_session_id: "sess-open" }),
+        draftRow({ chat_session_id: "sess-ready", status: "ready" }),
+        // Terminal records are not work in progress, so the count is the
+        // product's own filter rather than the length of the list endpoint.
+        draftRow({ chat_session_id: "sess-done", status: "completed", issue_id: "issue-1" }),
+        draftRow({ chat_session_id: "sess-dropped", status: "abandoned" }),
+      ];
+      renderManualPanel();
+
+      expect(
+        await screen.findByRole("button", { name: /2 unfinished alignment/ }),
+      ).toBeInTheDocument();
+    });
+
+    it("routes a row back to its alignment conversation", async () => {
+      const onClose = vi.fn();
+      mockIssueDrafts.rows = [
+        draftRow({
+          chat_session_id: "sess-open",
+          draft: { title: "Dark mode", description: "", status: "", priority: "" },
+        }),
+      ];
+      renderManualPanel(onClose);
+
+      await userEvent.click(
+        await screen.findByRole("button", { name: /1 unfinished alignment/ }),
+      );
+      await userEvent.click(await screen.findByText("Dark mode"));
+
+      expect(onClose).toHaveBeenCalled();
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/new/sess-open");
+    });
+
+    it("renders nothing for someone who never aligned", async () => {
+      mockIssueDrafts.rows = [
+        draftRow({ status: "completed", issue_id: "issue-1" }),
+      ];
+      renderManualPanel();
+
+      // Wait for the list to actually have been read: an unrendered banner
+      // before the query resolves would prove nothing.
+      await waitFor(() => expect(mockIssueDrafts.fetches).toBeGreaterThan(0));
+      expect(screen.queryByText(/unfinished alignment/)).toBeNull();
     });
   });
 });
