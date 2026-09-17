@@ -302,8 +302,8 @@ func TestIssueDraftPolicyRegistryIsWellFormed(t *testing.T) {
 // The front-end section is the shared contract's, not a policy's, so it reaches
 // the carrier whichever policy is running: a draft that skipped the screen must
 // not be indistinguishable from one whose request genuinely has no surface.
-// Version 3 is the record of the prompt that started asking — a draft that
-// recorded "2" was produced by one that never did.
+// Version 3 is the record of the contract that started asking about the screen
+// — a draft that recorded "2" was produced by one that never did.
 func TestIssueDraftContractAsksForTheFrontendSection(t *testing.T) {
 	for _, want := range []string{
 		// When a request counts as having a surface, and the tie-break:
@@ -329,12 +329,61 @@ func TestIssueDraftContractAsksForTheFrontendSection(t *testing.T) {
 	}
 
 	for key, policy := range issueDraftPolicyRegistry {
-		if policy.Version != "3" {
-			t.Fatalf("policy %q is at version %q, want 3", key, policy.Version)
-		}
 		if !strings.Contains(policy.Instructions(), "## 前端做法") {
 			t.Fatalf("policy %q does not carry the front-end section", key)
 		}
+	}
+
+	// Version 3 is the contract half's record and both entries share it, so the
+	// unguided entry — whose own prompt never changed — stops there. The guided
+	// entry moved on to 4 when its behaviour grew the two calls that are the
+	// user's to make, asserted separately below.
+	plain, ok := issueDraftPolicyByKey(issueDraftPolicyConversation)
+	if !ok {
+		t.Fatal("the conversation policy is not registered")
+	}
+	if plain.Version != "3" {
+		t.Fatalf("the conversation policy is at version %q, want 3", plain.Version)
+	}
+}
+
+// The two calls the carrier must not make for the user: which screens are in
+// this issue, and which direction the surface takes. The guided policy asks
+// both — the second one exactly once, because it cannot show a picture. The
+// unguided policy never interviews, so the same rules must not reach it. Version
+// 4 is the record of the guided prompt that started asking; the conversation
+// entry stays at 3 because its own prompt did not change.
+func TestIssueDraftQuestionPolicyHandsScopeAndDirectionToTheUser(t *testing.T) {
+	guided, ok := issueDraftPolicyByKey(issueDraftPolicyQuestion)
+	if !ok || !guided.Guided {
+		t.Fatal("the guided question policy is not registered as guided")
+	}
+	if guided.Version != "4" {
+		t.Fatalf("the guided policy is at version %q, want 4", guided.Version)
+	}
+	for _, want := range []string{
+		// Scope: the priority call is the user's, and the carrier proposes.
+		"two things are the user's to decide and yours only to propose",
+		"Which screens are in THIS issue and which wait for later",
+		"Ask it with the split you would choose marked recommended",
+		// Direction: asked once, with named options, then stopped.
+		"The direction the surface takes",
+		"Ask it once, with 2-4 named directions — then stop",
+		"a second question about the look buys nothing",
+		// Timing: the surface is settled before the rest of the draft.
+		"Ask the surface question before the rest of the draft is settled",
+	} {
+		if !strings.Contains(guided.Instructions(), want) {
+			t.Fatalf("the guided prompt does not carry %q", want)
+		}
+	}
+
+	plain, ok := issueDraftPolicyByKey(issueDraftPolicyConversation)
+	if !ok || plain.Guided {
+		t.Fatal("the conversation policy is missing or reports itself as guided")
+	}
+	if strings.Contains(plain.Instructions(), "two things are the user's to decide and yours only to propose") {
+		t.Fatal("the unguided policy still hands the surface to the user to decide")
 	}
 }
 

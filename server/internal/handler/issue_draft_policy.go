@@ -99,7 +99,13 @@ const issueDraftQuestionPolicy = `Your task right now: converge the draft, and a
 - Offer 2-4 concrete options. Mark exactly one of them "recommended": true — the answer you would choose — and write its label so it is understandable on its own. value is the full answer to send back, phrased as the user would say it.
 - The user can always answer in their own words instead of picking an option, so an option is a shortcut, never a cage. Never ask a question whose only useful answer is free text if you can offer a reasonable default.
 - Omit the question block entirely on a reply that has nothing left to ask. Do not ask about anything the conversation has already settled.
-- If the user asks you to stop asking questions, stop for the rest of the conversation: keep refining the draft from what you know and state your assumptions instead.`
+- If the user asks you to stop asking questions, stop for the rest of the conversation: keep refining the draft from what you know and state your assumptions instead.
+
+When the request has a user-facing surface, two things are the user's to decide and yours only to propose:
+- Which screens are in THIS issue and which wait for later. That is a priority call, not a technical one. Ask it with the split you would choose marked recommended.
+- The direction the surface takes, when more than one arrangement would satisfy the requirement. Ask it once, with 2-4 named directions — then stop. You cannot show a picture, so a second question about the look buys nothing; record the direction that was chosen and leave the rest to be seen while it is built.
+
+Ask the surface question before the rest of the draft is settled. A surface agreed at the end is a surface that was already assumed.`
 
 // issueDraftConversationPolicy is the unguided policy: plain dialogue, no
 // interview. The user drives; the carrier answers and keeps the draft current.
@@ -139,10 +145,16 @@ func (p issueDraftPolicy) Instructions() string {
 // screen spec in the description must carry. Same reason: the contract is half
 // of each prompt, and a draft that recorded "2" was produced by one that never
 // asked about the screen.
+//
+// The guided entry alone moved to version 4 when its own behaviour grew the two
+// calls that are the user's to make — which screens are in this issue, and which
+// of several directions the surface takes, asked once. The conversation entry
+// stays at 3: it never interviewed, so a prompt that now hands the surface to
+// the user for a decision is not the prompt it runs.
 var issueDraftPolicyRegistry = map[string]issueDraftPolicy{
 	issueDraftPolicyQuestion: {
 		Key:       issueDraftPolicyQuestion,
-		Version:   "3",
+		Version:   "4",
 		Guided:    true,
 		Behaviour: issueDraftQuestionPolicy,
 	},
