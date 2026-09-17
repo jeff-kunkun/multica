@@ -134,6 +134,10 @@ const mockViewState: Record<string, unknown> = {
   propertyFilters: {},
   cardPropertyIds: [],
   agentRunningFilter: false,
+  // Board sub-issue accordion (DENE-444): the card reads both on every
+  // render, so a fake view state missing them crashes the whole board.
+  boardExpandedParents: [] as string[],
+  toggleBoardParentExpanded: () => {},
 };
 vi.mock("@multica/core/issues/stores/view-store-context", () => ({
   ViewStoreProvider: ({ children }: { children: ReactNode }) => children,

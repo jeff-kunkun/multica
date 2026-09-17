@@ -1,0 +1,12 @@
+-- Two-level specialisation tree for agents (DENE-300 / DENE-301).
+--
+-- NULL means a base role; a non-NULL value points at the base role this agent
+-- specialises. The depth limit (a specialisation may not itself be a parent) is
+-- enforced in the application layer, not by a constraint: the repo forbids
+-- foreign keys and cascading actions, so the relationship, its validation and
+-- its dependent cleanup all live in handler code.
+--
+-- Nullable with no default: read as a plain UUID column, never filtered on
+-- alone, so no index is created here — the partial index lives in its own
+-- single-statement migration (488), as the concurrent-index rule requires.
+ALTER TABLE agent ADD COLUMN IF NOT EXISTS parent_agent_id UUID;

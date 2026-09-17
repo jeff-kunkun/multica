@@ -43,9 +43,18 @@ function defaultsForSurface(
 ): IssueViewState {
   const defaults = viewStoreSlice(set);
   if (!surfaceKey.startsWith("project:")) return defaults;
+  // A project view is read top-down: the questions are which big tasks are
+  // moving, which are stuck, and who owns them. Sub-issues are the steps
+  // inside those answers, so they start folded into their parent instead of
+  // competing with it for board space, and finished-through work drops out of
+  // the way. Every one of these is a display default the user can undo from
+  // the Display popover. (DENE-444)
   return {
     ...defaults,
     cardProperties: { ...defaults.cardProperties, project: false },
+    showSubIssues: false,
+    tableParentsCollapsedByDefault: true,
+    hideCompletedParents: true,
   };
 }
 

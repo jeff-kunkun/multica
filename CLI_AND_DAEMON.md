@@ -4,11 +4,14 @@ The `multica` CLI connects your local machine to Multica. It handles authenticat
 
 ## Installation
 
-### Homebrew (macOS/Linux)
+### Install script (macOS/Linux)
 
 ```bash
-brew install multica-ai/tap/multica
+curl -fsSL https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh | bash
 ```
+
+This fork publishes its own CLI archives, so there is no Homebrew tap to install
+from — `multica-ai/tap` carries the upstream build.
 
 ### Build from Source
 
@@ -20,12 +23,6 @@ cp server/bin/multica /usr/local/bin/multica
 ```
 
 ### Update
-
-```bash
-brew upgrade multica-ai/tap/multica
-```
-
-For install script or manual installs, use:
 
 ```bash
 multica update

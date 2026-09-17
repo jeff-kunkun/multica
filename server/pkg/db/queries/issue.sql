@@ -87,6 +87,55 @@ WHERE id = $1 AND workspace_id = $2;
 SELECT metadata, revision FROM issue
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: ListIssuesWaitingOn :many
+-- DENE-232 Stage 3: waiters in this workspace whose close.waiting_on matches
+-- the waited-on issue's identifier (PREFIX-N) or its UUID. Containment uses
+-- idx_issue_metadata_gin (jsonb_path_ops). Callers filter terminal / backlog
+-- waiters in Go with the same status resolver as child-done.
+SELECT * FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND (
+    metadata @> sqlc.arg('waiting_on_identifier')::jsonb
+    OR metadata @> sqlc.arg('waiting_on_id')::jsonb
+  );
+
+-- name: ListWatchdogParentIssues :many
+-- DENE-233 scan A: parents with an agent/squad assignee and at least one
+-- child. Status filtering (skip done/cancelled/backlog) happens in Go via
+-- the same childStatusResolver child-done uses, so custom statuses inherit
+-- category. workspace_id NULL scans every workspace.
+SELECT p.*
+FROM issue p
+WHERE p.assignee_type IN ('agent', 'squad')
+  AND (sqlc.narg('workspace_id')::uuid IS NULL OR p.workspace_id = sqlc.narg('workspace_id'))
+  AND EXISTS (SELECT 1 FROM issue c WHERE c.parent_issue_id = p.id)
+ORDER BY p.updated_at ASC
+LIMIT sqlc.arg('max_rows')::int;
+
+-- name: ListWatchdogInProgressIssues :many
+-- DENE-233 scan B: canonical in_progress rows with an agent/squad assignee
+-- whose last_activity_at is older than stale_before.
+SELECT *
+FROM issue
+WHERE status = 'in_progress'
+  AND assignee_type IN ('agent', 'squad')
+  AND COALESCE(last_activity_at, updated_at) < sqlc.arg('stale_before')::timestamptz
+  AND (sqlc.narg('workspace_id')::uuid IS NULL OR workspace_id = sqlc.narg('workspace_id'))
+ORDER BY last_activity_at ASC
+LIMIT sqlc.arg('max_rows')::int;
+
+-- name: ListWatchdogCloseProtocolIssues :many
+-- DENE-233 scan D: explicit close.waiting_on or wake_action=mention.
+SELECT *
+FROM issue
+WHERE (
+    COALESCE(metadata->>'close.waiting_on', '') <> ''
+    OR metadata->>'close.wake_action' = 'mention'
+  )
+  AND (sqlc.narg('workspace_id')::uuid IS NULL OR workspace_id = sqlc.narg('workspace_id'))
+ORDER BY updated_at ASC
+LIMIT sqlc.arg('max_rows')::int;
+
 -- name: LockIssueForChannelMediaBind :one
 -- Channel media resolves after /issue creation. Hold a key-share lock while
 -- the attachment row is written so a concurrent issue delete cannot land
@@ -555,6 +604,18 @@ WHERE workspace_id = $1
   AND origin_id = $3
 LIMIT 1;
 
+-- name: ListIssuesByOrigins :many
+-- Finds every issue stamped with one of a set of (origin_type, origin_id)
+-- pairs. The partial unique index on issue (origin_id) WHERE origin_type =
+-- 'issue_draft' makes this the authoritative answer to "does this alignment
+-- node already own an issue" — authoritative in a way a read by parent is not,
+-- because a node's issue can be re-parented off the group and still own its
+-- origin.
+SELECT * FROM issue
+WHERE workspace_id = $1
+  AND origin_type = $2
+  AND origin_id = ANY(sqlc.arg('origin_ids')::uuid[]);
+
 -- name: CountCreatedIssueAssignees :many
 -- Count assignees on issues created by a specific user.
 SELECT
@@ -570,9 +631,17 @@ WHERE workspace_id = $1
 GROUP BY assignee_type, assignee_id;
 
 -- name: ChildIssueProgress :many
+-- Per-parent roll-up of its direct children. `done` counts terminal children
+-- (done + cancelled); `blocked` and `active` are the two signals the project
+-- views bubble onto the parent card: a stuck child must be visible without
+-- expanding the parent, and a parent with no active child reads differently
+-- from one whose pipeline is running. All three key sets are expanded from
+-- categories by the handler, so custom statuses count under their category.
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done
+       COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done,
+       COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('blocked_status_keys')::text[]))::bigint AS blocked,
+       COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('active_status_keys')::text[]))::bigint AS active
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
