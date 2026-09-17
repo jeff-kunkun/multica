@@ -109,6 +109,130 @@ describe("parseIssueDraftBlock", () => {
     }
   });
 
+  it("reads the group, its stages and its hints", () => {
+    // What the prompt asks for: a key per sub-issue, a 1-based stage, and a
+    // hint at the kind of work rather than an assignee id.
+    const reply = `<issue_draft>${JSON.stringify({
+      title: "T",
+      children: [
+        {
+          key: "c1",
+          title: "Backend",
+          description: "Do it",
+          stage: 1,
+          assignee_hint: "backend",
+        },
+        { key: "c2", title: "Frontend", stage: 2, assignee_hint: "frontend" },
+      ],
+    })}</issue_draft>`;
+    expect(parseIssueDraftBlock(reply)?.children).toEqual([
+      {
+        key: "c1",
+        title: "Backend",
+        description: "Do it",
+        status: "todo",
+        priority: "none",
+        assignee_type: null,
+        assignee_id: null,
+        stage: 1,
+        assignee_hint: "backend",
+      },
+      {
+        key: "c2",
+        title: "Frontend",
+        description: "",
+        status: "backlog",
+        priority: "none",
+        assignee_type: null,
+        assignee_id: null,
+        stage: 2,
+        assignee_hint: "frontend",
+      },
+    ]);
+  });
+
+  it("derives each sub-issue's status from its stage", () => {
+    // This is the whole dispatch rule: stage 1 runs the moment the group is
+    // created, later stages park in Backlog with their assignee already bound.
+    const parsed = parseIssueDraftBlock(
+      `<issue_draft>{"title":"T","children":[{"key":"c1","title":"First","stage":1},{"key":"c2","title":"Later","stage":2}]}</issue_draft>`,
+    );
+    expect(parsed?.children?.map((child) => child.status)).toEqual([
+      "todo",
+      "backlog",
+    ]);
+  });
+
+  it("mints a key for a sub-issue the carrier left unnamed", () => {
+    // The server refuses a keyless sub-issue, and two nodes sharing a key
+    // derive one identity — a 400 or a 500 instead of a group.
+    const parsed = parseIssueDraftBlock(
+      `<issue_draft>{"title":"T","children":[{"title":"No key"},{"key":"c1","title":"Taken"},{"key":"c1","title":"Duplicate"}]}</issue_draft>`,
+    );
+    expect(parsed?.children?.map((child) => child.key)).toEqual([
+      "c1",
+      "c2",
+      "c3",
+    ]);
+  });
+
+  it("drops a sub-issue with no title", () => {
+    const parsed = parseIssueDraftBlock(
+      `<issue_draft>{"title":"T","children":[{"key":"c1","title":"  "},{"key":"c2","title":"Kept"}]}</issue_draft>`,
+    );
+    expect(parsed?.children?.map((child) => child.key)).toEqual(["c2"]);
+  });
+
+  it("ignores an assignee the carrier named", () => {
+    // It has no roster and its instructions forbid this; a wrong id makes the
+    // whole confirm fail, so the panel is the only thing that may choose one.
+    const parsed = parseIssueDraftBlock(
+      `<issue_draft>{"title":"T","children":[{"key":"c1","title":"Child","assignee_type":"agent","assignee_id":"made-up"}]}</issue_draft>`,
+    );
+    expect(parsed?.children?.[0]?.assignee_id).toBeNull();
+    expect(parsed?.children?.[0]?.assignee_type).toBeNull();
+  });
+
+  it("says nothing about sub-issues when the block does not mention them", () => {
+    // A reply that only restated the title must not delete the user's group.
+    expect(
+      parseIssueDraftBlock('<issue_draft>{"title":"T"}</issue_draft>'),
+    ).toEqual({ title: "T" });
+  });
+
+  it("treats a malformed array as no update rather than a clear", () => {
+    expect(
+      parseIssueDraftBlock(
+        '<issue_draft>{"title":"T","children":"two"}</issue_draft>',
+      ),
+    ).toEqual({ title: "T" });
+    expect(
+      parseIssueDraftBlock(
+        '<issue_draft>{"title":"T","children":[{"description":"no title"}]}</issue_draft>',
+      ),
+    ).toEqual({ title: "T" });
+  });
+
+  it("lets an explicit empty array clear the group", () => {
+    // The one way the conversation can say "this went back to a single issue".
+    expect(
+      parseIssueDraftBlock('<issue_draft>{"title":"T","children":[]}</issue_draft>')
+        ?.children,
+    ).toEqual([]);
+  });
+
+  it("caps the group at the server's limit", () => {
+    const many = Array.from({ length: 25 }, (_, index) => ({
+      key: `c${index + 1}`,
+      title: `Child ${index + 1}`,
+    }));
+    expect(
+      parseIssueDraftBlock(
+        `<issue_draft>${JSON.stringify({ title: "T", children: many })}</issue_draft>`,
+      )?.children,
+    ).toHaveLength(20);
+  });
+
   it("keeps the fields it can read when the block is only partly filled in", () => {
     // A missing field is "no opinion", not a wipe: the carrier is told to leave
     // status and priority empty unless the user stated them.
@@ -581,6 +705,47 @@ describe("issue draft input envelope", () => {
     });
   });
 
+  it("carries the group so the carrier can keep its keys", () => {
+    // The instructions say a key already emitted must come back unchanged, and
+    // the carrier can only keep that promise for a group it is shown.
+    const encoded = encodeIssueDraftInput("split it", {
+      ...EMPTY,
+      title: "Parent",
+      children: [
+        {
+          key: "c1",
+          title: "First",
+          description: "D",
+          status: "todo",
+          priority: "none",
+          stage: 1,
+          assignee_hint: "backend",
+        },
+      ],
+    });
+    const envelope = JSON.parse(encoded.split("\n")[1]!);
+    expect(envelope.current_draft.children).toEqual([
+      {
+        key: "c1",
+        title: "First",
+        description: "D",
+        stage: 1,
+        assignee_hint: "backend",
+      },
+    ]);
+  });
+
+  it("omits an empty group rather than stating there is none", () => {
+    const encoded = encodeIssueDraftInput("keep going", {
+      ...EMPTY,
+      title: "T",
+      children: [],
+    });
+    expect(
+      JSON.parse(encoded.split("\n")[1]!).current_draft,
+    ).not.toHaveProperty("children");
+  });
+
   it("returns anything that is not an envelope unchanged", () => {
     expect(decodeIssueDraftInput("plain text")).toBe("plain text");
     expect(decodeIssueDraftInput("MULTICA_ISSUE_DRAFT_INPUT\nnot json")).toBe(
@@ -607,6 +772,81 @@ describe("mergeIssueDraftPayload", () => {
   it("is a no-op when the reply had no parseable block", () => {
     expect(mergeIssueDraftPayload(EMPTY, null)).toBe(EMPTY);
   });
+
+  it("keeps the group the reply did not mention", () => {
+    // The block is a partial update. A reply that only restated the title must
+    // not read as "there are no sub-issues".
+    const current: IssueDraftPayload = {
+      ...EMPTY,
+      title: "Parent",
+      children: [
+        {
+          key: "c1",
+          title: "Child",
+          description: "",
+          status: "todo",
+          priority: "none",
+        },
+      ],
+    };
+    expect(mergeIssueDraftPayload(current, { title: "New" }).children).toEqual(
+      current.children,
+    );
+  });
+
+  it("replaces the sub-issue set so a removal can land", () => {
+    const current: IssueDraftPayload = {
+      ...EMPTY,
+      title: "Parent",
+      children: [
+        { key: "c1", title: "One", description: "", status: "todo", priority: "none" },
+        { key: "c2", title: "Two", description: "", status: "todo", priority: "none" },
+      ],
+    };
+    const merged = mergeIssueDraftPayload(current, {
+      children: [
+        { key: "c2", title: "Two, revised", description: "", status: "", priority: "" },
+      ],
+    });
+    expect(merged.children?.map((child) => child.key)).toEqual(["c2"]);
+    expect(merged.children?.[0]?.title).toBe("Two, revised");
+  });
+
+  it("keeps the assignee the user picked for a row that survives", () => {
+    // The carrier is not allowed to choose an assignee and does not know which
+    // one was chosen; if replacement wiped it, every later reply would quietly
+    // unassign work the user had already routed.
+    const current: IssueDraftPayload = {
+      ...EMPTY,
+      title: "Parent",
+      children: [
+        {
+          key: "c1",
+          title: "One",
+          description: "",
+          status: "todo",
+          priority: "none",
+          assignee_type: "agent",
+          assignee_id: "ag-1",
+          assignee_hint: "backend",
+        },
+      ],
+    };
+    const merged = mergeIssueDraftPayload(current, {
+      children: [
+        {
+          key: "c1",
+          title: "One, revised",
+          description: "",
+          status: "todo",
+          priority: "none",
+          assignee_hint: "backend",
+        },
+      ],
+    });
+    expect(merged.children?.[0]?.assignee_id).toBe("ag-1");
+    expect(merged.children?.[0]?.assignee_type).toBe("agent");
+  });
 });
 
 describe("issueDraftIsCreatable", () => {
@@ -614,5 +854,31 @@ describe("issueDraftIsCreatable", () => {
     expect(issueDraftIsCreatable({ ...EMPTY, title: "  " })).toBe(false);
     expect(issueDraftIsCreatable({ ...EMPTY, title: "T" })).toBe(true);
     expect(issueDraftIsCreatable({ ...EMPTY, title: "T", description: "" })).toBe(true);
+  });
+
+  it("refuses a group with a sub-issue that has no title", () => {
+    // The server validates every node through the root's gate and refuses the
+    // whole group, so the confirm button must not be offered for one.
+    expect(
+      issueDraftIsCreatable({
+        ...EMPTY,
+        title: "T",
+        children: [
+          { key: "c1", title: "A", description: "", status: "todo", priority: "none" },
+          { key: "c2", title: "  ", description: "", status: "todo", priority: "none" },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("refuses a group larger than the server's cap", () => {
+    const children = Array.from({ length: 21 }, (_, index) => ({
+      key: `c${index + 1}`,
+      title: `Child ${index + 1}`,
+      description: "",
+      status: "todo",
+      priority: "none",
+    }));
+    expect(issueDraftIsCreatable({ ...EMPTY, title: "T", children })).toBe(false);
   });
 });

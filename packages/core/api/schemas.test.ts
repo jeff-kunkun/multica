@@ -76,6 +76,7 @@ import {
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_ISSUE_STATUS_ENTRY,
 } from "./schemas";
+import { IssueDraftFinalizeSchema, IssueDraftPayloadSchema } from "./schemas";
 import { parseWithFallback } from "./schema";
 
 const baseIssue = {
@@ -2471,5 +2472,154 @@ describe("AgentSchema auto_retry_enabled", () => {
     });
     expect(parsed.id).toBe("agent-1");
     expect(parsed.auto_retry_enabled).toBeUndefined();
+  });
+});
+
+describe("alignment group drift", () => {
+  const ENDPOINT = { endpoint: "POST /api/issue-drafts/{id}/finalize" };
+
+  const draft = {
+    chat_session_id: "sess-1",
+    workspace_id: "ws-1",
+    status: "completed",
+    revision: 4,
+    draft: { title: "Parent", description: "", status: "", priority: "" },
+    issue_id: "issue-1",
+    policy: { key: "question", version: "2", guided: true },
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("reads the sub-issues a draft carries", () => {
+    const parsed = IssueDraftPayloadSchema.parse({
+      title: "Parent",
+      description: "",
+      status: "",
+      priority: "",
+      children: [
+        {
+          key: "c1",
+          title: "Child",
+          description: "",
+          status: "todo",
+          priority: "none",
+          stage: 1,
+          assignee_hint: "backend",
+        },
+      ],
+    });
+    expect(parsed.children).toHaveLength(1);
+    expect(parsed.children?.[0]?.key).toBe("c1");
+  });
+
+  it("reads the old single-issue shape as a group with only its root", () => {
+    // Not a compatibility branch: `children` absent and `children: []` are the
+    // same statement — this alignment settled on one issue.
+    expect(
+      IssueDraftPayloadSchema.parse({
+        title: "Parent",
+        description: "",
+        status: "",
+        priority: "",
+      }).children,
+    ).toEqual([]);
+    expect(
+      IssueDraftPayloadSchema.parse({
+        title: "Parent",
+        description: "",
+        status: "",
+        priority: "",
+        children: [],
+      }).children,
+    ).toEqual([]);
+  });
+
+  it("degrades a malformed children value instead of white-screening", () => {
+    // `children` not an array is a backend this build cannot read; the draft's
+    // own fields still restore, and the preview renders it as a single issue.
+    const parsed = IssueDraftPayloadSchema.parse({
+      title: "Parent",
+      description: "Kept",
+      status: "",
+      priority: "",
+      children: "two",
+    });
+    expect(parsed.title).toBe("Parent");
+    expect(parsed.children).toEqual([]);
+  });
+
+  it("keeps a sub-issue whose title is missing rather than dropping the set", () => {
+    // The panel is where "cannot be created" is decided; a row the user is
+    // looking at and can fix must not vanish from under them.
+    const parsed = IssueDraftPayloadSchema.parse({
+      title: "Parent",
+      description: "",
+      status: "",
+      priority: "",
+      children: [{ key: "c1", description: "no title yet" }],
+    });
+    expect(parsed.children).toHaveLength(1);
+    expect(parsed.children?.[0]?.title).toBe("");
+  });
+
+  it("parses the whole group a confirm reports", () => {
+    const parsed = IssueDraftFinalizeSchema.parse({
+      draft,
+      issue_id: "issue-1",
+      issues: [
+        { id: "issue-1", identifier: "MUL-1", title: "Parent", status: "todo" },
+        {
+          id: "issue-2",
+          identifier: "MUL-2",
+          title: "Child",
+          status: "backlog",
+          stage: 2,
+          assignee_type: "agent",
+          assignee_id: "ag-1",
+          parent_issue_id: "issue-1",
+        },
+      ],
+    });
+    expect(parsed.issues.map((issue) => issue.identifier)).toEqual([
+      "MUL-1",
+      "MUL-2",
+    ]);
+  });
+
+  it("degrades the group to empty when the backend predates it", () => {
+    expect(
+      parseWithFallback({ draft, issue_id: "issue-1" }, IssueDraftFinalizeSchema, {
+        draft: { ...draft, status: "draft" as const },
+        issue_id: "",
+        issues: [],
+      }, ENDPOINT).issues,
+    ).toEqual([]);
+  });
+
+  it("drops a group with one unusable row rather than showing a partial one", () => {
+    // A row with no id is a link that cannot resolve; "5 issues, one of them
+    // unopenable" and "we cannot tell how many" should look the same to the
+    // user — the parent alone.
+    const parsed = IssueDraftFinalizeSchema.parse({
+      draft,
+      issue_id: "issue-1",
+      issues: [
+        { id: "issue-1", identifier: "MUL-1", title: "Parent", status: "todo" },
+        { identifier: "MUL-2", title: "Ghost", status: "todo" },
+      ],
+    });
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.issue_id).toBe("issue-1");
+  });
+
+  it("still refuses a success body with no issue to navigate to", () => {
+    // The caller routes to `issue_id`; an empty one would strand the user on a
+    // route that cannot resolve while the issues it names are already live.
+    const result = IssueDraftFinalizeSchema.safeParse({
+      draft,
+      issue_id: "",
+      issues: [],
+    });
+    expect(result.success).toBe(false);
   });
 });

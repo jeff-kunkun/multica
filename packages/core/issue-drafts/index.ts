@@ -17,6 +17,21 @@ export {
   type IssueDraftFold,
 } from "./fold";
 export {
+  ISSUE_DRAFT_MAX_CHILDREN,
+  ISSUE_DRAFT_RECOMMENDED_CHILDREN,
+  issueDraftChildStatus,
+  issueDraftCreatedGroup,
+  issueDraftNodeRunsOnCreate,
+  maxIssueDraftChildStage,
+  mintIssueDraftChildKeys,
+  normalizeIssueDraftChildren,
+  normalizeIssueDraftPayloadGroup,
+  planIssueDraftGroup,
+  sameIssueDraftChildren,
+  type IssueDraftGroupPlan,
+  type IssueDraftGroupRow,
+} from "./group";
+export {
   appendIssueDraftSummary,
   findIssueDraft,
   issueDraftIsRecord,

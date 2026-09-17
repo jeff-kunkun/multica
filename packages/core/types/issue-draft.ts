@@ -11,9 +11,47 @@
 export type IssueDraftStatus = "draft" | "ready" | "completed" | "abandoned";
 
 /**
+ * One sub-issue of an alignment. `key` is this sub-issue's name WITHIN this
+ * draft: the preview panel mints one when a row first enters the draft, and
+ * every later save carries it back unchanged. It is not a UUID — the server
+ * hashes (conversation, key) into the sub-issue's real identity, so a client
+ * cannot name an identity that belongs to someone else's alignment, and the
+ * same key resolves to the same issue on a repeated confirm.
+ */
+export interface IssueDraftChild {
+  key: string;
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  assignee_type?: string | null;
+  assignee_id?: string | null;
+  /** The stage this sub-issue belongs to, 1-based. Absent/null means "no
+   *  stage", i.e. the implicit single stage. Stage 1 starts on confirm; later
+   *  stages are parked in Backlog until someone promotes them. */
+  stage?: number | null;
+  /**
+   * What kind of work this is ("backend implementation"), as the carrier
+   * describes it.
+   *
+   * Client-owned: the server never reads it. The carrier has no workspace
+   * roster, so it names the work instead of a person, and the preview panel
+   * shows the hint beside the assignee picker until the user has picked the
+   * real assignee.
+   */
+  assignee_hint?: string | null;
+}
+
+/**
  * The structured issue a draft has arrived at. Only these fields are read by
  * the server at finalize; anything else the client stores alongside them is
  * preserved untouched.
+ *
+ * The eight flat fields describe the group's ROOT — the parent issue. A request
+ * that turned out to be several pieces of work puts them in `children`, and the
+ * confirm creates the whole group in one transaction. An absent or empty
+ * `children` is not a legacy shape to be tolerated: it is a group with a single
+ * node, which is exactly what a lone issue always was.
  */
 export interface IssueDraftPayload {
   title: string;
@@ -24,6 +62,7 @@ export interface IssueDraftPayload {
   assignee_id?: string | null;
   project_id?: string | null;
   parent_issue_id?: string | null;
+  children?: IssueDraftChild[];
 }
 
 /**
@@ -85,11 +124,33 @@ export interface IssueDraftSummary extends IssueDraft {
   last_message_at: string;
 }
 
-/** Result of confirming a draft. `issue_id` is the same value for every repeat
- *  of the same confirm — the protocol creates at most one issue per draft. */
+/** One issue a confirm created, enough to render it as a row. */
+export interface IssueDraftCreatedIssue {
+  id: string;
+  /** MUL-123 — what a person reads, not the UUID. */
+  identifier: string;
+  title: string;
+  status: string;
+  stage?: number | null;
+  assignee_type?: string | null;
+  assignee_id?: string | null;
+  parent_issue_id?: string | null;
+}
+
+/**
+ * Result of confirming a draft.
+ *
+ * `issue_id` is the same value for every repeat of the same confirm — the
+ * protocol creates at most one group per alignment — and it stays the answer to
+ * "where does the user go now": it is the group's root (parent) issue.
+ * `issues` is the whole group, root first, and is absent from a backend that
+ * predates groups; callers that need the group degrade to `[issue_id]`, which
+ * is exactly what a group with no sub-issues is.
+ */
 export interface IssueDraftFinalizeResult {
   draft: IssueDraft;
   issue_id: string;
+  issues?: IssueDraftCreatedIssue[];
 }
 
 /** Result of rebinding a live alignment conversation to another runtime. */

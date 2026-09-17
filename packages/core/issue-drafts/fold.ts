@@ -1,4 +1,5 @@
 import type { ChatMessage, IssueDraftPayload, IssueDraftStatus } from "../types";
+import { sameIssueDraftChildren } from "./group";
 import { mergeIssueDraftPayload, parseIssueDraftBlock } from "./protocol";
 
 /**
@@ -96,6 +97,10 @@ export function sameIssueDraftValues(
     a.title === b.title &&
     a.description === b.description &&
     a.status === b.status &&
-    a.priority === b.priority
+    a.priority === b.priority &&
+    // The group is one of those fields since DENE-411: a reply that only
+    // rewrote the sub-issues changed the draft, and a fold that ignored it
+    // would leave the preview showing a group the server does not have.
+    sameIssueDraftChildren(a.children ?? [], b.children ?? [])
   );
 }

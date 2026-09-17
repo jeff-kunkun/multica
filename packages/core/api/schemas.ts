@@ -2291,10 +2291,40 @@ export const agentBuilderRuntimeSwitchFallback = (
 ): AgentBuilderRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
 
 /**
+ * One sub-issue of an alignment draft.
+ *
+ * Every field falls back on its own, `key` and `title` included, and neither is
+ * required. Both are things the CONFIRM cares about (the server refuses a
+ * sub-issue with no key, and an issue with no title), but this is the read path
+ * for a payload the client itself wrote and may be midway through editing: an
+ * empty title is a row the user is looking at and can fix, and dropping it here
+ * would delete their work from the screen to punish a state the panel already
+ * refuses to confirm. `issueDraftIsCreatable` is where "this cannot be created"
+ * is decided.
+ */
+export const IssueDraftChildSchema = z.object({
+  key: z.string().catch(""),
+  title: z.string().catch(""),
+  description: z.string().catch(""),
+  status: z.string().catch(""),
+  priority: z.string().catch(""),
+  assignee_type: z.string().nullish().catch(null),
+  assignee_id: z.string().nullish().catch(null),
+  stage: z.number().int().nullish().catch(null),
+  assignee_hint: z.string().nullish().catch(null),
+}).loose();
+
+/**
  * The structured issue an alignment draft has arrived at. Every field falls
  * back to empty on its own: a draft written by a newer build must still
  * restore the fields this build understands rather than discarding the
  * conversation's work wholesale.
+ *
+ * `children` follows the same rule one level up, and its fallback is `[]` — a
+ * group with only its root. That covers three cases with one value, which is
+ * the point: a backend that predates groups sends no `children` at all, a
+ * malformed array is not something to render half of, and an alignment that
+ * settled on one issue legitimately has none.
  */
 export const IssueDraftPayloadSchema = z.object({
   title: z.string().catch(""),
@@ -2305,6 +2335,7 @@ export const IssueDraftPayloadSchema = z.object({
   assignee_id: z.string().nullish().catch(null),
   project_id: z.string().nullish().catch(null),
   parent_issue_id: z.string().nullish().catch(null),
+  children: z.array(IssueDraftChildSchema).catch([]),
 }).loose();
 
 /**
@@ -2398,6 +2429,24 @@ export const EMPTY_ISSUE_DRAFT_LIST: { drafts: IssueDraftSummary[] } = {
 };
 
 /**
+ * One issue a confirm created, as the response reports it.
+ *
+ * `id` has no fallback: a row without an id is a link that cannot resolve, and
+ * a confirmation list is made of links. The rest fall back, so one unexpected
+ * field cannot turn a real created issue into a parse failure.
+ */
+export const IssueDraftCreatedIssueSchema = z.object({
+  id: z.string().min(1),
+  identifier: z.string().catch(""),
+  title: z.string().catch(""),
+  status: z.string().catch(""),
+  stage: z.number().int().nullish().catch(null),
+  assignee_type: z.string().nullish().catch(null),
+  assignee_id: z.string().nullish().catch(null),
+  parent_issue_id: z.string().nullish().catch(null),
+}).loose();
+
+/**
  * The result of confirming a draft.
  *
  * `issue_id` has no fallback on purpose. This endpoint returns 2xx only after
@@ -2405,11 +2454,20 @@ export const EMPTY_ISSUE_DRAFT_LIST: { drafts: IssueDraftSummary[] } = {
  * send the user to a route that cannot resolve while the issue it names is
  * already live. An unparseable success body is a hard parse failure at the
  * call site instead — the client re-confirms, which is safe because the
- * protocol returns the same issue for every repeat.
+ * protocol returns the same group for every repeat.
+ *
+ * `issues` is the other half, and it DOES have a fallback: a backend that
+ * predates groups does not send it, and a malformed row must not turn a confirm
+ * that succeeded into a failed request. `z.array(...).catch([])` drops the
+ * whole array when any row is unusable — deliberately, and not one row at a
+ * time: the group is a single judgement, and "5 issues, one of them
+ * unrenderable" and "we cannot tell how many" should both show the user the
+ * same thing (the parent alone, which is `[issue_id]`).
  */
 export const IssueDraftFinalizeSchema = z.object({
   draft: IssueDraftSchema,
   issue_id: z.string().min(1),
+  issues: z.array(IssueDraftCreatedIssueSchema).catch([]),
 }).loose();
 
 export const IssueDraftRuntimeSwitchSchema = z.object({

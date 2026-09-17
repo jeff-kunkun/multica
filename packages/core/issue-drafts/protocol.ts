@@ -1,4 +1,8 @@
-import type { ChatMessage, IssueDraftPayload } from "../types";
+import type { ChatMessage, IssueDraftChild, IssueDraftPayload } from "../types";
+import {
+  ISSUE_DRAFT_MAX_CHILDREN,
+  normalizeIssueDraftChildren,
+} from "./group";
 
 /**
  * Wire format between the alignment page and the hidden `issue_draft:*` carrier.
@@ -93,7 +97,69 @@ export function parseIssueDraftBlock(content: string): IssueDraftPatch | null {
       patch[field] = value;
     }
   }
+  const children = parseIssueDraftChildren(parsed.children);
+  if (children !== undefined) patch.children = children;
   return patch;
+}
+
+/**
+ * The sub-issue array of a draft block, parsed and normalized.
+ *
+ * `undefined` means "this block said nothing about sub-issues", which is NOT the
+ * same as "there are none": the block is a partial update, and a carrier that
+ * only restated the title must not delete the group the user already has. An
+ * explicit `[]` is a statement — an alignment that turned out to be one issue —
+ * and it does clear them, which is what makes "the conversation went back to a
+ * single issue" expressible at all.
+ *
+ * Two things are repaired rather than trusted, because both would otherwise
+ * cost the user a row at confirm time:
+ *
+ *   - a missing key is minted (`c1`, `c2`, …). The identity model needs a key
+ *     per sub-issue, and the server rejects a keyless one — an empty row we can
+ *     still repair is better than a 400 the user cannot act on.
+ *   - a missing title drops that entry. A sub-issue with no title is one the
+ *     server refuses, and unlike a missing key there is nothing to guess; the
+ *     row would be a line in the preview that can never be created.
+ *
+ * An assignee the carrier names is ignored. It has no roster, its instructions
+ * forbid it, and a wrong id here fails the whole confirm
+ * (`validateAssigneePair` refuses rather than ignores) — the preview panel is
+ * the only thing that may choose a real assignee.
+ */
+function parseIssueDraftChildren(raw: unknown): IssueDraftChild[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const children: IssueDraftChild[] = [];
+  for (const entry of raw) {
+    if (children.length >= ISSUE_DRAFT_MAX_CHILDREN) break;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const child = entry as Record<string, unknown>;
+    const title = typeof child.title === "string" ? child.title.trim() : "";
+    if (title.length === 0) continue;
+    children.push({
+      key: typeof child.key === "string" ? child.key.trim() : "",
+      title,
+      description: typeof child.description === "string" ? child.description : "",
+      status: "",
+      priority: "",
+      assignee_type: null,
+      assignee_id: null,
+      stage:
+        typeof child.stage === "number" && Number.isInteger(child.stage)
+          ? child.stage
+          : null,
+      assignee_hint:
+        typeof child.assignee_hint === "string"
+          ? child.assignee_hint.trim()
+          : null,
+    });
+  }
+  // A block that named sub-issues but produced none we can create is a
+  // malformed array, not a decision to delete the group — only an empty array
+  // says that. Clearing here would turn the carrier's broken JSON into lost
+  // user work.
+  if (raw.length > 0 && children.length === 0) return undefined;
+  return normalizeIssueDraftChildren(children);
 }
 
 /** The reply with every machine-readable block removed — what the conversation shows. */
@@ -232,6 +298,18 @@ export function encodeIssueDraftInput(
   request: string,
   draft: IssueDraftPayload,
 ): string {
+  // The group travels with the draft for the same reason the flat fields do:
+  // the carrier is told to preserve what it is given, and its instructions say
+  // a key it has already emitted must come back unchanged. Sending no children
+  // is how the envelope says "there are none" — an empty array would read as a
+  // statement that the group is empty, which is `[]`'s meaning on the way back.
+  const children = (draft.children ?? []).map((child) => ({
+    key: child.key,
+    title: child.title,
+    description: child.description,
+    stage: child.stage ?? null,
+    assignee_hint: child.assignee_hint ?? "",
+  }));
   return (
     DRAFT_INPUT_PREFIX +
     JSON.stringify({
@@ -241,6 +319,7 @@ export function encodeIssueDraftInput(
         description: draft.description,
         status: draft.status,
         priority: draft.priority,
+        ...(children.length > 0 ? { children } : {}),
       },
     })
   );
@@ -262,6 +341,13 @@ export function decodeIssueDraftInput(content: string): string {
  * Folds a parsed block into the draft the user is looking at. Patch fields
  * overwrite; everything else is preserved, including the fields the carrier is
  * not told about (assignee, project, parent) which the preview panel owns.
+ *
+ * `children` is replaced as a SET, not merged item by item: the sub-issue list
+ * is one judgement the carrier makes each turn, and merging it item-wise would
+ * make a removal impossible to express. What survives by key, however, keeps
+ * the fields the carrier is not allowed to choose — the assignee the user
+ * picked for that row — so a reply can reorder or rewrite the group without
+ * silently dropping the work someone already assigned.
  */
 export function mergeIssueDraftPayload(
   current: IssueDraftPayload,
@@ -276,17 +362,47 @@ export function mergeIssueDraftPayload(
       : {}),
     ...(patch.status !== undefined ? { status: patch.status } : {}),
     ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
+    ...(patch.children !== undefined
+      ? { children: mergeIssueDraftChildren(current.children, patch.children) }
+      : {}),
   };
 }
 
+/** The incoming sub-issues, carrying over the client-owned fields of the rows
+ *  that are still there (by key). */
+function mergeIssueDraftChildren(
+  current: readonly IssueDraftChild[] | undefined,
+  incoming: readonly IssueDraftChild[],
+): IssueDraftChild[] {
+  const before = new Map((current ?? []).map((child) => [child.key, child]));
+  return incoming.map((child) => {
+    const previous = before.get(child.key);
+    if (!previous) return child;
+    return {
+      ...child,
+      assignee_type: child.assignee_type ?? previous.assignee_type ?? null,
+      assignee_id: child.assignee_id ?? previous.assignee_id ?? null,
+      assignee_hint: child.assignee_hint ?? previous.assignee_hint ?? null,
+    };
+  });
+}
+
 /**
- * Whether the draft is worth creating an issue from. Only the title is
+ * Whether the draft is worth creating issues from. Only the title is
  * required: the server reads the rest out of the same object, and an empty
- * description is a legitimate issue. This is the client's own gate, so the
- * confirm button is never offered for something the server will refuse.
+ * description is a legitimate issue. Every sub-issue's title is required too —
+ * the server validates each node through the same gate as the root and refuses
+ * the whole group for one empty title, so this is the client's own check that
+ * the confirm button is never offered for something the server will refuse.
  */
 export function issueDraftIsCreatable(draft: IssueDraftPayload): boolean {
-  return draft.title.trim().length > 0;
+  if (draft.title.trim().length === 0) return false;
+  const children = draft.children ?? [];
+  // The group is refused as a whole by the server when it is oversized, so the
+  // client must not offer a confirm that cannot land. Deleting a row is the fix,
+  // and it is right there in the panel.
+  if (children.length > ISSUE_DRAFT_MAX_CHILDREN) return false;
+  return children.every((child) => child.title.trim().length > 0);
 }
 
 function parseJsonObject(value: string): Record<string, unknown> | null {
