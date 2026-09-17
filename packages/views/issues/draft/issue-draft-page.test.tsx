@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -12,7 +12,11 @@ import type {
 } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
-import { issueDraftNodeId } from "@multica/core/issue-drafts";
+import {
+  issueDraftNodeId,
+  markIssueDraftSeedFailure,
+  useIssueDraftSeedFailure,
+} from "@multica/core/issue-drafts";
 import { IssueDraftPage } from "./issue-draft-page";
 
 /**
@@ -216,6 +220,12 @@ vi.mock("@multica/ui/components/ui/resizable", () => ({
 
 vi.mock("../../agents/components/runtime-picker", () => ({
   RuntimePicker: () => <div data-testid="runtime-picker" />,
+}));
+
+// The project field is the preview panel's own; this suite stubs it the way it
+// stubs every other picker (what it hands back is pinned in the panel suite).
+vi.mock("../../projects/components/project-picker", () => ({
+  ProjectPicker: () => <div data-testid="project-picker" />,
 }));
 
 vi.mock("../components/pickers/status-picker", () => ({
@@ -1077,5 +1087,65 @@ describe("IssueDraftPage continuation round", () => {
     renderPage();
     await screen.findByText("This alignment has finished. It is read-only.");
     expect(mocks.reopenIssueDraft).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * DENE-425: the entry dialog opens the conversation, sends the first turn and
+ * closes — so when that send fails, this page is the only place the user can
+ * learn the request they typed was never asked. The empty transcript is the
+ * exact state a lost turn produces, which is why the fact has to be carried
+ * here rather than inferred from what is on screen.
+ */
+describe("IssueDraftPage lost first turn", () => {
+  // The id `renderPage` and the default draft fixture already agree on.
+  const SESSION = "sess-1";
+
+  it("says the first turn was lost, in the server's words", async () => {
+    mocks.messages = [];
+    markIssueDraftSeedFailure(SESSION, "runtime is unusable for this user");
+
+    renderPage(SESSION);
+
+    // The reason is the actionable half: it names which machine to fix, and it
+    // is the server's own 409 wording rather than a paraphrase.
+    expect(
+      await screen.findByText(
+        /Your first message was not sent \(runtime is unusable for this user\)/,
+      ),
+    ).toBeTruthy();
+    // And it says what to do about it — the composer below is the only retry
+    // there is, because the draft itself already exists.
+    expect(screen.getByText(/Type it again in the box below/)).toBeTruthy();
+  });
+
+  it("says it without quoting the server when the failure had no words", async () => {
+    mocks.messages = [];
+    // A 5xx or a transport failure: nothing the user can act on, so the page
+    // states the fact on its own (MUL-6472).
+    markIssueDraftSeedFailure(SESSION, "");
+
+    renderPage(SESSION);
+
+    expect(
+      await screen.findByText(/Your first message was not sent\./),
+    ).toBeTruthy();
+  });
+
+  it("does not show a stale notice once a turn is on the page", async () => {
+    // The default fixture transcript has a carrier turn. Whatever happened to
+    // the first message, this conversation is not missing one, so the notice is
+    // dropped rather than shown over a transcript that contradicts it.
+    markIssueDraftSeedFailure(SESSION, "runtime is unusable for this user");
+
+    renderPage(SESSION);
+
+    await waitFor(() =>
+      expect(screen.queryByText(/first message was not sent/)).toBeNull(),
+    );
+    // Dropped, not merely hidden: a later visit to this draft must not
+    // resurrect it.
+    const { result } = renderHook(() => useIssueDraftSeedFailure(SESSION));
+    await waitFor(() => expect(result.current).toBeNull());
   });
 });

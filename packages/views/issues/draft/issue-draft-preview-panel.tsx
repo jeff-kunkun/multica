@@ -36,6 +36,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink } from "../../navigation";
 import { RuntimePicker } from "../../agents/components/runtime-picker";
+import { ProjectPicker } from "../../projects/components/project-picker";
 import { AssigneePicker } from "../components/pickers/assignee-picker";
 import { PriorityPicker } from "../components/pickers/priority-picker";
 import { StagePicker } from "../components/pickers/stage-picker";
@@ -45,18 +46,19 @@ import { useT } from "../../i18n";
 /**
  * The right-hand column: exactly what pressing "confirm and create" will write.
  *
- * The four fields the server reads at finalize are the four shown here, and
+ * The parent fields the server reads at finalize are the ones shown here, and
  * they are editable — a conversation is a good way to arrive at a draft and a
  * bad way to fix a typo in it. Everything is local until "save", so the preview
  * never races the carrier's own revisions into the server one keystroke at a
  * time.
  *
- * The four fields describe the group's PARENT. Since DENE-411 the same
- * conversation can settle on a parent plus sub-issues, so the panel also edits
- * that list — title, stage, assignee, or deleting a row — and states, before
- * anyone presses confirm, what that confirm will actually start. That last part
- * is not decoration: a confirm can enqueue several agents at once, and the
- * stage rule (stage 1 runs, later stages wait in Backlog) is only knowable
+ * Those fields describe the group's PARENT, the project included: the server
+ * reads it off the root and back-fills every child from it. Since DENE-411 the
+ * same conversation can settle on a parent plus sub-issues, so the panel also
+ * edits that list — title, stage, assignee, or deleting a row — and states,
+ * before anyone presses confirm, what that confirm will actually start. That
+ * last part is not decoration: a confirm can enqueue several agents at once, and
+ * the stage rule (stage 1 runs, later stages wait in Backlog) is only knowable
  * here.
  */
 export function IssueDraftPreviewPanel({
@@ -390,6 +392,23 @@ export function IssueDraftPreviewPanel({
                   priority={(value.priority || null) as IssuePriority | null}
                   onUpdate={(updates) =>
                     setEditing({ ...value, priority: updates.priority ?? "" })
+                  }
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-caption text-muted-foreground">
+                  {t(($) => $.alignment.field_project)}
+                </span>
+                {/* The project the whole group is filed under: the server reads
+                    it off the parent and back-fills every child from it, so it
+                    is a parent-level field like the two beside it — and it is
+                    editable here for the same reason they are, because the
+                    entry face can only offer the context the user arrived
+                    with. */}
+                <ProjectPicker
+                  projectId={value.project_id ?? null}
+                  onUpdate={(updates) =>
+                    setEditing({ ...value, project_id: updates.project_id ?? null })
                   }
                 />
               </div>
@@ -896,6 +915,13 @@ function sameDraft(a: IssueDraftPayload, b: IssueDraftPayload): boolean {
     a.description === b.description &&
     a.status === b.status &&
     a.priority === b.priority &&
+    // Part of the payload the confirm reads, so editing it is an edit like any
+    // other: without this the panel would report itself clean, the confirm
+    // would create from the SAVED draft and the project someone just picked
+    // would be dropped without a word. `null` and `undefined` are the same
+    // answer here ("no project") — they differ only in how the payload was
+    // written, not in what gets created.
+    (a.project_id ?? null) === (b.project_id ?? null) &&
     // Editing the group is an edit to the draft like any other: without this
     // the panel would report itself clean, the session would fold the carrier's
     // next reply straight over the row someone just deleted, and "save" would

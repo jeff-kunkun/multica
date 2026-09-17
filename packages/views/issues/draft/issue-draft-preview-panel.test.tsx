@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => ({
   // whenever it is asked to show no runtime. The alignment page's selection is
   // server state, so that is the whole window after a confirm.
   seedRuntimeId: "rt-2" as string,
+  // What a click on the project picker below selects (null = "No project").
+  projectPick: "proj-1" as string | null,
 }));
 
 vi.mock("../../agents/components/runtime-picker", () => ({
@@ -65,6 +67,27 @@ vi.mock("../components/pickers/priority-picker", () => ({
   }) => (
     <button type="button" onClick={() => onUpdate({ priority: "high" })}>
       priority-picker
+    </button>
+  ),
+}));
+
+// The project picker is real on every other surface; here it is reduced to what
+// this suite asserts about it — the value it is shown, and the update it hands
+// back (DENE-425). `mocks.projectPick` is what a click selects, so a spec can
+// drive both choosing and clearing without a second trigger.
+vi.mock("../../projects/components/project-picker", () => ({
+  ProjectPicker: ({
+    projectId,
+    onUpdate,
+  }: {
+    projectId: string | null;
+    onUpdate: (u: { project_id: string | null }) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() => onUpdate({ project_id: mocks.projectPick })}
+    >
+      project-picker:{String(projectId)}
     </button>
   ),
 }));
@@ -197,6 +220,7 @@ function descriptionInput(): HTMLTextAreaElement {
 
 beforeEach(() => {
   mocks.seedRuntimeId = "rt-2";
+  mocks.projectPick = "proj-1";
 });
 afterEach(() => cleanup());
 
@@ -309,6 +333,61 @@ describe("IssueDraftPreviewPanel server revisions", () => {
 
     rerenderWith({ draft: { ...STORED, title: "手打的标题" } });
     await waitFor(() => expect(props.onDirtyChange).toHaveBeenLastCalledWith(false));
+  });
+});
+
+describe("IssueDraftPreviewPanel project", () => {
+  /**
+   * DENE-425: the project is a parent field like status and priority — the
+   * server files the whole group under the root's project — so the panel has to
+   * show it and let it be edited. Without it the only place a project could be
+   * chosen was the entry face, and a group aligned from a project page landed
+   * under "no project" with nothing on this screen saying so.
+   */
+  it("shows the draft's project and saves a new one with the rest of the payload", async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    renderPanel({
+      draft: { ...STORED, title: "T", project_id: "proj-0" },
+      onSave,
+    });
+
+    const picker = screen.getByRole("button", { name: "project-picker:proj-0" });
+    fireEvent.click(picker);
+
+    // The picker's answer is an edit like any other: it is on screen and not yet
+    // stored.
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ project_id: "proj-1" });
+  });
+
+  it("reports a project change as an unsaved edit", () => {
+    // `dirty` is what stops the confirm from creating the SAVED draft (which
+    // would silently drop the project just picked) and what stops a carrier
+    // reply from folding over it.
+    const onDirtyChange = vi.fn();
+    renderPanel({
+      draft: { ...STORED, title: "T", project_id: "proj-0" },
+      onDirtyChange,
+    });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "project-picker:proj-0" }));
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("treats clearing the project as an edit too", async () => {
+    mocks.projectPick = null;
+    const onSave = vi.fn().mockResolvedValue(true);
+    renderPanel({ draft: { ...STORED, title: "T", project_id: "proj-0" }, onSave });
+
+    fireEvent.click(screen.getByRole("button", { name: "project-picker:proj-0" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    // "No project" is written as an explicit null rather than by dropping the
+    // field, so the save is a change the server can act on.
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ project_id: null });
   });
 });
 

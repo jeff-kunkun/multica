@@ -65,6 +65,11 @@ export {
   type IssueDraftPolicyKey,
 } from "./policy";
 export {
+  clearIssueDraftSeedFailure,
+  markIssueDraftSeedFailure,
+  useIssueDraftSeedFailure,
+} from "./seed-failure";
+export {
   ISSUE_DRAFT_STAGES,
   issueDraftCanConfirm,
   issueDraftStage,

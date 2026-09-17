@@ -6,7 +6,12 @@ import { useDefaultLayout, type Layout } from "react-resizable-panels";
 import { ArrowLeft, MoreHorizontal } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { decodeIssueDraftInput, stripIssueDraftDirectives } from "@multica/core/issue-drafts";
+import {
+  clearIssueDraftSeedFailure,
+  decodeIssueDraftInput,
+  stripIssueDraftDirectives,
+  useIssueDraftSeedFailure,
+} from "@multica/core/issue-drafts";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -105,6 +110,28 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
     () => backOrReplace(paths.issues()),
     [backOrReplace, paths],
   );
+
+  /**
+   * The first turn this page was opened for never went out, as the entry dialog
+   * recorded it (DENE-425). Shown while the transcript is still empty and no
+   * turn is running — that is the state where "nothing has been said yet" and
+   * "the message was lost" are indistinguishable on screen, and the notice is
+   * the only thing that tells them apart. Once a turn lands (the user's own
+   * resend included) the fact is stale and the record is dropped, so it cannot
+   * resurface on a later visit to the same draft.
+   */
+  const seedFailure = useIssueDraftSeedFailure(draftId);
+  const seedFailureSettled =
+    session.messages.length > 0 || session.pending || session.isRecord;
+  const seedFailureNotice =
+    seedFailure !== null && !seedFailureSettled && !session.messagesLoading
+      ? seedFailure
+      : null;
+  useEffect(() => {
+    if (seedFailure !== null && seedFailureSettled) {
+      clearIssueDraftSeedFailure(draftId);
+    }
+  }, [draftId, seedFailure, seedFailureSettled]);
 
   // The conversation is gone — discarded elsewhere, or a link that outlived it.
   // Replace rather than push: the address no longer resolves, so it must not
@@ -220,6 +247,7 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               onStop={() => void session.stop()}
               error={session.error}
               question={session.question}
+              seedFailure={seedFailureNotice}
               // A record has nothing left to say: no composer, no answer chips
               // for a question that was already settled, and no runtime badge
               // for a machine that will never run another turn.

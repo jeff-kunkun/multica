@@ -1,9 +1,11 @@
 import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ApiError } from "@multica/core/api";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { useIssueDraftSeedFailure } from "@multica/core/issue-drafts";
 import type { IssueDraftPayload, RuntimeDevice } from "@multica/core/types";
 import enCommon from "../locales/en/common.json";
 import enIssues from "../locales/en/issues.json";
@@ -15,7 +17,8 @@ import { AlignCreatePanel } from "./align-create-issue";
  * The alignment face's contract is narrow on purpose: open the conversation,
  * hand the request over, leave. It must never create an issue — and it must
  * navigate even when the first turn fails, because a draft the user cannot see
- * is a draft they will create again.
+ * is a draft they will create again. That last rule is why a lost first turn
+ * has to be recorded for the page it lands on rather than shown here (DENE-425).
  *
  * DENE-370 moved this face INSIDE the create-issue dialog. What that adds is
  * the shared input: the alignment request lives in the create draft's own
@@ -39,7 +42,10 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   close: vi.fn(),
   setAlign: vi.fn(),
+  setShared: vi.fn(),
   setActiveMode: vi.fn(),
+  // What a click on the stubbed project picker selects (null = "No project").
+  projectPick: "proj-1" as string | null,
 }));
 
 vi.mock("@multica/core/api", async () => {
@@ -92,6 +98,7 @@ const draftStore = {
     activeMode: "manual" as string,
   },
   setAlign: mocks.setAlign,
+  setShared: mocks.setShared,
   setActiveMode: mocks.setActiveMode,
 };
 
@@ -238,6 +245,26 @@ vi.mock("../issues/draft/unfinished-issue-drafts", () => ({
     ) : null,
 }));
 
+// The real picker needs a project list this suite does not seed; what matters
+// here is the wiring — the value it is shown, and what its answer does to the
+// seed draft and the create payload (DENE-425).
+vi.mock("../projects/components/project-picker", () => ({
+  ProjectPicker: ({
+    projectId,
+    onUpdate,
+  }: {
+    projectId: string | null;
+    onUpdate: (u: { project_id: string | null }) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() => onUpdate({ project_id: mocks.projectPick })}
+    >
+      project-picker:{String(projectId)}
+    </button>
+  ),
+}));
+
 const TEST_RESOURCES = {
   en: { common: enCommon, issues: enIssues, modals: enModals, editor: enEditor },
 };
@@ -253,6 +280,7 @@ const ONLINE_RUNTIME = {
 function renderPanel(props: {
   onClose?: () => void;
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
+  data?: Record<string, unknown> | null;
 } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -263,6 +291,7 @@ function renderPanel(props: {
         <AlignCreatePanel
           onClose={props.onClose ?? mocks.close}
           onSwitchMode={props.onSwitchMode}
+          data={props.data}
         />
       </I18nProvider>
     </QueryClientProvider>,
@@ -332,7 +361,9 @@ beforeEach(() => {
     },
   });
   mocks.sendChatMessage.mockResolvedValue({ message_id: "msg-1", task_id: "task-1" });
+  mocks.projectPick = "proj-1";
   draftStore.draft.shared.attachments = [];
+  draftStore.draft.shared.projectId = undefined;
   draftStore.draft.align.request = "";
   mocks.setAlign.mockImplementation((patch: { request?: string }) => {
     draftStore.draft.align = { ...draftStore.draft.align, ...patch };
@@ -373,6 +404,111 @@ describe("AlignCreatePanel", () => {
     await waitFor(() =>
       expect(mocks.push).toHaveBeenCalledWith("/acme/issues/new/sess-new"),
     );
+  });
+
+  it("leaves the reason for a lost first turn where that page can read it", async () => {
+    // The face closes on submit, so it cannot be the one to say the turn was
+    // lost — the landing page is, and this is the handoff. The server's 409
+    // wording travels intact: "runtime is unusable for this user" is what tells
+    // the user which machine to fix (DENE-425).
+    mocks.sendChatMessage.mockRejectedValue(
+      new ApiError("runtime is unusable for this user", 409, "Conflict"),
+    );
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    await waitFor(() =>
+      expect(mocks.push).toHaveBeenCalledWith("/acme/issues/new/sess-new"),
+    );
+    const { result } = renderHook(() => useIssueDraftSeedFailure("sess-new"));
+    expect(result.current).toBe("runtime is unusable for this user");
+  });
+
+  it("records no server words when the failure has none to repeat", async () => {
+    // A 5xx message is internal detail (MUL-6472); the page says it in its own
+    // words rather than quoting it.
+    mocks.sendChatMessage.mockRejectedValue(
+      new ApiError("failed to create chat session", 500, "Internal Server Error"),
+    );
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    await waitFor(() =>
+      expect(mocks.push).toHaveBeenCalledWith("/acme/issues/new/sess-new"),
+    );
+    const { result } = renderHook(() => useIssueDraftSeedFailure("sess-new"));
+    expect(result.current).toBe("");
+  });
+
+  it("shows the server's own words when the create is refused", async () => {
+    // Every 4xx exit of the create endpoint used to collapse into one sentence
+    // that named neither the cause nor the fix (DENE-421).
+    mocks.createIssueDraftSession.mockRejectedValue(
+      new ApiError(
+        "runtime must be online to start an issue draft session",
+        409,
+        "Conflict",
+      ),
+    );
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    expect(
+      await screen.findByText(
+        "runtime must be online to start an issue draft session",
+      ),
+    ).toBeTruthy();
+    // Nothing was created: the user stays here, with the reason.
+    expect(mocks.close).not.toHaveBeenCalled();
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  it("falls back to its own sentence when the server's is not for the user", async () => {
+    mocks.createIssueDraftSession.mockRejectedValue(
+      new ApiError("pgx: relation \"chat_session\" does not exist", 500, "Internal Server Error"),
+    );
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    expect(
+      await screen.findByText("Could not start the alignment conversation."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/pgx: relation/)).toBeNull();
+  });
+
+  it("does not offer a second create when the response dropped the session id", async () => {
+    // The conversation WAS created — the schema fallback only lost its id — so
+    // a retry here is a duplicate draft nothing deduplicates. The face stays
+    // put and says so; the unfinished list above is the way back in.
+    mocks.createIssueDraftSession.mockResolvedValue({
+      session_id: "",
+      agent_id: "agent-1",
+      runtime_id: "rt-1",
+      draft: {
+        chat_session_id: "",
+        workspace_id: "ws-1",
+        status: "draft",
+        revision: 1,
+        draft: { title: "", description: "add dark mode", status: "", priority: "" },
+        created_at: "",
+        updated_at: "",
+      },
+    });
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    expect(
+      await screen.findByText(/carried no session id/),
+    ).toBeTruthy();
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.close).not.toHaveBeenCalled();
+    expect(submitButton()).toBeDisabled();
+    expect(mocks.sendChatMessage).not.toHaveBeenCalled();
   });
 
   it("refuses to start without a request", async () => {
@@ -469,7 +605,11 @@ describe("AlignCreatePanel", () => {
   });
 
   it("routes an unfinished draft to its conversation", async () => {
-    mocks.drafts = [{ chat_session_id: "sess-old" }];
+    // `status` is what makes this row unfinished: the banner offers work to
+    // RESUME, so a row the server reports as `completed`/`abandoned` is filtered
+    // out on the way in (DENE-371). Without it this fixture is a record, and the
+    // banner has nothing to offer.
+    mocks.drafts = [{ chat_session_id: "sess-old", status: "draft" }];
     renderPanel();
     await userEvent.click(await screen.findByRole("button", { name: "resume-unfinished" }));
     expect(mocks.push).toHaveBeenCalledWith("/acme/issues/new/sess-old");
@@ -547,6 +687,72 @@ describe("AlignCreatePanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /Switch to New issue/i }));
     expect(onSwitchMode).toHaveBeenCalledWith(null);
+  });
+
+  /**
+   * DENE-425: the alignment files a whole group, and the project is the one
+   * filing field it can inherit rather than discover — the project page the
+   * dialog was opened from. Without it a group aligned from that page lands
+   * under "no project".
+   */
+  it("files the alignment under the project the dialog was opened with", async () => {
+    renderPanel({ data: { project_id: "proj-page" } });
+    // The picker shows the inherited project rather than an empty field.
+    expect(
+      screen.getByRole("button", { name: "project-picker:proj-page" }),
+    ).toBeTruthy();
+
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.draft?.project_id).toBe("proj-page");
+  });
+
+  it("inherits the project the manual face committed on the way in", async () => {
+    // Switching faces carries no project in the modal payload (the carry
+    // channel is for the parent context alone), so `switchToAlign` writes it to
+    // the shared draft instead. This is that read.
+    draftStore.draft.shared.projectId = "proj-shared";
+    renderPanel();
+    expect(
+      screen.getByRole("button", { name: "project-picker:proj-shared" }),
+    ).toBeTruthy();
+
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.draft?.project_id).toBe("proj-shared");
+  });
+
+  it("lets the project be changed here and keeps it for the other faces", async () => {
+    draftStore.draft.shared.projectId = "proj-0";
+    renderPanel();
+
+    await userEvent.click(screen.getByRole("button", { name: "project-picker:proj-0" }));
+    // Written through to the shared draft, which is where the manual face seeds
+    // its own project from after a switch back.
+    expect(mocks.setShared).toHaveBeenCalledWith({ projectId: "proj-1" });
+
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.draft?.project_id).toBe("proj-1");
+  });
+
+  it("sends no project when the user has none", async () => {
+    renderPanel();
+    expect(screen.getByRole("button", { name: "project-picker:null" })).toBeTruthy();
+
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.draft).not.toHaveProperty("project_id");
   });
 
   it("blocks submit while a shared attachment is still uploading", async () => {

@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeftRight, Loader2, Sparkles } from "lucide-react";
+import { clientErrorMessage } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   issueDraftListOptions,
+  markIssueDraftSeedFailure,
   unfinishedIssueDrafts,
   useStartIssueDraft,
 } from "@multica/core/issue-drafts";
@@ -32,6 +34,7 @@ import {
 import { useT } from "../i18n";
 import { UnfinishedIssueDraftsBanner } from "../issues/draft/unfinished-issue-drafts";
 import { AppLink, useNavigation } from "../navigation";
+import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
 
 /**
@@ -48,19 +51,31 @@ import { useIssueCreateUploads } from "./use-issue-create-uploads";
  * What IS shared with "New issue" is everything about the input: the same
  * `ContentEditor`, the same upload pool (`draft.shared.attachments`), and the
  * same draft store, so a file or a body typed on either face survives a switch
- * to the other. Which machine runs the alignment is still decided FOR the user
- * — the page's preview panel is where that choice is visible and changeable
- * afterwards. The single case that stops the conversation from starting at all
- * — nothing usable to run on, or the chosen machine offline — is stated
- * outright instead of being left for the user to infer from a disabled button.
+ * to the other. So is the default PROJECT — the alignment files a whole group,
+ * and a group started from a project page has to land in that project rather
+ * than under "no project". Which machine runs the alignment is still decided FOR
+ * the user — the page's preview panel is where that choice is visible and
+ * changeable afterwards. The single case that stops the conversation from
+ * starting at all — nothing usable to run on, or the chosen machine offline — is
+ * stated outright instead of being left for the user to infer from a disabled
+ * button.
  */
 export function AlignCreatePanel({
   onClose,
   onSwitchMode,
+  data,
 }: {
   onClose: () => void;
   /** Called with the carry payload for the panel this face switches back to. */
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
+  /**
+   * The modal's seed payload — the same channel the manual and agent faces read
+   * their defaults from. Only `project_id` is meaningful here: priority and due
+   * date describe a filing decision the conversation is there to make, while
+   * the project is the one default the user arrived with (the project page they
+   * opened the dialog from) and would lose silently otherwise.
+   */
+  data?: Record<string, unknown> | null;
 }) {
   const { t } = useT("issues");
   const { t: tModals } = useT("modals");
@@ -71,6 +86,7 @@ export function AlignCreatePanel({
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setAlign = useIssueDraftStore((s) => s.setAlign);
+  const setShared = useIssueDraftStore((s) => s.setShared);
   const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
 
   // The alignment request lives in the draft's own `align` slot, exactly like
@@ -83,6 +99,24 @@ export function AlignCreatePanel({
   const editorRef = useRef<ContentEditorRef>(null);
   const [hasContent, setHasContent] = useState(initialRequest.trim().length > 0);
   const [runtimeId, setRuntimeId] = useState("");
+  // The default project, read from the same two places the manual face reads it
+  // (create-issue.tsx): the modal's own seed first, then the shared create
+  // draft. The second is how a switch from the manual face carries its pick —
+  // `switchToAlign` commits the local project there before switching, and the
+  // carry channel stays reserved for the parent context it cannot persist.
+  const [projectId, setProjectId] = useState<string | null>(() => {
+    if (data && "project_id" in data) {
+      return (data.project_id as string | null) ?? null;
+    }
+    return draft.shared.projectId ?? null;
+  });
+
+  /** Written through to the shared draft so a switch back to the manual face —
+   *  which seeds its own project from there — keeps the same one. */
+  const commitProject = (next: string | null) => {
+    setProjectId(next);
+    setShared({ projectId: next ?? undefined });
+  };
 
   const draftsQuery = useQuery(issueDraftListOptions(wsId));
   const runtimesQuery = useQuery(runtimeListOptions(wsId));
@@ -165,6 +199,12 @@ export function AlignCreatePanel({
   // placeholders too, so a file still uploading on the manual face keeps this
   // face's button disabled as well — the first turn binds the same pool.
   const canSubmit = hasContent && runtimeOnline && !start.isPending && !gate.uploading;
+  // A create whose response dropped the session id cannot be addressed. The
+  // conversation exists, so there is nothing to retry: the banner above is
+  // where it can be picked up, and offering the button again is offering a
+  // second, duplicate draft. Read off the mutation's own answer rather than a
+  // local flag, so the state cannot outlive the request that produced it.
+  const unaddressed = start.isSuccess && !start.data.draftId;
 
   const resume = (draftId: string) => {
     onClose();
@@ -172,7 +212,7 @@ export function AlignCreatePanel({
   };
 
   const submit = async () => {
-    if (!canSubmit || !selectedRuntime || gate.isBlocked()) return;
+    if (!canSubmit || !selectedRuntime || gate.isBlocked() || unaddressed) return;
     const request = editorRef.current?.getMarkdown()?.trim() ?? "";
     if (!request) return;
     // Only the ids whose markdown link the request still references: a file
@@ -181,15 +221,42 @@ export function AlignCreatePanel({
     const activeAttachmentIds = draftAttachments
       .filter((attachment) => contentReferencesAttachment(request, attachment))
       .map((attachment) => attachment.id);
-    const result = await start.mutateAsync({
-      runtimeId: selectedRuntime.id,
-      request,
-      attachmentIds: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
-    });
+    let result: Awaited<ReturnType<typeof start.mutateAsync>>;
+    try {
+      result = await start.mutateAsync({
+        runtimeId: selectedRuntime.id,
+        request,
+        projectId,
+        attachmentIds: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
+      });
+    } catch {
+      // The refusal is already on screen — `start.isError` renders the server's
+      // own words above. Swallowing the rejected promise here is what keeps it
+      // from also becoming an unhandled rejection with no reader.
+      return;
+    }
+    // The server created the conversation but this response does not carry its
+    // id (schema drift, see `useStartIssueDraft`). There is no page to open and
+    // the create is NOT a failure to repeat, so the face stays where it is and
+    // says so; the draft is in the unfinished list right above.
+    if (!result.draftId) return;
     onClose();
     // Navigating even when the first turn failed: the draft exists and holds
     // the request, so staying would only invite the user to create a second
-    // one. The page's composer is where a lost turn is resent.
+    // one. The page's composer is where a lost turn is resent — and it is told
+    // so, because a draft that opens on an empty transcript with no
+    // explanation is the failure the user cannot see.
+    if (!result.seeded) {
+      markIssueDraftSeedFailure(
+        result.draftId,
+        // The server's own 4xx wording (a runtime that went unusable between
+        // the create and the send) is the actionable half, so it travels as
+        // given. A 5xx or a transport failure has nothing worth repeating
+        // (MUL-6472): an empty reason is the page's cue to say it in its own
+        // words rather than to quote the server.
+        clientErrorMessage(result.seedError) ?? "",
+      );
+    }
     navigation.push(paths.newIssueDraft(result.draftId));
   };
 
@@ -235,6 +302,21 @@ export function AlignCreatePanel({
           {isDragOver && <FileDropOverlay />}
         </div>
 
+        {/* The one filing field this face asks for. Everything else the group
+            needs (title, status, priority, sub-issues) is what the conversation
+            is for, but the project is context the user already has: starting
+            from a project page and landing in "no project" is the surprise this
+            removes. The alignment page's preview can still change it. */}
+        <div className="mt-3 flex items-center gap-2">
+          <span className="text-caption text-muted-foreground">
+            {t(($) => $.alignment.field_project)}
+          </span>
+          <ProjectPicker
+            projectId={projectId}
+            onUpdate={(updates) => commitProject(updates.project_id ?? null)}
+          />
+        </div>
+
         {!runtimesLoading && !hasUsableRuntime ? (
           <p className="mt-4 text-body text-muted-foreground">
             {t(($) => $.alignment.entry_no_runtime)}
@@ -252,9 +334,26 @@ export function AlignCreatePanel({
           </p>
         ) : null}
 
+        {/* Why it failed, in the server's own words when it has any. Every exit
+            from the create — a runtime that is offline, a private runtime
+            someone else owns, a draft too large, a workspace this user is not
+            in — used to collapse into one sentence that named neither the cause
+            nor the fix (DENE-421). Only a 4xx is repeated: a 5xx message is
+            internal detail and a transport failure's says nothing actionable,
+            so both fall back to this face's own sentence. */}
         {start.isError ? (
           <p role="alert" className="mt-4 text-body text-destructive">
-            {t(($) => $.alignment.entry_failed)}
+            {clientErrorMessage(start.error) ?? t(($) => $.alignment.entry_failed)}
+          </p>
+        ) : null}
+
+        {/* The conversation was created but the response did not carry its id,
+            so there is no page to open it at. NOT a create to retry: the draft
+            exists, it is in the unfinished list above, and a second create is a
+            second draft. */}
+        {unaddressed ? (
+          <p role="alert" className="mt-4 text-body text-destructive">
+            {t(($) => $.alignment.entry_unaddressed)}
           </p>
         ) : null}
       </div>
@@ -294,7 +393,7 @@ export function AlignCreatePanel({
             {t(($) => $.alignment.entry_connect_runtime)}
           </Button>
         ) : (
-          <Button size="sm" onClick={() => void submit()} disabled={!canSubmit}>
+          <Button size="sm" onClick={() => void submit()} disabled={!canSubmit || unaddressed}>
             {start.isPending ? (
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
             ) : null}

@@ -32,6 +32,12 @@ import {
 
 export interface StartIssueDraftResult {
   session: IssueDraftSession;
+  /**
+   * The alignment's address — the id its page is opened with. EMPTY when the
+   * server created the conversation but this response did not carry the id;
+   * see the drift note in `useStartIssueDraft`. There is no page to open then,
+   * and the caller must not read the empty value as "nothing was created".
+   */
   draftId: string;
   /**
    * False when the conversation was opened but its first turn could not be
@@ -40,6 +46,16 @@ export interface StartIssueDraftResult {
    * cannot see and would create again.
    */
   seeded: boolean;
+  /**
+   * Why the first turn never left, when it did not.
+   *
+   * Carried out of the catch instead of being dropped on the floor: a draft
+   * that opens on an empty transcript with no explanation reads as "nothing is
+   * wrong", and the reason is what makes it actionable — a runtime that went
+   * unusable between the create and the send is a 4xx whose own wording says
+   * which machine to fix. Undefined whenever `seeded` is true.
+   */
+  seedError?: unknown;
 }
 
 /**
@@ -60,6 +76,13 @@ export function useStartIssueDraft(wsId: string) {
       /** What the user already typed at the entry point. */
       request: string;
       /**
+       * The project the group should be filed under. Stored in the seed so the
+       * carrier knows about it from the first turn and the confirm has it even
+       * if nobody edits the preview; absent means "no project", the same as it
+       * does on every other create surface.
+       */
+      projectId?: string | null;
+      /**
        * Attachments the request references. The draft does not exist yet when
        * they were uploaded, so they were bound to no owner; sending their ids
        * with the first turn is what attaches them to it. Same transport as any
@@ -71,10 +94,20 @@ export function useStartIssueDraft(wsId: string) {
       const session = await api.createIssueDraftSession({
         runtime_id: input.runtimeId,
         model: input.model?.trim() || undefined,
-        draft: seedDraft(request),
+        draft: seedDraft(request, input.projectId),
       });
       const draftId = session.session_id;
-      if (!draftId) throw new Error("issue draft session was not created");
+      // A missing `session_id` is response drift, NOT a create that failed.
+      // `IssueDraftSessionSchema` requires the field, so an id-less response
+      // falls back to `EMPTY_ISSUE_DRAFT_SESSION` — while the POST that opened
+      // the conversation committed server-side, because the id is the only
+      // thing the fallback drops. Throwing here reported "could not start the
+      // alignment" and left the user in the form, where the only possible retry
+      // is a SECOND conversation: a duplicate nothing deduplicates, since every
+      // create mints a new session. So the create is reported as the partial
+      // success it is — no address, no first turn — and the caller states that
+      // instead of offering a create again.
+      if (!draftId) return { session, draftId: "", seeded: false };
       try {
         const sent = await api.sendChatMessage(
           draftId,
@@ -103,11 +136,18 @@ export function useStartIssueDraft(wsId: string) {
           created_at: new Date().toISOString(),
         });
         return { session, draftId, seeded: true };
-      } catch {
-        return { session, draftId, seeded: false };
+      } catch (err) {
+        return { session, draftId, seeded: false, seedError: err };
       }
     },
     onSuccess: (result) => {
+      // A create whose id was dropped has no row to seed and no page to open.
+      // The draft is real all the same, so the list is re-read: it is where the
+      // user finds the conversation this response could not address.
+      if (!result.draftId) {
+        void qc.invalidateQueries({ queryKey: issueDraftKeys.list(wsId) });
+        return;
+      }
       // Seed before invalidating: the page this create navigates to reads the
       // list on its first render, and a row that is missing from it reads as a
       // finished alignment.
@@ -280,13 +320,24 @@ export function useSwitchIssueDraftPolicy(wsId: string) {
   });
 }
 
-/** The idea, kept server-side from the first moment so a lost turn loses nothing. */
-function seedDraft(request: string): Partial<IssueDraftPayload> {
+/**
+ * The idea, kept server-side from the first moment so a lost turn loses nothing.
+ *
+ * The project rides along because the conversation is what decides everything
+ * else: the server files the whole group under the draft's project (children
+ * are back-filled from their parent in `CreateGroup`), so leaving it out of the
+ * seed files a group that was started from a project page under "no project".
+ */
+function seedDraft(
+  request: string,
+  projectId?: string | null,
+): Partial<IssueDraftPayload> {
   return {
     title: "",
     description: request,
     status: "",
     priority: "",
+    ...(projectId ? { project_id: projectId } : {}),
   };
 }
 

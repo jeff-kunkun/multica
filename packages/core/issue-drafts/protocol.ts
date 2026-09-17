@@ -340,7 +340,9 @@ export function decodeIssueDraftInput(content: string): string {
 /**
  * Folds a parsed block into the draft the user is looking at. Patch fields
  * overwrite; everything else is preserved, including the fields the carrier is
- * not told about (assignee, project, parent) which the preview panel owns.
+ * not told about (assignee, project, parent) which the client owns — the
+ * preview panel edits them, and the project can also arrive seeded from the
+ * create entry point.
  *
  * `children` is replaced as a SET, not merged item by item: the sub-issue list
  * is one judgement the carrier makes each turn, and merging it item-wise would

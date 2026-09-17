@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquare, Sparkles } from "lucide-react";
+import { MessageSquare, Sparkles, TriangleAlert } from "lucide-react";
 import type { IssueDraftQuestion } from "@multica/core/issue-drafts";
 import type { ChatMessage } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -31,6 +31,7 @@ export function IssueDraftConversation({
   onStop,
   error,
   question,
+  seedFailure,
   readOnly: readOnlyProp,
   transformContent,
 }: {
@@ -55,6 +56,15 @@ export function IssueDraftConversation({
   error: string | null;
   /** The question the guided policy is waiting on, if any. */
   question: IssueDraftQuestion | null;
+  /**
+   * Why this conversation's first turn never reached the carrier, as the entry
+   * dialog recorded it, or null. "" is a lost turn whose failure carried no
+   * message of its own (a 5xx or a transport error). Rendered in place of the
+   * ordinary empty state, which is the state it is otherwise indistinguishable
+   * from — and the only place the user can learn that the request they typed
+   * was never asked (DENE-425).
+   */
+  seedFailure: string | null;
   /**
    * Render the transcript and nothing else — the shape a FINISHED alignment is
    * read back in (DENE-371). The composer, the answer chips and the runtime
@@ -117,12 +127,37 @@ export function IssueDraftConversation({
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-8">
           <div className="w-full max-w-md text-center">
-            <span className="mx-auto flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <MessageSquare className="size-5" aria-hidden="true" />
-            </span>
-            <p className="mt-4 text-pretty text-body leading-6 text-muted-foreground">
-              {t(($) => $.alignment.preview_empty)}
-            </p>
+            {/* Two empty states, and they must not look alike: "nothing has
+                been said yet" is the conversation waiting for its first turn,
+                while a lost first turn is a message the user believes they
+                already sent. The second one names the reason and points at the
+                composer below, which is the only way to recover the turn. */}
+            {seedFailure !== null ? (
+              <>
+                <span className="mx-auto flex size-11 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+                  <TriangleAlert className="size-5" aria-hidden="true" />
+                </span>
+                <p
+                  role="alert"
+                  className="mt-4 text-pretty text-body leading-6 text-destructive"
+                >
+                  {seedFailure
+                    ? t(($) => $.alignment.seed_failed_notice, {
+                        reason: seedFailure,
+                      })
+                    : t(($) => $.alignment.seed_failed_notice_plain)}
+                </p>
+              </>
+            ) : (
+              <>
+                <span className="mx-auto flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <MessageSquare className="size-5" aria-hidden="true" />
+                </span>
+                <p className="mt-4 text-pretty text-body leading-6 text-muted-foreground">
+                  {t(($) => $.alignment.preview_empty)}
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}
