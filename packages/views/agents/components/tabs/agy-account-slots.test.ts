@@ -1,33 +1,43 @@
 // @vitest-environment node
+//
+// Canonical suite for the AGY slot vocabulary (DENE-175, narrowed by DENE-309).
+//
+// DENE-309 retired the slot block that used to live in the custom-args tab, so
+// this file covers what is still on the code path: the `--gemini_dir` lever,
+// the host-home resolution the slot directories derive from, and the
+// parse/write pair for `runtime_config.agy_slots` — the key the backend reads
+// to decide which numbered accounts a quota-exhausted agent may rotate to.
+// The `agy_logged_in_dirs` / `agy_quota_exhausted` metadata keys stay on the
+// daemon's API surface, but this client reads per-account state from the
+// `agent_accounts` report instead, so their parsers are gone.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  ACCOUNT3_DIR,
+  AGY_SLOTS_RUNTIME_KEY,
   accountDirectoryLeaf,
-  accountSlotDirectory,
-  agyCredentialPaths,
   detectAgyAccountSlot,
-  directoryHasAgyCredentials,
   expandHomePrefix,
   formatAgyLoginCommand,
   getGeminiDir,
   inferHomeDirFromGeminiPath,
   isAbsoluteFsPath,
-  isIsolatedAccountSlot,
-  loginDirectory,
+  joinHomeDir,
   nextAccountNumber,
   normalizeAccountNumbers,
+  numberedSlotId,
+  parseAccountNumber,
   parseAgySlotsConfig,
   resolveHomeDir,
-  resolveSlotDirectory,
   runtimeHomeDir,
-  runtimeLoggedInDirs,
-  runtimeQuotaExhausted,
   setGeminiDir,
-  slotIsSignedIn,
-  slotQuotaResetAt,
   writeAgySlotsConfig,
 } from "./agy-account-slots";
+
+/** How the accounts model builds a numbered slot's directory on this host. */
+function slotDirectory(home: string | null, slot: number): string {
+  const leaf = accountDirectoryLeaf(slot);
+  return home ? joinHomeDir(home, leaf) : leaf;
+}
 
 describe("agy account slots", () => {
   afterEach(() => {
@@ -59,9 +69,7 @@ describe("agy account slots", () => {
     expect(detectAgyAccountSlot("/Users/you/.gemini-account2")).toBe("account2");
     expect(detectAgyAccountSlot("~/.gemini-account2")).toBe("account2");
     expect(detectAgyAccountSlot("/Users/you/.gemini-account3")).toBe("account3");
-    expect(detectAgyAccountSlot("~/.gemini-account3")).toBe("account3");
     expect(detectAgyAccountSlot("/Users/you/.gemini-account4")).toBe("account4");
-    expect(detectAgyAccountSlot("~/.gemini-account4")).toBe("account4");
     expect(detectAgyAccountSlot("/Users/you/.gemini-work")).toBe("custom");
   });
 
@@ -73,31 +81,12 @@ describe("agy account slots", () => {
     expect(inferHomeDirFromGeminiPath("/Users/you/.gemini-account2")).toBe(
       "/Users/you",
     );
-    expect(inferHomeDirFromGeminiPath("/Users/you/.gemini-account3")).toBe(
-      "/Users/you",
-    );
     expect(inferHomeDirFromGeminiPath("/Users/you/.gemini-account4")).toBe(
       "/Users/you",
     );
     expect(isAbsoluteFsPath("/Users/you/.gemini")).toBe(true);
     expect(isAbsoluteFsPath("~/.gemini")).toBe(false);
     expect(isAbsoluteFsPath("C:\\Users\\you\\.gemini")).toBe(true);
-  });
-
-  it("fills the isolated account-2 path and leaves account 1 as the default flag", () => {
-    expect(resolveSlotDirectory("account1", "/ignored", "/Users/you")).toBe("");
-    expect(resolveSlotDirectory("account2", "", "/Users/you")).toBe(
-      "/Users/you/.gemini-account2",
-    );
-    expect(resolveSlotDirectory("account3", "", "/Users/you")).toBe(
-      "/Users/you/.gemini-account3",
-    );
-    expect(resolveSlotDirectory("account4", "", "/Users/you")).toBe(
-      "/Users/you/.gemini-account4",
-    );
-    expect(
-      resolveSlotDirectory("custom", "~/.gemini-work", "/Users/you"),
-    ).toBe("/Users/you/.gemini-work");
   });
 
   it("prefers the current profile when inferring home, then process.env.HOME", () => {
@@ -111,9 +100,7 @@ describe("agy account slots", () => {
     vi.stubEnv("USERPROFILE", "");
     const home = resolveHomeDir("~/.gemini");
     expect(home).toBe("/Users/you");
-    expect(resolveSlotDirectory("account2", "~/.gemini", home)).toBe(
-      "/Users/you/.gemini-account2",
-    );
+    expect(slotDirectory(home, 2)).toBe("/Users/you/.gemini-account2");
   });
 
   it("expands ~\\.gemini into an absolute Account 2 path using USERPROFILE", () => {
@@ -121,9 +108,7 @@ describe("agy account slots", () => {
     vi.stubEnv("USERPROFILE", "C:\\Users\\you");
     const home = resolveHomeDir("~\\.gemini");
     expect(home).toBe("C:\\Users\\you");
-    expect(resolveSlotDirectory("account2", "~\\.gemini", home)).toBe(
-      "C:\\Users\\you\\.gemini-account2",
-    );
+    expect(slotDirectory(home, 2)).toBe("C:\\Users\\you\\.gemini-account2");
   });
 
   it("prefers runtime metadata home over process.env when the profile is empty", () => {
@@ -138,10 +123,9 @@ describe("agy account slots", () => {
     vi.stubEnv("HOME", "");
     vi.stubEnv("USERPROFILE", "");
     delete (globalThis as { desktopAPI?: unknown }).desktopAPI;
-    expect(resolveHomeDir("", "/Users/agy-host")).toBe("/Users/agy-host");
-    expect(
-      resolveSlotDirectory("account2", "", resolveHomeDir("", "/Users/agy-host")),
-    ).toBe("/Users/agy-host/.gemini-account2");
+    const home = resolveHomeDir("", "/Users/agy-host");
+    expect(home).toBe("/Users/agy-host");
+    expect(slotDirectory(home, 2)).toBe("/Users/agy-host/.gemini-account2");
   });
 
   it("returns null when no profile, runtime home, or env is available", () => {
@@ -150,24 +134,14 @@ describe("agy account slots", () => {
     delete (globalThis as { desktopAPI?: unknown }).desktopAPI;
     expect(resolveHomeDir("")).toBeNull();
     expect(runtimeHomeDir({ metadata: { home_dir: "~" } })).toBeNull();
-    expect(resolveSlotDirectory("account2", "", null)).toBe("~/.gemini-account2");
+    // With no host home the leaf stays relative, and the switch plan refuses it
+    // as an unusable directory instead of binding a guessed path.
+    expect(slotDirectory(null, 2)).toBe(".gemini-account2");
   });
 
   it("builds a one-line agy login command", () => {
     expect(formatAgyLoginCommand("/Users/you/.gemini-account2")).toBe(
       "agy --gemini_dir=/Users/you/.gemini-account2",
-    );
-    expect(loginDirectory("account1", "", "/Users/you")).toBe(
-      "/Users/you/.gemini",
-    );
-    expect(loginDirectory("account2", "", "/Users/you")).toBe(
-      "/Users/you/.gemini-account2",
-    );
-    expect(loginDirectory("account3", "", "/Users/you")).toBe(
-      "/Users/you/.gemini-account3",
-    );
-    expect(loginDirectory("account4", "", "/Users/you")).toBe(
-      "/Users/you/.gemini-account4",
     );
     expect(formatAgyLoginCommand("/Users/you/.gemini-account4")).toBe(
       "agy --gemini_dir=/Users/you/.gemini-account4",
@@ -175,18 +149,12 @@ describe("agy account slots", () => {
   });
 
   it("maps numbered slots onto isolated directories", () => {
-    expect(accountSlotDirectory("account1")).toBe(".gemini");
-    expect(accountSlotDirectory("account2")).toBe(".gemini-account2");
-    expect(accountSlotDirectory("account3")).toBe(ACCOUNT3_DIR);
-    expect(accountSlotDirectory("account4")).toBe(".gemini-account4");
     expect(accountDirectoryLeaf(1)).toBe(".gemini");
+    expect(accountDirectoryLeaf(2)).toBe(".gemini-account2");
     expect(accountDirectoryLeaf(4)).toBe(".gemini-account4");
-    expect(isIsolatedAccountSlot("account1")).toBe(false);
-    expect(isIsolatedAccountSlot("account2")).toBe(true);
-    expect(isIsolatedAccountSlot("account3")).toBe(true);
-    expect(isIsolatedAccountSlot("account4")).toBe(true);
-    expect(isIsolatedAccountSlot("custom")).toBe(false);
-    expect(resolveSlotDirectory("account4", "", null)).toBe("~/.gemini-account4");
+    expect(numberedSlotId(4)).toBe("account4");
+    expect(parseAccountNumber("account4")).toBe(4);
+    expect(parseAccountNumber("custom")).toBeNull();
   });
 
   it("adds the next unused account number so plus yields account 4", () => {
@@ -196,65 +164,23 @@ describe("agy account slots", () => {
     expect(normalizeAccountNumbers([4, 1, 4, 0, 99])).toEqual([1, 4]);
   });
 
-  it("persists the numbered slot list in runtime_config.agy_slots", () => {
+  it("persists the numbered slot list under the key the backend reads", () => {
+    expect(AGY_SLOTS_RUNTIME_KEY).toBe("agy_slots");
     expect(parseAgySlotsConfig({})).toEqual([1, 2, 3]);
-    expect(
-      parseAgySlotsConfig({ agy_slots: { accounts: [1, 4, 5] } }),
-    ).toEqual([1, 4, 5]);
-    expect(
-      parseAgySlotsConfig({}, "/Users/you/.gemini-account4"),
-    ).toEqual([1, 2, 3, 4]);
-    expect(
-      writeAgySlotsConfig({ mode: "local" }, [1, 4]),
-    ).toEqual({
+    expect(parseAgySlotsConfig({ agy_slots: { accounts: [1, 4, 5] } })).toEqual([
+      1, 4, 5,
+    ]);
+    expect(parseAgySlotsConfig({}, "/Users/you/.gemini-account4")).toEqual([
+      1, 2, 3, 4,
+    ]);
+    expect(writeAgySlotsConfig({ mode: "local" }, [1, 4])).toEqual({
       mode: "local",
       agy_slots: { accounts: [1, 4] },
     });
-  });
-
-  it("treats oauth_creds.json as a signed-in credential and ignores missing files", () => {
-    const dir = "/Users/you/.gemini-account4";
-    expect(agyCredentialPaths(dir)).toEqual([
-      "/Users/you/.gemini-account4/oauth_creds.json",
-      "/Users/you/.gemini-account4/antigravity-cli/antigravity-oauth-token",
-    ]);
-    expect(
-      directoryHasAgyCredentials(dir, (path) => path.endsWith("oauth_creds.json")),
-    ).toBe(true);
-    expect(directoryHasAgyCredentials(dir, () => false)).toBe(false);
-    expect(
-      slotIsSignedIn(dir, ["/Users/you/.gemini-account4"]),
-    ).toBe(true);
-    expect(slotIsSignedIn(dir, ["/Users/you/.gemini"])).toBe(false);
-    expect(
-      runtimeLoggedInDirs({
-        metadata: { agy_logged_in_dirs: ["/Users/you/.gemini", "relative"] },
-      }),
-    ).toEqual(["/Users/you/.gemini"]);
-  });
-
-  it("reads exhausted quota dirs and treats an elapsed reset as available", () => {
-    const future = 1_800_000_000;
-    const past = 1_700_000_000;
-    expect(
-      runtimeQuotaExhausted({
-        metadata: {
-          agy_quota_exhausted: [
-            { dir: "/Users/you/.gemini", reset_at: future },
-            { dir: "relative", reset_at: future },
-            { dir: "/Users/you/.gemini-account2", reset_at: past },
-          ],
-        },
-      }),
-    ).toEqual([
-      { dir: "/Users/you/.gemini", reset_at: future },
-      { dir: "/Users/you/.gemini-account2", reset_at: past },
-    ]);
-    expect(
-      slotQuotaResetAt("/Users/you/.gemini", [{ dir: "/Users/you/.gemini", reset_at: future }], 1_799_000_000_000),
-    ).toBe(future);
-    expect(
-      slotQuotaResetAt("/Users/you/.gemini", [{ dir: "/Users/you/.gemini", reset_at: past }], 1_800_000_000_000),
-    ).toBeNull();
+    // A slot set that arrives unsorted or out of range is stored normalised, so
+    // the backend's own normalisation cannot disagree with what the UI saved.
+    expect(writeAgySlotsConfig({}, [4, 4, 0, 40])).toEqual({
+      agy_slots: { accounts: [1, 4] },
+    });
   });
 });

@@ -29,20 +29,25 @@ func configReq(method, path, wsID string, body any) *http.Request {
 	)
 }
 
+// configWorkspace creates a workspace the way the real create path does: the
+// 7 built-in issue statuses are seeded inside the same transaction
+// (handler/workspace.go), so every workspace a user can import into already
+// carries them.
+func configWorkspace(t *testing.T, name, slug, prefix string) string {
+	t.Helper()
+	id := dbfx.Workspace(t, name, slug, testutil.Cols{"issue_prefix": prefix})
+	dbfx.Member(t, id, testUserID, "owner")
+	if err := testHandler.Queries.SeedIssueStatusEntries(context.Background(), util.MustParseUUID(id)); err != nil {
+		t.Fatalf("seed statuses for %s: %v", slug, err)
+	}
+	return id
+}
+
 func setupConfigWorkspaces(t *testing.T) (src, dst string) {
 	t.Helper()
 	suf := uuid.NewString()[:8]
-	src = dbfx.Workspace(t, "CfgSrc "+suf, "cfgsrc-"+suf)
-	dst = dbfx.Workspace(t, "CfgDst "+suf, "cfgdst-"+suf)
-	dbfx.Member(t, src, testUserID, "owner")
-	dbfx.Member(t, dst, testUserID, "owner")
-	if err := testHandler.Queries.SeedIssueStatusEntries(context.Background(), util.MustParseUUID(src)); err != nil {
-		t.Fatalf("seed src statuses: %v", err)
-	}
-	if err := testHandler.Queries.SeedIssueStatusEntries(context.Background(), util.MustParseUUID(dst)); err != nil {
-		t.Fatalf("seed dst statuses: %v", err)
-	}
-	return src, dst
+	return configWorkspace(t, "CfgSrc "+suf, "cfgsrc-"+suf, ""),
+		configWorkspace(t, "CfgDst "+suf, "cfgdst-"+suf, "")
 }
 
 func exportBundle(t *testing.T, wsID string) service.ConfigBundle {
@@ -383,6 +388,88 @@ func TestWorkspaceConfigRoundTripAndConflicts(t *testing.T) {
 	rename := importReport(t, dst, map[string]any{"bundle": bundle, "dry_run": dryFalse, "on_conflict": "rename", "include": []string{"agents"}}, http.StatusOK)
 	if n := dbfx.Count(t, `SELECT count(*) FROM agent WHERE workspace_id = $1 AND name LIKE $2`, dst, agentName+"%"); n < 2 {
 		t.Fatalf("rename should create a copy, agent count=%d report=%+v", n, rename.Stats)
+	}
+}
+
+// DENE-408: the source's own export carries the 7 platform-seeded built-in
+// statuses, and so does every workspace a user can import into — creating one
+// seeds them. Read as a conflict, the `issue_statuses` batch failed on its first
+// row under `fail`, the CLI's default, and the import stopped before the user
+// saw a single preview row. The built-ins are the platform's catalog on both
+// sides, not user data.
+func TestWorkspaceConfigImport_BuiltinStatusesAreNotConflictsUnderFail(t *testing.T) {
+	src, dst := setupConfigWorkspaces(t)
+	bundle := exportBundle(t, src)
+	if len(bundle.Entities.IssueStatuses) != 7 {
+		t.Fatalf("bundle carries %d issue statuses, want the 7 seeded built-ins", len(bundle.Entities.IssueStatuses))
+	}
+	for _, stt := range bundle.Entities.IssueStatuses {
+		if !stt.IsSystem {
+			t.Fatalf("exported status %q is not marked is_system, so it is not the built-in this test is about", stt.Key)
+		}
+	}
+
+	// The preview is the user's first sight of the import, so it must survive
+	// the default policy too, not only the apply.
+	for _, dryRun := range []bool{true, false} {
+		report := importReport(t, dst, map[string]any{
+			"bundle": bundle, "dry_run": dryRun, "on_conflict": "fail", "include": []string{"issue_statuses"},
+		}, http.StatusOK)
+		if report.Stats.Created != 0 || report.Stats.Skipped != 7 {
+			t.Fatalf("dry_run=%v stats=%+v, want the 7 built-ins skipped and none created", dryRun, report.Stats)
+		}
+		for _, batch := range report.Batches {
+			for _, item := range batch.Items {
+				if item.Action != service.ActionSkipped {
+					t.Fatalf("dry_run=%v status %q action=%q, want skipped (reason=%q)", dryRun, item.Name, item.Action, item.Reason)
+				}
+			}
+		}
+	}
+
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue_status WHERE workspace_id = $1`, dst); n != 7 {
+		t.Fatalf("target holds %d statuses after the import, want its own 7 untouched", n)
+	}
+}
+
+// The other half of DENE-408: sparing the built-ins must not disarm the `fail`
+// guard. A same-name label / agent / skill is real user data on both sides and
+// still has to stop the import with the entity named.
+func TestWorkspaceConfigImport_UserDataConflictsStillFail(t *testing.T) {
+	src, dst := setupConfigWorkspaces(t)
+	suf := uuid.NewString()[:8]
+	labelName := "conflict-label-" + suf
+	skillName := "conflict-skill-" + suf
+	agentName := "ConflictAgent-" + suf
+	for _, ws := range []string{src, dst} {
+		dbfx.Insert(t, "issue_label", testutil.Cols{
+			"workspace_id": ws, "resource_type": "agent", "name": labelName, "color": "#3b82f6", "description": "",
+		})
+		dbfx.Insert(t, "skill", testutil.Cols{
+			"workspace_id": ws, "name": skillName, "description": "d", "content": "# c\n", "created_by": testUserID,
+		})
+		dbfx.Agent(t, agentName, "", testutil.Cols{"workspace_id": ws, "visibility": "workspace"})
+	}
+
+	bundle := exportBundle(t, src)
+	for _, tt := range []struct{ include, name string }{
+		{"labels", labelName},
+		{"agents", agentName},
+		{"skills", skillName},
+	} {
+		t.Run(tt.include, func(t *testing.T) {
+			resp := testutil.Call(t, testHandler.ImportWorkspaceConfig, configReq("POST", "/api/workspaces/"+dst+"/config/import", dst, map[string]any{
+				"bundle": bundle, "dry_run": false, "on_conflict": "fail", "include": []string{tt.include},
+			}))
+			resp.Want(http.StatusConflict)
+			got := resp.Map()
+			if got["code"] != "config_import_conflict" {
+				t.Fatalf("code=%v body=%s", got["code"], resp.Text())
+			}
+			if msg, _ := got["error"].(string); !strings.Contains(msg, tt.name) {
+				t.Fatalf("error=%q, want the conflicting %s named", msg, tt.include)
+			}
+		})
 	}
 }
 

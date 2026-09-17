@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -22,28 +23,26 @@ const (
 
 // TestMain builds the workspace the fixture builders hang off, in the same
 // shape internal/handler's TestMain builds it. Without a database the suite
-// exits green rather than red: the same contract every other DB-backed package
-// here follows, so a laptop without Postgres still runs the rest of the tree.
+// runs its non-DB tests and the fixture tests skip; when the run's driver
+// promised one (scripts/test-db.sh sets MULTICA_REQUIRE_TEST_DB), a suite that
+// cannot reach it fails instead, so green here always means the fixtures ran.
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
-	}
+	dbURL := TestDatabaseURL()
 
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
-		fmt.Printf("Skipping DB fixture tests: could not connect: %v\n", err)
+		fmt.Printf("DB fixture tests unavailable: %v\n", err)
 		os.Exit(m.Run())
 	}
 	if err := pool.Ping(ctx); err != nil {
-		fmt.Printf("Skipping DB fixture tests: database not reachable: %v\n", err)
+		fmt.Printf("DB fixture tests unavailable: %v\n", err)
 		pool.Close()
 		os.Exit(m.Run())
 	}
 
 	if err := seedFixtureWorkspace(ctx, pool); err != nil {
-		fmt.Printf("Skipping DB fixture tests: seed failed: %v\n", err)
+		fmt.Printf("DB fixture tests unavailable: %v\n", err)
 		pool.Close()
 		os.Exit(m.Run())
 	}
@@ -79,7 +78,7 @@ func seedFixtureWorkspace(ctx context.Context, pool *pgxpool.Pool) error {
 func newFixture(t *testing.T) *Fixture {
 	t.Helper()
 	if testPool == nil {
-		t.Skip("database not available")
+		SkipDatabase(t, errors.New("the suite has no database"))
 	}
 	return New(testPool, testWorkspaceID, testUserID)
 }

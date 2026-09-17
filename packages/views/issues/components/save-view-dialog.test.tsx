@@ -8,7 +8,17 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { renderWithI18n } from "../../test/i18n";
-import { DraftDefinitionFields } from "./save-view-dialog";
+import { DraftDefinitionFields, SaveViewDialog, type SaveViewScope } from "./save-view-dialog";
+
+const mocks = vi.hoisted(() => ({
+  createMutate: vi.fn(),
+  updateMutate: vi.fn(),
+}));
+
+vi.mock("@multica/core/issue-views/mutations", () => ({
+  useCreateIssueView: () => ({ mutate: mocks.createMutate, isPending: false }),
+  useUpdateIssueView: () => ({ mutate: mocks.updateMutate, isPending: false }),
+}));
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
@@ -60,5 +70,78 @@ describe("DraftDefinitionFields ordering", () => {
     expect(
       screen.queryByRole("button", { name: "Reverse workflow order" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+function renderSaveDialog(scope: SaveViewScope) {
+  const store = createStore<IssueViewState>()(viewStoreSlice);
+  renderWithI18n(
+    <ViewStoreProvider store={store}>
+      <SaveViewDialog open onOpenChange={() => {}} scope={scope} />
+    </ViewStoreProvider>,
+  );
+}
+
+async function openVisibility(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("combobox", { name: "Visibility" }));
+}
+
+describe("SaveViewDialog visibility", () => {
+  it("offers three sharing choices on a project surface", async () => {
+    const user = userEvent.setup();
+    renderSaveDialog({ kind: "project", projectId: "proj-1" });
+
+    await openVisibility(user);
+
+    expect(screen.getByRole("option", { name: "Only visible to me" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Visible to workspace members" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Project members" })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Visible only to members of this project, and only on this project page",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the project choice on a workspace surface", async () => {
+    const user = userEvent.setup();
+    renderSaveDialog({ kind: "workspace" });
+
+    await openVisibility(user);
+
+    expect(screen.getByRole("option", { name: "Only visible to me" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Visible to workspace members" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Project members" })).not.toBeInTheDocument();
+  });
+
+  it("does not show a sharing control on My issues", () => {
+    renderSaveDialog({ kind: "my", variant: "assigned" });
+
+    expect(screen.queryByRole("combobox", { name: "Visibility" })).not.toBeInTheDocument();
+    expect(screen.getByText("My issues views are visible only to you")).toBeInTheDocument();
+  });
+
+  it("submits visibility=project with the project scope on the request body", async () => {
+    const user = userEvent.setup();
+    renderSaveDialog({ kind: "project", projectId: "proj-1" });
+
+    await user.type(screen.getByLabelText("Name"), "Sprint board");
+    await openVisibility(user);
+    await user.click(screen.getByRole("option", { name: "Project members" }));
+    await user.click(screen.getByRole("button", { name: "Create view" }));
+
+    expect(mocks.createMutate).toHaveBeenCalledTimes(1);
+    expect(mocks.createMutate.mock.calls[0]![0]).toEqual(
+      expect.objectContaining({
+        name: "Sprint board",
+        visibility: "project",
+        scope_type: "project",
+        scope_id: "proj-1",
+      }),
+    );
   });
 });

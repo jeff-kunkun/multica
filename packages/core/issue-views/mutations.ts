@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { IssueView } from "../api/schemas";
-import type { CreateIssueViewRequest } from "../api/schemas";
+import type { CreateIssueViewRequest, IssueView, IssueViewVisibility } from "../api/schemas";
 import { issueViewKeys } from "./queries";
 
 /** Create is a confirmed flow (dialog + toast) — no optimism, await then
@@ -35,7 +34,7 @@ export function useCreateIssueView(wsId: string) {
 export interface UpdateIssueViewInput {
   id: string;
   name?: string;
-  visibility?: "private" | "workspace";
+  visibility?: IssueViewVisibility;
   scope_variant?: string | null;
   query?: Record<string, unknown>;
   display?: Record<string, unknown>;

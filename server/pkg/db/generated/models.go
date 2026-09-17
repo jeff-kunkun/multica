@@ -55,6 +55,7 @@ type Agent struct {
 	ConversationStarters  []byte      `json:"conversation_starters"`
 	SwitchableModels      []byte      `json:"switchable_models"`
 	AutoRetryEnabled      bool        `json:"auto_retry_enabled"`
+	ParentAgentID         pgtype.UUID `json:"parent_agent_id"`
 }
 
 type AgentBuilderDraft struct {
@@ -803,6 +804,21 @@ type IssueDependency struct {
 	Type             string      `json:"type"`
 }
 
+type IssueDraft struct {
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	Status            string             `json:"status"`
+	Revision          int64              `json:"revision"`
+	Draft             []byte             `json:"draft"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	PolicyKey         string             `json:"policy_key"`
+	PolicyVersion     string             `json:"policy_version"`
+	FinalizeRound     int32              `json:"finalize_round"`
+	FinalizedRevision pgtype.Int8        `json:"finalized_revision"`
+}
+
 type IssueLabel struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
@@ -1177,6 +1193,15 @@ type Project struct {
 	DueDate     pgtype.Date        `json:"due_date"`
 }
 
+type ProjectMember struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	MemberID    pgtype.UUID        `json:"member_id"`
+	AddedBy     pgtype.UUID        `json:"added_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type ProjectResource struct {
 	ID           pgtype.UUID        `json:"id"`
 	ProjectID    pgtype.UUID        `json:"project_id"`
@@ -1300,6 +1325,17 @@ type SquadMember struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type StageWakeupFailure struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
+	ChildIssueID  pgtype.UUID        `json:"child_issue_id"`
+	Kind          string             `json:"kind"`
+	Error         pgtype.Text        `json:"error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	SweptAt       pgtype.Timestamptz `json:"swept_at"`
+}
+
 type SysCronExecution struct {
 	ID           pgtype.UUID        `json:"id"`
 	JobName      string             `json:"job_name"`
@@ -1406,6 +1442,27 @@ type TaskUsageHourlyRollupState struct {
 	LastRunFinishedAt pgtype.Timestamptz `json:"last_run_finished_at"`
 	LastRunRows       int64              `json:"last_run_rows"`
 	LastError         pgtype.Text        `json:"last_error"`
+}
+
+type TransferAttachmentUpload struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Sha256        string             `json:"sha256"`
+	SourceID      string             `json:"source_id"`
+	UploaderID    pgtype.UUID        `json:"uploader_id"`
+	TotalBytes    int64              `json:"total_bytes"`
+	Meta          []byte             `json:"meta"`
+	ReceivedBytes int64              `json:"received_bytes"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TransferAttachmentUploadChunk struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Sha256      string             `json:"sha256"`
+	OffsetBytes int64              `json:"offset_bytes"`
+	SizeBytes   int64              `json:"size_bytes"`
+	Data        []byte             `json:"data"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type User struct {

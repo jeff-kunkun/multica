@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/vcs"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -160,6 +159,9 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		slog.Warn("vcs: pull_request missing repo identity", "provider", conn.Provider)
 		return
 	}
+	// The close check, the child-done barrier and the waiting_on wake all resolve
+	// raw statuses below; share one catalog per workspace across the delivery.
+	ctx = withStatusResolverCache(ctx)
 
 	pr, err := h.Queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
 		WorkspaceID:     conn.WorkspaceID,
@@ -274,7 +276,9 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 
 	if ev.State == "merged" || ev.State == "closed" {
 		// Keep the catalog local to this delivery and connection's workspace.
-		resolver := issuestatus.NewResolver(conn.WorkspaceID)
+		// The delivery cache is installed at the top of this function, so the
+		// status writes below reuse this same catalog instead of reading again.
+		resolver := h.statusResolver(ctx, conn.WorkspaceID)
 		for _, issue := range reevalIssues {
 			// A custom terminal status counts as terminal here. (MUL-6243)
 			if s := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status); s == "done" || s == "cancelled" {

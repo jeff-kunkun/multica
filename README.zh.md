@@ -104,12 +104,12 @@ Claude Code、Codex、Cursor 都行。Multica 负责驱动它们，但不替你�
 <br/>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+curl -fsSL https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh | bash -s -- --with-server
 multica setup self-host
 ```
 
 Windows 上先设 `$env:MULTICA_MODE="with-server"`，再跑 PowerShell 安装脚本：
-`irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex`。
+`irm https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.ps1 | iex`。
 
 这会拉取 GHCR 上的官方镜像，需要 Docker。详见[自部署指南](SELF_HOSTING.md)。如果你选的 GHCR
 标签还没发布，可以在代码目录里跑 `make selfhost-build` 兜底。

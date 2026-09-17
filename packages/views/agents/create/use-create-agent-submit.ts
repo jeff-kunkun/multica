@@ -47,6 +47,12 @@ export function useCreateAgentSubmit(options: {
   /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
   duplicateSource?: Agent | null;
+  /**
+   * Base role the new agent specialises (DENE-301). Already resolved against
+   * the loaded agents by the caller — an unusable parent must arrive as null
+   * rather than as an id the server will reject.
+   */
+  parentAgentId?: string | null;
   /** Runs after the agent is committed, before navigation. */
   onCreated?: (agent: Agent) => Promise<void> | void;
 }) {
@@ -60,8 +66,15 @@ export function useCreateAgentSubmit(options: {
   const [nameError, setNameError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { draft, runtimeId, squadId, template, duplicateSource, onCreated } =
-    options;
+  const {
+    draft,
+    runtimeId,
+    squadId,
+    template,
+    duplicateSource,
+    parentAgentId,
+    onCreated,
+  } = options;
 
   const create = async () => {
     if (!runtimeId || creating) return;
@@ -75,6 +88,7 @@ export function useCreateAgentSubmit(options: {
           runtimeId,
           template,
           duplicateSource,
+          parentAgentId,
         }),
       );
       if (!agent.id) throw new Error(t(($) => $.creation_studio.create_failed));

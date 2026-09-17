@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/migrations"
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 // readinessQuery counts how many of the binary's required migration versions
@@ -58,6 +59,15 @@ type liveResponse struct {
 	PID       int    `json:"pid,omitempty"`
 	Commit    string `json:"commit,omitempty"`
 	StartedAt string `json:"started_at,omitempty"`
+	// Transfer advertises what this build can read on the import side, so an
+	// exporter can ask a target which bundle it accepts BEFORE writing one
+	// (DENE-431). It rides on the unauthenticated /health on purpose: the
+	// migration CLI is logged in to the source, so requiring the target's
+	// workspace-admin credentials for a read-only version question would make
+	// the pre-flight fail exactly where it matters. It is additive — an
+	// instance that predates it answers without the field, which the probe
+	// reports as "unknown".
+	Transfer *service.TransferCapabilities `json:"transfer,omitempty"`
 }
 
 type readinessResponse struct {
@@ -87,6 +97,8 @@ func (h *serverHealth) liveHandler(w http.ResponseWriter, _ *http.Request) {
 	if !h.startedAt.IsZero() {
 		resp.StartedAt = h.startedAt.Format(time.RFC3339)
 	}
+	caps := service.TransferCapabilitiesForCurrentBuild()
+	resp.Transfer = &caps
 	writeJSON(w, http.StatusOK, resp)
 }
 

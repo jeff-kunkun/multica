@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithI18n } from "../../test/i18n";
 import {
+  ApiError,
   CONFIG_BUNDLE_FORMAT,
   CONFIG_BUNDLE_SCHEMA_VERSION,
 } from "@multica/core/api";
@@ -14,6 +15,7 @@ const importWorkspaceConfig = vi.hoisted(() => vi.fn());
 const member = vi.hoisted(() => ({
   role: "owner" as "owner" | "admin" | "member",
 }));
+const desktop = vi.hoisted(() => ({ isDesktop: false }));
 
 vi.mock("@multica/core/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/api")>();
@@ -44,6 +46,14 @@ vi.mock("../../navigation", () => ({
     <a href={href}>{children}</a>
   ),
 }));
+
+vi.mock("../../platform", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../platform")>();
+  return {
+    ...actual,
+    isDesktopShell: () => desktop.isDesktop,
+  };
+});
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -148,6 +158,7 @@ function jsonFile(body: unknown, name = "acme.json") {
 
 beforeEach(() => {
   member.role = "owner";
+  desktop.isDesktop = false;
   exportWorkspaceConfig.mockReset();
   importWorkspaceConfig.mockReset();
   vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:export");
@@ -269,6 +280,57 @@ describe("ConfigTransferTab", () => {
     expect(
       await screen.findByRole("alert"),
     ).toHaveTextContent("Couldn't export configuration.");
+  });
+
+  it("shows a readable hint when export returns 404 instead of the raw API error", async () => {
+    const user = userEvent.setup();
+    desktop.isDesktop = true;
+    exportWorkspaceConfig.mockRejectedValue(
+      new ApiError("API error: 404 Not Found", 404, "Not Found"),
+    );
+    renderTab();
+
+    await user.click(
+      screen.getByRole("button", { name: "Export configuration" }),
+    );
+
+    const hint = await screen.findByTestId("config-transfer-unsupported");
+    expect(hint).toHaveTextContent(
+      "This server does not support configuration export/import. You need a kun self-hosted instance.",
+    );
+    expect(hint).toHaveTextContent(
+      "To migrate from official cloud, use “Migrate across environments (including chats)” above.",
+    );
+    expect(screen.queryByText(/API error: 404/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Export configuration" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Choose JSON file" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a readable hint when import returns 404 instead of the raw API error", async () => {
+    const user = userEvent.setup();
+    importWorkspaceConfig.mockRejectedValue(
+      new ApiError("API error: 404 Not Found", 404, "Not Found"),
+    );
+    renderTab();
+
+    await user.upload(
+      screen.getByTestId("config-transfer-file"),
+      jsonFile(bundle),
+    );
+
+    expect(
+      await screen.findByTestId("config-transfer-unsupported"),
+    ).toHaveTextContent(
+      "This server does not support configuration export/import. You need a kun self-hosted instance.",
+    );
+    expect(screen.queryByText(/API error: 404/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Export configuration" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows a failure alert for an invalid import file", async () => {

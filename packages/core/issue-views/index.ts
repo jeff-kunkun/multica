@@ -4,3 +4,4 @@ export * from "./active-view-store";
 export * from "./use-active-view";
 export * from "./baseline";
 export * from "./preferences";
+export * from "./visibility";
