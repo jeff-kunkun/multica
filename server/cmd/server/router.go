@@ -2174,6 +2174,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// running; the draft's content is untouched.
 					r.Patch("/policy", h.SwitchIssueDraftPolicy)
 					r.Post("/finalize", h.FinalizeIssueDraft)
+					// Starts another round on an alignment that already
+					// produced its group: same session, same draft row, and
+					// the next confirm adds only the nodes that own no issue
+					// yet. Idempotent, so a client may call it on load.
+					r.Post("/reopen", h.ReopenIssueDraft)
 					r.Post("/abandon", h.AbandonIssueDraft)
 				})
 			})

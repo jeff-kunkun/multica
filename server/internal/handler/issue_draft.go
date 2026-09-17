@@ -51,8 +51,16 @@ type issueDraftResponse struct {
 	Draft         json.RawMessage          `json:"draft"`
 	IssueID       *string                  `json:"issue_id,omitempty"`
 	Policy        issueDraftPolicyResponse `json:"policy"`
-	CreatedAt     string                   `json:"created_at"`
-	UpdatedAt     string                   `json:"updated_at"`
+	// FinalizeRound counts the rounds this alignment has been confirmed in: 0
+	// until it is reopened, then one more per reopen. It is what a client reads
+	// to know the draft it is looking at is a continuation, and what the server
+	// reads to know a confirm may add nodes instead of adopting the group.
+	FinalizeRound int32 `json:"finalize_round"`
+	// FinalizedRevision is the content revision the last confirmed round
+	// settled on, recorded when the draft was reopened. Absent until then.
+	FinalizedRevision *int64 `json:"finalized_revision,omitempty"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 func issueDraftToResponse(d db.IssueDraft) issueDraftResponse {
@@ -63,12 +71,17 @@ func issueDraftToResponse(d db.IssueDraft) issueDraftResponse {
 		Revision:      d.Revision,
 		Draft:         json.RawMessage(d.Draft),
 		Policy:        issueDraftPolicyResponseFromRow(d.PolicyKey, d.PolicyVersion),
+		FinalizeRound: d.FinalizeRound,
 		CreatedAt:     timestampToString(d.CreatedAt),
 		UpdatedAt:     timestampToString(d.UpdatedAt),
 	}
 	if d.IssueID.Valid {
 		id := uuidToString(d.IssueID)
 		out.IssueID = &id
+	}
+	if d.FinalizedRevision.Valid {
+		revision := d.FinalizedRevision.Int64
+		out.FinalizedRevision = &revision
 	}
 	return out
 }
@@ -512,6 +525,86 @@ func (h *Handler) AbandonIssueDraft(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, issueDraftToResponse(updated))
 }
 
+// ReopenIssueDraft starts another round on an alignment that already produced
+// its group, so the same conversation can be continued and confirmed again.
+//
+// It is the same draft row and the same chat session, never a new one: the
+// group's identity is derived from the session (issueDraftNodeID), so a second
+// session would mean a second group rather than more work in this one. What
+// moves is the lifecycle — back to 'ready' — plus finalize_round, which is what
+// lets the next confirm tell "these payload nodes are an increment" apart from
+// "this group is already committed, adopt it".
+//
+// Idempotent by construction. Only a 'completed' row reopens, so a second call
+// (a retried request, a double click, a page that reopened on load) matches
+// nothing and answers with the row as it stands rather than counting the round
+// twice. A draft that is still 'draft' or 'ready' has an open round already and
+// is answered the same way; an abandoned one is refused, because a discarded
+// alignment does not come back to life.
+//
+// The lock is the one every draft write uses, so a reopen cannot interleave
+// with a confirm deciding on the same row: either the confirm completed first
+// and this reopens that round, or this reopens first and the confirm creates
+// from the reopened revision.
+func (h *Handler) ReopenIssueDraft(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	session, ok := h.loadIssueDraftSession(w, r, userID, workspaceID)
+	if !ok {
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to reopen issue draft")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	locked, err := qtx.LockIssueDraftInWorkspace(r.Context(), db.LockIssueDraftInWorkspaceParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   session.WorkspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "issue draft not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock issue draft")
+		return
+	}
+
+	reopened := locked
+	switch locked.Status {
+	case "completed":
+		reopened, err = qtx.ReopenIssueDraft(r.Context(), db.ReopenIssueDraftParams{
+			ChatSessionID: session.ID,
+			WorkspaceID:   session.WorkspaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reopen issue draft")
+			return
+		}
+	case "abandoned":
+		writeError(w, http.StatusConflict, "this draft has been abandoned")
+		return
+	default:
+		// 'draft' or 'ready': the round is already open. Decided on the locked
+		// row, so this is a decision about the state the row is in now, not
+		// about the state it was in when the request was sent.
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit issue draft reopen")
+		return
+	}
+	writeJSON(w, http.StatusOK, issueDraftToResponse(reopened))
+}
+
 type SwitchIssueDraftPolicyRequest struct {
 	// Policy is the key of the alignment policy to run from the next turn on.
 	Policy string `json:"policy"`
@@ -736,11 +829,15 @@ func (h *Handler) FinalizeIssueDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	group, ok := h.issueGroupParamsFromDraft(w, r, workspaceID, session, ready)
+	state, ok := h.readIssueDraftGroupState(w, r, session)
 	if !ok {
 		return
 	}
-	issues, ok := h.createIssueGroupForDraft(w, r, session, group)
+	group, ok := h.issueGroupParamsFromDraft(w, r, workspaceID, session, ready, state)
+	if !ok {
+		return
+	}
+	issues, ok := h.createIssueGroupForDraft(w, r, session, state, group)
 	if !ok {
 		return
 	}

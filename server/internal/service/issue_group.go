@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -33,11 +35,24 @@ type IssueGroupNode struct {
 // IssueGroupParams is one group of issues that commits together: the root
 // (parent) first, then its children in the order the caller wants them read
 // back. CreateGroup links every other node to the root's inserted row.
+//
+// When RootIssueID is set the root is already committed: this is a
+// continuation round, Nodes are only the nodes that round adds, and every one
+// of them becomes a child of that root. The root is never re-inserted, and no
+// issue that already exists has a field rewritten — a node of a confirmed group
+// may have been edited by a person or an agent since it was created, and a
+// follow-up round in the alignment is not a reason to overwrite that. Which
+// nodes those are is the caller's decision (the draft handler derives it from
+// node identity); by the time CreateGroup runs, Nodes holds inserts only.
 type IssueGroupParams struct {
 	Nodes []IssueGroupNode
+	// RootIssueID, when valid, is the already-committed root of this group.
+	RootIssueID pgtype.UUID
 }
 
-// IssueGroupResult is the committed group. Issues[0] is the root.
+// IssueGroupResult is the committed group. Issues[0] is the root — unless the
+// caller passed RootIssueID, in which case the root was already committed and
+// Issues holds only the nodes this call inserted.
 type IssueGroupResult struct {
 	Issues []db.Issue
 }
@@ -63,6 +78,11 @@ type IssueGroupResult struct {
 // person who has just read the draft confirms it, so every node passes
 // AllowDuplicate — and the guard's row is therefore not surfaced here. Only
 // Create has an IssueCreateResult to carry it.
+//
+// The same transaction serves a continuation round, where group.RootIssueID is
+// the group's already-committed root and every node passed in is new. A round
+// that adds one node writes one row; a round that adds none does not call this
+// at all.
 func (s *IssueService) CreateGroup(ctx context.Context, group IssueGroupParams) (IssueGroupResult, error) {
 	if len(group.Nodes) == 0 {
 		return IssueGroupResult{}, errors.New("issue group has no nodes")
@@ -85,7 +105,12 @@ func (s *IssueService) CreateGroup(ctx context.Context, group IssueGroupParams) 
 	tasks := make([]db.AgentTaskQueue, 0, len(group.Nodes))
 	for i, node := range group.Nodes {
 		p := node.Params
-		if i > 0 {
+		switch {
+		case group.RootIssueID.Valid:
+			// A continuation round: the root is already committed, so nothing
+			// in Nodes is the root and every one of them is its child.
+			p.ParentIssueID = group.RootIssueID
+		case i > 0:
 			// The root row was inserted in this very transaction, so
 			// createInTx's parent lookup sees it in the same snapshot and
 			// back-fills the child's project from it.

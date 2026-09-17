@@ -81,8 +81,16 @@ func issueDraftGroupIssueCount(t *testing.T) int {
 // reopenIssueDraft puts a completed draft back in the state a crashed or racing
 // confirm leaves behind: still `ready`, no issue recorded, and — when the
 // caller passes replacement children — a payload that no longer matches what
-// the first confirm created. There is no endpoint for this yet (reopening is
-// the dynamic-alignment phase), so the state is constructed directly.
+// the first confirm created.
+//
+// It is deliberately NOT the /reopen endpoint. That endpoint starts a new round
+// (finalize_round+1) on a group that exists, and the confirm that follows is
+// allowed to append; this helper reproduces the two states a first round has to
+// survive, where the group exists but no round was ever opened on it: the
+// process that died between the commit and the record, and the save that
+// re-keyed every child while a confirm was in flight. Both must adopt the group
+// whole, so the round counter must stay 0 here — that is the point of the
+// fixture.
 func reopenIssueDraft(t *testing.T, sessionID string, draft map[string]any) int64 {
 	t.Helper()
 	raw, err := json.Marshal(draft)
