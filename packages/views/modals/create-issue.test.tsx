@@ -158,7 +158,6 @@ const mockDraftStore = {
   setActiveMode: mockSetActiveMode,
   clearDraft: mockClearDraft,
   setLastAssignee: mockSetLastAssignee,
-  hasDraft: () => false,
 };
 
 const mockQuickCreateStore = {

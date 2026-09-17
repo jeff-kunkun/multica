@@ -6,6 +6,7 @@ const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockBeginIsolatedDraft = vi.hoisted(() => vi.fn());
 const mockEndIsolatedDraft = vi.hoisted(() => vi.fn());
 const mockRefetchSourceContext = vi.hoisted(() => vi.fn());
+const mockClearDraft = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
@@ -33,6 +34,7 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
     getState: () => ({
       beginIsolatedDraft: mockBeginIsolatedDraft,
       endIsolatedDraft: mockEndIsolatedDraft,
+      clearDraft: mockClearDraft,
     }),
   },
 }));
@@ -126,14 +128,19 @@ vi.mock("./create-issue", () => ({
 // input, so here it only has to prove the switch keeps ONE DialogContent.
 vi.mock("./align-create-issue", () => ({
   AlignCreatePanel: ({
+    onClose,
     onSwitchMode,
   }: {
+    onClose: () => void;
     onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
   }) => (
     <div>
       align panel
       <button type="button" onClick={() => onSwitchMode?.(null)}>
         switch manual from align
+      </button>
+      <button type="button" onClick={() => onClose()}>
+        close from align
       </button>
     </div>
   ),
@@ -262,5 +269,40 @@ describe("CreateIssueDialog mode switching", () => {
 
     expect(screen.getByText("align panel")).toBeInTheDocument();
     expect(mockSetLastMode).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * DENE-421: an unsent create draft does not outlive the dialog. Reopening any
+ * of the three faces starts blank — before a submit, and before the alignment
+ * face has opened a conversation, what was typed is scratch. The shell owns
+ * this rather than each panel: Esc, the backdrop and every panel's own cancel
+ * all land on the same `onClose`, and a rule enforced in three places is a rule
+ * that holds in two.
+ */
+describe("CreateIssueDialog draft lifetime", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("clears the draft before handing the close up", () => {
+    const onClose = vi.fn();
+    render(<CreateIssueDialog onClose={onClose} initialMode="align" data={null} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "close from align" }));
+
+    expect(mockClearDraft).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the draft across a mode switch within one open", () => {
+    // The store still spans a switch: that is what stopped a manual body and an
+    // agent prompt from destroying each other (MUL-5181). Only the close clears.
+    render(<CreateIssueDialog onClose={vi.fn()} initialMode="manual" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "switch align" }));
+    fireEvent.click(screen.getByRole("button", { name: "switch manual from align" }));
+
+    expect(mockClearDraft).not.toHaveBeenCalled();
   });
 });

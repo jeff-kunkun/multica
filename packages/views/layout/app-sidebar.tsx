@@ -33,7 +33,6 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
 import { StatusIcon } from "../issues/components/status-icon";
-import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   openAlignIssue,
   openCreateIssueWithPreference,
@@ -173,12 +172,6 @@ const utilityNav: { key: NavKey; labelKey: NavLabelKey }[] = [
 
 const NAV_ITEM_CLASS_NAME =
   "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground";
-
-function DraftDot() {
-  const hasDraft = useIssueDraftStore((s) => s.hasDraft());
-  if (!hasDraft) return null;
-  return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
-}
 
 /**
  * Presentational pin row. The `label` and `iconNode` are computed by the
@@ -745,10 +738,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 className="text-muted-foreground"
                 onClick={() => openCreateIssueWithPreference()}
               >
-                <span className="relative">
-                  <SquarePen />
-                  <DraftDot />
-                </span>
+                <SquarePen />
                 <span>{t(($) => $.sidebar.new_issue)}</span>
                 {createIssueShortcut ? (
                   <ShortcutKeycaps shortcut={createIssueShortcut} decorative className="pointer-events-none ml-auto" />

@@ -948,6 +948,7 @@
     "field_status": "상태",
     "field_priority": "우선순위",
     "field_project": "프로젝트",
+    "field_assignee": "담당자",
     "save": "초안 저장",
     "saving": "저장 중…",
     "saved": "저장됨",

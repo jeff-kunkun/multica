@@ -948,6 +948,7 @@
     "field_status": "状态",
     "field_priority": "优先级",
     "field_project": "项目",
+    "field_assignee": "负责人",
     "save": "保存草稿",
     "saving": "保存中…",
     "saved": "已保存",

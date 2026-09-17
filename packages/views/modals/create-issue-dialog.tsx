@@ -108,7 +108,7 @@ function SourceContextCreateIssueDialog({
 }
 
 function CreateIssueDialogBody({
-  onClose,
+  onClose: closeDialog,
   initialMode,
   data,
   sourceContextData,
@@ -121,6 +121,24 @@ function CreateIssueDialogBody({
   sourceContextExpanded?: boolean;
 }) {
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
+
+  // Closing the dialog throws the unsent draft away (DENE-421). A draft that
+  // has not been submitted — and, on the alignment face, has not opened a
+  // conversation — is scratch input, so reopening "New issue", "Hand to an
+  // agent" or "Align first" starts blank rather than resurrecting whatever was
+  // typed and abandoned days ago. Everything worth keeping already has a
+  // durable home by then: a submitted issue, or a server-side alignment draft
+  // that the unfinished-alignments banner lists and can resume.
+  //
+  // This deliberately reverses MUL-5181's cross-open persistence; the store
+  // still spans a mode switch WITHIN one open, which is what kept a manual body
+  // and an agent prompt from destroying each other. `clearDraft` (not a full
+  // reset) so the last-assignee preference survives, same as after a submit.
+  const onClose = () => {
+    useIssueDraftStore.getState().clearDraft();
+    closeDialog();
+  };
+
   const [mode, setMode] = useState<CreateMode>(initialMode);
   const [panelData, setPanelData] = useState(data ?? null);
   const [isExpanded, setIsExpanded] = useState(false);

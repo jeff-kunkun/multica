@@ -655,6 +655,51 @@ describe("IssueDraftPreviewPanel project", () => {
 });
 
 /**
+ * DENE-421: the parent's own assignee. Sub-issue rows have had a picker since
+ * DENE-411; the root had none, so a group could only ever be created with an
+ * unassigned parent. Same reasoning as the project — the carrier has no
+ * workspace roster to resolve a name against, so if the panel does not offer
+ * it, nothing downstream can.
+ */
+describe("IssueDraftPreviewPanel parent assignee", () => {
+  it("saves the assignee the user picks for the parent, and reports the edit", () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    const { props } = renderPanel({
+      draft: { ...STORED, title: "T" },
+      stage: "ready",
+      onSave,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "assignee-picker:null" }));
+    expect(props.onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    return waitFor(() => expect(onSave).toHaveBeenCalledTimes(1)).then(() => {
+      const sent = savedPayload(onSave);
+      expect(sent.assignee_type).toBe("agent");
+      expect(sent.assignee_id).toBe("ag-9");
+    });
+  });
+
+  it("keeps a parent assignee edit when a carrier reply lands under it", () => {
+    // Identical hazard to the project's: the carrier's block cannot carry an
+    // assignee, so folding a reply in must not read as "unassigned" and revert.
+    const onDirtyChange = vi.fn();
+    const { rerenderWith } = renderPanel({
+      draft: { ...STORED, title: "T" },
+      onDirtyChange,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "assignee-picker:null" }));
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    rerenderWith({ draft: MERGED });
+    expect(screen.getByRole("button", { name: "assignee-picker:ag-9" })).toBeTruthy();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+  });
+});
+
+/**
  * DENE-415: a continuation round. The same conversation reopens on a group that
  * already exists, and the next confirm adds to it instead of adopting it whole.
  * The two things this suite pins are the two a person would be misled by: which

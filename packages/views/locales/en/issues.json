@@ -979,6 +979,7 @@
     "field_status": "Status",
     "field_priority": "Priority",
     "field_project": "Project",
+    "field_assignee": "Assignee",
     "save": "Save draft",
     "saving": "Saving…",
     "saved": "Saved",

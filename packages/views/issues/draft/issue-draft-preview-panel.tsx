@@ -414,6 +414,33 @@ export function IssueDraftPreviewPanel({
                   }
                 />
               </div>
+              {/* The root's own assignee. The carrier is never told about it
+                  either — it has no workspace roster to resolve a name
+                  against, which is why `assignee_hint` exists for children —
+                  so the panel owns it exactly as it owns status, priority and
+                  project. `open={false}` rather than a missing control on a
+                  finished alignment: the row still reads back who it went to.
+                  Children keep their own pickers; this one is the parent's. */}
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="text-caption text-muted-foreground">
+                  {t(($) => $.alignment.field_assignee)}
+                </span>
+                <AssigneePicker
+                  assigneeType={
+                    (value.assignee_type as IssueAssigneeType | null) ?? null
+                  }
+                  assigneeId={value.assignee_id ?? null}
+                  open={parentLocked ? false : undefined}
+                  align="start"
+                  onUpdate={(updates) =>
+                    setEditing({
+                      ...value,
+                      assignee_type: updates.assignee_type ?? null,
+                      assignee_id: updates.assignee_id ?? null,
+                    })
+                  }
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -928,6 +955,10 @@ function sameDraft(a: IssueDraftPayload, b: IssueDraftPayload): boolean {
     // reply would be adopted straight over the edit — silently reverting a
     // choice the user just made.
     (a.project_id ?? null) === (b.project_id ?? null) &&
+    // Same reason for the root's assignee: it is panel-owned, so a change here
+    // must count as dirty or the carrier's next reply reverts it.
+    (a.assignee_type ?? null) === (b.assignee_type ?? null) &&
+    (a.assignee_id ?? null) === (b.assignee_id ?? null) &&
     // Editing the group is an edit to the draft like any other: without this
     // the panel would report itself clean, the session would fold the carrier's
     // next reply straight over the row someone just deleted, and "save" would

@@ -40,8 +40,8 @@ export interface IssueCreateShared {
   /** Uploads for the dialog (placeholders + completed), referenced by the
    *  manual description OR the agent prompt markdown. A single pool so an
    *  image survives a mode switch from either side; each submit path sends
-   *  only the ids its own content references. Coordinator-owned (MUL-5181 L2):
-   *  a placeholder written at pick time survives dialog close, and one still
+   *  only the ids its own content references. A placeholder lives as long as
+   *  the dialog does — closing it clears the draft (DENE-421) — and one still
    *  `uploading` at load time is dropped on rehydrate. */
   attachments: DraftUpload[];
 }
@@ -138,7 +138,6 @@ interface IssueDraftStore {
   beginIsolatedDraft: () => void;
   endIsolatedDraft: () => void;
   setLastAssignee: (type?: IssueAssigneeType, id?: string) => void;
-  hasDraft: () => boolean;
 }
 
 function isLegacyFlatDraft(d: Record<string, unknown>): boolean {
@@ -208,7 +207,7 @@ function migrateDraft(raw: unknown): IssueCreateDraft {
 
 export const useIssueDraftStore = create<IssueDraftStore>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       draft: migrateDraft(undefined),
       lastAssigneeType: undefined,
       lastAssigneeId: undefined,
@@ -260,19 +259,6 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
           : s),
       setLastAssignee: (type, id) =>
         set({ lastAssigneeType: type, lastAssigneeId: id }),
-      hasDraft: () => {
-        const { manual, agent, align, shared } = get().draft;
-        return !!(
-          manual.title ||
-          manual.description ||
-          agent.prompt ||
-          align.request ||
-          Object.keys(manual.propertyValues).length > 0 ||
-          // Recoverable uploads only: a failed/interrupted remnant the user
-          // never dismissed must not pin the sidebar's draft dot forever.
-          shared.attachments.some((u) => u.status === "uploaded" || u.status === "uploading")
-        );
-      },
     }),
     {
       name: "multica_issue_draft",

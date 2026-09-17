@@ -948,6 +948,7 @@
     "field_status": "ステータス",
     "field_priority": "優先度",
     "field_project": "プロジェクト",
+    "field_assignee": "担当者",
     "save": "下書きを保存",
     "saving": "保存中…",
     "saved": "保存しました",

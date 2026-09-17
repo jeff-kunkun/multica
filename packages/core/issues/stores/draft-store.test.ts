@@ -339,43 +339,6 @@ describe("issue draft store — legacy rehydrate", () => {
   });
 });
 
-describe("issue draft store — hasDraft upload semantics", () => {
-  beforeEach(() => {
-    useIssueDraftStore.setState(RESET_STATE);
-  });
-
-  const placeholder = (status: "uploading" | "uploaded" | "failed" | "interrupted") =>
-    ({
-      clientUploadId: `c-${status}`,
-      status,
-      filename: "f.png",
-      size: 1,
-      ...(status === "uploaded"
-        ? {
-            attachment: {
-              id: "att-1",
-              filename: "f.png",
-              url: "https://cdn.example.test/f.png",
-            },
-          }
-        : {}),
-    }) as never;
-
-  it("counts uploaded and uploading entries as recoverable draft intent", () => {
-    const { setShared, hasDraft } = useIssueDraftStore.getState();
-    setShared({ attachments: [placeholder("uploading")] });
-    expect(hasDraft()).toBe(true);
-    setShared({ attachments: [placeholder("uploaded")] });
-    expect(hasDraft()).toBe(true);
-  });
-
-  it("ignores failed/interrupted remnants so they cannot pin the sidebar dot", () => {
-    const { setShared, hasDraft } = useIssueDraftStore.getState();
-    setShared({ attachments: [placeholder("failed"), placeholder("interrupted")] });
-    expect(hasDraft()).toBe(false);
-  });
-});
-
 describe("issue draft store — alignment slot (DENE-370)", () => {
   beforeEach(() => {
     useIssueDraftStore.setState(RESET_STATE);
@@ -394,13 +357,6 @@ describe("issue draft store — alignment slot (DENE-370)", () => {
     expect(draft.manual.title).toBe("manual title");
     expect(draft.manual.description).toBe("manual body");
     expect(draft.agent.prompt).toBe("agent prompt");
-  });
-
-  it("counts an alignment request as draft intent, so the sidebar dot cannot lie", () => {
-    const { setAlign, hasDraft } = useIssueDraftStore.getState();
-    expect(hasDraft()).toBe(false);
-    setAlign({ request: "add dark mode" });
-    expect(hasDraft()).toBe(true);
   });
 
   it("empties the alignment slot on clearDraft", () => {
