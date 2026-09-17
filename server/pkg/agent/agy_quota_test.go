@@ -75,14 +75,14 @@ func TestParseAgyQuotaError(t *testing.T) {
 	}
 }
 
-func TestDefaultAgyQuotaResetAt(t *testing.T) {
+func TestDefaultQuotaResetAt(t *testing.T) {
 	t.Parallel()
 	now := time.Unix(1_800_000_000, 0)
-	if got := DefaultAgyQuotaResetAt(now, time.Time{}); !got.Equal(now.Add(time.Hour)) {
+	if got := DefaultQuotaResetAt(now, time.Time{}); !got.Equal(now.Add(time.Hour)) {
 		t.Fatalf("default = %s", got)
 	}
 	want := now.Add(20 * time.Minute)
-	if got := DefaultAgyQuotaResetAt(now, want); !got.Equal(want) {
+	if got := DefaultQuotaResetAt(now, want); !got.Equal(want) {
 		t.Fatalf("explicit = %s", got)
 	}
 }

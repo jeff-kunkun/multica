@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // maxAgentAccounts bounds the read-only account report the daemon stamps onto
@@ -418,23 +420,29 @@ func (d *Daemon) agentAccountsReport(now time.Time) ([]AgentAccount, string) {
 		return []AgentAccount{}, "resolve host home directory: " + err.Error()
 	}
 	accounts, probeErr := probeAgentAccounts(home)
-	// Stamp the quota overlay even when part of the probe failed: the agy rows
-	// that did report are still correct, and dropping their deadline would
-	// make an exhausted account look available.
-	accounts = d.stampAgyQuotaResetAt(accounts, now)
+	// Stamp the quota overlay even when part of the probe failed: the rows that
+	// did report are still correct, and dropping their deadline would make an
+	// exhausted account look available.
+	accounts = d.stampAccountQuotaResetAt(accounts, now)
 	if probeErr != nil {
 		return accounts, probeErr.Error()
 	}
 	return accounts, ""
 }
 
-// stampAgyQuotaResetAt copies the AGY quota overlay onto the matching agy rows.
-// agent_accounts is the account channel that carries a quota deadline, and the
-// overlay is already this daemon's authoritative answer for "this directory is
-// exhausted until T" — deriving the deadline twice would let the two keys
-// disagree in the same UI.
-func (d *Daemon) stampAgyQuotaResetAt(accounts []AgentAccount, now time.Time) []AgentAccount {
-	overlay := d.agyQuotaOverlay(now)
+// stampAccountQuotaResetAt copies the quota overlay onto whichever reported
+// rows it names. agent_accounts is the account channel that carries a quota
+// deadline, and the overlay is already this daemon's authoritative answer for
+// "this directory is exhausted until T" — deriving the deadline twice would let
+// the two keys disagree in the same UI.
+//
+// Matching is by directory and NOT by CLI: the overlay is keyed by the account
+// directory a run actually burned, so an agy, dsh, claude, codex or cursor row
+// is stamped by the same rule. Restricting this to agy rows is exactly the gap
+// DENE-466 closes — it left "this account is out of quota" invisible for every
+// CLI but one, which is a thing the UI cannot prompt about if it never learns it.
+func (d *Daemon) stampAccountQuotaResetAt(accounts []AgentAccount, now time.Time) []AgentAccount {
+	overlay := d.accountQuotaOverlay(now)
 	if len(overlay) == 0 {
 		return accounts
 	}
@@ -443,10 +451,10 @@ func (d *Daemon) stampAgyQuotaResetAt(accounts []AgentAccount, now time.Time) []
 		resetAt[entry.Dir] = entry.ResetAt
 	}
 	for i := range accounts {
-		if accounts[i].CLI != agyCLIName {
-			continue
-		}
-		if unix, ok := resetAt[accounts[i].Home]; ok {
+		// The overlay stores normalised paths; the probe reports filepath.Join
+		// results, which are already clean. Normalising the lookup key anyway
+		// keeps a trailing separator on either side from silently missing.
+		if unix, ok := resetAt[agent.NormalizeAgyDir(accounts[i].Home)]; ok {
 			accounts[i].QuotaResetAt = unix
 		}
 	}
