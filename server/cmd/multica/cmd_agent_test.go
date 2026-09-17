@@ -789,6 +789,14 @@ func TestAgentMaxConcurrentTasksFlagValidation(t *testing.T) {
 	var requestCount int
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// `agent update` reads the agent before writing configuration, because
+		// a specialisation's configuration belongs to its base role (DENE-470).
+		// That read is not a request under test; the writes (POST create / PUT
+		// update) are.
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+			return
+		}
 		requestCount++
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode request body: %v", err)
@@ -1900,6 +1908,12 @@ func TestAgentUpdateSendsThinkingLevel(t *testing.T) {
 			var gotMethod, gotPath string
 			var gotBody map[string]any
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// The base-role read `agent update` performs before a
+				// configuration write (DENE-470) is not the request under test.
+				if r.Method == http.MethodGet {
+					json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+					return
+				}
 				gotMethod = r.Method
 				gotPath = r.URL.Path
 				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
@@ -1997,6 +2011,12 @@ func TestAgentServiceTierFlagsAndBodies(t *testing.T) {
 	t.Run("update sends explicit clear", func(t *testing.T) {
 		var gotBody map[string]any
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Only the write carries the body this test reads; `agent update`
+			// reads the agent first (DENE-470).
+			if r.Method == http.MethodGet {
+				json.NewEncoder(w).Encode(map[string]any{"id": "agent-123"})
+				return
+			}
 			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 				t.Errorf("decode request body: %v", err)
 			}
@@ -2168,6 +2188,12 @@ func TestAgentUpdateSendsConversationStarters(t *testing.T) {
 			var gotMethod, gotPath string
 			var gotBody map[string]any
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Only the write is recorded: `agent update` reads first
+				// (DENE-470).
+				if r.Method == http.MethodGet {
+					json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+					return
+				}
 				gotMethod = r.Method
 				gotPath = r.URL.Path
 				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
