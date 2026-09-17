@@ -37,7 +37,9 @@ func ImportTransferConfig(ctx context.Context, env TransferImportEnv, req Transf
 	if req.Manifest.Format != "" && req.Manifest.SchemaVersion != 0 &&
 		req.Manifest.SchemaVersion != TransferBundleSchemaVersionV1 &&
 		req.Manifest.SchemaVersion != TransferBundleSchemaVersionV2 {
-		return nil, &ImportError{Status: 400, Code: "transfer_bundle_version_unsupported", Msg: "unsupported transfer schema_version"}
+		return nil, &ImportError{Status: 400, Code: "transfer_bundle_version_unsupported", Msg: fmt.Sprintf(
+			"unsupported transfer schema_version %d: this server understands up to %d, so the bundle was produced by a newer build than the one running here — upgrade this target server",
+			req.Manifest.SchemaVersion, TransferBundleSchemaVersion)}
 	}
 	if req.DryRun == nil {
 		return nil, &ImportError{Status: 400, Code: "transfer_bundle_invalid", Msg: "dry_run is required"}

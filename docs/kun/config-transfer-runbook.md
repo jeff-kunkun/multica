@@ -156,6 +156,7 @@ multica transfer bind-runtimes --profile <目标档> --workspace <slug> \
 | 现象 | 含义 | 怎么办 |
 | --- | --- | --- |
 | `target_unsupported`（HTTP 404） | 目标不是带 `/transfer/*` 的 `kun` 实例 | 确认切到了自建 `kun`，不是官方云，也不是过旧的上游自建 |
+| `target_outdated` / `unsupported transfer schema_version`（HTTP 400） | 目标有 `/transfer/*`，但它那版 `kun` 还读不了带任务的包（`schema_version: 2`）——**问题在目标实例的版本，不在导出包** | 把目标实例升到含 V3 任务导入的 `kun`（`git fetch && git merge --ff-only origin/kun`，再 `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`）；不想升级就去掉任务重导：`--include config,conversations,attachments`，产出 `schema_version: 1` 的包 |
 | `transfer_bundle_corrupt` | zip 缺文件或内容校验对不上 | 重新导出一份，不要手工改 zip 里的文件 |
 | `transfer_issues_target_not_empty` | 目标工作区已经有任务，任务分组被整包拒收（编号要逐票保真），此次一行都没写 | 新建一个空工作区再导；确实要落进已有任务的工作区，改用 CLI 的 `--renumber`，并接受正文里旧编号会指错任务 |
 | `issue_limit_would_exceed` | 目标工作区的任务数会超过配额，一行都没写 | 清掉一些任务或换一个额度更宽的工作区再导 |

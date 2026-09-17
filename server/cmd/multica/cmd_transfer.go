@@ -526,10 +526,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 		if err := client.PostJSON(ctx, base+"/transfer/config", service.TransferConfigRequest{
 			Config: payload.Config, DryRun: &dry, OnConflict: onConflict, Options: importOptions,
 		}, &report); err != nil {
-			if st := httpStatusOf(err); st == 404 {
-				return fmt.Errorf("target_unsupported: this server is not a kun instance with /transfer/* endpoints")
-			}
-			return err
+			return explainTransferConfigError(err, payload.Manifest.SchemaVersion)
 		}
 		return cli.PrintJSON(cmd.OutOrStdout(), report)
 	}
@@ -579,10 +576,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 		Options:         importOptions,
 	}
 	if err := client.PostJSON(ctx, base+"/transfer/config", cfgReq, &cfgReport); err != nil {
-		if st := httpStatusOf(err); st == 404 {
-			return fmt.Errorf("target_unsupported: this server is not a kun instance with /transfer/* endpoints")
-		}
-		return err
+		return explainTransferConfigError(err, payload.Manifest.SchemaVersion)
 	}
 
 	// Issues go after config (labels, projects, agents and the status catalog
@@ -1330,6 +1324,41 @@ func postTransferAttachment(ctx context.Context, client *cli.APIClient, path str
 		return fmt.Errorf("POST %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+// transferErrorCodeOf reads the machine-readable `code` out of a failing
+// /transfer/* response. The transfer endpoints keep their full JSON body on
+// the error (see cli.transferErrorBodyLimit), so the code survives the trip
+// and the CLI can say something better than the raw server sentence.
+func transferErrorCodeOf(err error) string {
+	var he *cli.HTTPError
+	if !errors.As(err, &he) {
+		return ""
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal([]byte(he.Body), &body) != nil {
+		return ""
+	}
+	return body.Code
+}
+
+// explainTransferConfigError turns the two ways a too-old target fails into
+// one sentence that names the fix. A target predating the /transfer/* routes
+// 404s; a target that has the routes but not the V3 bundle reader answers 400
+// `transfer_bundle_version_unsupported`, and its own message — written by that
+// old build — says only "unsupported transfer schema_version" (DENE-240).
+func explainTransferConfigError(err error, bundleVersion int) error {
+	if httpStatusOf(err) == 404 {
+		return fmt.Errorf("target_unsupported: this server is not a kun instance with /transfer/* endpoints")
+	}
+	if transferErrorCodeOf(err) == "transfer_bundle_version_unsupported" {
+		return fmt.Errorf("target_outdated: this bundle is schema_version %d but the target server only reads older bundles — "+
+			"upgrade the target instance to a kun build that carries the V3 task import, or re-export without the `issues` group "+
+			"(--include config,conversations,attachments) to produce a schema_version 1 bundle: %w", bundleVersion, err)
+	}
+	return err
 }
 
 func httpStatusOf(err error) int {
