@@ -169,6 +169,8 @@ export function IssueDraftPreviewPanel({
   // what is on screen or they are answering a different question.
   const groupPlan = planIssueDraftGroup(value);
   const locked = record || pending || confirming || stage === "created";
+  // Unsaved edits and the confirm cannot both be right: see the footer.
+  const confirmNeedsSave = dirty && !locked;
   const canSave = !locked && !saving && value.title.trim().length > 0;
   // A title is not required to generate: the carrier's block is the only place
   // a title comes from before someone types one, so gating this button on the
@@ -492,11 +494,23 @@ export function IssueDraftPreviewPanel({
               <p className="text-caption text-muted-foreground">
                 {t(($) => $.alignment.confirm_hint)}
               </p>
+              {/* The confirm sends a revision, not a payload: it creates the
+                  draft the SERVER holds, so unsaved edits are not in it. The
+                  counts above are read off the screen, which is the only
+                  honest thing they can be while someone is editing — so the
+                  button has to wait for the two to agree. Without this, a
+                  deleted sub-issue is still created and its agent still
+                  started, under a line that just promised it would not be. */}
+              {confirmNeedsSave ? (
+                <p className="text-caption font-medium text-foreground">
+                  {t(($) => $.alignment.confirm_unsaved)}
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 onClick={() => void onConfirm()}
-                disabled={!canConfirm}
+                disabled={!canConfirm || confirmNeedsSave}
                 className="min-w-32"
               >
                 {confirming ? (

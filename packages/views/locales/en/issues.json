@@ -980,6 +980,7 @@
     "confirm": "Confirm and create",
     "confirming": "Creating…",
     "confirm_hint": "Creating the issue also enqueues the assignee's work.",
+    "confirm_unsaved": "Save your edits first — confirming creates the saved draft, not what is on screen.",
     "parent_label": "Parent issue",
     "group_title": "Sub-issues",
     "group_hint": "The fields above are the parent. Each sub-issue below is created together with it, in the order its stage gives.",

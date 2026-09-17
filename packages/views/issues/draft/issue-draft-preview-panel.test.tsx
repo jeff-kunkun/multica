@@ -491,6 +491,40 @@ describe("IssueDraftPreviewPanel group", () => {
     expect(screen.queryByText(/Starting right away/)).toBeNull();
   });
 
+  it("will not confirm a group the user has edited but not saved", async () => {
+    // The confirm sends a revision, not a payload: it creates what the SERVER
+    // holds. Offering it right after a row was deleted would create that row
+    // anyway and start its agent, directly under a count that just said it
+    // would not — the one thing this preview exists to prevent.
+    const onConfirm = vi.fn().mockResolvedValue(true);
+    const onSave = vi.fn().mockResolvedValue(true);
+    renderPanel({
+      draft: GROUP,
+      stage: "ready",
+      canConfirm: true,
+      onConfirm,
+      onSave,
+    });
+
+    const confirm = screen.getByRole("button", { name: /Confirm and create/ });
+    expect(confirm).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove sub-issue 2" }));
+    expect(screen.getByText("Confirming creates 2 issues.")).toBeTruthy();
+    expect(confirm).toBeDisabled();
+    expect(
+      screen.getByText(
+        "Save your edits first — confirming creates the saved draft, not what is on screen.",
+      ),
+    ).toBeTruthy();
+
+    // Saving is what makes the two agree, and the button comes back.
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(confirm).toBeEnabled());
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   it("lists the group the confirm created, by identifier", () => {
     renderPanel({
       draft: GROUP,

@@ -949,6 +949,7 @@
     "confirm": "确认并创建",
     "confirming": "创建中…",
     "confirm_hint": "创建任务会同时给负责人派发执行。",
+    "confirm_unsaved": "先保存改动。确认创建的是已保存的草稿，不是屏幕上这一份。",
     "parent_label": "父任务",
     "group_title": "拆出的子任务",
     "group_hint": "上面这些字段属于父任务。下面的子任务会跟它一起创建，按各自的阶段顺序推进。",
