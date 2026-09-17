@@ -45,6 +45,37 @@ export function childrenOf(
   return agents.filter((agent) => agent.parent_agent_id === parentId);
 }
 
+/**
+ * The base role of an agent, from an already-loaded agent list.
+ *
+ * `null` when the caller's list does not hold the row — the base role can be
+ * private to another member, or the list read can still be in flight — and for
+ * a base role itself. Callers show the served `parent_agent_name` in that case
+ * rather than inventing a name.
+ */
+export function parentAgentOf(
+  agents: readonly Agent[],
+  agent: Pick<Agent, "parent_agent_id" | "parent_agent_name">,
+): Agent | null {
+  const parentId = agent.parent_agent_id ?? "";
+  if (!parentId) return null;
+  return agents.find((candidate) => candidate.id === parentId) ?? null;
+}
+
+/**
+ * What to call an agent's base role in copy.
+ *
+ * The loaded row wins so a rename reads live; `parent_agent_name` — served
+ * with both the list and the detail — covers the base role this viewer cannot
+ * see. Empty when neither is available, which callers word as "the base role".
+ */
+export function parentAgentLabel(
+  agent: Pick<Agent, "parent_agent_id" | "parent_agent_name">,
+  parentAgent?: Agent | null,
+): string {
+  return parentAgent?.name || agent.parent_agent_name || "";
+}
+
 /** Active children of one base role, in list order. */
 export function activeChildrenOf(
   agents: readonly Agent[],

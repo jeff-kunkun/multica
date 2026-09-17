@@ -73,6 +73,7 @@ import {
   inheritedPromptReadState,
   isAgentHasChildrenError,
   isSpecialization,
+  parentAgentOf,
 } from "../specialization";
 import { ExpandableDescription } from "../../common/expandable-description";
 import { useT, useTimeAgo } from "../../i18n";
@@ -158,6 +159,15 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               candidate.parent_agent_id === agent.id && !candidate.archived_at,
           )
         : [],
+    [agent, agents],
+  );
+
+  // The base role, when the workspace list holds it. The settings surfaces
+  // show its live values for a specialisation (DENE-470); `null` means the
+  // viewer cannot see that row (e.g. private to another member) and the
+  // notices fall back to the name served on the child.
+  const parentAgent = useMemo(
+    () => (agent ? parentAgentOf(agents, agent) : null),
     [agent, agents],
   );
 
@@ -522,6 +532,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           agents={agents}
           onChangeBaseRole={handleChangeBaseRole}
           onDetachBaseRole={handleDetachBaseRole}
+          parentAgent={parentAgent}
           navIntent={tabNavIntent}
           onNavIntentHandled={() => setTabNavIntent(null)}
         />

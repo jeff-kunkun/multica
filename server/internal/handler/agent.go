@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/agentconfig"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -478,6 +479,36 @@ func (h *Handler) attachAgentInheritance(ctx context.Context, resp *AgentRespons
 	}
 	resp.InheritedSkills = inherited
 	return nil
+}
+
+// adoptBaseRoleConfig makes a specialisation's row hold its base role's
+// configuration (DENE-470): the runtime columns the claim fences and the
+// enqueue points read straight off the row, the invocation allow-list, which
+// lives in its own table, and the read-time half — model, thinking level, env,
+// args, mcp, runtime config, budgets, lineups — which the claim path resolves
+// from the base role at dispatch anyway.
+//
+// Called wherever the relationship is established or a client writes the child,
+// so no request can leave a specialisation carrying a configuration of its own:
+// the row is a copy of the base role's, and every later base-role edit is picked
+// up through the read-time resolution instead of a second propagation write.
+//
+// The caller owns the transaction: every call site runs inside the same
+// transaction as the row write it belongs to.
+func adoptBaseRoleConfig(ctx context.Context, q *db.Queries, baseAgentID, childAgentID pgtype.UUID) error {
+	if err := q.MirrorBaseRoleConfigOntoChild(ctx, db.MirrorBaseRoleConfigOntoChildParams{
+		BaseAgentID:  baseAgentID,
+		ChildAgentID: childAgentID,
+	}); err != nil {
+		return err
+	}
+	if err := q.SnapshotInheritedConfigFromBaseRole(ctx, db.SnapshotInheritedConfigFromBaseRoleParams{
+		BaseAgentID:  baseAgentID,
+		ChildAgentID: childAgentID,
+	}); err != nil {
+		return err
+	}
+	return copyInvocationTargetsFromAgent(ctx, q, baseAgentID, childAgentID)
 }
 
 // validateAgentParent enforces the two-level rule for a requested parent.
@@ -1718,24 +1749,60 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxAgentDescriptionLength))
 		return
 	}
-	if req.RuntimeID == "" {
+
+	// Two-level specialisation (DENE-301), resolved BEFORE anything that reads
+	// the request's own configuration. A specialisation inherits its base role's
+	// entire configuration (DENE-470), so the base role — not the request —
+	// decides which runtime is resolved and validated below, and every config
+	// field further down. An empty/absent parent_agent_id creates a base role.
+	// A create has no children yet, so the "parent cannot itself become a child"
+	// arm of the two-level rule cannot fire here.
+	var baseRole db.Agent
+	var parentAgentID pgtype.UUID
+	if req.ParentAgentID != "" {
+		parentActorType, parentActorID := h.resolveActor(r, ownerID, workspaceID)
+		parent, reject := h.validateAgentParent(r.Context(), workspaceID, req.ParentAgentID, "", parentActorType, parentActorID)
+		if reject != "" {
+			writeError(w, http.StatusBadRequest, reject)
+			return
+		}
+		baseRole = parent
+		parentAgentID = parent.ID
+	}
+	// Deriving a specialisation must not require the caller to know or repeat
+	// the base role's runtime: that is exactly the field the derive UI left
+	// empty, which is how six specialisations ended up unable to claim work.
+	inheriting := parentAgentID.Valid
+	runtimeIDInput := req.RuntimeID
+	if inheriting {
+		if !baseRole.RuntimeID.Valid {
+			writeError(w, http.StatusBadRequest, "the base role has no runtime; bind one before deriving a specialisation")
+			return
+		}
+		runtimeIDInput = uuidToString(baseRole.RuntimeID)
+	} else if runtimeIDInput == "" {
 		writeError(w, http.StatusBadRequest, "runtime_id is required")
 		return
 	}
-	conversationStarters, err := normaliseAgentConversationStarters(req.ConversationStarters)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if req.Visibility == "" {
-		req.Visibility = "private"
-	}
-	if err := defaultAndValidateAgentMaxConcurrentTasks(rawFields, &req.MaxConcurrentTasks); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+
+	conversationStarters := []AgentConversationStarter{}
+	if !inheriting {
+		var err error
+		conversationStarters, err = normaliseAgentConversationStarters(req.ConversationStarters)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if req.Visibility == "" {
+			req.Visibility = "private"
+		}
+		if err := defaultAndValidateAgentMaxConcurrentTasks(rawFields, &req.MaxConcurrentTasks); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeIDInput, "runtime_id")
 	if !ok {
 		return
 	}
@@ -1748,12 +1815,31 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// authoritative when present; otherwise the legacy visibility value is
 	// mapped. On create the caller is always the owner, so targets are
 	// accepted unconditionally.
-	_, hasTargets := rawFields["invocation_targets"]
-	legacyVis := req.Visibility
-	perm, _, permErr := parsePermissionInput(wsUUID, req.PermissionMode, req.InvocationTargets, req.PermissionMode != nil, hasTargets, &legacyVis)
-	if permErr != nil {
-		writeError(w, http.StatusBadRequest, permErr.Error())
-		return
+	//
+	// A specialisation inherits both halves (DENE-470): its base role owns who
+	// may run it, and the request cannot widen that — the allow-list rows are
+	// copied from the base role inside the create transaction.
+	var (
+		permissionMode string
+		visibility     string
+		perm           resolvedPermission
+		copyTargets    bool
+	)
+	if inheriting {
+		permissionMode = baseRole.PermissionMode
+		visibility = baseRole.Visibility
+		copyTargets = true
+	} else {
+		_, hasTargets := rawFields["invocation_targets"]
+		legacyVis := req.Visibility
+		var permErr error
+		perm, _, permErr = parsePermissionInput(wsUUID, req.PermissionMode, req.InvocationTargets, req.PermissionMode != nil, hasTargets, &legacyVis)
+		if permErr != nil {
+			writeError(w, http.StatusBadRequest, permErr.Error())
+			return
+		}
+		permissionMode = perm.mode
+		visibility = perm.legacyVisibility()
 	}
 	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 		ID:          runtimeUUID,
@@ -1778,26 +1864,32 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// Pi has a fixed token universe and a daemon-discovered per-model subset.
 	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
 	// combination-invalid values are logged and omitted from the invocation.
-	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
-		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
-		return
-	}
-	// For ACP-catalog providers the provider name is not the capability answer
-	// — this runtime's own discovered catalog is. Keeps a Hermes Agent user's
-	// clear 400 instead of accepting a level the daemon would later drop.
-	if req.ThinkingLevel != "" {
-		switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
-		case acpEffortAbsent:
-			writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
-			return
-		case acpEffortUnknown:
-			writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(runtime.Provider))
+	//
+	// Skipped when deriving: the request's thinking level and service tier are
+	// ignored, and validating a value that will not be stored would turn a
+	// harmless echo of the derive dialog's defaults into a 400.
+	if !inheriting {
+		if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
+			writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
 			return
 		}
-	}
-	if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))
-		return
+		// For ACP-catalog providers the provider name is not the capability answer
+		// — this runtime's own discovered catalog is. Keeps a Hermes Agent user's
+		// clear 400 instead of accepting a level the daemon would later drop.
+		if req.ThinkingLevel != "" {
+			switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
+			case acpEffortAbsent:
+				writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
+				return
+			case acpEffortUnknown:
+				writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(runtime.Provider))
+				return
+			}
+		}
+		if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))
+			return
+		}
 	}
 
 	// Probe workspace agent count BEFORE the insert so the funnel has a
@@ -1866,22 +1958,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Two-level specialisation (DENE-301). An empty/absent parent_agent_id
-	// creates a base role; a non-empty one must resolve to a base role in this
-	// workspace, which is what stops a specialisation from being specialised in
-	// turn. A create has no children yet, so the "parent cannot itself become a
-	// child" arm of the rule cannot fire here.
-	var parentAgentID pgtype.UUID
-	if req.ParentAgentID != "" {
-		parentActorType, parentActorID := h.resolveActor(r, ownerID, workspaceID)
-		parent, reject := h.validateAgentParent(r.Context(), workspaceID, req.ParentAgentID, "", parentActorType, parentActorID)
-		if reject != "" {
-			writeError(w, http.StatusBadRequest, reject)
-			return
-		}
-		parentAgentID = parent.ID
-	}
-
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start agent create transaction")
@@ -1890,7 +1966,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
-	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
+	// Configuration inheritance (DENE-470). Everything the child owns is built
+	// from the request above; every configuration column comes from the base
+	// role when there is one. The child's row is seeded with the base role's
+	// CURRENT values rather than with the request's, so a client that fills the
+	// derive form with defaults cannot fork the configuration — and so the row
+	// still describes the agent correctly if the base role disappears.
+	createParams := db.CreateAgentParams{
 		WorkspaceID:              wsUUID,
 		Name:                     req.Name,
 		Description:              req.Description,
@@ -1899,8 +1981,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		RuntimeMode:              runtime.RuntimeMode,
 		RuntimeConfig:            rc,
 		RuntimeID:                runtime.ID,
-		Visibility:               perm.legacyVisibility(),
-		PermissionMode:           perm.mode,
+		Visibility:               visibility,
+		PermissionMode:           permissionMode,
 		MaxConcurrentTasks:       req.MaxConcurrentTasks,
 		OwnerID:                  parseUUID(ownerID),
 		CustomEnv:                ce,
@@ -1912,7 +1994,12 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ConversationStarters:     sp,
 		ComposioToolkitAllowlist: allowlist,
 		ParentAgentID:            parentAgentID,
-	})
+	}
+	if inheriting {
+		createParams = seedCreateParamsFromBaseRole(createParams, baseRole)
+	}
+
+	created, err := qtx.CreateAgent(r.Context(), createParams)
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
 		// so the UI can show the right message instead of a generic 500.
@@ -1925,7 +2012,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create agent: "+err.Error())
 		return
 	}
-	if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, created.ID, parseUUID(ownerID), perm.targets); err != nil {
+	// The allow-list is its own table, so the inherited permission needs its own
+	// copy — in the same transaction, or a child could briefly be visible with
+	// its base role's permission_mode and no targets (which canInvokeAgent reads
+	// as deny-all for everyone but the owner).
+	if copyTargets {
+		if err := copyInvocationTargetsFromAgent(r.Context(), qtx, baseRole.ID, created.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save agent access")
+			return
+		}
+	} else if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, created.ID, parseUUID(ownerID), perm.targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save agent access")
 		return
 	}
@@ -1984,6 +2080,32 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		suppressComposioToolkitAllowlist(&resp)
 	}
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// seedCreateParamsFromBaseRole copies the configuration a specialisation
+// inherits from its base role onto the params of the row about to be created
+// (DENE-470). The field list lives in agentconfig.Inherited — this is that rule
+// applied to a row that does not exist yet, which is the one caller that cannot
+// start from a child row.
+func seedCreateParamsFromBaseRole(params db.CreateAgentParams, base db.Agent) db.CreateAgentParams {
+	inherited := agentconfig.Inherited(db.Agent{}, base)
+	params.RuntimeMode = inherited.RuntimeMode
+	params.RuntimeConfig = inherited.RuntimeConfig
+	params.RuntimeID = inherited.RuntimeID
+	params.Visibility = inherited.Visibility
+	params.PermissionMode = inherited.PermissionMode
+	params.MaxConcurrentTasks = inherited.MaxConcurrentTasks
+	params.CustomEnv = inherited.CustomEnv
+	params.CustomArgs = inherited.CustomArgs
+	params.McpConfig = inherited.McpConfig
+	params.Model = inherited.Model
+	params.ThinkingLevel = inherited.ThinkingLevel
+	params.ServiceTier = inherited.ServiceTier
+	params.ConversationStarters = inherited.ConversationStarters
+	params.SwitchableModels = inherited.SwitchableModels
+	params.DisabledRuntimeSkills = inherited.DisabledRuntimeSkills
+	params.ComposioToolkitAllowlist = inherited.ComposioToolkitAllowlist
+	return params
 }
 
 type UpdateAgentRequest struct {
@@ -2613,7 +2735,20 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updated, err := h.Queries.UpdateAgent(r.Context(), params)
+	// Every write below commits together (DENE-470). A base role's runtime
+	// columns and its specialisations' copies are the same fact, and the same
+	// goes for a specialisation that is being attached, detached or edited: a
+	// reader that saw one half without the other would either dispatch a task to
+	// the wrong runtime or hand it the wrong invocation allow-list.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start agent update transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	updated, err := qtx.UpdateAgent(r.Context(), params)
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — mirror CreateAgent and
 		// return a clear conflict instead of a 500 that leaks the raw
@@ -2639,7 +2774,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
 	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
 	if shouldClearMcpConfig {
-		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentMcpConfig(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
@@ -2647,7 +2782,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearThinkingLevel {
-		updated, err = h.Queries.ClearAgentThinkingLevel(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentThinkingLevel(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
@@ -2655,7 +2790,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearServiceTier {
-		updated, err = h.Queries.ClearAgentServiceTier(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentServiceTier(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent service_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear service_tier: "+err.Error())
@@ -2663,7 +2798,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearComposioAllowlist {
-		updated, err = h.Queries.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist: "+err.Error())
@@ -2675,7 +2810,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// all (see SetAgentParentAgent). Applied after the metadata update so the
 	// response reflects both in one payload.
 	if sentParent {
-		updated, err = h.Queries.SetAgentParentAgent(r.Context(), db.SetAgentParentAgentParams{
+		updated, err = qtx.SetAgentParentAgent(r.Context(), db.SetAgentParentAgentParams{
 			ID:            updated.ID,
 			ParentAgentID: parentAgentID,
 		})
@@ -2690,11 +2825,91 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// permission. Done after the row update so a permission_mode flip and its
 	// targets land together.
 	if replacePermissionTargets {
-		if err := h.replaceInvocationTargets(r.Context(), updated.ID, parseUUID(requestUserID(r)), resolvedPerm.targets); err != nil {
+		if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, updated.ID, parseUUID(requestUserID(r)), resolvedPerm.targets); err != nil {
 			slog.Warn("update agent: persist invocation targets failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update invocation targets: "+err.Error())
 			return
 		}
+	}
+
+	// Configuration inheritance (DENE-470). Three edges to close, all after the
+	// writes above so the mirror is the last word on these columns:
+	//
+	//   attach    — the new base role's runtime columns and allow-list land on
+	//               the child in this same transaction.
+	//   detach    — the read-time half (model, thinking level, env, args, mcp,
+	//               runtime config, budgets, allowlist, lineups) is frozen into
+	//               the child's own row, because from here on nothing resolves it
+	//               from the base role any more.
+	//   base-role — a base role's runtime/access change propagates to every
+	//               active specialisation, which is what keeps the two claim
+	//               fences (`a.runtime_id = atq.runtime_id`) and every enqueue
+	//               point reading the child's own row correct without touching
+	//               any of them.
+	switch {
+	case sentParent && parentAgentID.Valid:
+		if err := adoptBaseRoleConfig(r.Context(), qtx, parentAgentID, updated.ID); err != nil {
+			slog.Warn("update agent: adopt base role config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent")
+			return
+		}
+	case sentParent && existing.ParentAgentID.Valid:
+		if err := qtx.SnapshotInheritedConfigFromBaseRole(r.Context(), db.SnapshotInheritedConfigFromBaseRoleParams{
+			BaseAgentID:  existing.ParentAgentID,
+			ChildAgentID: updated.ID,
+		}); err != nil {
+			slog.Warn("update agent: snapshot inherited config on detach failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent")
+			return
+		}
+	case existing.ParentAgentID.Valid:
+		// The agent is still a specialisation and this request may have written
+		// its inherited columns. Make the row the base role's again: a
+		// specialisation's configuration is not editable, and a client that
+		// PATCHes the whole payload back must not be able to fork it — not even
+		// into columns the claim path would resolve away later, because those
+		// are what every non-claim reader shows.
+		if err := adoptBaseRoleConfig(r.Context(), qtx, existing.ParentAgentID, updated.ID); err != nil {
+			slog.Warn("update agent: re-assert base role config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent")
+			return
+		}
+	case req.RuntimeID != nil || permissionTouched:
+		if err := qtx.MirrorBaseRoleConfigToChildren(r.Context(), updated.ID); err != nil {
+			slog.Warn("update agent: propagate config to specialisations failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent")
+			return
+		}
+		children, err := qtx.ListAgentChildren(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("update agent: load specialisations for propagation failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent")
+			return
+		}
+		for _, child := range children {
+			if err := copyInvocationTargetsFromAgent(r.Context(), qtx, updated.ID, child.ID); err != nil {
+				slog.Warn("update agent: propagate invocation targets failed",
+					append(logger.RequestAttrs(r), "error", err, "agent_id", id, "child_agent_id", uuidToString(child.ID))...)
+				writeError(w, http.StatusInternalServerError, "failed to update agent")
+				return
+			}
+		}
+	}
+
+	// The mirrors above write through SQL, so the row the response is built from
+	// has to be re-read: `updated` still carries the pre-mirror values.
+	if sentParent || existing.ParentAgentID.Valid {
+		updated, err = qtx.GetAgent(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("update agent: reload after inheritance write failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit agent update")
+		return
 	}
 
 	resp := h.agentToResponse(updated)
@@ -3123,6 +3338,21 @@ func (h *Handler) SolidifyAgent(w http.ResponseWriter, r *http.Request) {
 		ParentAgentID: pgtype.UUID{},
 	}); err != nil {
 		slog.Warn("solidify agent: detach parent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to solidify agent")
+		return
+	}
+	// DENE-470: the base role's configuration is resolved live on every claim
+	// while the link exists, so detaching has to freeze it into the row this
+	// agent now owns — otherwise a solidified agent would silently fall back to
+	// whatever model, environment and arguments its own row happened to carry,
+	// while the user only asked to stop sharing the prompt. The runtime columns
+	// are already on the row (mirrored when the link was created) and the
+	// allow-list rows stay as they are, so this is only the read-time half.
+	if err := qtx.SnapshotInheritedConfigFromBaseRole(r.Context(), db.SnapshotInheritedConfigFromBaseRoleParams{
+		BaseAgentID:  child.ParentAgentID,
+		ChildAgentID: child.ID,
+	}); err != nil {
+		slog.Warn("solidify agent: snapshot inherited config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to solidify agent")
 		return
 	}

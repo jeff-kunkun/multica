@@ -17,6 +17,8 @@ import { Label } from "@multica/ui/components/ui/label";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
+import { InheritedConfigNotice } from "../inherited-config-notice";
+import { isSpecialization } from "../../specialization";
 
 // Form state mirrors OpenclawRuntimeConfig, but always carries a defined
 // mode value so the radio group is fully controlled. Empty-string mode
@@ -80,10 +82,13 @@ export function RuntimeConfigTab({
   agent,
   onSave,
   onDirtyChange,
+  parentAgent,
 }: {
   agent: Agent;
   onSave: (updates: { runtime_config: Record<string, unknown> }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
+  /** The base-role row when the caller holds it (DENE-470). */
+  parentAgent?: Agent | null;
 }) {
   const { t } = useT("agents");
 
@@ -137,6 +142,12 @@ export function RuntimeConfigTab({
   };
 
   const isGateway = state.mode === "gateway";
+
+  // The child's gateway settings are the base role's, and the server refuses
+  // the child's own (DENE-470). No editor, one line saying where they live.
+  if (isSpecialization(agent)) {
+    return <InheritedConfigNotice agent={agent} parentAgent={parentAgent} />;
+  }
 
   return (
     <div className="flex h-full flex-col space-y-4">

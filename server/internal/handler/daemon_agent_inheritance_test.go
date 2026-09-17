@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -52,6 +54,11 @@ func newInheritanceFixture(t *testing.T, name, parentPrompt, childPrompt string)
 		// prove the base role is re-read rather than snapshotted.
 		"max_concurrent_tasks": 4,
 	})
+	// The concurrency budget a specialisation runs under is its base role's
+	// (DENE-470), so the headroom has to sit on the base role. Set here rather
+	// than in the fixture's column list to keep the two rows' values distinct:
+	// the capacity test below fails if the child's own 4 is what is honoured.
+	dbfx.Exec(t, `UPDATE agent SET max_concurrent_tasks = 4 WHERE id = $1`, parentID)
 	issueID := dbfx.Issue(t, name+" issue")
 	taskID := dbfx.Task(t, childID, testutil.Cols{
 		"runtime_id": runtimeID,
@@ -72,12 +79,43 @@ func newInheritanceFixture(t *testing.T, name, parentPrompt, childPrompt string)
 // both skill transports — inline skills for a daemon without the bundle
 // capability, refs for one that has it.
 type inheritanceClaim struct {
-	TaskID       string
-	Instructions string
-	IsLeaderTask bool
-	Skills       []service.AgentSkillData
-	SkillRefs    []service.AgentSkillRefData
-	Raw          string
+	TaskID         string
+	Instructions   string
+	IsLeaderTask   bool
+	Skills         []service.AgentSkillData
+	SkillRefs      []service.AgentSkillRefData
+	CustomEnv      map[string]string
+	CustomArgs     []string
+	McpConfig      json.RawMessage
+	Model          string
+	ThinkingLevel  string
+	ServiceTier    string
+	RuntimeConfig  json.RawMessage
+	DisabledSkills []DisabledRuntimeSkill
+	Raw            string
+}
+
+// inheritanceClaimPayload is the shape claimInheritanceTask decodes. Kept
+// beside the claim struct so a field added to one is obviously missing from the
+// other.
+type inheritanceClaimPayload struct {
+	Task *struct {
+		ID           string `json:"id"`
+		IsLeaderTask bool   `json:"is_leader_task"`
+		Agent        *struct {
+			Instructions          string                      `json:"instructions"`
+			Skills                []service.AgentSkillData    `json:"skills"`
+			SkillRefs             []service.AgentSkillRefData `json:"skill_refs"`
+			CustomEnv             map[string]string           `json:"custom_env"`
+			CustomArgs            []string                    `json:"custom_args"`
+			McpConfig             json.RawMessage             `json:"mcp_config"`
+			Model                 string                      `json:"model"`
+			ThinkingLevel         string                      `json:"thinking_level"`
+			ServiceTier           string                      `json:"service_tier"`
+			RuntimeConfig         json.RawMessage             `json:"runtime_config"`
+			DisabledRuntimeSkills []DisabledRuntimeSkill      `json:"disabled_runtime_skills"`
+		} `json:"agent"`
+	} `json:"task"`
 }
 
 func claimInheritanceTask(t *testing.T, runtimeID, capabilities string) inheritanceClaim {
@@ -89,30 +127,55 @@ func claimInheritanceTask(t *testing.T, runtimeID, capabilities string) inherita
 	}
 	req = withURLParam(req, "runtimeId", runtimeID)
 
-	var resp struct {
-		Task *struct {
-			ID           string `json:"id"`
-			IsLeaderTask bool   `json:"is_leader_task"`
-			Agent        *struct {
-				Instructions string                      `json:"instructions"`
-				Skills       []service.AgentSkillData    `json:"skills"`
-				SkillRefs    []service.AgentSkillRefData `json:"skill_refs"`
-			} `json:"agent"`
-		} `json:"task"`
-	}
+	var resp inheritanceClaimPayload
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 	w.JSON(&resp)
 	if resp.Task == nil || resp.Task.Agent == nil {
 		t.Fatalf("claim returned no task/agent payload: %s", w.Body.String())
 	}
 	return inheritanceClaim{
-		TaskID:       resp.Task.ID,
-		Instructions: resp.Task.Agent.Instructions,
-		IsLeaderTask: resp.Task.IsLeaderTask,
-		Skills:       resp.Task.Agent.Skills,
-		SkillRefs:    resp.Task.Agent.SkillRefs,
-		Raw:          w.Body.String(),
+		TaskID:         resp.Task.ID,
+		Instructions:   resp.Task.Agent.Instructions,
+		IsLeaderTask:   resp.Task.IsLeaderTask,
+		Skills:         resp.Task.Agent.Skills,
+		SkillRefs:      resp.Task.Agent.SkillRefs,
+		CustomEnv:      resp.Task.Agent.CustomEnv,
+		CustomArgs:     resp.Task.Agent.CustomArgs,
+		McpConfig:      resp.Task.Agent.McpConfig,
+		Model:          resp.Task.Agent.Model,
+		ThinkingLevel:  resp.Task.Agent.ThinkingLevel,
+		ServiceTier:    resp.Task.Agent.ServiceTier,
+		RuntimeConfig:  resp.Task.Agent.RuntimeConfig,
+		DisabledSkills: resp.Task.Agent.DisabledRuntimeSkills,
+		Raw:            w.Body.String(),
 	}
+}
+
+// claimInheritanceTaskOrNone is claimInheritanceTask for the claims that are
+// EXPECTED to deliver nothing (capacity), where "no task" is the assertion
+// rather than a failure.
+func claimInheritanceTaskOrNone(t *testing.T, runtimeID, capabilities string) (inheritanceClaim, bool) {
+	t.Helper()
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "dene-302-daemon")
+	if capabilities != "" {
+		req.Header.Set("X-Client-Capabilities", capabilities)
+	}
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	var resp inheritanceClaimPayload
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
+	w.JSON(&resp)
+	if resp.Task == nil || resp.Task.Agent == nil {
+		return inheritanceClaim{Raw: w.Body.String()}, false
+	}
+	return inheritanceClaim{
+		TaskID:        resp.Task.ID,
+		Instructions:  resp.Task.Agent.Instructions,
+		Model:         resp.Task.Agent.Model,
+		ThinkingLevel: resp.Task.Agent.ThinkingLevel,
+		Raw:           w.Body.String(),
+	}, true
 }
 
 // TestClaim_SpecialisationRunsBaseRolePromptThenItsOwn is the core DENE-302
@@ -476,5 +539,165 @@ func TestClaim_SpecialisationPicksUpBaseRoleEditsOnTheNextClaim(t *testing.T) {
 	}
 	if countSkillNames(skillNames, "inherit-late-skill") == 0 {
 		t.Fatalf("a skill bound to the base role after the first claim never arrived; skills=%v", skillNames)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Configuration inheritance at dispatch time (DENE-470)
+//
+// The daemon never reads the agent rows itself: everything it boots the run
+// with arrives in this one payload. A configuration field that is not resolved
+// from the base role HERE is a field the run does not have, however correct the
+// row looks.
+
+// configuredInheritanceFixture is a base role with a distinct value in every
+// configuration field the claim payload carries, a specialisation that carries a
+// DIFFERENT value in each of the same columns, and a queued task for the
+// specialisation. Distinguishing the two rows is the whole point: a payload
+// assertion that passes on either row would prove nothing.
+type configuredInheritanceFixture struct {
+	RuntimeID string
+	ParentID  string
+	ChildID   string
+	IssueID   string
+	TaskID    string
+}
+
+func newConfiguredInheritanceFixture(t *testing.T, name string) configuredInheritanceFixture {
+	t.Helper()
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, name+" runtime")
+	provider := "handler_test_runtime"
+	// Scoped to this runtime and provider: disabledRuntimeSkillsFor drops every
+	// entry that does not match both, so an unscoped entry would make the
+	// payload assertion pass vacuously.
+	baseDisabled := testutil.Raw(fmt.Sprintf(
+		`'[{"runtime_id":%q,"provider":%q,"root":"provider","key":"base-skill","name":"Base Skill"}]'::jsonb`,
+		runtimeID, provider))
+	childDisabled := testutil.Raw(fmt.Sprintf(
+		`'[{"runtime_id":%q,"provider":%q,"root":"provider","key":"child-skill","name":"Child Skill"}]'::jsonb`,
+		runtimeID, provider))
+
+	parentID := dbfx.Agent(t, name+"-base", runtimeID, testutil.Cols{
+		"instructions":            "base role rules",
+		"model":                   "base-model",
+		"thinking_level":          "base-thinking",
+		"service_tier":            "base-tier",
+		"custom_env":              testutil.Raw(`'{"BASE_KEY":"base-value"}'::jsonb`),
+		"custom_args":             testutil.Raw(`'["--base-flag"]'::jsonb`),
+		"mcp_config":              testutil.Raw(`'{"mcpServers":{"base":{}}}'::jsonb`),
+		"runtime_config":          testutil.Raw(`'{"base":true}'::jsonb`),
+		"disabled_runtime_skills": baseDisabled,
+		"max_concurrent_tasks":    4,
+	})
+	childID := dbfx.Agent(t, name+"-spec", runtimeID, testutil.Cols{
+		"instructions":            "specialisation delta",
+		"parent_agent_id":         parentID,
+		"model":                   "child-model",
+		"thinking_level":          "child-thinking",
+		"service_tier":            "child-tier",
+		"custom_env":              testutil.Raw(`'{"CHILD_KEY":"child-value"}'::jsonb`),
+		"custom_args":             testutil.Raw(`'["--child-flag"]'::jsonb`),
+		"mcp_config":              testutil.Raw(`'{"mcpServers":{"child":{}}}'::jsonb`),
+		"runtime_config":          testutil.Raw(`'{"child":true}'::jsonb`),
+		"disabled_runtime_skills": childDisabled,
+		"max_concurrent_tasks":    1,
+	})
+	issueID := dbfx.Issue(t, name+" issue")
+	taskID := dbfx.Task(t, childID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+	})
+
+	return configuredInheritanceFixture{
+		RuntimeID: runtimeID,
+		ParentID:  parentID,
+		ChildID:   childID,
+		IssueID:   issueID,
+		TaskID:    taskID,
+	}
+}
+
+// TestClaim_SpecialisationRunsOnBaseRoleConfiguration is the configuration
+// counterpart of the DENE-302 prompt test: every field the daemon boots with
+// comes from the base role, and the specialisation's own column values — which
+// this fixture sets to something different on purpose — never reach the run.
+func TestClaim_SpecialisationRunsOnBaseRoleConfiguration(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	fx := newConfiguredInheritanceFixture(t, "inherit-config")
+	claim := claimInheritanceTask(t, fx.RuntimeID, "")
+	if claim.TaskID != fx.TaskID {
+		t.Fatalf("claimed task id = %q, want %q: %s", claim.TaskID, fx.TaskID, claim.Raw)
+	}
+
+	if claim.Model != "base-model" {
+		t.Errorf("model = %q, want the base role's", claim.Model)
+	}
+	if claim.ThinkingLevel != "base-thinking" {
+		t.Errorf("thinking_level = %q, want the base role's", claim.ThinkingLevel)
+	}
+	if claim.ServiceTier != "base-tier" {
+		t.Errorf("service_tier = %q, want the base role's", claim.ServiceTier)
+	}
+	if claim.CustomEnv["BASE_KEY"] != "base-value" || len(claim.CustomEnv) != 1 {
+		t.Errorf("custom_env = %v, want only the base role's variables", claim.CustomEnv)
+	}
+	if len(claim.CustomArgs) != 1 || claim.CustomArgs[0] != "--base-flag" {
+		t.Errorf("custom_args = %v, want only the base role's arguments", claim.CustomArgs)
+	}
+	if !strings.Contains(string(claim.McpConfig), `"base"`) || strings.Contains(string(claim.McpConfig), `"child"`) {
+		t.Errorf("mcp_config = %s, want the base role's servers", claim.McpConfig)
+	}
+	if !strings.Contains(string(claim.RuntimeConfig), `"base":true`) {
+		t.Errorf("runtime_config = %s, want the base role's", claim.RuntimeConfig)
+	}
+	if len(claim.DisabledSkills) != 1 || claim.DisabledSkills[0].Name != "Base Skill" {
+		t.Errorf("disabled_runtime_skills = %+v, want the base role's", claim.DisabledSkills)
+	}
+}
+
+// TestClaim_SpecialisationCapacityIsTheBaseRolesBudget pins the admission point.
+// The child's own row says 4; the base role says 1 and already has one run in
+// flight. If the child's column were still what capacity is counted against, the
+// claim below would return a task.
+func TestClaim_SpecialisationCapacityIsTheBaseRolesBudget(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	fx := newInheritanceFixture(t, "inherit-capacity", "base role rules", "specialisation delta")
+	// The base role's budget, not the child's: one slot, already taken.
+	dbfx.Exec(t, `UPDATE agent SET max_concurrent_tasks = 1 WHERE id = $1`, fx.ParentID)
+	dbfx.Exec(t, `UPDATE agent SET max_concurrent_tasks = 4 WHERE id = $1`, fx.ChildID)
+	dbfx.Task(t, fx.ChildID, testutil.Cols{
+		"runtime_id": fx.RuntimeID,
+		"status":     "running",
+		"started_at": testutil.Raw("now()"),
+	})
+	// A second queued task on its own issue — one pending task per (issue,
+	// agent) is a unique index — so the paused claim has something queued to
+	// refuse, which is where a wrong capacity answer shows up.
+	dbfx.Task(t, fx.ChildID, testutil.Cols{
+		"runtime_id": fx.RuntimeID,
+		"issue_id":   dbfx.Issue(t, "inherit-capacity second issue"),
+	})
+
+	if _, claimed := claimInheritanceTaskOrNone(t, fx.RuntimeID, ""); claimed {
+		t.Fatal("a specialisation claimed a task at its own max_concurrent_tasks instead of its base role's")
+	}
+
+	// Raising the BASE ROLE's budget is what admits the next run — the child's
+	// column has not moved.
+	dbfx.Exec(t, `UPDATE agent SET max_concurrent_tasks = 2 WHERE id = $1`, fx.ParentID)
+	claim, claimed := claimInheritanceTaskOrNone(t, fx.RuntimeID, "")
+	if !claimed {
+		t.Fatalf("raising the base role's budget did not admit the queued task: %s", claim.Raw)
+	}
+	if claim.TaskID == "" {
+		t.Fatalf("claim delivered no task id: %s", claim.Raw)
 	}
 }

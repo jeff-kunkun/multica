@@ -649,6 +649,81 @@ func applyAgentPermissionFlags(cmd *cobra.Command, body map[string]any) {
 	body["invocation_targets"] = targets
 }
 
+// inheritedAgentConfigFlags are the flags that write a configuration field a
+// specialisation inherits from its base role (DENE-470): runtime, model,
+// reasoning, environment, args, MCP, budget and access. The list is shared by
+// `agent create` and `agent update` — the helper below looks each name up, so a
+// flag only one of the two commands has is simply skipped for the other.
+//
+// Instructions, name, description, avatar and status are deliberately absent:
+// those are what a specialisation owns.
+var inheritedAgentConfigFlags = []string{
+	"runtime-id",
+	"runtime-config",
+	"model",
+	"thinking-level",
+	"service-tier",
+	"switchable-models",
+	"custom-args",
+	"custom-env",
+	"custom-env-stdin",
+	"custom-env-file",
+	"mcp-config",
+	"mcp-config-stdin",
+	"mcp-config-file",
+	"max-concurrent-tasks",
+	"conversation-starters",
+	"visibility",
+	"permission-mode",
+	"public-to-workspace",
+	"public-to-member",
+}
+
+// changedInheritedAgentConfigFlags lists the inherited-configuration flags this
+// invocation actually set, so a refusal names them instead of guessing.
+func changedInheritedAgentConfigFlags(cmd *cobra.Command) []string {
+	var changed []string
+	for _, name := range inheritedAgentConfigFlags {
+		if flag := cmd.Flags().Lookup(name); flag != nil && flag.Changed {
+			changed = append(changed, "--"+name)
+		}
+	}
+	return changed
+}
+
+// rejectInheritedConfigFlags refuses to write configuration onto a
+// specialisation, naming the flags that asked for it (DENE-470).
+//
+// It refuses rather than silently dropping them: a silently-dropped `--model`
+// looks exactly like a successful one, and the user walks away believing the
+// agent runs on the model they typed. The two ways out are in the message —
+// edit the base role, or solidify this agent into a base role of its own.
+func rejectInheritedConfigFlags(flags []string, baseRoleName string) error {
+	target := "its base role"
+	if baseRoleName != "" {
+		target = fmt.Sprintf("its base role %q", baseRoleName)
+	}
+	return fmt.Errorf(
+		"%s cannot be set on a specialisation: this agent inherits its configuration from %s. Edit the base role, or run `multica agent solidify <id>` first to give this agent its own configuration",
+		strings.Join(flags, ", "), target)
+}
+
+// agentBaseRoleFor reads an agent and reports the base role it specialises, if
+// any, as (id, name). An agent the caller cannot read is reported as an error
+// rather than as "no base role": the update that follows would fail anyway, and
+// guessing here would turn a permissions problem into a silent configuration
+// write.
+func agentBaseRoleFor(ctx context.Context, client *cli.APIClient, agentID string) (string, string, error) {
+	var out struct {
+		ParentAgentID   string `json:"parent_agent_id"`
+		ParentAgentName string `json:"parent_agent_name"`
+	}
+	if err := client.GetJSON(ctx, "/api/agents/"+agentID, &out); err != nil {
+		return "", "", err
+	}
+	return out.ParentAgentID, out.ParentAgentName, nil
+}
+
 func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -659,14 +734,25 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	if name == "" {
 		return fmt.Errorf("--name is required")
 	}
+	parentAgentID, _ := cmd.Flags().GetString("parent-agent-id")
+	parentAgentID = strings.TrimSpace(parentAgentID)
+	// Deriving: the base role supplies the runtime, so --runtime-id is optional
+	// and every configuration flag is refused outright (DENE-470).
+	if parentAgentID != "" {
+		if flags := changedInheritedAgentConfigFlags(cmd); len(flags) > 0 {
+			return rejectInheritedConfigFlags(flags, "")
+		}
+	}
 	runtimeID, _ := cmd.Flags().GetString("runtime-id")
-	if runtimeID == "" {
+	if runtimeID == "" && parentAgentID == "" {
 		return fmt.Errorf("--runtime-id is required")
 	}
 
 	body := map[string]any{
-		"name":       name,
-		"runtime_id": runtimeID,
+		"name": name,
+	}
+	if runtimeID != "" {
+		body["runtime_id"] = runtimeID
 	}
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
@@ -762,6 +848,32 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
+	}
+
+	// Configuration inheritance (DENE-470). A specialisation's configuration
+	// belongs to its base role, so a config flag is refused in both directions:
+	// on the same command line as a new parent (the mirror would overwrite what
+	// this request just wrote), and on an agent that is already one (there is
+	// nowhere for the value to land — the claim path resolves it from the base
+	// role). Refusing beats dropping: a silently ignored --model reads as a
+	// successful one.
+	configFlags := changedInheritedAgentConfigFlags(cmd)
+	if cmd.Flags().Changed("parent-agent-id") {
+		if len(configFlags) > 0 {
+			return fmt.Errorf(
+				"%s cannot be combined with --parent-agent-id: a specialisation inherits its configuration from its base role. Attach or detach first, then edit the configuration on whichever agent owns it",
+				strings.Join(configFlags, ", "))
+		}
+	} else if len(configFlags) > 0 {
+		ctx, cancel := cli.APIContext(context.Background())
+		baseRoleID, baseRoleName, err := agentBaseRoleFor(ctx, client, args[0])
+		cancel()
+		if err != nil {
+			return fmt.Errorf("read agent %s: %w", args[0], err)
+		}
+		if baseRoleID != "" {
+			return rejectInheritedConfigFlags(configFlags, baseRoleName)
+		}
 	}
 
 	body := map[string]any{}

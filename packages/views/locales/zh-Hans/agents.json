@@ -139,6 +139,9 @@
     "base_role_hint_none": "独立基础角色：不继承任何内容，之后可以在它下面派生特化。",
     "base_role_inherit_prompt": "基础角色的提示词会拼在本角色自己的提示词前面。",
     "base_role_inherit_skills_other": "{{count}} 个 skill 会被只读继承。",
+    "inherited_config_notice": "继承自「{{name}}」，此处只读；请到基础角色上修改。",
+    "inherited_config_notice_unnamed": "继承自基础角色，此处只读；请到基础角色上修改。",
+    "inherited_config_open": "打开基础角色",
     "inherited_prompt_label": "基础角色提示词",
     "inherited_prompt_hint": "此处只读。在「{{name}}」上修改，对所有特化同时生效。",
     "inherited_prompt_show": "展开",
@@ -668,7 +671,9 @@
       "reveal_action": "解锁并编辑",
       "revealing": "正在解锁…",
       "reveal_failed_toast": "加载环境变量值失败",
-      "empty_editable": "尚未配置环境变量。新增一条即可在智能体启动时注入。"
+      "empty_editable": "尚未配置环境变量。新增一条即可在智能体启动时注入。",
+      "inherited_notice": "环境变量配置在基础角色「{{name}}」上，请打开它查看或修改。",
+      "inherited_notice_unnamed": "环境变量配置在基础角色上，请打开它查看或修改。"
     },
     "custom_args": {
       "intro": "添加智能体启动时传入的 CLI 参数。",

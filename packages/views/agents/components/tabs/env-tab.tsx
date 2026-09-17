@@ -20,6 +20,8 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
+import { InheritedConfigNotice } from "../inherited-config-notice";
+import { isSpecialization, parentAgentLabel } from "../../specialization";
 import type { EnvParseError } from "./env-file";
 import {
   formatEnvFile,
@@ -81,6 +83,7 @@ export function EnvTab({
   agent,
   onDirtyChange,
   onSaved,
+  parentAgent,
 }: {
   agent: Agent;
   onDirtyChange?: (dirty: boolean) => void;
@@ -89,6 +92,8 @@ export function EnvTab({
   // the page reads (name, has_custom_env, etc.). Optional so call
   // sites without invalidation logic stay simple.
   onSaved?: () => void;
+  /** The base-role row when the caller holds it (DENE-470). */
+  parentAgent?: Agent | null;
 }) {
   const { t } = useT("agents");
 
@@ -318,6 +323,24 @@ export function EnvTab({
       setSaving(false);
     }
   };
+
+  // A specialisation runs with the base role's variables, and its own set is
+  // neither the effective one nor editable (DENE-470). State where they live
+  // instead of revealing rows whose save the server would refuse.
+  if (isSpecialization(agent)) {
+    const parentName = parentAgentLabel(agent, parentAgent);
+    return (
+      <InheritedConfigNotice
+        agent={agent}
+        parentAgent={parentAgent}
+        message={
+          parentName
+            ? t(($) => $.tab_body.env.inherited_notice, { name: parentName })
+            : t(($) => $.tab_body.env.inherited_notice_unnamed)
+        }
+      />
+    );
+  }
 
   // Pre-reveal state: show count + Reveal button. We never auto-fetch
   // on mount so a member just navigating between tabs doesn't trigger

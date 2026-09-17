@@ -16,6 +16,8 @@ import {
   isAgentHasChildrenError,
   isBaseRole,
   isSpecialization,
+  parentAgentLabel,
+  parentAgentOf,
   solidifyTargets,
   specializationCount,
 } from "./specialization";
@@ -113,6 +115,44 @@ describe("specialization relationship", () => {
       }),
     ];
     expect(baseRoleOptions(agents).map((a) => a.id)).toEqual(["b-a", "b-z"]);
+  });
+});
+
+// DENE-470: the settings surfaces show a specialisation's base role — live
+// values when the page's list holds the row, the served name when it does not.
+describe("locating an agent's base role", () => {
+  const child = agent({ id: "child-1", parent_agent_id: "base-1" });
+  const base = agent({ id: "base-1", name: "Base" });
+
+  it("returns the row from the loaded list", () => {
+    expect(parentAgentOf([base, child], child)).toBe(base);
+  });
+
+  it("returns null when the list does not hold it", () => {
+    // Private to another member, or the list read has not settled: the caller
+    // must fall back to the served name rather than inventing values.
+    expect(parentAgentOf([child], child)).toBeNull();
+    expect(parentAgentOf([], { parent_agent_id: "base-1" })).toBeNull();
+  });
+
+  it("returns null for a base role and for an absent parent field", () => {
+    expect(parentAgentOf([base, child], base)).toBeNull();
+    expect(parentAgentOf([base], { parent_agent_id: undefined })).toBeNull();
+    expect(parentAgentOf([base], { parent_agent_id: "" })).toBeNull();
+  });
+
+  it("names the base role from the live row, then from the served field", () => {
+    // The loaded row wins so a rename reads live; the served name covers the
+    // base role this viewer cannot see.
+    expect(parentAgentLabel(child, base)).toBe("Base");
+    expect(
+      parentAgentLabel({ parent_agent_id: "base-1", parent_agent_name: "Served" }, base),
+    ).toBe("Base");
+    expect(
+      parentAgentLabel({ parent_agent_id: "base-1", parent_agent_name: "Served" }),
+    ).toBe("Served");
+    // Neither: callers word this as "the base role".
+    expect(parentAgentLabel({ parent_agent_id: "base-1" })).toBe("");
   });
 });
 

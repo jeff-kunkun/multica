@@ -149,6 +149,13 @@ interface AgentOverviewPaneProps {
   onRetryInheritedPrompt?: () => void;
   /** Workspace agents, for the Instructions tab's base-role picker. */
   agents?: readonly Agent[];
+  /**
+   * This agent's base-role row when the page's agent list holds it (DENE-470).
+   * A specialisation inherits its whole configuration, so the settings
+   * surfaces render these values read-only and name where they are edited.
+   * `null` (base role private to another member) still renders them read-only.
+   */
+  parentAgent?: Agent | null;
   /** Attaches this agent to a base role by id (DENE-300 follow-up). */
   onChangeBaseRole?: (parentAgentId: string) => Promise<void>;
   /** Solidify-and-unbind, the non-lossy way back to an independent role. */
@@ -179,6 +186,7 @@ export function AgentOverviewPane({
   agents,
   onChangeBaseRole,
   onDetachBaseRole,
+  parentAgent = null,
   navIntent,
   onNavIntentHandled,
 }: AgentOverviewPaneProps) {
@@ -540,6 +548,7 @@ export function AgentOverviewPane({
                       canEdit={canEdit}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
+                      parentAgent={parentAgent}
                     />
                   )}
                   {effectiveView === "composio_mcp" && (
@@ -557,6 +566,7 @@ export function AgentOverviewPane({
                       currentUserId={currentUserId ?? null}
                       canEdit={canEdit}
                       onUpdate={onUpdate}
+                      parentAgent={parentAgent}
                     />
                   )}
                   {effectiveView === "access" && (
@@ -566,6 +576,7 @@ export function AgentOverviewPane({
                       currentUserId={currentUserId ?? null}
                       onDirtyChange={setActiveDirty}
                       onUpdate={onUpdate}
+                      parentAgent={parentAgent}
                     />
                   )}
                   {effectiveView === "accounts" && (
@@ -574,10 +585,15 @@ export function AgentOverviewPane({
                       runtimeDevice={runtime ?? undefined}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
+                      parentAgent={parentAgent}
                     />
                   )}
                   {effectiveView === "env" && (
-                    <EnvTab agent={agent} onDirtyChange={setActiveDirty} />
+                    <EnvTab
+                      agent={agent}
+                      onDirtyChange={setActiveDirty}
+                      parentAgent={parentAgent}
+                    />
                   )}
                   {effectiveView === "custom_args" && (
                     <CustomArgsTab
@@ -585,6 +601,7 @@ export function AgentOverviewPane({
                       runtimeDevice={runtime ?? undefined}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
+                      parentAgent={parentAgent}
                     />
                   )}
                   {effectiveView === "runtime_config" && (
@@ -592,6 +609,7 @@ export function AgentOverviewPane({
                       agent={agent}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
+                      parentAgent={parentAgent}
                     />
                   )}
                 </div>

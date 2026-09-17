@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/agentconfig"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -2312,31 +2313,36 @@ func (h *Handler) rejectClaimSkillLoad(task *db.AgentTaskQueue, err error) *clai
 	}
 }
 
-// inheritParentInstructions returns the prompt an agent actually RUNS with
-// (DENE-302): a specialisation's own instructions prefixed by its base role's,
-// composed with composeAgentInstructions — the same function the solidify
-// endpoint bakes into a child's row, so the text a user freezes and the text a
-// run dispatches with cannot drift.
+// claimBaseRole returns the base role a specialisation inherits from, read once
+// for the whole claim payload. Both halves of inheritance come off this one row:
+// the prompt (DENE-302) and every configuration field the run dispatches with
+// (DENE-470) — see agentconfig.Inherited for the field list and for why the
+// runtime columns are mirrored into the child row instead.
 //
 // The base role is re-read on every claim and nothing is cached or snapshotted:
 // an edit on either side of the relationship reaches the agent's next task,
 // which is the point of inheriting from a live row instead of copying it at
-// attach time.
+// attach time. found=false means "nothing to inherit", which covers both a base
+// role and the defensive case below.
 //
 // The two failures are deliberately different, following rejectClaimSourceLoad:
 //
 //   - The read FAILED (transient: DB blip, timeout, reset). The caller must
 //     preserve the task for redelivery rather than dispatch. A swallowed error
-//     here is indistinguishable from a base role that genuinely has no prompt,
-//     so half the effective prompt would go missing with nothing to notice it.
+//     here is indistinguishable from a base role that genuinely has no prompt or
+//     no configuration, so half the effective run would go missing with nothing
+//     to notice it. Refusing is also the only honest answer for the config half:
+//     dispatching the child's own columns would run the task on a stale model
+//     and a stale environment.
 //   - The base role row is GONE (ErrNoRows). There is nothing left to inherit
-//     and the specialisation's own prompt still runs, so this degrades to a
-//     non-specialisation turn. It is defensive only: the agent API refuses to
-//     archive a base role that still has active specialisations and has no hard
-//     delete, so no request path produces this state.
-func (h *Handler) inheritParentInstructions(ctx context.Context, agent db.Agent) (string, error) {
+//     and the specialisation's own prompt and (mirrored) runtime still run, so
+//     this degrades to a non-specialisation turn. It is defensive only: the
+//     agent API refuses to archive a base role that still has active
+//     specialisations and has no hard delete, so no request path produces this
+//     state.
+func (h *Handler) claimBaseRole(ctx context.Context, agent db.Agent) (db.Agent, bool, error) {
 	if !agent.ParentAgentID.Valid {
-		return agent.Instructions, nil
+		return db.Agent{}, false, nil
 	}
 	parent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 		ID:          agent.ParentAgentID,
@@ -2344,22 +2350,24 @@ func (h *Handler) inheritParentInstructions(ctx context.Context, agent db.Agent)
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("daemon claim: base role no longer resolves; dispatching with the specialisation's own instructions",
+			slog.Warn("daemon claim: base role no longer resolves; dispatching with the specialisation's own instructions and configuration",
 				"agent_id", uuidToString(agent.ID), "parent_agent_id", uuidToString(agent.ParentAgentID))
-			return agent.Instructions, nil
+			return db.Agent{}, false, nil
 		}
-		return "", err
+		return db.Agent{}, false, err
 	}
-	return composeAgentInstructions(parent.Instructions, agent.Instructions), nil
+	return parent, true, nil
 }
 
-// rejectClaimParentInstructions preserves a claim whose base role prompt could
-// not be read, for the reason in rejectClaimSkillLoad: the claim-build path hit
-// a transient read, and the stale-dispatched reclaim redelivers it. Dispatching
-// the plain child prompt instead would silently drop inherited rules that the
-// agent's configuration says it has.
-func (h *Handler) rejectClaimParentInstructions(task *db.AgentTaskQueue, err error) *claimBuildFailure {
-	slog.Error("task claim: base role instructions load failed; preserving task for redelivery",
+// rejectClaimBaseRole preserves a claim whose base role could not be read, for
+// the reason in rejectClaimSkillLoad: the claim-build path hit a transient read,
+// and the stale-dispatched reclaim redelivers it. Dispatching the plain child
+// prompt instead would silently drop inherited rules that the agent's
+// configuration says it has — and since the same read resolves the inherited
+// configuration (DENE-470), it would also run the task on the child's own stale
+// model, thinking level and environment.
+func (h *Handler) rejectClaimBaseRole(task *db.AgentTaskQueue, err error) *claimBuildFailure {
+	slog.Error("task claim: base role load failed; preserving task for redelivery",
 		"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID), "error", err)
 	return &claimBuildFailure{
 		outcome: "error_parent_instructions",
@@ -2632,6 +2640,19 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"error_runtime_access_denied", http.StatusForbidden, "private runtime does not permit task agent",
 		)
 	}
+	// Configuration inheritance (DENE-470): resolve the base role ONCE for the
+	// whole payload — the prompt below and every configuration field assembled
+	// after this point read from the result. Placed before the first column read
+	// so no field can be assembled from the child's own row by accident.
+	baseRole, hasBaseRole, err := h.claimBaseRole(r.Context(), agent)
+	if err != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimBaseRole(task, err)
+	}
+	instructions := agent.Instructions
+	if hasBaseRole {
+		instructions = composeAgentInstructions(baseRole.Instructions, agent.Instructions)
+		agent = agentconfig.Inherited(agent, baseRole)
+	}
 	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 	// A daemon older than the multica-platform merge assembles a brief that
 	// still names the built-ins this server stopped shipping. It cannot be
@@ -2705,10 +2726,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// effective value. Composing after a squad briefing would bury the base
 	// role's rules under task context; composing here also means both squad
 	// append points (issue-bound and quick-create) share the result for free.
-	instructions, err := h.inheritParentInstructions(r.Context(), agent)
-	if err != nil {
-		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimParentInstructions(task, err)
-	}
+	// `instructions` was composed from the same base role read that resolved the
+	// configuration above, so the prompt and the config can never come from two
+	// different versions of the relationship.
 	resp.Agent = &TaskAgentData{
 		ID:                    uuidToString(agent.ID),
 		Name:                  agent.Name,

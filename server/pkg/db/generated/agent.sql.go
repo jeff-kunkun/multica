@@ -2142,7 +2142,8 @@ INSERT INTO agent (
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     service_tier, conversation_starters,
-    composio_toolkit_allowlist, permission_mode, parent_agent_id
+    composio_toolkit_allowlist, permission_mode, parent_agent_id,
+    switchable_models, disabled_runtime_skills
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
@@ -2150,7 +2151,9 @@ INSERT INTO agent (
     $17, COALESCE($18::jsonb, '[]'::jsonb),
     $19::text[],
     COALESCE($20, 'private'),
-    $21::uuid
+    $21::uuid,
+    COALESCE($22::jsonb, '[]'::jsonb),
+    COALESCE($23::jsonb, '[]'::jsonb)
 )
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id
 `
@@ -2177,11 +2180,18 @@ type CreateAgentParams struct {
 	ComposioToolkitAllowlist []string    `json:"composio_toolkit_allowlist"`
 	PermissionMode           interface{} `json:"permission_mode"`
 	ParentAgentID            pgtype.UUID `json:"parent_agent_id"`
+	SwitchableModels         []byte      `json:"switchable_models"`
+	DisabledRuntimeSkills    []byte      `json:"disabled_runtime_skills"`
 }
 
 // parent_agent_id is NULL for a base role and points at one for a
 // specialisation (DENE-301). Depth is not a column: the handler refuses a
 // parent that is itself a child, so the tree can only ever be two levels deep.
+//
+// switchable_models and disabled_runtime_skills are seeded on create (DENE-470)
+// so a specialisation can start life as a copy of its base role's configuration
+// in full; omitting either keeps the column default, which is what every
+// non-deriving caller wants.
 func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, createAgent,
 		arg.WorkspaceID,
@@ -2205,6 +2215,8 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		arg.ComposioToolkitAllowlist,
 		arg.PermissionMode,
 		arg.ParentAgentID,
+		arg.SwitchableModels,
+		arg.DisabledRuntimeSkills,
 	)
 	var i Agent
 	err := row.Scan(
@@ -7298,6 +7310,61 @@ func (q *Queries) MergeDelegatedFailureCommentIntoPendingTask(ctx context.Contex
 	return i, err
 }
 
+const mirrorBaseRoleConfigOntoChild = `-- name: MirrorBaseRoleConfigOntoChild :exec
+UPDATE agent AS child
+SET runtime_id = base.runtime_id,
+    runtime_mode = base.runtime_mode,
+    visibility = base.visibility,
+    permission_mode = base.permission_mode,
+    updated_at = now()
+FROM agent AS base
+WHERE base.id = $1 AND child.id = $2
+`
+
+type MirrorBaseRoleConfigOntoChildParams struct {
+	BaseAgentID  pgtype.UUID `json:"base_agent_id"`
+	ChildAgentID pgtype.UUID `json:"child_agent_id"`
+}
+
+// Write-time half of configuration inheritance (DENE-470). A specialisation
+// stores its base role's runtime columns verbatim because ~20 enqueue points and
+// the two claim fences (`a.runtime_id = atq.runtime_id` in ClaimAgentTask and
+// ListQueuedClaimCandidatesByRuntime) read them straight off the row; resolving
+// them at read time would mean editing every one of those, and missing one
+// dispatches a task to the wrong runtime.
+//
+// Called when the parent link is CREATED or MOVED, in the same transaction as
+// SetAgentParentAgent so the child is never visible with a parent and a stale
+// runtime. Detaching does NOT call it: the child already holds the real values,
+// which is what makes solidify lossless for these columns.
+func (q *Queries) MirrorBaseRoleConfigOntoChild(ctx context.Context, arg MirrorBaseRoleConfigOntoChildParams) error {
+	_, err := q.db.Exec(ctx, mirrorBaseRoleConfigOntoChild, arg.BaseAgentID, arg.ChildAgentID)
+	return err
+}
+
+const mirrorBaseRoleConfigToChildren = `-- name: MirrorBaseRoleConfigToChildren :exec
+UPDATE agent AS child
+SET runtime_id = base.runtime_id,
+    runtime_mode = base.runtime_mode,
+    visibility = base.visibility,
+    permission_mode = base.permission_mode,
+    updated_at = now()
+FROM agent AS base
+WHERE base.id = $1
+  AND child.parent_agent_id = base.id
+  AND child.archived_at IS NULL
+`
+
+// Propagation arm of MirrorBaseRoleConfigOntoChild: a base role's runtime
+// columns are copied to every ACTIVE specialisation in the same transaction as
+// the base role's own update. Archived specialisations are skipped for the same
+// reason ListAgentChildren skips them — they no longer run, so rewriting them
+// would only resurrect a configuration their owner archived away.
+func (q *Queries) MirrorBaseRoleConfigToChildren(ctx context.Context, baseAgentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, mirrorBaseRoleConfigToChildren, baseAgentID)
+	return err
+}
+
 const nextDeferredTaskFireAtForRuntimes = `-- name: NextDeferredTaskFireAtForRuntimes :one
 SELECT MIN(fire_at)::timestamptz
 FROM agent_task_queue t
@@ -8734,6 +8801,48 @@ func (q *Queries) SettleDelegatedFailureRecoveryComment(ctx context.Context, com
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const snapshotInheritedConfigFromBaseRole = `-- name: SnapshotInheritedConfigFromBaseRole :exec
+UPDATE agent AS child
+SET runtime_config = base.runtime_config,
+    model = base.model,
+    thinking_level = base.thinking_level,
+    service_tier = base.service_tier,
+    custom_env = base.custom_env,
+    custom_args = base.custom_args,
+    mcp_config = base.mcp_config,
+    max_concurrent_tasks = base.max_concurrent_tasks,
+    auto_retry_enabled = base.auto_retry_enabled,
+    switchable_models = base.switchable_models,
+    conversation_starters = base.conversation_starters,
+    disabled_runtime_skills = base.disabled_runtime_skills,
+    composio_toolkit_allowlist = base.composio_toolkit_allowlist,
+    updated_at = now()
+FROM agent AS base
+WHERE base.id = $1 AND child.id = $2
+`
+
+type SnapshotInheritedConfigFromBaseRoleParams struct {
+	BaseAgentID  pgtype.UUID `json:"base_agent_id"`
+	ChildAgentID pgtype.UUID `json:"child_agent_id"`
+}
+
+// Freezes the read-time half of configuration inheritance into the child row
+// (DENE-470). While the link exists, the claim path resolves model, thinking
+// level, service tier, custom_env, custom_args, mcp_config, runtime_config,
+// disabled_runtime_skills, max_concurrent_tasks, auto_retry_enabled, the
+// Composio allowlist and the display-only lineups from the base role's live row.
+// The moment the link is REMOVED that resolution stops, so every one of those
+// columns has to land in the child's own row or the agent silently reverts to
+// whatever it happened to carry.
+//
+// Runs inside the same transaction as the detach (Agent.solidify, and
+// PUT /agents/{id} with an empty parent_agent_id), so "detached" and "has its
+// own configuration" commit together.
+func (q *Queries) SnapshotInheritedConfigFromBaseRole(ctx context.Context, arg SnapshotInheritedConfigFromBaseRoleParams) error {
+	_, err := q.db.Exec(ctx, snapshotInheritedConfigFromBaseRole, arg.BaseAgentID, arg.ChildAgentID)
+	return err
 }
 
 const startAgentTask = `-- name: StartAgentTask :one

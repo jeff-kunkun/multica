@@ -6,7 +6,9 @@ import {
   SettingsSection,
 } from "../../settings/components/settings-layout";
 import { useT } from "../../i18n";
+import { InheritedConfigNotice } from "./inherited-config-notice";
 import { AccessPicker } from "./inspector/access-picker";
+import { isSpecialization } from "../specialization";
 
 export function AgentAccessSettings({
   agent,
@@ -14,14 +16,25 @@ export function AgentAccessSettings({
   currentUserId,
   onDirtyChange,
   onUpdate,
+  parentAgent,
 }: {
   agent: Agent;
   members: MemberWithUser[];
   currentUserId: string | null;
   onDirtyChange?: (dirty: boolean) => void;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  /**
+   * The base-role row when the caller holds it. A specialisation inherits the
+   * base role's access rule, so the picker would write something the server
+   * refuses (DENE-470); the notice names where it is edited instead.
+   */
+  parentAgent?: Agent | null;
 }) {
   const { t } = useT("agents");
+
+  if (isSpecialization(agent)) {
+    return <InheritedConfigNotice agent={agent} parentAgent={parentAgent} />;
+  }
 
   return (
     <SettingsSection
