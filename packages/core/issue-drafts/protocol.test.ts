@@ -847,6 +847,53 @@ describe("mergeIssueDraftPayload", () => {
     expect(merged.children?.[0]?.assignee_id).toBe("ag-1");
     expect(merged.children?.[0]?.assignee_type).toBe("agent");
   });
+
+  it("does not carry a surviving row's description forward", () => {
+    // This pins the merge as it stands: replacing the group carries over the
+    // client-owned assignee fields of a row that is still there, and nothing
+    // else. Description is ours to overwrite, not to restore.
+    //
+    // It protects the ability to REWRITE a sub-issue's description. The
+    // alignment contract's front-end section tells the carrier to repeat a
+    // child's screen spec in every later block, and that rule is kept by the
+    // prompt, not by this merge. If description were also restored by key, a
+    // child that came back with an empty description would silently resurrect
+    // the previous text, and "change how this screen is written" would become
+    // impossible to express — the same argument as the whole-set replacement
+    // above.
+    const current: IssueDraftPayload = {
+      ...EMPTY,
+      title: "Parent",
+      children: [
+        {
+          key: "c1",
+          title: "Filter bar",
+          description: "## 前端做法\n- Name: issue-filter-bar",
+          status: "todo",
+          priority: "none",
+          assignee_type: "agent",
+          assignee_id: "ag-1",
+          assignee_hint: "frontend page",
+        },
+      ],
+    };
+    const merged = mergeIssueDraftPayload(current, {
+      children: [
+        {
+          key: "c1",
+          title: "Filter bar",
+          description: "",
+          status: "todo",
+          priority: "none",
+          assignee_hint: "frontend page",
+        },
+      ],
+    });
+    expect(merged.children?.[0]?.description).toBe("");
+    expect(merged.children?.[0]?.assignee_id).toBe("ag-1");
+    expect(merged.children?.[0]?.assignee_type).toBe("agent");
+    expect(merged.children?.[0]?.assignee_hint).toBe("frontend page");
+  });
 });
 
 describe("issueDraftIsCreatable", () => {
