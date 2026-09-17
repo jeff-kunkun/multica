@@ -104,12 +104,24 @@ export function useStartIssueDraft(wsId: string) {
        * never mentions).
        */
       projectId?: string;
+      /**
+       * The issue an alignment started mid-flight is filed UNDER (DENE-452).
+       *
+       * Not a filing preference: it is the whole point of starting the
+       * conversation from an existing issue — the issue the person was looking
+       * at stays the parent, and everything the conversation settles on is
+       * created beneath it instead of beside it. Written into the draft at
+       * creation for the same reason the project is: the confirm builds the
+       * group out of the stored payload, so a field that only lived in the
+       * panel would never reach the server.
+       */
+      parentIssueId?: string;
     }): Promise<StartIssueDraftResult> => {
       const request = input.request.trim();
       const session = await api.createIssueDraftSession({
         runtime_id: input.runtimeId,
         model: input.model?.trim() || undefined,
-        draft: seedDraft(request, input.projectId),
+        draft: seedDraft(request, input.projectId, input.parentIssueId),
       });
       const draftId = session.session_id;
       // An empty id is reachable only through the schema fallback above: every
@@ -329,6 +341,7 @@ export function useSwitchIssueDraftPolicy(wsId: string) {
 function seedDraft(
   request: string,
   projectId?: string,
+  parentIssueId?: string,
 ): Partial<IssueDraftPayload> {
   return {
     title: "",
@@ -338,6 +351,10 @@ function seedDraft(
     // Only when there is one: the draft's "no project" state is the field being
     // absent, and writing an empty string would address a project named "".
     ...(projectId ? { project_id: projectId } : {}),
+    // Same rule for the parent: an alignment filed under an existing issue
+    // records it here, and one that founds its own top-level issue leaves the
+    // field absent rather than writing a null the server would have to read.
+    ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
   };
 }
 

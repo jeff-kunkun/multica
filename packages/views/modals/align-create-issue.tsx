@@ -66,10 +66,23 @@ import { useIssueCreateUploads } from "./use-issue-create-uploads";
 export function AlignCreatePanel({
   onClose,
   onSwitchMode,
+  parentIssueId,
 }: {
   onClose: () => void;
   /** Called with the carry payload for the panel this face switches back to. */
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
+  /**
+   * The issue this alignment is being started FROM, when there is one
+   * (DENE-452: started from an issue's detail page, or from one of its comment
+   * threads).
+   *
+   * Deliberately a prop rather than a store field: the parent context is
+   * per-invocation, exactly as it is on the manual face, and persisting it
+   * would turn the next alignment opened from anywhere into a sub-issue of
+   * whatever was last looked at. It is written into the draft at creation, so
+   * the confirm files the whole group beneath that issue.
+   */
+  parentIssueId?: string;
 }) {
   const { t } = useT("issues");
   const { t: tModals } = useT("modals");
@@ -214,6 +227,10 @@ export function AlignCreatePanel({
         // settles on is filed under it — a project chosen here is not a display
         // preference the page reads back later.
         projectId,
+        // Same reasoning for the parent (DENE-452). Absent for an alignment
+        // that founds its own top-level issue, so the stored payload reads
+        // exactly as it did before mid-flight alignment existed.
+        ...(parentIssueId ? { parentIssueId } : {}),
       })
       // No session means no conversation to navigate to, and the reason is
       // already on screen: `entryFailureMessage` renders it from `start.error`,

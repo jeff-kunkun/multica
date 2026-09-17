@@ -551,6 +551,37 @@ describe("IssueDraftPage confirming", () => {
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/acme/issues/issue-9"));
   });
 
+  it("lands back on the issue this alignment was started from", async () => {
+    // An alignment started from an existing issue files its group BENEATH it
+    // (DENE-452), so confirming puts the person back where they were working
+    // rather than on the root it just created.
+    mocks.drafts = [
+      draftSummary({
+        status: "ready",
+        draft: {
+          title: "Dark mode",
+          description: "Add it.",
+          status: "",
+          priority: "",
+          parent_issue_id: "issue-7",
+        },
+      }),
+    ];
+    mocks.finalizeIssueDraft.mockResolvedValue({
+      draft: draftSummary({ status: "completed", issue_id: "issue-9" }),
+      issue_id: "issue-9",
+    });
+    renderPage();
+    const confirm = await screen.findByRole("button", { name: /Confirm and create/ });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    await userEvent.click(confirm);
+
+    await waitFor(() =>
+      expect(mocks.replace).toHaveBeenCalledWith("/acme/issues/issue-7"),
+    );
+    expect(mocks.replace).not.toHaveBeenCalledWith("/acme/issues/issue-9");
+  });
+
   it("sends one confirm for a double click, not two creates", async () => {
     mocks.drafts = [draftSummary({ status: "ready" })];
     let release: ((value: unknown) => void) | undefined;

@@ -320,6 +320,7 @@ const SECOND_ONLINE_RUNTIME = {
 function renderPanel(props: {
   onClose?: () => void;
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
+  parentIssueId?: string;
 } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -330,6 +331,7 @@ function renderPanel(props: {
         <AlignCreatePanel
           onClose={props.onClose ?? mocks.close}
           onSwitchMode={props.onSwitchMode}
+          parentIssueId={props.parentIssueId}
         />
       </I18nProvider>
     </QueryClientProvider>,
@@ -759,6 +761,36 @@ describe("AlignCreatePanel", () => {
     await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
     const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
     expect(input.draft?.project_id).toBe("proj-1");
+  });
+
+  it("files the conversation under the issue it was started from", async () => {
+    /**
+     * DENE-452: an alignment started from an existing issue is filed beneath
+     * it. The parent is written into the draft at creation because the confirm
+     * builds the group out of the STORED payload — a field that only lived in
+     * this panel would never reach the server, and the conversation would found
+     * a second top-level issue instead of the children of the one the person
+     * was looking at.
+     */
+    renderPanel({ parentIssueId: "issue-7" });
+    await typeRequest("this needs breaking down");
+    await userEvent.click(submitButton());
+
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.draft?.parent_issue_id).toBe("issue-7");
+  });
+
+  it("leaves the parent absent when the alignment founds its own top-level issue", async () => {
+    // Absent rather than null, so the stored payload reads exactly as it did
+    // before mid-flight alignment existed.
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.draft).not.toHaveProperty("parent_issue_id");
   });
 
   /**

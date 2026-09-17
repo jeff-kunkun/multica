@@ -374,6 +374,46 @@ export function planIssueDraftGroupProgress<T extends { stage?: number | null; s
 }
 
 /**
+ * The issue this alignment is filed UNDER, when it was started from one
+ * (DENE-452).
+ *
+ * An alignment started mid-flight — from an existing issue's detail page, or
+ * from one of its comment threads — does not found a new top-level issue: the
+ * issue it was started from is the group's parent, and everything the
+ * conversation settles on is created beneath it. That intent lives in the
+ * payload's `parent_issue_id`, which is written once when the draft is created
+ * and travels with every later save untouched.
+ *
+ * Empty strings are read as absent, the same way the server reads them: a
+ * client that writes `""` means "no parent", and addressing an issue with an
+ * empty id is not a state worth representing.
+ */
+export function issueDraftParentIssueId(
+  payload: Pick<IssueDraftPayload, "parent_issue_id"> | null | undefined,
+): string | null {
+  const id = payload?.parent_issue_id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+/**
+ * Where a confirmed alignment should land the user: back on the issue this
+ * alignment was started from, when there was one, and on the issue it just
+ * created otherwise.
+ *
+ * The person who starts an alignment from an issue is working IN that issue's
+ * context; the group it settles on is that issue's children, so the parent is
+ * what they come back to (DENE-452). A standalone alignment has no such
+ * context, and the root it produced is the only sensible destination — which is
+ * exactly what this returned before the parent case existed.
+ */
+export function issueDraftLandingIssueId(
+  parentIssueId: string | null,
+  createdIssueId: string | null,
+): string | null {
+  return parentIssueId ?? createdIssueId;
+}
+
+/**
  * The group a confirm produced, from the confirm's own response.
  *
  * A backend that predates groups sends no `issues`, and a group with no
@@ -394,6 +434,13 @@ export function issueDraftCreatedGroup(
       stage: null,
       assignee_type: null,
       assignee_id: null,
+      // A backend that predates groups describes no parent, and the fallback
+      // row exists precisely to say "the server told us nothing beyond this
+      // id". The group's real parent — the issue an alignment started
+      // mid-flight was filed under — comes off the DRAFT, not off this
+      // fabricated row, so `issueDraftParentIssueId` is what a caller reads
+      // for it. Writing anything else here would invent a relationship the
+      // server never reported.
       parent_issue_id: null,
     },
   ];

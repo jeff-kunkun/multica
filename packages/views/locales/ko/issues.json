@@ -470,7 +470,10 @@
     "alignment_continue": "정렬 계속하기",
     "alignment_continue_pending": "다시 여는 중…",
     "alignment_continue_failed": "이 정렬을 다시 열 수 없습니다. 더 이상 남아 있지 않을 수 있습니다.",
-    "alignment_origin": "이 이슈를 만든 정렬 보기"
+    "alignment_origin": "이 이슈를 만든 정렬 보기",
+    "alignment_start": "이 이슈로 정렬 시작",
+    "alignment_start_pending": "여는 중…",
+    "alignment_started_by_another": "이 작업에는 이미 정렬이 진행 중입니다."
   },
   "timeline": {
     "loading": "불러오는 중..."
@@ -575,7 +578,8 @@
       "bar_authors_more_other": "{{names}} 외 {{count}}명",
       "resolve_failed": "스레드를 해결하지 못했습니다",
       "unresolve_failed": "스레드 해결을 취소하지 못했습니다"
-    }
+    },
+    "align_action": "이 댓글로 정렬 시작"
   },
   "reply": {
     "placeholder": "답글 남기기...",

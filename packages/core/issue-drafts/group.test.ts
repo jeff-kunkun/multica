@@ -4,7 +4,9 @@ import type { IssueDraftChild, IssueDraftPayload } from "../types";
 import {
   issueDraftChildStatus,
   issueDraftCreatedGroup,
+  issueDraftLandingIssueId,
   issueDraftNodeRunsOnCreate,
+  issueDraftParentIssueId,
   maxIssueDraftChildStage,
   mintIssueDraftChildKeys,
   normalizeIssueDraftChildren,
@@ -413,6 +415,65 @@ describe("issueDraftCreatedGroup", () => {
 
   it("degrades to the root alone when the reported group is empty", () => {
     expect(issueDraftCreatedGroup({ issue_id: "i1", issues: [] })).toHaveLength(1);
+  });
+
+  it("does not invent a parent on the row it fabricates", () => {
+    // The group's real parent is the issue an alignment started mid-flight was
+    // filed under, and it is read off the DRAFT (`issueDraftParentIssueId`) —
+    // never off this row. The fallback exists to say "the server told us
+    // nothing beyond this id", so a row that named a parent would be asserting
+    // a relationship no response ever reported (DENE-452).
+    expect(issueDraftCreatedGroup({ issue_id: "i1" })[0]!.parent_issue_id).toBeNull();
+    expect(
+      issueDraftCreatedGroup({
+        issue_id: "i1",
+        issues: [
+          {
+            id: "i1",
+            identifier: "MUL-1",
+            title: "Filed under MUL-9",
+            status: "todo",
+            parent_issue_id: "parent-1",
+          },
+        ],
+      })[0]!.parent_issue_id,
+    ).toBe("parent-1");
+  });
+});
+
+describe("issueDraftParentIssueId", () => {
+  it("reads the issue an alignment started mid-flight was filed under", () => {
+    expect(issueDraftParentIssueId({ parent_issue_id: "parent-1" })).toBe("parent-1");
+  });
+
+  it("is null for a standalone alignment and for a backend that sends nothing", () => {
+    // An alignment started from nowhere in particular founds its own top-level
+    // issue; only an entry point that had an issue at hand writes the field.
+    expect(issueDraftParentIssueId({})).toBeNull();
+    expect(issueDraftParentIssueId({ parent_issue_id: null })).toBeNull();
+    // Empty string is absent, the same way the server reads it: addressing an
+    // issue by "" is not a state worth representing.
+    expect(issueDraftParentIssueId({ parent_issue_id: "" })).toBeNull();
+    expect(issueDraftParentIssueId(null)).toBeNull();
+  });
+});
+
+describe("issueDraftLandingIssueId", () => {
+  it("lands back on the issue the alignment was started from", () => {
+    // A group started from an existing issue is that issue's children. The
+    // person was working in the parent's context, so the parent is where the
+    // confirm puts them back (DENE-452).
+    expect(issueDraftLandingIssueId("parent-1", "root-1")).toBe("parent-1");
+  });
+
+  it("lands on the root it created when there was no parent", () => {
+    // A standalone alignment has no context to return to, which is exactly what
+    // this returned before the parent case existed.
+    expect(issueDraftLandingIssueId(null, "root-1")).toBe("root-1");
+  });
+
+  it("has nowhere to land until a confirm has produced something", () => {
+    expect(issueDraftLandingIssueId(null, null)).toBeNull();
   });
 });
 

@@ -111,7 +111,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useModalStore } from "@multica/core/modals";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
-import { issueAlignmentDraftId } from "@multica/core/issues";
+import { issueAlignmentDraftId, issueAlignmentHeldByAnother } from "@multica/core/issues";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { IssueAlignmentEntry } from "../draft/alignment-entry";
@@ -119,6 +119,7 @@ import { issueLabelsOptions } from "@multica/core/labels";
 import { propertyListOptions } from "@multica/core/properties";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import {
+  openAlignIssue,
   selectExpandedResolved,
   useRecentIssuesStore,
   useResolvedExpandStore,
@@ -1388,6 +1389,27 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     });
   }, [issue, openModal]);
 
+  /**
+   * Start an alignment FROM a comment (DENE-452).
+   *
+   * The same two fields the sub-issue action sends, plus the alignment face:
+   * the thread is the anchor — the shell seeds the request with it, and its
+   * preview is what says the comment still exists — and `parent_issue_id` is
+   * this issue, so whatever the conversation settles on is filed beneath it
+   * instead of founding a second top-level issue.
+   *
+   * The project and assignee seeds are deliberately NOT carried: the
+   * conversation decides who does the work, and the panel already inherits the
+   * project from the shared draft slot.
+   */
+  const openCommentAlign = useCallback((commentId: string) => {
+    if (!issue) return;
+    openAlignIssue({
+      anchor_comment_id: commentId,
+      parent_issue_id: issue.id,
+    });
+  }, [issue]);
+
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
   const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
@@ -2635,6 +2657,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             currentUserId: user?.id, canModerate: canModerateComments, onReply: submitReply,
             onReplyAccepted: scrollToTimelineBottom, onEdit: editComment, onDelete: deleteComment,
             onToggleReaction: handleToggleReaction, onCreateSubIssue: openCommentSubIssue,
+            onOpenAlign: openCommentAlign,
             onResolveToggle: handleResolveToggle,
             onCollapseResolved: reply.resolved_at ? () => toggleResolvedExpand(reply.id, false) : undefined,
             expandedResolvedIds: expandedResolved, onResolvedExpandChange: toggleResolvedExpand,
@@ -2672,6 +2695,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onDelete={deleteComment}
             onToggleReaction={handleToggleReaction}
             onCreateSubIssue={openCommentSubIssue}
+            onOpenAlign={openCommentAlign}
             onResolveToggle={handleResolveToggle}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
             expandedResolvedIds={expandedResolved}
@@ -2718,12 +2742,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // conversation and its list endpoint is creator-scoped, so for anyone else
   // the entry would open a page that can only say the draft is gone. The issue
   // is created by confirming the draft, so its creator IS that person.
-  const alignmentDraftId =
+  const alignmentHeldBySelf =
     issue?.creator_type === "member" &&
     !!user?.id &&
-    issue.creator_id === user.id
-      ? issueAlignmentDraftId(issue, parentIssue)
-      : null;
+    issue.creator_id === user.id;
+  const alignmentDraftId = alignmentHeldBySelf
+    ? issueAlignmentDraftId(issue, parentIssue)
+    : null;
+  // The same group, when the conversation behind it belongs to somebody else:
+  // there is nothing to continue, and nothing to start either. See
+  // `issueAlignmentHeldByAnother` for why both halves are needed — a null draft
+  // id alone is also what an issue with no alignment behind it looks like.
+  const alignmentHeldByAnother = issueAlignmentHeldByAnother(
+    issue,
+    parentIssue,
+    alignmentHeldBySelf,
+  );
   // The whole group, whichever member is open: the root plus its children. A
   // sub-issue reads them off its parent — the same two queries the "sub-issue
   // of" line already uses — so the progress line is about the group and not
@@ -3038,11 +3072,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               talking. It sits beside the "sub-issue of" line because it answers
               the same kind of question — where does this come from — and because
               an alignment is reachable from nowhere else: its carrier is a
-              hidden system agent, so it is absent from every chat list. */}
-          {alignmentDraftId && (
+              hidden system agent, so it is absent from every chat list.
+
+              An issue with no alignment behind it gets the other half of the
+              same entry instead: starting one ON this issue, filed beneath it
+              (DENE-452). The two never appear together — see the component. */}
+          {issue && (
             <IssueAlignmentEntry
               draftId={alignmentDraftId}
               groupIssues={alignmentGroupIssues}
+              parentIssueId={issue.id}
+              selfStarted={alignmentDraftId !== null}
+              startedByAnother={alignmentHeldByAnother}
             />
           )}
 

@@ -65,3 +65,32 @@ export function issueAlignmentDraftId(
   if (issue.parent_issue_id) return issueAlignmentOrigin(parent);
   return issueAlignmentOrigin(issue);
 }
+
+/**
+ * Whether this group was produced by somebody else's alignment conversation.
+ *
+ * An alignment is private: its draft list endpoint is creator-scoped, so a
+ * conversation belonging to another member cannot be read, reopened or even
+ * confirmed by this user — `issueAlignmentDraftId` resolves an id that only its
+ * creator can open. A surface that offered "continue this alignment" on that id
+ * would send the reader to a page that can only say the draft is gone.
+ *
+ * The distinction is invisible in the id alone (a null id is also what an
+ * issue with no alignment behind it looks like), so it is asked separately:
+ * the group HAS an alignment origin, and the id the current user can actually
+ * reach is empty. `isSelf` is the caller's own authorship check — for an issue
+ * created by confirming a draft, the creator IS the person who held the
+ * alignment.
+ *
+ * It matters beyond a missing link: an issue that already came out of an
+ * alignment must not offer "start another one" either, or a re-opened question
+ * would found a second conversation about work that already has one (DENE-452).
+ */
+export function issueAlignmentHeldByAnother(
+  issue: Pick<Issue, "origin_type" | "origin_id" | "parent_issue_id"> | null | undefined,
+  parent: Pick<Issue, "origin_type" | "origin_id"> | null | undefined,
+  isSelf: boolean,
+): boolean {
+  if (!issue || isSelf) return false;
+  return issueAlignmentDraftId(issue, parent) !== null;
+}

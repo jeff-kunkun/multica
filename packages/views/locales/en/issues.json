@@ -475,7 +475,10 @@
     "alignment_continue": "Continue aligning",
     "alignment_continue_pending": "Reopening…",
     "alignment_continue_failed": "Could not reopen this alignment. It may no longer be available.",
-    "alignment_origin": "View the alignment that created this"
+    "alignment_origin": "View the alignment that created this",
+    "alignment_start": "Align on this issue",
+    "alignment_start_pending": "Opening…",
+    "alignment_started_by_another": "An alignment is already running for this work."
   },
   "timeline": {
     "loading": "Loading..."
@@ -590,7 +593,8 @@
       "bar_authors_more_other": "{{names}} and {{count}} others",
       "resolve_failed": "Failed to resolve thread",
       "unresolve_failed": "Failed to unresolve thread"
-    }
+    },
+    "align_action": "Align on this first"
   },
   "reply": {
     "placeholder": "Leave a reply...",

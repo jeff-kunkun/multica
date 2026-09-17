@@ -16,12 +16,15 @@ export {
   sameIssueDraftValues,
   type IssueDraftFold,
 } from "./fold";
+export { issueDraftCommentSeed } from "./comment-seed";
 export {
   ISSUE_DRAFT_MAX_CHILDREN,
   ISSUE_DRAFT_RECOMMENDED_CHILDREN,
   issueDraftChildStatus,
   issueDraftCreatedGroup,
+  issueDraftLandingIssueId,
   issueDraftNodeRunsOnCreate,
+  issueDraftParentIssueId,
   maxIssueDraftChildStage,
   mintIssueDraftChildKeys,
   normalizeIssueDraftChildren,

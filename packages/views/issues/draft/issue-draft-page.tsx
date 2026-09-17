@@ -6,8 +6,12 @@ import { useDefaultLayout, type Layout } from "react-resizable-panels";
 import { ArrowLeft, MoreHorizontal } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { decodeIssueDraftInput, stripIssueDraftDirectives } from "@multica/core/issue-drafts";
-import { useWorkspacePaths } from "@multica/core/paths";
+import {
+  decodeIssueDraftInput,
+  issueDraftLandingIssueId,
+  issueDraftParentIssueId,
+  stripIssueDraftDirectives,
+} from "@multica/core/issue-drafts";import { useWorkspacePaths } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import type { ChatMessage } from "@multica/core/types";
@@ -116,17 +120,27 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
   // A confirmed draft is final. Replace, for the same reason: the alignment URL
   // is no longer an unfinished draft once the issue exists.
   //
+  // Where it lands is `issueDraftLandingIssueId`: an alignment started from an
+  // existing issue goes back to that issue — the group it produced is that
+  // issue's children, and the person was working in its context (DENE-452) —
+  // while a standalone alignment lands on the root it just created, which is
+  // what this always did.
+  //
   // Once per issue, not once per render. `paths` is rebuilt on every render and
   // a same-tick double click reports the same issue twice, so this effect runs
   // again and again while the page is still on screen — and a router told to
   // replace the same URL forty times never commits the navigation at all.
+  const landingIssueId = issueDraftLandingIssueId(
+    issueDraftParentIssueId(session.draft),
+    session.createdIssueId,
+  );
   const navigatedToIssueRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!session.createdIssueId) return;
-    if (navigatedToIssueRef.current === session.createdIssueId) return;
-    navigatedToIssueRef.current = session.createdIssueId;
-    navigation.replace(paths.issueDetail(session.createdIssueId));
-  }, [navigation, paths, session.createdIssueId]);
+    if (!landingIssueId) return;
+    if (navigatedToIssueRef.current === landingIssueId) return;
+    navigatedToIssueRef.current = landingIssueId;
+    navigation.replace(paths.issueDetail(landingIssueId));
+  }, [landingIssueId, navigation, paths]);
 
   if (session.missing) return null;
 

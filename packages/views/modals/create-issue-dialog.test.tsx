@@ -8,9 +8,13 @@ const mockEndIsolatedDraft = vi.hoisted(() => vi.fn());
 const mockRefetchSourceContext = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 
+// The preview a source-context dialog reads. `null` is the loading/failed
+// shape, which is also what a backend that predates the endpoint answers with.
+const sourcePreview = vi.hoisted(() => ({ current: null as unknown }));
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
-    data: { capture_token: "sha256:preview-token" },
+    data: sourcePreview.current,
     isLoading: false,
     isFetching: false,
     isError: false,
@@ -29,14 +33,27 @@ vi.mock("@multica/core/issues/queries", () => ({
   }),
 }));
 
+// A stand-in for the create draft's align slot: the shell writes the comment
+// seed into it, and the alignment face reads its body from it.
+const draftStore = vi.hoisted(() => ({
+  alignRequest: "",
+  setAlign: vi.fn(),
+}));
+
 vi.mock("@multica/core/issues/stores/draft-store", () => ({
-  useIssueDraftStore: {
-    getState: () => ({
-      beginIsolatedDraft: mockBeginIsolatedDraft,
-      endIsolatedDraft: mockEndIsolatedDraft,
-      clearDraft: mockClearDraft,
-    }),
-  },
+  useIssueDraftStore: Object.assign(
+    (selector: (s: { draft: { align: { request: string } } }) => unknown) =>
+      selector({ draft: { align: { request: draftStore.alignRequest } } }),
+    {
+      getState: () => ({
+        draft: { align: { request: draftStore.alignRequest } },
+        setAlign: draftStore.setAlign,
+        beginIsolatedDraft: mockBeginIsolatedDraft,
+        endIsolatedDraft: mockEndIsolatedDraft,
+        clearDraft: mockClearDraft,
+      }),
+    },
+  ),
 }));
 
 const mockCreateModeStore = {
@@ -130,12 +147,14 @@ vi.mock("./align-create-issue", () => ({
   AlignCreatePanel: ({
     onClose,
     onSwitchMode,
+    parentIssueId,
   }: {
     onClose: () => void;
     onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
+    parentIssueId?: string;
   }) => (
     <div>
-      align panel
+      align panel · parent:{String(parentIssueId ?? "none")}
       <button type="button" onClick={() => onSwitchMode?.(null)}>
         switch manual from align
       </button>
@@ -159,6 +178,9 @@ function contentClass() {
 describe("CreateIssueDialog sizing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sourcePreview.current = null;
+    draftStore.alignRequest = "";
+    draftStore.setAlign.mockClear();
   });
 
   it("leaves ordinary create outside the isolated source-context path", () => {
@@ -220,11 +242,77 @@ describe("CreateIssueDialog sizing", () => {
 
     expect(screen.getByText(/parent:parent-1/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "switch align" }));
-    expect(screen.getByText(/align panel/)).toBeInTheDocument();
+    expect(screen.getByText(/align panel · parent:parent-1/)).toBeInTheDocument();
     expect(mockSetLastMode).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "switch manual from align" }));
     expect(screen.getByText(/parent:parent-1/)).toBeInTheDocument();
+  });
+
+  // DENE-452: the parent the shell holds is not only kept for the way back —
+  // the alignment face is what writes it into the draft the confirm builds the
+  // group from. A shell that held it and never handed it over would file the
+  // conversation's issues at the top level anyway.
+  it("hands the parent to the alignment face, including from a comment entry", () => {
+    render(
+      <CreateIssueDialog
+        onClose={vi.fn()}
+        initialMode="align"
+        data={{ anchor_comment_id: "comment-source", parent_issue_id: "parent-source" }}
+      />,
+    );
+
+    expect(screen.getByText(/align panel · parent:parent-source/)).toBeInTheDocument();
+  });
+
+  it("leaves the alignment face without a parent for a standalone alignment", () => {
+    render(<CreateIssueDialog onClose={vi.fn()} initialMode="align" data={{}} />);
+
+    expect(screen.getByText(/align panel · parent:none/)).toBeInTheDocument();
+  });
+
+  // "Start aligning from this comment" seeds the conversation with the thread
+  // (DENE-452). The seed is written into the draft's own align slot — that is
+  // where the alignment face reads its body from — and only ONCE, so a user who
+  // deletes the quote and writes their own sentence keeps it.
+  it("seeds the alignment request from the comment thread, once", () => {
+    sourcePreview.current = {
+      capture_token: "sha256:preview-token",
+      anchor_comment_id: "comment-source",
+      source_issue: { id: "i-1", identifier: "MUL-9" },
+      comment_thread: [{ id: "comment-source", content: "the toggle flickers" }],
+    };
+    render(
+      <CreateIssueDialog
+        onClose={vi.fn()}
+        initialMode="align"
+        data={{ anchor_comment_id: "comment-source", parent_issue_id: "parent-source" }}
+      />,
+    );
+
+    expect(draftStore.setAlign).toHaveBeenCalledWith({
+      request: "MUL-9\n\n> the toggle flickers",
+    });
+    expect(draftStore.setAlign).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not overwrite a request the user already typed", () => {
+    draftStore.alignRequest = "my own sentence";
+    sourcePreview.current = {
+      capture_token: "sha256:preview-token",
+      anchor_comment_id: "comment-source",
+      source_issue: { id: "i-1", identifier: "MUL-9" },
+      comment_thread: [{ id: "comment-source", content: "the toggle flickers" }],
+    };
+    render(
+      <CreateIssueDialog
+        onClose={vi.fn()}
+        initialMode="align"
+        data={{ anchor_comment_id: "comment-source", parent_issue_id: "parent-source" }}
+      />,
+    );
+
+    expect(draftStore.setAlign).not.toHaveBeenCalled();
   });
 });
 
@@ -249,7 +337,7 @@ describe("CreateIssueDialog mode switching", () => {
     // never replays the open animation on a mode flip.
     expect(screen.getByTestId("dialog-content")).toBe(content);
     expect(contentClass()).toContain("align-dialog-class");
-    expect(screen.getByText("align panel")).toBeInTheDocument();
+    expect(screen.getByText(/align panel/)).toBeInTheDocument();
   });
 
   it("never remembers the alignment face as the filing preference", () => {
@@ -267,7 +355,7 @@ describe("CreateIssueDialog mode switching", () => {
   it("opens directly on the alignment face when the registry asks for it", () => {
     render(<CreateIssueDialog onClose={vi.fn()} initialMode="align" data={null} />);
 
-    expect(screen.getByText("align panel")).toBeInTheDocument();
+    expect(screen.getByText(/align panel/)).toBeInTheDocument();
     expect(mockSetLastMode).not.toHaveBeenCalled();
   });
 });

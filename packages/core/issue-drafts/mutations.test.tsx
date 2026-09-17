@@ -10,6 +10,7 @@ import { ApiClient, setApiInstance } from "../api";
 import type { ApiClient as ApiClientType } from "../api/client";
 import type { IssueDraftSession } from "../types";
 import { IssueDraftSessionUnrecognizedError, useStartIssueDraft } from "./mutations";
+import { issueDraftParentIssueId } from "./group";
 
 /**
  * DENE-370: the alignment entry point uploads through the shared create-dialog
@@ -201,5 +202,55 @@ describe("useStartIssueDraft", () => {
     // Absent rather than empty: "no project" is the field being missing, and an
     // empty string reads as a project named "".
     expect(input.draft).not.toHaveProperty("project_id");
+  });
+
+  /**
+   * DENE-452: an alignment started from an existing issue is filed BENEATH it.
+   * The confirm builds the group out of the stored payload, so the parent has to
+   * be written at creation; a field that only lived in the dialog would never
+   * reach the server, and the conversation would found a second top-level issue
+   * instead of the children of the one the person was looking at.
+   */
+  it("stores the issue an alignment was started from as the draft's parent", async () => {
+    const { result } = renderHook(() => useStartIssueDraft(WORKSPACE_ID), {
+      wrapper: createWrapper(queryClient),
+    });
+
+    await result.current.mutateAsync({
+      runtimeId: "rt-1",
+      request: "this needs breaking down",
+      parentIssueId: "issue-7",
+    });
+
+    expect(createIssueDraftSession).toHaveBeenCalledTimes(1);
+    const input = createIssueDraftSession.mock.calls[0]![0] as {
+      draft: { parent_issue_id?: string; description: string };
+    };
+    expect(input.draft.parent_issue_id).toBe("issue-7");
+
+    // The carrier is told where the work came from by the request itself, not by
+    // this field: the first turn carries the same four draft fields as ever.
+    await waitFor(() => expect(sendChatMessage).toHaveBeenCalledTimes(1));
+    expect(sendChatMessage.mock.calls[0]![1] as string).not.toContain("issue-7");
+  });
+
+  it("leaves the parent absent for a standalone alignment", async () => {
+    const { result } = renderHook(() => useStartIssueDraft(WORKSPACE_ID), {
+      wrapper: createWrapper(queryClient),
+    });
+
+    await result.current.mutateAsync({ runtimeId: "rt-1", request: "add dark mode" });
+
+    const input = createIssueDraftSession.mock.calls[0]![0] as {
+      draft: Record<string, unknown>;
+    };
+    // Absent, exactly as it was before mid-flight alignment existed: an
+    // alignment started from nowhere in particular founds its own top-level
+    // issue, and the stored payload has to keep saying so.
+    expect(input.draft).not.toHaveProperty("parent_issue_id");
+    // Read through the helper the page navigates with: "absent" and "no parent"
+    // are the same answer there, which is what keeps a standalone alignment
+    // landing on the root it just created.
+    expect(issueDraftParentIssueId(input.draft as { parent_issue_id?: null })).toBeNull();
   });
 });

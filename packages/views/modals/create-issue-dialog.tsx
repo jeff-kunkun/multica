@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { Dialog, DialogContent } from "@multica/ui/components/ui/dialog";
@@ -8,6 +8,8 @@ import {
   useCreateModeStore,
   type CreateMode,
 } from "@multica/core/issues/stores/create-mode-store";
+import { issueDraftCommentSeed } from "@multica/core/issue-drafts";
+import type { SourceContextPreview } from "@multica/core/types";
 import { AgentCreatePanel } from "./quick-create-issue";
 import { ManualCreatePanel, manualDialogContentClass } from "./create-issue";
 import { AlignCreatePanel, alignDialogContentClass } from "./align-create-issue";
@@ -146,6 +148,47 @@ function CreateIssueDialogBody({
     ? { ...(panelData ?? {}), ...sourceContextData }
     : panelData;
 
+  // The issue an alignment opened from an existing issue is filed UNDER
+  // (DENE-452). Per-invocation, like the manual face's parent context: it
+  // arrives in the modal payload (the detail page's "start aligning", the
+  // comment menu's, or the manual face's carry) and is handed to the alignment
+  // face so the draft records it. It is deliberately NOT persisted in the draft
+  // store — see `AlignCreatePanel`.
+  const alignParentIssueId =
+    typeof effectiveData?.parent_issue_id === "string" &&
+    effectiveData.parent_issue_id.length > 0
+      ? effectiveData.parent_issue_id
+      : undefined;
+
+  // An alignment opened FROM a comment thread starts on that comment rather
+  // than on an empty box (DENE-452). The seed is written ONCE, the first time it
+  // is both available and safe to write:
+  //
+  //   - the preview is a request of its own, so it lands a beat after the dialog
+  //     opens; until it does there is nothing to quote and the panel shows its
+  //     normal empty state;
+  //   - `applied` makes it once per open, so a user who deletes the quote and
+  //     writes their own sentence keeps it — a seed that came back on every
+  //     render would be a form that fights its user;
+  //   - it only ever fills an EMPTY align slot. A request already there belongs
+  //     to whoever typed it — the manual face's mode switch seeds this same slot
+  //     on its way out.
+  //
+  // It goes through the store rather than a prop because that is where the
+  // align panel reads its body from (`draft.align.request`), exactly as it does
+  // for a request carried over from the manual face.
+  const alignSeed = issueDraftCommentSeed(
+    effectiveData?.source_context_preview as SourceContextPreview | undefined,
+  );
+  const alignSeedApplied = useRef(false);
+  useEffect(() => {
+    if (alignSeedApplied.current || alignSeed === null) return;
+    alignSeedApplied.current = true;
+    const store = useIssueDraftStore.getState();
+    if (store.draft.align.request.trim().length > 0) return;
+    store.setAlign({ request: alignSeed });
+  }, [alignSeed]);
+
   const switchTo = (next: CreateMode) => (carry?: Record<string, unknown> | null) => {
     // The alignment face is NOT a filing preference: remembering it would make
     // the `c` shortcut and the sidebar's "New issue" reopen alignment for
@@ -204,15 +247,15 @@ function CreateIssueDialogBody({
             setIsExpanded={setIsExpanded}
           />
         ) : mode === "align" ? (
-          // No `data`: the alignment face seeds from the shared draft rather
-          // than from the modal's payload. The project is the one seed that
-          // crosses over — the manual face commits it to `draft.shared` on the
-          // way out, so opening this dialog from a project page and switching
-          // to alignment files the whole group under that project. Priority,
-          // due date and parent still do not apply: the conversation decides
-          // its own group, and none of the three has a field on this face.
+          // The parent context is read off the payload, not the store. The
+          // project is the one seed that crosses over on its own — the manual
+          // face commits it to `draft.shared` on the way out, so opening this
+          // dialog from a project page and switching to alignment files the
+          // whole group under that project — while priority, due date and stage
+          // still do not apply: the conversation decides its own group.
           <AlignCreatePanel
             onClose={onClose}
+            parentIssueId={alignParentIssueId}
             // Hands the untouched payload back on the way out. The alignment
             // face reads none of it, but the manual face's parent context is
             // per-invocation and NOT persisted in the draft store, so dropping
