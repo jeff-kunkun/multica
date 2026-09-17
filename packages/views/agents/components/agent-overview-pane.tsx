@@ -33,6 +33,12 @@ import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { AgentAccountsTab } from "./tabs/agent-accounts-tab";
+import {
+  formatQuotaResetAt,
+  nextQuotaResetMs,
+  parseAgentAccounts,
+} from "./tabs/agent-accounts-model";
+import { useQuotaResetTick } from "./tabs/use-quota-reset-tick";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { AgentMcpTab } from "./tabs/agent-mcp-tab";
@@ -217,6 +223,26 @@ export function AgentOverviewPane({
     dingtalkListing?.configured === true ||
     wecomListing?.configured === true ||
     telegramListing?.configured === true;
+
+  // A spent quota is the one account state that needs an action and that the
+  // tab rail cannot otherwise show. The daemon reports it on the runtime row,
+  // so the warning costs no request of its own — and it clears itself the
+  // moment the quota comes back (DENE-468).
+  const accountRows = useMemo(
+    () => parseAgentAccounts(runtime).accounts,
+    [runtime],
+  );
+  const accountNowMs = useQuotaResetTick(accountRows);
+  const quotaResetMs = useMemo(
+    () => nextQuotaResetMs(accountRows, accountNowMs),
+    [accountRows, accountNowMs],
+  );
+  const quotaAlert =
+    quotaResetMs === null
+      ? ""
+      : t(($) => $.tab_body.accounts.status_quota_exhausted, {
+          time: formatQuotaResetAt(quotaResetMs),
+        });
 
   const visibleCapabilityTabs = useMemo(() => {
     const showMcp = runtime
@@ -459,6 +485,9 @@ export function AgentOverviewPane({
                       )}
                     >
                       {t(($) => $.tabs[tab.labelKey])}
+                      {tab.id === "accounts" && quotaAlert ? (
+                        <QuotaAlertDot label={quotaAlert} />
+                      ) : null}
                     </button>
                   );
                 })}
@@ -471,6 +500,13 @@ export function AgentOverviewPane({
                   <h2 className="text-title-sm font-medium text-balance">
                     {t(($) => $.tabs[activeSecondaryTab.labelKey])}
                   </h2>
+                  {/* The rail's dot has to be explainable where it is read:
+                      this is the one line that says why the tab is flagged. */}
+                  {activeSecondaryTab.id === "accounts" && quotaAlert ? (
+                    <p className="mt-1 text-caption text-destructive">
+                      {quotaAlert}
+                    </p>
+                  ) : null}
                 </header>
 
                 <div className="mt-6">
@@ -596,5 +632,24 @@ export function AgentOverviewPane({
         </AlertDialog>
       )}
     </div>
+  );
+}
+
+/**
+ * The accounts tab's "a quota ran out" marker (DENE-468).
+ *
+ * The dot is what makes a spent quota reachable from the tab rail — the one
+ * place the user passes through on the way to anything else in the agent. It
+ * carries the deadline as a tooltip and as its accessible name, so the alert
+ * is never colour-only.
+ */
+function QuotaAlertDot({ label }: { label: string }) {
+  return (
+    <span
+      title={label}
+      className="ms-1.5 size-1.5 shrink-0 rounded-full bg-destructive"
+    >
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }

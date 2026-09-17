@@ -115,6 +115,9 @@ const DSH_ACCOUNT2 = account("dsh", "account2", `${RUNTIME_HOME}/.dsh-account2`,
 const CODEX_DEFAULT = account("codex", "default", `${RUNTIME_HOME}/.codex`, {
   lever: "",
 });
+const CODEX_ACCOUNT2 = account("codex", "account2", `${RUNTIME_HOME}/.codex-account2`, {
+  lever: "",
+});
 
 function runtimeWith(
   provider: string,
@@ -311,6 +314,130 @@ describe("AgentAccountsTab rest state", () => {
   });
 });
 
+// The one-click switch (DENE-468). Which situation qualifies is decided by
+// `quotaSwitchCandidate` and its matrix is covered in
+// `agent-accounts-model.test.ts`; what is checked here is the wiring — that the
+// button appears, performs the write through the same path as "save and
+// switch", and moves the summary bar.
+describe("AgentAccountsTab one-click switch", () => {
+  // 2100-01-01, so a spent quota stays spent for the life of this suite.
+  const FUTURE_RESET_AT = 4_102_444_800;
+  const SPENT = { quota_reset_at: FUTURE_RESET_AT };
+  const SIGNED_OUT = { signed_in: false };
+  const antigravityDefault = {
+    ...baseAgent,
+    custom_args: ["--gemini_dir", `${RUNTIME_HOME}/.gemini`],
+  };
+
+  function quickSwitchButton() {
+    return screen.queryByRole("button", { name: /^switch to /i });
+  }
+
+  it("switches to the eligible sibling in one click and rewrites the binding", async () => {
+    const { onSave } = renderTab({
+      agent: antigravityDefault,
+      device: runtimeWith("antigravity", [
+        account("agy", "default", `${RUNTIME_HOME}/.gemini`, {
+          lever: "custom_args:--gemini_dir",
+          ...SPENT,
+        }),
+        AGY_ACCOUNT2,
+      ]),
+    });
+
+    expect(await screen.findByText("Quota used up", { exact: false })).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "Switch to account2" });
+    fireEvent.click(button);
+
+    // The write is the drawer's own path: one `custom_args` update, no env
+    // call, and the summary bar moves to the account that took over.
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith({
+      custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
+    });
+    expect(updateAgentEnv).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(`--gemini_dir=${AGY_ACCOUNT2.home}`),
+    ).toBeInTheDocument();
+    expect(quickSwitchButton()).not.toBeInTheDocument();
+  });
+
+  it("writes the env key when the sibling's lever is an environment variable", async () => {
+    const { onSave } = renderTab({
+      device: runtimeWith("dsh", [
+        account("dsh", "default", `${RUNTIME_HOME}/.dsh`, {
+          lever: "env:DSH_HOME",
+          ...SPENT,
+        }),
+        DSH_ACCOUNT2,
+      ]),
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Switch to account2" }),
+    );
+
+    await waitFor(() => expect(updateAgentEnv).toHaveBeenCalledTimes(1));
+    expect(updateAgentEnv).toHaveBeenCalledWith("agent-1", {
+      custom_env: { DSH_HOME: DSH_ACCOUNT2.home },
+    });
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("offers nothing when the only sibling is spent or signed out too", async () => {
+    renderTab({
+      agent: antigravityDefault,
+      device: runtimeWith("antigravity", [
+        account("agy", "default", `${RUNTIME_HOME}/.gemini`, {
+          lever: "custom_args:--gemini_dir",
+          ...SPENT,
+        }),
+        account("agy", "account2", `${RUNTIME_HOME}/.gemini-account2`, {
+          lever: "custom_args:--gemini_dir",
+          ...SIGNED_OUT,
+        }),
+      ]),
+    });
+
+    // The state still announces itself; it just has no one-click way out, and
+    // "manage" stays the escape hatch.
+    expect(await screen.findByText("Quota used up", { exact: false })).toBeInTheDocument();
+    expect(quickSwitchButton()).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /manage accounts/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers nothing for a CLI the daemon reports no lever for", async () => {
+    // codex and cursor cannot be pointed at another directory at all, so a
+    // button here would be dead on click (DENE-305's read-only group rule).
+    renderTab({
+      agent: { ...baseAgent, model: "", runtime_id: "runtime-1" },
+      device: runtimeWith("codex", [
+        account("codex", "default", `${RUNTIME_HOME}/.codex`, {
+          lever: "",
+          ...SPENT,
+        }),
+        CODEX_ACCOUNT2,
+      ]),
+    });
+
+    expect(await screen.findByText("Codex · default")).toBeInTheDocument();
+    expect(quickSwitchButton()).not.toBeInTheDocument();
+  });
+
+  it("keeps the binding untouched while the account in effect has quota left", async () => {
+    const { onSave } = renderTab({
+      agent: antigravityDefault,
+      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+    });
+
+    expect(await screen.findByText("Antigravity · default")).toBeInTheDocument();
+    expect(quickSwitchButton()).not.toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
 describe("AgentAccountsTab untrusted states keep the drawer shut", () => {
   it("renders the empty state with its three entry points and no drawer entry", () => {
     renderTab({ device: runtimeWith("dsh", []) });
@@ -330,6 +457,11 @@ describe("AgentAccountsTab untrusted states keep the drawer shut", () => {
     expect(screen.getByText(/available lever DSH_HOME/)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /manage accounts/i }),
+    ).not.toBeInTheDocument();
+    // An empty list is not a list with a candidate in it: the one-click switch
+    // needs a sibling it can actually write, so it stays away too.
+    expect(
+      screen.queryByRole("button", { name: /^switch to /i }),
     ).not.toBeInTheDocument();
   });
 
@@ -401,6 +533,9 @@ describe("AgentAccountsTab untrusted states keep the drawer shut", () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /manage accounts/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^switch to /i }),
     ).not.toBeInTheDocument();
   });
 });

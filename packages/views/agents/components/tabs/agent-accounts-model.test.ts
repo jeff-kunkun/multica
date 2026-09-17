@@ -10,6 +10,7 @@ import {
   AGENT_ACCOUNT_CLIS,
   type AccountsViewState,
   type AgentAccount,
+  type AgentAccountBinding,
   accountLeverLabel,
   accountStatus,
   accountsViewState,
@@ -17,11 +18,14 @@ import {
   agySlotNumberOf,
   canManageAccounts,
   cliForProvider,
+  formatQuotaResetAt,
   groupAccountsByCli,
   isSwitchableLever,
+  nextQuotaResetMs,
   parseAccountLever,
   parseAgentAccounts,
   planAccountSwitch,
+  quotaSwitchCandidate,
   resolveCurrentAccount,
   withAgySlots,
 } from "./agent-accounts-model";
@@ -81,6 +85,12 @@ const CODEX_DEFAULT = account({
   home: `${RUNTIME_HOME}/.codex`,
   lever: "",
 });
+const CODEX_ACCOUNT2 = account({
+  cli: "codex",
+  account: "account2",
+  home: `${RUNTIME_HOME}/.codex-account2`,
+  lever: "",
+});
 const CLAUDE_DEFAULT = account({
   cli: "claude",
   account: "default",
@@ -91,6 +101,12 @@ const CURSOR_DEFAULT = account({
   cli: "cursor",
   account: "default",
   home: `${RUNTIME_HOME}/.cursor`,
+  lever: "",
+});
+const CURSOR_ACCOUNT2 = account({
+  cli: "cursor",
+  account: "account2",
+  home: `${RUNTIME_HOME}/.cursor-account2`,
   lever: "",
 });
 
@@ -565,6 +581,67 @@ describe("accountStatus", () => {
   });
 });
 
+describe("nextQuotaResetMs", () => {
+  const resetAt = 1_700_000_000;
+  const later = resetAt + 3_600;
+  const exhausted = (id: string, at: number) =>
+    account({
+      cli: "agy",
+      account: id,
+      home: `${RUNTIME_HOME}/.gemini`,
+      quota_reset_at: at,
+    });
+
+  it("returns the soonest deadline among the accounts still exhausted", () => {
+    const accounts = [
+      exhausted("default", later),
+      exhausted("account2", resetAt),
+      DSH_DEFAULT,
+    ];
+
+    expect(nextQuotaResetMs(accounts, resetAt * 1000 - 1)).toBe(resetAt * 1000);
+    // The first deadline passing promotes the next one, so the surfaces keep
+    // ticking until every spent quota is back.
+    expect(nextQuotaResetMs(accounts, resetAt * 1000)).toBe(later * 1000);
+    expect(nextQuotaResetMs(accounts, later * 1000)).toBeNull();
+  });
+
+  it("ignores accounts with nothing to wait for", () => {
+    expect(nextQuotaResetMs([], resetAt * 1000)).toBeNull();
+    // Signed in with an unspent quota, and signed out with a stale deadline.
+    expect(nextQuotaResetMs([DSH_DEFAULT], resetAt * 1000)).toBeNull();
+    expect(
+      nextQuotaResetMs(
+        [
+          account({
+            cli: "agy",
+            account: "account2",
+            home: `${RUNTIME_HOME}/.gemini-account2`,
+            signed_in: false,
+            quota_reset_at: later,
+          }),
+        ],
+        resetAt * 1000,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("formatQuotaResetAt", () => {
+  it("renders the deadline the same way for every surface that shows it", () => {
+    const at = 1_700_000_000_000;
+
+    expect(formatQuotaResetAt(at)).toBe(
+      new Date(at).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    );
+  });
+});
+
 describe("accountsViewState", () => {
   it("picks loading, error, empty or ready in that precedence", () => {
     expect(accountsViewState({ accounts: [], error: "read failed", loading: true })).toEqual({
@@ -733,5 +810,217 @@ describe("planAccountSwitch", () => {
     const plan = planAccountSwitch({ custom_args: [] }, target, READY);
     expect(JSON.stringify(plan)).not.toContain("PRIVATE KEY");
     expect(JSON.stringify(plan)).not.toContain("key_ref");
+  });
+});
+
+// The one-click switch (DENE-468). This is the canonical matrix for "may the
+// summary bar offer it, and which account does it move to"; the component
+// suite only checks that the button renders and performs the write.
+describe("quotaSwitchCandidate", () => {
+  const resetAt = 1_700_000_000;
+  const nowMs = resetAt * 1000 - 60_000;
+  const spent = (account: AgentAccount): AgentAccount => ({
+    ...account,
+    quota_reset_at: resetAt,
+  });
+  const signedOut = (account: AgentAccount): AgentAccount => ({
+    ...account,
+    signed_in: false,
+  });
+  const pick = (input: {
+    binding?: AgentAccountBinding;
+    accounts: readonly AgentAccount[];
+    current: AgentAccount | null;
+    view?: AccountsViewState;
+  }) =>
+    quotaSwitchCandidate({
+      binding: input.binding ?? { custom_args: [] },
+      accounts: input.accounts,
+      current: input.current,
+      view: input.view ?? READY,
+      nowMs,
+    });
+
+  it("picks a signed-in sibling of the same CLI while the current one is spent", () => {
+    const candidate = pick({
+      accounts: [spent(AGY_DEFAULT), AGY_ACCOUNT2, DSH_DEFAULT],
+      current: spent(AGY_DEFAULT),
+    });
+
+    expect(candidate).toEqual(AGY_ACCOUNT2);
+    // The button is only worth rendering because this very plan writes: it is
+    // the same gate "save and switch" goes through.
+    expect(planAccountSwitch({ custom_args: [] }, candidate, READY)).toEqual({
+      kind: "custom_args",
+      custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
+    });
+  });
+
+  it("picks the single env-lever sibling the same way", () => {
+    const candidate = pick({
+      binding: { custom_env: {} },
+      accounts: [spent(DSH_DEFAULT), DSH_ACCOUNT2],
+      current: spent(DSH_DEFAULT),
+    });
+
+    expect(candidate).toEqual(DSH_ACCOUNT2);
+    expect(planAccountSwitch({ custom_env: {} }, candidate, READY)).toEqual({
+      kind: "env",
+      key: "DSH_HOME",
+      value: DSH_ACCOUNT2.home,
+    });
+  });
+
+  it("is deterministic and independent of the order the daemon reported", () => {
+    const accounts = [AGY_DEFAULT, AGY_ACCOUNT2, DSH_DEFAULT];
+    const reversed = [...accounts].reverse();
+    const current = spent(AGY_DEFAULT);
+
+    // `default` leads the canonical group order, so account2 is the first
+    // eligible sibling under the CLI's own directory.
+    expect(pick({ accounts, current })?.account).toBe("account2");
+    expect(pick({ accounts: reversed, current })?.account).toBe("account2");
+  });
+
+  it("offers nothing while the account in effect has quota left", () => {
+    // The action exists for one situation only; anything else stays a
+    // deliberate choice made in the drawer.
+    expect(pick({ accounts: [AGY_DEFAULT, AGY_ACCOUNT2], current: AGY_DEFAULT })).toBeNull();
+    // Control: the same list does offer the switch while the quota is spent.
+    expect(
+      pick({ accounts: [spent(AGY_DEFAULT), AGY_ACCOUNT2], current: spent(AGY_DEFAULT) }),
+    ).toEqual(AGY_ACCOUNT2);
+  });
+
+  it("stops offering it once the deadline has passed", () => {
+    const accounts = [spent(AGY_DEFAULT), AGY_ACCOUNT2];
+
+    expect(pick({ accounts, current: spent(AGY_DEFAULT) })).toEqual(AGY_ACCOUNT2);
+    expect(
+      quotaSwitchCandidate({
+        binding: { custom_args: [] },
+        accounts,
+        current: spent(AGY_DEFAULT),
+        view: READY,
+        nowMs: resetAt * 1000,
+      }),
+    ).toBeNull();
+  });
+
+  it("offers nothing without a sibling to move to", () => {
+    expect(pick({ accounts: [spent(AGY_DEFAULT)], current: spent(AGY_DEFAULT) })).toBeNull();
+    // The other CLIs are not candidates: they are not accounts of this group.
+    expect(
+      pick({
+        accounts: [spent(AGY_DEFAULT), DSH_DEFAULT, DSH_ACCOUNT2],
+        current: spent(AGY_DEFAULT),
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses a sibling that is signed out or spent as well", () => {
+    // Moving to another dead end is not a switch, it is the same problem one
+    // account further along.
+    expect(
+      pick({
+        accounts: [spent(AGY_DEFAULT), signedOut(AGY_ACCOUNT2)],
+        current: spent(AGY_DEFAULT),
+      }),
+    ).toBeNull();
+    expect(
+      pick({
+        accounts: [spent(AGY_DEFAULT), spent(AGY_ACCOUNT2)],
+        current: spent(AGY_DEFAULT),
+      }),
+    ).toBeNull();
+    // Control: a signed-in sibling with quota left is the one that qualifies.
+    expect(
+      pick({
+        accounts: [spent(AGY_DEFAULT), signedOut(AGY_ACCOUNT2), account({ ...AGY_ACCOUNT2, account: "account3", home: `${RUNTIME_HOME}/.gemini-account3` })],
+        current: spent(AGY_DEFAULT),
+      })?.account,
+    ).toBe("account3");
+  });
+
+  it("never flags a group whose lever cannot be written", () => {
+    // codex / cursor report an empty lever: the daemon gives the client no way
+    // to point them at another directory, so there is no one-click switch.
+    expect(
+      pick({
+        accounts: [spent(CODEX_DEFAULT), CODEX_ACCOUNT2, spent(CURSOR_DEFAULT), CURSOR_ACCOUNT2],
+        current: spent(CODEX_DEFAULT),
+      }),
+    ).toBeNull();
+    expect(
+      pick({
+        accounts: [spent(CURSOR_DEFAULT), CURSOR_ACCOUNT2],
+        current: spent(CURSOR_DEFAULT),
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses a sibling whose lever shape this client cannot write", () => {
+    expect(
+      pick({
+        accounts: [
+          spent(AGY_DEFAULT),
+          account({
+            cli: "agy",
+            account: "account2",
+            home: `${RUNTIME_HOME}/.gemini-account2`,
+            lever: "custom_args:--gemini_profile",
+          }),
+        ],
+        current: spent(AGY_DEFAULT),
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses a sibling whose home cannot be bound", () => {
+    // A relative directory has no absolute path to write, so the button would
+    // be dead on click — the same rule `planAccountSwitch` enforces.
+    expect(
+      pick({
+        accounts: [
+          spent(AGY_DEFAULT),
+          account({
+            cli: "agy",
+            account: "account2",
+            home: ".gemini-account2",
+            lever: "custom_args:--gemini_dir",
+          }),
+        ],
+        current: spent(AGY_DEFAULT),
+      }),
+    ).toBeNull();
+  });
+
+  it("never offers a write from an untrusted list", () => {
+    const accounts = [spent(AGY_DEFAULT), AGY_ACCOUNT2];
+    const current = spent(AGY_DEFAULT);
+
+    for (const view of [
+      { kind: "loading" },
+      { kind: "empty" },
+      { kind: "error", message: "EACCES: permission denied" },
+    ] satisfies AccountsViewState[]) {
+      expect(pick({ accounts, current, view })).toBeNull();
+    }
+
+    // Control: the same list does offer it once the view is trustworthy.
+    expect(pick({ accounts, current, view: READY })).toEqual(AGY_ACCOUNT2);
+  });
+
+  it("offers nothing when no account is in effect", () => {
+    expect(pick({ accounts: [spent(AGY_DEFAULT), AGY_ACCOUNT2], current: null })).toBeNull();
+  });
+
+  it("picks a candidate that is not the account in effect even when it is reported twice", () => {
+    const candidate = pick({
+      accounts: [spent(AGY_DEFAULT), AGY_ACCOUNT2],
+      current: spent(AGY_DEFAULT),
+    });
+
+    expect(candidate?.account).not.toBe("default");
   });
 });

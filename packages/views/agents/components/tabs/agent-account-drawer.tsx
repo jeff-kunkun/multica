@@ -44,6 +44,7 @@ import {
   accountLeverLabel,
   accountStatus,
   agySlotNumberOf,
+  formatQuotaResetAt,
   parseAccountLever,
 } from "./agent-accounts-model";
 import { formatAgyLoginCommand } from "./agy-account-slots";
@@ -169,12 +170,7 @@ export function AccountStatusPill({
       ? t(($) => $.tab_body.accounts.status_signed_out)
       : status.kind === "quota_exhausted"
         ? t(($) => $.tab_body.accounts.status_quota_exhausted, {
-            time: new Date(status.reset_at_ms).toLocaleString(undefined, {
-              month: "short",
-              day: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            time: formatQuotaResetAt(status.reset_at_ms),
           })
         : t(($) => $.tab_body.accounts.status_signed_in);
   return (

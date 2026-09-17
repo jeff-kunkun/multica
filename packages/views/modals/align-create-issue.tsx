@@ -112,6 +112,42 @@ export function AlignCreatePanel({
 
   const editorRef = useRef<ContentEditorRef>(null);
   const [hasContent, setHasContent] = useState(initialRequest.trim().length > 0);
+
+  /**
+   * An alignment opened from a comment is seeded with that comment, and the
+   * seed lands AFTER this panel is already on screen: the source-context
+   * preview is a request of its own, while `ContentEditor` is uncontrolled and
+   * reads `defaultValue` once, at mount. So a request that arrives late has to
+   * be pushed into the live document — the same write-back `insertMarkdownAtEnd`
+   * exists for, where an upload settles against an editor that never owned its
+   * promise (DENE-452).
+   *
+   * Only into an EMPTY editor, and only once. Anything the user has typed while
+   * the preview was in flight is theirs, and a seed that re-applied would be a
+   * form fighting whoever is filling it in. `insertMarkdownAtEnd` reports
+   * whether it landed — the imperative handle exists from the first commit but
+   * the Tiptap instance is created in a passive effect, so an insert attempted
+   * in that window is a no-op — and the flag is only set once it did, so the
+   * retry below runs instead of dropping the quote.
+   */
+  const seededRef = useRef(initialRequest.trim().length > 0);
+  const [seedRetry, setSeedRetry] = useState(0);
+  const seedRequest = draft.align.request;
+  useEffect(() => {
+    if (seededRef.current) return;
+    if (seedRequest.trim().length === 0) return;
+    if ((editorRef.current?.getMarkdown() ?? "").trim().length > 0) return;
+    if (editorRef.current?.insertMarkdownAtEnd(seedRequest) === true) {
+      seededRef.current = true;
+      setHasContent(true);
+      return;
+    }
+    // The editor is not live yet. Come back on the next frame rather than
+    // spinning: this window is one passive effect wide.
+    if (seedRetry >= 10) return;
+    const frame = requestAnimationFrame(() => setSeedRetry((n) => n + 1));
+    return () => cancelAnimationFrame(frame);
+  }, [seedRequest, seedRetry]);
   const [runtimeId, setRuntimeId] = useState("");
 
   const draftsQuery = useQuery(issueDraftListOptions(wsId));

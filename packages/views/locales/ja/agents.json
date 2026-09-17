@@ -425,6 +425,7 @@
       "summary_unknown": "このエージェントが現在使っているバインディングに一致するアカウントが、このマシンにありません。",
       "active_badge": "使用中",
       "manage_action": "アカウントを管理",
+      "quick_switch_action": "{{account}} に切り替え",
       "others_title": "その他のアカウント",
       "others_hint": "読み取り専用です。切り替えは「アカウントを管理」で行います。",
       "loading_text": "アカウントのディレクトリとログイン状態を読み込んでいます…",

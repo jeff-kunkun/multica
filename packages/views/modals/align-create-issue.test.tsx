@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
@@ -183,6 +183,12 @@ vi.mock("@multica/ui/components/common/file-upload-button", () => ({
 // so the submit gate under test is production code, not a stub.
 let mockUploadIdSeq = 0;
 
+// Whether the mocked editor's underlying instance is "created". The real
+// ContentEditor builds Tiptap in a passive effect, so its imperative handle
+// exists for a commit before content can be inserted; a spec flips this to
+// reproduce that window.
+let editorLive = true;
+
 vi.mock("../editor", async () => {
   const uploadGate = await vi.importActual<
     typeof import("../editor/use-upload-gate")
@@ -232,6 +238,21 @@ vi.mock("../editor", async () => {
           }
         },
         hasActiveUploads: () => inFlightRef.current > 0,
+        // Mirrors the real handle: appends parsed markdown to the live
+        // document and reports whether it landed. `editorLive` is what makes
+        // the "handle exists, Tiptap does not yet" window testable — the real
+        // instance is created in a passive effect, and a seed inserted in that
+        // window is silently dropped.
+        insertMarkdownAtEnd: (markdown: string) => {
+          if (!editorLive) return false;
+          const next = valueRef.current
+            ? `${valueRef.current}\n\n${markdown}`
+            : markdown;
+          valueRef.current = next;
+          setValue(next);
+          onUpdate?.(next);
+          return true;
+        },
         insertUploadPlaceholder: () => true,
         settleUploadPlaceholder: () => false,
       }));
@@ -404,6 +425,7 @@ beforeEach(() => {
   draftStore.draft.shared.attachments = [];
   draftStore.draft.shared.projectId = undefined;
   draftStore.draft.align.request = "";
+  editorLive = true;
   mocks.setAlign.mockImplementation((patch: { request?: string }) => {
     draftStore.draft.align = { ...draftStore.draft.align, ...patch };
   });
@@ -416,6 +438,74 @@ beforeEach(() => {
 });
 
 describe("AlignCreatePanel", () => {
+  /**
+   * DENE-452: an alignment opened from a comment is seeded with that comment,
+   * and the seed lands AFTER this panel mounts — the source-context preview is
+   * a request of its own. `ContentEditor` is uncontrolled (`defaultValue` is
+   * read once), so a seed written to the align slot on a later commit is
+   * invisible unless the panel pushes it into the live document.
+   *
+   * This is the real timing, not the synchronous one: a spec that puts the
+   * quote in the store BEFORE the first render passes against an editor that
+   * can never show a late seed, which is exactly how this shipped broken.
+   */
+  it("shows a comment seed that arrives after it mounted", async () => {
+    renderPanel();
+    expect(editor()).toHaveValue("");
+
+    // The preview resolves and the shell writes the quote into the align slot.
+    act(() => {
+      writeDraftStore({
+        ...draftStore.draft,
+        align: { request: "MUL-9\n\n> the toggle flickers" },
+      });
+    });
+
+    await waitFor(() =>
+      expect(editor()).toHaveValue("MUL-9\n\n> the toggle flickers"),
+    );
+    // And it is submittable: the seed counts as content, so the button that was
+    // disabled over an empty box goes live once the runtime list settles too.
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+  });
+
+  it("leaves a request the user typed while the preview was in flight", async () => {
+    renderPanel();
+    await typeRequest("my own sentence");
+
+    act(() => {
+      writeDraftStore({
+        ...draftStore.draft,
+        align: { request: "MUL-9\n\n> the toggle flickers" },
+      });
+    });
+
+    // Their sentence stands. A seed that appended itself here would be the form
+    // arguing with whoever is filling it in.
+    await waitFor(() => expect(editor()).toHaveValue("my own sentence"));
+  });
+
+  it("retries the seed when the editor is not live yet", async () => {
+    // Reproduces the commit where the imperative handle exists but Tiptap does
+    // not: the first insert is a no-op, and dropping the quote there would lose
+    // it for good.
+    editorLive = false;
+    renderPanel();
+
+    act(() => {
+      writeDraftStore({
+        ...draftStore.draft,
+        align: { request: "MUL-9\n\n> the toggle flickers" },
+      });
+    });
+    await waitFor(() => expect(editor()).toHaveValue(""));
+
+    editorLive = true;
+    await waitFor(() =>
+      expect(editor()).toHaveValue("MUL-9\n\n> the toggle flickers"),
+    );
+  });
+
   it("opens a conversation for the request and creates no issue", async () => {
     renderPanel();
     await typeRequest("add dark mode");
