@@ -145,7 +145,9 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
             <p className="truncate text-caption text-muted-foreground">
               {record
                 ? t(($) => $.alignment.record_subtitle)
-                : t(($) => $.alignment.subtitle)}
+                : session.continuation
+                  ? t(($) => $.alignment.round_subtitle, { n: session.round })
+                  : t(($) => $.alignment.subtitle)}
             </p>
           </div>
           {/* No policy on the row means the backend predates policies, so
@@ -254,6 +256,10 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               readOnly={record}
               producedIssueId={session.producedIssueId}
               createdIssues={session.createdIssues}
+              round={session.round}
+              continuation={session.continuation}
+              builtChildren={session.groupChildren}
+              builtKeys={session.builtKeys}
               onDirtyChange={session.setLocalDirty}
               onSave={session.save}
               onGenerate={session.generatePreview}

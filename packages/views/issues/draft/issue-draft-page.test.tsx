@@ -12,6 +12,7 @@ import type {
 } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
+import { issueDraftNodeId } from "@multica/core/issue-drafts";
 import { IssueDraftPage } from "./issue-draft-page";
 
 /**
@@ -38,6 +39,8 @@ const mocks = vi.hoisted(() => ({
   abandonIssueDraft: vi.fn(),
   switchIssueDraftRuntime: vi.fn(),
   switchIssueDraftPolicy: vi.fn(),
+  reopenIssueDraft: vi.fn(),
+  listChildIssues: vi.fn(),
   sendChatMessage: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
@@ -74,6 +77,8 @@ vi.mock("@multica/core/api", async () => {
       abandonIssueDraft: mocks.abandonIssueDraft,
       switchIssueDraftRuntime: mocks.switchIssueDraftRuntime,
       switchIssueDraftPolicy: mocks.switchIssueDraftPolicy,
+      reopenIssueDraft: mocks.reopenIssueDraft,
+      listChildIssues: mocks.listChildIssues,
       sendChatMessage: mocks.sendChatMessage,
     },
   };
@@ -276,14 +281,14 @@ const ONLINE_RUNTIME = {
   provider: "claude",
 } as unknown as RuntimeDevice;
 
-function renderPage() {
+function renderPage(draftId = "sess-1") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <IssueDraftPage draftId="sess-1" />
+        <IssueDraftPage draftId={draftId} />
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -314,6 +319,8 @@ beforeEach(() => {
   );
   mocks.listRuntimes.mockImplementation(() => Promise.resolve(mocks.runtimes));
   mocks.listMembers.mockImplementation(() => Promise.resolve([]));
+  mocks.reopenIssueDraft.mockImplementation(() => Promise.resolve(draftSummary()));
+  mocks.listChildIssues.mockImplementation(() => Promise.resolve({ issues: [] }));
 });
 
 describe("IssueDraftPage stages", () => {
@@ -968,5 +975,88 @@ describe("IssueDraftPage reading a finished alignment", () => {
     expect(screen.queryByTestId("composer")).toBeNull();
     // A stale event cannot make a finished alignment speak again.
     expect(mocks.sendChatMessage).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * DENE-415: a round after the first. The draft row the page reads comes from a
+ * list whose rows do not carry `finalize_round`, so the round has to be read
+ * through the endpoint that does — and the group the earlier rounds built has
+ * to be separated from what this round adds, or the confirm promises creates it
+ * does not perform.
+ */
+describe("IssueDraftPage continuation round", () => {
+  const SESSION = "0193a5f0-1c2d-7e3f-8a4b-5c6d7e8f9a0b";
+  const child = (key: string, title: string) => ({
+    key,
+    title,
+    description: "",
+    status: "todo",
+    priority: "none",
+    stage: 1,
+    assignee_type: null,
+    assignee_id: null,
+    assignee_hint: null,
+  });
+
+  it("reads the round it is on and names what the earlier rounds built", async () => {
+    mocks.drafts = [
+      draftSummary({
+        chat_session_id: SESSION,
+        status: "ready",
+        issue_id: "issue-1",
+        draft: {
+          title: "Dark mode",
+          description: "Add it.",
+          status: "",
+          priority: "",
+          children: [child("c1", "后端开关"), child("c2", "前端主题")],
+        },
+      }),
+    ];
+    // What the server answers for an already-open round: the row as it stands,
+    // with the round on it.
+    mocks.reopenIssueDraft.mockResolvedValue(
+      draftSummary({ chat_session_id: SESSION, status: "ready", finalize_round: 1 }),
+    );
+    mocks.listChildIssues.mockResolvedValue({
+      issues: [
+        {
+          id: "issue-2",
+          identifier: "TES-2",
+          title: "后端开关",
+          status: "todo",
+          stage: 1,
+          origin_type: "issue_draft",
+          origin_id: issueDraftNodeId(SESSION, "c1"),
+        },
+      ],
+    });
+
+    renderPage(SESSION);
+
+    expect(await screen.findByText("Round 2")).toBeTruthy();
+    // The field is read on load because the list drops it; the call is the
+    // idempotent reopen the backend documents for exactly this.
+    await waitFor(() =>
+      expect(mocks.reopenIssueDraft).toHaveBeenCalledWith(SESSION),
+    );
+    // c1 already owns an issue, so it is shown as created and not as incoming.
+    expect(await screen.findByText("Already created")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /TES-2/ })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByText("Confirming creates 1 new issue(s).")).toBeTruthy(),
+    );
+  });
+
+  it("does not reopen a finished alignment just by opening it", async () => {
+    // A record is read back, not continued: reopening on load would restart a
+    // conversation the user only came to look at.
+    mocks.drafts = [
+      draftSummary({ status: "completed", issue_id: "issue-1", finalize_round: 1 }),
+    ];
+    renderPage();
+    await screen.findByText("This alignment has finished. It is read-only.");
+    expect(mocks.reopenIssueDraft).not.toHaveBeenCalled();
   });
 });

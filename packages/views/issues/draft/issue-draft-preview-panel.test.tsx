@@ -4,7 +4,12 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { IssueDraftPayload, IssuePriority, IssueStatus } from "@multica/core/types";
+import type {
+  Issue,
+  IssueDraftPayload,
+  IssuePriority,
+  IssueStatus,
+} from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 import { IssueDraftPreviewPanel } from "./issue-draft-preview-panel";
@@ -556,5 +561,108 @@ describe("IssueDraftPreviewPanel group", () => {
       "href",
       "/acme/issues/i1",
     );
+  });
+});
+
+/**
+ * DENE-415: a continuation round. The same conversation reopens on a group that
+ * already exists, and the next confirm adds to it instead of adopting it whole.
+ * The two things this suite pins are the two a person would be misled by: which
+ * rows are already real, and what the confirm in front of them will create.
+ */
+describe("IssueDraftPreviewPanel continuation round", () => {
+  const adopted = (id: string, identifier: string, title: string): Issue =>
+    ({
+      id,
+      identifier,
+      title,
+      status: "todo",
+      stage: null,
+    }) as unknown as Issue;
+
+  it("separates what exists from what this round adds", () => {
+    renderPanel({
+      draft: {
+        ...GROUP,
+        children: [
+          ...(GROUP.children ?? []),
+          {
+            key: "c3",
+            title: "文档更新",
+            description: "",
+            status: "",
+            priority: "",
+            stage: 1,
+            assignee_type: "agent",
+            assignee_id: "ag-3",
+            assignee_hint: null,
+          },
+        ],
+      },
+      round: 2,
+      continuation: true,
+      // The root ("") and c1/c2 own issues; c3 is the new one.
+      builtKeys: new Set(["", "c1", "c2"]),
+      builtChildren: [
+        adopted("i1", "MUL-1", "后端接口"),
+        adopted("i2", "MUL-2", "前端页面"),
+      ],
+    });
+
+    expect(screen.getByText("Round 2")).toBeTruthy();
+    expect(screen.getByText("Already created")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /MUL-1/ })).toHaveAttribute(
+      "href",
+      "/acme/issues/i1",
+    );
+    expect(screen.getByRole("link", { name: /MUL-2/ })).toHaveAttribute(
+      "href",
+      "/acme/issues/i2",
+    );
+
+    // Only the new row is editable, and it is the only one in the editable
+    // list: an adopted row's fields are never written back, so offering them
+    // for edit would promise a write the confirm does not perform. The parent
+    // is adopted too, which is why its fields are locked on this round.
+    expect(screen.getByDisplayValue("文档更新")).toBeTruthy();
+    expect(screen.queryByDisplayValue("后端接口")).toBeNull();
+    expect(screen.queryByDisplayValue("前端页面")).toBeNull();
+
+    // The numbers under the button are about this round.
+    expect(titleInput()).toBeDisabled();
+    expect(screen.getByText("Confirming creates 1 new issue(s).")).toBeTruthy();
+    expect(screen.getByText("Starting right away: 1.")).toBeTruthy();
+    // The parent is adopted too, so it is part of what this round keeps.
+    expect(screen.getByText("Kept as they are: 3.")).toBeTruthy();
+    expect(screen.queryByText("Confirming creates 3 issues.")).toBeNull();
+  });
+
+  it("says so when the round adds nothing", () => {
+    renderPanel({
+      draft: GROUP,
+      round: 3,
+      continuation: true,
+      builtKeys: new Set(["", "c1", "c2"]),
+      builtChildren: [
+        adopted("i1", "MUL-1", "后端接口"),
+        adopted("i2", "MUL-2", "前端页面"),
+      ],
+    });
+    expect(
+      screen.getByText(
+        "Confirming creates nothing new: every sub-issue here already exists.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Nothing new yet — keep talking and the added work appears here."),
+    ).toBeTruthy();
+  });
+
+  it("counts every node of a first round as being created", () => {
+    // Without a group behind it the panel is the DENE-411 one: nothing is
+    // adopted, and every row is a create.
+    renderPanel({ draft: GROUP, round: 1, continuation: false });
+    expect(screen.getByText("Confirming creates 3 issues.")).toBeTruthy();
+    expect(screen.queryByText("Already created")).toBeNull();
   });
 });

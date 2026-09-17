@@ -10,6 +10,7 @@ import {
   sameIssueDraftChildren,
 } from "@multica/core/issue-drafts";
 import type {
+  Issue,
   IssueAssigneeType,
   IssueDraftChild,
   IssueDraftCreatedIssue,
@@ -76,6 +77,10 @@ export function IssueDraftPreviewPanel({
   readOnly: readOnlyProp,
   producedIssueId,
   createdIssues,
+  round,
+  continuation,
+  builtChildren,
+  builtKeys,
   onDirtyChange,
   onSave,
   onGenerate,
@@ -115,6 +120,32 @@ export function IssueDraftPreviewPanel({
    */
   createdIssues?: IssueDraftCreatedIssue[] | null;
   /**
+   * Which round this alignment is on: 1 for a first pass, one more per reopen.
+   * Only shown past the first, because "round 1" on a brand-new alignment is a
+   * label about nothing. (DENE-415)
+   */
+  round?: number;
+  /**
+   * This round adds to a group that already exists. What changes is the promise
+   * under the confirm button and the split of the sub-issue list — the parent
+   * fields and the confirm itself are the same action either way.
+   */
+  continuation?: boolean;
+  /**
+   * The group as the server reads it back: the root's children, each carrying
+   * the node id it was created under. These are the issues this round ADOPTS
+   * and never rewrites, which is why they are rendered from the server's own
+   * rows rather than from the payload: the payload can be edited, the group
+   * cannot.
+   */
+  builtChildren?: readonly Issue[];
+  /**
+   * The payload sub-issue keys that already own an issue. Read off the same
+   * node ids `builtChildren` carry, so this is the same judgement stated as
+   * "which of the rows below are already real".
+   */
+  builtKeys?: ReadonlySet<string>;
+  /**
    * Reports whether the editor holds unsaved edits. The alignment session uses
    * it to decide whether it may adopt a carrier revision on its own: an edit in
    * progress is the user's, and nothing may be written over it.
@@ -131,6 +162,7 @@ export function IssueDraftPreviewPanel({
   onSwitchRuntime: (runtimeId: string) => Promise<string | null>;
 }) {
   const { t } = useT("issues");
+  const paths = useWorkspacePaths();
   const record = readOnlyProp === true;
   const [editing, setEditing] = useState<IssueDraftPayload | null>(draft);
   const [confirmingAbandon, setConfirmingAbandon] = useState(false);
@@ -164,11 +196,26 @@ export function IssueDraftPreviewPanel({
 
   const value = editing ?? draft ?? EMPTY_DRAFT;
   const children = value.children ?? [];
+  // Rows a previous round already created. They stay in `value` — the payload
+  // is one object and the confirm reads it whole — but they are not offered for
+  // editing: whatever is typed over one is dropped server-side, so letting the
+  // field look editable would be a promise the confirm cannot keep.
+  const adopted = builtKeys ?? EMPTY_BUILT_KEYS;
+  const isContinuation = continuation === true;
+  const newChildren = children
+    .map((child, index) => ({ child, index }))
+    .filter(({ child }) => !adopted.has(child.key));
   // What confirming will create and start. Read off the editor value, not the
   // stored draft: the user is editing this group, and the counts have to follow
   // what is on screen or they are answering a different question.
-  const groupPlan = planIssueDraftGroup(value);
+  const groupPlan = planIssueDraftGroup(value, adopted);
   const locked = record || pending || confirming || stage === "created";
+  // The parent fields lock one state earlier than the rest: on a continuation
+  // round the root issue already exists, and the server adopts it without
+  // rewriting a single field. Leaving the title editable would invite an edit
+  // the confirm silently drops. The NEW sub-issue rows stay editable — they are
+  // what the round is for.
+  const parentLocked = locked || isContinuation;
   // Unsaved edits and the confirm cannot both be right: see the footer.
   const confirmNeedsSave = dirty && !locked;
   const canSave = !locked && !saving && value.title.trim().length > 0;
@@ -257,9 +304,29 @@ export function IssueDraftPreviewPanel({
           </div>
 
           <div className="space-y-5">
-            {children.length > 0 ? (
+            {children.length > 0 || isContinuation ? (
               <p className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.alignment.parent_label)}
+              </p>
+            ) : null}
+            {/* The parent is a node like any other, so on a continuation round
+                it is adopted too: the confirm never rewrites it. Saying that
+                beside the fields it locks is what turns a disabled input into
+                an explanation instead of a bug. */}
+            {isContinuation ? (
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.alignment.parent_built)}
+                {producedIssueId ? (
+                  <>
+                    {" "}
+                    <AppLink
+                      href={paths.issueDetail(producedIssueId)}
+                      className="text-primary hover:underline"
+                    >
+                      {t(($) => $.alignment.parent_built_link)}
+                    </AppLink>
+                  </>
+                ) : null}
               </p>
             ) : null}
 
@@ -267,7 +334,7 @@ export function IssueDraftPreviewPanel({
               <Input
                 id="issue-draft-title"
                 value={value.title}
-                disabled={locked}
+                disabled={parentLocked}
                 placeholder={t(($) => $.alignment.field_title_placeholder)}
                 onChange={(event) =>
                   setEditing({ ...value, title: event.target.value })
@@ -282,7 +349,7 @@ export function IssueDraftPreviewPanel({
               <Textarea
                 id="issue-draft-description"
                 value={value.description}
-                disabled={locked}
+                disabled={parentLocked}
                 rows={10}
                 placeholder={t(($) => $.alignment.field_description_placeholder)}
                 onChange={(event) =>
@@ -291,7 +358,12 @@ export function IssueDraftPreviewPanel({
               />
             </Field>
 
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <div
+              className={cn(
+                "flex flex-wrap items-center gap-x-6 gap-y-3",
+                parentLocked && !locked && "pointer-events-none opacity-60",
+              )}
+            >
               <div className="flex items-center gap-2">
                 <span className="text-caption text-muted-foreground">
                   {t(($) => $.alignment.field_status)}
@@ -334,17 +406,84 @@ export function IssueDraftPreviewPanel({
               />
             </div>
 
+            {isContinuation ? (
+              <div className="rounded-md border bg-background p-3">
+                <p className="text-caption font-medium text-muted-foreground">
+                  {t(($) => $.alignment.round_label, { n: round ?? 1 })}
+                </p>
+                <p className="mt-1 text-caption text-foreground">
+                  {groupPlan.built > 0
+                    ? t(($) => $.alignment.round_hint, { count: groupPlan.built })
+                    : t(($) => $.alignment.round_hint_empty)}
+                </p>
+              </div>
+            ) : null}
+
+            {/* What the previous rounds already built. Rendered from the
+                server's own rows and not from the payload, because the payload
+                is what the user edits while these issues are what exists: a row
+                deleted below does not delete its issue, and a row renamed below
+                does not rename it either. Saying "these, and they will not
+                change" is the whole promise of a continuation round. */}
+            {isContinuation && (builtChildren?.length ?? 0) > 0 ? (
+              <div className="space-y-2 border-t pt-5">
+                <div>
+                  <h3 className="text-body font-medium">
+                    {t(($) => $.alignment.built_title)}
+                  </h3>
+                  <p className="mt-1 text-caption text-muted-foreground">
+                    {t(($) => $.alignment.built_hint)}
+                  </p>
+                </div>
+                <ul className="space-y-1">
+                  {(builtChildren ?? []).map((issue) => (
+                    <li key={issue.id}>
+                      <AppLink
+                        href={paths.issueDetail(issue.id)}
+                        className="flex min-w-0 items-center gap-2 rounded-md border bg-background px-3 py-2 hover:bg-muted/40"
+                      >
+                        <span className="shrink-0 text-caption tabular-nums text-muted-foreground">
+                          {issue.identifier}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-caption">
+                          {issue.title}
+                        </span>
+                        {issue.stage != null ? (
+                          <span className="shrink-0 text-caption text-muted-foreground">
+                            {t(($) => $.alignment.built_stage, { n: issue.stage })}
+                          </span>
+                        ) : null}
+                        <ExternalLink
+                          className="size-3.5 shrink-0 text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                      </AppLink>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
             {children.length > 0 ? (
               <div className="space-y-3 border-t pt-5">
                 <div>
                   <h3 className="text-body font-medium">
-                    {t(($) => $.alignment.group_title)}
+                    {isContinuation
+                      ? t(($) => $.alignment.new_group_title)
+                      : t(($) => $.alignment.group_title)}
                   </h3>
                   <p className="mt-1 text-caption text-muted-foreground">
-                    {t(($) => $.alignment.group_hint)}
+                    {isContinuation
+                      ? t(($) => $.alignment.new_group_hint)
+                      : t(($) => $.alignment.group_hint)}
                   </p>
                 </div>
-                {children.map((child, index) => {
+                {newChildren.length === 0 ? (
+                  <p className="text-caption text-muted-foreground">
+                    {t(($) => $.alignment.new_group_empty)}
+                  </p>
+                ) : null}
+                {newChildren.map(({ child, index }) => {
                   const row = groupPlan.rows[index + 1];
                   const startsNow = row?.startsOnCreate === true;
                   return (
@@ -463,8 +602,20 @@ export function IssueDraftPreviewPanel({
                   how many: stage 1 runs the moment the group exists, stage 2+
                   is created in Backlog and waits for a person to promote it.
                   Saying so here is the only place the user can learn it before
-                  it happens. */}
-              {groupPlan.total > 1 ? (
+                  it happens.
+
+                  On a continuation round the numbers are about THIS round: the
+                  nodes that already exist are adopted rather than created, so
+                  counting them would promise work the confirm does not do. */}
+              {isContinuation ? (
+                <p className="text-caption text-muted-foreground">
+                  {groupPlan.creating > 0
+                    ? t(($) => $.alignment.group_increment, {
+                        count: groupPlan.creating,
+                      })
+                    : t(($) => $.alignment.group_increment_none)}
+                </p>
+              ) : groupPlan.total > 1 ? (
                 <p className="text-caption text-muted-foreground">
                   {t(($) => $.alignment.group_summary, {
                     count: groupPlan.total,
@@ -485,10 +636,18 @@ export function IssueDraftPreviewPanel({
                   })}
                 </p>
               ) : null}
-              {groupPlan.total > 1 &&
+              {!isContinuation &&
+              groupPlan.total > 1 &&
               groupPlan.rows[0]?.startsOnCreate !== true ? (
                 <p className="text-caption text-muted-foreground">
                   {t(($) => $.alignment.group_summary_parent)}
+                </p>
+              ) : null}
+              {isContinuation && groupPlan.built > 0 ? (
+                <p className="text-caption text-muted-foreground">
+                  {t(($) => $.alignment.group_summary_built, {
+                    count: groupPlan.built,
+                  })}
                 </p>
               ) : null}
               <p className="text-caption text-muted-foreground">
@@ -719,6 +878,10 @@ const EMPTY_DRAFT: IssueDraftPayload = {
   status: "",
   priority: "",
 };
+
+/** A first round has nothing adopted, and the empty set is the honest default
+ *  for a caller that does not know about continuation rounds at all. */
+const EMPTY_BUILT_KEYS: ReadonlySet<string> = new Set<string>();
 
 function sameDraft(a: IssueDraftPayload, b: IssueDraftPayload): boolean {
   return (

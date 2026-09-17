@@ -22,7 +22,6 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
-  MessageSquare,
   Milestone,
   MoreHorizontal,
   PanelRight,
@@ -107,9 +106,10 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useModalStore } from "@multica/core/modals";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
-import { issueAlignmentOrigin } from "@multica/core/issues";
+import { issueAlignmentDraftId } from "@multica/core/issues";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
+import { IssueAlignmentEntry } from "../draft/alignment-entry";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { propertyListOptions } from "@multica/core/properties";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -2726,24 +2726,33 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     );
   };
 
-  // The alignment conversation that produced this issue, if any. Resolved from
-  // the issue's own origin pair rather than from a lookup: the detail endpoint
-  // carries it, so the entry costs no request and appears with the issue
-  // itself. Detail-only — a list row does not select the columns — which is
-  // exactly the surface this entry lives on. (DENE-371)
+  // The alignment conversation this issue came out of, if any, and the group it
+  // belongs to. Resolved from the origin pairs the detail endpoint already
+  // carries, so the entry costs no request of its own: a ROOT issue's origin is
+  // the conversation, while a sub-issue's is its own node id and resolves one
+  // hop through its parent (DENE-371, DENE-415).
   //
   // Only for the person who held the alignment. An alignment is a private
   // conversation and its list endpoint is creator-scoped, so for anyone else
   // the entry would open a page that can only say the draft is gone. The issue
   // is created by confirming the draft, so its creator IS that person.
-  const alignmentOriginId = issueAlignmentOrigin(issue);
   const alignmentDraftId =
-    alignmentOriginId &&
     issue?.creator_type === "member" &&
     !!user?.id &&
     issue.creator_id === user.id
-      ? alignmentOriginId
+      ? issueAlignmentDraftId(issue, parentIssue)
       : null;
+  // The whole group, whichever member is open: the root plus its children. A
+  // sub-issue reads them off its parent — the same two queries the "sub-issue
+  // of" line already uses — so the progress line is about the group and not
+  // about the one issue on screen.
+  const alignmentGroupIssues: Issue[] = issue
+    ? issue.parent_issue_id
+      ? parentIssue
+        ? [parentIssue, ...parentChildIssues]
+        : []
+      : [issue, ...childIssues]
+    : [];
 
   // Breadcrumb shows the single most-direct container, never a fabricated chain.
   // project_id and parent_issue_id are orthogonal (a sub-issue can live in a
@@ -3041,19 +3050,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </AppLink>
           )}
 
-          {/* The way back to the conversation this issue came out of. It sits
-              beside the "sub-issue of" line because it answers the same kind of
-              question — where does this come from — and because an alignment
-              conversation is reachable from nowhere else: its carrier is a
+          {/* The way back to the conversation this issue came out of, plus what
+              the group it belongs to is doing and the one action a changed
+              requirement needs: return to that same conversation and keep
+              talking. It sits beside the "sub-issue of" line because it answers
+              the same kind of question — where does this come from — and because
+              an alignment is reachable from nowhere else: its carrier is a
               hidden system agent, so it is absent from every chat list. */}
           {alignmentDraftId && (
-            <AppLink
-              href={paths.newIssueDraft(alignmentDraftId)}
-              className="mt-2 inline-flex max-w-full items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">{t(($) => $.detail.alignment_origin)}</span>
-            </AppLink>
+            <IssueAlignmentEntry
+              draftId={alignmentDraftId}
+              groupIssues={alignmentGroupIssues}
+            />
           )}
 
           {issue.source_context && (

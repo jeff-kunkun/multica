@@ -330,6 +330,9 @@ const mockApiObj = vi.hoisted(() => ({
   listRuntimes: vi.fn().mockResolvedValue([]),
   getProject: vi.fn(),
   listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+  // DENE-415: the "continue aligning" action, and the round read the alignment
+  // page does on load. The detail page only ever calls the former.
+  reopenIssueDraft: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -3050,6 +3053,9 @@ describe("IssueDetail (shared)", () => {
       name: /View the alignment that created this/,
     });
     expect(link.getAttribute("href")).toBe("/test/issues/new/sess-42");
+    // A group of one has no progress to report, and the line would read as
+    // noise beside the link. (DENE-415)
+    expect(screen.queryByText(/issue\(s\)/)).toBeNull();
   });
 
   it("offers no alignment entry for an issue created some other way", async () => {
@@ -3120,5 +3126,80 @@ describe("groupSubIssuesByStage", () => {
   it("omits the unstaged group when every child is staged", () => {
     const groups = groupSubIssuesByStage([child("s1", 1), child("s2", 2)]);
     expect(groups.map((g) => g.stage)).toEqual([1, 2]);
+  });
+});
+
+/**
+ * DENE-415: the alignment entry grew from "view the conversation" into "see
+ * where the group got to, and go back into the SAME conversation". Two things
+ * are easy to get wrong and are pinned here: the entry must resolve a
+ * SUB-issue's conversation through its parent (a sub-issue's own origin id is
+ * its node id, not the conversation), and the action must be a reopen of that
+ * conversation rather than a new alignment.
+ */
+describe("issue detail — alignment entry", () => {
+  const childIssue = (overrides: Partial<Issue> = {}): Issue => ({
+    ...mockIssue,
+    id: "issue-2",
+    identifier: "TES-2",
+    title: "Child work",
+    status: "done",
+    stage: 1,
+    parent_issue_id: "issue-1",
+    origin_type: "issue_draft",
+    origin_id: "3d56681b-224b-5d51-abc1-cc1f5016091e",
+    ...overrides,
+  });
+
+  it("shows where the group got to and reopens that same alignment", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      origin_type: "issue_draft",
+      origin_id: "sess-42",
+    });
+    mockApiObj.listChildIssues.mockResolvedValue({
+      issues: [
+        { ...mockIssue, id: "issue-2", identifier: "TES-2", status: "todo", stage: 1, parent_issue_id: "issue-1" },
+        { ...mockIssue, id: "issue-3", identifier: "TES-3", status: "done", stage: 2, parent_issue_id: "issue-1" },
+      ],
+    });
+    mockApiObj.reopenIssueDraft.mockResolvedValue({
+      chat_session_id: "sess-42",
+      workspace_id: "ws-1",
+      status: "ready",
+      revision: 8,
+      draft: { title: "T", description: "", status: "", priority: "" },
+      issue_id: "issue-1",
+      finalize_round: 1,
+      policy: { key: "question", version: "1", guided: true },
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    renderIssueDetail();
+
+    // The whole group: this issue plus its two sub-issues, one of them done.
+    await screen.findByText("3 issue(s) · 1 done · stage 1/2");
+    fireEvent.click(screen.getByRole("button", { name: /Continue aligning/ }));
+    await waitFor(() =>
+      expect(mockApiObj.reopenIssueDraft).toHaveBeenCalledWith("sess-42"),
+    );
+  });
+
+  it("resolves a sub-issue's alignment through its parent", async () => {
+    // A sub-issue is stamped with its own node id, which is a route that cannot
+    // open. The conversation lives on the group's root — its parent.
+    mockApiObj.getIssue.mockImplementation(async (id: string) =>
+      id === "issue-1"
+        ? { ...mockIssue, origin_type: "issue_draft", origin_id: "sess-42" }
+        : childIssue(),
+    );
+    mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    renderIssueDetail("issue-2");
+
+    const link = await screen.findByRole("link", {
+      name: /View the alignment that created this/,
+    });
+    expect(link.getAttribute("href")).toBe("/test/issues/new/sess-42");
   });
 });

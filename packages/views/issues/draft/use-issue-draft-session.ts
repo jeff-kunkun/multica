@@ -7,13 +7,16 @@ import { chatKeys, chatMessagesOptions, pendingChatTaskOptions } from "@multica/
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  issueDraftBuiltNodeKeys,
   issueDraftCanConfirm,
   issueDraftCreatedGroup,
+  issueDraftIsContinuation,
   issueDraftIsCreatable,
   issueDraftIsRecord,
   issueDraftKeys,
   issueDraftListOptions,
   issueDraftPendingQuestion,
+  issueDraftRound,
   issueDraftStage,
   encodeIssueDraftInput,
   findIssueDraft,
@@ -22,6 +25,7 @@ import {
   planIssueDraftFold,
   useAbandonIssueDraft,
   useFinalizeIssueDraft,
+  useReopenIssueDraft,
   useSaveIssueDraft,
   useSwitchIssueDraftPolicy,
   useSwitchIssueDraftRuntime,
@@ -29,10 +33,12 @@ import {
   type IssueDraftQuestion,
   type IssueDraftStage,
 } from "@multica/core/issue-drafts";
+import { childIssuesOptions } from "@multica/core/issues/queries";
 import type { IssueDraftPolicy } from "@multica/core/types";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import type {
   ChatMessage,
+  Issue,
   IssueDraftCreatedIssue,
   IssueDraftPayload,
   IssueDraftSummary,
@@ -42,6 +48,7 @@ import { useT } from "../../i18n";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
 const EMPTY_DRAFTS: readonly IssueDraftSummary[] = [];
+const EMPTY_ISSUES: readonly Issue[] = [];
 
 /**
  * What a draft reports before the server has said anything about policies.
@@ -73,8 +80,31 @@ export interface IssueDraftSession {
    * a record still has a draft, and everything it needs to be read back.
    */
   isRecord: boolean;
+  /**
+   * This alignment is on a round after its first: a group already exists and
+   * the conversation is adding to it (DENE-415). False for a first pass, which
+   * is the shape the page had before continuation existed.
+   */
+  continuation: boolean;
+  /**
+   * Which round this alignment is on, counting the first confirm as round 1.
+   * Always ≥ 1; a backend that predates rounds reports round 1.
+   */
+  round: number;
   /** The issue this alignment produced, once it has one. */
   producedIssueId: string | null;
+  /**
+   * The group as the server reads it back: every child of the group's root,
+   * with the `origin_id` each node was created under. Empty until the alignment
+   * has produced a group.
+   */
+  groupChildren: readonly Issue[];
+  groupLoading: boolean;
+  /**
+   * The payload sub-issue keys whose node already owns an issue, so the next
+   * confirm adopts them and never rewrites them. Empty on a first round.
+   */
+  builtKeys: ReadonlySet<string>;
   loading: boolean;
   loadFailed: boolean;
   messages: ChatMessage[];
@@ -135,6 +165,12 @@ export interface IssueDraftSession {
    */
   generatePreview: (current: IssueDraftPayload) => Promise<IssueDraftPayload | null>;
   confirm: () => Promise<boolean>;
+  /**
+   * Starts another round on this alignment. Idempotent, so callers may use it
+   * both as the deliberate "continue aligning" and as the read that tells a
+   * page which round it is on.
+   */
+  reopen: () => Promise<boolean>;
   abandon: () => Promise<boolean>;
   switchRuntime: (runtimeId: string) => Promise<string | null>;
   /** Switches between guided questions and plain dialogue. */
@@ -182,6 +218,7 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
   const saveMutation = useSaveIssueDraft(wsId);
   const abandonMutation = useAbandonIssueDraft(wsId);
   const finalizeMutation = useFinalizeIssueDraft(wsId);
+  const reopenMutation = useReopenIssueDraft(wsId);
   const runtimeMutation = useSwitchIssueDraftRuntime(wsId);
   const policyMutation = useSwitchIssueDraftPolicy(wsId);
 
@@ -209,6 +246,80 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
   const missing =
     messagesQuery.error instanceof ApiError && messagesQuery.error.status === 404;
   const retired = !missing && !createdIssueId && listQuery.isSuccess && !row;
+
+  /**
+   * The group this alignment has produced, read back through its root: the
+   * root's children are the nodes the alignment created (plus any a person
+   * added under it afterwards, which belong to the answer to "what is this
+   * group now").
+   *
+   * Gated on `issue_id`, so a first-round alignment — and every alignment that
+   * had not been confirmed yet — costs no request. (DENE-415)
+   */
+  const rootIssueId = producedIssueId;
+  const groupQuery = useQuery({
+    ...childIssuesOptions(wsId, rootIssueId ?? ""),
+    enabled: !!rootIssueId,
+  });
+  const groupChildren = groupQuery.data ?? EMPTY_ISSUES;
+  const groupLoading = !!rootIssueId && groupQuery.isLoading;
+
+  const continuation = row ? issueDraftIsContinuation(row) : false;
+  // Which payload nodes already own an issue. Derived from the node ids the
+  // server stamped the group's children with, so it agrees with the confirm's
+  // own skip rule instead of guessing from a title someone can edit.
+  //
+  // The ROOT's key is "" and it is part of the payload like any other node, so
+  // it joins the same set once a group exists: the confirm skips it and never
+  // rewrites it exactly as it does the children, and folding it in here keeps
+  // one rule ("adopted iff the key is in this set") instead of two.
+  const builtKeys = useMemo(() => {
+    const keys = new Set(
+      draft
+        ? issueDraftBuiltNodeKeys(draft.children ?? [], groupChildren, draftId)
+        : [],
+    );
+    if (draft && rootIssueId) keys.add("");
+    return keys as ReadonlySet<string>;
+  }, [draft, draftId, groupChildren, rootIssueId]);
+
+  /**
+   * Which round this page is on.
+   *
+   * `finalize_round` is the field that answers it, and the list endpoint this
+   * page reads its row from does not carry it: `ListIssueDraftsByCreator` does
+   * not select the column, so a continuation reads as round 1 forever after a
+   * reload. `POST /reopen` is the one call that returns the row with the round
+   * on it, and it is idempotent by construction — a `draft`/`ready` row is
+   * answered as it stands — which is exactly the use its handler documents
+   * ("a page that reopened on load").
+   *
+   * The answer is held for as long as the page is open, keyed by draft, because
+   * the read is a WRITE: applying it to the list cache is not enough, since the
+   * invalidation the reopen itself triggers refetches the list and answers 0
+   * again. The round is the highest of the two, so a draft whose row does carry
+   * the field (a newer backend, or the post-reopen echo) still wins.
+   */
+  const [roundSeen, setRoundSeen] = useState<{ draftId: string; round: number } | null>(
+    null,
+  );
+  const round = Math.max(
+    issueDraftRound(row ?? {}),
+    roundSeen?.draftId === draftId ? roundSeen.round : 1,
+  );
+  const roundReadForRef = useRef<string | null>(null);
+  const reopenRow = reopenMutation.mutateAsync;
+  useEffect(() => {
+    if (!row || row.finalize_round) return;
+    if (!issueDraftIsContinuation(row)) return;
+    if (roundReadForRef.current === draftId) return;
+    roundReadForRef.current = draftId;
+    // A failed read is not surfaced: the round is a label, and the page still
+    // shows everything else it has.
+    void reopenRow(draftId)
+      .then((opened) => setRoundSeen({ draftId, round: issueDraftRound(opened) }))
+      .catch(() => {});
+  }, [draftId, reopenRow, row]);
 
   const runtime = useMemo(
     () => runtimesQuery.data?.find((device) => device.id === row?.runtime_id) ?? null,
@@ -480,6 +591,22 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
     }
   }, [abandonMutation, draftId, t]);
 
+  /**
+   * Starts another round. Idempotent server-side, and the response is applied to
+   * the list, so the round and status this page reads are the ones the server
+   * just confirmed rather than a stale snapshot waiting on a refetch.
+   */
+  const reopen = useCallback(async (): Promise<boolean> => {
+    setError(null);
+    try {
+      await reopenMutation.mutateAsync(draftId);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(($) => $.alignment.reopen_failed));
+      return false;
+    }
+  }, [draftId, reopenMutation, t]);
+
   const switchRuntime = useCallback(
     async (runtimeId: string): Promise<string | null> => {
       setError(null);
@@ -542,7 +669,12 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
     missing,
     retired,
     isRecord,
+    continuation,
+    round,
     producedIssueId,
+    groupChildren,
+    groupLoading,
+    builtKeys,
     loading,
     loadFailed: listQuery.isError,
     messages,
@@ -569,6 +701,7 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
     save,
     generatePreview,
     confirm,
+    reopen,
     abandon,
     switchRuntime,
     setPolicy,
