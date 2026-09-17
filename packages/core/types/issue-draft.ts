@@ -78,9 +78,9 @@ export interface IssueDraftPayload {
 export interface IssueDraftPolicy {
   key: string;
   version: string;
-  /** Whether this policy asks the user questions — the guided `question`
-   *  policy does, `conversation` does not. The server decides, so the page
-   *  never hardcodes which key is which. */
+  /** Whether this policy asks the user questions — the guided `question` and
+   *  `frontend` policies do, `conversation` does not. The server decides, so
+   *  the page never hardcodes which key is which. */
   guided: boolean;
 }
 

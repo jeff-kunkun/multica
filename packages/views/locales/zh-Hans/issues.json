@@ -1034,6 +1034,7 @@
     "policy_label": "对齐方式",
     "policy_guided": "引导提问",
     "policy_plain": "普通对话",
+    "policy_frontend": "前端原型",
     "policy_version": "提示词 {{version}}",
     "policy_version_hint": "本次对齐使用的提示词版本。创建时记录在草稿上，因此已完成的草稿仍可追溯。",
     "policy_failed": "切换对齐方式失败。",

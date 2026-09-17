@@ -418,3 +418,17 @@ Ask the surface question before the rest of the draft is settled. A surface agre
 2. **切片 B 的方向问题是否默认开启。** 推荐开启（它正是 kk 原话里"也在 grill frontend 里面对齐"的那半）。若认为对齐里问观感价值不大、宁可全留给实现阶段的 `grill-frontend-look`，那就只发 A + C，边界退成"对齐只产出屏清单与约束，方向一律留到看见时定"—— 这仍然是一个自洽的方案，且更省。
 
 其余全部按本页结论执行，不需要再确认。
+
+---
+
+## 10. 补记：第三档 policy 最终落地（DENE-454）
+
+DENE-421 的终局决策推翻了本页 §0.3 / §3.3 关于「不加第三档 policy」的结论：策略表加第三个 key `frontend`，前端拷问升成独立策略，入口那颗策略药丸就是切换处。理由是**用户要能显式点名这件事** —— 嵌在现有两条策略里时，前端 grill 跟需求本身的拷问抢回合；而 `question` / `conversation` 那条轴管的是「怎么问」，管不了「谈什么」。
+
+§3.3 当初的三条反对理由，逐条落地：
+
+1. **正交轴的代价接受。** 切到 `frontend` 就不再区分引导/不引导 —— 它自己就是引导式，一次一个问题，`Guided: true`。
+2. **「谈前端是一个属性，不是一种模式」接受。** 它现在是一条并列、随时可切回的对齐方式；`SwitchIssueDraftPolicy` 重写 prompt 并重记版本的行为不变，本页 §5.2 的描述继续成立。
+3. **picker 已按 §3.3 给出的方式修好。** 标签从 `key === "question" ? A : B` 的三元改成按 key 查表，白名单 `ISSUE_DRAFT_POLICIES` 加 `frontend`，四语言文案齐。
+
+本页其余结论继续有效，并且正是 `frontend` 策略正文的来源：surface 判据（§2.1）、五行屏规格与「复用什么」（§4.1）、范围与方向由人拍板且方向只问一次（§4.2）、子单规格随 key 原样带回（§3.4）。「收成物必须可打开」一条以 `frontend-look-in-issue-alignment.md` §3.2 的附件方案为准。

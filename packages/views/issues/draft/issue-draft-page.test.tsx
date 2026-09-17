@@ -847,6 +847,46 @@ describe("IssueDraftPage policy", () => {
     );
   });
 
+  // The menu is rendered from the client's whitelist, not from the server's
+  // registry, so a list that stopped at the two text-only styles would leave the
+  // look round unreachable — the one style a user has to be able to ask for,
+  // since it spends turns drawing instead of interviewing.
+  it("offers every style with its own label, and switches to the look round", async () => {
+    mocks.switchIssueDraftPolicy.mockResolvedValue({
+      ...draftSummary({ policy: { key: "frontend", version: "1", guided: true } }),
+    });
+    renderPage();
+    await openStyleMenu();
+
+    const options = await screen.findAllByRole("menuitemradio");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "Guided questions",
+      "Plain conversation",
+      "Front-end prototype",
+    ]);
+
+    fireEvent.click(
+      screen.getByRole("menuitemradio", { name: "Front-end prototype" }),
+    );
+    await waitFor(() =>
+      expect(mocks.switchIssueDraftPolicy).toHaveBeenCalledWith("sess-1", {
+        policy: "frontend",
+      }),
+    );
+  });
+
+  it("reports the look round's own key and prompt version once it is recorded", async () => {
+    mocks.drafts = [
+      draftSummary({ policy: { key: "frontend", version: "1", guided: true } }),
+    ];
+    renderPage();
+    await openStyleMenu();
+    expect(
+      await screen.findByRole("menuitemradio", { name: "Front-end prototype" }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Prompt frontend@1")).toBeTruthy();
+  });
+
   it("surfaces a refused switch and leaves the running policy on screen", async () => {
     mocks.switchIssueDraftPolicy.mockRejectedValue(new Error("stop the current reply first"));
     renderPage();

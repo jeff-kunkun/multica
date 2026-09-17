@@ -301,7 +301,8 @@ export function useSwitchIssueDraftRuntime(wsId: string) {
 }
 
 /**
- * Switches how the carrier asks: guided questions, or plain dialogue.
+ * Switches how the carrier asks: guided questions, plain dialogue, or the
+ * front-end look round that settles a screen by building something openable.
  *
  * The response is applied to the list cache rather than merely invalidated for
  * the same reason a save is: the switch is a determinate field change the user

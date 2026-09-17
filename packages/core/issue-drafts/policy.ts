@@ -10,8 +10,15 @@
  * A draft reports its own policy in `policy`, including the prompt version the
  * carrier was given. That is the audit trail: a conversation keeps reporting the
  * version it ran even after the registry has moved on.
+ *
+ * Order is the order the switch renders: the guided default first, then the two
+ * alternatives the user reaches for on purpose.
  */
-export const ISSUE_DRAFT_POLICIES = ["question", "conversation"] as const;
+export const ISSUE_DRAFT_POLICIES = [
+  "question",
+  "conversation",
+  "frontend",
+] as const;
 
 export type IssueDraftPolicyKey = (typeof ISSUE_DRAFT_POLICIES)[number];
 

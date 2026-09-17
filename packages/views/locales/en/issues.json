@@ -1065,6 +1065,7 @@
     "policy_label": "Alignment style",
     "policy_guided": "Guided questions",
     "policy_plain": "Plain conversation",
+    "policy_frontend": "Front-end prototype",
     "policy_version": "Prompt {{version}}",
     "policy_version_hint": "The prompt version this conversation is running. Recorded when the alignment started, so a finished draft stays auditable.",
     "policy_failed": "Could not switch the alignment style.",

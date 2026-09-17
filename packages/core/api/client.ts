@@ -1831,8 +1831,9 @@ export class ApiClient {
   }
 
   /**
-   * Switches a live alignment conversation's policy: guided questions, or plain
-   * dialogue.
+   * Switches a live alignment conversation's policy: guided questions, plain
+   * dialogue, or the front-end look round. The keys are the server registry's;
+   * the client's whitelist is packages/core/issue-drafts/policy.ts.
    *
    * The response is the updated draft, including the policy version the server
    * recorded — the audit value, not an echo of the request. It is parsed with a

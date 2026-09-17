@@ -185,32 +185,78 @@ func TestSwitchIssueDraftPolicyRewritesCarrierPromptOnly(t *testing.T) {
 
 // An unknown key is refused, not defaulted: a session that looks switched while
 // running the old prompt is exactly the drift the recorded version exists to
-// prevent.
+// prevent. The refusal also has to name the keys, because it is the only place a
+// client author is told what they are — the front-end entry is the one most
+// likely to be guessed as "grill" rather than by its key.
 func TestIssueDraftPolicyRejectsUnknownKey(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	cleanupIssueDraftCarriers(t)
 
+	const wantMessage = "policy must be one of: conversation, frontend, question"
+
 	// On create.
-	testutil.Call(t, testHandler.CreateIssueDraftSession, newRequest(http.MethodPost, "/api/issue-drafts", map[string]any{
+	refused := testutil.Call(t, testHandler.CreateIssueDraftSession, newRequest(http.MethodPost, "/api/issue-drafts", map[string]any{
 		"runtime_id": testRuntimeID,
 		"policy":     "interrogation",
-	})).Want(http.StatusBadRequest)
+	})).Want(http.StatusBadRequest).Map()
+	if refused["error"] != wantMessage {
+		t.Fatalf("create refused an unknown policy with %v, want %q", refused["error"], wantMessage)
+	}
 
 	// And on switch, leaving the carrier's prompt alone.
 	session := startIssueDraftSession(t)
 	questionPolicy, _ := issueDraftPolicyByKey(issueDraftPolicyQuestion)
 	before := carrierInstructions(t, session.AgentID)
 
-	testutil.Call(t, testHandler.SwitchIssueDraftPolicy, switchPolicyRequest(t, session.SessionID, "interrogation")).
-		Want(http.StatusBadRequest)
+	switched := testutil.Call(t, testHandler.SwitchIssueDraftPolicy, switchPolicyRequest(t, session.SessionID, "interrogation")).
+		Want(http.StatusBadRequest).Map()
+	if switched["error"] != wantMessage {
+		t.Fatalf("switch refused an unknown policy with %v, want %q", switched["error"], wantMessage)
+	}
 
 	if got := carrierInstructions(t, session.AgentID); got != before {
 		t.Fatal("a refused policy switch still rewrote the carrier prompt")
 	}
 	if key, _ := carrierPolicyKey(t, session.SessionID); key != questionPolicy.Key {
 		t.Fatalf("a refused policy switch recorded policy %q", key)
+	}
+}
+
+// Every key the registry lists has to survive the endpoints, not just the
+// registry: create and switch both resolve through the same lookup, and a key
+// the picker offers but an endpoint refuses is a switch that cannot land. The
+// version recorded on the row is the audit half, so it is asserted here for
+// every entry rather than only for the default.
+func TestIssueDraftPolicyKeysAreSwitchable(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cleanupIssueDraftCarriers(t)
+
+	for _, key := range issueDraftPolicyKeys() {
+		policy, ok := issueDraftPolicyByKey(key)
+		if !ok {
+			t.Fatalf("issueDraftPolicyKeys listed %q, which the registry does not hold", key)
+		}
+
+		session := startIssueDraftSession(t)
+		var switched issueDraftResponse
+		testutil.Call(t, testHandler.SwitchIssueDraftPolicy, switchPolicyRequest(t, session.SessionID, key)).
+			Want(http.StatusOK).JSON(&switched)
+
+		if switched.Policy.Key != key || switched.Policy.Version != policy.Version || switched.Policy.Guided != policy.Guided {
+			t.Fatalf("switching to %q reported %+v, want %s@%s guided=%t",
+				key, switched.Policy, policy.Key, policy.Version, policy.Guided)
+		}
+		if recorded, version := carrierPolicyKey(t, session.SessionID); recorded != key || version != policy.Version {
+			t.Fatalf("switching to %q recorded %s@%s on the draft row, want %s@%s",
+				key, recorded, version, policy.Key, policy.Version)
+		}
+		if got := carrierInstructions(t, session.AgentID); got != policy.Instructions() {
+			t.Fatalf("switching to %q did not install that entry's prompt", key)
+		}
 	}
 }
 
@@ -296,6 +342,20 @@ func TestIssueDraftPolicyRegistryIsWellFormed(t *testing.T) {
 	}
 	if strings.Contains(plain.Instructions(), "<issue_draft_question>") {
 		t.Fatal("the unguided policy still teaches the question block")
+	}
+
+	// `guided` is what the client renders answer chips from, so a guided entry
+	// that never describes the block asks questions nobody can click, and an
+	// unguided one that does interviews after the user asked for conversation.
+	// The registry grows, so this is a loop rather than three named checks.
+	for key, policy := range issueDraftPolicyRegistry {
+		teaches := strings.Contains(policy.Instructions(), "<issue_draft_question>")
+		if policy.Guided && !teaches {
+			t.Fatalf("policy %q reports itself guided but never describes the question block", key)
+		}
+		if !policy.Guided && teaches {
+			t.Fatalf("policy %q reports itself unguided but still teaches the question block", key)
+		}
 	}
 }
 
@@ -384,6 +444,65 @@ func TestIssueDraftQuestionPolicyHandsScopeAndDirectionToTheUser(t *testing.T) {
 	}
 	if strings.Contains(plain.Instructions(), "two things are the user's to decide and yours only to propose") {
 		t.Fatal("the unguided policy still hands the surface to the user to decide")
+	}
+}
+
+// The front-end entry is the only policy that runs the look round. The two
+// text-only entries keep the contract's rule that a look is not settled in
+// prose; this one earns the exception the only way that rule allows — by
+// producing a file the user can open. Both halves are pinned here, because the
+// failure modes are opposite: an entry that lost the upload step is a policy
+// that only talks about prototypes, and a text-only entry that grew one is the
+// requirement interview suddenly spending its turns drawing.
+//
+// Version 1 is the record of a new entry, not a changed one: there is no
+// earlier prompt of it for a draft to have run.
+func TestIssueDraftFrontendPolicyRunsTheLookRound(t *testing.T) {
+	frontend, ok := issueDraftPolicyByKey(issueDraftPolicyFrontend)
+	if !ok {
+		t.Fatal("the front-end policy is not registered")
+	}
+	if !frontend.Guided {
+		t.Fatal("the front-end policy reports itself unguided, so its one question at a time would never render answer chips")
+	}
+	if frontend.Version != "1" {
+		t.Fatalf("the front-end policy is at version %q, want 1", frontend.Version)
+	}
+	for _, want := range []string{
+		// The user picked this style, so the round starts instead of being
+		// offered again — the offer belongs to the policies that do not have it.
+		"run the look round — do not offer it again",
+		// The default unit, and the comparison mode with its own tie-break.
+		"One screen at a time is the default",
+		"Five structural directions",
+		"one file behind a picker",
+		// The artifact, and the judgement that makes the style worth having.
+		"multica attachment upload",
+		"A round is not finished until the user has something to open",
+		// Widths and states: what makes it openable rather than a mock.
+		"desktop AND phone width",
+		"loading / empty / error",
+		// The round stops at two screens; past that it becomes an implementation
+		// issue rather than a longer alignment.
+		"At most two screens in one alignment",
+		// The settled prototype has to survive into the draft, or whoever opens
+		// the issue cannot see what was agreed.
+		`"Prototype:"`,
+		`"原型："`,
+	} {
+		if !strings.Contains(frontend.Instructions(), want) {
+			t.Fatalf("the front-end prompt does not carry %q", want)
+		}
+	}
+
+	for _, key := range []string{issueDraftPolicyQuestion, issueDraftPolicyConversation} {
+		policy, ok := issueDraftPolicyByKey(key)
+		if !ok {
+			t.Fatalf("policy %q is not registered", key)
+		}
+		if strings.Contains(policy.Instructions(), "multica attachment upload") {
+			t.Fatalf("policy %q builds prototypes; the look round belongs to %q", key, issueDraftPolicyFrontend)
+		}
 	}
 }
 

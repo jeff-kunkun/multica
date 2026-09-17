@@ -1034,6 +1034,7 @@
     "policy_label": "すり合わせの方式",
     "policy_guided": "質問で誘導",
     "policy_plain": "通常の会話",
+    "policy_frontend": "フロントエンドのプロトタイプ",
     "policy_version": "プロンプト {{version}}",
     "policy_version_hint": "この会話が使用しているプロンプトのバージョンです。開始時に記録されるため、完了したドラフトも追跡できます。",
     "policy_failed": "すり合わせの方式を切り替えられませんでした。",

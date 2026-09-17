@@ -14,10 +14,25 @@ import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 
 /**
- * Which alignment policy the conversation runs under: the guided one that asks
- * one question at a time, or plain dialogue.
+ * The label each policy key carries, as the message key it resolves to.
  *
- * Two named options rather than a switch, because these are two named
+ * A record rather than a ternary on `key === "question"`: `ISSUE_DRAFT_POLICIES`
+ * is the whitelist this menu renders, so a key added there without a label here
+ * is a compile error — not an option that quietly reads as plain dialogue, and
+ * not a menu that has to be edited in three places to grow a fourth.
+ */
+const POLICY_LABELS = {
+  question: "policy_guided",
+  conversation: "policy_plain",
+  frontend: "policy_frontend",
+} as const satisfies Record<IssueDraftPolicyKey, string>;
+
+/**
+ * Which alignment policy the conversation runs under: the guided one that asks
+ * one question at a time, plain dialogue, or the front-end look round that
+ * settles a screen by building something the user can open and look at.
+ *
+ * Three named options rather than a switch, because these are three named
  * behaviours and not an on/off setting — "关闭引导" tells the user what they
  * lose, "普通对话" tells them what they get. The version caption below them is
  * the audit half: it names the prompt the carrier was actually given, which is
@@ -80,9 +95,7 @@ export function IssueDraftPolicyPicker({
               "data-checked:focus:bg-accent data-checked:focus:text-foreground",
             )}
           >
-            {key === "question"
-              ? t(($) => $.alignment.policy_guided)
-              : t(($) => $.alignment.policy_plain)}
+            {t(($) => $.alignment[POLICY_LABELS[key]])}
           </DropdownMenuRadioItem>
         ))}
       </DropdownMenuRadioGroup>

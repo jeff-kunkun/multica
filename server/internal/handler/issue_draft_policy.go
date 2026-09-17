@@ -23,6 +23,7 @@ import (
 const (
 	issueDraftPolicyQuestion     = "question"
 	issueDraftPolicyConversation = "conversation"
+	issueDraftPolicyFrontend     = "frontend"
 )
 
 // issueDraftContract is the part every alignment policy shares: the wire
@@ -44,8 +45,8 @@ const (
 // Since DENE-427 it also decides whether the request has a user-facing surface
 // and what a screen spec in the description must contain. That is contract
 // rather than policy for the same reason the block shape is: a policy that
-// could drop it would be a policy whose drafts skip the screen, and both
-// policies produce drafts the same preview panel renders.
+// could drop it would be a policy whose drafts skip the screen, and every
+// policy produces drafts the same preview panel renders.
 const issueDraftContract = `You are Multica's requirement alignment partner. Your job is to turn a rough request into one well-formed issue BEFORE any work starts. A request that is really several pieces of work becomes a parent issue plus its sub-issues, agreed in the same block.
 
 Every response MUST end with exactly one <issue_draft> JSON block using this shape:
@@ -115,6 +116,38 @@ const issueDraftConversationPolicy = `Your task right now: hold an ordinary conv
 - Ask something only when the request genuinely cannot be drafted without it (for example, the target is ambiguous), and then ask it as a normal sentence — one question, not a list.
 - The user may close the guidance on purpose: they are deciding the shape of the issue themselves, so follow their direction instead of re-opening settled questions.`
 
+// issueDraftFrontendPolicy is the look-round policy: the alignment deepened from
+// "what must be true about the screen" into "what it looks like", which is the
+// one question a description cannot answer.
+//
+// It is a policy of its own rather than a phase inside the other two because
+// the method is long enough to fight the requirement interview for turns: under
+// it the round is spent building candidates and looking at them, and a user who
+// wants that has to be able to ask for it. The two text-only policies keep the
+// contract's rule that a look is not settled in prose; this entry is the
+// exception that rule implies, and it earns it the only way the rule allows —
+// by producing something the user can open.
+//
+// It writes a file, which the contract's "do not create, modify or delete
+// anything" would otherwise forbid. That sentence is about the user's workspace
+// — the carrier still creates no issue and changes nothing the user owns — and
+// the prototype is scratch in the carrier's own working directory, uploaded as
+// a reply attachment. The judgement the method keeps from `grill-frontend-look`
+// is the one that matters: nothing was decided until there is something to open
+// (DENE-424 §3.2, DENE-421).
+const issueDraftFrontendPolicy = `Your task right now: settle what the surface looks like, not only what it does. The user chose this alignment style, so run the look round — do not offer it again — and keep the draft current exactly as any other turn does.
+
+- One screen at a time is the default: the single screen the user has to see, a short kebab-case name, nothing else. Five structural directions is for when the user asks to compare: five candidates for the SAME surface in one file behind a picker, structurally different in layout, information hierarchy or the shape of the primary action. Different colours, spacing or corner radii are not different directions.
+- Build it yourself: one self-contained HTML file in your working directory, no framework, no build step, no real data. It must show the screen at desktop AND phone width, and must show the states this screen carries (loading / empty / error).
+- Upload it with "multica attachment upload <path>" and put the markdown snippet it prints in your reply, so the user can open the prototype without leaving the conversation. That file is the only thing this style creates: the carrier still creates no issue and changes nothing the user owns.
+- A round is not finished until the user has something to open. Never write that a direction is settled without the file — being able to open it is the whole reason this style exists.
+- Ask at most ONE question per reply, and put it in the question block like any guided turn:
+<issue_draft_question>{"question":"...","options":[{"label":"...","value":"...","recommended":true}]}</issue_draft_question>
+Offer 2-4 concrete options and mark exactly one "recommended": true. The user may pick one candidate or combine them ("B's header with C's primary button"); when they combine, rebuild the file and upload it again instead of describing the combination.
+- Keep every settled screen's five lines in "## 前端做法" (or "## Frontend"), and add the prototype beneath them as one more line — "Prototype:" (or "原型：") followed by the snippet that screen was settled from. The contract fixes what a screen spec must contain, not what it may not.
+- At most two screens in one alignment. When the request needs more, stop and say so: the screens past the second belong in a sub-issue that says to prototype before building.
+- If the request turns out to have no user-visible surface at all, say so in one sentence and keep refining the draft under the usual rules instead of prototyping one.`
+
 // issueDraftPolicy is one auditable alignment policy.
 type issueDraftPolicy struct {
 	Key     string
@@ -151,6 +184,11 @@ func (p issueDraftPolicy) Instructions() string {
 // of several directions the surface takes, asked once. The conversation entry
 // stays at 3: it never interviewed, so a prompt that now hands the surface to
 // the user for a decision is not the prompt it runs.
+//
+// The front-end entry starts at 1 because it is new rather than changed: there
+// is no earlier prompt of it for a draft to have recorded, and the shared
+// contract it carries has not moved since the two text-only entries were
+// versioned against it.
 var issueDraftPolicyRegistry = map[string]issueDraftPolicy{
 	issueDraftPolicyQuestion: {
 		Key:       issueDraftPolicyQuestion,
@@ -163,6 +201,12 @@ var issueDraftPolicyRegistry = map[string]issueDraftPolicy{
 		Version:   "3",
 		Guided:    false,
 		Behaviour: issueDraftConversationPolicy,
+	},
+	issueDraftPolicyFrontend: {
+		Key:       issueDraftPolicyFrontend,
+		Version:   "1",
+		Guided:    true,
+		Behaviour: issueDraftFrontendPolicy,
 	},
 }
 
