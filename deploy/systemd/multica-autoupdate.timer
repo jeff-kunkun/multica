@@ -1,0 +1,15 @@
+[Unit]
+Description=Run the Multica self-host autoupdate every 15 minutes
+Documentation=https://github.com/jeff-kunkun/multica/blob/kun/docs/kun/selfhost-autoupdate.md
+
+[Timer]
+# OnActiveSec, not OnBootSec: OnBootSec is relative to boot, so enabling the
+# timer on a box that has been up for days fires an upgrade the moment the
+# timer starts. This waits a fixed five minutes after activation instead.
+OnActiveSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=multica-autoupdate.service
+
+[Install]
+WantedBy=timers.target

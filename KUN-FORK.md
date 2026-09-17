@@ -42,6 +42,16 @@ bash scripts/setup-dsh-runtime.sh
 
 打包发布给真机用的 Desktop 版本，走 [docs/kun/desktop-release.md](docs/kun/desktop-release.md)：版本号由 tag 推导、必须从当前 `kun` tip 构建、产物没推上 Release 就等于没发。
 
+## 自建实例自动跟随 `kun`
+
+自建实例（`ai.ferryway.cc`）曾经落后 `kun` 70 个提交才被发现。现在用 systemd timer 每 15 分钟比一次 `/health` 自报的 commit 和 `origin/kun`，有漂移就重建、失败就回滚：
+
+```bash
+sudo scripts/install-selfhost-autoupdate.sh
+```
+
+装、停、查状态、手工回滚见 [docs/kun/selfhost-autoupdate.md](docs/kun/selfhost-autoupdate.md)。
+
 ## 边界
 
 - 不向 `multica-ai/multica` 开 PR 或 push。

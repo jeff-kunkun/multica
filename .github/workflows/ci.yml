@@ -97,6 +97,14 @@ jobs:
               - 'scripts/desktop-release-assets.test.mjs'
               - '.github/workflows/desktop-release.yml'
               - 'scripts/selfhost-config.test.sh'
+              # The autoupdate suite runs the real wait script against stubbed
+              # docker/curl, and its installer assertions read the unit
+              # templates, so a change to any of them has to run it.
+              - 'scripts/selfhost-autoupdate.sh'
+              - 'scripts/selfhost-autoupdate.test.sh'
+              - 'scripts/install-selfhost-autoupdate.sh'
+              - 'deploy/systemd/multica-autoupdate.service'
+              - 'deploy/systemd/multica-autoupdate.timer'
               - 'scripts/drop-database.sh'
               - 'scripts/remove-worktree.sh'
               - 'scripts/worktree-db.test.sh'
@@ -291,6 +299,10 @@ jobs:
       - name: Test self-host env derivation
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/selfhost-config.test.sh
+
+      - name: Test self-host autoupdate
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: bash scripts/selfhost-autoupdate.test.sh
 
       - name: Test worktree database cleanup
         if: ${{ needs.changes.outputs.frontend == 'true' }}
