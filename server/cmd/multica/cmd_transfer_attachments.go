@@ -54,7 +54,11 @@ const (
 
 // transferAttachmentUploader sends the attachments group for one import.
 type transferAttachmentUploader struct {
-	client   *cli.APIClient
+	client *cli.APIClient
+	// sender is the DENE-442 wire path. The whole-blob fallback goes through
+	// it rather than through a second posting helper, so compression, the
+	// request budget and the halving retry stay defined in one place.
+	sender   *transferWireSender
 	base     string
 	chunkMax int64
 	progress *transferProgressReporter
@@ -69,9 +73,10 @@ type transferAttachmentUploader struct {
 	doneCount  int
 }
 
-func newTransferAttachmentUploader(client *cli.APIClient, base string, chunkMax int64, progress *transferProgressReporter, attachments []service.TransferAttachmentRow) *transferAttachmentUploader {
+func newTransferAttachmentUploader(client *cli.APIClient, sender *transferWireSender, base string, chunkMax int64, progress *transferProgressReporter, attachments []service.TransferAttachmentRow) *transferAttachmentUploader {
 	u := &transferAttachmentUploader{
 		client:     client,
+		sender:     sender,
 		base:       base,
 		chunkMax:   chunkMax,
 		progress:   progress,
@@ -145,7 +150,7 @@ func (u *transferAttachmentUploader) upload(ctx context.Context, att service.Tra
 	// A body-less row (omitted for size or secrecy) is metadata only: there is
 	// nothing to chunk and nothing to time out.
 	if att.BodyOmittedReason != nil || att.SHA256 == "" || len(blob) == 0 {
-		return postTransferAttachment(ctx, u.client, u.base+"/transfer/attachments", att, blob)
+		return u.postWholeBlob(ctx, att, blob)
 	}
 	status := u.staged[att.SourceID]
 	if status.Imported {
@@ -160,7 +165,7 @@ func (u *transferAttachmentUploader) upload(ctx context.Context, att service.Tra
 					"import over a link that is not behind the proxy",
 				len(blob), len(blob))
 		}
-		return postTransferAttachment(ctx, u.client, u.base+"/transfer/attachments", att, blob)
+		return u.postWholeBlob(ctx, att, blob)
 	}
 	if status.TotalBytes != 0 && status.TotalBytes != int64(len(blob)) {
 		return fmt.Errorf("target holds %d staged bytes for sha256 %s but the bundle blob is %d bytes",
@@ -170,6 +175,17 @@ func (u *transferAttachmentUploader) upload(ctx context.Context, att service.Tra
 		return err
 	}
 	return postTransferAttachmentCommit(ctx, u.client, u.base+"/transfer/attachments/commit", att.SHA256)
+}
+
+// postWholeBlob is the pre-chunking path: one request carries the whole blob.
+// It is what a body-less row and a target without chunk staging get.
+func (u *transferAttachmentUploader) postWholeBlob(ctx context.Context, att service.TransferAttachmentRow, blob []byte) error {
+	chunk, err := transferAttachmentChunk(att, blob)
+	if err != nil {
+		return err
+	}
+	_, err = u.sender.post(ctx, u.base+"/transfer/attachments", chunk)
+	return err
 }
 
 // sendChunks walks the blob from resumeOffset to the end. The server answers
