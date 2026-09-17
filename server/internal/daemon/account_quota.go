@@ -105,6 +105,20 @@ func expandAccountHomePrefix(path, home string) string {
 //     every failed task already goes through, so a phrasing it learns is a
 //     phrasing this path learns with it.
 //
+// Signal 1 carries one exception (DENE-483). Not every "exhausted" snapshot is
+// the provider's own report: agent.withQuotaPlanLimits synthesises a
+// window-less exhausted snapshot out of the error text whenever it looks like a
+// quota error, and that word list matches a bare 429 / "rate limit" / "too many
+// requests". A snapshot with no future window and an error text that classifies
+// as plain capacity is therefore a retryable blip wearing the exhausted label,
+// and stamping it would put a red "out of quota" dot next to a working account
+// — a dot DENE-468's one-click switcher invites people to act on.
+//
+// The exclusion is deliberately that narrow. A window-less exhausted snapshot
+// is still trusted on its own when the error text is not a capacity signal:
+// dsh's balance probe (is_available=false) and claude's "hit your session
+// limit" both produce exactly that shape for a genuine exhaustion.
+//
 // Only Result.Error is classified, never Result.Output: the output is the
 // agent's own prose, and an agent that writes the word "quota" in an answer
 // must not burn its account.
@@ -113,13 +127,18 @@ func expandAccountHomePrefix(path, home string) string {
 // back to a "Resets in …" hint in the error text, and lands on a short default
 // when neither exists — see agent.DefaultQuotaResetAt for why short.
 func accountQuotaResetAt(result agent.Result, now time.Time) (time.Time, bool) {
+	reason := taskfailure.Classify(result.Error)
 	planExhausted := result.PlanLimits != nil &&
 		result.PlanLimits.Status == protocol.PlanLimitsStatusExhausted
-	if !planExhausted && taskfailure.Classify(result.Error) != taskfailure.ReasonAgentProviderQuotaLimit {
+	soonest := soonestPlanLimitReset(result.PlanLimits, now)
+	if planExhausted && soonest.IsZero() && reason == taskfailure.ReasonAgentProviderCapacityOrRateLimit {
+		planExhausted = false
+	}
+	if !planExhausted && reason != taskfailure.ReasonAgentProviderQuotaLimit {
 		return time.Time{}, false
 	}
-	if at := soonestPlanLimitReset(result.PlanLimits, now); !at.IsZero() {
-		return at, true
+	if !soonest.IsZero() {
+		return soonest, true
 	}
 	if at := agent.ParseQuotaResetHint(result.Error, now); !at.IsZero() {
 		return at, true

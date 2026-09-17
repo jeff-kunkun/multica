@@ -37,8 +37,55 @@ func TestParseAgyQuotaError(t *testing.T) {
 			wantReset: time.Hour + 2*time.Minute + 3*time.Second,
 		},
 		{
+			// DENE-483: real exhaustion wordings taskfailure.Classify has
+			// always called provider_quota_limit. Antigravity is kept out of
+			// accountQuotaProviderCLI, so anything this parser declines is
+			// recorded by nothing and switches no slot.
+			name:   "402 insufficient balance",
+			text:   "API request failed: 402 {\"error\":\"insufficient_balance\"}",
+			wantOK: true,
+		},
+		{
+			name:   "monthly usage limit reached",
+			text:   "Error: monthly usage limit reached for this account",
+			wantOK: true,
+		},
+		{
+			name:   "run out of credits",
+			text:   "You have run out of credits. Top up to continue.",
+			wantOK: true,
+		},
+		{
+			name:   "bare 402 payment required",
+			text:   "HTTP 402 Payment Required",
+			wantOK: true,
+		},
+		{
+			name:      "usage limit reached with a reset hint",
+			text:      "Usage limit reached. Resets in 3h.",
+			wantOK:    true,
+			wantReset: 3 * time.Hour,
+		},
+		{
 			name:   "rate limit is not a slot exhaustion",
 			text:   "HTTP 429 rate limit exceeded; try again later",
+			wantOK: false,
+		},
+		{
+			name:   "too many requests is not a slot exhaustion",
+			text:   "Error: 429 too many requests",
+			wantOK: false,
+		},
+		{
+			// 402 needs a billing word beside it; a number that happens to
+			// contain 402 must not burn a slot.
+			name:   "a 402 with no billing context is not quota",
+			text:   "task 402 failed: connection reset by peer",
+			wantOK: false,
+		},
+		{
+			name:   "402 inside a longer number is not quota",
+			text:   "request timed out after 1402ms, balance check skipped",
 			wantOK: false,
 		},
 		{

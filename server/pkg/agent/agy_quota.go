@@ -39,20 +39,74 @@ var (
 	agyResetsInRe   = regexp.MustCompile(`(?i)resets\s+in\s+((?:\d+d)?(?:\d+h)?(?:\d+m)?(?:\d+s)?)`)
 	agyDurationRe   = regexp.MustCompile(`(\d+)([dhms])`)
 	agyAccountDirRe = regexp.MustCompile(`^\.gemini-account(\d+)$`)
+	// HTTP 402 behind a digit boundary, the same guard taskfailure uses, so a
+	// task id or a "1402ms" timing in the output cannot burn a slot.
+	agyPaymentRequiredRe = regexp.MustCompile(`(^|[^0-9])402([^0-9]|$)`)
 )
 
-// ParseAgyQuotaError reports whether text is an AGY/Antigravity individual
-// quota exhaustion. Matching is intentionally narrower than the generic
-// plan-limits 429 classifier: a transient rate limit must not burn a slot.
+// agyQuotaWitnesses are phrasings that only ever mean "this account is spent".
+//
+// Every entry has to stay non-transient. The generic plan-limits classifier
+// also fires on a bare 429 / "rate limit" / "too many requests"; those stay out
+// deliberately, because the consequence here is not a colour on a badge — the
+// deadline this produces hides the slot from SelectAgyLaunchDir until it
+// expires, so a retryable blip would cost a usable account an hour.
+var agyQuotaWitnesses = []string{
+	"individual quota reached",
+	"resource_exhausted",
+	"quota exceeded",
+	"quota_exceeded",
+	// Real exhaustion wordings that taskfailure.Classify has always called
+	// provider_quota_limit while this list did not (DENE-483). Without them an
+	// AGY account that truly ran out neither switched slots nor showed up on
+	// the accounts tab: both paths read this one answer.
+	"insufficient_balance",
+	"insufficient balance",
+	"balance is too low",
+	"usage limit reached",
+	"monthly usage limit",
+	"out of credits",
+	"credits exhausted",
+	"no credits remaining",
+}
+
+// agyBillingContext is what makes a bare HTTP 402 readable as this account's
+// billing state. 402 is "Payment Required" and never transient, but the number
+// alone can appear in prose, so one billing word has to accompany it.
+var agyBillingContext = []string{
+	"payment",
+	"balance",
+	"credit",
+	"quota",
+	"billing",
+	"insufficient",
+}
+
+func containsAnyAgyWitness(lower string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseAgyQuotaError reports whether text is an AGY/Antigravity account
+// exhaustion — its own individual-quota wording, or any of the billing
+// exhaustion phrasings in agyQuotaWitnesses.
+//
+// Matching is intentionally narrower than the generic plan-limits 429
+// classifier: a transient rate limit must not burn a slot. It is not narrower
+// than taskfailure.Classify's quota bucket, which is the bug DENE-483 fixed —
+// antigravity is deliberately kept out of the shared accountQuotaProviderCLI
+// accounting, so whatever this function declines is recorded by nothing at all.
 func ParseAgyQuotaError(text string) (AgyQuotaHit, bool) {
 	lower := strings.ToLower(text)
 	if lower == "" {
 		return AgyQuotaHit{}, false
 	}
-	matched := strings.Contains(lower, "individual quota reached") ||
-		strings.Contains(lower, "resource_exhausted") ||
-		strings.Contains(lower, "quota exceeded") ||
-		strings.Contains(lower, "quota_exceeded")
+	matched := containsAnyAgyWitness(lower, agyQuotaWitnesses) ||
+		(agyPaymentRequiredRe.MatchString(lower) && containsAnyAgyWitness(lower, agyBillingContext))
 	resetAt := parseAgyResetsIn(lower, time.Time{})
 	if !matched && !resetAt.IsZero() && strings.Contains(lower, "quota") {
 		matched = true
