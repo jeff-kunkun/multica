@@ -69,6 +69,28 @@ vi.mock("../components/pickers/priority-picker", () => ({
   ),
 }));
 
+// The project picker is a real component with its own suite; here it is reduced
+// to the only two things this suite asserts about it — the value it shows and
+// the update it hands back.
+vi.mock("../../projects/components/project-picker", () => ({
+  ProjectPicker: ({
+    projectId,
+    onUpdate,
+  }: {
+    projectId: string | null;
+    onUpdate: (u: { project_id?: string | null }) => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="project-picker"
+      data-project-id={projectId ?? "none"}
+      onClick={() => onUpdate({ project_id: "proj-9" })}
+    >
+      project-picker
+    </button>
+  ),
+}));
+
 // The stage and assignee pickers are real components mounted on the issue
 // surfaces; here they are reduced to the only thing this suite asserts about
 // them — the update they hand back, and which row it belongs to.
@@ -561,6 +583,74 @@ describe("IssueDraftPreviewPanel group", () => {
       "href",
       "/acme/issues/i1",
     );
+  });
+});
+
+/**
+ * DENE-423: the project. The carrier is never told which one to use — it has no
+ * project list and is not asked to guess — so if this panel does not offer it,
+ * nothing downstream can. The three things pinned here are the three a user
+ * would be misled by: whether the choice is saved, whether a later reply
+ * reverts it, and whether a sub-issue appears to have one of its own.
+ */
+describe("IssueDraftPreviewPanel project", () => {
+  it("saves the project the user picks, and reports the edit as unsaved", () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    const { props } = renderPanel({
+      draft: { ...STORED, title: "T" },
+      stage: "ready",
+      onSave,
+    });
+    expect(screen.getByTestId("project-picker")).toHaveAttribute(
+      "data-project-id",
+      "none",
+    );
+
+    fireEvent.click(screen.getByTestId("project-picker"));
+
+    // The project is an ordinary edit: the confirm reads the SAVED draft, so an
+    // edit that did not mark itself dirty would be silently not-what-gets-created.
+    expect(props.onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    return waitFor(() => expect(onSave).toHaveBeenCalledTimes(1)).then(() => {
+      expect(savedPayload(onSave).project_id).toBe("proj-9");
+    });
+  });
+
+  it("keeps a project edit when a carrier reply lands under it", () => {
+    // The reply block cannot mention the project (`parseIssueDraftBlock` accepts
+    // only the fields the carrier owns), so folding one in must not read as
+    // "no project" and revert the choice.
+    const onDirtyChange = vi.fn();
+    const { rerenderWith } = renderPanel({
+      draft: { ...STORED, title: "T" },
+      onDirtyChange,
+    });
+
+    fireEvent.click(screen.getByTestId("project-picker"));
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    rerenderWith({ draft: { ...MERGED, project_id: "p-from-server" } });
+    expect(screen.getByTestId("project-picker")).toHaveAttribute(
+      "data-project-id",
+      "proj-9",
+    );
+    expect(titleInput().value).toBe("T");
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("offers no project control on a sub-issue row", () => {
+    // A sub-issue's project is backfilled from the parent inside the create
+    // transaction, so a control on the row would be a choice the confirm
+    // silently overwrites. The panel says the inheritance out loud instead.
+    renderPanel({ draft: GROUP, stage: "ready" });
+
+    expect(screen.getAllByTestId("project-picker")).toHaveLength(1);
+    expect(childTitleInput(1)).toBeTruthy();
+    expect(
+      screen.getByText("Sub-issues are filed under the parent's project."),
+    ).toBeTruthy();
   });
 });
 

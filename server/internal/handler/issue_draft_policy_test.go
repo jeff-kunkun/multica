@@ -299,6 +299,45 @@ func TestIssueDraftPolicyRegistryIsWellFormed(t *testing.T) {
 	}
 }
 
+// The front-end section is the shared contract's, not a policy's, so it reaches
+// the carrier whichever policy is running: a draft that skipped the screen must
+// not be indistinguishable from one whose request genuinely has no surface.
+// Version 3 is the record of the prompt that started asking — a draft that
+// recorded "2" was produced by one that never did.
+func TestIssueDraftContractAsksForTheFrontendSection(t *testing.T) {
+	for _, want := range []string{
+		// When a request counts as having a surface, and the tie-break:
+		// unsure means "has one", because the two mistakes are not symmetric.
+		"A request has a surface when any outcome in it changes what a person sees or does on a screen",
+		"When you cannot tell, assume it has one",
+		// The fixed heading, in the language the description is written in.
+		`"## 前端做法"`,
+		`"## Frontend"`,
+		// The five lines one screen group is made of.
+		"- Name:",
+		"- Entry:",
+		"- Main action:",
+		"- States:",
+		"- Reuse:",
+		// A child's spec comes back with its key, or the group rewrite
+		// silently deletes it.
+		"carry it back unchanged in every later block",
+	} {
+		if !strings.Contains(issueDraftContract, want) {
+			t.Fatalf("the shared contract does not carry %q", want)
+		}
+	}
+
+	for key, policy := range issueDraftPolicyRegistry {
+		if policy.Version != "3" {
+			t.Fatalf("policy %q is at version %q, want 3", key, policy.Version)
+		}
+		if !strings.Contains(policy.Instructions(), "## 前端做法") {
+			t.Fatalf("policy %q does not carry the front-end section", key)
+		}
+	}
+}
+
 // Finalize is the structured direct-write path this whole flow exists to
 // protect: a policy switch must not become a second way to create an issue, and
 // it must not be required before confirming.

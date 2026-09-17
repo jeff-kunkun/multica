@@ -27,6 +27,10 @@ if [[ "$*" == *"-sI"* ]]; then
   exit 0
 fi
 
+if [[ -n "${MULTICA_TEST_CURL_LOG:-}" ]]; then
+  printf '%s\n' "$*" >>"$MULTICA_TEST_CURL_LOG"
+fi
+
 out=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,6 +60,7 @@ _run_installer() {
   if ! PATH="$tmp/stub-bin:$tmp/install-bin:/usr/bin:/bin" \
     MULTICA_BIN_DIR="$tmp/install-bin" \
     MULTICA_TEST_ARCHIVE="$tmp/multica.tar.gz" \
+    MULTICA_REPO="${MULTICA_TEST_REPO:-multica-ai/multica}" \
     bash "$ROOT_DIR/scripts/install.sh" >"$out" 2>"$err"; then
     echo "install.sh exited non-zero" >&2
     cat "$out" >&2 || true
@@ -128,6 +133,50 @@ STUB
   chmod +x "$tmp/stub-bin/brew"
 
   _run_installer "$tmp"
+}
+
+# The whole point of DENE-420: a plain `install.sh` run on this fork must not
+# reach `multica-ai/tap` (which only carries the upstream build) and must pull
+# the archive from this fork's releases.
+test_default_repo_is_the_fork_and_skips_homebrew() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_sandbox "$tmp"
+  cat >"$tmp/stub-bin/brew" <<'STUB'
+#!/usr/bin/env bash
+echo "brew must not be called on a fork install: brew $*" >&2
+exit 90
+STUB
+  chmod +x "$tmp/stub-bin/brew"
+
+  if ! PATH="$tmp/stub-bin:$tmp/install-bin:/usr/bin:/bin" \
+    MULTICA_BIN_DIR="$tmp/install-bin" \
+    MULTICA_TEST_ARCHIVE="$tmp/multica.tar.gz" \
+    MULTICA_TEST_CURL_LOG="$tmp/curl.log" \
+    bash "$ROOT_DIR/scripts/install.sh" >"$tmp/install.out" 2>"$tmp/install.err"; then
+    echo "install.sh exited non-zero on the fork default" >&2
+    cat "$tmp/install.out" >&2 || true
+    cat "$tmp/install.err" >&2 || true
+    return 1
+  fi
+
+  if grep -q "brew must not be called" "$tmp/install.err"; then
+    echo "fork install reached Homebrew" >&2
+    cat "$tmp/install.err" >&2 || true
+    return 1
+  fi
+  if ! grep -q "github.com/jeff-kunkun/multica/releases/download/" "$tmp/curl.log"; then
+    echo "expected the CLI archive to come from the fork's releases" >&2
+    cat "$tmp/curl.log" >&2 || true
+    return 1
+  fi
+  if grep -q "github.com/multica-ai/multica/releases/download/" "$tmp/curl.log"; then
+    echo "fork install downloaded an upstream release asset" >&2
+    cat "$tmp/curl.log" >&2 || true
+    return 1
+  fi
 }
 
 test_remote_ssh_install_prints_token_login_hint() {
@@ -509,6 +558,7 @@ STUB
   fi
 }
 
+test_default_repo_is_the_fork_and_skips_homebrew
 test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
 test_remote_ssh_install_prints_token_login_hint
