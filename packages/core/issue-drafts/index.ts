@@ -64,10 +64,12 @@ export {
   type StartIssueDraftResult,
 } from "./mutations";
 export {
-  ISSUE_DRAFT_POLICIES,
-  isIssueDraftPolicyKey,
-  type IssueDraftPolicyKey,
-} from "./policy";
+  DEFAULT_ISSUE_DRAFT_SKILLS,
+  ISSUE_DRAFT_SKILLS,
+  isIssueDraftSkillKey,
+  readIssueDraftSkills,
+  type IssueDraftSkillKey,
+} from "./skills";
 export {
   ISSUE_DRAFT_STAGES,
   issueDraftCanConfirm,

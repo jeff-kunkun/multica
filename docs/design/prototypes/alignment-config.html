@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>对齐弹窗 · 复合配置浮层原型（DENE-512）</title>
+<style>
+  :root {
+    --bg: #f6f6f7;
+    --card: #ffffff;
+    --fg: #18181b;
+    --muted: #71717a;
+    --border: #e4e4e7;
+    --input: #e4e4e7;
+    --accent: #f4f4f5;
+    --primary: #18181b;
+    --primary-fg: #fafafa;
+    --ok: #16a34a;
+    --danger: #dc2626;
+    --ring: #a1a1aa;
+    --shadow: 0 10px 30px -12px rgb(0 0 0 / 0.25);
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #09090b; --card: #111113; --fg: #fafafa; --muted: #a1a1aa;
+      --border: #27272a; --input: #27272a; --accent: #1c1c1f;
+      --primary: #fafafa; --primary-fg: #18181b; --ring: #52525b;
+      --shadow: 0 10px 30px -12px rgb(0 0 0 / 0.7);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 24px 16px 48px;
+  }
+  .caption { font-size: 12px; line-height: 1.45; color: var(--muted); }
+  .micro { font-size: 11px; line-height: 1.4; color: var(--muted); }
+  .label { font-size: 13px; font-weight: 500; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+
+  /* ---------- page chrome ---------- */
+  .page { max-width: 1180px; margin: 0 auto; }
+  .pagehead { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between; margin-bottom: 18px; }
+  .pagehead h1 { font-size: 18px; margin: 0 0 4px; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  .toggle {
+    border: 1px solid var(--border); background: var(--card); color: var(--fg);
+    border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+  }
+  .toggle[aria-pressed="true"] { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+
+  .stage { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+  .viewport {
+    background: linear-gradient(0deg, rgb(0 0 0 / 0.03), rgb(0 0 0 / 0.03)), var(--bg);
+    border: 1px dashed var(--border); border-radius: 14px; padding: 22px;
+    display: flex; align-items: flex-start; justify-content: center;
+  }
+  .viewport[data-width="phone"] { width: 420px; }
+  .viewport[data-width="desktop"] { flex: 1; min-width: 620px; }
+  /* Prototype-only deviation, stated so nobody reads it as the intended
+     stacking: the real panel is an absolutely positioned popover anchored to
+     its pill inside a height-capped dialog. An absolutely positioned child
+     cannot grow the dialog it sits in, so a screenshot of the real geometry
+     would clip the panel. Here the expanded panel is placed in the flow,
+     directly above the bar — the pill/panel relationship, order and content are
+     what this prototype is for; the floating behaviour is not. */
+  .dialog { max-height: none; }
+  .dialog-head { overflow: visible; }
+  .annot { flex: 0 0 250px; }
+
+  /* ---------- dialog ---------- */
+  .dialog {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); width: 100%; max-width: 576px; max-height: 78vh;
+    display: flex; flex-direction: column; overflow: hidden; position: relative;
+  }
+  .viewport[data-width="phone"] .dialog { max-width: 100%; max-height: none; }
+  .dialog-head { padding: 20px 24px 8px; overflow-y: auto; flex: 1; min-height: 140px; }
+  .badge-icon {
+    width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+    background: color-mix(in oklab, var(--primary) 10%, transparent); color: var(--fg);
+  }
+  .dialog h2 { font-size: 15px; margin: 14px 0 0; }
+  .editor {
+    margin-top: 14px; min-height: 128px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg); padding: 10px 12px; font-size: 13px; color: var(--fg); overflow-y: auto;
+  }
+  .editor p { margin: 0 0 6px; }
+  .editor .ph { color: var(--muted); }
+  .notice { margin-top: 14px; font-size: 13px; }
+  .notice.err { color: var(--danger); }
+  .banner {
+    display: flex; align-items: center; gap: 8px; border: 1px solid var(--border);
+    background: var(--accent); border-radius: 10px; padding: 8px 10px; margin-bottom: 14px; font-size: 12px;
+  }
+
+  /* ---------- bottom bar ---------- */
+  .bar {
+    border-top: 1px solid var(--border); padding: 10px 14px; display: flex; flex-wrap: wrap;
+    align-items: center; gap: 8px; flex: none;
+  }
+  .bar .spacer { flex: 1 1 auto; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 28px; max-width: 14rem;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg);
+    border-radius: 999px; padding: 0 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .pill:hover { background: var(--accent); }
+  .pill[aria-expanded="true"] { border-color: var(--ring); background: var(--accent); }
+  .pill .txt { overflow: hidden; text-overflow: ellipsis; }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
+  .pill.warn .dot { background: #eab308; }
+  .pill.bad .dot { background: var(--danger); }
+  .pill.ghost { border-color: transparent; color: var(--muted); }
+  .icon-btn {
+    width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--card); color: var(--fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .btn {
+    height: 32px; border-radius: 8px; border: 1px solid transparent; background: var(--primary); color: var(--primary-fg);
+    padding: 0 14px; font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.ghost { background: transparent; color: var(--fg); border-color: transparent; }
+  .btn.ghost:hover { background: var(--accent); }
+
+  /* ---------- popover ---------- */
+  .pop-wrap { order: -1; flex: 1 0 100%; position: relative; }
+  .popover {
+    width: 100%;
+    /* Capped so the three pickers scroll inside while the head and foot stay
+       fixed; in the real panel this is the popover's own max-height. */
+    max-height: 620px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow); display: none; flex-direction: column; overflow: hidden;
+  }
+  .popover[data-open="true"] { display: flex; }
+  .pop-scroll { overflow-y: auto; padding: 10px 12px 4px; }
+  .pophead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); flex: none; }
+  .pophead .name { font-size: 12px; font-weight: 600; }
+  .pop-group { padding: 6px 2px 10px; }
+  .pop-group + .pop-group { border-top: 1px solid var(--border); padding-top: 12px; }
+  .pop-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .pop-title .name { font-size: 12px; font-weight: 600; letter-spacing: .01em; }
+  .pop-title .hint { font-size: 11px; color: var(--muted); }
+  .rows { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow-y: auto; }
+  .row {
+    display: flex; align-items: flex-start; gap: 8px; width: 100%; text-align: left;
+    border: 0; background: transparent; color: var(--fg); border-radius: 8px; padding: 6px 8px; cursor: pointer; font-size: 13px;
+  }
+  .row:hover { background: var(--accent); }
+  .row[data-selected="true"] { background: var(--accent); font-weight: 600; }
+  .row .sub { display: block; font-weight: 400; font-size: 11px; color: var(--muted); }
+  .row .check { margin-left: auto; color: var(--fg); flex: none; }
+  .row[disabled] { opacity: .5; cursor: not-allowed; }
+  .skill {
+    display: flex; gap: 10px; padding: 8px; border-radius: 10px; cursor: pointer; align-items: flex-start;
+  }
+  .skill:hover { background: var(--accent); }
+  .skill input { margin: 3px 0 0; accent-color: var(--primary); flex: none; width: 15px; height: 15px; }
+  .skill .txt { min-width: 0; }
+  .skill .name { font-size: 13px; font-weight: 600; }
+  .skill .desc { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .skill .key { font-family: ui-monospace, monospace; font-size: 10px; color: var(--muted); }
+  .popfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border); padding: 10px 12px; flex: none; background: var(--card); }
+  .popover .rows { max-height: none; }
+  .warnline { font-size: 11px; color: var(--danger); }
+  .swatch { display: flex; gap: 6px; align-items: center; }
+  .kbd { border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: 10px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="pagehead">
+    <div>
+      <h1>对齐弹窗底栏 · 复合配置浮层</h1>
+      <p class="caption" style="margin:0">
+        DENE-512 原型 · <span class="mono">issue-alignment-modal</span> ·
+        底栏一颗「对齐配置」药丸展开：执行机器 / Model / Think Level / 三项对齐技能勾选。
+      </p>
+    </div>
+    <div class="controls">
+      <button class="toggle" id="w-desktop" aria-pressed="true" onclick="setWidth('desktop')">桌面 1440</button>
+      <button class="toggle" id="w-phone" aria-pressed="false" onclick="setWidth('phone')">手机 390</button>
+      <span style="width:10px"></span>
+      <button class="toggle" id="s-open" aria-pressed="true" onclick="setState('open')">浮层展开</button>
+      <button class="toggle" id="s-closed" aria-pressed="false" onclick="setState('closed')">浮层收起</button>
+      <button class="toggle" id="s-empty" aria-pressed="false" onclick="setState('empty')">空态（无可用机器）</button>
+      <button class="toggle" id="s-error" aria-pressed="false" onclick="setState('error')">错误态（机器离线）</button>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="viewport" id="viewport" data-width="desktop">
+      <div class="dialog" role="dialog" aria-label="先对齐需求">
+        <div class="dialog-head">
+          <div class="banner" id="banner">
+            <span>◷</span>
+            <span>你有 1 场未完成的对齐：<b>「内置对齐技能集」</b></span>
+            <span style="margin-left:auto;color:var(--muted)">继续 →</span>
+          </div>
+
+          <div class="badge-icon" aria-hidden="true">✦</div>
+          <h2>先对齐需求</h2>
+          <p class="caption" style="margin:8px 0 0">
+            说清要做什么，先谈成一个结构化任务再开工。谈完你可以直接建单。
+          </p>
+
+          <div class="editor">
+            <p>新建任务时想先把「内置对齐技能集」这件事对齐：把 wayfinder / grill / grill-frontend-look 内置进平台，弹窗底栏能选 CLI、Model、Think Level，还能勾选开启哪几项对齐技能。</p>
+          </div>
+
+          <p class="notice err" id="notice" style="display:none" role="alert"></p>
+        </div>
+
+        <!-- ============ bottom bar ============ -->
+        <div class="bar">
+          <button class="icon-btn" title="添加附件" aria-label="添加附件">＋</button>
+          <button class="pill" title="项目"><span class="txt">Multica 魔改</span></button>
+
+          <div class="pop-wrap">
+            <button class="pill" id="configPill" aria-expanded="true" title="对齐配置">
+              <span>⚙</span>
+              <span class="txt" id="pillSummary">本机 · claude-opus-4-6 · High · 3 项技能</span>
+              <span>⌄</span>
+            </button>
+
+            <div class="popover" id="popover" data-open="true" role="dialog" aria-label="对齐配置">
+              <div class="pophead">
+                <span class="name">对齐配置</span>
+                <span class="micro">随会话冻结</span>
+              </div>
+              <div class="pop-scroll">
+              <!-- runtime -->
+              <div class="pop-group">
+                <div class="pop-title"><span class="name">执行机器</span><span class="hint" id="rtHint">2 台在线</span></div>
+                <div class="rows" id="rtRows">
+                  <button class="row" data-selected="true" onclick="pickRuntime(this,'本机 (MacBook Pro)','online')">
+                    <span class="dot" style="width:7px;height:7px;border-radius:50%;background:var(--ok);margin-top:6px"></span>
+                    <span>本机 (MacBook Pro)<span class="sub">claude · codex · agy</span></span>
+                    <span class="check">✓</span>
+                  </button>
+                  <button class="row" onclick="pickRuntime(this,'工作室 Linux','online')">
+                    <span class="dot" style="width:7px;height:7px;border-radius:50%;background:var(--ok);margin-top:6px"></span>
+                    <span>工作室 Linux<span class="sub">codex · gemini</span></span>
+                    <span class="check"></span>
+                  </button>
+                  <button class="row" onclick="pickRuntime(this,'旧 Mac mini','offline')">
+                    <span class="dot" style="width:7px;height:7px;border-radius:50%;background:var(--danger);margin-top:6px"></span>
+                    <span>旧 Mac mini<span class="sub">离线 · 无法开工</span></span>
+                    <span class="check"></span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- model -->
+              <div class="pop-group">
+                <div class="pop-title"><span class="name">Model</span><span class="hint" id="mdHint">本机推荐</span></div>
+                <div class="rows" id="mdRows">
+                  <button class="row" data-selected="true" onclick="pickModel(this,'claude-opus-4-6')">
+                    <span>claude-opus-4-6<span class="sub">Anthropic · 推荐</span></span><span class="check">✓</span>
+                  </button>
+                  <button class="row" onclick="pickModel(this,'claude-sonnet-4-6')">
+                    <span>claude-sonnet-4-6<span class="sub">Anthropic</span></span><span class="check"></span>
+                  </button>
+                  <button class="row" onclick="pickModel(this,'gpt-5.3-codex')">
+                    <span>gpt-5.3-codex<span class="sub">OpenAI</span></span><span class="check"></span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- thinking -->
+              <div class="pop-group">
+                <div class="pop-title">
+                  <span class="name">Think Level</span>
+                  <span class="hint" id="tlHint">随 Model 联动</span>
+                </div>
+                <div class="rows" id="tlRows">
+                  <button class="row" onclick="pickThink(this,'')">
+                    <span>跟随 CLI 配置<span class="sub">不传 --effort，由本机 CLI 决定</span></span><span class="check"></span>
+                  </button>
+                  <button class="row" onclick="pickThink(this,'low')"><span>Low</span><span class="check"></span></button>
+                  <button class="row" onclick="pickThink(this,'medium')"><span>Medium</span><span class="check"></span></button>
+                  <button class="row" data-selected="true" onclick="pickThink(this,'high')">
+                    <span>High<span class="sub">对齐要读完整场对话，建议不低于 Medium</span></span><span class="check">✓</span>
+                  </button>
+                  <button class="row" onclick="pickThink(this,'xhigh')"><span>Extra high</span><span class="check"></span></button>
+                </div>
+              </div>
+
+              <!-- skills -->
+              <div class="pop-group">
+                <div class="pop-title">
+                  <span class="name">对齐技能</span>
+                  <span class="hint" id="skHint">已选 3/3</span>
+                </div>
+                <div style="margin-top:4px">
+                  <label class="skill">
+                    <input type="checkbox" checked onchange="syncSkills()" data-skill="wayfinder" />
+                    <span class="txt">
+                      <span class="name">决策寻路 <span class="key">wayfinder</span></span>
+                      <span class="desc">Destination 说得清、路线还在雾里时：先把决策地图画出来，逐张解决决策票，再谈单。</span>
+                    </span>
+                  </label>
+                  <label class="skill">
+                    <input type="checkbox" checked onchange="syncSkills()" data-skill="grill" />
+                    <span class="txt">
+                      <span class="name">拷问基线 <span class="key">grill · grilling</span></span>
+                      <span class="desc">前沿轮推进：每轮列全当前可答的决策、每题带推荐答案，未共识不动手。关掉就是纯对话。</span>
+                    </span>
+                  </label>
+                  <label class="skill">
+                    <input type="checkbox" checked onchange="syncSkills()" data-skill="frontend" />
+                    <span class="txt">
+                      <span class="name">前端先看见 <span class="key">grill-frontend-look</span></span>
+                      <span class="desc">一屏一档 / 五个结构方向，产出可打开的 HTML 原型；没有可打开的收成物就算这轮没完成。</span>
+                    </span>
+                  </label>
+                </div>
+                <p class="micro" id="skillWarn" style="display:none;color:var(--danger);margin:6px 2px 0">
+                  至少留一项技能，否则这场对齐只剩普通对话。
+                </p>
+              </div>
+              </div>
+
+              <div class="popfoot">
+                <span class="micro">设置随会话冻结并记入 <span class="mono">policy</span> 审计记录</span>
+                <button class="btn ghost" onclick="setState('closed')">完成</button>
+              </div>
+            </div>
+          </div>
+
+          <span class="spacer"></span>
+          <button class="btn ghost">切到新建任务</button>
+          <button class="btn ghost">取消</button>
+          <button class="btn" id="submitBtn">开始对齐</button>
+        </div>
+      </div>
+    </div>
+
+    <aside class="annot">
+      <p class="caption" style="margin-top:0"><b>底栏</b>：附件、项目、一颗「对齐配置」药丸（机器 · Model · Think · 技能数），右侧动作不变。</p>
+      <p class="caption"><b>浮层</b>：四段自上而下 —— 执行机器 / Model / Think Level / 对齐技能。前三段联动：换机器重置 Model 与 Think；换 Model 重置 Think。</p>
+      <p class="caption"><b>技能段</b>：三项复选框，默认全开。至少保留一项，全关时给行内红字而不是禁用提交。</p>
+      <p class="caption"><b>提交</b>：机器必须在线；Model 与 Think 允许留空走 CLI 默认。</p>
+      <p class="caption" style="color:var(--muted)">原型仅供方向确认，非生产页；浅/深色跟随系统。</p>
+    </aside>
+  </div>
+</div>
+
+<script>
+  var state = { open: true, skills: ['wayfinder','grill','frontend'], runtime: '本机 (MacBook Pro)', model: 'claude-opus-4-6', think: 'high' };
+
+  function setWidth(w) {
+    document.getElementById('viewport').dataset.width = w;
+    document.getElementById('w-desktop').setAttribute('aria-pressed', String(w === 'desktop'));
+    document.getElementById('w-phone').setAttribute('aria-pressed', String(w === 'phone'));
+  }
+
+  function setState(s) {
+    var pop = document.getElementById('popover');
+    var pill = document.getElementById('configPill');
+    var notice = document.getElementById('notice');
+    var submit = document.getElementById('submitBtn');
+    notice.style.display = 'none';
+
+    if (s === 'open') { state.open = true; }
+    if (s === 'closed') { state.open = false; }
+    if (s === 'empty') {
+      state.open = true;
+      document.getElementById('rtRows').innerHTML =
+        '<p class="micro" style="padding:8px">这个工作区还没有可用的执行机器。先连接一台 Runtime，对齐才有地方跑。</p>';
+      document.getElementById('rtHint').textContent = '0 台在线';
+      submit.textContent = '连接 Runtime';
+      submit.disabled = false;
+    }
+    if (s === 'error') {
+      state.open = false;
+      notice.textContent = '本机 (MacBook Pro) 当前离线，对齐无法开始。换一台在线的机器，或把本机守护进程启动起来。';
+      notice.style.display = 'block';
+      submit.disabled = true;
+    }
+    pop.dataset.open = String(state.open);
+    pill.setAttribute('aria-expanded', String(state.open));
+    document.getElementById('s-open').setAttribute('aria-pressed', String(s === 'open'));
+    document.getElementById('s-closed').setAttribute('aria-pressed', String(s === 'closed'));
+    document.getElementById('s-empty').setAttribute('aria-pressed', String(s === 'empty'));
+    document.getElementById('s-error').setAttribute('aria-pressed', String(s === 'error'));
+    if (s === 'open' || s === 'closed') { submit.textContent = '开始对齐'; submit.disabled = false; }
+    syncPill();
+  }
+
+  function resetGroup(sel) {
+    document.querySelectorAll(sel + ' .row').forEach(function (r) {
+      r.dataset.selected = 'false';
+      var c = r.querySelector('.check'); if (c) c.textContent = '';
+    });
+  }
+
+  function pickRuntime(el, name, status) {
+    resetGroup('#rtRows');
+    el.dataset.selected = 'true'; el.querySelector('.check').textContent = '✓';
+    state.runtime = name;
+    document.getElementById('mdHint').textContent = status === 'online' ? name + ' · 推荐' : '机器离线';
+    state.model = '';
+    resetGroup('#mdRows');
+    state.think = '';
+    resetGroup('#tlRows');
+    document.getElementById('tlHint').textContent = '等 Model 定下来';
+    syncPill();
+  }
+
+  function pickModel(el, name) {
+    resetGroup('#mdRows');
+    el.dataset.selected = 'true'; el.querySelector('.check').textContent = '✓';
+    state.model = name;
+    state.think = '';
+    resetGroup('#tlRows');
+    document.getElementById('tlHint').textContent = '随 Model 联动';
+    syncPill();
+  }
+
+  function pickThink(el, value) {
+    resetGroup('#tlRows');
+    el.dataset.selected = 'true'; el.querySelector('.check').textContent = '✓';
+    state.think = value;
+    syncPill();
+  }
+
+  function syncSkills() {
+    state.skills = Array.prototype.slice
+      .call(document.querySelectorAll('.skill input'))
+      .filter(function (i) { return i.checked; })
+      .map(function (i) { return i.dataset.skill; });
+    var empty = state.skills.length === 0;
+    document.getElementById('skillWarn').style.display = empty ? 'block' : 'none';
+    document.getElementById('skHint').textContent = '已选 ' + state.skills.length + '/3';
+    document.getElementById('submitBtn').disabled = empty;
+    syncPill();
+  }
+
+  function syncPill() {
+    var think = state.think ? state.think[0].toUpperCase() + state.think.slice(1) : '跟随 CLI';
+    document.getElementById('pillSummary').textContent =
+      state.runtime.split(' ')[0] + ' · ' + (state.model || '默认 Model') + ' · ' + think + ' · ' + state.skills.length + ' 项技能';
+  }
+
+  syncSkills();
+</script>
+</body>
+</html>

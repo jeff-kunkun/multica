@@ -2830,26 +2830,48 @@ describe("ApiClient issue drafts", () => {
     await expect(client.listIssueDrafts()).resolves.toEqual([]);
   });
 
-  it("switches the alignment policy and reports the version the server recorded", async () => {
+  it("switches the alignment skills and reports the versions the server recorded", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
         ...draft,
-        policy: { key: "conversation", version: "1", guided: false },
+        policy: {
+          key: "frontend+grill",
+          version: "1+4",
+          guided: true,
+          skills: [
+            { key: "frontend", version: "1" },
+            { key: "grill", version: "4" },
+          ],
+        },
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
     await expect(
-      client.switchIssueDraftPolicy("session-1", { policy: "conversation" }),
+      client.switchIssueDraftPolicy("session-1", {
+        skills: ["frontend", "grill"],
+      }),
     ).resolves.toMatchObject({
-      policy: { key: "conversation", version: "1", guided: false },
+      policy: {
+        key: "frontend+grill",
+        version: "1+4",
+        guided: true,
+        skills: [
+          { key: "frontend", version: "1" },
+          { key: "grill", version: "4" },
+        ],
+      },
     });
 
     const call = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(call[0]).toContain("/api/issue-drafts/session-1/policy");
     expect(call[1].method).toBe("PATCH");
-    expect(JSON.parse(String(call[1].body))).toEqual({ policy: "conversation" });
+    // The whole set travels, not a delta: the carrier's prompt is composed from
+    // the set, so a delta would make it a function of the switch history.
+    expect(JSON.parse(String(call[1].body))).toEqual({
+      skills: ["frontend", "grill"],
+    });
   });
 
   it("reports no policy at all for a body from a backend that has none", async () => {
@@ -2861,7 +2883,7 @@ describe("ApiClient issue drafts", () => {
 
     const client = new ApiClient("https://api.example.test");
     await expect(client.listIssueDrafts()).resolves.toMatchObject([
-      { policy: { key: "", version: "", guided: false } },
+      { policy: { key: "", version: "", guided: false, skills: [] } },
     ]);
   });
 

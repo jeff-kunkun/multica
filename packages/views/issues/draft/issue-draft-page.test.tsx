@@ -251,7 +251,12 @@ function draftSummary(overrides: Partial<IssueDraftSummary> = {}): IssueDraftSum
     revision: 3,
     draft: { title: "Dark mode", description: "Add it.", status: "", priority: "" },
     issue_id: null,
-    policy: { key: "question", version: "1", guided: true },
+    policy: {
+      key: "grill",
+      version: "4",
+      guided: true,
+      skills: [{ key: "grill", version: "4" }],
+    },
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     title: "Align a new issue",
@@ -848,106 +853,220 @@ async function openStyleMenu() {
 }
 
 describe("IssueDraftPage policy", () => {
-  it("shows which policy is running, with the prompt version it recorded", async () => {
+  it("shows which skills are running, with the prompt versions they recorded", async () => {
     renderPage();
     expect(await screen.findByText("Aligning")).toBeTruthy();
     expect(
-      screen.queryByRole("menuitemradio", { name: "Guided questions" }),
+      screen.queryByRole("menuitemcheckbox", { name: /Requirement interview/ }),
     ).toBeNull();
 
     await openStyleMenu();
     expect(
-      await screen.findByRole("menuitemradio", { name: "Guided questions" }),
+      await screen.findByRole("menuitemcheckbox", { name: /Requirement interview/ }),
     ).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText("Prompt question@1")).toBeTruthy();
+    // The two skills this conversation is not running are offered unchecked —
+    // that is the whole point of the control.
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: /Decision map/ }),
+    ).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Prompt grill@4")).toBeTruthy();
   });
 
-  it("switches to plain dialogue through the server, not in local state", async () => {
+  it("adds a skill through the server, not in local state", async () => {
     mocks.switchIssueDraftPolicy.mockResolvedValue({
-      ...draftSummary({ policy: { key: "conversation", version: "1", guided: false } }),
+      ...draftSummary({
+        policy: {
+          key: "frontend+grill",
+          version: "1+4",
+          guided: true,
+          skills: [
+            { key: "frontend", version: "1" },
+            { key: "grill", version: "4" },
+          ],
+        },
+      }),
     });
     renderPage();
     await openStyleMenu();
     fireEvent.click(
-      await screen.findByRole("menuitemradio", { name: "Plain conversation" }),
+      await screen.findByRole("menuitemcheckbox", { name: /See the screen first/ }),
     );
+    // The WHOLE set travels: the carrier's prompt is composed from it, so a
+    // delta would make the prompt a function of the switch history.
     await waitFor(() =>
       expect(mocks.switchIssueDraftPolicy).toHaveBeenCalledWith("sess-1", {
-        policy: "conversation",
+        skills: ["grill", "frontend"],
       }),
     );
   });
 
   // The menu is rendered from the client's whitelist, not from the server's
-  // registry, so a list that stopped at the two text-only styles would leave the
-  // look round unreachable — the one style a user has to be able to ask for,
-  // since it spends turns drawing instead of interviewing.
-  it("offers every style with its own label, and switches to the look round", async () => {
+  // registry, so a list that stopped at the requirement interview would leave
+  // the look round and the decision map unreachable — the two skills a user has
+  // to be able to ask for on purpose.
+  it("offers every skill with its own label, and can switch to a set of one", async () => {
+    // The conversation is already running the look round, so the interview is
+    // the box that can be turned OFF — the last-skill rule leaves this click
+    // live, which is what makes the resulting set of one observable.
+    mocks.drafts = [
+      draftSummary({
+        policy: {
+          key: "frontend+grill",
+          version: "1+4",
+          guided: true,
+          skills: [
+            { key: "frontend", version: "1" },
+            { key: "grill", version: "4" },
+          ],
+        },
+      }),
+    ];
     mocks.switchIssueDraftPolicy.mockResolvedValue({
-      ...draftSummary({ policy: { key: "frontend", version: "1", guided: true } }),
+      ...draftSummary({
+        policy: {
+          key: "frontend",
+          version: "1",
+          guided: true,
+          skills: [{ key: "frontend", version: "1" }],
+        },
+      }),
     });
     renderPage();
     await openStyleMenu();
 
-    const options = await screen.findAllByRole("menuitemradio");
+    const options = await screen.findAllByRole("menuitemcheckbox");
     expect(options.map((option) => option.textContent)).toEqual([
-      "Guided questions",
-      "Plain conversation",
-      "Front-end prototype",
+      expect.stringContaining("Requirement interview"),
+      expect.stringContaining("Decision map"),
+      expect.stringContaining("See the screen first"),
     ]);
 
+    // Turning the interview off while the look round is on leaves a set of one:
+    // the look round still asks its own question, so the control stays live.
     fireEvent.click(
-      screen.getByRole("menuitemradio", { name: "Front-end prototype" }),
+      screen.getByRole("menuitemcheckbox", { name: /Requirement interview/ }),
     );
     await waitFor(() =>
       expect(mocks.switchIssueDraftPolicy).toHaveBeenCalledWith("sess-1", {
-        policy: "frontend",
+        skills: ["frontend"],
       }),
     );
   });
 
-  it("reports the look round's own key and prompt version once it is recorded", async () => {
+  it("refuses to turn off the last skill, naming why", async () => {
+    renderPage();
+    await openStyleMenu();
+    const only = await screen.findByRole("menuitemcheckbox", {
+      name: /Requirement interview/,
+    });
+    // The server refuses an empty set, so the control does not offer one: the
+    // last checked row is disabled rather than accepting a click that 400s.
+    expect(only).toBeDisabled();
+    expect(only).toHaveAttribute(
+      "title",
+      "At least one alignment skill has to stay on.",
+    );
+    expect(mocks.switchIssueDraftPolicy).not.toHaveBeenCalled();
+  });
+
+  it("reports a two-skill set's keys and prompt versions once recorded", async () => {
     mocks.drafts = [
-      draftSummary({ policy: { key: "frontend", version: "1", guided: true } }),
+      draftSummary({
+        policy: {
+          key: "frontend+grill",
+          version: "1+4",
+          guided: true,
+          skills: [
+            { key: "frontend", version: "1" },
+            { key: "grill", version: "4" },
+          ],
+        },
+      }),
     ];
     renderPage();
     await openStyleMenu();
     expect(
-      await screen.findByRole("menuitemradio", { name: "Front-end prototype" }),
+      await screen.findByRole("menuitemcheckbox", { name: /See the screen first/ }),
     ).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText("Prompt frontend@1")).toBeTruthy();
+    expect(screen.getByText("Prompt frontend+grill@1+4")).toBeTruthy();
   });
 
-  it("surfaces a refused switch and leaves the running policy on screen", async () => {
+  it("surfaces a refused switch and leaves the running set on screen", async () => {
+    mocks.drafts = [
+      draftSummary({
+        policy: {
+          key: "frontend+grill",
+          version: "1+4",
+          guided: true,
+          skills: [
+            { key: "frontend", version: "1" },
+            { key: "grill", version: "4" },
+          ],
+        },
+      }),
+    ];
     mocks.switchIssueDraftPolicy.mockRejectedValue(new Error("stop the current reply first"));
     renderPage();
     await openStyleMenu();
     fireEvent.click(
-      await screen.findByRole("menuitemradio", { name: "Plain conversation" }),
+      await screen.findByRole("menuitemcheckbox", { name: /Decision map/ }),
     );
     expect(await screen.findByText("stop the current reply first")).toBeTruthy();
     // Selecting closes the menu so the refusal is visible; reopening must still
-    // show the style the server is running, not the one that was clicked.
-    await openStyleMenu();
+    // show the set the server is running, not the one that was clicked. The
+    // reopen is retried because the refusal banner renders as the menu is still
+    // dismissing, and a click on a dismissing trigger only closes it again.
+    await waitFor(
+      async () => {
+        await openStyleMenu();
+        expect(
+          await screen.findByRole("menuitemcheckbox", { name: /Requirement interview/ }),
+        ).toHaveAttribute("aria-checked", "true");
+      },
+      { timeout: 3000 },
+    );
+    // The map was never turned on, because the switch that would have turned it
+    // on was refused.
     expect(
-      await screen.findByRole("menuitemradio", { name: "Guided questions" }),
-    ).toHaveAttribute("aria-checked", "true");
+      screen.getByRole("menuitemcheckbox", { name: /Decision map/ }),
+    ).toHaveAttribute("aria-checked", "false");
   });
 
   it("offers no control at all when the backend reports no policy", async () => {
-    // An installed desktop client can talk to a backend that predates policies;
-    // a switch that cannot land is worse than no switch, and an empty menu is
+    // An installed desktop client can talk to a backend that predates skills; a
+    // toggle that cannot land is worse than no toggle, and an empty menu is
     // worse than no menu.
-    mocks.drafts = [draftSummary({ policy: { key: "", version: "", guided: false } })];
+    mocks.drafts = [
+      draftSummary({ policy: { key: "", version: "", guided: false, skills: [] } }),
+    ];
     renderPage();
     await screen.findByText("Aligning");
     expect(screen.queryByRole("button", { name: "More alignment options" })).toBeNull();
-    expect(
-      screen.queryByRole("menuitemradio", { name: "Plain conversation" }),
-    ).toBeNull();
-    expect(
-      screen.queryByRole("menuitemradio", { name: "Guided questions" }),
-    ).toBeNull();
+    expect(screen.queryByRole("menuitemcheckbox")).toBeNull();
+  });
+
+  it("names a skill this client cannot toggle instead of hiding it", async () => {
+    // Response drift in the other direction: the server runs a skill this build
+    // has no copy for. Dropping it would misreport the set the carrier was
+    // given, so the row is shown, disabled, and labelled as unknown.
+    mocks.drafts = [
+      draftSummary({
+        policy: {
+          key: "grill+cosmic",
+          version: "4+1",
+          guided: true,
+          skills: [
+            { key: "cosmic", version: "1" },
+            { key: "grill", version: "4" },
+          ],
+        },
+      }),
+    ];
+    renderPage();
+    await openStyleMenu();
+    const unknown = await screen.findByRole("menuitemcheckbox", { name: /cosmic/ });
+    expect(unknown).toHaveAttribute("aria-checked", "true");
+    expect(unknown).toHaveAttribute("aria-disabled", "true");
   });
 });
 

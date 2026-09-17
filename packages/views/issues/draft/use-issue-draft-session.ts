@@ -29,7 +29,7 @@ import {
   useSaveIssueDraft,
   useSwitchIssueDraftPolicy,
   useSwitchIssueDraftRuntime,
-  type IssueDraftPolicyKey,
+  type IssueDraftSkillKey,
   type IssueDraftQuestion,
   type IssueDraftStage,
 } from "@multica/core/issue-drafts";
@@ -60,7 +60,12 @@ const EMPTY_ISSUES: readonly Issue[] = [];
  * older backend is a real deployment shape — an installed desktop client can
  * talk to one — so the state has to be representable, not assumed away.
  */
-const UNKNOWN_POLICY: IssueDraftPolicy = { key: "", version: "", guided: false };
+const UNKNOWN_POLICY: IssueDraftPolicy = {
+  key: "",
+  version: "",
+  guided: false,
+  skills: [],
+};
 
 export interface IssueDraftSession {
   stage: IssueDraftStage;
@@ -128,8 +133,8 @@ export interface IssueDraftSession {
   runtimeOnline: boolean;
   switchingRuntime: boolean;
   /**
-   * The alignment policy in force, as the server records it: which behaviour the
-   * carrier runs, and which version of its prompt it was given.
+   * The alignment skills in force, as the server records them: which methods the
+   * carrier runs, and which versions of their prompts it was given.
    */
   policy: IssueDraftPolicy;
   switchingPolicy: boolean;
@@ -183,8 +188,8 @@ export interface IssueDraftSession {
   reopen: () => Promise<boolean>;
   abandon: () => Promise<boolean>;
   switchRuntime: (runtimeId: string) => Promise<string | null>;
-  /** Switches between guided questions and plain dialogue. */
-  setPolicy: (policy: IssueDraftPolicyKey) => Promise<boolean>;
+  /** Replaces the set of alignment skills the carrier runs. */
+  setPolicy: (skills: IssueDraftSkillKey[]) => Promise<boolean>;
   stop: () => Promise<void>;
   retry: () => void;
   clearError: () => void;
@@ -648,16 +653,16 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
   );
 
   /**
-   * Switches the alignment policy. The control must not move until the server
-   * has answered: what changes is what the NEXT reply will do, and a picker that
-   * shows "plain dialogue" while the carrier is still interviewing is the same
+   * Replaces the alignment skill set. The control must not move until the server
+   * has answered: what changes is what the NEXT reply will do, and a toggle that
+   * shows the interview off while the carrier is still interviewing is the same
    * class of lie as a runtime picker that moved before the rebind (MUL-5163).
    */
   const setPolicy = useCallback(
-    async (next: IssueDraftPolicyKey): Promise<boolean> => {
+    async (next: IssueDraftSkillKey[]): Promise<boolean> => {
       setError(null);
       try {
-        await policyMutation.mutateAsync({ draftId, policy: next });
+        await policyMutation.mutateAsync({ draftId, skills: next });
         return true;
       } catch (err) {
         setError(

@@ -66,22 +66,44 @@ export interface IssueDraftPayload {
 }
 
 /**
- * How the carrier is asking: which alignment policy this conversation runs
- * under, and which version of that policy's prompt it was given.
+ * One alignment skill a conversation is running, with the version of the
+ * method prompt the carrier was given for it.
+ *
+ * The set is the unit of configuration (DENE-512): the carrier's system prompt
+ * is the shared contract plus every enabled skill's method, so a conversation
+ * can interview AND draw a decision map AND settle a screen, in one prompt.
+ * `version` is per skill for that reason — the recorded `(skill, version)` pairs
+ * are what a finished alignment points at when someone asks what produced it.
+ */
+export interface IssueDraftSkill {
+  key: string;
+  version: string;
+}
+
+/**
+ * How the carrier is asking: which alignment skills this conversation runs
+ * under, and which versions of their prompts it was given.
  *
  * `version` is the audit half — it names the prompt that produced the draft, and
  * it is read back from the draft row, so a finished alignment still reports the
  * version it ran after the registry moved on. `key` is empty when the backend
- * predates policies: nothing here can be switched then, and the page hides the
+ * predates skills: nothing here can be switched then, and the page hides the
  * control rather than offering a switch that cannot land.
  */
 export interface IssueDraftPolicy {
   key: string;
   version: string;
-  /** Whether this policy asks the user questions — the guided `question` and
-   *  `frontend` policies do, `conversation` does not. The server decides, so
+  /** Whether ANY enabled skill asks the user questions — the guided interview
+   *  and the look round do, a plain dialogue does not. The server decides, so
    *  the page never hardcodes which key is which. */
   guided: boolean;
+  /**
+   * The same record as a list, which is what the toggle restores itself from.
+   * Absent or empty on a backend that predates skills (or when the response
+   * drifted), in which case `key` is the only thing that can be read — and it is
+   * a single skill key there, not a "+"-joined set.
+   */
+  skills?: IssueDraftSkill[];
 }
 
 /** One alignment draft as the server owns it. */

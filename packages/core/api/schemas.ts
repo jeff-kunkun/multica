@@ -2344,28 +2344,43 @@ export const IssueDraftPayloadSchema = z.object({
 }).loose();
 
 /**
- * The alignment policy a draft runs under.
+ * The alignment skills a draft runs under.
  *
  * Every field has a fallback, and the fallback is deliberately "nothing is
  * known": an installed desktop client can talk to a backend that predates
- * policies, and reporting a key it never sent would offer a switch that cannot
+ * skills, and reporting a key it never sent would offer a toggle that cannot
  * land. `key: ""` is that state — the page hides the control instead.
+ *
+ * `skills` is the same record as a list, and it is what the toggle restores its
+ * checkboxes from. It defaults to empty rather than to the default set on
+ * purpose: an unparseable list must fall back to "read the joined key", not to
+ * "this conversation runs the interview", which would show a checked box for a
+ * skill nobody enabled.
  */
 export const IssueDraftPolicySchema = z.object({
   key: z.string().catch(""),
   version: z.string().catch(""),
   guided: z.boolean().catch(false),
+  skills: z
+    .array(z.object({ key: z.string().catch(""), version: z.string().catch("") }).loose())
+    .catch([]),
 }).loose();
 
 export const EMPTY_ISSUE_DRAFT_POLICY: IssueDraftPolicy = {
   key: "",
   version: "",
   guided: false,
+  skills: [],
 };
 
 /** The fallback shape, as the schema's own output type: `key: ""` is the
- *  documented "this backend has no policies" state and must survive `.catch`. */
-const UNKNOWN_ISSUE_DRAFT_POLICY = { key: "", version: "", guided: false };
+ *  documented "this backend has no skills" state and must survive `.catch`. */
+const UNKNOWN_ISSUE_DRAFT_POLICY = {
+  key: "",
+  version: "",
+  guided: false,
+  skills: [],
+};
 
 /**
  * One alignment draft.

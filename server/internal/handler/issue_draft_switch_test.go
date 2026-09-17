@@ -65,28 +65,25 @@ func sendDraftChatTurn(t *testing.T, sessionID, content string) {
 }
 
 // assertRecordedPromptIsTheNextReplysPrompt is the auditability property in one
-// check: the prompt version the draft records must be the prompt the agent
+// check: the prompt versions the draft records must be the prompt the agent
 // carrying the next reply actually has. A registry whose version moved without
 // its prompt moving — or a switch that wrote one without the other — fails here.
 func assertRecordedPromptIsTheNextReplysPrompt(t *testing.T, sessionID, agentID string) {
 	t.Helper()
 	key, version := carrierPolicyKey(t, sessionID)
-	recorded, ok := issueDraftPolicyByKey(key)
-	if !ok {
-		t.Fatalf("the draft records policy %q, which is not in the registry", key)
+	set := issueDraftSkillSet(strings.Split(key, issueDraftSkillJoin))
+	if set.Keys() != key || set.Version() != version {
+		t.Fatalf("the draft records %s@%s, which is not this registry's record for that set (%s@%s) — the audit trail names a prompt nobody can read",
+			key, version, set.Keys(), set.Version())
 	}
-	if recorded.Version != version {
-		t.Fatalf("the draft records %s@%s, but the registry's prompt for %s is version %s — the audit trail names a prompt nobody can read",
-			key, version, key, recorded.Version)
-	}
-	if got := carrierInstructions(t, agentID); got != recorded.Instructions() {
+	if got := carrierInstructions(t, agentID); got != set.Instructions() {
 		t.Fatalf("the next reply's carrier does not hold the prompt %s@%s records", key, version)
 	}
 }
 
-// The guided policy's whole visible effect is the question block, so a switch to
-// plain dialogue has to be observable as "the prompt no longer teaches it" —
-// asserted on the prompt the next reply gets, not on the registry.
+// The grill skill's whole visible effect is the question block, so dropping it
+// has to be observable as "the prompt no longer teaches it" — asserted on the
+// prompt the next reply gets, not on the registry.
 func TestPolicySwitchChangesThePromptOfTheNextReply(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -94,20 +91,16 @@ func TestPolicySwitchChangesThePromptOfTheNextReply(t *testing.T) {
 	cleanupIssueDraftCarriers(t)
 
 	session := startIssueDraftSession(t)
-	questionPolicy, ok := issueDraftPolicyByKey(issueDraftPolicyQuestion)
-	if !ok {
-		t.Fatal("the guided question policy is not registered")
-	}
-	if got := carrierInstructions(t, session.AgentID); got != questionPolicy.Instructions() {
+	guidedSet := issueDraftSkillSet{issueDraftSkillGrill}
+	if got := carrierInstructions(t, session.AgentID); got != guidedSet.Instructions() {
 		t.Fatal("the conversation did not open on the guided prompt")
 	}
 
-	conversationPolicy, ok := issueDraftPolicyByKey(issueDraftPolicyConversation)
-	if !ok {
-		t.Fatal("the conversation policy is not registered")
-	}
+	// Plain dialogue is the EMPTY set now: there is a skill for interviewing and
+	// none for not interviewing, so "stop asking me questions" is answered by
+	// leaving the interviewer out rather than by switching to a second prompt.
 	testutil.Call(t, testHandler.SwitchIssueDraftPolicy,
-		switchPolicyRequest(t, session.SessionID, issueDraftPolicyConversation)).
+		switchPolicyRequest(t, session.SessionID, issueDraftSkillFrontend)).
 		Want(http.StatusOK)
 
 	// The next turn, sent with the pre-switch agent in hand.
@@ -118,11 +111,11 @@ func TestPolicySwitchChangesThePromptOfTheNextReply(t *testing.T) {
 		t.Fatalf("the next reply is queued for agent %s, want the conversation's carrier %s", agentID, session.AgentID)
 	}
 	prompt := carrierInstructions(t, agentID)
-	if prompt != conversationPolicy.Instructions() {
+	if prompt != (issueDraftSkillSet{issueDraftSkillFrontend}).Instructions() {
 		t.Fatal("the next reply's carrier still holds the prompt the switch replaced")
 	}
-	if strings.Contains(prompt, "<issue_draft_question>") {
-		t.Fatal("the unguided prompt still teaches the question block; an answer chip would keep appearing after the user closed the guidance")
+	if strings.Contains(prompt, "converge the draft, and ask about what you cannot decide alone") {
+		t.Fatal("the prompt without the grill skill still runs the requirement interview; the user turned that skill off")
 	}
 	assertRecordedPromptIsTheNextReplysPrompt(t, session.SessionID, agentID)
 }

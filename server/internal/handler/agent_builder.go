@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
@@ -380,6 +381,42 @@ func (h *Handler) resolveSessionCarrierRuntime(w http.ResponseWriter, r *http.Re
 		return db.AgentRuntime{}, false
 	}
 	return runtime, true
+}
+
+// sessionCarrierThinkingLevelAccepted validates a reasoning effort for a
+// conversation carrier against the runtime it will actually run on, writing the
+// 400 itself when it refuses.
+//
+// It exists because the two carrier flows and agent create/update all have to
+// answer the same two questions and none of them may answer differently:
+//
+//   - Is this a value this provider understands at all? A fixed-enum provider
+//     rejects an unknown literal here rather than persisting a word the daemon
+//     will drop.
+//   - For an ACP-catalog provider, does the catalog this runtime reported
+//     actually advertise an effort? The provider name is not the answer there,
+//     and this is the check that keeps a level from being frozen onto a carrier
+//     that cannot take one.
+//
+// An empty level means "let the local CLI decide" and is always accepted — it
+// is the picker's own empty option, not a missing value.
+func (h *Handler) sessionCarrierThinkingLevelAccepted(w http.ResponseWriter, r *http.Request, runtime db.AgentRuntime, level string) bool {
+	if !agent.IsKnownThinkingValue(runtime.Provider, level) {
+		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, level))
+		return false
+	}
+	if level == "" {
+		return true
+	}
+	switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
+	case acpEffortAbsent:
+		writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
+		return false
+	case acpEffortUnknown:
+		writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(runtime.Provider))
+		return false
+	}
+	return true
 }
 
 type SwitchAgentBuilderRuntimeRequest struct {

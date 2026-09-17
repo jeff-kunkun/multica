@@ -2248,30 +2248,38 @@ const createAgentBuilder = `-- name: CreateAgentBuilder :one
 INSERT INTO agent (
     workspace_id, name, description, runtime_mode, runtime_config, runtime_id,
     visibility, permission_mode, max_concurrent_tasks, owner_id, instructions,
-    custom_env, custom_args, model, kind, system_key
+    custom_env, custom_args, model, thinking_level, kind, system_key
 ) VALUES (
     $1, $2, '', $3, '{}'::jsonb, $4,
     'private', 'private', 1, $5, $6,
-    '{}'::jsonb, '[]'::jsonb, $7, 'system', $8
+    '{}'::jsonb, '[]'::jsonb, $7, $8,
+    'system', $9
 )
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id
 `
 
 type CreateAgentBuilderParams struct {
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	Name         string      `json:"name"`
-	RuntimeMode  string      `json:"runtime_mode"`
-	RuntimeID    pgtype.UUID `json:"runtime_id"`
-	OwnerID      pgtype.UUID `json:"owner_id"`
-	Instructions string      `json:"instructions"`
-	Model        pgtype.Text `json:"model"`
-	SystemKey    pgtype.Text `json:"system_key"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Name          string      `json:"name"`
+	RuntimeMode   string      `json:"runtime_mode"`
+	RuntimeID     pgtype.UUID `json:"runtime_id"`
+	OwnerID       pgtype.UUID `json:"owner_id"`
+	Instructions  string      `json:"instructions"`
+	Model         pgtype.Text `json:"model"`
+	ThinkingLevel pgtype.Text `json:"thinking_level"`
+	SystemKey     pgtype.Text `json:"system_key"`
 }
 
 // One hidden builder agent per creation session. Keeping the execution carrier
 // session-scoped freezes its model/runtime configuration when multiple builder
 // flows are open concurrently, while `kind = 'system'` keeps it out of normal
 // agent lists and assignment surfaces.
+//
+// thinking_level joins model as a choice frozen onto the carrier at creation
+// rather than a later UPDATE: both are read off the carrier when the daemon
+// stamps and runs a task, so a value written after the session exists is a value
+// the first turn never ran with. NULL means "let the local CLI decide", which is
+// what the picker's empty option asks for (DENE-512).
 func (q *Queries) CreateAgentBuilder(ctx context.Context, arg CreateAgentBuilderParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, createAgentBuilder,
 		arg.WorkspaceID,
@@ -2281,6 +2289,7 @@ func (q *Queries) CreateAgentBuilder(ctx context.Context, arg CreateAgentBuilder
 		arg.OwnerID,
 		arg.Instructions,
 		arg.Model,
+		arg.ThinkingLevel,
 		arg.SystemKey,
 	)
 	var i Agent

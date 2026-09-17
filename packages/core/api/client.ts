@@ -1704,10 +1704,13 @@ export class ApiClient {
   async createIssueDraftSession(data: {
     runtime_id: string;
     model?: string;
+    /** Reasoning effort for the carrier, empty meaning the local CLI's own
+     *  default. Validated server-side against the target runtime (DENE-512). */
+    thinking_level?: string;
     draft?: Partial<IssueDraftPayload>;
-    /** Which alignment policy to open under. Omitted means the guided
-     *  default; see packages/core/issue-drafts/policy.ts. */
-    policy?: string;
+    /** Which alignment skills to open under. Omitted means the server's
+     *  default; see packages/core/issue-drafts/skills.ts. */
+    skills?: string[];
   }): Promise<IssueDraftSession> {
     const raw = await this.fetch<unknown>("/api/issue-drafts", {
       method: "POST",
@@ -1831,18 +1834,22 @@ export class ApiClient {
   }
 
   /**
-   * Switches a live alignment conversation's policy: guided questions, plain
-   * dialogue, or the front-end look round. The keys are the server registry's;
-   * the client's whitelist is packages/core/issue-drafts/policy.ts.
+   * Replaces the set of alignment skills a live conversation runs. The keys are
+   * the server registry's; the client's whitelist is
+   * packages/core/issue-drafts/skills.ts.
    *
-   * The response is the updated draft, including the policy version the server
+   * The whole set is sent rather than a delta: the carrier's prompt is composed
+   * from the set, so a delta would make the prompt a function of the switch
+   * history rather than of what is checked.
+   *
+   * The response is the updated draft, including the versions the server
    * recorded — the audit value, not an echo of the request. It is parsed with a
    * fallback because a caller that cannot read the body can still re-read the
    * list; the switch itself already committed server-side.
    */
   async switchIssueDraftPolicy(
     sessionId: string,
-    data: { policy: string },
+    data: { skills: string[] },
   ): Promise<IssueDraft> {
     const raw = await this.fetch<unknown>(
       `/api/issue-drafts/${sessionId}/policy`,

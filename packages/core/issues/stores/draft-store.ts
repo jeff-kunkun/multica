@@ -6,6 +6,7 @@ import type {
   IssueAssigneeType,
   IssuePropertyValues,
 } from "../../types";
+import type { IssueDraftSkillKey } from "../../issue-drafts/skills";
 import type { CreateMode } from "./create-mode-store";
 import type { QuickCreateActorType } from "./quick-create-store";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
@@ -71,6 +72,16 @@ export interface IssueCreateAlign {
    *  the agent prompt, so a mode switch never overwrites another face's body. */
   request: string;
   /**
+   * Which alignment skills the conversation opens with (DENE-512).
+   *
+   * Persisted, unlike the machine/model/effort beside it in the same panel: the
+   * skill set is live — the alignment page can change it between turns — so a
+   * user who turned the look round off and comes back to the entry point means
+   * it. Absent means "not chosen yet", which the panel resolves to the
+   * registry's default rather than freezing the default into the draft.
+   */
+  skills?: IssueDraftSkillKey[];
+  /**
    * The draft whose first turn the entry panel could not deliver (DENE-422).
    *
    * The panel hands off and closes the moment the conversation exists, so it is
@@ -116,6 +127,7 @@ const emptyAgent = (): IssueCreateAgent => ({
 
 const emptyAlign = (): IssueCreateAlign => ({
   request: "",
+  skills: undefined,
 });
 
 interface IssueDraftStore {

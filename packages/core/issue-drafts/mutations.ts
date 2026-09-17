@@ -86,6 +86,20 @@ export function useStartIssueDraft(wsId: string) {
     mutationFn: async (input: {
       runtimeId: string;
       model?: string;
+      /**
+       * Reasoning effort for the carrier, empty meaning the local CLI's own
+       * default. Chosen in the same panel as the machine and the model, and
+       * frozen onto the carrier with them — the daemon reads it off the agent,
+       * so a level applied after the first turn is a level that turn never ran
+       * at (DENE-512).
+       */
+      thinkingLevel?: string;
+      /**
+       * The alignment skills this conversation runs. Omitted means the server's
+       * default; the entry point sends what its checkboxes show so the panel and
+       * the conversation cannot disagree.
+       */
+      skills?: string[];
       /** What the user already typed at the entry point. */
       request: string;
       /**
@@ -121,6 +135,13 @@ export function useStartIssueDraft(wsId: string) {
       const session = await api.createIssueDraftSession({
         runtime_id: input.runtimeId,
         model: input.model?.trim() || undefined,
+        thinking_level: input.thinkingLevel?.trim() || undefined,
+        // Only when the caller chose: an omitted field is the server's default,
+        // and sending the client's default would make this client the owner of
+        // a product decision the registry already made.
+        ...(input.skills && input.skills.length > 0
+          ? { skills: input.skills }
+          : {}),
         draft: seedDraft(request, input.projectId, input.parentIssueId),
       });
       const draftId = session.session_id;
@@ -313,21 +334,22 @@ export function useSwitchIssueDraftRuntime(wsId: string) {
 }
 
 /**
- * Switches how the carrier asks: guided questions, plain dialogue, or the
- * front-end look round that settles a screen by building something openable.
+ * Replaces the set of alignment skills the carrier runs: the requirement
+ * interview, the decision map, and the look round that settles a screen by
+ * building something openable — any combination of the three.
  *
  * The response is applied to the list cache rather than merely invalidated for
  * the same reason a save is: the switch is a determinate field change the user
- * is standing in front of, and the recorded prompt version it returns is the
- * audit value the page displays. A failure re-reads instead — a switch refused
+ * is standing in front of, and the recorded versions it returns are the audit
+ * value the page displays. A failure re-reads instead — a switch refused
  * because a reply is in flight must leave the control showing what is actually
  * running.
  */
 export function useSwitchIssueDraftPolicy(wsId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { draftId: string; policy: string }) =>
-      api.switchIssueDraftPolicy(input.draftId, { policy: input.policy }),
+    mutationFn: (input: { draftId: string; skills: string[] }) =>
+      api.switchIssueDraftPolicy(input.draftId, { skills: input.skills }),
     onSuccess: (updated) => {
       applyDraftRow(qc, wsId, updated);
       void qc.invalidateQueries({ queryKey: issueDraftKeys.list(wsId) });

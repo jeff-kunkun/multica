@@ -8,6 +8,7 @@ import { ApiError, clientErrorMessage } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  DEFAULT_ISSUE_DRAFT_SKILLS,
   IssueDraftSessionUnrecognizedError,
   issueDraftListOptions,
   unfinishedIssueDrafts,
@@ -36,7 +37,7 @@ import {
 import { useT } from "../i18n";
 import { UnfinishedIssueDraftsBanner } from "../issues/draft/unfinished-issue-drafts";
 import { ClearablePillButton } from "../common/pill-button";
-import { RuntimePicker } from "../agents/components/runtime-picker";
+import { AlignmentConfigPicker } from "../issues/draft/alignment-config-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { AppLink, useNavigation } from "../navigation";
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
@@ -149,6 +150,18 @@ export function AlignCreatePanel({
     return () => cancelAnimationFrame(frame);
   }, [seedRequest, seedRetry]);
   const [runtimeId, setRuntimeId] = useState("");
+  // Model and reasoning level live here rather than in the draft store: they are
+  // frozen onto the carrier when the session is created and can never be changed
+  // afterwards, so persisting them would offer the next alignment a choice its
+  // conversation could not honour. The skill set IS persisted (it is switchable
+  // on the page), so it rides the draft store like the request does.
+  const [model, setModel] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState("");
+  // The default is applied here, at read time, rather than written into the
+  // store on mount: a user who never opens the panel has expressed no opinion,
+  // and freezing the default into the draft would make it look like one — and
+  // would outlive a change to what the default IS.
+  const skills = draft.align.skills ?? DEFAULT_ISSUE_DRAFT_SKILLS;
 
   const draftsQuery = useQuery(issueDraftListOptions(wsId));
   const runtimesQuery = useQuery(runtimeListOptions(wsId));
@@ -257,6 +270,9 @@ export function AlignCreatePanel({
     const result = await start
       .mutateAsync({
         runtimeId: selectedRuntime.id,
+        model: model || undefined,
+        thinkingLevel: thinkingLevel || undefined,
+        skills: [...skills],
         request,
         attachmentIds: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         // Stored on the draft at creation, so the whole group the conversation
@@ -378,17 +394,30 @@ export function AlignCreatePanel({
             }
             align="start"
           />
-          {/* Not clearable: the alignment has to run SOMEWHERE, so there is no
-              empty state to offer — unlike the project, which is optional by
-              design. */}
-          <RuntimePicker
-            variant="pill"
+          {/* One pill for the four choices the conversation cannot be started
+              without deciding (DENE-512): which machine, which model, how hard
+              it thinks, and which alignment skills run. They were three
+              separate controls before — a machine pill here and a model/effort
+              pair the alignment page could change afterwards — but the model
+              and the effort are frozen onto the carrier at creation and can
+              never be changed, so they were effectively create-time settings
+              living on a page that could not set them. Not clearable either
+              way: the alignment has to run SOMEWHERE, so there is no empty
+              state to offer, unlike the project, which is optional by design. */}
+          <AlignmentConfigPicker
             runtimes={runtimes}
             runtimesLoading={runtimesLoading}
             members={membersQuery.data ?? []}
             currentUserId={currentUserId}
-            selectedRuntimeId={runtimeId}
-            onSelect={setRuntimeId}
+            runtimeId={runtimeId}
+            onRuntimeChange={setRuntimeId}
+            model={model}
+            onModelChange={setModel}
+            thinkingLevel={thinkingLevel}
+            onThinkingLevelChange={setThinkingLevel}
+            skills={skills}
+            onSkillsChange={(next) => setAlign({ skills: [...next] })}
+            disabled={start.isPending}
           />
         </div>
         {/* The way back to filing this as an issue. The body stays in the

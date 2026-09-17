@@ -88,14 +88,21 @@ RETURNING *;
 -- session-scoped freezes its model/runtime configuration when multiple builder
 -- flows are open concurrently, while `kind = 'system'` keeps it out of normal
 -- agent lists and assignment surfaces.
+--
+-- thinking_level joins model as a choice frozen onto the carrier at creation
+-- rather than a later UPDATE: both are read off the carrier when the daemon
+-- stamps and runs a task, so a value written after the session exists is a value
+-- the first turn never ran with. NULL means "let the local CLI decide", which is
+-- what the picker's empty option asks for (DENE-512).
 INSERT INTO agent (
     workspace_id, name, description, runtime_mode, runtime_config, runtime_id,
     visibility, permission_mode, max_concurrent_tasks, owner_id, instructions,
-    custom_env, custom_args, model, kind, system_key
+    custom_env, custom_args, model, thinking_level, kind, system_key
 ) VALUES (
     @workspace_id, @name, '', @runtime_mode, '{}'::jsonb, @runtime_id,
     'private', 'private', 1, @owner_id, @instructions,
-    '{}'::jsonb, '[]'::jsonb, sqlc.narg('model'), 'system', @system_key
+    '{}'::jsonb, '[]'::jsonb, sqlc.narg('model'), sqlc.narg('thinking_level'),
+    'system', @system_key
 )
 RETURNING *;
 

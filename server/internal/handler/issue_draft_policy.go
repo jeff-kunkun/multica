@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Alignment policies are the pluggable half of a requirement-alignment
+// Alignment skills are the pluggable half of a requirement-alignment
 // conversation: what the carrier is asked to do with the user's request, and
 // the prompt that says so.
 //
@@ -17,13 +17,55 @@ import (
 // recorded on the draft. `issue_draft.policy_key` / `policy_version` are that
 // record; this file is the registry they name.
 //
-// Adding a policy means adding an entry here — nothing else selects behaviour.
-// Changing an entry's *prompt* means bumping its Version, because the version
+// A conversation runs a SET of them, chosen at the create entry point and
+// switchable while the draft is still open (DENE-512). The set is what the
+// carrier's system prompt is composed from: the shared wire contract, then each
+// enabled skill's method. The platform ships them because a workspace-scoped
+// skill cannot be relied on — the carrier's `system_key` is per-session
+// (`issue_draft:<uuid>`), so nothing in a workspace library can be attached to
+// it, and every workspace would have to own a copy of the method for the
+// feature to work at all.
+//
+// Adding a skill means adding an entry here — nothing else selects behaviour.
+// Changing an entry's *method* means bumping its Version, because the version
 // is what a finished conversation points at when someone audits it later.
+// Versions move together: every skill is half of the same composed prompt, so a
+// contract change makes every composition a prompt nobody has run before.
+//
+// The enable-set and the versions are both recorded on one line each —
+// `policy_key` is the "+"-joined skill list, `policy_version` the same list
+// carrying each skill's version. Encoding the set in the existing columns keeps
+// the mirror of this registry in the database a single named record, which is
+// the property the switch endpoint and the audit trail are both built on; a
+// second table for "skills of a draft" would be a second thing to keep in step.
 const (
+	// issueDraftSkillGrill is the eager half: converge by asking, one question
+	// at a time, with a recommended answer attached. It is the alignment's
+	// naming of this workspace's `grill`/`grilling` method.
+	issueDraftSkillGrill = "grill"
+	// issueDraftSkillWayfinder is the map half: the request is one effort whose
+	// route is still foggy, so the alignment settles WHAT to do as a decision
+	// map before it settles one issue's wording.
+	issueDraftSkillWayfinder = "wayfinder"
+	// issueDraftSkillFrontend is the look half: what the surface looks like is
+	// decided by opening something, not by describing it.
+	issueDraftSkillFrontend = "frontend"
+
+	// issueDraftPolicyQuestion and issueDraftPolicyConversation are the two
+	// legacy single-policy keys. `question` is exactly `grill` and
+	// `conversation` is exactly the empty set (the plain-dialogue half of
+	// `grill`), so the normalization below accepts both without a migration.
 	issueDraftPolicyQuestion     = "question"
 	issueDraftPolicyConversation = "conversation"
-	issueDraftPolicyFrontend     = "frontend"
+	// issueDraftPolicyFrontend is the retired third key. A draft created while
+	// `frontend` was a policy still has to report what it ran, so the key stays
+	// resolvable and normalizes to the skill of the same name.
+	issueDraftPolicyFrontend = "frontend"
+
+	// issueDraftSkillJoin separates the skill keys, and their versions, in the
+	// two recorded columns. "+" is not legal inside a key, so a recorded set
+	// always splits back into exactly the skills that composed it.
+	issueDraftSkillJoin = "+"
 )
 
 // issueDraftContract is the part every alignment policy shares: the wire
@@ -83,15 +125,18 @@ Name the platforms the surface lands on (web, desktop, mobile) once for the whol
 
 Do not choose the look. Which of several possible layouts or visual treatments wins is decided by looking at something, not by talking about it. Write down what must be true about the screen and leave how it looks to the implementation.`
 
-// issueDraftQuestionPolicy is the guided policy: interview first, one question
-// at a time, with recommended answers the user can accept in one click.
+// issueDraftGrillSkill is the eager-questioning skill: interview first, one
+// question at a time, with recommended answers the user can accept in one
+// click. It is this workspace's `grill` / `grilling` method, rewritten for the
+// one place it runs — an alignment conversation that converges on a draft
+// rather than on a plan of record.
 //
 // The options are a separate block from the draft on purpose. The draft block
 // is a partial update to a structured object, while a question is a turn-level
 // affordance that has to disappear once it is answered — folding them together
 // would make "no question this turn" indistinguishable from "the model forgot
 // to restate the title".
-const issueDraftQuestionPolicy = `Your task right now: converge the draft, and ask about what you cannot decide alone.
+const issueDraftGrillSkill = `Your task right now: converge the draft, and ask about what you cannot decide alone.
 
 - Ask at most ONE question per reply — the single question whose answer most changes what gets built. Never send a list of questions.
 - Prefer proposing a concrete draft over interviewing: if you can infer a sensible answer, put it in the draft and say what you assumed instead of asking.
@@ -100,7 +145,8 @@ const issueDraftQuestionPolicy = `Your task right now: converge the draft, and a
 - Offer 2-4 concrete options. Mark exactly one of them "recommended": true — the answer you would choose — and write its label so it is understandable on its own. value is the full answer to send back, phrased as the user would say it.
 - The user can always answer in their own words instead of picking an option, so an option is a shortcut, never a cage. Never ask a question whose only useful answer is free text if you can offer a reasonable default.
 - Omit the question block entirely on a reply that has nothing left to ask. Do not ask about anything the conversation has already settled.
-- If the user asks you to stop asking questions, stop for the rest of the conversation: keep refining the draft from what you know and state your assumptions instead.
+- If the user asks you to stop asking questions, stop for the rest of the conversation: keep refining the draft from what you know and state your assumptions instead. That is the user deciding the shape of the issue themselves, so follow their direction instead of re-opening settled questions.
+- Ask something outside the question block only when the request genuinely cannot be drafted without it (for example, the target is ambiguous), and then as a normal sentence — one question, not a list.
 
 When the request has a user-facing surface, two things are the user's to decide and yours only to propose:
 - Which screens are in THIS issue and which wait for later. That is a priority call, not a technical one. Ask it with the split you would choose marked recommended.
@@ -108,22 +154,45 @@ When the request has a user-facing surface, two things are the user's to decide 
 
 Ask the surface question before the rest of the draft is settled. A surface agreed at the end is a surface that was already assumed.`
 
-// issueDraftConversationPolicy is the unguided policy: plain dialogue, no
-// interview. The user drives; the carrier answers and keeps the draft current.
-const issueDraftConversationPolicy = `Your task right now: hold an ordinary conversation about the request and keep the draft current.
+// issueDraftWayfinderSkill is the decision-map skill: the request is one effort
+// whose destination can be named but whose route is still foggy, so what the
+// alignment settles FIRST is the map — which decisions have to be made, in what
+// order, and which of them are still unsayable.
+//
+// It is this workspace's `wayfinder` method with its artifact moved: wayfinder
+// normally writes a map into a tracker through a project's adapter, and an
+// alignment carrier has no project, no repository and a contract that forbids
+// creating anything (issue_draft_policy.go's shared contract). So the map is
+// kept where the alignment already keeps its state — in the reply and in the
+// draft's description — and the decision tickets it names become the group's
+// sub-issues, which IS the tracker this conversation owns.
+const issueDraftWayfinderSkill = `Your task right now: before the draft's wording, settle the ROUTE — what has to be decided, in what order, and what cannot be said yet.
 
-- Do not interview the user and do not emit question blocks. Answer what was asked, propose the draft you would write, and name any assumption you had to make.
-- Ask something only when the request genuinely cannot be drafted without it (for example, the target is ambiguous), and then ask it as a normal sentence — one question, not a list.
-- The user may close the guidance on purpose: they are deciding the shape of the issue themselves, so follow their direction instead of re-opening settled questions.`
+- Run this only for an effort that will not fit in one issue: several decisions, dependencies between them, or a destination the user can name while the way there is still unclear. A request that is already one well-formed issue needs none of this — say so in one sentence and go back to the ordinary rules.
+- Keep a decision map at the top of your reply, small enough to read in one screen:
+## 决策地图
+- 目的地: <the artifact, decision or change this effort has to make possible>
+- 已经在手: <decisions already settled in this conversation, one line each>
+- 下一步可决: <the decisions whose prerequisites are all settled — these can be answered now>
+- 还说不清: <what is in scope but cannot be stated precisely yet>
+- 范围外: <what this effort explicitly does not cover, and why>
+- Only two kinds of thing belong in 下一步可决: a decision the user has to make, and something that must be found out first (a fact in the codebase, a document, a measurement). Anything whose prerequisites are unsettled stays in 还说不清 — an unanswerable question on the frontier is what makes a map useless.
+- Ask the user about ONE frontier decision per reply. Put it in the question block so the user can answer it in one click, with 2-4 concrete options and exactly one marked "recommended": true — the answer you would choose:
+<issue_draft_question>{"question":"...","options":[{"label":"...","value":"...","recommended":true}]}</issue_draft_question>
+Never ask about a decision whose prerequisite is still open, and never send a list of questions.
+- Facts are yours to find, decisions are the user's to make. If a frontier item is a fact, look it up with the tools you have and report it instead of asking; if it needs a real investigation, put it in the map as a research note for the implementation issue rather than blocking the conversation on it.
+- Every settled decision moves to 已经在手 and pushes the frontier outward. When an answer makes a decision irrelevant or out of scope, move it to 范围外 with one line of reason — do not silently drop it.
+- The group you are drafting IS this map's product: a decision the user made that needs implementation becomes a child issue, and the map's 已经在手 section is what its description carries forward so nobody re-litigates it. Expand the map, do not replace it — carry the whole map back in every reply.
+- The route is clear when nothing is left in 下一步可决 and 还说不清 is empty or explicitly deferred. Only then converge on the final draft. Do not declare the route clear while a frontier decision is unanswered, and do not treat an empty frontier caused by an unanswered prerequisite as convergence — say which decision is holding it up.`
 
-// issueDraftFrontendPolicy is the look-round policy: the alignment deepened from
+// issueDraftFrontendSkill is the look-round skill: the alignment deepened from
 // "what must be true about the screen" into "what it looks like", which is the
 // one question a description cannot answer.
 //
-// It is a policy of its own rather than a phase inside the other two because
+// It is a skill of its own rather than a phase inside the others because
 // the method is long enough to fight the requirement interview for turns: under
 // it the round is spent building candidates and looking at them, and a user who
-// wants that has to be able to ask for it. The two text-only policies keep the
+// wants that has to be able to ask for it. The text-only side keeps the
 // contract's rule that a look is not settled in prose; this entry is the
 // exception that rule implies, and it earns it the only way the rule allows —
 // by producing something the user can open.
@@ -135,7 +204,7 @@ const issueDraftConversationPolicy = `Your task right now: hold an ordinary conv
 // a reply attachment. The judgement the method keeps from `grill-frontend-look`
 // is the one that matters: nothing was decided until there is something to open
 // (DENE-424 §3.2, DENE-421).
-const issueDraftFrontendPolicy = `Your task right now: settle what the surface looks like, not only what it does. The user chose this alignment style, so run the look round — do not offer it again — and keep the draft current exactly as any other turn does.
+const issueDraftFrontendSkill = `Your task right now: settle what the surface looks like, not only what it does. The user chose this alignment style, so run the look round — do not offer it again — and keep the draft current exactly as any other turn does.
 
 - One screen at a time is the default: the single screen the user has to see, a short kebab-case name, nothing else. Five structural directions is for when the user asks to compare: five candidates for the SAME surface in one file behind a picker, structurally different in layout, information hierarchy or the shape of the primary action. Different colours, spacing or corner radii are not different directions.
 - Build it yourself: one self-contained HTML file in your working directory, no framework, no build step, no real data. It must show the screen at desktop AND phone width, and must show the states this screen carries (loading / empty / error).
@@ -148,26 +217,22 @@ Offer 2-4 concrete options and mark exactly one "recommended": true. The user ma
 - At most two screens in one alignment. When the request needs more, stop and say so: the screens past the second belong in a sub-issue that says to prototype before building.
 - If the request turns out to have no user-visible surface at all, say so in one sentence and keep refining the draft under the usual rules instead of prototyping one.`
 
-// issueDraftPolicy is one auditable alignment policy.
-type issueDraftPolicy struct {
+// issueDraftSkill is one auditable alignment skill.
+type issueDraftSkill struct {
 	Key     string
 	Version string
-	// Guided tells the client whether this policy asks the user questions, so
+	// Guided tells the client whether this skill asks the user questions, so
 	// the alignment page can show the guidance control in the state it is
-	// actually in without hardcoding which key is which.
+	// actually in without hardcoding which key is which. It must agree with the
+	// method: a skill whose text emits the question block is guided, and the
+	// registry test asserts exactly that.
 	Guided bool
-	// Behaviour is the policy-specific half of the carrier's prompt.
-	Behaviour string
+	// Method is the skill-specific half of the carrier's prompt.
+	Method string
 }
 
-// Instructions is the full system prompt installed on the carrier: the shared
-// wire contract plus this policy's behaviour.
-func (p issueDraftPolicy) Instructions() string {
-	return issueDraftContract + "\n\n" + p.Behaviour
-}
-
-// issueDraftPolicyRegistry is the whole set. A new policy is a new entry; the
-// keys are the values accepted by the create and switch endpoints.
+// issueDraftSkillRegistry is the whole set. A new skill is a new entry; the keys
+// are the values accepted by the create and switch endpoints.
 //
 // Every entry moved to version 2 when the shared contract grew `children`: the
 // contract block is half of each prompt, so both entries are different prompts
@@ -189,70 +254,219 @@ func (p issueDraftPolicy) Instructions() string {
 // is no earlier prompt of it for a draft to have recorded, and the shared
 // contract it carries has not moved since the two text-only entries were
 // versioned against it.
-var issueDraftPolicyRegistry = map[string]issueDraftPolicy{
-	issueDraftPolicyQuestion: {
-		Key:       issueDraftPolicyQuestion,
-		Version:   "4",
-		Guided:    true,
-		Behaviour: issueDraftQuestionPolicy,
+//
+// DENE-512 kept `grill` at 4 and `frontend` at 1 across the rename: their method
+// text is the same prompt, and the only thing that moved is how a conversation
+// selects it. A draft that recorded `question@4` really did run the prompt
+// `grill@4` composes, to the character. `wayfinder` starts at 1 because there is
+// no earlier prompt of it at all.
+var issueDraftSkillRegistry = map[string]issueDraftSkill{
+	issueDraftSkillGrill: {
+		Key:     issueDraftSkillGrill,
+		Version: "4",
+		Guided:  true,
+		Method:  issueDraftGrillSkill,
 	},
-	issueDraftPolicyConversation: {
-		Key:       issueDraftPolicyConversation,
-		Version:   "3",
-		Guided:    false,
-		Behaviour: issueDraftConversationPolicy,
+	issueDraftSkillFrontend: {
+		Key:     issueDraftSkillFrontend,
+		Version: "1",
+		Guided:  true,
+		Method:  issueDraftFrontendSkill,
 	},
-	issueDraftPolicyFrontend: {
-		Key:       issueDraftPolicyFrontend,
-		Version:   "1",
-		Guided:    true,
-		Behaviour: issueDraftFrontendPolicy,
+	issueDraftSkillWayfinder: {
+		Key:     issueDraftSkillWayfinder,
+		Version: "1",
+		Guided:  true,
+		Method:  issueDraftWayfinderSkill,
 	},
 }
 
-// issueDraftPolicyKeys is the registry's key list, sorted so an error message
+// issueDraftSkillKeys is the registry's key list, sorted so an error message
 // does not depend on map iteration order.
-func issueDraftPolicyKeys() []string {
-	keys := make([]string, 0, len(issueDraftPolicyRegistry))
-	for key := range issueDraftPolicyRegistry {
+func issueDraftSkillKeys() []string {
+	keys := make([]string, 0, len(issueDraftSkillRegistry))
+	for key := range issueDraftSkillRegistry {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	return keys
 }
 
-// issueDraftPolicyByKey resolves a client-supplied policy key. The caller
-// decides what an unknown key means; this only answers whether it exists.
-func issueDraftPolicyByKey(key string) (issueDraftPolicy, bool) {
-	policy, ok := issueDraftPolicyRegistry[key]
-	return policy, ok
+// issueDraftSkillUnknownMessage is the one wording every rejection of an
+// unknown key uses, so the create and switch endpoints cannot drift apart.
+func issueDraftSkillUnknownMessage() string {
+	return fmt.Sprintf("skills must be among: %s", strings.Join(issueDraftSkillKeys(), ", "))
 }
 
-// issueDraftPolicyUnknownMessage is the one wording every rejection of an
-// unknown key uses, so the create and switch endpoints cannot drift apart.
-func issueDraftPolicyUnknownMessage() string {
-	return fmt.Sprintf("policy must be one of: %s", strings.Join(issueDraftPolicyKeys(), ", "))
+// issueDraftSkillSet is a request's skills after normalization: the registry
+// keys it selected, sorted so the recorded value does not depend on the order
+// the client happened to send them in.
+type issueDraftSkillSet []string
+
+// normalizeIssueDraftSkills turns what a client sent into the set that will be
+// composed and recorded.
+//
+// Three inputs are accepted, in this order of authority:
+//
+//   - `skills`: the DENE-512 field. Every key must be registered, an empty list
+//     is refused (a conversation with no method at all is a carrier with no
+//     instructions), and duplicates collapse.
+//   - `policy`: the pre-DENE-512 single key, still sent by installed clients
+//     that have not been updated. `question` means the grill skill,
+//     `conversation` means an empty set, `frontend` means the front-end skill.
+//   - neither: the guided default, which is `grill` alone.
+//
+// The caller distinguishes "unknown key" from "no method" by the returned
+// error; both are 400s but only the first is fixable by picking another skill.
+func normalizeIssueDraftSkills(skills []string, legacyPolicy string) (issueDraftSkillSet, string) {
+	if skills == nil {
+		if strings.TrimSpace(legacyPolicy) == "" {
+			return issueDraftSkillSet{issueDraftSkillGrill}, ""
+		}
+		switch strings.TrimSpace(legacyPolicy) {
+		case issueDraftPolicyQuestion:
+			return issueDraftSkillSet{issueDraftSkillGrill}, ""
+		case issueDraftPolicyConversation:
+			return issueDraftSkillSet{}, ""
+		case issueDraftPolicyFrontend:
+			return issueDraftSkillSet{issueDraftSkillFrontend}, ""
+		default:
+			return nil, issueDraftSkillUnknownMessage()
+		}
+	}
+	seen := make(map[string]bool, len(skills))
+	out := make(issueDraftSkillSet, 0, len(skills))
+	for _, raw := range skills {
+		key := strings.TrimSpace(raw)
+		if key == "" {
+			continue
+		}
+		if _, ok := issueDraftSkillRegistry[key]; !ok {
+			return nil, issueDraftSkillUnknownMessage()
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, key)
+	}
+	if len(out) == 0 {
+		return nil, "at least one alignment skill is required"
+	}
+	sort.Strings(out)
+	return out, ""
+}
+
+// Keys is the recorded form of the set: the sorted keys joined with "+".
+func (s issueDraftSkillSet) Keys() string {
+	return strings.Join(s, issueDraftSkillJoin)
+}
+
+// Version is the recorded form of the versions: one version per skill, in the
+// same order as Keys, so the pair can be read as a list of (skill, version).
+func (s issueDraftSkillSet) Version() string {
+	versions := make([]string, 0, len(s))
+	for _, key := range s {
+		skill, ok := issueDraftSkillRegistry[key]
+		if !ok {
+			// Unreachable: the set is built by normalizeIssueDraftSkills, which
+			// refuses an unregistered key. Recording an empty token beats
+			// failing a create on a registry that drifted.
+			versions = append(versions, "")
+			continue
+		}
+		versions = append(versions, skill.Version)
+	}
+	return strings.Join(versions, issueDraftSkillJoin)
+}
+
+// Guided reports whether any enabled skill interviews the user. The client
+// draws the guidance control from this, so it must answer for a recorded set
+// whose skills are still registered.
+func (s issueDraftSkillSet) Guided() bool {
+	for _, key := range s {
+		if skill, ok := issueDraftSkillRegistry[key]; ok && skill.Guided {
+			return true
+		}
+	}
+	return false
+}
+
+// Instructions is the full system prompt installed on the carrier: the shared
+// wire contract, then every enabled skill's method in key order.
+//
+// Order matters and is the registry's sorted order rather than the order the
+// user ticked the boxes: the prompt has to be a function of the recorded set,
+// or two drafts that recorded the same skills would have run different prompts.
+func (s issueDraftSkillSet) Instructions() string {
+	parts := []string{issueDraftContract}
+	for _, key := range s {
+		if skill, ok := issueDraftSkillRegistry[key]; ok {
+			parts = append(parts, skill.Method)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// recordedSkillVersions splits a recorded `policy_version` back into one
+// version per recorded key. It is deliberately positional: a row written before
+// DENE-512 carries a bare key and a bare version, and splitting "4" on "+"
+// yields exactly one token, which is that row's own answer.
+func recordedSkillVersions(version string) []string {
+	if version == "" {
+		return nil
+	}
+	return strings.Split(version, issueDraftSkillJoin)
 }
 
 // issueDraftPolicyResponse is the auditable half of a draft's wire shape: which
-// policy is running, which version of its prompt the carrier was given, and
-// whether that policy asks questions.
+// alignment skills are running, which versions of their prompts the carrier was
+// given, and whether any of them asks questions.
 //
-// Version is read from the draft row, never from the registry — a conversation
-// keeps reporting the prompt it actually ran after the registry moves on. A key
-// that is no longer registered still reports its recorded version; only
-// `guided` falls back, because the client needs a definite answer for how to
-// draw the control.
+// Key and Version are read from the draft row, never from the registry — a
+// conversation keeps reporting the prompt it actually ran after the registry
+// moves on. They are the "+"-joined recorded pair, e.g. key `frontend+grill`
+// with version `1+4`. A key that is no longer registered still reports its
+// recorded version; only `guided` falls back, because the client needs a
+// definite answer for how to draw the control.
+//
+// The field names are the pre-DENE-512 ones on purpose. An installed desktop
+// client reads `policy.key` to decide which of its three switch entries is
+// selected; a set it does not recognise simply selects none, which is a correct
+// rendering of "this conversation runs something you have no name for".
 type issueDraftPolicyResponse struct {
 	Key     string `json:"key"`
 	Version string `json:"version"`
 	Guided  bool   `json:"guided"`
+	// Skills is the same record as a list, so a client that knows about
+	// per-skill toggles does not have to split strings to restore them.
+	Skills []issueDraftSkillState `json:"skills"`
+}
+
+// issueDraftSkillState is one enabled skill as the API reports it.
+type issueDraftSkillState struct {
+	Key     string `json:"key"`
+	Version string `json:"version"`
 }
 
 func issueDraftPolicyResponseFromRow(key, version string) issueDraftPolicyResponse {
-	guided := false
-	if policy, ok := issueDraftPolicyByKey(key); ok {
-		guided = policy.Guided
+	set := issueDraftSkillSet{}
+	if trimmed := strings.TrimSpace(key); trimmed != "" {
+		set = issueDraftSkillSet(strings.Split(trimmed, issueDraftSkillJoin))
 	}
-	return issueDraftPolicyResponse{Key: key, Version: version, Guided: guided}
+	versions := recordedSkillVersions(version)
+	states := make([]issueDraftSkillState, 0, len(set))
+	for i, skillKey := range set {
+		recorded := ""
+		if i < len(versions) {
+			recorded = versions[i]
+		}
+		states = append(states, issueDraftSkillState{Key: skillKey, Version: recorded})
+	}
+	return issueDraftPolicyResponse{
+		Key:     key,
+		Version: version,
+		Guided:  set.Guided(),
+		Skills:  states,
+	}
 }

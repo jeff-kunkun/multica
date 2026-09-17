@@ -168,13 +168,22 @@ func (h *Handler) loadIssueDraftSession(w http.ResponseWriter, r *http.Request, 
 type CreateIssueDraftSessionRequest struct {
 	RuntimeID string `json:"runtime_id"`
 	Model     string `json:"model,omitempty"`
+	// ThinkingLevel is the reasoning effort the carrier runs at, empty meaning
+	// "whatever the local CLI is configured with". Validated against the target
+	// runtime exactly as agent create/update validates it, so a level the
+	// runtime cannot take is refused here rather than persisted and dropped by
+	// the daemon (DENE-512).
+	ThinkingLevel string `json:"thinking_level,omitempty"`
 	// Draft seeds the conversation with what the user already typed in the
 	// create entry point, so the first turn can answer it instead of asking
 	// for it again. Optional; omitted means an empty draft.
 	Draft json.RawMessage `json:"draft,omitempty"`
-	// Policy picks the alignment policy the conversation opens under. Optional:
-	// omitted means the guided default, which is what the create entry points
-	// offer. See issue_draft_policy.go for the registry.
+	// Skills picks the alignment skills the conversation opens under, in any
+	// order. Optional: omitted means the guided default, which is what the
+	// create entry points offer. See issue_draft_policy.go for the registry.
+	Skills []string `json:"skills,omitempty"`
+	// Policy is the pre-DENE-512 single-key form of Skills, still sent by
+	// installed clients. Read only when Skills is absent.
 	Policy string `json:"policy,omitempty"`
 }
 
@@ -215,16 +224,13 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// The policy decides the carrier's prompt, so an unknown key is rejected
+	// The skills decide the carrier's prompt, so an unknown key is rejected
 	// before anything is created: a conversation running an empty prompt would
-	// look like it worked and behave like nothing.
-	policyKey := strings.TrimSpace(req.Policy)
-	if policyKey == "" {
-		policyKey = issueDraftPolicyQuestion
-	}
-	policy, ok := issueDraftPolicyByKey(policyKey)
-	if !ok {
-		writeError(w, http.StatusBadRequest, issueDraftPolicyUnknownMessage())
+	// look like it worked and behave like nothing. A client that predates
+	// DENE-512 sends `policy` instead, and normalization reads it.
+	skills, rejection := normalizeIssueDraftSkills(req.Skills, req.Policy)
+	if rejection != "" {
+		writeError(w, http.StatusBadRequest, rejection)
 		return
 	}
 
@@ -234,6 +240,17 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 	}
 	runtime, ok := h.resolveSessionCarrierRuntime(w, r, workspaceID, workspaceUUID, runtimeID, "an issue draft session", "start")
 	if !ok {
+		return
+	}
+
+	// The reasoning dial is part of what the user picked in the same panel as
+	// the machine, so it is validated against THAT runtime here rather than
+	// accepted and silently dropped: an alignment carrier that runs at the
+	// default effort while its picker says "Extra high" is a setting the user
+	// cannot trust. Same two checks as agent create (agent.go), shared so the
+	// sentences cannot drift.
+	thinkingLevel := strings.TrimSpace(req.ThinkingLevel)
+	if !h.sessionCarrierThinkingLevelAccepted(w, r, runtime, thinkingLevel) {
 		return
 	}
 
@@ -267,8 +284,12 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 		RuntimeMode:  runtime.RuntimeMode,
 		RuntimeID:    runtime.ID,
 		OwnerID:      ownerUUID,
-		Instructions: policy.Instructions(),
+		Instructions: skills.Instructions(),
 		Model:        pgtype.Text{String: model, Valid: model != ""},
+		ThinkingLevel: pgtype.Text{
+			String: thinkingLevel,
+			Valid:  thinkingLevel != "",
+		},
 		SystemKey: pgtype.Text{
 			String: fmt.Sprintf("issue_draft:%s", flowID),
 			Valid:  true,
@@ -300,8 +321,8 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 		ChatSessionID: session.ID,
 		WorkspaceID:   workspaceUUID,
 		Draft:         draft,
-		PolicyKey:     policy.Key,
-		PolicyVersion: policy.Version,
+		PolicyKey:     skills.Keys(),
+		PolicyVersion: skills.Version(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create issue draft")
@@ -608,20 +629,26 @@ func (h *Handler) ReopenIssueDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 type SwitchIssueDraftPolicyRequest struct {
-	// Policy is the key of the alignment policy to run from the next turn on.
-	Policy string `json:"policy"`
+	// Skills is the set of alignment skills to run from the next turn on, in
+	// any order. Optional when the installed client still sends Policy.
+	Skills []string `json:"skills,omitempty"`
+	// Policy is the pre-DENE-512 single key. Read only when Skills is absent.
+	Policy string `json:"policy,omitempty"`
 }
 
-// SwitchIssueDraftPolicy swaps the questioning behaviour of a live alignment
-// conversation: guided interview, or plain dialogue.
+// SwitchIssueDraftPolicy swaps which alignment skills a live conversation runs.
 //
-// Two writes, one decision. The draft row records which policy and prompt
-// version is in force — that is the audit trail — and the carrier agent's
-// instructions are replaced with that policy's prompt, which is the only thing
+// Two writes, one decision. The draft row records which skills and prompt
+// versions are in force — that is the audit trail — and the carrier agent's
+// instructions are replaced with the composed prompt, which is the only thing
 // that actually changes the next reply (the daemon reads instructions off the
 // claimed agent). Writing one without the other would either leave a session
-// behaving like its old policy while claiming the new one, or run a prompt
+// behaving like its old skills while claiming the new ones, or run a prompt
 // nothing points at.
+//
+// A live conversation may add or drop skills between turns, which is why the
+// enabled set travels as a whole rather than as a delta: the composed prompt is
+// a function of the set, and a delta would make it a function of the history.
 //
 // The pending-task gate mirrors the runtime switch: a reply already in flight
 // was claimed with the previous instructions, so switching under it would make
@@ -639,16 +666,19 @@ func (h *Handler) SwitchIssueDraftPolicy(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	policyKey := strings.TrimSpace(req.Policy)
-	if policyKey == "" {
-		writeError(w, http.StatusBadRequest, "policy is required")
+	// Unlike create, there is no default here: a switch must say what it is
+	// switching TO, or an empty body would silently reset the conversation to
+	// the guided default. A body that names neither field is refused, which is
+	// why the absence of `skills` is distinguished from an empty list.
+	if req.Skills == nil && strings.TrimSpace(req.Policy) == "" {
+		writeError(w, http.StatusBadRequest, "skills is required")
 		return
 	}
 	// An unknown key is refused rather than defaulted: this endpoint exists to
 	// make the running prompt an explicit, auditable choice.
-	policy, ok := issueDraftPolicyByKey(policyKey)
-	if !ok {
-		writeError(w, http.StatusBadRequest, issueDraftPolicyUnknownMessage())
+	skills, rejection := normalizeIssueDraftSkills(req.Skills, req.Policy)
+	if rejection != "" {
+		writeError(w, http.StatusBadRequest, rejection)
 		return
 	}
 
@@ -691,7 +721,7 @@ func (h *Handler) SwitchIssueDraftPolicy(w http.ResponseWriter, r *http.Request)
 
 	if _, err := qtx.UpdateIssueDraftCarrierInstructions(r.Context(), db.UpdateIssueDraftCarrierInstructionsParams{
 		ID:           session.AgentID,
-		Instructions: policy.Instructions(),
+		Instructions: skills.Instructions(),
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "issue draft session not found")
@@ -704,12 +734,12 @@ func (h *Handler) SwitchIssueDraftPolicy(w http.ResponseWriter, r *http.Request)
 	updated, err := qtx.UpdateIssueDraftPolicy(r.Context(), db.UpdateIssueDraftPolicyParams{
 		ChatSessionID: session.ID,
 		WorkspaceID:   session.WorkspaceID,
-		PolicyKey:     policy.Key,
-		PolicyVersion: policy.Version,
+		PolicyKey:     skills.Keys(),
+		PolicyVersion: skills.Version(),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			h.writeIssueDraftWriteConflict(w, r, session, "switch policy on")
+			h.writeIssueDraftWriteConflict(w, r, session, "switch skills on")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to record issue draft policy")
