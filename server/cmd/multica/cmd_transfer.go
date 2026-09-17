@@ -74,6 +74,7 @@ func init() {
 	transferImportCmd.Flags().Bool("dry-run", false, "Preview without writing")
 	transferImportCmd.Flags().String("on-conflict", "fail", "Conflict policy for config entities: fail, overwrite, rename, skip")
 	transferImportCmd.Flags().Bool("renumber", false, "Offset every imported issue number by the target workspace's watermark (needs a non-empty target and asks for confirmation)")
+	transferImportCmd.Flags().String("max-request-bytes", "", "Ceiling for one transfer request body on the wire, compressed (default 2MB, or the value the target advertises). Accepts 512KB / 2MB / plain bytes. Lower it when an edge proxy keeps cutting requests short")
 	registerTransferImportOptionFlags(transferImportCmd)
 	_ = transferImportCmd.MarkFlagRequired("workspace")
 	_ = transferImportCmd.MarkFlagRequired("in")
@@ -271,6 +272,15 @@ type transferProgressEvent struct {
 	AttachmentsDownloaded int `json:"attachments_downloaded,omitempty"`
 	AttachmentsUploaded   int `json:"attachments_uploaded,omitempty"`
 	AttachmentsTotal      int `json:"attachments_total,omitempty"`
+	// RequestIndex / RequestsTotal / RequestBytes / UploadBytesPerSecond
+	// describe the upload direction one request at a time (DENE-442). The
+	// import used to be a handful of opaque multi-minute requests; now that it
+	// is packed to a byte budget it can say which request is in flight, how
+	// many there are, how big this one was, and what the link measured.
+	RequestIndex         int   `json:"request_index,omitempty"`
+	RequestsTotal        int   `json:"requests_total,omitempty"`
+	RequestBytes         int   `json:"request_bytes,omitempty"`
+	UploadBytesPerSecond int64 `json:"upload_bytes_per_second,omitempty"`
 }
 
 type transferProgressReporter struct {
@@ -578,6 +588,11 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	dry, _ := cmd.Flags().GetBool("dry-run")
 	onConflict, _ := cmd.Flags().GetString("on-conflict")
 	renumber, _ := cmd.Flags().GetBool("renumber")
+	rawMaxBytes, _ := cmd.Flags().GetString("max-request-bytes")
+	maxRequestBytes, err := parseTransferByteSize(rawMaxBytes)
+	if err != nil {
+		return err
+	}
 
 	client, err := newTransferAPIClient(cmd)
 	if err != nil {
@@ -585,6 +600,14 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
+
+	// Everything below goes through the wire sender rather than PostJSON: it
+	// compresses the body when the target can decode it, packs each request to
+	// a byte budget instead of a row count, and halves a request the edge cuts
+	// short (DENE-442).
+	progress := newTransferProgressReporter(cmd.ErrOrStderr())
+	target := probeTransferWireTarget(ctx, client.BaseURL, cmd.ErrOrStderr())
+	sender := newTransferWireSender(client, target, maxRequestBytes, progress)
 
 	wsID, err := resolveTransferWorkspaceID(ctx, sourceClient{api: client}, workspace)
 	if err != nil {
@@ -601,12 +624,14 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 
 	base := "/api/workspaces/" + url.PathEscape(wsID)
 	if payload.V1Only {
-		var report any
-		if err := client.PostJSON(ctx, base+"/transfer/config", service.TransferConfigRequest{
-			Config: payload.Config, DryRun: &dry, OnConflict: onConflict, Options: importOptions,
-		}, &report); err != nil {
+		req := service.TransferConfigRequest{Config: payload.Config, DryRun: &dry, OnConflict: onConflict, Options: importOptions}
+		sender.beginStage("config", 1)
+		raws, err := sender.post(ctx, base+"/transfer/config", transferJSONChunk(req, "It carries the workspace config bundle."))
+		if err != nil {
 			return explainTransferConfigError(err, payload.Manifest.SchemaVersion)
 		}
+		var report any
+		_ = json.Unmarshal(firstTransferResponse(raws), &report)
 		return cli.PrintJSON(cmd.OutOrStdout(), report)
 	}
 
@@ -654,64 +679,60 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 		OnConflict:      onConflict,
 		Options:         importOptions,
 	}
-	if err := client.PostJSON(ctx, base+"/transfer/config", cfgReq, &cfgReport); err != nil {
+	sender.beginStage("config", 1)
+	cfgRaws, err := sender.post(ctx, base+"/transfer/config", transferJSONChunk(cfgReq, "It carries the workspace config bundle."))
+	if err != nil {
 		return explainTransferConfigError(err, payload.Manifest.SchemaVersion)
 	}
+	_ = json.Unmarshal(firstTransferResponse(cfgRaws), &cfgReport)
 
 	// Issues go after config (labels, projects, agents and the status catalog
 	// must exist) and before attachments (attachment.comment_id references
 	// comment.id).
 	issuesFold := &transferIssuesReportFold{}
 	if len(payload.IssueShards) > 0 {
-		if err := uploadTransferIssueShards(ctx, client, base, payload, issueShards, dry, renumber, issuesFold); err != nil {
+		if err := uploadTransferIssueShards(ctx, sender, base, payload, issueShards, dry, renumber, issuesFold); err != nil {
 			return err
 		}
 	}
 
-	for i := range payload.SessionShards {
-		req := service.TransferConversationsRequest{
-			Refs:     payload.Manifest.Refs,
-			Sessions: payload.SessionShards[i],
-			DryRun:   &dry,
-		}
-		if i < len(payload.MessageShards) {
-			req.Messages = payload.MessageShards[i]
-		}
-		req.Finalize = i == len(payload.SessionShards)-1 && len(payload.Attachments) == 0
-		var convReport any
-		if err := client.PostJSON(ctx, base+"/transfer/conversations", req, &convReport); err != nil {
-			return fmt.Errorf("upload conversations shard %d: %w", i+1, err)
-		}
+	// The chat group finalizes on its last request, unless attachments still
+	// have to be written first: those reference comment ids, so the group can
+	// only be committed after them.
+	conversationsFinalize := len(payload.Attachments) == 0
+	if err := uploadTransferConversations(ctx, sender, base, payload, dry, conversationsFinalize); err != nil {
+		return err
 	}
 	if !dry {
 		// Attachment uploads are the long silent stretch of an import (a real
 		// workspace carries minutes' worth of them), so report each one.
-		progress := newTransferProgressReporter(cmd.ErrOrStderr())
 		progress.reportUploaded(0, len(payload.Attachments))
 		for i, att := range payload.Attachments {
 			var blob []byte
 			if att.SHA256 != "" {
 				blob = payload.Blobs[att.SHA256]
 			}
-			reason := ""
-			if att.BodyOmittedReason != nil {
-				reason = *att.BodyOmittedReason
+			chunk, err := transferAttachmentChunk(att, blob)
+			if err != nil {
+				return fmt.Errorf("upload attachment %s (%s): %w", att.Filename, att.SourceID, err)
 			}
-			_ = reason
-			if err := postTransferAttachment(ctx, client, base+"/transfer/attachments", att, blob); err != nil {
-				return fmt.Errorf("upload attachment %s: %w", att.SourceID, err)
+			if _, err := sender.post(ctx, base+"/transfer/attachments", chunk); err != nil {
+				// Name the attachment: the blob is the one thing on this path
+				// that cannot be halved, and "upload failed" alone leaves the
+				// user with a bundle they cannot fix (DENE-442).
+				return fmt.Errorf("upload attachment %s (%s): %w", att.Filename, att.SourceID, err)
 			}
 			progress.reportUploaded(i+1, len(payload.Attachments))
 		}
 		if len(payload.SessionShards) > 0 {
 			fin := service.TransferConversationsRequest{DryRun: boolPtr(false), Finalize: true, Refs: payload.Manifest.Refs}
-			var convReport any
-			if err := client.PostJSON(ctx, base+"/transfer/conversations", fin, &convReport); err != nil {
+			sender.beginStage("conversations", 1)
+			if _, err := sender.post(ctx, base+"/transfer/conversations", transferJSONChunk(fin, "It is the finalize pass and cannot be split.")); err != nil {
 				return fmt.Errorf("finalize conversations: %w", err)
 			}
 		}
 		if len(payload.IssueShards) > 0 {
-			if err := finalizeTransferIssues(ctx, client, base, payload, renumber, issuesFold); err != nil {
+			if err := finalizeTransferIssues(ctx, sender, base, payload, renumber, issuesFold); err != nil {
 				return err
 			}
 		}
@@ -824,7 +845,7 @@ func transferImportOutput(cfgReport any, fold *transferIssuesReportFold) any {
 // `renumber` travels with every shard for the same reason the gate runs on
 // every shard: the flag is what lets a non-empty target accept the write at all
 // (contract §2.3), so a shard that dropped it would 400 halfway through.
-func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer, shards [][]service.TransferIssueRow, dry, renumber bool, fold *transferIssuesReportFold) error {
+func uploadTransferIssueShards(ctx context.Context, sender *transferWireSender, base string, payload *loadedTransfer, shards [][]service.TransferIssueRow, dry, renumber bool, fold *transferIssuesReportFold) error {
 	// Relations travel in the shard that holds the rows they point at, because
 	// both reaction tables carry a real foreign key to their comment/issue.
 	commentIssue := map[string]string{}
@@ -852,25 +873,37 @@ func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base 
 		relationsByShard[idx] = append(relationsByShard[idx], rel)
 	}
 
+	// The plan is built once, before the first request, from the budget the
+	// link measurement currently supports. Every chunk remembers how to halve
+	// itself, so a request the edge cuts short is retried smaller rather than
+	// failing the import.
+	type issueRequest struct {
+		shard int
+		chunk transferWireChunk
+	}
+	var requests []issueRequest
 	for i := range shards {
-		req := service.TransferIssuesRequest{
-			Refs:      payload.Manifest.Refs,
-			Issues:    shards[i],
-			Relations: relationsByShard[i],
-			DryRun:    &dry,
-			Renumber:  renumber,
-		}
+		var comments []service.TransferCommentRow
 		if i < len(payload.CommentShards) {
-			req.Comments = payload.CommentShards[i]
+			comments = payload.CommentShards[i]
 		}
-		var raw json.RawMessage
-		if err := client.PostJSON(ctx, base+"/transfer/issues", req, &raw); err != nil {
+		planner := newTransferIssuesPlanner(sender.chunkLimit(), payload.Manifest.Refs, dry, renumber, shards[i], comments, relationsByShard[i])
+		for _, chunk := range planner.plan() {
+			requests = append(requests, issueRequest{shard: i, chunk: chunk.wire(payload.Manifest.Refs, dry, renumber)})
+		}
+	}
+	sender.beginStage("issues", len(requests))
+	for _, req := range requests {
+		raws, err := sender.post(ctx, base+"/transfer/issues", req.chunk)
+		if err != nil {
 			if st := httpStatusOf(err); st == 404 {
 				return fmt.Errorf("target_unsupported: this server is not a kun instance with /transfer/issues")
 			}
-			return fmt.Errorf("upload issues shard %d: %w", i+1, err)
+			return fmt.Errorf("upload issues shard %d: %w", req.shard+1, err)
 		}
-		fold.add(decodeTransferIssuesReport(raw))
+		for _, raw := range raws {
+			fold.add(decodeTransferIssuesReport(raw))
+		}
 	}
 	return nil
 }
@@ -885,7 +918,7 @@ func uploadTransferIssueShards(ctx context.Context, client *cli.APIClient, base 
 // still reads clean; sending link rows instead of whole comments is what keeps
 // a few thousand rows inside the request-body cap. `renumber` must ride along:
 // the empty-target gate runs on this request too.
-func finalizeTransferIssues(ctx context.Context, client *cli.APIClient, base string, payload *loadedTransfer, renumber bool, fold *transferIssuesReportFold) error {
+func finalizeTransferIssues(ctx context.Context, sender *transferWireSender, base string, payload *loadedTransfer, renumber bool, fold *transferIssuesReportFold) error {
 	seenIssue := map[string]bool{}
 	var issues []service.TransferIssueRow
 	for _, shard := range payload.IssueShards {
@@ -924,11 +957,20 @@ func finalizeTransferIssues(ctx context.Context, client *cli.APIClient, base str
 		return fmt.Errorf("issues finalize payload is %d bytes, over the %d byte request cap; parent pointers cannot be trimmed without flattening threads",
 			n, service.TransferConversationsMaxBytes)
 	}
-	var raw json.RawMessage
-	if err := client.PostJSON(ctx, base+"/transfer/issues", req, &raw); err != nil {
+	// The finalize pass is the one request that must not be halved: it bumps
+	// the workspace's issue watermark, so sending it twice would move it twice.
+	// It carries link rows only — one id pair per row, no bodies — which is
+	// what keeps it inside the budget on a workspace of any size.
+	sender.beginStage("issues", 1)
+	chunk := transferJSONChunk(req, fmt.Sprintf("It is the finalize pass for %d task and %d comment link row(s) and cannot be split.",
+		len(issues), len(comments)))
+	raws, err := sender.post(ctx, base+"/transfer/issues", chunk)
+	if err != nil {
 		return fmt.Errorf("finalize issues: %w", err)
 	}
-	fold.add(decodeTransferIssuesReport(raw))
+	for _, raw := range raws {
+		fold.add(decodeTransferIssuesReport(raw))
+	}
 	return nil
 }
 
@@ -1351,10 +1393,15 @@ func fetchTransferIssueCounter(ctx context.Context, client *cli.APIClient, wsID 
 	return ws.IssueCounter, nil
 }
 
-func postTransferAttachment(ctx context.Context, client *cli.APIClient, path string, meta service.TransferAttachmentRow, blob []byte) error {
+// transferAttachmentChunk builds the multipart body for one attachment.
+//
+// The blob is the one payload on this path that cannot be halved, so the chunk
+// carries no Split recipe: when the edge drops it, the sender reports which
+// attachment it was instead of pretending a retry could help.
+func transferAttachmentChunk(meta service.TransferAttachmentRow, blob []byte) (transferWireChunk, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	metaJSON, _ := json.Marshal(service.TransferAttachmentMeta{
+	metaJSON, err := json.Marshal(service.TransferAttachmentMeta{
 		SourceID:          meta.SourceID,
 		ChatSessionID:     meta.ChatSessionID,
 		ChatMessageID:     meta.ChatMessageID,
@@ -1367,42 +1414,118 @@ func postTransferAttachment(ctx context.Context, client *cli.APIClient, path str
 		SHA256:            meta.SHA256,
 		BodyOmittedReason: meta.BodyOmittedReason,
 	})
+	if err != nil {
+		return transferWireChunk{}, err
+	}
 	if err := mw.WriteField("meta", string(metaJSON)); err != nil {
-		return err
+		return transferWireChunk{}, err
 	}
 	if len(blob) > 0 {
 		part, err := mw.CreateFormFile("file", meta.Filename)
 		if err != nil {
-			return err
+			return transferWireChunk{}, err
 		}
 		if _, err := part.Write(blob); err != nil {
-			return err
+			return transferWireChunk{}, err
 		}
 	}
 	if err := mw.Close(); err != nil {
-		return err
+		return transferWireChunk{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(client.BaseURL, "/")+path, &buf)
+	return transferWireChunk{
+		Body:        buf.Bytes(),
+		ContentType: mw.FormDataContentType(),
+		Label: fmt.Sprintf("It carries attachment %s (%s), which cannot be split.",
+			meta.Filename, humanBytes(meta.SizeBytes)),
+	}, nil
+}
+
+// transferJSONChunk marshals one JSON request body for the wire sender.
+func transferJSONChunk(req any, label string) transferWireChunk {
+	body, err := json.Marshal(req)
 	if err != nil {
-		return err
+		body = nil
 	}
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	if client.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+client.Token)
+	return transferWireChunk{Body: body, ContentType: transferJSONContentType, Label: label}
+}
+
+// firstTransferResponse is the single answer a request that cannot be halved
+// produces. A halved request answers twice and its reports are folded instead.
+func firstTransferResponse(raws []json.RawMessage) json.RawMessage {
+	if len(raws) == 0 {
+		return nil
 	}
-	if client.WorkspaceID != "" {
-		req.Header.Set("X-Workspace-ID", client.WorkspaceID)
+	return raws[0]
+}
+
+// uploadTransferConversations sends the chat group.
+//
+// `finalizeLast` marks the last request of an import that carries no
+// attachments, which is the pass that commits the group on the target. It is
+// resolved to exactly one request: the finalize pass is not repeatable, so the
+// chunk that carries it is excluded from halving (see
+// transferConversationsChunk.wire).
+func uploadTransferConversations(ctx context.Context, sender *transferWireSender, base string, payload *loadedTransfer, dry, finalizeLast bool) error {
+	var chunks []transferConversationsChunk
+	for i := range payload.SessionShards {
+		var messages []service.TransferMessageRow
+		if i < len(payload.MessageShards) {
+			messages = payload.MessageShards[i]
+		}
+		planner := newTransferConversationsPlanner(sender.chunkLimit(), payload.Manifest.Refs, dry, payload.SessionShards[i], messages)
+		chunks = append(chunks, planner.plan()...)
 	}
-	resp, err := client.HTTPClient.Do(req)
-	if err != nil {
-		return err
+	if len(chunks) == 0 {
+		return nil
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("POST %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
+	requests := make([]transferWireChunk, 0, len(chunks))
+	for i, chunk := range chunks {
+		finalize := finalizeLast && i == len(chunks)-1
+		requests = append(requests, chunk.wire(payload.Manifest.Refs, dry, finalize))
+	}
+	sender.beginStage("conversations", len(requests))
+	for i, chunk := range requests {
+		if _, err := sender.post(ctx, base+"/transfer/conversations", chunk); err != nil {
+			return fmt.Errorf("upload conversations (request %d of %d): %w", i+1, len(requests), err)
+		}
 	}
 	return nil
+}
+
+// parseTransferByteSize reads `--max-request-bytes`. A bare number is bytes;
+// a KB/MB/GB suffix (decimal or binary, case-insensitive) scales it, because
+// "512KB" is what a user types when they want smaller requests and it should
+// not mean 512 bytes.
+func parseTransferByteSize(raw string) (int, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, nil
+	}
+	upper := strings.ToUpper(value)
+	multiplier := 1
+	for _, unit := range []struct {
+		suffix string
+		scale  int
+	}{
+		{"GIB", 1 << 30}, {"GB", 1000 * 1000 * 1000},
+		{"MIB", 1 << 20}, {"MB", 1000 * 1000},
+		{"KIB", 1 << 10}, {"KB", 1000},
+		{"B", 1},
+	} {
+		if strings.HasSuffix(upper, unit.suffix) {
+			multiplier = unit.scale
+			upper = strings.TrimSpace(strings.TrimSuffix(upper, unit.suffix))
+			break
+		}
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(upper))
+	if err != nil {
+		return 0, fmt.Errorf("invalid --max-request-bytes %q: expected a byte count such as 512KB, 2MB or 2097152", raw)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("invalid --max-request-bytes %q: must be positive", raw)
+	}
+	return n * multiplier, nil
 }
 
 // transferErrorCodeOf reads the machine-readable `code` out of a failing

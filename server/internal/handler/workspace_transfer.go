@@ -57,15 +57,17 @@ func (h *Handler) ImportWorkspaceTransferIssues(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, service.TransferConversationsMaxBytes)
+	body, err := openTransferBody(w, r, service.TransferConversationsMaxBytes)
+	if err != nil {
+		writeTransferDecodeError(w, err, service.TransferConversationsMaxBytes, "transfer_bundle_too_large")
+		return
+	}
+	defer body.Close()
 	var req service.TransferIssuesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			writeErrorCode(w, http.StatusRequestEntityTooLarge, "transfer_bundle_too_large", "issues payload exceeds 20 MiB")
-			return
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
+		if !writeTransferDecodeError(w, err, service.TransferConversationsMaxBytes, "transfer_bundle_too_large") {
+			writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid request body")
 		}
-		writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid request body")
 		return
 	}
 	report, err := service.ImportTransferIssues(r.Context(), env, req)
@@ -88,15 +90,17 @@ func (h *Handler) ImportWorkspaceTransferConfig(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, service.ConfigBundleMaxBytes)
+	body, err := openTransferBody(w, r, service.ConfigBundleMaxBytes)
+	if err != nil {
+		writeTransferDecodeError(w, err, service.ConfigBundleMaxBytes, "config_bundle_too_large")
+		return
+	}
+	defer body.Close()
 	var req service.TransferConfigRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			writeErrorCode(w, http.StatusRequestEntityTooLarge, "config_bundle_too_large", "import payload exceeds 20 MiB")
-			return
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
+		if !writeTransferDecodeError(w, err, service.ConfigBundleMaxBytes, "config_bundle_too_large") {
+			writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid request body")
 		}
-		writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid request body")
 		return
 	}
 	report, err := service.ImportTransferConfig(r.Context(), env, req)
@@ -267,15 +271,17 @@ func (h *Handler) ImportWorkspaceTransferConversations(w http.ResponseWriter, r 
 	if !ok {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, service.TransferConversationsMaxBytes)
+	body, err := openTransferBody(w, r, service.TransferConversationsMaxBytes)
+	if err != nil {
+		writeTransferDecodeError(w, err, service.TransferConversationsMaxBytes, "transfer_bundle_too_large")
+		return
+	}
+	defer body.Close()
 	var req service.TransferConversationsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			writeErrorCode(w, http.StatusRequestEntityTooLarge, "transfer_bundle_too_large", "conversations payload exceeds 20 MiB")
-			return
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
+		if !writeTransferDecodeError(w, err, service.TransferConversationsMaxBytes, "transfer_bundle_too_large") {
+			writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid request body")
 		}
-		writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid request body")
 		return
 	}
 	report, err := service.ImportTransferConversations(r.Context(), env, req)
@@ -296,9 +302,19 @@ func (h *Handler) ImportWorkspaceTransferAttachment(w http.ResponseWriter, r *ht
 	if !ok {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, service.TransferAttachmentMaxBytes+1<<20)
+	// The multipart body may arrive gzip-compressed like the JSON ones; the
+	// decoder has to be in place before ParseMultipartForm reads r.Body.
+	attachmentBody, err := openTransferBody(w, r, service.TransferAttachmentMaxBytes+1<<20)
+	if err != nil {
+		writeTransferDecodeError(w, err, service.TransferAttachmentMaxBytes+1<<20, "transfer_bundle_too_large")
+		return
+	}
+	defer attachmentBody.Close()
+	r.Body = attachmentBody
 	if err := r.ParseMultipartForm(service.TransferAttachmentMaxBytes + 1<<20); err != nil {
-		writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid multipart form")
+		if !writeTransferDecodeError(w, err, service.TransferAttachmentMaxBytes+1<<20, "transfer_bundle_too_large") {
+			writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid multipart form")
+		}
 		return
 	}
 	if r.MultipartForm != nil {

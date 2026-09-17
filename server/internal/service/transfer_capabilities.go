@@ -39,6 +39,33 @@ type TransferCapabilities struct {
 	// means "unknown": an old instance that answers the field without a group
 	// list is still version-gated, so the version is the only signal there.
 	Groups []string `json:"groups"`
+	// AcceptsGzip reports that the /transfer/* endpoints decode a
+	// `Content-Encoding: gzip` request body. It is absent on an instance that
+	// predates the field, and the sender then has to assume the instance would
+	// read the compressed bytes as JSON — so "absent" and "false" both mean
+	// "do not compress", which is why this is the safe default rather than a
+	// guess the sender is allowed to make.
+	AcceptsGzip bool `json:"accepts_gzip"`
+	// MaxRequestBytes is the largest DECOMPRESSED request body the target
+	// accepts on a transfer endpoint. 0 means "did not say", which the sender
+	// treats as unknown instead of as a zero-byte budget: an instance that
+	// predates this field still accepts bodies, it just does not describe
+	// them.
+	MaxRequestBytes int `json:"max_request_bytes,omitempty"`
+}
+
+// TransferServerMaxRequestBytes is the decompressed body cap this build
+// enforces on the transfer requests that carry JSON (config, issues,
+// conversations). It is advertised as TransferCapabilities.MaxRequestBytes so
+// the sender can keep its own chunk budget inside what the target reads.
+// Attachments have their own, larger cap (TransferAttachmentMaxBytes) because
+// they carry an opaque blob rather than parsed JSON.
+func TransferServerMaxRequestBytes() int {
+	limit := TransferConversationsMaxBytes
+	if ConfigBundleMaxBytes < limit {
+		limit = ConfigBundleMaxBytes
+	}
+	return limit
 }
 
 // TransferCapabilitiesForCurrentBuild is what this build advertises. It is
@@ -48,6 +75,8 @@ func TransferCapabilitiesForCurrentBuild() TransferCapabilities {
 	return TransferCapabilities{
 		MaxSchemaVersion: TransferBundleSchemaVersion,
 		Groups:           append([]string(nil), TransferIncludeGroups...),
+		AcceptsGzip:      true,
+		MaxRequestBytes:  TransferServerMaxRequestBytes(),
 	}
 }
 

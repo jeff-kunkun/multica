@@ -387,6 +387,45 @@ func (c *APIClient) DeleteJSONWithBody(ctx context.Context, path string, body an
 	return nil
 }
 
+// PostEncoded performs a POST with a body the caller has already built and
+// optionally encoded.
+//
+// PostJSON marshals for you, which is exactly what the transfer sender cannot
+// use: it compresses the body, measures the compressed bytes, and has to
+// re-slice a body the edge dropped, so the bytes on the wire are its own. What
+// it still needs from this client is the transport, the auth/identity headers,
+// the size-capped error body, and the *HTTPError / *NetworkError classification
+// every caller of this package already branches on. contentEncoding, when set,
+// is sent verbatim as Content-Encoding and tells the server how the body was
+// encoded; the caller is responsible for the server understanding it (the
+// /transfer/* endpoints advertise that through /health).
+func (c *APIClient) PostEncoded(ctx context.Context, path, contentType, contentEncoding string, payload []byte, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", contentType)
+	if contentEncoding != "" {
+		req.Header.Set("Content-Encoding", contentEncoding)
+	}
+	c.setHeaders(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return newHTTPError(http.MethodPost, path, resp)
+	}
+	if out == nil {
+		return nil
+	}
+	return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
+}
+
 // PostJSON performs a POST request with a JSON body.
 func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any) error {
 	data, err := json.Marshal(body)
