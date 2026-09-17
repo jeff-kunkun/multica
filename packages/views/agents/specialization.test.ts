@@ -6,6 +6,8 @@ import {
   activeChildrenOf,
   agentHasChildrenNames,
   baseRoleOptions,
+  baseRoleOptionsFor,
+  canChangeBaseRole,
   childrenOf,
   composeEffectiveInstructions,
   hasInheritedPrompt,
@@ -111,6 +113,39 @@ describe("specialization relationship", () => {
       }),
     ];
     expect(baseRoleOptions(agents).map((a) => a.id)).toEqual(["b-a", "b-z"]);
+  });
+});
+
+describe("changing an existing agent's base role", () => {
+  const base = agent({ id: "base-1", name: "Base" });
+  const other = agent({ id: "base-2", name: "Other base" });
+  const child = agent({ id: "child-1", parent_agent_id: "base-1" });
+
+  it("omits the agent itself from its own options", () => {
+    expect(
+      baseRoleOptionsFor([base, other, child], "base-1").map((a) => a.id),
+    ).toEqual(["base-2"]);
+  });
+
+  it("keeps the create picker's rules — no specialisations, no archived", () => {
+    const archived = agent({ id: "base-3", name: "Archived", archived_at: "x" });
+    expect(
+      baseRoleOptionsFor([base, child, archived], "child-1").map((a) => a.id),
+    ).toEqual(["base-1"]);
+  });
+
+  it("lets a specialisation be re-pointed or detached", () => {
+    expect(canChangeBaseRole(child, 0)).toBe(true);
+  });
+
+  it("lets a childless base role be attached", () => {
+    expect(canChangeBaseRole(base, 0)).toBe(true);
+  });
+
+  it("refuses an agent that already has specialisations — that would be three levels", () => {
+    expect(canChangeBaseRole({ child_count: 1 }, 0)).toBe(false);
+    // No child_count from an older backend: the visible children still count.
+    expect(canChangeBaseRole({}, 2)).toBe(false);
   });
 });
 

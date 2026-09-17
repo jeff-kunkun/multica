@@ -166,7 +166,11 @@
     "archive_block_confirm": "고정 후 해제하고 보관",
     "archive_block_cancel": "취소",
     "archive_block_solidified_toast_other": "특화 {{count}}개를 고정하고 \"{{name}}\"을(를) 보관했습니다.",
-    "archive_block_failed_toast": "\"{{name}}\" 고정에 실패했습니다: {{error}}"
+    "archive_block_failed_toast": "\"{{name}}\" 고정에 실패했습니다: {{error}}",
+    "change_base_role_hint": "이 에이전트를 베이스 역할 아래에 둡니다. 저장하면 특화가 되고, 실행할 때 베이스 역할의 프롬프트 뒤에 자신의 프롬프트가 이어집니다.",
+    "change_base_role_save": "베이스 역할 저장",
+    "change_base_role_locked": "이 에이전트에는 이미 특화가 있어 베이스 역할 아래에 둘 수 없습니다 — 상속은 두 단계까지입니다.",
+    "change_base_role_detach_hint": "“독립 베이스 역할”로 바꾸면 해제하기 전에 베이스 역할의 현재 프롬프트를 이 에이전트에 기록하므로 실행 내용은 바뀌지 않습니다."
   },
   "detail": {
     "back_to_agents": "에이전트",

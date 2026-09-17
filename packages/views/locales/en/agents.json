@@ -182,7 +182,11 @@
     "archive_block_cancel": "Cancel",
     "archive_block_solidified_toast_one": "Solidified {{count}} specialization and archived \"{{name}}\".",
     "archive_block_solidified_toast_other": "Solidified {{count}} specializations and archived \"{{name}}\".",
-    "archive_block_failed_toast": "Could not solidify \"{{name}}\": {{error}}"
+    "archive_block_failed_toast": "Could not solidify \"{{name}}\": {{error}}",
+    "change_base_role_hint": "Hang this agent off a base role: it becomes a specialization, and every run gets the base role's prompt followed by its own.",
+    "change_base_role_save": "Save base role",
+    "change_base_role_locked": "This agent already has specializations of its own, so it can't hang off a base role — inheritance is two levels only.",
+    "change_base_role_detach_hint": "Switching to “independent base role” writes the base role's current prompt into this agent before unbinding, so what it runs with does not change."
   },
   "detail": {
     "back_to_agents": "Agents",

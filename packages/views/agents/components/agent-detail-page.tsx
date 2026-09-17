@@ -254,6 +254,34 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     }
   };
 
+  // Re-parenting an existing agent (DENE-300 follow-up). The write itself is
+  // an ordinary field update, but the INHERITED half of the prompt only
+  // arrives on the detail read — so that read has to be invalidated too, or
+  // the page keeps showing the previous base role's text under the new link.
+  const handleChangeBaseRole = async (parentAgentId: string) => {
+    if (!agent) return;
+    await handleUpdate(agent.id, { parent_agent_id: parentAgentId });
+    await qc.invalidateQueries({ queryKey: workspaceKeys.agent(wsId, agent.id) });
+  };
+
+  // "Independent base role" is solidify-and-unbind, not a bare detach: the
+  // base role's prompt is written into this agent first, so what it runs with
+  // does not change when the link goes away.
+  const handleDetachBaseRole = async () => {
+    if (!agent) return;
+    try {
+      await api.solidifyAgent(agent.id);
+      await qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      await qc.invalidateQueries({ queryKey: workspaceKeys.agent(wsId, agent.id) });
+      toast.success(t(($) => $.detail.agent_updated_toast));
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast),
+      );
+      throw e;
+    }
+  };
+
   const handleArchive = async (id: string): Promise<boolean> => {
     try {
       await api.archiveAgent(id);
@@ -491,6 +519,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           childAgents={childAgents}
           inheritedPromptState={inheritedPromptState}
           onRetryInheritedPrompt={() => void detailQuery.refetch()}
+          agents={agents}
+          onChangeBaseRole={handleChangeBaseRole}
+          onDetachBaseRole={handleDetachBaseRole}
           navIntent={tabNavIntent}
           onNavIntentHandled={() => setTabNavIntent(null)}
         />

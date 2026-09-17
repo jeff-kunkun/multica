@@ -85,6 +85,37 @@ export function baseRoleOptions(agents: readonly Agent[]): Agent[] {
 }
 
 /**
+ * Base roles an EXISTING agent may be attached to (DENE-300 follow-up).
+ *
+ * Same rule as the create picker, minus the agent itself: the server refuses a
+ * self-reference with the same 400 it refuses a specialisation parent with, so
+ * offering it would only produce an error the user cannot act on.
+ */
+export function baseRoleOptionsFor(
+  agents: readonly Agent[],
+  agentId: string,
+): Agent[] {
+  return baseRoleOptions(agents).filter((agent) => agent.id !== agentId);
+}
+
+/**
+ * Whether an existing agent's base role can still be changed.
+ *
+ * Only depth blocks it: an agent that already HAS specialisations cannot be
+ * given a parent of its own, because that would be three levels and the server
+ * rejects it. A specialisation may always be re-pointed or detached, and a
+ * childless base role may always be attached. Permission is a separate gate
+ * the caller applies (`canEdit`).
+ */
+export function canChangeBaseRole(
+  agent: Pick<Agent, "parent_agent_id" | "child_count">,
+  visibleChildren: number,
+): boolean {
+  if (isSpecialization(agent)) return true;
+  return specializationCount(agent, visibleChildren) === 0;
+}
+
+/**
  * The prompt a specialisation actually runs with: the base role's prompt, a
  * blank line, then its own. Mirrors `composeAgentInstructions` on the server,
  * including the "no stray blank lines when one side is empty" rule — the

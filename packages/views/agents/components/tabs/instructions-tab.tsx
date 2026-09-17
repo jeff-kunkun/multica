@@ -18,6 +18,7 @@ import {
   type InheritedPromptState,
 } from "../../specialization";
 
+import { BaseRoleField } from "../base-role-field";
 import { ConversationStartersEditor } from "../conversation-starters-editor";
 
 /** How long the deep-linked conversation-starters editor stays ringed. */
@@ -30,6 +31,10 @@ export function InstructionsTab({
   childAgents = [],
   inheritedPromptState = "ready",
   onRetryInheritedPrompt,
+  agents,
+  canEdit = true,
+  onChangeBaseRole,
+  onDetachBaseRole,
 }: {
   agent: Agent;
   onSave: (updates: {
@@ -53,6 +58,17 @@ export function InstructionsTab({
   inheritedPromptState?: InheritedPromptState;
   /** Re-runs that read; the failure state offers it as the way out. */
   onRetryInheritedPrompt?: () => void;
+  /**
+   * The workspace agent list, for the base-role picker below (DENE-300
+   * follow-up). Omitted by the standalone mounts, which renders no picker —
+   * the same shape a backend without the specialisation fields produces.
+   */
+  agents?: readonly Agent[];
+  canEdit?: boolean;
+  /** Attaches this agent to a base role by id. */
+  onChangeBaseRole?: (parentAgentId: string) => Promise<void>;
+  /** Solidify-and-unbind: bakes the inherited prompt in, then detaches. */
+  onDetachBaseRole?: () => Promise<void>;
 }) {
   const { t } = useT("agents");
   // Optional read: this tab is a leaf that tests mount in isolation, and its
@@ -257,6 +273,20 @@ export function InstructionsTab({
               })
             : t(($) => $.tab_body.instructions.intro)}
       </p>
+
+      {/* Which base role this agent hangs off — editable here, because
+          picking one at creation is no help to the agents that already exist
+          (DENE-300 follow-up). */}
+      {agents && onChangeBaseRole && onDetachBaseRole && !hasSystemLayer && (
+        <BaseRoleField
+          agent={agent}
+          agents={agents}
+          visibleChildren={childAgents.length}
+          canEdit={canEdit}
+          onAttach={onChangeBaseRole}
+          onDetach={onDetachBaseRole}
+        />
+      )}
 
       {/* Base-role view: the prompt below is shared with every specialisation,
           so say so before the user edits it (DENE-304). */}

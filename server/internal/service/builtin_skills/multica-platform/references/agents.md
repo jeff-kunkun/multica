@@ -132,9 +132,23 @@ already has children of its own. A base role must be active to be attached to
 parent answers "not found", exactly like a missing one, so attaching cannot be
 used to probe for private agents.
 
-`parent_agent_id` is an HTTP-body field only. The CLI has no
-`--parent-agent-id` flag and no `solidify` command; both are reached through the
-web/desktop UI or a direct API call.
+Attaching is not a create-only decision: an agent that already exists is
+re-parented with the same field, on `PUT /api/agents/{id}`. `parent_agent_id`
+there is a tri-state keyed on the field being present in the body — absent means
+no change, `""` detaches, an id attaches.
+
+From the CLI:
+
+```bash
+multica agent create --name "..." --runtime-id <id> --parent-agent-id <base-role-id>
+multica agent update <id> --parent-agent-id <base-role-id>   # attach or re-point
+multica agent update <id> --parent-agent-id ""               # detach, DROPPING the inherited prompt
+multica agent solidify <id>                                  # detach, KEEPING it (see below)
+```
+
+From the UI, the base-role picker on the agent detail page's Instructions tab
+does the same two writes: choosing a base role attaches, choosing "independent
+base role" routes through solidify so the running behaviour does not change.
 
 ### What is inherited
 

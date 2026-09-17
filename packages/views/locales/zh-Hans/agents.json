@@ -166,7 +166,11 @@
     "archive_block_confirm": "固化并解绑后归档",
     "archive_block_cancel": "取消",
     "archive_block_solidified_toast_other": "已固化 {{count}} 个特化并归档「{{name}}」。",
-    "archive_block_failed_toast": "固化「{{name}}」失败：{{error}}"
+    "archive_block_failed_toast": "固化「{{name}}」失败：{{error}}",
+    "change_base_role_hint": "把这个角色挂到某个基础角色下面：保存后它变成特化，运行时先拼接基础角色的提示词，再拼接它自己的。",
+    "change_base_role_save": "保存基础角色",
+    "change_base_role_locked": "这个角色下面已经有特化，不能再挂到别的基础角色下面 —— 继承只允许两层。",
+    "change_base_role_detach_hint": "改成「独立基础角色」会先把基础角色当前的提示词写进本角色，再解除绑定，运行时拿到的内容不变。"
   },
   "detail": {
     "back_to_agents": "智能体",

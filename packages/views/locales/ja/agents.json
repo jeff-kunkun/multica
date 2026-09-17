@@ -158,7 +158,11 @@
     "archive_block_confirm": "固化して解除し、アーカイブ",
     "archive_block_cancel": "キャンセル",
     "archive_block_solidified_toast_other": "特化 {{count}} 件を固化し、「{{name}}」をアーカイブしました。",
-    "archive_block_failed_toast": "「{{name}}」を固化できませんでした: {{error}}"
+    "archive_block_failed_toast": "「{{name}}」を固化できませんでした: {{error}}",
+    "change_base_role_hint": "このエージェントをベースロールの下に置きます。保存すると特化になり、実行時はベースロールのプロンプトの後に自身のプロンプトが続きます。",
+    "change_base_role_save": "ベースロールを保存",
+    "change_base_role_locked": "このエージェントには既に特化があるため、ベースロールの下には置けません（継承は 2 階層まで）。",
+    "change_base_role_detach_hint": "「独立したベースロール」に変更すると、解除前にベースロールの現在のプロンプトがこのエージェントに書き込まれるため、実行内容は変わりません。"
   },
   "detail": {
     "back_to_agents": "エージェント",

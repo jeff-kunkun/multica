@@ -141,6 +141,12 @@ interface AgentOverviewPaneProps {
   inheritedPromptState?: InheritedPromptState;
   /** Re-reads the detail payload that carries the base role's prompt. */
   onRetryInheritedPrompt?: () => void;
+  /** Workspace agents, for the Instructions tab's base-role picker. */
+  agents?: readonly Agent[];
+  /** Attaches this agent to a base role by id (DENE-300 follow-up). */
+  onChangeBaseRole?: (parentAgentId: string) => Promise<void>;
+  /** Solidify-and-unbind, the non-lossy way back to an independent role. */
+  onDetachBaseRole?: () => Promise<void>;
   navIntent?: DetailTab | null;
   onNavIntentHandled?: () => void;
 }
@@ -164,6 +170,9 @@ export function AgentOverviewPane({
   childAgents = [],
   inheritedPromptState = "ready",
   onRetryInheritedPrompt,
+  agents,
+  onChangeBaseRole,
+  onDetachBaseRole,
   navIntent,
   onNavIntentHandled,
 }: AgentOverviewPaneProps) {
@@ -473,6 +482,10 @@ export function AgentOverviewPane({
                       childAgents={childAgents}
                       inheritedPromptState={inheritedPromptState}
                       onRetryInheritedPrompt={onRetryInheritedPrompt}
+                      agents={agents}
+                      canEdit={canEdit}
+                      onChangeBaseRole={onChangeBaseRole}
+                      onDetachBaseRole={onDetachBaseRole}
                     />
                   )}
                   {effectiveView === "skills" && (
