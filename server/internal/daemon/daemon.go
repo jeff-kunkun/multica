@@ -529,11 +529,14 @@ type Daemon struct {
 	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	planLimitsMu sync.RWMutex
 	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
-	// agyQuota tracks per-directory AGY/Antigravity individual-quota exhaustion
-	// so the same agent can fail over to another isolation slot. Guarded by
-	// agyQuotaMu; persisted under ~/.multica so a daemon restart keeps the X.
-	agyQuotaMu sync.Mutex
-	agyQuota   map[string]time.Time // gemini dir -> reset_at
+	// accountQuota tracks per-directory CLI account quota exhaustion: which
+	// account directory is out of quota, and until when. AGY reads it to fail
+	// over to another isolation slot; every other CLI reads it through the
+	// `agent_accounts` channel, which is how a quota-exhausted dsh or claude
+	// account becomes visible at all (DENE-466). Guarded by accountQuotaMu;
+	// persisted under ~/.multica so a daemon restart keeps the X.
+	accountQuotaMu sync.Mutex
+	accountQuota   map[string]time.Time // account dir -> reset_at
 	// Live Claude/Codex/Gemini/Grok/Kimi/GLM/MiniMax/DeepSeek usage probes
 	// (cc-switch style). Throttled
 	// separately from the 15s heartbeat so we do not hammer unofficial APIs.
@@ -9251,6 +9254,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
 	d.recordPlanLimits(task.RuntimeID, result.PlanLimits)
+	// Record the account-level quota hit on the SAME terminal result, and only
+	// here: the AGY path above already accounts for antigravity while it fails
+	// over, and every other CLI would otherwise have no way to learn that one of
+	// its accounts is out of quota (DENE-466). Reading it after the retries is
+	// what keeps a failure a retry recovered from out of the store.
+	d.recordRunAccountQuota(provider, agentCustomEnv, result, time.Now())
 	phaseRecorder.Mark(taskPhaseTurnCompleted)
 
 	elapsed := time.Since(taskStart).Round(time.Second)

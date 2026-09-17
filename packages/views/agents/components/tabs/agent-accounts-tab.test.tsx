@@ -239,8 +239,10 @@ beforeEach(() => {
 });
 
 describe("AgentAccountsTab rest state", () => {
-  it("shows the account in effect and lists the others as read-only chips", async () => {
-    renderTab({
+  it("shows the account in effect and makes every switchable sibling one click", async () => {
+    // DENE-466: these chips used to be read-only labels that sent the user
+    // through the drawer for a three-step switch.
+    const { onSave } = renderTab({
       agent: {
         ...baseAgent,
         custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
@@ -254,11 +256,44 @@ describe("AgentAccountsTab rest state", () => {
       screen.getByText(`--gemini_dir=${AGY_ACCOUNT2.home}`),
     ).toBeInTheDocument();
 
-    // Non-current accounts are chips, never controls: clicking one must not
-    // switch the account.
-    const chip = screen.getByText("DSH · default");
+    const chip = screen.getByText("Antigravity · default").closest("button");
+    expect(chip).not.toBeNull();
+    fireEvent.click(chip as HTMLElement);
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        custom_args: ["--gemini_dir", AGY_DEFAULT.home],
+      }),
+    );
+  });
+
+  it("keeps a CLI with no lever as a read-only chip", async () => {
+    // A button that cannot write is worse than no button: codex reports an
+    // empty lever, so its row must stay a label.
+    renderTab({
+      agent: { ...baseAgent, custom_args: ["--gemini_dir", AGY_DEFAULT.home] },
+      device: runtimeWith("antigravity", [AGY_DEFAULT, CODEX_DEFAULT]),
+    });
+
+    const chip = await screen.findByText("Codex · default");
     expect(chip.closest("button")).toBeNull();
-    expect(screen.getByText("Antigravity · default")).toBeInTheDocument();
+  });
+
+  it("keeps a CLI this agent does not run as a read-only chip", async () => {
+    // DSH_HOME is switchable, but rebinding it on an antigravity agent changes
+    // nothing it runs — one click is too cheap a way to make that write.
+    renderTab({
+      agent: { ...baseAgent, custom_args: ["--gemini_dir", AGY_DEFAULT.home] },
+      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2, DSH_DEFAULT]),
+    });
+
+    expect(
+      (await screen.findByText("DSH · default")).closest("button"),
+    ).toBeNull();
+    expect(
+      screen.getByText("Antigravity · account2").closest("button"),
+    ).not.toBeNull();
   });
 
   it("reads the env endpoint only when an account is bound through an env key", async () => {

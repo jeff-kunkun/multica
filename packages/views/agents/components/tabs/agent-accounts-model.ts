@@ -15,6 +15,7 @@
 //   No function here produces a filesystem action against an account directory.
 // - Empty and error states never produce a write action.
 
+import type { AgentAccountSwitch } from "@multica/core/agents";
 import { parseWithFallback } from "@multica/core/api/schema";
 import { z } from "zod";
 import {
@@ -26,8 +27,10 @@ import {
   normalizeAccountNumbers,
   numberedSlotId,
   parseAccountNumber,
+  parseAgySlotsConfig,
   resolveHomeDir,
   setGeminiDir,
+  writeAgySlotsConfig,
 } from "./agy-account-slots";
 
 /** Runtime metadata key holding the daemon-reported account list. */
@@ -604,6 +607,58 @@ export function accountStatus(
 }
 
 /**
+ * The account this agent should switch to when the one in effect is unusable.
+ *
+ * Walks the CURRENT account's CLI group starting after the current row and
+ * wrapping, and returns the first row that is signed in, not exhausted at
+ * `nowMs`, and carries a lever this client can write. That is deliberately the
+ * same walk the backend's AGY slot failover performs (`NextAvailableAgySlot`):
+ * a one-click switch that picked a different account than an automatic failover
+ * would is a UI telling the user something the runtime disagrees with.
+ *
+ * Returns null when the current account is unknown (nothing to walk from) or
+ * when every sibling is signed out, exhausted or unswitchable — an honest "no
+ * target" is what keeps the caller from rendering a button that cannot help.
+ *
+ * Note this does NOT require the current account to be exhausted. Whether to
+ * offer the switch is the caller's question; this only answers where it goes.
+ */
+export function nextAvailableAccount(
+  agent: AgentAccountBinding | null | undefined,
+  accounts: readonly AgentAccount[],
+  nowMs: number = Date.now(),
+): AgentAccount | null {
+  const current = resolveCurrentAccount(agent, accounts);
+  if (!current) return null;
+
+  const siblings = orderedAccounts(accounts).filter(
+    (account) => account.cli === current.cli,
+  );
+  const currentKey = accountIdentity(current);
+  const start = siblings.findIndex(
+    (account) => accountIdentity(account) === currentKey,
+  );
+  // The current account always belongs to its own group, so a miss would mean
+  // the two lists disagree; walking from 0 in that case still only returns a
+  // row that passes every check below.
+  const from = start >= 0 ? start + 1 : 0;
+
+  for (let step = 0; step < siblings.length; step += 1) {
+    const candidate = siblings[(from + step) % siblings.length];
+    if (!candidate || accountIdentity(candidate) === currentKey) continue;
+    if (accountStatus(candidate, nowMs).kind !== "signed_in") continue;
+    if (!isSwitchableLever(candidate.lever)) continue;
+    return candidate;
+  }
+  return null;
+}
+
+/** Stable per-row identity, matching the `(cli, account)` pair the parser dedupes on. */
+function accountIdentity(account: AgentAccount): string {
+  return `${account.cli}\u0000${account.account}`;
+}
+
+/**
  * Pick one of the four page states, in precedence order: an in-flight read
  * wins over a stale error, a probe error wins over an empty list (the design
  * renders them differently and only this field can tell them apart), and only
@@ -670,4 +725,50 @@ export function planAccountSwitch(
     };
   }
   return { kind: "unsupported", reason: "unsupported_lever" };
+}
+
+/**
+ * Agent fields a one-click switch has to write alongside the binding itself.
+ * `AgentAccountBinding` answers "which account is in effect"; this answers
+ * "what else travels with the change".
+ */
+export type AgentAccountSlotsBinding = AgentAccountBinding & {
+  /** `agent.runtime_config` — carries `agy_slots`, the rotation allow-list. */
+  runtime_config?: Record<string, unknown> | null;
+};
+
+/**
+ * Turn a switch plan into the single write `useSwitchAgentAccount` performs.
+ *
+ * Only the agy branch adds anything: binding `--gemini_dir` to a directory that
+ * is not in `runtime_config.agy_slots` would leave the agent launching from a
+ * slot the backend is not allowed to rotate to, so the target's slot number
+ * joins the list in the SAME request. Every other lever is the plan verbatim.
+ *
+ * Returns null for a plan that describes no write (`noop`, `unsupported`); the
+ * caller has already decided what to tell the user about those.
+ */
+export function accountSwitchWrite(
+  agent: AgentAccountSlotsBinding | null | undefined,
+  target: AgentAccount,
+  plan: AccountSwitchPlan,
+): AgentAccountSwitch | null {
+  if (plan.kind === "env") return { kind: "env", key: plan.key, value: plan.value };
+  if (plan.kind !== "custom_args") return null;
+
+  const slot = agySlotNumberOf(target);
+  if (slot === null) return { kind: "custom_args", custom_args: plan.custom_args };
+
+  const persisted = parseAgySlotsConfig(
+    agent?.runtime_config,
+    getGeminiDir([...(agent?.custom_args ?? [])]),
+  );
+  if (persisted.includes(slot)) {
+    return { kind: "custom_args", custom_args: plan.custom_args };
+  }
+  return {
+    kind: "custom_args",
+    custom_args: plan.custom_args,
+    runtime_config: writeAgySlotsConfig(agent?.runtime_config, [...persisted, slot]),
+  };
 }

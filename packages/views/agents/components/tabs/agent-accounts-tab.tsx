@@ -30,7 +30,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, FolderTree } from "lucide-react";
 import { toast } from "sonner";
-import { isAgentRuntimeBound } from "@multica/core/agents";
+import {
+  AGENT_ENV_STALE_TIME_MS,
+  agentEnvQueryKey,
+  isAgentRuntimeBound,
+  useSwitchAgentAccount,
+} from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
@@ -45,11 +50,13 @@ import {
   type AgentAccountBinding,
   type AgentAccountCli,
   accountLeverLabel,
+  accountSwitchWrite,
   accountsViewState,
   agySlotAccountId,
   canManageAccounts,
   cliForProvider,
   groupAccountsByCli,
+  isSwitchableLever,
   parseAccountLever,
   parseAgentAccounts,
   planAccountSwitch,
@@ -68,6 +75,7 @@ import {
   writeAgySlotsConfig,
 } from "./agy-account-slots";
 import { AgentProviderPresetsSection } from "./agent-provider-presets-section";
+import { AgentAccountQuotaSwitch } from "../agent-account-quota-switch";
 import {
   AccountActivePill,
   AccountStatusPill,
@@ -78,16 +86,6 @@ import {
   accountLoginCommand,
   agentCliLabel,
 } from "./agent-account-drawer";
-
-/**
- * `GET /api/agents/{id}/env` is audited server-side, so its answer is cached
- * for the session instead of being refetched on every mount and focus.
- */
-const ENV_STALE_TIME_MS = 5 * 60_000;
-
-function agentEnvQueryKey(wsId: string | null, agentId: string) {
-  return ["agent-env", wsId ?? "", agentId] as const;
-}
 
 /**
  * The empty state has no account rows to read a lever from, so the copy needs
@@ -222,7 +220,7 @@ export function AgentAccountsTab({
     queryKey: agentEnvQueryKey(wsId, agent.id),
     queryFn: () => api.getAgentEnv(agent.id),
     enabled: !!agent.id && needsEnvBinding,
-    staleTime: ENV_STALE_TIME_MS,
+    staleTime: AGENT_ENV_STALE_TIME_MS,
     refetchOnWindowFocus: false,
   });
 
@@ -270,9 +268,14 @@ export function AgentAccountsTab({
     [allAccounts, currentKey],
   );
 
+  // The CLI this agent's runtime actually consumes. A chip outside it is
+  // informational: switching its lever would not change what this agent runs.
+  const providerCli = cliForProvider(runtimeDevice?.provider);
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const switchAccount = useSwitchAgentAccount(agent.id);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   // Re-render when the soonest exhausted quota resets, so the pill flips back
@@ -306,6 +309,11 @@ export function AgentAccountsTab({
 
   const openDrawer = () => {
     setSelectedKey(currentKey);
+    // Re-seed from what the agent actually has. A one-click chip switch can
+    // fold a slot into runtime_config without the drawer ever opening, and a
+    // `slots` left over from mount would write that slot back out on the next
+    // drawer save.
+    setSlots(originalSlots);
     setDrawerOpen(true);
   };
 
@@ -339,10 +347,19 @@ export function AgentAccountsTab({
     if (selectedKey === slotKey(slot)) setSelectedKey(slotKey(1));
   };
 
-  const handleSaveAndSwitch = async () => {
-    const target =
-      allAccounts.find((account) => accountKey(account) === selectedKey) ??
-      null;
+  /**
+   * Perform one switch. Shared by the drawer's "save and switch" and by the
+   * rest state's one-click chips, so the two entry points cannot disagree about
+   * what a switch writes — the drawer is only the surface that also carries
+   * pending slot edits.
+   *
+   * `pendingSlots` is the drawer's unsaved slot list; the chips pass nothing,
+   * because a one-click switch has no unsaved state to commit.
+   */
+  const applySwitch = async (
+    target: AgentAccount | null,
+    pendingSlots?: number[],
+  ) => {
     const plan = planAccountSwitch(binding, target, viewState);
 
     if (plan.kind === "unsupported") {
@@ -351,30 +368,14 @@ export function AgentAccountsTab({
           ? t(($) => $.tab_body.accounts.switch_invalid_home_toast)
           : t(($) => $.tab_body.accounts.switch_unsupported_toast),
       );
-      return;
+      return false;
     }
-    if (plan.kind === "noop" && !slotsDirty) {
-      setDrawerOpen(false);
-      setSelectedKey(null);
-      return;
-    }
+    if (plan.kind === "noop" && pendingSlots === undefined) return true;
 
     setSaving(true);
     try {
       if (plan.kind === "env") {
-        // Env levers cannot ride on `PUT /api/agents/{id}` (custom_env is
-        // rejected with 400 there). Re-read the map and change ONLY the target
-        // key, so an unrelated variable the user set is written back as-is —
-        // values the server masked as "****" are preserved by its guard.
-        const envResponse = await api.getAgentEnv(agent.id);
-        const nextEnv = {
-          ...(envResponse.custom_env ?? {}),
-          [plan.key]: plan.value,
-        };
-        const saved = await api.updateAgentEnv(agent.id, {
-          custom_env: nextEnv,
-        });
-        queryClient.setQueryData(agentEnvQueryKey(wsId, agent.id), saved);
+        await switchAccount.mutateAsync({ kind: "env", key: plan.key, value: plan.value });
       }
 
       // The agy binding and the slot list are both agent fields, so they leave
@@ -382,11 +383,19 @@ export function AgentAccountsTab({
       // launches with `custom_args`, and committing only half of that pair
       // would leave the agent bound to a directory it may not rotate to.
       const updates: Partial<Agent> = {};
-      if (plan.kind === "custom_args") updates.custom_args = plan.custom_args;
-      if (slotsDirty) {
+      if (plan.kind === "custom_args" && target) {
+        const write = accountSwitchWrite(binding, target, plan);
+        if (write?.kind === "custom_args") {
+          updates.custom_args = write.custom_args;
+          if (write.runtime_config) updates.runtime_config = write.runtime_config;
+        }
+      }
+      // An explicit slot edit from the drawer outranks the list accountSwitchWrite
+      // folded the target into: it is the list the user just authored.
+      if (pendingSlots !== undefined) {
         updates.runtime_config = writeAgySlotsConfig(
           agent.runtime_config,
-          slots,
+          pendingSlots,
         );
       }
       if (Object.keys(updates).length > 0) await onSave(updates);
@@ -400,16 +409,26 @@ export function AgentAccountsTab({
                 : "",
             }),
       );
-      setDrawerOpen(false);
-      setSelectedKey(null);
+      return true;
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
           ? err.message
           : t(($) => $.tab_body.accounts.switch_failed_toast),
       );
+      return false;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveAndSwitch = async () => {
+    const target =
+      allAccounts.find((account) => accountKey(account) === selectedKey) ??
+      null;
+    if (await applySwitch(target, slotsDirty ? slots : undefined)) {
+      setDrawerOpen(false);
+      setSelectedKey(null);
     }
   };
 
@@ -469,6 +488,11 @@ export function AgentAccountsTab({
 
       {viewState.kind === "ready" ? (
         <>
+          <AgentAccountQuotaSwitch
+            agent={agent}
+            runtime={runtimeDevice}
+            nowMs={nowMs}
+          />
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-surface p-3.5">
             {current ? (
               <>
@@ -521,21 +545,56 @@ export function AgentAccountsTab({
                 {t(($) => $.tab_body.accounts.others_title)}
               </p>
               <p className="mt-0.5 text-micro text-muted-foreground">
-                {t(($) => $.tab_body.accounts.others_hint)}
+                {t(($) => $.tab_body.accounts.others_switch_hint)}
               </p>
-              {/* Read-only by design: a chip never switches the account. */}
+              {/* One click per chip. These used to be read-only labels that sent
+                  the user back through the drawer for a three-step switch; the
+                  drawer still owns everything else (adding slots, login
+                  commands, per-row detail), but changing which account is in
+                  effect is the one action worth reaching in a single click
+                  (DENE-466). Two kinds of row keep the read-only chip: a CLI
+                  with no lever, and a CLI this agent does not run — binding
+                  DSH_HOME on an antigravity agent is a write that changes
+                  nothing, and one click is too cheap a way to make it. */}
               <div className="mt-2.5 flex flex-wrap gap-2">
-                {others.map((account) => (
-                  <span
-                    key={accountKey(account)}
-                    className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-muted px-2 py-0.5 text-micro text-muted-foreground"
-                  >
-                    <AgentCliBadge cli={account.cli} showLabel={false} />
-                    <span className="truncate">
-                      {`${agentCliLabel(account.cli)} · ${account.account}`}
-                    </span>
-                  </span>
-                ))}
+                {others.map((account) => {
+                  const label = `${agentCliLabel(account.cli)} · ${account.account}`;
+                  const chip = (
+                    <>
+                      <AgentCliBadge cli={account.cli} showLabel={false} />
+                      <span className="truncate">{label}</span>
+                      <AccountStatusPill
+                        account={account}
+                        nowMs={nowMs}
+                        className="border-0 bg-transparent px-0"
+                      />
+                    </>
+                  );
+                  if (!isSwitchableLever(account.lever) || account.cli !== providerCli) {
+                    return (
+                      <span
+                        key={accountKey(account)}
+                        className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-muted px-2 py-0.5 text-micro text-muted-foreground"
+                      >
+                        {chip}
+                      </span>
+                    );
+                  }
+                  return (
+                    <button
+                      key={accountKey(account)}
+                      type="button"
+                      disabled={saving}
+                      aria-label={t(($) => $.tab_body.accounts.others_switch_action, {
+                        account: label,
+                      })}
+                      onClick={() => void applySwitch(account)}
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-muted px-2 py-0.5 text-micro text-muted-foreground transition-colors hover:border-brand/40 hover:text-foreground disabled:opacity-60"
+                    >
+                      {chip}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ) : null}

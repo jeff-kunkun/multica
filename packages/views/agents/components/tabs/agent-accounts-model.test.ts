@@ -12,6 +12,7 @@ import {
   type AgentAccount,
   accountLeverLabel,
   accountStatus,
+  accountSwitchWrite,
   accountsViewState,
   agySlotAccountId,
   agySlotNumberOf,
@@ -19,6 +20,7 @@ import {
   cliForProvider,
   groupAccountsByCli,
   isSwitchableLever,
+  nextAvailableAccount,
   parseAccountLever,
   parseAgentAccounts,
   planAccountSwitch,
@@ -733,5 +735,118 @@ describe("planAccountSwitch", () => {
     const plan = planAccountSwitch({ custom_args: [] }, target, READY);
     expect(JSON.stringify(plan)).not.toContain("PRIVATE KEY");
     expect(JSON.stringify(plan)).not.toContain("key_ref");
+  });
+});
+
+describe("nextAvailableAccount", () => {
+  const NOW = 1_800_000_000_000;
+  const exhausted = (base: AgentAccount): AgentAccount => ({
+    ...base,
+    quota_reset_at: Math.floor(NOW / 1000) + 3600,
+  });
+  const signedOut = (base: AgentAccount): AgentAccount => ({
+    ...base,
+    signed_in: false,
+  });
+
+  it("walks past the current account to the next usable sibling", () => {
+    const binding = { provider: "dsh", custom_env: { DSH_HOME: DSH_DEFAULT.home } };
+    expect(
+      nextAvailableAccount(binding, [DSH_DEFAULT, DSH_ACCOUNT2], NOW)?.account,
+    ).toBe("account2");
+  });
+
+  it("wraps around so the last account can fall back to the first", () => {
+    const binding = { provider: "dsh", custom_env: { DSH_HOME: DSH_ACCOUNT2.home } };
+    expect(
+      nextAvailableAccount(binding, [DSH_DEFAULT, DSH_ACCOUNT2], NOW)?.account,
+    ).toBe("default");
+  });
+
+  it("skips an exhausted sibling", () => {
+    const binding = { provider: "dsh", custom_env: { DSH_HOME: DSH_DEFAULT.home } };
+    expect(
+      nextAvailableAccount(binding, [DSH_DEFAULT, exhausted(DSH_ACCOUNT2)], NOW),
+    ).toBeNull();
+  });
+
+  it("skips a signed-out sibling", () => {
+    const binding = { provider: "dsh", custom_env: { DSH_HOME: DSH_DEFAULT.home } };
+    expect(
+      nextAvailableAccount(binding, [DSH_DEFAULT, signedOut(DSH_ACCOUNT2)], NOW),
+    ).toBeNull();
+  });
+
+  it("never crosses CLIs — an agy agent is not rescued by a dsh account", () => {
+    const binding = { provider: "antigravity", custom_args: ["--gemini_dir", AGY_DEFAULT.home] };
+    expect(
+      nextAvailableAccount(binding, [AGY_DEFAULT, DSH_DEFAULT, DSH_ACCOUNT2], NOW),
+    ).toBeNull();
+  });
+
+  it("refuses an unswitchable sibling", () => {
+    // Two codex rows could never happen today (no account glob), but the lever
+    // gate is what decides this, not the CLI id.
+    const other = account({ cli: "codex", account: "account2", home: `${RUNTIME_HOME}/.codex-2`, lever: "" });
+    const binding = { provider: "codex" };
+    expect(nextAvailableAccount(binding, [CODEX_DEFAULT, other], NOW)).toBeNull();
+  });
+
+  it("has nothing to walk from when the current account is unknown", () => {
+    const binding = { provider: "dsh", custom_env: { DSH_HOME: "/elsewhere/.dsh" } };
+    expect(nextAvailableAccount(binding, [DSH_DEFAULT, DSH_ACCOUNT2], NOW)).toBeNull();
+  });
+});
+
+describe("accountSwitchWrite", () => {
+  it("passes an env plan through verbatim", () => {
+    const binding = { provider: "dsh", custom_env: { DSH_HOME: DSH_DEFAULT.home } };
+    const plan = planAccountSwitch(binding, DSH_ACCOUNT2, READY);
+    expect(accountSwitchWrite(binding, DSH_ACCOUNT2, plan)).toEqual({
+      kind: "env",
+      key: "DSH_HOME",
+      value: DSH_ACCOUNT2.home,
+    });
+  });
+
+  it("folds an agy target's slot into the rotation list it is missing from", () => {
+    // Binding --gemini_dir to a slot the backend may not rotate to is the
+    // half-committed pair the drawer's save has always avoided.
+    const binding = {
+      provider: "antigravity",
+      custom_args: ["--gemini_dir", AGY_DEFAULT.home],
+      runtime_config: { agy_slots: { accounts: [1] } },
+    };
+    const plan = planAccountSwitch(binding, AGY_ACCOUNT2, READY);
+    const write = accountSwitchWrite(binding, AGY_ACCOUNT2, plan);
+    expect(write).toMatchObject({
+      kind: "custom_args",
+      custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
+      runtime_config: { agy_slots: { accounts: [1, 2] } },
+    });
+  });
+
+  it("leaves the rotation list alone when the target is already in it", () => {
+    const binding = {
+      provider: "antigravity",
+      custom_args: ["--gemini_dir", AGY_DEFAULT.home],
+      runtime_config: { agy_slots: { accounts: [1, 2] } },
+    };
+    const plan = planAccountSwitch(binding, AGY_ACCOUNT2, READY);
+    const write = accountSwitchWrite(binding, AGY_ACCOUNT2, plan);
+    expect(write).toEqual({
+      kind: "custom_args",
+      custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
+    });
+  });
+
+  it("describes no write for a plan that has none", () => {
+    const binding = { provider: "dsh", custom_env: { DSH_HOME: DSH_DEFAULT.home } };
+    expect(
+      accountSwitchWrite(binding, DSH_DEFAULT, planAccountSwitch(binding, DSH_DEFAULT, READY)),
+    ).toBeNull();
+    expect(
+      accountSwitchWrite(binding, CODEX_DEFAULT, planAccountSwitch(binding, CODEX_DEFAULT, READY)),
+    ).toBeNull();
   });
 });

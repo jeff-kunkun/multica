@@ -9,6 +9,7 @@ import type {
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { AgentAccountQuotaSwitch } from "./agent-account-quota-switch";
 import {
   AgentQuotaCapsule,
   AgentQuotaMeter,
@@ -126,6 +127,17 @@ export function AgentOverviewSummary({
         )}
       </section>
 
+      {/* The one interactive element on an otherwise read-only surface, and
+          deliberately so: this is where a user learns the agent is out of
+          quota, and an alert that can only state the problem sends them
+          hunting through settings for the fix (DENE-466). It renders nothing
+          unless the account in effect is actually exhausted. */}
+      <AgentAccountQuotaSwitch
+        agent={agent}
+        runtime={runtime}
+        nowMs={now}
+        className="mt-5"
+      />
       <AgentQuotaMeter agentId={agent.id} runtime={runtime} now={now} />
       <AgentPerformanceSummary agent={agent} />
     </aside>
