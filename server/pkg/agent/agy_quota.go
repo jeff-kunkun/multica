@@ -107,8 +107,13 @@ func parseAgyResetsIn(lower string, now time.Time) time.Time {
 	return now.Add(d)
 }
 
-// DefaultAgyQuotaResetAt returns now+1h when the provider omitted a reset.
-func DefaultAgyQuotaResetAt(now, resetAt time.Time) time.Time {
+// DefaultQuotaResetAt returns now+1h when the provider omitted a reset.
+//
+// One hour is deliberately short for a deadline nobody reported: the overlay
+// it feeds hides an account from selection, and a guess that outlives the real
+// reset costs more than one that expires early and lets the next run re-learn
+// the truth.
+func DefaultQuotaResetAt(now, resetAt time.Time) time.Time {
 	if !resetAt.IsZero() {
 		return resetAt
 	}
@@ -116,6 +121,33 @@ func DefaultAgyQuotaResetAt(now, resetAt time.Time) time.Time {
 		now = time.Now()
 	}
 	return now.Add(defaultAgyQuotaReset)
+}
+
+// ParseQuotaResetHint reads a "Resets in 3h20m" style deadline out of any
+// CLI's quota error text, or the zero time when the text carries none.
+//
+// The phrasing originated in AGY's individual-quota error, but nothing about
+// the pattern is AGY-specific and the non-AGY account channel needs the same
+// answer — deriving it a second time would let two deadlines for the same
+// account disagree. Unlike ParseAgyQuotaError this does NOT decide whether the
+// text is a quota failure at all; the caller has already classified it.
+func ParseQuotaResetHint(text string, now time.Time) time.Time {
+	return parseAgyResetsIn(strings.ToLower(text), now)
+}
+
+// IsAgyAccountDir reports whether dir is one of AGY's own account directories
+// (~/.gemini or ~/.gemini-accountN).
+//
+// The quota store is keyed by directory and now holds every CLI's accounts, so
+// the legacy `agy_quota_exhausted` wire key needs a way to stay what its name
+// promises. An empty dir is not an AGY directory here: accountNumberFromDir
+// reads "" as "the default account" for argument parsing, which is the wrong
+// answer for a membership test.
+func IsAgyAccountDir(dir string) bool {
+	if strings.TrimSpace(dir) == "" {
+		return false
+	}
+	return accountNumberFromDir(dir) > 0
 }
 
 // GeminiDirFromArgs returns the --gemini_dir value from a CLI argv region.

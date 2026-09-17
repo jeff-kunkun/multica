@@ -436,6 +436,7 @@
       "summary_unknown": "이 에이전트가 지금 사용하는 바인딩과 일치하는 계정이 이 컴퓨터에 없습니다.",
       "active_badge": "사용 중",
       "manage_action": "계정 관리",
+      "quick_switch_action": "{{account}} (으)로 전환",
       "others_title": "다른 계정",
       "others_hint": "읽기 전용입니다. 전환은 '계정 관리'에서 합니다.",
       "loading_text": "계정 디렉터리와 로그인 상태를 읽는 중…",

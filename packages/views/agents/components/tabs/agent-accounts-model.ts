@@ -604,6 +604,42 @@ export function accountStatus(
 }
 
 /**
+ * The one rendering of a quota-reset deadline, shared by the summary pill and
+ * the accounts tab's warning so the two surfaces cannot disagree about when
+ * the account comes back. Locale-formatted, so it is presentation only.
+ */
+export function formatQuotaResetAt(resetAtMs: number): string {
+  return new Date(resetAtMs).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/**
+ * Soonest deadline among the accounts whose quota is still spent at `nowMs`,
+ * or null when nothing is waiting on a reset.
+ *
+ * Surfaced so no caller keeps its own clock: the summary pill and the accounts
+ * tab's warning both flip back the moment the quota returns, instead of on the
+ * next reload. A signed-out account is skipped — `accountStatus` already says
+ * there is nothing to wait for without credentials.
+ */
+export function nextQuotaResetMs(
+  accounts: readonly AgentAccount[],
+  nowMs: number = Date.now(),
+): number | null {
+  return accounts.reduce<number | null>((soonest, account) => {
+    const status = accountStatus(account, nowMs);
+    if (status.kind !== "quota_exhausted") return soonest;
+    return soonest === null || status.reset_at_ms < soonest
+      ? status.reset_at_ms
+      : soonest;
+  }, null);
+}
+
+/**
  * Pick one of the four page states, in precedence order: an in-flight read
  * wins over a stale error, a probe error wins over an empty list (the design
  * renders them differently and only this field can tell them apart), and only
@@ -670,4 +706,52 @@ export function planAccountSwitch(
     };
   }
   return { kind: "unsupported", reason: "unsupported_lever" };
+}
+
+/**
+ * The account a one-click switch may move to, or null when the surface must
+ * not offer that action at all.
+ *
+ * The action exists for exactly one situation: the account in effect has spent
+ * its quota, and a sibling account of the same CLI can take over right now. So
+ * all of the following must hold:
+ *
+ * - the account in effect is `quota_exhausted` at `nowMs` (a quota that already
+ *   came back is not a reason to move);
+ * - the group's lever is writable, which drops codex / cursor — the daemon
+ *   reports no lever for them, and an empty lever can never be bound;
+ * - the candidate is signed in with quota left — "signed out" and "exhausted"
+ *   are both dead ends, and picking one would only move the dead end;
+ * - the switch really writes: the candidate goes through the same
+ *   `planAccountSwitch` gate as "save and switch", so an untrusted view, an
+ *   unknown lever shape or a home that is not an absolute path produces no
+ *   button instead of a dead one.
+ *
+ * The first eligible account in the canonical group order wins, so the choice
+ * is deterministic and never depends on the order the daemon reported.
+ */
+export function quotaSwitchCandidate(input: {
+  binding: AgentAccountBinding | null | undefined;
+  accounts: readonly AgentAccount[];
+  current: AgentAccount | null | undefined;
+  view?: AccountsViewState;
+  nowMs?: number;
+}): AgentAccount | null {
+  const { binding, accounts, current, view } = input;
+  const nowMs = input.nowMs ?? Date.now();
+  if (!current) return null;
+  if (accountStatus(current, nowMs).kind !== "quota_exhausted") return null;
+
+  const group = groupAccountsByCli(accounts).find(
+    (entry) => entry.cli === current.cli,
+  );
+  if (!group || !group.switchable) return null;
+
+  return (
+    group.accounts.find((account) => {
+      if (account.account === current.account) return false;
+      if (accountStatus(account, nowMs).kind !== "signed_in") return false;
+      return planAccountSwitch(binding, account, view).kind !== "unsupported";
+    }) ?? null
+  );
 }

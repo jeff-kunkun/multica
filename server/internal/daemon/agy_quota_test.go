@@ -48,7 +48,7 @@ func TestAgyQuotaFailoverSwitchesGeminiDir(t *testing.T) {
 	if got.Opts.ResumeSessionID != "" {
 		t.Fatal("failover must drop the prior conversation id")
 	}
-	states := d.agyQuotaSnapshot(now)
+	states := d.accountQuotaSnapshot(now)
 	if len(states) != 1 || states[0].Dir != account1 {
 		t.Fatalf("exhausted = %#v", states)
 	}
@@ -112,7 +112,7 @@ func TestApplyAgyLaunchSlotSkipsExhaustedCurrent(t *testing.T) {
 
 	d := &Daemon{}
 	now := time.Unix(1_800_000_000, 0)
-	d.markAgyQuotaExhausted(account1, now.Add(time.Hour))
+	d.markAccountQuotaExhausted(account1, now.Add(time.Hour))
 	opts := agent.ExecOptions{CustomArgs: []string{"--gemini_dir", account1}}
 	runtimeConfig, _ := json.Marshal(map[string]any{
 		"agy_slots": map[string]any{"accounts": []int{1, 2}},
@@ -131,8 +131,8 @@ func TestAgyQuotaSnapshotDropsExpired(t *testing.T) {
 	d := &Daemon{}
 	now := time.Unix(1_800_000_000, 0)
 	dir := filepath.Join(home, ".gemini")
-	d.markAgyQuotaExhausted(dir, now.Add(-time.Minute))
-	if states := d.agyQuotaSnapshot(now); len(states) != 0 {
+	d.markAccountQuotaExhausted(dir, now.Add(-time.Minute))
+	if states := d.accountQuotaSnapshot(now); len(states) != 0 {
 		t.Fatalf("expired still present: %#v", states)
 	}
 }

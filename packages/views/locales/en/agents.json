@@ -553,6 +553,7 @@
       "summary_unknown": "No account on this machine matches the binding this agent currently uses.",
       "active_badge": "In use",
       "manage_action": "Manage accounts",
+      "quick_switch_action": "Switch to {{account}}",
       "others_title": "Other accounts",
       "others_hint": "Read-only. Switching happens in the Manage accounts drawer.",
       "loading_text": "Reading account directories and sign-in state…",

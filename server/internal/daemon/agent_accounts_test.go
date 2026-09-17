@@ -327,7 +327,7 @@ func TestWithRegistrationHostMetaKeepsLegacyAgyKeys(t *testing.T) {
 
 	d := &Daemon{cfg: Config{DaemonID: "daemon-agent-accounts"}, logger: slog.Default()}
 	resetAt := time.Now().Add(time.Hour).Truncate(time.Second)
-	d.markAgyQuotaExhausted(filepath.Join(f.home, ".gemini"), resetAt)
+	d.markAccountQuotaExhausted(filepath.Join(f.home, ".gemini"), resetAt)
 
 	req := d.withRegistrationHostMeta(map[string]any{"workspace_id": "ws"})
 
