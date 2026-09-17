@@ -314,3 +314,56 @@ func TestReopenIssueDraftRefusesAnAbandonedDraft(t *testing.T) {
 		t.Fatalf("the refused reopen left the draft in %q, want abandoned", status)
 	}
 }
+
+// A node's issue can leave the group — moved under a sibling, re-parented onto
+// another epic, detached to the top level — and it still owns its origin. The
+// round that follows has to recognise it as an existing node anyway.
+//
+// Reading the group by parent does not: it would report the moved node as new,
+// the insert would collide on the partial unique index over issue (origin_id),
+// and the whole round's transaction would roll back — so the nodes the round
+// genuinely added would silently never be created, and every later confirm
+// would fail the same way. Ownership is therefore asked by origin, which is the
+// key that index is on.
+func TestReopenIssueDraftSeesNodesMovedOutOfTheGroup(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cleanupIssueDraftGroup(t)
+
+	session := startIssueDraftSession(t)
+	first := roundOne(t, session.SessionID,
+		draftChild("c1", "first child", "todo"),
+		draftChild("c2", "second child", "todo"),
+	)
+
+	// Somebody re-parents the first child under its sibling.
+	dbfx.Exec(t, `UPDATE issue SET parent_issue_id = $1 WHERE id = $2`, first.Issues[2].ID, first.Issues[1].ID)
+
+	var reopened issueDraftResponse
+	testutil.Call(t, testHandler.ReopenIssueDraft, reopenRequest(t, session.SessionID)).
+		Want(http.StatusOK).JSON(&reopened)
+	round := saveIssueDraft(t, session.SessionID, reopened.Revision, "ready", draftGroupPayload("round one parent",
+		draftChild("c1", "first child", "todo"),
+		draftChild("c2", "second child", "todo"),
+		draftChild("c3", "third child", "todo"),
+	))
+
+	var second FinalizeIssueDraftResponse
+	testutil.Call(t, testHandler.FinalizeIssueDraft, finalizeRequest(t, session.SessionID, round.Revision)).
+		Want(http.StatusOK).JSON(&second)
+
+	// Exactly one new issue: the moved node is adopted, not built again.
+	if got := issueDraftGroupIssueCount(t); got != 4 {
+		t.Fatalf("the round left %d issues from this alignment, want 4 — the node it added "+
+			"was lost to a collision with the node that had moved out of the group", got)
+	}
+	var movedParent, movedID string
+	dbfx.QueryRow(t, `SELECT id::text, parent_issue_id::text FROM issue WHERE id = $1`,
+		first.Issues[1].ID).Scan(&movedID, &movedParent)
+	if movedParent != first.Issues[2].ID {
+		t.Fatalf("the round moved the node back under the root: parent = %s, want %s — "+
+			"a follow-up round adopts what exists, it does not re-file it",
+			movedParent, first.Issues[2].ID)
+	}
+}

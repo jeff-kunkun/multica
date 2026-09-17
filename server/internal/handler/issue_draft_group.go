@@ -240,21 +240,6 @@ type issueDraftGroupState struct {
 	// Group is the whole committed group, root first. Only meaningful when
 	// HasRoot is true.
 	Group []db.Issue
-	// nodeIDs are the origin ids that already own an issue of this group. A
-	// node's origin is derived, so membership here is identity, not title or key
-	// text: a save that re-keys everything matches nothing and a save that keeps
-	// its keys matches every node it did not add.
-	nodeIDs map[string]struct{}
-}
-
-// ownsNode reports whether the issue this node derives its id from is already
-// committed.
-func (s issueDraftGroupState) ownsNode(origin pgtype.UUID) bool {
-	if !origin.Valid {
-		return false
-	}
-	_, ok := s.nodeIDs[uuidToString(origin)]
-	return ok
 }
 
 // readIssueDraftGroupState reads the group this alignment already produced, if
@@ -274,18 +259,39 @@ func (h *Handler) readIssueDraftGroupState(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return issueDraftGroupState{}, false
 	}
-	state := issueDraftGroupState{
-		HasRoot: true,
-		Root:    root,
-		Group:   group,
-		nodeIDs: make(map[string]struct{}, len(group)),
+	return issueDraftGroupState{HasRoot: true, Root: root, Group: group}, true
+}
+
+// issueDraftOwnedNodes answers, for one payload's nodes, which of them already
+// own an issue.
+//
+// It asks by origin rather than by reading the group's children, and that
+// distinction is the whole point: origin_id is what migration 486's partial
+// unique index is on, so it is the only answer the next INSERT will agree with.
+// A read by parent disagrees the moment a node's issue leaves the group — moved
+// under a sibling, re-parented onto another epic, detached to the top level —
+// and a round that believed such a node was new would collide on its origin and
+// take every genuinely new node in the same transaction down with it.
+func (h *Handler) issueDraftOwnedNodes(w http.ResponseWriter, r *http.Request, session db.ChatSession, origins []pgtype.UUID) (map[string]struct{}, bool) {
+	owned := make(map[string]struct{}, len(origins))
+	if len(origins) == 0 {
+		return owned, true
 	}
-	for _, issue := range group {
-		if issue.OriginType.Valid && issue.OriginType.String == issueDraftOriginType && issue.OriginID.Valid {
-			state.nodeIDs[uuidToString(issue.OriginID)] = struct{}{}
+	issues, err := h.Queries.ListIssuesByOrigins(r.Context(), db.ListIssuesByOriginsParams{
+		WorkspaceID: session.WorkspaceID,
+		OriginType:  pgtype.Text{String: issueDraftOriginType, Valid: true},
+		OriginIds:   origins,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to look up issues for draft")
+		return nil, false
+	}
+	for _, issue := range issues {
+		if issue.OriginID.Valid {
+			owned[uuidToString(issue.OriginID)] = struct{}{}
 		}
 	}
-	return state, true
+	return owned, true
 }
 
 // issueGroupParamsFromDraft turns a ready draft into the set of create
@@ -345,21 +351,38 @@ func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Reque
 	}
 
 	group := service.IssueGroupParams{Nodes: make([]service.IssueGroupNode, 0, len(nodes))}
-	if state.HasRoot && draft.FinalizeRound > 0 {
-		// The round is what tells a continuation apart from the two cases that
-		// must adopt the group whole: a first confirm that finds the root
-		// already committed is a crash recovery or a re-keyed save racing it
-		// (§3.3 timelines B and C), and adding to the group there would turn
-		// "confirm again" into "create those children too". Reopening is the
-		// only thing that makes the new keys an increment, and it is the only
-		// thing that moves this counter.
-		group.RootIssueID = state.Root.ID
+	if !state.HasRoot || draft.FinalizeRound == 0 {
+		// Not a continuation round. Either nothing exists yet and the whole
+		// payload is built, or the group is already committed and the caller
+		// adopts it whole — a first confirm that finds the root there is a
+		// crash recovery or a re-keyed save racing it (§3.3 timelines B and C),
+		// and appending there would turn "confirm again" into "create those
+		// children too". Reopening is the only thing that makes new keys an
+		// increment, and the only thing that moves the round counter.
+		for _, node := range nodes {
+			params, ok := h.issueParamsFromDraft(w, r, workspaceID, session, node)
+			if !ok {
+				return service.IssueGroupParams{}, false
+			}
+			group.Nodes = append(group.Nodes, service.IssueGroupNode{Params: params})
+		}
+		return group, true
 	}
+
+	group.RootIssueID = state.Root.ID
+	origins := make([]pgtype.UUID, 0, len(nodes))
 	for _, node := range nodes {
-		if state.ownsNode(issueDraftNodeID(session.ID, node.Key)) {
-			// Already an issue. Adopted, not rewritten — and only reachable in a
-			// continuation round, because RootIssueID is what marks the call as
-			// an append.
+		origins = append(origins, issueDraftNodeID(session.ID, node.Key))
+	}
+	owned, ok := h.issueDraftOwnedNodes(w, r, session, origins)
+	if !ok {
+		return service.IssueGroupParams{}, false
+	}
+	for i, node := range nodes {
+		if _, exists := owned[uuidToString(origins[i])]; exists {
+			// Already an issue. Adopted, not rewritten: the group is real work
+			// by the time a round is added to it, edited by people and agents,
+			// and a follow-up round is not grounds for overwriting that.
 			continue
 		}
 		params, ok := h.issueParamsFromDraft(w, r, workspaceID, session, node)

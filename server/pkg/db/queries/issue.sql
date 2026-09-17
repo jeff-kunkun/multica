@@ -604,6 +604,18 @@ WHERE workspace_id = $1
   AND origin_id = $3
 LIMIT 1;
 
+-- name: ListIssuesByOrigins :many
+-- Finds every issue stamped with one of a set of (origin_type, origin_id)
+-- pairs. The partial unique index on issue (origin_id) WHERE origin_type =
+-- 'issue_draft' makes this the authoritative answer to "does this alignment
+-- node already own an issue" — authoritative in a way a read by parent is not,
+-- because a node's issue can be re-parented off the group and still own its
+-- origin.
+SELECT * FROM issue
+WHERE workspace_id = $1
+  AND origin_type = $2
+  AND origin_id = ANY(sqlc.arg('origin_ids')::uuid[]);
+
 -- name: CountCreatedIssueAssignees :many
 -- Count assignees on issues created by a specific user.
 SELECT
