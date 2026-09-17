@@ -152,6 +152,8 @@
     "no_labels": "No labels yet",
     "no_assignee": "No assignee",
     "no_project": "No project",
+    "project_tooltip": "Filter by project",
+    "project_clear": "Clear project filter",
     "section_status": "Status",
     "section_priority": "Priority",
     "section_assignee": "Assignee",

@@ -150,6 +150,8 @@
     "no_labels": "아직 라벨이 없습니다",
     "no_assignee": "담당자 없음",
     "no_project": "프로젝트 없음",
+    "project_tooltip": "프로젝트로 필터",
+    "project_clear": "프로젝트 필터 지우기",
     "section_status": "상태",
     "section_priority": "우선순위",
     "section_assignee": "담당자",

@@ -150,6 +150,8 @@
     "no_labels": "还没有标签",
     "no_assignee": "无负责人",
     "no_project": "无项目",
+    "project_tooltip": "按项目筛选",
+    "project_clear": "清除项目筛选",
     "section_status": "状态",
     "section_priority": "优先级",
     "section_assignee": "负责人",

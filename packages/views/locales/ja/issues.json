@@ -150,6 +150,8 @@
     "no_labels": "まだラベルがありません",
     "no_assignee": "担当者なし",
     "no_project": "プロジェクトなし",
+    "project_tooltip": "プロジェクトで絞り込む",
+    "project_clear": "プロジェクトの絞り込みを解除",
     "section_status": "ステータス",
     "section_priority": "優先度",
     "section_assignee": "担当者",
