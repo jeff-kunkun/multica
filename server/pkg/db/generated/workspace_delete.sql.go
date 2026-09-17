@@ -306,6 +306,12 @@ deleted_stage_wakeup_failures AS (
 deleted_attachments AS (
     DELETE FROM attachment WHERE workspace_id = $1
 ),
+deleted_transfer_attachment_chunks AS (
+    DELETE FROM transfer_attachment_upload_chunk WHERE workspace_id = $1
+),
+deleted_transfer_attachment_uploads AS (
+    DELETE FROM transfer_attachment_upload WHERE workspace_id = $1
+),
 deleted_channel_outbound_cards AS (
     DELETE FROM channel_outbound_card_message
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
@@ -498,6 +504,9 @@ WHERE channel_media_pending_object.workspace_id = $1
 // outside the workspace being torn down (the stagnation watchdog only scans
 // unswept rows of live workspaces), and they carry no foreign key, so nothing
 // else removes them. Same no-FK chore as the tables below.
+// Same no-FK chore for the resumable attachment staging (DENE-443). Both
+// tables are keyed by workspace_id, so the teardown never has to assemble the
+// (sha256, offset) pairs it is dropping first.
 // Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
 // than the session set because that column exists precisely so this statement
 // does not have to join through chat_session, which it deletes in this same CTE.

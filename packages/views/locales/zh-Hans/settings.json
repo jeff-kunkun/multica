@@ -1459,6 +1459,7 @@
       "progress_session_current": "当前会话：{{title}}",
       "progress_attachments": "已下载 {{count}} 个附件",
       "progress_attachments_total": "{{done}} / {{total}} 个附件",
+      "progress_attachments_bytes": "附件 {{done}} / {{total}}",
       "progress_issues": "{{done}} / {{total}} 个任务",
       "progress_stage_config": "正在导出配置…",
       "progress_stage_conversations": "正在导出对话…",

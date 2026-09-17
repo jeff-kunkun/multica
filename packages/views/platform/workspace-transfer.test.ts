@@ -41,6 +41,32 @@ describe("transferProgressRatio", () => {
     ).toBe(0.25);
   });
 
+  it("prefers attachment bytes over the attachment count", () => {
+    // The count can freeze on one large blob while the bytes keep moving, so a
+    // sample carrying both must be read in bytes (DENE-443).
+    expect(
+      transferProgressRatio(
+        sample({
+          attachmentsDownloaded: 1,
+          attachmentsTotal: 370,
+          attachmentsBytesUploaded: 50 * 1024 * 1024,
+          attachmentsBytesTotal: 100 * 1024 * 1024,
+        }),
+      ),
+    ).toBe(0.5);
+    // A byte total of zero says nothing, so the count still decides.
+    expect(
+      transferProgressRatio(
+        sample({
+          attachmentsDownloaded: 1,
+          attachmentsTotal: 4,
+          attachmentsBytesUploaded: 0,
+          attachmentsBytesTotal: 0,
+        }),
+      ),
+    ).toBe(0.25);
+  });
+
   it("reads a missing done counter as zero and clamps an overshoot", () => {
     expect(transferProgressRatio(sample({ issuesTotal: 40 }))).toBe(0);
     // The source can grow during the walk, so done > total is reachable.

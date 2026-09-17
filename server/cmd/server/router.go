@@ -1618,6 +1618,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/transfer/issues", h.ImportWorkspaceTransferIssues)
 					r.Post("/transfer/conversations", h.ImportWorkspaceTransferConversations)
 					r.Post("/transfer/attachments", h.ImportWorkspaceTransferAttachment)
+					r.Post("/transfer/attachments/status", h.ImportWorkspaceTransferAttachmentStatus)
+					r.Post("/transfer/attachments/chunk", h.ImportWorkspaceTransferAttachmentChunk)
+					r.Post("/transfer/attachments/commit", h.ImportWorkspaceTransferAttachmentCommit)
 					r.Post("/transfer/bind-runtimes", h.BindWorkspaceTransferRuntimes)
 					r.Post("/members", h.CreateInvitation)
 					r.Route("/members/{memberId}", func(r chi.Router) {

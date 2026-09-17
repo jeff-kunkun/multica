@@ -299,6 +299,11 @@ export function parseTransferProgressLine(line: string): TransferProgressEvent |
       obj.attachments_downloaded ?? obj.attachments_uploaded,
     ),
     attachmentsTotal: asNumber(obj.attachments_total),
+    // The same progress in bytes, which is what an import of 370 attachments
+    // needs: the count freezes on the one 15 MB archive while the bytes keep
+    // moving (DENE-443). Absent on an older CLI.
+    attachmentsBytesUploaded: asNumber(obj.attachments_bytes_uploaded),
+    attachmentsBytesTotal: asNumber(obj.attachments_bytes_total),
     issuesDone: asNumber(obj.issues_done),
     issuesTotal: asNumber(obj.issues_total),
   };

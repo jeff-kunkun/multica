@@ -1466,6 +1466,7 @@
       "progress_session_current": "Current session: {{title}}",
       "progress_attachments": "{{count}} attachments downloaded",
       "progress_attachments_total": "{{done}} / {{total}} attachments",
+      "progress_attachments_bytes": "attachments {{done}} / {{total}}",
       "progress_issues": "{{done}} / {{total}} tasks",
       "progress_stage_config": "Exporting configuration…",
       "progress_stage_conversations": "Exporting chats…",

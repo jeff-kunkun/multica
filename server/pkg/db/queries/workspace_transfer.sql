@@ -157,3 +157,64 @@ SET issue_counter = GREATEST(
     (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)
 )
 WHERE id = $1;
+
+-- name: GetTransferAttachmentUpload :one
+SELECT * FROM transfer_attachment_upload
+WHERE workspace_id = $1 AND sha256 = $2;
+
+-- name: UpsertTransferAttachmentUpload :exec
+-- The chunk endpoints carry the attachment meta on every request, so a resume
+-- that starts at a later chunk still lands the row the commit will read.
+INSERT INTO transfer_attachment_upload (
+    workspace_id, sha256, source_id, uploader_id, total_bytes, meta
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (workspace_id, sha256) DO UPDATE SET
+    source_id   = EXCLUDED.source_id,
+    uploader_id = EXCLUDED.uploader_id,
+    total_bytes = EXCLUDED.total_bytes,
+    meta        = EXCLUDED.meta,
+    updated_at  = now();
+
+-- name: InsertTransferAttachmentUploadChunk :execrows
+-- A re-sent chunk is a no-op: the offset is part of the key, and the bytes at
+-- that offset are by definition the same ones (content-addressed by sha256).
+INSERT INTO transfer_attachment_upload_chunk (
+    workspace_id, sha256, offset_bytes, size_bytes, data
+) VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (workspace_id, sha256, offset_bytes) DO NOTHING;
+
+-- name: ListTransferAttachmentUploadChunkRanges :many
+SELECT offset_bytes, size_bytes FROM transfer_attachment_upload_chunk
+WHERE workspace_id = $1 AND sha256 = $2
+ORDER BY offset_bytes;
+
+-- name: ListTransferAttachmentUploadChunks :many
+SELECT offset_bytes, size_bytes, data FROM transfer_attachment_upload_chunk
+WHERE workspace_id = $1 AND sha256 = $2
+ORDER BY offset_bytes;
+
+-- name: SummarizeTransferAttachmentUploadChunks :one
+SELECT
+    COALESCE(SUM(size_bytes), 0)::bigint AS received_bytes,
+    COUNT(*)::bigint                     AS chunk_count
+FROM transfer_attachment_upload_chunk
+WHERE workspace_id = $1 AND sha256 = $2;
+
+-- name: SetTransferAttachmentUploadReceived :exec
+UPDATE transfer_attachment_upload
+SET received_bytes = $3, updated_at = now()
+WHERE workspace_id = $1 AND sha256 = $2;
+
+-- name: ListTransferAttachmentUploadsForWorkspace :many
+SELECT sha256, source_id, total_bytes, received_bytes, created_at
+FROM transfer_attachment_upload
+WHERE workspace_id = $1
+ORDER BY created_at, sha256;
+
+-- name: DeleteTransferAttachmentUploadChunks :exec
+DELETE FROM transfer_attachment_upload_chunk
+WHERE workspace_id = $1 AND sha256 = $2;
+
+-- name: DeleteTransferAttachmentUpload :exec
+DELETE FROM transfer_attachment_upload
+WHERE workspace_id = $1 AND sha256 = $2;

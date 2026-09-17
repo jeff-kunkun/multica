@@ -3,9 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -328,6 +331,125 @@ func (h *Handler) ImportWorkspaceTransferAttachment(w http.ResponseWriter, r *ht
 		}
 	}
 	report, err := service.ImportTransferAttachment(r.Context(), env, meta, body)
+	if err != nil {
+		h.writeTransferError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+// ImportWorkspaceTransferAttachmentStatus answers the resume question for a
+// whole bundle in one round trip: for each (source_id, sha256) the client
+// names, whether the attachment row already exists and how many bytes of the
+// blob the target already holds.
+func (h *Handler) ImportWorkspaceTransferAttachmentStatus(w http.ResponseWriter, r *http.Request) {
+	env, ok := h.loadTransferEnv(w, r)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, service.TransferConversationsMaxBytes)
+	var req service.TransferAttachmentStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "transfer_bundle_too_large", "attachment status payload is too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid request body")
+		return
+	}
+	report, err := service.TransferAttachmentUploadStatuses(r.Context(), env, req.Entries)
+	if err != nil {
+		h.writeTransferError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+// ImportWorkspaceTransferAttachmentChunk stages one slice of a blob. The
+// request is multipart with the same `meta` field the one-shot endpoint takes,
+// plus sha256 / offset / total_bytes and the slice as `file`.
+func (h *Handler) ImportWorkspaceTransferAttachmentChunk(w http.ResponseWriter, r *http.Request) {
+	env, ok := h.loadTransferEnv(w, r)
+	if !ok {
+		return
+	}
+	limit := int64(service.TransferAttachmentChunkMaxBytes) + 1<<20
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	if err := r.ParseMultipartForm(limit); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "transfer_bundle_too_large",
+				fmt.Sprintf("attachment chunk exceeds %d bytes", service.TransferAttachmentChunkMaxBytes))
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid multipart form")
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	rawMeta := r.FormValue("meta")
+	if rawMeta == "" {
+		writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "missing meta field")
+		return
+	}
+	var meta service.TransferAttachmentMeta
+	if err := json.Unmarshal([]byte(rawMeta), &meta); err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid meta json")
+		return
+	}
+	offset, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("offset")), 10, 64)
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "transfer_attachment_offset_invalid", "offset must be an integer")
+		return
+	}
+	total, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("total_bytes")), 10, 64)
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "transfer_attachment_total_invalid", "total_bytes must be an integer")
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "transfer_attachment_chunk_empty", "missing file field")
+		return
+	}
+	defer file.Close()
+	chunk, err := io.ReadAll(io.LimitReader(file, int64(service.TransferAttachmentChunkMaxBytes)+1))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read chunk")
+		return
+	}
+	report, err := service.StageTransferAttachmentChunk(r.Context(), env, service.TransferAttachmentChunkRequest{
+		SHA256:     r.FormValue("sha256"),
+		Offset:     offset,
+		TotalBytes: total,
+		Meta:       meta,
+		Chunk:      chunk,
+	})
+	if err != nil {
+		h.writeTransferError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+// ImportWorkspaceTransferAttachmentCommit assembles a fully staged blob,
+// verifies it against its sha256, and writes the attachment row.
+func (h *Handler) ImportWorkspaceTransferAttachmentCommit(w http.ResponseWriter, r *http.Request) {
+	env, ok := h.loadTransferEnv(w, r)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, service.TransferConversationsMaxBytes)
+	var req struct {
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "transfer_bundle_invalid", "invalid request body")
+		return
+	}
+	report, err := service.CommitTransferAttachmentUpload(r.Context(), env, req.SHA256)
 	if err != nil {
 		h.writeTransferError(w, r, err)
 		return

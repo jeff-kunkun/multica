@@ -39,10 +39,12 @@ Both directions stream progress as JSON lines on **stderr** (stdout stays reserv
 {"event":"progress","stage":"conversations","sessions_total":26}
 {"event":"progress","stage":"conversations","session_index":3,"sessions_total":26,"session_title":"Deploy","attachments_downloaded":4}
 {"event":"progress","stage":"issues","issues_done":40,"issues_total":200}
-{"event":"progress","attachments_uploaded":12,"attachments_total":29}
+{"event":"progress","attachments_uploaded":12,"attachments_total":29,"attachments_bytes_uploaded":5242880,"attachments_bytes_total":104857600}
 ```
 
 Export reports the session walk and downloaded attachment bodies; import reports uploaded attachments. Attachments are discovered per message during an export, so `attachments_total` exists only for import.
+
+An import that transfers attachments also sends `attachments_bytes_uploaded` / `attachments_bytes_total`. Attachment bodies differ by two orders of magnitude, so the count is a poor progress signal — it sits still on the one 15 MB archive while 300 thumbnails finish. A listener that has the byte fields should prefer them for the bar and the line; one that does not still has the counts.
 
 `stage` names the export group being walked (`config`, `conversations`, `issues`), in the order the export runs them. The task walk makes several serial reads per issue, so on a real workspace it is the longest stretch of a full export; without `stage` and `issues_done` / `issues_total` a listener sat on the conversation group's finished counters for minutes and could not tell a slow export from a hung one. `issues_total` is honest: the whole issue list is fetched before any issue is read. Import does not emit `stage`, and a CLI older than this protocol emits none at all — treat an absent or unrecognised `stage` as "unknown", not as an error.
 
@@ -50,7 +52,7 @@ A `--dry-run` conflict 409 carries the whole import report next to `error`/`code
 
 If the target returns 404 for `/transfer/*`, the CLI reports `target_unsupported` — the target must be a `kun` instance. If it returns 400 `transfer_bundle_version_unsupported`, the CLI reports `target_outdated`: the target has the routes but its build predates the V3 bundle reader, so a `schema_version: 2` bundle (one carrying the `issues` group) is unreadable there. The fix is on the target — upgrade it, or re-export without `issues` for a `schema_version: 1` bundle. Passing `--target <url>` to the export is what turns that failure into a decision made before the bundle exists.
 
-`GET /health` carries a `transfer` object — `{"max_schema_version": <int>, "groups": ["config", "conversations", "attachments", "issues"]}` — alongside the usual liveness fields. It is unauthenticated on purpose (an exporter is logged in to the source, not the target), it is additive (an older instance answers without it, which reads as "unknown"), and `max_schema_version` is derived from the same constant the import kernel checks, so a target can never advertise a version its reader would refuse.
+`GET /health` carries a `transfer` object — `{"max_schema_version": <int>, "groups": ["config", "conversations", "attachments", "issues"], "attachment_chunk_max_bytes": <int>}` — alongside the usual liveness fields. `attachment_chunk_max_bytes` is the largest slice `/transfer/attachments/chunk` accepts; an instance that answers without it predates resumable attachment staging, so the importer falls back to one request per blob and refuses a blob too large for that (see below). It is unauthenticated on purpose (an exporter is logged in to the source, not the target), it is additive (an older instance answers without it, which reads as "unknown"), and `max_schema_version` is derived from the same constant the import kernel checks, so a target can never advertise a version its reader would refuse.
 
 ## Server endpoints
 
@@ -61,10 +63,27 @@ All five sit under `/api/workspaces/{id}` and require workspace owner/admin. Age
 | `POST` | `/transfer/config` | Apply the V1 config bundle after people/email mapping and runtime-profile import. `dry_run` required. `on_conflict` is fail/overwrite/rename/skip. Carries the `options` object, including `auto_bind_runtimes`. |
 | `POST` | `/transfer/issues` | One task shard (issue rows + comment rows + relation rows + the package-wide `refs`). Idempotent by deterministic ids. `finalize: true` backfills the parent pointers, bumps the issue counter and rebuilds subscribers. |
 | `POST` | `/transfer/conversations` | One conversation shard (sessions + messages + refs). Idempotent by deterministic ids. `finalize: true` publishes one workspace chat-list invalidation. |
-| `POST` | `/transfer/attachments` | Multipart: `meta` JSON + optional `file`. Idempotent. |
+| `POST` | `/transfer/attachments` | Multipart: `meta` JSON + optional `file`. One request carries one whole blob. Idempotent. Used for body-less rows and as the fallback when the target does not advertise chunk staging. |
+| `POST` | `/transfer/attachments/status` | `{"entries":[{"source_id","sha256"}]}` → per entry `imported`, `received_bytes`, `total_bytes`, `resume_offset`. One call answers the whole bundle. |
+| `POST` | `/transfer/attachments/chunk` | Multipart: `meta` JSON + `sha256` + `offset` + `total_bytes` + `file` (the slice). Idempotent on `(sha256, offset)`. |
+| `POST` | `/transfer/attachments/commit` | `{"sha256"}`. Assembles the staged slices, verifies the body against its own sha256, writes the attachment row, and discards the staging. |
 | `POST` | `/transfer/bind-runtimes` | `{"bindings":[{"agent_id","runtime_id"}]}` → one result per binding. Same gates as the agent editor: the agent must be manageable by the caller and `canUseRuntimeForAgent` must pass, so another member's private runtime is refused. |
 
 Import order: config → issue shards → conversation shards → attachments → a final conversations call with `finalize: true` → a final issues call with `finalize: true`.
+
+### Resumable attachments
+
+A single blob can be far larger than one request can carry: the reference bundle has a 6.2 MB blob, and on a ~45 KB/s uplink that is ~140 s — past a 100 s proxy timeout. When the target advertises `attachment_chunk_max_bytes`, every attachment body travels as content-addressed slices instead:
+
+1. one `/transfer/attachments/status` call for the whole bundle, which says which attachment rows already exist and how many bytes of each blob the target holds;
+2. slices from the target's reported contiguous prefix to the end, sized by measured throughput (starting at 2 MiB, target ~30 s per request, capped by the advertised maximum and floored at 128 KiB);
+3. one `/transfer/attachments/commit` per blob, which verifies sha256 before anything is written.
+
+A killed import therefore resumes: the bytes already staged are not re-sent, and rows already committed are skipped without a request at all. Staging is keyed by `(workspace_id, sha256, offset_bytes)`, so a re-sent slice is a no-op and slices may arrive out of order; slices from different runs may overlap, and assembly takes each slice's uncovered tail rather than skipping it. The target's reported prefix is the authority — if it moves backwards (a killed run's request landing late), the uploader rewinds and continues rather than failing.
+
+Half-finished staging is reaped in application code on the next staging request for that workspace: 24 h TTL, and a 512 MiB per-workspace cap with the oldest uploads evicted first. A workspace teardown deletes it explicitly (`DeleteWorkspaceLeafData`); there are no foreign keys.
+
+Retryable failures (524/522/504/408/429/5xx, or a transport that dies mid-body) halve the slice and retry at the same offset, up to three splits. When the target does **not** advertise chunk staging, the importer sends one request per blob and refuses a blob above 4 MiB with `target_unsupported` naming the size and the fix, rather than uploading until the proxy cuts the connection.
 
 History writes use dedicated `INSERT … ON CONFLICT (id) DO NOTHING` queries. They must not go through `POST /api/chat/sessions/{id}/messages` or `POST /api/issues/{id}/comments` (both enqueue tasks and rewrite timestamps).
 

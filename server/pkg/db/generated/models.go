@@ -1444,6 +1444,27 @@ type TaskUsageHourlyRollupState struct {
 	LastError         pgtype.Text        `json:"last_error"`
 }
 
+type TransferAttachmentUpload struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Sha256        string             `json:"sha256"`
+	SourceID      string             `json:"source_id"`
+	UploaderID    pgtype.UUID        `json:"uploader_id"`
+	TotalBytes    int64              `json:"total_bytes"`
+	Meta          []byte             `json:"meta"`
+	ReceivedBytes int64              `json:"received_bytes"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TransferAttachmentUploadChunk struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Sha256      string             `json:"sha256"`
+	OffsetBytes int64              `json:"offset_bytes"`
+	SizeBytes   int64              `json:"size_bytes"`
+	Data        []byte             `json:"data"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type User struct {
 	ID                      pgtype.UUID        `json:"id"`
 	Name                    string             `json:"name"`

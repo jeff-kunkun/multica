@@ -1459,6 +1459,7 @@
       "progress_session_current": "現在のセッション: {{title}}",
       "progress_attachments": "添付ファイル {{count}} 件をダウンロード済み",
       "progress_attachments_total": "{{done}} / {{total}} 件の添付ファイル",
+      "progress_attachments_bytes": "添付ファイル {{done}} / {{total}}",
       "progress_issues": "{{done}} / {{total}} 件のタスク",
       "progress_stage_config": "設定を書き出し中…",
       "progress_stage_conversations": "会話を書き出し中…",

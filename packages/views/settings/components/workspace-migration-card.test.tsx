@@ -1138,6 +1138,58 @@ describe("WorkspaceMigrationCard", () => {
     });
   });
 
+  // An attachments group is 370 files spanning 20 KB to 15 MB, so an import
+  // that reports only a count parks on the one large blob for minutes. The
+  // byte line is what the card shows when the CLI sends it (DENE-443).
+  it("shows attachment progress in bytes when the CLI reports them", async () => {
+    const user = userEvent.setup();
+    let emit: ((event: TransferProgressEvent) => void) | undefined;
+    desktop.subscribe.mockImplementation((cb) => {
+      emit = cb as (event: TransferProgressEvent) => void;
+      return () => {};
+    });
+    desktop.pickImport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValueOnce({
+      ok: true,
+      action: "import",
+      dryRun: true,
+      report: importReport,
+    });
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Import from zip" }));
+    await screen.findByTestId("workspace-migration-report");
+
+    desktop.run.mockImplementationOnce(
+      () => new Promise<TransferRunResult>(() => {}),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Import into this workspace" }),
+    );
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Import into this workspace" }),
+    );
+    await waitFor(() => expect(desktop.run).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      emit?.({
+        phase: "running",
+        attachmentsDownloaded: 4,
+        attachmentsTotal: 370,
+        attachmentsBytesUploaded: 5 * 1024 * 1024,
+        attachmentsBytesTotal: 100 * 1024 * 1024,
+      });
+    });
+    const progress = await screen.findByTestId("workspace-migration-progress");
+    expect(progress).toHaveTextContent("attachments 5.0 MB / 100.0 MB");
+    expect(progress).not.toHaveTextContent("4 / 370 attachments");
+  });
+
   it.each([
     ["target_unsupported", "The target instance needs a kun build."],
     ["cli_too_old", "The Desktop CLI is too old for transfer."],

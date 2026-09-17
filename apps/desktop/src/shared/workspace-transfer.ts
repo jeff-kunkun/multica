@@ -25,6 +25,14 @@ export type TransferProgressEvent = {
   currentSessionTitle?: string;
   attachmentsDownloaded?: number;
   attachmentsTotal?: number;
+  /**
+   * The same attachment progress in bytes. Attachment bodies differ by two
+   * orders of magnitude, so a count that stalls on one 15 MB archive while the
+   * remaining 300 files are thumbnails is not progress the user can read
+   * (DENE-443). A CLI that sends these decides the bar and the line.
+   */
+  attachmentsBytesUploaded?: number;
+  attachmentsBytesTotal?: number;
   issuesDone?: number;
   issuesTotal?: number;
 };

@@ -25,6 +25,14 @@ export type TransferProgressEvent = {
   currentSessionTitle?: string;
   attachmentsDownloaded?: number;
   attachmentsTotal?: number;
+  /**
+   * The same attachment progress in bytes. Attachment bodies differ by two
+   * orders of magnitude, so a count that stalls on one 15 MB archive while the
+   * remaining 300 files are thumbnails is not progress the user can read
+   * (DENE-443). A CLI that sends these decides the bar and the line.
+   */
+  attachmentsBytesUploaded?: number;
+  attachmentsBytesTotal?: number;
   issuesDone?: number;
   issuesTotal?: number;
 };
@@ -366,6 +374,10 @@ export function transferProgressRatio(
   const pairs: [number | undefined, number | undefined][] = [
     [progress.issuesDone, progress.issuesTotal],
     [progress.sessionsDone, progress.sessionsTotal],
+    // Bytes before the count: when the CLI reports both, the count can sit
+    // still for minutes on one large blob while the bytes keep moving, and the
+    // bar must show the movement (DENE-443).
+    [progress.attachmentsBytesUploaded, progress.attachmentsBytesTotal],
     [progress.attachmentsDownloaded, progress.attachmentsTotal],
   ];
   for (const [done, total] of pairs) {

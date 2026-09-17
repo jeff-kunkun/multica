@@ -327,6 +327,15 @@ deleted_stage_wakeup_failures AS (
 deleted_attachments AS (
     DELETE FROM attachment WHERE workspace_id = $1
 ),
+-- Same no-FK chore for the resumable attachment staging (DENE-443). Both
+-- tables are keyed by workspace_id, so the teardown never has to assemble the
+-- (sha256, offset) pairs it is dropping first.
+deleted_transfer_attachment_chunks AS (
+    DELETE FROM transfer_attachment_upload_chunk WHERE workspace_id = $1
+),
+deleted_transfer_attachment_uploads AS (
+    DELETE FROM transfer_attachment_upload WHERE workspace_id = $1
+),
 deleted_channel_outbound_cards AS (
     DELETE FROM channel_outbound_card_message
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)

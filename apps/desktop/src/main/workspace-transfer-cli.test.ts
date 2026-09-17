@@ -493,6 +493,23 @@ describe("parseTransferEstimate / progress", () => {
     });
   });
 
+  // Byte progress is what an attachments group actually needs: 370 files whose
+  // sizes differ by two orders of magnitude make the count useless as a bar
+  // (DENE-443).
+  it("reads attachment byte progress", () => {
+    expect(
+      parseTransferProgressLine(
+        '{"event":"progress","attachments_uploaded":4,"attachments_total":370,"attachments_bytes_uploaded":5242880,"attachments_bytes_total":104857600}',
+      ),
+    ).toMatchObject({
+      phase: "running",
+      attachmentsDownloaded: 4,
+      attachmentsTotal: 370,
+      attachmentsBytesUploaded: 5242880,
+      attachmentsBytesTotal: 104857600,
+    });
+  });
+
   it("leaves counters absent when the line omits them", () => {
     const event = parseTransferProgressLine(
       '{"event":"progress","sessions_total":2}',

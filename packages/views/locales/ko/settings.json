@@ -1459,6 +1459,7 @@
       "progress_session_current": "현재 세션: {{title}}",
       "progress_attachments": "첨부 {{count}}개 다운로드됨",
       "progress_attachments_total": "{{done}} / {{total}}개 첨부",
+      "progress_attachments_bytes": "첨부 {{done}} / {{total}}",
       "progress_issues": "{{done}} / {{total}}개 작업",
       "progress_stage_config": "구성을 내보내는 중…",
       "progress_stage_conversations": "대화를 내보내는 중…",

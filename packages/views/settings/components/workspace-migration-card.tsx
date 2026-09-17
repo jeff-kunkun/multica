@@ -906,7 +906,17 @@ function ProgressLines({ progress }: { progress: TransferProgressEvent }) {
       }),
     );
   }
-  if (progress.attachmentsTotal != null) {
+  if (progress.attachmentsBytesTotal != null && progress.attachmentsBytesTotal > 0) {
+    // Byte progress is the honest line for an attachment group whose bodies
+    // span two orders of magnitude: a count would sit on one large archive
+    // while hundreds of thumbnails finished (DENE-443).
+    lines.push(
+      t(($) => $.config_transfer.migration.progress_attachments_bytes, {
+        done: formatTransferBytes(progress.attachmentsBytesUploaded ?? 0),
+        total: formatTransferBytes(progress.attachmentsBytesTotal),
+      }),
+    );
+  } else if (progress.attachmentsTotal != null) {
     lines.push(
       t(($) => $.config_transfer.migration.progress_attachments_total, {
         done: progress.attachmentsDownloaded ?? 0,

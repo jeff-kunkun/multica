@@ -23,6 +23,36 @@ func (q *Queries) CountAgentTaskQueueByChatSessionIDs(ctx context.Context, sessi
 	return column_1, err
 }
 
+const deleteTransferAttachmentUpload = `-- name: DeleteTransferAttachmentUpload :exec
+DELETE FROM transfer_attachment_upload
+WHERE workspace_id = $1 AND sha256 = $2
+`
+
+type DeleteTransferAttachmentUploadParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Sha256      string      `json:"sha256"`
+}
+
+func (q *Queries) DeleteTransferAttachmentUpload(ctx context.Context, arg DeleteTransferAttachmentUploadParams) error {
+	_, err := q.db.Exec(ctx, deleteTransferAttachmentUpload, arg.WorkspaceID, arg.Sha256)
+	return err
+}
+
+const deleteTransferAttachmentUploadChunks = `-- name: DeleteTransferAttachmentUploadChunks :exec
+DELETE FROM transfer_attachment_upload_chunk
+WHERE workspace_id = $1 AND sha256 = $2
+`
+
+type DeleteTransferAttachmentUploadChunksParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Sha256      string      `json:"sha256"`
+}
+
+func (q *Queries) DeleteTransferAttachmentUploadChunks(ctx context.Context, arg DeleteTransferAttachmentUploadChunksParams) error {
+	_, err := q.db.Exec(ctx, deleteTransferAttachmentUploadChunks, arg.WorkspaceID, arg.Sha256)
+	return err
+}
+
 const getRuntimeProfileByDisplayName = `-- name: GetRuntimeProfileByDisplayName :one
 
 SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at FROM runtime_profile
@@ -51,6 +81,33 @@ func (q *Queries) GetRuntimeProfileByDisplayName(ctx context.Context, arg GetRun
 		&i.Visibility,
 		&i.CreatedBy,
 		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getTransferAttachmentUpload = `-- name: GetTransferAttachmentUpload :one
+SELECT workspace_id, sha256, source_id, uploader_id, total_bytes, meta, received_bytes, created_at, updated_at FROM transfer_attachment_upload
+WHERE workspace_id = $1 AND sha256 = $2
+`
+
+type GetTransferAttachmentUploadParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Sha256      string      `json:"sha256"`
+}
+
+func (q *Queries) GetTransferAttachmentUpload(ctx context.Context, arg GetTransferAttachmentUploadParams) (TransferAttachmentUpload, error) {
+	row := q.db.QueryRow(ctx, getTransferAttachmentUpload, arg.WorkspaceID, arg.Sha256)
+	var i TransferAttachmentUpload
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Sha256,
+		&i.SourceID,
+		&i.UploaderID,
+		&i.TotalBytes,
+		&i.Meta,
+		&i.ReceivedBytes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -123,6 +180,193 @@ func (q *Queries) GetWorkspaceMemberByEmail(ctx context.Context, arg GetWorkspac
 		&i.Role,
 		&i.Email,
 	)
+	return i, err
+}
+
+const insertTransferAttachmentUploadChunk = `-- name: InsertTransferAttachmentUploadChunk :execrows
+INSERT INTO transfer_attachment_upload_chunk (
+    workspace_id, sha256, offset_bytes, size_bytes, data
+) VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (workspace_id, sha256, offset_bytes) DO NOTHING
+`
+
+type InsertTransferAttachmentUploadChunkParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Sha256      string      `json:"sha256"`
+	OffsetBytes int64       `json:"offset_bytes"`
+	SizeBytes   int64       `json:"size_bytes"`
+	Data        []byte      `json:"data"`
+}
+
+// A re-sent chunk is a no-op: the offset is part of the key, and the bytes at
+// that offset are by definition the same ones (content-addressed by sha256).
+func (q *Queries) InsertTransferAttachmentUploadChunk(ctx context.Context, arg InsertTransferAttachmentUploadChunkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertTransferAttachmentUploadChunk,
+		arg.WorkspaceID,
+		arg.Sha256,
+		arg.OffsetBytes,
+		arg.SizeBytes,
+		arg.Data,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const listTransferAttachmentUploadChunkRanges = `-- name: ListTransferAttachmentUploadChunkRanges :many
+SELECT offset_bytes, size_bytes FROM transfer_attachment_upload_chunk
+WHERE workspace_id = $1 AND sha256 = $2
+ORDER BY offset_bytes
+`
+
+type ListTransferAttachmentUploadChunkRangesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Sha256      string      `json:"sha256"`
+}
+
+type ListTransferAttachmentUploadChunkRangesRow struct {
+	OffsetBytes int64 `json:"offset_bytes"`
+	SizeBytes   int64 `json:"size_bytes"`
+}
+
+func (q *Queries) ListTransferAttachmentUploadChunkRanges(ctx context.Context, arg ListTransferAttachmentUploadChunkRangesParams) ([]ListTransferAttachmentUploadChunkRangesRow, error) {
+	rows, err := q.db.Query(ctx, listTransferAttachmentUploadChunkRanges, arg.WorkspaceID, arg.Sha256)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTransferAttachmentUploadChunkRangesRow{}
+	for rows.Next() {
+		var i ListTransferAttachmentUploadChunkRangesRow
+		if err := rows.Scan(&i.OffsetBytes, &i.SizeBytes); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTransferAttachmentUploadChunks = `-- name: ListTransferAttachmentUploadChunks :many
+SELECT offset_bytes, size_bytes, data FROM transfer_attachment_upload_chunk
+WHERE workspace_id = $1 AND sha256 = $2
+ORDER BY offset_bytes
+`
+
+type ListTransferAttachmentUploadChunksParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Sha256      string      `json:"sha256"`
+}
+
+type ListTransferAttachmentUploadChunksRow struct {
+	OffsetBytes int64  `json:"offset_bytes"`
+	SizeBytes   int64  `json:"size_bytes"`
+	Data        []byte `json:"data"`
+}
+
+func (q *Queries) ListTransferAttachmentUploadChunks(ctx context.Context, arg ListTransferAttachmentUploadChunksParams) ([]ListTransferAttachmentUploadChunksRow, error) {
+	rows, err := q.db.Query(ctx, listTransferAttachmentUploadChunks, arg.WorkspaceID, arg.Sha256)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTransferAttachmentUploadChunksRow{}
+	for rows.Next() {
+		var i ListTransferAttachmentUploadChunksRow
+		if err := rows.Scan(&i.OffsetBytes, &i.SizeBytes, &i.Data); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTransferAttachmentUploadsForWorkspace = `-- name: ListTransferAttachmentUploadsForWorkspace :many
+SELECT sha256, source_id, total_bytes, received_bytes, created_at
+FROM transfer_attachment_upload
+WHERE workspace_id = $1
+ORDER BY created_at, sha256
+`
+
+type ListTransferAttachmentUploadsForWorkspaceRow struct {
+	Sha256        string             `json:"sha256"`
+	SourceID      string             `json:"source_id"`
+	TotalBytes    int64              `json:"total_bytes"`
+	ReceivedBytes int64              `json:"received_bytes"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListTransferAttachmentUploadsForWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListTransferAttachmentUploadsForWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listTransferAttachmentUploadsForWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTransferAttachmentUploadsForWorkspaceRow{}
+	for rows.Next() {
+		var i ListTransferAttachmentUploadsForWorkspaceRow
+		if err := rows.Scan(
+			&i.Sha256,
+			&i.SourceID,
+			&i.TotalBytes,
+			&i.ReceivedBytes,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setTransferAttachmentUploadReceived = `-- name: SetTransferAttachmentUploadReceived :exec
+UPDATE transfer_attachment_upload
+SET received_bytes = $3, updated_at = now()
+WHERE workspace_id = $1 AND sha256 = $2
+`
+
+type SetTransferAttachmentUploadReceivedParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Sha256        string      `json:"sha256"`
+	ReceivedBytes int64       `json:"received_bytes"`
+}
+
+func (q *Queries) SetTransferAttachmentUploadReceived(ctx context.Context, arg SetTransferAttachmentUploadReceivedParams) error {
+	_, err := q.db.Exec(ctx, setTransferAttachmentUploadReceived, arg.WorkspaceID, arg.Sha256, arg.ReceivedBytes)
+	return err
+}
+
+const summarizeTransferAttachmentUploadChunks = `-- name: SummarizeTransferAttachmentUploadChunks :one
+SELECT
+    COALESCE(SUM(size_bytes), 0)::bigint AS received_bytes,
+    COUNT(*)::bigint                     AS chunk_count
+FROM transfer_attachment_upload_chunk
+WHERE workspace_id = $1 AND sha256 = $2
+`
+
+type SummarizeTransferAttachmentUploadChunksParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Sha256      string      `json:"sha256"`
+}
+
+type SummarizeTransferAttachmentUploadChunksRow struct {
+	ReceivedBytes int64 `json:"received_bytes"`
+	ChunkCount    int64 `json:"chunk_count"`
+}
+
+func (q *Queries) SummarizeTransferAttachmentUploadChunks(ctx context.Context, arg SummarizeTransferAttachmentUploadChunksParams) (SummarizeTransferAttachmentUploadChunksRow, error) {
+	row := q.db.QueryRow(ctx, summarizeTransferAttachmentUploadChunks, arg.WorkspaceID, arg.Sha256)
+	var i SummarizeTransferAttachmentUploadChunksRow
+	err := row.Scan(&i.ReceivedBytes, &i.ChunkCount)
 	return i, err
 }
 
@@ -611,4 +855,39 @@ func (q *Queries) TransferListIssueIDs(ctx context.Context, workspaceID pgtype.U
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertTransferAttachmentUpload = `-- name: UpsertTransferAttachmentUpload :exec
+INSERT INTO transfer_attachment_upload (
+    workspace_id, sha256, source_id, uploader_id, total_bytes, meta
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (workspace_id, sha256) DO UPDATE SET
+    source_id   = EXCLUDED.source_id,
+    uploader_id = EXCLUDED.uploader_id,
+    total_bytes = EXCLUDED.total_bytes,
+    meta        = EXCLUDED.meta,
+    updated_at  = now()
+`
+
+type UpsertTransferAttachmentUploadParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Sha256      string      `json:"sha256"`
+	SourceID    string      `json:"source_id"`
+	UploaderID  pgtype.UUID `json:"uploader_id"`
+	TotalBytes  int64       `json:"total_bytes"`
+	Meta        []byte      `json:"meta"`
+}
+
+// The chunk endpoints carry the attachment meta on every request, so a resume
+// that starts at a later chunk still lands the row the commit will read.
+func (q *Queries) UpsertTransferAttachmentUpload(ctx context.Context, arg UpsertTransferAttachmentUploadParams) error {
+	_, err := q.db.Exec(ctx, upsertTransferAttachmentUpload,
+		arg.WorkspaceID,
+		arg.Sha256,
+		arg.SourceID,
+		arg.UploaderID,
+		arg.TotalBytes,
+		arg.Meta,
+	)
+	return err
 }
