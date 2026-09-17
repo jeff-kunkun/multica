@@ -31,10 +31,19 @@ const (
 // It is deliberately policy-independent. The `<issue_draft>` block is a
 // contract with `packages/core/issue-drafts/protocol.ts`, and a policy that
 // could change it would be a policy that breaks the preview.
-const issueDraftContract = `You are Multica's requirement alignment partner. Your job is to turn a rough request into one well-formed issue BEFORE any work starts.
+//
+// The block carries the whole group since DENE-411: the flat fields are the
+// parent, `children` are its sub-issues. Keys are the carrier's own names for
+// its sub-issues and the client hands them back verbatim — the server derives
+// each sub-issue's identity from (conversation, key), which is what makes the
+// same key resolve to the same issue on every confirm. `assignee_hint` is here
+// rather than `assignee_id` because the carrier has no roster to resolve an id
+// against; the preview panel turns the hint into a real assignee. The type and
+// its bounds are in `issueDraftChild` (issue_draft.go).
+const issueDraftContract = `You are Multica's requirement alignment partner. Your job is to turn a rough request into one well-formed issue BEFORE any work starts. A request that is really several pieces of work becomes a parent issue plus its sub-issues, agreed in the same block.
 
 Every response MUST end with exactly one <issue_draft> JSON block using this shape:
-<issue_draft>{"title":"","description":"","status":"","priority":""}</issue_draft>
+<issue_draft>{"title":"","description":"","status":"","priority":"","children":[{"key":"c1","title":"","description":"","stage":1,"assignee_hint":""}]}</issue_draft>
 
 Rules:
 - The JSON must be valid, compact JSON on one physical line. Do not wrap it in Markdown fences.
@@ -43,6 +52,13 @@ Rules:
 - title is one concise line naming the outcome, not the activity.
 - description is Markdown: the problem, the acceptance criteria, and the constraints that are already known. Write down what was decided in the conversation; do not restate the whole transcript.
 - Leave status and priority empty unless the user states them.
+- The flat fields describe the PARENT issue: the outcome the whole request adds up to. children are the separate sub-issues that parent is made of.
+- Split into children only when the request is genuinely several pieces of work, and omit children entirely when one issue covers it — an alignment that produced one issue is a group of one. Never emit an empty children array.
+- At most 8 children. The server refuses a draft with more than 20.
+- Every child needs a stable key ("c1", "c2", …). Once you have emitted a key, carry that key back unchanged in every later block, and never re-key a child you already named — the key is what stops the same sub-issue from being created twice.
+- stage is the 1-based order the work happens in: stage 1 is what can start first, stage 2 waits for stage 1. Leave stage empty when the sub-issues are not ordered; if you stage any of them, stage every one of them.
+- assignee_hint names the kind of work in a few words ("backend implementation", "frontend page", "manual verification"). Never write an assignee id or a person's name — you have no roster, and the user picks the real assignee.
+- Leave a child's status and priority out: the stage decides when a child starts, and a child with no priority is normal.
 - Never request, expose, or place secrets, tokens, passwords, or environment-variable values in the draft.
 - You are aligning a request, not executing it. Do not create, modify or delete anything, and never claim the issue has been created — the user creates it by confirming the draft.`
 
@@ -93,16 +109,20 @@ func (p issueDraftPolicy) Instructions() string {
 
 // issueDraftPolicyRegistry is the whole set. A new policy is a new entry; the
 // keys are the values accepted by the create and switch endpoints.
+//
+// Every entry moved to version 2 when the shared contract grew `children`: the
+// contract block is half of each prompt, so both entries are different prompts
+// now, and a draft that recorded "1" was produced by one that could not split.
 var issueDraftPolicyRegistry = map[string]issueDraftPolicy{
 	issueDraftPolicyQuestion: {
 		Key:       issueDraftPolicyQuestion,
-		Version:   "1",
+		Version:   "2",
 		Guided:    true,
 		Behaviour: issueDraftQuestionPolicy,
 	},
 	issueDraftPolicyConversation: {
 		Key:       issueDraftPolicyConversation,
-		Version:   "1",
+		Version:   "2",
 		Guided:    false,
 		Behaviour: issueDraftConversationPolicy,
 	},
