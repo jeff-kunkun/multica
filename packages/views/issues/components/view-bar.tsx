@@ -49,8 +49,9 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
+import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
-import type { IssueView } from "@multica/core/api/schemas";
+import type { IssueView, IssueViewVisibility } from "@multica/core/api/schemas";
 import {
   canManageIssueView,
   type IssueViewScope,
@@ -61,7 +62,7 @@ import {
   useUpdateIssueViewPreference,
   EMPTY_VIEW_BAR_PREFS,
 } from "@multica/core/issue-views/preferences";
-import { useDeleteIssueView } from "@multica/core/issue-views/mutations";
+import { useDeleteIssueView, useUpdateIssueView } from "@multica/core/issue-views/mutations";
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { pinListOptions } from "@multica/core/pins/queries";
@@ -141,10 +142,12 @@ function SortableBarTab({
 /** Shared tab chrome so the real row and the measurement mirror agree. */
 function BarTabButton({
   label,
+  tag,
   active,
   onClick,
 }: {
   label: string;
+  tag?: string;
   active?: boolean;
   onClick?: () => void;
 }) {
@@ -162,6 +165,9 @@ function BarTabButton({
       tabIndex={onClick ? undefined : -1}
     >
       <span className="truncate">{label}</span>
+      {tag ? (
+        <span className="shrink-0 text-caption text-muted-foreground">{tag}</span>
+      ) : null}
     </Button>
   );
 }
@@ -203,6 +209,8 @@ export function ViewBar({
   const prefs = preference?.prefs ?? EMPTY_VIEW_BAR_PREFS;
   const updatePreference = useUpdateIssueViewPreference(wsId, scope);
   const deleteView = useDeleteIssueView(wsId);
+  const updateView = useUpdateIssueView(wsId);
+  const projectSharedTag = t(($) => $.view_bar.project_shared_tag);
   const [manageOpen, setManageOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [deleting, setDeleting] = useState<IssueView | null>(null);
@@ -393,6 +401,11 @@ export function ViewBar({
           }
         >
           <span className="truncate">{view.name}</span>
+          {view.visibility === "project" && (
+            <span className="shrink-0 text-caption text-muted-foreground">
+              {projectSharedTag}
+            </span>
+          )}
         </ContextMenuTrigger>
         <ContextMenuContent className="w-44">
           {/* Edit stays visible but disabled without permission — the greyed
@@ -439,7 +452,10 @@ export function ViewBar({
       >
         {visible.map((item) => (
           <span key={item.barItemId} className="inline-flex">
-            <BarTabButton label={item.label} />
+            <BarTabButton
+              label={item.label}
+              tag={item.view?.visibility === "project" ? projectSharedTag : undefined}
+            />
           </span>
         ))}
       </div>
@@ -504,6 +520,11 @@ export function ViewBar({
                 )}
               >
                 <span className="truncate">{activeView.name}</span>
+                {activeView.visibility === "project" && (
+                  <span className="shrink-0 text-caption text-muted-foreground">
+                    {projectSharedTag}
+                  </span>
+                )}
                 <ChevronDown className="size-3 shrink-0" />
               </Button>
             ) : (
@@ -589,6 +610,22 @@ export function ViewBar({
           onEditView(view);
         }}
         onDeleteView={confirmDelete}
+        onChangeVisibility={(view, visibility: IssueViewVisibility) => {
+          updateView.mutate(
+            {
+              id: view.id,
+              visibility,
+              expected_revision: view.revision,
+            },
+            {
+              onError: (err) => {
+                toast.error(
+                  err instanceof Error ? err.message : t(($) => $.save_view.toast_failed),
+                );
+              },
+            },
+          );
+        }}
       />
 
       {/* Context-menu / overflow-row delete share one confirm. */}

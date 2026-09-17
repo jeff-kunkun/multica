@@ -962,3 +962,82 @@ describe("IssueSurface — status catalog failure", () => {
     expect(rowRequests.length).toBeGreaterThanOrEqual(before);
   });
 });
+
+/**
+ * The badge components shipped once already without anything mounting
+ * `ParentIssueLookupProvider`, so `useParentIssueRef` always returned null and
+ * the badge was invisible on every board and list — with the component suite
+ * green, because it mounts the provider itself. This suite owns the wiring:
+ * it drives the real surface and asserts the lookup reaches the rows. (DENE-480)
+ */
+describe("IssueSurface — parent ownership lookup", () => {
+  let qc: QueryClient;
+
+  function stubApi(issues: Issue[]) {
+    const listIssues = vi.fn((params?: ListIssuesParams) =>
+      Promise.resolve({
+        issues: params?.status === "todo" ? issues : [],
+        total: params?.status === "todo" ? issues.length : 0,
+      } satisfies ListIssuesResponse),
+    );
+    setApiInstance({
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+      listIssues,
+      ...statusTableMethodsFromLegacy(listIssues),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
+      getWorkspaceWorkingAgents: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+  }
+
+  beforeEach(() => {
+    mockWsId.current = "ws-1";
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    pruneIssueSurfaceViewStates([]);
+  });
+
+  afterEach(() => {
+    cleanup();
+    qc.clear();
+    pruneIssueSurfaceViewStates([]);
+    vi.restoreAllMocks();
+  });
+
+  function surface() {
+    return (
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pp" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>
+    );
+  }
+
+  it("names the parent on a sub-issue row rendered by the real surface", async () => {
+    const parent = makeIssue("p", "Parent task", "pp");
+    const child: Issue = {
+      ...makeIssue("c", "Child task", "pp"),
+      parent_issue_id: parent.id,
+    };
+    stubApi([parent, child]);
+
+    // The badge only has a job once sub-issues share the top level with their
+    // parents; with the toggle off the surface never renders a child row.
+    const store = getIssueSurfaceViewStore("project:pp");
+    act(() => store.getState().toggleShowSubIssues());
+
+    render(surface());
+
+    await screen.findByText("Child task");
+    const badge = await screen.findByTestId("parent-issue-badge");
+    expect(badge).toHaveTextContent(parent.identifier);
+    expect(badge).toHaveTextContent("Parent task");
+    // Exactly one: the parent's own row must not carry a badge.
+    expect(screen.getAllByTestId("parent-issue-badge")).toHaveLength(1);
+  });
+});

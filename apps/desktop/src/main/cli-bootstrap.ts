@@ -14,8 +14,12 @@ import { selectPlatformReleaseAssetName } from "./cli-release-asset";
 // same-repo builds, but it can also repair or bootstrap a managed copy in
 // userData on first launch when the bundled binary is missing or unusable.
 
+// This fork publishes its own CLI archives (.github/workflows/cli-release.yml),
+// so a Desktop build that had to repair its managed CLI must fetch them from
+// here. Pointing at upstream put an upstream binary next to a kun-fork app
+// (DENE-420).
 const GITHUB_LATEST_BASE =
-  "https://github.com/multica-ai/multica/releases/latest/download";
+  "https://github.com/jeff-kunkun/multica/releases/latest/download";
 
 function binaryName(): string {
   return process.platform === "win32" ? "multica.exe" : "multica";

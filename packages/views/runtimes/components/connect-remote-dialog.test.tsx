@@ -71,6 +71,17 @@ describe("ConnectRemoteDialog", () => {
     wsEventState.handler = null;
   });
 
+  // A self-hosted kun instance that told people to curl the upstream
+  // installer handed them the upstream CLI (DENE-420).
+  it("installs the CLI from the kun fork, not upstream", () => {
+    const { baseElement } = renderDialog();
+
+    expect(baseElement).toHaveTextContent(
+      "https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh",
+    );
+    expect(baseElement).not.toHaveTextContent("multica-ai/multica");
+  });
+
   it("uses cloud setup commands by default", () => {
     const { baseElement } = renderDialog();
 

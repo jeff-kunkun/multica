@@ -70,6 +70,18 @@ type IssueResponse struct {
 	ParentIssueID *string `json:"parent_issue_id"`
 	ProjectID     *string `json:"project_id"`
 	Position      float64 `json:"position"`
+	// OriginType / OriginID are the issue's provenance for platform-internal
+	// flows — autopilot runs, quick-create tasks, and requirement alignment
+	// (`origin_type='issue_draft'`, `origin_id` = the alignment's
+	// chat_session_id). Detail-only and additive: absent on a row that has no
+	// origin, and on list rows, whose query does not select the columns.
+	//
+	// Read them as a PAIR: an alignment jump-off exists only when origin_type
+	// is exactly 'issue_draft', and treating a missing field as "not from an
+	// alignment" is correct, because every write path that sets one sets both
+	// (DENE-371).
+	OriginType *string `json:"origin_type,omitempty"`
+	OriginID   *string `json:"origin_id,omitempty"`
 	// Stage groups sub-issues under the same parent into ordered barrier
 	// groups (null = unstaged). See issue_child_done.go for how a closed
 	// stage gates the child-done -> parent wake.
@@ -310,8 +322,16 @@ func (h *Handler) fillStatusCategory(ctx context.Context, wsID pgtype.UUID, resp
 	h.newStatusCategoryFiller(ctx, wsID)(resp)
 }
 
+// issueIdentifier is the human-readable issue reference ("HAN-42"). It is one
+// function because it is a wire contract: the create response, the list
+// projections and the alignment confirmation have to spell an issue the same
+// way, or a person comparing two screens sees two different issues.
+func issueIdentifier(issuePrefix string, number int32) string {
+	return issuePrefix + "-" + strconv.Itoa(int(number))
+}
+
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
-	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	identifier := issueIdentifier(issuePrefix, i.Number)
 	// A built-in status IS its own category, so this costs no catalog lookup and
 	// every response carries it. A CUSTOM status is left empty here and filled
 	// in by endpoints that resolve the catalog (see the children endpoints'
@@ -337,6 +357,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID:  uuidToPtr(i.ParentIssueID),
 		ProjectID:      uuidToPtr(i.ProjectID),
 		Position:       i.Position,
+		OriginType:     textToPtr(i.OriginType),
+		OriginID:       uuidToPtr(i.OriginID),
 		Stage:          int4ToPtr(i.Stage),
 		StartDate:      dateToPtr(i.StartDate),
 		DueDate:        dateToPtr(i.DueDate),
@@ -356,7 +378,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 	if issuestatus.IsBuiltIn(i.Status) {
 		statusCategory = i.Status
 	}
-	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	identifier := issueIdentifier(issuePrefix, i.Number)
 	return IssueResponse{
 		ID:             uuidToString(i.ID),
 		WorkspaceID:    uuidToString(i.WorkspaceID),
@@ -425,7 +447,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 	if issuestatus.IsBuiltIn(i.Status) {
 		statusCategory = i.Status
 	}
-	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	identifier := issueIdentifier(issuePrefix, i.Number)
 	return IssueResponse{
 		ID:             uuidToString(i.ID),
 		WorkspaceID:    uuidToString(i.WorkspaceID),
@@ -2477,9 +2499,21 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
 		return
 	}
+	blockedStatusKeys, err := h.blockedIssueStatusKeys(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
+		return
+	}
+	activeStatusKeys, err := h.activeIssueStatusKeys(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
+		return
+	}
 	rows, err := h.Queries.ChildIssueProgress(r.Context(), db.ChildIssueProgressParams{
 		WorkspaceID:        wsUUID,
 		TerminalStatusKeys: terminalStatusKeys,
+		BlockedStatusKeys:  blockedStatusKeys,
+		ActiveStatusKeys:   activeStatusKeys,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
@@ -2490,6 +2524,12 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID string `json:"parent_issue_id"`
 		Total         int64  `json:"total"`
 		Done          int64  `json:"done"`
+		// Children sitting in the `blocked` category, and children actually
+		// moving (in_progress / in_review). The project views bubble both onto
+		// the parent card so a stuck or stalled pipeline is visible without
+		// expanding the parent.
+		Blocked int64 `json:"blocked"`
+		Active  int64 `json:"active"`
 	}
 	resp := make([]progressEntry, len(rows))
 	for i, row := range rows {
@@ -2497,6 +2537,8 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 			ParentIssueID: uuidToString(row.ParentIssueID),
 			Total:         row.Total,
 			Done:          row.Done,
+			Blocked:       row.Blocked,
+			Active:        row.Active,
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -3757,6 +3799,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// fails best-effort.
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -4214,6 +4257,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// the parent/stage notification is evaluated once against the final state
 	// after the loop (MUL-4155) rather than per-child mid-batch.
 	var childDoneCompleted []db.Issue
+	var waitingOnCompleted []db.Issue
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -4448,13 +4492,16 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// done/cancelled status still enters the stage barrier below. A literal
 		// comparison here left childDoneCompleted empty and silently skipped
 		// notifyParentsOfBatchChildDone entirely. (MUL-6243)
-		if statusChanged && issue.ParentIssueID.Valid {
+		if statusChanged {
 			prevTerminal := isTerminalChildStatus(
 				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
 			nowTerminal := isTerminalChildStatus(
 				issuestatus.Effective(r.Context(), h.Queries, issue.WorkspaceID, issue.Status))
 			if !prevTerminal && nowTerminal {
-				childDoneCompleted = append(childDoneCompleted, issue)
+				waitingOnCompleted = append(waitingOnCompleted, issue)
+				if issue.ParentIssueID.Valid {
+					childDoneCompleted = append(childDoneCompleted, issue)
+				}
 			}
 		}
 
@@ -4466,6 +4513,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// of issue_ids order (MUL-4155). Best-effort; failure does not abort the
 	// batch. Single-issue UpdateIssue is unchanged and still notifies inline.
 	h.notifyParentsOfBatchChildDone(r.Context(), childDoneCompleted)
+	h.notifyWaitersOfIssuesDone(r.Context(), waitingOnCompleted)
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})

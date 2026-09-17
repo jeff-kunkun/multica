@@ -308,6 +308,9 @@ export interface IssueTableFilters {
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];
   include_sub_issues?: boolean;
+  /** Drop issues that are finished THROUGH — terminal status AND no unfinished
+   *  sub-issue. A terminal parent with open children is kept. (DENE-444) */
+  hide_completed_parents?: boolean;
 }
 
 export type IssueTableSortField =

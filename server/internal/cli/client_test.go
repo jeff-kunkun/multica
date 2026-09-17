@@ -625,3 +625,45 @@ func TestHTTPErrorTaskScopedFollowsTheRequestNotTheClient(t *testing.T) {
 		}
 	})
 }
+
+// TestHTTPErrorBodyLimitKeepsTransferReportsReadable pins the read cap a 409
+// from /transfer/* gets.
+//
+// Those responses carry the entire import report (one item per imported entity)
+// next to "error"/"code" in one JSON object, so the generic 4 KiB cap cut the
+// body mid-object. The result was unparseable JSON and a bare generic "Request
+// conflict" line where the server had named the conflicting entity (DENE-318).
+func TestHTTPErrorBodyLimitKeepsTransferReportsReadable(t *testing.T) {
+	report := strings.Repeat(`{"action":"skipped","entity_type":"skills"}`, 400)
+	body := `{"code":"config_import_conflict","error":"entity already exists: Bug","report":{"items":[` + report + `]}}`
+	if len(body) <= httpErrorBodyLimit {
+		t.Fatalf("test body is %d bytes; it must exceed the generic %d cap", len(body), httpErrorBodyLimit)
+	}
+
+	for _, tc := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{"transfer path keeps the whole body", "/api/workspaces/ws-1/transfer/config", body},
+		{"other paths keep the generic cap", "/api/issues", body[:httpErrorBodyLimit]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &http.Response{
+				StatusCode: http.StatusConflict,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Request:    httptest.NewRequest(http.MethodPost, tc.path, nil),
+			}
+			httpErr := newHTTPError(http.MethodPost, tc.path, resp)
+			if httpErr.Body != tc.want {
+				t.Fatalf("body length = %d, want %d", len(httpErr.Body), len(tc.want))
+			}
+			if got := extractServerMessage(httpErr.Body); got != "entity already exists: Bug" {
+				t.Errorf("extractServerMessage() = %q, want the server sentence", got)
+			}
+			if got := ServerErrorCode(httpErr); got != "config_import_conflict" {
+				t.Errorf("ServerErrorCode() = %q, want config_import_conflict", got)
+			}
+		})
+	}
+}

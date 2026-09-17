@@ -509,30 +509,104 @@ func userMessage(err error, lang Language) string {
 	return strings.TrimSpace(err.Error())
 }
 
-// extractServerMessage tries to pull a human-readable message out of a JSON
-// error body like {"error":"..."} or {"message":"..."}. Returns "" if the
-// body is not JSON or has no recognizable message field.
+// serverMessageKeys are the fields an API error body may carry prose in, in
+// preference order.
+var serverMessageKeys = []string{"error", "message", "detail", "title"}
+
+// serverErrorFields is what an API error body says about a failure, decoded
+// from either a whole or a truncated object.
+type serverErrorFields struct {
+	// Code is the stable machine identifier from the "code" field.
+	Code string
+	// Message is prose meant for a person. When the body carries no prose it
+	// falls back to a machine code, so the user still gets something greppable.
+	Message string
+}
+
+// parseServerErrorFields decodes the message-bearing fields of an error body.
 //
-// A few endpoints put a stable machine code in "error" and the prose in
-// "message" (the issue-table cursor responses do this). Prose always wins;
-// a bare code is kept only as a last resort so the user still gets something
-// greppable when no sentence is on offer.
-func extractServerMessage(body string) string {
+// A body that is not valid JSON is still worth reading: the largest error
+// responses are truncated ones, and their leading fields are exactly the ones
+// a user needs. /transfer/* puts the whole import report after "code"/"error",
+// so anything capping the read (an older client, a proxy, a future endpoint
+// with an even bigger payload) used to leave the CLI with unparseable JSON and
+// nothing to show (DENE-318). Losing the server's sentence because of a
+// trailing key we never needed is the failure mode this avoids.
+func parseServerErrorFields(body string) serverErrorFields {
 	body = strings.TrimSpace(body)
 	if body == "" || body[0] != '{' {
-		return ""
+		return serverErrorFields{}
 	}
 	var parsed map[string]any
-	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
-		return ""
+	if err := json.Unmarshal([]byte(body), &parsed); err == nil {
+		return serverErrorFieldsFromMap(parsed)
 	}
-	var code string
-	for _, key := range []string{"error", "message", "detail", "title"} {
-		v, ok := parsed[key]
+	return parseServerErrorFieldsFromPrefix(body)
+}
+
+func serverErrorFieldsFromMap(parsed map[string]any) serverErrorFields {
+	out := serverErrorFields{}
+	if code, ok := parsed["code"].(string); ok {
+		if code = strings.TrimSpace(code); looksLikeMachineCode(code) {
+			out.Code = code
+		}
+	}
+	out.Message = serverMessageFromLookup(func(key string) (string, bool) {
+		s, ok := parsed[key].(string)
+		return s, ok
+	})
+	return out
+}
+
+// parseServerErrorFieldsFromPrefix streams the leading key/value pairs of a
+// body that does not parse as a whole (normally one cut off mid-object) and
+// stops at the first thing the tokenizer cannot read. Keys written before the
+// truncated tail survive; a nested value that never closes ends the scan.
+func parseServerErrorFieldsFromPrefix(body string) serverErrorFields {
+	dec := json.NewDecoder(strings.NewReader(body))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return serverErrorFields{}
+	}
+	out := serverErrorFields{}
+	values := map[string]string{}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			break
+		}
+		var value any
+		if err := dec.Decode(&value); err != nil {
+			break
+		}
+		s, ok := value.(string)
 		if !ok {
 			continue
 		}
-		s, ok := v.(string)
+		if s = strings.TrimSpace(s); s != "" {
+			values[key] = s
+		}
+	}
+	if code := values["code"]; looksLikeMachineCode(code) {
+		out.Code = code
+	}
+	out.Message = serverMessageFromLookup(func(key string) (string, bool) {
+		s, ok := values[key]
+		return s, ok
+	})
+	return out
+}
+
+// serverMessageFromLookup picks the sentence to show for a body whose string
+// fields are already extracted. Prose always wins; a bare machine code is kept
+// only as a last resort.
+func serverMessageFromLookup(lookup func(string) (string, bool)) string {
+	code := ""
+	for _, key := range serverMessageKeys {
+		s, ok := lookup(key)
 		if !ok {
 			continue
 		}
@@ -550,6 +624,18 @@ func extractServerMessage(body string) string {
 	return code
 }
 
+// extractServerMessage tries to pull a human-readable message out of a JSON
+// error body like {"error":"..."} or {"message":"..."}. Returns "" if the
+// body is not JSON or has no recognizable message field.
+//
+// A few endpoints put a stable machine code in "error" and the prose in
+// "message" (the issue-table cursor responses do this). Prose always wins;
+// a bare code is kept only as a last resort so the user still gets something
+// greppable when no sentence is on offer.
+func extractServerMessage(body string) string {
+	return parseServerErrorFields(body).Message
+}
+
 // ServerErrorCode returns the stable `code` a server error body carries, or ""
 // when err is not an HTTP failure or the body has no code.
 //
@@ -563,20 +649,7 @@ func ServerErrorCode(err error) string {
 	if !errors.As(err, &httpErr) {
 		return ""
 	}
-	body := strings.TrimSpace(httpErr.Body)
-	if body == "" || body[0] != '{' {
-		return ""
-	}
-	var parsed struct {
-		Code string `json:"code"`
-	}
-	if jsonErr := json.Unmarshal([]byte(body), &parsed); jsonErr != nil {
-		return ""
-	}
-	if !looksLikeMachineCode(parsed.Code) {
-		return ""
-	}
-	return parsed.Code
+	return parseServerErrorFields(httpErr.Body).Code
 }
 
 // looksLikeMachineCode reports whether s is a bare identifier such as
