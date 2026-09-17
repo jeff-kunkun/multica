@@ -231,17 +231,28 @@ export interface IssueDraftGroupRow {
   isRoot: boolean;
   /** Confirming creates this issue AND starts its assignee's work. */
   startsOnCreate: boolean;
+  /**
+   * This node already owns an issue, so this confirm adopts it and never
+   * rewrites it (DENE-414). False for every node of a first round, which is
+   * what makes a payload with no group behind it read exactly as it did before
+   * continuation rounds existed.
+   */
+  alreadyBuilt: boolean;
 }
 
 export interface IssueDraftGroupPlan {
   /** The root first, then the sub-issues in payload order. */
   rows: IssueDraftGroupRow[];
-  /** How many issues the confirm creates. */
+  /** Every node the payload names, built ones included. */
   total: number;
+  /** How many issues this confirm creates — the nodes that own none yet. */
+  creating: number;
   /** How many of them start an agent the moment they exist. */
   starting: number;
   /** How many are created in Backlog, waiting for their stage. */
   parked: number;
+  /** How many already exist and are adopted untouched. */
+  built: number;
 }
 
 /**
@@ -250,12 +261,24 @@ export interface IssueDraftGroupPlan {
  * The root's status is taken as the payload carries it (the panel owns that
  * field); a sub-issue's is derived from its stage, which is what makes the
  * preview agree with the stored payload even while the user is mid-edit.
+ *
+ * `builtKeys` are the nodes a previous round already created (see
+ * `issueDraftBuiltNodeKeys`); the ROOT's key is `""`, exactly as it is in the
+ * payload and in the server's own node model. They stay in `rows` — the panel
+ * still has to render what the group is made of — but they are excluded from
+ * every "this confirm will…" count, because the server skips them and never
+ * rewrites their fields. Without it, a continuation round would promise to
+ * create work it adopts.
  */
 export function planIssueDraftGroup(
   payload: IssueDraftPayload | null,
+  builtKeys?: ReadonlySet<string>,
 ): IssueDraftGroupPlan {
-  if (!payload) return { rows: [], total: 0, starting: 0, parked: 0 };
+  if (!payload) {
+    return { rows: [], total: 0, creating: 0, starting: 0, parked: 0, built: 0 };
+  }
 
+  const isBuilt = (key: string) => builtKeys?.has(key) === true;
   const root: IssueDraftGroupRow = {
     key: "",
     title: payload.title,
@@ -266,6 +289,10 @@ export function planIssueDraftGroup(
     assigneeHint: null,
     isRoot: true,
     startsOnCreate: issueDraftNodeRunsOnCreate(payload),
+    // The root's key is "", the same key the payload and the server's node
+    // model give it, so an adopted root is expressed in the same set as an
+    // adopted sub-issue rather than as a second flag.
+    alreadyBuilt: isBuilt(""),
   };
   const children = (payload.children ?? []).map<IssueDraftGroupRow>((child) => {
     const stage = child.stage ?? null;
@@ -284,14 +311,65 @@ export function planIssueDraftGroup(
         assignee_type: child.assignee_type,
         assignee_id: child.assignee_id,
       }),
+      alreadyBuilt: isBuilt(child.key),
     };
   });
   const rows = [root, ...children];
+  // A node that already exists is not created again, so it neither runs nor
+  // waits: the counts below answer "what does THIS confirm do", and the
+  // adoption is stated separately as `built`.
+  const incoming = rows.filter((row) => !row.alreadyBuilt);
   return {
     rows,
     total: rows.length,
-    starting: rows.filter((row) => row.startsOnCreate).length,
-    parked: rows.filter((row) => row.status === "backlog").length,
+    creating: incoming.length,
+    starting: incoming.filter((row) => row.startsOnCreate).length,
+    parked: incoming.filter((row) => row.status === "backlog").length,
+    built: rows.length - incoming.length,
+  };
+}
+
+/**
+ * How far a group has got, for a surface that is not the alignment page: the
+ * issue detail of one of its members.
+ *
+ * Reads the SAME two signals the board reads — the stage an issue carries, and
+ * whether its status is done — and answers the only two questions worth a line
+ * of text there: how much of the group is finished, and which stage is being
+ * worked on. `activeStage` is the lowest stage that has work which is neither
+ * finished nor parked in Backlog; when every remaining stage is parked, the
+ * lowest parked one is the one waiting, so the answer names real work rather
+ * than "stage 1" on a group whose stage 1 is long done.
+ */
+export interface IssueDraftGroupStageProgress {
+  total: number;
+  done: number;
+  /** The highest stage in the group; 0 when the group is unstaged. */
+  stages: number;
+  /** The lowest stage with work still to do, or null when the group is done. */
+  activeStage: number | null;
+}
+
+export function planIssueDraftGroupProgress<T extends { stage?: number | null; status: string }>(
+  issues: readonly T[],
+  isDone: (issue: T) => boolean,
+): IssueDraftGroupStageProgress {
+  const stages = issues.reduce(
+    (max, issue) => (issue.stage != null && issue.stage > max ? issue.stage : max),
+    0,
+  );
+  const remaining = issues.filter((issue) => !isDone(issue));
+  const live = remaining.filter((issue) => (issue.status.trim() || "todo") !== "backlog");
+  const pool = live.length > 0 ? live : remaining;
+  const activeStage = pool.reduce<number | null>((lowest, issue) => {
+    const stage = issue.stage ?? 1;
+    return lowest === null || stage < lowest ? stage : lowest;
+  }, null);
+  return {
+    total: issues.length,
+    done: issues.length - remaining.length,
+    stages,
+    activeStage,
   };
 }
 

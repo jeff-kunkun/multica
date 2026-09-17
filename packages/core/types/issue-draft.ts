@@ -96,8 +96,25 @@ export interface IssueDraft {
   revision: number;
   draft: IssueDraftPayload;
   /** The issue this draft became. Present only once status is `completed`,
-   *  and stable across repeated confirms. */
+   *  and stable across repeated confirms. It is the group's ROOT issue; the
+   *  rest of the group is read back through it. */
   issue_id?: string | null;
+  /**
+   * How many times this alignment has been reopened for another round: 0 until
+   * the second round, then one more per reopen. A confirmed alignment is not
+   * necessarily finished — a follow-up round appends to the SAME group — so
+   * this is what a page reads to know it is looking at a continuation rather
+   * than at a first pass.
+   *
+   * The round a person sees is this plus one. Absent on a backend that predates
+   * rounds; the client then reads 0, which is the "first round" answer.
+   */
+  finalize_round?: number;
+  /**
+   * The content revision the previous round confirmed, recorded when the draft
+   * was reopened. Absent until then.
+   */
+  finalized_revision?: number | null;
   /** The policy and prompt version in force for this conversation. */
   policy: IssueDraftPolicy;
   created_at: string;

@@ -65,6 +65,39 @@ export function issueDraftIsRecord(draft: Pick<IssueDraftSummary, "status">): bo
   return draft.status === "completed" || draft.status === "abandoned";
 }
 
+/**
+ * Whether this alignment is on a round after its first — it already produced
+ * the group and is being continued (DENE-415).
+ *
+ * Read off the pair, never off either half: a live status means the round is
+ * open, and an `issue_id` means a group already exists for it. A first-round
+ * alignment has neither — it is `draft`/`ready` with no `issue_id` until the
+ * confirm lands — and a finished one is a record, which the page reads back
+ * rather than continues.
+ *
+ * This is also what tells a caller "the group's issues are worth reading": they
+ * are, only here.
+ */
+export function issueDraftIsContinuation(
+  draft: Pick<IssueDraftSummary, "status" | "issue_id">,
+): boolean {
+  return !issueDraftIsRecord(draft) && !!draft.issue_id;
+}
+
+/**
+ * Which round this alignment is on, as a person counts them: the first confirm
+ * is round 1, and every reopen starts the next one.
+ *
+ * `finalize_round` counts reopens, so the label is +1. A backend that predates
+ * rounds reports 0, which reads as round 1 — the same thing it would have said
+ * before continuation existed.
+ */
+export function issueDraftRound(
+  draft: Pick<IssueDraftSummary, "finalize_round">,
+): number {
+  return Math.max(0, draft.finalize_round ?? 0) + 1;
+}
+
 /** The draft with this id, or undefined while it is loading or already retired. */
 export function findIssueDraft(
   drafts: readonly IssueDraftSummary[],

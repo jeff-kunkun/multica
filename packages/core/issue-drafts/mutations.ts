@@ -210,12 +210,42 @@ export function useFinalizeIssueDraft(wsId: string) {
 }
 
 /**
+ * Starts another round on an alignment that already produced its group, so the
+ * same conversation can be continued and the next confirm appends to the same
+ * group instead of adopting it whole.
+ *
+ * Two callers, one endpoint. The issue detail page's "continue aligning" is the
+ * deliberate one — a person asking to reopen a finished alignment — and the
+ * alignment page itself calls it on LOAD for a round that is already open, to
+ * read back the round it is on: the list endpoint's rows do not carry
+ * `finalize_round`, and reopen answers with the draft row whether or not it
+ * changed anything. That is safe because the endpoint is idempotent by
+ * construction (only a `completed` draft reopens), which its own handler
+ * documents.
+ *
+ * The answer is applied to the list rather than merely invalidated: the row's
+ * `finalize_round` and status are exactly what the caller is about to render.
+ */
+export function useReopenIssueDraft(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (draftId: string) => api.reopenIssueDraft(draftId),
+    onSuccess: (updated) => {
+      applyDraftRow(qc, wsId, updated);
+      void qc.invalidateQueries({ queryKey: issueDraftKeys.list(wsId) });
+    },
+    onError: () => {
+      void qc.invalidateQueries({ queryKey: issueDraftKeys.list(wsId) });
+    },
+  });
+}
+
+/**
  * Rebinds a live conversation to another runtime. Callers must not show the new
  * runtime as selected until this resolves — the picker showing runtime B while
  * messages still run on A is exactly the bug the builder's equivalent fixed
  * (MUL-5163).
- */
-export function useSwitchIssueDraftRuntime(wsId: string) {
+ */export function useSwitchIssueDraftRuntime(wsId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: { draftId: string; runtimeId: string }) =>

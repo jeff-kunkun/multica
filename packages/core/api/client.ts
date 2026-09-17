@@ -1779,6 +1779,33 @@ export class ApiClient {
   }
 
   /**
+   * Starts another round on an alignment that already produced its group, so
+   * the same conversation can be continued and the next confirm adds only the
+   * nodes that own no issue yet.
+   *
+   * The same session and the same draft row, never a new one — the group's
+   * identity is derived from the session, so a second session would mean a
+   * second group. Idempotent by construction: only a `completed` draft
+   * reopens, and an open round (`draft` / `ready`) answers with the row as it
+   * stands, so a client may call it on load as well as on an explicit
+   * "continue aligning" (DENE-414).
+   *
+   * Parsed with a fallback like the other draft writes: this is a lifecycle
+   * move whose answer the caller re-reads from the list anyway, and a body that
+   * cannot be parsed must not turn a reopen that committed into a failed
+   * request.
+   */
+  async reopenIssueDraft(sessionId: string): Promise<IssueDraft> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-drafts/${sessionId}/reopen`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
+      endpoint: "POST /api/issue-drafts/{id}/reopen",
+    });
+  }
+
+  /**
    * Confirms a draft into an issue. Safe to retry: the protocol creates at
    * most one issue per draft and every repeat returns that same `issue_id`.
    *

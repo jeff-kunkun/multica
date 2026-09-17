@@ -2377,6 +2377,13 @@ export const IssueDraftSchema = z.object({
   revision: z.number().int().nonnegative(),
   draft: IssueDraftPayloadSchema,
   issue_id: z.string().nullish().catch(null),
+  // The round this alignment is on. `.catch(0)` rather than a hard number: an
+  // installed desktop client can talk to a backend that predates rounds, and
+  // "0 reopens" is exactly what such a backend means. It only ever feeds a
+  // label, so a missing field must cost the label and never the page
+  // (DENE-415).
+  finalize_round: z.number().int().nonnegative().catch(0),
+  finalized_revision: z.number().int().nullish().catch(null),
   policy: IssueDraftPolicySchema.catch(() => UNKNOWN_ISSUE_DRAFT_POLICY),
   created_at: z.string().catch(""),
   updated_at: z.string().catch(""),
@@ -2393,6 +2400,8 @@ export const EMPTY_ISSUE_DRAFT: IssueDraft = {
     status: "",
     priority: "",
   },
+  finalize_round: 0,
+  finalized_revision: null,
   policy: EMPTY_ISSUE_DRAFT_POLICY,
   created_at: "",
   updated_at: "",

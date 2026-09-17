@@ -4,7 +4,9 @@ import type { IssueDraft, IssueDraftSession, IssueDraftSummary } from "../types"
 import {
   appendIssueDraftSummary,
   findIssueDraft,
+  issueDraftIsContinuation,
   issueDraftIsRecord,
+  issueDraftRound,
   patchIssueDraftSummary,
   unfinishedIssueDrafts,
 } from "./queries";
@@ -61,6 +63,34 @@ describe("issueDraftIsRecord", () => {
     expect(issueDraftIsRecord({ status: "abandoned" })).toBe(true);
     expect(issueDraftIsRecord({ status: "draft" })).toBe(false);
     expect(issueDraftIsRecord({ status: "ready" })).toBe(false);
+  });
+});
+
+describe("issueDraftIsContinuation", () => {
+  // A continuation is the pair: the round is still open AND a group already
+  // exists for it. Either half alone is something else — a live first pass has
+  // no issue yet, and a finished alignment is a record to read back, not one to
+  // continue. (DENE-415)
+  it("is true only for a live alignment that already produced a group", () => {
+    expect(issueDraftIsContinuation({ status: "ready", issue_id: "issue-1" })).toBe(true);
+    expect(issueDraftIsContinuation({ status: "draft", issue_id: "issue-1" })).toBe(true);
+    expect(issueDraftIsContinuation({ status: "ready", issue_id: null })).toBe(false);
+    expect(issueDraftIsContinuation({ status: "completed", issue_id: "issue-1" })).toBe(false);
+    expect(issueDraftIsContinuation({ status: "abandoned", issue_id: null })).toBe(false);
+  });
+});
+
+describe("issueDraftRound", () => {
+  it("counts the first confirm as round 1 and each reopen as one more", () => {
+    expect(issueDraftRound({ finalize_round: 0 })).toBe(1);
+    expect(issueDraftRound({ finalize_round: 2 })).toBe(3);
+  });
+
+  it("reads a backend without the field as a first round", () => {
+    // An installed desktop client can talk to a backend that predates rounds;
+    // the label must cost the round, not the page.
+    expect(issueDraftRound({})).toBe(1);
+    expect(issueDraftRound({ finalize_round: undefined })).toBe(1);
   });
 });
 

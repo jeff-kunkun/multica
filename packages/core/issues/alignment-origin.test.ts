@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { issueAlignmentOrigin } from "./alignment-origin";
+import { issueAlignmentDraftId, issueAlignmentOrigin } from "./alignment-origin";
 
 /**
  * The issue → alignment link is one decision, and it is made here so the entry
@@ -31,5 +31,64 @@ describe("issueAlignmentOrigin", () => {
   it("refuses an empty or blank id rather than navigating to its parent route", () => {
     expect(issueAlignmentOrigin({ origin_type: "issue_draft", origin_id: "" })).toBeNull();
     expect(issueAlignmentOrigin({ origin_type: "issue_draft", origin_id: "  " })).toBeNull();
+  });
+});
+
+describe("issueAlignmentDraftId", () => {
+  const root = { origin_type: "issue_draft", origin_id: "sess-42" } as const;
+
+  it("reads the conversation off a root issue's own stamp", () => {
+    expect(issueAlignmentDraftId({ ...root, parent_issue_id: null }, null)).toBe(
+      "sess-42",
+    );
+  });
+
+  it("resolves a sub-issue through its parent, never through its own stamp", () => {
+    // A sub-issue is stamped with its own node id — a UUIDv5 the server derives
+    // from the session and the node's key — so its own stamp names a draft
+    // route that cannot open. The conversation only lives on the group's root,
+    // which is its parent. (DENE-415)
+    expect(
+      issueAlignmentDraftId(
+        {
+          origin_type: "issue_draft",
+          origin_id: "3d56681b-224b-5d51-abc1-cc1f5016091e",
+          parent_issue_id: "issue-root",
+        },
+        root,
+      ),
+    ).toBe("sess-42");
+  });
+
+  it("offers nothing for a sub-issue whose parent is not on this alignment", () => {
+    expect(
+      issueAlignmentDraftId(
+        {
+          origin_type: "issue_draft",
+          origin_id: "3d56681b-224b-5d51-abc1-cc1f5016091e",
+          parent_issue_id: "issue-root",
+        },
+        { origin_type: "issue_draft" },
+      ),
+    ).toBeNull();
+    expect(
+      issueAlignmentDraftId(
+        {
+          origin_type: "issue_draft",
+          origin_id: "3d56681b-224b-5d51-abc1-cc1f5016091e",
+          parent_issue_id: "issue-root",
+        },
+        undefined,
+      ),
+    ).toBeNull();
+  });
+
+  it("offers nothing for an issue that did not come from an alignment", () => {
+    expect(
+      issueAlignmentDraftId(
+        { origin_type: "autopilot", origin_id: "run-7", parent_issue_id: null },
+        null,
+      ),
+    ).toBeNull();
   });
 });

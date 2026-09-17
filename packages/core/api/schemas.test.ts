@@ -76,7 +76,11 @@ import {
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_ISSUE_STATUS_ENTRY,
 } from "./schemas";
-import { IssueDraftFinalizeSchema, IssueDraftPayloadSchema } from "./schemas";
+import {
+  IssueDraftFinalizeSchema,
+  IssueDraftPayloadSchema,
+  IssueDraftSchema,
+} from "./schemas";
 import { parseWithFallback } from "./schema";
 
 const baseIssue = {
@@ -2621,5 +2625,53 @@ describe("alignment group drift", () => {
       issues: [],
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("alignment rounds on the wire", () => {
+  const draft = {
+    chat_session_id: "sess-1",
+    workspace_id: "ws-1",
+    status: "ready",
+    revision: 7,
+    draft: { title: "Parent", description: "", status: "", priority: "" },
+    issue_id: "issue-1",
+    policy: { key: "question", version: "2", guided: true },
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("reads the round a continuation round is on", () => {
+    const parsed = IssueDraftSchema.parse({
+      ...draft,
+      finalize_round: 2,
+      finalized_revision: 6,
+    });
+    expect(parsed.finalize_round).toBe(2);
+    expect(parsed.finalized_revision).toBe(6);
+  });
+
+  it("degrades a backend without rounds to the first round", () => {
+    // An installed desktop client can talk to a backend that predates rounds.
+    // The field only ever feeds a label, so its absence must cost the label and
+    // never the page (DENE-415).
+    const parsed = IssueDraftSchema.parse(draft);
+    expect(parsed.finalize_round).toBe(0);
+    // Absent stays absent; only a present-but-unusable value is defaulted.
+    expect(parsed.finalized_revision ?? null).toBeNull();
+  });
+
+  it("degrades a malformed round rather than refusing the draft", () => {
+    // `status` is the field that decides whether the page offers a confirm, so
+    // it is the one that must stay strict; the round is presentation, and a
+    // draft whose round is nonsense is still a draft the user can act on.
+    const parsed = IssueDraftSchema.parse({
+      ...draft,
+      finalize_round: "third",
+      finalized_revision: "nope",
+    });
+    expect(parsed.status).toBe("ready");
+    expect(parsed.finalize_round).toBe(0);
+    expect(parsed.finalized_revision).toBeNull();
   });
 });

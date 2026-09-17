@@ -27,22 +27,32 @@ export {
   normalizeIssueDraftChildren,
   normalizeIssueDraftPayloadGroup,
   planIssueDraftGroup,
+  planIssueDraftGroupProgress,
   sameIssueDraftChildren,
   type IssueDraftGroupPlan,
   type IssueDraftGroupRow,
+  type IssueDraftGroupStageProgress,
 } from "./group";
+export {
+  ISSUE_DRAFT_NODE_NAMESPACE,
+  issueDraftBuiltNodeKeys,
+  issueDraftNodeId,
+} from "./node";
 export {
   appendIssueDraftSummary,
   findIssueDraft,
+  issueDraftIsContinuation,
   issueDraftIsRecord,
   issueDraftKeys,
   issueDraftListOptions,
+  issueDraftRound,
   patchIssueDraftSummary,
   unfinishedIssueDrafts,
 } from "./queries";
 export {
   useAbandonIssueDraft,
   useFinalizeIssueDraft,
+  useReopenIssueDraft,
   useSaveIssueDraft,
   useStartIssueDraft,
   useSwitchIssueDraftPolicy,

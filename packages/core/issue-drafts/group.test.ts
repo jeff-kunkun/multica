@@ -10,6 +10,7 @@ import {
   normalizeIssueDraftChildren,
   normalizeIssueDraftPayloadGroup,
   planIssueDraftGroup,
+  planIssueDraftGroupProgress,
   sameIssueDraftChildren,
 } from "./group";
 
@@ -273,9 +274,41 @@ describe("planIssueDraftGroup", () => {
     expect(planIssueDraftGroup(null)).toEqual({
       rows: [],
       total: 0,
+      creating: 0,
       starting: 0,
       parked: 0,
+      built: 0,
     });
+  });
+
+  it("counts an adopted node as neither created nor started", () => {
+    // A continuation round: the node already owns an issue, so the confirm
+    // skips it and never rewrites its fields. Counting it would promise work
+    // the confirm does not do — and "runs immediately" for an issue that is not
+    // being created is the same lie one size smaller (DENE-415).
+    const plan = planIssueDraftGroup(
+      payload({
+        children: [
+          child({ key: "a", stage: 1, assignee_type: "agent", assignee_id: "ag1" }),
+          child({ key: "b", stage: 1, assignee_type: "agent", assignee_id: "ag2" }),
+        ],
+      }),
+      new Set(["a"]),
+    );
+    expect(plan.total).toBe(3);
+    expect(plan.creating).toBe(2);
+    expect(plan.starting).toBe(1);
+    expect(plan.built).toBe(1);
+    expect(plan.rows.map((row) => row.alreadyBuilt)).toEqual([false, true, false]);
+  });
+
+  it("counts every node of a first round as being created", () => {
+    const plan = planIssueDraftGroup(
+      payload({ children: [child({ key: "a", stage: 1 })] }),
+      new Set<string>(),
+    );
+    expect(plan.creating).toBe(plan.total);
+    expect(plan.built).toBe(0);
   });
 
   it("reads a draft with no children as exactly one issue", () => {
@@ -380,5 +413,49 @@ describe("issueDraftCreatedGroup", () => {
 
   it("degrades to the root alone when the reported group is empty", () => {
     expect(issueDraftCreatedGroup({ issue_id: "i1", issues: [] })).toHaveLength(1);
+  });
+});
+
+describe("planIssueDraftGroupProgress", () => {
+  const issue = (stage: number | null, status: string) => ({ stage, status });
+  const done = (i: { status: string }) => i.status === "done";
+
+  it("counts the group and names the stage being worked on", () => {
+    // Reading it off the board's own two signals — the stage an issue carries
+    // and whether its status is done — is what keeps this line from disagreeing
+    // with the group itself. (DENE-415)
+    const progress = planIssueDraftGroupProgress(
+      [
+        issue(null, "done"), // the root: a parent has no stage
+        issue(1, "done"),
+        issue(1, "todo"),
+        issue(2, "backlog"),
+      ],
+      done,
+    );
+    expect(progress.total).toBe(4);
+    expect(progress.done).toBe(2);
+    expect(progress.stages).toBe(2);
+    expect(progress.activeStage).toBe(1);
+  });
+
+  it("falls back to the stage that is waiting when nothing is running", () => {
+    const progress = planIssueDraftGroupProgress(
+      [issue(1, "done"), issue(2, "backlog")],
+      done,
+    );
+    expect(progress.activeStage).toBe(2);
+  });
+
+  it("reports no active stage once the group is finished", () => {
+    const progress = planIssueDraftGroupProgress([issue(1, "done")], done);
+    expect(progress.done).toBe(1);
+    expect(progress.activeStage).toBeNull();
+  });
+
+  it("treats an unstaged group as one implicit stage", () => {
+    const progress = planIssueDraftGroupProgress([issue(null, "todo")], done);
+    expect(progress.stages).toBe(0);
+    expect(progress.activeStage).toBe(1);
   });
 });
