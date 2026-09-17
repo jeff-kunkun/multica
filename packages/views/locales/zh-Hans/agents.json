@@ -532,6 +532,7 @@
       "summary_unknown": "本机账号里没有与这个智能体当前绑定对应的账号。",
       "active_badge": "使用中",
       "manage_action": "管理账号",
+      "quick_switch_action": "切到 {{account}}",
       "others_title": "其它账号",
       "others_hint": "只读。切号在「管理账号」抽屉里。",
       "loading_text": "正在读取本机账号目录与登录状态…",
