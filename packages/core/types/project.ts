@@ -56,6 +56,18 @@ export interface ListProjectsResponse {
   total: number;
 }
 
+export interface ProjectMember {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  member_id: string;
+  added_by: string | null;
+  created_at: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+}
+
 // ProjectResource is a typed pointer from a project to an external resource.
 // The resource_ref shape depends on resource_type. New types add a case in
 // validateAndNormalizeResourceRef on the server and a renderer in the UI.

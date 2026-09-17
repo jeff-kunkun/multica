@@ -39,6 +39,7 @@ const mockSetIssueProperty = vi.hoisted(() => vi.fn());
 const mockSetShared = vi.hoisted(() => vi.fn());
 const mockSetManual = vi.hoisted(() => vi.fn());
 const mockSetAgent = vi.hoisted(() => vi.fn());
+const mockSetAlign = vi.hoisted(() => vi.fn());
 const mockSetActiveMode = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
@@ -139,7 +140,10 @@ const emptyIssueDraft = () => ({
     actorType: undefined as "agent" | "squad" | undefined,
     actorId: undefined as string | undefined,
   },
-  activeMode: "manual" as "manual" | "agent",
+  align: {
+    request: "",
+  },
+  activeMode: "manual" as "manual" | "agent" | "align",
 });
 
 const mockDraftStore = {
@@ -149,6 +153,7 @@ const mockDraftStore = {
   setShared: mockSetShared,
   setManual: mockSetManual,
   setAgent: mockSetAgent,
+  setAlign: mockSetAlign,
   setActiveMode: mockSetActiveMode,
   clearDraft: mockClearDraft,
   setLastAssignee: mockSetLastAssignee,
@@ -642,6 +647,9 @@ describe("CreateIssueModal", () => {
     mockSetAgent.mockImplementation((patch: Partial<typeof mockDraftStore.draft.agent>) => {
       mockDraftStore.draft.agent = { ...mockDraftStore.draft.agent, ...patch };
     });
+    mockSetAlign.mockImplementation((patch: Partial<typeof mockDraftStore.draft.align>) => {
+      mockDraftStore.draft.align = { ...mockDraftStore.draft.align, ...patch };
+    });
     mockClearDraft.mockImplementation(() => {
       const next = emptyIssueDraft();
       next.manual.assigneeType = mockDraftStore.lastAssigneeType;
@@ -1088,6 +1096,81 @@ describe("CreateIssueModal", () => {
     expect(onSwitchMode.mock.calls[0]?.[0]).toBeNull();
   });
 
+  // DENE-370: "align first" is the create-issue shell's third face. Switching
+  // to it must carry what the user already wrote — the same one-time
+  // assist-init the agent prompt gets — so nobody retypes their request.
+  it("assist-inits the alignment request from the title and description", async () => {
+    const user = userEvent.setup();
+    const onSwitchMode = vi.fn();
+    const onSwitchToAlign = vi.fn();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={onSwitchMode}
+        onSwitchToAlign={onSwitchToAlign}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
+    await user.type(screen.getByPlaceholderText("Add description..."), "Split the middleware");
+    await user.click(screen.getByRole("button", { name: /Align first/i }));
+
+    // The body rides the shared draft store (the align face reads its own
+    // slot); the two switch targets stay distinct callbacks, so this can never
+    // land on the agent face by mistake.
+    expect(onSwitchToAlign).toHaveBeenCalledTimes(1);
+    expect(onSwitchMode).not.toHaveBeenCalled();
+    expect(mockSetAlign).toHaveBeenCalledWith({
+      request: "Refactor auth\n\nSplit the middleware",
+    });
+  });
+
+  // An already-written alignment request is the user's own text: a later
+  // manual→align flip must not clobber it with whatever the manual face holds.
+  it("does not overwrite an alignment request the user already edited", async () => {
+    mockDraftStore.draft.align.request = "what I actually want to align";
+    const user = userEvent.setup();
+    const onSwitchToAlign = vi.fn();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        onSwitchToAlign={onSwitchToAlign}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
+    await user.click(screen.getByRole("button", { name: /Align first/i }));
+
+    expect(onSwitchToAlign).toHaveBeenCalledTimes(1);
+    expect(mockSetAlign).not.toHaveBeenCalled();
+  });
+
+  it("hides the alignment entry while a source context is captured", () => {
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        onSwitchToAlign={vi.fn()}
+        data={sourceContextPanelData()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    // The alignment conversation starts from the request alone and has no
+    // place to carry the captured thread, so offering it here would silently
+    // drop what the dialog was opened for.
+    expect(screen.queryByRole("button", { name: /Align first/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Switch to Agent/i })).toBeTruthy();
+  });
+
   // Reporter scenario: backend rejects same-titled create with a 409 +
   // structured duplicate body. The user should land on a duplicate toast
   // pointing at the existing issue, not a generic "create failed" message.
@@ -1225,6 +1308,35 @@ describe("CreateIssueModal", () => {
       expect.objectContaining({ projectId: "proj-1" }),
     );
     expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
+  });
+
+  // Same contract on the way to the alignment face (DENE-423): the alignment
+  // entry and the preview panel both read the project off this slot, so a
+  // project seeded from a project page — or picked here — has to be committed
+  // before the switch, not left in local state the other face cannot see.
+  it("commits the picked project to the shared draft when switching to alignment", async () => {
+    const user = userEvent.setup();
+    const onSwitchMode = vi.fn();
+    const onSwitchToAlign = vi.fn();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={onSwitchMode}
+        onSwitchToAlign={onSwitchToAlign}
+        data={{ project_id: "proj-1" }}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
+    await user.click(screen.getByRole("button", { name: /Align first/i }));
+
+    expect(onSwitchToAlign).toHaveBeenCalledTimes(1);
+    expect(mockSetShared).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "proj-1" }),
+    );
   });
 
   it("restores an unfinished project selection after manual create remounts", async () => {
@@ -1620,15 +1732,17 @@ describe("CreateIssueModal", () => {
     }
 
     function renderManual(onSwitchMode = vi.fn()) {
+      const onSwitchToAlign = vi.fn();
       const view = renderModal(
         <ManualCreatePanel
           onClose={vi.fn()}
           onSwitchMode={onSwitchMode}
+          onSwitchToAlign={onSwitchToAlign}
           isExpanded={false}
           setIsExpanded={vi.fn()}
         />,
       );
-      return { ...view, onSwitchMode };
+      return { ...view, onSwitchMode, onSwitchToAlign };
     }
 
     it("disables Create and shows Uploading… while an upload is in flight", async () => {
@@ -1699,6 +1813,22 @@ describe("CreateIssueModal", () => {
       await waitFor(() => expect(switchButton).toBeDisabled());
       fireEvent.click(switchButton);
       expect(onSwitchMode).not.toHaveBeenCalled();
+    });
+
+    it("blocks the switch to alignment while an upload is in flight", async () => {
+      const user = userEvent.setup();
+      const { onSwitchToAlign } = renderManual();
+      await user.type(screen.getByPlaceholderText("Issue title"), "Has a screenshot");
+
+      startPendingUpload();
+
+      // Same reason as Switch to Agent: the switch snapshots the body into the
+      // alignment request while the pending image is still only a blob.
+      const switchButton = screen.getByRole("button", { name: /Align first/i });
+      await waitFor(() => expect(switchButton).toBeDisabled());
+      fireEvent.click(switchButton);
+      expect(onSwitchToAlign).not.toHaveBeenCalled();
+      expect(mockSetAlign).not.toHaveBeenCalled();
     });
   });
 

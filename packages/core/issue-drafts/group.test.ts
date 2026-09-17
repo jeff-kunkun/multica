@@ -1,0 +1,461 @@
+// @vitest-environment node
+import { describe, expect, it } from "vitest";
+import type { IssueDraftChild, IssueDraftPayload } from "../types";
+import {
+  issueDraftChildStatus,
+  issueDraftCreatedGroup,
+  issueDraftNodeRunsOnCreate,
+  maxIssueDraftChildStage,
+  mintIssueDraftChildKeys,
+  normalizeIssueDraftChildren,
+  normalizeIssueDraftPayloadGroup,
+  planIssueDraftGroup,
+  planIssueDraftGroupProgress,
+  sameIssueDraftChildren,
+} from "./group";
+
+/**
+ * The group rules the preview and the confirm must agree on.
+ *
+ * They are pure and live here rather than in the panel because both halves of
+ * the promise are decided by them: what the panel SHOWS ("3 issues, 1 starts
+ * now") and what the server is asked to CREATE are derived from the same
+ * normalization, and a divergence between the two is a confirm that does
+ * something other than what the user just approved.
+ */
+
+function child(overrides: Partial<IssueDraftChild> = {}): IssueDraftChild {
+  return {
+    key: "c1",
+    title: "A sub-issue",
+    description: "",
+    status: "",
+    priority: "",
+    assignee_type: null,
+    assignee_id: null,
+    stage: null,
+    assignee_hint: null,
+    ...overrides,
+  };
+}
+
+function payload(overrides: Partial<IssueDraftPayload> = {}): IssueDraftPayload {
+  return {
+    title: "Parent",
+    description: "",
+    status: "",
+    priority: "",
+    ...overrides,
+  };
+}
+
+describe("issueDraftChildStatus", () => {
+  it("starts the first stage and parks the rest", () => {
+    expect(issueDraftChildStatus(1)).toBe("todo");
+    expect(issueDraftChildStatus(2)).toBe("backlog");
+    expect(issueDraftChildStatus(9)).toBe("backlog");
+  });
+
+  it("treats an unstaged sub-issue as the implicit single stage", () => {
+    // A group nobody staged is not a group that waits: it is one stage, and
+    // everything in it is meant to run.
+    expect(issueDraftChildStatus(null)).toBe("todo");
+    expect(issueDraftChildStatus(undefined)).toBe("todo");
+  });
+});
+
+describe("normalizeIssueDraftChildStages", () => {
+  it("leaves an unstaged group unstaged", () => {
+    const children = [child({ key: "a" }), child({ key: "b" })];
+    expect(
+      normalizeIssueDraftChildren(children).map((c) => c.stage),
+    ).toEqual([null, null]);
+  });
+
+  it("fills stage 1 for the members a staged group left unstaged", () => {
+    // An unstaged sibling in a staged group falls out of the stage barrier
+    // entirely — it neither holds a stage back nor is woken by one — so it
+    // would be dispatched by nobody. Stage 1 is the only safe answer.
+    const children = [
+      child({ key: "a", stage: 2 }),
+      child({ key: "b", stage: null }),
+    ];
+    expect(normalizeIssueDraftChildren(children).map((c) => c.stage)).toEqual([
+      2, 1,
+    ]);
+  });
+
+  it("renumbers by order of appearance, closing gaps", () => {
+    const children = [
+      child({ key: "a", stage: 3 }),
+      child({ key: "b", stage: 1 }),
+      child({ key: "c", stage: 3 }),
+    ];
+    expect(normalizeIssueDraftChildren(children).map((c) => c.stage)).toEqual([
+      2, 1, 2,
+    ]);
+  });
+
+  it("does not promote a group whose only stage is a later one", () => {
+    // Stage 2 alone means "this waits". Squashing it to stage 1 while closing
+    // gaps would silently turn a parked sub-issue into one that runs the moment
+    // it is created — the opposite of what the carrier said.
+    const children = [child({ key: "a", stage: 2 }), child({ key: "b", stage: 3 })];
+    const normalized = normalizeIssueDraftChildren(children);
+    expect(normalized.map((c) => c.stage)).toEqual([2, 3]);
+    expect(normalized.map((c) => c.status)).toEqual(["backlog", "backlog"]);
+  });
+
+  it("treats a stage outside the server's range as no stage at all", () => {
+    // The server refuses stage > 20 outright, so a payload carrying one must be
+    // repaired here rather than 400 at confirm time. With nothing else staged,
+    // the group is simply unstaged.
+    const children = [child({ key: "a", stage: 21 }), child({ key: "b", stage: 0 })];
+    const normalized = normalizeIssueDraftChildren(children);
+    expect(normalized.map((c) => c.stage)).toEqual([null, null]);
+    expect(normalized.map((c) => c.status)).toEqual(["todo", "todo"]);
+  });
+
+  it("fills an unusable stage into a staged group like any missing one", () => {
+    // The documented rule for a sub-issue with no usable stage in a staged
+    // group is stage 1: an unprestaged sibling would fall out of the barrier
+    // and be dispatched by nobody.
+    const children = [child({ key: "a", stage: 21 }), child({ key: "b", stage: 3 })];
+    const normalized = normalizeIssueDraftChildren(children);
+    expect(normalized.map((c) => c.stage)).toEqual([1, 2]);
+    expect(normalized.map((c) => c.status)).toEqual(["todo", "backlog"]);
+  });
+
+  it("keeps a high but contiguous range where it is", () => {
+    const children = [18, 19, 20].map((stage, index) =>
+      child({ key: `c${index + 1}`, stage }),
+    );
+    expect(normalizeIssueDraftChildren(children).map((c) => c.stage)).toEqual([
+      18, 19, 20,
+    ]);
+  });
+});
+
+describe("mintIssueDraftChildKeys", () => {
+  it("keeps the keys that are already usable", () => {
+    const children = [child({ key: "c1" }), child({ key: "design" })];
+    expect(mintIssueDraftChildKeys(children).map((c) => c.key)).toEqual([
+      "c1",
+      "design",
+    ]);
+  });
+
+  it("mints a key for a sub-issue that arrived without one", () => {
+    const children = [child({ key: "" }), child({ key: "  " })];
+    expect(mintIssueDraftChildKeys(children).map((c) => c.key)).toEqual([
+      "c1",
+      "c2",
+    ]);
+  });
+
+  it("repairs a duplicate without stealing the first one's identity", () => {
+    // Two nodes with one key derive one origin_id: the second insert collides
+    // inside the create transaction, which is a 500 rather than a sentence the
+    // user can act on.
+    const children = [child({ key: "c1" }), child({ key: "c1" })];
+    expect(mintIssueDraftChildKeys(children).map((c) => c.key)).toEqual([
+      "c1",
+      "c2",
+    ]);
+  });
+
+  it("replaces a key the server would refuse as too long", () => {
+    const children = [child({ key: "k".repeat(65) })];
+    expect(mintIssueDraftChildKeys(children)[0]?.key).toBe("c1");
+  });
+
+  it("trims a key so the stored key is the one identity was derived from", () => {
+    const children = [child({ key: " c1 " })];
+    expect(mintIssueDraftChildKeys(children)[0]?.key).toBe("c1");
+  });
+});
+
+describe("normalizeIssueDraftChildren", () => {
+  it("writes the status each stage implies", () => {
+    const children = [
+      child({ key: "a", stage: 1 }),
+      child({ key: "b", stage: 2 }),
+    ];
+    expect(normalizeIssueDraftChildren(children).map((c) => c.status)).toEqual([
+      "todo",
+      "backlog",
+    ]);
+  });
+
+  it("overrides a stored status that contradicts the stage", () => {
+    // Stage is the only thing the user edits; the status is the derived half.
+    // Keeping a stale one would dispatch by the wrong rule.
+    const children = [child({ key: "a", stage: 3, status: "todo" })];
+    expect(normalizeIssueDraftChildren(children)[0]?.status).toBe("backlog");
+  });
+
+  it("defaults a missing priority", () => {
+    expect(
+      normalizeIssueDraftChildren([child({ priority: "  " })])[0]?.priority,
+    ).toBe("none");
+  });
+});
+
+describe("normalizeIssueDraftPayloadGroup", () => {
+  it("returns the same payload when there is nothing to normalize", () => {
+    const draft = payload({
+      children: [child({ key: "a", stage: 1, status: "todo", priority: "none" })],
+    });
+    expect(normalizeIssueDraftPayloadGroup(draft)).toBe(draft);
+  });
+
+  it("leaves a payload with no children alone", () => {
+    const draft = payload();
+    expect(normalizeIssueDraftPayloadGroup(draft)).toBe(draft);
+  });
+
+  it("normalizes the group when it needs it", () => {
+    const draft = payload({ children: [child({ key: "", stage: 2 })] });
+    const normalized = normalizeIssueDraftPayloadGroup(draft);
+    expect(normalized.children?.[0]?.key).toBe("c1");
+    expect(normalized.children?.[0]?.status).toBe("backlog");
+  });});
+
+describe("issueDraftNodeRunsOnCreate", () => {
+  it("runs a todo node with an agent assignee", () => {
+    expect(
+      issueDraftNodeRunsOnCreate({
+        status: "todo",
+        assignee_type: "agent",
+        assignee_id: "a1",
+      }),
+    ).toBe(true);
+  });
+
+  it("treats an empty status the way the server does", () => {
+    expect(
+      issueDraftNodeRunsOnCreate({
+        status: "",
+        assignee_type: "agent",
+        assignee_id: "a1",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not run a backlog node", () => {
+    expect(
+      issueDraftNodeRunsOnCreate({
+        status: "backlog",
+        assignee_type: "agent",
+        assignee_id: "a1",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not run an unassigned node — the parent's normal shape", () => {
+    expect(issueDraftNodeRunsOnCreate({ status: "todo" })).toBe(false);
+  });
+
+  it("does not call a member assignment a running agent", () => {
+    // Assigning a person enqueues nothing; saying "runs now" would tell the
+    // user a human had been paged.
+    expect(
+      issueDraftNodeRunsOnCreate({
+        status: "todo",
+        assignee_type: "member",
+        assignee_id: "u1",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("planIssueDraftGroup", () => {
+  it("is empty for a draft that does not exist", () => {
+    expect(planIssueDraftGroup(null)).toEqual({
+      rows: [],
+      total: 0,
+      creating: 0,
+      starting: 0,
+      parked: 0,
+      built: 0,
+    });
+  });
+
+  it("counts an adopted node as neither created nor started", () => {
+    // A continuation round: the node already owns an issue, so the confirm
+    // skips it and never rewrites its fields. Counting it would promise work
+    // the confirm does not do — and "runs immediately" for an issue that is not
+    // being created is the same lie one size smaller (DENE-415).
+    const plan = planIssueDraftGroup(
+      payload({
+        children: [
+          child({ key: "a", stage: 1, assignee_type: "agent", assignee_id: "ag1" }),
+          child({ key: "b", stage: 1, assignee_type: "agent", assignee_id: "ag2" }),
+        ],
+      }),
+      new Set(["a"]),
+    );
+    expect(plan.total).toBe(3);
+    expect(plan.creating).toBe(2);
+    expect(plan.starting).toBe(1);
+    expect(plan.built).toBe(1);
+    expect(plan.rows.map((row) => row.alreadyBuilt)).toEqual([false, true, false]);
+  });
+
+  it("counts every node of a first round as being created", () => {
+    const plan = planIssueDraftGroup(
+      payload({ children: [child({ key: "a", stage: 1 })] }),
+      new Set<string>(),
+    );
+    expect(plan.creating).toBe(plan.total);
+    expect(plan.built).toBe(0);
+  });
+
+  it("reads a draft with no children as exactly one issue", () => {
+    // The old shape is not a legacy branch: it is a group with only its root.
+    const plan = planIssueDraftGroup(payload({ title: "One" }));
+    expect(plan.total).toBe(1);
+    expect(plan.rows[0]?.isRoot).toBe(true);
+    expect(plan.parked).toBe(0);
+  });
+
+  it("counts the whole group and says which rows start", () => {
+    const plan = planIssueDraftGroup(
+      payload({
+        children: [
+          child({ key: "a", stage: 1, assignee_type: "agent", assignee_id: "ag1" }),
+          child({ key: "b", stage: 2, assignee_type: "agent", assignee_id: "ag2" }),
+        ],
+      }),
+    );
+    expect(plan.total).toBe(3);
+    expect(plan.starting).toBe(1);
+    expect(plan.parked).toBe(1);
+    expect(plan.rows.map((row) => row.startsOnCreate)).toEqual([
+      false,
+      true,
+      false,
+    ]);
+  });
+
+  it("derives a row's status from its stage, not from the stored value", () => {
+    // Mid-edit the panel has moved the stage but nothing has been saved yet;
+    // the numbers under the confirm button have to follow the screen.
+    const plan = planIssueDraftGroup(
+      payload({ children: [child({ key: "a", stage: 2, status: "todo" })] }),
+    );
+    expect(plan.rows[1]?.status).toBe("backlog");
+  });
+
+  it("runs every member of an unstaged group that has an agent", () => {
+    const plan = planIssueDraftGroup(
+      payload({
+        children: [
+          child({ key: "a", assignee_type: "agent", assignee_id: "ag1" }),
+          child({ key: "b", assignee_type: "agent", assignee_id: "ag2" }),
+        ],
+      }),
+    );
+    expect(plan.starting).toBe(2);
+    expect(plan.parked).toBe(0);
+  });
+});
+
+describe("sameIssueDraftChildren", () => {
+  it("compares the set and every field that decides what is created", () => {
+    expect(sameIssueDraftChildren([child()], [child()])).toBe(true);
+    expect(sameIssueDraftChildren([child()], [child({ title: "Other" })])).toBe(
+      false,
+    );
+    expect(sameIssueDraftChildren([child()], [child({ stage: 2 })])).toBe(false);
+    expect(
+      sameIssueDraftChildren(
+        [child()],
+        [child({ assignee_type: "agent", assignee_id: "ag1" })],
+      ),
+    ).toBe(false);
+    expect(sameIssueDraftChildren([child()], [])).toBe(false);
+  });
+});
+
+describe("maxIssueDraftChildStage", () => {
+  it("is 0 when nothing is staged", () => {
+    expect(maxIssueDraftChildStage([child(), child()])).toBe(0);
+    expect(maxIssueDraftChildStage([child({ stage: 3 }), child({ stage: 2 })])).toBe(3);
+  });
+});
+
+describe("issueDraftCreatedGroup", () => {
+  it("reports the whole group the confirm answered with", () => {
+    const issues = [
+      { id: "i1", identifier: "MUL-1", title: "Parent", status: "todo" },
+      { id: "i2", identifier: "MUL-2", title: "Child", status: "backlog" },
+    ];
+    expect(issueDraftCreatedGroup({ issue_id: "i1", issues })).toBe(issues);
+  });
+
+  it("degrades to the root alone for a backend that predates groups", () => {
+    // No `issues` at all means "the group is the one issue named by issue_id",
+    // which is exactly what a group with no sub-issues is.
+    expect(issueDraftCreatedGroup({ issue_id: "i1" })).toEqual([
+      {
+        id: "i1",
+        identifier: "",
+        title: "",
+        status: "",
+        stage: null,
+        assignee_type: null,
+        assignee_id: null,
+        parent_issue_id: null,
+      },
+    ]);
+  });
+
+  it("degrades to the root alone when the reported group is empty", () => {
+    expect(issueDraftCreatedGroup({ issue_id: "i1", issues: [] })).toHaveLength(1);
+  });
+});
+
+describe("planIssueDraftGroupProgress", () => {
+  const issue = (stage: number | null, status: string) => ({ stage, status });
+  const done = (i: { status: string }) => i.status === "done";
+
+  it("counts the group and names the stage being worked on", () => {
+    // Reading it off the board's own two signals — the stage an issue carries
+    // and whether its status is done — is what keeps this line from disagreeing
+    // with the group itself. (DENE-415)
+    const progress = planIssueDraftGroupProgress(
+      [
+        issue(null, "done"), // the root: a parent has no stage
+        issue(1, "done"),
+        issue(1, "todo"),
+        issue(2, "backlog"),
+      ],
+      done,
+    );
+    expect(progress.total).toBe(4);
+    expect(progress.done).toBe(2);
+    expect(progress.stages).toBe(2);
+    expect(progress.activeStage).toBe(1);
+  });
+
+  it("falls back to the stage that is waiting when nothing is running", () => {
+    const progress = planIssueDraftGroupProgress(
+      [issue(1, "done"), issue(2, "backlog")],
+      done,
+    );
+    expect(progress.activeStage).toBe(2);
+  });
+
+  it("reports no active stage once the group is finished", () => {
+    const progress = planIssueDraftGroupProgress([issue(1, "done")], done);
+    expect(progress.done).toBe(1);
+    expect(progress.activeStage).toBeNull();
+  });
+
+  it("treats an unstaged group as one implicit stage", () => {
+    const progress = planIssueDraftGroupProgress([issue(null, "todo")], done);
+    expect(progress.stages).toBe(0);
+    expect(progress.activeStage).toBe(1);
+  });
+});

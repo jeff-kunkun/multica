@@ -22,6 +22,8 @@ import { normalizeStoredUploads, type DraftUpload } from "../../drafts/draft-upl
 //             date, assignee, labels, custom properties.
 //   agent   — the agent form's own state: the free-text prompt and the picked
 //             actor (agent or squad).
+//   align   — the alignment form's own state: the request handed to the
+//             alignment conversation's first turn (DENE-370).
 //   activeMode — which form the draft is currently being edited in.
 //
 // Before this split, `switchToAgent` concatenated title + description into the
@@ -64,10 +66,27 @@ export interface IssueCreateAgent {
   actorId?: string;
 }
 
+export interface IssueCreateAlign {
+  /** What the alignment conversation is asked to work on. Its own slot, like
+   *  the agent prompt, so a mode switch never overwrites another face's body. */
+  request: string;
+  /**
+   * The draft whose first turn the entry panel could not deliver (DENE-422).
+   *
+   * The panel hands off and closes the moment the conversation exists, so it is
+   * gone before the page that shows the lost turn renders; this is the one
+   * channel between them that already exists. Set on the way out, read and
+   * cleared once by the page it names — keyed by draft id so a conversation the
+   * failure does not belong to never claims it.
+   */
+  seedFailedDraftId?: string;
+}
+
 export interface IssueCreateDraft {
   shared: IssueCreateShared;
   manual: IssueCreateManual;
   agent: IssueCreateAgent;
+  align: IssueCreateAlign;
   activeMode: CreateMode;
 }
 
@@ -95,6 +114,10 @@ const emptyAgent = (): IssueCreateAgent => ({
   actorId: undefined,
 });
 
+const emptyAlign = (): IssueCreateAlign => ({
+  request: "",
+});
+
 interface IssueDraftStore {
   draft: IssueCreateDraft;
   /** In-memory only. While present, writes target an isolated source-context
@@ -109,6 +132,7 @@ interface IssueDraftStore {
   setShared: (patch: Partial<IssueCreateShared>) => void;
   setManual: (patch: Partial<IssueCreateManual>) => void;
   setAgent: (patch: Partial<IssueCreateAgent>) => void;
+  setAlign: (patch: Partial<IssueCreateAlign>) => void;
   setActiveMode: (mode: CreateMode) => void;
   clearDraft: () => void;
   beginIsolatedDraft: () => void;
@@ -159,6 +183,7 @@ function migrateDraft(raw: unknown): IssueCreateDraft {
             : {},
       },
       agent: emptyAgent(),
+      align: emptyAlign(),
       activeMode: "manual",
     };
   }
@@ -174,7 +199,10 @@ function migrateDraft(raw: unknown): IssueCreateDraft {
     },
     manual: { ...emptyManual(), ...((d.manual as Partial<IssueCreateManual>) ?? {}) },
     agent: { ...emptyAgent(), ...((d.agent as Partial<IssueCreateAgent>) ?? {}) },
-    activeMode: d.activeMode === "agent" ? "agent" : "manual",
+    // Backfills drafts persisted before the alignment face existed.
+    align: { ...emptyAlign(), ...((d.align as Partial<IssueCreateAlign>) ?? {}) },
+    activeMode:
+      d.activeMode === "agent" ? "agent" : d.activeMode === "align" ? "align" : "manual",
   };
 }
 
@@ -190,6 +218,8 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
         set((s) => ({ draft: { ...s.draft, manual: { ...s.draft.manual, ...patch } } })),
       setAgent: (patch) =>
         set((s) => ({ draft: { ...s.draft, agent: { ...s.draft.agent, ...patch } } })),
+      setAlign: (patch) =>
+        set((s) => ({ draft: { ...s.draft, align: { ...s.draft.align, ...patch } } })),
       setActiveMode: (mode) =>
         set((s) => ({ draft: { ...s.draft, activeMode: mode } })),
       clearDraft: () =>
@@ -202,6 +232,7 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
               assigneeId: s.lastAssigneeId,
             },
             agent: emptyAgent(),
+            align: emptyAlign(),
             activeMode: s.draft.activeMode,
           },
         })),
@@ -218,6 +249,7 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
                 assigneeId: s.lastAssigneeId,
               },
               agent: emptyAgent(),
+              align: emptyAlign(),
               activeMode: "agent",
             },
           };
@@ -229,11 +261,12 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
       setLastAssignee: (type, id) =>
         set({ lastAssigneeType: type, lastAssigneeId: id }),
       hasDraft: () => {
-        const { manual, agent, shared } = get().draft;
+        const { manual, agent, align, shared } = get().draft;
         return !!(
           manual.title ||
           manual.description ||
           agent.prompt ||
+          align.request ||
           Object.keys(manual.propertyValues).length > 0 ||
           // Recoverable uploads only: a failed/interrupted remnant the user
           // never dismissed must not pin the sidebar's draft dot forever.

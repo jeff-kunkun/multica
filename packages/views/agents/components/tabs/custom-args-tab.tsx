@@ -1,59 +1,33 @@
 "use client";
 
+// Custom CLI arguments for one agent.
+//
+// This tab owned AGY's numbered account slots until DENE-309 moved them to the
+// accounts tab, where the rest of the account surface lives. `--gemini_dir` is
+// still AGY's binding lever and still rides in `custom_args` — it is only
+// edited from the accounts tab now, and stays hidden from this list so the
+// binding has exactly one control point.
+
 import { useEffect, useRef, useState } from "react";
 import {
-  Check,
-  Circle,
-  Copy,
   Loader2,
   Pencil,
   Plus,
   Save,
   Terminal,
   Trash2,
-  X,
 } from "lucide-react";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
-import { copyText } from "@multica/ui/lib/clipboard";
-import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
 import {
   SettingsCard,
   SettingsSection,
 } from "../../../settings/components/settings-layout";
-import {
-  type AgyAccountSlot,
-  DEFAULT_NUMBERED_ACCOUNTS,
-  MAX_AGY_ACCOUNT_NUMBER,
-  accountDirectoryLeaf,
-  detectAgyAccountSlot,
-  formatAgyLoginCommand,
-  getGeminiDir,
-  isAbsoluteFsPath,
-  isGeminiDirToken,
-  isIsolatedAccountSlot,
-  isNumberedAccountSlot,
-  joinHomeDir,
-  loginDirectory,
-  nextAccountNumber,
-  normalizeAccountNumbers,
-  numberedSlotId,
-  parseAccountNumber,
-  parseAgySlotsConfig,
-  resolveHomeDir,
-  resolveSlotDirectory,
-  runtimeHomeDir,
-  runtimeLoggedInDirs,
-  runtimeQuotaExhausted,
-  setGeminiDir,
-  slotIsSignedIn,
-  slotQuotaResetAt,
-  writeAgySlotsConfig,
-} from "./agy-account-slots";
+import { isGeminiDirToken } from "./agy-account-slots";
 
 interface ArgEntry {
   id: string;
@@ -107,50 +81,15 @@ export function CustomArgsTab({
   const [entries, setEntries] = useState<ArgEntry[]>(
     argsToEntries(agent.custom_args ?? []),
   );
-  const isAntigravity = runtimeDevice?.provider?.toLowerCase() === "antigravity";
-  const [slot, setSlot] = useState<AgyAccountSlot>(() =>
-    detectAgyAccountSlot(getGeminiDir(agent.custom_args ?? [])),
-  );
-  const [accounts, setAccounts] = useState<number[]>(() =>
-    parseAgySlotsConfig(agent.runtime_config, getGeminiDir(agent.custom_args ?? [])),
-  );
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorValue, setEditorValue] = useState("");
   const [saving, setSaving] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [quotaNow, setQuotaNow] = useState(() => Date.now());
   const editorInputRef = useRef<HTMLInputElement>(null);
 
   const currentArgs = entriesToArgs(entries);
-  const geminiDir = getGeminiDir(currentArgs);
-  const homeDir = resolveHomeDir(geminiDir, runtimeHomeDir(runtimeDevice));
   const originalArgs = agent.custom_args ?? [];
-  const originalAccounts = parseAgySlotsConfig(
-    agent.runtime_config,
-    getGeminiDir(originalArgs),
-  );
-  const argsDirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
-  const slotsDirty = JSON.stringify(accounts) !== JSON.stringify(originalAccounts);
-  const dirty = argsDirty || slotsDirty;
+  const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
   const visibleEntries = visibleArgEntries(entries);
-  const loginPath = loginDirectory(slot, geminiDir, homeDir);
-  const loginCommand = formatAgyLoginCommand(loginPath);
-  const loggedInDirs = runtimeLoggedInDirs(runtimeDevice);
-  const quotaExhausted = runtimeQuotaExhausted(runtimeDevice);
-  const nextAccount = nextAccountNumber(accounts);
-  const canAddAccount = nextAccount <= MAX_AGY_ACCOUNT_NUMBER;
-
-  const numberedSlotLabel = (account: number) =>
-    account === 1
-      ? t(($) => $.tab_body.custom_args.slot_account1_label)
-      : t(($) => $.tab_body.custom_args.slot_account_label, { n: account });
-  const numberedSlotHint = (account: number) =>
-    account === 1
-      ? t(($) => $.tab_body.custom_args.slot_account1_hint)
-      : t(($) => $.tab_body.custom_args.slot_account_hint, { n: account });
-  const slotLabel = isNumberedAccountSlot(slot)
-    ? numberedSlotLabel(parseAccountNumber(slot) ?? 1)
-    : t(($) => $.tab_body.custom_args.slot_custom_label);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -159,52 +98,6 @@ export function CustomArgsTab({
   useEffect(() => {
     if (editor) editorInputRef.current?.focus();
   }, [editor]);
-
-  const nextQuotaResetMs = quotaExhausted.reduce<number | null>((soonest, entry) => {
-    const at = entry.reset_at * 1000;
-    if (at <= quotaNow) return soonest;
-    if (soonest === null || at < soonest) return at;
-    return soonest;
-  }, null);
-
-  useEffect(() => {
-    if (nextQuotaResetMs === null) return;
-    const delay = Math.min(Math.max(nextQuotaResetMs - Date.now(), 0), 2_147_000_000);
-    const timer = window.setTimeout(() => setQuotaNow(Date.now()), delay);
-    return () => window.clearTimeout(timer);
-  }, [nextQuotaResetMs]);
-
-  const applyGeminiDir = (profile: string) => {
-    setEntries(argsToEntries(setGeminiDir(currentArgs, profile)));
-  };
-
-  const selectSlot = (next: AgyAccountSlot) => {
-    if (isIsolatedAccountSlot(next) && !homeDir) {
-      toast.error(t(($) => $.tab_body.custom_args.home_unresolved_toast));
-      return;
-    }
-    setSlot(next);
-    if (next === "custom") return;
-    applyGeminiDir(resolveSlotDirectory(next, geminiDir, homeDir));
-  };
-
-  const addAccount = () => {
-    if (!homeDir) {
-      toast.error(t(($) => $.tab_body.custom_args.home_unresolved_toast));
-      return;
-    }
-    if (!canAddAccount) return;
-    const next = normalizeAccountNumbers([...accounts, nextAccount]);
-    setAccounts(next);
-    selectSlot(numberedSlotId(nextAccount));
-  };
-
-  const removeAccount = (account: number) => {
-    if (account <= 1) return;
-    const next = normalizeAccountNumbers(accounts.filter((n) => n !== account));
-    setAccounts(next);
-    if (parseAccountNumber(slot) === account) selectSlot("account1");
-  };
 
   const startAdding = () => {
     setEditor({ kind: "add" });
@@ -242,32 +135,10 @@ export function CustomArgsTab({
     if (editor?.kind === "edit" && editor.entryId === entryId) closeEditor();
   };
 
-  const handleCopyLogin = () => {
-    void copyText(loginCommand).then((ok) => {
-      if (!ok) {
-        toast.error(t(($) => $.tab_body.custom_args.login_copy_failed_toast));
-        return;
-      }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
   const handleSave = async () => {
-    if (isAntigravity && geminiDir && !isAbsoluteFsPath(geminiDir)) {
-      toast.error(t(($) => $.tab_body.custom_args.absolute_path_required_toast));
-      return;
-    }
     setSaving(true);
     try {
-      await onSave(
-        isAntigravity
-          ? {
-              custom_args: currentArgs,
-              runtime_config: writeAgySlotsConfig(agent.runtime_config, accounts),
-            }
-          : { custom_args: currentArgs },
-      );
+      await onSave({ custom_args: currentArgs });
       toast.success(t(($) => $.tab_body.custom_args.saved_toast));
     } catch (err) {
       toast.error(
@@ -324,277 +195,15 @@ export function CustomArgsTab({
     ? [launchHeader, ...currentArgs.map(formatArgForPreview)].join(" ")
     : null;
 
-  const slots: Array<{
-    id: AgyAccountSlot;
-    account: number | null;
-    label: string;
-    hint: string;
-    directory: string;
-  }> = [
-    ...accounts.map((account) => {
-      const id = numberedSlotId(account);
-      const directory = loginDirectory(id, account === 1 ? "" : resolveSlotDirectory(id, "", homeDir), homeDir);
-      return {
-        id,
-        account,
-        label: numberedSlotLabel(account),
-        hint: numberedSlotHint(account),
-        directory,
-      };
-    }),
-    {
-      id: "custom" as const,
-      account: null,
-      label: t(($) => $.tab_body.custom_args.slot_custom_label),
-      hint: t(($) => $.tab_body.custom_args.slot_custom_hint),
-      // Only claim the current Gemini dir when it is not one of the numbered
-      // slots; otherwise a logged-in numbered slot would also light this row.
-      directory:
-        detectAgyAccountSlot(geminiDir) === "custom"
-          ? loginDirectory("custom", geminiDir, homeDir)
-          : "",
-    },
-  ];
-
   return (
     <div className="space-y-6">
       <p className="max-w-2xl text-pretty text-body leading-6 text-muted-foreground">
         {t(($) => $.tab_body.custom_args.intro)}
       </p>
 
-      {isAntigravity ? (
-        <>
-          <SettingsSection
-            title={t(($) => $.tab_body.custom_args.antigravity_profile_label)}
-            description={t(($) => $.tab_body.custom_args.antigravity_profile_description)}
-          >
-            <SettingsCard>
-              <div className="space-y-3 p-3">
-                <div
-                  role="radiogroup"
-                  aria-label={t(($) => $.tab_body.custom_args.slot_group_aria)}
-                  className="grid gap-2"
-                >
-                  {slots.map((item) => {
-                    const selected = slot === item.id;
-                    const quotaReset = slotQuotaResetAt(item.directory, quotaExhausted, quotaNow);
-                    const signedIn = !quotaReset && slotIsSignedIn(item.directory, loggedInDirs);
-                    const resetLabel = quotaReset
-                      ? new Date(quotaReset * 1000).toLocaleString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : "";
-                    return (
-                      <div key={item.id} className="flex items-stretch gap-1">
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          onClick={() => selectSlot(item.id)}
-                          className={cn(
-                            "flex min-w-0 flex-1 items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                            selected
-                              ? "border-foreground font-medium shadow-[inset_0_0_0_1px_var(--color-foreground)]"
-                              : "border-border hover:border-foreground/20 hover:bg-accent/30",
-                          )}
-                        >
-                          <span
-                            aria-hidden
-                            className={cn(
-                              "relative mt-0.5 inline-block size-4 shrink-0 rounded-full border-[1.5px]",
-                              selected ? "border-foreground" : "border-border",
-                            )}
-                          >
-                            {selected ? (
-                              <span className="absolute inset-[3px] rounded-full bg-foreground" />
-                            ) : null}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-body leading-5">{item.label}</span>
-                            <span
-                              className={cn(
-                                "mt-0.5 block font-normal text-caption leading-5",
-                                quotaReset ? "text-destructive" : "text-muted-foreground",
-                              )}
-                            >
-                              {quotaReset
-                                ? t(($) => $.tab_body.custom_args.slot_exhausted_hint, {
-                                    time: resetLabel,
-                                  })
-                                : item.hint}
-                            </span>
-                          </span>
-                          <span
-                            role="img"
-                            aria-label={
-                              quotaReset
-                                ? t(($) => $.tab_body.custom_args.slot_exhausted_aria)
-                                : signedIn
-                                  ? t(($) => $.tab_body.custom_args.slot_signed_in_aria)
-                                  : t(($) => $.tab_body.custom_args.slot_signed_out_aria)
-                            }
-                            className="mt-0.5 shrink-0"
-                          >
-                            {quotaReset ? (
-                              <X className="size-3.5 text-destructive" aria-hidden="true" />
-                            ) : signedIn ? (
-                              <Check className="size-3.5 text-success" aria-hidden="true" />
-                            ) : (
-                              <Circle className="size-3.5 text-muted-foreground/70" aria-hidden="true" />
-                            )}
-                          </span>
-                        </button>
-                        {item.account && item.account > 1 ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            className="mt-1 shrink-0 text-muted-foreground hover:text-destructive"
-                            onClick={() => removeAccount(item.account ?? 0)}
-                            aria-label={t(($) => $.tab_body.custom_args.slot_remove_aria, {
-                              n: item.account,
-                            })}
-                          >
-                            <Trash2 className="size-3.5" aria-hidden="true" />
-                          </Button>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-center"
-                    onClick={addAccount}
-                    disabled={!canAddAccount}
-                    aria-label={t(($) => $.tab_body.custom_args.slot_add_aria)}
-                  >
-                    <Plus className="size-3.5" aria-hidden="true" />
-                    {t(($) => $.tab_body.custom_args.slot_add_action)}
-                  </Button>
-                </div>
-
-                {slot === "custom" ? (
-                  <div className="space-y-2">
-                    <label
-                      className="text-caption font-medium"
-                      htmlFor="agy-profile-directory"
-                    >
-                      {t(($) => $.tab_body.custom_args.antigravity_profile_input_label)}
-                    </label>
-                    <Input
-                      id="agy-profile-directory"
-                      value={geminiDir}
-                      onChange={(event) => applyGeminiDir(event.target.value.trim())}
-                      placeholder={t(
-                        ($) => $.tab_body.custom_args.antigravity_profile_placeholder,
-                      )}
-                      spellCheck={false}
-                      autoComplete="off"
-                      className="font-mono text-caption"
-                    />
-                  </div>
-                ) : loginPath ? (
-                  <p className="text-caption leading-5 text-muted-foreground">
-                    <span className="font-medium text-foreground">
-                      {t(($) => $.tab_body.custom_args.resolved_path_label)}
-                    </span>{" "}
-                    <code className="font-mono" translate="no">
-                      {loginPath}
-                    </code>
-                  </p>
-                ) : null}
-              </div>
-            </SettingsCard>
-          </SettingsSection>
-
-          <SettingsSection title={t(($) => $.tab_body.custom_args.login_title)}>
-            <SettingsCard>
-              <div className="space-y-3 p-4">
-                <p className="text-body leading-6">
-                  {t(($) => $.tab_body.custom_args.login_bound, {
-                    slot: slotLabel,
-                    path: loginPath,
-                  })}
-                </p>
-                {loginPath ? (
-                  <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5">
-                    <code
-                      className="min-w-0 flex-1 break-all font-mono text-caption leading-5"
-                      translate="no"
-                    >
-                      {loginCommand}
-                    </code>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={handleCopyLogin}
-                      aria-label={
-                        copied
-                          ? t(($) => $.tab_body.custom_args.login_copied_aria)
-                          : t(($) => $.tab_body.custom_args.login_copy_aria)
-                      }
-                    >
-                      {copied ? (
-                        <Check className="size-3.5" aria-hidden="true" />
-                      ) : (
-                        <Copy className="size-3.5" aria-hidden="true" />
-                      )}
-                    </Button>
-                  </div>
-                ) : null}
-                <p className="text-caption leading-5 text-muted-foreground">
-                  {t(($) => $.tab_body.custom_args.login_keychain_hint)}
-                </p>
-              </div>
-            </SettingsCard>
-          </SettingsSection>
-        </>
-      ) : (
-        <SettingsSection
-          title={t(($) => $.tab_body.custom_args.accounts_title)}
-          description={t(($) => $.tab_body.custom_args.accounts_unbound_description)}
-        >
-          <SettingsCard>
-            <div className="space-y-3 p-4">
-              <p className="text-body leading-6">
-                {t(($) => $.tab_body.custom_args.accounts_unbound_hint)}
-              </p>
-              <ul className="space-y-2">
-                {DEFAULT_NUMBERED_ACCOUNTS.map((account) => (
-                  <li
-                    key={account}
-                    className="flex min-w-0 items-start gap-3 rounded-lg bg-muted px-3 py-2.5"
-                  >
-                    <span className="w-20 shrink-0 text-caption leading-5 text-muted-foreground">
-                      {numberedSlotLabel(account)}
-                    </span>
-                    <code
-                      className="min-w-0 flex-1 break-all font-mono text-caption leading-5"
-                      translate="no"
-                    >
-                      {formatAgyLoginCommand(
-                        joinHomeDir(
-                          runtimeHomeDir(runtimeDevice) ?? "$HOME",
-                          accountDirectoryLeaf(account),
-                        ),
-                      )}
-                    </code>
-                  </li>
-                ))}
-              </ul>
-              <p className="text-caption leading-5 text-muted-foreground">
-                {t(($) => $.tab_body.custom_args.login_keychain_hint)}
-              </p>
-            </div>
-          </SettingsCard>
-        </SettingsSection>
-      )}
+      <p className="max-w-2xl text-pretty rounded-lg border border-border bg-muted/40 p-3 text-caption leading-5 text-muted-foreground">
+        {t(($) => $.tab_body.custom_args.accounts_moved_hint)}
+      </p>
 
       <SettingsSection
         title={t(($) => $.tab_body.custom_args.arguments_label)}
