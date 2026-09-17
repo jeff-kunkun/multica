@@ -214,6 +214,8 @@
     "section_profile_hint": "管理该智能体在工作区内的展示方式。",
     "section_execution": "执行配置",
     "section_execution_hint": "选择运行时、模型、思考强度、速度和并行运行上限。",
+    "section_accounts": "账号",
+    "section_accounts_hint": "这个智能体当前用哪个账号运行；增删改都在「管理账号」抽屉里完成。",
     "section_access": "访问权限",
     "section_access_hint": "控制谁可以运行该智能体并使用它已连接的能力。",
     "section_properties": "属性",
@@ -320,7 +322,6 @@
     "instructions": "指令",
     "skills": "Skills",
     "environment": "环境变量",
-    "accounts": "账号",
     "custom_args": "自定义参数",
     "mcp_config": "MCP",
     "composio_mcp": "MCP 应用",
@@ -527,7 +528,6 @@
       "workspace_notes_placeholder": "写下这个智能体应该始终知道的上下文。\n\n# 示例\n我们的主仓库是 github.com/acme/platform。\n即使聊天用中文，任务也一律用英文写。\n周五不部署。"
     },
     "accounts": {
-      "intro": "这一屏只显示当前生效的账号；增删改都在「管理账号」抽屉里完成。",
       "summary_current": "当前账号",
       "summary_unknown": "本机账号里没有与这个智能体当前绑定对应的账号。",
       "active_badge": "使用中",

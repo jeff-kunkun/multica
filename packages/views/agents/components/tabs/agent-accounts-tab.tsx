@@ -1,6 +1,8 @@
 "use client";
 
-// Agent "accounts" tab (design C5: summary bar + drawer).
+// Agent accounts surface (design C5: summary bar + drawer). It renders as the
+// "Accounts" section of the agent's General settings (DENE-492, plan B); its
+// own heading and description come from the section around it.
 //
 // The rest state answers one question — which account is in effect right now —
 // and keeps every management action inside the drawer. Parsing, grouping,
@@ -431,10 +433,6 @@ export function AgentAccountsTab({
 
   return (
     <div className="space-y-6">
-      <p className="max-w-2xl text-pretty text-body leading-6 text-muted-foreground">
-        {t(($) => $.tab_body.accounts.intro)}
-      </p>
-
       {viewState.kind === "loading" ? <AccountsLoading /> : null}
 
       {viewState.kind === "error" ? (

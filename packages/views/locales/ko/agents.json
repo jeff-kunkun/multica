@@ -214,6 +214,8 @@
     "section_profile_hint": "워크스페이스에서 이 에이전트가 표시되는 방식을 관리합니다.",
     "section_execution": "실행 설정",
     "section_execution_hint": "런타임, 모델, 추론 수준, 속도와 병렬 실행 한도를 설정합니다.",
+    "section_accounts": "계정",
+    "section_accounts_hint": "이 에이전트가 사용하는 계정입니다. 추가·편집·전환은 모두 '계정 관리'에서 합니다.",
     "section_access": "접근 권한",
     "section_access_hint": "이 에이전트와 연결된 기능을 사용할 수 있는 대상을 관리합니다.",
     "section_properties": "속성",
@@ -320,7 +322,6 @@
     "instructions": "지침",
     "skills": "스킬",
     "environment": "환경",
-    "accounts": "계정",
     "custom_args": "사용자 지정 인자",
     "mcp_config": "MCP",
     "composio_mcp": "MCP 앱",
@@ -428,7 +429,6 @@
       "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다."
     },
     "accounts": {
-      "intro": "이 화면에는 현재 적용 중인 계정만 표시합니다. 추가·편집·전환은 모두 '계정 관리'에서 합니다.",
       "summary_current": "현재 계정",
       "summary_unknown": "이 에이전트가 지금 사용하는 바인딩과 일치하는 계정이 이 컴퓨터에 없습니다.",
       "active_badge": "사용 중",

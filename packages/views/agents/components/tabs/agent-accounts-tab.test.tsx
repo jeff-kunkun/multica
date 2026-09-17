@@ -877,10 +877,19 @@ describe("agents locale bundles", () => {
     expect(expected.length).toBeGreaterThan(0);
     for (const [locale, bundle] of Object.entries(bundles)) {
       expect(keySet(bundle as typeof enAgents), locale).toEqual(expected);
+      // The heading and description now come from the General section that
+      // wraps this surface (DENE-492), so they are part of the same parity
+      // guard as the keys inside it.
+      const inspector = (bundle as { inspector: Record<string, unknown> })
+        .inspector;
+      expect(inspector.section_accounts, locale).toBeTruthy();
+      expect(inspector.section_accounts_hint, locale).toBeTruthy();
+      // The retired tab's label must be gone everywhere, not just in English —
+      // a leftover key is what keeps a dead entry point one edit away.
       expect(
         (bundle as { tabs: Record<string, unknown> }).tabs.accounts,
         locale,
-      ).toBeTruthy();
+      ).toBeUndefined();
     }
   });
 });

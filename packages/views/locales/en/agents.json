@@ -230,6 +230,8 @@
     "section_profile_hint": "Manage how this agent appears across the workspace.",
     "section_execution": "Execution",
     "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel run limit.",
+    "section_accounts": "Accounts",
+    "section_accounts_hint": "The account this agent runs as. Adding, editing and switching all happen in Manage accounts.",
     "section_access": "Access",
     "section_access_hint": "Control who can run this agent and use its connected capabilities.",
     "section_properties": "Properties",
@@ -337,7 +339,6 @@
     "instructions": "Instructions",
     "skills": "Skills",
     "environment": "Environment",
-    "accounts": "Accounts",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
     "composio_mcp": "MCP Apps",
@@ -545,7 +546,6 @@
       "workspace_notes_placeholder": "Add context this agent should always have.\n\n# Example\nOur main repository is github.com/acme/platform.\nWrite issues in English even when we chat in Chinese.\nWe do not deploy on Fridays."
     },
     "accounts": {
-      "intro": "This tab shows only the account in effect. Adding, editing and switching all happen in Manage accounts.",
       "summary_current": "Current account",
       "summary_unknown": "No account on this machine matches the binding this agent currently uses.",
       "active_badge": "In use",
