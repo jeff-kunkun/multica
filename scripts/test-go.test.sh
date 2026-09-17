@@ -5,7 +5,10 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 TEST_DIR=$(mktemp -d "${TMPDIR:-/tmp}/multica-test-go.XXXXXX")
 BIN_DIR="$TEST_DIR/bin"
 CALLS_FILE="$TEST_DIR/go-calls.log"
+PSQL_CALLS_FILE="$TEST_DIR/psql-calls.log"
+COMMITS_FILE="$TEST_DIR/xact-commit"
 OUTPUT_FILE="$TEST_DIR/output.log"
+RUN_DB_FILE="$TEST_DIR/run-db.log"
 
 cleanup() {
   rm -rf "$TEST_DIR"
@@ -14,7 +17,13 @@ trap cleanup EXIT
 
 mkdir -p "$BIN_DIR"
 export MULTICA_TEST_GO_CALLS="$CALLS_FILE"
+export MULTICA_TEST_PSQL_CALLS="$PSQL_CALLS_FILE"
+export MULTICA_TEST_PSQL_COMMITS="$COMMITS_FILE"
+export MULTICA_TEST_RUN_DB="$RUN_DB_FILE"
 : >"$CALLS_FILE"
+: >"$PSQL_CALLS_FILE"
+printf '0' >"$COMMITS_FILE"
+: >"$RUN_DB_FILE"
 
 cat >"$BIN_DIR/go" <<'FAKE'
 #!/usr/bin/env bash
@@ -35,6 +44,10 @@ case "${1:-}" in
   test)
     printf '%s\n' "$*" >>"$MULTICA_TEST_GO_CALLS"
     ;;
+  run)
+    # `go run ./cmd/migrate up` against the run's private database.
+    printf '%s\n' "$*" >>"$MULTICA_TEST_RUN_DB"
+    ;;
   *)
     echo "unexpected go command: $*" >&2
     exit 2
@@ -42,6 +55,26 @@ case "${1:-}" in
 esac
 FAKE
 chmod 755 "$BIN_DIR/go"
+
+# The runner provisions a database with psql, so the suite's contract now
+# includes it. The counter is what pg_stat_database.xact_commit looks like for a
+# run whose tests actually connected: it moves between the runner's two reads.
+cat >"$BIN_DIR/psql" <<'FAKE'
+#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >>"$MULTICA_TEST_PSQL_CALLS"
+
+case "$*" in
+  *xact_commit*)
+    commits=$(cat "$MULTICA_TEST_PSQL_COMMITS")
+    commits=$((commits + 1))
+    printf '%s' "$commits" >"$MULTICA_TEST_PSQL_COMMITS"
+    printf '%s\n' "$commits"
+    ;;
+esac
+exit 0
+FAKE
+chmod 755 "$BIN_DIR/psql"
 
 regular_call='test -race github.com/multica-ai/multica/server github.com/multica-ai/multica/server/internal/daemon'
 agent_call='test -race -p 2 -parallel 2 ./pkg/agent/...'
@@ -55,6 +88,42 @@ expect_calls() {
     exit 1
   fi
   : >"$CALLS_FILE"
+}
+
+# The run is wrapped in a private database: one created and one dropped per
+# invocation, and the migration applied to the database that was created rather
+# than to DATABASE_URL.
+expect_provisioned_database() {
+  label=$1
+  if ! grep -q 'CREATE DATABASE' "$PSQL_CALLS_FILE"; then
+    echo "$label did not create a run database:" >&2
+    cat "$PSQL_CALLS_FILE" >&2
+    exit 1
+  fi
+  if ! grep -q 'DROP DATABASE' "$PSQL_CALLS_FILE"; then
+    echo "$label did not drop the database it created:" >&2
+    cat "$PSQL_CALLS_FILE" >&2
+    exit 1
+  fi
+  if ! grep -q 'cmd/migrate up' "$RUN_DB_FILE"; then
+    echo "$label did not migrate the run database:" >&2
+    cat "$RUN_DB_FILE" >&2
+    exit 1
+  fi
+  : >"$PSQL_CALLS_FILE"
+  : >"$RUN_DB_FILE"
+}
+
+# pkg/agent opens no database, and the CI job that runs it has no Postgres
+# service. Provisioning one there would fail the run on a server it never
+# needed, so `--only agent` must reach `go test` without touching psql.
+expect_no_provisioned_database() {
+  label=$1
+  if [ -s "$PSQL_CALLS_FILE" ] || [ -s "$RUN_DB_FILE" ]; then
+    echo "$label provisioned a database for a suite that reads none:" >&2
+    cat "$PSQL_CALLS_FILE" "$RUN_DB_FILE" >&2
+    exit 1
+  fi
 }
 
 # $1: case label; the rest are arguments for test-go.sh. Asserts the usage
@@ -77,6 +146,13 @@ expect_usage_failure() {
     cat "$CALLS_FILE" >&2
     exit 1
   fi
+  # Usage errors must be answered before anything is provisioned: a typo must
+  # not cost a database.
+  if [ -s "$PSQL_CALLS_FILE" ] || [ -s "$RUN_DB_FILE" ]; then
+    echo "$label provisioned a database before rejecting its arguments:" >&2
+    cat "$PSQL_CALLS_FILE" "$RUN_DB_FILE" >&2
+    exit 1
+  fi
   if ! grep -q '^usage: .*test-go.sh \[--race\] \[--only regular|agent\]$' "$OUTPUT_FILE"; then
     echo "$label did not print usage" >&2
     cat "$OUTPUT_FILE" >&2
@@ -87,13 +163,25 @@ expect_usage_failure() {
 PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --race
 expect_calls "--race" "$regular_call
 $agent_call"
+expect_provisioned_database "--race"
+
+# check.sh calls the wrapper with no arguments at all. It forwards its own
+# argument list across the re-exec, and on bash 3.2 (the system bash on macOS)
+# expanding an empty array under `set -u` aborts the script before a single
+# test runs.
+PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh"
+expect_calls "no arguments" "${regular_call/ -race/}
+${agent_call/ -race/}"
+expect_provisioned_database "no arguments"
 
 PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --race --only regular
 expect_calls "--only regular" "$regular_call"
+expect_provisioned_database "--only regular"
 
 # Option order must not matter: CI spells it one way, humans another.
 PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --only agent --race
 expect_calls "--only agent" "$agent_call"
+expect_no_provisioned_database "--only agent"
 
 expect_usage_failure "unknown option" --unknown
 expect_usage_failure "unknown --only scope" --only everything

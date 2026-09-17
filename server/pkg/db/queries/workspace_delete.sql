@@ -317,8 +317,24 @@ deleted_hourly_dirty AS (
 deleted_hourly AS (
     DELETE FROM task_usage_hourly WHERE workspace_id = $1
 ),
+-- Stage-barrier wake failures are workspace-keyed diagnostics with no reader
+-- outside the workspace being torn down (the stagnation watchdog only scans
+-- unswept rows of live workspaces), and they carry no foreign key, so nothing
+-- else removes them. Same no-FK chore as the tables below.
+deleted_stage_wakeup_failures AS (
+    DELETE FROM stage_wakeup_failure WHERE workspace_id = $1
+),
 deleted_attachments AS (
     DELETE FROM attachment WHERE workspace_id = $1
+),
+-- Same no-FK chore for the resumable attachment staging (DENE-443). Both
+-- tables are keyed by workspace_id, so the teardown never has to assemble the
+-- (sha256, offset) pairs it is dropping first.
+deleted_transfer_attachment_chunks AS (
+    DELETE FROM transfer_attachment_upload_chunk WHERE workspace_id = $1
+),
+deleted_transfer_attachment_uploads AS (
+    DELETE FROM transfer_attachment_upload WHERE workspace_id = $1
 ),
 deleted_channel_outbound_cards AS (
     DELETE FROM channel_outbound_card_message
@@ -337,6 +353,10 @@ deleted_draft_restores AS (
 -- does not have to join through chat_session, which it deletes in this same CTE.
 deleted_agent_builder_drafts AS (
     DELETE FROM agent_builder_draft WHERE workspace_id = $1
+),
+-- Same no-FK chore for the alignment conversations' structured drafts.
+deleted_issue_drafts AS (
+    DELETE FROM issue_draft WHERE workspace_id = $1
 ),
 deleted_comment_reactions AS (
     DELETE FROM comment_reaction WHERE workspace_id = $1
