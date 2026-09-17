@@ -228,6 +228,8 @@ export function useIssueSurfaceController({
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
+  const hideCompletedParents = useViewStore((s) => s.hideCompletedParents);
+  const tableHierarchy = useViewStore((s) => s.tableHierarchy);
   const ganttShowCompleted = useViewStore((s) => s.ganttShowCompleted);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
@@ -322,6 +324,12 @@ export function useIssueSurfaceController({
       : grouping;
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
   const usesTable = effectiveViewMode === "table";
+  // The two modes whose own layout IS the parent/child relationship: the
+  // Table's hierarchy tree, and a swimlane grouped by parent. Both need the
+  // sub-issues the flat "show sub-issues" filter would take away.
+  const parentAwareLayout =
+    (usesTable && tableHierarchy) ||
+    (effectiveViewMode === "swimlane" && swimlaneGrouping === "parent");
   const activeSearch = usesTable ? tableSearch : search;
   const debouncedActiveSearch = useDebouncedTableSearch(activeSearch);
   const usesServerStatusSurface =
@@ -487,7 +495,14 @@ export function useIssueSurfaceController({
         ...(agentRunningFilter
           ? { working_issue_ids: [...workingIssueIDs] }
           : {}),
-        include_sub_issues: showSubIssues,
+        // A parent-aware layout already restricts what it shows at the top
+        // level: the Table's root branch asks for rows whose parent is outside
+        // the membership window, its child branches ask for one parent's
+        // children by id, and a parent swimlane IS a lane of children. Sending
+        // the flat `parent_issue_id IS NULL` filter alongside either one would
+        // empty every child branch and every lane. (DENE-444)
+        include_sub_issues: showSubIssues || parentAwareLayout,
+        ...(hideCompletedParents ? { hide_completed_parents: true } : {}),
       },
       ...(debouncedActiveSearch ? { search: debouncedActiveSearch } : {}),
       sort: {
@@ -505,8 +520,10 @@ export function useIssueSurfaceController({
     includeNoAssignee,
     labelFilters,
     priorityFilters,
+    hideCompletedParents,
     scope,
     showSubIssues,
+    parentAwareLayout,
     sort.sort_by,
     sort.sort_direction,
     statusFilters,

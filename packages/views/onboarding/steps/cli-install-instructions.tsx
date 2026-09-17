@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 import { Check, Copy, Terminal } from "lucide-react";
+import { CLI_INSTALL_COMMAND } from "@multica/core/constants/distribution";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../../i18n";
 
-const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
+const INSTALL_CMD = CLI_INSTALL_COMMAND;
 const SETUP_CMD = "multica setup";
 
 function CopyButton({ text }: { text: string }) {

@@ -308,6 +308,9 @@ const mockApiObj = vi.hoisted(() => ({
   rerunIssue: vi.fn(),
   listTaskMessages: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
+  // Batched expansion the sub-issue blocker tree walks below the direct
+  // children (one request per nesting level, not one per parent).
+  listChildrenByParents: vi.fn().mockResolvedValue({ issues: [] }),
   getChildIssueProgress: vi.fn().mockResolvedValue({ progress: [] }),
   getAgentTaskSnapshot: vi.fn().mockResolvedValue([]),
   // The sub-issues header chip reads this narrowed to the parent issue.
@@ -327,6 +330,9 @@ const mockApiObj = vi.hoisted(() => ({
   listRuntimes: vi.fn().mockResolvedValue([]),
   getProject: vi.fn(),
   listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+  // DENE-415: the "continue aligning" action, and the round read the alignment
+  // page does on load. The detail page only ever calls the former.
+  reopenIssueDraft: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -706,6 +712,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    mockApiObj.listChildrenByParents.mockResolvedValue({ issues: [] });
     mockApiObj.getChildIssueProgress.mockResolvedValue({ progress: [] });
     mockApiObj.getAgentTaskSnapshot.mockResolvedValue([]);
     mockApiObj.getWorkspaceWorkingAgents.mockResolvedValue([]);
@@ -2482,6 +2489,54 @@ describe("IssueDetail (shared)", () => {
       expect(bareRow?.textContent).not.toContain("/");
     });
 
+    it("marks a row whose blocker sits on a grandchild as propagated", async () => {
+      // Regression (DENE-311): the row badge used to be derived from a
+      // one-level children map, so a grandchild root cause left its own row
+      // unmarked while the summary card listed that grandchild as a root cause.
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 11,
+            identifier: "TES-11",
+            title: "Migrate tables",
+          }),
+        ],
+      });
+      mockApiObj.listChildrenByParents.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "grandchild-1",
+            number: 12,
+            identifier: "TES-12",
+            title: "Delete the old table",
+            parent_issue_id: "child-1",
+            metadata: {
+              "close.conclusion": "blocked",
+              "close.block_kind": "decision",
+              "close.block_action": "confirm the drop",
+            },
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Migrate tables");
+      // The child neither blocks nor is written as blocked — only its
+      // grandchild is, one level below what the row used to look at.
+      await waitFor(() =>
+        expect(screen.getByTestId("sub-issue-blocker-badge")).toHaveAttribute(
+          "data-blocker-state",
+          "PROPAGATED",
+        ),
+      );
+      expect(screen.getByText("Blocked by a sub-issue TES-12")).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: "TES-12 · Delete the old table" }),
+      ).toBeInTheDocument();
+    });
+
     it("hides fields the user toggled off in the display preference", async () => {
       useSubIssueDisplayStore.setState({
         rowProperties: {
@@ -2551,6 +2606,52 @@ describe("IssueDetail (shared)", () => {
       // Chip renders only on the row that has a value for the property.
       expect(await screen.findByText("Sprint 3")).toBeInTheDocument();
       expect(screen.getAllByText("Sprint 3")).toHaveLength(1);
+    });
+
+    it("shows close-protocol fields and the missing-close exception on sub-issue rows", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 230,
+            identifier: "DENE-230",
+            title: "Stage 1 child",
+            stage: 1,
+            status: "done",
+            metadata: {},
+            last_activity_at: "2026-09-15T11:15:22Z",
+          }),
+          subIssue({
+            id: "child-2",
+            number: 231,
+            identifier: "DENE-231",
+            title: "Stage 2 child",
+            stage: 2,
+            status: "done",
+            last_activity_at: "2026-09-15T12:16:13Z",
+            metadata: {
+              "close.at": "2026-09-15T11:52:15Z",
+              "close.conclusion": "delivered",
+              "close.evidence_comment_id": "01a0a4e9-1c4e-75a6-8895-79f1210f494e",
+              "close.next_owner_id": "",
+              "close.next_owner_type": "none",
+              "close.status": "done",
+              "close.waiting_on": "",
+              "close.wake_action": "stage_done",
+            },
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Stage 1 child");
+      expect(screen.getByText("Not closed under protocol")).toBeInTheDocument();
+      expect(screen.getByText("delivered")).toBeInTheDocument();
+      expect(screen.getByText("Next: none")).toBeInTheDocument();
+      const strips = screen.getAllByTestId("sub-issue-close-strip");
+      expect(strips[0]).toHaveAttribute("data-close-state", "missing");
+      expect(strips[1]).toHaveAttribute("data-close-state", "ok");
     });
 
     it("mutes the due date on done sub-issues even when past", async () => {
@@ -2935,6 +3036,64 @@ describe("IssueDetail (shared)", () => {
     expect(rendered.indexOf("comment-midway")).toBeLessThan(rendered.indexOf("comment-run-reply"));
   });
 
+
+  // DENE-371: the issue → alignment jump-off. An alignment conversation is
+  // reachable from nowhere else (its carrier is a hidden system agent, so no
+  // chat list will ever show it), which makes this entry the only route back to
+  // what was agreed before the issue existed.
+  it("links back to the alignment that created this issue", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      origin_type: "issue_draft",
+      origin_id: "sess-42",
+    });
+    renderIssueDetail();
+
+    const link = await screen.findByRole("link", {
+      name: /View the alignment that created this/,
+    });
+    expect(link.getAttribute("href")).toBe("/test/issues/new/sess-42");
+    // A group of one has no progress to report, and the line would read as
+    // noise beside the link. (DENE-415)
+    expect(screen.queryByText(/issue\(s\)/)).toBeNull();
+  });
+
+  it("offers no alignment entry for an issue created some other way", async () => {
+    // The same origin pair is written by autopilot runs and quick-create tasks;
+    // their origin_id is not a conversation, and an entry that navigated to one
+    // would 404. Absent provenance — a list row, or an older backend — is the
+    // same answer.
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      origin_type: "autopilot",
+      origin_id: "run-7",
+    });
+    renderIssueDetail();
+
+    await screen.findByText("Implement authentication");
+    expect(
+      screen.queryByRole("link", { name: /View the alignment that created this/ }),
+    ).toBeNull();
+  });
+
+  it("offers no alignment entry to someone who did not hold the alignment", async () => {
+    // The drafts endpoint is creator-scoped — an alignment is a private
+    // conversation — so for a teammate the entry could only open a page saying
+    // the draft is gone. The issue's creator is whoever confirmed the draft.
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      creator_type: "member",
+      creator_id: "user-2",
+      origin_type: "issue_draft",
+      origin_id: "sess-42",
+    });
+    renderIssueDetail();
+
+    await screen.findByText("Implement authentication");
+    expect(
+      screen.queryByRole("link", { name: /View the alignment that created this/ }),
+    ).toBeNull();
+  });
 });
 
 describe("groupSubIssuesByStage", () => {
@@ -2967,5 +3126,80 @@ describe("groupSubIssuesByStage", () => {
   it("omits the unstaged group when every child is staged", () => {
     const groups = groupSubIssuesByStage([child("s1", 1), child("s2", 2)]);
     expect(groups.map((g) => g.stage)).toEqual([1, 2]);
+  });
+});
+
+/**
+ * DENE-415: the alignment entry grew from "view the conversation" into "see
+ * where the group got to, and go back into the SAME conversation". Two things
+ * are easy to get wrong and are pinned here: the entry must resolve a
+ * SUB-issue's conversation through its parent (a sub-issue's own origin id is
+ * its node id, not the conversation), and the action must be a reopen of that
+ * conversation rather than a new alignment.
+ */
+describe("issue detail — alignment entry", () => {
+  const childIssue = (overrides: Partial<Issue> = {}): Issue => ({
+    ...mockIssue,
+    id: "issue-2",
+    identifier: "TES-2",
+    title: "Child work",
+    status: "done",
+    stage: 1,
+    parent_issue_id: "issue-1",
+    origin_type: "issue_draft",
+    origin_id: "3d56681b-224b-5d51-abc1-cc1f5016091e",
+    ...overrides,
+  });
+
+  it("shows where the group got to and reopens that same alignment", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      origin_type: "issue_draft",
+      origin_id: "sess-42",
+    });
+    mockApiObj.listChildIssues.mockResolvedValue({
+      issues: [
+        { ...mockIssue, id: "issue-2", identifier: "TES-2", status: "todo", stage: 1, parent_issue_id: "issue-1" },
+        { ...mockIssue, id: "issue-3", identifier: "TES-3", status: "done", stage: 2, parent_issue_id: "issue-1" },
+      ],
+    });
+    mockApiObj.reopenIssueDraft.mockResolvedValue({
+      chat_session_id: "sess-42",
+      workspace_id: "ws-1",
+      status: "ready",
+      revision: 8,
+      draft: { title: "T", description: "", status: "", priority: "" },
+      issue_id: "issue-1",
+      finalize_round: 1,
+      policy: { key: "question", version: "1", guided: true },
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    renderIssueDetail();
+
+    // The whole group: this issue plus its two sub-issues, one of them done.
+    await screen.findByText("3 issue(s) · 1 done · stage 1/2");
+    fireEvent.click(screen.getByRole("button", { name: /Continue aligning/ }));
+    await waitFor(() =>
+      expect(mockApiObj.reopenIssueDraft).toHaveBeenCalledWith("sess-42"),
+    );
+  });
+
+  it("resolves a sub-issue's alignment through its parent", async () => {
+    // A sub-issue is stamped with its own node id, which is a route that cannot
+    // open. The conversation lives on the group's root — its parent.
+    mockApiObj.getIssue.mockImplementation(async (id: string) =>
+      id === "issue-1"
+        ? { ...mockIssue, origin_type: "issue_draft", origin_id: "sess-42" }
+        : childIssue(),
+    );
+    mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    renderIssueDetail("issue-2");
+
+    const link = await screen.findByRole("link", {
+      name: /View the alignment that created this/,
+    });
+    expect(link.getAttribute("href")).toBe("/test/issues/new/sess-42");
   });
 });

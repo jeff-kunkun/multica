@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useModalStore } from "@multica/core/modals";
+import type { CreateMode } from "@multica/core/issues/stores";
 import { CreateIssueDialog } from "./create-issue-dialog";
 import { CreateProjectModal } from "./create-project";
 import { CreateSquadModal } from "./create-squad";
@@ -11,6 +12,21 @@ import { AddChildIssueModal } from "./add-child-issue";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
 import { RunConfirmModal } from "./run-confirm";
 import { IssueLimitUpgradeDialog } from "./issue-limit-upgrade-dialog";
+
+/**
+ * Which face the create-issue dialog opens on.
+ *
+ * `create-issue` is the manual face unless the opener asked for the alignment
+ * face by name (`initial_mode: "align"`, see `openAlignIssue`). The alignment
+ * entry used to be its own `create-issue-draft` modal mounting a second dialog;
+ * it is now an initial mode of this one, so switching faces never remounts the
+ * Popup and nothing about the alignment input duplicates "New issue".
+ */
+function createIssueInitialMode(
+  data: Record<string, unknown> | null,
+): CreateMode {
+  return data?.initial_mode === "align" ? "align" : "manual";
+}
 
 export function ModalRegistry() {
   const modal = useModalStore((s) => s.modal);
@@ -25,7 +41,7 @@ export function ModalRegistry() {
       activeModal = (
         <CreateIssueDialog
           onClose={close}
-          initialMode="manual"
+          initialMode={createIssueInitialMode(data)}
           data={data}
         />
       );

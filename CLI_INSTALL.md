@@ -7,7 +7,7 @@
 Give this instruction to your AI agent:
 
 ```
-Fetch https://github.com/multica-ai/multica/blob/main/CLI_INSTALL.md and follow the instructions to install Multica CLI, log in, and start the daemon on this machine.
+Fetch https://github.com/jeff-kunkun/multica/blob/kun/CLI_INSTALL.md and follow the instructions to install Multica CLI, log in, and start the daemon on this machine.
 ```
 
 ---
@@ -29,18 +29,10 @@ multica version
 
 > **Windows users:** Skip to [Option C: Windows (PowerShell)](#option-c-windows-powershell) below.
 
-### Option A: Homebrew (preferred — macOS/Linux)
-
-Check if Homebrew is available:
+### Option A: Install script (preferred — macOS/Linux)
 
 ```bash
-which brew
-```
-
-If `brew` is found, install via Homebrew:
-
-```bash
-brew install multica-ai/tap/multica
+curl -fsSL https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh | bash
 ```
 
 Then verify:
@@ -54,12 +46,15 @@ If the version prints successfully, skip to **Step 3**.
 To upgrade later, run:
 
 ```bash
-brew upgrade multica-ai/tap/multica
+multica update
 ```
 
-### Option B: Download from GitHub Releases (macOS/Linux, no Homebrew)
+Do not install this CLI with Homebrew: `multica-ai/tap` only carries the
+upstream build, and this fork ships its own.
 
-If Homebrew is not available, download the binary directly.
+### Option B: Download from GitHub Releases (macOS/Linux, no install script)
+
+If the install script cannot be used, download the binary directly.
 
 Detect OS and architecture, then download the correct archive:
 
@@ -73,11 +68,11 @@ if [ "$ARCH" = "x86_64" ]; then
 fi
 
 # Get the latest release tag from GitHub
-LATEST=$(curl -sI https://github.com/multica-ai/multica/releases/latest | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n')
+LATEST=$(curl -sI https://github.com/jeff-kunkun/multica/releases/latest | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n')
 
 # Download and extract
 VERSION="${LATEST#v}"
-curl -sL "https://github.com/multica-ai/multica/releases/download/${LATEST}/multica-cli-${VERSION}-${OS}-${ARCH}.tar.gz" -o /tmp/multica.tar.gz
+curl -sL "https://github.com/jeff-kunkun/multica/releases/download/${LATEST}/multica-cli-${VERSION}-${OS}-${ARCH}.tar.gz" -o /tmp/multica.tar.gz
 tar -xzf /tmp/multica.tar.gz -C /tmp multica
 sudo mv /tmp/multica /usr/local/bin/multica
 rm /tmp/multica.tar.gz
@@ -99,7 +94,7 @@ multica version
 Run in PowerShell (no admin required):
 
 ```powershell
-irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.ps1 | iex
 ```
 
 This downloads the latest Windows binary from GitHub Releases, installs it to `%USERPROFILE%\.multica\bin\`, and adds it to your user PATH.

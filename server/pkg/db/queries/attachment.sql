@@ -180,6 +180,33 @@ SELECT * FROM attachment
 WHERE chat_message_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC;
 
+-- name: ListAttachmentsByChatSession :many
+-- Every attachment an alignment conversation still owns, whichever side of it
+-- produced the file: one the user uploaded rides a user message (the send
+-- stamps chat_session_id AND chat_message_id), one the carrier uploaded binds
+-- to its reply (chat_message_id only, via BindChatAttachmentsToMessage). The
+-- OR is what keeps the carrier's own prototypes from being silently dropped,
+-- and reading the messages here rather than through ListChatMessages keeps the
+-- answer independent of that query's presentation ordering: a file uploaded on
+-- a turn that is not the visible head is still a file this alignment produced.
+--
+-- Rows that already have an owner are excluded, which is what makes a repeat
+-- confirm a no-op instead of a second link: LinkAttachmentsToIssue only ever
+-- fills in a NULL issue_id.
+SELECT * FROM attachment AS a
+WHERE a.workspace_id = sqlc.arg(workspace_id)
+  AND a.issue_id IS NULL
+  AND a.comment_id IS NULL
+  AND a.source_context_id IS NULL
+  AND (
+    a.chat_session_id = sqlc.arg(chat_session_id)
+    OR a.chat_message_id IN (
+      SELECT m.id FROM chat_message AS m
+      WHERE m.chat_session_id = sqlc.arg(chat_session_id)
+    )
+  )
+ORDER BY a.created_at ASC, a.id ASC;
+
 -- name: LockAttachmentsForIssueLink :many
 -- Issue updates bind attachments and then touch the owner row. Only rows that
 -- belong to no issue yet are eligible, and nothing reaches those through an
