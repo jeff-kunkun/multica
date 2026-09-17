@@ -14,7 +14,7 @@ import (
 const createIssueDraft = `-- name: CreateIssueDraft :one
 INSERT INTO issue_draft (chat_session_id, workspace_id, draft, policy_key, policy_version)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version
+RETURNING chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version, finalize_round, finalized_revision
 `
 
 type CreateIssueDraftParams struct {
@@ -53,6 +53,8 @@ func (q *Queries) CreateIssueDraft(ctx context.Context, arg CreateIssueDraftPara
 		&i.UpdatedAt,
 		&i.PolicyKey,
 		&i.PolicyVersion,
+		&i.FinalizeRound,
+		&i.FinalizedRevision,
 	)
 	return i, err
 }
@@ -87,7 +89,7 @@ func (q *Queries) DeleteIssueDraftsBySystemRuntimeAgents(ctx context.Context, ru
 }
 
 const getIssueDraftInWorkspace = `-- name: GetIssueDraftInWorkspace :one
-SELECT chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version FROM issue_draft
+SELECT chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version, finalize_round, finalized_revision FROM issue_draft
 WHERE chat_session_id = $1 AND workspace_id = $2
 `
 
@@ -113,6 +115,8 @@ func (q *Queries) GetIssueDraftInWorkspace(ctx context.Context, arg GetIssueDraf
 		&i.UpdatedAt,
 		&i.PolicyKey,
 		&i.PolicyVersion,
+		&i.FinalizeRound,
+		&i.FinalizedRevision,
 	)
 	return i, err
 }
@@ -227,7 +231,7 @@ func (q *Queries) ListIssueDraftsByCreator(ctx context.Context, arg ListIssueDra
 }
 
 const lockIssueDraftInWorkspace = `-- name: LockIssueDraftInWorkspace :one
-SELECT chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version FROM issue_draft
+SELECT chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version, finalize_round, finalized_revision FROM issue_draft
 WHERE chat_session_id = $1 AND workspace_id = $2
 FOR UPDATE
 `
@@ -262,6 +266,8 @@ func (q *Queries) LockIssueDraftInWorkspace(ctx context.Context, arg LockIssueDr
 		&i.UpdatedAt,
 		&i.PolicyKey,
 		&i.PolicyVersion,
+		&i.FinalizeRound,
+		&i.FinalizedRevision,
 	)
 	return i, err
 }
@@ -273,7 +279,7 @@ SET status = 'abandoned',
 WHERE chat_session_id = $1
   AND workspace_id = $2
   AND status IN ('draft', 'ready')
-RETURNING chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version
+RETURNING chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version, finalize_round, finalized_revision
 `
 
 type MarkIssueDraftAbandonedParams struct {
@@ -298,6 +304,8 @@ func (q *Queries) MarkIssueDraftAbandoned(ctx context.Context, arg MarkIssueDraf
 		&i.UpdatedAt,
 		&i.PolicyKey,
 		&i.PolicyVersion,
+		&i.FinalizeRound,
+		&i.FinalizedRevision,
 	)
 	return i, err
 }
@@ -310,7 +318,7 @@ SET status = 'completed',
 WHERE chat_session_id = $2
   AND workspace_id = $3
   AND status <> 'completed'
-RETURNING chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version
+RETURNING chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version, finalize_round, finalized_revision
 `
 
 type MarkIssueDraftCompletedParams struct {
@@ -344,6 +352,61 @@ func (q *Queries) MarkIssueDraftCompleted(ctx context.Context, arg MarkIssueDraf
 		&i.UpdatedAt,
 		&i.PolicyKey,
 		&i.PolicyVersion,
+		&i.FinalizeRound,
+		&i.FinalizedRevision,
+	)
+	return i, err
+}
+
+const reopenIssueDraft = `-- name: ReopenIssueDraft :one
+UPDATE issue_draft
+SET status = 'ready',
+    finalize_round = finalize_round + 1,
+    finalized_revision = revision,
+    updated_at = now()
+WHERE chat_session_id = $1
+  AND workspace_id = $2
+  AND status = 'completed'
+RETURNING chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version, finalize_round, finalized_revision
+`
+
+type ReopenIssueDraftParams struct {
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+}
+
+// Starts another round on an alignment whose group already exists: the draft
+// goes back to 'ready' so the same conversation can be continued and confirmed
+// again, and the round counter advances so that the next confirm can tell the
+// nodes it does not find are an increment rather than a group to build.
+//
+// finalized_revision records the revision this round confirmed. It is read
+// from the row, not passed in: revision does not move between a confirm and the
+// reopen that follows it — the save paths only accept 'draft'/'ready' — so the
+// value at reopen time IS the revision the round confirmed.
+//
+// The guard is 'completed' alone, and that is what makes the call idempotent: a
+// second reopen matches zero rows (the draft is 'ready' by then) and the
+// handler answers with the row as it stands rather than counting the round
+// twice. Abandoned drafts are excluded, for the same reason
+// MarkIssueDraftCompleted excludes them: a discarded alignment does not come
+// back to life.
+func (q *Queries) ReopenIssueDraft(ctx context.Context, arg ReopenIssueDraftParams) (IssueDraft, error) {
+	row := q.db.QueryRow(ctx, reopenIssueDraft, arg.ChatSessionID, arg.WorkspaceID)
+	var i IssueDraft
+	err := row.Scan(
+		&i.ChatSessionID,
+		&i.WorkspaceID,
+		&i.Status,
+		&i.Revision,
+		&i.Draft,
+		&i.IssueID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PolicyKey,
+		&i.PolicyVersion,
+		&i.FinalizeRound,
+		&i.FinalizedRevision,
 	)
 	return i, err
 }
@@ -358,7 +421,7 @@ WHERE chat_session_id = $3
   AND workspace_id = $4
   AND revision = $5
   AND status IN ('draft', 'ready')
-RETURNING chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version
+RETURNING chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version, finalize_round, finalized_revision
 `
 
 type UpdateIssueDraftParams struct {
@@ -394,6 +457,8 @@ func (q *Queries) UpdateIssueDraft(ctx context.Context, arg UpdateIssueDraftPara
 		&i.UpdatedAt,
 		&i.PolicyKey,
 		&i.PolicyVersion,
+		&i.FinalizeRound,
+		&i.FinalizedRevision,
 	)
 	return i, err
 }
@@ -406,7 +471,7 @@ SET policy_key = $1,
 WHERE chat_session_id = $3
   AND workspace_id = $4
   AND status IN ('draft', 'ready')
-RETURNING chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version
+RETURNING chat_session_id, workspace_id, status, revision, draft, issue_id, created_at, updated_at, policy_key, policy_version, finalize_round, finalized_revision
 `
 
 type UpdateIssueDraftPolicyParams struct {
@@ -443,6 +508,8 @@ func (q *Queries) UpdateIssueDraftPolicy(ctx context.Context, arg UpdateIssueDra
 		&i.UpdatedAt,
 		&i.PolicyKey,
 		&i.PolicyVersion,
+		&i.FinalizeRound,
+		&i.FinalizedRevision,
 	)
 	return i, err
 }

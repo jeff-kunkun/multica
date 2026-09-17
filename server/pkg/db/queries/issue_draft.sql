@@ -138,6 +138,33 @@ WHERE chat_session_id = @chat_session_id
   AND status <> 'completed'
 RETURNING *;
 
+-- name: ReopenIssueDraft :one
+-- Starts another round on an alignment whose group already exists: the draft
+-- goes back to 'ready' so the same conversation can be continued and confirmed
+-- again, and the round counter advances so that the next confirm can tell the
+-- nodes it does not find are an increment rather than a group to build.
+--
+-- finalized_revision records the revision this round confirmed. It is read
+-- from the row, not passed in: revision does not move between a confirm and the
+-- reopen that follows it — the save paths only accept 'draft'/'ready' — so the
+-- value at reopen time IS the revision the round confirmed.
+--
+-- The guard is 'completed' alone, and that is what makes the call idempotent: a
+-- second reopen matches zero rows (the draft is 'ready' by then) and the
+-- handler answers with the row as it stands rather than counting the round
+-- twice. Abandoned drafts are excluded, for the same reason
+-- MarkIssueDraftCompleted excludes them: a discarded alignment does not come
+-- back to life.
+UPDATE issue_draft
+SET status = 'ready',
+    finalize_round = finalize_round + 1,
+    finalized_revision = revision,
+    updated_at = now()
+WHERE chat_session_id = @chat_session_id
+  AND workspace_id = @workspace_id
+  AND status = 'completed'
+RETURNING *;
+
 -- name: MarkIssueDraftAbandoned :one
 -- Discarding an alignment conversation. Terminal states are excluded so
 -- abandoning a draft that has already become an issue cannot orphan that issue

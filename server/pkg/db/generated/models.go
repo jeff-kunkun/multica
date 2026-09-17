@@ -805,16 +805,18 @@ type IssueDependency struct {
 }
 
 type IssueDraft struct {
-	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Status        string             `json:"status"`
-	Revision      int64              `json:"revision"`
-	Draft         []byte             `json:"draft"`
-	IssueID       pgtype.UUID        `json:"issue_id"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	PolicyKey     string             `json:"policy_key"`
-	PolicyVersion string             `json:"policy_version"`
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	Status            string             `json:"status"`
+	Revision          int64              `json:"revision"`
+	Draft             []byte             `json:"draft"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	PolicyKey         string             `json:"policy_key"`
+	PolicyVersion     string             `json:"policy_version"`
+	FinalizeRound     int32              `json:"finalize_round"`
+	FinalizedRevision pgtype.Int8        `json:"finalized_revision"`
 }
 
 type IssueLabel struct {
