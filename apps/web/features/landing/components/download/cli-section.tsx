@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { Check, Copy, Terminal } from "lucide-react";
+import { CLI_INSTALL_COMMAND } from "@multica/core/constants/distribution";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useLocale } from "../../i18n";
 
-const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
+const INSTALL_CMD = CLI_INSTALL_COMMAND;
 const SETUP_CMD = "multica setup";
 
 /**

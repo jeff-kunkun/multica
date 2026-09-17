@@ -131,13 +131,13 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "view":
-		// Same read rule as the view endpoints: your own views, or views
-		// shared to the workspace. Foreign private views 404 — a pin must
-		// never confirm their existence.
+		// Same read rule as the view endpoints: your own views, workspace-
+		// shared views, or project-shared views in the caller's project set.
+		// Foreign private views 404 — a pin must never confirm their existence.
 		view, err := h.Queries.GetIssueView(r.Context(), db.GetIssueViewParams{
 			ID: itemUUID, WorkspaceID: wsUUID,
 		})
-		if err != nil || !canReadIssueView(view, parseUUID(userID)) {
+		if err != nil || !h.userCanReadIssueView(r.Context(), view, wsUUID, userID) {
 			writeError(w, http.StatusNotFound, "view not found")
 			return
 		}

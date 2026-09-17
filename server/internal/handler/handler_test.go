@@ -41,22 +41,36 @@ const (
 	handlerTestWorkspaceSlug = "handler-tests"
 )
 
+// exitWithoutDatabase ends the run the way a missing fixture always has —
+// green, with every DB-backed test skipped — unless the run promised a
+// database, in which case a suite that asserted nothing must not look like a
+// suite that passed. TestMain has no *testing.T, so it cannot use
+// testutil.SkipDatabase; the decision must be the same one.
+func exitWithoutDatabase(reason string) {
+	if testutil.RequireTestDatabase() {
+		fmt.Printf("database required (MULTICA_REQUIRE_TEST_DB=1) but %s\n", reason)
+		os.Exit(1)
+	}
+	fmt.Printf("Skipping tests: %s\n", reason)
+	os.Exit(0)
+}
+
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dbURL := os.Getenv("DATABASE_URL")
+	// The database is the one the run's test driver provisioned, private to
+	// this run; see scripts/test-db.sh and internal/testutil.
+	dbURL := testutil.TestDatabaseURL()
 	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+		exitWithoutDatabase("no test database is configured")
 	}
 
-	pool, err := pgxpool.New(ctx, dbURL)
+	pool, err := handlerTestPool(ctx, dbURL)
 	if err != nil {
-		fmt.Printf("Skipping tests: could not connect to database: %v\n", err)
-		os.Exit(0)
+		exitWithoutDatabase(err.Error())
 	}
 	if err := pool.Ping(ctx); err != nil {
-		fmt.Printf("Skipping tests: database not reachable: %v\n", err)
 		pool.Close()
-		os.Exit(0)
+		exitWithoutDatabase(err.Error())
 	}
 
 	queries := db.New(pool)
@@ -99,6 +113,63 @@ func TestMain(m *testing.M) {
 	}
 	pool.Close()
 	os.Exit(code)
+}
+
+// handlerTestSessionTZ is the TimeZone every connection in this package's test
+// pool is pinned to, deliberately not UTC.
+//
+// PostgreSQL resolves CURRENT_DATE, `now()::date`, `date_trunc('day', now())`
+// and friends in the SESSION's TimeZone, which defaults to the shared
+// instance's — a property of whoever installed the server, not of this
+// repository. A fixture anchored that way and a request that pins `?tz=UTC`
+// then sit on two different calendars, and every `days=N` window assertion
+// built on the pair passes on one machine and fails on the next with nothing
+// changed but the installer's system clock. Observed exactly that on the two
+// dashboard exact-window tests: America/Chicago green, Asia/Taipei red, same
+// code, same freshly migrated empty database, DENE-399.
+//
+// The fixtures now name their zone themselves (dayStartUTC, dashboardFixtureTZ)
+// and every query under test slices days with an explicit `AT TIME ZONE @tz`,
+// so pinning a session zone costs the suite nothing. What it buys is that the
+// class of bug stops being silent: a new fixture that reads the session
+// calendar day diverges from the UTC-pinned windows here on EVERY machine
+// instead of agreeing by luck on most of them.
+//
+// Asia/Taipei specifically because it is east of UTC: its calendar day has
+// already rolled over while UTC's has not, which is the direction that makes
+// the disagreement visible. A zone behind UTC hides it for part of the day,
+// which is how this stayed green on a laptop for so long.
+const handlerTestSessionTZ = "Asia/Taipei"
+
+// handlerTestPool opens the suite's pool with handlerTestSessionTZ applied to
+// every connection it hands out.
+func handlerTestPool(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	cfg.ConnConfig.RuntimeParams["timezone"] = handlerTestSessionTZ
+	return pgxpool.NewWithConfig(ctx, cfg)
+}
+
+// TestHandlerTestPoolPinsASessionTimezone guards the guard above: a pool whose
+// TimeZone drifted back to the server default would make every window fixture
+// in this package machine-dependent again, and nothing else in the suite would
+// notice until someone ran it on an instance that had rolled over.
+func TestHandlerTestPoolPinsASessionTimezone(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	var tz string
+	if err := testPool.QueryRow(context.Background(), `SHOW TimeZone`).Scan(&tz); err != nil {
+		t.Fatalf("read session TimeZone: %v", err)
+	}
+	if tz != handlerTestSessionTZ {
+		t.Errorf("test pool session TimeZone is %q, want %q — window fixtures would silently follow the server default", tz, handlerTestSessionTZ)
+	}
 }
 
 func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, string, error) {

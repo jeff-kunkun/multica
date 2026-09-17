@@ -9,6 +9,7 @@ import { runtimeKeys } from "@multica/core/runtimes/queries";
 import { useWSEvent } from "@multica/core/realtime";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useConfigStore } from "@multica/core/config";
+import { CLI_INSTALL_COMMAND } from "@multica/core/constants/distribution";
 import {
   Dialog,
   DialogContent,
@@ -30,8 +31,7 @@ import { useT } from "../../i18n";
 
 type Step = "instructions" | "success";
 
-const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
+const INSTALL_CMD = CLI_INSTALL_COMMAND;
 const CLOUD_SERVER_URL = "https://api.multica.ai";
 const CLOUD_APP_URL = "https://multica.ai";
 

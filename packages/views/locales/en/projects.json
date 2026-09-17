@@ -148,6 +148,18 @@
     "toast_local_mode_update_failed": "Could not update the execution mode",
     "mode_badge_in_place": "Direct"
   },
+  "members": {
+    "section_header": "Members",
+    "empty": "No members yet.",
+    "add_button": "Add member",
+    "add_placeholder": "Add a workspace member...",
+    "no_results": "No results",
+    "remove_tooltip": "Remove",
+    "toast_added": "Member added",
+    "toast_add_failed": "Failed to add member",
+    "toast_removed": "Member removed",
+    "toast_remove_failed": "Failed to remove member"
+  },
   "delete_dialog": {
     "title": "Delete project",
     "description": "This will delete the project. Issues will not be deleted but will be unlinked.",

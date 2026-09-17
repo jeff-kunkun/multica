@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,12 @@ const maxAgyQuotaExhausted = 32
 
 // agyQuotaExhaustedEntry is the credential-free overlay the settings UI uses
 // to show a red X and a reset time. reset_at is unix seconds.
+//
+// The store behind it is keyed by account directory and holds EVERY CLI's
+// exhausted accounts (DENE-466), not only AGY's. Two readers split that store:
+// accountQuotaOverlay serves the multi-CLI `agent_accounts` channel, and
+// agyQuotaOverlay filters back down to AGY's own directories so the legacy
+// `agy_quota_exhausted` wire key keeps meaning what its name says.
 type agyQuotaExhaustedEntry struct {
 	Dir     string `json:"dir"`
 	ResetAt int64  `json:"reset_at"`
@@ -40,61 +47,85 @@ func defaultAgyQuotaFile() string {
 	return filepath.Join(home, ".multica", "agy-quota-exhausted.json")
 }
 
-func (d *Daemon) markAgyQuotaExhausted(dir string, resetAt time.Time) {
+// markAccountQuotaExhausted records that one CLI account directory is out of
+// quota until resetAt. Any CLI's directory is accepted; the store is keyed by
+// the normalised absolute path, which is also how the account report matches
+// its rows.
+func (d *Daemon) markAccountQuotaExhausted(dir string, resetAt time.Time) {
 	dir = agent.NormalizeAgyDir(dir)
 	if dir == "" || resetAt.IsZero() {
 		return
 	}
-	d.agyQuotaMu.Lock()
-	defer d.agyQuotaMu.Unlock()
-	d.ensureAgyQuotaLocked()
-	d.agyQuota[dir] = resetAt
-	d.persistAgyQuotaLocked()
+	d.accountQuotaMu.Lock()
+	defer d.accountQuotaMu.Unlock()
+	d.ensureAccountQuotaLocked()
+	d.accountQuota[dir] = resetAt
+	d.persistAccountQuotaLocked()
 }
 
-func (d *Daemon) agyQuotaSnapshot(now time.Time) []agent.AgyQuotaState {
-	d.agyQuotaMu.Lock()
-	defer d.agyQuotaMu.Unlock()
-	d.ensureAgyQuotaLocked()
-	out := make([]agent.AgyQuotaState, 0, len(d.agyQuota))
+// accountQuotaSnapshot returns every directory still exhausted at now, dropping
+// and re-persisting the ones whose deadline has passed.
+func (d *Daemon) accountQuotaSnapshot(now time.Time) []agent.AgyQuotaState {
+	d.accountQuotaMu.Lock()
+	defer d.accountQuotaMu.Unlock()
+	d.ensureAccountQuotaLocked()
+	out := make([]agent.AgyQuotaState, 0, len(d.accountQuota))
 	changed := false
-	for dir, resetAt := range d.agyQuota {
+	for dir, resetAt := range d.accountQuota {
 		if resetAt.IsZero() || !resetAt.After(now) {
-			delete(d.agyQuota, dir)
+			delete(d.accountQuota, dir)
 			changed = true
 			continue
 		}
 		out = append(out, agent.AgyQuotaState{Dir: dir, ResetAt: resetAt})
 	}
 	if changed {
-		d.persistAgyQuotaLocked()
+		d.persistAccountQuotaLocked()
 	}
 	return out
 }
 
+// accountQuotaOverlay is every CLI's exhausted account directory — the input to
+// the `agent_accounts` quota stamp.
+func (d *Daemon) accountQuotaOverlay(now time.Time) []agyQuotaExhaustedEntry {
+	return quotaOverlayEntries(d.accountQuotaSnapshot(now), nil)
+}
+
+// agyQuotaOverlay is the AGY-only view of the same store, kept because the
+// `agy_quota_exhausted` key on registration and /health promises AGY
+// directories. A dsh or claude directory leaking into it would be a wire
+// contract that lies about its own name.
 func (d *Daemon) agyQuotaOverlay(now time.Time) []agyQuotaExhaustedEntry {
-	states := d.agyQuotaSnapshot(now)
-	if len(states) == 0 {
-		return []agyQuotaExhaustedEntry{}
-	}
+	return quotaOverlayEntries(d.accountQuotaSnapshot(now), agent.IsAgyAccountDir)
+}
+
+// quotaOverlayEntries renders a snapshot as the wire overlay, keeping only the
+// directories keep accepts. A nil keep accepts everything. Sorted so the
+// payload is stable across heartbeats: an unordered overlay would churn the
+// stored metadata for no reason.
+func quotaOverlayEntries(states []agent.AgyQuotaState, keep func(string) bool) []agyQuotaExhaustedEntry {
 	out := make([]agyQuotaExhaustedEntry, 0, len(states))
 	for _, item := range states {
+		if keep != nil && !keep(item.Dir) {
+			continue
+		}
 		out = append(out, agyQuotaExhaustedEntry{
 			Dir:     item.Dir,
 			ResetAt: item.ResetAt.Unix(),
 		})
-		if len(out) >= maxAgyQuotaExhausted {
-			break
-		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Dir < out[j].Dir })
+	if len(out) > maxAgyQuotaExhausted {
+		out = out[:maxAgyQuotaExhausted]
 	}
 	return out
 }
 
-func (d *Daemon) ensureAgyQuotaLocked() {
-	if d.agyQuota != nil {
+func (d *Daemon) ensureAccountQuotaLocked() {
+	if d.accountQuota != nil {
 		return
 	}
-	d.agyQuota = make(map[string]time.Time)
+	d.accountQuota = make(map[string]time.Time)
 	path := agyQuotaFileFn()
 	if path == "" {
 		return
@@ -113,17 +144,17 @@ func (d *Daemon) ensureAgyQuotaLocked() {
 		if dir = agent.NormalizeAgyDir(dir); dir == "" || !resetAt.After(now) {
 			continue
 		}
-		d.agyQuota[dir] = resetAt
+		d.accountQuota[dir] = resetAt
 	}
 }
 
-func (d *Daemon) persistAgyQuotaLocked() {
+func (d *Daemon) persistAccountQuotaLocked() {
 	path := agyQuotaFileFn()
 	if path == "" {
 		return
 	}
-	raw := make(map[string]int64, len(d.agyQuota))
-	for dir, resetAt := range d.agyQuota {
+	raw := make(map[string]int64, len(d.accountQuota))
+	for dir, resetAt := range d.accountQuota {
 		if dir == "" || resetAt.IsZero() {
 			continue
 		}
@@ -147,7 +178,7 @@ func (d *Daemon) applyAgyLaunchSlot(provider string, opts *agent.ExecOptions, ru
 	current := agent.ResolveAgyGeminiDir(agent.GeminiDirFromArgs(opts.CustomArgs), home)
 	accounts := agent.ParseAgySlotAccounts(runtimeConfig, current)
 	entries := agent.BuildAgySlotDirs(accounts, home, current)
-	next, ok := agent.SelectAgyLaunchDir(entries, current, d.agyQuotaSnapshot(now), currentAgyLoggedInDirs(), now)
+	next, ok := agent.SelectAgyLaunchDir(entries, current, d.accountQuotaSnapshot(now), currentAgyLoggedInDirs(), now)
 	if !ok || next == "" || next == current {
 		return
 	}
@@ -165,12 +196,12 @@ func (d *Daemon) agyQuotaFailover(provider string, result agent.Result, opts age
 	}
 	home, _ := agyQuotaHomeFn()
 	current := agent.ResolveAgyGeminiDir(agent.GeminiDirFromArgs(opts.CustomArgs), home)
-	resetAt := agent.DefaultAgyQuotaResetAt(now, hit.ResetAt)
-	d.markAgyQuotaExhausted(current, resetAt)
+	resetAt := agent.DefaultQuotaResetAt(now, hit.ResetAt)
+	d.markAccountQuotaExhausted(current, resetAt)
 	accounts := agent.ParseAgySlotAccounts(runtimeConfig, current)
 	entries := agent.BuildAgySlotDirs(accounts, home, current)
 	loggedIn := currentAgyLoggedInDirs()
-	exhausted := d.agyQuotaSnapshot(now)
+	exhausted := d.accountQuotaSnapshot(now)
 	next, ok := agent.NextAvailableAgySlot(entries, current, exhausted, loggedIn, now)
 	if !ok {
 		return agySlotFailover{

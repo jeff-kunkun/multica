@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     include: ["**/*.test.{ts,tsx}"],
+    setupFiles: ["./test/setup.ts"],
     passWithNoTests: true,
   },
 });

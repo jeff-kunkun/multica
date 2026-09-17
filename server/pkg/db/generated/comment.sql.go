@@ -699,6 +699,35 @@ func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepli
 	return has_replied, err
 }
 
+const hasRecentWatchdogComment = `-- name: HasRecentWatchdogComment :one
+SELECT EXISTS (
+    SELECT 1 FROM comment
+    WHERE issue_id = $1
+      AND author_type = 'system'
+      AND deleted_at IS NULL
+      AND content LIKE '%' || $2 || '%'
+      AND created_at > $3::timestamptz
+) AS exists
+`
+
+type HasRecentWatchdogCommentParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	Marker  pgtype.Text        `json:"marker"`
+	Since   pgtype.Timestamptz `json:"since"`
+}
+
+// Generic "has this issue already received a system comment carrying <marker>
+// within the window" probe. Despite the name it is not tied to the removed
+// Stage 4 stagnation watchdog (DENE-520): its only remaining caller is the
+// completion-stall signal in internal/service/task_completion_stall.go, which
+// uses it as a repeat guard.
+func (q *Queries) HasRecentWatchdogComment(ctx context.Context, arg HasRecentWatchdogCommentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasRecentWatchdogComment, arg.IssueID, arg.Marker, arg.Since)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listChildCommentsForParents = `-- name: ListChildCommentsForParents :many
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at FROM comment
 WHERE parent_id = ANY($1::uuid[])
