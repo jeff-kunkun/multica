@@ -66,12 +66,21 @@ export function useStartIssueDraft(wsId: string) {
        * other chat turn (DENE-369).
        */
       attachmentIds?: string[];
+      /**
+       * The project the whole group is filed under, when the user picked one at
+       * the entry point. Stored on the draft at creation rather than sent to the
+       * carrier: the carrier has no project list and is never asked to guess
+       * one, so this is the client-owned field the preview panel can still
+       * change afterwards (`mergeIssueDraftPayload` preserves what the reply
+       * never mentions).
+       */
+      projectId?: string;
     }): Promise<StartIssueDraftResult> => {
       const request = input.request.trim();
       const session = await api.createIssueDraftSession({
         runtime_id: input.runtimeId,
         model: input.model?.trim() || undefined,
-        draft: seedDraft(request),
+        draft: seedDraft(request, input.projectId),
       });
       const draftId = session.session_id;
       if (!draftId) throw new Error("issue draft session was not created");
@@ -281,12 +290,18 @@ export function useSwitchIssueDraftPolicy(wsId: string) {
 }
 
 /** The idea, kept server-side from the first moment so a lost turn loses nothing. */
-function seedDraft(request: string): Partial<IssueDraftPayload> {
+function seedDraft(
+  request: string,
+  projectId?: string,
+): Partial<IssueDraftPayload> {
   return {
     title: "",
     description: request,
     status: "",
     priority: "",
+    // Only when there is one: the draft's "no project" state is the field being
+    // absent, and writing an empty string would address a project named "".
+    ...(projectId ? { project_id: projectId } : {}),
   };
 }
 

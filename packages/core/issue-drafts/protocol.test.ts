@@ -894,6 +894,34 @@ describe("mergeIssueDraftPayload", () => {
     expect(merged.children?.[0]?.assignee_type).toBe("agent");
     expect(merged.children?.[0]?.assignee_hint).toBe("frontend page");
   });
+
+  it("keeps the project the reply never mentions", () => {
+    // The project is client-owned for the same reason the assignee is: the
+    // carrier has no project list and is not asked to pick one. Folding a reply
+    // in must therefore leave what the preview panel chose alone.
+    const parsed = parseIssueDraftBlock(
+      '<issue_draft>{"title":"New","description":"D","status":"todo","priority":"high"}</issue_draft>',
+    );
+    const merged = mergeIssueDraftPayload(
+      { ...EMPTY, title: "Old", project_id: "p1" },
+      parsed,
+    );
+    expect(merged.title).toBe("New");
+    expect(merged.project_id).toBe("p1");
+  });
+
+  it("drops a project the reply tried to name anyway", () => {
+    // Belt and braces: the block cannot set a field the carrier was never told
+    // about, so a model that invents `project_id` cannot route the group into
+    // a project nobody chose.
+    const parsed = parseIssueDraftBlock(
+      '<issue_draft>{"title":"T","project_id":"invented"}</issue_draft>',
+    );
+    expect(parsed).not.toHaveProperty("project_id");
+    expect(
+      mergeIssueDraftPayload({ ...EMPTY, project_id: "p1" }, parsed).project_id,
+    ).toBe("p1");
+  });
 });
 
 describe("issueDraftIsCreatable", () => {
