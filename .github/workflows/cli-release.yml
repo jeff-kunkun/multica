@@ -134,6 +134,7 @@ jobs:
             || gh release view "$TAG" --repo "$REPO" >/dev/null
 
       - name: Upload CLI assets
+        id: upload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$TAG" --repo "$REPO" --clobber dist/cli/*
@@ -144,7 +145,10 @@ jobs:
       # than the local build must leave a red run, never a half-published
       # release that `install.sh` will fail against.
       - name: Verify every CLI asset is really uploaded
-        if: always()
+        # Runs whenever the upload reported success — that is the case this
+        # guards. A build or upload that failed outright is already red, and
+        # re-checking an empty dist/ there would only add noise.
+        if: steps.upload.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

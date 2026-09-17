@@ -22,7 +22,11 @@
 #
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The repo to build from is the working directory's checkout, NOT the script's
+# own location: cli-release.yml stages this script outside the tree it packages
+# so `workflow_dispatch` can backfill a tag older than the script, and deriving
+# the root from $BASH_SOURCE there landed on $RUNNER_TEMP/.. instead.
+ROOT_DIR="${MULTICA_REPO_ROOT:-$(git rev-parse --show-toplevel)}"
 
 VERSION=""
 OUT_DIR=""
@@ -33,6 +37,9 @@ TARGETS=(darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows
 usage() {
   cat >&2 <<'USAGE'
 usage: build-cli-archives.sh --version <vX.Y.Z> --out <dir> [--targets "os/arch ..."]
+
+Builds from the current working directory's git checkout; set MULTICA_REPO_ROOT
+to build a different one.
 USAGE
   exit 2
 }
