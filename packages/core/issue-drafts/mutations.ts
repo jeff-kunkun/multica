@@ -245,7 +245,8 @@ export function useReopenIssueDraft(wsId: string) {
  * runtime as selected until this resolves — the picker showing runtime B while
  * messages still run on A is exactly the bug the builder's equivalent fixed
  * (MUL-5163).
- */export function useSwitchIssueDraftRuntime(wsId: string) {
+ */
+export function useSwitchIssueDraftRuntime(wsId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: { draftId: string; runtimeId: string }) =>

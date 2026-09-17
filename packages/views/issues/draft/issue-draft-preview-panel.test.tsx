@@ -630,6 +630,14 @@ describe("IssueDraftPreviewPanel continuation round", () => {
 
     // The numbers under the button are about this round.
     expect(titleInput()).toBeDisabled();
+
+    // The parent's status/priority pickers take no `disabled` prop, so the row
+    // has to be inert as well as dimmed: dimming alone leaves their triggers in
+    // the tab order, and a keyboard user would be able to change a field this
+    // round's confirm silently drops.
+    const parentFields = screen.getByText("Status").closest("div")?.parentElement;
+    expect(parentFields).toHaveAttribute("inert");
+
     expect(screen.getByText("Confirming creates 1 new issue(s).")).toBeTruthy();
     expect(screen.getByText("Starting right away: 1.")).toBeTruthy();
     // The parent is adopted too, so it is part of what this round keeps.
@@ -664,5 +672,10 @@ describe("IssueDraftPreviewPanel continuation round", () => {
     renderPanel({ draft: GROUP, round: 1, continuation: false });
     expect(screen.getByText("Confirming creates 3 issues.")).toBeTruthy();
     expect(screen.queryByText("Already created")).toBeNull();
+    // ...and the parent fields stay reachable, which is also what proves the
+    // continuation suite's `inert` assertion is reading a live attribute.
+    expect(
+      screen.getByText("Status").closest("div")?.parentElement,
+    ).not.toHaveAttribute("inert");
   });
 });

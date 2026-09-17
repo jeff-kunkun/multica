@@ -358,7 +358,14 @@ export function IssueDraftPreviewPanel({
               />
             </Field>
 
+            {/* `inert` and not only `pointer-events-none`: these pickers take
+                no `disabled` prop, and dimming them leaves their trigger in the
+                tab order, so a keyboard user could still change a field this
+                round's confirm silently drops — the exact promise the dimming
+                is there to make. Read-only stays readable; it stops being
+                reachable. */}
             <div
+              inert={parentLocked && !locked}
               className={cn(
                 "flex flex-wrap items-center gap-x-6 gap-y-3",
                 parentLocked && !locked && "pointer-events-none opacity-60",
