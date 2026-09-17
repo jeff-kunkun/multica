@@ -1,9 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Loader2 } from "lucide-react";
+import { ExternalLink, Loader2, Trash2 } from "lucide-react";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { IssueDraftPayload, IssuePriority, IssueStatus, MemberWithUser, RuntimeDevice } from "@multica/core/types";
+import {
+  maxIssueDraftChildStage,
+  normalizeIssueDraftPayloadGroup,
+  planIssueDraftGroup,
+  sameIssueDraftChildren,
+} from "@multica/core/issue-drafts";
+import type {
+  IssueAssigneeType,
+  IssueDraftChild,
+  IssueDraftCreatedIssue,
+  IssueDraftPayload,
+  IssuePriority,
+  IssueStatus,
+  MemberWithUser,
+  RuntimeDevice,
+} from "@multica/core/types";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,7 +35,9 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink } from "../../navigation";
 import { RuntimePicker } from "../../agents/components/runtime-picker";
+import { AssigneePicker } from "../components/pickers/assignee-picker";
 import { PriorityPicker } from "../components/pickers/priority-picker";
+import { StagePicker } from "../components/pickers/stage-picker";
 import { StatusPicker } from "../components/pickers/status-picker";
 import { useT } from "../../i18n";
 
@@ -32,6 +49,14 @@ import { useT } from "../../i18n";
  * bad way to fix a typo in it. Everything is local until "save", so the preview
  * never races the carrier's own revisions into the server one keystroke at a
  * time.
+ *
+ * The four fields describe the group's PARENT. Since DENE-411 the same
+ * conversation can settle on a parent plus sub-issues, so the panel also edits
+ * that list — title, stage, assignee, or deleting a row — and states, before
+ * anyone presses confirm, what that confirm will actually start. That last part
+ * is not decoration: a confirm can enqueue several agents at once, and the
+ * stage rule (stage 1 runs, later stages wait in Backlog) is only knowable
+ * here.
  */
 export function IssueDraftPreviewPanel({
   draft,
@@ -50,6 +75,7 @@ export function IssueDraftPreviewPanel({
   pending,
   readOnly: readOnlyProp,
   producedIssueId,
+  createdIssues,
   onDirtyChange,
   onSave,
   onGenerate,
@@ -82,6 +108,12 @@ export function IssueDraftPreviewPanel({
   readOnly?: boolean;
   /** The issue this alignment produced, for the record's way across to it. */
   producedIssueId?: string | null;
+  /**
+   * The whole group this alignment produced, root first. Absent until a confirm
+   * has answered; a backend that predates groups answers with the parent alone,
+   * which is what `[issue_id]` means (DENE-411).
+   */
+  createdIssues?: IssueDraftCreatedIssue[] | null;
   /**
    * Reports whether the editor holds unsaved edits. The alignment session uses
    * it to decide whether it may adopt a carrier revision on its own: an edit in
@@ -131,6 +163,11 @@ export function IssueDraftPreviewPanel({
   }, [dirty, onDirtyChange]);
 
   const value = editing ?? draft ?? EMPTY_DRAFT;
+  const children = value.children ?? [];
+  // What confirming will create and start. Read off the editor value, not the
+  // stored draft: the user is editing this group, and the counts have to follow
+  // what is on screen or they are answering a different question.
+  const groupPlan = planIssueDraftGroup(value);
   const locked = record || pending || confirming || stage === "created";
   const canSave = !locked && !saving && value.title.trim().length > 0;
   // A title is not required to generate: the carrier's block is the only place
@@ -160,10 +197,34 @@ export function IssueDraftPreviewPanel({
   };
 
   const handleSave = () => {
-    void onSave(value, saveStatus).then((savedNow) => {
+    // The group is normalized on the way out — keys, contiguous stages, and the
+    // status each stage implies. The confirm sends a revision rather than a
+    // payload, so whatever is stored here is what gets created; a sub-issue
+    // left with a stale status would be dispatched by the wrong rule, and the
+    // editor adopts the normalized value so "clean" means the same thing on
+    // both sides.
+    const next = normalizeIssueDraftPayloadGroup(value);
+    if (next !== value) setEditing(next);
+    void onSave(next, saveStatus).then((savedNow) => {
       // What the server now holds is the new clean point; the server's own echo
       // arrives as a `draft` prop and is adopted from there.
-      if (savedNow) setBaseline(value);
+      if (savedNow) setBaseline(next);
+    });
+  };
+
+  const updateChild = (index: number, patch: Partial<IssueDraftChild>) => {
+    setEditing({
+      ...value,
+      children: children.map((child, at) =>
+        at === index ? { ...child, ...patch } : child,
+      ),
+    });
+  };
+
+  const removeChild = (index: number) => {
+    setEditing({
+      ...value,
+      children: children.filter((_, at) => at !== index),
     });
   };
 
@@ -194,6 +255,12 @@ export function IssueDraftPreviewPanel({
           </div>
 
           <div className="space-y-5">
+            {children.length > 0 ? (
+              <p className="text-caption font-medium text-muted-foreground">
+                {t(($) => $.alignment.parent_label)}
+              </p>
+            ) : null}
+
             <Field label={t(($) => $.alignment.field_title)} htmlFor="issue-draft-title">
               <Input
                 id="issue-draft-title"
@@ -264,6 +331,116 @@ export function IssueDraftPreviewPanel({
                 disabled={locked || switchingRuntime || pending}
               />
             </div>
+
+            {children.length > 0 ? (
+              <div className="space-y-3 border-t pt-5">
+                <div>
+                  <h3 className="text-body font-medium">
+                    {t(($) => $.alignment.group_title)}
+                  </h3>
+                  <p className="mt-1 text-caption text-muted-foreground">
+                    {t(($) => $.alignment.group_hint)}
+                  </p>
+                </div>
+                {children.map((child, index) => {
+                  const row = groupPlan.rows[index + 1];
+                  const startsNow = row?.startsOnCreate === true;
+                  return (
+                    <div
+                      key={child.key}
+                      className="space-y-2 rounded-md border bg-background p-3"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-caption text-muted-foreground">
+                          {t(($) => $.alignment.child_label, { n: index + 1 })}
+                        </span>
+                        <span
+                          className={cn(
+                            "ml-auto text-caption",
+                            startsNow
+                              ? "font-medium text-foreground"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          {startsNow
+                            ? t(($) => $.alignment.child_starts_now)
+                            : t(($) => $.alignment.child_parked)}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-muted-foreground"
+                          aria-label={t(($) => $.alignment.child_remove, {
+                            n: index + 1,
+                          })}
+                          disabled={locked}
+                          onClick={() => removeChild(index)}
+                        >
+                          <Trash2 className="size-4" aria-hidden="true" />
+                        </Button>
+                      </div>
+                      <Input
+                        aria-label={t(($) => $.alignment.child_title, {
+                          n: index + 1,
+                        })}
+                        value={child.title}
+                        disabled={locked}
+                        placeholder={t(
+                          ($) => $.alignment.field_title_placeholder,
+                        )}
+                        onChange={(event) =>
+                          updateChild(index, { title: event.target.value })
+                        }
+                      />
+                      {/* A record is read back, not edited: the pickers are
+                          closed rather than removed so the row still shows what
+                          was agreed. Neither picker takes a `disabled` prop,
+                          and a controlled `open={false}` is what keeps a
+                          finished alignment from offering a choice that can no
+                          longer be saved. */}
+                      <div
+                        className={cn(
+                          "flex flex-wrap items-center gap-x-4 gap-y-2",
+                          locked && "pointer-events-none opacity-60",
+                        )}
+                      >
+                        <StagePicker
+                          stage={child.stage ?? null}
+                          maxStage={maxIssueDraftChildStage(children)}
+                          open={locked ? false : undefined}
+                          align="start"
+                          onUpdate={(updates) =>
+                            updateChild(index, { stage: updates.stage ?? null })
+                          }
+                        />
+                        <AssigneePicker
+                          assigneeType={
+                            (child.assignee_type as IssueAssigneeType | null) ??
+                            null
+                          }
+                          assigneeId={child.assignee_id ?? null}
+                          open={locked ? false : undefined}
+                          align="start"
+                          onUpdate={(updates) =>
+                            updateChild(index, {
+                              assignee_type: updates.assignee_type ?? null,
+                              assignee_id: updates.assignee_id ?? null,
+                            })
+                          }
+                        />
+                      </div>
+                      {child.assignee_hint ? (
+                        <p className="text-caption text-muted-foreground">
+                          {t(($) => $.alignment.child_hint, {
+                            hint: child.assignee_hint,
+                          })}
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -272,14 +449,50 @@ export function IssueDraftPreviewPanel({
         {record ? (
           <AlignmentRecordFooter producedIssueId={producedIssueId ?? null} />
         ) : stage === "created" ? (
-          <p className="text-body font-medium text-foreground">
-            {t(($) => $.alignment.created_title)}
-          </p>
+          <CreatedGroupFooter
+            issues={createdIssues ?? null}
+            fallbackIssueId={producedIssueId ?? null}
+          />
         ) : (
           <>
-            <p className="mb-3 text-caption text-muted-foreground">
-              {t(($) => $.alignment.confirm_hint)}
-            </p>
+            <div className="mb-3 space-y-1">
+              {/* What the button below is about to do, in numbers. A confirm
+                  can enqueue more than one agent, and the stage rule decides
+                  how many: stage 1 runs the moment the group exists, stage 2+
+                  is created in Backlog and waits for a person to promote it.
+                  Saying so here is the only place the user can learn it before
+                  it happens. */}
+              {groupPlan.total > 1 ? (
+                <p className="text-caption text-muted-foreground">
+                  {t(($) => $.alignment.group_summary, {
+                    count: groupPlan.total,
+                  })}
+                </p>
+              ) : null}
+              {groupPlan.starting > 0 ? (
+                <p className="text-caption font-medium text-foreground">
+                  {t(($) => $.alignment.group_summary_running, {
+                    count: groupPlan.starting,
+                  })}
+                </p>
+              ) : null}
+              {groupPlan.parked > 0 ? (
+                <p className="text-caption text-muted-foreground">
+                  {t(($) => $.alignment.group_summary_parked, {
+                    count: groupPlan.parked,
+                  })}
+                </p>
+              ) : null}
+              {groupPlan.total > 1 &&
+              groupPlan.rows[0]?.startsOnCreate !== true ? (
+                <p className="text-caption text-muted-foreground">
+                  {t(($) => $.alignment.group_summary_parent)}
+                </p>
+              ) : null}
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.alignment.confirm_hint)}
+              </p>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 onClick={() => void onConfirm()}
@@ -401,6 +614,72 @@ function AlignmentRecordFooter({
   );
 }
 
+/**
+ * What a confirm just created, as the server reported it.
+ *
+ * The rows are the confirm's own answer, so a repeat confirm on a draft whose
+ * issue already exists (a second tab, a retry) reads back the SAME group rather
+ * than degrading to "one issue" — which is the whole reason the endpoint answers
+ * with the set instead of the root alone (DENE-411, and
+ * `docs/design/issue-draft-group-finalize.md` §5.2).
+ *
+ * A backend that predates groups reports the root alone, and the row that
+ * produces carries no title or identifier: saying "1 issue" is the honest
+ * version of that, because that is all the server told us.
+ */
+function CreatedGroupFooter({
+  issues,
+  fallbackIssueId,
+}: {
+  issues: IssueDraftCreatedIssue[] | null;
+  fallbackIssueId: string | null;
+}) {
+  const { t } = useT("issues");
+  const paths = useWorkspacePaths();
+  const rows =
+    issues && issues.length > 0
+      ? issues
+      : fallbackIssueId
+        ? [
+            {
+              id: fallbackIssueId,
+              identifier: "",
+              title: "",
+              status: "",
+              stage: null,
+              assignee_type: null,
+              assignee_id: null,
+              parent_issue_id: null,
+            } satisfies IssueDraftCreatedIssue,
+          ]
+        : [];
+  return (
+    <div className="space-y-2">
+      <p className="text-body font-medium text-foreground">
+        {t(($) => $.alignment.created_title)}
+      </p>
+      {rows.length > 1 ? (
+        <p className="text-caption text-muted-foreground">
+          {t(($) => $.alignment.created_group_title, { count: rows.length })}
+        </p>
+      ) : null}
+      <ul className="space-y-1">
+        {rows.map((issue) => (
+          <li key={issue.id}>
+            <AppLink
+              href={paths.issueDetail(issue.id)}
+              className="inline-flex items-center gap-1 text-body text-primary hover:underline"
+            >
+              <ExternalLink className="size-3.5" aria-hidden="true" />
+              {issue.identifier || issue.title || t(($) => $.alignment.record_issue_link)}
+            </AppLink>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Field({
   label,
   htmlFor,
@@ -432,6 +711,11 @@ function sameDraft(a: IssueDraftPayload, b: IssueDraftPayload): boolean {
     a.title === b.title &&
     a.description === b.description &&
     a.status === b.status &&
-    a.priority === b.priority
+    a.priority === b.priority &&
+    // Editing the group is an edit to the draft like any other: without this
+    // the panel would report itself clean, the session would fold the carrier's
+    // next reply straight over the row someone just deleted, and "save" would
+    // write nothing.
+    sameIssueDraftChildren(a.children ?? [], b.children ?? [])
   );
 }

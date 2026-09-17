@@ -36,6 +36,14 @@ vi.mock("../../agents/components/runtime-picker", () => ({
   },
 }));
 
+// The confirmed group's rows are links to issues; the path helper needs a
+// workspace-scoped route this suite does not mount.
+vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({
+    issueDetail: (id: string) => `/acme/issues/${id}`,
+  }),
+}));
+
 vi.mock("../components/pickers/status-picker", () => ({
   StatusPicker: ({ onUpdate }: { onUpdate: (u: { status: IssueStatus | null }) => void }) => (
     <button type="button" onClick={() => onUpdate({ status: "todo" })}>
@@ -54,6 +62,66 @@ vi.mock("../components/pickers/priority-picker", () => ({
       priority-picker
     </button>
   ),
+}));
+
+// The stage and assignee pickers are real components mounted on the issue
+// surfaces; here they are reduced to the only thing this suite asserts about
+// them — the update they hand back, and which row it belongs to.
+vi.mock("../components/pickers/stage-picker", () => ({
+  StagePicker: ({
+    stage,
+    onUpdate,
+  }: {
+    stage: number | null;
+    onUpdate: (u: { stage: number | null }) => void;
+  }) => (
+    <button type="button" onClick={() => onUpdate({ stage: 2 })}>
+      stage-picker:{String(stage)}
+    </button>
+  ),
+}));
+
+vi.mock("../components/pickers/assignee-picker", () => ({
+  AssigneePicker: ({
+    assigneeId,
+    onUpdate,
+  }: {
+    assigneeId: string | null;
+    onUpdate: (u: { assignee_type: string; assignee_id: string }) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() => onUpdate({ assignee_type: "agent", assignee_id: "ag-9" })}
+    >
+      assignee-picker:{String(assigneeId)}
+    </button>
+  ),
+}));
+
+// The record's and the confirmed group's rows are links; a plain anchor is what
+// this suite can assert on without a platform navigation adapter.
+vi.mock("../../navigation", () => ({
+  AppLink: ({
+    href,
+    children,
+    ...rest
+  }: {
+    href: string;
+    children: React.ReactNode;
+  } & React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
+  useNavigation: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    pathname: "/acme/issues",
+    searchParams: new URLSearchParams(),
+    hash: "",
+    getShareableUrl: (path: string) => path,
+  }),
+  useBackOrReplace: () => vi.fn(),
 }));
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
@@ -258,5 +326,201 @@ describe("IssueDraftPreviewPanel runtime seeding", () => {
   it("ignores the seed once the draft is created", () => {
     const { props } = renderPanel({ stage: "created" });
     expect(props.onSwitchRuntime).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The group half of the panel (DENE-411): what confirming will create, and what
+ * it will start.
+ *
+ * The load-bearing fact is that a confirm can enqueue several agents at once,
+ * and only the stage decides how many. A preview that showed the group without
+ * saying which rows run would be asking the user to approve something they
+ * cannot see; so the assertions here are about the counts and the per-row
+ * badges, not about the rows existing.
+ */
+const GROUP: IssueDraftPayload = {
+  title: "收件箱支持批量标记已读",
+  description: "d",
+  status: "",
+  priority: "",
+  children: [
+    {
+      key: "c1",
+      title: "后端接口",
+      description: "",
+      status: "todo",
+      priority: "none",
+      stage: 1,
+      assignee_type: "agent",
+      assignee_id: "ag-1",
+      assignee_hint: "backend",
+    },
+    {
+      key: "c2",
+      title: "前端页面",
+      description: "",
+      status: "backlog",
+      priority: "none",
+      stage: 2,
+      assignee_type: "agent",
+      assignee_id: "ag-2",
+      assignee_hint: "frontend",
+    },
+  ],
+};
+
+function childTitleInput(n: number): HTMLInputElement {
+  return screen.getByLabelText(`Sub-issue ${n} title`) as HTMLInputElement;
+}
+
+function savedPayload(onSave: ReturnType<typeof vi.fn>): IssueDraftPayload {
+  return onSave.mock.calls[0]?.[0] as IssueDraftPayload;
+}
+
+describe("IssueDraftPreviewPanel single-issue drafts", () => {
+  it("shows no group section for a draft with no sub-issues", () => {
+    // The old shape is a group of one, not a legacy branch: no heading, no
+    // empty list, no counts that would read as something missing.
+    renderPanel({ draft: { ...STORED, title: "T" } });
+    expect(screen.queryByText("Sub-issues")).toBeNull();
+    expect(screen.queryByText("Parent issue")).toBeNull();
+    expect(screen.queryByText(/Confirming creates/)).toBeNull();
+  });
+});
+
+describe("IssueDraftPreviewPanel group", () => {
+  it("lists the whole group and says which rows start on confirm", () => {
+    renderPanel({ draft: GROUP, stage: "ready", canConfirm: true });
+
+    expect(screen.getByText("Sub-issues")).toBeTruthy();
+    expect(screen.getByText("Parent issue")).toBeTruthy();
+    expect(childTitleInput(1).value).toBe("后端接口");
+    expect(childTitleInput(2).value).toBe("前端页面");
+    expect(screen.getByText("Suggested: backend")).toBeTruthy();
+
+    // Exactly one row starts an agent; the other is parked and the panel says
+    // so, because a confirm that starts two agents is not what this preview
+    // should imply.
+    expect(screen.getAllByText("Runs immediately")).toHaveLength(1);
+    expect(screen.getAllByText("Waits for its stage")).toHaveLength(1);
+
+    expect(screen.getByText("Confirming creates 3 issues.")).toBeTruthy();
+    expect(screen.getByText("Starting right away: 1.")).toBeTruthy();
+    expect(
+      screen.getByText("Created in Backlog, waiting for their stage: 1."),
+    ).toBeTruthy();
+    // And the parent, which is created but starts nothing.
+    expect(
+      screen.getByText(
+        "The parent is created unassigned, so it starts nothing on its own.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("writes the deleted sub-issue out of the payload it saves", () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    renderPanel({ draft: GROUP, stage: "ready", onSave });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove sub-issue 2" }));
+    expect(screen.queryByText("前端页面")).toBeNull();
+    expect(screen.getByText("Confirming creates 2 issues.")).toBeTruthy();
+    expect(
+      screen.queryByText("Created in Backlog, waiting for their stage: 1."),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    return waitFor(() => expect(onSave).toHaveBeenCalledTimes(1)).then(() => {
+      const sent = savedPayload(onSave);
+      expect(sent.children?.map((child) => child.key)).toEqual(["c1"]);
+      expect(sent.children?.[0]?.title).toBe("后端接口");
+    });
+  });
+
+  it("re-derives the status and the counts when a stage is edited", () => {
+    // The user moves the only sub-issue to stage 2: nothing runs on confirm,
+    // and the summary has to stop promising that something will.
+    const onSave = vi.fn().mockResolvedValue(true);
+    renderPanel({
+      draft: { ...STORED, title: "T", children: [GROUP.children![0]!] },
+      stage: "ready",
+      onSave,
+    });
+    expect(screen.getByText("Starting right away: 1.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "stage-picker:1" }));
+    expect(screen.queryByText("Starting right away: 1.")).toBeNull();
+    expect(screen.getByText("Waits for its stage")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    return waitFor(() => expect(onSave).toHaveBeenCalledTimes(1)).then(() => {
+      // The stage is what the confirm dispatches by, so the derived status has
+      // to be in the payload the server stores — the confirm sends a revision,
+      // not a payload, and cannot derive anything itself.
+      expect(savedPayload(onSave).children?.[0]?.status).toBe("backlog");
+    });
+  });
+
+  it("takes an assignee the user picked for a sub-issue", () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    renderPanel({ draft: GROUP, stage: "ready", onSave });
+
+    fireEvent.click(screen.getByRole("button", { name: "assignee-picker:ag-2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    return waitFor(() => expect(onSave).toHaveBeenCalledTimes(1)).then(() => {
+      const sent = savedPayload(onSave);
+      expect(sent.children?.[1]?.assignee_type).toBe("agent");
+      expect(sent.children?.[1]?.assignee_id).toBe("ag-9");
+      // The row that was not touched keeps what it had.
+      expect(sent.children?.[0]?.assignee_id).toBe("ag-1");
+    });
+  });
+
+  it("counts a row with no agent as starting nothing", () => {
+    // An unassigned sub-issue is created and enqueues nothing; calling it
+    // "runs immediately" would tell the user an agent had been paged.
+    renderPanel({
+      draft: {
+        ...STORED,
+        title: "T",
+        children: [{ ...GROUP.children![0]!, assignee_type: null, assignee_id: null }],
+      },
+      stage: "ready",
+    });
+    expect(screen.getByText("Waits for its stage")).toBeTruthy();
+    expect(screen.queryByText(/Starting right away/)).toBeNull();
+  });
+
+  it("lists the group the confirm created, by identifier", () => {
+    renderPanel({
+      draft: GROUP,
+      stage: "created",
+      createdIssues: [
+        { id: "i1", identifier: "MUL-1", title: "Parent", status: "todo" },
+        { id: "i2", identifier: "MUL-2", title: "Child", status: "backlog" },
+      ],
+    });
+    expect(screen.getByText("2 issues created")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /MUL-1/ })).toHaveAttribute(
+      "href",
+      "/acme/issues/i1",
+    );
+    expect(screen.getByRole("link", { name: /MUL-2/ })).toBeTruthy();
+  });
+
+  it("falls back to the parent alone when the confirm reported no group", () => {
+    // A backend that predates groups answers with `issue_id` only. One link is
+    // the honest rendering of that, not an error.
+    renderPanel({
+      draft: GROUP,
+      stage: "created",
+      producedIssueId: "i1",
+      createdIssues: null,
+    });
+    expect(screen.queryByText(/issues created/)).toBeNull();
+    expect(screen.getByRole("link", { name: /Open the issue/ })).toHaveAttribute(
+      "href",
+      "/acme/issues/i1",
+    );
   });
 });

@@ -8,6 +8,7 @@ import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   issueDraftCanConfirm,
+  issueDraftCreatedGroup,
   issueDraftIsCreatable,
   issueDraftIsRecord,
   issueDraftKeys,
@@ -32,6 +33,7 @@ import type { IssueDraftPolicy } from "@multica/core/types";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import type {
   ChatMessage,
+  IssueDraftCreatedIssue,
   IssueDraftPayload,
   IssueDraftSummary,
   RuntimeDevice,
@@ -109,6 +111,11 @@ export interface IssueDraftSession {
   confirming: boolean;
   abandoning: boolean;
   createdIssueId: string | null;
+  /**
+   * The whole group this confirm created, root first. Null until a confirm has
+   * answered; `[the root]` for a backend that predates groups.
+   */
+  createdIssues: IssueDraftCreatedIssue[] | null;
   send: (
     content: string,
     attachmentIds?: string[],
@@ -165,6 +172,9 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
   // A successful confirm is final even after the refetch drops the completed
   // draft out of the unfinished list, so it outranks everything the list says.
   const [createdIssueId, setCreatedIssueId] = useState<string | null>(null);
+  const [createdIssues, setCreatedIssues] = useState<
+    IssueDraftCreatedIssue[] | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -448,6 +458,10 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
         expectedRevision: revision,
       });
       setCreatedIssueId(result.issue_id);
+      // The group the confirm reported, not just its root: the page shows what
+      // was created, and a repeat confirm has to read back the same list rather
+      // than degrading to "one issue".
+      setCreatedIssues(issueDraftCreatedGroup(result));
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : t(($) => $.alignment.confirm_failed));
@@ -550,6 +564,7 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
     confirming: finalizeMutation.isPending,
     abandoning: abandonMutation.isPending,
     createdIssueId,
+    createdIssues,
     send,
     save,
     generatePreview,

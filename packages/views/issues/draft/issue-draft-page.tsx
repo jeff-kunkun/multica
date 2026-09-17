@@ -253,6 +253,7 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               pending={session.pending}
               readOnly={record}
               producedIssueId={session.producedIssueId}
+              createdIssues={session.createdIssues}
               onDirtyChange={session.setLocalDirty}
               onSave={session.save}
               onGenerate={session.generatePreview}

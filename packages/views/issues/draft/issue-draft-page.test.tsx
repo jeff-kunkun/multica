@@ -4,7 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { ApiError } from "@multica/core/api";
-import type { ChatMessage, IssueDraftSummary, RuntimeDevice } from "@multica/core/types";
+import type {
+  ChatMessage,
+  IssueDraftPayload,
+  IssueDraftSummary,
+  RuntimeDevice,
+} from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 import { IssueDraftPage } from "./issue-draft-page";
@@ -214,6 +219,20 @@ vi.mock("../components/pickers/status-picker", () => ({
 
 vi.mock("../components/pickers/priority-picker", () => ({
   PriorityPicker: () => <div data-testid="priority-picker" />,
+}));
+
+// The group's own pickers need a workspace roster this suite does not seed; the
+// panel suite is where what they hand back is pinned.
+vi.mock("../components/pickers/stage-picker", () => ({
+  StagePicker: ({ stage }: { stage: number | null }) => (
+    <div data-testid="stage-picker">{String(stage)}</div>
+  ),
+}));
+
+vi.mock("../components/pickers/assignee-picker", () => ({
+  AssigneePicker: ({ assigneeId }: { assigneeId: string | null }) => (
+    <div data-testid="assignee-picker">{String(assigneeId)}</div>
+  ),
 }));
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
@@ -588,6 +607,110 @@ describe("IssueDraftPage confirming", () => {
     await userEvent.click(confirm);
     expect(await screen.findByText("invalid finalize response")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Confirm and create/ })).toBeTruthy();
+  });
+});
+
+describe("IssueDraftPage group", () => {
+  const GROUP_DRAFT: IssueDraftPayload = {
+    title: "收件箱支持批量标记已读",
+    description: "d",
+    status: "",
+    priority: "",
+    children: [
+      {
+        key: "c1",
+        title: "后端接口",
+        description: "",
+        status: "todo",
+        priority: "none",
+        stage: 1,
+        assignee_type: "agent",
+        assignee_id: "ag-1",
+        assignee_hint: "backend",
+      },
+      {
+        key: "c2",
+        title: "前端页面",
+        description: "",
+        status: "backlog",
+        priority: "none",
+        stage: 2,
+        assignee_type: "agent",
+        assignee_id: "ag-2",
+      },
+    ],
+  };
+
+  it("shows the whole group and the rows that will start, before confirming", async () => {
+    // The one thing a user cannot discover from a single-issue preview: this
+    // confirm creates three issues and starts exactly one agent.
+    mocks.drafts = [
+      draftSummary({ status: "ready", draft: GROUP_DRAFT }),
+    ];
+    renderPage();
+
+    expect(await screen.findByText("Sub-issues")).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Sub-issue 1 title") as HTMLInputElement).value,
+    ).toBe("后端接口");
+    expect(
+      (screen.getByLabelText("Sub-issue 2 title") as HTMLInputElement).value,
+    ).toBe("前端页面");
+    expect(screen.getAllByText("Runs immediately")).toHaveLength(1);
+    expect(screen.getAllByText("Waits for its stage")).toHaveLength(1);
+    expect(screen.getByText("Confirming creates 3 issues.")).toBeTruthy();
+    expect(screen.getByText("Starting right away: 1.")).toBeTruthy();
+    expect(
+      screen.getByText("Created in Backlog, waiting for their stage: 1."),
+    ).toBeTruthy();
+  });
+
+  it("does not offer a confirm for a group with an untitled sub-issue", async () => {
+    mocks.drafts = [
+      draftSummary({
+        status: "ready",
+        draft: {
+          ...GROUP_DRAFT,
+          children: [{ ...GROUP_DRAFT.children![1]!, title: "  " }],
+        },
+      }),
+    ];
+    renderPage();
+    await screen.findByText("Sub-issues");
+    expect(
+      screen.getByRole("button", { name: /Confirm and create/ }),
+    ).toBeDisabled();
+  });
+
+  it("lists the group the confirm created instead of only its parent", async () => {
+    // A repeat confirm (a second tab, a retry) has to read back the same list —
+    // the endpoint answers with the set precisely so the page cannot degrade to
+    // "one issue" on the second look (design §5.2).
+    mocks.drafts = [draftSummary({ status: "ready", draft: GROUP_DRAFT })];
+    mocks.finalizeIssueDraft.mockResolvedValue({
+      draft: draftSummary({
+        status: "completed",
+        draft: GROUP_DRAFT,
+        issue_id: "issue-9",
+      }),
+      issue_id: "issue-9",
+      issues: [
+        { id: "issue-9", identifier: "MUL-9", title: "Parent", status: "todo" },
+        { id: "issue-10", identifier: "MUL-10", title: "Child", status: "todo" },
+        { id: "issue-11", identifier: "MUL-11", title: "Later", status: "backlog" },
+      ],
+    });
+    renderPage();
+    const confirm = await screen.findByRole("button", { name: /Confirm and create/ });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    await userEvent.click(confirm);
+
+    await waitFor(() => expect(screen.getByText("3 issues created")).toBeTruthy());
+    expect(screen.getByRole("link", { name: /MUL-9/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /MUL-10/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /MUL-11/ })).toBeTruthy();
+    // The page still lands on the group's root.
+    expect(mocks.replace).toHaveBeenCalledWith("/acme/issues/issue-9");
   });
 });
 
