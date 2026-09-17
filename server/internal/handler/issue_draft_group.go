@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -11,9 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // This file is the "one alignment becomes a SET of issues" half of the draft
@@ -493,6 +496,66 @@ func (h *Handler) createIssueGroupForDraft(w http.ResponseWriter, r *http.Reques
 	}
 	writeIssueDraftCreateError(w, r, err)
 	return nil, false
+}
+
+// carryIssueDraftAttachments binds the files this alignment produced to the
+// group's ROOT issue (DENE-453).
+//
+// An alignment is where a prototype is usually made — a screenshot the user
+// dropped in, an HTML mock the carrier uploaded — and the group is what has to
+// keep it. Left where they are, those files stay chat-scoped: an attachment
+// bound to a chat message is deleted with that message (the FK cascades), so
+// the reference an issue's description points at would eventually outlive its
+// own file. Binding them to the root is what makes the reference durable.
+//
+// Root only, deliberately. Every node of the group may link one of these from
+// its description, and a markdown link needs no second copy of the bytes: one
+// row, owned by the root, IS "the file this alignment produced". Re-uploading
+// per node would multiply the storage and split one artifact into as many
+// unrelated ones.
+//
+// Best-effort, like every other create-time attachment bind
+// (IssueService.linkAttachments): the group is committed by the time this runs,
+// so a failure here must not turn a successful confirm into an error response —
+// the client would retry a confirm that already happened. It is also naturally
+// idempotent: the query returns only rows nothing owns yet, and
+// LinkAttachmentsToIssue only ever fills in a NULL issue_id, so a second
+// confirm adopts the group and finds nothing left to carry.
+func (h *Handler) carryIssueDraftAttachments(r *http.Request, session db.ChatSession, rootIssue db.Issue) {
+	attachments, err := h.Queries.ListAttachmentsByChatSession(r.Context(), db.ListAttachmentsByChatSessionParams{
+		WorkspaceID:   session.WorkspaceID,
+		ChatSessionID: session.ID,
+	})
+	if err != nil {
+		slog.Error("failed to load issue draft attachments", append(logger.RequestAttrs(r), "error", err)...)
+		return
+	}
+	// Nothing was uploaded, so nothing about the group changes: the confirm
+	// that never touched a file issues no extra statement.
+	if len(attachments) == 0 {
+		return
+	}
+	ids := make([]pgtype.UUID, 0, len(attachments))
+	for _, attachment := range attachments {
+		ids = append(ids, attachment.ID)
+	}
+	if _, err := h.Queries.LinkAttachmentsToIssue(r.Context(), db.LinkAttachmentsToIssueParams{
+		IssueID:       rootIssue.ID,
+		WorkspaceID:   session.WorkspaceID,
+		AttachmentIds: ids,
+		// The root was created moments ago and no reader holds a revision of it
+		// yet; bumping here would only invalidate the number the create itself
+		// just reported.
+		BumpRevision: false,
+	}); err != nil {
+		slog.Error("failed to carry issue draft attachments", append(logger.RequestAttrs(r), "error", err)...)
+		return
+	}
+	// The bytes are the issue's now, so every surface holding that issue's
+	// attachments is stale — the confirm's own response among them.
+	h.publish(protocol.EventIssueAttachmentsChanged, uuidToString(session.WorkspaceID), "member", uuidToString(session.CreatorID), map[string]any{
+		"issue_id": uuidToString(rootIssue.ID),
+	})
 }
 
 // prepareIssueGroupOpts fills in each node's post-commit options: who acted,

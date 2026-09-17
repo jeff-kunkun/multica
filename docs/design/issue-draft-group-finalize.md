@@ -369,6 +369,10 @@ FinalizeIssueDraft(sessionId, {expected_revision})
 │   │   └─ 23505 → 认领（§3.4）
 │   └─ 其它错误 → writeIssueDraftCreateError（不变，`issue_draft.go:967`）
 │
+├─ carryIssueDraftAttachments       会话附件 → 根单（§5.4，DENE-453）
+│   ├─ ListAttachmentsByChatSession 只取还没有主的行
+│   └─ LinkAttachmentsToIssue(根单) 失败只记 error，不改响应
+│
 └─ [tx3] completeIssueDraft（不变，issue_id = 根节点 id）───► 200
 ```
 
@@ -430,6 +434,15 @@ export const IssueDraftFinalizeSchema = z.object({
 ```
 
 `issues` 里单张的 `id` 用 `min(1)` 而不是 `.catch("")`：一行没有 id 的记录在确认页上是一个点不开的幽灵行，整条丢掉比留着好——但 `z.array(...).catch([])` 会在任意一行坏掉时丢掉**整个数组**。这是刻意的：组是一个整体判断，「5 张里有 1 张解析不了」和「不知道有几张」应该给用户同一个界面（退化成只显示父单），而不是一个少了一行、看起来完整的列表。
+
+### 5.4 会话附件挂在根单上（DENE-453）
+
+对齐会话里产出的原型（用户丢进去的截图、载体自己传的 HTML）落在 `attachment` 表上，先绑在会话的消息上。确认时这些行要改挂到**根单**：
+
+- **为什么必须挂**：`attachment.chat_message_id` 是 `ON DELETE CASCADE`，会话一删消息一删，文件跟着没；而 description 里的 markdown 链接会一直留在单上。挂到根单是让那条链接活得比会话久。
+- **为什么只挂根单**：子单的 description 引用同一个 URL 就够了，markdown 链接不需要第二份字节。按节点各传一份会把一份产物拆成 N 份互不相干的附件。
+- **读法**：`ListAttachmentsByChatSession`（`pkg/db/queries/attachment.sql`）取本会话还没主的行，两个方向都算——用户上传的带 `chat_session_id`，载体上传的只带 `chat_message_id`，只看前者会漏掉载体自己的原型。它同时是幂等的来源：已经挂过的行 `issue_id` 不再为 NULL，重复确认取不到任何东西。
+- **姿态**：best-effort，与 §4.5 的 `linkAttachments` 一致。组这时已经提交，附件挂失败不能把一次成功的确认报成失败——客户端会重试一次已经发生的确认。成功时补一条 `issue_attachments:changed`，让别处的 issue 详情页知道附件变了。
 
 ## 6. 派单语义
 

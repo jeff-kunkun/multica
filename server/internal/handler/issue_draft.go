@@ -843,6 +843,11 @@ func (h *Handler) FinalizeIssueDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The prototypes the conversation produced ride on the group's root, which
+	// is issues[0] on every path this far: the created group, the one an
+	// earlier confirm left behind, and the one a continuation round appended
+	// to. Sub-issues reference them by markdown link instead (DENE-453).
+	h.carryIssueDraftAttachments(r, session, issues[0])
 	completed, ok := h.completeIssueDraft(w, r, session, issues)
 	if !ok {
 		return
