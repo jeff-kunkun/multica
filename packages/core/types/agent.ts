@@ -551,6 +551,16 @@ export interface Agent {
    * the nested view needs no per-agent request; the detail response omits it.
    */
   child_count?: number;
+  /**
+   * Runtime inheritance (DENE-505). True when this specialisation follows its
+   * base role's runtime profile: `runtime_id`, `runtime_mode`, `runtime_config`,
+   * `model`, `thinking_level` and `service_tier` are kept equal to the base
+   * role's and are re-copied whenever the base role's change. Always false (or
+   * absent on a backend that predates the feature) for a base role, so
+   * `=== true` is the only safe reading — treat `undefined` as "owns its
+   * runtime", exactly like the pre-feature behaviour.
+   */
+  runtime_inherited?: boolean;
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
@@ -746,6 +756,16 @@ export interface CreateAgentRequest {
    * specialisation ("特化角色不能再派生").
    */
   parent_agent_id?: string;
+  /**
+   * Runtime inheritance (DENE-505). Omitted with a `parent_agent_id` means
+   * "follow the base role's runtime" — the default for a specialisation, and
+   * the reason `runtime_id` may then be omitted entirely: any runtime field sent
+   * alongside is not an override, the child takes the base role's. Send `false`
+   * to opt out, which restores the pre-feature contract (runtime_id required,
+   * model / thinking_level / runtime_config as given). A base role cannot
+   * inherit; `true` without a parent is rejected.
+   */
+  runtime_inherited?: boolean;
 }
 
 export interface AgentBuilderSession {
@@ -894,6 +914,18 @@ export interface UpdateAgentRequest {
    *     has children, or when the target is not a base role
    */
   parent_agent_id?: string | null;
+  /**
+   * Runtime inheritance (DENE-505). Omitted preserves the stored flag.
+   *
+   * `true` makes this specialisation follow its base role again and re-copies
+   * the base role's runtime profile immediately; it is refused on a base role,
+   * and refused in the same request as `runtime_id` / `runtime_config` /
+   * `model` / `thinking_level` / `service_tier` — "follow" and "set my own
+   * runtime" contradict each other, so the server answers 400 instead of
+   * picking one. `false` opts out and is lossless: the agent keeps the values
+   * it was already running with.
+   */
+  runtime_inherited?: boolean;
 }
 
 export type AgentSwitchableModelRole = "default" | "fallback" | "batch";

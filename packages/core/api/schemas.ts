@@ -1688,6 +1688,11 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
     .optional()
     .catch(undefined),
   child_count: z.number().optional().catch(undefined),
+  // Runtime inheritance (DENE-505). Optional-and-caught for the same reason as
+  // the fields above: a backend that predates the feature omits it, and an
+  // absent value has to read as "this agent owns its runtime" — the
+  // pre-feature behaviour — rather than dropping the agent row.
+  runtime_inherited: z.boolean().optional().catch(undefined),
   avatar_url: z.string().nullable().default(null),
   runtime_mode: z.string().catch("local"),
   runtime_config: z.record(z.string(), z.unknown()).default({}),

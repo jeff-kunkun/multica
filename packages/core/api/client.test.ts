@@ -2955,6 +2955,42 @@ describe("ApiClient agent specialisation reads (DENE-304)", () => {
     await expect(client.listAgents()).resolves.toEqual([]);
   });
 
+  // DENE-505. The runtime-inheritance flag is read on the list and on detail
+  // to decide whether the config panel offers "inherit from the base role" or
+  // an independent runtime. Same optional-and-caught contract as the rest of
+  // the specialisation fields: absent means "owns its runtime" (the
+  // pre-feature behaviour), and a malformed value costs the flag, not the row.
+  it("parses the runtime inheritance flag and degrades a malformed one alone", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse([
+          { id: "agent-base", name: "Base Role", runtime_inherited: false },
+          {
+            id: "agent-child",
+            name: "Variant",
+            parent_agent_id: "agent-base",
+            runtime_inherited: true,
+          },
+          {
+            id: "agent-drifted",
+            name: "Drifted",
+            parent_agent_id: "agent-base",
+            runtime_inherited: "yes",
+          },
+        ]),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const agents = await client.listAgents();
+
+    expect(agents[0]?.runtime_inherited).toBe(false);
+    expect(agents[1]?.runtime_inherited).toBe(true);
+    expect(agents[2]?.runtime_inherited).toBeUndefined();
+    expect(agents[2]?.parent_agent_id).toBe("agent-base");
+  });
+
   it("drops only the unusable row, keeping the rest of the agents list", async () => {
     // One row without an id must not blank the surface the whole product is
     // navigated from.
