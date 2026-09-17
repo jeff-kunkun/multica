@@ -34,6 +34,7 @@ import {
   BoardCardSubIssues,
   BoardCardSubIssueToggle,
 } from "./board-card-sub-issues";
+import { ParentIssueBadge } from "./parent-issue-badge";
 function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
@@ -209,6 +210,12 @@ export const BoardCardContent = memo(function BoardCardContent({
         </div>
         <IssueAgentActivityIndicator issueId={issue.id} />
       </div>
+
+      {/* Row 1b: parent ownership. Sub-issues and top-level issues share a
+          column whenever "Show sub-issues" is on, so a child says what it
+          belongs to before it says what it is. Renders nothing on a parent
+          card. (DENE-480) */}
+      <ParentIssueBadge parentIssueId={issue.parent_issue_id} className="mt-1" />
 
       {/* Row 2: Title */}
       <p className="mt-1 text-body font-medium leading-snug line-clamp-2">

@@ -25,6 +25,7 @@ import { LabelChip } from "../../labels/label-chip";
 import { CustomStatusChip } from "./custom-status-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { ParentIssueBadge } from "./parent-issue-badge";
 import { useLocale } from "../../i18n";
 
 export interface ChildProgress {
@@ -122,6 +123,14 @@ function ListRowContent({
           <IssueAgentActivityIndicator issueId={issue.id} />
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            {/* Parent ownership, ahead of the title for the same reason the
+                board card carries it: a child and a top-level issue are
+                otherwise identical rows. Silent on a parent. (DENE-480) */}
+            <ParentIssueBadge
+              parentIssueId={issue.parent_issue_id}
+              density="row"
+              className="hidden sm:inline-flex"
+            />
             <span className="truncate">{issue.title}</span>
             {/* List sections are categories, so a custom status needs to name
                 itself on the row. Silent for built-ins. (MUL-6243) */}
