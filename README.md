@@ -108,12 +108,12 @@ friends. Multica drives them; it doesn't ship them.
 <br/>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+curl -fsSL https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh | bash -s -- --with-server
 multica setup self-host
 ```
 
 On Windows, set `$env:MULTICA_MODE="with-server"`, then run the PowerShell installer:
-`irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex`.
+`irm https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.ps1 | iex`.
 
 This pulls the official images from GHCR and requires Docker. See the
 [Self-Hosting Guide](SELF_HOSTING.md); if the selected GHCR tag has not been published yet,
