@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 func createIssueViewForTest(t *testing.T, body map[string]any) (IssueViewResponse, int, string) {
@@ -611,5 +613,197 @@ func TestDeletingViewsSweepsTheirPins(t *testing.T) {
 	}
 	if n := countViewPins(); n != 0 {
 		t.Fatalf("pin survived project deletion: %d rows", n)
+	}
+}
+
+func seedIssueViewMember(t *testing.T, name, suffix, role string) string {
+	t.Helper()
+	email := fmt.Sprintf("iv-%s-%s@multica.test", strings.ReplaceAll(t.Name(), "/", "-"), suffix)
+	userID := dbfx.User(t, name, email)
+	dbfx.Member(t, testWorkspaceID, userID, role)
+	return userID
+}
+
+func addIssueViewProjectMember(t *testing.T, projectID, memberID string) {
+	t.Helper()
+	dbfx.Insert(t, "project_member", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"project_id":   projectID,
+		"member_id":    memberID,
+	})
+}
+
+func createIssueViewAs(t *testing.T, userID string, body map[string]any) IssueViewResponse {
+	t.Helper()
+	view := testutil.Decode[IssueViewResponse](t, testHandler.CreateIssueView, newRequestAs(userID, "POST", "/api/issue-views", body), http.StatusCreated)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_view WHERE id = $1`, view.ID)
+	})
+	return view
+}
+
+func listIssueViewsAs(t *testing.T, userID, path string) []IssueViewResponse {
+	t.Helper()
+	return testutil.Decode[[]IssueViewResponse](t, testHandler.ListIssueViews, newRequestAs(userID, "GET", path, nil), http.StatusOK)
+}
+
+func getIssueViewAs(t *testing.T, userID, viewID string, want int) {
+	t.Helper()
+	req := testutil.WithURLParams(newRequestAs(userID, "GET", "/api/issue-views/"+viewID, nil), "id", viewID)
+	testutil.Call(t, testHandler.GetIssueViewByID, req).Want(want)
+}
+
+func issueViewListed(views []IssueViewResponse, id string) bool {
+	for _, v := range views {
+		if v.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func TestIssueViewProjectVisibility(t *testing.T) {
+	creatorID := seedIssueViewMember(t, "View Creator", "creator", "member")
+	memberID := seedIssueViewMember(t, "View Member", "member", "member")
+	outsiderID := seedIssueViewMember(t, "View Outsider", "outsider", "member")
+	leadID := seedIssueViewMember(t, "View Lead", "lead", "member")
+	adminID := seedIssueViewMember(t, "View Admin", "admin", "admin")
+
+	projectID := dbfx.Project(t, "project visibility", testutil.Cols{
+		"lead_type": "member",
+		"lead_id":   leadID,
+	})
+	addIssueViewProjectMember(t, projectID, creatorID)
+	addIssueViewProjectMember(t, projectID, memberID)
+
+	view := createIssueViewAs(t, creatorID, map[string]any{
+		"name":       "Project shared",
+		"scope_type": "project",
+		"scope_id":   projectID,
+		"visibility": "project",
+		"query":      map[string]any{},
+	})
+	if view.Visibility != "project" {
+		t.Fatalf("create visibility = %s, want project", view.Visibility)
+	}
+
+	listPath := "/api/issue-views?scope_type=project&scope_id=" + projectID
+	for _, uid := range []string{creatorID, memberID, leadID, adminID, testUserID} {
+		if !issueViewListed(listIssueViewsAs(t, uid, listPath), view.ID) {
+			t.Fatalf("user %s missing project view from list", uid)
+		}
+		getIssueViewAs(t, uid, view.ID, http.StatusOK)
+	}
+
+	if issueViewListed(listIssueViewsAs(t, outsiderID, listPath), view.ID) {
+		t.Fatal("non-member listed a project-visibility view")
+	}
+	getIssueViewAs(t, outsiderID, view.ID, http.StatusNotFound)
+
+	patchReq := testutil.WithURLParams(newRequestAs(memberID, "PATCH", "/api/issue-views/"+view.ID, map[string]any{
+		"name":              "Hijacked",
+		"expected_revision": view.Revision,
+	}), "id", view.ID)
+	testutil.Call(t, testHandler.UpdateIssueView, patchReq).Want(http.StatusForbidden)
+
+	removeReq := projectMemberRemoveReq(t, testUserID, projectID, memberID)
+	testutil.Call(t, testHandler.RemoveProjectMember, removeReq).Want(http.StatusNoContent)
+	if issueViewListed(listIssueViewsAs(t, memberID, listPath), view.ID) {
+		t.Fatal("removed member still listed the project-visibility view")
+	}
+	getIssueViewAs(t, memberID, view.ID, http.StatusNotFound)
+
+	_, code, body := createIssueViewForTest(t, map[string]any{
+		"name":       "Illegal combo",
+		"scope_type": "workspace",
+		"visibility": "project",
+		"query":      map[string]any{},
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("project visibility on workspace scope: expected 400, got %d: %s", code, body)
+	}
+
+	wsView := createIssueViewAs(t, creatorID, map[string]any{
+		"name":       "Workspace patch target",
+		"scope_type": "workspace",
+		"visibility": "workspace",
+		"query":      map[string]any{},
+	})
+	illegalPatch := testutil.WithURLParams(newRequestAs(creatorID, "PATCH", "/api/issue-views/"+wsView.ID, map[string]any{
+		"visibility":        "project",
+		"expected_revision": wsView.Revision,
+	}), "id", wsView.ID)
+	testutil.Call(t, testHandler.UpdateIssueView, illegalPatch).Want(http.StatusBadRequest)
+
+	privateView := createIssueViewAs(t, creatorID, map[string]any{
+		"name":       "Still private",
+		"scope_type": "workspace",
+		"visibility": "private",
+		"query":      map[string]any{},
+	})
+	if issueViewListed(listIssueViewsAs(t, memberID, "/api/issue-views?scope_type=workspace"), privateView.ID) {
+		t.Fatal("private view leaked to another member")
+	}
+	getIssueViewAs(t, memberID, privateView.ID, http.StatusNotFound)
+
+	sharedView := createIssueViewAs(t, creatorID, map[string]any{
+		"name":       "Still workspace",
+		"scope_type": "workspace",
+		"visibility": "workspace",
+		"query":      map[string]any{},
+	})
+	if !issueViewListed(listIssueViewsAs(t, outsiderID, "/api/issue-views?scope_type=workspace"), sharedView.ID) {
+		t.Fatal("workspace-shared view missing from another member's list")
+	}
+	getIssueViewAs(t, outsiderID, sharedView.ID, http.StatusOK)
+
+	_, code, body = createIssueViewForTest(t, map[string]any{
+		"name":          "My still private",
+		"scope_type":    "my",
+		"scope_variant": "assigned",
+		"visibility":    "workspace",
+		"query":         map[string]any{},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("my view: expected 201, got %d: %s", code, body)
+	}
+}
+
+func TestIssueViewProjectVisibilityConfigImport(t *testing.T) {
+	src, dst := setupConfigWorkspaces(t)
+	projectID := dbfx.Project(t, "imported project board", testutil.Cols{"workspace_id": src})
+	viewName := "Project board " + projectID[:8]
+	dbfx.Insert(t, "issue_view", testutil.Cols{
+		"workspace_id": src,
+		"owner_id":     testUserID,
+		"name":         viewName,
+		"scope_type":   "project",
+		"scope_id":     projectID,
+		"visibility":   "project",
+		"query":        testutil.Raw(`'{}'::jsonb`),
+	})
+
+	bundle := exportBundle(t, src)
+	found := false
+	for _, v := range bundle.Entities.IssueViews {
+		if v.Name == viewName {
+			found = true
+			if v.Visibility != "project" {
+				t.Fatalf("export visibility = %s, want project", v.Visibility)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("project-visibility view missing from export bundle")
+	}
+
+	_ = importReport(t, dst, map[string]any{
+		"bundle": bundle, "dry_run": false, "on_conflict": "skip", "include": []string{"projects", "issue_views"},
+	}, http.StatusOK)
+
+	var vis string
+	dbfx.QueryRow(t, `SELECT visibility FROM issue_view WHERE workspace_id = $1 AND name = $2`, dst, viewName).Scan(&vis)
+	if vis != "project" {
+		t.Fatalf("imported visibility = %s, want project", vis)
 	}
 }

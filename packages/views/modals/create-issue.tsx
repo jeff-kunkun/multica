@@ -20,6 +20,7 @@ import {
   MoreHorizontal,
   Settings2,
   Shapes,
+  Sparkles,
   Tag,
   X as XIcon,
 } from "lucide-react";
@@ -201,6 +202,7 @@ function CreateRunHint({
 export function ManualCreatePanel({
   onClose,
   onSwitchMode,
+  onSwitchToAlign,
   data,
   isExpanded,
   setIsExpanded,
@@ -208,6 +210,10 @@ export function ManualCreatePanel({
   onClose: () => void;
   /** Called with the carry payload to seed the agent panel after switch. */
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
+  /** Called to reach the dialog's alignment face (DENE-370). A separate
+   *  callback because the shell binds one switch to one target mode: a panel
+   *  with two of them cannot say which one a bare call means. */
+  onSwitchToAlign?: (carry?: Record<string, unknown> | null) => void;
   data?: Record<string, unknown> | null;
   /** Lifted to the shell so DialogContent's mode-aware className can react
    *  without the body itself having to live inside DialogContent (which would
@@ -239,6 +245,7 @@ export function ManualCreatePanel({
   const setManual = useIssueDraftStore((s) => s.setManual);
   const setShared = useIssueDraftStore((s) => s.setShared);
   const setAgent = useIssueDraftStore((s) => s.setAgent);
+  const setAlign = useIssueDraftStore((s) => s.setAlign);
   const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
@@ -823,6 +830,36 @@ export function ManualCreatePanel({
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
+  // Switch to the alignment face WITHOUT destroying the manual draft. The
+  // alignment request gets its own slot in the same draft store, and like the
+  // agent prompt it is assist-inited ONCE from what the manual face holds —
+  // title + description — so a user who already wrote the request does not
+  // retype it, while a request they later edit on the alignment face is never
+  // clobbered by switching back and forth. The BODY therefore rides the store
+  // (the align panel reads its slot), and the carry channel is left to what is
+  // not persisted: the parent-issue context, exactly as on manual→agent.
+  const switchToAlign = () => {
+    // Serializing mid-upload packs a body that has already lost the pending
+    // image, so gate the switch too (see switchToAgent).
+    if (gate.isBlocked()) return;
+    // Commit the shared fields to the draft so the other face reads them from
+    // there; local state can hold a value seeded from `data` that never went
+    // through a picker.
+    setShared({ projectId, priority, dueDate });
+    if (!draft.align.request.trim()) {
+      const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
+      const seeded = [title.trim(), desc].filter(Boolean).join("\n\n");
+      if (seeded) setAlign({ request: seeded });
+    }
+    setActiveMode("align");
+    const carryParentIdentifier =
+      parentIssue?.identifier ?? (data?.parent_issue_identifier as string | undefined);
+    const carry: Record<string, unknown> = {};
+    if (parentIssueId) carry.parent_issue_id = parentIssueId;
+    if (carryParentIdentifier) carry.parent_issue_identifier = carryParentIdentifier;
+    onSwitchToAlign?.(Object.keys(carry).length > 0 ? carry : null);
+  };
+
   // One state for the button and the keyboard paths, so a rendered affordance
   // can never disagree with what `handleSubmit` will actually do.
   const submitState: "submitting" | "uploading" | "missing_title" | "source_unavailable" | "ready" =
@@ -1385,6 +1422,26 @@ export function ManualCreatePanel({
                 <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
                 {t(($) => $.create_issue.switch_to_agent)}
               </button>
+              {/* Aligning is the third face of this same dialog (DENE-370).
+                  Absent without a wired callback and while a source context is
+                  captured: the alignment conversation is started from the
+                  request alone and has no place to carry the captured thread,
+                  so offering it there would silently drop what the user
+                  opened the dialog for. */}
+              {!anchorCommentId && onSwitchToAlign && (
+                <button
+                  type="button"
+                  onClick={switchToAlign}
+                  disabled={gate.uploading}
+                  aria-disabled={gate.uploading || undefined}
+                  aria-busy={gate.uploading || undefined}
+                  title={t(($) => $.create_issue.switch_to_align_tooltip)}
+                  className="flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Sparkles className="size-3.5" />
+                  {t(($) => $.create_issue.switch_to_align)}
+                </button>
+              )}
               <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
                 <Switch
                   size="sm"

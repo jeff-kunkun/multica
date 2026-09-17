@@ -38,10 +38,17 @@
 
 ### 1.2 智能体
 
+分组判定（导出与导入共用，**不得**用内部字段 `kind`）：
+
+- **普通智能体**（进 `entities.agents`）：无 `system_key`。
+- **系统智能体**（进 `entities.system_agents`）：`system_key` 非空且不以 `agent_builder:` 开头。
+- `agent_builder:` 前缀是隐藏执行载体，不导出。
+- `kind` 是内部字段、读接口不暴露（`AgentResponse` 只有 `system_key`），契约不以它作为任何导出判定条件。产品唯一的系统智能体 Mika 在库里是 `kind='user'` + `system_key='mika'`；`kind='system'` 在本 schema 里表示不可见执行载体，不会出现在任何列表接口。
+
 | 表 | 结论 | 导出字段 | 排除字段 | 理由 |
 | --- | --- | --- | --- | --- |
-| `agent`（`kind = 'user'`） | 部分导出 | `name`、`description`、`instructions`、`avatar_url`、`runtime_mode`、`runtime_config`（去除 `gateway.token`）、`custom_args`、`model`、`thinking_level`、`service_tier`、`visibility`、`permission_mode`、`max_concurrent_tasks`、`conversation_starters`、`disabled_runtime_skills`、`composio_toolkit_allowlist` | `custom_env`（秘密）、`mcp_config`（秘密）、`runtime_config.gateway.token`（秘密）、`runtime_id`（机器绑定）、`status`、`owner_id`（改为导入者）、`archived_at/archived_by`、`system_key`、`kind` | 读取接口本身就不返回 `custom_env` 明文（`has_custom_env` / `custom_env_key_count`），`mcp_config` 对 agent actor 与 `always_redact_env` 工作区始终脱敏。导出走同一条规则，并为这三项各登记一条 `secrets_omitted`。`runtime_id` 指向 `agent_runtime`（守护进程注册，工作区隔离），导入后智能体处于 `runtime_bound = false`，需重新绑定运行时。`composio_toolkit_allowlist` 只是 slug 列表，本身不是秘密，但生效依赖 owner 的 Composio 连接，导入后自动失效直至导入者自己连接。 |
-| `agent`（`kind = 'system'`） | 部分导出 | `system_key`、`instructions`、`model`、`thinking_level`、`service_tier`、`conversation_starters`、`disabled_runtime_skills` | 其余全部 | 系统智能体由产品在每个工作区自动创建，不能新建。导入按 `system_key` 找到目标工作区同名系统智能体后 patch 上述字段。 |
+| `agent`（无 `system_key`） | 部分导出 | `name`、`description`、`instructions`、`avatar_url`、`runtime_mode`、`runtime_config`（去除 `gateway.token`）、`custom_args`、`model`、`thinking_level`、`service_tier`、`visibility`、`permission_mode`、`max_concurrent_tasks`、`conversation_starters`、`disabled_runtime_skills`、`composio_toolkit_allowlist` | `custom_env`（秘密）、`mcp_config`（秘密）、`runtime_config.gateway.token`（秘密）、`runtime_id`（机器绑定）、`status`、`owner_id`（改为导入者）、`archived_at/archived_by`、`system_key`、`kind` | 本组是无 `system_key` 的普通智能体。读取接口本身就不返回 `custom_env` 明文（`has_custom_env` / `custom_env_key_count`），`mcp_config` 对 agent actor 与 `always_redact_env` 工作区始终脱敏。导出走同一条规则，并为这三项各登记一条 `secrets_omitted`。`runtime_id` 指向 `agent_runtime`（守护进程注册，工作区隔离），导入后智能体处于 `runtime_bound = false`，需重新绑定运行时。`composio_toolkit_allowlist` 只是 slug 列表，本身不是秘密，但生效依赖 owner 的 Composio 连接，导入后自动失效直至导入者自己连接。 |
+| `agent`（`system_key` 非空且不以 `agent_builder:` 开头） | 部分导出 | `system_key`、`instructions`、`model`、`thinking_level`、`service_tier`、`conversation_starters`、`disabled_runtime_skills` | 其余全部 | 系统智能体由产品在每个工作区自动创建，不能新建。判定键是 `system_key`，不是内部字段 `kind`。导入按 `system_key` 找到目标工作区同名系统智能体后 patch 上述字段。 |
 | `agent_skill` | 导出 | `agent_id`（引用）、`skill_id`（引用）、`enabled` | 无 | 随智能体一起以 `skills: [{skill: <source_id>, enabled}]` 内嵌导出。 |
 | `agent_to_label` | 导出 | `agent_id`、`label_id`（均引用） | 无 | 内嵌为 `label_ids`。只允许引用 `resource_type = 'agent'` 的标签。 |
 | `agent_mcp_server` | 部分导出 | `agent_id`（引用）、`server_id`（引用，按**名字**回填）、`enabled` | 无 | `workspace_mcp_server` 条目本身不可导出（见 1.6），导入时按名字在目标工作区查找同名条目，找到才绑定，否则记 `unmapped_refs`。 |
@@ -215,8 +222,8 @@ entities.issue_statuses[]     issue_status
 entities.issue_properties[]   issue_property
 entities.skills[]             skill + files[] + label_ids[]
 entities.mcp_servers[]        workspace_mcp_server，仅 name/transport，导入不创建
-entities.agents[]             agent(kind=user) + skills[] + label_ids[] + mcp_servers[] + invocation_targets[]
-entities.system_agents[]      agent(kind=system) 的可 patch 字段
+entities.agents[]             无 system_key 的普通智能体 + skills[] + label_ids[] + mcp_servers[] + invocation_targets[]
+entities.system_agents[]      system_key 非空且不以 agent_builder: 开头的可 patch 字段
 entities.squads[]             squad + members[]
 entities.projects[]           project + resources[]
 entities.autopilots[]         autopilot + triggers[] + subscribers[] + collaborators[]
@@ -455,6 +462,8 @@ entities.issue_views[]        issue_view
 | `skip` | 跳过该实体，但**仍登记映射**（源 id → 目标已存在的实体），后续引用照常解析 |
 
 V1 不支持按实体类型分别指定策略；`include` 数组可以把整类实体排除在导入之外。
+
+**例外：平台自带的系统状态不算冲突**（DENE-408）。创建一个工作区时会 seed 7 条 `is_system = true` 的状态（`backlog` / `todo` / …，键即 category），源端导出里也带着它们，所以导入到一个**全新空工作区**时 `issue_statuses` 批次必然在第一行就撞上同名同 key 的行。这种「源与目标都是内置行」的配对不按冲突处理：`fail` 下记为 `skipped`（目标那 7 条名字、颜色、描述本来就与源端一致，跳过等于 overwrite 会写下的结果），`overwrite` / `skip` / `rename` 行为不变。这样 CLI 默认的 `fail` 不会被空目标误触发，护栏只对真正的用户数据（同名 label / agent / skill 等）生效。
 
 ### 5.3 身份键（判定「同一个实体」）
 
