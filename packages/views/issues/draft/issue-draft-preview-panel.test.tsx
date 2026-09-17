@@ -873,6 +873,17 @@ describe("IssueDraftPreviewPanel carried files", () => {
     );
   });
 
+  it("counts one file in the singular", () => {
+    // The hint names the files by number, so it inflects with them: a lone
+    // prototype must not read as "these 1 files".
+    renderPanel({ attachments: [PROTOTYPE] });
+    expect(
+      screen.getByText(
+        "After you confirm, this file belongs to the parent task. Sub-issues link it instead of uploading a copy.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("falls back to the click-time URL when the server sends no durable one", () => {
     // `markdown_url` is additive: an older backend omits it, and a row whose
     // href resolved to the empty string would be a dead link.

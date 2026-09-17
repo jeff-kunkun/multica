@@ -983,7 +983,7 @@
     "built_title": "已建（不会被改动）",
     "built_hint": "确认时这些单会被原样接上：标题、阶段、负责人都不会被回写。要改请点开对应的单。",
     "attachments_title": "参考产物",
-    "attachments_hint": "确认后这 {{count}} 个文件挂在父任务上；子任务只引用链接，不重复上传一份。",
+    "attachments_hint_other": "确认后这 {{count}} 个文件挂在父任务上；子任务只引用链接，不重复上传一份。",
     "built_stage": "阶段 {{n}}",
     "new_group_title": "本轮新增",
     "new_group_hint": "只会新建这几张。它们挂在同一个父单下，顺序由各自的阶段决定。",
