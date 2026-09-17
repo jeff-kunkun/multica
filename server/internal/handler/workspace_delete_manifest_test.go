@@ -125,6 +125,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"task_usage_hourly":                  workspaceDelete,
 	"task_usage_hourly_dirty":            workspaceDelete,
 	"task_usage_hourly_rollup_state":     workspaceDeleteKeep,
+	"transfer_attachment_upload":         workspaceDelete,
+	"transfer_attachment_upload_chunk":   workspaceDelete,
 	"user":                               workspaceDeleteKeep,
 	"user_composio_connection":           workspaceDeleteKeep,
 	"user_password_credential":           workspaceDeleteKeep,
