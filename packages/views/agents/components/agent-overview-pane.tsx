@@ -32,6 +32,13 @@ import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
+import { AgentAccountsTab } from "./tabs/agent-accounts-tab";
+import {
+  formatQuotaResetAt,
+  nextQuotaResetMs,
+  parseAgentAccounts,
+} from "./tabs/agent-accounts-model";
+import { useQuotaResetTick } from "./tabs/use-quota-reset-tick";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { AgentMcpTab } from "./tabs/agent-mcp-tab";
@@ -43,6 +50,7 @@ import { AgentOverviewSummary } from "./agent-overview-summary";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
+import type { InheritedPromptState } from "../specialization";
 
 type DetailSection = "overview" | "work" | "capabilities" | "settings";
 
@@ -56,6 +64,7 @@ export type DetailTab =
   | "integrations"
   | "general"
   | "access"
+  | "accounts"
   | "env"
   | "custom_args"
   | "runtime_config";
@@ -70,6 +79,7 @@ type SecondaryTab = {
     | "integrations"
     | "general"
     | "access"
+    | "accounts"
     | "environment"
     | "custom_args"
     | "runtime_config";
@@ -86,6 +96,7 @@ const CAPABILITY_TABS: SecondaryTab[] = [
 const SETTINGS_TABS: SecondaryTab[] = [
   { id: "general", labelKey: "general" },
   { id: "access", labelKey: "access" },
+  { id: "accounts", labelKey: "accounts" },
   { id: "env", labelKey: "environment" },
   { id: "custom_args", labelKey: "custom_args" },
   { id: "runtime_config", labelKey: "runtime_config" },
@@ -129,6 +140,19 @@ interface AgentOverviewPaneProps {
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   currentUserId?: string | null;
   canEdit: boolean;
+  /** Active specialisations of this agent (DENE-304); the Instructions tab
+   *  names them so an edit to a shared prompt is not a silent change. */
+  childAgents?: readonly Agent[];
+  /** Where the base role's prompt for a specialisation came from (DENE-384). */
+  inheritedPromptState?: InheritedPromptState;
+  /** Re-reads the detail payload that carries the base role's prompt. */
+  onRetryInheritedPrompt?: () => void;
+  /** Workspace agents, for the Instructions tab's base-role picker. */
+  agents?: readonly Agent[];
+  /** Attaches this agent to a base role by id (DENE-300 follow-up). */
+  onChangeBaseRole?: (parentAgentId: string) => Promise<void>;
+  /** Solidify-and-unbind, the non-lossy way back to an independent role. */
+  onDetachBaseRole?: () => Promise<void>;
   navIntent?: DetailTab | null;
   onNavIntentHandled?: () => void;
 }
@@ -149,6 +173,12 @@ export function AgentOverviewPane({
   onUpdate,
   currentUserId,
   canEdit,
+  childAgents = [],
+  inheritedPromptState = "ready",
+  onRetryInheritedPrompt,
+  agents,
+  onChangeBaseRole,
+  onDetachBaseRole,
   navIntent,
   onNavIntentHandled,
 }: AgentOverviewPaneProps) {
@@ -194,6 +224,26 @@ export function AgentOverviewPane({
     wecomListing?.configured === true ||
     telegramListing?.configured === true;
 
+  // A spent quota is the one account state that needs an action and that the
+  // tab rail cannot otherwise show. The daemon reports it on the runtime row,
+  // so the warning costs no request of its own — and it clears itself the
+  // moment the quota comes back (DENE-468).
+  const accountRows = useMemo(
+    () => parseAgentAccounts(runtime).accounts,
+    [runtime],
+  );
+  const accountNowMs = useQuotaResetTick(accountRows);
+  const quotaResetMs = useMemo(
+    () => nextQuotaResetMs(accountRows, accountNowMs),
+    [accountRows, accountNowMs],
+  );
+  const quotaAlert =
+    quotaResetMs === null
+      ? ""
+      : t(($) => $.tab_body.accounts.status_quota_exhausted, {
+          time: formatQuotaResetAt(quotaResetMs),
+        });
+
   const visibleCapabilityTabs = useMemo(() => {
     const showMcp = runtime
       ? providerSupportsMcpConfig(runtime.provider)
@@ -226,7 +276,9 @@ export function AgentOverviewPane({
         // owner/admin (MUL-5438) — the same rule `canEdit` encodes — so
         // showing the tab to anyone else guarantees a 403 on "Reveal & edit".
         // The server stays the boundary; this only removes a dead entry point.
-        if (tab.id === "env") return canEdit;
+        // Accounts reads the same endpoint to tell a bound lever from an
+        // unbound one, so it carries the env tab's permission rule too.
+        if (tab.id === "env" || tab.id === "accounts") return canEdit;
         if (tab.id === "runtime_config") return runtime?.provider === "openclaw";
         return true;
       }),
@@ -433,6 +485,9 @@ export function AgentOverviewPane({
                       )}
                     >
                       {t(($) => $.tabs[tab.labelKey])}
+                      {tab.id === "accounts" && quotaAlert ? (
+                        <QuotaAlertDot label={quotaAlert} />
+                      ) : null}
                     </button>
                   );
                 })}
@@ -445,6 +500,13 @@ export function AgentOverviewPane({
                   <h2 className="text-title-sm font-medium text-balance">
                     {t(($) => $.tabs[activeSecondaryTab.labelKey])}
                   </h2>
+                  {/* The rail's dot has to be explainable where it is read:
+                      this is the one line that says why the tab is flagged. */}
+                  {activeSecondaryTab.id === "accounts" && quotaAlert ? (
+                    <p className="mt-1 text-caption text-destructive">
+                      {quotaAlert}
+                    </p>
+                  ) : null}
                 </header>
 
                 <div className="mt-6">
@@ -453,6 +515,13 @@ export function AgentOverviewPane({
                       agent={agent}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
+                      childAgents={childAgents}
+                      inheritedPromptState={inheritedPromptState}
+                      onRetryInheritedPrompt={onRetryInheritedPrompt}
+                      agents={agents}
+                      canEdit={canEdit}
+                      onChangeBaseRole={onChangeBaseRole}
+                      onDetachBaseRole={onDetachBaseRole}
                     />
                   )}
                   {effectiveView === "skills" && (
@@ -497,6 +566,14 @@ export function AgentOverviewPane({
                       currentUserId={currentUserId ?? null}
                       onDirtyChange={setActiveDirty}
                       onUpdate={onUpdate}
+                    />
+                  )}
+                  {effectiveView === "accounts" && (
+                    <AgentAccountsTab
+                      agent={agent}
+                      runtimeDevice={runtime ?? undefined}
+                      onSave={(updates) => onUpdate(agent.id, updates)}
+                      onDirtyChange={setActiveDirty}
                     />
                   )}
                   {effectiveView === "env" && (
@@ -555,5 +632,24 @@ export function AgentOverviewPane({
         </AlertDialog>
       )}
     </div>
+  );
+}
+
+/**
+ * The accounts tab's "a quota ran out" marker (DENE-468).
+ *
+ * The dot is what makes a spent quota reachable from the tab rail — the one
+ * place the user passes through on the way to anything else in the agent. It
+ * carries the deadline as a tooltip and as its accessible name, so the alert
+ * is never colour-only.
+ */
+function QuotaAlertDot({ label }: { label: string }) {
+  return (
+    <span
+      title={label}
+      className="ms-1.5 size-1.5 shrink-0 rounded-full bg-destructive"
+    >
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }

@@ -1,16 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Save } from "lucide-react";
+import { Layers, Loader2, Lock, RotateCcw, Save } from "lucide-react";
 import { useConfigStore } from "@multica/core/config";
 import { AGENT_FOCUS_CONVERSATION_STARTERS } from "@multica/core/paths";
+import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import type { Agent, AgentConversationStarter } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../i18n";
-import { useOptionalNavigation } from "../../../navigation";
+import { AppLink, useOptionalNavigation } from "../../../navigation";
+import {
+  composeEffectiveInstructions,
+  hasInheritedPrompt,
+  isSpecialization,
+  type InheritedPromptState,
+} from "../../specialization";
 
+import { BaseRoleField } from "../base-role-field";
 import { ConversationStartersEditor } from "../conversation-starters-editor";
 
 /** How long the deep-linked conversation-starters editor stays ringed. */
@@ -20,6 +28,13 @@ export function InstructionsTab({
   agent,
   onSave,
   onDirtyChange,
+  childAgents = [],
+  inheritedPromptState = "ready",
+  onRetryInheritedPrompt,
+  agents,
+  canEdit = true,
+  onChangeBaseRole,
+  onDetachBaseRole,
 }: {
   agent: Agent;
   onSave: (updates: {
@@ -27,12 +42,44 @@ export function InstructionsTab({
     conversation_starters?: AgentConversationStarter[];
   }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Active specialisations of this agent, when it is a base role. Supplied by
+   * the page (which already holds the list) so the tab can say which agents a
+   * prompt edit here reaches (DENE-304).
+   */
+  childAgents?: readonly Agent[];
+  /**
+   * How the read that carries `inherited_instructions` went. The page owns the
+   * query, so it is the only layer that can tell an in-flight or failed read
+   * from a base role that really has no prompt — and stating the latter when
+   * the read failed is exactly the misreport this pins down (DENE-384).
+   * Defaults to `ready` for the standalone mounts.
+   */
+  inheritedPromptState?: InheritedPromptState;
+  /** Re-runs that read; the failure state offers it as the way out. */
+  onRetryInheritedPrompt?: () => void;
+  /**
+   * The workspace agent list, for the base-role picker below (DENE-300
+   * follow-up). Omitted by the standalone mounts, which renders no picker —
+   * the same shape a backend without the specialisation fields produces.
+   */
+  agents?: readonly Agent[];
+  canEdit?: boolean;
+  /** Attaches this agent to a base role by id. */
+  onChangeBaseRole?: (parentAgentId: string) => Promise<void>;
+  /** Solidify-and-unbind: bakes the inherited prompt in, then detaches. */
+  onDetachBaseRole?: () => Promise<void>;
 }) {
   const { t } = useT("agents");
   // Optional read: this tab is a leaf that tests mount in isolation, and its
   // only navigation-dependent behaviour (the deep-link focus below) degrades
   // to "no highlight" when there is no adapter.
   const navigation = useOptionalNavigation();
+  // Optional read for the same reason as `navigation`: this tab is mounted
+  // standalone in tests, and a missing workspace slug only costs the child
+  // links their href (they render as plain text below), not the whole tab.
+  const slug = useWorkspaceSlug();
+  const workspacePaths = slug ? paths.workspace(slug) : null;
   const conversationStartersSupported = useConfigStore(
     (state) => state.agentConversationStartersSupported,
   );
@@ -46,6 +93,11 @@ export function InstructionsTab({
   const focusHandledForAgentRef = useRef<string | null>(null);
   const focusFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [systemOpen, setSystemOpen] = useState(false);
+  // Both inheritance blocks start folded: the parent prompt is context, and
+  // the effective prompt is a long string that would push the editable field
+  // out of view.
+  const [inheritedOpen, setInheritedOpen] = useState(false);
+  const [effectiveOpen, setEffectiveOpen] = useState(false);
   const persistedConversationStartersKey = JSON.stringify(
     agent.conversation_starters ?? [],
   );
@@ -78,6 +130,29 @@ export function InstructionsTab({
   // overwrites. Ordinary agents have no system half and render unchanged.
   const systemInstructions = agent.system_instructions?.trim() ?? "";
   const hasSystemLayer = systemInstructions.length > 0;
+
+  // DENE-304 inheritance. `inherited_instructions` is only served by the agent
+  // DETAIL endpoint, so a specialisation opened from a list that has not
+  // loaded it yet renders the "nothing inherited" state rather than a blank
+  // block passed off as the parent's prompt.
+  //
+  // DENE-384: "not loaded it yet" and "failed to load it" are NOT that state.
+  // The copy below never claims the base role has no prompt while the read is
+  // still in flight or has failed — the page says which of the three it is.
+  const isSpecializationAgent = isSpecialization(agent);
+  const inheritedInstructions = agent.inherited_instructions ?? "";
+  const inheritedPromptReady = inheritedPromptState === "ready";
+  const hasInherited = inheritedPromptReady && hasInheritedPrompt(agent);
+  const parentName = agent.parent_agent_name || "";
+  const inheritedPromptStatusText = inheritedPromptReady
+    ? t(($) => $.specialization.inherited_prompt_unavailable)
+    : inheritedPromptState === "failed"
+      ? t(($) => $.specialization.inherited_prompt_failed)
+      : t(($) => $.specialization.inherited_prompt_loading);
+  const effectivePrompt = composeEffectiveInstructions(
+    inheritedInstructions,
+    value,
+  );
 
   // Refetches replace nested arrays even when their contents are unchanged.
   // Compare against the last persisted semantic snapshot so those refetches
@@ -192,8 +267,117 @@ export function InstructionsTab({
       <p className="max-w-2xl text-pretty text-body leading-6 text-muted-foreground">
         {hasSystemLayer
           ? t(($) => $.tab_body.instructions.workspace_notes_intro)
-          : t(($) => $.tab_body.instructions.intro)}
+          : isSpecializationAgent
+            ? t(($) => $.specialization.specialization_intro, {
+                name: parentName,
+              })
+            : t(($) => $.tab_body.instructions.intro)}
       </p>
+
+      {/* Which base role this agent hangs off — editable here, because
+          picking one at creation is no help to the agents that already exist
+          (DENE-300 follow-up). */}
+      {agents && onChangeBaseRole && onDetachBaseRole && !hasSystemLayer && (
+        <BaseRoleField
+          agent={agent}
+          agents={agents}
+          visibleChildren={childAgents.length}
+          canEdit={canEdit}
+          onAttach={onChangeBaseRole}
+          onDetach={onDetachBaseRole}
+        />
+      )}
+
+      {/* Base-role view: the prompt below is shared with every specialisation,
+          so say so before the user edits it (DENE-304). */}
+      {childAgents.length > 0 && (
+        <div
+          data-testid="agent-specialization-children"
+          className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5"
+        >
+          <p className="text-caption leading-snug">
+            {t(($) => $.specialization.base_sync_hint, { name: agent.name })}
+          </p>
+          <ul className="mt-1.5 flex flex-wrap gap-1.5">
+            {childAgents.map((child) => (
+              <li key={child.id}>
+                {workspacePaths ? (
+                  <AppLink
+                    href={workspacePaths.agentDetail(child.id)}
+                    newTabTitle={child.name}
+                    className="inline-flex max-w-40 items-center gap-1 rounded-xs border border-border bg-background px-1.5 py-0.5 text-caption text-muted-foreground hover:text-foreground hover:underline"
+                  >
+                    <Layers aria-hidden="true" className="size-3 shrink-0" />
+                    <span className="min-w-0 truncate">{child.name}</span>
+                  </AppLink>
+                ) : (
+                  <span className="inline-flex max-w-40 items-center gap-1 rounded-xs border border-border bg-background px-1.5 py-0.5 text-caption text-muted-foreground">
+                    <Layers aria-hidden="true" className="size-3 shrink-0" />
+                    <span className="min-w-0 truncate">{child.name}</span>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Specialisation view: the base role's prompt is not editable from here,
+          and it is shown as its own block so the field below reads as the
+          ADDITIONAL half rather than as the whole prompt. */}
+      {isSpecializationAgent && (
+        <div
+          data-testid="agent-inherited-prompt"
+          className="rounded-lg border bg-muted/30"
+        >
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5">
+            <Lock
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+            <span className="text-body font-medium">
+              {t(($) => $.specialization.inherited_prompt_label)}
+            </span>
+            <p className="min-w-0 flex-1 text-caption leading-snug text-muted-foreground">
+              {hasInherited
+                ? t(($) => $.specialization.inherited_prompt_hint, {
+                    name: parentName,
+                  })
+                : inheritedPromptStatusText}
+            </p>
+            {inheritedPromptState === "failed" && onRetryInheritedPrompt && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="shrink-0"
+                data-testid="agent-inherited-prompt-retry"
+                onClick={onRetryInheritedPrompt}
+              >
+                <RotateCcw aria-hidden="true" className="size-3.5" />
+                {t(($) => $.specialization.inherited_prompt_retry)}
+              </Button>
+            )}
+            {hasInherited && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="shrink-0"
+                aria-expanded={inheritedOpen}
+                onClick={() => setInheritedOpen((open) => !open)}
+              >
+                {inheritedOpen
+                  ? t(($) => $.specialization.inherited_prompt_hide)
+                  : t(($) => $.specialization.inherited_prompt_show)}
+              </Button>
+            )}
+          </div>
+          {hasInherited && inheritedOpen && (
+            <pre className="max-h-80 overflow-auto border-t px-3 py-2.5 text-caption leading-6 whitespace-pre-wrap text-muted-foreground">
+              {inheritedInstructions}
+            </pre>
+          )}
+        </div>
+      )}
 
       {hasSystemLayer && (
         <div className="rounded-lg border bg-muted/30">
@@ -229,9 +413,11 @@ export function InstructionsTab({
           htmlFor={`agent-system-prompt-${agent.id}`}
           className="text-body font-medium"
         >
-          {hasSystemLayer
-            ? t(($) => $.tab_body.instructions.workspace_notes_label)
-            : t(($) => $.tab_body.instructions.system_prompt_label)}
+          {isSpecializationAgent
+            ? t(($) => $.specialization.own_prompt_label)
+            : hasSystemLayer
+              ? t(($) => $.tab_body.instructions.workspace_notes_label)
+              : t(($) => $.tab_body.instructions.system_prompt_label)}
         </label>
         <Textarea
           id={`agent-system-prompt-${agent.id}`}
@@ -240,14 +426,71 @@ export function InstructionsTab({
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder={
-            hasSystemLayer
-              ? t(($) => $.tab_body.instructions.workspace_notes_placeholder)
-              : t(($) => $.tab_body.instructions.placeholder)
+            isSpecializationAgent
+              ? t(($) => $.specialization.own_prompt_placeholder)
+              : hasSystemLayer
+                ? t(($) => $.tab_body.instructions.workspace_notes_placeholder)
+                : t(($) => $.tab_body.instructions.placeholder)
           }
           rows={18}
           className="min-h-96 resize-y leading-6"
         />
       </div>
+
+      {/* What the daemon is actually handed: parent first, then this agent's
+          own text — composed with the same rule the claim path uses. Shown
+          live off the editor draft, so an edit in progress is previewed before
+          it is saved. */}
+      {isSpecializationAgent && (
+        <div
+          data-testid="agent-effective-prompt"
+          className="rounded-lg border bg-muted/30"
+        >
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5">
+            <span className="text-body font-medium">
+              {t(($) => $.specialization.effective_prompt_label)}
+            </span>
+            <p className="min-w-0 flex-1 text-caption leading-snug text-muted-foreground">
+              {t(($) => $.specialization.effective_prompt_hint)}
+            </p>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="shrink-0"
+              aria-expanded={effectiveOpen}
+              onClick={() => setEffectiveOpen((open) => !open)}
+            >
+              {effectiveOpen
+                ? t(($) => $.specialization.inherited_prompt_hide)
+                : t(($) => $.specialization.inherited_prompt_show)}
+            </Button>
+          </div>
+          {effectiveOpen &&
+            (!inheritedPromptReady ? (
+              // The parent half is unknown, so there is no honest composed
+              // string to preview — showing just this agent's own text as
+              // "exactly what the runtime receives" would be a lie in the
+              // same way the inherited block's copy was (DENE-384).
+              <p
+                data-testid="agent-effective-prompt-unknown"
+                className="border-t px-3 py-2.5 text-caption text-muted-foreground"
+              >
+                {inheritedPromptStatusText}
+              </p>
+            ) : effectivePrompt ? (
+              <pre
+                data-testid="agent-effective-prompt-text"
+                className="max-h-80 overflow-auto border-t px-3 py-2.5 text-caption leading-6 whitespace-pre-wrap"
+              >
+                {effectivePrompt}
+              </pre>
+            ) : (
+              <p className="border-t px-3 py-2.5 text-caption text-muted-foreground">
+                {t(($) => $.specialization.effective_prompt_empty)}
+              </p>
+            ))}
+        </div>
+      )}
 
       {conversationStartersSupported ? (
         <div

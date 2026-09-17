@@ -29,6 +29,7 @@ import { ChatThreadList } from "./components/chat-thread-list";
 import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
 import { NewChatButton } from "./components/new-chat-button";
+import { AlignmentRecords } from "../issues/draft";
 import { useChatController } from "./components/use-chat-controller";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
@@ -232,6 +233,11 @@ export function ChatPage() {
         onSelectSession={handleSelect}
         onArchive={handleArchive}
       />
+      {/* Below the conversations and outside them: an alignment is a different
+          kind of thing, kept out of the chat list by the access boundary its
+          hidden carrier sits behind, so it gets its own group rather than a
+          tag on rows it can never appear among (DENE-371). */}
+      <AlignmentRecords wsId={c.wsId} />
     </div>
   );
 

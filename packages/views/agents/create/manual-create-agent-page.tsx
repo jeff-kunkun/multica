@@ -8,7 +8,13 @@ import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { useBackOrReplace, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { isSpecialization } from "../specialization";
+import { BaseRoleSelect, NO_BASE_ROLE } from "../components/base-role-select";
 import { AgentConfigurationPanel } from "./agent-configuration-panel";
+import {
+  SettingsCard,
+  SettingsSection,
+} from "../../settings/components/settings-layout";
 import { CreateAgentFooter } from "./create-agent-footer";
 import { AgentCreateChip, AgentCreateShell } from "./create-shell";
 import { useCreateAgentForm } from "./use-create-agent-form";
@@ -34,12 +40,28 @@ export function ManualCreateAgentPage() {
   const backOrReplace = useBackOrReplace();
   const duplicateId = navigation.searchParams.get("duplicate");
   const squadId = navigation.searchParams.get("squad");
+  // Arriving from "derive a specialization" on the list: the base role is
+  // already decided, and the form shows it preselected. Kept as page state
+  // rather than a draft field so an unrelated manual draft (which the store
+  // persists per owner) can never resurrect a stale parent.
+  const [parentAgentId, setParentAgentId] = useState(
+    () => navigation.searchParams.get("parent") ?? NO_BASE_ROLE,
+  );
 
   const form = useCreateAgentForm();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const duplicateAgent = duplicateId
     ? agents.find((agent) => agent.id === duplicateId) ?? null
     : null;
+  // Resolve against the loaded agents so a stale/archived deep link degrades to
+  // "independent base role" instead of a request the server refuses.
+  const parentAgent =
+    agents.find(
+      (agent) =>
+        agent.id === parentAgentId &&
+        !agent.archived_at &&
+        !isSpecialization(agent),
+    ) ?? null;
 
   // True when a duplicate had to fall back to another runtime, which drops the
   // source's model / thinking / speed. The notice explains the empty fields.
@@ -83,6 +105,7 @@ export function ManualCreateAgentPage() {
     runtimeId: form.selectedRuntime?.id ?? null,
     squadId,
     duplicateSource: duplicateAgent,
+    parentAgentId: parentAgent?.id ?? null,
     // The work is committed; leaving it stored would hand the finished agent's
     // fields to whoever opens this form next. Only this flow's slot — another
     // half-finished copy is still someone's unfinished work.
@@ -134,6 +157,23 @@ export function ManualCreateAgentPage() {
               {t(($) => $.creation_studio.duplicate_runtime_reset_notice)}
             </div>
           )}
+          {/* The base-role choice sits above the whole configuration panel: it
+              frames what the rest of the form MEANS (this agent's own prompt is
+              appended to the base role's, not a replacement for it). */}
+          <SettingsSection
+            title={t(($) => $.specialization.base_role_label)}
+            className="mb-8"
+          >
+            <SettingsCard>
+              <div className="p-3">
+                <BaseRoleSelect
+                  agents={agents}
+                  value={parentAgent?.id ?? NO_BASE_ROLE}
+                  onChange={setParentAgentId}
+                />
+              </div>
+            </SettingsCard>
+          </SettingsSection>
           <AgentConfigurationPanel
             draft={form.draft}
             onChange={form.setDraft}

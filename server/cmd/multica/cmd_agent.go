@@ -56,6 +56,18 @@ var agentArchiveCmd = &cobra.Command{
 	RunE:  runAgentArchive,
 }
 
+// Solidify is the non-lossy way out of a specialisation: the base role's
+// prompt is written into the agent's own instructions BEFORE the link is
+// cleared, so what the daemon is handed does not change. `agent update
+// --parent-agent-id ""` is the lossy counterpart and stays available for the
+// case where dropping the inherited text is the point.
+var agentSolidifyCmd = &cobra.Command{
+	Use:   "solidify <id>",
+	Short: "Bake a specialisation's inherited prompt into its own and detach it from its base role",
+	Args:  exactArgs(1),
+	RunE:  runAgentSolidify,
+}
+
 var agentRestoreCmd = &cobra.Command{
 	Use:   "restore <id>",
 	Short: "Restore an archived agent",
@@ -137,6 +149,7 @@ func init() {
 	agentCmd.AddCommand(agentUpdateCmd)
 	agentCmd.AddCommand(agentArchiveCmd)
 	agentCmd.AddCommand(agentRestoreCmd)
+	agentCmd.AddCommand(agentSolidifyCmd)
 	agentCmd.AddCommand(agentTasksCmd)
 	agentCmd.AddCommand(agentAvatarCmd)
 	agentCmd.AddCommand(agentSkillsCmd)
@@ -178,6 +191,7 @@ func init() {
 	agentCreateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
 	agentCreateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent runs (1-50)")
+	agentCreateCmd.Flags().String("parent-agent-id", "", "Base role to specialise: the new agent inherits that agent's prompt (prepended at run time) and skills. Must be a base role itself — a specialisation cannot be specialised further. Empty = an independent base role.")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent update
@@ -210,6 +224,7 @@ func init() {
 	agentUpdateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent runs (1-50)")
+	agentUpdateCmd.Flags().String("parent-agent-id", "", "Attach this existing agent to a base role, or pass an empty string to detach it. Detaching here does NOT keep the inherited prompt — use 'multica agent solidify <id>' for the non-lossy unbind. An agent that already has specialisations cannot be attached (two levels only).")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent archive
@@ -217,6 +232,9 @@ func init() {
 
 	// agent restore
 	agentRestoreCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// agent solidify
+	agentSolidifyCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent tasks
 	agentTasksCmd.Flags().String("output", "table", "Output format: table or json")
@@ -713,6 +731,15 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["max_concurrent_tasks"] = v
 	}
+	// Two-level specialisation (DENE-301). An empty value means "independent
+	// base role", which is also what omitting the flag means, so the key is
+	// only sent when it carries an id.
+	if cmd.Flags().Changed("parent-agent-id") {
+		v, _ := cmd.Flags().GetString("parent-agent-id")
+		if v = strings.TrimSpace(v); v != "" {
+			body["parent_agent_id"] = v
+		}
+	}
 
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
@@ -812,9 +839,17 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	} else if ok {
 		body["mcp_config"] = mc
 	}
+	// parent_agent_id is a tri-state on the server, keyed on the field being
+	// PRESENT in the body: absent = no change, "" = detach, id = attach. The
+	// flag reproduces exactly that, so `--parent-agent-id ""` is a detach and
+	// not a no-op (DENE-300 follow-up).
+	if cmd.Flags().Changed("parent-agent-id") {
+		v, _ := cmd.Flags().GetString("parent-agent-id")
+		body["parent_agent_id"] = strings.TrimSpace(v)
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --switchable-models, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --switchable-models, --custom-args, --mcp-config, --visibility, --status, --max-concurrent-tasks, or --parent-agent-id (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -854,6 +889,29 @@ func runAgentArchive(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Agent archived: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
+	return nil
+}
+
+func runAgentSolidify(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/agents/"+args[0]+"/solidify", nil, &result); err != nil {
+		return fmt.Errorf("solidify agent: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	fmt.Printf("Agent solidified and detached: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
 	return nil
 }
 

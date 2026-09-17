@@ -8,6 +8,11 @@ import {
 } from "@multica/core/issues";
 import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
+import { groupSubIssuesByStage } from "../utils/sub-issue-stages";
+// Re-exported for the callers that grew up with it living here; the function
+// itself moved so the board accordion can order its rows without importing
+// this module (DENE-444).
+export { groupSubIssuesByStage };
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
@@ -76,6 +81,8 @@ import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueCo
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
+import { SubIssueCloseStrip } from "./sub-issue-close-strip";
+import { SubIssueBlockerBadge, SubIssueBlockerSummary, blockerBadgeState, useSubIssueBlockerData } from "./sub-issue-blocker-summary";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { useNewRunIds } from "./use-run-comment-motion";
@@ -104,12 +111,15 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useModalStore } from "@multica/core/modals";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueAlignmentDraftId, issueAlignmentHeldByAnother } from "@multica/core/issues";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
+import { IssueAlignmentEntry } from "../draft/alignment-entry";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { propertyListOptions } from "@multica/core/properties";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import {
+  openAlignIssue,
   selectExpandedResolved,
   useRecentIssuesStore,
   useResolvedExpandStore,
@@ -415,29 +425,6 @@ function isOptionalPropSet(
   }
 }
 
-// groupSubIssuesByStage orders a parent's children for display: staged groups
-// ascending by stage, then the unstaged group (stage === null) last. Callers
-// render a per-group stage header only when the set is actually staged.
-export function groupSubIssuesByStage(
-  children: Issue[],
-): { stage: number | null; items: Issue[] }[] {
-  const byStage = new Map<number, Issue[]>();
-  const unstaged: Issue[] = [];
-  for (const c of children) {
-    if (c.stage != null) {
-      const arr = byStage.get(c.stage);
-      if (arr) arr.push(c);
-      else byStage.set(c.stage, [c]);
-    } else {
-      unstaged.push(c);
-    }
-  }
-  const groups: { stage: number | null; items: Issue[] }[] = [...byStage.keys()]
-    .sort((a, b) => a - b)
-    .map((s) => ({ stage: s, items: byStage.get(s) as Issue[] }));
-  if (unstaged.length > 0) groups.push({ stage: null, items: unstaged });
-  return groups;
-}
 
 // Shallow array equality by element identity. Used to reuse the previous
 // render's per-thread reply slice when nothing in *this* thread changed,
@@ -689,6 +676,7 @@ function SubIssueRow({
   childProgress,
   rowProps,
   customProperties,
+  blockerState,
 }: {
   child: Issue;
   /** The sub-issue's OWN children progress (it can itself be a parent). */
@@ -697,6 +685,7 @@ function SubIssueRow({
   rowProps: SubIssueRowProperties;
   /** Workspace custom properties the user opted into showing on rows. */
   customProperties: IssueProperty[];
+  blockerState?: { state: "ROOT" | "PROPAGATED" | "CLEAR"; rootCause?: string };
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -741,10 +730,11 @@ function SubIssueRow({
     <IssueActionsContextMenu issue={child}>
       <div
         className={cn(
-          "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
+          "flex flex-col gap-1 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
           selected && "bg-accent/30",
         )}
       >
+        <div className="flex items-center gap-2.5">
         {/* Priority ⇄ checkbox slot, mirroring the main list rows: the
             priority icon yields to the selection checkbox on hover/focus.
             Opacity (not display) swap keeps the checkbox keyboard-tabbable. */}
@@ -786,6 +776,7 @@ function SubIssueRow({
             />
           }
         />
+        <SubIssueBlockerBadge state={blockerState?.state ?? "CLEAR"} rootCause={blockerState?.rootCause} />
         <AppLink
           href={paths.issueDetail(child.id)}
           className="flex min-w-0 flex-1 items-center gap-2.5"
@@ -890,6 +881,8 @@ function SubIssueRow({
             }
           />
         )}
+        </div>
+        <SubIssueCloseStrip issue={child} />
       </div>
     </IssueActionsContextMenu>
   );
@@ -1396,6 +1389,27 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     });
   }, [issue, openModal]);
 
+  /**
+   * Start an alignment FROM a comment (DENE-452).
+   *
+   * The same two fields the sub-issue action sends, plus the alignment face:
+   * the thread is the anchor — the shell seeds the request with it, and its
+   * preview is what says the comment still exists — and `parent_issue_id` is
+   * this issue, so whatever the conversation settles on is filed beneath it
+   * instead of founding a second top-level issue.
+   *
+   * The project and assignee seeds are deliberately NOT carried: the
+   * conversation decides who does the work, and the panel already inherits the
+   * project from the shared draft slot.
+   */
+  const openCommentAlign = useCallback((commentId: string) => {
+    if (!issue) return;
+    openAlignIssue({
+      anchor_comment_id: commentId,
+      parent_issue_id: issue.id,
+    });
+  }, [issue]);
+
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
   const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
@@ -1808,6 +1822,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // this answer, so a defaulted or stale empty array must not count as "no
   // sub-issues" (MUL-5714).
   const childCountKnown = childIssuesLoaded && !childIssuesFetching;
+  // One blocker tree for the whole sub-issue section: the summary card and the
+  // row badges read the same nodes, so a root cause on a grandchild marks its
+  // row without a per-row re-derivation.
+  // Gated on having children: the sub-issue section — and with it the card and
+  // the row badges — only renders then, and an ungated call would expand a
+  // childless issue's own `close.waiting_on` on every issue page.
+  const blockerData = useSubIssueBlockerData(childIssues.length > 0 ? issue : null, childIssues);
   // Parent's children — used to render the "x/y" progress next to the
   // "Sub-issue of …" breadcrumb under the title.
   const { data: parentChildIssues = [] } = useQuery({
@@ -2636,6 +2657,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             currentUserId: user?.id, canModerate: canModerateComments, onReply: submitReply,
             onReplyAccepted: scrollToTimelineBottom, onEdit: editComment, onDelete: deleteComment,
             onToggleReaction: handleToggleReaction, onCreateSubIssue: openCommentSubIssue,
+            onOpenAlign: openCommentAlign,
             onResolveToggle: handleResolveToggle,
             onCollapseResolved: reply.resolved_at ? () => toggleResolvedExpand(reply.id, false) : undefined,
             expandedResolvedIds: expandedResolved, onResolvedExpandChange: toggleResolvedExpand,
@@ -2673,6 +2695,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onDelete={deleteComment}
             onToggleReaction={handleToggleReaction}
             onCreateSubIssue={openCommentSubIssue}
+            onOpenAlign={openCommentAlign}
             onResolveToggle={handleResolveToggle}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
             expandedResolvedIds={expandedResolved}
@@ -2708,6 +2731,44 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       />
     );
   };
+
+  // The alignment conversation this issue came out of, if any, and the group it
+  // belongs to. Resolved from the origin pairs the detail endpoint already
+  // carries, so the entry costs no request of its own: a ROOT issue's origin is
+  // the conversation, while a sub-issue's is its own node id and resolves one
+  // hop through its parent (DENE-371, DENE-415).
+  //
+  // Only for the person who held the alignment. An alignment is a private
+  // conversation and its list endpoint is creator-scoped, so for anyone else
+  // the entry would open a page that can only say the draft is gone. The issue
+  // is created by confirming the draft, so its creator IS that person.
+  const alignmentHeldBySelf =
+    issue?.creator_type === "member" &&
+    !!user?.id &&
+    issue.creator_id === user.id;
+  const alignmentDraftId = alignmentHeldBySelf
+    ? issueAlignmentDraftId(issue, parentIssue)
+    : null;
+  // The same group, when the conversation behind it belongs to somebody else:
+  // there is nothing to continue, and nothing to start either. See
+  // `issueAlignmentHeldByAnother` for why both halves are needed — a null draft
+  // id alone is also what an issue with no alignment behind it looks like.
+  const alignmentHeldByAnother = issueAlignmentHeldByAnother(
+    issue,
+    parentIssue,
+    alignmentHeldBySelf,
+  );
+  // The whole group, whichever member is open: the root plus its children. A
+  // sub-issue reads them off its parent — the same two queries the "sub-issue
+  // of" line already uses — so the progress line is about the group and not
+  // about the one issue on screen.
+  const alignmentGroupIssues: Issue[] = issue
+    ? issue.parent_issue_id
+      ? parentIssue
+        ? [parentIssue, ...parentChildIssues]
+        : []
+      : [issue, ...childIssues]
+    : [];
 
   // Breadcrumb shows the single most-direct container, never a fabricated chain.
   // project_id and parent_issue_id are orthogonal (a sub-issue can live in a
@@ -3005,6 +3066,27 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </AppLink>
           )}
 
+          {/* The way back to the conversation this issue came out of, plus what
+              the group it belongs to is doing and the one action a changed
+              requirement needs: return to that same conversation and keep
+              talking. It sits beside the "sub-issue of" line because it answers
+              the same kind of question — where does this come from — and because
+              an alignment is reachable from nowhere else: its carrier is a
+              hidden system agent, so it is absent from every chat list.
+
+              An issue with no alignment behind it gets the other half of the
+              same entry instead: starting one ON this issue, filed beneath it
+              (DENE-452). The two never appear together — see the component. */}
+          {issue && (
+            <IssueAlignmentEntry
+              draftId={alignmentDraftId}
+              groupIssues={alignmentGroupIssues}
+              parentIssueId={issue.id}
+              selfStarted={alignmentDraftId !== null}
+              startedByAnother={alignmentHeldByAnother}
+            />
+          )}
+
           {issue.source_context && (
             <SourceContextBadge
               context={issue.source_context}
@@ -3179,6 +3261,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   </div>
                 </div>
 
+                <SubIssueBlockerSummary data={blockerData} />
+
                 {/* Inline batch toolbar — appears next to the rows when
                     selections exist, instead of as a far-away fixed bar. */}
                 <BatchActionToolbar issues={childIssues} placement="inline" />
@@ -3195,7 +3279,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             <div className="bg-muted/40 px-3 py-1 text-micro font-medium uppercase tracking-wider text-muted-foreground">
                               {groupStage == null
                                 ? t(($) => $.stage.none)
-                                : t(($) => $.stage.value, { n: groupStage })}
+                                : <>{t(($) => $.stage.value, { n: groupStage })} · {groupStage === Math.min(...groups.filter((g) => g.stage != null).map((g) => g.stage!)) ? t(($) => $.stage.blocking) : t(($) => $.stage.queued)}</>}
                             </div>
                           )}
                           {items.map((child) => (
@@ -3205,6 +3289,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                               childProgress={subIssueProgress?.get(child.id)}
                               rowProps={subIssueRowProps}
                               customProperties={subIssueCustomProps}
+                              blockerState={blockerBadgeState(blockerData.tree, child.id)}
                             />
                           ))}
                         </Fragment>
