@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ApiError } from "@multica/core/api";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { IssueDraftPayload, RuntimeDevice } from "@multica/core/types";
 import enCommon from "../locales/en/common.json";
@@ -375,6 +376,98 @@ describe("AlignCreatePanel", () => {
     );
   });
 
+  /**
+   * DENE-422: a lost first turn must reach the page that can resend it. This
+   * panel closes on navigation and the conversation opens with an empty
+   * transcript, so without the handoff the user sees a blank alignment and has
+   * no way to know their request never arrived.
+   */
+  it("hands a lost first turn to the conversation it navigates to", async () => {
+    mocks.sendChatMessage.mockRejectedValue(
+      new ApiError("runtime_unusable", 409, "Conflict"),
+    );
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    await waitFor(() =>
+      expect(mocks.push).toHaveBeenCalledWith("/acme/issues/new/sess-new"),
+    );
+    // The page reads this slot and says the turn was lost; the draft id is what
+    // keeps the sentence on the conversation it belongs to.
+    expect(mocks.setAlign).toHaveBeenCalledWith({ seedFailedDraftId: "sess-new" });
+  });
+
+  /**
+   * The exits of `CreateIssueDraftSession` say different things — a runtime that
+   * went offline, a private runtime, an oversized draft — and all of them are
+   * 4xx sentences written for the reader. Collapsing them into one generic line
+   * is what made DENE-366 unreportable from a screenshot.
+   */
+  it("shows the server's own reason when the entry is refused", async () => {
+    mocks.createIssueDraftSession.mockRejectedValue(
+      new ApiError("runtime must be online to start an issue draft session", 409, "Conflict"),
+    );
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "runtime must be online to start an issue draft session",
+    );
+    expect(alert).not.toHaveTextContent("Could not start the alignment conversation.");
+    // A refused create leaves nothing to open, so the face stays put.
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A 5xx message is Go error chains and table names (MUL-6472) and must never
+   * be rendered. The status code is the part that is safe, and it is what makes
+   * a screenshot actionable.
+   */
+  it("states the status for a server error without leaking its message", async () => {
+    mocks.createIssueDraftSession.mockRejectedValue(
+      new ApiError(
+        'pq: relation "issue_draft_sessions" does not exist',
+        500,
+        "Internal Server Error",
+      ),
+    );
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not start the alignment conversation. Server error (HTTP 500).",
+    );
+    expect(alert).not.toHaveTextContent("issue_draft_sessions");
+  });
+
+  /**
+   * CLAUDE.md's malformed-response contract. `parseWithFallback` degrades an
+   * unreadable create-session body to an empty session whose draft exists on the
+   * server, so "the session was not created" would be false AND expensive: the
+   * user creates a second, orphaned draft. Drift is reported as drift.
+   */
+  it("reports an unreadable create-session response as drift, not a missing session", async () => {
+    mocks.createIssueDraftSession.mockResolvedValue({ session_id: "" });
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "The server's response was not recognized. The client or the server may need an update.",
+    );
+    expect(alert).not.toHaveTextContent("Could not start the alignment conversation.");
+    // The draft was created but this client never learned its id, so there is
+    // nowhere to navigate to — and nothing is sent.
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.sendChatMessage).not.toHaveBeenCalled();
+  });
+
   it("refuses to start without a request", async () => {
     renderPanel();
     // Typing a request first is what proves the auto-selected runtime is in
@@ -469,7 +562,9 @@ describe("AlignCreatePanel", () => {
   });
 
   it("routes an unfinished draft to its conversation", async () => {
-    mocks.drafts = [{ chat_session_id: "sess-old" }];
+    // `status` is what makes the row unfinished: the banner lists actionable
+    // drafts only, so a fixture without one reads as an alignment already over.
+    mocks.drafts = [{ chat_session_id: "sess-old", status: "draft" }];
     renderPanel();
     await userEvent.click(await screen.findByRole("button", { name: "resume-unfinished" }));
     expect(mocks.push).toHaveBeenCalledWith("/acme/issues/new/sess-old");

@@ -2,10 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import type { TFunction } from "i18next";
 import { ArrowLeftRight, Loader2, Sparkles } from "lucide-react";
+import { ApiError, clientErrorMessage } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  IssueDraftSessionUnrecognizedError,
   issueDraftListOptions,
   unfinishedIssueDrafts,
   useStartIssueDraft,
@@ -181,15 +184,28 @@ export function AlignCreatePanel({
     const activeAttachmentIds = draftAttachments
       .filter((attachment) => contentReferencesAttachment(request, attachment))
       .map((attachment) => attachment.id);
-    const result = await start.mutateAsync({
-      runtimeId: selectedRuntime.id,
-      request,
-      attachmentIds: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
-    });
+    const result = await start
+      .mutateAsync({
+        runtimeId: selectedRuntime.id,
+        request,
+        attachmentIds: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
+      })
+      // No session means no conversation to navigate to, and the reason is
+      // already on screen: `entryFailureMessage` renders it from `start.error`,
+      // which React Query keeps. Caught here so `void submit()` turns a stated
+      // failure into a return instead of an unhandled rejection.
+      .catch(() => null);
+    if (!result) return;
     onClose();
     // Navigating even when the first turn failed: the draft exists and holds
     // the request, so staying would only invite the user to create a second
     // one. The page's composer is where a lost turn is resent.
+    if (!result.seeded) {
+      // Hand the loss to the page this navigation lands on — the panel is gone
+      // from here on, and a conversation that opens empty without saying why is
+      // what made the failure look like the user's own mistake.
+      setAlign({ seedFailedDraftId: result.draftId });
+    }
     navigation.push(paths.newIssueDraft(result.draftId));
   };
 
@@ -254,7 +270,7 @@ export function AlignCreatePanel({
 
         {start.isError ? (
           <p role="alert" className="mt-4 text-body text-destructive">
-            {t(($) => $.alignment.entry_failed)}
+            {entryFailureMessage(start.error, t)}
           </p>
         ) : null}
       </div>
@@ -306,6 +322,36 @@ export function AlignCreatePanel({
       </div>
     </>
   );
+}
+
+/**
+ * Why the entry failed, in the terms the user can act on.
+ *
+ * `clientErrorMessage` is the repo's existing contract for exactly this: a 4xx
+ * message is written by the handler FOR the reader ("runtime must be online to
+ * start an issue draft session") and is worth showing verbatim, while a 5xx
+ * message is internal detail that must never be rendered (MUL-6472). Collapsing
+ * every exit into one sentence is what made the DENE-366 screenshot
+ * unreportable, so this is the only place the exits are told apart — no local
+ * status sniffing that could drift from that helper.
+ *
+ * A 5xx still has to say which class of failure it was, and the status code is
+ * the safe part of that; a transport failure carries no status at all and keeps
+ * the plain sentence.
+ */
+function entryFailureMessage(error: unknown, t: TFunction<"issues">): string {
+  const server = clientErrorMessage(error);
+  if (server) return server;
+  // Drift is named as drift. The draft was created and the request stored on the
+  // server before this client lost the response, so "could not start" would
+  // point the user at a second, orphaned draft.
+  if (error instanceof IssueDraftSessionUnrecognizedError) {
+    return t(($) => $.alignment.entry_response_unrecognized);
+  }
+  if (error instanceof ApiError) {
+    return t(($) => $.alignment.entry_failed_status, { status: error.status });
+  }
+  return t(($) => $.alignment.entry_failed);
 }
 
 /** className for DialogContent in align mode. The shell (which owns the

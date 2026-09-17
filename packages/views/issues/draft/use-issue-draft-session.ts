@@ -34,6 +34,7 @@ import {
   type IssueDraftStage,
 } from "@multica/core/issue-drafts";
 import { childIssuesOptions } from "@multica/core/issues/queries";
+import { useIssueDraftStore } from "@multica/core/issues/stores";
 import type { IssueDraftPolicy } from "@multica/core/types";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import type {
@@ -215,6 +216,27 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  /**
+   * A first turn the entry panel could not deliver (DENE-422).
+   *
+   * That panel closes the moment a conversation exists, so it cannot say this
+   * itself; it leaves the draft id in the create draft's align slot and this is
+   * the one page the id names. The flag is read into local state and cleared
+   * from the slot in the same pass — what the composer shows must not depend on
+   * a store write that a remount would re-run — and the composer's error slot is
+   * where it belongs, because resending from there is the whole recovery.
+   */
+  const seedFailedDraftId = useIssueDraftStore(
+    (s) => s.draft.align.seedFailedDraftId,
+  );
+  const setAlign = useIssueDraftStore((s) => s.setAlign);
+  const [seedLost, setSeedLost] = useState(false);
+  useEffect(() => {
+    if (seedFailedDraftId !== draftId) return;
+    setSeedLost(true);
+    setAlign({ seedFailedDraftId: undefined });
+  }, [draftId, seedFailedDraftId, setAlign]);
 
   const saveMutation = useSaveIssueDraft(wsId);
   const abandonMutation = useAbandonIssueDraft(wsId);
@@ -448,6 +470,9 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
           created_at: createdAt,
         });
         commitInput?.();
+        // The turn that was lost at the entry point is no longer lost: the
+        // sentence the composer is showing about it has to go with it.
+        setSeedLost(false);
         // The server reports which ids it actually bound. Diff against what we
         // asked for so a silent bind failure is visible here rather than only
         // as an assistant that never mentions the file. Servers that predate
@@ -654,7 +679,10 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
     pending,
     pendingTask: pendingQuery.data,
     sending,
-    error,
+    // One slot, two sources: a turn this page tried to send, and the first turn
+    // the entry panel could not. The user's next action is the same for both —
+    // say it again from the composer below the sentence.
+    error: error ?? (seedLost ? t(($) => $.alignment.seed_lost) : null),
     runtime,
     runtimeOnline,
     switchingRuntime: runtimeMutation.isPending,
@@ -682,6 +710,9 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
       void listQuery.refetch();
       void messagesQuery.refetch();
     },
-    clearError: () => setError(null),
+    clearError: () => {
+      setError(null);
+      setSeedLost(false);
+    },
   };
 }

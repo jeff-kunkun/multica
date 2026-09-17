@@ -50,6 +50,7 @@ export {
   unfinishedIssueDrafts,
 } from "./queries";
 export {
+  IssueDraftSessionUnrecognizedError,
   useAbandonIssueDraft,
   useFinalizeIssueDraft,
   useReopenIssueDraft,
