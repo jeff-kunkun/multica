@@ -32,7 +32,11 @@ import {
   viewStoreSlice,
 } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import type { Project } from "@multica/core/types";
+import type {
+  IssueTableFacetSpec,
+  IssueTableFacetsResponse,
+  Project,
+} from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { FilterChipsBar } from "./filter-chips-bar";
 import { IssueDisplayControls } from "./issues-header";
@@ -71,6 +75,10 @@ function renderToolbar(
     projectScopeFixed?: boolean;
     /** Mirrors an open saved view's query. */
     viewQuery?: Record<string, unknown>;
+    /** Mirrors a paged surface: counts come from the server facets. */
+    facetCountsExact?: boolean;
+    tableFacetCounts?: IssueTableFacetsResponse;
+    onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
   } = {},
 ) {
   setApiInstance({
@@ -90,6 +98,9 @@ function renderToolbar(
         <IssueDisplayControls
           scopedIssues={[]}
           projectScopeFixed={options.projectScopeFixed}
+          facetCountsExact={options.facetCountsExact}
+          tableFacetCounts={options.tableFacetCounts}
+          onTableFacetChange={options.onTableFacetChange}
           viewBaseline={
             options.viewQuery ? baselineFromQuery(options.viewQuery) : undefined
           }
@@ -243,5 +254,45 @@ describe("toolbar project quick filter", () => {
     renderToolbar({ viewQuery: { statusFilters: ["todo"] } });
 
     expect(projectTrigger()).toBeInTheDocument();
+  });
+
+  it("asks the surface for the project facet while it is open", async () => {
+    const onTableFacetChange = vi.fn();
+    renderToolbar({ facetCountsExact: false, onTableFacetChange });
+
+    await openQuickMenu();
+    expect(onTableFacetChange).toHaveBeenCalledWith({ kind: "project" });
+
+    // Closing hands the facet back, exactly like the Filter menu's sub-menu:
+    // paged surfaces only count the facet a visible menu asked for.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(onTableFacetChange).toHaveBeenCalledWith(null));
+  });
+
+  it("badges the projects from the server facets it asked for", async () => {
+    renderToolbar({
+      facetCountsExact: false,
+      tableFacetCounts: {
+        query_fingerprint: "fp",
+        total: 5,
+        facets: [
+          {
+            kind: "project",
+            values: [
+              { key: ALPHA.id, count: 3 },
+              { key: "__none__", count: 2 },
+            ],
+          },
+        ],
+      },
+    });
+
+    await openQuickMenu();
+    expect(screen.getByRole("menuitemcheckbox", { name: /Alpha/ })).toHaveTextContent(
+      "3",
+    );
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: /No project/ }),
+    ).toHaveTextContent("2");
   });
 });

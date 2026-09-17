@@ -626,13 +626,20 @@ function ProjectSubContent({
  * The trigger carries the current selection: nothing selected reads "Project",
  * one project shows its icon and name, several keep the first name and count
  * the rest as `+N`.
+ *
+ * The per-project counts are the server's facets, so opening this menu asks for
+ * the project facet exactly as the Filter menu's project sub-menu does — the
+ * same request, keyed to the same `activeTableFacet`. Without it the badges
+ * would be empty on every paged surface, because those never count client-side.
  */
 function IssueProjectFilterMenu({
   counts,
   noProjectCount,
+  onTableFacetChange,
 }: {
   counts: Map<string, number>;
   noProjectCount: number;
+  onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -663,7 +670,11 @@ function IssueProjectFilterMenu({
       : lead?.title ?? t(($) => $.filters.section_project);
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      onOpenChange={(open) =>
+        onTableFacetChange?.(open ? { kind: "project" } : null)
+      }
+    >
       <Tooltip>
         <DropdownMenuTrigger
           render={
@@ -2128,6 +2139,7 @@ export function IssueDisplayControls({
           <IssueProjectFilterMenu
             counts={counts.project}
             noProjectCount={counts.noProject}
+            onTableFacetChange={onTableFacetChange}
           />
         )}
 
