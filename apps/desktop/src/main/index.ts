@@ -7,6 +7,7 @@ import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { applyFallbackPathDirs } from "./path-fallback";
 import { setupWorkspaceTransfer } from "./workspace-transfer-ipc";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
@@ -112,15 +113,10 @@ const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
 // or any daemon-manager spawn.
 if (process.platform !== "win32") {
   fixPath();
-  // Fallback: prepend common install locations in case fix-path came up
-  // short (broken shell rc, non-interactive $SHELL, missing entries). Safe
-  // to duplicate — PATH lookups short-circuit on first match.
-  const fallbackPaths = [
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    join(homedir(), ".local/bin"),
-  ];
-  process.env.PATH = `${fallbackPaths.join(":")}:${process.env.PATH ?? ""}`;
+  // Fallback padding in case fix-path came up short (broken shell rc,
+  // non-interactive $SHELL, missing entries); it is prepended, so its order
+  // decides which install of an agent CLI wins. See path-fallback.ts.
+  process.env.PATH = applyFallbackPathDirs(process.env.PATH, homedir());
 }
 
 const PROTOCOL = "multica";
