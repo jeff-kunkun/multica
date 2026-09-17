@@ -1063,5 +1063,8 @@
     "stage": "ステージ {{stage}}",
     "empty": "サブタスクはありません",
     "load_failed": "サブタスクを読み込めませんでした"
+  },
+  "parent_issue_badge": {
+    "open": "親タスク {{identifier}} を開く: {{title}}"
   }
 }

@@ -1063,5 +1063,8 @@
     "stage": "阶段 {{stage}}",
     "empty": "暂无子任务",
     "load_failed": "子任务加载失败"
+  },
+  "parent_issue_badge": {
+    "open": "打开父任务 {{identifier}}：{{title}}"
   }
 }

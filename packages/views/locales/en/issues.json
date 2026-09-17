@@ -1099,5 +1099,8 @@
     "stage": "Stage {{stage}}",
     "empty": "No sub-issues",
     "load_failed": "Could not load sub-issues"
+  },
+  "parent_issue_badge": {
+    "open": "Open parent issue {{identifier}}: {{title}}"
   }
 }
