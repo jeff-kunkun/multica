@@ -12,11 +12,13 @@ Cross-environment export of config + chats + tasks, and import into a `kun` serv
 
 ```bash
 multica transfer export --profile <source-login> --workspace <slug> --out <file.zip> [--include config,conversations,attachments[,issues]] [--estimate] [--exclude-archived] [--no-people] [--target <url> [--downgrade]]
-multica transfer import --profile <target-login> --workspace <slug> --in <file.zip> [--dry-run] [--on-conflict fail|overwrite|rename|skip] [--renumber] [--activate-autopilots=false] [--apply-workspace-settings=false] [--apply-issue-prefix] [--auto-bind-runtimes=false]
+multica transfer import --profile <target-login> --workspace <slug> --in <file.zip> [--dry-run] [--on-conflict fail|overwrite|rename|skip] [--renumber] [--activate-autopilots=false] [--apply-workspace-settings=false] [--apply-issue-prefix] [--auto-bind-runtimes=false] [--max-request-bytes 512KB]
 multica transfer bind-runtimes --profile <target-login> --workspace <slug> --bind <agent-id>=<runtime-id> [--bind …]
 ```
 
 `transfer import` options: `--activate-autopilots` (default true — imported automations start triggering), `--apply-workspace-settings` (default true), `--apply-issue-prefix` (default false, but `transfer import` turns it on by itself when the bundle carries the issues group and `--renumber` is not set — see tasks below; destructive), `--auto-bind-runtimes` (default true — see runtime binding below), `--renumber` (default false, see tasks below), `--on-conflict` (default `fail`; the target's own 7 seeded built-in statuses never count as conflicts, so importing into a fresh empty workspace does not 409 on them — a same-name label/agent/skill still does). Only a changed default is worth passing.
+
+`--max-request-bytes` (default 2MB, accepts `512KB` / `2MB` / a plain byte count) caps one request body **on the wire**. The import does not send one request per shard: it packs every request to that budget, gzips the body when the target's `/health` advertises `transfer.accepts_gzip`, and takes the smaller of the flag and the target's `transfer.max_request_bytes`. A target that does not advertise `accepts_gzip` receives raw bodies and is planned by raw size, so the budget holds either way. A request an edge proxy cuts short (522/524/504/408, or a dropped connection) is halved and retried up to three times — every write is keyed by a deterministic id, so a repeated row is a no-op. Lower the flag only when an edge keeps cutting requests short on a slow uplink; the failure names itself `edge_timeout:` and prints the request size and the measured rate.
 
 `transfer export --include issues` is off by default. Turning it on is what makes the bundle `schema_version: 2`, and it prints the one precondition the caller has to meet: the target workspace must have no tasks at all.
 
@@ -62,6 +64,8 @@ All five sit under `/api/workspaces/{id}` and require workspace owner/admin. Age
 | `POST` | `/transfer/issues` | One task shard (issue rows + comment rows + relation rows + the package-wide `refs`). Idempotent by deterministic ids. `finalize: true` backfills the parent pointers, bumps the issue counter and rebuilds subscribers. |
 | `POST` | `/transfer/conversations` | One conversation shard (sessions + messages + refs). Idempotent by deterministic ids. `finalize: true` publishes one workspace chat-list invalidation. |
 | `POST` | `/transfer/attachments` | Multipart: `meta` JSON + optional `file`. Idempotent. |
+
+Every transfer endpoint accepts a `Content-Encoding: gzip` request body and enforces its byte cap on the **decoded** bytes (a gzip bomb is refused with the endpoint's own 413 code; a body declared gzip that is not is a 400 `transfer_bundle_invalid`). `GET /health` advertises this as `transfer.accepts_gzip` plus `transfer.max_request_bytes`; an instance predating the fields simply omits them and senders fall back to uncompressed bodies.
 | `POST` | `/transfer/bind-runtimes` | `{"bindings":[{"agent_id","runtime_id"}]}` → one result per binding. Same gates as the agent editor: the agent must be manageable by the caller and `canUseRuntimeForAgent` must pass, so another member's private runtime is refused. |
 
 Import order: config → issue shards → conversation shards → attachments → a final conversations call with `finalize: true` → a final issues call with `finalize: true`.

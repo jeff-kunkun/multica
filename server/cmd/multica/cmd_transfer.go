@@ -707,6 +707,7 @@ func runTransferImport(cmd *cobra.Command, _ []string) error {
 		// Attachment uploads are the long silent stretch of an import (a real
 		// workspace carries minutes' worth of them), so report each one.
 		progress.reportUploaded(0, len(payload.Attachments))
+		sender.beginStage("attachments", len(payload.Attachments))
 		for i, att := range payload.Attachments {
 			var blob []byte
 			if att.SHA256 != "" {
@@ -887,7 +888,7 @@ func uploadTransferIssueShards(ctx context.Context, sender *transferWireSender, 
 		if i < len(payload.CommentShards) {
 			comments = payload.CommentShards[i]
 		}
-		planner := newTransferIssuesPlanner(sender.chunkLimit(), payload.Manifest.Refs, dry, renumber, shards[i], comments, relationsByShard[i])
+		planner := newTransferIssuesPlanner(sender.chunkLimit(), sender.compresses(), payload.Manifest.Refs, dry, renumber, shards[i], comments, relationsByShard[i])
 		for _, chunk := range planner.plan() {
 			requests = append(requests, issueRequest{shard: i, chunk: chunk.wire(payload.Manifest.Refs, dry, renumber)})
 		}
@@ -1472,7 +1473,7 @@ func uploadTransferConversations(ctx context.Context, sender *transferWireSender
 		if i < len(payload.MessageShards) {
 			messages = payload.MessageShards[i]
 		}
-		planner := newTransferConversationsPlanner(sender.chunkLimit(), payload.Manifest.Refs, dry, payload.SessionShards[i], messages)
+		planner := newTransferConversationsPlanner(sender.chunkLimit(), sender.compresses(), payload.Manifest.Refs, dry, payload.SessionShards[i], messages)
 		chunks = append(chunks, planner.plan()...)
 	}
 	if len(chunks) == 0 {

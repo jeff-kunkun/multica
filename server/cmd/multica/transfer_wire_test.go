@@ -257,7 +257,7 @@ func TestTransferWire_ChunksByCompressedBytesNotRows(t *testing.T) {
 
 	check := func(t *testing.T, rows []service.TransferIssueRow) []transferIssuesChunk {
 		t.Helper()
-		planner := newTransferIssuesPlanner(limit, refs, true, false, rows, nil, nil)
+		planner := newTransferIssuesPlanner(limit, true, refs, true, false, rows, nil, nil)
 		chunks := planner.plan()
 		if len(chunks) == 0 {
 			t.Fatal("planner produced no chunks")
@@ -311,7 +311,7 @@ func TestTransferWire_SplitsOneOversizedTaskByItsComments(t *testing.T) {
 			Content:  pseudoRandomString(i, 600),
 		})
 	}
-	planner := newTransferIssuesPlanner(limit, service.TransferRefs{}, true, false, []service.TransferIssueRow{issue}, comments, nil)
+	planner := newTransferIssuesPlanner(limit, true, service.TransferRefs{}, true, false, []service.TransferIssueRow{issue}, comments, nil)
 	chunks := planner.plan()
 	if len(chunks) < 2 {
 		t.Fatalf("want the oversized task split across requests, got %d chunk(s)", len(chunks))
@@ -376,7 +376,7 @@ func TestTransferWire_HalvesAndRetriesWhenTheEdgeTimesOut(t *testing.T) {
 			Title:    pseudoRandomString(i, 400),
 		})
 	}
-	chunks := newTransferIssuesPlanner(sender.chunkLimit(), service.TransferRefs{}, false, false, rows, nil, nil).plan()
+	chunks := newTransferIssuesPlanner(sender.chunkLimit(), sender.compresses(), service.TransferRefs{}, false, false, rows, nil, nil).plan()
 	if len(chunks) != 1 {
 		t.Fatalf("fixture should plan one oversized request, planned %d", len(chunks))
 	}
@@ -768,4 +768,38 @@ func pseudoRandomBytes(variant, n int) []byte {
 		out[i] = byte(seed >> 24)
 	}
 	return out
+}
+
+// A target that does not advertise accepts_gzip receives the raw bytes, so the
+// budget has to be measured on those. Planning by the compressed size and then
+// sending uncompressed is what put 15x the budget on the wire against exactly
+// the old instance this fallback exists for.
+func TestTransferWire_PlansRawBytesForATargetThatCannotDecodeGzip(t *testing.T) {
+	const limit = 32 << 10
+	refs := service.TransferRefs{}
+	var rows []service.TransferIssueRow
+	for i := 0; i < 400; i++ {
+		rows = append(rows, service.TransferIssueRow{
+			SourceID: fmt.Sprintf("66666666-6666-6666-6666-%012d", i),
+			Number:   int32(i + 1),
+			Title:    strings.Repeat("the quick brown fox jumps over the lazy dog ", 20),
+		})
+	}
+	chunks := newTransferIssuesPlanner(limit, false, refs, true, false, rows, nil, nil).plan()
+	total := 0
+	for i, chunk := range chunks {
+		body := chunk.wire(refs, true, false).Body
+		if len(body) > limit {
+			t.Fatalf("request %d carries %d raw bytes, over the %d budget the target will see", i, len(body), limit)
+		}
+		total += len(chunk.Issues)
+	}
+	if total != len(rows) {
+		t.Fatalf("chunks carry %d rows, want %d", total, len(rows))
+	}
+	// And the same rows still pack into fewer requests when the target can
+	// decode gzip, or the fix would have cost the compression win.
+	if compressed := newTransferIssuesPlanner(limit, true, refs, true, false, rows, nil, nil).plan(); len(compressed) >= len(chunks) {
+		t.Fatalf("a gzip-capable target should need fewer requests: %d vs %d", len(compressed), len(chunks))
+	}
 }
