@@ -107,6 +107,13 @@ type AgentResponse struct {
 	// a specialisation (DENE-301). The tree is at most two levels deep; the
 	// server enforces that, so a non-empty value here is always a base role.
 	ParentAgentID string `json:"parent_agent_id,omitempty"`
+	// RuntimeInherited marks this specialisation as following its base role's
+	// runtime profile (DENE-505): runtime_id, runtime_mode, runtime_config,
+	// model, thinking_level and service_tier stay equal to the base role's and
+	// are re-copied whenever the base role's change. Always false for a base
+	// role — the field reports the stored relationship, never "inherits
+	// nothing".
+	RuntimeInherited bool `json:"runtime_inherited"`
 	// ParentAgentName is the display name of ParentAgentID, so a client can
 	// name the parent without a second request. Populated on the agents list
 	// and on agent detail. Empty for a base role.
@@ -273,6 +280,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		SystemKey:                a.SystemKey.String,
 		SystemInstructions:       systemInstructionsFor(a),
 		ParentAgentID:            uuidToString(a.ParentAgentID),
+		RuntimeInherited:         a.RuntimeInherited,
 		AvatarURL:                h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
 		RuntimeMode:              a.RuntimeMode,
 		RuntimeConfig:            rc,
@@ -478,6 +486,37 @@ func (h *Handler) attachAgentInheritance(ctx context.Context, resp *AgentRespons
 	}
 	resp.InheritedSkills = inherited
 	return nil
+}
+
+// syncInheritedAgentRuntimeProfiles copies a base role's runtime profile onto
+// the specialisations that follow it (DENE-505) and returns the rows that
+// actually changed. One statement, so the copy cannot land halfway.
+//
+// A failure is logged rather than returned: the caller's own write has already
+// committed by the time this runs, so failing the request would tell the user
+// their edit was rejected while the base role keeps it. The children stay on
+// the previous profile until the next base-role edit or the child's own save
+// re-runs this.
+func (h *Handler) syncInheritedAgentRuntimeProfiles(ctx context.Context, parentAgentID pgtype.UUID, r *http.Request) []db.Agent {
+	children, err := h.Queries.SyncInheritedAgentRuntimeProfiles(ctx, parentAgentID)
+	if err != nil {
+		slog.Warn("sync inherited agent runtime profiles failed",
+			append(logger.RequestAttrs(r), "error", err, "parent_agent_id", uuidToString(parentAgentID))...)
+		return nil
+	}
+	return children
+}
+
+// publishAgentUpdate fans one agent row out to the workspace as an
+// agent:updated event. Used for the specialisations a base-role edit cascaded
+// into: their rows changed while the request's actor was editing the base role,
+// and a client that only saw the base role's event would keep painting the old
+// runtime on every child row.
+func (h *Handler) publishAgentUpdate(r *http.Request, agent db.Agent) {
+	wsID := uuidToString(agent.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	resp := h.agentToResponse(agent)
+	h.publish(protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 }
 
 // validateAgentParent enforces the two-level rule for a requested parent.
@@ -1617,6 +1656,15 @@ type CreateAgentRequest struct {
 	// (DENE-301). Empty creates a base role. The target must be a base role in
 	// the same workspace; a specialisation cannot be specialised in turn.
 	ParentAgentID string `json:"parent_agent_id"`
+	// RuntimeInherited makes the new specialisation follow its base role's
+	// runtime profile (DENE-505). Omitted with a parent means "follow": that is
+	// the default for a specialisation, so runtime_id may then be omitted
+	// entirely and any runtime fields sent alongside are not used — the child
+	// takes the base role's. Explicit false opts out, and then this endpoint
+	// behaves exactly as it did before DENE-505 (runtime_id required, model /
+	// thinking_level / runtime_config as given). Setting it true without a
+	// parent_agent_id is a 400.
+	RuntimeInherited *bool `json:"runtime_inherited"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -1718,7 +1766,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxAgentDescriptionLength))
 		return
 	}
-	if req.RuntimeID == "" {
+	// A base role must name its runtime. A specialisation may omit it and
+	// follow its base role's runtime instead (DENE-505); whether that is what
+	// this request means is decided below, once the base role resolves.
+	if req.RuntimeID == "" && req.ParentAgentID == "" {
 		writeError(w, http.StatusBadRequest, "runtime_id is required")
 		return
 	}
@@ -1735,10 +1786,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
-	if !ok {
-		return
-	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
 		return
@@ -1755,49 +1802,127 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, permErr.Error())
 		return
 	}
-	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-		ID:          runtimeUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid runtime_id")
-		return
+
+	// Two-level specialisation (DENE-301). An empty/absent parent_agent_id
+	// creates a base role; a non-empty one must resolve to a base role in this
+	// workspace, which is what stops a specialisation from being specialised in
+	// turn. A create has no children yet, so the "parent cannot itself become a
+	// child" arm of the rule cannot fire here.
+	//
+	// Resolved BEFORE the runtime (DENE-505) because inheriting the base role's
+	// runtime is defined in terms of this row — there is no runtime_id to look
+	// up when the caller asked to follow.
+	var parentAgent db.Agent
+	var parentAgentUUID pgtype.UUID
+	if req.ParentAgentID != "" {
+		parentActorType, parentActorID := h.resolveActor(r, ownerID, workspaceID)
+		parent, reject := h.validateAgentParent(r.Context(), workspaceID, req.ParentAgentID, "", parentActorType, parentActorID)
+		if reject != "" {
+			writeError(w, http.StatusBadRequest, reject)
+			return
+		}
+		parentAgent = parent
+		parentAgentUUID = parent.ID
 	}
 
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
 		return
 	}
-	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
-		return
-	}
 
-	// thinking_level validation: fixed-enum providers reject unknown literals;
-	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
-	// Pi has a fixed token universe and a daemon-discovered per-model subset.
-	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
-	// combination-invalid values are logged and omitted from the invocation.
-	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
-		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
-		return
-	}
-	// For ACP-catalog providers the provider name is not the capability answer
-	// — this runtime's own discovered catalog is. Keeps a Hermes Agent user's
-	// clear 400 instead of accepting a level the daemon would later drop.
-	if req.ThinkingLevel != "" {
-		switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
-		case acpEffortAbsent:
-			writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
-			return
-		case acpEffortUnknown:
-			writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(runtime.Provider))
+	// Runtime inheritance (DENE-505): a specialisation follows its base role's
+	// runtime profile by default. `runtime_inherited: false` is the explicit
+	// opt-out and the only thing that makes the request's own runtime fields
+	// authoritative; a base role can never inherit, so asking for it there is a
+	// 400 rather than a silently ignored field.
+	inheritRuntime := parentAgentUUID.Valid
+	if req.RuntimeInherited != nil {
+		if *req.RuntimeInherited && !parentAgentUUID.Valid {
+			writeError(w, http.StatusBadRequest, "runtime_inherited needs a parent_agent_id: only a specialisation can follow a base role's runtime")
 			return
 		}
+		inheritRuntime = *req.RuntimeInherited
 	}
-	if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))
-		return
+
+	// A specialisation may only follow its base role onto a runtime this member
+	// can actually use. Dispatch refuses a private runtime whose owner is not
+	// the agent's owner (see the daemon claim), so inheriting onto one would
+	// create an agent that can never run. The caller's own runtime_id is then
+	// the honest fallback — the pre-DENE-505 behaviour for attaching to another
+	// member's base role — and without one there is nothing to bind to.
+	inheritedRuntimeStatus := ""
+	inheritedRuntimeProvider := ""
+	if inheritRuntime && parentAgent.RuntimeID.Valid {
+		if parentRuntime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+			ID:          parentAgent.RuntimeID,
+			WorkspaceID: wsUUID,
+		}); err == nil {
+			if !canUseRuntimeForAgent(member, parentRuntime) {
+				if req.RuntimeID == "" {
+					writeError(w, http.StatusForbidden, "this base role runs on a runtime that is private to its owner; pass runtime_id with runtime_inherited=false to give this agent its own runtime")
+					return
+				}
+				slog.Info("create agent: base role runtime is not usable by the caller; creating with the requested runtime instead",
+					append(logger.RequestAttrs(r), "parent_agent_id", req.ParentAgentID)...)
+				inheritRuntime = false
+			} else {
+				inheritedRuntimeStatus = parentRuntime.Status
+				inheritedRuntimeProvider = parentRuntime.Provider
+			}
+		}
+	}
+
+	// The resolved runtime of an agent that OWNS its configuration. Left zero
+	// for an inherited specialisation: its profile comes from the base role.
+	var runtime db.AgentRuntime
+	if !inheritRuntime {
+		if req.RuntimeID == "" {
+			writeError(w, http.StatusBadRequest, "runtime_id is required unless the agent inherits its base role's runtime")
+			return
+		}
+		runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
+		if !ok {
+			return
+		}
+		runtime, err = h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+			ID:          runtimeUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
+			return
+		}
+
+		// thinking_level validation: fixed-enum providers reject unknown literals;
+		// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
+		// Pi has a fixed token universe and a daemon-discovered per-model subset.
+		// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
+		// combination-invalid values are logged and omitted from the invocation.
+		if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
+			writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
+			return
+		}
+		// For ACP-catalog providers the provider name is not the capability answer
+		// — this runtime's own discovered catalog is. Keeps a Hermes Agent user's
+		// clear 400 instead of accepting a level the daemon would later drop.
+		if req.ThinkingLevel != "" {
+			switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
+			case acpEffortAbsent:
+				writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
+				return
+			case acpEffortUnknown:
+				writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(runtime.Provider))
+				return
+			}
+		}
+		if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))
+			return
+		}
 	}
 
 	// Probe workspace agent count BEFORE the insert so the funnel has a
@@ -1866,20 +1991,24 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Two-level specialisation (DENE-301). An empty/absent parent_agent_id
-	// creates a base role; a non-empty one must resolve to a base role in this
-	// workspace, which is what stops a specialisation from being specialised in
-	// turn. A create has no children yet, so the "parent cannot itself become a
-	// child" arm of the rule cannot fire here.
-	var parentAgentID pgtype.UUID
-	if req.ParentAgentID != "" {
-		parentActorType, parentActorID := h.resolveActor(r, ownerID, workspaceID)
-		parent, reject := h.validateAgentParent(r.Context(), workspaceID, req.ParentAgentID, "", parentActorType, parentActorID)
-		if reject != "" {
-			writeError(w, http.StatusBadRequest, reject)
-			return
-		}
-		parentAgentID = parent.ID
+	// The profile this row is born with. An inherited specialisation takes every
+	// runtime-scoped value from its base role instead of the request: the
+	// caller asked to follow, so a runtime_id / model / thinking_level /
+	// runtime_config in the same payload is not an override — `runtime_inherited:
+	// false` is how a caller asks for those to be its own (DENE-505).
+	createdRuntimeMode := runtime.RuntimeMode
+	createdRuntimeID := runtime.ID
+	createdRuntimeConfig := rc
+	createdModel := pgtype.Text{String: req.Model, Valid: req.Model != ""}
+	createdThinkingLevel := pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""}
+	createdServiceTier := pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""}
+	if inheritRuntime {
+		createdRuntimeMode = parentAgent.RuntimeMode
+		createdRuntimeID = parentAgent.RuntimeID
+		createdRuntimeConfig = parentAgent.RuntimeConfig
+		createdModel = parentAgent.Model
+		createdThinkingLevel = parentAgent.ThinkingLevel
+		createdServiceTier = parentAgent.ServiceTier
 	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -1896,9 +2025,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Description:              req.Description,
 		Instructions:             req.Instructions,
 		AvatarUrl:                avatarURL,
-		RuntimeMode:              runtime.RuntimeMode,
-		RuntimeConfig:            rc,
-		RuntimeID:                runtime.ID,
+		RuntimeMode:              createdRuntimeMode,
+		RuntimeConfig:            createdRuntimeConfig,
+		RuntimeID:                createdRuntimeID,
 		Visibility:               perm.legacyVisibility(),
 		PermissionMode:           perm.mode,
 		MaxConcurrentTasks:       req.MaxConcurrentTasks,
@@ -1906,12 +2035,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		CustomEnv:                ce,
 		CustomArgs:               ca,
 		McpConfig:                mc,
-		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
-		ThinkingLevel:            pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
-		ServiceTier:              pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
+		Model:                    createdModel,
+		ThinkingLevel:            createdThinkingLevel,
+		ServiceTier:              createdServiceTier,
 		ConversationStarters:     sp,
 		ComposioToolkitAllowlist: allowlist,
-		ParentAgentID:            parentAgentID,
+		ParentAgentID:            parentAgentUUID,
+		RuntimeInherited:         pgtype.Bool{Bool: inheritRuntime, Valid: true},
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -1944,7 +2074,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID)...)
 
-	if runtime.Status == "online" {
+	// An inherited specialisation binds the base role's runtime, so its liveness
+	// is that runtime's, not the (absent) request runtime's.
+	createdRuntimeStatus := runtime.Status
+	if inheritRuntime {
+		createdRuntimeStatus = inheritedRuntimeStatus
+	}
+	if createdRuntimeStatus == "online" {
 		h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)
 		created, _ = h.Queries.GetAgent(r.Context(), created.ID)
 	}
@@ -1969,12 +2105,19 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
+	// Reported for the profile the agent actually got: an inherited
+	// specialisation has no request runtime of its own, and reporting the empty
+	// zero value would make the funnel look like a runtime-less create.
+	createdRuntimeProvider := runtime.Provider
+	if inheritRuntime {
+		createdRuntimeProvider = inheritedRuntimeProvider
+	}
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(
 		ownerID,
 		workspaceID,
 		uuidToString(created.ID),
-		runtime.Provider,
-		runtime.RuntimeMode,
+		createdRuntimeProvider,
+		createdRuntimeMode,
 		req.Template,
 		isFirstAgent,
 	))
@@ -2053,6 +2196,16 @@ type UpdateAgentRequest struct {
 	// Setting it on an agent that already has children is refused: that would
 	// make this row a middle level of a three-level tree.
 	ParentAgentID *string `json:"parent_agent_id"`
+	// RuntimeInherited switches a specialisation between following its base
+	// role's runtime profile and owning one (DENE-505). Omitted preserves the
+	// stored value. TRUE re-copies the base role's runtime_id / runtime_mode /
+	// runtime_config / model / thinking_level / service_tier immediately, and
+	// later base-role edits keep re-copying them; it is refused on a base role
+	// and in the same request as a runtime field, because "follow" and "set my
+	// own runtime" contradict each other. FALSE is the opt-out and is lossless:
+	// the agent keeps the values it was already running with, exactly like a
+	// solidified prompt.
+	RuntimeInherited *bool `json:"runtime_inherited"`
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -2303,6 +2456,53 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	params := db.UpdateAgentParams{
 		ID: existing.ID,
 	}
+
+	// Runtime inheritance (DENE-505). Everything is decided before the first
+	// write: what the flag becomes, whether the request contradicts itself, and
+	// which row the copy is taken from afterwards.
+	//
+	// A request that touches a runtime field cannot also mean "follow the base
+	// role" — the two say opposite things about the same columns — so it is a
+	// 400 rather than a silent pick. That is deliberately strict: rewriting a
+	// following child's runtime by accident is the drift this feature exists to
+	// stop, and the message names the one field that resolves it.
+	runtimeFieldsTouched := false
+	for _, field := range []string{"runtime_id", "runtime_config", "model", "thinking_level", "service_tier"} {
+		if _, ok := rawFields[field]; ok {
+			runtimeFieldsTouched = true
+			break
+		}
+	}
+	// The parent this update leaves behind: the requested one when the request
+	// touched parent_agent_id, the stored one otherwise.
+	parentAfter := existing.ParentAgentID
+	if sentParent {
+		parentAfter = parentAgentID
+	}
+	inheritRuntime := existing.RuntimeInherited
+	if req.RuntimeInherited != nil {
+		if *req.RuntimeInherited && !parentAfter.Valid {
+			writeError(w, http.StatusBadRequest, "runtime_inherited needs a parent_agent_id: only a specialisation can follow a base role's runtime")
+			return
+		}
+		if *req.RuntimeInherited && runtimeFieldsTouched {
+			writeError(w, http.StatusBadRequest, "runtime_inherited=true follows the base role's runtime; drop the runtime fields from this request, or pass runtime_inherited=false to configure this agent's own runtime")
+			return
+		}
+		inheritRuntime = *req.RuntimeInherited
+		params.RuntimeInherited = pgtype.Bool{Bool: *req.RuntimeInherited, Valid: true}
+	}
+	if runtimeFieldsTouched && inheritRuntime {
+		writeError(w, http.StatusBadRequest, "this agent follows its base role's runtime; pass runtime_inherited=false to give it its own runtime configuration")
+		return
+	}
+	if !parentAfter.Valid && inheritRuntime {
+		// Detaching. SetAgentParentAgent clears the flag with the parent, and the
+		// materialised profile stays behind, so the agent keeps exactly what it
+		// was running with.
+		inheritRuntime = false
+	}
+
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: *req.Name, Valid: true}
 	}
@@ -2676,14 +2876,40 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// response reflects both in one payload.
 	if sentParent {
 		updated, err = h.Queries.SetAgentParentAgent(r.Context(), db.SetAgentParentAgentParams{
-			ID:            updated.ID,
-			ParentAgentID: parentAgentID,
+			ID:               updated.ID,
+			ParentAgentID:    parentAgentID,
+			RuntimeInherited: params.RuntimeInherited,
 		})
 		if err != nil {
 			slog.Warn("update agent: set parent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update agent parent")
 			return
 		}
+	}
+
+	// Materialise the copy the follow flag promises (DENE-505): a specialisation
+	// that follows re-reads its base role, a base role re-writes the
+	// specialisations that follow it. Never both — the two branches are
+	// exclusive by construction, because a row with a parent is not a base role.
+	//
+	// Run after the parent/flag writes so the copy is taken from the row this
+	// request just committed. Only a touched runtime field can have moved a base
+	// role's profile, so an unrelated edit (a rename, a prompt) does not walk
+	// the children.
+	var syncedChildren []db.Agent
+	switch {
+	case updated.RuntimeInherited && updated.ParentAgentID.Valid:
+		syncedChildren = h.syncInheritedAgentRuntimeProfiles(r.Context(), updated.ParentAgentID, r)
+		// The agent being edited can be one of the rows rewritten above when it
+		// just flipped to following (or was re-parented onto a base role); the
+		// response must carry the copy, not the pre-copy row.
+		for _, child := range syncedChildren {
+			if child.ID == updated.ID {
+				updated = child
+			}
+		}
+	case !updated.ParentAgentID.Valid && runtimeFieldsTouched:
+		syncedChildren = h.syncInheritedAgentRuntimeProfiles(r.Context(), updated.ID, r)
 	}
 
 	// Invocation targets (MUL-3963): replace wholesale when the owner touched
@@ -2695,6 +2921,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to update invocation targets: "+err.Error())
 			return
 		}
+	}
+
+	// Fan the cascaded rows out before the actor's own response: every one of
+	// them is a committed change other clients have to see, and a client that
+	// only receives the base role's event would keep painting the old runtime on
+	// each child row until its next full load.
+	for _, child := range syncedChildren {
+		if child.ID == updated.ID {
+			continue
+		}
+		h.publishAgentUpdate(r, child)
 	}
 
 	resp := h.agentToResponse(updated)
@@ -3014,6 +3251,18 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("restore agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to restore agent")
 		return
+	}
+
+	// A restored specialisation that follows its base role rejoins the tree and
+	// takes the profile the base role has NOW: archived children are skipped by
+	// the cascade, so the copy it went to sleep with can be several base-role
+	// edits old (DENE-505).
+	if restored.RuntimeInherited && restored.ParentAgentID.Valid {
+		for _, child := range h.syncInheritedAgentRuntimeProfiles(r.Context(), restored.ParentAgentID, r) {
+			if child.ID == restored.ID {
+				restored = child
+			}
+		}
 	}
 
 	wsID := uuidToString(restored.WorkspaceID)

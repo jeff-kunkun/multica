@@ -56,6 +56,7 @@ type Agent struct {
 	SwitchableModels      []byte      `json:"switchable_models"`
 	AutoRetryEnabled      bool        `json:"auto_retry_enabled"`
 	ParentAgentID         pgtype.UUID `json:"parent_agent_id"`
+	RuntimeInherited      bool        `json:"runtime_inherited"`
 }
 
 type AgentBuilderDraft struct {

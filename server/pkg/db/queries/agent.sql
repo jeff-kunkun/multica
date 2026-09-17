@@ -66,12 +66,18 @@ FOR SHARE;
 -- parent_agent_id is NULL for a base role and points at one for a
 -- specialisation (DENE-301). Depth is not a column: the handler refuses a
 -- parent that is itself a child, so the tree can only ever be two levels deep.
+--
+-- runtime_inherited (DENE-505) is TRUE only for a specialisation that follows
+-- its base role's runtime profile. The handler has already resolved that
+-- profile into the runtime_* / model / thinking_level / service_tier
+-- parameters, so the row is born holding the values it will run with.
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     service_tier, conversation_starters,
-    composio_toolkit_allowlist, permission_mode, parent_agent_id
+    composio_toolkit_allowlist, permission_mode, parent_agent_id,
+    runtime_inherited
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
@@ -79,7 +85,8 @@ INSERT INTO agent (
     $17, COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
     sqlc.narg('composio_toolkit_allowlist')::text[],
     COALESCE(sqlc.narg('permission_mode'), 'private'),
-    sqlc.narg('parent_agent_id')::uuid
+    sqlc.narg('parent_agent_id')::uuid,
+    COALESCE(sqlc.narg('runtime_inherited')::boolean, FALSE)
 )
 RETURNING *;
 
@@ -199,6 +206,11 @@ UPDATE agent SET
     -- "turned off" the same way thinking_level's two-query pattern does for
     -- nullable text. A bool column cannot be cleared to NULL.
     auto_retry_enabled = COALESCE(sqlc.narg('auto_retry_enabled'), auto_retry_enabled),
+    -- Same tri-state for runtime inheritance (DENE-505): NULL leaves the flag
+    -- alone, FALSE switches a specialisation to its own runtime configuration,
+    -- TRUE makes it follow its base role again. Setting it back to "not
+    -- applicable" belongs to SetAgentParentAgent, which owns the detach.
+    runtime_inherited = COALESCE(sqlc.narg('runtime_inherited')::boolean, runtime_inherited),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -211,10 +223,60 @@ RETURNING *;
 -- calling this; the statement itself is unconditional so the same query serves
 -- the create path's initial bind, a re-parent, and the solidify transaction's
 -- detach.
+--
+-- runtime_inherited (DENE-505) rides along because it is only meaningful while
+-- parent_agent_id is set: detaching a specialisation clears the flag in the
+-- same statement that clears the parent, so no code path can leave a base role
+-- claiming it follows one. A caller that is not changing the flag passes NULL
+-- and keeps whatever the row had.
 UPDATE agent
-SET parent_agent_id = sqlc.narg('parent_agent_id')::uuid, updated_at = now()
+SET parent_agent_id = sqlc.narg('parent_agent_id')::uuid,
+    runtime_inherited = CASE
+        WHEN sqlc.narg('parent_agent_id')::uuid IS NULL THEN FALSE
+        ELSE COALESCE(sqlc.narg('runtime_inherited')::boolean, runtime_inherited)
+    END,
+    updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: SyncInheritedAgentRuntimeProfiles :many
+-- Copies a base role's runtime profile onto every specialisation that follows
+-- it (DENE-505), and is the single writer of that copy. One statement rather
+-- than a per-field diff: the whole profile is derived from one row, so
+-- re-deriving it is idempotent and cannot drift halfway.
+--
+-- Scope is every inherited child of @parent_agent_id, which covers the four
+-- moments the copy can go stale — the base role's own runtime edit, a
+-- specialisation flipping to "follow", a re-parent onto another base role, and
+-- a restore from the archive. Callers pass the FINAL parent id of the row they
+-- changed.
+--
+-- The DISTINCT guard keeps an unchanged child out of the write set: callers
+-- broadcast an agent:updated event per returned row, and an event that carries
+-- nothing new is noise for every client in the workspace.
+--
+-- Archived specialisations are skipped: they do not run, so they must not hold
+-- up a base role's edit. A restore re-runs this for its parent.
+UPDATE agent AS child
+SET runtime_id = parent.runtime_id,
+    runtime_mode = parent.runtime_mode,
+    runtime_config = parent.runtime_config,
+    model = parent.model,
+    thinking_level = parent.thinking_level,
+    service_tier = parent.service_tier,
+    updated_at = now()
+FROM agent AS parent
+WHERE child.parent_agent_id = parent.id
+  AND child.runtime_inherited
+  AND child.archived_at IS NULL
+  AND parent.id = @parent_agent_id
+  AND (child.runtime_id IS DISTINCT FROM parent.runtime_id
+    OR child.runtime_mode IS DISTINCT FROM parent.runtime_mode
+    OR child.runtime_config IS DISTINCT FROM parent.runtime_config
+    OR child.model IS DISTINCT FROM parent.model
+    OR child.thinking_level IS DISTINCT FROM parent.thinking_level
+    OR child.service_tier IS DISTINCT FROM parent.service_tier)
+RETURNING child.*;
 
 -- name: ListAgentChildren :many
 -- Base-role children for the delete guard and the solidify transaction
