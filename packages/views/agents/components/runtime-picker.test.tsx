@@ -77,6 +77,29 @@ function trigger(container: HTMLElement): HTMLButtonElement {
   return element;
 }
 
+describe("RuntimePicker pill variant", () => {
+  // DENE-443 put this picker on the create dialog's alignment toolbar, where a
+  // labelled full-width form row does not fit. The chrome differs; the LIST
+  // must not — a second rendering of the machine rows is how two pickers drift.
+  it("drops the label row and still selects from the same list", () => {
+    const { container, onSelect } = renderPicker({ variant: "pill" });
+
+    expect(container.querySelector('[data-slot="popover-trigger"]')?.textContent)
+      .toContain("Claude (a.local)");
+    // The form row's label is the pill's own name, so it is not repeated.
+    expect(container.textContent).not.toContain("Runtime");
+
+    fireEvent.click(trigger(container));
+    const rows = document.querySelectorAll<HTMLButtonElement>(
+      '[data-slot="popover-content"] button',
+    );
+    expect(rows.length).toBe(RUNTIMES.length);
+    fireEvent.click(rows[rows.length - 1]!);
+
+    expect(onSelect).toHaveBeenCalledWith("rt-b");
+  });
+});
+
 describe("RuntimePicker (creation studio)", () => {
   beforeEach(() => cleanup());
   afterEach(() => cleanup());

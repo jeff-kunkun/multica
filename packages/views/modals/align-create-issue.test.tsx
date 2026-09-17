@@ -303,6 +303,18 @@ const ONLINE_RUNTIME = {
   status: "online",
   owner_id: "user-1",
   provider: "claude",
+  device_info: "host-a",
+} as unknown as RuntimeDevice;
+
+// A second online machine, so the toolbar picker has something to choose
+// BETWEEN — the whole point of DENE-443's second item.
+const SECOND_ONLINE_RUNTIME = {
+  id: "rt-2",
+  name: "Codex on laptop",
+  status: "online",
+  owner_id: "user-1",
+  provider: "codex",
+  device_info: "host-b",
 } as unknown as RuntimeDevice;
 
 function renderPanel(props: {
@@ -422,6 +434,25 @@ describe("AlignCreatePanel", () => {
       expect(mocks.push).toHaveBeenCalledWith("/acme/issues/new/sess-new"),
     );
     expect(mocks.close).toHaveBeenCalled();
+  });
+
+  it("runs the alignment on the machine picked in the toolbar", async () => {
+    // Which CLI the alignment runs on used to be decided silently and could
+    // only be changed after the fact, on the detail page (DENE-443).
+    mocks.runtimes = [ONLINE_RUNTIME, SECOND_ONLINE_RUNTIME];
+    renderPanel();
+    await typeRequest("add dark mode");
+
+    // Seeded with the machine the face would have chosen on its own, so the
+    // picker never starts empty.
+    const picker = await screen.findByRole("button", { name: /Local/ });
+    await userEvent.click(picker);
+    await userEvent.click(await screen.findByText("Codex on laptop"));
+
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.runtime_id).toBe("rt-2");
   });
 
   it("still opens the conversation when the first turn could not be sent", async () => {

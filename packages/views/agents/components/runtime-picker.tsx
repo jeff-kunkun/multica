@@ -15,6 +15,7 @@ import {
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
 import { Label } from "@multica/ui/components/ui/label";
+import { PillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
 import {
   buildRuntimeMachines,
@@ -37,6 +38,7 @@ export function RuntimePicker({
   selectedRuntimeId,
   onSelect,
   disabled = false,
+  variant = "field",
 }: {
   runtimes: RuntimeDevice[];
   runtimesLoading?: boolean;
@@ -47,6 +49,16 @@ export function RuntimePicker({
   /** Blocks opening the picker while the selection cannot be honoured yet
    *  (e.g. a builder reply or a runtime rebind is in flight). */
   disabled?: boolean;
+  /**
+   * How the trigger reads. `field` is the labelled, full-width form row the
+   * agent forms and the draft preview panel use. `pill` is the same picker on
+   * a create toolbar, where it sits beside the project pill and must read as
+   * one of them: no label row (the pill's own icon and name are the label),
+   * and the mine/all toggle moves inside the popup, which is the only place a
+   * pill has room for it. The LIST is shared either way — a second rendering
+   * of the machine rows is how two pickers drift apart (DENE-443).
+   */
+  variant?: "field" | "pill";
 }) {
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
@@ -127,44 +139,51 @@ export function RuntimePicker({
     onSelect(firstUsable?.id ?? "");
   };
 
+  const pill = variant === "pill";
+
+  // These are not just a view filter: changing tab re-selects the first usable
+  // runtime in the new list, so they are a second way to fire onSelect and must
+  // honour `disabled` alongside the trigger. Built once and placed by variant
+  // — above the trigger in a form row, inside the popup on a toolbar pill.
+  const filterToggle = hasOtherRuntimes ? (
+    <div className="flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-0.5">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => handleFilterChange("mine")}
+        className={`rounded-xs px-2 py-0.5 text-caption font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
+          filter === "mine"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        {t(($) => $.create_dialog.runtime_filter_mine)}
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => handleFilterChange("all")}
+        className={`rounded-xs px-2 py-0.5 text-caption font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
+          filter === "all"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        {t(($) => $.create_dialog.runtime_filter_all)}
+      </button>
+    </div>
+  ) : null;
+
   return (
-    <div className="flex flex-col min-w-0">
-      <div className="flex h-6 items-center justify-between">
-        <Label className="text-caption text-muted-foreground">
-          {t(($) => $.create_dialog.runtime_label)}
-        </Label>
-        {hasOtherRuntimes && (
-          // These are not just a view filter: changing tab re-selects the first
-          // usable runtime in the new list, so they are a second way to fire
-          // onSelect and must honour `disabled` alongside the trigger.
-          <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => handleFilterChange("mine")}
-              className={`rounded-xs px-2 py-0.5 text-caption font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
-                filter === "mine"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t(($) => $.create_dialog.runtime_filter_mine)}
-            </button>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => handleFilterChange("all")}
-              className={`rounded-xs px-2 py-0.5 text-caption font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
-                filter === "all"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t(($) => $.create_dialog.runtime_filter_all)}
-            </button>
-          </div>
-        )}
-      </div>
+    <div className={pill ? "inline-flex min-w-0" : "flex flex-col min-w-0"}>
+      {pill ? null : (
+        <div className="flex h-6 items-center justify-between">
+          <Label className="text-caption text-muted-foreground">
+            {t(($) => $.create_dialog.runtime_label)}
+          </Label>
+          {filterToggle}
+        </div>
+      )}
       <Popover
         open={open && !disabled}
         onOpenChange={(next) => {
@@ -173,6 +192,35 @@ export function RuntimePicker({
           if (!next) setSearch("");
         }}
       >
+        {pill ? (
+          // Same trigger contract, toolbar chrome: one line, the machine name
+          // truncating before its siblings, and the owner/device second line
+          // dropped — a pill has no room for it and the popup still shows it on
+          // every row.
+          <PopoverTrigger
+            disabled={disabled || (runtimes.length === 0 && !runtimesLoading)}
+            render={<PillButton />}
+            title={selectedRuntime ? runtimeDisplayName(selectedRuntime) : undefined}
+          >
+            {runtimesLoading ? (
+              <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+            ) : selectedRuntime ? (
+              <ProviderLogo
+                provider={selectedRuntime.provider}
+                className="size-3.5 shrink-0"
+              />
+            ) : (
+              <Cloud className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <span className="truncate">
+              {runtimesLoading
+                ? t(($) => $.create_dialog.runtime_loading)
+                : selectedRuntime
+                  ? runtimeDisplayName(selectedRuntime)
+                  : t(($) => $.create_dialog.runtime_none)}
+            </span>
+          </PopoverTrigger>
+        ) : (
         <PopoverTrigger
           disabled={disabled || (runtimes.length === 0 && !runtimesLoading)}
           className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
@@ -215,10 +263,23 @@ export function RuntimePicker({
             }`}
           />
         </PopoverTrigger>
+        )}
         <PopoverContent
           align="start"
-          className="w-[var(--anchor-width)] p-1 flex flex-col max-h-72"
+          className={
+            pill
+              ? "w-72 p-1 flex flex-col max-h-72"
+              : "w-[var(--anchor-width)] p-1 flex flex-col max-h-72"
+          }
         >
+          {pill && filterToggle ? (
+            <div className="mb-1 flex shrink-0 items-center justify-between gap-2 px-1">
+              <span className="truncate text-caption text-muted-foreground">
+                {t(($) => $.create_dialog.runtime_label)}
+              </span>
+              {filterToggle}
+            </div>
+          ) : null}
           {showSearch && (
             <div className="relative mb-1 shrink-0">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />

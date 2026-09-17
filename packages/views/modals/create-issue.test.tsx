@@ -35,6 +35,7 @@ const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
 const mockListProperties = vi.hoisted(() => vi.fn());
+const mockListIssueDrafts = vi.hoisted(() => vi.fn());
 const mockSetIssueProperty = vi.hoisted(() => vi.fn());
 const mockSetShared = vi.hoisted(() => vi.fn());
 const mockSetManual = vi.hoisted(() => vi.fn());
@@ -330,6 +331,7 @@ vi.mock("@multica/core/api", async () => {
   return {
     api: {
       createCommentSubIssue: mockCreateCommentSubIssue,
+      listIssueDrafts: mockListIssueDrafts,
       listProperties: mockListProperties,
       setIssueProperty: mockSetIssueProperty,
       uploadFile: mockApiUploadFile,
@@ -505,10 +507,16 @@ vi.mock("../projects/components/project-picker", () => ({
 }));
 
 vi.mock("@multica/ui/components/ui/dialog", () => ({
-  Dialog: ({ children }: { children: React.ReactNode }) => <div data-testid="dialog-root">{children}</div>,
+  // `open` is honoured (defaulting to open) so a nested dialog this panel
+  // hosts — the unfinished-alignments list — is not rendered before it is
+  // asked for.
+  Dialog: ({ open, children }: { open?: boolean; children: React.ReactNode }) =>
+    open === false ? null : <div data-testid="dialog-root">{children}</div>,
   DialogContent: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
   ),
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
   ),
@@ -656,6 +664,7 @@ describe("CreateIssueModal", () => {
       next.manual.assigneeId = mockDraftStore.lastAssigneeId;
       mockDraftStore.draft = next;
     });
+    mockListIssueDrafts.mockResolvedValue([]);
     mockApiUploadFile.mockResolvedValue({
       id: "11111111-2222-3333-4444-555555555555",
       workspace_id: "ws-test",
@@ -1094,6 +1103,75 @@ describe("CreateIssueModal", () => {
     });
     // Actor rides the store, not the carry; no parent here → carry is null.
     expect(onSwitchMode.mock.calls[0]?.[0]).toBeNull();
+  });
+
+  // DENE-443: the unfinished-alignment banner used to hang off the align face
+  // only, so the toolbar's own "switch to New issue" hid the single route back
+  // into a conversation already in progress.
+  it("keeps unfinished alignments reachable from the manual face", async () => {
+    mockListIssueDrafts.mockResolvedValue([
+      {
+        chat_session_id: "sess-1",
+        workspace_id: "ws-test",
+        status: "draft",
+        revision: 1,
+        draft: { title: "Dark mode", description: "", status: "", priority: "" },
+        issue_id: null,
+        policy: { key: "question", version: "1", guided: true },
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        title: "Align a new issue",
+        runtime_id: "rt-1",
+        last_message_content: "",
+        last_message_role: "",
+        last_message_at: "",
+      },
+      // A confirmed alignment is a RECORD, not work to resume, so the count
+      // the banner shows must be the unfinished one only.
+      {
+        chat_session_id: "sess-2",
+        workspace_id: "ws-test",
+        status: "completed",
+        revision: 4,
+        draft: { title: "Shipped", description: "", status: "", priority: "" },
+        issue_id: "issue-9",
+        policy: { key: "question", version: "1", guided: true },
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        title: "Align a new issue",
+        runtime_id: "rt-1",
+        last_message_content: "",
+        last_message_role: "",
+        last_message_at: "",
+      },
+    ]);
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByText(/You have 1 unfinished alignment/),
+    ).toBeTruthy();
+  });
+
+  it("shows no alignment banner on the manual face when nothing is unfinished", async () => {
+    // The precondition for putting it here at all: a user who never aligns
+    // must see no new chrome on the form they do use.
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    await screen.findByPlaceholderText("Issue title");
+    expect(screen.queryByText(/unfinished alignment/)).toBeNull();
   });
 
   // DENE-370: "align first" is the create-issue shell's third face. Switching

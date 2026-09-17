@@ -4,6 +4,7 @@ import { issueStatusCategory } from "@multica/core/issues";
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
+import { UnfinishedIssueDraftsBanner } from "../issues/draft/unfinished-issue-drafts";
 import {
   AlertTriangle,
   ArrowDown,
@@ -63,6 +64,10 @@ import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-previe
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import {
+  issueDraftListOptions,
+  unfinishedIssueDrafts,
+} from "@multica/core/issue-drafts";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
@@ -330,6 +335,14 @@ export function ManualCreatePanel({
   const wsId = useWorkspaceId();
   const { categoryOf: draftStatusCategory } = useIssueStatuses(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
+  // An alignment left half-finished is reachable from BOTH faces of this
+  // dialog (DENE-443). It used to hang off the align face only, so switching
+  // here — the switch this toolbar offers — hid the one route back to a
+  // conversation already in progress. Same query, same filter, same resume as
+  // over there; with nothing unfinished the banner renders nothing, so a user
+  // who never aligns sees no new chrome.
+  const { data: issueDrafts = [] } = useQuery(issueDraftListOptions(wsId));
+  const unfinishedDrafts = unfinishedIssueDrafts(issueDrafts);
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
@@ -963,6 +976,19 @@ export function ManualCreatePanel({
                 </Tooltip>
               </div>
             </div>
+
+            {unfinishedDrafts.length > 0 && (
+              <div className="px-5 shrink-0">
+                <UnfinishedIssueDraftsBanner
+                  wsId={wsId}
+                  drafts={unfinishedDrafts}
+                  onResume={(draftId) => {
+                    onClose();
+                    router.push(p.newIssueDraft(draftId));
+                  }}
+                />
+              </div>
+            )}
 
             {/* Title */}
             <div className="px-5 pb-2 shrink-0">
