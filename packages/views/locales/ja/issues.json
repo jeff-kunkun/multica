@@ -472,7 +472,6 @@
     "alignment_continue_failed": "このすり合わせを再開できませんでした。すでに存在しない可能性があります。",
     "alignment_origin": "この課題を作ったすり合わせを見る",
     "alignment_start": "この課題からすり合わせる",
-    "alignment_start_pending": "開いています…",
     "alignment_started_by_another": "この作業にはすでにすり合わせがあります。"
   },
   "timeline": {

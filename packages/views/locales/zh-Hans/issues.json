@@ -472,7 +472,6 @@
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
     "subscription_update_failed": "无法更新订阅状态，请重试。",
     "alignment_start": "就这张任务发起对齐",
-    "alignment_start_pending": "正在打开…",
     "alignment_started_by_another": "这件事已经有一场对齐在进行。"
   },
   "timeline": {
