@@ -54,6 +54,10 @@ type RoutePattern = readonly string[];
 
 const WORKSPACE_ROUTES: readonly RoutePattern[] = [
   ["issues"],
+  // The alignment conversation before an issue exists. Its `:draftId` is a
+  // chat session id, so it has to be templated like any other id rather than
+  // reaching a diagnostic payload raw.
+  ["issues", "new", ":draftId"],
   ["issues", ":id"],
   ["projects"],
   ["projects", ":id"],

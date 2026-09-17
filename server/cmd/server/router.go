@@ -499,6 +499,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.UpdateStore = handler.NewRedisUpdateStore(rdb)
 		h.ModelListStore = handler.NewRedisModelListStore(rdb)
 		h.ModelCatalogCache = handler.NewRedisModelCatalogCache(rdb)
+		h.ProviderPresetStore = handler.NewRedisProviderPresetStore(rdb)
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 		h.LivenessStore = handler.NewRedisLivenessStore(rdb)
@@ -1463,6 +1464,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/update/{updateId}/result", h.ReportUpdateResult)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
+		r.Post("/runtimes/{runtimeId}/provider-presets/{requestId}/result", h.ReportProviderPresetResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/{requestId}/result", h.ReportLocalSkillListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/import/{requestId}/result", h.ReportLocalSkillImportResult)
 
@@ -1612,6 +1614,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/", h.UpdateWorkspace)
 					r.Get("/config/export", h.ExportWorkspaceConfig)
 					r.Post("/config/import", h.ImportWorkspaceConfig)
+					r.Post("/transfer/config", h.ImportWorkspaceTransferConfig)
+					r.Post("/transfer/issues", h.ImportWorkspaceTransferIssues)
+					r.Post("/transfer/conversations", h.ImportWorkspaceTransferConversations)
+					r.Post("/transfer/attachments", h.ImportWorkspaceTransferAttachment)
+					r.Post("/transfer/bind-runtimes", h.BindWorkspaceTransferRuntimes)
 					r.Post("/members", h.CreateInvitation)
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
@@ -1982,6 +1989,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					r.Get("/members", h.ListProjectMembers)
+					r.Post("/members", h.AddProjectMember)
+					r.Delete("/members/{memberId}", h.RemoveProjectMember)
 				})
 			})
 
@@ -2095,6 +2105,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateAgent)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
+					// Bakes the base role's prompt into this specialisation and
+					// detaches it, which is what makes the base role archivable
+					// again (DENE-301). Not a route older servers know, so a
+					// client that needs it must be talking to a server that
+					// shipped the two-level model.
+					r.Post("/solidify", h.SolidifyAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/dingtalk/groups", h.ListDingTalkGroupsForAgent)
@@ -2135,6 +2151,31 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Autosaved configuration, including edits the user has typed
 				// but not sent. Read back through the list above.
 				r.Put("/{sessionId}/draft", h.SaveAgentBuilderDraft)
+			})
+
+			// Requirement alignment before an issue exists. Creating an issue
+			// enqueues agent work, so this flow is the one place a request can
+			// be discussed without anything being created: everything here
+			// writes only the draft, and POST /finalize is the single
+			// transition that produces an issue.
+			r.Route("/api/issue-drafts", func(r chi.Router) {
+				// Alignment conversations are invisible to every chat list
+				// (their carrier is kind='system'), so this is the only route
+				// back to one. `?status=all` widens it from "the ones I can
+				// still act on" to "every alignment I have", which is what the
+				// chat sidebar's alignment records read back (DENE-371).
+				r.Get("/", h.ListIssueDrafts)
+				r.Post("/", h.CreateIssueDraftSession)
+				r.Route("/{sessionId}", func(r chi.Router) {
+					r.Patch("/", h.UpdateIssueDraft)
+					r.Patch("/runtime", h.SwitchIssueDraftRuntime)
+					// Guided questions, or plain dialogue. Rewrites the
+					// carrier's prompt and records which policy version is
+					// running; the draft's content is untouched.
+					r.Patch("/policy", h.SwitchIssueDraftPolicy)
+					r.Post("/finalize", h.FinalizeIssueDraft)
+					r.Post("/abandon", h.AbandonIssueDraft)
+				})
 			})
 
 			// Skills
@@ -2182,6 +2223,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/update/{updateId}", h.GetUpdate)
 					r.Post("/models", h.InitiateListModels)
 					r.Get("/models/{requestId}", h.GetModelListRequest)
+					r.Post("/provider-presets", h.InitiateProviderPresetAction)
+					r.Get("/provider-presets/{requestId}", h.GetProviderPresetRequest)
 					r.Post("/local-skills", h.InitiateListLocalSkills)
 					r.Get("/local-skills/{requestId}", h.GetLocalSkillListRequest)
 					r.Post("/local-skills/import", h.InitiateImportLocalSkill)

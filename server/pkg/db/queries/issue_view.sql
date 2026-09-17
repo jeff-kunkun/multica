@@ -7,14 +7,25 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: ListIssueViewsForUser :many
--- One surface's selector list: the caller's own views plus workspace-shared
--- ones, for a single (scope_type, scope_id) container. scope_id is NULL for
--- workspace and my scopes, so compare NULL-safely.
+-- One surface's selector list: the caller's own views, workspace-shared
+-- ones, and project-shared views whose scope_id is in the caller's project
+-- set. The handler loads that set once (memberships + lead projects, or
+-- every project for owner/admin) and passes it in — do not JOIN here, or
+-- the list row-multiplies. scope_id is NULL for workspace and my scopes,
+-- so compare NULL-safely.
 SELECT * FROM issue_view
 WHERE workspace_id = $1
   AND scope_type = $2
   AND scope_id IS NOT DISTINCT FROM sqlc.narg('scope_id')::uuid
-  AND (owner_id = $3 OR visibility = 'workspace')
+  AND (
+    owner_id = $3
+    OR visibility = 'workspace'
+    OR (
+      visibility = 'project'
+      AND scope_type = 'project'
+      AND scope_id = ANY(sqlc.arg('project_ids')::uuid[])
+    )
+  )
 ORDER BY created_at ASC
 -- Hard response cap: the bar/panel are not built for more than this, and
 -- every row carries full query/display JSON. The create quota keeps real

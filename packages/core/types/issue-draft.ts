@@ -1,0 +1,159 @@
+/**
+ * Requirement alignment: the conversation that happens BEFORE an issue exists.
+ *
+ * Creating an issue enqueues agent work, so a misunderstood request starts
+ * executing before anyone has agreed what it means. A draft is that agreement
+ * in progress — a hidden conversation plus a server-owned structured object —
+ * and nothing is created until `finalize`.
+ */
+
+/** Where an alignment conversation has got to. */
+export type IssueDraftStatus = "draft" | "ready" | "completed" | "abandoned";
+
+/**
+ * One sub-issue of an alignment. `key` is this sub-issue's name WITHIN this
+ * draft: the preview panel mints one when a row first enters the draft, and
+ * every later save carries it back unchanged. It is not a UUID — the server
+ * hashes (conversation, key) into the sub-issue's real identity, so a client
+ * cannot name an identity that belongs to someone else's alignment, and the
+ * same key resolves to the same issue on a repeated confirm.
+ */
+export interface IssueDraftChild {
+  key: string;
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  assignee_type?: string | null;
+  assignee_id?: string | null;
+  /** The stage this sub-issue belongs to, 1-based. Absent/null means "no
+   *  stage", i.e. the implicit single stage. Stage 1 starts on confirm; later
+   *  stages are parked in Backlog until someone promotes them. */
+  stage?: number | null;
+  /**
+   * What kind of work this is ("backend implementation"), as the carrier
+   * describes it.
+   *
+   * Client-owned: the server never reads it. The carrier has no workspace
+   * roster, so it names the work instead of a person, and the preview panel
+   * shows the hint beside the assignee picker until the user has picked the
+   * real assignee.
+   */
+  assignee_hint?: string | null;
+}
+
+/**
+ * The structured issue a draft has arrived at. Only these fields are read by
+ * the server at finalize; anything else the client stores alongside them is
+ * preserved untouched.
+ *
+ * The eight flat fields describe the group's ROOT — the parent issue. A request
+ * that turned out to be several pieces of work puts them in `children`, and the
+ * confirm creates the whole group in one transaction. An absent or empty
+ * `children` is not a legacy shape to be tolerated: it is a group with a single
+ * node, which is exactly what a lone issue always was.
+ */
+export interface IssueDraftPayload {
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  assignee_type?: string | null;
+  assignee_id?: string | null;
+  project_id?: string | null;
+  parent_issue_id?: string | null;
+  children?: IssueDraftChild[];
+}
+
+/**
+ * How the carrier is asking: which alignment policy this conversation runs
+ * under, and which version of that policy's prompt it was given.
+ *
+ * `version` is the audit half — it names the prompt that produced the draft, and
+ * it is read back from the draft row, so a finished alignment still reports the
+ * version it ran after the registry moved on. `key` is empty when the backend
+ * predates policies: nothing here can be switched then, and the page hides the
+ * control rather than offering a switch that cannot land.
+ */
+export interface IssueDraftPolicy {
+  key: string;
+  version: string;
+  /** Whether this policy asks the user questions — the guided `question`
+   *  policy does, `conversation` does not. The server decides, so the page
+   *  never hardcodes which key is which. */
+  guided: boolean;
+}
+
+/** One alignment draft as the server owns it. */
+export interface IssueDraft {
+  /** The alignment conversation. It is also the draft's identity — one
+   *  conversation has exactly one draft. */
+  chat_session_id: string;
+  workspace_id: string;
+  status: IssueDraftStatus;
+  /** Optimistic-concurrency token. Every save bumps it, and both save and
+   *  finalize refuse a token that is not the one the user was looking at. */
+  revision: number;
+  draft: IssueDraftPayload;
+  /** The issue this draft became. Present only once status is `completed`,
+   *  and stable across repeated confirms. */
+  issue_id?: string | null;
+  /** The policy and prompt version in force for this conversation. */
+  policy: IssueDraftPolicy;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A newly opened alignment conversation and its empty draft. */
+export interface IssueDraftSession {
+  session_id: string;
+  /** The hidden carrier that executes this conversation. */
+  agent_id: string;
+  /** Where this conversation actually runs. Seed the runtime picker from it so
+   *  it can never disagree with what answers the next message. */
+  runtime_id: string;
+  draft: IssueDraft;
+}
+
+/** One unfinished alignment conversation, as listed for resuming. */
+export interface IssueDraftSummary extends IssueDraft {
+  title: string;
+  runtime_id: string;
+  last_message_content: string;
+  last_message_role: string;
+  last_message_at: string;
+}
+
+/** One issue a confirm created, enough to render it as a row. */
+export interface IssueDraftCreatedIssue {
+  id: string;
+  /** MUL-123 — what a person reads, not the UUID. */
+  identifier: string;
+  title: string;
+  status: string;
+  stage?: number | null;
+  assignee_type?: string | null;
+  assignee_id?: string | null;
+  parent_issue_id?: string | null;
+}
+
+/**
+ * Result of confirming a draft.
+ *
+ * `issue_id` is the same value for every repeat of the same confirm — the
+ * protocol creates at most one group per alignment — and it stays the answer to
+ * "where does the user go now": it is the group's root (parent) issue.
+ * `issues` is the whole group, root first, and is absent from a backend that
+ * predates groups; callers that need the group degrade to `[issue_id]`, which
+ * is exactly what a group with no sub-issues is.
+ */
+export interface IssueDraftFinalizeResult {
+  draft: IssueDraft;
+  issue_id: string;
+  issues?: IssueDraftCreatedIssue[];
+}
+
+/** Result of rebinding a live alignment conversation to another runtime. */
+export interface IssueDraftRuntimeSwitch {
+  runtime_id: string;
+}
