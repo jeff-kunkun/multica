@@ -33,8 +33,9 @@ import {
 } from "../editor";
 import { useT } from "../i18n";
 import { UnfinishedIssueDraftsBanner } from "../issues/draft/unfinished-issue-drafts";
-import { AppLink, useNavigation } from "../navigation";
+import { ClearablePillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { AppLink, useNavigation } from "../navigation";
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
 
 /**
@@ -49,36 +50,26 @@ import { useIssueCreateUploads } from "./use-issue-create-uploads";
  * desktop tab.
  *
  * What IS shared with "New issue" is everything about the input: the same
- * `ContentEditor`, the same upload pool (`draft.shared.attachments`), and the
- * same draft store, so a file or a body typed on either face survives a switch
- * to the other. So is the default PROJECT — the alignment files a whole group,
- * and a group started from a project page has to land in that project rather
- * than under "no project". Which machine runs the alignment is still decided FOR
- * the user — the page's preview panel is where that choice is visible and
- * changeable afterwards. The single case that stops the conversation from
- * starting at all — nothing usable to run on, or the chosen machine offline — is
- * stated outright instead of being left for the user to infer from a disabled
- * button.
+ * `ContentEditor`, the same upload pool (`draft.shared.attachments`), the same
+ * optional project (`draft.shared.projectId`), and the same draft store, so a
+ * file, a body or a project chosen on either face survives a switch to the
+ * other. Which machine runs the alignment is still decided FOR the user
+ * — the page's preview panel is where that choice is visible and changeable
+ * afterwards. The single case that stops the conversation from starting at all
+ * — nothing usable to run on, or the chosen machine offline — is stated
+ * outright instead of being left for the user to infer from a disabled button.
  */
 export function AlignCreatePanel({
   onClose,
   onSwitchMode,
-  data,
 }: {
   onClose: () => void;
   /** Called with the carry payload for the panel this face switches back to. */
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
-  /**
-   * The modal's seed payload — the same channel the manual and agent faces read
-   * their defaults from. Only `project_id` is meaningful here: priority and due
-   * date describe a filing decision the conversation is there to make, while
-   * the project is the one default the user arrived with (the project page they
-   * opened the dialog from) and would lose silently otherwise.
-   */
-  data?: Record<string, unknown> | null;
 }) {
   const { t } = useT("issues");
   const { t: tModals } = useT("modals");
+  const { t: tProjects } = useT("projects");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
@@ -88,6 +79,12 @@ export function AlignCreatePanel({
   const setAlign = useIssueDraftStore((s) => s.setAlign);
   const setShared = useIssueDraftStore((s) => s.setShared);
   const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
+
+  // The project is the SHARED slot's, exactly as it is on the manual face: it
+  // is a property of the issue, not of the form that described it, so a project
+  // picked here (or there) is what the whole group is filed under. Optional by
+  // design — no project is a legitimate choice and the picker says so.
+  const projectId = draft.shared.projectId;
 
   // The alignment request lives in the draft's own `align` slot, exactly like
   // the agent prompt: the manual face assist-inits it when it switches here,
@@ -99,24 +96,6 @@ export function AlignCreatePanel({
   const editorRef = useRef<ContentEditorRef>(null);
   const [hasContent, setHasContent] = useState(initialRequest.trim().length > 0);
   const [runtimeId, setRuntimeId] = useState("");
-  // The default project, read from the same two places the manual face reads it
-  // (create-issue.tsx): the modal's own seed first, then the shared create
-  // draft. The second is how a switch from the manual face carries its pick —
-  // `switchToAlign` commits the local project there before switching, and the
-  // carry channel stays reserved for the parent context it cannot persist.
-  const [projectId, setProjectId] = useState<string | null>(() => {
-    if (data && "project_id" in data) {
-      return (data.project_id as string | null) ?? null;
-    }
-    return draft.shared.projectId ?? null;
-  });
-
-  /** Written through to the shared draft so a switch back to the manual face —
-   *  which seeds its own project from there — keeps the same one. */
-  const commitProject = (next: string | null) => {
-    setProjectId(next);
-    setShared({ projectId: next ?? undefined });
-  };
 
   const draftsQuery = useQuery(issueDraftListOptions(wsId));
   const runtimesQuery = useQuery(runtimeListOptions(wsId));
@@ -226,8 +205,11 @@ export function AlignCreatePanel({
       result = await start.mutateAsync({
         runtimeId: selectedRuntime.id,
         request,
-        projectId,
         attachmentIds: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
+        // Stored on the draft at creation, so the whole group the conversation
+        // settles on is filed under it — a project chosen here is not a display
+        // preference the page reads back later.
+        projectId,
       });
     } catch {
       // The refusal is already on screen — `start.isError` renders the server's
@@ -302,21 +284,6 @@ export function AlignCreatePanel({
           {isDragOver && <FileDropOverlay />}
         </div>
 
-        {/* The one filing field this face asks for. Everything else the group
-            needs (title, status, priority, sub-issues) is what the conversation
-            is for, but the project is context the user already has: starting
-            from a project page and landing in "no project" is the surprise this
-            removes. The alignment page's preview can still change it. */}
-        <div className="mt-3 flex items-center gap-2">
-          <span className="text-caption text-muted-foreground">
-            {t(($) => $.alignment.field_project)}
-          </span>
-          <ProjectPicker
-            projectId={projectId}
-            onUpdate={(updates) => commitProject(updates.project_id ?? null)}
-          />
-        </div>
-
         {!runtimesLoading && !hasUsableRuntime ? (
           <p className="mt-4 text-body text-muted-foreground">
             {t(($) => $.alignment.entry_no_runtime)}
@@ -359,11 +326,27 @@ export function AlignCreatePanel({
       </div>
 
       <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-        <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+        {/* The attach + project pair: both are properties of the issue being
+            filed, not of the request, so they stay on the toolbar row rather
+            than in front of the one thing this face actually asks for
+            (DENE-367). `min-w-0` lets the project pill shrink first when the
+            row is tight — its own chrome caps it at 14rem either way. */}
+        <div className="flex min-h-7 min-w-0 items-center gap-2 sm:mr-auto">
           <FileUploadButton
             size="sm"
             multiple
             onSelect={(file) => editorRef.current?.uploadFile(file)}
+          />
+          <ProjectPicker
+            projectId={projectId ?? null}
+            onUpdate={(updates) => setShared({ projectId: updates.project_id ?? undefined })}
+            triggerRender={
+              <ClearablePillButton
+                onClear={projectId ? () => setShared({ projectId: undefined }) : undefined}
+                clearLabel={tProjects(($) => $.picker.clear_aria)}
+              />
+            }
+            align="start"
           />
         </div>
         {/* The way back to filing this as an issue. The body stays in the

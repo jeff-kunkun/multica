@@ -186,17 +186,15 @@ function CreateIssueDialogBody({
             setIsExpanded={setIsExpanded}
           />
         ) : mode === "align" ? (
-          // The modal's seeds reach this face too, because one of them is
-          // context the conversation cannot invent: the project the user
-          // arrived with (a project page opens the dialog with `project_id`).
-          // The rest — priority, due date, parent — still describe a filing
-          // decision the alignment is there to make, and the face reads none of
-          // them. On a switch INTO this mode the payload is the parent context
-          // alone (see `switchToAlign`), which is why the project also rides
-          // the shared draft rather than only this channel.
+          // No `data`: the alignment face seeds from the shared draft rather
+          // than from the modal's payload. The project is the one seed that
+          // crosses over — the manual face commits it to `draft.shared` on the
+          // way out, so opening this dialog from a project page and switching
+          // to alignment files the whole group under that project. Priority,
+          // due date and parent still do not apply: the conversation decides
+          // its own group, and none of the three has a field on this face.
           <AlignCreatePanel
             onClose={onClose}
-            data={effectiveData}
             // Hands the untouched payload back on the way out. The alignment
             // face reads none of it, but the manual face's parent context is
             // per-invocation and NOT persisted in the draft store, so dropping

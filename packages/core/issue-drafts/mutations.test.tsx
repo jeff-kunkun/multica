@@ -106,7 +106,13 @@ describe("useStartIssueDraft", () => {
     expect(sendChatMessage.mock.calls[0]![2]).toBeUndefined();
   });
 
-  it("hands the chosen project to the server with the seed", async () => {
+  /**
+   * DENE-423: a project chosen at the entry point is stored on the draft at
+   * creation, because the server files the whole group under whatever the root
+   * node carries. It is never shown to the carrier — the turn still carries the
+   * same four fields — so the project has to survive in the stored draft alone.
+   */
+  it("stores the entry point's project on the draft it creates", async () => {
     const { result } = renderHook(() => useStartIssueDraft(WORKSPACE_ID), {
       wrapper: createWrapper(queryClient),
     });
@@ -117,15 +123,20 @@ describe("useStartIssueDraft", () => {
       projectId: "proj-1",
     });
 
+    expect(createIssueDraftSession).toHaveBeenCalledTimes(1);
     const input = createIssueDraftSession.mock.calls[0]![0] as {
-      draft?: { project_id?: string };
+      draft: { project_id?: string; description: string };
     };
-    expect(input.draft?.project_id).toBe("proj-1");
+    expect(input.draft.project_id).toBe("proj-1");
+    expect(input.draft.description).toBe("add dark mode");
+
+    // The carrier has no project list and is not asked to guess one: the first
+    // turn must not carry the field it was never told about.
+    await waitFor(() => expect(sendChatMessage).toHaveBeenCalledTimes(1));
+    expect(sendChatMessage.mock.calls[0]![1] as string).not.toContain("proj-1");
   });
 
-  it("seeds no project when none was chosen", async () => {
-    // "No project" is the absence of the field, not a null one — the same shape
-    // every other create surface sends.
+  it("leaves the project absent when none was chosen", async () => {
     const { result } = renderHook(() => useStartIssueDraft(WORKSPACE_ID), {
       wrapper: createWrapper(queryClient),
     });
@@ -133,8 +144,10 @@ describe("useStartIssueDraft", () => {
     await result.current.mutateAsync({ runtimeId: "rt-1", request: "add dark mode" });
 
     const input = createIssueDraftSession.mock.calls[0]![0] as {
-      draft?: Record<string, unknown>;
+      draft: Record<string, unknown>;
     };
+    // Absent rather than empty: "no project" is the field being missing, and an
+    // empty string reads as a project named "".
     expect(input.draft).not.toHaveProperty("project_id");
   });
 

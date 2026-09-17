@@ -961,6 +961,7 @@
     "parent_label": "父任务",
     "group_title": "拆出的子任务",
     "group_hint": "上面这些字段属于父任务。下面的子任务会跟它一起创建，按各自的阶段顺序推进。",
+    "group_project_inherited": "子任务跟随父任务的项目。",
     "child_label": "子任务 {{n}}",
     "child_title": "子任务 {{n}} 的标题",
     "child_starts_now": "会立刻开跑",

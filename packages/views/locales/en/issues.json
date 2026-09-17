@@ -992,6 +992,7 @@
     "parent_label": "Parent issue",
     "group_title": "Sub-issues",
     "group_hint": "The fields above are the parent. Each sub-issue below is created together with it, in the order its stage gives.",
+    "group_project_inherited": "Sub-issues are filed under the parent's project.",
     "child_label": "Sub-issue {{n}}",
     "child_title": "Sub-issue {{n}} title",
     "child_starts_now": "Runs immediately",

@@ -42,7 +42,7 @@ Export reports the session walk and downloaded attachment bodies; import reports
 
 A `--dry-run` conflict 409 carries the whole import report next to `error`/`code`, which is why the CLI keeps the full error body for `/transfer/*` instead of its usual 4 KiB cap.
 
-If the target returns 404 for `/transfer/*`, the CLI reports `target_unsupported` — the target must be a `kun` instance.
+If the target returns 404 for `/transfer/*`, the CLI reports `target_unsupported` — the target must be a `kun` instance. If it returns 400 `transfer_bundle_version_unsupported`, the CLI reports `target_outdated`: the target has the routes but its build predates the V3 bundle reader, so a `schema_version: 2` bundle (one carrying the `issues` group) is unreadable there. The fix is on the target — upgrade it, or re-export without `issues` for a `schema_version: 1` bundle.
 
 ## Server endpoints
 

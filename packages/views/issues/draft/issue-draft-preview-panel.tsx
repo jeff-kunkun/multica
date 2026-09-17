@@ -46,19 +46,20 @@ import { useT } from "../../i18n";
 /**
  * The right-hand column: exactly what pressing "confirm and create" will write.
  *
- * The parent fields the server reads at finalize are the ones shown here, and
- * they are editable — a conversation is a good way to arrive at a draft and a
- * bad way to fix a typo in it. Everything is local until "save", so the preview
+ * The fields the server reads at finalize are the fields shown here, and they
+ * are editable — a conversation is a good way to arrive at a draft and a bad way
+ * to fix a typo in it. The project belongs to that set for the same reason the
+ * assignee does: the carrier is never told about either, so if the panel did not
+ * offer it, nothing could. Everything is local until "save", so the preview
  * never races the carrier's own revisions into the server one keystroke at a
  * time.
  *
- * Those fields describe the group's PARENT, the project included: the server
- * reads it off the root and back-fills every child from it. Since DENE-411 the
- * same conversation can settle on a parent plus sub-issues, so the panel also
- * edits that list — title, stage, assignee, or deleting a row — and states,
- * before anyone presses confirm, what that confirm will actually start. That
- * last part is not decoration: a confirm can enqueue several agents at once, and
- * the stage rule (stage 1 runs, later stages wait in Backlog) is only knowable
+ * The four fields describe the group's PARENT. Since DENE-411 the same
+ * conversation can settle on a parent plus sub-issues, so the panel also edits
+ * that list — title, stage, assignee, or deleting a row — and states, before
+ * anyone presses confirm, what that confirm will actually start. That last part
+ * is not decoration: a confirm can enqueue several agents at once, and the
+ * stage rule (stage 1 runs, later stages wait in Backlog) is only knowable
  * here.
  */
 export function IssueDraftPreviewPanel({
@@ -395,18 +396,19 @@ export function IssueDraftPreviewPanel({
                   }
                 />
               </div>
-              <div className="flex items-center gap-2">
+              {/* The project is one of the fields the carrier is never told
+                  about (it has no project list and is not asked to guess one),
+                  which is exactly why the panel owns it. Root only: a
+                  sub-issue's project is backfilled from the parent inside the
+                  create transaction, so a control here would be a promise the
+                  confirm overwrites. */}
+              <div className="flex min-w-0 items-center gap-2">
                 <span className="text-caption text-muted-foreground">
                   {t(($) => $.alignment.field_project)}
                 </span>
-                {/* The project the whole group is filed under: the server reads
-                    it off the parent and back-fills every child from it, so it
-                    is a parent-level field like the two beside it — and it is
-                    editable here for the same reason they are, because the
-                    entry face can only offer the context the user arrived
-                    with. */}
                 <ProjectPicker
                   projectId={value.project_id ?? null}
+                  disabled={parentLocked}
                   onUpdate={(updates) =>
                     setEditing({ ...value, project_id: updates.project_id ?? null })
                   }
@@ -502,6 +504,12 @@ export function IssueDraftPreviewPanel({
                     {isContinuation
                       ? t(($) => $.alignment.new_group_hint)
                       : t(($) => $.alignment.group_hint)}
+                  </p>
+                  {/* A sub-issue has no project control of its own, and silently
+                      inheriting one is the kind of thing a preview should say
+                      rather than leave to be discovered after the confirm. */}
+                  <p className="mt-1 text-caption text-muted-foreground">
+                    {t(($) => $.alignment.group_project_inherited)}
                   </p>
                 </div>
                 {newChildren.length === 0 ? (
@@ -915,12 +923,10 @@ function sameDraft(a: IssueDraftPayload, b: IssueDraftPayload): boolean {
     a.description === b.description &&
     a.status === b.status &&
     a.priority === b.priority &&
-    // Part of the payload the confirm reads, so editing it is an edit like any
-    // other: without this the panel would report itself clean, the confirm
-    // would create from the SAVED draft and the project someone just picked
-    // would be dropped without a word. `null` and `undefined` are the same
-    // answer here ("no project") — they differ only in how the payload was
-    // written, not in what gets created.
+    // The project is edited here like any other field. Without it the panel
+    // would report itself clean after a project change, and the next carrier
+    // reply would be adopted straight over the edit — silently reverting a
+    // choice the user just made.
     (a.project_id ?? null) === (b.project_id ?? null) &&
     // Editing the group is an edit to the draft like any other: without this
     // the panel would report itself clean, the session would fold the carrier's

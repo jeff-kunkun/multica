@@ -76,19 +76,21 @@ export function useStartIssueDraft(wsId: string) {
       /** What the user already typed at the entry point. */
       request: string;
       /**
-       * The project the group should be filed under. Stored in the seed so the
-       * carrier knows about it from the first turn and the confirm has it even
-       * if nobody edits the preview; absent means "no project", the same as it
-       * does on every other create surface.
-       */
-      projectId?: string | null;
-      /**
        * Attachments the request references. The draft does not exist yet when
        * they were uploaded, so they were bound to no owner; sending their ids
        * with the first turn is what attaches them to it. Same transport as any
        * other chat turn (DENE-369).
        */
       attachmentIds?: string[];
+      /**
+       * The project the whole group is filed under, when the user picked one at
+       * the entry point. Stored on the draft at creation rather than sent to the
+       * carrier: the carrier has no project list and is never asked to guess
+       * one, so this is the client-owned field the preview panel can still
+       * change afterwards (`mergeIssueDraftPayload` preserves what the reply
+       * never mentions).
+       */
+      projectId?: string;
     }): Promise<StartIssueDraftResult> => {
       const request = input.request.trim();
       const session = await api.createIssueDraftSession({
@@ -320,23 +322,18 @@ export function useSwitchIssueDraftPolicy(wsId: string) {
   });
 }
 
-/**
- * The idea, kept server-side from the first moment so a lost turn loses nothing.
- *
- * The project rides along because the conversation is what decides everything
- * else: the server files the whole group under the draft's project (children
- * are back-filled from their parent in `CreateGroup`), so leaving it out of the
- * seed files a group that was started from a project page under "no project".
- */
+/** The idea, kept server-side from the first moment so a lost turn loses nothing. */
 function seedDraft(
   request: string,
-  projectId?: string | null,
+  projectId?: string,
 ): Partial<IssueDraftPayload> {
   return {
     title: "",
     description: request,
     status: "",
     priority: "",
+    // Only when there is one: the draft's "no project" state is the field being
+    // absent, and writing an empty string would address a project named "".
     ...(projectId ? { project_id: projectId } : {}),
   };
 }

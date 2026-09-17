@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -11,6 +11,7 @@ import enCommon from "../locales/en/common.json";
 import enIssues from "../locales/en/issues.json";
 import enModals from "../locales/en/modals.json";
 import enEditor from "../locales/en/editor.json";
+import enProjects from "../locales/en/projects.json";
 import { AlignCreatePanel } from "./align-create-issue";
 
 /**
@@ -45,7 +46,6 @@ const mocks = vi.hoisted(() => ({
   setShared: vi.fn(),
   setActiveMode: vi.fn(),
   // What a click on the stubbed project picker selects (null = "No project").
-  projectPick: "proj-1" as string | null,
 }));
 
 vi.mock("@multica/core/api", async () => {
@@ -102,10 +102,33 @@ const draftStore = {
   setActiveMode: mocks.setActiveMode,
 };
 
+// The real store is a zustand subscription, so a write made through a picker
+// re-renders the face that reads it. The mock has to do the same or a spec
+// could never observe the picker's own update: it would assert against the
+// render that preceded the click.
+const draftStoreListeners = new Set<() => void>();
+let draftStoreRevision = 0;
+function subscribeDraftStore(listener: () => void) {
+  draftStoreListeners.add(listener);
+  return () => {
+    draftStoreListeners.delete(listener);
+  };
+}
+function getDraftStoreRevision() {
+  return draftStoreRevision;
+}
+function writeDraftStore(next: typeof draftStore.draft) {
+  draftStore.draft = next;
+  draftStoreRevision += 1;
+  draftStoreListeners.forEach((listener) => listener());
+}
+
 vi.mock("@multica/core/issues/stores", () => ({
   useIssueDraftStore: Object.assign(
-    (selector?: (state: typeof draftStore) => unknown) =>
-      selector ? selector(draftStore) : draftStore,
+    (selector?: (state: typeof draftStore) => unknown) => {
+      useSyncExternalStore(subscribeDraftStore, getDraftStoreRevision);
+      return selector ? selector(draftStore) : draftStore;
+    },
     { getState: () => draftStore },
   ),
 }));
@@ -121,6 +144,28 @@ vi.mock("../navigation", () => ({
   }),
   AppLink: ({ href, children }: { href: string; children: React.ReactNode }) => (
     <a href={href}>{children}</a>
+  ),
+}));
+
+// The project picker is a real component with its own suite; this face's
+// contract is the WIRING around it — which draft slot the choice lands in, and
+// what the first turn carries.
+vi.mock("../projects/components/project-picker", () => ({
+  ProjectPicker: ({
+    projectId,
+    onUpdate,
+  }: {
+    projectId: string | null;
+    onUpdate: (updates: { project_id?: string | null }) => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="project-picker"
+      data-project-id={projectId ?? "none"}
+      onClick={() => onUpdate({ project_id: "proj-1" })}
+    >
+      Choose project
+    </button>
   ),
 }));
 
@@ -245,28 +290,14 @@ vi.mock("../issues/draft/unfinished-issue-drafts", () => ({
     ) : null,
 }));
 
-// The real picker needs a project list this suite does not seed; what matters
-// here is the wiring — the value it is shown, and what its answer does to the
-// seed draft and the create payload (DENE-425).
-vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: ({
-    projectId,
-    onUpdate,
-  }: {
-    projectId: string | null;
-    onUpdate: (u: { project_id: string | null }) => void;
-  }) => (
-    <button
-      type="button"
-      onClick={() => onUpdate({ project_id: mocks.projectPick })}
-    >
-      project-picker:{String(projectId)}
-    </button>
-  ),
-}));
-
 const TEST_RESOURCES = {
-  en: { common: enCommon, issues: enIssues, modals: enModals, editor: enEditor },
+  en: {
+    common: enCommon,
+    issues: enIssues,
+    modals: enModals,
+    editor: enEditor,
+    projects: enProjects,
+  },
 };
 
 const ONLINE_RUNTIME = {
@@ -280,7 +311,6 @@ const ONLINE_RUNTIME = {
 function renderPanel(props: {
   onClose?: () => void;
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
-  data?: Record<string, unknown> | null;
 } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -291,7 +321,6 @@ function renderPanel(props: {
         <AlignCreatePanel
           onClose={props.onClose ?? mocks.close}
           onSwitchMode={props.onSwitchMode}
-          data={props.data}
         />
       </I18nProvider>
     </QueryClientProvider>,
@@ -361,12 +390,17 @@ beforeEach(() => {
     },
   });
   mocks.sendChatMessage.mockResolvedValue({ message_id: "msg-1", task_id: "task-1" });
-  mocks.projectPick = "proj-1";
   draftStore.draft.shared.attachments = [];
   draftStore.draft.shared.projectId = undefined;
   draftStore.draft.align.request = "";
   mocks.setAlign.mockImplementation((patch: { request?: string }) => {
     draftStore.draft.align = { ...draftStore.draft.align, ...patch };
+  });
+  mocks.setShared.mockImplementation((patch: { projectId?: string }) => {
+    writeDraftStore({
+      ...draftStore.draft,
+      shared: { ...draftStore.draft.shared, ...patch },
+    });
   });
 });
 
@@ -605,10 +639,9 @@ describe("AlignCreatePanel", () => {
   });
 
   it("routes an unfinished draft to its conversation", async () => {
-    // `status` is what makes this row unfinished: the banner offers work to
-    // RESUME, so a row the server reports as `completed`/`abandoned` is filtered
-    // out on the way in (DENE-371). Without it this fixture is a record, and the
-    // banner has nothing to offer.
+    // The row carries a live status: the banner counts only the alignments with
+    // a next turn in them (DENE-371), so a fixture without one is filtered out
+    // before it ever reaches the banner.
     mocks.drafts = [{ chat_session_id: "sess-old", status: "draft" }];
     renderPanel();
     await userEvent.click(await screen.findByRole("button", { name: "resume-unfinished" }));
@@ -690,68 +723,59 @@ describe("AlignCreatePanel", () => {
   });
 
   /**
-   * DENE-425: the alignment files a whole group, and the project is the one
-   * filing field it can inherit rather than discover — the project page the
-   * dialog was opened from. Without it a group aligned from that page lands
-   * under "no project".
+   * DENE-423: the project is optional and the face does not ask for it up
+   * front — but when one is chosen, the draft is created holding it, so the
+   * whole group the conversation settles on is filed under that project rather
+   * than under nothing. It rides the SHARED slot, like the attachment pool, so
+   * the manual face and this one are choosing the same field.
    */
-  it("files the alignment under the project the dialog was opened with", async () => {
-    renderPanel({ data: { project_id: "proj-page" } });
-    // The picker shows the inherited project rather than an empty field.
-    expect(
-      screen.getByRole("button", { name: "project-picker:proj-page" }),
-    ).toBeTruthy();
-
-    await typeRequest("add dark mode");
-    await userEvent.click(submitButton());
-
-    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
-    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
-    expect(input.draft?.project_id).toBe("proj-page");
-  });
-
-  it("inherits the project the manual face committed on the way in", async () => {
-    // Switching faces carries no project in the modal payload (the carry
-    // channel is for the parent context alone), so `switchToAlign` writes it to
-    // the shared draft instead. This is that read.
-    draftStore.draft.shared.projectId = "proj-shared";
+  it("files the conversation under the project picked on this face", async () => {
     renderPanel();
-    expect(
-      screen.getByRole("button", { name: "project-picker:proj-shared" }),
-    ).toBeTruthy();
-
     await typeRequest("add dark mode");
-    await userEvent.click(submitButton());
 
-    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
-    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
-    expect(input.draft?.project_id).toBe("proj-shared");
-  });
-
-  it("lets the project be changed here and keeps it for the other faces", async () => {
-    draftStore.draft.shared.projectId = "proj-0";
-    renderPanel();
-
-    await userEvent.click(screen.getByRole("button", { name: "project-picker:proj-0" }));
-    // Written through to the shared draft, which is where the manual face seeds
-    // its own project from after a switch back.
+    await userEvent.click(screen.getByTestId("project-picker"));
     expect(mocks.setShared).toHaveBeenCalledWith({ projectId: "proj-1" });
+    expect(screen.getByTestId("project-picker")).toHaveAttribute(
+      "data-project-id",
+      "proj-1",
+    );
 
-    await typeRequest("add dark mode");
     await userEvent.click(submitButton());
     await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
     const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
     expect(input.draft?.project_id).toBe("proj-1");
   });
 
-  it("sends no project when the user has none", async () => {
+  /**
+   * The other half of the same contract: a project the manual face already
+   * committed — including one an opener seeded from a project page — is what
+   * this face opens on, with no second click, because both faces read the one
+   * shared slot.
+   */
+  it("opens on the project the shared slot already holds", async () => {
+    draftStore.draft.shared.projectId = "proj-9";
     renderPanel();
-    expect(screen.getByRole("button", { name: "project-picker:null" })).toBeTruthy();
+
+    expect(screen.getByTestId("project-picker")).toHaveAttribute(
+      "data-project-id",
+      "proj-9",
+    );
 
     await typeRequest("add dark mode");
     await userEvent.click(submitButton());
     await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
     const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.draft?.project_id).toBe("proj-9");
+  });
+
+  it("leaves the project out of the draft when none was chosen", async () => {
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    // Absent, not an empty string: "no project" is the field being missing.
     expect(input.draft).not.toHaveProperty("project_id");
   });
 

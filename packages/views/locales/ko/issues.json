@@ -961,6 +961,7 @@
     "parent_label": "상위 이슈",
     "group_title": "분할된 하위 이슈",
     "group_hint": "위 항목은 상위 이슈입니다. 아래 하위 이슈는 함께 생성되고 각자의 단계 순서대로 진행됩니다.",
+    "group_project_inherited": "하위 이슈는 상위 이슈의 프로젝트에 생성됩니다.",
     "child_label": "하위 이슈 {{n}}",
     "child_title": "하위 이슈 {{n}} 제목",
     "child_starts_now": "즉시 실행",

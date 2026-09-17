@@ -961,6 +961,7 @@
     "parent_label": "親タスク",
     "group_title": "分割したサブタスク",
     "group_hint": "上の項目は親タスクです。下のサブタスクは一緒に作成され、それぞれのステージ順に進みます。",
+    "group_project_inherited": "サブタスクは親タスクのプロジェクトに作成されます。",
     "child_label": "サブタスク {{n}}",
     "child_title": "サブタスク {{n}} のタイトル",
     "child_starts_now": "すぐに実行",
