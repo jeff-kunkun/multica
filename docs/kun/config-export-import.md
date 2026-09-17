@@ -224,6 +224,7 @@ entities.skills[]             skill + files[] + label_ids[]
 entities.mcp_servers[]        workspace_mcp_server，仅 name/transport，导入不创建
 entities.agents[]             无 system_key 的普通智能体 + skills[] + label_ids[] + mcp_servers[] + invocation_targets[]
 entities.system_agents[]      system_key 非空且不以 agent_builder: 开头的可 patch 字段
+                              外加 source_id（源 agent uuid，供跨实例迁移按 uuid 建 refs 索引）
 entities.squads[]             squad + members[]
 entities.projects[]           project + resources[]
 entities.autopilots[]         autopilot + triggers[] + subscribers[] + collaborators[]
@@ -311,7 +312,7 @@ entities.issue_views[]        issue_view
         "invocation_targets": [ { "target_type": "workspace", "target_id": null }, { "target_type": "member", "target_id": "c924599a-9548-4fc1-9146-a3645ecbb0c6" } ] }
     ],
     "system_agents": [
-      { "system_key": "mika", "instructions": "本工作区备注：优先中文回复。", "model": null, "thinking_level": null, "service_tier": null, "conversation_starters": [], "disabled_runtime_skills": [] }
+      { "source_id": "01a0a3f2-0000-7000-8000-000000000f01", "system_key": "mika", "instructions": "本工作区备注：优先中文回复。", "model": null, "thinking_level": null, "service_tier": null, "conversation_starters": [], "disabled_runtime_skills": [] }
     ],
     "squads": [
       { "source_id": "01a0a3f2-0000-7000-8000-000000000ea1", "name": "龙珠小队", "description": "", "instructions": "", "avatar_url": null,
