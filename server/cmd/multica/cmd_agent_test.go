@@ -2387,3 +2387,247 @@ func TestAgentParentAgentIDFlagTriState(t *testing.T) {
 		}
 	})
 }
+
+// newAgentUpdateCmdForTest registers the flag set `multica agent update` has,
+// because the refusal under test reads flags by name off the command.
+func newAgentUpdateCmdForTest(t *testing.T) *cobra.Command {
+	t.Helper()
+
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("instructions", "", "")
+	cmd.Flags().String("conversation-starters", "", "")
+	cmd.Flags().String("runtime-id", "", "")
+	cmd.Flags().String("runtime-config", "", "")
+	cmd.Flags().String("model", "", "")
+	cmd.Flags().String("thinking-level", "", "")
+	cmd.Flags().String("service-tier", "", "")
+	cmd.Flags().String("custom-args", "", "")
+	cmd.Flags().String("switchable-models", "", "")
+	cmd.Flags().String("mcp-config", "", "")
+	cmd.Flags().Bool("mcp-config-stdin", false, "")
+	cmd.Flags().String("mcp-config-file", "", "")
+	cmd.Flags().String("visibility", "", "")
+	cmd.Flags().String("permission-mode", "", "")
+	cmd.Flags().Bool("public-to-workspace", false, "")
+	cmd.Flags().StringSlice("public-to-member", nil, "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().Int32("max-concurrent-tasks", 0, "")
+	cmd.Flags().String("parent-agent-id", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	return cmd
+}
+
+// A specialisation's configuration belongs to its base role (DENE-470), so
+// `agent update` must refuse a configuration flag on one instead of reporting a
+// success the server would undo. The GET is what tells the CLI which kind of
+// agent it is holding.
+func TestAgentUpdateRefusesInheritedConfigurationOnSpecialisation(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+
+	var putBody map[string]any
+	puts := 0
+	parentID := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":                "agent-123",
+				"name":              "Spec",
+				"parent_agent_id":   parentID,
+				"parent_agent_name": "Base Role",
+			})
+			return
+		}
+		puts++
+		putBody = nil
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&putBody)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "Spec"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	t.Run("configuration flag on a specialisation names the base role", func(t *testing.T) {
+		parentID = "base-1"
+		cmd := newAgentUpdateCmdForTest(t)
+		if err := cmd.Flags().Set("model", "gpt-5"); err != nil {
+			t.Fatal(err)
+		}
+		err := runAgentUpdate(cmd, []string{"agent-123"})
+		if err == nil {
+			t.Fatal("expected a refusal, got success")
+		}
+		if !strings.Contains(err.Error(), "--model") || !strings.Contains(err.Error(), "Base Role") {
+			t.Fatalf("refusal does not name the flag and the base role: %v", err)
+		}
+		if !strings.Contains(err.Error(), "solidify") {
+			t.Fatalf("refusal does not offer the way out: %v", err)
+		}
+	})
+
+	t.Run("identity fields still update a specialisation", func(t *testing.T) {
+		parentID = "base-1"
+		before := puts
+		cmd := newAgentUpdateCmdForTest(t)
+		if err := cmd.Flags().Set("description", "own description"); err != nil {
+			t.Fatal(err)
+		}
+		if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
+			t.Fatalf("runAgentUpdate: %v", err)
+		}
+		if puts != before+1 {
+			t.Fatalf("description update did not reach the server (puts %d -> %d)", before, puts)
+		}
+		if putBody["description"] != "own description" {
+			t.Fatalf("body description = %v", putBody["description"])
+		}
+	})
+
+	t.Run("configuration flag on a base role is sent", func(t *testing.T) {
+		parentID = ""
+		cmd := newAgentUpdateCmdForTest(t)
+		if err := cmd.Flags().Set("model", "gpt-5"); err != nil {
+			t.Fatal(err)
+		}
+		if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
+			t.Fatalf("runAgentUpdate: %v", err)
+		}
+		if putBody["model"] != "gpt-5" {
+			t.Fatalf("body model = %v, want gpt-5", putBody["model"])
+		}
+	})
+
+	t.Run("a new parent plus configuration is refused in one request", func(t *testing.T) {
+		parentID = ""
+		cmd := newAgentUpdateCmdForTest(t)
+		if err := cmd.Flags().Set("parent-agent-id", "base-1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Flags().Set("runtime-id", "runtime-1"); err != nil {
+			t.Fatal(err)
+		}
+		err := runAgentUpdate(cmd, []string{"agent-123"})
+		if err == nil {
+			t.Fatal("expected a refusal, got success")
+		}
+		if !strings.Contains(err.Error(), "--runtime-id") || !strings.Contains(err.Error(), "--parent-agent-id") {
+			t.Fatalf("refusal does not name both flags: %v", err)
+		}
+	})
+}
+
+// On create the base role supplies the runtime, so --runtime-id becomes optional
+// exactly when --parent-agent-id is given — and a configuration flag alongside
+// it is refused rather than silently dropped.
+func TestAgentCreateWithParentAgentID(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body = nil
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "Spec"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	newCreateCmd := func(t *testing.T) *cobra.Command {
+		t.Helper()
+		cmd := &cobra.Command{Use: "create"}
+		cmd.Flags().String("name", "", "")
+		cmd.Flags().String("description", "", "")
+		cmd.Flags().String("instructions", "", "")
+		cmd.Flags().String("runtime-id", "", "")
+		cmd.Flags().String("parent-agent-id", "", "")
+		cmd.Flags().String("model", "", "")
+		cmd.Flags().String("conversation-starters", "", "")
+		cmd.Flags().Int32("max-concurrent-tasks", 6, "")
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().String("profile", "", "")
+		return cmd
+	}
+
+	t.Run("deriving without a runtime is allowed", func(t *testing.T) {
+		cmd := newCreateCmd(t)
+		for flag, value := range map[string]string{"name": "Spec", "parent-agent-id": "base-1"} {
+			if err := cmd.Flags().Set(flag, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := runAgentCreate(cmd, nil); err != nil {
+			t.Fatalf("runAgentCreate: %v", err)
+		}
+		if body["parent_agent_id"] != "base-1" {
+			t.Fatalf("body parent_agent_id = %v", body["parent_agent_id"])
+		}
+		if _, sent := body["runtime_id"]; sent {
+			t.Fatalf("body must not pin a runtime when deriving: %v", body)
+		}
+	})
+
+	t.Run("a configuration flag alongside a parent is refused", func(t *testing.T) {
+		cmd := newCreateCmd(t)
+		for flag, value := range map[string]string{"name": "Spec", "parent-agent-id": "base-1", "model": "gpt-5"} {
+			if err := cmd.Flags().Set(flag, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		err := runAgentCreate(cmd, nil)
+		if err == nil {
+			t.Fatal("expected a refusal, got success")
+		}
+		if !strings.Contains(err.Error(), "--model") {
+			t.Fatalf("refusal does not name the flag: %v", err)
+		}
+	})
+
+	t.Run("a base role still requires a runtime", func(t *testing.T) {
+		cmd := newCreateCmd(t)
+		if err := cmd.Flags().Set("name", "Base"); err != nil {
+			t.Fatal(err)
+		}
+		err := runAgentCreate(cmd, nil)
+		if err == nil || !strings.Contains(err.Error(), "--runtime-id") {
+			t.Fatalf("expected the runtime requirement, got %v", err)
+		}
+	})
+}

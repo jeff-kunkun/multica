@@ -31,6 +31,7 @@ import {
 import { useAutoSave } from "../../settings/components/use-auto-save";
 import { useT } from "../../i18n";
 import { CharCounter } from "./char-counter";
+import { InheritedConfigNotice } from "./inherited-config-notice";
 import { ModelPicker } from "./inspector/model-picker";
 import {
   buildModelChangeUpdate,
@@ -39,6 +40,7 @@ import {
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
+import { isSpecialization } from "../specialization";
 
 interface InspectorProps {
   agent: Agent;
@@ -48,6 +50,13 @@ interface InspectorProps {
   currentUserId: string | null;
   canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  /**
+   * The base-role row when the caller holds it. A specialisation inherits the
+   * whole execution configuration, so this section renders the base role's
+   * values read-only instead of the child's — and `null` (a base role private
+   * to another member) still keeps every control read-only.
+   */
+  parentAgent?: Agent | null;
 }
 
 interface ProfileDraft {
@@ -72,6 +81,7 @@ export function AgentDetailInspector({
   currentUserId,
   canEdit,
   onUpdate,
+  parentAgent = null,
 }: InspectorProps) {
   const { t } = useT("agents");
   const { t: ts } = useT("settings");
@@ -119,17 +129,34 @@ export function AgentDetailInspector({
     isEqual: profileDraftsEqual,
   });
 
-  const isOnline = runtime?.status === "online";
-  const canReadRuntime =
-    runtime != null && isRuntimeUsableForUser(runtime, currentUserId);
-  const canDiscoverRuntimeModels = isOnline && canReadRuntime;
   const nameInvalid = name.trim().length === 0;
+
+  // A specialisation inherits the whole execution configuration from its base
+  // role (DENE-470), so this section shows the base role's values and no
+  // editor: the server refuses those writes on the child. When the base-role
+  // row is not in the loaded list, the child's own values are the only ones at
+  // hand — they stay read-only either way.
+  const inheritsExecution = isSpecialization(agent);
+  const execution = inheritsExecution ? (parentAgent ?? agent) : agent;
+  const executionCanEdit = canEdit && !inheritsExecution;
+  const executionRuntime =
+    inheritsExecution && parentAgent
+      ? (runtimes.find(
+          (candidate) => candidate.id === parentAgent.runtime_id,
+        ) ?? null)
+      : runtime;
+  const executionModelsDiscoverable =
+    executionRuntime != null &&
+    executionRuntime.status === "online" &&
+    isRuntimeUsableForUser(executionRuntime, currentUserId);
 
   // Same query the Thinking / Speed fields already use, so switching model
   // costs no extra request. `null` = not authoritative (offline runtime, still
   // loading, or discovery failed) and must not trigger any clearing.
   const modelsQuery = useQuery(
-    runtimeModelsOptions(canDiscoverRuntimeModels ? agent.runtime_id : null),
+    runtimeModelsOptions(
+      executionModelsDiscoverable ? execution.runtime_id : null,
+    ),
   );
   const modelCatalog = useMemo<ModelCatalog>(
     () =>
@@ -243,6 +270,9 @@ export function AgentDetailInspector({
         title={t(($) => $.inspector.section_execution)}
         description={t(($) => $.inspector.section_execution_hint)}
       >
+        {inheritsExecution && (
+          <InheritedConfigNotice agent={agent} parentAgent={parentAgent} />
+        )}
         <SettingsCard>
           <SettingsRow
             label={t(($) => $.inspector.prop_runtime)}
@@ -251,11 +281,11 @@ export function AgentDetailInspector({
             <RuntimePicker
               variant="field"
               showLabel={false}
-              value={agent.runtime_id}
+              value={execution.runtime_id}
               runtimes={runtimes}
               members={members}
               currentUserId={currentUserId}
-              canEdit={canEdit}
+              canEdit={executionCanEdit}
               // Model, thinking level, and service tier are runtime/model
               // native. Clear them together so the new runtime resolves its
               // own defaults instead of inheriting incompatible tokens.
@@ -276,33 +306,33 @@ export function AgentDetailInspector({
             <ModelPicker
               variant="field"
               showLabel={false}
-              runtimeId={agent.runtime_id}
-              runtimeOnline={canDiscoverRuntimeModels}
-              value={agent.model ?? ""}
-              canEdit={canEdit}
+              runtimeId={execution.runtime_id}
+              runtimeOnline={executionModelsDiscoverable}
+              value={execution.model ?? ""}
+              canEdit={executionCanEdit}
               onChange={handleModelChange}
             />
           </SettingsRow>
           <ThinkingSettingField
             label={t(($) => $.inspector.prop_thinking)}
-            runtimeId={agent.runtime_id}
-            runtimeOnline={canDiscoverRuntimeModels}
-            provider={runtime?.provider ?? ""}
-            model={agent.model ?? ""}
-            value={agent.thinking_level ?? ""}
-            canEdit={canEdit}
+            runtimeId={execution.runtime_id}
+            runtimeOnline={executionModelsDiscoverable}
+            provider={executionRuntime?.provider ?? ""}
+            model={execution.model ?? ""}
+            value={execution.thinking_level ?? ""}
+            canEdit={executionCanEdit}
             onChange={(thinkingLevel) =>
               update({ thinking_level: thinkingLevel })
             }
           />
           <ServiceTierSettingField
             label={t(($) => $.inspector.prop_speed)}
-            runtimeId={agent.runtime_id}
-            runtimeOnline={canDiscoverRuntimeModels}
-            provider={runtime?.provider ?? ""}
-            model={agent.model ?? ""}
-            value={agent.service_tier ?? ""}
-            canEdit={canEdit}
+            runtimeId={execution.runtime_id}
+            runtimeOnline={executionModelsDiscoverable}
+            provider={executionRuntime?.provider ?? ""}
+            model={execution.model ?? ""}
+            value={execution.service_tier ?? ""}
+            canEdit={executionCanEdit}
             onChange={(serviceTier) => update({ service_tier: serviceTier })}
           />
           <SettingsRow
@@ -310,8 +340,8 @@ export function AgentDetailInspector({
             size="select-wide"
           >
             <ConcurrencyField
-              value={agent.max_concurrent_tasks}
-              canEdit={canEdit}
+              value={execution.max_concurrent_tasks}
+              canEdit={executionCanEdit}
               onSave={(next) => update({ max_concurrent_tasks: next })}
             />
           </SettingsRow>
@@ -320,8 +350,8 @@ export function AgentDetailInspector({
             description={t(($) => $.inspector.prop_auto_retry_hint)}
           >
             <Switch
-              checked={isAgentAutoRetryEnabled(agent)}
-              disabled={!canEdit}
+              checked={isAgentAutoRetryEnabled(execution)}
+              disabled={!executionCanEdit}
               onCheckedChange={(checked) => {
                 void update({ auto_retry_enabled: checked });
               }}

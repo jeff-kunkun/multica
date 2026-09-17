@@ -131,6 +131,9 @@
     "base_role_hint_none": "独立したベースロールです。何も継承せず、後から特化をぶら下げられます。",
     "base_role_inherit_prompt": "ベースロールのプロンプトが、このエージェント自身のプロンプトの前に連結されます。",
     "base_role_inherit_skills_other": "{{count}} 件のスキルを読み取り専用で継承します。",
+    "inherited_config_notice": "「{{name}}」から継承しています。ここでは読み取り専用です。変更はベースロールで行ってください。",
+    "inherited_config_notice_unnamed": "ベースロールから継承しています。ここでは読み取り専用です。変更はベースロールで行ってください。",
+    "inherited_config_open": "ベースロールを開く",
     "inherited_prompt_label": "ベースロールのプロンプト",
     "inherited_prompt_hint": "ここでは読み取り専用です。「{{name}}」で編集すると、すべての特化に反映されます。",
     "inherited_prompt_show": "表示",
@@ -560,7 +563,9 @@
       "reveal_action": "表示して編集",
       "revealing": "表示中...",
       "reveal_failed_toast": "環境変数の値を読み込めませんでした",
-      "empty_editable": "設定された環境変数はありません。起動時にエージェントへ注入する変数を追加してください。"
+      "empty_editable": "設定された環境変数はありません。起動時にエージェントへ注入する変数を追加してください。",
+      "inherited_notice": "環境変数はベースロール「{{name}}」に設定されています。開いて確認または変更してください。",
+      "inherited_notice_unnamed": "環境変数はベースロールに設定されています。開いて確認または変更してください。"
     },
     "custom_args": {
       "intro": "エージェントの起動時に渡す CLI 引数を追加します。",

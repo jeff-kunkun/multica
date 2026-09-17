@@ -152,6 +152,9 @@
     "base_role_inherit_prompt": "The base role's prompt is prepended to this agent's own prompt.",
     "base_role_inherit_skills_one": "{{count}} skill is inherited read-only.",
     "base_role_inherit_skills_other": "{{count}} skills are inherited read-only.",
+    "inherited_config_notice": "Inherited from \"{{name}}\" — read-only here; edit it on the base role.",
+    "inherited_config_notice_unnamed": "Inherited from the base role — read-only here; edit it on the base role.",
+    "inherited_config_open": "Open base role",
     "inherited_prompt_label": "Base role prompt",
     "inherited_prompt_hint": "Read-only here. Edited on \"{{name}}\", and shared by every specialization.",
     "inherited_prompt_show": "Show",
@@ -687,7 +690,9 @@
       "reveal_action": "Reveal & edit",
       "revealing": "Revealing…",
       "reveal_failed_toast": "Failed to load env values",
-      "empty_editable": "No environment variables configured. Add one to inject it into the agent at launch."
+      "empty_editable": "No environment variables configured. Add one to inject it into the agent at launch.",
+      "inherited_notice": "Environment variables live on the base role \"{{name}}\" — open it to view or change them.",
+      "inherited_notice_unnamed": "Environment variables live on the base role — open it to view or change them."
     },
     "custom_args": {
       "intro": "Add CLI arguments passed when this agent starts.",

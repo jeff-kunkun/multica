@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/agentconfig"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/chattitle"
@@ -363,6 +364,19 @@ type runtimeMCPOverlayData struct {
 	ConnectedApps json.RawMessage
 }
 
+// inheritedAgent loads an agent by id and resolves it against its base role, so
+// every caller that needs a configuration value gets the value the run will
+// actually use (DENE-470). One helper for the auto-retry switch and the Composio
+// allowlist because both are consumed inside this package on the failure paths,
+// and both must agree with the claim payload about where the value lives.
+func (s *TaskService) inheritedAgent(ctx context.Context, agentID pgtype.UUID) (db.Agent, error) {
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return agent, err
+	}
+	return agentconfig.LoadInherited(ctx, s.Queries, agent)
+}
+
 // buildRuntimeMCPOverlay computes the optional per-task Composio MCP overlay.
 // Enqueue paths call this BEFORE inserting the queued row so the daemon cannot
 // claim a task during the network round-trip to Composio and miss the overlay.
@@ -372,6 +386,17 @@ func (s *TaskService) buildRuntimeMCPOverlay(ctx context.Context, originatorUser
 	}
 	if !featureflags.ComposioMCPAppsEnabled(ctx, s.FeatureFlags) {
 		return runtimeMCPOverlayData{}
+	}
+	// Configuration inheritance (DENE-470): for a specialisation the toolkit
+	// allowlist is the base role's. Resolved HERE — inside the one wrapper every
+	// enqueue path already goes through — rather than at each of the dozen call
+	// sites, where missing one would silently drop the agent's connected apps.
+	if resolved, err := agentconfig.LoadInherited(ctx, s.Queries, agent); err != nil {
+		slog.Warn("runtime mcp overlay: resolve inherited agent config failed; task will run without composio overlay",
+			"agent_id", util.UUIDToString(agent.ID), "error", err)
+		return runtimeMCPOverlayData{}
+	} else {
+		agent = resolved
 	}
 	result, err := s.Composio.BuildTaskOverlay(ctx, originatorUserID, agent)
 	if err != nil {
@@ -3485,6 +3510,16 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 			return nil
 		}
 
+		// Configuration inheritance (DENE-470): a specialisation runs under its
+		// base role's concurrency limit. Resolved here because this is the single
+		// admission point every claim funnels through — the limit is read once,
+		// below, and no other path counts running tasks against it.
+		agent, err = agentconfig.LoadInherited(ctx, qtx, agent)
+		if err != nil {
+			outcome = "error_get_base_role"
+			return fmt.Errorf("resolve inherited agent config: %w", err)
+		}
+
 		t0 = time.Now()
 		running, err := qtx.CountRunningTasks(ctx, agentID)
 		countRunningMs = time.Since(t0).Milliseconds()
@@ -4701,10 +4736,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
 		} else {
-			agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID)
+			agent, aerr := s.inheritedAgent(ctx, parent.AgentID)
 			if aerr != nil {
-				// Fail-closed: auto_retry_enabled lives on the agent row. If
-				// we cannot read it we cannot know whether the owner turned
+				// Fail-closed: auto_retry_enabled lives on the agent row — or,
+				// for a specialisation, on its base role (DENE-470). If we
+				// cannot read it we cannot know whether the owner turned
 				// retries off, and a retry child would also have no overlay.
 				// Skip rather than guessing the historical default (on).
 				slog.Warn("fail task auto-retry: load agent failed; skipping retry",
@@ -5298,10 +5334,11 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if !retryableReasons[reason] {
 		return nil, nil
 	}
-	agent, agentErr := s.Queries.GetAgent(ctx, parent.AgentID)
+	agent, agentErr := s.inheritedAgent(ctx, parent.AgentID)
 	if agentErr != nil {
-		// Fail-closed: without the agent row we cannot evaluate
-		// auto_retry_enabled, and a retry child would have no overlay either.
+		// Fail-closed: without the agent row (or, for a specialisation, its base
+		// role — DENE-470) we cannot evaluate auto_retry_enabled, and a retry
+		// child would have no overlay either.
 		slog.Warn("task auto-retry: load agent failed; skipping retry",
 			"parent_task_id", util.UUIDToString(parent.ID),
 			"agent_id", util.UUIDToString(parent.AgentID),

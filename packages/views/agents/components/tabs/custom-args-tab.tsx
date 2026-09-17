@@ -27,6 +27,8 @@ import {
   SettingsCard,
   SettingsSection,
 } from "../../../settings/components/settings-layout";
+import { InheritedConfigNotice } from "../inherited-config-notice";
+import { isSpecialization } from "../../specialization";
 import { isGeminiDirToken } from "./agy-account-slots";
 
 interface ArgEntry {
@@ -71,11 +73,14 @@ export function CustomArgsTab({
   runtimeDevice,
   onSave,
   onDirtyChange,
+  parentAgent,
 }: {
   agent: Agent;
   runtimeDevice?: RuntimeDevice;
   onSave: (updates: Partial<Agent>) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
+  /** The base-role row when the caller holds it (DENE-470). */
+  parentAgent?: Agent | null;
 }) {
   const { t } = useT("agents");
   const [entries, setEntries] = useState<ArgEntry[]>(
@@ -194,6 +199,13 @@ export function CustomArgsTab({
   const launchCommand = launchHeader
     ? [launchHeader, ...currentArgs.map(formatArgForPreview)].join(" ")
     : null;
+
+  // A specialisation inherits the base role's arguments and cannot save its
+  // own (DENE-470), so the editor is replaced by the notice that names where
+  // they are edited.
+  if (isSpecialization(agent)) {
+    return <InheritedConfigNotice agent={agent} parentAgent={parentAgent} />;
+  }
 
   return (
     <div className="space-y-6">

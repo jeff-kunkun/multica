@@ -558,3 +558,42 @@ describe("AgentDetailPage inherited-prompt read state", () => {
     expect(typeof panePropsRef.current?.onRetryInheritedPrompt).toBe("function");
   });
 });
+
+// DENE-470: the settings surfaces show the base role's live values, so the
+// page resolves the row out of the list it already reads. `null` is a real
+// answer — the base role can be private to another member — and the notices
+// must still render from the name served on the child.
+describe("AgentDetailPage base-role wiring", () => {
+  const child: Agent = {
+    ...baseAgent,
+    parent_agent_id: "agent-base",
+    parent_agent_name: "Base Role",
+  };
+  const base: Agent = { ...baseAgent, id: "agent-base", name: "Base Role" };
+
+  it("passes the base-role row the list holds", async () => {
+    agentsRef.current = [child, base];
+    mockGetAgent.mockResolvedValue(child);
+
+    renderPage();
+
+    // Identity, not a deep match: the pane must be handed the row the list
+    // holds so the surfaces read live values rather than a copy.
+    await waitFor(() => expect(panePropsRef.current?.parentAgent).toBe(base));
+    expect(panePropsRef.current?.agent).toBe(child);
+  });
+
+  it("passes null when the list does not hold the base role", async () => {
+    agentsRef.current = [child];
+    mockGetAgent.mockResolvedValue(child);
+
+    renderPage();
+
+    // Wait for the list read to settle before reading the prop, so the null
+    // below is the answer and not the pre-fetch default.
+    await waitFor(() =>
+      expect(panePropsRef.current?.agents).toHaveLength(1),
+    );
+    expect(panePropsRef.current?.parentAgent).toBeNull();
+  });
+});

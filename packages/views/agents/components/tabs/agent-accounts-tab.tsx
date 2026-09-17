@@ -56,6 +56,8 @@ import {
   resolveCurrentAccount,
   withAgySlots,
 } from "./agent-accounts-model";
+import { InheritedConfigNotice } from "../inherited-config-notice";
+import { isSpecialization } from "../../specialization";
 import {
   MAX_AGY_ACCOUNT_NUMBER,
   detectAgyAccountSlot,
@@ -132,6 +134,13 @@ export interface AgentAccountsTabProps {
   runtimeDevice?: RuntimeDevice;
   onSave: (updates: Partial<Agent>) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * The base-role row when the caller holds it. The drawer writes the agent's
+   * own `custom_args` / `runtime_config` / `custom_env` — all inherited fields
+   * the server re-asserts from the base role (DENE-470) — so a specialisation
+   * gets the read-only notice instead of controls that silently do nothing.
+   */
+  parentAgent?: Agent | null;
 }
 
 export function AgentAccountsTab({
@@ -139,6 +148,7 @@ export function AgentAccountsTab({
   runtimeDevice,
   onSave,
   onDirtyChange,
+  parentAgent,
 }: AgentAccountsTabProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
@@ -419,6 +429,12 @@ export function AgentAccountsTab({
   };
 
   const daemonHref = slug ? paths.workspace(slug).runtimes() : null;
+
+  // The account slots and the levers that bind them live on the base role, so
+  // the drawer's single write would be undone by the server (DENE-470).
+  if (isSpecialization(agent)) {
+    return <InheritedConfigNotice agent={agent} parentAgent={parentAgent} />;
+  }
 
   return (
     <div className="space-y-6">

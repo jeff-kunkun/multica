@@ -51,6 +51,8 @@ import {
   McpTransportIcon,
 } from "../../../common/mcp-server-row";
 import { useT } from "../../../i18n";
+import { InheritedConfigNotice } from "../inherited-config-notice";
+import { isSpecialization } from "../../specialization";
 import {
   listManagedMcpServers,
   mcpTransportLabel,
@@ -67,6 +69,7 @@ export function McpConfigTab({
   canEdit = true,
   onSave,
   onDirtyChange,
+  parentAgent,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
@@ -79,6 +82,8 @@ export function McpConfigTab({
   canEdit?: boolean;
   onSave: (updates: { mcp_config: unknown | null }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
+  /** The base-role row when the caller holds it (DENE-470). */
+  parentAgent?: Agent | null;
 }) {
   const { t } = useT("agents");
   const canReadRuntime =
@@ -307,6 +312,13 @@ export function McpConfigTab({
       setDeleting(false);
     }
   };
+
+  // A specialisation inherits the base role's MCP servers; its own inventory is
+  // neither the effective set nor editable (DENE-470), so the tab states where
+  // the servers are configured instead of offering writes the server refuses.
+  if (isSpecialization(agent)) {
+    return <InheritedConfigNotice agent={agent} parentAgent={parentAgent} />;
+  }
 
   return (
     // Three sources, one heading each. The prose that used to sit under every
