@@ -156,11 +156,20 @@ func (s *transferWireSender) post(ctx context.Context, path string, chunk transf
 
 func (s *transferWireSender) postDepth(ctx context.Context, path string, chunk transferWireChunk, depth int, out *[]json.RawMessage) error {
 	payload := chunk.Body
+	encoding := ""
 	if s.target.gzip() {
-		payload = gzipBytes(chunk.Body)
+		// gzipBytes reports whether it actually compressed. A body it could not
+		// shrink (an already-compressed attachment) stays raw, and the header
+		// has to follow the bytes rather than the target's capability — a
+		// Content-Encoding over a body that is not that encoding is a 400.
+		var compressed bool
+		payload, compressed = gzipBytes(chunk.Body)
+		if compressed {
+			encoding = "gzip"
+		}
 	}
 	start := time.Now()
-	raw, err := s.do(ctx, path, chunk.ContentType, payload)
+	raw, err := s.do(ctx, path, chunk.ContentType, encoding, payload)
 	elapsed := time.Since(start)
 	if err == nil {
 		s.observe(len(payload), elapsed)
@@ -188,13 +197,10 @@ func (s *transferWireSender) postDepth(ctx context.Context, path string, chunk t
 	return s.postDepth(ctx, path, second, depth+1, out)
 }
 
-// do is the single HTTP call. Content-Encoding is set from the same decision
-// that produced the bytes, so the body and the header can never disagree.
-func (s *transferWireSender) do(ctx context.Context, path, contentType string, payload []byte) (json.RawMessage, error) {
-	encoding := ""
-	if s.target.gzip() {
-		encoding = "gzip"
-	}
+// do is the single HTTP call. The caller passes the encoding that produced the
+// bytes — never the target's capability — so the body and the header can never
+// disagree.
+func (s *transferWireSender) do(ctx context.Context, path, contentType, encoding string, payload []byte) (json.RawMessage, error) {
 	var raw json.RawMessage
 	if err := s.client.PostEncoded(ctx, path, contentType, encoding, payload, &raw); err != nil {
 		return nil, wrapTransferHTTP(err)
@@ -300,26 +306,28 @@ func transferWireEdgeFailure(err error) bool {
 	return false
 }
 
-// gzipBytes compresses a request body, and returns it unchanged when
-// compression does not actually help: an incompressible attachment (a zip, a
-// PNG) comes out the same size or larger once the gzip header and trailer are
-// counted, and the target would pay a decode for nothing.
-func gzipBytes(raw []byte) []byte {
+// gzipBytes compresses a request body and reports whether the result is the
+// compressed one. The second return value is what the caller must send as
+// Content-Encoding: compression is skipped when it does not actually help — an
+// incompressible attachment (a zip, a PNG) comes out the same size or larger
+// once the gzip header and trailer are counted — and announcing `gzip` over
+// those raw bytes makes the target refuse the request outright.
+func gzipBytes(raw []byte) ([]byte, bool) {
 	var buf bytes.Buffer
 	zw, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
 	if err != nil {
-		return raw
+		return raw, false
 	}
 	if _, err := zw.Write(raw); err != nil {
-		return raw
+		return raw, false
 	}
 	if err := zw.Close(); err != nil {
-		return raw
+		return raw, false
 	}
 	if buf.Len() >= len(raw) {
-		return raw
+		return raw, false
 	}
-	return buf.Bytes()
+	return buf.Bytes(), true
 }
 
 func humanBytes(n int64) string {
@@ -406,7 +414,8 @@ func transferRequestFits(rawRows, rawPlus, limit int, build func() []byte) bool 
 	if rawRows+rawPlus <= limit {
 		return true
 	}
-	return len(gzipBytes(build())) <= limit
+	wire, _ := gzipBytes(build())
+	return len(wire) <= limit
 }
 
 // transferIssuesRequest marshals one `/transfer/issues` body.

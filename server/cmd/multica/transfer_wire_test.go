@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -262,7 +265,7 @@ func TestTransferWire_ChunksByCompressedBytesNotRows(t *testing.T) {
 		total := 0
 		for i, chunk := range chunks {
 			wire := chunk.wire(refs, true, false)
-			if got := len(gzipBytes(wire.Body)); got > limit {
+			if got := len(wireBytes(wire.Body)); got > limit {
 				t.Fatalf("chunk %d is %d compressed bytes, over the %d budget", i, got, limit)
 			}
 			total += len(chunk.Issues)
@@ -316,7 +319,7 @@ func TestTransferWire_SplitsOneOversizedTaskByItsComments(t *testing.T) {
 	seenComment := map[string]int{}
 	for i, chunk := range chunks {
 		wire := chunk.wire(service.TransferRefs{}, true, false)
-		if got := len(gzipBytes(wire.Body)); got > limit {
+		if got := len(wireBytes(wire.Body)); got > limit {
 			t.Fatalf("chunk %d is %d compressed bytes, over the %d budget", i, got, limit)
 		}
 		if len(chunk.Issues) != 1 || chunk.Issues[0].SourceID != issue.SourceID {
@@ -434,8 +437,8 @@ func TestTransferWire_EdgeFailureNamesBytesRateAndSplits(t *testing.T) {
 	if strings.Contains(msg, "temporarily unavailable") {
 		t.Fatalf("message still points at the server:\n%s", msg)
 	}
-	if !strings.Contains(msg, humanBytes(int64(len(gzipBytes(chunk.Body))))) {
-		t.Fatalf("message should name the request size (%s):\n%s", humanBytes(int64(len(gzipBytes(chunk.Body)))), msg)
+	if !strings.Contains(msg, humanBytes(int64(len(wireBytes(chunk.Body))))) {
+		t.Fatalf("message should name the request size (%s):\n%s", humanBytes(int64(len(wireBytes(chunk.Body)))), msg)
 	}
 	if !strings.Contains(msg, "/s") {
 		t.Fatalf("message should name the measured rate:\n%s", msg)
@@ -547,6 +550,191 @@ func TestParseTransferByteSize(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Attachments are multipart, and they are compressed the same way
+// ---------------------------------------------------------------------------
+
+// Compression is a negotiation about what the target can read, not a promise
+// that every body shrank. An attachment blob is routinely already compressed
+// (a PNG, a zip, a base64 blob), and gzip then comes out slightly LARGER once
+// its header and trailer are counted. The sender must fall back to the raw
+// bytes AND stop claiming gzip: a Content-Encoding over a body that is not
+// that encoding is a 400 on the target, not a slow upload.
+func TestTransferWire_DoesNotClaimGzipForABodyItCouldNotCompress(t *testing.T) {
+	recorder := &transferWireRecorder{}
+	caps := map[string]any{
+		"max_schema_version": 2,
+		"groups":             []string{"attachments"},
+		"accepts_gzip":       true,
+		"max_request_bytes":  20 << 20,
+	}
+	srv := recorder.server(t, caps, nil)
+	sender, _ := newTransferTestSender(t, srv.URL, 0, caps)
+
+	// Uniform bytes are incompressible, which is what an already-compressed
+	// attachment body (a PNG, a zip) looks like on the wire. The base64-ish
+	// pseudoRandomString is not enough here: 64 symbols carry 6 bits each, so
+	// gzip still finds a third of the body to remove.
+	blob := pseudoRandomBytes(7, 64<<10)
+	var probe bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&probe, gzip.BestSpeed)
+	_, _ = zw.Write(blob)
+	_ = zw.Close()
+	if probe.Len() < len(blob) {
+		t.Fatalf("fixture is compressible: %d encoded vs %d raw", probe.Len(), len(blob))
+	}
+	meta := service.TransferAttachmentRow{
+		SourceID:    "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+		Filename:    "photo.png",
+		ContentType: "image/png",
+		SizeBytes:   int64(len(blob)),
+		CreatedAt:   "2026-09-01T00:00:01Z",
+	}
+	chunk, err := transferAttachmentChunk(meta, blob)
+	if err != nil {
+		t.Fatalf("transferAttachmentChunk: %v", err)
+	}
+	if _, err := sender.post(context.Background(), "/api/workspaces/ws/transfer/attachments", chunk); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+
+	arrivals := recorder.all()
+	if len(arrivals) != 1 {
+		t.Fatalf("want 1 request, got %d", len(arrivals))
+	}
+	got := arrivals[0]
+	if got.encoding != "" {
+		t.Fatalf("body was not compressed but Content-Encoding is %q", got.encoding)
+	}
+	if got.encodedBytes != len(chunk.Body) {
+		t.Fatalf("wire body is %d bytes, want the %d raw ones", got.encodedBytes, len(chunk.Body))
+	}
+}
+
+// The attachment body is the one transfer payload that is not JSON, so its
+// compression has to survive a trip through the target's multipart parser. The
+// sender compresses it with the same negotiation and the same header as a JSON
+// body, and the bytes that arrive still have to parse as the form the CLI
+// built: the body part carries the blob byte for byte, and the meta field still
+// describes it.
+func TestTransferWire_CompressesMultipartAttachmentBodies(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		caps     map[string]any
+		wantGzip bool
+	}{
+		{
+			name: "advertised",
+			caps: map[string]any{
+				"max_schema_version": 2,
+				"groups":             []string{"attachments"},
+				"accepts_gzip":       true,
+				"max_request_bytes":  20 << 20,
+			},
+			wantGzip: true,
+		},
+		{
+			name: "old instance without the field",
+			caps: map[string]any{
+				"max_schema_version": 2,
+				"groups":             []string{"attachments"},
+			},
+			wantGzip: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := &transferWireRecorder{}
+			srv := recorder.server(t, tc.caps, nil)
+			sender, _ := newTransferTestSender(t, srv.URL, 0, tc.caps)
+
+			blob := []byte(strings.Repeat("attachment bytes that gzip can shrink ", 128))
+			meta := service.TransferAttachmentRow{
+				SourceID:    "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+				Filename:    "note.txt",
+				ContentType: "text/plain",
+				SizeBytes:   int64(len(blob)),
+				CreatedAt:   "2026-09-01T00:00:01Z",
+			}
+			chunk, err := transferAttachmentChunk(meta, blob)
+			if err != nil {
+				t.Fatalf("transferAttachmentChunk: %v", err)
+			}
+			if !strings.HasPrefix(chunk.ContentType, "multipart/form-data; boundary=") {
+				t.Fatalf("attachment chunk content type is %q", chunk.ContentType)
+			}
+			if _, err := sender.post(context.Background(), "/api/workspaces/ws/transfer/attachments", chunk); err != nil {
+				t.Fatalf("post: %v", err)
+			}
+
+			arrivals := recorder.all()
+			if len(arrivals) != 1 {
+				t.Fatalf("want 1 request, got %d", len(arrivals))
+			}
+			got := arrivals[0]
+			if want := "/api/workspaces/ws/transfer/attachments"; got.path != want {
+				t.Fatalf("posted to %q, want %q", got.path, want)
+			}
+			if tc.wantGzip && got.encoding != "gzip" {
+				t.Fatalf("want Content-Encoding gzip, got %q", got.encoding)
+			}
+			if !tc.wantGzip && got.encoding != "" {
+				t.Fatalf("want an uncompressed body, got Content-Encoding %q", got.encoding)
+			}
+			if tc.wantGzip && got.encodedBytes >= got.decodedBytes {
+				t.Fatalf("gzip did not shrink the attachment: encoded=%d decoded=%d", got.encodedBytes, got.decodedBytes)
+			}
+
+			// What a target with the decoder in front of ParseMultipartForm
+			// sees: the original form, with the blob intact.
+			_, params, err := mime.ParseMediaType(got.contentType)
+			if err != nil {
+				t.Fatalf("parse Content-Type %q: %v", got.contentType, err)
+			}
+			form, err := multipart.NewReader(bytes.NewReader(got.body), params["boundary"]).ReadForm(int64(len(got.body)) + 1)
+			if err != nil {
+				t.Fatalf("target could not read the multipart body: %v", err)
+			}
+			defer form.RemoveAll()
+
+			var parsed service.TransferAttachmentMeta
+			if values := form.Value["meta"]; len(values) != 1 {
+				t.Fatalf("form carries %d meta field(s), want 1", len(values))
+			} else if err := json.Unmarshal([]byte(values[0]), &parsed); err != nil {
+				t.Fatalf("meta field is not JSON: %v", err)
+			}
+			if parsed.SourceID != meta.SourceID || parsed.Filename != meta.Filename || parsed.SizeBytes != meta.SizeBytes {
+				t.Fatalf("meta arrived as %+v, want source_id=%s filename=%s size=%d",
+					parsed, meta.SourceID, meta.Filename, meta.SizeBytes)
+			}
+
+			files := form.File["file"]
+			if len(files) != 1 {
+				t.Fatalf("form carries %d file part(s), want 1", len(files))
+			}
+			f, err := files[0].Open()
+			if err != nil {
+				t.Fatalf("open file part: %v", err)
+			}
+			stored, err := io.ReadAll(f)
+			f.Close()
+			if err != nil {
+				t.Fatalf("read file part: %v", err)
+			}
+			if !bytes.Equal(stored, blob) {
+				t.Fatalf("file part carried %d bytes, want the %d original ones", len(stored), len(blob))
+			}
+		})
+	}
+}
+
+// wireBytes is the body a chunk actually puts on the wire: gzip when that
+// shrinks it, the raw bytes otherwise — the same decision the sender makes, so
+// a test asserting on request size measures what the edge sees.
+func wireBytes(raw []byte) []byte {
+	out, _ := gzipBytes(raw)
+	return out
+}
+
 // pseudoRandomString builds text that gzip cannot shrink: a deterministic
 // sequence of printable-but-arbitrary bytes stands in for the base64 and blob
 // content a real bundle carries.
@@ -566,4 +754,18 @@ func pseudoRandomString(variant, n int) string {
 		b.WriteByte(alphabet[seed%uint64(len(alphabet))])
 	}
 	return b.String()
+}
+
+// pseudoRandomBytes is the incompressible counterpart: every byte value is
+// equally likely, so gzip cannot shrink it and falls back to storing it.
+func pseudoRandomBytes(variant, n int) []byte {
+	out := make([]byte, n)
+	seed := uint64(0x2545f4914f6cdd1d) ^ (uint64(variant+1) * 0x9e3779b97f4a7c15)
+	for i := range out {
+		seed ^= seed << 13
+		seed ^= seed >> 7
+		seed ^= seed << 17
+		out[i] = byte(seed >> 24)
+	}
+	return out
 }
