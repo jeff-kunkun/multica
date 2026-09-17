@@ -35,12 +35,16 @@ A bare V1 `multica.workspace-config` JSON file can be passed to `transfer import
 Both directions stream progress as JSON lines on **stderr** (stdout stays reserved for the command's own output — the zip path, or the import report), one object per line. Fields that say nothing are omitted, so a listener can render "N / M sessions" and "X / Y attachments" without guessing:
 
 ```json
-{"event":"progress","sessions_total":26}
-{"event":"progress","session_index":3,"sessions_total":26,"session_title":"Deploy","attachments_downloaded":4}
+{"event":"progress","stage":"config"}
+{"event":"progress","stage":"conversations","sessions_total":26}
+{"event":"progress","stage":"conversations","session_index":3,"sessions_total":26,"session_title":"Deploy","attachments_downloaded":4}
+{"event":"progress","stage":"issues","issues_done":40,"issues_total":200}
 {"event":"progress","attachments_uploaded":12,"attachments_total":29}
 ```
 
 Export reports the session walk and downloaded attachment bodies; import reports uploaded attachments. Attachments are discovered per message during an export, so `attachments_total` exists only for import.
+
+`stage` names the export group being walked (`config`, `conversations`, `issues`), in the order the export runs them. The task walk makes several serial reads per issue, so on a real workspace it is the longest stretch of a full export; without `stage` and `issues_done` / `issues_total` a listener sat on the conversation group's finished counters for minutes and could not tell a slow export from a hung one. `issues_total` is honest: the whole issue list is fetched before any issue is read. Import does not emit `stage`, and a CLI older than this protocol emits none at all — treat an absent or unrecognised `stage` as "unknown", not as an error.
 
 A `--dry-run` conflict 409 carries the whole import report next to `error`/`code`, which is why the CLI keeps the full error body for `/transfer/*` instead of its usual 4 KiB cap.
 

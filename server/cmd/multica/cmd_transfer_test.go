@@ -787,8 +787,24 @@ func TestTransferExport_WritesProgressLinesToStderr(t *testing.T) {
 	if len(lines) == 0 {
 		t.Fatalf("no progress lines on stderr; stderr = %q", stderr.String())
 	}
-	if got := lines[0]["sessions_total"]; got != float64(2) {
-		t.Fatalf("first progress line = %v, want sessions_total 2", lines[0])
+	// The config group is walked first and now says so, so the session total
+	// is no longer the very first line — it is the first one that carries it
+	// (DENE-240).
+	if got := lines[0]["stage"]; got != "config" {
+		t.Fatalf("first progress line = %v, want the config stage", lines[0])
+	}
+	var sessionsHeader map[string]any
+	for _, line := range lines {
+		if line["sessions_total"] != nil {
+			sessionsHeader = line
+			break
+		}
+	}
+	if sessionsHeader == nil || sessionsHeader["sessions_total"] != float64(2) {
+		t.Fatalf("progress lines = %v, want one announcing sessions_total 2", lines)
+	}
+	if got := sessionsHeader["stage"]; got != "conversations" {
+		t.Fatalf("session progress line = %v, want the conversations stage", sessionsHeader)
 	}
 	var indices []float64
 	for _, line := range lines {

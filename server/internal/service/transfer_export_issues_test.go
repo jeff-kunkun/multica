@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -168,4 +169,77 @@ func transferCommentRowsForTest(issueID string, n int) []TransferCommentRow {
 		}
 	}
 	return rows
+}
+
+// The task walk makes several serial reads per issue, so on a real workspace it
+// is the longest stretch of an export. It reports its own counters because the
+// card otherwise sat on the conversation group's finished numbers for minutes
+// and looked hung (DENE-240).
+func TestExportIssues_ReportsStageAndIssueProgress(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/issues?direction=asc&limit=100&offset=0&sort=created_at": map[string]any{
+			"issues": []map[string]any{
+				{"id": "iss-1", "identifier": "SRC-1", "number": 1, "title": "One", "created_at": "2026-09-01T00:00:00Z"},
+				{"id": "iss-2", "identifier": "SRC-2", "number": 2, "title": "Two", "created_at": "2026-09-02T00:00:00Z"},
+				{"id": "iss-3", "identifier": "SRC-3", "number": 3, "title": "Three", "created_at": "2026-09-03T00:00:00Z"},
+			},
+			"has_more": false,
+		},
+		// The issue detail read is the only place issue reactions are served,
+		// and it answers with an object; without it the walk stops at the
+		// first issue and the counters never get past zero.
+		"/api/issues/iss-1": map[string]any{"id": "iss-1"},
+		"/api/issues/iss-2": map[string]any{"id": "iss-2"},
+		"/api/issues/iss-3": map[string]any{"id": "iss-3"},
+	}}
+
+	var samples []TransferExportProgress
+	refs := TransferRefs{}
+	out := exportIssues(context.Background(), src, TransferExportOpts{
+		Include:      []string{TransferIncludeIssues},
+		WorkspaceRef: "src",
+		Progress:     func(p TransferExportProgress) { samples = append(samples, p) },
+	}, &refs)
+	if len(out.IssueRows) != 3 {
+		t.Fatalf("issue rows = %d, want 3 so the counters mean something", len(out.IssueRows))
+	}
+	if len(samples) == 0 {
+		t.Fatal("no progress samples from the task walk")
+	}
+
+	for i, s := range samples {
+		if s.Stage != TransferStageIssues {
+			t.Errorf("sample %d stage = %q, want %q", i, s.Stage, TransferStageIssues)
+		}
+		if s.IssuesTotal != 3 {
+			t.Errorf("sample %d total = %d, want the whole list known up front", i, s.IssuesTotal)
+		}
+	}
+	if first := samples[0]; first.IssuesDone != 0 {
+		t.Errorf("first sample = %+v, want the total before any issue is read", first)
+	}
+	// A walk that ends on "2 / 3" reads as a stalled export, not a finished one.
+	if last := samples[len(samples)-1]; last.IssuesDone != 3 {
+		t.Errorf("last sample = %+v, want a finished walk", last)
+	}
+}
+
+// An estimate run only counts; there is nothing to report per issue, and a
+// nil callback must stay a no-op rather than panicking through the tracker.
+func TestExportIssues_NoProgressCallbackIsSafe(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/issues?direction=asc&limit=100&offset=0&sort=created_at": map[string]any{
+			"issues":   []map[string]any{{"id": "iss-1", "number": 1, "title": "One"}},
+			"has_more": false,
+		},
+		"/api/issues/iss-1": map[string]any{"id": "iss-1"},
+	}}
+	refs := TransferRefs{}
+	out := exportIssues(context.Background(), src, TransferExportOpts{
+		Include:      []string{TransferIncludeIssues},
+		WorkspaceRef: "src",
+	}, &refs)
+	if len(out.IssueRows) != 1 {
+		t.Fatalf("issue rows = %d, want 1", len(out.IssueRows))
+	}
 }

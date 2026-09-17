@@ -10,13 +10,23 @@ export type TransferErrorCode =
   | "busy"
   | "unknown";
 
+/**
+ * Which export group the CLI is walking. An export ships up to three groups and
+ * each can run for minutes, so the card names the one in flight instead of
+ * leaving the previous group's counters frozen on screen (DENE-240).
+ */
+export type TransferStage = "config" | "conversations" | "issues";
+
 export type TransferProgressEvent = {
   phase: "estimating" | "running" | "finalizing";
+  stage?: TransferStage;
   sessionsTotal?: number;
   sessionsDone?: number;
   currentSessionTitle?: string;
   attachmentsDownloaded?: number;
   attachmentsTotal?: number;
+  issuesDone?: number;
+  issuesTotal?: number;
 };
 
 export type TransferSecretToFill = {
@@ -202,6 +212,48 @@ export type TransferRunResult =
     }
   | { ok: false; code: TransferErrorCode; message: string };
 
+/**
+ * Which transfer a job is running, in the terms the card labels its buttons
+ * with. A dry run and a write are told apart so the import button never says
+ * "importing" while it is only refreshing a preview.
+ */
+export type TransferJobKind =
+  | "export"
+  | "import-preview"
+  | "import-apply"
+  | "bind-runtimes";
+
+/**
+ * The transfer the main process is running, or the last one it ran.
+ *
+ * A transfer outlives the card: the CLI runs in the main process, so switching
+ * settings pages unmounts the card while the export keeps going. Before this
+ * state existed the card's own `useState` was the only record of the run, so a
+ * page switch made a running export look stopped, and the next click hit the
+ * main process's "a transfer is already running" guard and appeared to do
+ * nothing (DENE-240). The card now rebuilds itself from this snapshot on mount.
+ */
+export type TransferJobState = {
+  /** Monotonic within an app session; 0 before the first transfer. */
+  runId: number;
+  kind: TransferJobKind | null;
+  running: boolean;
+  progress: TransferProgressEvent | null;
+  /** The bundle path of a running or finished import, for the card's header. */
+  inPath: string | null;
+  /** The finished job's answer, kept so a remounted card can still read it. */
+  result: TransferRunResult | null;
+};
+
+export const IDLE_TRANSFER_JOB_STATE: TransferJobState = {
+  runId: 0,
+  kind: null,
+  running: false,
+  progress: null,
+  inPath: null,
+  result: null,
+};
+
 export type TransferPickPathResult =
   | { ok: true; path: string; fileName: string }
   | {
@@ -218,6 +270,10 @@ interface DesktopTransferAPI {
   runWorkspaceTransfer?: (request: TransferRunRequest) => Promise<TransferRunResult>;
   onTransferProgress?: (
     callback: (event: TransferProgressEvent) => void,
+  ) => () => void;
+  getTransferJobState?: () => Promise<TransferJobState>;
+  onTransferJobState?: (
+    callback: (state: TransferJobState) => void,
   ) => () => void;
 }
 
@@ -257,6 +313,24 @@ export async function runWorkspaceTransfer(
   return api.runWorkspaceTransfer(request);
 }
 
+/**
+ * The run the main process is on. A Desktop build that predates the job state
+ * reports idle, which is what the card assumed before anyway.
+ */
+export async function getTransferJobState(): Promise<TransferJobState> {
+  const api = readDesktopAPI();
+  if (!api?.getTransferJobState) return IDLE_TRANSFER_JOB_STATE;
+  return api.getTransferJobState();
+}
+
+export function subscribeTransferJobState(
+  callback: (state: TransferJobState) => void,
+): () => void {
+  const api = readDesktopAPI();
+  if (!api?.onTransferJobState) return () => {};
+  return api.onTransferJobState(callback);
+}
+
 export function subscribeTransferProgress(
   callback: (event: TransferProgressEvent) => void,
 ): () => void {
@@ -275,6 +349,31 @@ export function formatTransferBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+/**
+ * How far the run has got, as a 0–1 ratio, or null when nothing in the sample
+ * carries an honest denominator.
+ *
+ * The counters are read most-specific first: the task walk is the last and
+ * longest stage, so once it reports a total it is the one the bar should track;
+ * the attachment counter is the weakest signal because the CLI only knows an
+ * attachment total on the import side (DENE-240).
+ */
+export function transferProgressRatio(
+  progress: TransferProgressEvent,
+): number | null {
+  const pairs: [number | undefined, number | undefined][] = [
+    [progress.issuesDone, progress.issuesTotal],
+    [progress.sessionsDone, progress.sessionsTotal],
+    [progress.attachmentsDownloaded, progress.attachmentsTotal],
+  ];
+  for (const [done, total] of pairs) {
+    if (total == null || total <= 0) continue;
+    const ratio = (done ?? 0) / total;
+    return Math.min(1, Math.max(0, ratio));
+  }
+  return null;
 }
 
 /** Host shown as the V2 export source (current API server). */

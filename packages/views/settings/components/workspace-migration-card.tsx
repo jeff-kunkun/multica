@@ -33,6 +33,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import { Progress } from "@multica/ui/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -44,19 +45,24 @@ import { useT } from "../../i18n";
 import {
   fileNameFromPath,
   formatTransferBytes,
+  getTransferJobState,
   isDesktopShell,
   markTransferExportCompleted,
   pickTransferExportPath,
   pickTransferImportPath,
   runWorkspaceTransfer,
+  subscribeTransferJobState,
   subscribeTransferProgress,
   transferExportSourceHost,
+  transferProgressRatio,
   type TransferErrorCode,
   type TransferImportOptions,
   type TransferImportReportView,
+  type TransferJobState,
   type TransferIssuesDegradationKind,
   type TransferIssuesSummary,
   type TransferProgressEvent,
+  type TransferRunResult,
   type TransferRuntimeBind,
   type TransferRuntimeBinding,
   type TransferRuntimeBindingOutcome,
@@ -170,9 +176,62 @@ export function WorkspaceMigrationCard() {
   // reaching the main process and coming back as "a transfer is already
   // running" (DENE-318).
   const busyRef = useRef(false);
+  // True while this card is showing a run it did not start — the main process
+  // was already running one when the card mounted, or another window kicked it
+  // off. Such a run has no `await` here to close it out, so the job-state
+  // channel does that instead (DENE-240).
+  const adoptedRef = useRef(false);
+
+  // The export runs in the main process and outlives this card: switching
+  // settings pages unmounts it while the CLI keeps going. Before the main
+  // process owned the run, that made a live export look stopped and the next
+  // click silently hit the "already running" guard (DENE-240).
+  const applyAdoptedRef = useRef(applyAdoptedResult);
+  useEffect(() => {
+    applyAdoptedRef.current = applyAdoptedResult;
+  });
 
   useEffect(() => {
-    return subscribeTransferProgress((event) => setProgress(event));
+    let alive = true;
+
+    void getTransferJobState().then((state: TransferJobState) => {
+      if (!alive) return;
+      if (state.running) {
+        adoptedRef.current = true;
+        busyRef.current = true;
+        setBusy(true);
+        setActiveAction(state.kind);
+        setProgress(state.progress);
+        return;
+      }
+      // A snapshot read at mount is history, not news: the run that finished
+      // while the card was away gets its outcome shown, not re-announced.
+      if (state.result) applyAdoptedRef.current(state.inPath, state.result, false);
+    });
+
+    const offState = subscribeTransferJobState((state) => {
+      if (!alive) return;
+      if (state.running) {
+        if (busyRef.current) return;
+        adoptedRef.current = true;
+        busyRef.current = true;
+        setBusy(true);
+        setActiveAction(state.kind);
+        setProgress(state.progress);
+        return;
+      }
+      if (!adoptedRef.current) return;
+      adoptedRef.current = false;
+      finishTransfer();
+      if (state.result) applyAdoptedRef.current(state.inPath, state.result, true);
+    });
+    const offProgress = subscribeTransferProgress((event) => setProgress(event));
+
+    return () => {
+      alive = false;
+      offState();
+      offProgress();
+    };
   }, []);
 
   if (!isDesktopShell()) return null;
@@ -180,9 +239,65 @@ export function WorkspaceMigrationCard() {
   function startTransfer(action: TransferAction): boolean {
     if (busyRef.current) return false;
     busyRef.current = true;
+    // This card owns the run from here, so its own `await` answers it.
+    adoptedRef.current = false;
     setActiveAction(action);
     setBusy(true);
     return true;
+  }
+
+  /**
+   * Shows the outcome of a transfer this card did not run itself. `notify`
+   * separates a run that just finished (worth a toast) from one being read back
+   * out of the main process at mount (already over, announcing it would be a
+   * second toast for the same run).
+   */
+  function applyAdoptedResult(
+    inPath: string | null,
+    result: TransferRunResult,
+    notify: boolean,
+  ) {
+    if (!result.ok) {
+      if (result.code === "busy") return;
+      setError({ code: result.code, fallback: result.message });
+      if (notify) toast.error(errorMessage(result.code, result.message));
+      return;
+    }
+    if (result.action === "export") {
+      setExportResult({ path: result.outPath, bytes: result.bytes });
+      markTransferExportCompleted();
+      if (notify) toast.success(t(($) => $.config_transfer.migration.export_success));
+      return;
+    }
+    if (result.action === "import" && inPath) {
+      setImportPhase({
+        step: result.dryRun ? "preview" : "result",
+        fileName: fileNameFromPath(inPath),
+        inPath,
+        report: result.report,
+      });
+      if (!result.dryRun) {
+        setBindOutcomes({});
+        if (notify) toast.success(t(($) => $.config_transfer.migration.success));
+        void invalidateImportedQueries();
+      }
+    }
+  }
+
+  /**
+   * The main process refused a second run because one is already going. That is
+   * not a failure to report — it means this card is out of date, so it re-reads
+   * the run in flight and shows it. Staying silent is what made a re-click look
+   * like a dead button (DENE-240).
+   */
+  async function adoptRunningTransfer() {
+    const state = await getTransferJobState();
+    if (!state.running) return;
+    adoptedRef.current = true;
+    busyRef.current = true;
+    setBusy(true);
+    setActiveAction(state.kind);
+    setProgress(state.progress);
   }
 
   function finishTransfer() {
@@ -245,9 +360,14 @@ export function WorkspaceMigrationCard() {
         ...(includeIssues ? { includeIssues: true } : {}),
       });
       if (!result.ok) {
-        // The main process refuses a second transfer while one is running.
-        // That is the same click, not a failure, so stay quiet.
-        if (result.code === "busy") return;
+        // Stale card: the main process is already running a transfer this
+        // card never started (it was mounted after the run began, or another
+        // window started it). Show that run instead of returning in silence,
+        // which is what made a re-click look like a dead button (DENE-240).
+        if (result.code === "busy") {
+          await adoptRunningTransfer();
+          return;
+        }
         setError({ code: result.code, fallback: result.message });
         toast.error(errorMessage(result.code, result.message));
         return;
@@ -257,7 +377,9 @@ export function WorkspaceMigrationCard() {
       markTransferExportCompleted();
       toast.success(t(($) => $.config_transfer.migration.export_success));
     } finally {
-      finishTransfer();
+      // An adopted run is closed out by the job-state channel, not here: this
+      // card is now a spectator of a transfer that is still going.
+      if (!adoptedRef.current) finishTransfer();
     }
   }
 
@@ -287,7 +409,14 @@ export function WorkspaceMigrationCard() {
         options: importOptions,
       });
       if (!result.ok) {
-        if (result.code === "busy") return;
+        // Stale card: the main process is already running a transfer this
+        // card never started (it was mounted after the run began, or another
+        // window started it). Show that run instead of returning in silence,
+        // which is what made a re-click look like a dead button (DENE-240).
+        if (result.code === "busy") {
+          await adoptRunningTransfer();
+          return;
+        }
         setImportPhase({ step: "idle" });
         setError({ code: result.code, fallback: result.message });
         toast.error(errorMessage(result.code, result.message));
@@ -296,7 +425,9 @@ export function WorkspaceMigrationCard() {
       if (result.action !== "import") return;
       setImportPhase({ step: "preview", fileName, inPath, report: result.report });
     } finally {
-      finishTransfer();
+      // An adopted run is closed out by the job-state channel, not here: this
+      // card is now a spectator of a transfer that is still going.
+      if (!adoptedRef.current) finishTransfer();
     }
   }
 
@@ -324,7 +455,14 @@ export function WorkspaceMigrationCard() {
         options: importOptions,
       });
       if (!result.ok) {
-        if (result.code === "busy") return;
+        // Stale card: the main process is already running a transfer this
+        // card never started (it was mounted after the run began, or another
+        // window started it). Show that run instead of returning in silence,
+        // which is what made a re-click look like a dead button (DENE-240).
+        if (result.code === "busy") {
+          await adoptRunningTransfer();
+          return;
+        }
         setError({ code: result.code, fallback: result.message });
         toast.error(errorMessage(result.code, result.message));
         return;
@@ -342,7 +480,9 @@ export function WorkspaceMigrationCard() {
       toast.success(t(($) => $.config_transfer.migration.success));
       await invalidateImportedQueries();
     } finally {
-      finishTransfer();
+      // An adopted run is closed out by the job-state channel, not here: this
+      // card is now a spectator of a transfer that is still going.
+      if (!adoptedRef.current) finishTransfer();
     }
   }
 
@@ -363,7 +503,14 @@ export function WorkspaceMigrationCard() {
         bindings,
       });
       if (!result.ok) {
-        if (result.code === "busy") return;
+        // Stale card: the main process is already running a transfer this
+        // card never started (it was mounted after the run began, or another
+        // window started it). Show that run instead of returning in silence,
+        // which is what made a re-click look like a dead button (DENE-240).
+        if (result.code === "busy") {
+          await adoptRunningTransfer();
+          return;
+        }
         setError({ code: result.code, fallback: result.message });
         toast.error(errorMessage(result.code, result.message));
         return;
@@ -390,7 +537,9 @@ export function WorkspaceMigrationCard() {
       }
       await invalidateImportedQueries();
     } finally {
-      finishTransfer();
+      // An adopted run is closed out by the job-state channel, not here: this
+      // card is now a spectator of a transfer that is still going.
+      if (!adoptedRef.current) finishTransfer();
     }
   }
 
@@ -719,6 +868,29 @@ export function WorkspaceMigrationCard() {
 function ProgressLines({ progress }: { progress: TransferProgressEvent }) {
   const { t } = useT("settings");
   const lines: string[] = [];
+  // Which of the three walks is running. Without it the card sat on the
+  // conversation counters for the whole task walk and looked hung (DENE-240).
+  const headline =
+    progress.phase === "estimating"
+      ? t(($) => $.config_transfer.migration.progress_estimating)
+      : progress.phase === "finalizing"
+        ? t(($) => $.config_transfer.migration.progress_finalizing)
+        : progress.stage === "config"
+          ? t(($) => $.config_transfer.migration.progress_stage_config)
+          : progress.stage === "conversations"
+            ? t(($) => $.config_transfer.migration.progress_stage_conversations)
+            : progress.stage === "issues"
+              ? t(($) => $.config_transfer.migration.progress_stage_issues)
+              : "";
+  if (headline) lines.push(headline);
+  if (progress.issuesTotal != null && progress.issuesTotal > 0) {
+    lines.push(
+      t(($) => $.config_transfer.migration.progress_issues, {
+        done: progress.issuesDone ?? 0,
+        total: progress.issuesTotal,
+      }),
+    );
+  }
   if (progress.sessionsTotal != null) {
     lines.push(
       t(($) => $.config_transfer.migration.progress_sessions, {
@@ -748,14 +920,25 @@ function ProgressLines({ progress }: { progress: TransferProgressEvent }) {
       }),
     );
   }
-  if (lines.length === 0) {
-    return <p>{t(($) => $.config_transfer.migration.exporting)}</p>;
-  }
+  const ratio = transferProgressRatio(progress);
   return (
     <>
-      {lines.map((line) => (
-        <p key={line}>{line}</p>
-      ))}
+      {ratio == null ? null : (
+        <Progress
+          className="mb-2"
+          value={Math.round(ratio * 100)}
+          aria-label={t(($) => $.config_transfer.migration.exporting)}
+          data-testid="workspace-migration-progress-bar"
+        />
+      )}
+      {lines.length === 0 ? (
+        <p>{t(($) => $.config_transfer.migration.exporting)}</p>
+      ) : (
+        lines.map((line) => <p key={line}>{line}</p>)
+      )}
+      <p className="text-muted-foreground">
+        {t(($) => $.config_transfer.migration.progress_keeps_running)}
+      </p>
     </>
   );
 }

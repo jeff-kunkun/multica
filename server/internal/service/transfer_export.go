@@ -162,6 +162,11 @@ type TransferExportOpts struct {
 // CLI turns each sample into a `{"event":"progress",...}` line on stderr
 // (DENE-318).
 type TransferExportProgress struct {
+	// Stage names the group being walked: TransferStageConfig,
+	// TransferStageConversations or TransferStageIssues. An export that ships
+	// several groups spends minutes in each, so a reader that only counted
+	// sessions saw a frozen "26 / 26" for the whole task walk (DENE-240).
+	Stage string
 	// SessionIndex is the 1-based position of the session being exported, and
 	// SessionsTotal how many the export will walk. Together they read as
 	// "3 / 26 sessions" while SessionTitle names the session in flight.
@@ -172,7 +177,19 @@ type TransferExportProgress struct {
 	// is deliberately absent: attachments are discovered per message, so no
 	// honest denominator exists before the walk finishes.
 	AttachmentsDownloaded int
+	// IssuesDone / IssuesTotal are the task walk's counterpart to the session
+	// pair. The total is known up front: the issue list is fetched whole before
+	// any issue is read.
+	IssuesDone  int
+	IssuesTotal int
 }
+
+// The stages an export walks, in the order ExportFromSource runs them.
+const (
+	TransferStageConfig        = "config"
+	TransferStageConversations = "conversations"
+	TransferStageIssues        = "issues"
+)
 
 type TransferExportFiles struct {
 	Manifest      TransferManifest
@@ -280,6 +297,9 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 		Stats:          map[string]int{},
 	}
 
+	if inc["config"] && opts.Progress != nil {
+		opts.Progress(TransferExportProgress{Stage: TransferStageConfig})
+	}
 	if inc["config"] {
 		cfgGaps := exportConfigGroups(ctx, src, ws.ID, &bundle, peopleByID)
 		gaps = append(gaps, cfgGaps...)
@@ -1375,6 +1395,7 @@ func (t *exportProgressTracker) attachment(downloaded bool) {
 
 func (t *exportProgressTracker) sample() TransferExportProgress {
 	return TransferExportProgress{
+		Stage:                 TransferStageConversations,
 		SessionIndex:          t.sessionIndex,
 		SessionsTotal:         t.sessionsTotal,
 		SessionTitle:          t.sessionTitle,

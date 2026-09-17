@@ -4,7 +4,20 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithI18n } from "../../test/i18n";
-import type { TransferProgressEvent, TransferRunResult } from "../../platform";
+import type {
+  TransferJobState,
+  TransferProgressEvent,
+  TransferRunResult,
+} from "../../platform";
+
+const IDLE_JOB: TransferJobState = {
+  runId: 0,
+  kind: null,
+  running: false,
+  progress: null,
+  inPath: null,
+  result: null,
+};
 
 const desktop = vi.hoisted(() => ({
   isDesktop: true,
@@ -12,6 +25,10 @@ const desktop = vi.hoisted(() => ({
   pickImport: vi.fn(),
   run: vi.fn(),
   subscribe: vi.fn<(cb: (event: unknown) => void) => () => void>(() => () => {}),
+  jobState: vi.fn<() => Promise<unknown>>(),
+  subscribeJobState: vi.fn<(cb: (state: unknown) => void) => () => void>(
+    () => () => {},
+  ),
 }));
 
 vi.mock("../../platform", async (importOriginal) => {
@@ -24,6 +41,9 @@ vi.mock("../../platform", async (importOriginal) => {
     runWorkspaceTransfer: (request: unknown) => desktop.run(request),
     subscribeTransferProgress: (cb: (event: TransferProgressEvent) => void) =>
       desktop.subscribe(cb as (event: unknown) => void),
+    getTransferJobState: () => desktop.jobState(),
+    subscribeTransferJobState: (cb: (state: TransferJobState) => void) =>
+      desktop.subscribeJobState(cb as (state: unknown) => void),
   };
 });
 
@@ -130,6 +150,10 @@ beforeEach(() => {
   desktop.run.mockReset();
   desktop.subscribe.mockReset();
   desktop.subscribe.mockReturnValue(() => {});
+  desktop.jobState.mockReset();
+  desktop.jobState.mockResolvedValue(IDLE_JOB);
+  desktop.subscribeJobState.mockReset();
+  desktop.subscribeJobState.mockReturnValue(() => {});
   vi.mocked(toast.error).mockClear();
   vi.mocked(toast.success).mockClear();
   window.localStorage.removeItem(TRANSFER_EXPORT_COMPLETED_KEY);
@@ -860,6 +884,131 @@ describe("WorkspaceMigrationCard", () => {
     expect(
       screen.queryByTestId("workspace-migration-error"),
     ).not.toBeInTheDocument();
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+  });
+
+  // The three DENE-240 symptoms are one cause: the run lives in the main
+  // process, but the card used to be the only record of it, so leaving the
+  // settings page took the export's whole UI with it.
+  it("re-attaches to an export that was already running when it mounted", async () => {
+    desktop.jobState.mockResolvedValue({
+      runId: 4,
+      kind: "export",
+      running: true,
+      progress: {
+        phase: "running",
+        stage: "issues",
+        issuesDone: 40,
+        issuesTotal: 200,
+      },
+      inPath: null,
+      result: null,
+    });
+    renderCard();
+
+    const running = await screen.findByRole("button", { name: "Exporting…" });
+    expect(running).toBeDisabled();
+    const progress = screen.getByTestId("workspace-migration-progress");
+    expect(progress).toHaveTextContent("Exporting tasks…");
+    expect(progress).toHaveTextContent("40 / 200 tasks");
+    expect(screen.getByTestId("workspace-migration-progress-bar")).toBeInTheDocument();
+    // Re-attaching must not start a second CLI run.
+    expect(desktop.run).not.toHaveBeenCalled();
+  });
+
+  it("shows the outcome of an export that finished while the card was away, without re-announcing it", async () => {
+    desktop.jobState.mockResolvedValue({
+      runId: 4,
+      kind: "export",
+      running: false,
+      progress: null,
+      inPath: null,
+      result: {
+        ok: true,
+        action: "export",
+        outPath: "/tmp/acme.zip",
+        bytes: 2048,
+      },
+    });
+    renderCard();
+
+    expect(await screen.findByText(/acme\.zip/)).toBeInTheDocument();
+    // A snapshot read at mount is history: the toast already fired, or never
+    // had anyone to fire at. Either way it must not fire again on every visit.
+    expect(vi.mocked(toast.success)).not.toHaveBeenCalled();
+  });
+
+  it("finishes an adopted run when the main process reports it done", async () => {
+    let push: ((state: TransferJobState) => void) | undefined;
+    desktop.subscribeJobState.mockImplementation((cb) => {
+      push = cb as (state: TransferJobState) => void;
+      return () => {};
+    });
+    desktop.jobState.mockResolvedValue({
+      runId: 4,
+      kind: "export",
+      running: true,
+      progress: { phase: "running", stage: "issues" },
+      inPath: null,
+      result: null,
+    });
+    renderCard();
+    await screen.findByRole("button", { name: "Exporting…" });
+
+    await act(async () => {
+      push?.({
+        runId: 4,
+        kind: "export",
+        running: false,
+        progress: null,
+        inPath: null,
+        result: {
+          ok: true,
+          action: "export",
+          outPath: "/tmp/acme.zip",
+          bytes: 2048,
+        },
+      });
+    });
+
+    expect(screen.getByRole("button", { name: "Export to zip" })).toBeEnabled();
+    expect(screen.getByText(/acme\.zip/)).toBeInTheDocument();
+    expect(vi.mocked(toast.success)).toHaveBeenCalled();
+  });
+
+  it("shows the run in flight when the main process refuses a second one", async () => {
+    const user = userEvent.setup();
+    desktop.pickExport.mockResolvedValue({
+      ok: true,
+      path: "/tmp/acme.zip",
+      fileName: "acme.zip",
+    });
+    desktop.run.mockResolvedValue({
+      ok: false,
+      code: "busy",
+      message: "a transfer is already running",
+    });
+    desktop.jobState
+      .mockResolvedValueOnce(IDLE_JOB)
+      .mockResolvedValue({
+        runId: 7,
+        kind: "export",
+        running: true,
+        progress: { phase: "running", stage: "conversations", sessionsDone: 2, sessionsTotal: 9 },
+        inPath: null,
+        result: null,
+      });
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Export to zip" }));
+
+    // The old card returned in silence here, which read as a dead button.
+    const running = await screen.findByRole("button", { name: "Exporting…" });
+    expect(running).toBeDisabled();
+    expect(screen.getByTestId("workspace-migration-progress")).toHaveTextContent(
+      "2 / 9 sessions",
+    );
+    expect(screen.queryByTestId("workspace-migration-error")).not.toBeInTheDocument();
     expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
   });
 

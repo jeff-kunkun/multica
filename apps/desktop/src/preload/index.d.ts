@@ -21,6 +21,7 @@ import type {
 } from "../shared/daemon-types";
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
 import type {
+  TransferJobState,
   TransferPickPathResult,
   TransferProgressEvent,
   TransferRunRequest,
@@ -154,6 +155,10 @@ interface DesktopAPI {
   runWorkspaceTransfer: (request: TransferRunRequest) => Promise<TransferRunResult>;
   onTransferProgress: (
     callback: (event: TransferProgressEvent) => void,
+  ) => () => void;
+  getTransferJobState: () => Promise<TransferJobState>;
+  onTransferJobState: (
+    callback: (state: TransferJobState) => void,
   ) => () => void;
 }
 

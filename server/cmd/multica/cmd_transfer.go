@@ -255,10 +255,16 @@ func includesTransferGroup(include []string, group string) bool {
 // they carry nothing to say, so the card never renders a "0 / 0" placeholder
 // (DENE-318).
 type transferProgressEvent struct {
-	Event         string `json:"event"`
+	Event string `json:"event"`
+	// Stage names the export group in flight (config / conversations /
+	// issues), so the card can say which of the three long walks is running
+	// instead of freezing on the previous group's counters (DENE-240).
+	Stage         string `json:"stage,omitempty"`
 	SessionIndex  int    `json:"session_index,omitempty"`
 	SessionsTotal int    `json:"sessions_total,omitempty"`
 	SessionTitle  string `json:"session_title,omitempty"`
+	IssuesDone    int    `json:"issues_done,omitempty"`
+	IssuesTotal   int    `json:"issues_total,omitempty"`
 	// AttachmentsDownloaded reports the export direction,
 	// AttachmentsUploaded the import direction. The Desktop card keeps one
 	// attachment counter for both.
@@ -280,10 +286,13 @@ func newTransferProgressReporter(w io.Writer) *transferProgressReporter {
 func (r *transferProgressReporter) reportExport(p service.TransferExportProgress) {
 	r.write(transferProgressEvent{
 		Event:                 "progress",
+		Stage:                 p.Stage,
 		SessionIndex:          p.SessionIndex,
 		SessionsTotal:         p.SessionsTotal,
 		SessionTitle:          p.SessionTitle,
 		AttachmentsDownloaded: p.AttachmentsDownloaded,
+		IssuesDone:            p.IssuesDone,
+		IssuesTotal:           p.IssuesTotal,
 	})
 }
 

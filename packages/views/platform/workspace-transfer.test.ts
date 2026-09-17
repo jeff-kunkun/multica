@@ -5,7 +5,48 @@ import {
   hasCompletedTransferExport,
   markTransferExportCompleted,
   transferExportSourceHost,
+  transferProgressRatio,
+  type TransferProgressEvent,
 } from "./workspace-transfer";
+
+/** Canonical matrix for the export progress bar's denominator (DENE-240). */
+describe("transferProgressRatio", () => {
+  function sample(over: Partial<TransferProgressEvent>): TransferProgressEvent {
+    return { phase: "running", ...over };
+  }
+
+  it("has no ratio while no counter carries a total", () => {
+    expect(transferProgressRatio(sample({}))).toBeNull();
+    expect(transferProgressRatio(sample({ phase: "estimating" }))).toBeNull();
+    // A count with no denominator is exactly the case the bar cannot draw:
+    // an export discovers attachments per message, so there is no honest total.
+    expect(transferProgressRatio(sample({ attachmentsDownloaded: 12 }))).toBeNull();
+    expect(transferProgressRatio(sample({ sessionsTotal: 0, sessionsDone: 0 }))).toBeNull();
+  });
+
+  it("tracks the task walk over the earlier stages once it reports a total", () => {
+    // The task walk runs last and longest, so a sample carrying both must not
+    // leave the bar pinned at the conversation group's finished 26 / 26.
+    expect(
+      transferProgressRatio(
+        sample({ sessionsDone: 26, sessionsTotal: 26, issuesDone: 10, issuesTotal: 40 }),
+      ),
+    ).toBe(0.25);
+  });
+
+  it("falls back to sessions, then attachments", () => {
+    expect(transferProgressRatio(sample({ sessionsDone: 13, sessionsTotal: 26 }))).toBe(0.5);
+    expect(
+      transferProgressRatio(sample({ attachmentsDownloaded: 3, attachmentsTotal: 12 })),
+    ).toBe(0.25);
+  });
+
+  it("reads a missing done counter as zero and clamps an overshoot", () => {
+    expect(transferProgressRatio(sample({ issuesTotal: 40 }))).toBe(0);
+    // The source can grow during the walk, so done > total is reachable.
+    expect(transferProgressRatio(sample({ issuesDone: 45, issuesTotal: 40 }))).toBe(1);
+  });
+});
 
 describe("transferExportSourceHost", () => {
   it("returns the host from an API base URL", () => {

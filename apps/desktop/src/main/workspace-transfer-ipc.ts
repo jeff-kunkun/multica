@@ -3,9 +3,13 @@ import { basename } from "path";
 import { stat } from "fs/promises";
 import { BrowserWindow, dialog, ipcMain } from "electron";
 import {
+  IDLE_TRANSFER_JOB_STATE,
   transferExportFilename,
+  type TransferJobKind,
+  type TransferJobState,
   type TransferPickPathResult,
   type TransferProgressEvent,
+  type TransferRunRequest,
   type TransferRunResult,
 } from "../shared/workspace-transfer";
 import {
@@ -20,7 +24,39 @@ import {
   resolveDesktopCliBinary,
 } from "./daemon-manager";
 
-let transferBusy = false;
+/**
+ * The transfer in flight, owned here rather than in the card.
+ *
+ * The CLI is a main-process child, so it keeps running when the renderer
+ * navigates away and unmounts the card. Keeping the run's state here is what
+ * lets a remounted card pick the same run back up instead of showing an idle
+ * form over a running export (DENE-240).
+ */
+let job: TransferJobState = IDLE_TRANSFER_JOB_STATE;
+let nextRunId = 1;
+
+function jobKind(req: TransferRunRequest): TransferJobKind {
+  if (req.action === "export") return "export";
+  if (req.action === "bind-runtimes") return "bind-runtimes";
+  return req.dryRun ? "import-preview" : "import-apply";
+}
+
+/**
+ * Broadcasts to every window, not just the sender: the run belongs to the app,
+ * and a second window showing settings must not sit on a stale snapshot.
+ */
+function broadcast(channel: string, payload: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send(channel, payload);
+    }
+  }
+}
+
+function setJob(next: TransferJobState): void {
+  job = next;
+  broadcast("transfer:state", job);
+}
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -107,33 +143,50 @@ export function setupWorkspaceTransfer(
     },
   );
 
+  ipcMain.handle("transfer:state", (): TransferJobState => job);
+
   ipcMain.handle(
     "transfer:run",
-    async (event, raw: unknown): Promise<TransferRunResult> => {
+    async (_event, raw: unknown): Promise<TransferRunResult> => {
       const req = parseTransferRunRequest(raw);
       if (!req) {
         return { ok: false, code: "unknown", message: "invalid transfer request" };
       }
-      if (transferBusy) {
+      if (job.running) {
         return { ok: false, code: "busy", message: "a transfer is already running" };
       }
-      const sender = event.sender;
-      transferBusy = true;
+      const runId = nextRunId++;
+      setJob({
+        runId,
+        kind: jobKind(req),
+        running: true,
+        progress: null,
+        inPath: req.action === "import" ? req.inPath : null,
+        result: null,
+      });
+      let result: TransferRunResult;
       try {
-        return await runTransferCli(req, {
+        result = await runTransferCli(req, {
           resolveCli: resolveDesktopCliBinary,
           profileName: activeDesktopProfileName,
           runCommand: spawnTransferCommand,
           statSize: async (path) => (await stat(path)).size,
           sendProgress: (progress: TransferProgressEvent) => {
-            if (!sender.isDestroyed()) {
-              sender.send("transfer:progress", progress);
-            }
+            // A progress line for a run the app has moved past is noise.
+            if (job.runId !== runId) return;
+            job = { ...job, progress };
+            broadcast("transfer:progress", progress);
           },
         });
-      } finally {
-        transferBusy = false;
+      } catch (err) {
+        result = { ok: false, code: "unknown", message: errorMessage(err) };
       }
+      // A newer run already replaced this one: its state wins, and this
+      // answer goes only to the caller that is still awaiting it.
+      if (job.runId === runId) {
+        setJob({ ...job, running: false, progress: null, result });
+      }
+      return result;
     },
   );
 }

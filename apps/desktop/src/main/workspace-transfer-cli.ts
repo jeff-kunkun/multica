@@ -20,6 +20,7 @@ import {
   type TransferRuntimeBindingOutcome,
   type TransferRuntimeCandidate,
   type TransferSecretToFill,
+  type TransferStage,
 } from "../shared/workspace-transfer";
 
 /**
@@ -288,6 +289,7 @@ export function parseTransferProgressLine(line: string): TransferProgressEvent |
   if (obj.event !== "progress" && obj.type !== "progress") return null;
   return {
     phase: "running",
+    stage: asTransferStage(obj.stage),
     sessionsTotal: asNumber(obj.sessions_total),
     sessionsDone: asNumber(obj.session_index ?? obj.sessions_done),
     currentSessionTitle: asNonEmptyString(obj.session_title),
@@ -297,7 +299,20 @@ export function parseTransferProgressLine(line: string): TransferProgressEvent |
       obj.attachments_downloaded ?? obj.attachments_uploaded,
     ),
     attachmentsTotal: asNumber(obj.attachments_total),
+    issuesDone: asNumber(obj.issues_done),
+    issuesTotal: asNumber(obj.issues_total),
   };
+}
+
+/**
+ * A CLI newer than this build may name a stage this one has never heard of, and
+ * an older one names none at all. Either way the card falls back to the plain
+ * "exporting" line rather than rendering an unknown label (DENE-240).
+ */
+function asTransferStage(raw: unknown): TransferStage | undefined {
+  return raw === "config" || raw === "conversations" || raw === "issues"
+    ? raw
+    : undefined;
 }
 
 export function parseTransferImportReport(stdout: string): TransferImportReportView {
@@ -487,31 +502,12 @@ export async function runTransferCli(
     });
 
   if (req.action === "export") {
-    deps.sendProgress({ phase: "estimating" });
-    const estimateArgs = buildTransferCliArgs(profile, {
-      action: "export",
-      workspace: req.workspace,
-      estimate: true,
-      includeIssues: req.includeIssues,
-    });
-    const estimate = await run(estimateArgs);
-    if (estimate.code !== 0) {
-      const code = classifyTransferError(stripProgressLines(`${estimate.stdout}\n${estimate.stderr}`));
-      if (code === "cli_too_old" || code === "target_unsupported") {
-        feedProgress.flush();
-        return { ok: false, code, message: trimOutput(estimate.stderr || estimate.stdout) };
-      }
-    } else {
-      const parsed = parseTransferEstimate(estimate.stdout);
-      if (parsed) {
-        deps.sendProgress({
-          phase: "running",
-          sessionsTotal: parsed.sessions,
-          attachmentsTotal: parsed.attachment_bodies || parsed.attachments,
-        });
-      }
-    }
-
+    // No `--estimate` pre-pass. It walked every session and every issue over
+    // the API just to pre-fill a total, which doubled the wall-clock of the
+    // slowest thing in the product — and the export's own progress lines
+    // already carry `sessions_total` and `issues_total` from the walk that is
+    // actually doing the work (DENE-240). A failure classifies the same way
+    // off the real run, so the pre-pass was not buying an early exit either.
     deps.sendProgress({ phase: "running" });
     const exportArgs = buildTransferCliArgs(profile, {
       action: "export",

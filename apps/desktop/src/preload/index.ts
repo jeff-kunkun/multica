@@ -35,6 +35,7 @@ import {
   type TabSelectionShortcutKey,
 } from "../shared/main-renderer-messages";
 import type {
+  TransferJobState,
   TransferPickPathResult,
   TransferProgressEvent,
   TransferRunRequest,
@@ -291,6 +292,14 @@ const desktopAPI = {
     const handler = (_: unknown, payload: TransferProgressEvent) => callback(payload);
     ipcRenderer.on("transfer:progress", handler);
     return () => ipcRenderer.removeListener("transfer:progress", handler);
+  },
+  /** The run the main process is on, so a remounted card resumes it (DENE-240). */
+  getTransferJobState: (): Promise<TransferJobState> =>
+    ipcRenderer.invoke("transfer:state"),
+  onTransferJobState: (callback: (state: TransferJobState) => void) => {
+    const handler = (_: unknown, payload: TransferJobState) => callback(payload);
+    ipcRenderer.on("transfer:state", handler);
+    return () => ipcRenderer.removeListener("transfer:state", handler);
   },
 };
 

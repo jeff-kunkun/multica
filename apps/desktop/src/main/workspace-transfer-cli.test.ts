@@ -449,6 +449,36 @@ describe("parseTransferEstimate / progress", () => {
     });
   });
 
+  // The task walk is the longest stage of a full export and reports its own
+  // counters; without them the card sat on the conversation group's finished
+  // numbers for minutes and looked hung (DENE-240).
+  it("reads the stage and the task counters", () => {
+    expect(
+      parseTransferProgressLine(
+        '{"event":"progress","stage":"issues","issues_done":40,"issues_total":200}',
+      ),
+    ).toMatchObject({
+      phase: "running",
+      stage: "issues",
+      issuesDone: 40,
+      issuesTotal: 200,
+    });
+  });
+
+  // A CLI older than the stage field, or newer than this build, must not put a
+  // label the card cannot render on screen.
+  it("drops an absent or unknown stage", () => {
+    expect(
+      parseTransferProgressLine('{"event":"progress","sessions_total":3}')?.stage,
+    ).toBeUndefined();
+    expect(
+      parseTransferProgressLine('{"event":"progress","stage":"plugins"}')?.stage,
+    ).toBeUndefined();
+    expect(
+      parseTransferProgressLine('{"event":"progress","stage":7}')?.stage,
+    ).toBeUndefined();
+  });
+
   // Imports upload attachments instead of downloading them, and the card has
   // one attachment counter, so the parser accepts both spellings (DENE-318).
   it("reads the import direction's uploaded counter", () => {
@@ -571,19 +601,14 @@ describe("parseTransferRunRequest", () => {
 });
 
 describe("runTransferCli", () => {
-  it("runs estimate then export with the Desktop profile", async () => {
+  // The card used to pay for a full `--estimate` walk before the export that
+  // actually writes the zip — the same sessions and the same per-issue reads,
+  // twice, just to pre-fill a total the export itself reports (DENE-240).
+  it("exports in one run, with no estimate pre-pass", async () => {
     const calls: string[][] = [];
     const deps = mockDeps({
       runCommand: async (_bin, args) => {
         calls.push(args);
-        if (args.includes("--estimate")) {
-          return {
-            code: 0,
-            stdout:
-              '{"sessions":4,"messages":10,"attachments":1,"attachment_bodies":1,"estimated_bytes":100}',
-            stderr: "",
-          };
-        }
         return { code: 0, stdout: "/tmp/acme.zip\n", stderr: "" };
       },
     });
@@ -599,24 +624,17 @@ describe("runTransferCli", () => {
       outPath: "/tmp/acme.zip",
       bytes: 42,
     });
-    expect(calls[0]).toEqual([
-      "--profile",
-      PROFILE,
-      "transfer",
-      "export",
-      "--workspace",
-      "acme",
-      "--estimate",
-    ]);
-    expect(calls[1]).toEqual([
-      "--profile",
-      PROFILE,
-      "transfer",
-      "export",
-      "--workspace",
-      "acme",
-      "--out",
-      "/tmp/acme.zip",
+    expect(calls).toEqual([
+      [
+        "--profile",
+        PROFILE,
+        "transfer",
+        "export",
+        "--workspace",
+        "acme",
+        "--out",
+        "/tmp/acme.zip",
+      ],
     ]);
   });
 

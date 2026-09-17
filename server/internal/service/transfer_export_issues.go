@@ -73,6 +73,23 @@ func exportIssues(ctx context.Context, src TransferSourceClient, opts TransferEx
 		return out
 	}
 
+	// The task walk makes several serial reads per issue, so on a real
+	// workspace it is the longest stretch of the export. Without its own
+	// counter the card sat on the conversation group's last sample for minutes
+	// and looked hung (DENE-240). The total is honest here: the whole issue
+	// list is already in hand.
+	reportIssues := func(done int) {
+		if opts.Progress == nil {
+			return
+		}
+		opts.Progress(TransferExportProgress{
+			Stage:       TransferStageIssues,
+			IssuesDone:  done,
+			IssuesTotal: len(issues),
+		})
+	}
+	reportIssues(0)
+
 	// Resume: an issue already checkpointed is not read again, and its rows
 	// come back from the partial directory instead of the source. Any issue not
 	// in the completed set is re-walked from scratch (§8.5).
@@ -92,7 +109,8 @@ func exportIssues(ctx context.Context, src TransferSourceClient, opts TransferEx
 		}
 	}
 
-	for _, raw := range issues {
+	for i, raw := range issues {
+		reportIssues(i)
 		issueID := strField(raw, "id")
 		if issueID == "" {
 			out.Gaps = append(out.Gaps, TransferExportGap{Group: TransferIncludeIssues, Reason: gapReasonListShapeUnknown})
@@ -169,6 +187,8 @@ func exportIssues(ctx context.Context, src TransferSourceClient, opts TransferEx
 			_ = persistCompletedIssue(opts.PartialDir, resume, row, comments, issueAtts, issueRelations, issueBlobs, watermark)
 		}
 	}
+	// The walk is over; the last sample must not read "399 / 400".
+	reportIssues(len(issues))
 	return out
 }
 

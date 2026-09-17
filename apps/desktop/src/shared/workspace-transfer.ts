@@ -10,13 +10,23 @@ export type TransferErrorCode =
   | "busy"
   | "unknown";
 
+/**
+ * Which export group the CLI is walking. An export ships up to three groups and
+ * each can run for minutes, so the card names the one in flight instead of
+ * leaving the previous group's counters frozen on screen (DENE-240).
+ */
+export type TransferStage = "config" | "conversations" | "issues";
+
 export type TransferProgressEvent = {
   phase: "estimating" | "running" | "finalizing";
+  stage?: TransferStage;
   sessionsTotal?: number;
   sessionsDone?: number;
   currentSessionTitle?: string;
   attachmentsDownloaded?: number;
   attachmentsTotal?: number;
+  issuesDone?: number;
+  issuesTotal?: number;
 };
 
 export type TransferSecretToFill = {
@@ -188,6 +198,48 @@ export type TransferRunResult =
       report: TransferBindRuntimesReport;
     }
   | { ok: false; code: TransferErrorCode; message: string };
+
+/**
+ * Which transfer a job is running, in the terms the card labels its buttons
+ * with. A dry run and a write are told apart so the import button never says
+ * "importing" while it is only refreshing a preview.
+ */
+export type TransferJobKind =
+  | "export"
+  | "import-preview"
+  | "import-apply"
+  | "bind-runtimes";
+
+/**
+ * The transfer the main process is running, or the last one it ran.
+ *
+ * A transfer outlives the card: the CLI runs in the main process, so switching
+ * settings pages unmounts the card while the export keeps going. Before this
+ * state existed the card's own `useState` was the only record of the run, so a
+ * page switch made a running export look stopped, and the next click hit the
+ * main process's "a transfer is already running" guard and appeared to do
+ * nothing (DENE-240). The card now rebuilds itself from this snapshot on mount.
+ */
+export type TransferJobState = {
+  /** Monotonic within an app session; 0 before the first transfer. */
+  runId: number;
+  kind: TransferJobKind | null;
+  running: boolean;
+  progress: TransferProgressEvent | null;
+  /** The bundle path of a running or finished import, for the card's header. */
+  inPath: string | null;
+  /** The finished job's answer, kept so a remounted card can still read it. */
+  result: TransferRunResult | null;
+};
+
+export const IDLE_TRANSFER_JOB_STATE: TransferJobState = {
+  runId: 0,
+  kind: null,
+  running: false,
+  progress: null,
+  inPath: null,
+  result: null,
+};
 
 export type TransferPickPathResult =
   | { ok: true; path: string; fileName: string }
