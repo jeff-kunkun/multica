@@ -133,6 +133,12 @@ func newTransferWireSender(client *cli.APIClient, target transferWireTarget, con
 	return &transferWireSender{client: client, target: target, configured: configured, progress: progress}
 }
 
+// compresses reports whether the bodies this sender produces will travel
+// compressed, which is what the chunk planners must size against.
+func (s *transferWireSender) compresses() bool {
+	return s.target.gzip()
+}
+
 // chunkLimit is the byte budget one request may carry, compressed.
 func (s *transferWireSender) chunkLimit() int {
 	return service.TransferWireLimit(s.configured, s.target.caps, s.rate)
@@ -410,9 +416,18 @@ func (s *transferRowSizer[T]) rawBytes(lo, hi int) int {
 // else the request carries (refs, flags). When even the raw bytes fit there is
 // nothing left to check: the send path falls back to the raw bytes when gzip
 // does not shrink them, so a body that fits raw can only stay the same size.
-func transferRequestFits(rawRows, rawPlus, limit int, build func() []byte) bool {
+//
+// compress says whether the target will actually receive the compressed bytes.
+// It has to be asked, because the budget is about what travels: planning a
+// request by its gzipped size and then sending it raw to an instance that does
+// not advertise accepts_gzip puts 5-10x the budget on the wire — which is the
+// failure this whole path exists to prevent.
+func transferRequestFits(rawRows, rawPlus, limit int, compress bool, build func() []byte) bool {
 	if rawRows+rawPlus <= limit {
 		return true
+	}
+	if !compress {
+		return false
 	}
 	wire, _ := gzipBytes(build())
 	return len(wire) <= limit
@@ -534,6 +549,9 @@ func (c transferIssuesChunk) split() (transferIssuesChunk, transferIssuesChunk, 
 // comments of `IssueShards[i]`).
 type transferIssuesPlanner struct {
 	limit            int
+	// compress mirrors the sender's decision, so the planner measures the
+	// bytes that will actually travel rather than the ones it could make.
+	compress         bool
 	refs             service.TransferRefs
 	dry              bool
 	renumber         bool
@@ -548,9 +566,10 @@ type transferIssuesPlanner struct {
 	rawPrefix []int
 }
 
-func newTransferIssuesPlanner(limit int, refs service.TransferRefs, dry, renumber bool, issues []service.TransferIssueRow, comments []service.TransferCommentRow, relations []service.TransferRelationRow) *transferIssuesPlanner {
+func newTransferIssuesPlanner(limit int, compress bool, refs service.TransferRefs, dry, renumber bool, issues []service.TransferIssueRow, comments []service.TransferCommentRow, relations []service.TransferRelationRow) *transferIssuesPlanner {
 	p := &transferIssuesPlanner{
 		limit:            limit,
+		compress:         compress,
 		refs:             refs,
 		dry:              dry,
 		renumber:         renumber,
@@ -611,7 +630,7 @@ func (p *transferIssuesPlanner) relationsOf(lo, hi int) []service.TransferRelati
 // fits reports whether issues[lo:hi], with the comments and relations that hang
 // off them, produce a request inside the budget.
 func (p *transferIssuesPlanner) fits(lo, hi int) bool {
-	return transferRequestFits(p.rawPrefix[hi]-p.rawPrefix[lo], p.overhead, p.limit, func() []byte {
+	return transferRequestFits(p.rawPrefix[hi]-p.rawPrefix[lo], p.overhead, p.limit, p.compress, func() []byte {
 		return transferIssuesRequest(p.refs, p.dry, p.renumber, false, p.issues[lo:hi], p.commentsOf(lo, hi), p.relationsOf(lo, hi))
 	})
 }
@@ -665,7 +684,7 @@ func (p *transferIssuesPlanner) splitSingleIssue(index int) []transferIssuesChun
 	}
 	sizer := newTransferRowSizer(comments)
 	fits := func(lo, hi int) bool {
-		return transferRequestFits(sizer.rawBytes(lo, hi), p.overhead+rawJSONSize(issue), p.limit, func() []byte {
+		return transferRequestFits(sizer.rawBytes(lo, hi), p.overhead+rawJSONSize(issue), p.limit, p.compress, func() []byte {
 			return transferIssuesRequest(p.refs, p.dry, p.renumber, false,
 				[]service.TransferIssueRow{issue}, comments[lo:hi], commentRelations(lo, hi))
 		})
@@ -760,6 +779,7 @@ func (c transferConversationsChunk) split() (transferConversationsChunk, transfe
 // comments travel with their issue.
 type transferConversationsPlanner struct {
 	limit          int
+	compress       bool
 	refs           service.TransferRefs
 	dry            bool
 	sessions       []service.TransferSessionRow
@@ -770,9 +790,10 @@ type transferConversationsPlanner struct {
 	rawPrefix []int
 }
 
-func newTransferConversationsPlanner(limit int, refs service.TransferRefs, dry bool, sessions []service.TransferSessionRow, messages []service.TransferMessageRow) *transferConversationsPlanner {
+func newTransferConversationsPlanner(limit int, compress bool, refs service.TransferRefs, dry bool, sessions []service.TransferSessionRow, messages []service.TransferMessageRow) *transferConversationsPlanner {
 	p := &transferConversationsPlanner{
 		limit:          limit,
+		compress:       compress,
 		refs:           refs,
 		dry:            dry,
 		sessions:       sessions,
@@ -798,7 +819,7 @@ func (p *transferConversationsPlanner) messagesOf(lo, hi int) []service.Transfer
 }
 
 func (p *transferConversationsPlanner) fits(lo, hi int) bool {
-	return transferRequestFits(p.rawPrefix[hi]-p.rawPrefix[lo], p.overhead, p.limit, func() []byte {
+	return transferRequestFits(p.rawPrefix[hi]-p.rawPrefix[lo], p.overhead, p.limit, p.compress, func() []byte {
 		return transferConversationsRequest(p.refs, p.dry, false, p.sessions[lo:hi], p.messagesOf(lo, hi))
 	})
 }
@@ -824,7 +845,7 @@ func (p *transferConversationsPlanner) splitSingleSession(index int) []transferC
 	}
 	sizer := newTransferRowSizer(messages)
 	fits := func(lo, hi int) bool {
-		return transferRequestFits(sizer.rawBytes(lo, hi), p.overhead+rawJSONSize(session), p.limit, func() []byte {
+		return transferRequestFits(sizer.rawBytes(lo, hi), p.overhead+rawJSONSize(session), p.limit, p.compress, func() []byte {
 			return transferConversationsRequest(p.refs, p.dry, false, []service.TransferSessionRow{session}, messages[lo:hi])
 		})
 	}

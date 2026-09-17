@@ -167,8 +167,42 @@ multica transfer bind-runtimes --profile <目标档> --workspace <slug> \
 | `transfer_issues_target_not_empty` | 目标工作区已经有任务，任务分组被整包拒收（编号要逐票保真），此次一行都没写 | 新建一个空工作区再导；确实要落进已有任务的工作区，改用 CLI 的 `--renumber`，并接受正文里旧编号会指错任务 |
 | `issue_limit_would_exceed` | 目标工作区的任务数会超过配额，一行都没写 | 清掉一些任务或换一个额度更宽的工作区再导 |
 | 429 / 503 | 源端限流或暂时不可用 | CLI 会自动退避重试（最多 8 次、间隔翻倍）。一直失败就换个时间再导 |
+| `edge_timeout:`（HTTP 524 / 522 / 504） | 目标域名前面的 CDN 边缘在 ~100 秒内没收完这一个请求就把它掐了。**问题在上行带宽与请求体积，不在目标服务器** | CLI 已经会自动把这一块对半切重试三次；仍失败就照错误里那几条做：原样重跑（写入幂等，已导的不会重复）、按分组分几次导、`--max-request-bytes 512KB` 强制更小的请求，或让目标域名绕开 CDN 代理。另见下一节 |
 
 包坏了不要「修一下再导」。重新导出。
+
+## 慢链路 / CDN 边缘超时
+
+上行只有几百 Kbps 又把域名挂在 Cloudflare 这类 CDN 后面时，一个 10MB 的任务分片要传三分钟，边缘在 100 秒就断，nginx 日志上留下的是 `POST …/transfer/issues 499 0`（客户端断连、零字节响应），后端容器日志里一行都没有 —— 请求根本没走到 Go 服务。DENE-442 之后这条路默认就通了，不需要额外参数：
+
+- 请求体在目标 `/health` 报 `transfer.accepts_gzip` 时自动 gzip（JSON 通常小 5–10 倍）；老实例不报这个字段就原样不压缩，并按未压缩的体积分块。
+- 分块按「线上字节」算，默认一个请求最多 2MB，并按实测上行速率自适应收紧。要更小就 `--max-request-bytes 512KB`。
+- 被边缘掐掉的请求会自动对半切后重试（最多三次）；导入写入按确定性 id 幂等，重复的行是空操作。
+- stderr 每个请求打一行进度：`request_index` / `requests_total` / `request_bytes` / `upload_bytes_per_second`。
+
+### 目标实例这一侧：让 `/api/` 直连后端
+
+自建实例的 nginx 默认把 `/` 交给 Next.js（`127.0.0.1:3000`），前端 middleware 再 rewrite 到 `backend:8080`，大请求体因此被缓冲两跳。把 `/api/` 直接交给后端可以省掉一跳（`/api/daemon/ws` 的 WebSocket 块必须留在它前面）：
+
+```nginx
+location /api/daemon/ws { ... 保持原样，必须在下面这块之前 ... }
+
+location /api/ {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_request_buffering off;
+    proxy_read_timeout 300s;
+    client_max_body_size 50m;
+}
+```
+
+`client_max_body_size` 要对齐服务端的附件上限（`TransferAttachmentMaxBytes`）。改完 `nginx -t && systemctl reload nginx`，再逐条确认：`curl -sf https://<域名>/health`、`/readyz`、登录页能开、跑一次真实的 `multica transfer import --dry-run`。
+
+**这份 nginx 配置是手工维护在盒子上的，不在仓库里**，所以每次重建实例都要照上面重做一遍。
 
 ## 迁完长什么样
 
