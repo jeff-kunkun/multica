@@ -199,6 +199,51 @@ func TestAccountQuotaResetAt(t *testing.T) {
 			wantReset: now.Add(time.Hour),
 		},
 		{
+			// DENE-483: dsh's snapshot is never the provider's own report —
+			// withQuotaPlanLimits synthesises it from the error text, and that
+			// word list fires on a bare 429. A window-less "exhausted" whose
+			// error classifies as plain capacity is a retryable blip wearing
+			// the label, and stamping it would put a red dot next to a working
+			// account that DENE-468's one-click switcher invites acting on.
+			name: "a window-less exhausted snapshot from a bare 429 proves nothing",
+			result: agent.Result{
+				Status:     "failed",
+				Error:      "Error: 429 too many requests",
+				PlanLimits: &protocol.PlanLimitsSnapshot{Provider: "dsh", Status: protocol.PlanLimitsStatusExhausted},
+			},
+		},
+		{
+			// The other side of that exclusion, and the reason it is written
+			// this narrowly: claude's session limit produces the same
+			// window-less exhausted shape for a genuine exhaustion. Its error
+			// text is not a capacity signal, so the snapshot stays trusted.
+			name: "a window-less exhausted snapshot still counts when the error is not capacity",
+			result: agent.Result{
+				Status:     "failed",
+				Error:      "Claude Code: you've hit your session limit",
+				PlanLimits: &protocol.PlanLimitsSnapshot{Provider: "claude", Status: protocol.PlanLimitsStatusExhausted},
+			},
+			wantOK:    true,
+			wantReset: now.Add(time.Hour),
+		},
+		{
+			// The exclusion only applies to a snapshot with nothing but the
+			// label. A provider that reported a real future window said more
+			// than the error text did, whatever the error text says.
+			name: "a reported window survives a capacity error text",
+			result: agent.Result{
+				Status: "failed",
+				Error:  "HTTP 429 rate limit exceeded; try again later",
+				PlanLimits: &protocol.PlanLimitsSnapshot{
+					Provider: "dsh",
+					Status:   protocol.PlanLimitsStatusExhausted,
+					Windows:  []protocol.PlanLimitWindow{{Name: "5h", ResetsAt: unixPtr(now.Add(20 * time.Minute).Unix())}},
+				},
+			},
+			wantOK:    true,
+			wantReset: now.Add(20 * time.Minute),
+		},
+		{
 			// "available" is the opposite verdict; it must not be read as a hit
 			// just because a snapshot is attached.
 			name: "an available snapshot with a benign error proves nothing",
