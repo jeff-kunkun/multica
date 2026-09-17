@@ -23,6 +23,7 @@ const (
 	RuntimeSweepStageDelegatedFailureRecovery = "delegated_failure_recovery"
 	RuntimeSweepStageDeferredChatFinalization = "deferred_chat_finalize"
 	RuntimeSweepStageGC                       = "runtime_gc"
+	RuntimeSweepStageStagnationWatchdog       = "stagnation_watchdog"
 
 	RuntimeGCSkipEligibilityChanged = "eligibility_changed"
 	RuntimeGCSkipNonTerminalTask    = "non_terminal_task"
@@ -501,7 +502,8 @@ func normalizeRuntimeSweepStage(stage string) string {
 		RuntimeSweepStageQueuedExpiry,
 		RuntimeSweepStageDelegatedFailureRecovery,
 		RuntimeSweepStageDeferredChatFinalization,
-		RuntimeSweepStageGC:
+		RuntimeSweepStageGC,
+		RuntimeSweepStageStagnationWatchdog:
 		return stage
 	default:
 		return "other"

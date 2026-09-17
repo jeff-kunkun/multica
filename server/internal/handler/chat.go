@@ -758,6 +758,12 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete agent builder draft")
 		return
 	}
+	// Same no-FK chore, for the structured draft an alignment conversation was
+	// building. A no-op for ordinary chats, which never have one.
+	if err := qtx.DeleteIssueDraft(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete issue draft")
+		return
+	}
 
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,

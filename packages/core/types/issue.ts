@@ -218,4 +218,16 @@ export interface Issue {
   last_activity_at?: string | null;
   /** Present only on issue detail responses for issues created from a comment. */
   source_context?: IssueSourceContext;
+  /**
+   * Where this issue came from, for platform-internal flows: an autopilot run,
+   * a quick-create task, or a requirement alignment (`issue_draft`, with
+   * `origin_id` = the alignment conversation's id).
+   *
+   * Absent on rows that have no origin, and on LIST responses, whose query does
+   * not select the columns — so this is a detail-only field. Read the pair
+   * together through `issueAlignmentOrigin`, never one field alone: a list row
+   * would otherwise look like an issue that came from nowhere. (DENE-371)
+   */
+  origin_type?: string;
+  origin_id?: string;
 }

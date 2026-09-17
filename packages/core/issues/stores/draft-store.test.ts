@@ -50,6 +50,9 @@ const RESET_STATE = {
       actorType: undefined,
       actorId: undefined,
     },
+    align: {
+      request: "",
+    },
     activeMode: "manual" as const,
   },
   lastAssigneeType: undefined,
@@ -252,6 +255,8 @@ describe("issue draft store — legacy rehydrate", () => {
     expect(draft.shared.attachments).toEqual([]);
     // A legacy draft had no agent prompt (it lived in a separate store).
     expect(draft.agent.prompt).toBe("");
+    // Nor an alignment request — the alignment face shipped later.
+    expect(draft.align.request).toBe("");
     expect(draft.activeMode).toBe("manual");
   });
 
@@ -284,6 +289,7 @@ describe("issue draft store — legacy rehydrate", () => {
     expect(draft.manual.title).toBe("kept");
     expect(draft.manual.status).toBe("todo");
     expect(draft.agent.prompt).toBe("keep me");
+    expect(draft.align.request).toBe("");
     expect(draft.activeMode).toBe("agent");
   });
 
@@ -333,40 +339,58 @@ describe("issue draft store — legacy rehydrate", () => {
   });
 });
 
-describe("issue draft store — hasDraft upload semantics", () => {
+describe("issue draft store — alignment slot (DENE-370)", () => {
   beforeEach(() => {
     useIssueDraftStore.setState(RESET_STATE);
   });
 
-  const placeholder = (status: "uploading" | "uploaded" | "failed" | "interrupted") =>
-    ({
-      clientUploadId: `c-${status}`,
-      status,
-      filename: "f.png",
-      size: 1,
-      ...(status === "uploaded"
-        ? {
-            attachment: {
-              id: "att-1",
-              filename: "f.png",
-              url: "https://cdn.example.test/f.png",
-            },
-          }
-        : {}),
-    }) as never;
+  it("keeps the alignment request in its own slot, apart from the other faces", () => {
+    const { setAlign, setManual, setAgent } = useIssueDraftStore.getState();
 
-  it("counts uploaded and uploading entries as recoverable draft intent", () => {
-    const { setShared, hasDraft } = useIssueDraftStore.getState();
-    setShared({ attachments: [placeholder("uploading")] });
-    expect(hasDraft()).toBe(true);
-    setShared({ attachments: [placeholder("uploaded")] });
-    expect(hasDraft()).toBe(true);
+    setManual({ title: "manual title", description: "manual body" });
+    setAgent({ prompt: "agent prompt" });
+    setAlign({ request: "align this" });
+
+    const { draft } = useIssueDraftStore.getState();
+    expect(draft.align.request).toBe("align this");
+    // A switch between faces is a no-op on the others' data.
+    expect(draft.manual.title).toBe("manual title");
+    expect(draft.manual.description).toBe("manual body");
+    expect(draft.agent.prompt).toBe("agent prompt");
   });
 
-  it("ignores failed/interrupted remnants so they cannot pin the sidebar dot", () => {
-    const { setShared, hasDraft } = useIssueDraftStore.getState();
-    setShared({ attachments: [placeholder("failed"), placeholder("interrupted")] });
-    expect(hasDraft()).toBe(false);
+  it("empties the alignment slot on clearDraft", () => {
+    const { setAlign, clearDraft } = useIssueDraftStore.getState();
+    setAlign({ request: "add dark mode" });
+    clearDraft();
+    expect(useIssueDraftStore.getState().draft.align.request).toBe("");
+  });
+
+  it("restores a persisted alignment draft, active mode included", async () => {
+    localStorage.setItem(
+      "multica_issue_draft:delta",
+      JSON.stringify({
+        state: {
+          draft: {
+            shared: { attachments: [] },
+            manual: { title: "kept" },
+            agent: { prompt: "" },
+            align: { request: "persisted request" },
+            activeMode: "align",
+          },
+        },
+        version: 0,
+      }),
+    );
+
+    setCurrentWorkspace("delta", "ws_d");
+    await flush();
+    await flush();
+
+    const { draft } = useIssueDraftStore.getState();
+    expect(draft.align.request).toBe("persisted request");
+    expect(draft.manual.title).toBe("kept");
+    expect(draft.activeMode).toBe("align");
   });
 });
 

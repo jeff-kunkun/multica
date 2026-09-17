@@ -44,6 +44,9 @@ vi.mock("./tabs/skills-tab", () => ({
 vi.mock("./tabs/env-tab", () => ({
   EnvTab: () => <div>env-tab</div>,
 }));
+vi.mock("./tabs/agent-accounts-tab", () => ({
+  AgentAccountsTab: () => <div>agent-accounts-tab</div>,
+}));
 vi.mock("./tabs/custom-args-tab", () => ({
   CustomArgsTab: () => <div>custom-args-tab</div>,
 }));
@@ -119,7 +122,7 @@ const baseAgent: Agent = {
   archived_by: null,
 };
 
-function makeRuntime(provider: string): AgentRuntime {
+function makeRuntime(provider: string, accounts?: unknown[]): AgentRuntime {
   return {
     id: "runtime-1",
     workspace_id: "ws-1",
@@ -130,7 +133,7 @@ function makeRuntime(provider: string): AgentRuntime {
     launch_header: "",
     status: "online",
     device_info: "",
-    metadata: {},
+    metadata: accounts === undefined ? {} : { agent_accounts: accounts },
     owner_id: null,
     visibility: "private",
     last_seen_at: null,
@@ -139,9 +142,26 @@ function makeRuntime(provider: string): AgentRuntime {
   };
 }
 
+// 2100-01-01, so a spent quota stays spent for the life of this suite.
+const FUTURE_RESET_AT = 4_102_444_800;
+
+function account(id: string, overrides: Record<string, unknown> = {}) {
+  return {
+    cli: "agy",
+    account: id,
+    home: `/Users/you/.gemini-${id}`,
+    base_url: "",
+    key_ref: "",
+    lever: "custom_args:--gemini_dir",
+    signed_in: true,
+    quota_reset_at: 0,
+    ...overrides,
+  };
+}
+
 function renderPane(
   runtimes: AgentRuntime[],
-  { canEdit = true }: { canEdit?: boolean } = {},
+  { canEdit = true, view }: { canEdit?: boolean; view?: string } = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -151,7 +171,7 @@ function renderPane(
     replace: vi.fn(),
     back: vi.fn(),
     pathname: "/acme/agents/agent-1",
-    searchParams: new URLSearchParams(),
+    searchParams: new URLSearchParams(view ? { view } : {}),
     hash: "",
     getShareableUrl: (path) => path,
   };
@@ -262,6 +282,96 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
     openCapabilities();
     expect(
       screen.queryByRole("tab", { name: /^Integrations$/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentOverviewPane Accounts tab", () => {
+  it("registers the Accounts tab ahead of Environment and renders it", () => {
+    renderPane([makeRuntime("dsh")]);
+    openSettings();
+
+    const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(tabs.indexOf("Accounts")).toBeGreaterThan(-1);
+    expect(tabs.indexOf("Accounts")).toBeLessThan(tabs.indexOf("Environment"));
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Accounts$/i }));
+    expect(screen.getByText("agent-accounts-tab")).toBeInTheDocument();
+  });
+
+  it("opens the Accounts view from a ?view=accounts deep link", () => {
+    renderPane([makeRuntime("dsh")], { view: "accounts" });
+    expect(screen.getByText("agent-accounts-tab")).toBeInTheDocument();
+  });
+
+  it("hides the Accounts tab from users who cannot manage the agent", () => {
+    // Accounts reads GET /api/agents/{id}/env to tell a bound lever from an
+    // unbound one, so it inherits the env endpoint's permission rule: showing
+    // it to anyone else guarantees a 403 and an unanswerable summary.
+    renderPane([makeRuntime("dsh")], { canEdit: false });
+    openSettings();
+    expect(
+      screen.queryByRole("tab", { name: /^Accounts$/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// The accounts tab title carries a status dot when a quota is spent (DENE-468):
+// the rail is the only place a user passes through before the accounts screen,
+// so a spent quota that cannot be acted on has to be visible from there.
+describe("AgentOverviewPane accounts quota warning", () => {
+  const spent = account("default", { quota_reset_at: FUTURE_RESET_AT });
+  const ready = account("account2");
+
+  function accountsTab() {
+    return screen.getByRole("tab", { name: /Quota used up/i });
+  }
+
+  it("flags the accounts tab and explains the dot where it is read", () => {
+    renderPane([makeRuntime("antigravity", [spent, ready])]);
+    openSettings();
+
+    // Exactly one tab carries it, and its accessible name says why.
+    expect(screen.getAllByRole("tab", { name: /Quota used up/i })).toHaveLength(1);
+    expect(accountsTab()).toHaveTextContent(/^Accounts/);
+
+    fireEvent.click(accountsTab());
+
+    // The explanation is the copy the summary pill already uses, so the two
+    // surfaces cannot disagree about when the quota comes back.
+    expect(
+      screen.getByText(/Quota used up · back/, { selector: "p" }),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the tab unmarked while every quota is available", () => {
+    renderPane([makeRuntime("antigravity", [ready])]);
+    openSettings();
+
+    expect(
+      screen.queryByRole("tab", { name: /Quota used up/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("stops flagging a deadline that has already passed", () => {
+    // A reset time in the past means the account is usable again; the dot must
+    // not outlive the quota it describes.
+    renderPane([
+      makeRuntime("antigravity", [account("default", { quota_reset_at: 1 }), ready]),
+    ]);
+    openSettings();
+
+    expect(
+      screen.queryByRole("tab", { name: /Quota used up/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("stays quiet when the daemon reported no accounts at all", () => {
+    renderPane([makeRuntime("antigravity")]);
+    openSettings();
+
+    expect(
+      screen.queryByRole("tab", { name: /Quota used up/i }),
     ).not.toBeInTheDocument();
   });
 });

@@ -390,10 +390,22 @@ jobs:
         run: helm show chart "$OCI_REGISTRY/multica" --version "$CHART_VERSION"
 
   # Build the Desktop installers for Linux and Windows and upload them to
-  # the GitHub Release that the `release` job above just published. macOS
-  # Desktop continues to ship via the manual `release-desktop` skill so it
-  # can be signed + notarized with Apple Developer credentials that are
-  # not (yet) wired into CI.
+  # the GitHub Release that the `release` job above just published.
+  #
+  # macOS is not in this matrix. Upstream it is packaged by hand so it can be
+  # signed + notarized with Apple Developer credentials CI does not carry. On
+  # the kun fork it is published by .github/workflows/desktop-release.yml,
+  # which runs on its own tag trigger (DENE-352) — do NOT add a mac entry
+  # here: the two would race over the same asset names on every tag, and that
+  # workflow deletes half-uploaded assets, which is the failure this job
+  # would then hit.
+  #
+  # Note this job never runs on the fork at all: it `needs: release`, which is
+  # gated on `github.repository_owner == 'multica-ai'`, and a skipped
+  # dependency skips its dependents. Linux/Windows Desktop assets are
+  # therefore upstream-only today. That is deliberate — nothing on the fork
+  # consumes them — but it is why desktop-release.yml exists separately rather
+  # than as another entry here.
   desktop:
     needs: release
     strategy:

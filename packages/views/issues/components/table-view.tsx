@@ -1332,6 +1332,9 @@ export function TableView({
     (state) => state.toggleTableParentCollapsed,
   );
   const tableHierarchy = useViewStore((state) => state.tableHierarchy);
+  const tableParentsCollapsedByDefault = useViewStore(
+    (state) => state.tableParentsCollapsedByDefault,
+  );
   const sortBy = useViewStore((state) => state.sortBy);
   const setSortBy = useViewStore((state) => state.setSortBy);
   const sortDirection = useViewStore((state) => state.sortDirection);
@@ -1446,6 +1449,15 @@ export function TableView({
     () => new Set(tableCollapsedParents),
     [tableCollapsedParents],
   );
+  // `tableCollapsedParents` lists the parents whose state DIFFERS from the
+  // surface default, so the same list and the same toggle serve both a
+  // default-expanded surface (workspace) and a default-collapsed one
+  // (project). (DENE-444)
+  const isParentCollapsed = useCallback(
+    (issueId: string) =>
+      tableParentsCollapsedByDefault !== collapsedParentSet.has(issueId),
+    [collapsedParentSet, tableParentsCollapsedByDefault],
+  );
   const [serverBranchState, setServerBranchState] =
     useState<ServerBranchState>({
       identity: "",
@@ -1528,12 +1540,12 @@ export function TableView({
           enabled:
             (branch.groupKey === null ||
               !collapsedGroupSet.has(branch.groupKey)) &&
-            !branch.ancestorIds.some((id) => collapsedParentSet.has(id)),
+            !branch.ancestorIds.some((id) => isParentCollapsed(id)),
         };
       }),
     [
       collapsedGroupSet,
-      collapsedParentSet,
+      isParentCollapsed,
       serverBranchPageTargets,
       serverGroupSpec,
       serverQuery,
@@ -1861,7 +1873,7 @@ export function TableView({
         // ids otherwise create duplicate React keys and duplicate selection.
         if (seenIssueIds.has(row.issue.id)) continue;
         seenIssueIds.add(row.issue.id);
-        const collapsed = collapsedParentSet.has(row.issue.id);
+        const collapsed = isParentCollapsed(row.issue.id);
         result.push({
           kind: "issue",
           key: row.issue.id,
@@ -1967,7 +1979,7 @@ export function TableView({
     return result;
   }, [
     collapsedGroupSet,
-    collapsedParentSet,
+    isParentCollapsed,
     activeServerBranches,
     activateServerBranch,
     loadNextServerBranchPage,

@@ -218,21 +218,33 @@ SELECT id, workspace_id, owner_id, name, scope_type, scope_id, scope_variant, vi
 WHERE workspace_id = $1
   AND scope_type = $2
   AND scope_id IS NOT DISTINCT FROM $4::uuid
-  AND (owner_id = $3 OR visibility = 'workspace')
+  AND (
+    owner_id = $3
+    OR visibility = 'workspace'
+    OR (
+      visibility = 'project'
+      AND scope_type = 'project'
+      AND scope_id = ANY($5::uuid[])
+    )
+  )
 ORDER BY created_at ASC
 LIMIT 200
 `
 
 type ListIssueViewsForUserParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ScopeType   string      `json:"scope_type"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
-	ScopeID     pgtype.UUID `json:"scope_id"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	ScopeType   string        `json:"scope_type"`
+	OwnerID     pgtype.UUID   `json:"owner_id"`
+	ScopeID     pgtype.UUID   `json:"scope_id"`
+	ProjectIds  []pgtype.UUID `json:"project_ids"`
 }
 
-// One surface's selector list: the caller's own views plus workspace-shared
-// ones, for a single (scope_type, scope_id) container. scope_id is NULL for
-// workspace and my scopes, so compare NULL-safely.
+// One surface's selector list: the caller's own views, workspace-shared
+// ones, and project-shared views whose scope_id is in the caller's project
+// set. The handler loads that set once (memberships + lead projects, or
+// every project for owner/admin) and passes it in — do not JOIN here, or
+// the list row-multiplies. scope_id is NULL for workspace and my scopes,
+// so compare NULL-safely.
 // Hard response cap: the bar/panel are not built for more than this, and
 // every row carries full query/display JSON. The create quota keeps real
 // data far below it; the LIMIT is the abuse backstop.
@@ -242,6 +254,7 @@ func (q *Queries) ListIssueViewsForUser(ctx context.Context, arg ListIssueViewsF
 		arg.ScopeType,
 		arg.OwnerID,
 		arg.ScopeID,
+		arg.ProjectIds,
 	)
 	if err != nil {
 		return nil, err
