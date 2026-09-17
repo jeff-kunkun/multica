@@ -352,16 +352,17 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// These are task nouns, not section headings: a task arrives as "set up an
 	// autopilot", never as "Core model".
 	triggerWords := map[string]string{
-		"references/issues.md":         "issue",
-		"references/close-protocol.md": "close protocol",
-		"references/mentions.md":       "mention",
-		"references/agents.md":         "agent",
-		"references/squads.md":         "squad",
-		"references/autopilots.md":     "autopilot",
-		"references/projects.md":       "project",
-		"references/runtimes.md":       "runtime",
-		"references/skill-import.md":   "skill import",
-		"references/transfer.md":       "transfer",
+		"references/issues.md":          "issue",
+		"references/close-protocol.md":  "close protocol",
+		"references/mentions.md":        "mention",
+		"references/agents.md":          "agent",
+		"references/specialisations.md": "specialisation",
+		"references/squads.md":          "squad",
+		"references/autopilots.md":      "autopilot",
+		"references/projects.md":        "project",
+		"references/runtimes.md":        "runtime",
+		"references/skill-import.md":    "skill import",
+		"references/transfer.md":        "transfer",
 	}
 
 	skill, ok := findSkill(t, PlatformSkillName)
@@ -623,6 +624,23 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Define the job first",
 				"Run a low-risk task",
 				"Decision flow",
+			},
+		},
+		{
+			file: "references/specialisations.md",
+			want: []string{
+				"hard-capped at TWO levels",
+				"Inheritance is LIVE, not a copy",
+				// DENE-505: the runtime half is inherited by default, as a
+				// copy rather than a live read, and `runtime_inherited` is the
+				// only override. An agent debugging a child stuck on a stale
+				// runtime needs all three facts.
+				"`runtime_inherited` is the flag",
+				"are a COPY of the base role's",
+				"Setting it false is lossless",
+				"`inherited_instructions` is served verbatim",
+				"`POST /api/agents/{id}/solidify`",
+				"`agent_has_children`",
 			},
 		},
 		{
