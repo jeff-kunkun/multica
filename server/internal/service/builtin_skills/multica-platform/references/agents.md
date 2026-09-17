@@ -394,8 +394,9 @@ State-changing (require an explicit instruction — do not run speculatively):
   unknown provider-level literal is — model-specific gaps fail at run time.
 - "`set` and `add` are interchangeable for skills." `set` replaces all
   bindings; using it when you meant `add` silently removes capabilities.
-- "A specialisation clones the base role's configuration." It inherits only the
-  prompt and the skill set; `model`, `runtime_id`, `max_concurrent_tasks` and
+- "A specialisation clones the base role's configuration." It inherits the
+  prompt, the skill set, and (unless it opts out) the runtime configuration;
+  `max_concurrent_tasks`, `custom_args`, `custom_env`, `mcp_config` and
   permissions stay independently set on each agent.
 - "A base-role edit needs a re-attach to reach its specialisations." It does not
   — nothing is snapshotted, so the next claim of every specialisation already
