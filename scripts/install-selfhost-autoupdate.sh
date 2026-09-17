@@ -85,8 +85,15 @@ done
 
 mkdir -p "$UNIT_DIR" "$STATE_DIR"
 
+# --state-dir has to reach the unit, not just mkdir: the script's own default
+# is /var/lib/multica, so a unit that does not carry the chosen path would send
+# the operator to `cat <their dir>/autoupdate.json` for a file written
+# somewhere else entirely.
+STATE_FILE="$STATE_DIR/autoupdate.json"
+
 render() {
-  sed -e "s#@REPO_DIR@#${REPO_DIR}#g" -e "s#@BRANCH@#${BRANCH}#g" "$TEMPLATE_DIR/$1"
+  sed -e "s#@REPO_DIR@#${REPO_DIR}#g" -e "s#@BRANCH@#${BRANCH}#g" \
+    -e "s#@STATE_FILE@#${STATE_FILE}#g" "$TEMPLATE_DIR/$1"
 }
 
 changed=0
@@ -125,4 +132,4 @@ echo "Installed. The timer runs multica-autoupdate.service 5 minutes from now an
 echo "  systemctl list-timers multica-autoupdate.timer"
 echo "  systemctl start multica-autoupdate.service     # upgrade now, in the foreground"
 echo "  systemctl disable --now multica-autoupdate.timer  # stop following the branch"
-echo "  cat ${STATE_DIR}/autoupdate.json               # what the last run did"
+echo "  cat ${STATE_FILE}                              # what the last run did"

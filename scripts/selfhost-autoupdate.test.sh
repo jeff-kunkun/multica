@@ -301,7 +301,8 @@ bash "$INSTALLER" --repo-dir "$checkout" --branch kun --unit-dir "$unit_dir" \
 require_contains "$unit_dir/multica-autoupdate.service" "WorkingDirectory=$checkout" "the installer must point the unit at the checkout"
 require_contains "$unit_dir/multica-autoupdate.service" "MULTICA_AUTOUPDATE_BRANCH=kun" "the installer must bake in the branch"
 require_contains "$unit_dir/multica-autoupdate.timer" "OnUnitActiveSec=15min" "the timer must poll every 15 minutes"
-require_contains "$unit_dir/multica-autoupdate.timer" "Persistent=true" "the timer must persist"
+require_contains "$unit_dir/multica-autoupdate.timer" "OnActiveSec=5min" "the timer must not fire the instant it is enabled"
+require_contains "$unit_dir/multica-autoupdate.service" "MULTICA_AUTOUPDATE_STATE_FILE=$work/inststate/autoupdate.json" "--state-dir must reach the unit, not just mkdir the directory"
 require_contains "$unit_dir/multica-autoupdate.service" "TimeoutStartSec=3600" "the unit must outlive a cold build"
 before="$(cksum "$unit_dir/multica-autoupdate.service" "$unit_dir/multica-autoupdate.timer")"
 bash "$INSTALLER" --repo-dir "$checkout" --branch kun --unit-dir "$unit_dir" \

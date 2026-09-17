@@ -8,7 +8,9 @@ Documentation=https://github.com/jeff-kunkun/multica/blob/kun/docs/kun/selfhost-
 # timer starts. This waits a fixed five minutes after activation instead.
 OnActiveSec=5min
 OnUnitActiveSec=15min
-Persistent=true
+# No Persistent=: it only applies to OnCalendar= timers, and the monotonic
+# pair above already covers a reboot — the timer re-activates at boot and
+# fires five minutes later.
 Unit=multica-autoupdate.service
 
 [Install]
