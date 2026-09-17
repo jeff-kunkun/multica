@@ -38,9 +38,9 @@ export function BoardCardSubIssueToggle({
   const { t } = useT("issues");
   const pipeline = parentPipelineState(rollup);
   const Chevron = expanded ? ChevronDown : ChevronRight;
-  const label = expanded
-    ? t(($) => $.sub_issue_accordion.collapse, { count: rollup.total })
-    : t(($) => $.sub_issue_accordion.expand, { count: rollup.total });
+  // One label for both states: the count is what the reader wants, and
+  // `aria-expanded` — not a second wording — is how the state is announced.
+  const label = t(($) => $.sub_issue_accordion.count, { count: rollup.total });
 
   return (
     <div
@@ -55,7 +55,6 @@ export function BoardCardSubIssueToggle({
       <button
         type="button"
         aria-expanded={expanded}
-        aria-label={label}
         onClick={onToggle}
         // Active/expanded stays legible under hover: the weight change is on a
         // dimension hover never touches.

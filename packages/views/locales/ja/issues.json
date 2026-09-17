@@ -1049,8 +1049,7 @@
     "record_abandoned_hint": "課題は作成されていません。"
   },
   "sub_issue_accordion": {
-    "expand_other": "サブタスク {{count}} 件",
-    "collapse_other": "サブタスク {{count}} 件",
+    "count_other": "サブタスク {{count}} 件",
     "blocked_other": "{{count}} 件が停止中",
     "active_other": "{{count}} 件が進行中",
     "stalled_other": "{{count}} 件が未着手",

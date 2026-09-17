@@ -1080,10 +1080,8 @@
     "record_abandoned_hint": "No issue was created."
   },
   "sub_issue_accordion": {
-    "expand_one": "{{count}} sub-issue",
-    "expand_other": "{{count}} sub-issues",
-    "collapse_one": "{{count}} sub-issue",
-    "collapse_other": "{{count}} sub-issues",
+    "count_one": "{{count}} sub-issue",
+    "count_other": "{{count}} sub-issues",
     "blocked_one": "{{count}} blocked",
     "blocked_other": "{{count}} blocked",
     "active_one": "{{count}} in progress",

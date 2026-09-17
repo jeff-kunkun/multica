@@ -1049,8 +1049,7 @@
     "record_abandoned_hint": "没有产出任务。"
   },
   "sub_issue_accordion": {
-    "expand_other": "{{count}} 个子任务",
-    "collapse_other": "{{count}} 个子任务",
+    "count_other": "{{count}} 个子任务",
     "blocked_other": "{{count}} 个卡住",
     "active_other": "{{count}} 个进行中",
     "stalled_other": "{{count}} 个待认领",

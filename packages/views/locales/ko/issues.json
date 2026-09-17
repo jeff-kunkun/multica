@@ -1049,8 +1049,7 @@
     "record_abandoned_hint": "생성된 이슈가 없습니다."
   },
   "sub_issue_accordion": {
-    "expand_other": "하위 태스크 {{count}}개",
-    "collapse_other": "하위 태스크 {{count}}개",
+    "count_other": "하위 태스크 {{count}}개",
     "blocked_other": "{{count}}개 막힘",
     "active_other": "{{count}}개 진행 중",
     "stalled_other": "{{count}}개 미착수",
