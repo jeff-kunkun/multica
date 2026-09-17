@@ -249,6 +249,11 @@ type ConfigInvocationTarget struct {
 }
 
 type ConfigSystemAgent struct {
+	// SourceID is the source workspace's agent uuid. It exists so the transfer
+	// ref index can be keyed the way issue rows reference an agent — by uuid —
+	// rather than by system_key, which no issue row ever carries. Bundles
+	// written before this field omit it.
+	SourceID              string          `json:"source_id,omitempty"`
 	SystemKey             string          `json:"system_key"`
 	Instructions          string          `json:"instructions"`
 	Model                 *string         `json:"model"`

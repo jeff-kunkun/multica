@@ -1411,8 +1411,8 @@ func (s *transferIssueState) planRelation(ctx context.Context, row TransferRelat
 // ---------------------------------------------------------------------------
 
 // resolveActor maps one polymorphic (type, id) reference. `ok == false` means
-// the caller applies its own documented degradation: unassigned for an
-// assignee, the importer for a creator or author, dropped for a reaction.
+// the caller applies its own documented degradation: the importer for an
+// assignee, creator or author, dropped for a reaction.
 func (s *transferIssueState) resolveActor(actorType, actorID string) (string, pgtype.UUID, bool, error) {
 	switch actorType {
 	case "member":
@@ -1455,14 +1455,16 @@ func (s *transferIssueState) resolveAssignee(ctx context.Context, row TransferIs
 	}
 	actorType, actorID, ok, _ := s.resolveActor(source, derefString(row.AssigneeID))
 	if !ok {
-		// Unassigned is the honest empty: pointing the issue at the importer
-		// would fill their own task list with work they never owned.
+		// An unmappable assignee falls back to the importer, matching creator
+		// and comment author: a workspace owner who migrates their own history
+		// would rather inherit the orphans than hunt for silently empty rows.
+		// The degradation is still reported; only its resolution changed.
 		s.report.AssigneeUnmapped = append(s.report.AssigneeUnmapped, UnmappedRef{
 			Entity: "issue", SourceID: row.SourceID, Field: "assignee_id",
 			RefType: source, RefID: derefString(row.AssigneeID),
-			Reason: "assignee_unmapped", Resolution: "unassigned",
+			Reason: "assignee_unmapped", Resolution: "importer",
 		})
-		return "", pgtype.UUID{}
+		return "member", s.env.ImporterID
 	}
 	return actorType, actorID
 }

@@ -127,7 +127,7 @@ WHERE workspace_id = $1 AND kind = 'user'
 ORDER BY created_at ASC;
 
 -- name: ExportSystemAgents :many
-SELECT system_key, instructions, model, thinking_level, service_tier,
+SELECT id, system_key, instructions, model, thinking_level, service_tier,
        conversation_starters, disabled_runtime_skills
 FROM agent
 WHERE workspace_id = $1 AND kind = 'system'

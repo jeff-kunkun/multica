@@ -358,7 +358,7 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 		refs.Agents[a.SourceID] = TransferAgentRef{Name: a.Name}
 	}
 	for _, a := range bundle.Entities.SystemAgents {
-		refs.SystemAgents[a.SystemKey] = TransferAgentRef{SystemKey: a.SystemKey}
+		refs.SystemAgents[systemAgentRefKey(a)] = TransferAgentRef{SystemKey: a.SystemKey}
 	}
 	for _, p := range bundle.Entities.Projects {
 		refs.Projects[p.SourceID] = TransferProjRef{Title: p.Title}
@@ -793,6 +793,19 @@ func pluginContributedSkillNames(ctx context.Context, src TransferSourceClient, 
 	return out, nil
 }
 
+// systemAgentRefKey is the key a system agent is indexed under in
+// TransferRefs.SystemAgents. Issue, comment and mention rows reference an agent
+// by its source uuid, so the index is keyed by uuid rather than by system_key,
+// which no row ever carries. Bundles written before ConfigSystemAgent had a
+// SourceID fall back to system_key: that key never matches a row either, but it
+// keeps their behaviour unchanged instead of dropping the entry outright.
+func systemAgentRefKey(a ConfigSystemAgent) string {
+	if a.SourceID != "" {
+		return a.SourceID
+	}
+	return a.SystemKey
+}
+
 func exportAgentsGroup(ctx context.Context, src TransferSourceClient, bundle *ConfigBundle, _ *[]TransferExportGap, gap func(string, error)) {
 	var agents []map[string]any
 	if trunc, err := getList(ctx, src, "/api/agents", &agents); err != nil {
@@ -809,6 +822,7 @@ func exportAgentsGroup(ctx context.Context, src TransferSourceClient, bundle *Co
 		}
 		if sysKey != "" {
 			bundle.Entities.SystemAgents = append(bundle.Entities.SystemAgents, ConfigSystemAgent{
+				SourceID:              id,
 				SystemKey:             sysKey,
 				Instructions:          strField(raw, "instructions"),
 				Model:                 strPtrField(raw, "model"),

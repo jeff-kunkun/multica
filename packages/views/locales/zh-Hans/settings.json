@@ -1509,7 +1509,7 @@
       "issues_parents": "回填父子指针 {{count}} 条",
       "issues_degraded_title": "失去引用的行（已降级）",
       "degrade_status": "状态不在目标工作区的状态目录里",
-      "degrade_assignee": "指派人无法映射，已改为未指派",
+      "degrade_assignee": "指派人无法映射，已改为指派给导入者",
       "degrade_creator": "创建人无法映射",
       "degrade_project": "项目无法映射",
       "degrade_author": "评论作者无法映射",
