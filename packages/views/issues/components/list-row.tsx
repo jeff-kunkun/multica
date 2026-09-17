@@ -30,6 +30,10 @@ import { useLocale } from "../../i18n";
 export interface ChildProgress {
   done: number;
   total: number;
+  /** Direct children sitting in the `blocked` category. */
+  blocked: number;
+  /** Direct children in `in_progress` / `in_review` — the live pipeline. */
+  active: number;
 }
 
 function formatDate(date: string, locale: string): string {

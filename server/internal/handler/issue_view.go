@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -31,7 +32,7 @@ var (
 	validIssueViewScopeTypes        = []string{"workspace", "my", "project"}
 	validIssueViewMyVariants        = []string{"assigned", "created", "involved", "any"}
 	validIssueViewWorkspaceVariants = []string{"members", "agents"}
-	validIssueViewVisibilities      = []string{"private", "workspace"}
+	validIssueViewVisibilities      = []string{"private", "workspace", "project"}
 )
 
 // validateIssueViewVariant returns the pgtype value for a scope_variant
@@ -92,11 +93,102 @@ func issueViewToResponse(v db.IssueView) IssueViewResponse {
 	}
 }
 
-// canReadIssueView: owner always; workspace-shared views for any member.
-// (My-scope views are constrained to private by the DB CHECK, so they only
-// ever match the owner branch.)
-func canReadIssueView(v db.IssueView, userID pgtype.UUID) bool {
-	return v.OwnerID == userID || v.Visibility == "workspace"
+// canReadIssueView: owner always; workspace-shared views for any member;
+// project-shared views when the caller is in projectIDs (explicit members
+// plus lead, or every workspace project for owner/admin). My-scope views
+// are constrained to private by the DB CHECK, so they only ever match the
+// owner branch.
+func canReadIssueView(v db.IssueView, userID pgtype.UUID, projectIDs []pgtype.UUID) bool {
+	if v.OwnerID == userID || v.Visibility == "workspace" {
+		return true
+	}
+	if v.Visibility != "project" || v.ScopeType != "project" || !v.ScopeID.Valid {
+		return false
+	}
+	for _, id := range projectIDs {
+		if id.Valid && id.Bytes == v.ScopeID.Bytes {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) userCanReadIssueView(ctx context.Context, view db.IssueView, wsUUID pgtype.UUID, userID string) bool {
+	userUUID := parseUUID(userID)
+	if canReadIssueView(view, userUUID, nil) {
+		return true
+	}
+	if view.Visibility != "project" {
+		return false
+	}
+	ids, err := h.listAccessibleProjectIDs(ctx, wsUUID, userUUID)
+	if err != nil {
+		return false
+	}
+	return canReadIssueView(view, userUUID, ids)
+}
+
+// listAccessibleProjectIDs is the caller's project set for visibility='project'
+// reads: explicit project_member rows plus projects they lead, merged once.
+// Workspace owner/admin get every project in the workspace (management
+// fallback). Never JOIN this into ListIssueViewsForUser.
+func (h *Handler) listAccessibleProjectIDs(ctx context.Context, wsUUID, userUUID pgtype.UUID) ([]pgtype.UUID, error) {
+	member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      userUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err == nil && roleAllowed(member.Role, "owner", "admin") {
+		ids, err := h.Queries.ListProjectIDsInWorkspace(ctx, wsUUID)
+		if err != nil {
+			return nil, err
+		}
+		if ids == nil {
+			return []pgtype.UUID{}, nil
+		}
+		return ids, nil
+	}
+
+	memberships, err := h.Queries.ListProjectMembershipsForUser(ctx, db.ListProjectMembershipsForUserParams{
+		WorkspaceID: wsUUID,
+		MemberID:    userUUID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	led, err := h.Queries.ListProjectIDsLedByMember(ctx, db.ListProjectIDsLedByMemberParams{
+		WorkspaceID: wsUUID,
+		LeadID:      userUUID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mergeProjectIDs(memberships, led), nil
+}
+
+func mergeProjectIDs(parts ...[]pgtype.UUID) []pgtype.UUID {
+	seen := make(map[[16]byte]struct{})
+	out := []pgtype.UUID{}
+	for _, part := range parts {
+		for _, id := range part {
+			if !id.Valid {
+				continue
+			}
+			if _, ok := seen[id.Bytes]; ok {
+				continue
+			}
+			seen[id.Bytes] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func rejectProjectVisibilityOffProject(w http.ResponseWriter, visibility, scopeType string) bool {
+	if visibility == "project" && scopeType != "project" {
+		writeError(w, http.StatusBadRequest, "project visibility is only valid for project views")
+		return true
+	}
+	return false
 }
 
 func isJSONObject(raw json.RawMessage) bool {
@@ -161,6 +253,9 @@ func (h *Handler) CreateIssueView(w http.ResponseWriter, r *http.Request) {
 	}
 	if !contains(validIssueViewVisibilities, req.Visibility) {
 		writeError(w, http.StatusBadRequest, "invalid visibility")
+		return
+	}
+	if rejectProjectVisibilityOffProject(w, req.Visibility, req.ScopeType) {
 		return
 	}
 	if req.DefinitionVersion <= 0 {
@@ -251,11 +346,17 @@ func (h *Handler) ListIssueViews(w http.ResponseWriter, r *http.Request) {
 		scopeID = id
 	}
 
+	projectIDs, err := h.listAccessibleProjectIDs(r.Context(), wsUUID, parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list views")
+		return
+	}
 	views, err := h.Queries.ListIssueViewsForUser(r.Context(), db.ListIssueViewsForUserParams{
 		WorkspaceID: wsUUID,
 		ScopeType:   scopeType,
 		OwnerID:     parseUUID(userID),
 		ScopeID:     scopeID,
+		ProjectIds:  projectIDs,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list views")
@@ -283,7 +384,7 @@ func (h *Handler) loadIssueViewForUser(w http.ResponseWriter, r *http.Request, u
 	view, err := h.Queries.GetIssueView(r.Context(), db.GetIssueViewParams{
 		ID: idUUID, WorkspaceID: wsUUID,
 	})
-	if err != nil || !canReadIssueView(view, parseUUID(userID)) {
+	if err != nil || !h.userCanReadIssueView(r.Context(), view, wsUUID, userID) {
 		writeError(w, http.StatusNotFound, "view not found")
 		return db.IssueView{}, pgtype.UUID{}, false
 	}
@@ -303,13 +404,14 @@ func (h *Handler) GetIssueViewByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // canManageIssueView: the owner, or a workspace admin/owner for shared
-// views. Private views of others are invisible (404 in the loader), so
+// (workspace or project) views. Project members do not gain manage
+// rights. Private views of others are invisible (404 in the loader), so
 // admin powers never reach them.
 func (h *Handler) canManageIssueView(r *http.Request, view db.IssueView, userID string) bool {
 	if view.OwnerID == parseUUID(userID) {
 		return true
 	}
-	if view.Visibility != "workspace" {
+	if view.Visibility != "workspace" && view.Visibility != "project" {
 		return false
 	}
 	member, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
@@ -368,6 +470,9 @@ func (h *Handler) UpdateIssueView(w http.ResponseWriter, r *http.Request) {
 	if req.Visibility != nil {
 		if !contains(validIssueViewVisibilities, *req.Visibility) {
 			writeError(w, http.StatusBadRequest, "invalid visibility")
+			return
+		}
+		if rejectProjectVisibilityOffProject(w, *req.Visibility, view.ScopeType) {
 			return
 		}
 		if view.ScopeType == "my" && *req.Visibility != "private" {

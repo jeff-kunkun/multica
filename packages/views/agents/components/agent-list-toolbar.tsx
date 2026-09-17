@@ -310,6 +310,27 @@ export function AgentListToolbar({
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
+        {/* Group by base role (DENE-304). A top-level switch rather than a
+            popover item because it is the one view mode that changes what a
+            row MEANS — a specialisation stops being a peer of its base role
+            and becomes a child of it. It writes the same persisted `grouping`
+            field the display popover's group-by row does, so the two controls
+            can never disagree: the popover lists all three modes, this switch
+            is the one-click path to the nesting and back to flat. */}
+        <label className="hidden h-8 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-caption text-muted-foreground md:flex">
+          <Switch
+            size="sm"
+            checked={grouping === "specialization"}
+            onCheckedChange={(checked) =>
+              onGroupingChange(checked ? "specialization" : "none")
+            }
+            aria-label={t(($) => $.toolbar.grouping_specialization)}
+            data-testid="agents-group-specialization"
+          />
+          <span className="whitespace-nowrap">
+            {t(($) => $.toolbar.grouping_specialization)}
+          </span>
+        </label>
         {/* Filter */}
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -691,6 +712,16 @@ export function AgentListToolbar({
                   onClick={() => onGroupingChange("squad")}
                 >
                   {t(($) => $.toolbar.grouping_squad)}
+                </Button>
+                <Button
+                  type="button"
+                  variant={grouping === "specialization" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-7 flex-1 text-caption"
+                  aria-pressed={grouping === "specialization"}
+                  onClick={() => onGroupingChange("specialization")}
+                >
+                  {t(($) => $.toolbar.grouping_specialization)}
                 </Button>
               </div>
             </div>

@@ -302,3 +302,22 @@ func TestUpdateDownloadTimeoutOrDefault(t *testing.T) {
 		})
 	}
 }
+
+// A kun-fork CLI that self-updated from upstream would quietly replace itself
+// with the upstream build, which is the failure DENE-420 is about.
+func TestReleaseRepoDefaultsToTheFork(t *testing.T) {
+	t.Setenv("MULTICA_RELEASE_REPO", "")
+	if got := releaseRepo(); got != "jeff-kunkun/multica" {
+		t.Fatalf("releaseRepo() = %q, want the kun fork", got)
+	}
+	if got, want := ReleasesPageURL(), "https://github.com/jeff-kunkun/multica/releases/latest"; got != want {
+		t.Fatalf("ReleasesPageURL() = %q, want %q", got, want)
+	}
+}
+
+func TestReleaseRepoHonorsOverride(t *testing.T) {
+	t.Setenv("MULTICA_RELEASE_REPO", "multica-ai/multica")
+	if got := releaseRepo(); got != "multica-ai/multica" {
+		t.Fatalf("releaseRepo() = %q, want the override", got)
+	}
+}

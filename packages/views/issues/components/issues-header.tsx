@@ -1861,6 +1861,7 @@ export function IssueDisplayControls({
   const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
   const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
+  const hideCompletedParents = useViewStore((s) => s.hideCompletedParents);
   const act = useViewStoreApi().getState();
   const headerWsId = useWorkspaceId();
   // Active custom-property catalog: drives the filter sections, dynamic
@@ -2274,6 +2275,21 @@ export function IssueDisplayControls({
                   size="sm"
                   checked={showSubIssues}
                   onCheckedChange={() => act.toggleShowSubIssues()}
+                />
+              </label>
+              <label className="flex cursor-pointer items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block text-caption font-medium text-muted-foreground">
+                    {t(($) => $.display.hide_completed_parents)}
+                  </span>
+                  <span className="block text-caption text-faint-foreground">
+                    {t(($) => $.display.hide_completed_parents_description)}
+                  </span>
+                </span>
+                <Switch
+                  size="sm"
+                  checked={hideCompletedParents}
+                  onCheckedChange={() => act.toggleHideCompletedParents()}
                 />
               </label>
               {availableCardPropertyOptions.length > 0 && (

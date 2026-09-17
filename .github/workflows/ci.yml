@@ -93,7 +93,18 @@ jobs:
               - 'scripts/check-ui-wildcard-exports.test.sh'
               - 'scripts/check-ui-radius-tokens.mjs'
               - 'scripts/check-ui-radius-tokens.test.mjs'
+              - 'scripts/desktop-release-assets.mjs'
+              - 'scripts/desktop-release-assets.test.mjs'
+              - '.github/workflows/desktop-release.yml'
               - 'scripts/selfhost-config.test.sh'
+              # The autoupdate suite runs the real wait script against stubbed
+              # docker/curl, and its installer assertions read the unit
+              # templates, so a change to any of them has to run it.
+              - 'scripts/selfhost-autoupdate.sh'
+              - 'scripts/selfhost-autoupdate.test.sh'
+              - 'scripts/install-selfhost-autoupdate.sh'
+              - 'deploy/systemd/multica-autoupdate.service'
+              - 'deploy/systemd/multica-autoupdate.timer'
               - 'scripts/drop-database.sh'
               - 'scripts/remove-worktree.sh'
               - 'scripts/worktree-db.test.sh'
@@ -289,6 +300,10 @@ jobs:
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/selfhost-config.test.sh
 
+      - name: Test self-host autoupdate
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: bash scripts/selfhost-autoupdate.test.sh
+
       - name: Test worktree database cleanup
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/worktree-db.test.sh
@@ -339,6 +354,13 @@ jobs:
         run: |
           node --test scripts/check-ui-radius-tokens.test.mjs
           node scripts/check-ui-radius-tokens.mjs
+
+      # The release gate desktop-release.yml runs before it can pass; covered
+      # here because a broken comparison would silently accept a truncated
+      # upload and re-publish the dead auto-update feed DENE-352 is about.
+      - name: Test Desktop release asset verification
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: node --test scripts/desktop-release-assets.test.mjs
 
       # WARN PHASE — reports, never blocks. `shamefully-hoist=true` in .npmrc
       # hides both halves of the drift this catches: an undeclared import still
