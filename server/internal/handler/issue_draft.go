@@ -539,9 +539,10 @@ func (h *Handler) AbandonIssueDraft(w http.ResponseWriter, r *http.Request) {
 //
 // Idempotent by construction. Only a 'completed' row reopens, so a second call
 // (a retried request, a double click) matches nothing and answers with the row
-// as it stands rather than counting the round twice. A draft that is still 'draft' or 'ready' has an open round already and
-// is answered the same way; an abandoned one is refused, because a discarded
-// alignment does not come back to life.
+// as it stands rather than counting the round twice. A draft that is still
+// 'draft' or 'ready' has an open round already and is answered the same way;
+// an abandoned one is refused, because a discarded alignment does not come
+// back to life.
 //
 // The lock is the one every draft write uses, so a reopen cannot interleave
 // with a confirm deciding on the same row: either the confirm completed first
