@@ -20,6 +20,7 @@ function row(overrides: Partial<IssueDraftSummary> = {}): IssueDraftSummary {
     draft: { title: "Dark mode", description: "Add it.", status: "", priority: "" },
     issue_id: null,
     policy: { key: "question", version: "1", guided: true },
+    capabilities: { keys: [], version: "" },
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     title: "Align a new issue",
@@ -103,6 +104,7 @@ describe("patchIssueDraftSummary", () => {
       revision: 2,
       draft: { title: "Dark mode", description: "Add it.", status: "", priority: "" },
       policy: { key: "question", version: "1", guided: true },
+    capabilities: { keys: [], version: "" },
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:01:00Z",
     };
@@ -132,6 +134,7 @@ describe("appendIssueDraftSummary", () => {
       revision: 1,
       draft: { title: "", description: "add dark mode", status: "", priority: "" },
       policy: { key: "question", version: "1", guided: true },
+    capabilities: { keys: [], version: "" },
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     },

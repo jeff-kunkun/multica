@@ -42,6 +42,7 @@ function session(overrides: Partial<IssueDraftSession> = {}): IssueDraftSession 
       revision: 1,
       draft: { title: "", description: "", status: "", priority: "" },
       policy: { key: "question", version: "1", guided: true },
+    capabilities: { keys: [], version: "" },
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     },

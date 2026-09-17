@@ -79,7 +79,7 @@ func assertRecordedPromptIsTheNextReplysPrompt(t *testing.T, sessionID, agentID 
 		t.Fatalf("the draft records %s@%s, but the registry's prompt for %s is version %s — the audit trail names a prompt nobody can read",
 			key, version, key, recorded.Version)
 	}
-	if got := carrierInstructions(t, agentID); got != recorded.Instructions() {
+	if got := carrierInstructions(t, agentID); got != defaultInstructions(t, recorded) {
 		t.Fatalf("the next reply's carrier does not hold the prompt %s@%s records", key, version)
 	}
 }
@@ -98,7 +98,7 @@ func TestPolicySwitchChangesThePromptOfTheNextReply(t *testing.T) {
 	if !ok {
 		t.Fatal("the guided question policy is not registered")
 	}
-	if got := carrierInstructions(t, session.AgentID); got != questionPolicy.Instructions() {
+	if got := carrierInstructions(t, session.AgentID); got != defaultInstructions(t, questionPolicy) {
 		t.Fatal("the conversation did not open on the guided prompt")
 	}
 
@@ -118,7 +118,7 @@ func TestPolicySwitchChangesThePromptOfTheNextReply(t *testing.T) {
 		t.Fatalf("the next reply is queued for agent %s, want the conversation's carrier %s", agentID, session.AgentID)
 	}
 	prompt := carrierInstructions(t, agentID)
-	if prompt != conversationPolicy.Instructions() {
+	if prompt != defaultInstructions(t, conversationPolicy) {
 		t.Fatal("the next reply's carrier still holds the prompt the switch replaced")
 	}
 	if strings.Contains(prompt, "<issue_draft_question>") {

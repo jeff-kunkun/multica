@@ -69,6 +69,13 @@ export {
   type IssueDraftPolicyKey,
 } from "./policy";
 export {
+  ISSUE_DRAFT_CAPABILITIES,
+  encodeIssueDraftCapabilities,
+  isIssueDraftCapabilityKey,
+  issueDraftEnabledCapabilities,
+  type IssueDraftCapabilityKey,
+} from "./capabilities";
+export {
   ISSUE_DRAFT_STAGES,
   issueDraftCanConfirm,
   issueDraftStage,

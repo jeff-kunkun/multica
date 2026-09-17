@@ -51,6 +51,11 @@ type issueDraftResponse struct {
 	Draft         json.RawMessage          `json:"draft"`
 	IssueID       *string                  `json:"issue_id,omitempty"`
 	Policy        issueDraftPolicyResponse `json:"policy"`
+	// Capabilities is the other half of the audit record: the methods the
+	// carrier's prompt was assembled from, and the version of their text. It is
+	// also what the alignment page draws its capability control from — the set
+	// the conversation is running, not the set this client would pick.
+	Capabilities issueDraftCapabilityResponse `json:"capabilities"`
 	// FinalizeRound counts the rounds this alignment has been confirmed in: 0
 	// until it is reopened, then one more per reopen. It is what a client reads
 	// to know the draft it is looking at is a continuation, and what the server
@@ -71,6 +76,7 @@ func issueDraftToResponse(d db.IssueDraft) issueDraftResponse {
 		Revision:      d.Revision,
 		Draft:         json.RawMessage(d.Draft),
 		Policy:        issueDraftPolicyResponseFromRow(d.PolicyKey, d.PolicyVersion),
+		Capabilities:  issueDraftCapabilityResponseFromRow(d.CapabilityKeys, d.CapabilityVersion),
 		FinalizeRound: d.FinalizeRound,
 		CreatedAt:     timestampToString(d.CreatedAt),
 		UpdatedAt:     timestampToString(d.UpdatedAt),
@@ -176,6 +182,16 @@ type CreateIssueDraftSessionRequest struct {
 	// omitted means the guided default, which is what the create entry points
 	// offer. See issue_draft_policy.go for the registry.
 	Policy string `json:"policy,omitempty"`
+	// Capabilities picks the alignment methods the carrier is given, by key.
+	// See issue_draft_capability.go for the registry.
+	//
+	// Absent and empty are different requests, and the difference is the one
+	// the picker needs: absent means "this client has no capability control" and
+	// gets the built-in default, while an empty array is a client saying "none
+	// of them" — the state a picker with every box unchecked produces. Anything
+	// else is resolved: unknown keys are refused, and a capability's own
+	// requirements are added.
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 type CreateIssueDraftSessionResponse struct {
@@ -228,6 +244,25 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// The capabilities are the other half of the carrier's prompt, so they are
+	// resolved here too — before anything is created. An unknown key is refused
+	// rather than dropped for the same reason an unknown policy is: a
+	// conversation assembled without a method the user turned on looks like it
+	// worked and behaves like the method was never there. The resolved set is
+	// the union of what was asked for and what the policy requires, and it is
+	// that union — never the raw request — which is both assembled and recorded.
+	requested, err := resolveIssueDraftCapabilities(req.Capabilities)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	required, err := issueDraftPolicyRequiredCapabilities(policy)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve alignment capabilities")
+		return
+	}
+	capabilities := issueDraftMergeCapabilities(requested, required)
+
 	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
 		return
@@ -267,7 +302,7 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 		RuntimeMode:  runtime.RuntimeMode,
 		RuntimeID:    runtime.ID,
 		OwnerID:      ownerUUID,
-		Instructions: policy.Instructions(),
+		Instructions: policy.Instructions(capabilities),
 		Model:        pgtype.Text{String: model, Valid: model != ""},
 		SystemKey: pgtype.Text{
 			String: fmt.Sprintf("issue_draft:%s", flowID),
@@ -297,11 +332,13 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 	}
 
 	created, err := qtx.CreateIssueDraft(r.Context(), db.CreateIssueDraftParams{
-		ChatSessionID: session.ID,
-		WorkspaceID:   workspaceUUID,
-		Draft:         draft,
-		PolicyKey:     policy.Key,
-		PolicyVersion: policy.Version,
+		ChatSessionID:     session.ID,
+		WorkspaceID:       workspaceUUID,
+		Draft:             draft,
+		PolicyKey:         policy.Key,
+		PolicyVersion:     policy.Version,
+		CapabilityKeys:    issueDraftCapabilityKeys(capabilities),
+		CapabilityVersion: issueDraftCapabilityVersion,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create issue draft")
@@ -414,6 +451,8 @@ func (h *Handler) ListIssueDrafts(w http.ResponseWriter, r *http.Request) {
 				IssueID:           row.IssueID,
 				PolicyKey:         row.PolicyKey,
 				PolicyVersion:     row.PolicyVersion,
+				CapabilityKeys:    row.CapabilityKeys,
+				CapabilityVersion: row.CapabilityVersion,
 				FinalizeRound:     row.FinalizeRound,
 				FinalizedRevision: row.FinalizedRevision,
 				CreatedAt:         row.CreatedAt,
@@ -689,9 +728,41 @@ func (h *Handler) SwitchIssueDraftPolicy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// The switch rewrites the whole installed prompt, so the capabilities have
+	// to be carried across it: the row's own recorded set plus whatever the new
+	// policy requires. Never the new policy's requirements alone — turning the
+	// guidance down is not a request to have the user's other methods dropped,
+	// and never the request's, because this endpoint does not take one.
+	//
+	// A capability the running build has retired is dropped from the prompt
+	// instead of failing the switch: this is a live conversation being changed,
+	// not a prompt being reconstructed, and refusing to switch because a method
+	// no longer exists would strand it.
+	recorded, err := qtx.GetIssueDraftInWorkspace(r.Context(), db.GetIssueDraftInWorkspaceParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   session.WorkspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			h.writeIssueDraftWriteConflict(w, r, session, "switch policy on")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to read issue draft capabilities")
+		return
+	}
+	required, err := issueDraftPolicyRequiredCapabilities(policy)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve alignment capabilities")
+		return
+	}
+	capabilities := issueDraftMergeCapabilities(
+		issueDraftCapabilitiesFromKeys(recorded.CapabilityKeys),
+		required,
+	)
+
 	if _, err := qtx.UpdateIssueDraftCarrierInstructions(r.Context(), db.UpdateIssueDraftCarrierInstructionsParams{
 		ID:           session.AgentID,
-		Instructions: policy.Instructions(),
+		Instructions: policy.Instructions(capabilities),
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "issue draft session not found")
@@ -702,10 +773,12 @@ func (h *Handler) SwitchIssueDraftPolicy(w http.ResponseWriter, r *http.Request)
 	}
 
 	updated, err := qtx.UpdateIssueDraftPolicy(r.Context(), db.UpdateIssueDraftPolicyParams{
-		ChatSessionID: session.ID,
-		WorkspaceID:   session.WorkspaceID,
-		PolicyKey:     policy.Key,
-		PolicyVersion: policy.Version,
+		ChatSessionID:     session.ID,
+		WorkspaceID:       session.WorkspaceID,
+		PolicyKey:         policy.Key,
+		PolicyVersion:     policy.Version,
+		CapabilityKeys:    issueDraftCapabilityKeys(capabilities),
+		CapabilityVersion: issueDraftCapabilityVersion,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

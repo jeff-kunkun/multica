@@ -135,18 +135,19 @@ const issueDraftConversationPolicy = `Your task right now: hold an ordinary conv
 // a reply attachment. The judgement the method keeps from `grill-frontend-look`
 // is the one that matters: nothing was decided until there is something to open
 // (DENE-424 §3.2, DENE-421).
+//
+// The method itself no longer lives here. It is the `grill-frontend-look`
+// capability (issue_draft_capability.go), which this entry names in Requires:
+// one copy of the round, so a user who turns that capability on under another
+// policy gets the same discipline, and a user who turns it off while running
+// this policy still gets it — the policy IS that round, and a look round
+// without its method is a prompt that only talks about prototypes.
 const issueDraftFrontendPolicy = `Your task right now: settle what the surface looks like, not only what it does. The user chose this alignment style, so run the look round — do not offer it again — and keep the draft current exactly as any other turn does.
 
-- One screen at a time is the default: the single screen the user has to see, a short kebab-case name, nothing else. Five structural directions is for when the user asks to compare: five candidates for the SAME surface in one file behind a picker, structurally different in layout, information hierarchy or the shape of the primary action. Different colours, spacing or corner radii are not different directions.
-- Build it yourself: one self-contained HTML file in your working directory, no framework, no build step, no real data. It must show the screen at desktop AND phone width, and must show the states this screen carries (loading / empty / error).
-- Upload it with "multica attachment upload <path>" and put the markdown snippet it prints in your reply, so the user can open the prototype without leaving the conversation. That file is the only thing this style creates: the carrier still creates no issue and changes nothing the user owns.
-- A round is not finished until the user has something to open. Never write that a direction is settled without the file — being able to open it is the whole reason this style exists.
 - Ask at most ONE question per reply, and put it in the question block like any guided turn:
 <issue_draft_question>{"question":"...","options":[{"label":"...","value":"...","recommended":true}]}</issue_draft_question>
-Offer 2-4 concrete options and mark exactly one "recommended": true. The user may pick one candidate or combine them ("B's header with C's primary button"); when they combine, rebuild the file and upload it again instead of describing the combination.
-- Keep every settled screen's five lines in "## 前端做法" (or "## Frontend"), and add the prototype beneath them as one more line — "Prototype:" (or "原型：") followed by the snippet that screen was settled from. The contract fixes what a screen spec must contain, not what it may not.
-- At most two screens in one alignment. When the request needs more, stop and say so: the screens past the second belong in a sub-issue that says to prototype before building.
-- If the request turns out to have no user-visible surface at all, say so in one sentence and keep refining the draft under the usual rules instead of prototyping one.`
+Offer 2-4 concrete options and mark exactly one "recommended": true.
+- This alignment is the look round, so the round's own rules govern it — including the one that stops it at two screens and hands the rest to a sub-issue that says to prototype before building.`
 
 // issueDraftPolicy is one auditable alignment policy.
 type issueDraftPolicy struct {
@@ -156,14 +157,38 @@ type issueDraftPolicy struct {
 	// the alignment page can show the guidance control in the state it is
 	// actually in without hardcoding which key is which.
 	Guided bool
+	// Requires names the capabilities this policy is incoherent without. It is
+	// the same expansion `grill` uses, applied to a policy: the look round is
+	// a method another capability already carries, so naming it here is what
+	// keeps one copy of it instead of a second one in Behaviour.
+	Requires []string
 	// Behaviour is the policy-specific half of the carrier's prompt.
 	Behaviour string
 }
 
 // Instructions is the full system prompt installed on the carrier: the shared
-// wire contract plus this policy's behaviour.
-func (p issueDraftPolicy) Instructions() string {
-	return issueDraftContract + "\n\n" + p.Behaviour
+// wire contract, the methods of the capabilities this alignment runs with, and
+// this policy's behaviour.
+//
+// The three parts are assembled in that order on purpose. The contract is the
+// wire format and the rules that never bend; the capabilities are the methods
+// the user turned on; the behaviour is what this turn's job is, last because it
+// is the most immediate instruction and the one a long method must not bury.
+//
+// `capabilities` is the resolved set — see resolveIssueDraftCapabilities — not
+// the client's raw list. Callers pass it already expanded so the prompt and the
+// draft row that records it cannot disagree.
+func (p issueDraftPolicy) Instructions(capabilities []issueDraftCapability) string {
+	parts := make([]string, 0, len(capabilities)+2)
+	parts = append(parts, issueDraftContract)
+	if len(capabilities) > 0 {
+		parts = append(parts, issueDraftCapabilityPreamble)
+		for _, capability := range capabilities {
+			parts = append(parts, capability.Fragment)
+		}
+	}
+	parts = append(parts, p.Behaviour)
+	return strings.Join(parts, "\n\n")
 }
 
 // issueDraftPolicyRegistry is the whole set. A new policy is a new entry; the
@@ -189,6 +214,16 @@ func (p issueDraftPolicy) Instructions() string {
 // is no earlier prompt of it for a draft to have recorded, and the shared
 // contract it carries has not moved since the two text-only entries were
 // versioned against it.
+//
+// The front-end entry moved to 2 when its look-round method moved out to the
+// `grill-frontend-look` capability and it declared that capability as a
+// requirement. This is not the shared-contract rule: the entry's own behaviour
+// changed — it stopped restating the method and started naming it — and a
+// prompt assembled under version 1 was a different text. The two text-only
+// entries stay where they are for the same reason: neither half of their prompt
+// moved. What the assembled prompt is made of is pinned by the capability
+// version and keys recorded beside the policy version; see
+// issue_draft_capability.go.
 var issueDraftPolicyRegistry = map[string]issueDraftPolicy{
 	issueDraftPolicyQuestion: {
 		Key:       issueDraftPolicyQuestion,
@@ -204,10 +239,21 @@ var issueDraftPolicyRegistry = map[string]issueDraftPolicy{
 	},
 	issueDraftPolicyFrontend: {
 		Key:       issueDraftPolicyFrontend,
-		Version:   "1",
+		Version:   "2",
 		Guided:    true,
+		Requires:  []string{issueDraftCapabilityGrillFrontendLook},
 		Behaviour: issueDraftFrontendPolicy,
 	},
+}
+
+// issueDraftPolicyRequiredCapabilities resolves a policy's own capability
+// requirements into the same shape a client-supplied list resolves to, so the
+// two can be merged into one set before anything is assembled or recorded.
+func issueDraftPolicyRequiredCapabilities(policy issueDraftPolicy) ([]issueDraftCapability, error) {
+	if len(policy.Requires) == 0 {
+		return nil, nil
+	}
+	return resolveIssueDraftCapabilities(policy.Requires)
 }
 
 // issueDraftPolicyKeys is the registry's key list, sorted so an error message

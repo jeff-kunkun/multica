@@ -18,6 +18,7 @@ import type {
   ChatPendingTask,
   ChatSession,
   IssueDraft,
+  IssueDraftCapabilities,
   IssueDraftPolicy,
   IssueDraftRuntimeSwitch,
   IssueDraftSession,
@@ -2368,6 +2369,33 @@ export const EMPTY_ISSUE_DRAFT_POLICY: IssueDraftPolicy = {
 const UNKNOWN_ISSUE_DRAFT_POLICY = { key: "", version: "", guided: false };
 
 /**
+ * The built-in alignment capabilities a draft runs with.
+ *
+ * Same fallback rule as the policy above, and the same reason: a backend that
+ * predates capabilities sends no field at all, and reporting a key it never
+ * sent would draw a control the server cannot honour. `keys: []` is that state
+ * — this conversation runs no method this client can name.
+ *
+ * `keys` carries its own `.catch([])` rather than relying on the outer one,
+ * because a malformed list must cost the list and not the draft: the page still
+ * has a conversation to render, and the only thing an unreadable key list can
+ * change is which boxes are ticked.
+ */
+export const IssueDraftCapabilitiesSchema = z.object({
+  keys: z.array(z.string()).catch([]),
+  version: z.string().catch(""),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_CAPABILITIES: IssueDraftCapabilities = {
+  keys: [],
+  version: "",
+};
+
+/** The fallback shape as the schema's own output type, so a `.catch` on the
+ *  draft produces the same object as a missing field. */
+const UNKNOWN_ISSUE_DRAFT_CAPABILITIES = { keys: [], version: "" };
+
+/**
  * One alignment draft.
  *
  * `status` deliberately has no `.catch()`: it decides whether the UI offers
@@ -2390,6 +2418,11 @@ export const IssueDraftSchema = z.object({
   finalize_round: z.number().int().nonnegative().catch(0),
   finalized_revision: z.number().int().nullish().catch(null),
   policy: IssueDraftPolicySchema.catch(() => UNKNOWN_ISSUE_DRAFT_POLICY),
+  // Same rule as `policy`, one axis over: the methods this conversation runs,
+  // and no guess at a set this backend never sent.
+  capabilities: IssueDraftCapabilitiesSchema.catch(
+    () => UNKNOWN_ISSUE_DRAFT_CAPABILITIES,
+  ),
   created_at: z.string().catch(""),
   updated_at: z.string().catch(""),
 }).loose();
@@ -2408,6 +2441,7 @@ export const EMPTY_ISSUE_DRAFT: IssueDraft = {
   finalize_round: 0,
   finalized_revision: null,
   policy: EMPTY_ISSUE_DRAFT_POLICY,
+  capabilities: EMPTY_ISSUE_DRAFT_CAPABILITIES,
   created_at: "",
   updated_at: "",
 };

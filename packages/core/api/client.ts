@@ -1708,6 +1708,13 @@ export class ApiClient {
     /** Which alignment policy to open under. Omitted means the guided
      *  default; see packages/core/issue-drafts/policy.ts. */
     policy?: string;
+    /**
+     * Which built-in alignment methods the carrier is given. Omitted means the
+     * server's built-in default set; an empty array means "none", which is how
+     * the picker's all-unchecked state is expressed. The keys this client
+     * offers are in packages/core/issue-drafts/capabilities.ts.
+     */
+    capabilities?: string[];
   }): Promise<IssueDraftSession> {
     const raw = await this.fetch<unknown>("/api/issue-drafts", {
       method: "POST",

@@ -84,6 +84,25 @@ export interface IssueDraftPolicy {
   guided: boolean;
 }
 
+/**
+ * Which built-in alignment methods this conversation runs with, and which
+ * version of their text the carrier was given.
+ *
+ * The other half of the audit record `policy` carries: the policy version pins
+ * the shared contract and the policy's own behaviour, and this pins the methods
+ * they were assembled with. `keys` is the recorded list rather than this
+ * client's idea of it — a backend may name a capability a later build retired —
+ * so a caller intersects it with the keys it knows before rendering a control.
+ *
+ * Both fields fall back to the empty state, which is what an installed desktop
+ * client sees when it talks to a backend that predates capabilities: no method
+ * list, and a control that renders nothing rather than guessing.
+ */
+export interface IssueDraftCapabilities {
+  keys: string[];
+  version: string;
+}
+
 /** One alignment draft as the server owns it. */
 export interface IssueDraft {
   /** The alignment conversation. It is also the draft's identity — one
@@ -117,6 +136,8 @@ export interface IssueDraft {
   finalized_revision?: number | null;
   /** The policy and prompt version in force for this conversation. */
   policy: IssueDraftPolicy;
+  /** The built-in methods this conversation runs with, and their text version. */
+  capabilities: IssueDraftCapabilities;
   created_at: string;
   updated_at: string;
 }

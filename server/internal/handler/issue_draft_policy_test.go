@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,6 +27,28 @@ func carrierInstructions(t *testing.T, agentID string) string {
 	var instructions string
 	dbfx.QueryRow(t, `SELECT instructions FROM agent WHERE id = $1`, agentID).Scan(&instructions)
 	return instructions
+}
+
+// defaultInstructions is the prompt a session opened with no capability list
+// gets under this policy: the built-in default set, merged with whatever the
+// policy itself requires.
+//
+// It is not `policy.Behaviour`. The installed prompt is the shared contract,
+// the capability fragments and the behaviour, and every session these tests
+// start is opened without a capability list — so this is the text the carrier's
+// agent row actually holds, and comparing against anything else would pass
+// while the carrier ran something else.
+func defaultInstructions(t *testing.T, policy issueDraftPolicy) string {
+	t.Helper()
+	capabilities, err := resolveIssueDraftCapabilities(nil)
+	if err != nil {
+		t.Fatalf("resolving the default capabilities: %v", err)
+	}
+	required, err := issueDraftPolicyRequiredCapabilities(policy)
+	if err != nil {
+		t.Fatalf("resolving policy %q's required capabilities: %v", policy.Key, err)
+	}
+	return policy.Instructions(issueDraftMergeCapabilities(capabilities, required))
 }
 
 // carrierPolicyKey reads the policy recorded on the draft row itself — the
@@ -78,7 +101,7 @@ func TestIssueDraftDefaultsToGuidedQuestionPolicy(t *testing.T) {
 	}
 
 	instructions := carrierInstructions(t, session.AgentID)
-	if instructions != questionPolicy.Instructions() {
+	if instructions != defaultInstructions(t, questionPolicy) {
 		t.Fatal("carrier was not given the registered question prompt")
 	}
 	if !strings.Contains(instructions, "<issue_draft_question>") {
@@ -170,7 +193,7 @@ func TestSwitchIssueDraftPolicyRewritesCarrierPromptOnly(t *testing.T) {
 		t.Fatalf("draft row recorded %s@%s after the switch, want %s@%s",
 			recordedKey, recordedVersion, conversationPolicy.Key, conversationPolicy.Version)
 	}
-	if got := carrierInstructions(t, session.AgentID); got != conversationPolicy.Instructions() {
+	if got := carrierInstructions(t, session.AgentID); got != defaultInstructions(t, conversationPolicy) {
 		t.Fatal("carrier kept the old prompt after the policy switch")
 	}
 
@@ -178,7 +201,7 @@ func TestSwitchIssueDraftPolicyRewritesCarrierPromptOnly(t *testing.T) {
 	questionPolicy, _ := issueDraftPolicyByKey(issueDraftPolicyQuestion)
 	testutil.Call(t, testHandler.SwitchIssueDraftPolicy, switchPolicyRequest(t, session.SessionID, issueDraftPolicyQuestion)).
 		Want(http.StatusOK)
-	if got := carrierInstructions(t, session.AgentID); got != questionPolicy.Instructions() {
+	if got := carrierInstructions(t, session.AgentID); got != defaultInstructions(t, questionPolicy) {
 		t.Fatal("carrier did not get the question prompt back after switching back")
 	}
 }
@@ -254,7 +277,7 @@ func TestIssueDraftPolicyKeysAreSwitchable(t *testing.T) {
 			t.Fatalf("switching to %q recorded %s@%s on the draft row, want %s@%s",
 				key, recorded, version, policy.Key, policy.Version)
 		}
-		if got := carrierInstructions(t, session.AgentID); got != policy.Instructions() {
+		if got := carrierInstructions(t, session.AgentID); got != defaultInstructions(t, policy) {
 			t.Fatalf("switching to %q did not install that entry's prompt", key)
 		}
 	}
@@ -278,7 +301,7 @@ func TestSwitchIssueDraftPolicyRequiresOwnership(t *testing.T) {
 	)).Want(http.StatusForbidden)
 
 	questionPolicy, _ := issueDraftPolicyByKey(issueDraftPolicyQuestion)
-	if got := carrierInstructions(t, session.AgentID); got != questionPolicy.Instructions() {
+	if got := carrierInstructions(t, session.AgentID); got != defaultInstructions(t, questionPolicy) {
 		t.Fatal("a rejected policy switch rewrote the carrier prompt")
 	}
 }
@@ -303,7 +326,7 @@ func TestSwitchIssueDraftPolicyRefusesWhileTurnIsPending(t *testing.T) {
 		Want(http.StatusConflict)
 
 	questionPolicy, _ := issueDraftPolicyByKey(issueDraftPolicyQuestion)
-	if got := carrierInstructions(t, session.AgentID); got != questionPolicy.Instructions() {
+	if got := carrierInstructions(t, session.AgentID); got != defaultInstructions(t, questionPolicy) {
 		t.Fatal("a refused policy switch rewrote the carrier prompt")
 	}
 }
@@ -325,7 +348,7 @@ func TestIssueDraftPolicyRegistryIsWellFormed(t *testing.T) {
 		if strings.TrimSpace(policy.Behaviour) == "" {
 			t.Fatalf("policy %q has no prompt", key)
 		}
-		if !strings.Contains(policy.Instructions(), "<issue_draft>") {
+		if !strings.Contains(defaultInstructions(t, policy), "<issue_draft>") {
 			t.Fatalf("policy %q does not carry the shared draft-block contract", key)
 		}
 	}
@@ -333,14 +356,14 @@ func TestIssueDraftPolicyRegistryIsWellFormed(t *testing.T) {
 	if !ok || !guided.Guided {
 		t.Fatal("the guided default is not registered as guided")
 	}
-	if !strings.Contains(guided.Instructions(), "<issue_draft_question>") {
+	if !strings.Contains(defaultInstructions(t, guided), "<issue_draft_question>") {
 		t.Fatal("the guided policy does not describe the question block")
 	}
 	plain, ok := issueDraftPolicyByKey(issueDraftPolicyConversation)
 	if !ok || plain.Guided {
 		t.Fatal("the conversation policy is missing or reports itself as guided")
 	}
-	if strings.Contains(plain.Instructions(), "<issue_draft_question>") {
+	if strings.Contains(defaultInstructions(t, plain), "<issue_draft_question>") {
 		t.Fatal("the unguided policy still teaches the question block")
 	}
 
@@ -349,7 +372,7 @@ func TestIssueDraftPolicyRegistryIsWellFormed(t *testing.T) {
 	// unguided one that does interviews after the user asked for conversation.
 	// The registry grows, so this is a loop rather than three named checks.
 	for key, policy := range issueDraftPolicyRegistry {
-		teaches := strings.Contains(policy.Instructions(), "<issue_draft_question>")
+		teaches := strings.Contains(defaultInstructions(t, policy), "<issue_draft_question>")
 		if policy.Guided && !teaches {
 			t.Fatalf("policy %q reports itself guided but never describes the question block", key)
 		}
@@ -389,7 +412,7 @@ func TestIssueDraftContractAsksForTheFrontendSection(t *testing.T) {
 	}
 
 	for key, policy := range issueDraftPolicyRegistry {
-		if !strings.Contains(policy.Instructions(), "## 前端做法") {
+		if !strings.Contains(defaultInstructions(t, policy), "## 前端做法") {
 			t.Fatalf("policy %q does not carry the front-end section", key)
 		}
 	}
@@ -433,7 +456,7 @@ func TestIssueDraftQuestionPolicyHandsScopeAndDirectionToTheUser(t *testing.T) {
 		// Timing: the surface is settled before the rest of the draft.
 		"Ask the surface question before the rest of the draft is settled",
 	} {
-		if !strings.Contains(guided.Instructions(), want) {
+		if !strings.Contains(defaultInstructions(t, guided), want) {
 			t.Fatalf("the guided prompt does not carry %q", want)
 		}
 	}
@@ -442,7 +465,7 @@ func TestIssueDraftQuestionPolicyHandsScopeAndDirectionToTheUser(t *testing.T) {
 	if !ok || plain.Guided {
 		t.Fatal("the conversation policy is missing or reports itself as guided")
 	}
-	if strings.Contains(plain.Instructions(), "two things are the user's to decide and yours only to propose") {
+	if strings.Contains(defaultInstructions(t, plain), "two things are the user's to decide and yours only to propose") {
 		t.Fatal("the unguided policy still hands the surface to the user to decide")
 	}
 }
@@ -465,14 +488,16 @@ func TestIssueDraftFrontendPolicyRunsTheLookRound(t *testing.T) {
 	if !frontend.Guided {
 		t.Fatal("the front-end policy reports itself unguided, so its one question at a time would never render answer chips")
 	}
-	if frontend.Version != "1" {
-		t.Fatalf("the front-end policy is at version %q, want 1", frontend.Version)
+	if frontend.Version != "2" {
+		t.Fatalf("the front-end policy is at version %q, want 2", frontend.Version)
 	}
 	for _, want := range []string{
 		// The user picked this style, so the round starts instead of being
 		// offered again — the offer belongs to the policies that do not have it.
 		"run the look round — do not offer it again",
-		// The default unit, and the comparison mode with its own tie-break.
+		// The default unit, and the comparison mode with its own tie-break. Both
+		// live in the `grill-frontend-look` capability now, and they reach this
+		// prompt because the policy declares it as a requirement.
 		"One screen at a time is the default",
 		"Five structural directions",
 		"one file behind a picker",
@@ -490,19 +515,27 @@ func TestIssueDraftFrontendPolicyRunsTheLookRound(t *testing.T) {
 		`"Prototype:"`,
 		`"原型："`,
 	} {
-		if !strings.Contains(frontend.Instructions(), want) {
+		if !strings.Contains(defaultInstructions(t, frontend), want) {
 			t.Fatalf("the front-end prompt does not carry %q", want)
 		}
 	}
 
+	// The look round reaches a text-only policy only when the user turns the
+	// capability on, and the *policy's own half* must never carry it: a
+	// requirement interview that grew a prototyping step on its own is the
+	// failure this boundary exists to catch. `frontend` is the opposite case —
+	// it declares the capability, so the round is part of what it means.
 	for _, key := range []string{issueDraftPolicyQuestion, issueDraftPolicyConversation} {
 		policy, ok := issueDraftPolicyByKey(key)
 		if !ok {
 			t.Fatalf("policy %q is not registered", key)
 		}
-		if strings.Contains(policy.Instructions(), "multica attachment upload") {
-			t.Fatalf("policy %q builds prototypes; the look round belongs to %q", key, issueDraftPolicyFrontend)
+		if strings.Contains(policy.Behaviour, "multica attachment upload") {
+			t.Fatalf("policy %q builds prototypes on its own; the look round belongs to %q, or to a capability the user turns on", key, issueDraftPolicyFrontend)
 		}
+	}
+	if !slices.Contains(frontend.Requires, issueDraftCapabilityGrillFrontendLook) {
+		t.Fatalf("the front-end policy does not require the %q capability, so the round it names has no method", issueDraftCapabilityGrillFrontendLook)
 	}
 }
 

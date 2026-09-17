@@ -817,6 +817,8 @@ type IssueDraft struct {
 	PolicyVersion     string             `json:"policy_version"`
 	FinalizeRound     int32              `json:"finalize_round"`
 	FinalizedRevision pgtype.Int8        `json:"finalized_revision"`
+	CapabilityKeys    []string           `json:"capability_keys"`
+	CapabilityVersion string             `json:"capability_version"`
 }
 
 type IssueLabel struct {

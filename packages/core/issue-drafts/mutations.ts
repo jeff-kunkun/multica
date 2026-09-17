@@ -116,12 +116,24 @@ export function useStartIssueDraft(wsId: string) {
        * panel would never reach the server.
        */
       parentIssueId?: string;
+      /**
+       * Which built-in alignment methods this conversation runs with.
+       *
+       * Sent at creation and never after: the capabilities are assembled into
+       * the carrier's instructions, which are installed once — changing them on
+       * a live conversation would need the same two-write switch the policy has,
+       * and nothing asks for that yet. Omitted means the server's built-in
+       * default set; an empty array means none, which is the state an emptied
+       * picker is in (see `encodeIssueDraftCapabilities`).
+       */
+      capabilities?: string[];
     }): Promise<StartIssueDraftResult> => {
       const request = input.request.trim();
       const session = await api.createIssueDraftSession({
         runtime_id: input.runtimeId,
         model: input.model?.trim() || undefined,
         draft: seedDraft(request, input.projectId, input.parentIssueId),
+        capabilities: input.capabilities,
       });
       const draftId = session.session_id;
       // An empty id is reachable only through the schema fallback above: every

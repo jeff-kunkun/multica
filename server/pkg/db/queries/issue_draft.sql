@@ -6,9 +6,11 @@
 -- policy_key / policy_version are written next to the carrier agent whose
 -- instructions were set from the same policy: the row records the prompt that
 -- actually steers this conversation, not the one the registry happens to serve
--- when someone later asks.
-INSERT INTO issue_draft (chat_session_id, workspace_id, draft, policy_key, policy_version)
-VALUES (@chat_session_id, @workspace_id, @draft, @policy_key, @policy_version)
+-- when someone later asks. capability_keys / capability_version are the other
+-- half of that record — the methods that prompt was assembled from, and the
+-- text of those methods (issue_draft_capability.go).
+INSERT INTO issue_draft (chat_session_id, workspace_id, draft, policy_key, policy_version, capability_keys, capability_version)
+VALUES (@chat_session_id, @workspace_id, @draft, @policy_key, @policy_version, @capability_keys, @capability_version)
 RETURNING *;
 
 -- name: GetIssueDraftInWorkspace :one
@@ -56,6 +58,11 @@ FOR UPDATE;
 -- only row an open alignment page reads: without them a continuation could not
 -- say which round it is on, and the page had to POST /reopen — a write — purely
 -- to read the round back (DENE-416).
+--
+-- `capability_keys` / `capability_version` ride along for the same reason:
+-- this row is what the alignment page renders, and the capabilities control is
+-- drawn from the set the conversation is actually running rather than from
+-- whatever this client would pick by default.
 SELECT d.chat_session_id,
        d.workspace_id,
        d.status,
@@ -64,6 +71,8 @@ SELECT d.chat_session_id,
        d.issue_id,
        d.policy_key,
        d.policy_version,
+       d.capability_keys,
+       d.capability_version,
        d.created_at,
        d.updated_at,
        d.finalize_round,
@@ -108,7 +117,15 @@ RETURNING *;
 
 -- name: UpdateIssueDraftPolicy :one
 -- Re-records which alignment policy a live conversation is running under,
--- together with the version of that policy's prompt the carrier was just given.
+-- together with the version of that policy's prompt the carrier was just given,
+-- and the capabilities that prompt was assembled from.
+--
+-- The capabilities are part of this write rather than a second statement
+-- because they and the policy are one decision: the instructions installed on
+-- the carrier are contract + capabilities + behaviour, so a row that recorded
+-- the new policy with the old capability set would point at a prompt nobody
+-- ran. Switching to a policy that requires a capability adds it; switching away
+-- does not remove what the user chose.
 --
 -- Deliberately does NOT bump `revision`: revision is the optimistic-concurrency
 -- token for the draft's *content*, and switching how the carrier asks questions
@@ -118,6 +135,8 @@ RETURNING *;
 UPDATE issue_draft
 SET policy_key = @policy_key,
     policy_version = @policy_version,
+    capability_keys = @capability_keys,
+    capability_version = @capability_version,
     updated_at = now()
 WHERE chat_session_id = @chat_session_id
   AND workspace_id = @workspace_id

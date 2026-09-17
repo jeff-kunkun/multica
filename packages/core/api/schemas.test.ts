@@ -2675,3 +2675,62 @@ describe("alignment rounds on the wire", () => {
     expect(parsed.finalized_revision).toBeNull();
   });
 });
+
+describe("alignment capabilities on the wire", () => {
+  const draft = {
+    chat_session_id: "sess-1",
+    workspace_id: "ws-1",
+    status: "ready",
+    revision: 7,
+    draft: { title: "Parent", description: "", status: "", priority: "" },
+    policy: { key: "question", version: "4", guided: true },
+    capabilities: {
+      keys: ["wayfinder", "grill", "grilling"],
+      version: "1",
+    },
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("reads the method set a draft is running", () => {
+    const parsed = IssueDraftSchema.parse(draft);
+    expect(parsed.capabilities.keys).toEqual(["wayfinder", "grill", "grilling"]);
+    expect(parsed.capabilities.version).toBe("1");
+  });
+
+  it("degrades a backend without capabilities to no method at all", () => {
+    // The same rule as `policy`, one axis over: a backend that predates
+    // capabilities sends no field, and an invented key would draw a control the
+    // server cannot honour. An empty list is the honest "nothing known" state,
+    // and the page renders the conversation without the control.
+    const { capabilities: _omitted, ...withoutCapabilities } = draft;
+    const parsed = IssueDraftSchema.parse(withoutCapabilities);
+    expect(parsed.capabilities).toEqual({ keys: [], version: "" });
+    expect(parsed.policy.key).toBe("question");
+  });
+
+  it("costs the key list, not the draft, when a key list is malformed", () => {
+    // The list is the only field of a draft that the picker reads, and a
+    // malformed one must not turn a conversation the user can still act on into
+    // a parse failure — the same asymmetry `finalize_round` is written with.
+    const parsed = IssueDraftSchema.parse({
+      ...draft,
+      capabilities: { keys: "wayfinder", version: "1" },
+    });
+    expect(parsed.status).toBe("ready");
+    expect(parsed.capabilities.keys).toEqual([]);
+    // Version survives on its own: it is the audit half, and one bad sibling
+    // must not erase what prompt the carrier was given.
+    expect(parsed.capabilities.version).toBe("1");
+  });
+
+  it("keeps a version whose key list is empty", () => {
+    // "This alignment runs no capability" is a real answer, not a missing one,
+    // and it must stay distinguishable from the backend that sent nothing.
+    const parsed = IssueDraftSchema.parse({
+      ...draft,
+      capabilities: { keys: [], version: "1" },
+    });
+    expect(parsed.capabilities).toEqual({ keys: [], version: "1" });
+  });
+});
