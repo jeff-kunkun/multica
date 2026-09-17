@@ -1516,7 +1516,7 @@
       "issues_parents": "{{count}} thread links backfilled",
       "issues_degraded_title": "Rows that lost a reference",
       "degrade_status": "Status not in this workspace's catalog",
-      "degrade_assignee": "Assignee could not be mapped",
+      "degrade_assignee": "Assignee could not be mapped, assigned to the importer",
       "degrade_creator": "Creator could not be mapped",
       "degrade_project": "Project could not be mapped",
       "degrade_author": "Comment author could not be mapped",

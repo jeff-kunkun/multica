@@ -1061,7 +1061,7 @@ func (q *Queries) ExportSquads(ctx context.Context, arg ExportSquadsParams) ([]E
 }
 
 const exportSystemAgents = `-- name: ExportSystemAgents :many
-SELECT system_key, instructions, model, thinking_level, service_tier,
+SELECT id, system_key, instructions, model, thinking_level, service_tier,
        conversation_starters, disabled_runtime_skills
 FROM agent
 WHERE workspace_id = $1 AND kind = 'system'
@@ -1078,6 +1078,7 @@ type ExportSystemAgentsParams struct {
 }
 
 type ExportSystemAgentsRow struct {
+	ID                    pgtype.UUID `json:"id"`
 	SystemKey             pgtype.Text `json:"system_key"`
 	Instructions          string      `json:"instructions"`
 	Model                 pgtype.Text `json:"model"`
@@ -1087,6 +1088,9 @@ type ExportSystemAgentsRow struct {
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 }
 
+// `id` rides along so a bundle can say which source agent each system agent
+// was: the issue transfer indexes its refs by source uuid, and system_key is
+// the target-side lookup key, not the source-side identity.
 func (q *Queries) ExportSystemAgents(ctx context.Context, arg ExportSystemAgentsParams) ([]ExportSystemAgentsRow, error) {
 	rows, err := q.db.Query(ctx, exportSystemAgents, arg.WorkspaceID, arg.IncludeArchived)
 	if err != nil {
@@ -1097,6 +1101,7 @@ func (q *Queries) ExportSystemAgents(ctx context.Context, arg ExportSystemAgents
 	for rows.Next() {
 		var i ExportSystemAgentsRow
 		if err := rows.Scan(
+			&i.ID,
 			&i.SystemKey,
 			&i.Instructions,
 			&i.Model,

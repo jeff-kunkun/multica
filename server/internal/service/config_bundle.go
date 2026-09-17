@@ -249,6 +249,10 @@ type ConfigInvocationTarget struct {
 }
 
 type ConfigSystemAgent struct {
+	// SourceID is the source workspace's agent uuid. Bundles written before
+	// the issue transfer needed it carry no `source_id`: readers must treat the
+	// empty value as "unknown", never as an id.
+	SourceID              string          `json:"source_id,omitempty"`
 	SystemKey             string          `json:"system_key"`
 	Instructions          string          `json:"instructions"`
 	Model                 *string         `json:"model"`

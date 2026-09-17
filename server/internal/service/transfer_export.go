@@ -358,7 +358,16 @@ func ExportFromSource(ctx context.Context, src TransferSourceClient, opts Transf
 		refs.Agents[a.SourceID] = TransferAgentRef{Name: a.Name}
 	}
 	for _, a := range bundle.Entities.SystemAgents {
-		refs.SystemAgents[a.SystemKey] = TransferAgentRef{SystemKey: a.SystemKey}
+		// The issue transfer looks a source assignee / author / mention up by the
+		// source agent's uuid, so the index is keyed by that id and only the
+		// system_key travels as the target-side lookup. A bundle written before
+		// system agents carried a source id has nothing to key on: skipping the
+		// entry keeps the old fallback behavior instead of inventing a second
+		// lookup path.
+		if a.SourceID == "" {
+			continue
+		}
+		refs.SystemAgents[a.SourceID] = TransferAgentRef{SystemKey: a.SystemKey}
 	}
 	for _, p := range bundle.Entities.Projects {
 		refs.Projects[p.SourceID] = TransferProjRef{Title: p.Title}
@@ -809,6 +818,7 @@ func exportAgentsGroup(ctx context.Context, src TransferSourceClient, bundle *Co
 		}
 		if sysKey != "" {
 			bundle.Entities.SystemAgents = append(bundle.Entities.SystemAgents, ConfigSystemAgent{
+				SourceID:              id,
 				SystemKey:             sysKey,
 				Instructions:          strField(raw, "instructions"),
 				Model:                 strPtrField(raw, "model"),

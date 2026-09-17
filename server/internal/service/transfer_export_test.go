@@ -59,6 +59,11 @@ func TestExportAgentsGroup_SystemKeyWithoutKind(t *testing.T) {
 	if len(bundle.Entities.SystemAgents) != 1 || bundle.Entities.SystemAgents[0].SystemKey != "mika" {
 		t.Fatalf("system_agents=%v", bundle.Entities.SystemAgents)
 	}
+	// DENE-442: the issue transfer resolves a source assignee / author / mention
+	// by the source agent's uuid, so the exported entity has to carry it.
+	if bundle.Entities.SystemAgents[0].SourceID != "sys-1" {
+		t.Fatalf("source_id=%q, want sys-1", bundle.Entities.SystemAgents[0].SourceID)
+	}
 	if len(bundle.Entities.Agents) != 1 || bundle.Entities.Agents[0].Name != "Bot" {
 		t.Fatalf("agents=%v", bundle.Entities.Agents)
 	}
@@ -676,5 +681,42 @@ func TestExportFromSource_ReportsSessionAndAttachmentProgress(t *testing.T) {
 	}
 	if downloaded[len(downloaded)-1] != 2 {
 		t.Errorf("attachment counter ended at %d, want 2", downloaded[len(downloaded)-1])
+	}
+}
+
+// DENE-442: refs.system_agents used to be keyed by system_key, which is the
+// target-side lookup key. Every source assignee, comment author and mention
+// carries the source agent's uuid, so that index never hit and every reference
+// to a built-in agent degraded. The index is keyed by the source uuid now, and
+// a source row with no id is skipped rather than indexed under an empty key.
+func TestTransferExportIndexesSystemAgentsBySourceID(t *testing.T) {
+	src := &fakeTransferSource{payloads: map[string]any{
+		"/api/me":              map[string]any{"id": "user-1", "email": "owner@example.com"},
+		"/api/workspaces":      []map[string]any{{"id": "ws-1", "slug": "src", "name": "Src"}},
+		"/api/workspaces/ws-1": map[string]any{"id": "ws-1", "slug": "src", "name": "Src"},
+		"/api/agents": []map[string]any{
+			{"id": "sys-1", "system_key": "mika", "name": "Mika", "instructions": "hi"},
+			// A source that does not expose the agent id cannot be indexed by
+			// it; the entry is skipped instead of keyed under "".
+			{"system_key": "legacy", "name": "Legacy", "instructions": "hi"},
+		},
+	}}
+
+	files, err := ExportFromSource(context.Background(), src, TransferExportOpts{
+		Include:      []string{"config"},
+		WorkspaceRef: "src",
+	})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	refs := files.Manifest.Refs.SystemAgents
+	if len(refs) != 1 {
+		t.Fatalf("refs.system_agents=%v, want only the agent whose source id is known", refs)
+	}
+	if ref, ok := refs["sys-1"]; !ok || ref.SystemKey != "mika" {
+		t.Fatalf("refs.system_agents[sys-1]=%+v, want {system_key: mika}", ref)
+	}
+	if _, stale := refs["mika"]; stale {
+		t.Fatalf("refs.system_agents=%v is still keyed by system_key", refs)
 	}
 }

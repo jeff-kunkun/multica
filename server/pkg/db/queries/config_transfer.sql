@@ -127,7 +127,10 @@ WHERE workspace_id = $1 AND kind = 'user'
 ORDER BY created_at ASC;
 
 -- name: ExportSystemAgents :many
-SELECT system_key, instructions, model, thinking_level, service_tier,
+-- `id` rides along so a bundle can say which source agent each system agent
+-- was: the issue transfer indexes its refs by source uuid, and system_key is
+-- the target-side lookup key, not the source-side identity.
+SELECT id, system_key, instructions, model, thinking_level, service_tier,
        conversation_starters, disabled_runtime_skills
 FROM agent
 WHERE workspace_id = $1 AND kind = 'system'

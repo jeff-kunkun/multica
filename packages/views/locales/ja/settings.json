@@ -1509,7 +1509,7 @@
       "issues_parents": "スレッドの親リンクを {{count}} 件補完",
       "issues_degraded_title": "参照を失った行（降格）",
       "degrade_status": "状態が取り込み先のカタログにない",
-      "degrade_assignee": "担当者を対応付けできず未割り当てに",
+      "degrade_assignee": "担当者を対応付けできず、取り込み者に割り当てました",
       "degrade_creator": "作成者を対応付けできない",
       "degrade_project": "プロジェクトを対応付けできない",
       "degrade_author": "コメント投稿者を対応付けできない",

@@ -48,7 +48,7 @@
 | 表 | 结论 | 导出字段 | 排除字段 | 理由 |
 | --- | --- | --- | --- | --- |
 | `agent`（无 `system_key`） | 部分导出 | `name`、`description`、`instructions`、`avatar_url`、`runtime_mode`、`runtime_config`（去除 `gateway.token`）、`custom_args`、`model`、`thinking_level`、`service_tier`、`visibility`、`permission_mode`、`max_concurrent_tasks`、`conversation_starters`、`disabled_runtime_skills`、`composio_toolkit_allowlist` | `custom_env`（秘密）、`mcp_config`（秘密）、`runtime_config.gateway.token`（秘密）、`runtime_id`（机器绑定）、`status`、`owner_id`（改为导入者）、`archived_at/archived_by`、`system_key`、`kind` | 本组是无 `system_key` 的普通智能体。读取接口本身就不返回 `custom_env` 明文（`has_custom_env` / `custom_env_key_count`），`mcp_config` 对 agent actor 与 `always_redact_env` 工作区始终脱敏。导出走同一条规则，并为这三项各登记一条 `secrets_omitted`。`runtime_id` 指向 `agent_runtime`（守护进程注册，工作区隔离），导入后智能体处于 `runtime_bound = false`，需重新绑定运行时。`composio_toolkit_allowlist` 只是 slug 列表，本身不是秘密，但生效依赖 owner 的 Composio 连接，导入后自动失效直至导入者自己连接。 |
-| `agent`（`system_key` 非空且不以 `agent_builder:` 开头） | 部分导出 | `system_key`、`instructions`、`model`、`thinking_level`、`service_tier`、`conversation_starters`、`disabled_runtime_skills` | 其余全部 | 系统智能体由产品在每个工作区自动创建，不能新建。判定键是 `system_key`，不是内部字段 `kind`。导入按 `system_key` 找到目标工作区同名系统智能体后 patch 上述字段。 |
+| `agent`（`system_key` 非空且不以 `agent_builder:` 开头） | 部分导出 | `source_id`、`system_key`、`instructions`、`model`、`thinking_level`、`service_tier`、`conversation_starters`、`disabled_runtime_skills` | 其余全部 | 系统智能体由产品在每个工作区自动创建，不能新建。判定键是 `system_key`，不是内部字段 `kind`。导入按 `system_key` 找到目标工作区同名系统智能体后 patch 上述字段。`source_id`（DENE-442 起）是源工作区的 agent uuid，只给 V3 任务迁移反查身份用：配置导入本身不读它，旧包没有这个字段也照常工作。 |
 | `agent_skill` | 导出 | `agent_id`（引用）、`skill_id`（引用）、`enabled` | 无 | 随智能体一起以 `skills: [{skill: <source_id>, enabled}]` 内嵌导出。 |
 | `agent_to_label` | 导出 | `agent_id`、`label_id`（均引用） | 无 | 内嵌为 `label_ids`。只允许引用 `resource_type = 'agent'` 的标签。 |
 | `agent_mcp_server` | 部分导出 | `agent_id`（引用）、`server_id`（引用，按**名字**回填）、`enabled` | 无 | `workspace_mcp_server` 条目本身不可导出（见 1.6），导入时按名字在目标工作区查找同名条目，找到才绑定，否则记 `unmapped_refs`。 |
@@ -311,7 +311,7 @@ entities.issue_views[]        issue_view
         "invocation_targets": [ { "target_type": "workspace", "target_id": null }, { "target_type": "member", "target_id": "c924599a-9548-4fc1-9146-a3645ecbb0c6" } ] }
     ],
     "system_agents": [
-      { "system_key": "mika", "instructions": "本工作区备注：优先中文回复。", "model": null, "thinking_level": null, "service_tier": null, "conversation_starters": [], "disabled_runtime_skills": [] }
+      { "source_id": "01a0ab1b-...", "system_key": "mika", "instructions": "本工作区备注：优先中文回复。", "model": null, "thinking_level": null, "service_tier": null, "conversation_starters": [], "disabled_runtime_skills": [] }
     ],
     "squads": [
       { "source_id": "01a0a3f2-0000-7000-8000-000000000ea1", "name": "龙珠小队", "description": "", "instructions": "", "avatar_url": null,

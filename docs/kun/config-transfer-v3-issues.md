@@ -33,7 +33,7 @@ kk zi 2026-09-16 真机反馈（DENE-365 描述引用的评论 `01a0ab16`）：
 | 2 | 编号策略 | **目标工作区必须为空**（`CountWorkspaceIssues == 0`），此时 `number` 原样保留、`issue_prefix` 由 V1 已有规则一并落地、正文里的 `DENE-xxx` 自动正确。包带 `issues` 分组时 `--apply-issue-prefix` **默认开启**（DENE-404）：关掉它，空目标下号保留、前缀不保留，标识符会整体改名。目标非空时默认 **400 拒绝** `issues` 分组；只有显式 `--renumber` 才做整体偏移，代价（正文引用全错）写在报告里。详见第 2 节。 |
 | 3 | mention 重写 | 只处理 `util.MentionRe` 认识的 `member` / `agent` / `squad` / `issue` 四类。映射得到就改写 id；**映射不到一律降级为纯文本**（丢链接、留标签文字），不保留死链。理由是代码级的：残留的无法解析的根评论 mention 会让整条线程的后续路由**静默失效**。详见第 3 节。 |
 | 4 | 父子与阶段 | `issue.parent_issue_id` 和 `comment.parent_id` 都有真实外键，必须**两遍写入**：第一遍全部以 `parent = NULL` 插入，第二遍回填父指针。回填解析不到时两张表口径不同：issue 置 `NULL`，**comment 上溯到最近的包内祖先**（11.7）。`stage` / `position` 随第一遍原样写入。详见第 4 节。 |
-| 5 | 多态指派 | `assignee_type` ∈ `member` / `agent` / `squad`，复用 V2 的 people map 与 V1 的 agent / squad 身份键。映射不到降级为**未指派**并记报告行；`creator_*` 同规则，但兜底为导入者而不是空（列 NOT NULL）。同一套映射还要跑在 `issue.properties` 里 `actor` / `multi_actor` 两类属性的值上（1.2.1）——那是最容易漏的一处引用。详见第 5 节。 |
+| 5 | 多态指派 | `assignee_type` ∈ `member` / `agent` / `squad`，复用 V2 的 people map 与 V1 的 agent / squad 身份键（系统智能体按**源 agent uuid** 反查 `refs.system_agents` 拿到 `system_key`，再落到目标同 `system_key` 的智能体）。映射不到一律**兜底为导入者**并记报告行（`resolution: importer`），不留空；`creator_*` / `comment.author_*` 同规则。同一套映射还要跑在 `issue.properties` 里 `actor` / `multi_actor` 两类属性的值上（1.2.1）——那是最容易漏的一处引用。详见第 5 节。 |
 | 6 | 收件箱 | **不迁 `inbox_item`**。它 100% 由任务完成与 autopilot 配额产生，跨实例没有对应运行记录。但导入时**必须重建 `issue_subscriber` 的 creator / assignee 两条**，否则导入后这些票上的新活动谁都收不到通知。详见第 6 节。 |
 | 7 | 无副作用写入 | 沿用 V2 的做法：`workspace_transfer.sql` 里加专用 `INSERT ... ON CONFLICT (id) DO NOTHING`，带显式 `id` 与 `created_at`，**不走** `CreateIssue` / `CreateComment` / `h.publish` / 事件总线。测试断言导入不产生任何 `agent_task_queue` 行。详见第 7 节。 |
 | 8 | 体积与分片 | 复用 V2 的 `TransferMessageShardMaxBytes` / `TransferConversationsMaxBytes` / `TransferAttachmentMaxBytes` 三个常量，不另立。任务分片按「一张 issue 的全部评论不跨片」聚合。详见第 8 节。 |
@@ -207,7 +207,7 @@ DENE-365 描述里的表名与库里的实际结构有三处出入，按实际�
 | mention 类型 | 目标 id 怎么来 | 映射不到时 |
 | --- | --- | --- |
 | `member` | V2 §4.3 的 people map（源 user id → 邮箱 → 目标同邮箱 user） | 降级为纯文本 |
-| `agent` | V1 身份键：普通智能体按 `name`，系统智能体按 `system_key`（从 `manifest.refs.agents` / `refs.system_agents` 反查） | 降级为纯文本 |
+| `agent` | V1 身份键：普通智能体按 `name`；系统智能体按**源 agent uuid** 查 `refs.system_agents` 得 `system_key`，再落到目标同 `system_key` 的智能体（从 `manifest.refs.agents` / `refs.system_agents` 反查） | 降级为纯文本 |
 | `squad` | V1 身份键 `name` | 降级为纯文本 |
 | `issue` | 本包内的 issue 目标 id（第 9 节的确定性 id 推导）。指向**包外**的 issue（源工作区里没被导出的票，或跨工作区引用）映射不到 | 降级为纯文本 |
 | `project` | V1 身份键 `title` | 降级为纯文本 |
@@ -269,8 +269,8 @@ DENE-365 描述里的表名与库里的实际结构有三处出入，按实际�
 
 | 引用 | 目标 id 怎么来 | 映射不到时 |
 | --- | --- | --- |
-| `assignee_type = 'member'` | V2 §4.3 people map | **降级为未指派**（`assignee_type` 与 `assignee_id` 都置 NULL），报告 `assignee_unmapped` |
-| `assignee_type = 'agent'` | V1 agent 身份键（`name` / `system_key`） | 同上 |
+| `assignee_type = 'member'` | V2 §4.3 people map | **兜底为导入者**（`assignee_type = 'member'`，`assignee_id = 导入者`），报告 `assignee_unmapped`（`resolution: importer`） |
+| `assignee_type = 'agent'` | 普通智能体按 V1 身份键 `name`；系统智能体按**源 agent uuid** 查 `refs.system_agents` 取 `system_key`，再落到目标工作区同 `system_key` 的智能体 | 同上 |
 | `assignee_type = 'squad'` | V1 squad 身份键 `name` | 同上 |
 | `creator_type` / `creator_id` | 同上三条规则 | **兜底为导入者**（`creator_type = 'member'`，`creator_id = 导入者`），报告 `creator_unmapped`。列是 NOT NULL，不能置空 |
 | `comment.author_type` / `author_id` | `member` / `agent` 同上；`author_type = 'system'` 不映射，原样写入 | 兜底为导入者，报告 `comment_author_unmapped` |
@@ -278,9 +278,11 @@ DENE-365 描述里的表名与库里的实际结构有三处出入，按实际�
 | reaction 的 `actor_type` / `actor_id` | 同上 | **丢掉该条 reaction**（1.2 已述） |
 | `issue.properties` 里 `actor` / `multi_actor` 的值 | 同上（值形如 `"member:<uuid>"`） | `actor` 删整个键；`multi_actor` 删那一条引用，删空后删键。报告 `property_actor_unmapped`（1.2.1） |
 
-### 5.2 为什么指派降级成未指派而不是给导入者
+### 5.2 为什么指派映射不到时兜底给导入者，而不是留空
 
-把一张原本指派给「主力工作-贝吉塔」的票改指给导入者，会让「我的任务」列表里凭空多出一堆不属于自己的活。未指派虽然也丢信息，但它是**诚实的空**，用户在票列表里一眼能看出哪些需要重新指派。报告里按原指派对象汇总（「12 张票原指派给 主力工作-贝吉塔，未在目标工作区找到」），用户可以批量补。
+**2026-09-17 DENE-442 改的口径，取代本节原先的「诚实的空」。** 起因是 owner 在 DENE-240 的导入预览里看到「指派人无法映射，已改为未指派 28」——导入一份几百张票的工作区，最后得到 28 张没人认领的票，比「多几张挂在自己名下」更糟：没人认领的票不会出现在任何人的任务列表里，也就没人会去补。导入者本来就是这批数据的新主人，兜底给他至少保证每张票都有归属，且**指派不触发任何运行**（5.3），不会凭空起任务。
+
+代价照旧要如实记账：每条降级仍然写一行报告（`reason: assignee_unmapped`，`resolution: importer`，带源 ref 类型与 id），前端按原指派对象汇总（「28 张票原指派给 X，未在目标工作区找到，已改为指派给导入者」），用户可以按报告批量重指。系统智能体不再进这张表：它们现在按源 agent uuid 命中 `refs.system_agents`，落到目标同 `system_key` 的智能体（见 5.1）。
 
 ### 5.3 指派重建不得触发运行
 
@@ -517,7 +519,7 @@ secrets_omitted.json                全包汇总
 {"kind":"comment_reaction","comment_id":"01a0ab16-...","actor_type":"agent","actor_id":"1cbd7845-...","emoji":"✅","created_at":"2026-09-16T17:01:00Z"}
 ```
 
-`manifest.refs` 在 V2 的 `agents` / `system_agents` / `projects` 之外新增 `members`（源 user id → 邮箱）、`squads`（源 id → name）、`issues`（源 id → `{number, identifier}`）、`issue_statuses`（key → category）。这四个 map 是导入端做 mention 重写（第 3 节）与状态降级（1.4）的全部依据，随每个分片一起上传，服务端不需要记住前一个请求的结果——与 V2 的无状态导入一致。
+`manifest.refs` 在 V2 的 `agents` / `system_agents` / `projects` 之外新增 `members`（源 user id → 邮箱）、`squads`（源 id → name）、`issues`（源 id → `{number, identifier}`）、`issue_statuses`（key → category）。这四个 map 是导入端做 mention 重写（第 3 节）与状态降级（1.4）的全部依据，随每个分片一起上传，服务端不需要记住前一个请求的结果——与 V2 的无状态导入一致。`system_agents` 自 DENE-442 起按**源 agent uuid** 建索引（值是 `{system_key}`）：系统智能体的 id 才是源端的身份，`system_key` 只是目标端的落点键。DENE-442 之前导出的旧包在 `entities.system_agents[]` 里没有 `source_id`，导入端跳过该条索引、退回按 `name` 找普通智能体的老路径，不报错也不另铺并行路径。
 
 ### 9.5 确定性 id
 
