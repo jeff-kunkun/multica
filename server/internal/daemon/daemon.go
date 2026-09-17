@@ -529,11 +529,13 @@ type Daemon struct {
 	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	planLimitsMu sync.RWMutex
 	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
-	// agyQuota tracks per-directory AGY/Antigravity individual-quota exhaustion
-	// so the same agent can fail over to another isolation slot. Guarded by
-	// agyQuotaMu; persisted under ~/.multica so a daemon restart keeps the X.
-	agyQuotaMu sync.Mutex
-	agyQuota   map[string]time.Time // gemini dir -> reset_at
+	// quota tracks per-(cli, account) provider-quota exhaustion: which account a
+	// run failed on, and when it may be tried again. Guarded by quotaMu;
+	// persisted under ~/.multica so a daemon restart keeps the X. Read by the
+	// account report (quota_reset_at) and by the AGY slot failover. See
+	// quota_exhaustion.go.
+	quotaMu sync.Mutex
+	quota   map[quotaAccountKey]time.Time
 	// Live Claude/Codex/Gemini/Grok/Kimi/GLM/MiniMax/DeepSeek usage probes
 	// (cc-switch style). Throttled
 	// separately from the 15s heartbeat so we do not hammer unofficial APIs.
@@ -9482,6 +9484,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// mutually exclusive by provider, so they cannot stack.
 		errMsg = annotateHermesProviderUnconfigured(errMsg, provider, env.HermesHome != "")
 		errMsg = annotateCodexRetiredCompaction(errMsg, provider)
+		// DENE-467: a provider quota rejection is the one failure that says
+		// something about the ACCOUNT rather than about the task, so it is
+		// filed against the account this run actually used. That is what turns
+		// "some run failed" into "this account is out of quota until T", which
+		// the account surface can show and a human can act on. The failure
+		// reason is the trigger because it is already the canonical verdict on
+		// the raw text, computed once, here.
+		d.markRunQuotaExhausted(provider, execOpts, task, failureReason)
 		return TaskResult{
 			Status:        "blocked",
 			Comment:       errMsg,

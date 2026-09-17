@@ -46,7 +46,7 @@ func probeAgyLoggedInDirs(home string) []string {
 }
 
 func currentAgyLoggedInDirs() []string {
-	home, err := agyQuotaHomeFn()
+	home, err := quotaHomeFn()
 	if err != nil {
 		return nil
 	}

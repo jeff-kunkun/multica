@@ -12,10 +12,15 @@ import (
 )
 
 const (
-	agySlotsRuntimeKey   = "agy_slots"
-	maxAgyAccountNumber  = 32
-	defaultAgyQuotaReset = time.Hour
-	agyAccount1Dir       = ".gemini"
+	agySlotsRuntimeKey  = "agy_slots"
+	maxAgyAccountNumber = 32
+	agyAccount1Dir      = ".gemini"
+	// DefaultQuotaReset is the exhaustion window applied when a provider
+	// reports an account as out of quota without saying when it recovers. It
+	// began as the AGY-only fallback (DENE-305) and is now the shared default
+	// for every CLI's quota accounting, which is why it carries the neutral
+	// name while only the AGY parser below uses it directly.
+	DefaultQuotaReset = time.Hour
 )
 
 // AgyQuotaHit is a parsed Antigravity/AGY quota exhaustion from CLI output.
@@ -107,7 +112,8 @@ func parseAgyResetsIn(lower string, now time.Time) time.Time {
 	return now.Add(d)
 }
 
-// DefaultAgyQuotaResetAt returns now+1h when the provider omitted a reset.
+// DefaultAgyQuotaResetAt returns now+DefaultQuotaReset when the provider
+// omitted a reset.
 func DefaultAgyQuotaResetAt(now, resetAt time.Time) time.Time {
 	if !resetAt.IsZero() {
 		return resetAt
@@ -115,7 +121,7 @@ func DefaultAgyQuotaResetAt(now, resetAt time.Time) time.Time {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	return now.Add(defaultAgyQuotaReset)
+	return now.Add(DefaultQuotaReset)
 }
 
 // GeminiDirFromArgs returns the --gemini_dir value from a CLI argv region.

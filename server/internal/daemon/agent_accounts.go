@@ -17,9 +17,18 @@ import (
 // into an unbounded payload.
 const maxAgentAccounts = 32
 
-// agyCLIName is the CLI id of Antigravity/Gemini. Named because the quota
-// overlay is keyed by provider family, not by directory.
+// agyCLIName is the CLI id of Antigravity/Gemini. Named because AGY keeps its
+// own accounting pathways — the slot failover and the directory-keyed quota
+// overlay — beside this table's conventions.
 const agyCLIName = "agy"
+
+// agyBaseDir is the probe's own AGY directory under home, also the leaf of the
+// default AGY account id. Named here because the AGY slot pool and the quota
+// ledger both derive account identity from it instead of hard-coding the name.
+const agyBaseDir = ".gemini"
+
+// agentAccountDefaultID is the id every CLI's own directory is reported under.
+const agentAccountDefaultID = "default"
 
 // Binding levers. A lever is how a "use this account" write reaches the CLI,
 // and it is also the frontend's answer to "can this row be switched at all?" —
@@ -123,7 +132,7 @@ type agentCLIProbe struct {
 var agentCLIProbes = []agentCLIProbe{
 	{
 		CLI:         agyCLIName,
-		BaseDir:     ".gemini",
+		BaseDir:     agyBaseDir,
 		AccountGlob: ".gemini-account*",
 		Lever:       agentLeverAgyGeminiDir,
 		// Same witnesses the slot failover already trusts (agyDirHasLogin),
@@ -323,11 +332,44 @@ func agentAccountCandidates(probe agentCLIProbe, home string, budget int) []stri
 	return out
 }
 
+// agentCLIProbeByCLI finds one CLI's probe row. Callers that must agree with
+// the report about a directory's account id — the quota ledger — resolve their
+// CLI through this rather than keeping a second copy of the layout.
+func agentCLIProbeByCLI(cli string) (agentCLIProbe, bool) {
+	cli = strings.TrimSpace(cli)
+	for _, probe := range agentCLIProbes {
+		if probe.CLI == cli {
+			return probe, true
+		}
+	}
+	return agentCLIProbe{}, false
+}
+
+// agentConventionAccountID names the account a directory holds under the CLI's
+// own naming convention, or ok=false when the directory is outside it. It is
+// the id-side twin of agentAccountCandidates: the same BaseDir and AccountGlob
+// decide both, so every id this mints is an id the report publishes, and a
+// directory the probe would not report mints nothing.
+func agentConventionAccountID(probe agentCLIProbe, dir string) (string, bool) {
+	name := filepath.Base(dir)
+	if name == probe.BaseDir {
+		return agentAccountDefaultID, true
+	}
+	glob := strings.TrimSpace(probe.AccountGlob)
+	if glob == "" {
+		return "", false
+	}
+	if matched, err := filepath.Match(glob, name); err != nil || !matched {
+		return "", false
+	}
+	return agentAccountID(probe.BaseDir, dir), true
+}
+
 // agentAccountID derives the stable per-CLI account id from a directory name.
 func agentAccountID(baseDir, dir string) string {
 	name := filepath.Base(dir)
 	if name == baseDir {
-		return "default"
+		return agentAccountDefaultID
 	}
 	if suffix := strings.TrimPrefix(name, baseDir+"-"); suffix != name && suffix != "" {
 		return suffix
@@ -418,37 +460,33 @@ func (d *Daemon) agentAccountsReport(now time.Time) ([]AgentAccount, string) {
 		return []AgentAccount{}, "resolve host home directory: " + err.Error()
 	}
 	accounts, probeErr := probeAgentAccounts(home)
-	// Stamp the quota overlay even when part of the probe failed: the agy rows
-	// that did report are still correct, and dropping their deadline would
-	// make an exhausted account look available.
-	accounts = d.stampAgyQuotaResetAt(accounts, now)
+	// Stamp the quota ledger even when part of the probe failed: the rows that
+	// did report are still correct, and dropping their deadline would make an
+	// exhausted account look available.
+	accounts = d.stampQuotaResetAt(accounts, now)
 	if probeErr != nil {
 		return accounts, probeErr.Error()
 	}
 	return accounts, ""
 }
 
-// stampAgyQuotaResetAt copies the AGY quota overlay onto the matching agy rows.
-// agent_accounts is the account channel that carries a quota deadline, and the
-// overlay is already this daemon's authoritative answer for "this directory is
-// exhausted until T" — deriving the deadline twice would let the two keys
-// disagree in the same UI.
-func (d *Daemon) stampAgyQuotaResetAt(accounts []AgentAccount, now time.Time) []AgentAccount {
-	overlay := d.agyQuotaOverlay(now)
-	if len(overlay) == 0 {
-		return accounts
-	}
-	resetAt := make(map[string]int64, len(overlay))
-	for _, entry := range overlay {
-		resetAt[entry.Dir] = entry.ResetAt
-	}
+// stampQuotaResetAt copies the quota ledger onto every row it names, whichever
+// CLI that row belongs to. agent_accounts is the account channel that carries a
+// quota deadline, and the ledger is this daemon's authoritative answer for
+// "this account is exhausted until T" — deriving the deadline twice would let
+// the two keys disagree in the same UI.
+//
+// The lookup filters by now (see quotaExhaustedUntil), so a deadline that has
+// already passed reports 0 and the row goes back to looking available without
+// anyone clearing state.
+func (d *Daemon) stampQuotaResetAt(accounts []AgentAccount, now time.Time) []AgentAccount {
 	for i := range accounts {
-		if accounts[i].CLI != agyCLIName {
+		accounts[i].QuotaResetAt = 0
+		resetAt := d.quotaExhaustedUntil(accounts[i].CLI, accounts[i].Account, now)
+		if resetAt.IsZero() {
 			continue
 		}
-		if unix, ok := resetAt[accounts[i].Home]; ok {
-			accounts[i].QuotaResetAt = unix
-		}
+		accounts[i].QuotaResetAt = resetAt.Unix()
 	}
 	return accounts
 }
