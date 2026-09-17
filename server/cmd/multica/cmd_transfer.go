@@ -65,6 +65,8 @@ func init() {
 	transferExportCmd.Flags().Bool("estimate", false, "Estimate size without writing a bundle")
 	transferExportCmd.Flags().Bool("exclude-archived", false, "Skip archived chats")
 	transferExportCmd.Flags().Bool("no-people", false, "Omit people.json (member refs other than exporter will degrade)")
+	transferExportCmd.Flags().String("target", "", "Target instance URL: ask it (GET /health) which transfer schema versions and groups it can read before exporting")
+	transferExportCmd.Flags().Bool("downgrade", false, "With --target: export the newest bundle the target can read, dropping the groups it cannot, instead of refusing")
 	_ = transferExportCmd.MarkFlagRequired("workspace")
 
 	transferImportCmd.Flags().String("workspace", "", "Target workspace slug or id")
@@ -309,8 +311,22 @@ func runTransferExport(cmd *cobra.Command, _ []string) error {
 	estimate, _ := cmd.Flags().GetBool("estimate")
 	excludeArchived, _ := cmd.Flags().GetBool("exclude-archived")
 	noPeople, _ := cmd.Flags().GetBool("no-people")
+	target, _ := cmd.Flags().GetString("target")
+	downgrade, _ := cmd.Flags().GetBool("downgrade")
 	if !estimate && outPath == "" {
 		return fmt.Errorf("--out is required unless --estimate is set")
+	}
+
+	// The target is asked first, so the bundle is written at a version the
+	// target can actually read (DENE-431). Without --target the export is
+	// unchanged: there is nothing to negotiate with.
+	includeList := parseInclude(include)
+	if target != "" {
+		negotiated, err := resolveTransferExportInclude(cmd, target, includeList, downgrade)
+		if err != nil {
+			return err
+		}
+		includeList = negotiated
 	}
 
 	client, err := newTransferAPIClient(cmd)
@@ -318,7 +334,7 @@ func runTransferExport(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	fmt.Fprintln(cmd.ErrOrStderr(), "This bundle will contain full chat history and member emails. Keep it as a sensitive file; do not upload it to a public location.")
-	if includesTransferGroup(parseInclude(include), service.TransferIncludeIssues) {
+	if includesTransferGroup(includeList, service.TransferIncludeIssues) {
 		// The issues group is not a merge: it relies on the source numbers
 		// staying authoritative, which only holds in an empty target (§2.2).
 		fmt.Fprintln(cmd.ErrOrStderr(), "The issues group requires the target workspace to have no issues at all.")
@@ -348,7 +364,7 @@ func runTransferExport(cmd *cobra.Command, _ []string) error {
 	}
 
 	files, err := service.ExportFromSource(ctx, sourceClient{api: client}, service.TransferExportOpts{
-		Include:         parseInclude(include),
+		Include:         includeList,
 		ExcludeArchived: excludeArchived,
 		People:          !noPeople,
 		Estimate:        estimate,
@@ -374,6 +390,60 @@ func runTransferExport(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintln(cmd.ErrOrStderr(), "Export complete. Store the zip privately; it contains chat history and member emails.")
 	fmt.Fprintln(cmd.OutOrStdout(), outPath)
 	return nil
+}
+
+// transferTargetProbeTimeout bounds the pre-export capability probe. It is a
+// short read of a health endpoint, not a transfer request: a target that does
+// not answer it in seconds is treated as "unknown" and the export proceeds.
+const transferTargetProbeTimeout = 10 * time.Second
+
+// resolveTransferExportInclude asks the target what it can read and returns the
+// `--include` list the export should use.
+//
+// Three outcomes, in the order the migration case hits them:
+//
+//   - The target is readable and can take the requested groups → the request is
+//     exported unchanged.
+//   - The target is readable and cannot → without --downgrade this is an error
+//     naming the target's ceiling and exactly which groups it would cost, so
+//     the user chooses between trimming the bundle and upgrading the target.
+//     The import side stays strict (it refuses a newer bundle outright), so
+//     this is the only side where the choice can be made.
+//   - The target cannot be asked at all — old build, no /health, network
+//     failure — → the export proceeds untouched with a warning. A pre-flight
+//     check that blocks the work it is meant to protect is worse than no
+//     pre-flight check.
+func resolveTransferExportInclude(cmd *cobra.Command, target string, requested []string, downgrade bool) ([]string, error) {
+	ctx, cancel := context.WithTimeout(cmd.Context(), transferTargetProbeTimeout)
+	defer cancel()
+	caps, err := service.ProbeTransferCapabilities(ctx, &http.Client{Timeout: transferTargetProbeTimeout}, target)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Could not confirm what %s can read (%v); exporting the requested groups unchanged.\n", target, err)
+		return requested, nil
+	}
+	negotiated := service.NegotiateTransferInclude(requested, caps)
+	if !negotiated.Degraded() {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%s reads transfer bundles up to schema_version %d; exporting the requested groups.\n",
+			target, negotiated.TargetVersion)
+		return requested, nil
+	}
+	dropped := strings.Join(negotiated.Dropped, ", ")
+	if !downgrade {
+		return nil, fmt.Errorf("target_outdated: %s reads transfer bundles up to schema_version %d, so it cannot read this schema_version %d export; "+
+			"continuing would drop the `%s` group. Re-run with --downgrade to export what the target can read, or upgrade the target instance",
+			target, negotiated.TargetVersion, negotiated.RequestedVersion, dropped)
+	}
+	if len(negotiated.Kept) == 0 {
+		// An empty --include list is not "export nothing": the kernel reads it
+		// as the default config + conversations + attachments. Refusing here is
+		// what keeps a target that names no groups at all from silently
+		// receiving those three.
+		return nil, fmt.Errorf("target_outdated: %s reads transfer bundles up to schema_version %d and names no group this export could keep, so --downgrade has nothing to export",
+			target, negotiated.TargetVersion)
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "%s reads transfer bundles up to schema_version %d; --downgrade drops the `%s` group from this export.\n",
+		target, negotiated.TargetVersion, dropped)
+	return negotiated.Kept, nil
 }
 
 func writeTransferZip(outPath string, files *service.TransferExportFiles) error {

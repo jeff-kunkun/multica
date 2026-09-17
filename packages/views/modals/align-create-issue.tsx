@@ -2,10 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import type { TFunction } from "i18next";
 import { ArrowLeftRight, Loader2, Sparkles } from "lucide-react";
+import { ApiError, clientErrorMessage } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  IssueDraftSessionUnrecognizedError,
   issueDraftListOptions,
   unfinishedIssueDrafts,
   useStartIssueDraft,
@@ -31,6 +34,8 @@ import {
 } from "../editor";
 import { useT } from "../i18n";
 import { UnfinishedIssueDraftsBanner } from "../issues/draft/unfinished-issue-drafts";
+import { ClearablePillButton } from "../common/pill-button";
+import { ProjectPicker } from "../projects/components/project-picker";
 import { AppLink, useNavigation } from "../navigation";
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
 
@@ -46,9 +51,10 @@ import { useIssueCreateUploads } from "./use-issue-create-uploads";
  * desktop tab.
  *
  * What IS shared with "New issue" is everything about the input: the same
- * `ContentEditor`, the same upload pool (`draft.shared.attachments`), and the
- * same draft store, so a file or a body typed on either face survives a switch
- * to the other. Which machine runs the alignment is still decided FOR the user
+ * `ContentEditor`, the same upload pool (`draft.shared.attachments`), the same
+ * optional project (`draft.shared.projectId`), and the same draft store, so a
+ * file, a body or a project chosen on either face survives a switch to the
+ * other. Which machine runs the alignment is still decided FOR the user
  * — the page's preview panel is where that choice is visible and changeable
  * afterwards. The single case that stops the conversation from starting at all
  * — nothing usable to run on, or the chosen machine offline — is stated
@@ -64,6 +70,7 @@ export function AlignCreatePanel({
 }) {
   const { t } = useT("issues");
   const { t: tModals } = useT("modals");
+  const { t: tProjects } = useT("projects");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
@@ -71,7 +78,14 @@ export function AlignCreatePanel({
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setAlign = useIssueDraftStore((s) => s.setAlign);
+  const setShared = useIssueDraftStore((s) => s.setShared);
   const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
+
+  // The project is the SHARED slot's, exactly as it is on the manual face: it
+  // is a property of the issue, not of the form that described it, so a project
+  // picked here (or there) is what the whole group is filed under. Optional by
+  // design — no project is a legitimate choice and the picker says so.
+  const projectId = draft.shared.projectId;
 
   // The alignment request lives in the draft's own `align` slot, exactly like
   // the agent prompt: the manual face assist-inits it when it switches here,
@@ -181,15 +195,32 @@ export function AlignCreatePanel({
     const activeAttachmentIds = draftAttachments
       .filter((attachment) => contentReferencesAttachment(request, attachment))
       .map((attachment) => attachment.id);
-    const result = await start.mutateAsync({
-      runtimeId: selectedRuntime.id,
-      request,
-      attachmentIds: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
-    });
+    const result = await start
+      .mutateAsync({
+        runtimeId: selectedRuntime.id,
+        request,
+        attachmentIds: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
+        // Stored on the draft at creation, so the whole group the conversation
+        // settles on is filed under it — a project chosen here is not a display
+        // preference the page reads back later.
+        projectId,
+      })
+      // No session means no conversation to navigate to, and the reason is
+      // already on screen: `entryFailureMessage` renders it from `start.error`,
+      // which React Query keeps. Caught here so `void submit()` turns a stated
+      // failure into a return instead of an unhandled rejection.
+      .catch(() => null);
+    if (!result) return;
     onClose();
     // Navigating even when the first turn failed: the draft exists and holds
     // the request, so staying would only invite the user to create a second
     // one. The page's composer is where a lost turn is resent.
+    if (!result.seeded) {
+      // Hand the loss to the page this navigation lands on — the panel is gone
+      // from here on, and a conversation that opens empty without saying why is
+      // what made the failure look like the user's own mistake.
+      setAlign({ seedFailedDraftId: result.draftId });
+    }
     navigation.push(paths.newIssueDraft(result.draftId));
   };
 
@@ -254,17 +285,33 @@ export function AlignCreatePanel({
 
         {start.isError ? (
           <p role="alert" className="mt-4 text-body text-destructive">
-            {t(($) => $.alignment.entry_failed)}
+            {entryFailureMessage(start.error, t)}
           </p>
         ) : null}
       </div>
 
       <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-        <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+        {/* The attach + project pair: both are properties of the issue being
+            filed, not of the request, so they stay on the toolbar row rather
+            than in front of the one thing this face actually asks for
+            (DENE-367). `min-w-0` lets the project pill shrink first when the
+            row is tight — its own chrome caps it at 14rem either way. */}
+        <div className="flex min-h-7 min-w-0 items-center gap-2 sm:mr-auto">
           <FileUploadButton
             size="sm"
             multiple
             onSelect={(file) => editorRef.current?.uploadFile(file)}
+          />
+          <ProjectPicker
+            projectId={projectId ?? null}
+            onUpdate={(updates) => setShared({ projectId: updates.project_id ?? undefined })}
+            triggerRender={
+              <ClearablePillButton
+                onClear={projectId ? () => setShared({ projectId: undefined }) : undefined}
+                clearLabel={tProjects(($) => $.picker.clear_aria)}
+              />
+            }
+            align="start"
           />
         </div>
         {/* The way back to filing this as an issue. The body stays in the
@@ -306,6 +353,36 @@ export function AlignCreatePanel({
       </div>
     </>
   );
+}
+
+/**
+ * Why the entry failed, in the terms the user can act on.
+ *
+ * `clientErrorMessage` is the repo's existing contract for exactly this: a 4xx
+ * message is written by the handler FOR the reader ("runtime must be online to
+ * start an issue draft session") and is worth showing verbatim, while a 5xx
+ * message is internal detail that must never be rendered (MUL-6472). Collapsing
+ * every exit into one sentence is what made the DENE-366 screenshot
+ * unreportable, so this is the only place the exits are told apart — no local
+ * status sniffing that could drift from that helper.
+ *
+ * A 5xx still has to say which class of failure it was, and the status code is
+ * the safe part of that; a transport failure carries no status at all and keeps
+ * the plain sentence.
+ */
+function entryFailureMessage(error: unknown, t: TFunction<"issues">): string {
+  const server = clientErrorMessage(error);
+  if (server) return server;
+  // Drift is named as drift. The draft was created and the request stored on the
+  // server before this client lost the response, so "could not start" would
+  // point the user at a second, orphaned draft.
+  if (error instanceof IssueDraftSessionUnrecognizedError) {
+    return t(($) => $.alignment.entry_response_unrecognized);
+  }
+  if (error instanceof ApiError) {
+    return t(($) => $.alignment.entry_failed_status, { status: error.status });
+  }
+  return t(($) => $.alignment.entry_failed);
 }
 
 /** className for DialogContent in align mode. The shell (which owns the

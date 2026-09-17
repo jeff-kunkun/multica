@@ -1,0 +1,180 @@
+name: CLI Release
+
+# Publishes the CLI archives (`multica-cli-<version>-<os>-<arch>`, the legacy
+# `multica_<os>_<arch>` names and `checksums.txt`) to the GitHub Release for the
+# pushed tag.
+#
+# Why this is not release.yml's GoReleaser job: that job is gated on
+# `github.repository_owner == 'multica-ai'` because it also publishes to
+# `multica-ai/homebrew-tap`, for which a fork holds no token. So on this fork it
+# never ran, the fork's releases carried only the Desktop installers, and
+# `scripts/install.sh` had nothing fork-built to download — which is how a
+# self-hosted instance handed people the upstream CLI (DENE-420).
+#
+# Why it is separate from desktop-release.yml: the Desktop build needs a macOS
+# runner and ~20 minutes; the CLI cross-compiles on Linux in a couple. Both
+# workflows create-or-reuse the same release and only ever touch their own
+# asset names, so the order they finish in does not matter.
+#
+# Republishing an existing tag is a workflow_dispatch with that tag: the
+# checked-out commit is the tag itself, so the rebuild stays the release's own
+# baseline.
+
+on:
+  push:
+    tags:
+      # GitHub Actions uses glob patterns here, not regex. Match versioned tags
+      # broadly at the trigger layer, then enforce strict semver below.
+      - "v*.*.*"
+      - "!v*-dirty*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to rebuild and republish, e.g. v0.4.59"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# Serialize per ref: two runs publishing the same tag would fight over the same
+# asset names.
+concurrency:
+  group: cli-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cli:
+    # Upstream publishes the CLI with GoReleaser from release.yml. Guard the
+    # job so this workflow can never double-publish there.
+    if: github.repository == 'jeff-kunkun/multica'
+    runs-on: ubuntu-latest
+    env:
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Resolve the release tag
+        id: meta
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-}"
+          if [[ -z "$tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tags must look like vX.Y.Z or vX.Y.Z-suffix; got '$tag'."
+            exit 1
+          fi
+          if [[ "$tag" == *-dirty* ]]; then
+            echo "::error::Refusing to release from dirty tag '$tag'."
+            exit 1
+          fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout ${{ steps.meta.outputs.tag }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+          fetch-depth: 0
+
+      # The build baseline is the tag's own tree, but a tag older than this
+      # workflow does not carry the build script. Take the script from the
+      # commit whose workflow is running so `workflow_dispatch` can backfill an
+      # older tag, and stage it outside the tree being packaged.
+      - name: Checkout the release tooling from ${{ github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .release-tools
+          sparse-checkout: scripts/build-cli-archives.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Stage the release tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .release-tools/scripts/build-cli-archives.sh "$RUNNER_TEMP/build-cli-archives.sh"
+          rm -rf .release-tools
+          echo "BUILD_TOOL=$RUNNER_TEMP/build-cli-archives.sh" >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # releases follow the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+
+      - name: Record Go toolchain
+        run: go version
+
+      - name: Build CLI archives
+        run: bash "$BUILD_TOOL" --version "$TAG" --out dist/cli
+
+      - name: Ensure the release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "release $TAG already exists; CLI assets will be added to it"
+            exit 0
+          fi
+          # The Desktop workflow may be creating the same release right now;
+          # losing that race is fine as long as the release ends up there.
+          gh release create "$TAG" \
+            --repo "$REPO" \
+            --verify-tag \
+            --title "Multica $TAG (kun fork)" \
+            --generate-notes \
+            || gh release view "$TAG" --repo "$REPO" >/dev/null
+
+      - name: Upload CLI assets
+        id: upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" --repo "$REPO" --clobber dist/cli/*
+
+      # `gh release upload` exiting 0 says nothing about whether the bytes
+      # arrived (the Desktop workflow's header records that failure mode). An
+      # asset that is missing, still in `state=starter`, or a different size
+      # than the local build must leave a red run, never a half-published
+      # release that `install.sh` will fail against.
+      - name: Verify every CLI asset is really uploaded
+        # Runs whenever the upload reported success — that is the case this
+        # guards. A build or upload that failed outright is already red, and
+        # re-checking an empty dist/ there would only add noise.
+        if: steps.upload.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          id=$(gh api "repos/$REPO/releases/tags/$TAG" --jq .id)
+          gh api --paginate "repos/$REPO/releases/$id/assets" \
+            --jq '.[] | [.name, .state, .size] | @tsv' > remote.tsv
+          status=0
+          for path in dist/cli/*; do
+            name="$(basename "$path")"
+            size="$(wc -c <"$path" | tr -d ' ')"
+            line="$(awk -F'\t' -v n="$name" '$1 == n {print; exit}' remote.tsv || true)"
+            if [[ -z "$line" ]]; then
+              echo "::error::$name is missing from release $TAG"
+              status=1
+              continue
+            fi
+            state="$(cut -f2 <<<"$line")"
+            remote_size="$(cut -f3 <<<"$line")"
+            if [[ "$state" != "uploaded" ]]; then
+              echo "::error::$name has state=$state (expected uploaded)"
+              status=1
+            fi
+            if [[ "$remote_size" != "$size" ]]; then
+              echo "::error::$name is $remote_size bytes on the release, $size locally"
+              status=1
+            fi
+          done
+          exit "$status"

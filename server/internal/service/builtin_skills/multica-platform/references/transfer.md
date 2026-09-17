@@ -11,7 +11,7 @@ Cross-environment export of config + chats + tasks, and import into a `kun` serv
 ## CLI
 
 ```bash
-multica transfer export --profile <source-login> --workspace <slug> --out <file.zip> [--include config,conversations,attachments[,issues]] [--estimate] [--exclude-archived] [--no-people]
+multica transfer export --profile <source-login> --workspace <slug> --out <file.zip> [--include config,conversations,attachments[,issues]] [--estimate] [--exclude-archived] [--no-people] [--target <url> [--downgrade]]
 multica transfer import --profile <target-login> --workspace <slug> --in <file.zip> [--dry-run] [--on-conflict fail|overwrite|rename|skip] [--renumber] [--activate-autopilots=false] [--apply-workspace-settings=false] [--apply-issue-prefix] [--auto-bind-runtimes=false]
 multica transfer bind-runtimes --profile <target-login> --workspace <slug> --bind <agent-id>=<runtime-id> [--bind …]
 ```
@@ -19,6 +19,8 @@ multica transfer bind-runtimes --profile <target-login> --workspace <slug> --bin
 `transfer import` options: `--activate-autopilots` (default true — imported automations start triggering), `--apply-workspace-settings` (default true), `--apply-issue-prefix` (default false, but `transfer import` turns it on by itself when the bundle carries the issues group and `--renumber` is not set — see tasks below; destructive), `--auto-bind-runtimes` (default true — see runtime binding below), `--renumber` (default false, see tasks below), `--on-conflict` (default `fail`; the target's own 7 seeded built-in statuses never count as conflicts, so importing into a fresh empty workspace does not 409 on them — a same-name label/agent/skill still does). Only a changed default is worth passing.
 
 `transfer export --include issues` is off by default. Turning it on is what makes the bundle `schema_version: 2`, and it prints the one precondition the caller has to meet: the target workspace must have no tasks at all.
+
+`--target <url>` asks the target what it can read **before** the bundle is written: the CLI reads `GET <url>/health` and its `transfer` object (`max_schema_version`, `groups`). A target that cannot read the requested groups is refused with `target_outdated`, naming the target's ceiling and which groups continuing would cost; `--downgrade` exports the newest bundle the target can read instead (dropping `issues` for a V2-only target, so the bundle comes out `schema_version: 1`). A target that cannot be asked at all — an older build without the field, a 404, an unreachable host — is a warning, not a failure: the export proceeds with exactly what was requested. Without `--target` nothing is probed. The import side stays strict and never partially accepts a bundle, so the downgrade decision belongs here, on the export side.
 
 `transfer bind-runtimes` applies the runtimes a human picked for the agents the auto-bind rule left alone. `--bind` is repeatable and answers one line per binding; a partially failed batch still exits 0 so the caller keeps the per-binding detail.
 
@@ -42,7 +44,9 @@ Export reports the session walk and downloaded attachment bodies; import reports
 
 A `--dry-run` conflict 409 carries the whole import report next to `error`/`code`, which is why the CLI keeps the full error body for `/transfer/*` instead of its usual 4 KiB cap.
 
-If the target returns 404 for `/transfer/*`, the CLI reports `target_unsupported` — the target must be a `kun` instance. If it returns 400 `transfer_bundle_version_unsupported`, the CLI reports `target_outdated`: the target has the routes but its build predates the V3 bundle reader, so a `schema_version: 2` bundle (one carrying the `issues` group) is unreadable there. The fix is on the target — upgrade it, or re-export without `issues` for a `schema_version: 1` bundle.
+If the target returns 404 for `/transfer/*`, the CLI reports `target_unsupported` — the target must be a `kun` instance. If it returns 400 `transfer_bundle_version_unsupported`, the CLI reports `target_outdated`: the target has the routes but its build predates the V3 bundle reader, so a `schema_version: 2` bundle (one carrying the `issues` group) is unreadable there. The fix is on the target — upgrade it, or re-export without `issues` for a `schema_version: 1` bundle. Passing `--target <url>` to the export is what turns that failure into a decision made before the bundle exists.
+
+`GET /health` carries a `transfer` object — `{"max_schema_version": <int>, "groups": ["config", "conversations", "attachments", "issues"]}` — alongside the usual liveness fields. It is unauthenticated on purpose (an exporter is logged in to the source, not the target), it is additive (an older instance answers without it, which reads as "unknown"), and `max_schema_version` is derived from the same constant the import kernel checks, so a target can never advertise a version its reader would refuse.
 
 ## Server endpoints
 

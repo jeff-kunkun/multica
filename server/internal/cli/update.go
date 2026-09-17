@@ -30,6 +30,27 @@ import (
 // changes one place.
 const ChecksumManifestName = "checksums.txt"
 
+// ReleaseRepo is the GitHub repository `multica update` and the auto-update
+// poller read releases from. It is this fork, not upstream: a CLI built from
+// the kun tree that self-updated to `multica-ai/multica` would silently
+// replace itself with the upstream build (DENE-420). MULTICA_RELEASE_REPO
+// overrides it for anyone who wants the upstream binary.
+const ReleaseRepo = "jeff-kunkun/multica"
+
+// releaseRepo returns the repository releases are fetched from.
+func releaseRepo() string {
+	if v := strings.TrimSpace(os.Getenv("MULTICA_RELEASE_REPO")); v != "" {
+		return v
+	}
+	return ReleaseRepo
+}
+
+// ReleasesPageURL is the human-facing releases page for releaseRepo(), used in
+// error messages that ask the user to look the version up by hand.
+func ReleasesPageURL() string {
+	return "https://github.com/" + releaseRepo() + "/releases/latest"
+}
+
 const DefaultUpdateDownloadTimeout = 120 * time.Second
 
 // GitHubRelease is the subset of the GitHub releases API response we need.
@@ -226,7 +247,7 @@ func verifyAssetSHA256(data []byte, expectedHex, assetName string) error {
 
 func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/tags/"+tag, nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+releaseRepo()+"/releases/tags/"+tag, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +273,7 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 // FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+releaseRepo()+"/releases/latest", nil)
 	if err != nil {
 		return nil, err
 	}

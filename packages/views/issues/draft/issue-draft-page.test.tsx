@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { ApiError } from "@multica/core/api";
+import { useIssueDraftStore } from "@multica/core/issues/stores";
 import type {
   ChatMessage,
   IssueDraftPayload,
@@ -473,6 +474,46 @@ describe("IssueDraftPage stages", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /attachments/i,
     );
+  });
+
+  /**
+   * DENE-422: the entry panel cannot say this itself — it closes as the
+   * conversation opens — so it leaves the draft id in the create draft's align
+   * slot. The composer's error slot is where the sentence belongs, because
+   * resending from the composer right below it is the entire recovery.
+   */
+  it("says the first turn was lost when the entry panel handed one over", async () => {
+    useIssueDraftStore.getState().setAlign({ seedFailedDraftId: "sess-1" });
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The first turn was not sent. Send it again below.",
+    );
+    // Read and cleared in the same pass: the sentence describes this arrival,
+    // not every later visit to the conversation.
+    expect(
+      useIssueDraftStore.getState().draft.align.seedFailedDraftId,
+    ).toBeUndefined();
+  });
+
+  it("ignores a lost-turn flag meant for another conversation", async () => {
+    useIssueDraftStore.getState().setAlign({ seedFailedDraftId: "sess-other" });
+    renderPage();
+    await screen.findByText("Aligning");
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("drops the lost-turn sentence once the turn is actually sent", async () => {
+    useIssueDraftStore.getState().setAlign({ seedFailedDraftId: "sess-1" });
+    mocks.sendChatMessage.mockResolvedValue({ message_id: "m12", task_id: "t12" });
+    renderPage();
+    await screen.findByRole("alert");
+
+    await userEvent.click(screen.getByRole("button", { name: "send-turn" }));
+
+    await waitFor(() => expect(mocks.sendChatMessage).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("still offers the structured preview once the draft is ready", async () => {

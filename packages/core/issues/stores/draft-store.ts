@@ -70,6 +70,16 @@ export interface IssueCreateAlign {
   /** What the alignment conversation is asked to work on. Its own slot, like
    *  the agent prompt, so a mode switch never overwrites another face's body. */
   request: string;
+  /**
+   * The draft whose first turn the entry panel could not deliver (DENE-422).
+   *
+   * The panel hands off and closes the moment the conversation exists, so it is
+   * gone before the page that shows the lost turn renders; this is the one
+   * channel between them that already exists. Set on the way out, read and
+   * cleared once by the page it names — keyed by draft id so a conversation the
+   * failure does not belong to never claims it.
+   */
+  seedFailedDraftId?: string;
 }
 
 export interface IssueCreateDraft {

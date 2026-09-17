@@ -45,6 +45,8 @@ func newTransferExportTestCmd() *cobra.Command {
 	cmd.Flags().Bool("estimate", false, "")
 	cmd.Flags().Bool("exclude-archived", false, "")
 	cmd.Flags().Bool("no-people", false, "")
+	cmd.Flags().String("target", "", "")
+	cmd.Flags().Bool("downgrade", false, "")
 	return cmd
 }
 

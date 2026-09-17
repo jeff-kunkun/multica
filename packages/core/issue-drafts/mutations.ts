@@ -30,6 +30,25 @@ import {
  * flag that cannot drift from the request it describes.
  */
 
+/**
+ * `POST /api/issue-drafts` came back in a shape this client does not recognize.
+ *
+ * `parseWithFallback` degrades an unparseable body to `EMPTY_ISSUE_DRAFT_SESSION`
+ * (`packages/core/api/schemas.ts`) so the app keeps rendering, and the one field
+ * that proves the call succeeded — `session_id` — arrives empty. Reporting that
+ * as "the session was not created" is a lie with a cost: the draft DOES exist on
+ * the server, so the retry it invites leaves an orphan behind. It is also the one
+ * failure CLAUDE.md's API-compatibility rule says must be named as itself —
+ * response drift, not a network error — so it gets its own type the UI can
+ * localize instead of falling in with the transport failures.
+ */
+export class IssueDraftSessionUnrecognizedError extends Error {
+  constructor() {
+    super("issue draft session response was not recognized");
+    this.name = "IssueDraftSessionUnrecognizedError";
+  }
+}
+
 export interface StartIssueDraftResult {
   session: IssueDraftSession;
   draftId: string;
@@ -40,6 +59,16 @@ export interface StartIssueDraftResult {
    * cannot see and would create again.
    */
   seeded: boolean;
+  /**
+   * Why that first turn was not delivered, when `seeded` is false — the original
+   * rejection, not a message. Preserved rather than discarded so the caller can
+   * say what happened (a runtime the carrier cannot run on, an attachment bind
+   * that failed) instead of leaving the user on a silent empty conversation.
+   *
+   * The raw error, so the reader decides what is safe to render: a 4xx reason is
+   * written for the user, a 5xx one is internal detail (MUL-6472).
+   */
+  seedError?: unknown;
 }
 
 /**
@@ -66,15 +95,28 @@ export function useStartIssueDraft(wsId: string) {
        * other chat turn (DENE-369).
        */
       attachmentIds?: string[];
+      /**
+       * The project the whole group is filed under, when the user picked one at
+       * the entry point. Stored on the draft at creation rather than sent to the
+       * carrier: the carrier has no project list and is never asked to guess
+       * one, so this is the client-owned field the preview panel can still
+       * change afterwards (`mergeIssueDraftPayload` preserves what the reply
+       * never mentions).
+       */
+      projectId?: string;
     }): Promise<StartIssueDraftResult> => {
       const request = input.request.trim();
       const session = await api.createIssueDraftSession({
         runtime_id: input.runtimeId,
         model: input.model?.trim() || undefined,
-        draft: seedDraft(request),
+        draft: seedDraft(request, input.projectId),
       });
       const draftId = session.session_id;
-      if (!draftId) throw new Error("issue draft session was not created");
+      // An empty id is reachable only through the schema fallback above: every
+      // shape the server has ever sent carries a session id here. So this is
+      // response drift, and it must not be reported as "nothing was created" —
+      // the draft was created and its request stored before this call returned.
+      if (!draftId) throw new IssueDraftSessionUnrecognizedError();
       try {
         const sent = await api.sendChatMessage(
           draftId,
@@ -103,8 +145,11 @@ export function useStartIssueDraft(wsId: string) {
           created_at: new Date().toISOString(),
         });
         return { session, draftId, seeded: true };
-      } catch {
-        return { session, draftId, seeded: false };
+      } catch (err) {
+        // Kept, not swallowed: the caller navigates to a page that has to be
+        // able to say this turn was lost, and the reason is what makes that
+        // sentence actionable instead of mysterious.
+        return { session, draftId, seeded: false, seedError: err };
       }
     },
     onSuccess: (result) => {
@@ -281,12 +326,18 @@ export function useSwitchIssueDraftPolicy(wsId: string) {
 }
 
 /** The idea, kept server-side from the first moment so a lost turn loses nothing. */
-function seedDraft(request: string): Partial<IssueDraftPayload> {
+function seedDraft(
+  request: string,
+  projectId?: string,
+): Partial<IssueDraftPayload> {
   return {
     title: "",
     description: request,
     status: "",
     priority: "",
+    // Only when there is one: the draft's "no project" state is the field being
+    // absent, and writing an empty string would address a project named "".
+    ...(projectId ? { project_id: projectId } : {}),
   };
 }
 

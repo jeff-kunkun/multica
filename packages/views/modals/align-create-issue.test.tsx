@@ -1,14 +1,16 @@
-import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ApiError } from "@multica/core/api";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { IssueDraftPayload, RuntimeDevice } from "@multica/core/types";
 import enCommon from "../locales/en/common.json";
 import enIssues from "../locales/en/issues.json";
 import enModals from "../locales/en/modals.json";
 import enEditor from "../locales/en/editor.json";
+import enProjects from "../locales/en/projects.json";
 import { AlignCreatePanel } from "./align-create-issue";
 
 /**
@@ -39,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   close: vi.fn(),
   setAlign: vi.fn(),
+  setShared: vi.fn(),
   setActiveMode: vi.fn(),
 }));
 
@@ -92,13 +95,37 @@ const draftStore = {
     activeMode: "manual" as string,
   },
   setAlign: mocks.setAlign,
+  setShared: mocks.setShared,
   setActiveMode: mocks.setActiveMode,
 };
 
+// The real store is a zustand subscription, so a write made through a picker
+// re-renders the face that reads it. The mock has to do the same or a spec
+// could never observe the picker's own update: it would assert against the
+// render that preceded the click.
+const draftStoreListeners = new Set<() => void>();
+let draftStoreRevision = 0;
+function subscribeDraftStore(listener: () => void) {
+  draftStoreListeners.add(listener);
+  return () => {
+    draftStoreListeners.delete(listener);
+  };
+}
+function getDraftStoreRevision() {
+  return draftStoreRevision;
+}
+function writeDraftStore(next: typeof draftStore.draft) {
+  draftStore.draft = next;
+  draftStoreRevision += 1;
+  draftStoreListeners.forEach((listener) => listener());
+}
+
 vi.mock("@multica/core/issues/stores", () => ({
   useIssueDraftStore: Object.assign(
-    (selector?: (state: typeof draftStore) => unknown) =>
-      selector ? selector(draftStore) : draftStore,
+    (selector?: (state: typeof draftStore) => unknown) => {
+      useSyncExternalStore(subscribeDraftStore, getDraftStoreRevision);
+      return selector ? selector(draftStore) : draftStore;
+    },
     { getState: () => draftStore },
   ),
 }));
@@ -114,6 +141,28 @@ vi.mock("../navigation", () => ({
   }),
   AppLink: ({ href, children }: { href: string; children: React.ReactNode }) => (
     <a href={href}>{children}</a>
+  ),
+}));
+
+// The project picker is a real component with its own suite; this face's
+// contract is the WIRING around it — which draft slot the choice lands in, and
+// what the first turn carries.
+vi.mock("../projects/components/project-picker", () => ({
+  ProjectPicker: ({
+    projectId,
+    onUpdate,
+  }: {
+    projectId: string | null;
+    onUpdate: (updates: { project_id?: string | null }) => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="project-picker"
+      data-project-id={projectId ?? "none"}
+      onClick={() => onUpdate({ project_id: "proj-1" })}
+    >
+      Choose project
+    </button>
   ),
 }));
 
@@ -239,7 +288,13 @@ vi.mock("../issues/draft/unfinished-issue-drafts", () => ({
 }));
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, issues: enIssues, modals: enModals, editor: enEditor },
+  en: {
+    common: enCommon,
+    issues: enIssues,
+    modals: enModals,
+    editor: enEditor,
+    projects: enProjects,
+  },
 };
 
 const ONLINE_RUNTIME = {
@@ -333,9 +388,16 @@ beforeEach(() => {
   });
   mocks.sendChatMessage.mockResolvedValue({ message_id: "msg-1", task_id: "task-1" });
   draftStore.draft.shared.attachments = [];
+  draftStore.draft.shared.projectId = undefined;
   draftStore.draft.align.request = "";
   mocks.setAlign.mockImplementation((patch: { request?: string }) => {
     draftStore.draft.align = { ...draftStore.draft.align, ...patch };
+  });
+  mocks.setShared.mockImplementation((patch: { projectId?: string }) => {
+    writeDraftStore({
+      ...draftStore.draft,
+      shared: { ...draftStore.draft.shared, ...patch },
+    });
   });
 });
 
@@ -373,6 +435,98 @@ describe("AlignCreatePanel", () => {
     await waitFor(() =>
       expect(mocks.push).toHaveBeenCalledWith("/acme/issues/new/sess-new"),
     );
+  });
+
+  /**
+   * DENE-422: a lost first turn must reach the page that can resend it. This
+   * panel closes on navigation and the conversation opens with an empty
+   * transcript, so without the handoff the user sees a blank alignment and has
+   * no way to know their request never arrived.
+   */
+  it("hands a lost first turn to the conversation it navigates to", async () => {
+    mocks.sendChatMessage.mockRejectedValue(
+      new ApiError("runtime_unusable", 409, "Conflict"),
+    );
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    await waitFor(() =>
+      expect(mocks.push).toHaveBeenCalledWith("/acme/issues/new/sess-new"),
+    );
+    // The page reads this slot and says the turn was lost; the draft id is what
+    // keeps the sentence on the conversation it belongs to.
+    expect(mocks.setAlign).toHaveBeenCalledWith({ seedFailedDraftId: "sess-new" });
+  });
+
+  /**
+   * The exits of `CreateIssueDraftSession` say different things — a runtime that
+   * went offline, a private runtime, an oversized draft — and all of them are
+   * 4xx sentences written for the reader. Collapsing them into one generic line
+   * is what made DENE-366 unreportable from a screenshot.
+   */
+  it("shows the server's own reason when the entry is refused", async () => {
+    mocks.createIssueDraftSession.mockRejectedValue(
+      new ApiError("runtime must be online to start an issue draft session", 409, "Conflict"),
+    );
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "runtime must be online to start an issue draft session",
+    );
+    expect(alert).not.toHaveTextContent("Could not start the alignment conversation.");
+    // A refused create leaves nothing to open, so the face stays put.
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A 5xx message is Go error chains and table names (MUL-6472) and must never
+   * be rendered. The status code is the part that is safe, and it is what makes
+   * a screenshot actionable.
+   */
+  it("states the status for a server error without leaking its message", async () => {
+    mocks.createIssueDraftSession.mockRejectedValue(
+      new ApiError(
+        'pq: relation "issue_draft_sessions" does not exist',
+        500,
+        "Internal Server Error",
+      ),
+    );
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not start the alignment conversation. Server error (HTTP 500).",
+    );
+    expect(alert).not.toHaveTextContent("issue_draft_sessions");
+  });
+
+  /**
+   * CLAUDE.md's malformed-response contract. `parseWithFallback` degrades an
+   * unreadable create-session body to an empty session whose draft exists on the
+   * server, so "the session was not created" would be false AND expensive: the
+   * user creates a second, orphaned draft. Drift is reported as drift.
+   */
+  it("reports an unreadable create-session response as drift, not a missing session", async () => {
+    mocks.createIssueDraftSession.mockResolvedValue({ session_id: "" });
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "The server's response was not recognized. The client or the server may need an update.",
+    );
+    expect(alert).not.toHaveTextContent("Could not start the alignment conversation.");
+    // The draft was created but this client never learned its id, so there is
+    // nowhere to navigate to — and nothing is sent.
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.sendChatMessage).not.toHaveBeenCalled();
   });
 
   it("refuses to start without a request", async () => {
@@ -469,7 +623,10 @@ describe("AlignCreatePanel", () => {
   });
 
   it("routes an unfinished draft to its conversation", async () => {
-    mocks.drafts = [{ chat_session_id: "sess-old" }];
+    // The row carries a live status: the banner counts only the alignments with
+    // a next turn in them (DENE-371), so a fixture without one is filtered out
+    // before it ever reaches the banner.
+    mocks.drafts = [{ chat_session_id: "sess-old", status: "draft" }];
     renderPanel();
     await userEvent.click(await screen.findByRole("button", { name: "resume-unfinished" }));
     expect(mocks.push).toHaveBeenCalledWith("/acme/issues/new/sess-old");
@@ -547,6 +704,63 @@ describe("AlignCreatePanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /Switch to New issue/i }));
     expect(onSwitchMode).toHaveBeenCalledWith(null);
+  });
+
+  /**
+   * DENE-423: the project is optional and the face does not ask for it up
+   * front — but when one is chosen, the draft is created holding it, so the
+   * whole group the conversation settles on is filed under that project rather
+   * than under nothing. It rides the SHARED slot, like the attachment pool, so
+   * the manual face and this one are choosing the same field.
+   */
+  it("files the conversation under the project picked on this face", async () => {
+    renderPanel();
+    await typeRequest("add dark mode");
+
+    await userEvent.click(screen.getByTestId("project-picker"));
+    expect(mocks.setShared).toHaveBeenCalledWith({ projectId: "proj-1" });
+    expect(screen.getByTestId("project-picker")).toHaveAttribute(
+      "data-project-id",
+      "proj-1",
+    );
+
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.draft?.project_id).toBe("proj-1");
+  });
+
+  /**
+   * The other half of the same contract: a project the manual face already
+   * committed — including one an opener seeded from a project page — is what
+   * this face opens on, with no second click, because both faces read the one
+   * shared slot.
+   */
+  it("opens on the project the shared slot already holds", async () => {
+    draftStore.draft.shared.projectId = "proj-9";
+    renderPanel();
+
+    expect(screen.getByTestId("project-picker")).toHaveAttribute(
+      "data-project-id",
+      "proj-9",
+    );
+
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.draft?.project_id).toBe("proj-9");
+  });
+
+  it("leaves the project out of the draft when none was chosen", async () => {
+    renderPanel();
+    await typeRequest("add dark mode");
+    await userEvent.click(submitButton());
+
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    // Absent, not an empty string: "no project" is the field being missing.
+    expect(input.draft).not.toHaveProperty("project_id");
   });
 
   it("blocks submit while a shared attachment is still uploading", async () => {

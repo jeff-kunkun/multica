@@ -36,6 +36,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink } from "../../navigation";
 import { RuntimePicker } from "../../agents/components/runtime-picker";
+import { ProjectPicker } from "../../projects/components/project-picker";
 import { AssigneePicker } from "../components/pickers/assignee-picker";
 import { PriorityPicker } from "../components/pickers/priority-picker";
 import { StagePicker } from "../components/pickers/stage-picker";
@@ -45,9 +46,11 @@ import { useT } from "../../i18n";
 /**
  * The right-hand column: exactly what pressing "confirm and create" will write.
  *
- * The four fields the server reads at finalize are the four shown here, and
- * they are editable — a conversation is a good way to arrive at a draft and a
- * bad way to fix a typo in it. Everything is local until "save", so the preview
+ * The fields the server reads at finalize are the fields shown here, and they
+ * are editable — a conversation is a good way to arrive at a draft and a bad way
+ * to fix a typo in it. The project belongs to that set for the same reason the
+ * assignee does: the carrier is never told about either, so if the panel did not
+ * offer it, nothing could. Everything is local until "save", so the preview
  * never races the carrier's own revisions into the server one keystroke at a
  * time.
  *
@@ -393,6 +396,24 @@ export function IssueDraftPreviewPanel({
                   }
                 />
               </div>
+              {/* The project is one of the fields the carrier is never told
+                  about (it has no project list and is not asked to guess one),
+                  which is exactly why the panel owns it. Root only: a
+                  sub-issue's project is backfilled from the parent inside the
+                  create transaction, so a control here would be a promise the
+                  confirm overwrites. */}
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="text-caption text-muted-foreground">
+                  {t(($) => $.alignment.field_project)}
+                </span>
+                <ProjectPicker
+                  projectId={value.project_id ?? null}
+                  disabled={parentLocked}
+                  onUpdate={(updates) =>
+                    setEditing({ ...value, project_id: updates.project_id ?? null })
+                  }
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -483,6 +504,12 @@ export function IssueDraftPreviewPanel({
                     {isContinuation
                       ? t(($) => $.alignment.new_group_hint)
                       : t(($) => $.alignment.group_hint)}
+                  </p>
+                  {/* A sub-issue has no project control of its own, and silently
+                      inheriting one is the kind of thing a preview should say
+                      rather than leave to be discovered after the confirm. */}
+                  <p className="mt-1 text-caption text-muted-foreground">
+                    {t(($) => $.alignment.group_project_inherited)}
                   </p>
                 </div>
                 {newChildren.length === 0 ? (
@@ -896,6 +923,11 @@ function sameDraft(a: IssueDraftPayload, b: IssueDraftPayload): boolean {
     a.description === b.description &&
     a.status === b.status &&
     a.priority === b.priority &&
+    // The project is edited here like any other field. Without it the panel
+    // would report itself clean after a project change, and the next carrier
+    // reply would be adopted straight over the edit — silently reverting a
+    // choice the user just made.
+    (a.project_id ?? null) === (b.project_id ?? null) &&
     // Editing the group is an edit to the draft like any other: without this
     // the panel would report itself clean, the session would fold the carrier's
     // next reply straight over the row someone just deleted, and "save" would

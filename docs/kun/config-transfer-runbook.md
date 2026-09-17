@@ -82,6 +82,7 @@ multica setup self-host --profile selfhost
 multica transfer export --profile <源档> --workspace <slug> --estimate
 multica transfer export --profile <源档> --workspace <slug> --out ~/transfer.zip
 multica transfer export --profile <源档> --workspace <slug> --include config,conversations,attachments,issues --out ~/transfer.zip
+multica transfer export --profile <源档> --workspace <slug> --include config,conversations,attachments,issues --target https://<自建实例域名> --out ~/transfer.zip
 ```
 
 - `<源档>`：官方云一般省略 `--profile`；若你建过 `cloud` 档就写 `--profile cloud`。
@@ -89,6 +90,7 @@ multica transfer export --profile <源档> --workspace <slug> --include config,c
 - `--estimate` 只打印会话数 / 消息数 / 估算体积，不写文件。
 - `--include` 默认是 `config,conversations,attachments`。**要迁任务就显式加上 `issues`**，它是整个包里唯一的默认关闭项：带任务的包体积是平时的数倍到数十倍，而且有上面那条空工作区前置。
 - 版本号跟着内容走：不带 `issues` 产出 `schema_version: 1`（未升级的目标端也能读），带 `issues` 产出 `2`（目标端必须是含 V3 的 `kun`）。
+- `--target <目标地址>`：**导出前先问目标读到第几版**（读目标的 `/health`），别等导完再被拒。目标读不了你要的分组时，默认直接失败并说清「继续的话会去掉哪些分组」以及要加 `--downgrade`；加了 `--downgrade` 就按目标能力降级导出（目标是 V2 时，任务分组被去掉，包退成 `schema_version: 1`）。目标问不到（老版本没这个字段、地址不通）只提示「无法确认目标版本」，照常按你要的分组导出，不阻塞。不带 `--target` 就完全不探测，和以前一样。
 - 完成后终端会打出 zip 路径。权限是 `0600`，不要传到公开位置。
 
 ## 命令行导入

@@ -1310,6 +1310,35 @@ describe("CreateIssueModal", () => {
     expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
   });
 
+  // Same contract on the way to the alignment face (DENE-423): the alignment
+  // entry and the preview panel both read the project off this slot, so a
+  // project seeded from a project page — or picked here — has to be committed
+  // before the switch, not left in local state the other face cannot see.
+  it("commits the picked project to the shared draft when switching to alignment", async () => {
+    const user = userEvent.setup();
+    const onSwitchMode = vi.fn();
+    const onSwitchToAlign = vi.fn();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={onSwitchMode}
+        onSwitchToAlign={onSwitchToAlign}
+        data={{ project_id: "proj-1" }}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
+    await user.click(screen.getByRole("button", { name: /Align first/i }));
+
+    expect(onSwitchToAlign).toHaveBeenCalledTimes(1);
+    expect(mockSetShared).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "proj-1" }),
+    );
+  });
+
   it("restores an unfinished project selection after manual create remounts", async () => {
     const user = userEvent.setup();
 
