@@ -296,6 +296,10 @@ vi.mock("@multica/core/issues/config", () => ({
 
 // Mock view store
 const mockViewState = {
+  // Board sub-issue accordion (DENE-444): the card reads both on every
+  // render, so a fake view state missing them crashes the whole board.
+  boardExpandedParents: [] as string[],
+  toggleBoardParentExpanded: () => {},
   viewMode: "board" as "board" | "list",
   grouping: "status" as "status" | "assignee",
   statusFilters: [] as string[],

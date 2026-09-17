@@ -222,7 +222,9 @@
     "card_project": "프로젝트",
     "card_labels": "라벨",
     "card_child_progress": "하위 태스크 진행률",
-    "show_sub_issues": "하위 태스크 표시"
+    "show_sub_issues": "하위 태스크 표시",
+    "hide_completed_parents": "완료된 항목 숨기기",
+    "hide_completed_parents_description": "태스크 본체와 모든 하위 태스크가 완료되면 표시하지 않습니다"
   },
   "view": {
     "tooltip_board": "보드 보기",
@@ -1045,5 +1047,15 @@
     "record_issue_link": "생성된 이슈 열기",
     "record_abandoned_title": "이 정렬은 포기되었습니다",
     "record_abandoned_hint": "생성된 이슈가 없습니다."
+  },
+  "sub_issue_accordion": {
+    "expand_other": "하위 태스크 {{count}}개",
+    "collapse_other": "하위 태스크 {{count}}개",
+    "blocked_other": "{{count}}개 막힘",
+    "active_other": "{{count}}개 진행 중",
+    "stalled_other": "{{count}}개 미착수",
+    "stage": "스테이지 {{stage}}",
+    "empty": "하위 태스크 없음",
+    "load_failed": "하위 태스크를 불러오지 못했습니다"
   }
 }

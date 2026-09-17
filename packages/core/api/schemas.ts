@@ -1549,6 +1549,11 @@ export const ChildIssueProgressResponseSchema = z.object({
           parent_issue_id: z.string(),
           total: z.number(),
           done: z.number(),
+          // Added after the endpoint shipped: an installed client talking to
+          // an older backend gets 0, which reads as "nothing blocked / nothing
+          // running" — the same thing the UI showed before these existed.
+          blocked: z.number().catch(0).default(0),
+          active: z.number().catch(0).default(0),
         })
         .loose(),
     )

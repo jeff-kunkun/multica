@@ -226,7 +226,9 @@
     "card_project": "Project",
     "card_labels": "Labels",
     "card_child_progress": "Sub-issue progress",
-    "show_sub_issues": "Show sub-issues"
+    "show_sub_issues": "Show sub-issues",
+    "hide_completed_parents": "Hide finished work",
+    "hide_completed_parents_description": "Hide issues whose own status and every sub-issue are done"
   },
   "view": {
     "tooltip_board": "Board view",
@@ -1076,5 +1078,20 @@
     "record_issue_link": "Open the issue",
     "record_abandoned_title": "This alignment was given up",
     "record_abandoned_hint": "No issue was created."
+  },
+  "sub_issue_accordion": {
+    "expand_one": "{{count}} sub-issue",
+    "expand_other": "{{count}} sub-issues",
+    "collapse_one": "{{count}} sub-issue",
+    "collapse_other": "{{count}} sub-issues",
+    "blocked_one": "{{count}} blocked",
+    "blocked_other": "{{count}} blocked",
+    "active_one": "{{count}} in progress",
+    "active_other": "{{count}} in progress",
+    "stalled_one": "{{count}} unclaimed",
+    "stalled_other": "{{count}} unclaimed",
+    "stage": "Stage {{stage}}",
+    "empty": "No sub-issues",
+    "load_failed": "Could not load sub-issues"
   }
 }

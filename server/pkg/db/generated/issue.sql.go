@@ -14,7 +14,9 @@ import (
 const childIssueProgress = `-- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE status = ANY($2::text[]))::bigint AS done
+       COUNT(*) FILTER (WHERE status = ANY($2::text[]))::bigint AS done,
+       COUNT(*) FILTER (WHERE status = ANY($3::text[]))::bigint AS blocked,
+       COUNT(*) FILTER (WHERE status = ANY($4::text[]))::bigint AS active
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
@@ -24,16 +26,31 @@ GROUP BY parent_issue_id
 type ChildIssueProgressParams struct {
 	WorkspaceID        pgtype.UUID `json:"workspace_id"`
 	TerminalStatusKeys []string    `json:"terminal_status_keys"`
+	BlockedStatusKeys  []string    `json:"blocked_status_keys"`
+	ActiveStatusKeys   []string    `json:"active_status_keys"`
 }
 
 type ChildIssueProgressRow struct {
 	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
 	Total         int64       `json:"total"`
 	Done          int64       `json:"done"`
+	Blocked       int64       `json:"blocked"`
+	Active        int64       `json:"active"`
 }
 
+// Per-parent roll-up of its direct children. `done` counts terminal children
+// (done + cancelled); `blocked` and `active` are the two signals the project
+// views bubble onto the parent card: a stuck child must be visible without
+// expanding the parent, and a parent with no active child reads differently
+// from one whose pipeline is running. All three key sets are expanded from
+// categories by the handler, so custom statuses count under their category.
 func (q *Queries) ChildIssueProgress(ctx context.Context, arg ChildIssueProgressParams) ([]ChildIssueProgressRow, error) {
-	rows, err := q.db.Query(ctx, childIssueProgress, arg.WorkspaceID, arg.TerminalStatusKeys)
+	rows, err := q.db.Query(ctx, childIssueProgress,
+		arg.WorkspaceID,
+		arg.TerminalStatusKeys,
+		arg.BlockedStatusKeys,
+		arg.ActiveStatusKeys,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +58,13 @@ func (q *Queries) ChildIssueProgress(ctx context.Context, arg ChildIssueProgress
 	items := []ChildIssueProgressRow{}
 	for rows.Next() {
 		var i ChildIssueProgressRow
-		if err := rows.Scan(&i.ParentIssueID, &i.Total, &i.Done); err != nil {
+		if err := rows.Scan(
+			&i.ParentIssueID,
+			&i.Total,
+			&i.Done,
+			&i.Blocked,
+			&i.Active,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

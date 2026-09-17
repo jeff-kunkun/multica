@@ -2499,9 +2499,21 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
 		return
 	}
+	blockedStatusKeys, err := h.blockedIssueStatusKeys(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
+		return
+	}
+	activeStatusKeys, err := h.activeIssueStatusKeys(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
+		return
+	}
 	rows, err := h.Queries.ChildIssueProgress(r.Context(), db.ChildIssueProgressParams{
 		WorkspaceID:        wsUUID,
 		TerminalStatusKeys: terminalStatusKeys,
+		BlockedStatusKeys:  blockedStatusKeys,
+		ActiveStatusKeys:   activeStatusKeys,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
@@ -2512,6 +2524,12 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID string `json:"parent_issue_id"`
 		Total         int64  `json:"total"`
 		Done          int64  `json:"done"`
+		// Children sitting in the `blocked` category, and children actually
+		// moving (in_progress / in_review). The project views bubble both onto
+		// the parent card so a stuck or stalled pipeline is visible without
+		// expanding the parent.
+		Blocked int64 `json:"blocked"`
+		Active  int64 `json:"active"`
 	}
 	resp := make([]progressEntry, len(rows))
 	for i, row := range rows {
@@ -2519,6 +2537,8 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 			ParentIssueID: uuidToString(row.ParentIssueID),
 			Total:         row.Total,
 			Done:          row.Done,
+			Blocked:       row.Blocked,
+			Active:        row.Active,
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

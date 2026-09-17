@@ -1298,7 +1298,13 @@ export class ApiClient {
   }
 
   async getChildIssueProgress(): Promise<{
-    progress: { parent_issue_id: string; total: number; done: number }[];
+    progress: {
+      parent_issue_id: string;
+      total: number;
+      done: number;
+      blocked: number;
+      active: number;
+    }[];
   }> {
     const raw = await this.fetch<unknown>("/api/issues/child-progress");
     return parseWithFallback(

@@ -63,7 +63,7 @@ export function IssueDraftStageStrip({
                   "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-caption",
                   active && "bg-primary/10 font-medium text-primary",
                   !active && done && "text-muted-foreground",
-                  !active && !done && "text-muted-foreground/60",
+                  !active && !done && "text-faint-foreground",
                 )}
               >
                 {done ? (

@@ -222,7 +222,9 @@
     "card_project": "プロジェクト",
     "card_labels": "ラベル",
     "card_child_progress": "サブタスクの進捗",
-    "show_sub_issues": "サブタスクを表示"
+    "show_sub_issues": "サブタスクを表示",
+    "hide_completed_parents": "完了済みを隠す",
+    "hide_completed_parents_description": "タスク本体とすべてのサブタスクが完了したら非表示にする"
   },
   "view": {
     "tooltip_board": "ボード表示",
@@ -1045,5 +1047,15 @@
     "record_issue_link": "作成された課題を開く",
     "record_abandoned_title": "このすり合わせは破棄されました",
     "record_abandoned_hint": "課題は作成されていません。"
+  },
+  "sub_issue_accordion": {
+    "expand_other": "サブタスク {{count}} 件",
+    "collapse_other": "サブタスク {{count}} 件",
+    "blocked_other": "{{count}} 件が停止中",
+    "active_other": "{{count}} 件が進行中",
+    "stalled_other": "{{count}} 件が未着手",
+    "stage": "ステージ {{stage}}",
+    "empty": "サブタスクはありません",
+    "load_failed": "サブタスクを読み込めませんでした"
   }
 }

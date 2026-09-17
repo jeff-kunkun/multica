@@ -8,6 +8,11 @@ import {
 } from "@multica/core/issues";
 import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
+import { groupSubIssuesByStage } from "../utils/sub-issue-stages";
+// Re-exported for the callers that grew up with it living here; the function
+// itself moved so the board accordion can order its rows without importing
+// this module (DENE-444).
+export { groupSubIssuesByStage };
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
@@ -419,29 +424,6 @@ function isOptionalPropSet(
   }
 }
 
-// groupSubIssuesByStage orders a parent's children for display: staged groups
-// ascending by stage, then the unstaged group (stage === null) last. Callers
-// render a per-group stage header only when the set is actually staged.
-export function groupSubIssuesByStage(
-  children: Issue[],
-): { stage: number | null; items: Issue[] }[] {
-  const byStage = new Map<number, Issue[]>();
-  const unstaged: Issue[] = [];
-  for (const c of children) {
-    if (c.stage != null) {
-      const arr = byStage.get(c.stage);
-      if (arr) arr.push(c);
-      else byStage.set(c.stage, [c]);
-    } else {
-      unstaged.push(c);
-    }
-  }
-  const groups: { stage: number | null; items: Issue[] }[] = [...byStage.keys()]
-    .sort((a, b) => a - b)
-    .map((s) => ({ stage: s, items: byStage.get(s) as Issue[] }));
-  if (unstaged.length > 0) groups.push({ stage: null, items: unstaged });
-  return groups;
-}
 
 // Shallow array equality by element identity. Used to reuse the previous
 // render's per-thread reply slice when nothing in *this* thread changed,

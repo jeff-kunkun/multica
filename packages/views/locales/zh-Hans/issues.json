@@ -222,7 +222,9 @@
     "card_project": "项目",
     "card_labels": "标签",
     "card_child_progress": "子任务进度",
-    "show_sub_issues": "显示子任务"
+    "show_sub_issues": "显示子任务",
+    "hide_completed_parents": "隐藏已完成",
+    "hide_completed_parents_description": "任务本身和全部子任务都已完成时不再显示"
   },
   "view": {
     "tooltip_board": "看板视图",
@@ -1045,5 +1047,15 @@
     "record_issue_link": "查看产出的任务",
     "record_abandoned_title": "这次对齐已放弃",
     "record_abandoned_hint": "没有产出任务。"
+  },
+  "sub_issue_accordion": {
+    "expand_other": "{{count}} 个子任务",
+    "collapse_other": "{{count}} 个子任务",
+    "blocked_other": "{{count}} 个卡住",
+    "active_other": "{{count}} 个进行中",
+    "stalled_other": "{{count}} 个待认领",
+    "stage": "阶段 {{stage}}",
+    "empty": "暂无子任务",
+    "load_failed": "子任务加载失败"
   }
 }

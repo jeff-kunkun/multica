@@ -735,6 +735,44 @@ describe("ApiClient schema fallback", () => {
         progress: [],
       });
     });
+
+    // An installed desktop client can outrun its backend. The blocked/active
+    // roll-up arrived after the endpoint shipped, so an older server sends
+    // neither — the row must survive with zeroes rather than being dropped,
+    // which would take the parent's progress ring down with it.
+    it("defaults the blocked/active roll-up an older backend does not send", async () => {
+      stubFetchJson({
+        progress: [{ parent_issue_id: "p-1", total: 3, done: 1 }],
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getChildIssueProgress()).resolves.toEqual({
+        progress: [
+          { parent_issue_id: "p-1", total: 3, done: 1, blocked: 0, active: 0 },
+        ],
+      });
+    });
+
+    it("defaults a roll-up field the backend sent with the wrong type", async () => {
+      stubFetchJson({
+        progress: [
+          {
+            parent_issue_id: "p-1",
+            total: 3,
+            done: 1,
+            blocked: "two",
+            active: null,
+          },
+        ],
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getChildIssueProgress()).resolves.toEqual({
+        progress: [
+          { parent_issue_id: "p-1", total: 3, done: 1, blocked: 0, active: 0 },
+        ],
+      });
+    });
   });
 
   describe("listAutopilotDeliveries", () => {

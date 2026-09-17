@@ -631,9 +631,17 @@ WHERE workspace_id = $1
 GROUP BY assignee_type, assignee_id;
 
 -- name: ChildIssueProgress :many
+-- Per-parent roll-up of its direct children. `done` counts terminal children
+-- (done + cancelled); `blocked` and `active` are the two signals the project
+-- views bubble onto the parent card: a stuck child must be visible without
+-- expanding the parent, and a parent with no active child reads differently
+-- from one whose pipeline is running. All three key sets are expanded from
+-- categories by the handler, so custom statuses count under their category.
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done
+       COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done,
+       COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('blocked_status_keys')::text[]))::bigint AS blocked,
+       COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('active_status_keys')::text[]))::bigint AS active
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
