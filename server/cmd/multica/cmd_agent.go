@@ -174,7 +174,7 @@ func init() {
 	agentCreateCmd.Flags().String("description", "", "Agent description")
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
 	agentCreateCmd.Flags().String("conversation-starters", "", "Conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Shown above the Chat composer; selecting one fills the composer and does not start a run. Omit to default to none.")
-	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
+	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required unless the new agent specialises a base role, which inherits that base role's runtime by default)")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
 	agentCreateCmd.Flags().String("thinking-level", "", "Reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Empty = runtime default.")
@@ -191,7 +191,8 @@ func init() {
 	agentCreateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
 	agentCreateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent runs (1-50)")
-	agentCreateCmd.Flags().String("parent-agent-id", "", "Base role to specialise: the new agent inherits that agent's prompt (prepended at run time) and skills. Must be a base role itself — a specialisation cannot be specialised further. Empty = an independent base role.")
+	agentCreateCmd.Flags().String("parent-agent-id", "", "Base role to specialise: the new agent inherits that agent's prompt (prepended at run time), skills, and — unless --runtime-inherited=false — its runtime configuration (runtime, model, thinking level). Must be a base role itself — a specialisation cannot be specialised further. Empty = an independent base role.")
+	agentCreateCmd.Flags().Bool("runtime-inherited", false, "Specialisation only: follow the base role's runtime configuration (runtime_id, model, thinking_level, service_tier, runtime_config). Default for a specialisation; pass --runtime-inherited=false together with --runtime-id to give it its own. Rejected without --parent-agent-id.")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent update
@@ -225,6 +226,7 @@ func init() {
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent runs (1-50)")
 	agentUpdateCmd.Flags().String("parent-agent-id", "", "Attach this existing agent to a base role, or pass an empty string to detach it. Detaching here does NOT keep the inherited prompt — use 'multica agent solidify <id>' for the non-lossy unbind. An agent that already has specialisations cannot be attached (two levels only).")
+	agentUpdateCmd.Flags().Bool("runtime-inherited", false, "Follow the base role's runtime configuration (true), or keep this agent's own (false). Copied immediately in both directions; opting out keeps the values the agent is running with now. Refused on a base role, and refused in the same call as a runtime flag (--runtime-id/--model/--thinking-level/--service-tier/--runtime-config) while following.")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent archive
@@ -660,13 +662,33 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--name is required")
 	}
 	runtimeID, _ := cmd.Flags().GetString("runtime-id")
-	if runtimeID == "" {
+	parentAgentID, _ := cmd.Flags().GetString("parent-agent-id")
+	parentAgentID = strings.TrimSpace(parentAgentID)
+
+	// Runtime inheritance (DENE-505). A specialisation follows its base role's
+	// runtime configuration unless the caller opts out, which is why --runtime-id
+	// stops being required the moment --parent-agent-id is given: the runtime is
+	// then the base role's. runtime_inherited is sent only when the flag was set,
+	// so omitting it keeps the server's "follow" default instead of restating it.
+	inheritRuntime := parentAgentID != ""
+	if cmd.Flags().Changed("runtime-inherited") {
+		inheritRuntime, _ = cmd.Flags().GetBool("runtime-inherited")
+		if inheritRuntime && parentAgentID == "" {
+			return fmt.Errorf("--runtime-inherited needs --parent-agent-id: only a specialisation can follow a base role's runtime")
+		}
+	}
+	if runtimeID == "" && !inheritRuntime {
 		return fmt.Errorf("--runtime-id is required")
 	}
 
 	body := map[string]any{
-		"name":       name,
-		"runtime_id": runtimeID,
+		"name": name,
+	}
+	if runtimeID != "" {
+		body["runtime_id"] = runtimeID
+	}
+	if cmd.Flags().Changed("runtime-inherited") {
+		body["runtime_inherited"] = inheritRuntime
 	}
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
@@ -734,11 +756,8 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	// Two-level specialisation (DENE-301). An empty value means "independent
 	// base role", which is also what omitting the flag means, so the key is
 	// only sent when it carries an id.
-	if cmd.Flags().Changed("parent-agent-id") {
-		v, _ := cmd.Flags().GetString("parent-agent-id")
-		if v = strings.TrimSpace(v); v != "" {
-			body["parent_agent_id"] = v
-		}
+	if parentAgentID != "" {
+		body["parent_agent_id"] = parentAgentID
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -848,8 +867,16 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		body["parent_agent_id"] = strings.TrimSpace(v)
 	}
 
+	// runtime_inherited (DENE-505) is an explicit switch in both directions, so
+	// the key is sent whenever the flag was set — including `false`, which is the
+	// opt-out and would otherwise be indistinguishable from "leave it alone".
+	if cmd.Flags().Changed("runtime-inherited") {
+		v, _ := cmd.Flags().GetBool("runtime-inherited")
+		body["runtime_inherited"] = v
+	}
+
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --switchable-models, --custom-args, --mcp-config, --visibility, --status, --max-concurrent-tasks, or --parent-agent-id (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --switchable-models, --custom-args, --mcp-config, --visibility, --status, --max-concurrent-tasks, --parent-agent-id, or --runtime-inherited (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
