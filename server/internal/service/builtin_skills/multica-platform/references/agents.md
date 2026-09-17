@@ -77,9 +77,9 @@ The HTTP body accepts: `name`, `description`, `instructions`,
 `conversation_starters`, `avatar_url`, `runtime_id`, `runtime_config`,
 `custom_env`, `custom_args`, `model`, `thinking_level`, `service_tier`,
 `visibility`, `max_concurrent_tasks`, `mcp_config`, `skill_ids`,
-`parent_agent_id` (specialisation only — see below; the CLI sends it through no
-flag, so a specialised agent is created or re-parented from the web/desktop UI
-or a direct API call).
+`parent_agent_id` and `runtime_inherited` (specialisation only — see below).
+`runtime_id` is required for a base role and optional for a specialisation that
+follows its base role.
 
 ## Copying an agent
 
@@ -140,9 +140,12 @@ no change, `""` detaches, an id attaches.
 From the CLI:
 
 ```bash
-multica agent create --name "..." --runtime-id <id> --parent-agent-id <base-role-id>
+multica agent create --name "..." --parent-agent-id <base-role-id>              # follows the base role's runtime
+multica agent create --name "..." --parent-agent-id <base-role-id> \
+  --runtime-id <id> --runtime-inherited=false                                  # owns its own runtime instead
 multica agent update <id> --parent-agent-id <base-role-id>   # attach or re-point
 multica agent update <id> --parent-agent-id ""               # detach, DROPPING the inherited prompt
+multica agent update <id> --runtime-inherited=false          # stop following; keep what it runs with now
 multica agent solidify <id>                                  # detach, KEEPING it (see below)
 ```
 
@@ -162,15 +165,42 @@ Inherited, and read-only on the child:
   deduplicated by skill id, with the base role's bindings first as a stable
   prefix. v1 keeps an inherited skill read-only on the child: it cannot be
   disabled or removed there.
+- **Runtime configuration** (DENE-505), unless the child opts out: `runtime_id`,
+  `runtime_mode`, `runtime_config`, `model`, `thinking_level` and `service_tier`
+  are a COPY of the base role's, taken when the child is created, when a base
+  role's profile changes, when the child is re-parented, and when it is switched
+  back to following. The copy is materialised into the child's own row, so
+  dispatch needs no parent lookup — but unlike the prompt it is a copy, not a
+  live read: a base-role edit that happens while the child is archived reaches
+  it on restore, not before, and a direct SQL edit of the base role's columns
+  reaches it on the next API write.
+  - `runtime_inherited` is the flag. True = following. Every specialisation
+    created through the API follows by DEFAULT, which is also why `runtime_id`
+    may be omitted on create — and why a `runtime_id` sent alongside
+    `parent_agent_id` is NOT an override (`runtime_inherited: false` is).
+  - Setting it false is lossless: the child keeps exactly the values it was
+    running with, the runtime counterpart of a solidified prompt. Setting it
+    true re-copies the base role's profile immediately.
+  - A base role cannot inherit (`runtime_inherited: true` without a
+    `parent_agent_id` is a 400), a following child refuses runtime edits in the
+    same request (400 — pass `runtime_inherited: false` first), and detaching
+    from the base role clears the flag.
+  - A child can only follow onto a runtime its owner may use: the base role's
+    runtime must be public or owned by the agent's owner (the same rule the
+    daemon claim enforces). Creating a specialisation of a base role whose
+    runtime is another member's private runtime therefore needs an explicit
+    `runtime_id` — which lands as an independent runtime, not an error.
 
 Everything else stays INDEPENDENT per agent — a specialisation is the same role
-with its own configuration, not a clone. In particular `model`, `runtime_id`,
-`max_concurrent_tasks`, and invocation permissions are set separately on the
-child and are NOT inherited from the parent, and the child does not override the
-parent's values either.
+with its own configuration, not a clone. In particular `max_concurrent_tasks`,
+`custom_args`, `custom_env`, `mcp_config` and invocation permissions are set
+separately on the child and are NOT inherited from the parent, and the child
+does not override the parent's values either.
 
-Both halves are recomputed on every claim, so a change on either side of the
-relationship lands on the specialisation's next task with no re-attach step.
+The prompt and skills are recomputed on every claim, so a change on either side
+of the relationship lands on the specialisation's next task with no re-attach
+step. The runtime copy lands through the write that changed it (create, attach,
+re-parent, flip, or a base-role runtime edit).
 
 ### Response fields
 
@@ -179,6 +209,7 @@ relationship lands on the specialisation's next task with no re-attach step.
 | `parent_agent_id` | list + detail | the base role's id; empty for a base role |
 | `parent_agent_name` | list + detail | the base role's display name, so a client can name it without a second request |
 | `child_count` | list + detail | active specialisations hanging off this agent; always `0` for a specialisation |
+| `runtime_inherited` | list + detail | true when this specialisation follows its base role's runtime configuration (see above); always false for a base role |
 | `inherited_instructions` | detail only | the base role's own `instructions`, verbatim |
 | `inherited_skills` | detail only | the base role's skill bindings, read-only |
 
