@@ -25,8 +25,8 @@ const CompletionStallMarker = "completion-stall:run-completed-without-terminal-s
 // completionStallRepeatWindow collapses repeated signals for the same issue.
 // The completion path — unlike the failure path — does not change the issue,
 // so a row that stays in_progress would otherwise collect one identical system
-// comment per finished run. Same 30-minute window the stagnation watchdog uses
-// for its own repeat guard.
+// comment per finished run. 30 minutes keeps that at one signal per stalled
+// run without suppressing a genuinely new one.
 const completionStallRepeatWindow = 30 * time.Minute
 
 // HandleCompletedTasks is the completion-path mirror of HandleFailedTasks.
@@ -173,8 +173,10 @@ func (s *TaskService) signalCompletionStall(ctx context.Context, issueKey string
 // guard every orchestration turn would emit a signal saying "no executor is
 // working on it" while its children were actively running, which is exactly
 // the noise that would make the dispatcher stop reading the marker. A parent
-// whose children later go quiet is still caught: the stagnation watchdog's
-// scan A and scan B cover that case once the parent is stale.
+// whose children later go quiet is NOT re-signalled here: the finished run was
+// on a child, so nothing arrives on the parent row to re-evaluate. That gap is
+// deliberate — the server runs no stagnation scan (DENE-520), so a parent that
+// goes quiet surfaces through the stage barrier or a human reading the timeline.
 //
 // Failing open (returning false on a query error) keeps the detection
 // behaviour of the failure path: a missing children read must not silence a
@@ -276,8 +278,7 @@ func (s *TaskService) resolveAssigneeDisplay(ctx context.Context, issue db.Issue
 // sanitizeMentionLabel strips characters that would break the mention markdown
 // if a name contained them. The mention regex is non-greedy on the label, so a
 // stray `]` would short-circuit it. Kept local because the service has no other
-// mention renderer; the handler's copy serves the child-done and watchdog
-// comments.
+// mention renderer; the handler's copy serves the child-done comments.
 func sanitizeMentionLabel(name string) string {
 	cleaned := strings.ReplaceAll(name, "]", "")
 	cleaned = strings.TrimSpace(cleaned)

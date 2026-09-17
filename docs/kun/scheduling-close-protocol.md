@@ -2,14 +2,14 @@
 
 本页是 DENE-229 长程任务的 close protocol 契约。Stage 2（DENE-231）按本页落地，不再自行决定字段名、写入时机、收尾状态或唤醒动作。本页只定义机制与最小闭环，**不重写调度器**，不改角色权限、模型绑定、外部通知策略。
 
-核对基线：`origin/kun` @ `32fd66b6e`（2026-09-15）。行号指向该提交。凡本页写「未实现」的补偿扫描，由 Stage 4（DENE-233）实现；本页把查询入口和幂等条件写死。
+核对基线：`origin/kun` @ `32fd66b6e`（2026-09-15）。行号指向该提交。本页描述的 Stage 4 补偿扫描（DENE-233）已在 DENE-520 摘除，恢复到官方 upstream 行为：没有补偿扫描，只有平台既有事件驱动唤醒（见 §7）。
 
 ## 0. 一页结论
 
 - 平台今天**只会**在子票从非终态进入 `done` 或 `cancelled`、且该完成**关闭了 stage 屏障**时，才给父票写系统评论并唤醒父票 assignee。评论本身、`in_review`、`blocked`、跨票文字依赖，都不会唤醒父票。
 - Agent 运行时 brief 把「交付本票自己的 ask」写成 `in_review`。`in_review` **不是** stage 终态。按 brief 正确收尾的 staged 子票会把父票卡在 `in_progress`。这是 DENE-196 / DENE-209 / DENE-189 停滞的机制原因，也是本协议要解开的点。
 - 统一收尾五要素：`结论 + 状态 + 证据 + 下一责任人 + 唤醒动作`。缺任一要素视为未收口。
-- 唤醒失败没有补偿扫描（错误被 warn 后吞掉）。Stage 4 必须按第 7 节的四个扫描入口补扫，且必须走 `HasPendingTaskForIssueAndAgent` 幂等，禁止重复派发。
+- 唤醒失败没有补偿扫描（错误被 warn 后吞掉），这是官方行为，DENE-520 已确认保持。停滞只能靠平台既有事件被人发现：屏障关闭的 child-done 唤醒、`close.waiting_on` 的即时唤醒、或人读评论/看板。
 
 ## 1. 现状盘点（真实案例 × 代码）
 
@@ -273,36 +273,36 @@ Agent 评论必须让人类不看 metadata 也能读懂。固定小标题，顺�
 | `* → done` | 已链接 PR 带 close intent，且 PR 合并 | `github.go:1921-1938` |
 | 不写状态，只评论+入队 | 子票进入终态且屏障关闭 | `issue_child_done.go:329-407` |
 
-没有「超时把 `in_review` 打回 `todo`」。没有「停滞扫描」。这两项是 Stage 4 的活，且 Stage 4 也**不得**自动改 `in_review`/`blocked`——只允许评论 + mention（见 7）。
+没有「超时把 `in_review` 打回 `todo`」。没有「停滞扫描」——server 不扫描停滞，也不自动改 `in_review`/`blocked`。停滞只由 §4 的既有事件驱动，或由人读评论发现。
 
 ## 4. 触发矩阵
 
-事件 → 唤醒谁 → 载体 → 失败时补偿。补偿扫描的查询入口在第 7 节，Stage 4 实现。
+事件 → 唤醒谁 → 载体 → 失败表现。「失败时补偿」一列写的是官方行为下的实际兜底：**没有自动补偿扫描**（DENE-520 摘除 Stage 4 看门狗后），失败只留 warn 日志或 `trigger_outcomes` 记录，靠人读评论/看板发现。
 
 | ID | 事件 | 唤醒谁 | 载体 | 失败表现 | 补偿 |
 | --- | --- | --- | --- | --- | --- |
-| T1 | 子票进入 `done`/`cancelled` 且屏障关闭，父 assignee = agent | 父票 agent | server 系统评论 + `EnqueueTaskForMention`（`issue_child_done.go:727-765`） | warn 日志，状态已提交 | 扫描 C |
-| T2 | 同 T1，父 assignee = squad | 父票 **leader only**（不扇出队员） | `EnqueueTaskForSquadLeader`（`:767-823`） | 同上 | 扫描 C |
-| T3 | 同 T1，父 assignee = member / 无 / backlog / 已终态 | 无人 | 整段 skip（`:116-132`） | 静默 | 扫描 A 仍列出父票，Dispatcher 人读后决定 |
-| T4 | 子票进入终态但屏障未关 | 无人 | 静默（`:155-157`） | 无日志 | 预期行为；扫描 A 不把未关屏障当失败 |
-| T5 | 评论含 `[@x](mention://agent\|squad/<uuid>)` | 该 agent 或 squad leader | `computeCommentAgentTriggers` → enqueue（`comment.go:2637-2673`） | `trigger_outcomes`：`blocked` / `coalesced` / `deferred` | 读 `trigger_outcomes`；`blocked` 用扫描 B/D 补 mention，禁止对 `coalesced`/`deferred` 重发 |
+| T1 | 子票进入 `done`/`cancelled` 且屏障关闭，父 assignee = agent | 父票 agent | server 系统评论 + `EnqueueTaskForMention`（`issue_child_done.go:727-765`） | warn 日志，状态已提交 | 无自动补偿：失败只留 warn |
+| T2 | 同 T1，父 assignee = squad | 父票 **leader only**（不扇出队员） | `EnqueueTaskForSquadLeader`（`:767-823`） | 同上 | 无自动补偿：失败只留 warn |
+| T3 | 同 T1，父 assignee = member / 无 / backlog / 已终态 | 无人 | 整段 skip（`:116-132`） | 静默 | 无自动补偿；Dispatcher 人读后决定 |
+| T4 | 子票进入终态但屏障未关 | 无人 | 静默（`:155-157`） | 无日志 | 预期行为；未关屏障不是失败 |
+| T5 | 评论含 `[@x](mention://agent\|squad/<uuid>)` | 该 agent 或 squad leader | `computeCommentAgentTriggers` → enqueue（`comment.go:2637-2673`） | `trigger_outcomes`：`blocked` / `coalesced` / `deferred` | 读 `trigger_outcomes`；`blocked` 由 Dispatcher 人读后手工 mention，禁止对 `coalesced`/`deferred` 重发 |
 | T6 | 评论含 member / issue / `@all` only | 无人（`@all` 还抑制 assignee 隐式路由） | 解析后 return nil | 静默 | 协议禁止把这三种当唤醒 |
 | T7 | 成员在非 note 评论、无显式 agent mention | issue assignee（隐式） | member 路径（`comment.go:2681` 之后） | 普通 comment 入队失败 | 不是 close protocol 主路径 |
 | T8 | agent 在 **squad 票**上发结果评论 | 该票 squad leader | `routeAssignedSquadLeaderFallback`（`:2692-2696`） | 同票协调闭环 | 不跨票 |
-| T9 | `backlog →` 非 backlog/非终态，已有 agent/squad assignee | 该 assignee / leader | `WillEnqueueRun` status source（`issue_trigger.go:131-137`） | 未入队则 issue 停在新状态 | 扫描 B |
-| T10 | create/assign 到非 backlog 的 agent/squad | 该 assignee / leader | `WillEnqueueRun` assign source | 运行时不可用会 `noteRuntimeUnusable` | 扫描 B |
+| T9 | `backlog →` 非 backlog/非终态，已有 agent/squad assignee | 该 assignee / leader | `WillEnqueueRun` status source（`issue_trigger.go:131-137`） | 未入队则 issue 停在新状态 | 无自动补偿；需人发现 |
+| T10 | create/assign 到非 backlog 的 agent/squad | 该 assignee / leader | `WillEnqueueRun` assign source | 运行时不可用会 `noteRuntimeUnusable` | 无自动补偿；需人发现 |
 | T11 | GitHub PR 合并且 close intent | 无直接 agent；issue → `done`，然后走 T1/T2 | `advanceIssueToDone` | warn，issue 可能仍非 done | 合并后核对 `issue.status`；不是 `done` 则 CLI 补写 `done`（仍走 T1） |
-| T12 | 任务失败 | 不唤醒他人；可能本票 `→ todo` | `HandleFailedTasks` | retry / delegated recovery | 扫描 B；额度类失败（案例 1.5）不得自动换模型（不变约束） |
+| T12 | 任务失败 | 不唤醒他人；可能本票 `→ todo` | `HandleFailedTasks` | retry / delegated recovery | 无自动补偿；额度类失败（案例 1.5）不得自动换模型（不变约束） |
 | T13 | Autopilot schedule/webhook/manual | autopilot 的 agent/squad leader | autopilot run | `skipped` + `failure_reason` | autopilot runs 列表，不进 issue 扫描 |
-| T14 | `close.wake_action=mention` 的证据评论 | `close.next_owner_id` | 同 T5 | 同 T5 | 扫描 D：metadata 已写但无对应 queued/running task |
-| T15 | `close.waiting_on` 指向的票进入 `done`/`cancelled` | 等待方 assignee（agent / squad leader） | server 系统评论 + `EnqueueTaskForMention` / `EnqueueTaskForSquadLeader`（`issue_waiting_on.go`，与 T1/T2 同一入队面） | warn 日志，状态已提交 | 扫描 D 补偿（Stage 4）。同一 `(issue, agent)` 已有 queued/running 则跳过 enqueue |
+| T14 | `close.wake_action=mention` 的证据评论 | `close.next_owner_id` | 同 T5 | 同 T5 | 无自动补偿：metadata 已写但无对应 queued/running 时需人发现 |
+| T15 | `close.waiting_on` 指向的票进入 `done`/`cancelled` | 等待方 assignee（agent / squad leader） | server 系统评论 + `EnqueueTaskForMention` / `EnqueueTaskForSquadLeader`（`issue_waiting_on.go`，与 T1/T2 同一入队面） | warn 日志，状态已提交 | 无自动补偿。同一 `(issue, agent)` 已有 queued/running 则跳过 enqueue |
 
 幂等（所有入队共用）：
 
 - `HasPendingTaskForIssueAndAgent` 按 `(issue, agent, reviewed head)` 去重（`issue_child_done.go:749-757`、`issue_trigger.go:203-218`）。
 - T15 跨票等待唤醒按 `HasActiveTaskForIssueAndAgent` 去重：同一 `(issue, agent)` 已有 queued / dispatched / running / waiting_local_directory ⇒ 仍写系统评论，跳过 enqueue（`issue_waiting_on.go` `dispatchWaitingOnAssigneeTrigger`）。
 - 同线程 pending 的 mention 结果是 `coalesced`，禁止重发。
-- 扫描补偿必须先读 pending/active；已有则只写评论不 enqueue。
+- 没有补偿扫描（DENE-520）。任何补发的 mention 都是人/Dispatcher 的手工动作，且必须先读 pending/active；已有则只写评论不 enqueue。
 
 ## 5. 不变约束
 
@@ -312,14 +312,14 @@ Stage 2–5 改代码时必须保持。违反任一条约等于重写调度器�
 2. **不改 stage 终态集合。** 仍是 `done`/`cancelled`。不把 `in_review`/`blocked` 当屏障关闭。
 3. **不改角色权限与模型绑定。** 不改 agent/squad 的 runtime、model、visibility、invoke gate。额度失败（案例 1.5）换席是调度人决策，不是本协议自动行为。
 4. **不改外部通知策略。** child-done 继续不读 `notification_preference`（`issue_child_done.go:683-687`）；system 评论继续跳过 subscriber listener。
-5. **不重复派发。** 补偿扫描必须经过 `HasPendingTaskForIssueAndAgent` / `HasActiveTaskForIssue`。`coalesced`/`deferred` 的 mention 禁止再贴一条相同 mention。
+5. **不重复派发。** 任何补发（人工或 Dispatcher 手工 mention）必须经过 `HasPendingTaskForIssueAndAgent` / `HasActiveTaskForIssue`。`coalesced`/`deferred` 的 mention 禁止再贴一条相同 mention。
 6. **squad child-done 只叫醒 leader。** 不扇出队员（`:676-680`）。
 7. **member 父票保持静默。** 不给人类父票发系统 child-done（`:127-132`）。
 8. **backlog 父票保持静默。** 避免 #4320 / MUL-3497 的自动激活（`:119-126`）。
 9. **Agent 不得对 daemon 任务分支 `reset --hard` / `rebase`。** 已有工作流约束，close protocol 不放开。
 10. **`mention://member` 与 `mention://issue` 永不入队。** 协议里的「唤醒」只允许 `mention://agent`、`mention://squad`、或 server stage 屏障。
-11. **本阶段不启用 Autopilot 扫票。** 停滞看门是 Stage 4 的 issue 扫描 + mention，不是新 autopilot 规则（避免和权限/通知纠缠）。
-12. **不把 `KindStageWakeup` 接到新代码路径，除非 Stage 4 明确要做归因。** 今天它未被任何 enqueue 使用。
+11. **不启用 Autopilot 扫票。** server 没有 issue 停滞扫描（DENE-520 摘除 Stage 4 看门狗后恢复官方行为），停滞由既有事件 + 人发现，不引入新 autopilot 规则（避免和权限/通知纠缠）。
+12. **不把 `KindStageWakeup` 接到新代码路径。** 它未被任何 enqueue 使用；补偿扫描已摘除，也不再有归因写入。
 
 ## 6. Stage 2 接口（DENE-231 直接照做）
 
@@ -382,54 +382,20 @@ Dispatcher **禁止**在 Stage N 子票仍是 `in_review`/`blocked`/`in_progress
 ### 6.4 明确不在 Stage 2 做的
 
 - 前端展示下一唤醒者 / 阻塞原因（Stage 5）。
-- 30 分钟停滞扫描（Stage 4）。
+- 30 分钟停滞扫描（Stage 4 曾实现，DENE-520 已整层摘除）。
 - 把跨票 `waiting_on` 升级成真实父子边（Stage 3）。
 - Autopilot 规则。
 - 新的 `KindStageWakeup` 入队路径。
 
-## 7. 唤醒失败的补偿扫描入口（Stage 4 实现，本页把查询写死）
+## 7. 没有补偿扫描（DENE-520 恢复官方行为）
 
-Stage 4（DENE-233）实现下面四个入口，挂在 `delegatedFailureRecoverySweepInterval` 旁路（5 分钟，单轮 30 秒 timeout）。每个入口命中后的动作只能是：**一条带 `mention://agent|squad` 的评论**（或对已有 pending 的目标只写人读评论）。禁止自动 `done`，禁止自动晋升 `backlog` 子票，禁止换模型。child-done 五类失败另写入 `stage_wakeup_failure`。
+官方 upstream 没有唤醒失败的补偿扫描，本 fork 也不再有：DENE-233 引入的 Stage 4 看门狗（四扫描 A–D、`stagnation_watchdog*.go`、5 分钟 sweeper 旁路）已在 DENE-520 按 kk zi 的判定整层摘除。
 
-### 扫描 A — stage 屏障该关未关 / 关了父票没人跑
+- child-done 的五类失败（加载父票、列兄弟、写系统评论、enqueue agent、enqueue squad leader）只写 **best-effort warn 日志**，不重试、不落表、不补扫。状态已经提交，失败不回滚。
+- 评论 mention 的失败同样只体现在 `trigger_outcomes`（`blocked` / `coalesced` / `deferred`），没有后台补发。
+- 停滞因此只能由平台既有事件解开，或由人读评论/看板发现：§4 的 T1/T2（stage 屏障关闭）、T15（`close.waiting_on` 被等票进入终态）、T5/T9/T10（mention / 状态 / 指派入队）。
+- 保留 `stage_wakeup_failure` 表与迁移 480–482：自建实例已应用，删迁移会破坏迁移历史；表不再有新写入，也不再被读取。
 
-入口：对每个 `assignee_type ∈ {agent,squad}` 且 `status ∉ {done,cancelled,backlog}` 的父票，拉 `issue children`。
-
-命中：
-
-- 最低未完成 stage 的 `done` 计数 = `total`（按 `status_category` 终态），**并且**父票在过去 30 分钟没有该 assignee/leader 的 queued/dispatched/running task。这覆盖 T1/T2 enqueue 被吞的情况。
-- 或：最低未完成 stage 里每个子票都是 `in_review` 或 `blocked`，且 `close.at`（或 `last_activity_at`）早于 30 分钟。这覆盖 DENE-196 卡 DENE-189 Stage 3——不是 enqueue 失败，是协议误用 `in_review` 当完成。动作是 mention **父票** Dispatcher，让他决定验收还是退回，不自动 `done`。
-
-### 扫描 B — `in_progress` 无 active run
-
-入口：`status` 有效值为 `in_progress`，`HasActiveTaskForIssue = false`，`last_activity_at < now-30m`。
-
-命中后 mention 当前 assignee（agent/squad leader）。这是 DENE-233 正文的 30 分钟看门狗。`in_review`/`blocked` **排除**（与 `HandleFailedTasks` 同一理由：那时所有权在验收人或阻塞方）。
-
-### 扫描 C — child-done 日志失败
-
-入口：同一时间窗内日志含：
-
-- `child done: create system comment failed`
-- `child done: enqueue parent agent task failed`
-- `child done: enqueue parent squad leader task failed`
-- `child done: failed to load parent`
-- `child done: failed to list siblings for stage barrier`
-
-且对应 parent 仍满足扫描 A 第一条。动作同 A：mention 父 assignee，依赖 pending 去重。
-
-### 扫描 D — 显式跨票等待已解除，或 mention 唤醒没入队
-
-入口：
-
-- `close.waiting_on` 非空，被等票 `status_category ∈ {done,cancelled}`，本票仍非终态，本票 assignee 无 active task。
-- 或 `close.wake_action=mention` 且 `close.next_owner_id` 在该 issue 上无 queued/running，且 `close.at < now-30m`。
-
-动作：对本票 assignee（D1）或 `next_owner`（D2）发 mention。覆盖 DENE-209 等 DENE-196、以及 T14 评论 mention 被 invoke gate 挡掉。
-
-Stage 3 已把 D1 的**即时路径**接到被等票进入终态的同一条 status 写入上（`notifyWaitersOfIssueDone`）。扫描 D 仍是 Stage 4 的补偿：即时 enqueue 被吞、或 `close.at` 已过 30 分钟而等待方还没跑时，再 mention 一次，且必须先过 `HasActiveTaskForIssueAndAgent`。
-
-幂等：四个扫描共用「目标 `(issue, agent)` 已有 pending/running ⇒ 跳过 enqueue」。扫描周期建议 5–15 分钟，可挂在现有 `delegatedFailureRecoverySweepInterval` 旁路，**不要**新开 autopilot。
 
 ## 8. 哪些结论会唤醒谁（给 Dispatcher 的速查）
 
@@ -444,7 +410,7 @@ Stage 3 已把 D1 的**即时路径**接到被等票进入终态的同一条 sta
 
 DENE-230 本票走 `awaiting_review`：Reviewer 醒，布尔玛（父票）要等 PR 合并把本票打成 `done` 之后才被 Stage 1 屏障叫醒，然后才能把 DENE-231 从 `backlog` 提到 `todo`。
 
-## 9. Stage 3 已落地；Stage 4–5 仍预告
+## 9. Stage 3 已落地；Stage 4 已摘除（DENE-520），Stage 5 已落地
 
 ### 9.1 改造规则（DENE-232）
 
@@ -493,9 +459,9 @@ Agent 写法：
 - 不能挂的，收口时 `close.waiting_on=<identifier>`，状态保持 `in_review` / `blocked` / `in_progress`（§6.1 禁止 `done`）。
 - 被等票 `done` 时 **不要** 再 mention 等待方 assignee（server 会叫醒，mention 会双发）。
 
-### 9.2 Stage 4（已落地，DENE-233）与 Stage 5（已落地，DENE-234）
+### 9.2 Stage 4（已摘除，DENE-520）与 Stage 5（已落地，DENE-234）
 
-- **Stage 4**：第 7 节四扫描挂在 `delegatedFailureRecoverySweepInterval`（5 分钟）旁路，单轮 30 秒 timeout。命中后只写一条带 `mention://agent|squad` 的系统评论；目标 `(issue, agent)` 已有 queued/dispatched/running/waiting_local_directory 则跳过 enqueue。child-done 五类失败写入 `stage_wakeup_failure`。`close.status` 必须等于 `issue.status` 由 `closeprotocol.StatusMatchesIssue` 断言。Dispatcher 推进回合收缩为：读 `issue children` + 读 `close.*` + 晋升或短结论，禁止重型全景看板。
+- **Stage 4**：DENE-233 落地的停滞看门狗（四扫描、系统评论、`stage_wakeup_failure` 留痕、5 分钟 sweeper 旁路）已在 DENE-520 整层摘除，恢复官方行为：没有补偿扫描，child-done 唤醒失败只 warn（见 §7）。`closeprotocol.StatusMatchesIssue` 的 §6.1 断言助手保留不变。Dispatcher 推进回合收缩为：读 `issue children` + 读 `close.*` + 晋升或短结论，禁止重型全景看板。
 - **Stage 5**：在 `groupSubIssuesByStage` 旁，每个子票渲染 `SubIssueCloseStrip`（`packages/views/issues/components/sub-issue-close-strip.tsx`）：当前 stage、`close.conclusion`、下一唤醒者（`close.next_owner_type` + `close.next_owner_id`）、等待来源（`close.waiting_on`）、最近 `last_activity_at`。两种异常态显式标出，不渲染成空字段：缺 `close.*`（未按协议收口）、`close.status != issue.status`（漂移）。`blocked` / `in_review` 用 next owner + waiting_on + last_activity 表达卡在谁、卡了多久。数据源是 issue `metadata`；`issue_metadata:changed` 经 `onIssueMetadataChanged` → `patchIssueSnapshot` 写入 children cache，子票条即时刷新。独立实页验收归 Stage 6（DENE-260）。
 
 ### 9.3 效率对比（DENE-229 家族，2026-09-15）
@@ -506,7 +472,7 @@ Agent 写法：
 | --- | --- | --- |
 | 阶段数 | 隐式等待 + 串行文字依赖，阶段边界不可观察 | 6 个显式 stage（1–5 实现，6 独立验收）。Stage 1–4 已关屏障 |
 | Dispatcher 回合 | 7–17 分钟级全景看板；卡点要读评论才发现 | 屏障关闭后一次短回合：读 `issue children` + `close.*` + 晋升或短结论。本家族 4 次晋升（1→2、2→3、3→4、4→5） |
-| 停滞发现 | 靠人读评论。DENE-196 卡 DENE-189 Stage 3：人类问「为什么没人接手」后 Dispatcher 12 分钟才手工 mention | 即时路径秒级（T1/T2 stage 屏障、T15 `waiting_on`）；补偿扫描 5–15 分钟（Stage 4，挂现有 sweeper） |
+| 停滞发现 | 靠人读评论。DENE-196 卡 DENE-189 Stage 3：人类问「为什么没人接手」后 Dispatcher 12 分钟才手工 mention | 即时路径秒级（T1/T2 stage 屏障、T15 `waiting_on`）。DENE-520 后不再有补偿扫描，无即时事件覆盖的停滞仍靠人读评论发现 |
 | 总耗时 | 文字等待可无限挂（DENE-209 等 DENE-196 无人叫醒） | 本家族 Stage 1 创建 10:47:57Z → Stage 4 `close.at` 13:04:42Z，约 2.3h 走完 4 个实现 stage（含 Fable 额度失败改派） |
 
 Stage 1 DENE-230 `metadata: {}`，是真实的「未按协议收口」样本。Stage 2–4 八键齐全且 `close.status=done` 与 issue 一致。历史漂移（DENE-232 / DENE-233 曾 `close.status=in_review` 而 issue 已 `done`）由 Stage 5 的 drift 态覆盖。
@@ -523,6 +489,6 @@ Stage 1 DENE-230 `metadata: {}`，是真实的「未按协议收口」样本。S
 
 回退：squash 合入 `kun` 后，revert 该 PR（或 `git revert` 该 merge）。无 migration、无 dual-write、无 server 行为变化。`close.*` metadata 保留。
 
-回滚后行为：子票列表回到「只有 stage 分组、没有下一唤醒者 / 异常态」。调度、屏障、扫描、waiting_on 唤醒不受影响。
+回滚后行为：子票列表回到「只有 stage 分组、没有下一唤醒者 / 异常态」。调度、屏障、waiting_on 唤醒不受影响。
 
-不回滚的：Stage 1–4 的协议、扫描、waiting_on 路径。Stage 5 只是只读展示。
+不回滚的：Stage 1–3 的协议与 waiting_on 路径（Stage 4 的补偿扫描已由 DENE-520 单独摘除）。Stage 5 只是只读展示。

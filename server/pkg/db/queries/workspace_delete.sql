@@ -317,10 +317,10 @@ deleted_hourly_dirty AS (
 deleted_hourly AS (
     DELETE FROM task_usage_hourly WHERE workspace_id = $1
 ),
--- Stage-barrier wake failures are workspace-keyed diagnostics with no reader
--- outside the workspace being torn down (the stagnation watchdog only scans
--- unswept rows of live workspaces), and they carry no foreign key, so nothing
--- else removes them. Same no-FK chore as the tables below.
+-- Stage-barrier wake failures are workspace-keyed rows with no foreign key, so
+-- nothing else removes them. The Stage 4 writer was removed in DENE-520, but the
+-- table and migrations stay for self-hosted workspaces that already applied
+-- them, so the teardown keeps sweeping whatever a pre-removal build left behind.
 deleted_stage_wakeup_failures AS (
     DELETE FROM stage_wakeup_failure WHERE workspace_id = $1
 ),

@@ -500,10 +500,10 @@ WHERE channel_media_pending_object.workspace_id = $1
 // here is still removed by this teardown rather than by the FK cascade. The
 // former single statement combined all three with OR, which cost a full scan of
 // task_token (MUL-5999); split, each path is an index scan.
-// Stage-barrier wake failures are workspace-keyed diagnostics with no reader
-// outside the workspace being torn down (the stagnation watchdog only scans
-// unswept rows of live workspaces), and they carry no foreign key, so nothing
-// else removes them. Same no-FK chore as the tables below.
+// Stage-barrier wake failures are workspace-keyed rows with no foreign key, so
+// nothing else removes them. The Stage 4 writer was removed in DENE-520, but the
+// table and migrations stay for self-hosted workspaces that already applied
+// them, so the teardown keeps sweeping whatever a pre-removal build left behind.
 // Same no-FK chore for the resumable attachment staging (DENE-443). Both
 // tables are keyed by workspace_id, so the teardown never has to assemble the
 // (sha256, offset) pairs it is dropping first.
