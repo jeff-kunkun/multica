@@ -74,3 +74,42 @@ func isReadOnlyMethod(method string) bool {
 		return false
 	}
 }
+
+// issueDraftCarrierUploadPath is the ONE write an alignment carrier may make:
+// posting a file it produced for its own chat reply (DENE-590).
+//
+// The read-only scope above is about what the carrier may CHANGE in the
+// workspace — issues, comments, status, assignment. Uploading a file it just
+// made is none of those: the row it creates is bound to the carrier's own task
+// and its own chat session, and it becomes visible exactly where the carrier's
+// words already appear. An alignment that can show a mock-up but cannot hand
+// over the file is the same conversation minus the artefact, which is why
+// carrier uploads were designed for from the start (see
+// handler/issue_draft_attachment_test.go: "an HTML prototype the carrier
+// uploaded") and only the credential scope was left unfinished.
+//
+// The exception is a path allowlist, not a general "safe write" category,
+// because there is no such category: every other POST this token could reach
+// writes something the user has not confirmed. The upload endpoint's own gates
+// (handler/file.go) are what keep this narrow — a carrier upload must carry a
+// task_id equal to the token's own task, and the handler additionally refuses
+// the issue/comment/session bindings that would let one land anywhere but the
+// carrier's reply.
+const issueDraftCarrierUploadPath = "/api/upload-file"
+
+// IssueDraftScopeHeader marks a request whose credential is an alignment
+// carrier's, so the upload handler can apply the extra restrictions the scope
+// implies without re-querying the token table. Server-set only, on the same
+// terms as X-Actor-Source: the Auth middleware deletes any client-supplied
+// value before the auth branches run.
+const IssueDraftScopeHeader = "X-Actor-Scope"
+
+// IssueDraftScopeValue is the only value IssueDraftScopeHeader may carry.
+const IssueDraftScopeValue = "issue_draft"
+
+// isIssueDraftAllowedWrite reports whether a write is the one exception a
+// carrier token is granted. Exact method and exact path: a prefix or a
+// method-family match is how an allowlist stops being one.
+func isIssueDraftAllowedWrite(method, path string) bool {
+	return method == http.MethodPost && strings.TrimSuffix(path, "/") == issueDraftCarrierUploadPath
+}

@@ -29,12 +29,19 @@ import (
 // A status of http.StatusNoContent is the handler having run.
 func assertScope(t *testing.T, queries *db.Queries, method, token string) (int, http.Header) {
 	t.Helper()
+	return assertScopePath(t, queries, method, "/api/issues", token)
+}
+
+// assertScopePath is assertScope for a specific path — the allowlisted upload
+// endpoint is a property of the path as much as the method.
+func assertScopePath(t *testing.T, queries *db.Queries, method, path, token string) (int, http.Header) {
+	t.Helper()
 	var seen http.Header
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = r.Header.Clone()
 		w.WriteHeader(http.StatusNoContent)
 	})
-	req := httptest.NewRequest(method, "/api/issues", nil)
+	req := httptest.NewRequest(method, path, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	Auth(queries, nil, nil)(next).ServeHTTP(rec, req)
@@ -261,6 +268,111 @@ func TestIsReadOnlyMethod(t *testing.T) {
 	for _, method := range refused {
 		if isReadOnlyMethod(method) {
 			t.Fatalf("isReadOnlyMethod(%q) = true, want false", method)
+		}
+	}
+}
+
+// The one write a carrier is granted: posting the file it produced for its own
+// reply (DENE-590). An alignment that can describe a mock-up but cannot hand
+// over the file it just made is the bug this closes — the carrier's own
+// conversation is where the file belongs, and the upload handler is what keeps
+// it there.
+func TestIssueDraftCarrierMayUploadForItsOwnReply(t *testing.T) {
+	rig := scopeFixture(t)
+	token := rig.mintTaskToken(t, rig.carrierID, "now() + interval '1 hour'")
+
+	status, seen := assertScopePath(t, rig.queries, http.MethodPost, "/api/upload-file", token)
+	if status != http.StatusNoContent {
+		t.Fatalf("POST /api/upload-file with a carrier token: status = %d, want %d", status, http.StatusNoContent)
+	}
+	// The handler needs to know the credential was a carrier's, because the
+	// bindings it must refuse (issue_id, comment_id, chat_session_id) are form
+	// fields the middleware never sees.
+	if got := seen.Get(IssueDraftScopeHeader); got != IssueDraftScopeValue {
+		t.Fatalf("%s = %q, want %q", IssueDraftScopeHeader, got, IssueDraftScopeValue)
+	}
+}
+
+// The allowlist is one path, not a category of "harmless" writes: every other
+// POST the carrier could reach still changes something the user has not
+// confirmed.
+func TestIssueDraftCarrierUploadExceptionIsPathOnly(t *testing.T) {
+	rig := scopeFixture(t)
+	token := rig.mintTaskToken(t, rig.carrierID, "now() + interval '1 hour'")
+
+	for _, path := range []string{
+		"/api/issues",
+		"/api/upload-file/other",
+		"/api/upload-files",
+	} {
+		t.Run(path, func(t *testing.T) {
+			status, seen := assertScopePath(t, rig.queries, http.MethodPost, path, token)
+			if status != http.StatusForbidden {
+				t.Fatalf("POST %s with a carrier token: status = %d, want %d", path, status, http.StatusForbidden)
+			}
+			if seen != nil {
+				t.Fatal("downstream handler ran for a refused write")
+			}
+		})
+	}
+}
+
+// The scope marker is server-set, and the handler that reads it treats its
+// ABSENCE as "not a carrier". So a client must not be able to clear one the
+// middleware would have stamped, nor forge one on an ordinary token.
+func TestIssueDraftScopeHeaderIsServerSet(t *testing.T) {
+	rig := scopeFixture(t)
+
+	carrier := rig.mintTaskToken(t, rig.carrierID, "now() + interval '1 hour'")
+	var seen http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/upload-file", nil)
+	req.Header.Set("Authorization", "Bearer "+carrier)
+	// A carrier trying to shed its own scope so the handler stops restricting it.
+	req.Header.Set(IssueDraftScopeHeader, "")
+	rec := httptest.NewRecorder()
+	Auth(rig.queries, nil, nil)(next).ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("carrier upload: status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if got := seen.Get(IssueDraftScopeHeader); got != IssueDraftScopeValue {
+		t.Fatalf("a client-cleared %s reached the handler as %q, want %q", IssueDraftScopeHeader, got, IssueDraftScopeValue)
+	}
+
+	ordinary := rig.mintTaskToken(t, rig.ordinaryID, "now() + interval '1 hour'")
+	seen = nil
+	req = httptest.NewRequest(http.MethodPost, "/api/upload-file", nil)
+	req.Header.Set("Authorization", "Bearer "+ordinary)
+	req.Header.Set(IssueDraftScopeHeader, IssueDraftScopeValue)
+	rec = httptest.NewRecorder()
+	Auth(rig.queries, nil, nil)(next).ServeHTTP(rec, req)
+	if got := seen.Get(IssueDraftScopeHeader); got != "" {
+		t.Fatalf("a client-supplied %s survived on an ordinary token: %q", IssueDraftScopeHeader, got)
+	}
+}
+
+// The predicate itself: exact method, exact path.
+func TestIsIssueDraftAllowedWrite(t *testing.T) {
+	cases := []struct {
+		method string
+		path   string
+		want   bool
+	}{
+		{method: http.MethodPost, path: "/api/upload-file", want: true},
+		{method: http.MethodPost, path: "/api/upload-file/", want: true},
+		{method: http.MethodPut, path: "/api/upload-file", want: false},
+		{method: http.MethodDelete, path: "/api/upload-file", want: false},
+		{method: http.MethodPost, path: "/api/upload-file/bulk", want: false},
+		{method: http.MethodPost, path: "/api/upload-files", want: false},
+		{method: http.MethodPost, path: "/api/issues", want: false},
+		{method: http.MethodPost, path: "", want: false},
+	}
+	for _, tc := range cases {
+		if got := isIssueDraftAllowedWrite(tc.method, tc.path); got != tc.want {
+			t.Fatalf("isIssueDraftAllowedWrite(%q, %q) = %v, want %v", tc.method, tc.path, got, tc.want)
 		}
 	}
 }
