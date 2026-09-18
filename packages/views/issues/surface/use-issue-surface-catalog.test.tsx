@@ -26,6 +26,19 @@ import { useIssueSurfaceController } from "./use-issue-surface-controller";
  *   not be sent until the catalog proves this workspace has a custom status.
  */
 
+vi.mock("@multica/core/auth", () => ({
+  // The controller reads the current user to key the pin list — pins are
+  // per-user, and `pinned_first` is only sent once this user has one.
+  useAuthStore: Object.assign(
+    (selector?: (state: { user: { id: string } }) => unknown) => {
+      const state = { user: { id: "user-1" } };
+      return selector ? selector(state) : state;
+    },
+    { getState: () => ({ user: { id: "user-1" } }) },
+  ),
+  registerAuthStore: vi.fn(),
+}));
+
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
 const QA_ENTRY: IssueStatusEntry = {

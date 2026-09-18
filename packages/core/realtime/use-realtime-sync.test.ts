@@ -240,6 +240,59 @@ describe("applyChatSessionUpdatedToCache", () => {
     expect(row.project_id).toBeNull();
   });
 
+  // DENE-522: another device replaced the whole set, so patching only the
+  // mirrored primary would leave this tab showing chips the session no longer
+  // has.
+  it("applies the full project set from another tab", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [
+      makeSession({ project_id: "project-1", project_ids: ["project-1"] }),
+    ]);
+
+    applyChatSessionUpdatedToCache(qc, WS_ID, {
+      chat_session_id: "s1",
+      project_id: "project-1",
+      project_ids: ["project-1", "project-2"],
+    });
+
+    const row = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!;
+    expect(row.project_ids).toEqual(["project-1", "project-2"]);
+  });
+
+  it("clears the set on an explicit empty project_ids", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [
+      makeSession({ project_id: "project-1", project_ids: ["project-1"] }),
+    ]);
+
+    applyChatSessionUpdatedToCache(qc, WS_ID, {
+      chat_session_id: "s1",
+      project_id: null,
+      project_ids: [],
+    });
+
+    const row = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!;
+    expect(row.project_ids).toEqual([]);
+    expect(row.project_id).toBeNull();
+  });
+
+  // A rename/pin/archive event carries neither field; leaving the set alone is
+  // what stops an unrelated event from wiping this tab's chips.
+  it("leaves the project set untouched when the event omits it", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [
+      makeSession({ project_id: "project-1", project_ids: ["project-1"] }),
+    ]);
+
+    applyChatSessionUpdatedToCache(qc, WS_ID, {
+      chat_session_id: "s1",
+      title: "Renamed",
+    });
+
+    const row = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!;
+    expect(row.project_ids).toEqual(["project-1"]);
+  });
+
   // MUL-4360 cross-tab: chatSessionsOptions is staleTime: Infinity, so a stale
   // cache in another tab never self-heals. When an archive event lands there,
   // the row's unread must be forced to 0 to match the archive mutation and the

@@ -432,10 +432,13 @@ describe("useIssueActions", () => {
     act(() => {
       r1.current.togglePin();
     });
-    expect(mockCreatePinMutate).toHaveBeenCalledWith({
-      item_type: "issue",
-      item_id: "issue-1",
-    });
+    // The second argument is the per-call failure handler: a rejected pin used
+    // to be completely silent, because nothing optimistic happens until the
+    // server answers. (DENE-500)
+    expect(mockCreatePinMutate).toHaveBeenCalledWith(
+      { item_type: "issue", item_id: "issue-1" },
+      { onError: expect.any(Function) },
+    );
     expect(mockDeletePinMutate).not.toHaveBeenCalled();
 
     mockCreatePinMutate.mockReset();
@@ -448,11 +451,33 @@ describe("useIssueActions", () => {
     act(() => {
       r2.current.togglePin();
     });
-    expect(mockDeletePinMutate).toHaveBeenCalledWith({
-      itemType: "issue",
-      itemId: "issue-1",
-    });
+    expect(mockDeletePinMutate).toHaveBeenCalledWith(
+      { itemType: "issue", itemId: "issue-1" },
+      { onError: expect.any(Function) },
+    );
     expect(mockCreatePinMutate).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed pin instead of leaving the icon unchanged in silence", async () => {
+    pinListRef.value = [];
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+    await waitFor(() => {
+      expect(result.current.isPinned).toBe(false);
+    });
+
+    act(() => {
+      result.current.togglePin();
+    });
+    // The mutation itself would call this; invoke it the way React Query does
+    // on a rejected request.
+    const options = mockCreatePinMutate.mock.calls[0]?.[1] as {
+      onError: () => void;
+    };
+    expect(options?.onError).toBeTypeOf("function");
+    act(() => {
+      options.onError();
+    });
+    expect(toast.error).toHaveBeenCalledTimes(1);
   });
 
   it("is a safe no-op when issue is null", () => {

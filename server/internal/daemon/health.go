@@ -91,6 +91,22 @@ type HealthResponse struct {
 	// individual quota is exhausted until reset_at. Always present (possibly
 	// empty) so Desktop can clear a recovered X without waiting for register.
 	AgyQuotaExhausted []agyQuotaExhaustedEntry `json:"agy_quota_exhausted"`
+	// AgentAccounts is the live multi-CLI account overlay: every existing
+	// account directory of every CLI this daemon knows how to probe, with its
+	// binding lever and credential-existence status. Always present, possibly
+	// empty — Desktop merges it onto runtime metadata so the account surface
+	// updates after a login without waiting for the next re-register, and
+	// reads the empty array as "no accounts" rather than "no answer".
+	//
+	// No credential value can appear here: see AgentAccount, which has no field
+	// able to carry one.
+	AgentAccounts []AgentAccount `json:"agent_accounts"`
+	// AgentAccountsError explains why the probe failed, and is omitted when it
+	// did not. It is what separates the account surface's empty state from its
+	// error state, so it is required rather than optional: with only an empty
+	// AgentAccounts the two are indistinguishable and the UI would offer
+	// editing affordances over a list it could not read.
+	AgentAccountsError string `json:"agent_accounts_error,omitempty"`
 }
 
 type healthWorkspace struct {
@@ -343,6 +359,12 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			status = "running"
 		}
 
+		// The account probe never decides liveness: a host whose home is
+		// unreadable still answers 200 with the error in the body, because a
+		// /health that fails would take the daemon down for a display-only
+		// channel.
+		agentAccounts, agentAccountsErr := d.agentAccountsReport(time.Now())
+
 		resp := HealthResponse{
 			Status:                status,
 			PID:                   os.Getpid(),
@@ -365,6 +387,8 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			PlanLimits:          d.planLimitsByProvider(),
 			AgyLoggedInDirs:     currentAgyLoggedInDirs(),
 			AgyQuotaExhausted:   d.agyQuotaOverlay(time.Now()),
+			AgentAccounts:       agentAccounts,
+			AgentAccountsError:  agentAccountsErr,
 		}
 		if reporter, ok := d.repoCache.(interface{ Activity() repocache.Activity }); ok {
 			activity := reporter.Activity()

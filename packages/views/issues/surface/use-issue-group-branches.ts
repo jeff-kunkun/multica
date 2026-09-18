@@ -19,6 +19,7 @@ import {
   issueTableRowPageOptions,
 } from "@multica/core/issues/queries";
 import { issueStatusCategory } from "@multica/core/issues";
+import { pinnedIssueIdsFromRows } from "@multica/core/issues/surface/pinned-first";
 import type {
   Issue,
   IssueTableGroupDescriptor,
@@ -42,6 +43,8 @@ export interface IssueGroupBranches {
   enabled: boolean;
   descriptors: IssueTableGroupDescriptor[];
   issues: Issue[];
+  /** Issue ids this window's own `/table/rows` pages reported as pinned. */
+  pinnedIssueIds: ReadonlySet<string>;
   pagination: Record<string, IssueGroupPageState>;
   total: number;
   isLoading: boolean;
@@ -482,10 +485,27 @@ export function useIssueGroupBranches({
     void refetchGroups();
   }, [refetchGroups]);
 
+
+  // The pinned ids the SERVER ranked, read off the rows themselves. A
+  // projection of each row's own `is_pinned`, never a re-derivation from the
+  // sidebar pin list: a pin the server did not rank (filtered out of this
+  // query, or another arm's row not yet paged in) must not lead a client sort
+  // or draw a badge. (DENE-500)
+  const pinnedIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const queryResult of pageResults) {
+      for (const id of pinnedIssueIdsFromRows(queryResult.data?.rows ?? [])) {
+        ids.add(id);
+      }
+    }
+    return ids;
+  }, [pageResults]);
+
   return {
     enabled,
     descriptors,
     issues,
+    pinnedIssueIds,
     pagination,
     // `/groups` owns the exact query-wide visible total. Deriving it from
     // loaded descriptors made a hidden-only first group page look globally

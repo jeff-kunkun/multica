@@ -279,7 +279,7 @@ describe("auxiliary revision — sibling caches under a shared key prefix", () =
       group_key: null,
       parent_id: null,
       total: 1,
-      rows: [{ issue: issue(2, "stale row"), direct_child_count: 0 }],
+      rows: [{ issue: issue(2, "stale row"), direct_child_count: 0, is_pinned: false }],
       branch_total: 1,
       next_cursor: null,
     });
@@ -309,7 +309,7 @@ describe("auxiliary revision — sibling caches under a shared key prefix", () =
       group_key: null,
       parent_id: null,
       total: 1,
-      rows: [{ issue: issue(3, "current row"), direct_child_count: 0 }],
+      rows: [{ issue: issue(3, "current row"), direct_child_count: 0, is_pinned: false }],
       branch_total: 1,
       next_cursor: null,
     });

@@ -35,10 +35,12 @@ const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
 const mockListProperties = vi.hoisted(() => vi.fn());
+const mockListIssueDrafts = vi.hoisted(() => vi.fn());
 const mockSetIssueProperty = vi.hoisted(() => vi.fn());
 const mockSetShared = vi.hoisted(() => vi.fn());
 const mockSetManual = vi.hoisted(() => vi.fn());
 const mockSetAgent = vi.hoisted(() => vi.fn());
+const mockSetAlign = vi.hoisted(() => vi.fn());
 const mockSetActiveMode = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
@@ -139,7 +141,10 @@ const emptyIssueDraft = () => ({
     actorType: undefined as "agent" | "squad" | undefined,
     actorId: undefined as string | undefined,
   },
-  activeMode: "manual" as "manual" | "agent",
+  align: {
+    request: "",
+  },
+  activeMode: "manual" as "manual" | "agent" | "align",
 });
 
 const mockDraftStore = {
@@ -149,10 +154,10 @@ const mockDraftStore = {
   setShared: mockSetShared,
   setManual: mockSetManual,
   setAgent: mockSetAgent,
+  setAlign: mockSetAlign,
   setActiveMode: mockSetActiveMode,
   clearDraft: mockClearDraft,
   setLastAssignee: mockSetLastAssignee,
-  hasDraft: () => false,
 };
 
 const mockQuickCreateStore = {
@@ -325,6 +330,7 @@ vi.mock("@multica/core/api", async () => {
   return {
     api: {
       createCommentSubIssue: mockCreateCommentSubIssue,
+      listIssueDrafts: mockListIssueDrafts,
       listProperties: mockListProperties,
       setIssueProperty: mockSetIssueProperty,
       uploadFile: mockApiUploadFile,
@@ -500,10 +506,16 @@ vi.mock("../projects/components/project-picker", () => ({
 }));
 
 vi.mock("@multica/ui/components/ui/dialog", () => ({
-  Dialog: ({ children }: { children: React.ReactNode }) => <div data-testid="dialog-root">{children}</div>,
+  // `open` is honoured (defaulting to open) so a nested dialog this panel
+  // hosts — the unfinished-alignments list — is not rendered before it is
+  // asked for.
+  Dialog: ({ open, children }: { open?: boolean; children: React.ReactNode }) =>
+    open === false ? null : <div data-testid="dialog-root">{children}</div>,
   DialogContent: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
   ),
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
   ),
@@ -642,12 +654,16 @@ describe("CreateIssueModal", () => {
     mockSetAgent.mockImplementation((patch: Partial<typeof mockDraftStore.draft.agent>) => {
       mockDraftStore.draft.agent = { ...mockDraftStore.draft.agent, ...patch };
     });
+    mockSetAlign.mockImplementation((patch: Partial<typeof mockDraftStore.draft.align>) => {
+      mockDraftStore.draft.align = { ...mockDraftStore.draft.align, ...patch };
+    });
     mockClearDraft.mockImplementation(() => {
       const next = emptyIssueDraft();
       next.manual.assigneeType = mockDraftStore.lastAssigneeType;
       next.manual.assigneeId = mockDraftStore.lastAssigneeId;
       mockDraftStore.draft = next;
     });
+    mockListIssueDrafts.mockResolvedValue([]);
     mockApiUploadFile.mockResolvedValue({
       id: "11111111-2222-3333-4444-555555555555",
       workspace_id: "ws-test",
@@ -1088,6 +1104,152 @@ describe("CreateIssueModal", () => {
     expect(onSwitchMode.mock.calls[0]?.[0]).toBeNull();
   });
 
+  // DENE-443: the unfinished-alignment banner used to hang off the align face
+  // only, so the toolbar's own "switch to New issue" hid the single route back
+  // into a conversation already in progress.
+  it("keeps unfinished alignments reachable from the manual face", async () => {
+    mockListIssueDrafts.mockResolvedValue([
+      {
+        chat_session_id: "sess-1",
+        workspace_id: "ws-test",
+        status: "draft",
+        revision: 1,
+        draft: { title: "Dark mode", description: "", status: "", priority: "" },
+        issue_id: null,
+        policy: { key: "question", version: "1", guided: true },
+        capabilities: { keys: [], version: "" },
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        title: "Align a new issue",
+        runtime_id: "rt-1",
+        last_message_content: "",
+        last_message_role: "",
+        last_message_at: "",
+      },
+      // A confirmed alignment is a RECORD, not work to resume, so the count
+      // the banner shows must be the unfinished one only.
+      {
+        chat_session_id: "sess-2",
+        workspace_id: "ws-test",
+        status: "completed",
+        revision: 4,
+        draft: { title: "Shipped", description: "", status: "", priority: "" },
+        issue_id: "issue-9",
+        policy: { key: "question", version: "1", guided: true },
+        capabilities: { keys: [], version: "" },
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        title: "Align a new issue",
+        runtime_id: "rt-1",
+        last_message_content: "",
+        last_message_role: "",
+        last_message_at: "",
+      },
+    ]);
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByText(/You have 1 unfinished alignment/),
+    ).toBeTruthy();
+  });
+
+  it("shows no alignment banner on the manual face when nothing is unfinished", async () => {
+    // The precondition for putting it here at all: a user who never aligns
+    // must see no new chrome on the form they do use.
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    await screen.findByPlaceholderText("Issue title");
+    expect(screen.queryByText(/unfinished alignment/)).toBeNull();
+  });
+
+  // DENE-370: "align first" is the create-issue shell's third face. Switching
+  // to it must carry what the user already wrote — the same one-time
+  // assist-init the agent prompt gets — so nobody retypes their request.
+  it("assist-inits the alignment request from the title and description", async () => {
+    const user = userEvent.setup();
+    const onSwitchMode = vi.fn();
+    const onSwitchToAlign = vi.fn();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={onSwitchMode}
+        onSwitchToAlign={onSwitchToAlign}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
+    await user.type(screen.getByPlaceholderText("Add description..."), "Split the middleware");
+    await user.click(screen.getByRole("button", { name: /Align first/i }));
+
+    // The body rides the shared draft store (the align face reads its own
+    // slot); the two switch targets stay distinct callbacks, so this can never
+    // land on the agent face by mistake.
+    expect(onSwitchToAlign).toHaveBeenCalledTimes(1);
+    expect(onSwitchMode).not.toHaveBeenCalled();
+    expect(mockSetAlign).toHaveBeenCalledWith({
+      request: "Refactor auth\n\nSplit the middleware",
+    });
+  });
+
+  // An already-written alignment request is the user's own text: a later
+  // manual→align flip must not clobber it with whatever the manual face holds.
+  it("does not overwrite an alignment request the user already edited", async () => {
+    mockDraftStore.draft.align.request = "what I actually want to align";
+    const user = userEvent.setup();
+    const onSwitchToAlign = vi.fn();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        onSwitchToAlign={onSwitchToAlign}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
+    await user.click(screen.getByRole("button", { name: /Align first/i }));
+
+    expect(onSwitchToAlign).toHaveBeenCalledTimes(1);
+    expect(mockSetAlign).not.toHaveBeenCalled();
+  });
+
+  it("hides the alignment entry while a source context is captured", () => {
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        onSwitchToAlign={vi.fn()}
+        data={sourceContextPanelData()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    // The alignment conversation starts from the request alone and has no
+    // place to carry the captured thread, so offering it here would silently
+    // drop what the dialog was opened for.
+    expect(screen.queryByRole("button", { name: /Align first/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Switch to Agent/i })).toBeTruthy();
+  });
+
   // Reporter scenario: backend rejects same-titled create with a 409 +
   // structured duplicate body. The user should land on a duplicate toast
   // pointing at the existing issue, not a generic "create failed" message.
@@ -1225,6 +1387,35 @@ describe("CreateIssueModal", () => {
       expect.objectContaining({ projectId: "proj-1" }),
     );
     expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
+  });
+
+  // Same contract on the way to the alignment face (DENE-423): the alignment
+  // entry and the preview panel both read the project off this slot, so a
+  // project seeded from a project page — or picked here — has to be committed
+  // before the switch, not left in local state the other face cannot see.
+  it("commits the picked project to the shared draft when switching to alignment", async () => {
+    const user = userEvent.setup();
+    const onSwitchMode = vi.fn();
+    const onSwitchToAlign = vi.fn();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={onSwitchMode}
+        onSwitchToAlign={onSwitchToAlign}
+        data={{ project_id: "proj-1" }}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
+    await user.click(screen.getByRole("button", { name: /Align first/i }));
+
+    expect(onSwitchToAlign).toHaveBeenCalledTimes(1);
+    expect(mockSetShared).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "proj-1" }),
+    );
   });
 
   it("restores an unfinished project selection after manual create remounts", async () => {
@@ -1620,15 +1811,17 @@ describe("CreateIssueModal", () => {
     }
 
     function renderManual(onSwitchMode = vi.fn()) {
+      const onSwitchToAlign = vi.fn();
       const view = renderModal(
         <ManualCreatePanel
           onClose={vi.fn()}
           onSwitchMode={onSwitchMode}
+          onSwitchToAlign={onSwitchToAlign}
           isExpanded={false}
           setIsExpanded={vi.fn()}
         />,
       );
-      return { ...view, onSwitchMode };
+      return { ...view, onSwitchMode, onSwitchToAlign };
     }
 
     it("disables Create and shows Uploading… while an upload is in flight", async () => {
@@ -1699,6 +1892,22 @@ describe("CreateIssueModal", () => {
       await waitFor(() => expect(switchButton).toBeDisabled());
       fireEvent.click(switchButton);
       expect(onSwitchMode).not.toHaveBeenCalled();
+    });
+
+    it("blocks the switch to alignment while an upload is in flight", async () => {
+      const user = userEvent.setup();
+      const { onSwitchToAlign } = renderManual();
+      await user.type(screen.getByPlaceholderText("Issue title"), "Has a screenshot");
+
+      startPendingUpload();
+
+      // Same reason as Switch to Agent: the switch snapshots the body into the
+      // alignment request while the pending image is still only a blob.
+      const switchButton = screen.getByRole("button", { name: /Align first/i });
+      await waitFor(() => expect(switchButton).toBeDisabled());
+      fireEvent.click(switchButton);
+      expect(onSwitchToAlign).not.toHaveBeenCalled();
+      expect(mockSetAlign).not.toHaveBeenCalled();
     });
   });
 

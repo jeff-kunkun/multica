@@ -96,25 +96,67 @@ export function buildColumns(
   return cols;
 }
 
-export function computePosition(ids: string[], activeId: string, issueMap: Map<string, Issue>): number {
+export function computePosition(
+  ids: string[],
+  activeId: string,
+  issueMap: Map<string, Issue>,
+  pinnedIds?: ReadonlySet<string>,
+): number {
   const idx = ids.indexOf(activeId);
   if (idx === -1) return 0;
   const getPos = (id: string) => issueMap.get(id)?.position ?? 0;
-  if (ids.length === 1) return issueMap.get(activeId)?.position ?? 0;
-  if (idx === 0) return getPos(ids[1]!) - 1;
-  if (idx === ids.length - 1) return getPos(ids[idx - 1]!) + 1;
-  return (getPos(ids[idx - 1]!) + getPos(ids[idx + 1]!)) / 2;
+  // Anchored exactly where getMoveAnchors anchors, so the position the row is
+  // written with and the before_id/after_id the server is told about describe
+  // the same slot — otherwise a clamped drop would still write a position
+  // inside the pinned block.
+  const { before_id, after_id } = getMoveAnchors(ids, activeId, pinnedIds);
+  if (!before_id && !after_id) return issueMap.get(activeId)?.position ?? 0;
+  if (!before_id) return getPos(after_id!) - 1;
+  if (!after_id) return getPos(before_id) + 1;
+  return (getPos(before_id) + getPos(after_id!)) / 2;
 }
 
+/**
+ * The neighbours a drop is allowed to anchor against.
+ *
+ * The pinned block is a barrier, never a range a row can be inserted into: a
+ * row only takes anchors from a neighbour in its OWN arm, so a plain row
+ * dropped among pinned rows lands immediately below the block and a pinned row
+ * cannot fall out of it. Without this the pair of anchors would name a pinned
+ * and a plain row, and the server would compute a shared mid-position — which
+ * is also why neither the anchors nor the move ever write `issue.position` for
+ * a pin: `position` is a workspace-wide field and pins are per-user, so
+ * pinning must not rewrite everyone's manual order. (DENE-500)
+ */
 export function getMoveAnchors(
   ids: readonly string[],
   activeId: string,
+  pinnedIds?: ReadonlySet<string>,
 ): Pick<DragMoveUpdates, "before_id" | "after_id"> {
   const index = ids.indexOf(activeId);
-  return {
-    before_id: index > 0 ? ids[index - 1]! : null,
-    after_id: index >= 0 && index < ids.length - 1 ? ids[index + 1]! : null,
-  };
+  if (!pinnedIds || index === -1) {
+    return {
+      before_id: index > 0 ? ids[index - 1]! : null,
+      after_id: index >= 0 && index < ids.length - 1 ? ids[index + 1]! : null,
+    };
+  }
+  const activePinned = pinnedIds.has(activeId);
+  const sameArm = (id: string) => pinnedIds.has(id) === activePinned;
+  let beforeId: string | null = null;
+  for (let i = index - 1; i >= 0; i -= 1) {
+    if (sameArm(ids[i]!)) {
+      beforeId = ids[i]!;
+      break;
+    }
+  }
+  let afterId: string | null = null;
+  for (let i = index + 1; i < ids.length; i += 1) {
+    if (sameArm(ids[i]!)) {
+      afterId = ids[i]!;
+      break;
+    }
+  }
+  return { before_id: beforeId, after_id: afterId };
 }
 
 /**

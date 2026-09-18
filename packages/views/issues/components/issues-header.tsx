@@ -299,11 +299,31 @@ function useIssueCounts(
   }, [allIssues, serverFacets]);
 }
 
+/** Every toolbar filter entry point badges its options from the same counts,
+ *  so the quick filter and the Filter menu can never disagree. */
+function useFilterCounts(
+  scopedIssues: Issue[],
+  facetCountsExact: boolean | undefined,
+  tableFacetCounts: IssueTableFacetsResponse | undefined,
+) {
+  return useIssueCounts(
+    facetCountsExact ? scopedIssues : NO_COUNT_ISSUES,
+    tableFacetCounts,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Scope config
 // ---------------------------------------------------------------------------
 
 const SCOPE_VALUES: IssuesScope[] = ["all", "members", "agents"];
+
+// Toolbar controls share one geometry: icon-only on narrow screens, label
+// from md up. An active filter swaps the outline for the brand fill.
+const CONTROL_BUTTON_CLASS =
+  "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
+const CONTROL_BUTTON_ACTIVE_CLASS =
+  "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:h-7 md:w-auto md:px-2.5";
 
 // ---------------------------------------------------------------------------
 // Actor sub-menu content (shared between Assignee and Creator)
@@ -590,6 +610,121 @@ function ProjectSubContent({
         )}
       </div>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Project quick filter (toolbar level)
+// ---------------------------------------------------------------------------
+
+/**
+ * The project filter promoted out of the Filter menu (DENE-499). It opens the
+ * SAME `ProjectSubContent` over the SAME `projectFilters` / `includeNoProject`
+ * state, so the two entry points can never disagree — no parallel state, no
+ * second copy of the project list.
+ *
+ * The trigger carries the current selection: nothing selected reads "Project",
+ * one project shows its icon and name, several keep the first name and count
+ * the rest as `+N`.
+ *
+ * The per-project counts are the server's facets, so opening this menu asks for
+ * the project facet exactly as the Filter menu's project sub-menu does — the
+ * same request, keyed to the same `activeTableFacet`. Without it the badges
+ * would be empty on every paged surface, because those never count client-side.
+ */
+function IssueProjectFilterMenu({
+  counts,
+  noProjectCount,
+  onTableFacetChange,
+}: {
+  counts: Map<string, number>;
+  noProjectCount: number;
+  onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
+}) {
+  const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const projectFilters = useViewStore((s) => s.projectFilters);
+  const includeNoProject = useViewStore((s) => s.includeNoProject);
+  const act = useViewStoreApi().getState();
+  const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const projectById = useMemo(
+    () => new Map(projects.map((p) => [p.id, p])),
+    [projects],
+  );
+  // A filter can outlive the project it names (deleted elsewhere): the name
+  // falls back to the generic label rather than rendering an empty trigger.
+  const selectedProjects = projectFilters
+    .map((id) => projectById.get(id))
+    .filter((p): p is (typeof projects)[number] => p !== undefined);
+  const selectedCount = projectFilters.length + (includeNoProject ? 1 : 0);
+  const hasSelection = selectedCount > 0;
+  const lead = selectedProjects[0];
+  // "No project" alone is its own state — it has no project name to lead with.
+  const noProjectOnly = includeNoProject && projectFilters.length === 0;
+  const extra = selectedCount - 1;
+
+  const label = !hasSelection
+    ? t(($) => $.filters.section_project)
+    : noProjectOnly
+      ? t(($) => $.filters.no_project)
+      : lead?.title ?? t(($) => $.filters.section_project);
+
+  return (
+    <DropdownMenu
+      onOpenChange={(open) =>
+        onTableFacetChange?.(open ? { kind: "project" } : null)
+      }
+    >
+      <Tooltip>
+        <DropdownMenuTrigger
+          render={
+            <TooltipTrigger
+              render={
+                <Button
+                  variant={hasSelection ? "default" : "outline"}
+                  size="sm"
+                  data-slot="project-filter-trigger"
+                  className={
+                    hasSelection ? CONTROL_BUTTON_ACTIVE_CLASS : CONTROL_BUTTON_CLASS
+                  }
+                >
+                  {!hasSelection ? (
+                    <FolderKanban className="size-3.5" />
+                  ) : noProjectOnly ? (
+                    <FolderMinus className="size-3.5" />
+                  ) : (
+                    <ProjectIcon project={lead} />
+                  )}
+                  <span className="hidden max-w-40 truncate md:inline">{label}</span>
+                  {extra > 0 && <span className="tabular-nums">+{extra}</span>}
+                </Button>
+              }
+            />
+          }
+        />
+        <TooltipContent side="bottom">{t(($) => $.filters.project_tooltip)}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-auto min-w-52 p-0">
+        <ProjectSubContent
+          counts={counts}
+          selected={projectFilters}
+          onToggle={act.toggleProjectFilter}
+          includeNoProject={includeNoProject}
+          onToggleNoProject={act.toggleNoProject}
+          noProjectCount={noProjectCount}
+        />
+        {hasSelection && (
+          <>
+            <DropdownMenuSeparator />
+            {/* Same clear as the project chip's X: both halves of the
+                dimension go together. */}
+            <DropdownMenuItem onClick={() => act.clearFilterDimension("project")}>
+              {t(($) => $.filters.project_clear)}
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1341,6 +1476,7 @@ export function IssuesHeader({
             tableFacetCounts={tableFacetCounts}
             onTableFacetChange={onTableFacetChange}
             viewBaseline={viewBaseline}
+            projectScopeFixed={saveViewScope?.kind === "project"}
           />
           <ViewRefreshIndicator active={isRefreshing} />
         </div>
@@ -1442,10 +1578,7 @@ export function IssueFilterMenu({
       workspaceProperties.filter((p) => isFilterablePropertyType(p.type)),
     [workspaceProperties],
   );
-  const counts = useIssueCounts(
-    facetCountsExact ? scopedIssues : NO_COUNT_ISSUES,
-    tableFacetCounts,
-  );
+  const counts = useFilterCounts(scopedIssues, facetCountsExact, tableFacetCounts);
   const showDateFilter = !!onDateFilterChange;
   const effectivePropertyFilters = useMemo(() => {
     const activeIds = new Set(filterableProperties.map((p) => p.id));
@@ -1817,6 +1950,7 @@ export function IssueDisplayControls({
   tableFacetCounts,
   onTableFacetChange,
   viewBaseline,
+  projectScopeFixed = false,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
@@ -1825,6 +1959,10 @@ export function IssueDisplayControls({
   /** Open saved view: menu marks the view's values checked-and-disabled;
    *  the trigger count only counts additions on top. */
   viewBaseline?: IssueViewBaseline;
+  /** The surface IS one project (project detail): the project dimension is
+   *  pinned before any filter runs. See `projectFilterPinned` for the other
+   *  half of the rule — a saved view that fixes projects. */
+  projectScopeFixed?: boolean;
   // Only Project Detail renders <GanttView>; other surfaces (global /issues,
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
@@ -1861,6 +1999,7 @@ export function IssueDisplayControls({
   const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
   const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
+  const hideCompletedParents = useViewStore((s) => s.hideCompletedParents);
   const act = useViewStoreApi().getState();
   const headerWsId = useWorkspaceId();
   // Active custom-property catalog: drives the filter sections, dynamic
@@ -1982,10 +2121,28 @@ export function IssueDisplayControls({
         : effectiveTableGrouping === "project"
           ? t(($) => $.table.columns.project)
           : t(($) => $.table.group_none);
-  const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
+
+  // The project dimension can be pinned from two directions: the surface is
+  // one project (project detail), or the open saved view fixes projects. A
+  // toolbar quick filter would then only offer ways to filter the page down to
+  // nothing, so it stays hidden — the Filter menu's project section, which
+  // honors fixedIds, remains the entry point.
+  const projectFilterPinned =
+    projectScopeFixed ||
+    (viewBaseline !== undefined &&
+      (viewBaseline.project.size > 0 || viewBaseline.includeNoProject));
+  const counts = useFilterCounts(scopedIssues, facetCountsExact, tableFacetCounts);
 
   return (
     <div className="flex shrink-0 items-center gap-1">
+        {!projectFilterPinned && (
+          <IssueProjectFilterMenu
+            counts={counts.project}
+            noProjectCount={counts.noProject}
+            onTableFacetChange={onTableFacetChange}
+          />
+        )}
+
         <IssueFilterMenu
           trigger={
             <Button
@@ -1993,8 +2150,8 @@ export function IssueDisplayControls({
               size="sm"
               className={
                 hasActiveFilters
-                  ? "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:h-7 md:w-auto md:px-2.5"
-                  : controlButtonClass
+                  ? CONTROL_BUTTON_ACTIVE_CLASS
+                  : CONTROL_BUTTON_CLASS
               }
             >
               <Filter className="size-3.5" />
@@ -2028,7 +2185,7 @@ export function IssueDisplayControls({
                 <Button
                   variant="outline"
                   size="sm"
-                  className={controlButtonClass}
+                  className={CONTROL_BUTTON_CLASS}
                 >
                   <Rows3 className="size-3.5" />
                   <span className="hidden md:inline">
@@ -2086,7 +2243,7 @@ export function IssueDisplayControls({
               <Button
                 variant="outline"
                 size="sm"
-                className={controlButtonClass}
+                className={CONTROL_BUTTON_CLASS}
               >
                 <Columns3 className="size-3.5" />
                 <span className="hidden md:inline">
@@ -2105,7 +2262,7 @@ export function IssueDisplayControls({
               render={
                 <TooltipTrigger
                   render={
-                    <Button variant="outline" size="sm" className={controlButtonClass}>
+                    <Button variant="outline" size="sm" className={CONTROL_BUTTON_CLASS}>
                       <SlidersHorizontal className="size-3.5" />
                       <span className="hidden md:inline">{t(($) => $.display.button)}</span>
                     </Button>
@@ -2276,6 +2433,21 @@ export function IssueDisplayControls({
                   onCheckedChange={() => act.toggleShowSubIssues()}
                 />
               </label>
+              <label className="flex cursor-pointer items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block text-caption font-medium text-muted-foreground">
+                    {t(($) => $.display.hide_completed_parents)}
+                  </span>
+                  <span className="block text-caption text-faint-foreground">
+                    {t(($) => $.display.hide_completed_parents_description)}
+                  </span>
+                </span>
+                <Switch
+                  size="sm"
+                  checked={hideCompletedParents}
+                  onCheckedChange={() => act.toggleHideCompletedParents()}
+                />
+              </label>
               {availableCardPropertyOptions.length > 0 && (
                 <div>
                   <span className="text-caption font-medium text-muted-foreground">
@@ -2325,7 +2497,7 @@ export function IssueDisplayControls({
                 render={
                   <TooltipTrigger
                     render={
-                      <Button variant="outline" size="sm" className={controlButtonClass}>
+                      <Button variant="outline" size="sm" className={CONTROL_BUTTON_CLASS}>
                         {viewMode === "board" ? (
                           <Columns3 className="size-3.5" />
                         ) : viewMode === "table" ? (

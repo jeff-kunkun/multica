@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useInfiniteQuery,
   useQuery,
@@ -30,10 +30,14 @@ import {
 import {
   useCreateChatSession,
   useMarkChatSessionRead,
-  useSetChatSessionProject,
+  useSetChatSessionProjects,
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import {
+  chatSessionProjectIds,
+  sameProjectIds,
+} from "@multica/core/chat/project-context";
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import {
   enqueuePendingChatTask,
@@ -95,48 +99,46 @@ export function isStillOnComposeTarget(
 }
 
 /**
- * Decide what a project-context change should do, given the open session.
+ * Decide what a project-set change should do, given the open session.
  *
  *  - `awaitSession`: an active session id is set but its row has not loaded
  *    yet. Bail so a persisted selection resolving before its sessions query
  *    cannot misfile a project change into the new-chat draft.
- *  - `detachCurrent`: removing context from the open session — safe in place,
- *    it only changes what future turns receive.
- *  - `startFreshChat`: switching to a DIFFERENT project. A fresh chat is
- *    started so the old project's provider memory / reused workdir cannot
- *    bleed in. It must stay bound to the agent whose session we are leaving
- *    (`agentId`): clearing the active session otherwise drops selection back
- *    to the stored `selectedAgentId`, which can be a stale preference for a
- *    different agent, sending the lazily-created session to the wrong agent.
- *  - `setDraftProject`: no open session, so this only adjusts the new-chat
- *    draft's project.
+ *  - `updateCurrent`: rewrite the open session's set in place. Safe: it only
+ *    changes what FUTURE turns receive, and the server keeps the whole set in
+ *    one transaction.
+ *  - `setDraftProjects`: no open session, so this only adjusts the new-chat
+ *    draft's set.
+ *
+ * A chat can hold several projects at once (DENE-522), so attaching one no
+ * longer starts a fresh chat. That rule existed to stop a project the session
+ * had just LEFT from bleeding in through provider memory or a reused workdir —
+ * with a set, attaching adds context without dropping any, and detaching was
+ * already done in place. A wholesale swap, the only case the old rule covered,
+ * is no longer reachable: every affordance here toggles or replaces one entry.
  *
  * Shared by both send chains — the chat tab's controller and the floating
- * ChatWindow — so the stale-agent rule cannot drift between the two surfaces.
+ * ChatWindow — so the two surfaces cannot drift apart.
  */
 export type ProjectContextChange =
   | { kind: "awaitSession" }
-  | { kind: "detachCurrent"; sessionId: string }
-  | { kind: "startFreshChat"; agentId: string; projectId: string }
-  | { kind: "setDraftProject"; projectId: string | null };
+  | { kind: "updateCurrent"; sessionId: string; projectIds: string[] }
+  | { kind: "setDraftProjects"; projectIds: string[] };
 
 export function planProjectContextChange(input: {
-  targetProjectId: string | null;
+  targetProjectIds: string[];
   activeSessionId: string | null;
   currentSession: { id: string; agent_id: string } | null;
 }): ProjectContextChange {
   if (input.activeSessionId) {
     if (!input.currentSession) return { kind: "awaitSession" };
-    if (input.targetProjectId === null) {
-      return { kind: "detachCurrent", sessionId: input.currentSession.id };
-    }
     return {
-      kind: "startFreshChat",
-      agentId: input.currentSession.agent_id,
-      projectId: input.targetProjectId,
+      kind: "updateCurrent",
+      sessionId: input.currentSession.id,
+      projectIds: input.targetProjectIds,
     };
   }
-  return { kind: "setDraftProject", projectId: input.targetProjectId };
+  return { kind: "setDraftProjects", projectIds: input.targetProjectIds };
 }
 
 // True when a session has an in-flight pending task in the cache — the signal
@@ -208,10 +210,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const wsId = useWorkspaceId();
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
-  const selectedProjectId = useChatStore((s) => s.selectedProjectId);
+  const selectedProjectIds = useChatStore((s) => s.selectedProjectIds);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
-  const setSelectedProjectId = useChatStore((s) => s.setSelectedProjectId);
+  const setSelectedProjectIds = useChatStore((s) => s.setSelectedProjectIds);
   const user = useAuthStore((s) => s.user);
   const { data: agents = [], isSuccess: agentsLoaded } = useQuery(
     agentListOptions(wsId),
@@ -302,28 +304,42 @@ export function useChatController(opts?: { isActive?: boolean }) {
     ? sessions.find((s) => s.id === activeSessionId)
     : null;
   const isSessionArchived = currentSession?.status === "archived";
-  const candidateProjectId = currentSession
-    ? currentSession.project_id ?? null
-    : selectedProjectId;
-  const activeProjectId = candidateProjectId &&
-    (!projectsLoaded || projects.some((project) => project.id === candidateProjectId))
-    ? candidateProjectId
-    : null;
+  // An open session's server-persisted set wins; only a new chat reads the
+  // locally persisted draft set.
+  const candidateProjectIds = useMemo(
+    () => (currentSession ? chatSessionProjectIds(currentSession) : selectedProjectIds),
+    [currentSession, selectedProjectIds],
+  );
+  // Until the project list settles, show the set as-is rather than hiding
+  // chips that cannot be confirmed yet; once it has loaded, a project missing
+  // from it is gone and drops out.
+  const activeProjectIds = useMemo(
+    () =>
+      projectsLoaded
+        ? candidateProjectIds.filter((id) =>
+            projects.some((project) => project.id === id),
+          )
+        : candidateProjectIds,
+    [projectsLoaded, projects, candidateProjectIds],
+  );
 
   // A project may be deleted on another client while this workspace's next
   // chat preference is still persisted locally. Normalize it as soon as the
   // authoritative project list settles so a future send cannot carry a stale
   // selection.
   useEffect(() => {
-    if (!projectsLoaded || !selectedProjectId) return;
-    if (projects.some((project) => project.id === selectedProjectId)) return;
-    setSelectedProjectId(null);
-  }, [projectsLoaded, projects, selectedProjectId, setSelectedProjectId]);
+    if (!projectsLoaded || selectedProjectIds.length === 0) return;
+    const live = selectedProjectIds.filter((id) =>
+      projects.some((project) => project.id === id),
+    );
+    if (live.length === selectedProjectIds.length) return;
+    setSelectedProjectIds(live);
+  }, [projectsLoaded, projects, selectedProjectIds, setSelectedProjectIds]);
 
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
-  const setSessionProject = useSetChatSessionProject();
+  const setSessionProjects = useSetChatSessionProjects();
   const setArchived = useSetChatSessionArchived();
 
   const currentMember = members.find((m) => m.user_id === user?.id);
@@ -446,7 +462,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
           const session = await createSession.mutateAsync({
             agent_id: activeAgent.id,
             title: deriveChatTitle(titleSeed),
-            project_id: activeProjectId,
+            project_ids: activeProjectIds,
           });
           return session.id;
         } finally {
@@ -459,7 +475,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     [
       activeSessionId,
       activeAgent,
-      activeProjectId,
+      activeProjectIds,
       createSession,
       sessions,
       sessionsLoaded,
@@ -700,13 +716,13 @@ export function useChatController(opts?: { isActive?: boolean }) {
     // A fresh chat has no project unless the user explicitly chooses one.
     // The open session's project is server-owned history, not a default for
     // the next session.
-    setSelectedProjectId(null);
+    setSelectedProjectIds([]);
     setActiveSession(null);
     requestInputFocus();
   }, [
     activeSessionId,
     pendingTaskId,
-    setSelectedProjectId,
+    setSelectedProjectIds,
     setActiveSession,
     requestInputFocus,
   ]);
@@ -722,14 +738,14 @@ export function useChatController(opts?: { isActive?: boolean }) {
         previousSessionId: activeSessionId,
       });
       setSelectedAgentId(agent.id);
-      setSelectedProjectId(null);
+      setSelectedProjectIds([]);
       setActiveSession(null);
       requestInputFocus();
     },
     [
       activeSessionId,
       setSelectedAgentId,
-      setSelectedProjectId,
+      setSelectedProjectIds,
       setActiveSession,
       requestInputFocus,
     ],
@@ -752,43 +768,42 @@ export function useChatController(opts?: { isActive?: boolean }) {
     [activeAgent, setSelectedAgentId, setActiveSession],
   );
 
-  const handleProjectChange = useCallback(
-    (projectId: string | null) => {
-      if (projectId === activeProjectId) return;
+  /** Takes the COMPLETE next set, in selection order — the same shape the
+   *  server's `project_ids` replacement takes, so no caller has to know
+   *  whether it just attached or detached. */
+  const handleProjectsChange = useCallback(
+    (projectIds: string[]) => {
+      if (sameProjectIds(projectIds, activeProjectIds)) return;
       uiLogger.info("selectProjectContext", {
-        from: activeProjectId,
-        to: projectId,
+        from: activeProjectIds,
+        to: projectIds,
         previousSessionId: activeSessionId,
       });
       const plan = planProjectContextChange({
-        targetProjectId: projectId,
+        targetProjectIds: projectIds,
         activeSessionId,
         currentSession: currentSession ?? null,
       });
       switch (plan.kind) {
         case "awaitSession":
           return;
-        case "detachCurrent":
-          setSessionProject.mutate({ sessionId: plan.sessionId, projectId: null });
+        case "updateCurrent":
+          setSessionProjects.mutate({
+            sessionId: plan.sessionId,
+            projectIds: plan.projectIds,
+          });
           break;
-        case "startFreshChat":
-          setSelectedAgentId(plan.agentId);
-          setSelectedProjectId(plan.projectId);
-          setActiveSession(null);
-          break;
-        case "setDraftProject":
-          setSelectedProjectId(plan.projectId);
+        case "setDraftProjects":
+          setSelectedProjectIds(plan.projectIds);
           break;
       }
       requestInputFocus();
     }, [
-      activeProjectId,
+      activeProjectIds,
       activeSessionId,
       currentSession,
-      setSessionProject,
-      setSelectedAgentId,
-      setSelectedProjectId,
-      setActiveSession,
+      setSessionProjects,
+      setSelectedProjectIds,
       requestInputFocus,
     ],
   );
@@ -833,10 +848,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
     projects,
     activeSessionId,
     selectedAgentId,
-    activeProjectId,
+    activeProjectIds,
     projectContextUnsupported: projectContextSupport === false,
     isProjectUpdating:
-      setSessionProject.isPending || (!!activeSessionId && !currentSession),
+      setSessionProjects.isPending || (!!activeSessionId && !currentSession),
     currentSession,
     isSessionArchived,
     isAgentArchived,
@@ -875,7 +890,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     handleNewChat,
     handleStartNewChat,
     handleSelectSession,
-    handleProjectChange,
+    handleProjectsChange,
     advanceSelectionAfterArchive,
     archiveSession,
     // store setters (for surfaces that sync selection to the URL, etc.)

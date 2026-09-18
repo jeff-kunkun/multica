@@ -82,6 +82,7 @@ describe("refreshFrozenTableRows", () => {
         depth: 0,
         hasChildren: true,
         collapsed: false,
+        isPinned: false,
       },
       {
         kind: "issue",
@@ -90,6 +91,7 @@ describe("refreshFrozenTableRows", () => {
         depth: 1,
         hasChildren: false,
         collapsed: false,
+        isPinned: false,
       },
     ];
     const liveA = makeIssue("issue-1", { title: "Live A" });
@@ -126,6 +128,7 @@ describe("refreshFrozenTableRows", () => {
         depth: 0,
         hasChildren: false,
         collapsed: false,
+        isPinned: false,
       },
     ];
 

@@ -57,6 +57,7 @@ import {
   SendChatMessageResponseSchema,
   SquadListSchema,
   SquadMemberListSchema,
+  ProjectMemberListSchema,
   SquadSchema,
   SourceContextPreviewSchema,
   TimelineEntriesSchema,
@@ -74,6 +75,11 @@ import {
   IssueStatusEntrySchema,
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_ISSUE_STATUS_ENTRY,
+} from "./schemas";
+import {
+  IssueDraftFinalizeSchema,
+  IssueDraftPayloadSchema,
+  IssueDraftSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
 
@@ -132,6 +138,31 @@ describe("ChatSessionSchema", () => {
       route_revision: 3,
     });
     expect(parsed.is_current_channel_route).toBe(false);
+  });
+
+  it("carries the project set and leaves it absent on a server without one", () => {
+    expect(ChatSessionSchema.parse(baseSession).project_ids).toBeUndefined();
+    expect(
+      ChatSessionSchema.parse({
+        ...baseSession,
+        project_id: "project-1",
+        project_ids: ["project-1", "project-2"],
+      }).project_ids,
+    ).toEqual(["project-1", "project-2"]);
+  });
+
+  // An installed desktop build can meet a backend that renamed or retyped the
+  // field. Dropping just project_ids lets chatSessionProjectIds fall back to
+  // the singular project_id; failing the whole row would hide the Chat.
+  it("drops a malformed project set without dropping the Chat", () => {
+    const parsed = ChatSessionSchema.parse({
+      ...baseSession,
+      project_id: "project-1",
+      project_ids: "project-1",
+    });
+    expect(parsed.project_ids).toBeUndefined();
+    expect(parsed.project_id).toBe("project-1");
+    expect(parsed.id).toBe("chat-1");
   });
 
   it("degrades malformed session metadata without dropping the Chat", () => {
@@ -1100,6 +1131,43 @@ describe("SquadListSchema member preview drift", () => {
   });
 });
 
+describe("ProjectMemberListSchema", () => {
+  it("parses GET /api/projects/:id/members rows", () => {
+    const parsed = ProjectMemberListSchema.parse([
+      {
+        id: "row-1",
+        workspace_id: "ws-1",
+        project_id: "proj-1",
+        member_id: "user-1",
+        added_by: "user-2",
+        created_at: "2026-05-01T00:00:00Z",
+        name: "Ada",
+        email: "ada@example.test",
+        avatar_url: null,
+      },
+      {
+        id: "row-2",
+        project_id: "proj-1",
+        member_id: "user-3",
+      },
+    ]);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]?.name).toBe("Ada");
+    expect(parsed[1]?.name).toBe("");
+    expect(parsed[1]?.avatar_url).toBeNull();
+  });
+
+  it("rejects a row missing required fields instead of parsing as an empty roster", () => {
+    expect(
+      ProjectMemberListSchema.safeParse([
+        { id: "row-1", project_id: "proj-1" },
+      ]).success,
+    ).toBe(false);
+    expect(ProjectMemberListSchema.safeParse({ members: [] }).success).toBe(false);
+    expect(ProjectMemberListSchema.safeParse("not-an-array").success).toBe(false);
+  });
+});
+
 describe("SquadMemberListSchema", () => {
   it("parses GET /api/squads/:id/members rows", () => {
     const parsed = SquadMemberListSchema.parse([
@@ -1976,6 +2044,11 @@ describe("IssueViewSchema", () => {
     expect(parsed.revision).toBe(1);
   });
 
+  it("accepts the project visibility value without rejecting the view", () => {
+    const parsed = IssueViewSchema.parse({ ...valid, visibility: "project" });
+    expect(parsed.visibility).toBe("project");
+  });
+
   it("degrades a malformed list response to [] via parseWithFallback", () => {
     expect(
       parseWithFallback({ nonsense: true }, IssueViewListSchema, [], {
@@ -2428,5 +2501,261 @@ describe("AgentSchema auto_retry_enabled", () => {
     });
     expect(parsed.id).toBe("agent-1");
     expect(parsed.auto_retry_enabled).toBeUndefined();
+  });
+});
+
+describe("alignment group drift", () => {
+  const ENDPOINT = { endpoint: "POST /api/issue-drafts/{id}/finalize" };
+
+  const draft = {
+    chat_session_id: "sess-1",
+    workspace_id: "ws-1",
+    status: "completed",
+    revision: 4,
+    draft: { title: "Parent", description: "", status: "", priority: "" },
+    issue_id: "issue-1",
+    policy: { key: "question", version: "2", guided: true },
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("reads the sub-issues a draft carries", () => {
+    const parsed = IssueDraftPayloadSchema.parse({
+      title: "Parent",
+      description: "",
+      status: "",
+      priority: "",
+      children: [
+        {
+          key: "c1",
+          title: "Child",
+          description: "",
+          status: "todo",
+          priority: "none",
+          stage: 1,
+          assignee_hint: "backend",
+        },
+      ],
+    });
+    expect(parsed.children).toHaveLength(1);
+    expect(parsed.children?.[0]?.key).toBe("c1");
+  });
+
+  it("reads the old single-issue shape as a group with only its root", () => {
+    // Not a compatibility branch: `children` absent and `children: []` are the
+    // same statement — this alignment settled on one issue.
+    expect(
+      IssueDraftPayloadSchema.parse({
+        title: "Parent",
+        description: "",
+        status: "",
+        priority: "",
+      }).children,
+    ).toEqual([]);
+    expect(
+      IssueDraftPayloadSchema.parse({
+        title: "Parent",
+        description: "",
+        status: "",
+        priority: "",
+        children: [],
+      }).children,
+    ).toEqual([]);
+  });
+
+  it("degrades a malformed children value instead of white-screening", () => {
+    // `children` not an array is a backend this build cannot read; the draft's
+    // own fields still restore, and the preview renders it as a single issue.
+    const parsed = IssueDraftPayloadSchema.parse({
+      title: "Parent",
+      description: "Kept",
+      status: "",
+      priority: "",
+      children: "two",
+    });
+    expect(parsed.title).toBe("Parent");
+    expect(parsed.children).toEqual([]);
+  });
+
+  it("keeps a sub-issue whose title is missing rather than dropping the set", () => {
+    // The panel is where "cannot be created" is decided; a row the user is
+    // looking at and can fix must not vanish from under them.
+    const parsed = IssueDraftPayloadSchema.parse({
+      title: "Parent",
+      description: "",
+      status: "",
+      priority: "",
+      children: [{ key: "c1", description: "no title yet" }],
+    });
+    expect(parsed.children).toHaveLength(1);
+    expect(parsed.children?.[0]?.title).toBe("");
+  });
+
+  it("parses the whole group a confirm reports", () => {
+    const parsed = IssueDraftFinalizeSchema.parse({
+      draft,
+      issue_id: "issue-1",
+      issues: [
+        { id: "issue-1", identifier: "MUL-1", title: "Parent", status: "todo" },
+        {
+          id: "issue-2",
+          identifier: "MUL-2",
+          title: "Child",
+          status: "backlog",
+          stage: 2,
+          assignee_type: "agent",
+          assignee_id: "ag-1",
+          parent_issue_id: "issue-1",
+        },
+      ],
+    });
+    expect(parsed.issues.map((issue) => issue.identifier)).toEqual([
+      "MUL-1",
+      "MUL-2",
+    ]);
+  });
+
+  it("degrades the group to empty when the backend predates it", () => {
+    expect(
+      parseWithFallback({ draft, issue_id: "issue-1" }, IssueDraftFinalizeSchema, {
+        draft: { ...draft, status: "draft" as const },
+        issue_id: "",
+        issues: [],
+      }, ENDPOINT).issues,
+    ).toEqual([]);
+  });
+
+  it("drops a group with one unusable row rather than showing a partial one", () => {
+    // A row with no id is a link that cannot resolve; "5 issues, one of them
+    // unopenable" and "we cannot tell how many" should look the same to the
+    // user — the parent alone.
+    const parsed = IssueDraftFinalizeSchema.parse({
+      draft,
+      issue_id: "issue-1",
+      issues: [
+        { id: "issue-1", identifier: "MUL-1", title: "Parent", status: "todo" },
+        { identifier: "MUL-2", title: "Ghost", status: "todo" },
+      ],
+    });
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.issue_id).toBe("issue-1");
+  });
+
+  it("still refuses a success body with no issue to navigate to", () => {
+    // The caller routes to `issue_id`; an empty one would strand the user on a
+    // route that cannot resolve while the issues it names are already live.
+    const result = IssueDraftFinalizeSchema.safeParse({
+      draft,
+      issue_id: "",
+      issues: [],
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("alignment rounds on the wire", () => {
+  const draft = {
+    chat_session_id: "sess-1",
+    workspace_id: "ws-1",
+    status: "ready",
+    revision: 7,
+    draft: { title: "Parent", description: "", status: "", priority: "" },
+    issue_id: "issue-1",
+    policy: { key: "question", version: "2", guided: true },
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("reads the round a continuation round is on", () => {
+    const parsed = IssueDraftSchema.parse({
+      ...draft,
+      finalize_round: 2,
+      finalized_revision: 6,
+    });
+    expect(parsed.finalize_round).toBe(2);
+    expect(parsed.finalized_revision).toBe(6);
+  });
+
+  it("degrades a backend without rounds to the first round", () => {
+    // An installed desktop client can talk to a backend that predates rounds.
+    // The field only ever feeds a label, so its absence must cost the label and
+    // never the page (DENE-415).
+    const parsed = IssueDraftSchema.parse(draft);
+    expect(parsed.finalize_round).toBe(0);
+    // Absent stays absent; only a present-but-unusable value is defaulted.
+    expect(parsed.finalized_revision ?? null).toBeNull();
+  });
+
+  it("degrades a malformed round rather than refusing the draft", () => {
+    // `status` is the field that decides whether the page offers a confirm, so
+    // it is the one that must stay strict; the round is presentation, and a
+    // draft whose round is nonsense is still a draft the user can act on.
+    const parsed = IssueDraftSchema.parse({
+      ...draft,
+      finalize_round: "third",
+      finalized_revision: "nope",
+    });
+    expect(parsed.status).toBe("ready");
+    expect(parsed.finalize_round).toBe(0);
+    expect(parsed.finalized_revision).toBeNull();
+  });
+});
+
+describe("alignment capabilities on the wire", () => {
+  const draft = {
+    chat_session_id: "sess-1",
+    workspace_id: "ws-1",
+    status: "ready",
+    revision: 7,
+    draft: { title: "Parent", description: "", status: "", priority: "" },
+    policy: { key: "question", version: "4", guided: true },
+    capabilities: {
+      keys: ["wayfinder", "grill", "grilling"],
+      version: "1",
+    },
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("reads the method set a draft is running", () => {
+    const parsed = IssueDraftSchema.parse(draft);
+    expect(parsed.capabilities.keys).toEqual(["wayfinder", "grill", "grilling"]);
+    expect(parsed.capabilities.version).toBe("1");
+  });
+
+  it("degrades a backend without capabilities to no method at all", () => {
+    // The same rule as `policy`, one axis over: a backend that predates
+    // capabilities sends no field, and an invented key would draw a control the
+    // server cannot honour. An empty list is the honest "nothing known" state,
+    // and the page renders the conversation without the control.
+    const { capabilities: _omitted, ...withoutCapabilities } = draft;
+    const parsed = IssueDraftSchema.parse(withoutCapabilities);
+    expect(parsed.capabilities).toEqual({ keys: [], version: "" });
+    expect(parsed.policy.key).toBe("question");
+  });
+
+  it("costs the key list, not the draft, when a key list is malformed", () => {
+    // The list is the only field of a draft that the picker reads, and a
+    // malformed one must not turn a conversation the user can still act on into
+    // a parse failure — the same asymmetry `finalize_round` is written with.
+    const parsed = IssueDraftSchema.parse({
+      ...draft,
+      capabilities: { keys: "wayfinder", version: "1" },
+    });
+    expect(parsed.status).toBe("ready");
+    expect(parsed.capabilities.keys).toEqual([]);
+    // Version survives on its own: it is the audit half, and one bad sibling
+    // must not erase what prompt the carrier was given.
+    expect(parsed.capabilities.version).toBe("1");
+  });
+
+  it("keeps a version whose key list is empty", () => {
+    // "This alignment runs no capability" is a real answer, not a missing one,
+    // and it must stay distinguishable from the backend that sent nothing.
+    const parsed = IssueDraftSchema.parse({
+      ...draft,
+      capabilities: { keys: [], version: "1" },
+    });
+    expect(parsed.capabilities).toEqual({ keys: [], version: "1" });
   });
 });

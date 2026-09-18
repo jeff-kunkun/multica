@@ -57,6 +57,19 @@ const batchUpdateMutateAsync = vi.hoisted(() => vi.fn());
 const batchDeleteMutateAsync = vi.hoisted(() => vi.fn());
 const openModal = vi.hoisted(() => vi.fn());
 
+vi.mock("@multica/core/auth", () => ({
+  // The controller reads the current user to key the pin list — pins are
+  // per-user, and `pinned_first` is only sent once this user has one.
+  useAuthStore: Object.assign(
+    (selector?: (state: { user: { id: string } }) => unknown) => {
+      const state = { user: { id: "user-1" } };
+      return selector ? selector(state) : state;
+    },
+    { getState: () => ({ user: { id: "user-1" } }) },
+  ),
+  registerAuthStore: vi.fn(),
+}));
+
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -593,6 +606,49 @@ describe("useIssueSurfaceController", () => {
       for (const resolve of resolvers) resolve({ issues: [], total: 0 });
     });
     await waitFor(() => expect(result.current.isRefreshing).toBe(false));
+  });
+
+  // A project surface opens with sub-issues folded (DENE-444), and the flat
+  // filter that expresses that would also empty the Table's child branches and
+  // every parent swimlane lane — the two layouts whose whole job is showing
+  // children under their parent.
+  it("keeps sub-issues in the query for the layouts built out of them", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => store.setState({ showSubIssues: false }));
+    listIssues.mockResolvedValue({ issues: [], total: 0 });
+
+    const { result, rerender } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table", "board", "swimlane"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    act(() => store.getState().setViewMode("board"));
+    rerender();
+    expect(result.current.tableQuerySpec.filters.include_sub_issues).toBe(false);
+
+    act(() => store.getState().setViewMode("table"));
+    rerender();
+    expect(result.current.tableQuerySpec.filters.include_sub_issues).toBe(true);
+
+    // Hierarchy off makes the Table flat again, so the fold applies once more.
+    act(() => store.getState().toggleTableHierarchy());
+    rerender();
+    expect(result.current.tableQuerySpec.filters.include_sub_issues).toBe(false);
+
+    act(() => {
+      store.getState().setViewMode("swimlane");
+      store.getState().setSwimlaneGrouping("parent");
+    });
+    rerender();
+    expect(result.current.tableQuerySpec.filters.include_sub_issues).toBe(true);
+
+    act(() => store.getState().setSwimlaneGrouping("assignee"));
+    rerender();
+    expect(result.current.tableQuerySpec.filters.include_sub_issues).toBe(false);
   });
 
   it("debounces table search into the canonical server query without fetching the legacy flat window", async () => {
@@ -1448,7 +1504,9 @@ describe("useIssueSurfaceController", () => {
     ]);
 
     const store = getIssueSurfaceViewStore("project:p1");
-    act(() => store.getState().toggleShowSubIssues());
+    // Written, not toggled: a project surface already starts with sub-issues
+    // folded (DENE-444), so toggling from here would turn them back ON.
+    act(() => store.setState({ showSubIssues: false }));
 
     const { result } = renderHook(
       () =>
@@ -1481,7 +1539,9 @@ describe("useIssueSurfaceController", () => {
     ]);
 
     const store = getIssueSurfaceViewStore("project:p1");
-    act(() => store.getState().toggleShowSubIssues());
+    // Written, not toggled: a project surface already starts with sub-issues
+    // folded (DENE-444), so toggling from here would turn them back ON.
+    act(() => store.setState({ showSubIssues: false }));
 
     const { result } = renderHook(
       () =>

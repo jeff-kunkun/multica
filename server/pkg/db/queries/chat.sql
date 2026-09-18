@@ -3,14 +3,6 @@ INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id,
 VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2), $5, sqlc.narg('project_id'), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()))
 RETURNING *;
 
--- name: ClearChatSessionProjectByProject :exec
--- Project references are intentionally soft (no database FK). Keep chat
--- history while removing the context selection when a project is deleted.
--- Do not touch updated_at: context cleanup is not chat activity.
-UPDATE chat_session
-SET project_id = NULL
-WHERE project_id = $1 AND workspace_id = $2;
-
 -- name: GetChatSession :one
 SELECT * FROM chat_session
 WHERE id = $1;
@@ -231,10 +223,81 @@ RETURNING *;
 -- name: UpdateChatSessionProject :one
 -- Project context is user-editable session metadata. Do not touch updated_at:
 -- changing context is not conversation activity and must not reorder history.
+--
+-- DENE-523: this column is the session's PRIMARY project — the first entry of
+-- its chat_session_project set — kept in sync by whoever writes that set. A
+-- chat can carry several projects; this one is what older clients and older
+-- daemons understand.
 UPDATE chat_session
 SET project_id = sqlc.narg('project_id')
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
 RETURNING *;
+
+-- name: ListChatSessionProjectIDs :many
+-- The session's project set in selection order. chat_session_project is the
+-- authoritative set; chat_session.project_id is only its first entry. Ordered
+-- by position because every row one replace writes shares a single transaction
+-- timestamp, so created_at alone would order the set by random UUID.
+SELECT project_id FROM chat_session_project
+WHERE chat_session_id = $1
+ORDER BY position ASC, created_at ASC, id ASC;
+
+-- name: ListChatSessionProjectIDsForSessions :many
+-- Batch form of ListChatSessionProjectIDs for list endpoints: one read for
+-- every session on the page, ordered so the caller can group without sorting.
+SELECT chat_session_id, project_id FROM chat_session_project
+WHERE chat_session_id = ANY(sqlc.arg('chat_session_ids')::uuid[])
+ORDER BY chat_session_id, position ASC, created_at ASC, id ASC;
+
+-- name: ListChatSessionProjectsInWorkspace :many
+-- Resolves a session's project set to project rows for the daemon claim. Both
+-- the set and the projects are workspace-scoped, so a cross-tenant reference
+-- degrades to "not in this set" instead of leaking another tenant's context,
+-- and a stale or deleted project simply disappears from the result (soft
+-- references, no FKs — see 493_chat_session_project).
+SELECT p.* FROM chat_session_project AS csp
+JOIN project AS p ON p.id = csp.project_id AND p.workspace_id = csp.workspace_id
+WHERE csp.chat_session_id = $1 AND csp.workspace_id = $2
+ORDER BY csp.position ASC, csp.created_at ASC, csp.id ASC;
+
+-- name: DeleteChatSessionProjectsForSession :exec
+-- Replace semantics for one session: the writer deletes and re-inserts the
+-- whole set inside one transaction so a partial set is never visible.
+DELETE FROM chat_session_project
+WHERE chat_session_id = $1 AND workspace_id = $2;
+
+-- name: InsertChatSessionProject :exec
+-- position is the caller's selection order. The unique index makes a duplicate
+-- project in one request a no-op rather than an error.
+INSERT INTO chat_session_project (workspace_id, chat_session_id, project_id, position)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (chat_session_id, project_id) DO NOTHING;
+
+-- name: DeleteChatSessionProjectsForProject :exec
+-- Project deletion clears every session set that references it, then the
+-- mirrored primary column is re-pointed (RepointChatSessionPrimaryAfterProjectDelete)
+-- in the same transaction.
+DELETE FROM chat_session_project
+WHERE project_id = $1 AND workspace_id = $2;
+
+-- name: RepointChatSessionPrimaryAfterProjectDelete :exec
+-- Project deletion shrinks every session set that referenced it (the caller
+-- deletes those chat_session_project rows first, in the same transaction).
+-- chat_session.project_id mirrors the head of that set, so a session whose
+-- primary was the deleted project must move to the new head — or to NULL when
+-- the set is now empty. Leaving the stale id behind would make the derived
+-- column name a project the session no longer attaches.
+--
+-- Do not touch updated_at: context cleanup is not chat activity.
+UPDATE chat_session AS cs
+SET project_id = (
+    SELECT csp.project_id
+    FROM chat_session_project AS csp
+    WHERE csp.chat_session_id = cs.id AND csp.workspace_id = cs.workspace_id
+    ORDER BY csp.position ASC, csp.created_at ASC, csp.id ASC
+    LIMIT 1
+)
+WHERE cs.project_id = $1 AND cs.workspace_id = $2;
 
 -- name: UpdateChatSessionTitleIfCurrent :one
 -- Compare-and-swap the title: only overwrite it when it still equals the

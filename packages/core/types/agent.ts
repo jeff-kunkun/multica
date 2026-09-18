@@ -79,6 +79,31 @@ export interface PlanLimitsSnapshot {
   observed_at: number;
 }
 
+export type JevStatusValue = "active" | "fallback" | "unknown";
+
+/**
+ * Host-level JEV (fast judgement layer) status reported by the daemon. There is
+ * one state directory per machine, so every runtime of a daemon carries the
+ * same snapshot. `unknown` means "we cannot tell" (unreadable state files, or a
+ * daemon that predates the field) and must never be rendered as active.
+ *
+ * Any field beyond `status` is optional detail. Cooldown remaining is computed
+ * from `disabled_until`, never sent pre-computed, so the payload stays stable
+ * across heartbeats.
+ */
+export interface JevStatusSnapshot {
+  status: JevStatusValue;
+  model?: string;
+  manual?: boolean;
+  disabled_until?: number;
+  failures?: number;
+  reason?: string;
+  last_scene?: string;
+  last_outcome?: string;
+  last_decision_at?: number;
+  observed_at?: number;
+}
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -109,6 +134,11 @@ export interface RuntimeDevice {
    */
   profile_id?: string | null;
   plan_limits?: PlanLimitsSnapshot | null;
+  /**
+   * Host-level JEV status. Absent/null when the backend has no snapshot yet
+   * (older server or older daemon) — consumers must render that as unknown.
+   */
+  jev?: JevStatusSnapshot | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
@@ -523,6 +553,44 @@ export interface Agent {
   /** Read-only product half of a system agent's prompt, served from the
    *  backend binary. Absent for ordinary agents. */
   system_instructions?: string;
+  /**
+   * Base role this agent specialises (DENE-301). Empty/absent for a base role;
+   * the tree is at most two levels deep, so a non-empty value always points at
+   * a base role. Older servers omit the field entirely — treat `undefined`
+   * exactly like the empty string.
+   */
+  parent_agent_id?: string;
+  /** Display name of `parent_agent_id`, served with the list and the detail so
+   *  the client never needs a second request to name the base role. */
+  parent_agent_name?: string;
+  /**
+   * The base role's own `instructions`, verbatim. The prompt a specialisation
+   * actually runs with is `parent + "\n\n" + own` (see
+   * `composeEffectiveInstructions`), so the detail surface shows the inherited
+   * half separately instead of letting the child's text look self-contained.
+   * Empty for a base role, and also empty when the viewer may not read the
+   * parent's prompt — the relationship itself stays visible.
+   */
+  inherited_instructions?: string;
+  /** The base role's skill bindings: read-only on the child (v1 cannot drop
+   *  one). Only the detail endpoint loads them; the list leaves it undefined. */
+  inherited_skills?: AgentSkillSummary[];
+  /**
+   * How many ACTIVE specialisations hang off this agent (0 for a
+   * specialisation, and for a base role with none). Populated on the list, so
+   * the nested view needs no per-agent request; the detail response omits it.
+   */
+  child_count?: number;
+  /**
+   * Runtime inheritance (DENE-505). True when this specialisation follows its
+   * base role's runtime profile: `runtime_id`, `runtime_mode`, `runtime_config`,
+   * `model`, `thinking_level` and `service_tier` are kept equal to the base
+   * role's and are re-copied whenever the base role's change. Always false (or
+   * absent on a backend that predates the feature) for a base role, so
+   * `=== true` is the only safe reading — treat `undefined` as "owns its
+   * runtime", exactly like the pre-feature behaviour.
+   */
+  runtime_inherited?: boolean;
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
@@ -711,6 +779,23 @@ export interface CreateAgentRequest {
   template?: string;
   /** Workspace skill IDs attached atomically with the agent row. */
   skill_ids?: string[];
+  /**
+   * Base role to attach this agent to as a specialisation (DENE-301). Omit —
+   * or send "" — to create an independent base role. The server refuses a
+   * parent that is archived, belongs to another workspace, or is itself a
+   * specialisation ("特化角色不能再派生").
+   */
+  parent_agent_id?: string;
+  /**
+   * Runtime inheritance (DENE-505). Omitted with a `parent_agent_id` means
+   * "follow the base role's runtime" — the default for a specialisation, and
+   * the reason `runtime_id` may then be omitted entirely: any runtime field sent
+   * alongside is not an override, the child takes the base role's. Send `false`
+   * to opt out, which restores the pre-feature contract (runtime_id required,
+   * model / thinking_level / runtime_config as given). A base role cannot
+   * inherit; `true` without a parent is rejected.
+   */
+  runtime_inherited?: boolean;
 }
 
 export interface AgentBuilderSession {
@@ -850,6 +935,27 @@ export interface UpdateAgentRequest {
    * turns platform auto-retry off without affecting manual rerun.
    */
   auto_retry_enabled?: boolean;
+  /**
+   * Re-parents this agent (DENE-301). Tri-state semantics:
+   *   - field omitted → no change
+   *   - "" → detach from the base role, keeping the child's own prompt
+   *     (this is what `/solidify` uses when the parent prompt is not readable)
+   *   - non-empty → attach to that base role; refused when this agent already
+   *     has children, or when the target is not a base role
+   */
+  parent_agent_id?: string | null;
+  /**
+   * Runtime inheritance (DENE-505). Omitted preserves the stored flag.
+   *
+   * `true` makes this specialisation follow its base role again and re-copies
+   * the base role's runtime profile immediately; it is refused on a base role,
+   * and refused in the same request as `runtime_id` / `runtime_config` /
+   * `model` / `thinking_level` / `service_tier` — "follow" and "set my own
+   * runtime" contradict each other, so the server answers 400 instead of
+   * picking one. `false` opts out and is lossless: the agent keeps the values
+   * it was already running with.
+   */
+  runtime_inherited?: boolean;
 }
 
 export type AgentSwitchableModelRole = "default" | "fallback" | "batch";
@@ -1377,4 +1483,116 @@ export interface RuntimeLocalSkillImportResult {
   status: "created" | "updated" | "conflict";
   skill?: Skill;
   conflict?: RuntimeLocalSkillImportConflict;
+}
+
+// ---------------------------------------------------------------------------
+// Provider presets (DENE-348)
+// ---------------------------------------------------------------------------
+//
+// A provider preset is one route in the agent CLI's own configuration: an
+// endpoint, the protocol it speaks and the key that authenticates it. The
+// daemon reads and writes those files on the user's machine, so every field
+// here is what the daemon decided to report — there is no request shape in
+// this file except the write-only upsert input below.
+//
+// The key itself is deliberately absent from every read interface. The daemon
+// generates `key_mask` on the machine holding the credentials file, and that
+// mask is all the server (and therefore this client) ever sees; `has_key` is
+// the existence bit. A type with no field for the value cannot leak it into
+// React state, the DOM or a console log by accident.
+
+export type RuntimeProviderPresetAction =
+  | "list"
+  | "upsert"
+  | "delete"
+  | "activate";
+
+export type RuntimeProviderPresetStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "timeout";
+
+export interface RuntimeProviderPresetModel {
+  id: string;
+  name?: string;
+  context_window?: number;
+}
+
+export interface RuntimeProviderPreset {
+  id: string;
+  api?: string;
+  base_url?: string;
+  api_key_env?: string;
+  /**
+   * Non-secret identifier of the stored key (`sk-ab…cdef`, or `••••` when the
+   * value is too short to mask partially). Empty when no key is stored.
+   */
+  key_mask?: string;
+  /** Whether `api_key_env` currently resolves to a stored value. */
+  has_key: boolean;
+  /** True for the preset `agent-default-model` currently points at. */
+  active?: boolean;
+  models: RuntimeProviderPresetModel[];
+}
+
+/** The pair written into the agent's default-model setting. */
+export interface RuntimeProviderPresetActive {
+  provider: string;
+  model: string;
+}
+
+/** The ticket a POST answers with. The refreshed list arrives through the poll. */
+export interface RuntimeProviderPresetTicket {
+  id: string;
+  status: string;
+}
+
+export interface RuntimeProviderPresetRequest {
+  id: string;
+  runtime_id: string;
+  provider: string;
+  action: string;
+  status: RuntimeProviderPresetStatus;
+  /**
+   * The refreshed preset list every successful action answers with, so the
+   * client redraws from this reply alone instead of following up with a list.
+   */
+  providers?: RuntimeProviderPreset[];
+  active?: RuntimeProviderPresetActive;
+  /**
+   * A delete that also emptied the active-model setting. The user just lost
+   * their default model, which the UI has to say out loud.
+   */
+  cleared_active?: boolean;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * The upsert body. `api_key` is write-only: it is accepted, written to the
+ * daemon's credentials file and never echoed back.
+ *
+ * Omit it (or send `""`) to leave the stored key alone, which is what lets a
+ * user rotate an endpoint without retyping the key. There is deliberately no
+ * `key_mask` field here — pre-filling the mask into the form would make the
+ * next submit write the mask itself as the new key.
+ */
+export interface RuntimeProviderPresetUpsertInput {
+  id: string;
+  api: string;
+  base_url: string;
+  /** Credential reference name. Empty lets the daemon derive one from `id`. */
+  api_key_env?: string;
+  models: RuntimeProviderPresetModel[];
+  api_key?: string;
+}
+
+/** Normalised reply of any preset action, for the query cache. */
+export interface RuntimeProviderPresetsResult {
+  presets: RuntimeProviderPreset[];
+  active: RuntimeProviderPresetActive | null;
+  clearedActive: boolean;
 }

@@ -29,6 +29,7 @@
     "project_context": "プロジェクトコンテキスト",
     "change_project_context": "プロジェクトコンテキストを変更",
     "remove_project_context": "プロジェクトコンテキストを削除",
+    "remove_all_project_context": "すべてのプロジェクトコンテキストを削除",
     "no_projects": "プロジェクトがまだありません",
     "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です"
   },

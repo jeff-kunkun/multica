@@ -6,11 +6,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 type stubReadinessDB struct {
@@ -208,5 +211,45 @@ func TestServerHealthLiveHandlerOmitsZeroStartedAt(t *testing.T) {
 	}
 	if body.StartedAt != "" {
 		t.Fatalf("started_at = %q, want empty for a zero time", body.StartedAt)
+	}
+}
+
+// /health is where an exporter asks a target which transfer bundles it can
+// read before writing one (DENE-431), so the field is a wire contract. The
+// probe reads back exactly what this handler serves: pinning only the struct
+// would let a renamed JSON tag pass while every real probe failed.
+func TestServerHealthLiveHandlerAdvertisesTransferCapabilities(t *testing.T) {
+	h := &serverHealth{pid: 9}
+
+	rec := httptest.NewRecorder()
+	h.liveHandler(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode /health: %v", err)
+	}
+	if _, ok := raw[service.TransferHealthField]; !ok {
+		t.Fatalf("/health carries no %q field: %s", service.TransferHealthField, rec.Body.String())
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(h.liveHandler))
+	defer srv.Close()
+	caps, err := service.ProbeTransferCapabilities(context.Background(), srv.Client(), srv.URL)
+	if err != nil {
+		t.Fatalf("probe the served /health: %v", err)
+	}
+	want := service.TransferCapabilitiesForCurrentBuild()
+	if caps.MaxSchemaVersion != want.MaxSchemaVersion {
+		t.Errorf("max_schema_version = %d, want the reader's %d", caps.MaxSchemaVersion, want.MaxSchemaVersion)
+	}
+	for _, group := range []string{
+		service.TransferIncludeConfig,
+		service.TransferIncludeConversations,
+		service.TransferIncludeAttachments,
+		service.TransferIncludeIssues,
+	} {
+		if !slices.Contains(caps.Groups, group) {
+			t.Errorf("advertised groups %v omit %q, a group this build can export", caps.Groups, group)
+		}
 	}
 }

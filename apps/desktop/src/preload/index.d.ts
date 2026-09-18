@@ -1,5 +1,8 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
-import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type {
+  RuntimeConfigResult,
+  RuntimeConfigSwitchResult,
+} from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
@@ -17,6 +20,13 @@ import type {
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
+import type {
+  TransferJobState,
+  TransferPickPathResult,
+  TransferProgressEvent,
+  TransferRunRequest,
+  TransferRunResult,
+} from "../shared/workspace-transfer";
 
 interface DesktopAPI {
   /** Absolute home directory captured in the preload process. */
@@ -32,6 +42,13 @@ interface DesktopAPI {
   onSystemLocaleChanged: (callback: (locale: string) => void) => () => void;
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig: RuntimeConfigResult;
+  /**
+   * Write ~/.multica/desktop.json for a server switch.
+   * Pass `null` to return to official cloud (written explicitly; the
+   * absent-file fallback is the self-hosted entry default). The running
+   * session is unchanged until a full quit and reopen.
+   */
+  switchServer: (url: string | null) => Promise<RuntimeConfigSwitchResult>;
   /** Main tabbed window or a dedicated issue-only window. */
   windowContext: DesktopWindowContext;
   /** Read any freeze/crash breadcrumb from a previous session, so the renderer
@@ -132,6 +149,18 @@ interface DesktopAPI {
   openIssueWindow: (
     request: IssueWindowRequest,
   ) => Promise<{ ok: true } | { ok: false; reason: "invalid_request" }>;
+  pickTransferExportPath: (input?: {
+    slug?: string;
+  }) => Promise<TransferPickPathResult>;
+  pickTransferImportPath: () => Promise<TransferPickPathResult>;
+  runWorkspaceTransfer: (request: TransferRunRequest) => Promise<TransferRunResult>;
+  onTransferProgress: (
+    callback: (event: TransferProgressEvent) => void,
+  ) => () => void;
+  getTransferJobState: () => Promise<TransferJobState>;
+  onTransferJobState: (
+    callback: (state: TransferJobState) => void,
+  ) => () => void;
 }
 
 type DaemonReauthResult =

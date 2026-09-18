@@ -949,6 +949,19 @@ function desktopSpawnEnv(): NodeJS.ProcessEnv {
   return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
 }
 
+export async function resolveDesktopCliBinary(): Promise<string | null> {
+  return resolveCliBinary();
+}
+
+export async function activeDesktopProfileName(): Promise<string | null> {
+  const active = await ensureActiveProfile();
+  return active?.name ?? null;
+}
+
+export function desktopCliSpawnEnv(): NodeJS.ProcessEnv {
+  return desktopSpawnEnv();
+}
+
 function scheduleStatusRefresh(): void {
   setTimeout(() => void pollOnce(), 0);
 }

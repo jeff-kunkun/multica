@@ -33,6 +33,9 @@ export type IssueTableDisplayRow =
       depth: number;
       hasChildren: boolean;
       collapsed: boolean;
+      /** The row's own `pin_rank` arm, carried through from the server row so
+       *  the badge reports the ordering that was actually applied. (DENE-500) */
+      isPinned: boolean;
     }
   // Stands in for a row that has not arrived yet. Cold loads render these in
   // the table's own grid rather than swapping the surface for a generic

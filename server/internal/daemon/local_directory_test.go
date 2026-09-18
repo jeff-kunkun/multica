@@ -1523,3 +1523,91 @@ func realPathForTest(t *testing.T, p string) string {
 	}
 	return real
 }
+
+// A task can carry several projects (DENE-523). A run occupies exactly one
+// directory, so the resolution order decides which project's local_directory
+// the agent starts in, and a broken resource in the primary project must still
+// fail loudly rather than silently running somewhere else.
+func TestLocalDirectoryAssignmentForTask_MultipleProjects(t *testing.T) {
+	const thisDaemon = "d-multi"
+
+	mkLocalDir := func(t *testing.T, path, daemonID string) []ProjectResourceData {
+		t.Helper()
+		raw, err := json.Marshal(localDirectoryRef{LocalPath: path, DaemonID: daemonID})
+		if err != nil {
+			t.Fatalf("marshal ref: %v", err)
+		}
+		return []ProjectResourceData{{
+			ID:           "r-" + filepath.Base(path),
+			ResourceType: localDirectoryResourceType,
+			ResourceRef:  raw,
+		}}
+	}
+
+	primaryDir := t.TempDir()
+	secondaryDir := t.TempDir()
+
+	t.Run("first project with a matching resource wins", func(t *testing.T) {
+		task := Task{
+			Projects: []ProjectContextData{
+				{ID: "p1", Resources: []ProjectResourceData{
+					{ID: "r1", ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://github.com/org/one"}`)},
+				}},
+				{ID: "p2", Resources: mkLocalDir(t, secondaryDir, thisDaemon)},
+			},
+		}
+		got, err := localDirectoryAssignmentForTask(task, thisDaemon)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if got == nil || got.AbsPath != filepath.Clean(secondaryDir) {
+			t.Fatalf("assignment = %+v, want the second project's directory %s", got, secondaryDir)
+		}
+	})
+
+	t.Run("priority order decides between two matching projects", func(t *testing.T) {
+		task := Task{
+			Projects: []ProjectContextData{
+				{ID: "p1", Resources: mkLocalDir(t, primaryDir, thisDaemon)},
+				{ID: "p2", Resources: mkLocalDir(t, secondaryDir, thisDaemon)},
+			},
+		}
+		got, err := localDirectoryAssignmentForTask(task, thisDaemon)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if got == nil || got.AbsPath != filepath.Clean(primaryDir) {
+			t.Fatalf("assignment = %+v, want the primary project's directory %s", got, primaryDir)
+		}
+	})
+
+	t.Run("a broken primary resource does not fall through", func(t *testing.T) {
+		task := Task{
+			Projects: []ProjectContextData{
+				{ID: "p1", Resources: []ProjectResourceData{{
+					ID:           "broken",
+					ResourceType: localDirectoryResourceType,
+					ResourceRef:  json.RawMessage(`{"local_path":`),
+				}}},
+				{ID: "p2", Resources: mkLocalDir(t, secondaryDir, thisDaemon)},
+			},
+		}
+		if _, err := localDirectoryAssignmentForTask(task, thisDaemon); err == nil {
+			t.Fatal("expected the broken resource to fail the resolution, not to fall through to another project")
+		}
+	})
+
+	t.Run("legacy singular fields still resolve", func(t *testing.T) {
+		task := Task{
+			ProjectID:        "p-legacy",
+			ProjectResources: mkLocalDir(t, primaryDir, thisDaemon),
+		}
+		got, err := localDirectoryAssignmentForTask(task, thisDaemon)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if got == nil || got.AbsPath != filepath.Clean(primaryDir) {
+			t.Fatalf("assignment = %+v, want the legacy project's directory %s", got, primaryDir)
+		}
+	})
+}

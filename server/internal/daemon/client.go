@@ -636,16 +636,18 @@ type (
 	HeartbeatResponse       = protocol.DaemonHeartbeatAckPayload
 	PendingUpdate           = protocol.DaemonHeartbeatPendingUpdate
 	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
+	PendingProviderConfig   = protocol.DaemonHeartbeatPendingProviderConfig
 	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
-func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, planLimits *protocol.PlanLimitsSnapshot) (*HeartbeatResponse, error) {
+func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, planLimits *protocol.PlanLimitsSnapshot, jev *protocol.JevStatusSnapshot) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id":            runtimeID,
 		"supports_batch_import": true,
 		"plan_limits":           planLimits,
+		"jev":                   jev,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -660,6 +662,12 @@ func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID str
 // ReportModelListResult sends the model-discovery result back to the server.
 func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)
+}
+
+// ReportProviderConfigResult sends the provider-preset result back to the
+// server. The result carries the refreshed preset list, never a key value.
+func (c *Client) ReportProviderConfigResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/provider-presets/%s/result", runtimeID, requestID), result, nil)
 }
 
 // ReportLocalSkillListResult sends the runtime-local-skill inventory back to the server.

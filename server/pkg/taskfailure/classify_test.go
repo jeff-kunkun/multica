@@ -131,6 +131,16 @@ func TestClassifyRules(t *testing.T) {
 		{"opencode continuation never started", "opencode stream ended without a terminal signal (last step required a continuation that never started)", ReasonAgentProviderNetwork},
 		{"opencode empty final step", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing", ReasonAgentProviderNetwork},
 		{"opencode empty step with process exit appended", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing; opencode exited with error: exit status 1", ReasonAgentProviderNetwork},
+		// DENE-235: DeepSeek/DSH adapter stream-death copy. STREAM_CLOSED is
+		// not in DSH's DEFAULT_RETRYABLE_CODES, so it used to land in
+		// agent_error.unknown and never retry. Idle-timeout (TIMEOUT) and the
+		// TRANSPORT wrap can also arrive after DSH's own retry budget is
+		// exhausted. Semantic witnesses: baseURL and timeout ms vary.
+		{"dsh sse stream ended with STREAM_CLOSED prefix", "STREAM_CLOSED: SSE stream ended without [DONE]", ReasonAgentProviderNetwork},
+		{"dsh sse stream ended without prefix", "SSE stream ended without [DONE]", ReasonAgentProviderNetwork},
+		{"dsh sse payload stream ended", "SSE payload stream ended without [DONE]", ReasonAgentProviderNetwork},
+		{"dsh stream idle timeout", "DeepSeek stream idle timeout after 300000ms", ReasonAgentProviderNetwork},
+		{"dsh transport wrap after retry exhaustion", "TRANSPORT: DeepSeek API stream from https://api.deepseek.com failed", ReasonAgentProviderNetwork},
 		// BHD-135: Pi's OpenAI-compatible SDK wording for a dropped LiteLLM
 		// call. Bare strings, then the same strings glued to "exit status 1"
 		// after pi-print-clean-exit forces a non-zero wrap-up.
@@ -178,6 +188,11 @@ func TestClassifyRules(t *testing.T) {
 		// 14. Catchall.
 		{"unrecognized", "the agent gave up for reasons unknown", ReasonAgentUnknown},
 		{"sentence with no marker", "Hello world.", ReasonAgentUnknown},
+		// DENE-235: the DSH stream-death witnesses must not absorb copy that
+		// has no network semantics. content_filter is a model refusal;
+		// "Selected model is at capacity" is already a capacity hit (rule
+		// "at capacity" wins) and must stay there, not get re-homed.
+		{"model stopped content_filter stays unknown", "model stopped: content_filter", ReasonAgentUnknown},
 		// Pi's two short provider messages must not become broad substring
 		// matches: local tool and MCP failures are deterministic and retrying
 		// them only repeats the same failure.

@@ -81,26 +81,36 @@ type issueTableDateFilterRequest struct {
 }
 
 type issueTableFiltersRequest struct {
-	Statuses          []string                     `json:"statuses,omitempty"`
-	Priorities        []string                     `json:"priorities,omitempty"`
-	Assignees         []issueTableActorRef         `json:"assignees,omitempty"`
-	IncludeNoAssignee bool                         `json:"include_no_assignee,omitempty"`
-	Creators          []issueTableActorRef         `json:"creators,omitempty"`
-	ProjectIDs        []string                     `json:"project_ids,omitempty"`
-	IncludeNoProject  bool                         `json:"include_no_project,omitempty"`
-	LabelIDs          []string                     `json:"label_ids,omitempty"`
+	Statuses          []string             `json:"statuses,omitempty"`
+	Priorities        []string             `json:"priorities,omitempty"`
+	Assignees         []issueTableActorRef `json:"assignees,omitempty"`
+	IncludeNoAssignee bool                 `json:"include_no_assignee,omitempty"`
+	Creators          []issueTableActorRef `json:"creators,omitempty"`
+	ProjectIDs        []string             `json:"project_ids,omitempty"`
+	IncludeNoProject  bool                 `json:"include_no_project,omitempty"`
+	LabelIDs          []string             `json:"label_ids,omitempty"`
 	// Members are raw JSON so operator objects ({op, value}) and plain
 	// strings both survive the round-trip into parsePropertiesFilterParam.
-	Properties        map[string][]json.RawMessage `json:"properties,omitempty"`
-	Date              *issueTableDateFilterRequest `json:"date,omitempty"`
-	WorkingOnly       bool                         `json:"working_only,omitempty"`
-	WorkingIssueIDs   []string                     `json:"working_issue_ids,omitempty"`
-	IncludeSubIssues  *bool                        `json:"include_sub_issues,omitempty"`
+	Properties       map[string][]json.RawMessage `json:"properties,omitempty"`
+	Date             *issueTableDateFilterRequest `json:"date,omitempty"`
+	WorkingOnly      bool                         `json:"working_only,omitempty"`
+	WorkingIssueIDs  []string                     `json:"working_issue_ids,omitempty"`
+	IncludeSubIssues *bool                        `json:"include_sub_issues,omitempty"`
+	// HideCompletedParents drops issues that are finished THROUGH: the issue's
+	// own status is terminal AND it has no unfinished sub-issue. A terminal
+	// parent that still has open children is deliberately kept — closing the
+	// parent is what would otherwise bury that work. (DENE-444)
+	HideCompletedParents bool `json:"hide_completed_parents,omitempty"`
 }
 
 type issueTableSortRequest struct {
 	Field     string `json:"field"`
 	Direction string `json:"direction"`
+	// PinnedFirst moves the caller's pinned issues to the front of their own
+	// branch. It is opt-in and omitted from the wire shape when off, so the
+	// canonical query fingerprint of a request that does not ask for it stays
+	// byte-identical to the pre-feature one and old cursors keep working.
+	PinnedFirst bool `json:"pinned_first,omitempty"`
 }
 
 type issueTableQuerySpec struct {
@@ -174,6 +184,16 @@ type issueTableCursor struct {
 	SortIsNull       bool    `json:"sort_is_null,omitempty"`
 	RowCreatedAt     string  `json:"row_created_at,omitempty"`
 	RowID            string  `json:"row_id,omitempty"`
+	// PinRank is the arm the cursor's last row came from: 0 pinned, 1 plain.
+	// Pinned-first ranks rows by (pin_rank, sort key), so the arm is part of the
+	// keyset position — without it a plain row that sorts before the last pinned
+	// row would be skipped. Omitted unless pinned-first was requested.
+	PinRank *int `json:"pin_rank,omitempty"`
+	// PinSet fingerprints the caller's pinned issue set when the cursor was
+	// minted. Pinning or unpinning mid-scroll moves a row between the arms, so a
+	// continuation whose set no longer matches is rejected instead of silently
+	// duplicating or skipping rows.
+	PinSet string `json:"pin_set,omitempty"`
 }
 
 func decodeIssueTableJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
@@ -236,6 +256,28 @@ func issueTableCursorMatches(w http.ResponseWriter, cursor *issueTableCursor, fi
 		return false
 	}
 	return true
+}
+
+// issueTablePinnedSetHash fingerprints the caller's pinned issue set for the
+// table cursor: the pinned item ids sorted and hashed, so the value depends on
+// the membership of the set and not on its sidebar ordering.
+//
+// A cursor is only valid while the set it was minted against is unchanged.
+// Pinning or unpinning between two pages moves a row between the pinned and the
+// plain arm, which would hand back a row twice or skip one entirely; the
+// continuation is rejected with the existing cursor_query_mismatch instead.
+// (DENE-500)
+func (h *Handler) issueTablePinnedSetHash(ctx context.Context, workspaceID, userID pgtype.UUID) (string, error) {
+	var joined pgtype.Text
+	if err := h.DB.QueryRow(ctx, `
+		SELECT string_agg(item_id::text, ',' ORDER BY item_id::text)
+		FROM pinned_item
+		WHERE workspace_id = $1 AND user_id = $2 AND item_type = 'issue'
+	`, workspaceID, userID).Scan(&joined); err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256([]byte(joined.String))
+	return hex.EncodeToString(digest[:8]), nil
 }
 
 func equalOptionalString(a, b *string) bool {
@@ -659,6 +701,22 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 	}
 	if spec.Filters.IncludeSubIssues != nil && !*spec.Filters.IncludeSubIssues {
 		where = append(where, "i.parent_issue_id IS NULL")
+	}
+	if spec.Filters.HideCompletedParents {
+		terminalStatusKeys, err := h.terminalIssueStatusKeys(r.Context(), workspaceUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
+			return issueTableSQL{}, false
+		}
+		// Expanded from categories, so a custom "Shipped" status counts as
+		// finished exactly like the built-in `done`.
+		terminalRef := addArg(terminalStatusKeys)
+		where = append(where, fmt.Sprintf(
+			"NOT (i.status = ANY(%s::text[]) AND NOT EXISTS ("+
+				"SELECT 1 FROM issue child WHERE child.parent_issue_id = i.id "+
+				"AND NOT (child.status = ANY(%s::text[]))))",
+			terminalRef, terminalRef,
+		))
 	}
 	where = appendIssueTableSearchFilter(where, addArg, spec.Search)
 

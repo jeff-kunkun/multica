@@ -38,6 +38,24 @@ bash scripts/setup-dsh-runtime.sh
 
 说明、已知坑、给上游的反馈建议见 [docs/kun/dsh-runtime.md](docs/kun/dsh-runtime.md)。
 
+## Desktop 发版
+
+打包发布给真机用的 Desktop 版本，走 [docs/kun/desktop-release.md](docs/kun/desktop-release.md)：版本号由 tag 推导、必须从当前 `kun` tip 构建、产物没推上 Release 就等于没发。
+
+## Desktop 默认入口 = 自建实例
+
+本 fork 的 Desktop **入口默认连自建实例**：`~/.multica/desktop.json` 不存在时用 `DEFAULT_ENTRY_RUNTIME_CONFIG`（`apps/desktop/src/shared/runtime-config.ts`，即 `https://ai.ferryway.cc`），不再回落官方云。官方云仍然可达——设置 → 服务器里切到「官方云」会**显式写一份** `desktop.json`，而不是删文件（删文件已经等于自建）。想改默认入口只改这一个常量。
+
+## 自建实例自动跟随 `kun`
+
+自建实例（`ai.ferryway.cc`）曾经落后 `kun` 70 个提交才被发现。现在用 systemd timer 每 15 分钟比一次 `/health` 自报的 commit 和 `origin/kun`，有漂移就重建、失败就回滚：
+
+```bash
+sudo scripts/install-selfhost-autoupdate.sh
+```
+
+装、停、查状态、手工回滚见 [docs/kun/selfhost-autoupdate.md](docs/kun/selfhost-autoupdate.md)。
+
 ## 边界
 
 - 不向 `multica-ai/multica` 开 PR 或 push。

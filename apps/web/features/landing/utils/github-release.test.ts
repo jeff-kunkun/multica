@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchLatestRelease } from "./github-release";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fetchLatestRelease, releasesRepo } from "./github-release";
 
 /** The twelve desktop artifacts a finished release carries. */
 function completeAssets(version: string) {
@@ -26,6 +26,13 @@ function completeAssets(version: string) {
 /** What a release looks like before the Windows/Linux jobs upload. */
 function macOnlyAssets(version: string) {
   return completeAssets(version).filter((a) => a.name.includes("-mac-"));
+}
+
+/** Every platform covered, but only the arch/format each job ships. */
+function everyPlatformAssets(version: string) {
+  return completeAssets(version).filter(
+    (a) => !a.name.includes("-mac-x64.") && !a.name.endsWith("-linux-aarch64.rpm"),
+  );
 }
 
 function releasePayload(overrides: {
@@ -55,9 +62,32 @@ function mockFetchWithReleases(releases: unknown[]) {
   return fetchMock;
 }
 
+beforeEach(() => {
+  delete process.env.GITHUB_RELEASE_REPO;
+});
+
 afterEach(() => {
+  delete process.env.GITHUB_RELEASE_REPO;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("releasesRepo", () => {
+  it("reads the kun fork by default — the repo this deployment releases from", () => {
+    expect(releasesRepo()).toBe("jeff-kunkun/multica");
+  });
+
+  it("follows GITHUB_RELEASE_REPO when a deployment releases from elsewhere", () => {
+    process.env.GITHUB_RELEASE_REPO = "someone/else";
+    expect(releasesRepo()).toBe("someone/else");
+  });
+
+  it("ignores a malformed override rather than retargeting the API URL", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.GITHUB_RELEASE_REPO = "../../unrelated/endpoint";
+    expect(releasesRepo()).toBe("jeff-kunkun/multica");
+    expect(warnSpy).toHaveBeenCalled();
+  });
 });
 
 describe("fetchLatestRelease", () => {
@@ -70,6 +100,51 @@ describe("fetchLatestRelease", () => {
     const result = await fetchLatestRelease();
     expect(result.version).toBe("v0.2.14");
     expect(result.assets.winX64Exe).toContain("0.2.14");
+  });
+
+  it("requests the fork's releases and reports its releases index", async () => {
+    const fetchMock = mockFetchWithReleases([
+      releasePayload({ tag: "v0.2.14", assets: completeAssets("0.2.14") }),
+    ]);
+
+    const result = await fetchLatestRelease();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.github.com/repos/jeff-kunkun/multica/releases?per_page=5",
+    );
+    expect(result.releasesUrl).toBe(
+      "https://github.com/jeff-kunkun/multica/releases",
+    );
+  });
+
+  it("reads releases from GITHUB_RELEASE_REPO when it is set", async () => {
+    process.env.GITHUB_RELEASE_REPO = "someone/else";
+    const fetchMock = mockFetchWithReleases([
+      releasePayload({ tag: "v0.2.14", assets: completeAssets("0.2.14") }),
+    ]);
+
+    const result = await fetchLatestRelease();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.github.com/repos/someone/else/releases?per_page=5",
+    );
+    expect(result.releasesUrl).toBe("https://github.com/someone/else/releases");
+  });
+
+  // The fork ships macOS on Apple Silicon only and skips the aarch64 RPM.
+  // Holding out for all twelve artifacts would reject every release it
+  // ever cuts, so /download would never step back from a broken one.
+  it("accepts a release that covers every platform but not every arch/format", async () => {
+    mockFetchWithReleases([
+      releasePayload({
+        tag: "v0.4.30",
+        assets: everyPlatformAssets("0.4.30"),
+      }),
+      releasePayload({ tag: "v0.4.29", assets: completeAssets("0.4.29") }),
+    ]);
+
+    const result = await fetchLatestRelease();
+    expect(result.version).toBe("v0.4.30");
+    expect(result.assets.macX64Dmg).toBeUndefined();
+    expect(result.assets.winArm64Exe).toContain("0.4.30");
   });
 
   // MUL-6313: v0.4.28's Windows packaging job failed and its Linux job
@@ -158,6 +233,7 @@ describe("fetchLatestRelease", () => {
       publishedAt: null,
       htmlUrl: null,
       assets: {},
+      releasesUrl: "https://github.com/jeff-kunkun/multica/releases",
     });
     expect(warnSpy).toHaveBeenCalled();
   });

@@ -131,3 +131,49 @@ const REQUIRED_ASSET_KEYS: (keyof DownloadAssets)[] = [
 export function hasCompleteAssetSet(assets: DownloadAssets): boolean {
   return REQUIRED_ASSET_KEYS.every((key) => typeof assets[key] === "string");
 }
+
+/**
+ * The asset groups the /download page presents as platforms. A release
+ * that covers all three gives every platform section at least one real
+ * file to hand out.
+ */
+const PLATFORM_ASSET_KEYS: Record<
+  "mac" | "windows" | "linux",
+  (keyof DownloadAssets)[]
+> = {
+  mac: ["macArm64Dmg", "macArm64Zip", "macX64Dmg", "macX64Zip"],
+  windows: ["winX64Exe", "winArm64Exe"],
+  linux: [
+    "linuxAmd64AppImage",
+    "linuxAmd64Deb",
+    "linuxAmd64Rpm",
+    "linuxArm64AppImage",
+    "linuxArm64Deb",
+    "linuxArm64Rpm",
+  ],
+};
+
+/**
+ * Whether macOS, Windows and Linux each resolved to at least one
+ * installer. This — not `hasCompleteAssetSet` — is what decides which
+ * release /download advertises.
+ *
+ * The distinction matters because the two questions differ. "Every one
+ * of the twelve artifacts is present" is the right test for whether to
+ * show the escape-hatch link next to a table with a blank cell in it.
+ * It is the wrong test for *choosing* a release: the fork publishes
+ * macOS on Apple Silicon only, so under the twelve-artifact rule every
+ * release it ever cuts is "incomplete", `pickRelease` walks the whole
+ * candidate window, finds nothing, and falls through to the newest
+ * release anyway — a stepping-back mechanism that can never step back,
+ * and that silently keeps showing a release whose Linux job failed.
+ * Platform coverage restores the behaviour the mechanism was built for:
+ * step back past a release that left a whole platform with dead
+ * buttons, ignore an arch/format gap that the table already marks
+ * unavailable.
+ */
+export function hasAllPlatformDownloads(assets: DownloadAssets): boolean {
+  return Object.values(PLATFORM_ASSET_KEYS).every((keys) =>
+    keys.some((key) => typeof assets[key] === "string"),
+  );
+}

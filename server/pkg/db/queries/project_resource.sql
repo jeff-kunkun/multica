@@ -16,6 +16,16 @@ SELECT * FROM project_resource
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
 ORDER BY project_id, position ASC, created_at ASC;
 
+-- name: ListProjectResourcesForProjectsInWorkspace :many
+-- Workspace-scoped batch read for the multi-project daemon claim (DENE-523):
+-- one query for every project attached to the task, under the same tenant rule
+-- as ListProjectResourcesInWorkspace. project_resource carries its own
+-- workspace_id, so a corrupt project reference cannot pull another tenant's
+-- repository URLs or local paths into a claim response.
+SELECT * FROM project_resource
+WHERE workspace_id = sqlc.arg('workspace_id') AND project_id = ANY(sqlc.arg('project_ids')::uuid[])
+ORDER BY project_id, position ASC, created_at ASC;
+
 -- name: GetProjectResource :one
 SELECT * FROM project_resource
 WHERE id = $1;

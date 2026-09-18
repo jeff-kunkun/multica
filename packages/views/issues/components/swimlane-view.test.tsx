@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ChildProgress } from "./list-row";
 import { SwimLaneView } from "./swimlane-view";
 import { IssueContextMenuProvider } from "../actions";
 import { ScrollRestorationProvider } from "../../platform";
@@ -154,6 +155,8 @@ const mockViewState: {
   propertyFilters?: Record<string, string[]>;
   cardPropertyIds?: string[];
   agentRunningFilter?: boolean;
+  boardExpandedParents: string[];
+  toggleBoardParentExpanded: (issueId: string) => void;
 } = {
   sortBy: "position",
   sortDirection: "asc",
@@ -176,6 +179,10 @@ const mockViewState: {
   propertyFilters: {},
   cardPropertyIds: [],
   agentRunningFilter: false,
+  // Board sub-issue accordion (DENE-444): the card reads both on every
+  // render, so a fake view state missing them crashes the whole board.
+  boardExpandedParents: [] as string[],
+  toggleBoardParentExpanded: () => {},
 };
 const mockSetSwimlaneOrder = mockViewState.setSwimlaneOrder as ReturnType<typeof vi.fn>;
 const mockToggleSwimlaneCollapsed = mockViewState.toggleSwimlaneCollapsed as ReturnType<typeof vi.fn>;
@@ -359,6 +366,7 @@ function makeServerBranches(
     enabled: true,
     descriptors,
     issues,
+  pinnedIssueIds: new Set<string>(),
     pagination,
     total: issues.length,
     isLoading: false,
@@ -1544,8 +1552,8 @@ describe("SwimLaneView", () => {
     };
 
     mockListChildrenByParents.mockResolvedValueOnce({ issues: [grandchild] });
-    const childProgressMap = new Map<string, { done: number; total: number }>([
-      ["p-1", { done: 0, total: 1 }],
+    const childProgressMap = new Map<string, ChildProgress>([
+      ["p-1", { done: 0, total: 1, blocked: 0, active: 0 }],
     ]);
 
     renderWithI18n(
@@ -1598,8 +1606,8 @@ describe("SwimLaneView", () => {
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     };
-    const childProgressMap = new Map<string, { done: number; total: number }>([
-      ["p-only", { done: 0, total: 3 }],
+    const childProgressMap = new Map<string, ChildProgress>([
+      ["p-only", { done: 0, total: 3, blocked: 0, active: 0 }],
     ]);
 
     renderWithI18n(
@@ -1716,8 +1724,8 @@ describe("SwimLaneView", () => {
       issues: [matchingGrandchild, nonMatchingGrandchild],
     });
 
-    const childProgressMap = new Map<string, { done: number; total: number }>([
-      ["p-2", { done: 0, total: 2 }],
+    const childProgressMap = new Map<string, ChildProgress>([
+      ["p-2", { done: 0, total: 2, blocked: 0, active: 0 }],
     ]);
 
     renderWithI18n(
@@ -1812,8 +1820,8 @@ describe("SwimLaneView", () => {
       issues: [runningGrandchild, nonRunningGrandchild],
     });
 
-    const childProgressMap = new Map<string, { done: number; total: number }>([
-      ["p-3", { done: 0, total: 2 }],
+    const childProgressMap = new Map<string, ChildProgress>([
+      ["p-3", { done: 0, total: 2, blocked: 0, active: 0 }],
     ]);
 
     renderWithI18n(
@@ -1874,7 +1882,7 @@ describe("SwimLaneView", () => {
           labelFilters: [],
         }}
         childProgressMap={
-          new Map([[parent.id, { done: 0, total: 1 }]])
+          new Map([[parent.id, { done: 0, total: 1, blocked: 0, active: 0 }]])
         }
         onMoveIssue={vi.fn()}
       />,
@@ -1938,8 +1946,8 @@ describe("SwimLaneView", () => {
 
     mockListChildrenByParents.mockResolvedValueOnce({ issues: [batchOnlyChild] });
 
-    const childProgressMap = new Map<string, { done: number; total: number }>([
-      ["p-4", { done: 0, total: 1 }],
+    const childProgressMap = new Map<string, ChildProgress>([
+      ["p-4", { done: 0, total: 1, blocked: 0, active: 0 }],
     ]);
 
     renderWithI18n(

@@ -88,9 +88,15 @@ export interface ChatSession {
   workspace_id: string;
   agent_id: string;
   creator_id: string;
-  /** Durable project context for every turn in this session. Null when the
-   *  conversation uses workspace context only; optional for older servers. */
+  /** Mirror of `project_ids[0]` — the session's PRIMARY project. Null when
+   *  the conversation uses workspace context only; optional for older
+   *  servers. Read `project_ids` (via `chatSessionProjectIds`) for the set. */
   project_id?: string | null;
+  /** Durable project context for every turn in this session, in selection
+   *  order: a chat can carry several projects at once (DENE-522). Optional
+   *  because a server predating the set omits it — `chatSessionProjectIds`
+   *  normalises that back to the single `project_id`. */
+  project_ids?: string[];
   title: string;
   status: "active" | "archived";
   /** True when the session has any unread assistant replies. List-only.
