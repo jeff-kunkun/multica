@@ -106,10 +106,10 @@ export function useCreateChatSession() {
   const wsId = useWorkspaceId();
 
   return useMutation({
-    mutationFn: (data: { agent_id: string; title?: string; project_id?: string | null }) => {
+    mutationFn: (data: { agent_id: string; title?: string; project_ids?: string[] }) => {
       logger.info("createChatSession.start", {
         agent_id: data.agent_id,
-        project_id: data.project_id,
+        project_ids: data.project_ids,
         titleLength: data.title?.length ?? 0,
       });
       return api.createChatSession(data);
@@ -202,33 +202,41 @@ export function useUpdateChatSession() {
 }
 
 /**
- * Changes the project context of an existing chat without replacing the
- * session. The optimistic patch keeps the context chip in place while the
- * server validates the soft project reference; failures restore the old row.
+ * Replaces the project set of an existing chat without replacing the session
+ * (DENE-522). `projectIds` is the COMPLETE set in selection order — an empty
+ * array detaches every project.
+ *
+ * Optimistic: attaching or detaching a project is locally predictable, keeps
+ * the user on the same screen and rolls back to one saved row, so the chips
+ * settle instantly while the server validates the soft project references.
+ * The patch also mirrors the head onto `project_id`, exactly as the server
+ * does, so nothing downstream sees the two fields disagree mid-flight.
  */
-export function useSetChatSessionProject() {
+export function useSetChatSessionProjects() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
 
   return useMutation({
-    mutationFn: (data: { sessionId: string; projectId: string | null }) => {
-      logger.info("setChatSessionProject.start", data);
-      return api.updateChatSession(data.sessionId, { project_id: data.projectId });
+    mutationFn: (data: { sessionId: string; projectIds: string[] }) => {
+      logger.info("setChatSessionProjects.start", data);
+      return api.updateChatSession(data.sessionId, { project_ids: data.projectIds });
     },
-    onMutate: async ({ sessionId, projectId }) => {
+    onMutate: async ({ sessionId, projectIds }) => {
       await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
 
       const prevSessions = qc.getQueryData<ChatSession[]>(chatKeys.sessions(wsId));
       const patch = (old?: ChatSession[]) =>
         old?.map((session) =>
-          session.id === sessionId ? { ...session, project_id: projectId } : session,
+          session.id === sessionId
+            ? { ...session, project_ids: projectIds, project_id: projectIds[0] ?? null }
+            : session,
         );
       qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), patch);
 
       return { prevSessions };
     },
     onError: (err, vars, ctx) => {
-      logger.error("setChatSessionProject.error.rollback", {
+      logger.error("setChatSessionProjects.error.rollback", {
         sessionId: vars.sessionId,
         err,
       });

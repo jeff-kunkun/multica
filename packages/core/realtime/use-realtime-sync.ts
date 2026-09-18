@@ -345,6 +345,9 @@ type ChatSessionUpdatedPayload = {
   chat_session_id: string;
   title?: string;
   project_id?: string | null;
+  /** The session's full project set, sent on the same events that carry
+   *  `project_id` (DENE-522). Absent on rename/pin/archive. */
+  project_ids?: string[];
   pinned?: boolean;
   status?: "active" | "archived";
   updated_at?: string;
@@ -380,6 +383,11 @@ export function applyChatSessionUpdatedToCache(
             ...s,
             title: payload.title ?? s.title,
             ...("project_id" in payload ? { project_id: payload.project_id } : {}),
+            // Same `in` rule as project_id: an explicit empty array clears the
+            // set, while an absent field leaves this tab's set alone. A server
+            // predating project_ids sends only project_id, and the singular
+            // patch above still moves the chip.
+            ...("project_ids" in payload ? { project_ids: payload.project_ids } : {}),
             pinned: payload.pinned ?? s.pinned,
             status: payload.status ?? s.status,
             updated_at: payload.updated_at ?? s.updated_at,

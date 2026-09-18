@@ -174,17 +174,31 @@ describe("chat store — open/closed default", () => {
   });
 });
 
-describe("chat store — selected project", () => {
-  it("persists and clears the next chat's project per workspace", () => {
+describe("chat store — selected projects", () => {
+  it("persists and clears the next chat's project set per workspace", () => {
     const storage = memStorage();
     const store = createChatStore({ storage });
 
-    store.getState().setSelectedProjectId("project-1");
-    expect(storage.getItem("multica:chat:selectedProjectId")).toBe("project-1");
-    expect(createChatStore({ storage }).getState().selectedProjectId).toBe("project-1");
+    store.getState().setSelectedProjectIds(["project-1", "project-2"]);
+    expect(storage.getItem("multica:chat:selectedProjectIds")).toBe(
+      '["project-1","project-2"]',
+    );
+    expect(createChatStore({ storage }).getState().selectedProjectIds).toEqual([
+      "project-1",
+      "project-2",
+    ]);
 
-    store.getState().setSelectedProjectId(null);
-    expect(storage.getItem("multica:chat:selectedProjectId")).toBeNull();
+    store.getState().setSelectedProjectIds([]);
+    expect(storage.getItem("multica:chat:selectedProjectIds")).toBeNull();
+  });
+
+  it("degrades a non-array persisted value to no project context", () => {
+    const storage = memStorage();
+    // What the single-project key held before DENE-522, in case anything ever
+    // writes a bare id here again: a bad value must not throw on boot.
+    storage.setItem("multica:chat:selectedProjectIds", "project-1");
+
+    expect(createChatStore({ storage }).getState().selectedProjectIds).toEqual([]);
   });
 });
 

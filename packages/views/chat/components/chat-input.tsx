@@ -21,6 +21,7 @@ import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
+import { replaceProjectId } from "@multica/core/chat/project-context";
 import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
 import { createLogger } from "@multica/core/logger";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
@@ -124,8 +125,11 @@ interface ChatInputProps {
   contextItems?: MentionItem[];
   /** Optional project context for the draft or current chat session. */
   projects?: Project[];
-  projectId?: string | null;
-  onProjectChange?: (projectId: string | null) => void;
+  /** Attached projects, in selection order. A chat can carry several at once
+   *  (DENE-522); each renders as its own chip above the editor. */
+  projectIds?: string[];
+  /** Called with the COMPLETE next set, never a delta. */
+  onProjectsChange?: (projectIds: string[]) => void;
   isProjectUpdating?: boolean;
   /** True when the active agent's daemon is too old to inject the project
    *  description into the run brief. Soft signal: selection stays enabled,
@@ -165,8 +169,8 @@ export function ChatInput({
   leftAdornment,
   contextItems,
   projects = [],
-  projectId,
-  onProjectChange,
+  projectIds = [],
+  onProjectsChange,
   isProjectUpdating,
   projectContextUnsupported,
   focusRequest,
@@ -597,12 +601,17 @@ export function ChatInput({
   // session. Once accepted, its project can still be detached while agent work
   // continues: changing session metadata does not cancel or move that task.
   const projectSelectionEnabled =
-    !!onProjectChange &&
+    !!onProjectsChange &&
     !disabled &&
     !noAgent &&
     !submitting &&
     !isProjectUpdating;
-  const selectedProject = projects.find((project) => project.id === projectId);
+  // Resolve in the set's order, dropping ids the project list does not know —
+  // a chip with no title would be an unlabelled pill the user cannot act on.
+  const selectedProjects = projectIds.flatMap((id) => {
+    const project = projects.find((candidate) => candidate.id === id);
+    return project ? [project] : [];
+  });
 
   return (
     <div
@@ -650,30 +659,47 @@ export function ChatInput({
         )}
         aria-disabled={noAgent || undefined}
       >
-        {selectedProject && (
+        {selectedProjects.length > 0 && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pt-2">
-            <div
-              className={cn(
-                "inline-flex max-w-full",
-                !projectSelectionEnabled && "pointer-events-none opacity-60",
-              )}
-            >
-              <ProjectPicker
-                projectId={selectedProject.id}
-                onUpdate={(updates) => onProjectChange?.(updates.project_id ?? null)}
-                disabled={!projectSelectionEnabled}
-                triggerRender={
-                  <ClearablePillButton
-                    disabled={!projectSelectionEnabled}
-                    aria-label={t(($) => $.input.change_project_context)}
-                    title={t(($) => $.input.change_project_context)}
-                    onClear={() => onProjectChange?.(null)}
-                    clearLabel={t(($) => $.input.remove_project_context)}
-                    className="h-6 border-surface-border bg-surface-raised font-medium text-foreground"
-                  />
-                }
-              />
-            </div>
+            {selectedProjects.map((selectedProject) => (
+              <div
+                key={selectedProject.id}
+                className={cn(
+                  "inline-flex max-w-full",
+                  !projectSelectionEnabled && "pointer-events-none opacity-60",
+                )}
+              >
+                {/* Picking a different project SWAPS this chip in place rather
+                    than replacing the whole set — adding is what the "+" menu
+                    is for, and a swap is the one thing the menu's checkboxes
+                    cannot express in a single step. */}
+                <ProjectPicker
+                  projectId={selectedProject.id}
+                  onUpdate={(updates) =>
+                    onProjectsChange?.(
+                      updates.project_id
+                        ? replaceProjectId(projectIds, selectedProject.id, updates.project_id)
+                        : projectIds.filter((id) => id !== selectedProject.id),
+                    )
+                  }
+                  disabled={!projectSelectionEnabled}
+                  triggerRender={
+                    <ClearablePillButton
+                      disabled={!projectSelectionEnabled}
+                      aria-label={t(($) => $.input.change_project_context)}
+                      title={t(($) => $.input.change_project_context)}
+                      onClear={() =>
+                        onProjectsChange?.(
+                          projectIds.filter((id) => id !== selectedProject.id),
+                        )
+                      }
+                      clearLabel={t(($) => $.input.remove_project_context)}
+                      className="h-6 border-surface-border bg-surface-raised font-medium text-foreground"
+                    />
+                  }
+                />
+              </div>
+            ))}
             {projectContextUnsupported && (
               <span className="inline-flex min-w-0 items-center gap-1 text-caption text-warning">
                 <TriangleAlert className="size-3 shrink-0" />
@@ -723,8 +749,8 @@ export function ChatInput({
                   ? (file) => editorRef.current?.uploadFile(file)
                   : undefined}
                 projects={projects}
-                projectId={projectId}
-                onSelectProject={projectSelectionEnabled ? onProjectChange : undefined}
+                projectIds={projectIds}
+                onProjectsChange={projectSelectionEnabled ? onProjectsChange : undefined}
                 projectContextUnsupported={projectContextUnsupported}
               />
             )}
