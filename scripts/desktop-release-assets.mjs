@@ -23,6 +23,15 @@
  *
  * `upload --dry-run` prints the exact `gh` invocations instead of running them.
  *
+ * `--scope-dist` narrows `check` and `clean` to the assets the local build
+ * actually produced. The macOS, Linux and Windows packaging jobs publish to one
+ * release in parallel, so every remote asset a job did not build is another
+ * job's business: unscoped, one job's `clean` deletes a sibling's 200 MB upload
+ * while it is still streaming, and one job's `check` fails on a sibling's
+ * in-flight `state=starter` asset. Scoped, each job judges and repairs only its
+ * own artifacts. Leave it off for a single-job release, where an unexplained
+ * zombie really is this run's debris.
+ *
  * The `gh` binary is overridable through DESKTOP_RELEASE_GH so tests can drive
  * the command with a fake executable.
  */
@@ -211,7 +220,7 @@ function formatBytes(value) {
  * its name is not part of this build, because it is the debris a failed upload
  * leaves behind and it blocks the next same-name upload.
  */
-export function compareReleaseAssets(local, remote) {
+export function compareReleaseAssets(local, remote, { scopeToLocal = false } = {}) {
   const remoteByName = new Map(remote.map((asset) => [asset.name, asset]));
   const rows = [];
 
@@ -269,6 +278,14 @@ export function compareReleaseAssets(local, remote) {
       remoteSize: published.size,
       remoteState: published.state,
     });
+  }
+
+  // Scoped runs stop here: what is left in `remoteByName` belongs to a
+  // sibling packaging job, and its upload state is not this job's verdict to
+  // give.
+  if (scopeToLocal) {
+    const failures = rows.filter((row) => row.status !== "ok");
+    return { ok: failures.length === 0, rows, failures };
   }
 
   for (const leftover of remoteByName.values()) {
@@ -339,6 +356,7 @@ export function parseArgs(argv) {
     dryRun: false,
     json: false,
     sizeOnly: false,
+    scopeDist: false,
   };
 
   const positional = [];
@@ -354,6 +372,10 @@ export function parseArgs(argv) {
     }
     if (token === "--size-only") {
       options.sizeOnly = true;
+      continue;
+    }
+    if (token === "--scope-dist") {
+      options.scopeDist = true;
       continue;
     }
     if (token === "--help" || token === "-h") {
@@ -396,14 +418,17 @@ export function parseArgs(argv) {
 function usage() {
   return [
     "Usage:",
-    "  node scripts/desktop-release-assets.mjs check  --tag vX.Y.Z [--dist <dir>] [--repo <owner/name>] [--attempts N] [--delay-ms N] [--size-only]",
-    "  node scripts/desktop-release-assets.mjs clean  --tag vX.Y.Z [--repo <owner/name>]",
+    "  node scripts/desktop-release-assets.mjs check  --tag vX.Y.Z [--dist <dir>] [--repo <owner/name>] [--attempts N] [--delay-ms N] [--size-only] [--scope-dist]",
+    "  node scripts/desktop-release-assets.mjs clean  --tag vX.Y.Z [--repo <owner/name>] [--dist <dir>] [--scope-dist]",
     "  node scripts/desktop-release-assets.mjs upload --tag vX.Y.Z [--dist <dir>] [--repo <owner/name>] [--dry-run]",
     "",
     "check   fails unless every locally built asset is state=uploaded, matches the local size,",
     "        and matches the server-side sha256 when GitHub reports one (--size-only skips the hash)",
     "clean   deletes non-uploaded (zombie) release assets so a re-upload can reuse the name",
     "upload  uploads every locally built asset with --clobber, feed metadata last",
+    "",
+    "--scope-dist  limit check/clean to the assets under --dist; required when several",
+    "              packaging jobs publish to one release in parallel",
   ].join("\n");
 }
 
@@ -457,7 +482,9 @@ function checkCommand(options) {
         ],
       };
     } else {
-      comparison = compareReleaseAssets(local, remote);
+      comparison = compareReleaseAssets(local, remote, {
+        scopeToLocal: options.scopeDist,
+      });
     }
     if (comparison.ok) break;
     if (attempt < options.attempts) {
@@ -494,7 +521,12 @@ function cleanCommand(options) {
     console.log(`[assets] no release for ${options.tag} on ${options.repo}; nothing to clean`);
     return 0;
   }
-  const zombies = zombieAssets(remote);
+  const scope = options.scopeDist
+    ? new Set(collectLocalAssets(options.dist).map((asset) => asset.name))
+    : null;
+  const zombies = zombieAssets(remote).filter(
+    (asset) => scope === null || scope.has(asset.name),
+  );
   if (zombies.length === 0) {
     console.log(`[assets] no zombie assets on ${options.tag}`);
     return 0;

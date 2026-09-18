@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { hasCompleteAssetSet, parseReleaseAssets } from "./parse-release-assets";
+import {
+  hasAllPlatformDownloads,
+  hasCompleteAssetSet,
+  parseReleaseAssets,
+} from "./parse-release-assets";
 
 function asset(name: string) {
   return {
@@ -68,5 +72,40 @@ describe("hasCompleteAssetSet", () => {
 
   it("rejects an empty asset set", () => {
     expect(hasCompleteAssetSet({})).toBe(false);
+  });
+});
+
+describe("hasAllPlatformDownloads", () => {
+  it("accepts a release carrying all twelve desktop artifacts", () => {
+    const assets = parseReleaseAssets(ALL_ARTIFACT_NAMES.map(asset));
+    expect(hasAllPlatformDownloads(assets)).toBe(true);
+  });
+
+  // What the fork's own release matrix produces: macOS on Apple Silicon
+  // only, and no aarch64 RPM. Every platform still has something to hand
+  // out, which is the question this predicate answers.
+  it("accepts a release covering every platform on only some arch/formats", () => {
+    const assets = parseReleaseAssets(
+      [
+        "multica-desktop-0.4.27-mac-arm64.dmg",
+        "multica-desktop-0.4.27-windows-x64.exe",
+        "multica-desktop-0.4.27-linux-amd64.deb",
+      ].map(asset),
+    );
+    expect(hasAllPlatformDownloads(assets)).toBe(true);
+    expect(hasCompleteAssetSet(assets)).toBe(false);
+  });
+
+  it("rejects a release with no build for one of the platforms", () => {
+    for (const platform of ["-mac-", "-windows-", "-linux-"]) {
+      const assets = parseReleaseAssets(
+        ALL_ARTIFACT_NAMES.filter((n) => !n.includes(platform)).map(asset),
+      );
+      expect(hasAllPlatformDownloads(assets), `dropped ${platform}`).toBe(false);
+    }
+  });
+
+  it("rejects an empty asset set", () => {
+    expect(hasAllPlatformDownloads({})).toBe(false);
   });
 });

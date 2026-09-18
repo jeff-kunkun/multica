@@ -393,3 +393,54 @@ test("clean deletes only the assets a failed upload left behind", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("--scope-dist leaves a sibling packaging job's in-flight upload alone", () => {
+  // The matrix shape: the Linux job finishes while the macOS job is still
+  // streaming its DMG. Unscoped, the Linux job's check fails on a zombie it
+  // does not own — and its clean would delete those bytes mid-transfer.
+  const local = [
+    { name: "multica-desktop-0.4.60-linux-x86_64.AppImage", size: 120, sha256: "a".repeat(64) },
+    { name: "latest-linux.yml", size: 40, sha256: "b".repeat(64) },
+  ];
+  const remote = [
+    { id: 1, name: "multica-desktop-0.4.60-linux-x86_64.AppImage", state: "uploaded", size: 120, digest: `sha256:${"a".repeat(64)}` },
+    { id: 2, name: "latest-linux.yml", state: "uploaded", size: 40, digest: null },
+    { id: 3, name: "multica-desktop-0.4.60-mac-arm64.dmg", state: "starter", size: 0, digest: null },
+  ];
+
+  assert.equal(compareReleaseAssets(local, remote).ok, false);
+
+  const scoped = compareReleaseAssets(local, remote, { scopeToLocal: true });
+  assert.equal(scoped.ok, true);
+  assert.deepEqual(
+    scoped.rows.map((row) => row.name),
+    local.map((asset) => asset.name),
+  );
+});
+
+test("--scope-dist still fails on this job's own truncated upload", () => {
+  const local = [
+    { name: "multica-desktop-0.4.60-windows-x64.exe", size: 100, sha256: "a".repeat(64) },
+  ];
+  const scoped = compareReleaseAssets(
+    local,
+    [
+      { id: 1, name: "multica-desktop-0.4.60-windows-x64.exe", state: "starter", size: 100, digest: null },
+      { id: 2, name: "multica-desktop-0.4.60-mac-arm64.dmg", state: "starter", size: 0, digest: null },
+    ],
+    { scopeToLocal: true },
+  );
+  assert.equal(scoped.ok, false);
+  assert.deepEqual(
+    scoped.failures.map((row) => [row.name, row.status]),
+    [["multica-desktop-0.4.60-windows-x64.exe", "not-uploaded"]],
+  );
+});
+
+test("--scope-dist is off unless asked for", () => {
+  assert.equal(parseArgs(["check", "--tag", "v0.4.60"]).scopeDist, false);
+  assert.equal(
+    parseArgs(["clean", "--tag", "v0.4.60", "--scope-dist"]).scopeDist,
+    true,
+  );
+});
