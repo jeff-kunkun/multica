@@ -140,6 +140,31 @@ describe("ChatSessionSchema", () => {
     expect(parsed.is_current_channel_route).toBe(false);
   });
 
+  it("carries the project set and leaves it absent on a server without one", () => {
+    expect(ChatSessionSchema.parse(baseSession).project_ids).toBeUndefined();
+    expect(
+      ChatSessionSchema.parse({
+        ...baseSession,
+        project_id: "project-1",
+        project_ids: ["project-1", "project-2"],
+      }).project_ids,
+    ).toEqual(["project-1", "project-2"]);
+  });
+
+  // An installed desktop build can meet a backend that renamed or retyped the
+  // field. Dropping just project_ids lets chatSessionProjectIds fall back to
+  // the singular project_id; failing the whole row would hide the Chat.
+  it("drops a malformed project set without dropping the Chat", () => {
+    const parsed = ChatSessionSchema.parse({
+      ...baseSession,
+      project_id: "project-1",
+      project_ids: "project-1",
+    });
+    expect(parsed.project_ids).toBeUndefined();
+    expect(parsed.project_id).toBe("project-1");
+    expect(parsed.id).toBe("chat-1");
+  });
+
   it("degrades malformed session metadata without dropping the Chat", () => {
     const parsed = ChatSessionSchema.parse({
       ...baseSession,

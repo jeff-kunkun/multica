@@ -14,15 +14,15 @@ const h = vi.hoisted(() => {
   const store = {
     activeSessionId: null as string | null,
     selectedAgentId: null as string | null,
-    selectedProjectId: null as string | null,
+    selectedProjectIds: [] as string[],
     setActiveSession: vi.fn((id: string | null) => {
       store.activeSessionId = id;
     }),
     setSelectedAgentId: vi.fn((id: string | null) => {
       store.selectedAgentId = id;
     }),
-    setSelectedProjectId: vi.fn((id: string | null) => {
-      store.selectedProjectId = id;
+    setSelectedProjectIds: vi.fn((ids: string[]) => {
+      store.selectedProjectIds = ids;
     }),
     appliedDraftRestoreIds: [] as string[],
     markDraftRestoreApplied: vi.fn((id: string) => {
@@ -136,7 +136,7 @@ vi.mock("@multica/core/chat/mutations", () => ({
   useCreateChatSession: () => ({ mutateAsync: h.createSessionMutate }),
   useMarkChatSessionRead: () => ({ mutate: h.markReadMutate }),
   useSetChatSessionArchived: () => ({ mutate: h.archivedMutate }),
-  useSetChatSessionProject: () => ({
+  useSetChatSessionProjects: () => ({
     mutate: h.setProjectMutate,
     isPending: false,
   }),
@@ -236,7 +236,7 @@ function setup(
 ) {
   h.store.activeSessionId = activeSessionId;
   h.store.selectedAgentId = null;
-  h.store.selectedProjectId = null;
+  h.store.selectedProjectIds = [];
   h.sessions = sessions;
   h.agents = agents;
   h.projects = [];
@@ -246,7 +246,7 @@ function setup(
   // effect of the call under test.
   h.store.setActiveSession.mockClear();
   h.store.setSelectedAgentId.mockClear();
-  h.store.setSelectedProjectId.mockClear();
+  h.store.setSelectedProjectIds.mockClear();
   h.archivedMutate.mockClear();
   return result;
 }
@@ -265,121 +265,118 @@ describe("useChatController project context", () => {
 
   beforeEach(() => {
     h.store.setActiveSession.mockClear();
-    h.store.setSelectedProjectId.mockClear();
+    h.store.setSelectedProjectIds.mockClear();
     h.createSessionMutate.mockClear();
     h.setProjectMutate.mockClear();
     h.createSessionMutate.mockResolvedValue({ id: "new-session" });
   });
 
   afterEach(() => {
-    h.store.selectedProjectId = null;
+    h.store.selectedProjectIds = [];
     h.projects = [];
   });
 
-  it("removes the project from the current chat without leaving it", () => {
+  function openProjectSession(projectIds: string[], agentId = "agent-a") {
     const projectSession = makeSession({
       id: "project-session",
-      agent_id: "agent-a",
-      project_id: project.id,
+      agent_id: agentId,
+      project_id: projectIds[0] ?? null,
+      project_ids: projectIds,
     });
     h.store.activeSessionId = projectSession.id;
-    h.store.selectedProjectId = project.id;
     h.sessions = [projectSession];
+    return projectSession;
+  }
+
+  it("removes the project from the current chat without leaving it", () => {
+    const projectSession = openProjectSession([project.id]);
     h.agents = [agentA];
     h.projects = [project];
 
     const { result } = renderHook(() => useChatController());
     h.store.setActiveSession.mockClear();
-    h.store.setSelectedProjectId.mockClear();
+    h.store.setSelectedProjectIds.mockClear();
 
-    act(() => result.current.handleProjectChange(null));
+    act(() => result.current.handleProjectsChange([]));
 
     expect(h.setProjectMutate).toHaveBeenCalledWith({
       sessionId: projectSession.id,
-      projectId: null,
+      projectIds: [],
     });
-    expect(h.store.setSelectedProjectId).not.toHaveBeenCalled();
+    expect(h.store.setSelectedProjectIds).not.toHaveBeenCalled();
     expect(h.store.setActiveSession).not.toHaveBeenCalled();
   });
 
-  it("starts a fresh chat when switching an existing chat to another project", () => {
-    const projectSession = makeSession({
-      id: "project-session",
-      agent_id: "agent-a",
-      project_id: project.id,
-    });
-    h.store.activeSessionId = projectSession.id;
-    h.store.selectedProjectId = project.id;
-    h.sessions = [projectSession];
+  // The headline behaviour change of DENE-522: attaching a second project used
+  // to abandon the conversation for a fresh chat (MUL-5150). It must now land
+  // on the open session, or the whole point — reading two projects in ONE
+  // conversation — is unreachable.
+  it("attaches another project to the open chat instead of starting a fresh one", () => {
+    const projectSession = openProjectSession([project.id]);
     h.agents = [agentA];
     h.projects = [project, otherProject];
 
     const { result } = renderHook(() => useChatController());
     h.store.setActiveSession.mockClear();
-    h.store.setSelectedProjectId.mockClear();
+    h.store.setSelectedProjectIds.mockClear();
 
-    act(() => result.current.handleProjectChange(otherProject.id));
+    act(() => result.current.handleProjectsChange([project.id, otherProject.id]));
 
-    expect(h.setProjectMutate).not.toHaveBeenCalled();
-    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(otherProject.id);
-    expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
+    expect(h.setProjectMutate).toHaveBeenCalledWith({
+      sessionId: projectSession.id,
+      projectIds: [project.id, otherProject.id],
+    });
+    expect(h.store.setSelectedProjectIds).not.toHaveBeenCalled();
+    expect(h.store.setActiveSession).not.toHaveBeenCalled();
   });
 
-  it("pins the fresh chat to the open session's agent when selectedAgentId is stale", () => {
-    // The open session belongs to agent B, but the persisted preference is
-    // still agent A. Switching to another project clears the active session,
-    // which would otherwise drop selection back to the stale agent A and send
-    // the lazily-created chat to the wrong agent (MUL-5150 regression). The
-    // switch must first sync selectedAgentId to the open session's agent.
-    const projectSession = makeSession({
-      id: "project-session",
-      agent_id: agentB.id,
-      project_id: project.id,
-    });
-    h.store.activeSessionId = projectSession.id;
-    h.store.selectedAgentId = agentA.id; // stale preference for a different agent
-    h.store.selectedProjectId = project.id;
-    h.sessions = [projectSession];
-    h.agents = [agentA, agentB];
+  it("reads the open session's whole set, not just its primary project", () => {
+    openProjectSession([project.id, otherProject.id]);
+    h.agents = [agentA];
     h.projects = [project, otherProject];
 
     const { result } = renderHook(() => useChatController());
-    h.store.setActiveSession.mockClear();
-    h.store.setSelectedAgentId.mockClear();
-    h.store.setSelectedProjectId.mockClear();
 
-    act(() => result.current.handleProjectChange(otherProject.id));
+    expect(result.current.activeProjectIds).toEqual([project.id, otherProject.id]);
+  });
 
-    expect(h.store.setSelectedAgentId).toHaveBeenCalledWith(agentB.id);
-    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(otherProject.id);
-    expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
+  // A project deleted on another client is still in the row until the refetch.
+  // Painting a chip for it would offer an action the server would 404.
+  it("drops a project the loaded list no longer knows", () => {
+    openProjectSession([project.id, otherProject.id]);
+    h.agents = [agentA];
+    h.projects = [project];
+
+    const { result } = renderHook(() => useChatController());
+
+    expect(result.current.activeProjectIds).toEqual([project.id]);
   });
 
   it("does not write project changes into the new-chat draft while an active session resolves", () => {
     h.store.activeSessionId = "loading-session";
-    h.store.selectedProjectId = project.id;
+    h.store.selectedProjectIds = [project.id];
     h.sessions = [];
     h.agents = [agentA];
     h.projects = [project];
 
     const { result } = renderHook(() => useChatController());
     h.store.setActiveSession.mockClear();
-    h.store.setSelectedProjectId.mockClear();
+    h.store.setSelectedProjectIds.mockClear();
 
-    act(() => result.current.handleProjectChange(null));
+    act(() => result.current.handleProjectsChange([]));
 
     expect(h.setProjectMutate).not.toHaveBeenCalled();
-    expect(h.store.setSelectedProjectId).not.toHaveBeenCalled();
+    expect(h.store.setSelectedProjectIds).not.toHaveBeenCalled();
     expect(h.store.setActiveSession).not.toHaveBeenCalled();
   });
 
-  it("persists the selected project when lazy-creating a session", async () => {
+  it("persists the whole selected set when lazy-creating a session", async () => {
     h.store.activeSessionId = null;
     h.store.selectedAgentId = agentA.id;
-    h.store.selectedProjectId = project.id;
+    h.store.selectedProjectIds = [project.id, otherProject.id];
     h.sessions = [];
     h.agents = [agentA];
-    h.projects = [project];
+    h.projects = [project, otherProject];
     vi.mocked(api.sendChatMessage).mockResolvedValue({
       message_id: "message-1",
       task_id: "task-1",
@@ -392,73 +389,60 @@ describe("useChatController project context", () => {
     });
 
     expect(h.createSessionMutate).toHaveBeenCalledWith(
-      expect.objectContaining({ project_id: project.id }),
+      expect.objectContaining({ project_ids: [project.id, otherProject.id] }),
     );
   });
 
-  it("does not inherit the current session project when starting a new chat", () => {
-    const projectSession = makeSession({
-      id: "project-session",
-      agent_id: "agent-a",
-      project_id: project.id,
-    });
-    h.store.activeSessionId = projectSession.id;
-    h.store.selectedProjectId = project.id;
-    h.sessions = [projectSession];
+  it("does not inherit the current session projects when starting a new chat", () => {
+    openProjectSession([project.id]);
     h.agents = [agentA, agentB];
     h.projects = [project];
 
     const { result } = renderHook(() => useChatController());
     h.store.setActiveSession.mockClear();
-    h.store.setSelectedProjectId.mockClear();
+    h.store.setSelectedProjectIds.mockClear();
 
     act(() => result.current.handleStartNewChat(agentB));
 
-    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(null);
+    expect(h.store.setSelectedProjectIds).toHaveBeenCalledWith([]);
     expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
   });
 
-  it("clears the current session project when using the plain new-chat action", () => {
-    const projectSession = makeSession({
-      id: "project-session",
-      agent_id: "agent-a",
-      project_id: project.id,
-    });
-    h.store.activeSessionId = projectSession.id;
-    h.store.selectedProjectId = project.id;
-    h.sessions = [projectSession];
+  it("clears the current session projects when using the plain new-chat action", () => {
+    openProjectSession([project.id]);
     h.agents = [agentA];
     h.projects = [project];
 
     const { result } = renderHook(() => useChatController());
     h.store.setActiveSession.mockClear();
-    h.store.setSelectedProjectId.mockClear();
+    h.store.setSelectedProjectIds.mockClear();
 
     act(() => result.current.handleNewChat());
 
-    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(null);
+    expect(h.store.setSelectedProjectIds).toHaveBeenCalledWith([]);
     expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
   });
 
-  it("keeps a historical session project out of the next-chat draft state", () => {
+  it("keeps a historical session's projects out of the next-chat draft state", () => {
     const projectSession = makeSession({
       id: "project-session",
       agent_id: "agent-a",
       project_id: project.id,
+      project_ids: [project.id],
     });
     h.store.activeSessionId = null;
-    h.store.selectedProjectId = null;
+    h.store.selectedProjectIds = [];
     h.sessions = [projectSession];
     h.agents = [agentA];
     h.projects = [project];
 
     const { result } = renderHook(() => useChatController());
     h.store.setActiveSession.mockClear();
-    h.store.setSelectedProjectId.mockClear();
+    h.store.setSelectedProjectIds.mockClear();
 
     act(() => result.current.handleSelectSession(projectSession));
 
-    expect(h.store.setSelectedProjectId).not.toHaveBeenCalled();
+    expect(h.store.setSelectedProjectIds).not.toHaveBeenCalled();
     expect(h.store.setActiveSession).toHaveBeenCalledWith(projectSession.id);
   });
 });
