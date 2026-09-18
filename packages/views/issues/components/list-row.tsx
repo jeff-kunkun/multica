@@ -25,8 +25,11 @@ import { LabelChip } from "../../labels/label-chip";
 import { CustomStatusChip } from "./custom-status-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { useIssuePinnedIds } from "../surface/pinned-context";
 import { ParentIssueBadge } from "./parent-issue-badge";
+import { PinnedRowBadge } from "./pinned-row-badge";
 import { useLocale } from "../../i18n";
+import { useT } from "../../i18n";
 
 export interface ChildProgress {
   done: number;
@@ -61,6 +64,9 @@ function ListRowContent({
   checkboxProps?: Pick<React.HTMLAttributes<HTMLDivElement>, "onClick" | "onMouseDown" | "onPointerDown">;
 }) {
   const locale = useLocale();
+  const { t } = useT("issues");
+  const pinnedIssueIds = useIssuePinnedIds();
+  const isPinned = pinnedIssueIds.has(issue.id);
   const selection = useIssueSurfaceSelection();
   const selected = selection.selectedIds.has(issue.id);
   const toggle = selection.toggle;
@@ -120,6 +126,7 @@ function ListRowContent({
           <span className="min-w-16 shrink-0 text-caption text-muted-foreground">
             {issue.identifier}
           </span>
+          {isPinned && <PinnedRowBadge label={t(($) => $.row.pinned_label)} />}
           <IssueAgentActivityIndicator issueId={issue.id} />
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">

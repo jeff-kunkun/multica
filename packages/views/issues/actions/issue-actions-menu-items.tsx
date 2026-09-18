@@ -309,7 +309,7 @@ export function IssueActionsMenuItems({
         ) : (
           <Pin className="h-3.5 w-3.5" />
         )}
-        {isPinned ? t(($) => $.actions.unpin_from_sidebar) : t(($) => $.actions.pin_to_sidebar)}
+        {isPinned ? t(($) => $.actions.unpin) : t(($) => $.actions.pin)}
       </P.Item>
       <P.Item onClick={copyLink}>
         <Link2 className="h-3.5 w-3.5" />

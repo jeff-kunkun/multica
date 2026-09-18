@@ -54,7 +54,7 @@
     "align_issue": "先对齐需求",
     "align_issue_hint": "先聊清楚再创建，确认前不会产生任务",
     "new_issue_shortcut": "C",
-    "pinned_label": "固定",
+    "pinned_label": "置顶",
     "work_group": "工作",
     "ai_team_group": "AI 团队",
     "show_more_pins": "再显示 {{count}} 项...",

@@ -3,6 +3,7 @@ import type { Issue } from "@multica/core/types";
 import type { BoardColumnGroup } from "../components/board-column";
 import {
   buildColumns,
+  computePosition,
   getIssueGroupId,
   getMoveAnchors,
   getMoveUpdates,
@@ -54,6 +55,86 @@ describe("getMoveAnchors", () => {
       before_id: null,
       after_id: null,
     });
+  });
+});
+
+/**
+ * The pinned block is a barrier inside a single branch, so a drop has to anchor
+ * against a neighbour in the SAME arm. Otherwise the pair of anchors spans the
+ * block boundary and the server computes a shared mid-position, which would
+ * both let a plain row be inserted among pinned rows and let a pinned row fall
+ * below them — the per-user order leaking into the shared `position` field.
+ * (DENE-500)
+ */
+describe("getMoveAnchors across the pinned barrier", () => {
+  // Served order: pinned block first, then the plain rows.
+  const pinned = new Set(["p1", "p2"]);
+
+  it("skips the block for a plain row dropped at its top", () => {
+    // "a" was dragged above the block; its real neighbours are the plain rows.
+    expect(getMoveAnchors(["p1", "p2", "a", "b", "c"], "a", pinned)).toEqual({
+      before_id: null,
+      after_id: "b",
+    });
+  });
+
+  it("keeps a plain row anchored inside the block's rows", () => {
+    expect(getMoveAnchors(["p1", "a", "p2", "b", "c"], "a", pinned)).toEqual({
+      before_id: null,
+      after_id: "b",
+    });
+  });
+
+  it("keeps a pinned row inside the block", () => {
+    // "p2" was dragged below the block: it still anchors to the pinned row
+    // above it, so it cannot escape.
+    expect(getMoveAnchors(["p1", "a", "b", "p2", "c"], "p2", pinned)).toEqual({
+      before_id: "p1",
+      after_id: null,
+    });
+  });
+
+  it("anchors normally when the whole list is one arm", () => {
+    expect(getMoveAnchors(["p1", "p2"], "p1", pinned)).toEqual({
+      before_id: null,
+      after_id: "p2",
+    });
+    expect(getMoveAnchors(["a", "b", "c"], "b", pinned)).toEqual({
+      before_id: "a",
+      after_id: "c",
+    });
+  });
+
+  it("is unchanged when there are no pins at all", () => {
+    expect(getMoveAnchors(["a", "moving", "b"], "moving", new Set())).toEqual({
+      before_id: "a",
+      after_id: "b",
+    });
+  });
+});
+
+describe("computePosition across the pinned barrier", () => {
+  it("never writes a position between a pinned and a plain neighbour", () => {
+    // Arms: pinned [p1(1), p4(4)], plain [a(10), b(20)].
+    const map = mapOf(mk("p1", 1), mk("p4", 4), mk("a", 10), mk("b", 20));
+    const pinned = new Set(["p1", "p4"]);
+    // "a" dropped between p1 and b must land relative to its plain neighbours,
+    // i.e. before b — not in the 4..10 range the block occupies.
+    const position = computePosition(["p1", "a", "p4", "b"], "a", map, pinned);
+    // Anchored to the next PLAIN row, so the value lands in the plain arm's
+    // range instead of the 4..10 gap the pinned block occupies.
+    expect(position).toBe(19); // b(20) - 1
+  });
+
+  it("keeps the position (a no-op drop) when the row is alone in its arm", () => {
+    // Clamped, "a" has no plain neighbour on either side, so there is no slot
+    // to move to and its own position comes back — the caller's
+    // `position === newPosition` check then skips the write entirely.
+    const map = mapOf(mk("p1", 1), mk("a", 10));
+    expect(computePosition(["p1", "a"], "a", map, new Set(["p1"]))).toBe(10);
+    // The unclamped version would have rewritten the SHARED position to sit
+    // just under the pinned row, which is exactly the leak being prevented.
+    expect(computePosition(["p1", "a"], "a", map)).toBe(2);
   });
 });
 

@@ -36,6 +36,7 @@ import { useT } from "../../i18n";
 import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
+import { IssueSurfacePinnedProvider } from "./pinned-context";
 import { ParentIssueLookupProvider } from "./parent-issue-context";
 import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
 import {
@@ -245,6 +246,11 @@ function IssueSurfaceContent({
           actions. */}
       <IssueContextMenuProvider>
       <IssueSurfaceSelectionProvider selection={controller.selection}>
+      {/* The pinned block the server ranked, for the rows whose projection
+          flattens `IssueTableRow` away — the List badge and the two client
+          sorts (Swimlane cells, drag anchors). One provider, so every consumer
+          reads the same window. (DENE-500) */}
+      <IssueSurfacePinnedProvider pinnedIssueIds={controller.pinnedIssueIds}>
         {renderHeader ? (
           renderHeader(renderContext)
         ) : (
@@ -374,6 +380,7 @@ function IssueSurfaceContent({
             }
           />
         )}
+      </IssueSurfacePinnedProvider>
       </IssueSurfaceSelectionProvider>
       </IssueContextMenuProvider>
       </ParentIssueLookupProvider>

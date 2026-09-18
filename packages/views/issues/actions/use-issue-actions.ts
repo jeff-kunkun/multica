@@ -146,14 +146,20 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     );
   }, [issueId, issueIdentifier, navigation, paths]);
 
+  // Both arms report a failure. `useCreatePin` writes nothing until the server
+  // answers, so a rejected pin used to be indistinguishable from a click that
+  // did not register — the icon simply never changed. `useDeletePin` rolls its
+  // optimistic removal back on error, so the toast is what explains the icon
+  // returning to its pinned state. (DENE-500)
   const togglePin = useCallback(() => {
     if (!issueId) return;
+    const onError = () => toast.error(t(($) => $.actions.pin_failed));
     if (isPinned) {
-      deletePin.mutate({ itemType: "issue", itemId: issueId });
+      deletePin.mutate({ itemType: "issue", itemId: issueId }, { onError });
     } else {
-      createPin.mutate({ item_type: "issue", item_id: issueId });
+      createPin.mutate({ item_type: "issue", item_id: issueId }, { onError });
     }
-  }, [isPinned, issueId, createPin, deletePin]);
+  }, [isPinned, issueId, createPin, deletePin, t]);
 
   const copyLink = useCallback(async () => {
     if (!issueId) return;

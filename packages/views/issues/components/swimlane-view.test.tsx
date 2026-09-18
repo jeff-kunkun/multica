@@ -366,6 +366,7 @@ function makeServerBranches(
     enabled: true,
     descriptors,
     issues,
+  pinnedIssueIds: new Set<string>(),
     pagination,
     total: issues.length,
     isLoading: false,

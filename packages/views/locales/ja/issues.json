@@ -446,8 +446,8 @@
     "agents_group": "エージェント",
     "mark_done_tooltip": "完了にする",
     "archive_tooltip": "アーカイブ",
-    "pin_tooltip": "サイドバーにピン留め",
-    "unpin_tooltip": "サイドバーのピン留めを解除",
+    "pin_tooltip": "ピン留め",
+    "unpin_tooltip": "ピン留めを解除",
     "thread_nav_label": "スレッドへ移動",
     "thread_nav_resolved_label": "{{title}}（解決済み）",
     "sidebar_tooltip": "右サイドバーの開閉",
@@ -744,8 +744,9 @@
     "due_clear": "日付をクリア",
     "unassigned": "未割り当て",
     "open_in_new_tab": "新しいタブで開く",
-    "pin_to_sidebar": "サイドバーにピン留め",
-    "unpin_from_sidebar": "サイドバーのピン留めを解除",
+    "pin": "ピン留め",
+    "unpin": "ピン留めを解除",
+    "pin_failed": "ピン留めを更新できませんでした",
     "copy_link": "リンクをコピー",
     "copy_workdir_path": "ローカルの作業ディレクトリのパスをコピー",
     "copy_project_directory_path": "プロジェクトディレクトリのパスをコピー",
@@ -1068,5 +1069,8 @@
   },
   "parent_issue_badge": {
     "open": "親タスク {{identifier}} を開く: {{title}}"
+  },
+  "row": {
+    "pinned_label": "ピン留め済み"
   }
 }

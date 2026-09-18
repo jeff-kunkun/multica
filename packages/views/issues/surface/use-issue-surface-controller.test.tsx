@@ -57,6 +57,19 @@ const batchUpdateMutateAsync = vi.hoisted(() => vi.fn());
 const batchDeleteMutateAsync = vi.hoisted(() => vi.fn());
 const openModal = vi.hoisted(() => vi.fn());
 
+vi.mock("@multica/core/auth", () => ({
+  // The controller reads the current user to key the pin list — pins are
+  // per-user, and `pinned_first` is only sent once this user has one.
+  useAuthStore: Object.assign(
+    (selector?: (state: { user: { id: string } }) => unknown) => {
+      const state = { user: { id: "user-1" } };
+      return selector ? selector(state) : state;
+    },
+    { getState: () => ({ user: { id: "user-1" } }) },
+  ),
+  registerAuthStore: vi.fn(),
+}));
+
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));

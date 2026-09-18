@@ -451,8 +451,8 @@
     "agents_group": "Agents",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
-    "pin_tooltip": "Pin to sidebar",
-    "unpin_tooltip": "Unpin from sidebar",
+    "pin_tooltip": "Pin",
+    "unpin_tooltip": "Unpin",
     "thread_nav_label": "Jump to comment thread",
     "thread_nav_resolved_label": "{{title}} (resolved)",
     "sidebar_tooltip": "Toggle right sidebar",
@@ -775,8 +775,9 @@
     "due_clear": "Clear date",
     "unassigned": "Unassigned",
     "open_in_new_tab": "Open in new tab",
-    "pin_to_sidebar": "Pin to sidebar",
-    "unpin_from_sidebar": "Unpin from sidebar",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "pin_failed": "Couldn't update the pin",
     "copy_link": "Copy link",
     "copy_workdir_path": "Copy local workdir path",
     "copy_project_directory_path": "Copy project directory path",
@@ -1104,5 +1105,8 @@
   },
   "parent_issue_badge": {
     "open": "Open parent issue {{identifier}}: {{title}}"
+  },
+  "row": {
+    "pinned_label": "Pinned"
   }
 }

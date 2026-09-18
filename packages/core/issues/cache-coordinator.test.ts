@@ -245,7 +245,7 @@ describe("applyIssueChange", () => {
       group_key: null,
       parent_id: null,
       total: 1,
-      rows: [{ issue: issue(), direct_child_count: 0 }],
+      rows: [{ issue: issue(), direct_child_count: 0, is_pinned: false }],
       branch_total: 1,
       next_cursor: null,
     };

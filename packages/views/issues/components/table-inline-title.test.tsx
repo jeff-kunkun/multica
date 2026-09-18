@@ -51,10 +51,10 @@ function makeIssue(title: string): Issue {
   };
 }
 
-function makeRow(title: string): Extract<
-  IssueTableDisplayRow,
-  { kind: "issue" }
-> {
+function makeRow(
+  title: string,
+  isPinned = false,
+): Extract<IssueTableDisplayRow, { kind: "issue" }> {
   return {
     kind: "issue",
     key: "issue:issue-1",
@@ -62,6 +62,7 @@ function makeRow(title: string): Extract<
     depth: 0,
     hasChildren: false,
     collapsed: false,
+    isPinned,
   };
 }
 
@@ -73,17 +74,20 @@ const baseProps = {
   toggleLabel: "Toggle sub-issues",
   renameLabel: "Rename issue",
   createSubIssueLabel: "Create sub-issue",
+  pinnedLabel: "Pinned",
 };
 
 /** Editing state lives in the table (one editor at a time); mirror that. */
 function Harness({
   title,
+  isPinned = false,
   onOpen,
   onUpdate,
   onEditingChange,
   onCreateSubIssue,
 }: {
   title: string;
+  isPinned?: boolean;
   onOpen?: () => void;
   onUpdate?: (updates: unknown) => void;
   onEditingChange?: (editing: boolean) => void;
@@ -93,7 +97,7 @@ function Harness({
   return (
     <InlineTitle
       {...baseProps}
-      row={makeRow(title)}
+      row={makeRow(title, isPinned)}
       editing={editing}
       onEditingChange={(next) => {
         setEditing(next);
@@ -227,5 +231,31 @@ describe("InlineTitle", () => {
       badge.compareDocumentPosition(titleButton) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+});
+
+/**
+ * The Table's own row marker. Table reads `is_pinned` straight off the served
+ * row, so the badge and the row order are the same fact — there is no separate
+ * pin store to disagree with. (DENE-500)
+ */
+describe("InlineTitle pinned indicator", () => {
+  it("marks a row the server ranked into the pinned block", () => {
+    render(<Harness title="Pinned row" isPinned />);
+    expect(screen.getByTestId("pinned-row-badge")).toBeTruthy();
+    expect(screen.getByText("Pinned row")).toBeTruthy();
+  });
+
+  it("draws nothing on an unpinned row", () => {
+    render(<Harness title="Plain row" />);
+    expect(screen.queryByTestId("pinned-row-badge")).toBeNull();
+    expect(screen.getByText("Plain row")).toBeTruthy();
+  });
+
+  it("names the marker for assistive tech", () => {
+    render(<Harness title="Labelled row" isPinned />);
+    // The badge carries the label the table passes down, so a reader is told
+    // what the position means rather than meeting an unlabelled icon.
+    expect(screen.getByRole("img", { name: "Pinned" })).toBeTruthy();
   });
 });

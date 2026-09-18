@@ -332,6 +332,13 @@ export interface IssueTableQuerySpec {
   sort: {
     field: IssueTableSortField;
     direction: "asc" | "desc";
+    /**
+     * Move the caller's pinned issues to the front of their own branch.
+     * Per-user and opt-in: only send it when this user actually has issue
+     * pins, because an older server decodes this body with
+     * `DisallowUnknownFields()` and would 400 the whole page. (DENE-500)
+     */
+    pinned_first?: boolean;
   };
 }
 
@@ -436,6 +443,13 @@ export interface IssueTableRowsRequest {
 export interface IssueTableRow {
   issue: Issue;
   direct_child_count: number;
+  /**
+   * The row's own arm in the pinned-first ordering. Derived server-side from
+   * the row's `pin_rank`, so the badge and the row order can never disagree;
+   * absent on an older server, where the order is still right but there is no
+   * badge to draw. (DENE-500)
+   */
+  is_pinned: boolean;
 }
 
 export interface IssueTableRowsResponse {

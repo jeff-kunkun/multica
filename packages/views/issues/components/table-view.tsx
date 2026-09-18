@@ -130,6 +130,7 @@ import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import type { IssueCreateDefaults } from "../surface/types";
 import { ProgressRing } from "./progress-ring";
+import { PinnedRowBadge } from "./pinned-row-badge";
 import {
   AssigneePicker,
   DueDatePicker,
@@ -633,6 +634,7 @@ export function InlineTitle({
   toggleLabel,
   renameLabel,
   createSubIssueLabel,
+  pinnedLabel,
 }: {
   row: Extract<IssueTableDisplayRow, { kind: "issue" }>;
   /** Rename state is owned by the table (one editor at a time) so it also
@@ -647,6 +649,7 @@ export function InlineTitle({
   toggleLabel: string;
   renameLabel: string;
   createSubIssueLabel: string;
+  pinnedLabel: string;
 }) {
   const [draft, setDraft] = useState(row.issue.title);
   const editingRef = useRef(editing);
@@ -718,6 +721,7 @@ export function InlineTitle({
       <span className="min-w-16 shrink-0 text-caption text-muted-foreground">
         {row.issue.identifier}
       </span>
+      {row.isPinned && <PinnedRowBadge label={pinnedLabel} />}
       <IssueAgentActivityIndicator issueId={row.issue.id} />
       {editing ? (
         <Input
@@ -1146,6 +1150,7 @@ function IssueTableBodyCell({
           toggleLabel={t(($) => $.table.toggle_sub_issues)}
           renameLabel={t(($) => $.table.rename_title)}
           createSubIssueLabel={t(($) => $.actions.create_sub_issue)}
+          pinnedLabel={t(($) => $.row.pinned_label)}
         />
       );
     case "identifier":
@@ -1881,6 +1886,9 @@ export function TableView({
           depth,
           hasChildren: tableHierarchy && row.direct_child_count > 0,
           collapsed,
+          // Read off the row itself, never a parallel pin store: the badge and
+          // the row order are then the same fact. (DENE-500)
+          isPinned: row.is_pinned === true,
         });
         if (tableHierarchy && row.direct_child_count > 0 && !collapsed) {
           appendBranch(groupKey, row.issue.id, depth + 1, [

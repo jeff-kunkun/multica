@@ -1483,6 +1483,9 @@ export const EMPTY_ISSUE_TABLE_GROUPS_RESPONSE: IssueTableGroupsResponse = {
 const IssueTableRowSchema = z.object({
   issue: IssueSchema,
   direct_child_count: z.number().default(0),
+  // Appended by DENE-500. An older server omits it, and the row then renders
+  // without a badge while keeping the order it was served in.
+  is_pinned: z.boolean().default(false),
 }).loose();
 
 export const IssueTableRowsResponseSchema = z.object({

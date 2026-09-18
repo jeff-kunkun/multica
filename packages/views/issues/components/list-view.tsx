@@ -38,6 +38,7 @@ import {
 } from "../utils/drag-utils";
 import type { BoardColumnGroup } from "./board-column";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { useIssuePinnedIds } from "../surface/pinned-context";
 import type { IssueCreateDefaults } from "../surface/types";
 import type {
   IssueStatusPageState,
@@ -96,6 +97,7 @@ function ListViewImpl({
     (s) => s.toggleListCollapsed
   );
   const sortBy = useViewStore((s) => s.sortBy);
+  const pinnedIssueIds = useIssuePinnedIds();
   const { t } = useT("issues");
 
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
@@ -288,7 +290,7 @@ function ListViewImpl({
           activeId,
           {
             ...getMoveUpdates(finalGroup, currentIssue.position, currentIssue),
-            ...getMoveAnchors(targetIds, activeId),
+            ...getMoveAnchors(targetIds, activeId, pinnedIssueIds),
           },
           beginSettle(),
         );
@@ -296,7 +298,7 @@ function ListViewImpl({
       }
 
       const finalIds = finalColumns[finalCol]!;
-      const newPosition = computePosition(finalIds, activeId, map);
+      const newPosition = computePosition(finalIds, activeId, map, pinnedIssueIds);
       const currentIssue = map.get(activeId);
 
       if (
@@ -314,12 +316,12 @@ function ListViewImpl({
         activeId,
         {
           ...getMoveUpdates(finalGroup, newPosition, currentIssue),
-          ...getMoveAnchors(finalIds, activeId),
+          ...getMoveAnchors(finalIds, activeId, pinnedIssueIds),
         },
         beginSettle(),
       );
     },
-    [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef, t],
+    [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef, t, pinnedIssueIds],
   );
 
   // dnd-kit fires onDragCancel — never onDragEnd — when an active drag is
