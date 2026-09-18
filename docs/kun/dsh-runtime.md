@@ -61,6 +61,17 @@ multica daemon status --output json   # agents 里应有 dsh
 
 真正调模型需要 `DEEPSEEK_API_KEY`，或 dsh 自己的凭据通道（browser-session / Keychain）。probe 和 `--list-models` 不走模型接口，所以没 key 也能绿。不要把 key 写进仓库、issue 或 PR。
 
+### 额度上报
+
+dsh 是 key 计量而不是订阅制，所以 Multica 只从 `ProbeDeepSeek`（`GET api.deepseek.com/user/balance`）读它的余额窗口，**不会**从某次任务的错误文本里合成「额度用完」。上游（OpenCode Zen、Command Code 等）的 429 是瞬时容量，不是余额；一次失败不该让 runtime 挂一整天的红标（DENE-606）。
+
+两个已知后果：
+
+- 守护进程环境里没有可用的 DeepSeek 余额 key 时，dsh 的额度显示为「暂无读数」，而不是猜一个值。dsh 自己的 provider key 住在 DSH 凭据库里，守护进程读不到。
+- 只有一句 `exhausted`、不带任何窗口的历史快照，超过一小时就不再当作现状返回（带窗口的快照仍按窗口自己的重置时刻算）。
+
+代码位置：`server/pkg/agent/plan_limits_quota.go`（合成规则）、`server/internal/handler/runtime.go`（时效规则）。
+
 ## 本机已验证版本（DENE-24 / DENE-25）
 
 | 组件 | 版本 |
