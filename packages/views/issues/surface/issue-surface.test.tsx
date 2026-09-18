@@ -20,9 +20,12 @@ import {
 import type {
   AgentTask,
   Issue,
+  IssueTableFacetsRequest,
+  IssueTableQuerySpec,
   IssueTableRowsRequest,
   ListIssuesParams,
   ListIssuesResponse,
+  PinnedItem,
 } from "@multica/core/types";
 import { IssueSurface } from "./issue-surface";
 import { statusTableMethodsFromLegacy } from "./status-table-test-api";
@@ -1039,5 +1042,149 @@ describe("IssueSurface — parent ownership lookup", () => {
     expect(badge).toHaveTextContent("Parent task");
     // Exactly one: the parent's own row must not carry a badge.
     expect(screen.getAllByTestId("parent-issue-badge")).toHaveLength(1);
+  });
+});
+
+/**
+ * The same failure mode as the block above, one feature later. Every
+ * pinned-first behaviour already has a test that supplies its own input:
+ * `packages/core/issues/surface/pinned-first.test.ts` calls the helpers
+ * directly, and `list-row-pinned.test.tsx` mounts `IssueSurfacePinnedProvider`
+ * itself. Neither can see the two lines that make the feature exist — the
+ * surface asking the server to rank pins, and the surface mounting the provider
+ * the row badge reads. Deleting either one leaves the whole view suite green.
+ * This suite owns those two lines; the matrices stay where they are. (DENE-500)
+ */
+describe("IssueSurface — pinned-first wiring", () => {
+  let qc: QueryClient;
+  let rowRequests: IssueTableRowsRequest[];
+  let facetQueries: IssueTableQuerySpec[];
+
+  function stubApi(issues: Issue[], pinnedIssueIds: readonly string[]) {
+    const listIssues = vi.fn((params?: ListIssuesParams) =>
+      Promise.resolve({
+        issues: params?.status === "todo" ? issues : [],
+        total: params?.status === "todo" ? issues.length : 0,
+      } satisfies ListIssuesResponse),
+    );
+    const legacy = statusTableMethodsFromLegacy(listIssues);
+    setApiInstance({
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+      listIssues,
+      ...legacy,
+      // Stand in for the server's pinned arm: the row carries its own
+      // `is_pinned`, which is the only thing the badge is ever allowed to read.
+      listIssueTableRows: async (request: IssueTableRowsRequest) => {
+        rowRequests.push(request);
+        const page = await legacy.listIssueTableRows(request);
+        return {
+          ...page,
+          rows: page.rows.map((row) => ({
+            ...row,
+            is_pinned: pinnedIssueIds.includes(row.issue.id),
+          })),
+        };
+      },
+      listIssueTableFacets: async (request: IssueTableFacetsRequest) => {
+        facetQueries.push(request.query);
+        return legacy.listIssueTableFacets(request);
+      },
+      listPins: async (): Promise<PinnedItem[]> =>
+        pinnedIssueIds.map((itemId, index) => ({
+          id: `pin-${itemId}`,
+          workspace_id: "ws-1",
+          user_id: "user-1",
+          item_type: "issue" as const,
+          item_id: itemId,
+          position: index,
+          created_at: "2026-01-01T00:00:00Z",
+        })),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
+      getWorkspaceWorkingAgents: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+  }
+
+  beforeEach(() => {
+    mockWsId.current = "ws-1";
+    rowRequests = [];
+    facetQueries = [];
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    pruneIssueSurfaceViewStates([]);
+  });
+
+  afterEach(() => {
+    cleanup();
+    qc.clear();
+    pruneIssueSurfaceViewStates([]);
+    vi.restoreAllMocks();
+  });
+
+  function surface() {
+    return (
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pf" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>
+    );
+  }
+
+  it("asks the server to rank pins and marks the row the server ranked", async () => {
+    const pinned = makeIssue("i1", "Pinned task", "pf");
+    const plain = makeIssue("i2", "Plain task", "pf");
+    stubApi([pinned, plain], [pinned.id]);
+
+    render(surface());
+
+    await screen.findByText("Pinned task");
+    // The provider has to be mounted by the surface for this to appear at all.
+    const badges = await screen.findAllByTestId("pinned-row-badge");
+    expect(badges).toHaveLength(1);
+
+    await waitFor(() =>
+      expect(
+        rowRequests.some((request) => request.query.sort.pinned_first === true),
+      ).toBe(true),
+    );
+  });
+
+  it("keeps the flag out of the count requests", async () => {
+    const pinned = makeIssue("i1", "Pinned task", "pf");
+    stubApi([pinned], [pinned.id]);
+
+    render(surface());
+
+    await screen.findByText("Pinned task");
+    await waitFor(() => expect(facetQueries.length).toBeGreaterThan(0));
+    // Pinned-first reorders within a branch and cannot move a count, so the
+    // facet aggregations must not be re-run behind a pin toggle.
+    expect(
+      facetQueries.every((query) => query.sort.pinned_first === undefined),
+    ).toBe(true);
+  });
+
+  it("sends nothing new for a user with no issue pins", async () => {
+    // An older server decodes this body with DisallowUnknownFields and 400s the
+    // whole page on `pinned_first`, so the field must stay off the wire until
+    // this user actually has a pin. (DENE-444 precedent)
+    const plain = makeIssue("i2", "Plain task", "pf");
+    stubApi([plain], []);
+
+    render(surface());
+
+    await screen.findByText("Plain task");
+    await waitFor(() => expect(rowRequests.length).toBeGreaterThan(0));
+    expect(
+      rowRequests.every(
+        (request) => request.query.sort.pinned_first === undefined,
+      ),
+    ).toBe(true);
+    expect(screen.queryByTestId("pinned-row-badge")).toBeNull();
   });
 });
