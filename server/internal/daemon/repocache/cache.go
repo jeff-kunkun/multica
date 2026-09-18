@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
@@ -69,7 +70,31 @@ var agentGitExcludePatterns = []string{
 	".omp",
 }
 
-const repoCacheGitTimeout = 10 * time.Minute
+// DefaultGitTimeout bounds a single git subprocess started by this package
+// unless SetGitTimeout overrides it.
+const DefaultGitTimeout = 10 * time.Minute
+
+// gitTimeoutNanos holds the per-command git timeout. It is package state rather
+// than a Cache field because the git helpers are free functions shared with
+// callers that have no Cache at hand.
+var gitTimeoutNanos atomic.Int64
+
+// SetGitTimeout overrides the per-command git timeout. Non-positive values
+// restore DefaultGitTimeout. A cold cache is built in bounded slices (see
+// bootstrapBareContext), so this bounds one slice, not the whole download.
+func SetGitTimeout(d time.Duration) {
+	if d <= 0 {
+		d = DefaultGitTimeout
+	}
+	gitTimeoutNanos.Store(int64(d))
+}
+
+func gitTimeout() time.Duration {
+	if n := gitTimeoutNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return DefaultGitTimeout
+}
 
 func newGitCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
@@ -85,7 +110,7 @@ func runGitCombinedOutput(args ...string) ([]byte, error) {
 }
 
 func runGitCombinedOutputContext(ctx context.Context, args ...string) ([]byte, error) {
-	return runGitCombinedOutputWithTimeoutContext(ctx, repoCacheGitTimeout, args...)
+	return runGitCombinedOutputWithTimeoutContext(ctx, gitTimeout(), args...)
 }
 
 func runGitCombinedOutputWithTimeout(timeout time.Duration, args ...string) ([]byte, error) {
@@ -104,12 +129,35 @@ func runGitCombinedOutputWithTimeoutContext(parent context.Context, timeout time
 	return out, err
 }
 
+// runGitCombinedOutputStdinContext is runGitCombinedOutputContext for commands
+// that read their input from stdin.
+func runGitCombinedOutputStdinContext(parent context.Context, stdin string, args ...string) ([]byte, error) {
+	timeout := gitTimeout()
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+
+	cmd := newGitCommand(args...)
+	cmd.Stdin = strings.NewReader(stdin)
+	out, err := processtree.CombinedOutput(ctx, cmd, 5*time.Second)
+	if ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("git command timed out after %s: %w", timeout, ctx.Err())
+	}
+	return out, err
+}
+
+// sliceTimedOut reports whether a git command hit its own per-command timeout
+// while the caller is still willing to wait, i.e. the slice was too big for
+// the link rather than the whole operation being cancelled.
+func sliceTimedOut(parent context.Context, err error) bool {
+	return parent.Err() == nil && errors.Is(err, context.DeadlineExceeded)
+}
+
 func runGitOutput(args ...string) ([]byte, error) {
 	return runGitOutputContext(context.Background(), args...)
 }
 
 func runGitOutputContext(ctx context.Context, args ...string) ([]byte, error) {
-	return runGitOutputWithTimeoutContext(ctx, repoCacheGitTimeout, args...)
+	return runGitOutputWithTimeoutContext(ctx, gitTimeout(), args...)
 }
 
 func runGitOutputWithTimeout(timeout time.Duration, args ...string) ([]byte, error) {
@@ -133,7 +181,7 @@ func runGit(args ...string) error {
 }
 
 func runGitContext(ctx context.Context, args ...string) error {
-	return runGitWithTimeoutContext(ctx, repoCacheGitTimeout, args...)
+	return runGitWithTimeoutContext(ctx, gitTimeout(), args...)
 }
 
 func runGitWithTimeout(timeout time.Duration, args ...string) error {
@@ -376,7 +424,7 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 		if err := repoLock.LockContext(ctx); err != nil {
 			return err
 		}
-		if isBareRepo(barePath) {
+		if IsReady(barePath) || adoptLegacyCacheContext(ctx, barePath) {
 			// Already cached — fetch latest.
 			c.logger.Info("repo cache: fetching", "url", repo.URL, "path", barePath)
 			if err := gitFetchContext(ctx, barePath); err != nil {
@@ -386,10 +434,11 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 				}
 			}
 		} else {
-			// Not cached — bare clone.
-			c.logger.Info("repo cache: cloning", "url", repo.URL, "path", barePath)
-			if err := gitCloneBareContext(ctx, repo.URL, barePath); err != nil {
-				c.logger.Error("repo cache: clone failed", "url", repo.URL, "error", err)
+			// Not cached, or a previous download was interrupted — build the
+			// cache, resuming from whatever slices already landed.
+			c.logger.Info("repo cache: downloading", "url", repo.URL, "path", barePath, "resuming", isBareRepo(barePath))
+			if err := bootstrapBareContext(ctx, repo.URL, barePath, c.logger); err != nil {
+				c.logger.Error("repo cache: download incomplete, progress kept for the next attempt", "url", repo.URL, "error", err)
 				if firstErr == nil {
 					firstErr = err
 				}
@@ -401,10 +450,11 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 }
 
 // Lookup returns the local bare clone path for a repo URL within a workspace.
-// Returns "" if not cached.
+// Returns "" if not cached, including while a download is still in progress
+// or was interrupted: only a cache carrying the ready marker is usable.
 func (c *Cache) Lookup(workspaceID, url string) string {
 	barePath := c.BarePath(workspaceID, url)
-	if isBareRepo(barePath) {
+	if IsReady(barePath) {
 		return barePath
 	}
 	return ""
@@ -574,11 +624,73 @@ func splitHostAndPath(rawURL string) (host, path string) {
 	return "", s
 }
 
-// isBareRepo checks if a path looks like a bare git repository.
+// isBareRepo reports whether a directory has been initialized as a bare git
+// repository. It says nothing about whether the download finished: git writes
+// HEAD in the first second of a clone. Use IsReady for "can this be used".
 func isBareRepo(path string) bool {
-	// A bare repo has a HEAD file at the root.
 	_, err := os.Stat(filepath.Join(path, "HEAD"))
 	return err == nil
+}
+
+// readyFile marks a bare cache whose download completed. It is written last,
+// after the full history has landed, and is the only readiness signal: every
+// other file in the directory (HEAD, config, refs/, objects/) exists from the
+// first second of a download.
+const readyFile = ".multica_cache_ready"
+
+// IsReady reports whether a bare cache finished downloading and can serve
+// worktrees. It is a single stat so lock-free callers can afford it.
+func IsReady(barePath string) bool {
+	_, err := os.Stat(filepath.Join(barePath, readyFile))
+	return err == nil
+}
+
+// buildingFile marks a cache whose download this package started and has not
+// finished. It exists so adoptLegacyCacheContext can tell an unfinished build
+// from a complete pre-marker cache: once history is unshallowed the two look
+// identical to git, yet the former may still lack the default branch's files.
+const buildingFile = ".multica_cache_building"
+
+func markReady(barePath string) error {
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := os.WriteFile(filepath.Join(barePath, readyFile), []byte(stamp), 0o644); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(barePath, buildingFile)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func isBuilding(barePath string) bool {
+	_, err := os.Stat(filepath.Join(barePath, buildingFile))
+	return err == nil
+}
+
+// adoptLegacyCacheContext stamps the ready marker onto a complete cache that
+// was created before the marker existed, so an upgrade does not re-download
+// every repository on the machine. A directory qualifies only when it has at
+// least one ref, is not shallow, and is not one of our own unfinished builds:
+// an interrupted `git clone --bare` has no refs (git writes them after the
+// pack lands), and an interrupted sliced download carries buildingFile.
+// Callers must hold the repo lock.
+func adoptLegacyCacheContext(ctx context.Context, barePath string) bool {
+	if !isBareRepo(barePath) || isBuilding(barePath) || !hasAnyRefContext(ctx, barePath) || isShallowContext(ctx, barePath) {
+		return false
+	}
+	return markReady(barePath) == nil
+}
+
+func hasAnyRefContext(ctx context.Context, barePath string) bool {
+	out, err := runGitOutputWithTimeoutContext(ctx, 30*time.Second, "-C", barePath, "for-each-ref", "--count=1", "--format=%(refname)")
+	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
+// isShallowContext reports whether history is still truncated. An unreadable
+// repository counts as shallow so it is never mistaken for complete.
+func isShallowContext(ctx context.Context, barePath string) bool {
+	out, err := runGitOutputWithTimeoutContext(ctx, 30*time.Second, "-C", barePath, "rev-parse", "--is-shallow-repository")
+	return err != nil || strings.TrimSpace(string(out)) != "false"
 }
 
 // modernFetchRefspec is the remote-tracking refspec that keeps fetched heads
@@ -588,25 +700,258 @@ func isBareRepo(path string) bool {
 // refs and abort the entire fetch.
 const modernFetchRefspec = "+refs/heads/*:refs/remotes/origin/*"
 
+// Slice sizing for a cold download. Git cannot resume an interrupted pack
+// transfer: a killed fetch discards everything it received. Progress therefore
+// has to be committed in units git considers complete, so history is fetched
+// as a depth-1 snapshot followed by deepen steps that grow geometrically. Each
+// finished slice survives an interruption; a retry restarts from the smallest
+// step, so it always re-reaches (and then passes) the slice that failed.
+const (
+	bootstrapInitialDeepen = 64
+	bootstrapDeepenGrowth  = 4
+	bootstrapMaxDeepen     = 1 << 20
+
+	// Blob batches are sized by count because a missing blob's size is unknown
+	// until it arrives. The batch grows while batches finish quickly and
+	// shrinks when one is slow, steering each toward blobBatchTargetDuration.
+	blobBatchInitial        = 256
+	blobBatchMax            = 8192
+	blobBatchTargetDuration = 45 * time.Second
+)
+
+// filterUnsupportedMarker is what git prints when the server ignores --filter.
+const filterUnsupportedMarker = "filtering not recognized by server"
+
 func gitCloneBare(url, dest string) error {
-	return gitCloneBareContext(context.Background(), url, dest)
+	return bootstrapBareContext(context.Background(), url, dest, nil)
 }
 
-func gitCloneBareContext(ctx context.Context, url, dest string) error {
-	if out, err := runGitCombinedOutputContext(ctx, "clone", "--bare", url, dest); err != nil {
-		// Clean up partial clone.
-		os.RemoveAll(dest)
-		return fmt.Errorf("git clone --bare: %s: %w", strings.TrimSpace(string(out)), err)
+// bootstrapBareContext builds the bare cache for url at dest, or resumes a
+// build an earlier call left unfinished. It never deletes dest: on any error
+// (including a timeout or cancellation) the slices already fetched stay on
+// disk and the ready marker stays absent, so the next call continues from them.
+//
+// The cache is created as a blobless partial clone when the server supports
+// object filters, and as a full clone otherwise. Three resumable phases run in
+// order: the depth-1 snapshot, the deepen slices back to full history, and
+// (blobless only) the default branch's file contents. The ready marker is
+// written only after all three. Callers must hold the repo lock.
+func bootstrapBareContext(ctx context.Context, url, dest string, logger *slog.Logger) error {
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return fmt.Errorf("create cache dir: %w", err)
 	}
-	// `git clone --bare` populates refs/heads/* as a snapshot and defaults to
-	// a mirror-style fetch refspec. Convert the bare repo to the standard
-	// remote-tracking layout immediately so subsequent fetches write to
-	// refs/remotes/origin/* and can't conflict with worktree-locked heads.
-	if err := ensureRemoteTrackingLayoutContext(ctx, dest); err != nil {
-		os.RemoveAll(dest)
-		return fmt.Errorf("configure fetch refspec: %w", err)
+	if err := os.WriteFile(filepath.Join(dest, buildingFile), nil, 0o644); err != nil {
+		return fmt.Errorf("write building marker: %w", err)
+	}
+	// `git init` is idempotent on an existing repository, which is what makes
+	// it the resume entry point as well as the cold-start one.
+	if out, err := runGitCombinedOutputContext(ctx, "init", "--bare", dest); err != nil {
+		return fmt.Errorf("git init --bare: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	// Set the remote-tracking layout up front so fetched heads never land in
+	// refs/heads/*, which is reserved for per-task worktree branches.
+	for _, kv := range [][2]string{
+		{"remote.origin.url", url},
+		{"remote.origin.fetch", modernFetchRefspec},
+	} {
+		if out, err := runGitCombinedOutputContext(ctx, "-C", dest, "config", kv[0], kv[1]); err != nil {
+			return fmt.Errorf("set %s: %s: %w", kv[0], strings.TrimSpace(string(out)), err)
+		}
+	}
+	removeStaleTempPacks(dest)
+
+	if !hasAnyRefContext(ctx, dest) {
+		if err := fetchFirstSliceContext(ctx, dest, logger); err != nil {
+			return err
+		}
+	}
+
+	step := bootstrapInitialDeepen
+	for isShallowContext(ctx, dest) {
+		if err := ctx.Err(); err != nil {
+			return context.Cause(ctx)
+		}
+		if out, err := runGitCombinedOutputContext(ctx, "-C", dest, "fetch", "--deepen="+strconv.Itoa(step), "origin"); err != nil {
+			if sliceTimedOut(ctx, err) && step > 1 {
+				// The slice outgrew one timeout window on this link. Nothing
+				// of it was kept, so take a smaller bite instead of failing.
+				step = max(1, step/bootstrapDeepenGrowth/bootstrapDeepenGrowth)
+				removeStaleTempPacks(dest)
+				continue
+			}
+			return fmt.Errorf("git fetch --deepen=%d: %s: %w", step, strings.TrimSpace(string(out)), err)
+		}
+		if logger != nil {
+			logger.Info("repo cache: history slice fetched", "path", dest, "deepen", step)
+		}
+		if step < bootstrapMaxDeepen {
+			step *= bootstrapDeepenGrowth
+		}
+	}
+
+	// Non-fatal: getRemoteDefaultBranch has fallbacks when origin/HEAD is unset.
+	_ = runGitContext(ctx, "-C", dest, "remote", "set-head", "origin", "--auto")
+	pointBareHeadAtDefaultBranchContext(ctx, dest)
+	if err := prefetchDefaultBranchBlobsContext(ctx, dest, logger); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	if err := markReady(dest); err != nil {
+		return fmt.Errorf("write ready marker: %w", err)
 	}
 	return nil
+}
+
+// pointBareHeadAtDefaultBranchContext reproduces the one thing `git clone
+// --bare` did that init + fetch does not: a bare HEAD that resolves to the
+// remote's default branch. `git init` leaves HEAD on an unborn branch, which
+// breaks `HEAD` as a worktree base and the bare-HEAD hint in
+// getRemoteDefaultBranch. Best-effort: every consumer has other fallbacks.
+func pointBareHeadAtDefaultBranchContext(ctx context.Context, barePath string) {
+	out, err := runGitOutputContext(ctx, "-C", barePath, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return
+	}
+	branch := strings.TrimPrefix(strings.TrimSpace(string(out)), "refs/remotes/origin/")
+	if branch == "" {
+		return
+	}
+	if err := runGitContext(ctx, "-C", barePath, "update-ref", "refs/heads/"+branch, "refs/remotes/origin/"+branch); err != nil {
+		return
+	}
+	_ = runGitContext(ctx, "-C", barePath, "symbolic-ref", "HEAD", "refs/heads/"+branch)
+}
+
+// prefetchDefaultBranchBlobsContext downloads the file contents of the default
+// branch tip into a blobless cache before it is declared ready.
+//
+// Without this a blobless cache only moves the problem: the first checkout has
+// to fetch every blob of the tree in one lazy, non-resumable request, and a
+// repository whose current files alone exceed one timeout window would fail
+// there forever. Here the same blobs arrive in batches, each batch a complete
+// pack that survives an interruption; a resume recomputes what is still
+// missing. Blobs only reachable from other branches or older commits are still
+// fetched on demand, which is what keeps the cache small.
+func prefetchDefaultBranchBlobsContext(ctx context.Context, barePath string, logger *slog.Logger) error {
+	// Read the promisor flag strictly: isPartialCloneContext folds every
+	// failure into "not partial", and here that would declare a cache ready
+	// while its files are still missing.
+	promisor, err := runGitOutputContext(ctx, "-C", barePath, "config", "--get", "remote.origin.promisor")
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return nil // key unset: a full clone has nothing to prefetch
+		}
+		return fmt.Errorf("read remote.origin.promisor: %w", err)
+	}
+	if strings.TrimSpace(string(promisor)) != "true" {
+		return nil
+	}
+	tip, err := runGitOutputContext(ctx, "-C", barePath, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD^{tree}")
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			// No resolvable default branch; checkouts fall back to lazy fetching.
+			return nil
+		}
+		return fmt.Errorf("resolve default branch tree: %w", err)
+	}
+	out, err := runGitOutputContext(ctx, "-C", barePath, "rev-list", "--objects", "--missing=print", "--no-object-names", strings.TrimSpace(string(tip)))
+	if err != nil {
+		return fmt.Errorf("list missing blobs: %w", err)
+	}
+	var missing []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if oid, ok := strings.CutPrefix(strings.TrimSpace(line), "?"); ok {
+			missing = append(missing, oid)
+		}
+	}
+
+	total := len(missing)
+	batch := blobBatchInitial
+	for len(missing) > 0 {
+		if err := ctx.Err(); err != nil {
+			return context.Cause(ctx)
+		}
+		n := min(batch, len(missing))
+		started := time.Now()
+		// The same invocation git itself uses for a lazy promisor fetch.
+		out, err := runGitCombinedOutputStdinContext(ctx, strings.Join(missing[:n], "\n")+"\n",
+			"-C", barePath, "-c", "fetch.negotiationAlgorithm=noop", "fetch", "origin",
+			"--no-tags", "--no-write-fetch-head", "--recurse-submodules=no",
+			"--filter="+partialCloneFilter, "--stdin")
+		if err != nil {
+			if sliceTimedOut(ctx, err) && batch > 1 {
+				batch = max(1, batch/4)
+				removeStaleTempPacks(barePath)
+				continue
+			}
+			return fmt.Errorf("prefetch blobs (%d of %d left): %s: %w", len(missing), total, strings.TrimSpace(string(out)), err)
+		}
+		missing = missing[n:]
+		if logger != nil {
+			logger.Info("repo cache: file contents batch fetched", "path", barePath, "done", total-len(missing), "total", total)
+		}
+		switch took := time.Since(started); {
+		case took < blobBatchTargetDuration/2:
+			batch = min(blobBatchMax, batch*2)
+		case took > blobBatchTargetDuration*2:
+			batch = max(1, batch/2)
+		}
+	}
+	return nil
+}
+
+// fetchFirstSliceContext fetches the depth-1 snapshot of every branch. It asks
+// for a blobless partial clone first; git records the promisor config itself
+// when given --filter. Two fallbacks keep a less capable server working: one
+// that ignores the filter gets its promisor config removed again (the objects
+// it sent are complete), and one that rejects shallow or filtered requests
+// outright gets a plain full fetch.
+func fetchFirstSliceContext(ctx context.Context, dest string, logger *slog.Logger) error {
+	out, err := runGitCombinedOutputContext(ctx, "-C", dest, "fetch", "--depth=1", "--filter="+partialCloneFilter, "origin")
+	if err == nil {
+		if strings.Contains(string(out), filterUnsupportedMarker) {
+			if logger != nil {
+				logger.Info("repo cache: server does not support object filters, building a full clone", "path", dest)
+			}
+			return unsetPromisorRemoteContext(ctx, dest)
+		}
+		return nil
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("git fetch --depth=1: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if logger != nil {
+		logger.Warn("repo cache: sliced partial fetch rejected, falling back to a full fetch", "path", dest, "error", strings.TrimSpace(string(out)))
+	}
+	if err := unsetPromisorRemoteContext(ctx, dest); err != nil {
+		return err
+	}
+	if out, err := runGitCombinedOutputContext(ctx, "-C", dest, "fetch", "origin"); err != nil {
+		return fmt.Errorf("git fetch: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+func unsetPromisorRemoteContext(ctx context.Context, repoPath string) error {
+	for _, key := range []string{"remote.origin.promisor", "remote.origin.partialclonefilter"} {
+		_, err := runGitCombinedOutputContext(ctx, "-C", repoPath, "config", "--unset-all", key)
+		// Exit 5 means the key was not set.
+		if ee, ok := err.(*exec.ExitError); err != nil && !(ok && ee.ExitCode() == 5) {
+			return fmt.Errorf("unset %s: %w", key, err)
+		}
+	}
+	return nil
+}
+
+// removeStaleTempPacks deletes pack fragments a killed fetch left behind. Git
+// never reuses them, so they are only dead weight in an unfinished cache.
+func removeStaleTempPacks(barePath string) {
+	matches, _ := filepath.Glob(filepath.Join(barePath, "objects", "pack", "tmp_*"))
+	for _, m := range matches {
+		_ = os.Remove(m)
+	}
 }
 
 // gitFetch runs `git fetch origin` on a bare cache, migrating its fetch
@@ -1929,7 +2274,7 @@ func (c *Cache) ReconcileCoAuthoredByHooks(workspaceID string, enabled bool) err
 			continue
 		}
 		barePath := filepath.Join(wsDir, entry.Name())
-		if !isBareRepo(barePath) {
+		if !IsReady(barePath) {
 			continue
 		}
 		if err := c.reconcileHookAt(filepath.Join(barePath, "hooks"), workspaceID, enabled); err != nil && firstErr == nil {

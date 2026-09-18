@@ -303,6 +303,9 @@ func TestCreateWorktreeContextReturnsBusyAfterBoundedLockWait(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(barePath, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := markReady(barePath); err != nil {
+		t.Fatal(err)
+	}
 
 	lock := cache.lockForRepo(barePath)
 	lock.Lock()
@@ -341,6 +344,9 @@ func TestCreateWorktreeContextCancelsRunningGitProcessTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(barePath, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := markReady(barePath); err != nil {
 		t.Fatal(err)
 	}
 

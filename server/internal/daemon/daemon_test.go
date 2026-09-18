@@ -4402,6 +4402,52 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	}
 }
 
+// The shared cache download must outlive the request that started it: a task
+// that is stopped or times out while waiting must not take the download down
+// with it (DENE-594).
+func TestEnsureRepoReadyCancelledRequestDoesNotStopDownload(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createDaemonTestRepo(t)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: sourceRepo}},
+			ReposVersion: "v1",
+		})
+	})
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
+	cache := d.repoCache.(*repocache.Cache)
+
+	// Hold the repo lock so the download is still pending when the request
+	// gives up, then let it proceed.
+	release := make(chan struct{})
+	held := make(chan struct{})
+	lockDone := make(chan struct{})
+	go func() {
+		defer close(lockDone)
+		_ = cache.WithRepoLock(cache.BarePath("ws-1", sourceRepo), func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := d.ensureRepoReady(ctx, "ws-1", sourceRepo); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ensureRepoReady error = %v, want deadline exceeded", err)
+	}
+
+	close(release)
+	<-lockDone
+	d.waitBackgroundSyncs()
+	if d.repoCache.Lookup("ws-1", sourceRepo) == "" {
+		t.Fatal("the download must finish after the requesting task went away")
+	}
+}
+
 func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 	t.Parallel()
 
