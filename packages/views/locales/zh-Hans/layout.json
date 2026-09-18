@@ -25,6 +25,7 @@
     "runtime": "运行时",
     "attachment": "附件",
     "create_agent": "创建智能体",
+    "create_issue": "对齐新任务",
     "unknown": "未知页面"
   },
   "help": {
@@ -50,6 +51,8 @@
     "invitation_decline": "拒绝",
     "log_out": "退出登录",
     "new_issue": "新建任务",
+    "align_issue": "先对齐需求",
+    "align_issue_hint": "先聊清楚再创建，确认前不会产生任务",
     "new_issue_shortcut": "C",
     "pinned_label": "固定",
     "work_group": "工作",

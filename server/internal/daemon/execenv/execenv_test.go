@@ -584,29 +584,34 @@ func TestPrepareWithProjectResources(t *testing.T) {
 		t.Fatalf("failed to read resources.json: %v", err)
 	}
 	var got struct {
-		ProjectID          string `json:"project_id"`
-		ProjectTitle       string `json:"project_title"`
-		ProjectDescription string `json:"project_description"`
-		Resources          []struct {
-			ID           string          `json:"id"`
-			ResourceType string          `json:"resource_type"`
-			ResourceRef  json.RawMessage `json:"resource_ref"`
-		} `json:"resources"`
+		Projects []struct {
+			ProjectID          string `json:"project_id"`
+			ProjectTitle       string `json:"project_title"`
+			ProjectDescription string `json:"project_description"`
+			Resources          []struct {
+				ID           string          `json:"id"`
+				ResourceType string          `json:"resource_type"`
+				ResourceRef  json.RawMessage `json:"resource_ref"`
+			} `json:"resources"`
+		} `json:"projects"`
 	}
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("resources.json unmarshal: %v\n%s", err, string(raw))
 	}
-	if got.ProjectID != taskCtx.ProjectID {
-		t.Errorf("resources.json project_id = %q, want %q", got.ProjectID, taskCtx.ProjectID)
+	if len(got.Projects) != 1 {
+		t.Fatalf("resources.json projects = %d, want 1", len(got.Projects))
 	}
-	if got.ProjectTitle != taskCtx.ProjectTitle {
-		t.Errorf("resources.json project_title = %q, want %q", got.ProjectTitle, taskCtx.ProjectTitle)
+	if got.Projects[0].ProjectID != taskCtx.ProjectID {
+		t.Errorf("resources.json project_id = %q, want %q", got.Projects[0].ProjectID, taskCtx.ProjectID)
 	}
-	if got.ProjectDescription != taskCtx.ProjectDescription {
-		t.Errorf("resources.json project_description = %q, want %q", got.ProjectDescription, taskCtx.ProjectDescription)
+	if got.Projects[0].ProjectTitle != taskCtx.ProjectTitle {
+		t.Errorf("resources.json project_title = %q, want %q", got.Projects[0].ProjectTitle, taskCtx.ProjectTitle)
 	}
-	if len(got.Resources) != 1 || got.Resources[0].ResourceType != "github_repo" {
-		t.Fatalf("resources.json resources mismatch: %+v", got.Resources)
+	if got.Projects[0].ProjectDescription != taskCtx.ProjectDescription {
+		t.Errorf("resources.json project_description = %q, want %q", got.Projects[0].ProjectDescription, taskCtx.ProjectDescription)
+	}
+	if len(got.Projects[0].Resources) != 1 || got.Projects[0].Resources[0].ResourceType != "github_repo" {
+		t.Fatalf("resources.json resources mismatch: %+v", got.Projects[0].Resources)
 	}
 
 	// CLAUDE.md should mention the project context block.
@@ -690,6 +695,180 @@ func TestChatProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A chat can attach several projects (DENE-523). The brief must carry every
+// project's description and resources — not just the primary one — so an agent
+// can work across the attached codebases in one run, and it must say who
+// decides attribution when a new artifact has to belong to one project.
+func TestMultiProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
+	t.Parallel()
+
+	ctx := TaskContextForEnv{
+		ChatSessionID: "chat-multi-project-context",
+		Projects: []ProjectContextForEnv{
+			{
+				ID:          "22222222-3333-4444-5555-666666666666",
+				Title:       "Project Alpha",
+				Description: "Alpha owns the shared client library.",
+				Resources: []ProjectResourceForEnv{{
+					ID:           "33333333-4444-5555-6666-777777777777",
+					ResourceType: "github_repo",
+					ResourceRef:  json.RawMessage(`{"url":"https://github.com/org/alpha"}`),
+				}},
+			},
+			{
+				ID:          "44444444-5555-6666-7777-888888888888",
+				Title:       "Project Beta",
+				Description: "Beta consumes the client library and ships the app.",
+				Resources: []ProjectResourceForEnv{{
+					ID:           "55555555-6666-7777-8888-999999999999",
+					ResourceType: "github_repo",
+					ResourceRef:  json.RawMessage(`{"url":"https://github.com/org/beta"}`),
+				}},
+			},
+		},
+	}
+
+	for _, tc := range []struct {
+		provider string
+		filename string
+	}{
+		{provider: "claude", filename: "CLAUDE.md"},
+		{provider: "codex", filename: "AGENTS.md"},
+	} {
+		tc := tc
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if _, err := InjectRuntimeConfig(dir, tc.provider, ctx); err != nil {
+				t.Fatalf("InjectRuntimeConfig: %v", err)
+			}
+			content, err := os.ReadFile(filepath.Join(dir, tc.filename))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.filename, err)
+			}
+			s := string(content)
+			for _, want := range []string{
+				"## Project Context",
+				"bound to 2 projects",
+				"### Project: Project Alpha",
+				"Alpha owns the shared client library.",
+				"### Project: Project Beta",
+				"Beta consumes the client library and ships the app.",
+				"https://github.com/org/alpha",
+				"https://github.com/org/beta",
+				"ask the user which project to use",
+			} {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s missing multi-project context %q", tc.filename, want)
+				}
+			}
+			// The single-project framing must not survive into a set: calling
+			// one project "the active project" is exactly the ambiguity this
+			// feature removes.
+			if strings.Contains(s, "The active project for this task is") {
+				t.Errorf("%s still frames one project as the task's only project", tc.filename)
+			}
+		})
+	}
+
+	// One project keeps the pre-DENE-523 section byte for byte.
+	t.Run("single project keeps the original wording", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		single := TaskContextForEnv{
+			ChatSessionID:      "chat-single-project-context",
+			ProjectID:          ctx.Projects[0].ID,
+			ProjectTitle:       ctx.Projects[0].Title,
+			ProjectDescription: ctx.Projects[0].Description,
+		}
+		if _, err := InjectRuntimeConfig(dir, "claude", single); err != nil {
+			t.Fatalf("InjectRuntimeConfig: %v", err)
+		}
+		content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+		if err != nil {
+			t.Fatalf("read CLAUDE.md: %v", err)
+		}
+		s := string(content)
+		for _, want := range []string{
+			"The active project for this task is **Project Alpha**.",
+			"Alpha owns the shared client library.",
+			"This project has no resources attached yet.",
+		} {
+			if !strings.Contains(s, want) {
+				t.Errorf("single-project brief missing %q", want)
+			}
+		}
+		if strings.Contains(s, "bound to") {
+			t.Error("single-project brief gained the multi-project framing")
+		}
+	})
+}
+
+// The resources.json sidecar carries every attached project, which is how the
+// agent reads a multi-project chat's repositories and local directories.
+func TestPrepareWithMultipleProjectsWritesEveryProject(t *testing.T) {
+	t.Parallel()
+
+	taskCtx := TaskContextForEnv{
+		ChatSessionID: "chat-multi-project-sidecar",
+		Projects: []ProjectContextForEnv{
+			{
+				ID:          "22222222-3333-4444-5555-666666666666",
+				Title:       "Project Alpha",
+				Description: "Alpha owns the shared client library.",
+				Resources: []ProjectResourceForEnv{{
+					ID:           "33333333-4444-5555-6666-777777777777",
+					ResourceType: "github_repo",
+					ResourceRef:  json.RawMessage(`{"url":"https://github.com/org/alpha"}`),
+					Label:        "Alpha repo",
+				}},
+			},
+			{
+				ID:          "44444444-5555-6666-7777-888888888888",
+				Title:       "Project Beta",
+				Description: "Beta consumes the client library and ships the app.",
+			},
+		},
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-test-multi-pr",
+		TaskID:         "11111111-2222-3333-4444-555555555555",
+		AgentName:      "Test Agent",
+		Provider:       "claude",
+		Task:           taskCtx,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	raw, err := os.ReadFile(filepath.Join(env.WorkDir, ".multica", "project", "resources.json"))
+	if err != nil {
+		t.Fatalf("failed to read resources.json: %v", err)
+	}
+	var payload projectResourceFile
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("resources.json unmarshal: %v\n%s", err, string(raw))
+	}
+	if len(payload.Projects) != 2 {
+		t.Fatalf("projects = %d, want both attached projects", len(payload.Projects))
+	}
+	if payload.Projects[0].ProjectID != "22222222-3333-4444-5555-666666666666" ||
+		payload.Projects[1].ProjectID != "44444444-5555-6666-7777-888888888888" {
+		t.Fatalf("project order = %s, %s; want selection order",
+			payload.Projects[0].ProjectID, payload.Projects[1].ProjectID)
+	}
+	if len(payload.Projects[0].Resources) != 1 || payload.Projects[0].Resources[0].Label != "Alpha repo" {
+		t.Fatalf("first project resources = %+v", payload.Projects[0].Resources)
+	}
+	// A project with no resources still gets an entry, so the agent can tell
+	// "attached, nothing to open" from "not attached".
+	if payload.Projects[1].Resources == nil || len(payload.Projects[1].Resources) != 0 {
+		t.Fatalf("second project resources = %+v, want an empty list", payload.Projects[1].Resources)
 	}
 }
 

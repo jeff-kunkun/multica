@@ -2,10 +2,10 @@
 # Multica installer — installs the CLI and optionally provisions a self-host server.
 #
 # Install / upgrade CLI only:
-#   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh | bash
 #
 # Install CLI + provision self-host server:
-#   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+#   curl -fsSL https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh | bash -s -- --with-server
 #
 # After installation, run `multica setup` to configure your environment.
 #
@@ -14,10 +14,24 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-REPO_URL="https://github.com/multica-ai/multica.git"
-REPO_WEB_URL="https://github.com/multica-ai/multica"  # without .git, for GitHub web APIs
+# Where the CLI and the self-host tree come from. This fork ships its own CLI
+# archives and its own self-host build, so a plain run must never fall back to
+# the upstream repo — an upstream binary talking to this instance is exactly
+# the bug this knob closes (DENE-420). Point MULTICA_REPO at
+# `multica-ai/multica` to install the upstream build instead.
+REPO_SLUG="${MULTICA_REPO:-jeff-kunkun/multica}"
+REPO_OWNER="${REPO_SLUG%%/*}"
+REPO_BRANCH="${MULTICA_REPO_BRANCH:-kun}"
+REPO_URL="https://github.com/${REPO_SLUG}.git"
+REPO_WEB_URL="https://github.com/${REPO_SLUG}"  # without .git, for GitHub web APIs
+REPO_RAW_URL="https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_BRANCH}"
 INSTALL_DIR="${MULTICA_INSTALL_DIR:-$HOME/.multica/server}"
-BREW_PACKAGE="multica-ai/tap/multica"
+# `multica-ai/tap` only carries the upstream build. Forks have no tap, so the
+# Homebrew path is skipped for them and GitHub Releases is the only source.
+BREW_PACKAGE=""
+if [ "$REPO_OWNER" = "multica-ai" ]; then
+  BREW_PACKAGE="multica-ai/tap/multica"
+fi
 
 # Host ports Compose reported after `up -d`; set by setup_server and reused by
 # the summary so the health check and the printed URLs cannot diverge.
@@ -45,6 +59,11 @@ warn()  { printf "${BOLD}${YELLOW}⚠ %s${RESET}\n" "$*" >&2; }
 fail()  { printf "${BOLD}${RED}✗ %s${RESET}\n" "$*" >&2; exit 1; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+# Homebrew is only a viable source when the configured repo actually has a
+# tap behind it. On a fork BREW_PACKAGE is empty and every brew branch is
+# skipped, so the install cannot silently land on the upstream formula.
+brew_tap_available() { [ -n "$BREW_PACKAGE" ] && command_exists brew; }
 
 running_in_ssh_session() {
   [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_CLIENT:-}" ] || [ -n "${SSH_TTY:-}" ]
@@ -93,7 +112,7 @@ detect_os() {
     Linux)  OS="linux" ;;
     MINGW*|MSYS*|CYGWIN*)
             fail "This script does not support Windows. Use the PowerShell installer instead:
-  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex" ;;
+  irm $REPO_RAW_URL/scripts/install.ps1 | iex" ;;
     *)      fail "Unsupported operating system: $(uname -s). Multica supports macOS, Linux, and Windows." ;;
   esac
 
@@ -155,7 +174,7 @@ install_cli_binary() {
   fi
 
   local version="${latest#v}"
-  local url="https://github.com/multica-ai/multica/releases/download/${latest}/multica-cli-${version}-${OS}-${ARCH}.tar.gz"
+  local url="$REPO_WEB_URL/releases/download/${latest}/multica-cli-${version}-${OS}-${ARCH}.tar.gz"
   local tmp_dir
   tmp_dir=$(mktemp -d)
 
@@ -284,7 +303,7 @@ install_cli() {
     fi
 
     info "Multica CLI $current_ver installed, latest is $latest_ver — upgrading..."
-    if command_exists brew && brew list "$BREW_PACKAGE" >/dev/null 2>&1; then
+    if brew_tap_available && brew list "$BREW_PACKAGE" >/dev/null 2>&1; then
       upgrade_cli_brew
     else
       install_cli_binary
@@ -296,7 +315,7 @@ install_cli() {
     return 0
   fi
 
-  if command_exists brew; then
+  if brew_tap_available; then
     install_cli_brew || install_cli_binary
   else
     install_cli_binary
@@ -443,7 +462,7 @@ run_default() {
   printf "\n"
   print_remote_server_token_hint
   printf "  ${BOLD}Self-hosting?${RESET} Install the server first:\n"
-  printf "     curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server\n"
+  printf "     curl -fsSL %s/scripts/install.sh | bash -s -- --with-server\n" "$REPO_RAW_URL"
   printf "\n"
 }
 
@@ -478,7 +497,7 @@ run_with_server() {
   printf "  or read the generated code from backend logs when Resend is unset.\n"
   printf "\n"
   printf "  ${BOLD}To stop all services:${RESET}\n"
-  printf "     curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --stop\n"
+  printf "     curl -fsSL %s/scripts/install.sh | bash -s -- --stop\n" "$REPO_RAW_URL"
   printf "\n"
 }
 

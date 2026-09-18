@@ -5,6 +5,16 @@ WHERE workspace_id = $1
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
 ORDER BY created_at DESC;
 
+-- name: ListProjectIDsInWorkspace :many
+SELECT id FROM project
+WHERE workspace_id = $1;
+
+-- name: ListProjectIDsLedByMember :many
+SELECT id FROM project
+WHERE workspace_id = $1
+  AND lead_type = 'member'
+  AND lead_id = $2;
+
 -- name: GetProjectInWorkspace :one
 SELECT * FROM project
 WHERE id = $1 AND workspace_id = $2;

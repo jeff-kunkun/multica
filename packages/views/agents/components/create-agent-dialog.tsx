@@ -43,12 +43,15 @@ import {
 } from "@multica/core/agents";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { CharCounter } from "./char-counter";
+import { BaseRoleSelect, NO_BASE_ROLE } from "./base-role-select";
+import { isSpecialization } from "../specialization";
 import { useT } from "../../i18n";
 
 export function CreateAgentDialog({
   runtimes,
   runtimesLoading,
   members,
+  agents,
   currentUserId,
   template,
   squadId,
@@ -58,6 +61,12 @@ export function CreateAgentDialog({
   runtimes: RuntimeDevice[];
   runtimesLoading?: boolean;
   members: MemberWithUser[];
+  /**
+   * Workspace agents, used to offer base roles (DENE-301). Only base roles are
+   * offered: the server refuses a parent that is itself a specialisation, or
+   * that is archived.
+   */
+  agents: Agent[];
   currentUserId: string | null;
   // When provided, the dialog opens in "Duplicate" mode: the visible
   // fields (name / description / runtime / visibility / model) are
@@ -143,6 +152,21 @@ export function CreateAgentDialog({
   const [model, setModel] = useState(template?.model ?? "");
   const [instructions, setInstructions] = useState(template?.instructions ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(template?.avatar_url ?? null);
+  // Empty = independent base role. A duplicate keeps its source's base role
+  // only when the source is itself a specialisation, so "Duplicate" stays a
+  // faithful copy; a manual create starts detached.
+  const [parentAgentId, setParentAgentId] = useState(() => {
+    const sourceParent = template?.parent_agent_id ?? "";
+    if (!sourceParent) return NO_BASE_ROLE;
+    return agents.some(
+      (agent) =>
+        agent.id === sourceParent &&
+        !agent.archived_at &&
+        !isSpecialization(agent),
+    )
+      ? sourceParent
+      : NO_BASE_ROLE;
+  });
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
     () => new Set(template?.skills.map((s) => s.id) ?? []),
   );
@@ -272,6 +296,12 @@ export function CreateAgentDialog({
         if (template.max_concurrent_tasks) {
           data.max_concurrent_tasks = template.max_concurrent_tasks;
         }
+      }
+      // Attach the new agent to the chosen base role (DENE-301). Sent only
+      // when the field resolved to a live base role, so a stale duplicate
+      // source can never turn Create into a 400.
+      if (parentAgentId) {
+        data.parent_agent_id = parentAgentId;
       }
       const createdAgent = await onCreate(data);
       // Squad context: attach the agent after skills land so the
@@ -431,6 +461,22 @@ export function CreateAgentDialog({
                 setSelectedRuntimeId(id);
               }}
             />
+
+            <div>
+              <Label
+                htmlFor="create-agent-base-role"
+                className="text-caption text-muted-foreground"
+              >
+                {t(($) => $.specialization.base_role_label)}
+              </Label>
+              <BaseRoleSelect
+                agents={agents}
+                value={parentAgentId}
+                onChange={setParentAgentId}
+                id="create-agent-base-role"
+                className="mt-1"
+              />
+            </div>
 
             <ModelDropdown
               runtimeId={selectedRuntime?.id ?? null}

@@ -147,6 +147,18 @@
     "toast_local_mode_update_failed": "无法更新执行方式",
     "mode_badge_in_place": "原地"
   },
+  "members": {
+    "section_header": "成员",
+    "empty": "还没有项目成员。",
+    "add_button": "添加成员",
+    "add_placeholder": "添加工作区成员...",
+    "no_results": "未找到结果",
+    "remove_tooltip": "移除",
+    "toast_added": "已添加成员",
+    "toast_add_failed": "添加成员失败",
+    "toast_removed": "已移除成员",
+    "toast_remove_failed": "移除成员失败"
+  },
   "delete_dialog": {
     "title": "删除项目",
     "description": "将删除这个项目。任务不会被删除，只会从项目中解除关联。",

@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
@@ -126,6 +126,9 @@ interface CommentCardProps {
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string) => void;
+  /** Start an alignment FROM this comment (DENE-452): the thread seeds the
+   *  conversation, and whatever it settles on is filed under this issue. */
+  onOpenAlign?: (commentId: string) => void;
   /** Resolve/unresolve any comment in this thread (commentId = the target row). */
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
   /**
@@ -617,6 +620,7 @@ function CommentRow({
   onDelete,
   onToggleReaction,
   onCreateSubIssue,
+  onOpenAlign,
   onResolveToggle,
 }: {
   runHeader?: ReactNode;
@@ -635,6 +639,7 @@ function CommentRow({
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string) => void;
+  onOpenAlign?: (commentId: string) => void;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
 }) {
   const { t } = useT("issues");
@@ -739,6 +744,16 @@ function CommentRow({
                 <DropdownMenuItem onClick={() => onCreateSubIssue(entry.id)}>
                   <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
                   {t(($) => $.source_context.create_action)}
+                </DropdownMenuItem>
+              )}
+              {/* The alignment half of the same question (DENE-452). Beside
+                  "file a sub-issue from here" because it answers it the other
+                  way round: this one hands the thread to the alignment agent
+                  when the work is not yet clear enough to file. */}
+              {onOpenAlign && entry.comment_type === "comment" && (
+                <DropdownMenuItem onClick={() => onOpenAlign(entry.id)}>
+                  <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                  {t(($) => $.comment.align_action)}
                 </DropdownMenuItem>
               )}
               {onResolveToggle && (
@@ -952,6 +967,7 @@ function CommentCardImpl({
   onDelete,
   onToggleReaction,
   onCreateSubIssue,
+  onOpenAlign,
   onResolveToggle,
   onCollapseResolved,
   expandedResolvedIds,
@@ -1003,7 +1019,7 @@ function CommentCardImpl({
       const reply = run.hasReply ? allNestedReplies.find((entry) => entry.id === run.commentId) : undefined;
       return <Fragment key={run.task.id}><AgentRunComment run={run} entering={enteringRunIds?.has(run.task.id)} commentProps={reply ? {
         issueId, entry: reply, replies: [], currentUserId, canModerate, onReply, onEdit, onDelete,
-        onToggleReaction, onCreateSubIssue, onResolveToggle, highlightedCommentId, enteringRunIds,
+        onToggleReaction, onCreateSubIssue, onOpenAlign, onResolveToggle, highlightedCommentId, enteringRunIds,
       } : undefined} />{reply && reply.id !== commentId && renderAnchoredRuns(reply.id)}</Fragment>;
     });
 
@@ -1169,6 +1185,14 @@ function CommentCardImpl({
                         <DropdownMenuItem onClick={() => onCreateSubIssue(entry.id)}>
                           <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
                           {t(($) => $.source_context.create_action)}
+                        </DropdownMenuItem>
+                      )}
+                      {/* The root card's menu carries the same pair as a
+                          reply's — see the note on the reply menu. */}
+                      {onOpenAlign && entry.comment_type === "comment" && (
+                        <DropdownMenuItem onClick={() => onOpenAlign(entry.id)}>
+                          <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                          {t(($) => $.comment.align_action)}
                         </DropdownMenuItem>
                       )}
                       {onResolveToggle && (
@@ -1373,6 +1397,7 @@ function CommentCardImpl({
                       onDelete={onDelete}
                       onToggleReaction={onToggleReaction}
                       onCreateSubIssue={onCreateSubIssue}
+                      onOpenAlign={onOpenAlign}
                       onResolveToggle={onResolveToggle}
                     />
                   </div>
@@ -1418,6 +1443,7 @@ function CommentCardImpl({
                       onDelete={onDelete}
                       onToggleReaction={onToggleReaction}
                       onCreateSubIssue={onCreateSubIssue}
+                      onOpenAlign={onOpenAlign}
                       onResolveToggle={onResolveToggle}
                     />
                   </div>

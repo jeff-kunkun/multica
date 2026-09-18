@@ -1,0 +1,23 @@
+[Unit]
+Description=Multica self-host autoupdate (follow the upstream branch tip)
+Documentation=https://github.com/jeff-kunkun/multica/blob/kun/docs/kun/selfhost-autoupdate.md
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# @REPO_DIR@, @BRANCH@ and @STATE_FILE@ are substituted by
+# scripts/install-selfhost-autoupdate.sh.
+WorkingDirectory=@REPO_DIR@
+Environment=MULTICA_AUTOUPDATE_BRANCH=@BRANCH@
+Environment=MULTICA_AUTOUPDATE_STATE_FILE=@STATE_FILE@
+# Optional operator overrides (MULTICA_AUTOUPDATE_STATE_FILE, ...); the leading
+# "-" makes a missing file fine. Listed after Environment= so it wins.
+EnvironmentFile=-/etc/multica/autoupdate.env
+ExecStart=@REPO_DIR@/scripts/selfhost-autoupdate.sh
+# A cold frontend build plus migrations on a 4 GiB box is minutes. The default
+# 90s would kill a healthy run in the middle of a rebuild.
+TimeoutStartSec=3600
+# systemd already serialises starts of one unit; the script takes its own file
+# lock on top, so a manual run overlapping a timer tick degrades to a skip
+# rather than two builds fighting over the same worktree and image tags.

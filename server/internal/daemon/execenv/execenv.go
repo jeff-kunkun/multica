@@ -35,6 +35,16 @@ type ProjectResourceForEnv struct {
 	Label        string          `json:"label,omitempty"` // optional user-supplied label
 }
 
+// ProjectContextForEnv is one project attached to the task, in priority order
+// (DENE-523). A chat session can attach several at once; the brief renders a
+// section per project and resources.json carries them all.
+type ProjectContextForEnv struct {
+	ID          string
+	Title       string
+	Description string
+	Resources   []ProjectResourceForEnv
+}
+
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
 	WorkspacesRoot  string // base path for all envs (e.g., ~/multica_workspaces)
@@ -171,6 +181,11 @@ type TaskContextForEnv struct {
 	ProjectTitle                  string                  // human-readable project title
 	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
+	// Projects is the task's project set in priority order (DENE-523). The
+	// singular Project* fields above mirror its first entry and remain the
+	// only source for a server that predates projects[]; projectContexts()
+	// normalises both shapes so rendering reads one path.
+	Projects []ProjectContextForEnv
 	// SidecarRoot, when set, is where this task's sidecar files were written
 	// instead of the cwd (Environment.SidecarRoot). The brief names the
 	// absolute paths it implies — the default relative paths would point at a
@@ -257,7 +272,27 @@ type TaskContextForEnv struct {
 	InitiatorEmail string
 }
 
-// SkillContextForEnv represents a skill to be written into the execution environment.
+// projectContexts returns the task's attached projects in priority order.
+//
+// Projects is the authoritative set; the singular Project* fields mirror its
+// first entry and are all a server predating projects[] sends. Normalising
+// here keeps the brief and the resources.json sidecar reading one shape, and
+// leaves the single-project output byte-identical to before DENE-523.
+func (ctx TaskContextForEnv) projectContexts() []ProjectContextForEnv {
+	if len(ctx.Projects) > 0 {
+		return ctx.Projects
+	}
+	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
+		return nil
+	}
+	return []ProjectContextForEnv{{
+		ID:          ctx.ProjectID,
+		Title:       ctx.ProjectTitle,
+		Description: ctx.ProjectDescription,
+		Resources:   ctx.ProjectResources,
+	}}
+}
+
 // IssueStatusForEnv is one active custom workspace status rendered into the
 // brief (MUL-6460). Name and Description are user-authored text and MUST pass
 // through the brief sanitizers before rendering; Key is constrained by the
@@ -270,6 +305,7 @@ type IssueStatusForEnv struct {
 	Description string
 }
 
+// SkillContextForEnv represents a skill to be written into the execution environment.
 type SkillContextForEnv struct {
 	Name        string
 	Description string

@@ -1,5 +1,6 @@
 import { homedir } from "os";
 import { join } from "path";
+import { desktopProfileName } from "../shared/runtime-config";
 
 // Keep the Go impl in sync: server/cmd/multica/cmd_daemon.go healthPortForProfile.
 export const DEFAULT_HEALTH_PORT = 19514;
@@ -26,13 +27,7 @@ export function assertResolvedProfile(profile: string): void {
 // never reads or writes the user's hand-configured profiles. Profile dir:
 //   ~/.multica/profiles/desktop-<host>/
 export function deriveProfileName(targetUrl: string): string {
-  try {
-    const url = new URL(targetUrl);
-    const host = url.host.replace(/:/g, "-").toLowerCase();
-    return `desktop-${host}`;
-  } catch {
-    return "desktop";
-  }
+  return desktopProfileName(targetUrl);
 }
 
 /**
