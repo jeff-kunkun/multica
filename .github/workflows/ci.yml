@@ -112,6 +112,8 @@ jobs:
               - 'scripts/dev-env.test.sh'
               - 'scripts/perf-compare.mjs'
               - 'scripts/perf-compare.test.sh'
+              - 'scripts/dsh-vision-probe.mjs'
+              - 'scripts/dsh-vision-probe.test.mjs'
               - 'scripts/selfhost-wait.sh'
               # selfhost-config.test.sh asserts on the installers' side of
               # the port contract, so a change to either must run it.
@@ -318,6 +320,13 @@ jobs:
       - name: Test UI performance comparison runner
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/perf-compare.test.sh
+
+      # Offline by construction: the suite stubs fetch and never reads a real
+      # ~/.dsh, so it proves the classification and the settings.yaml edit
+      # without an API key or a dsh install.
+      - name: Test dsh vision probe
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: node scripts/dsh-vision-probe.test.mjs
 
       - name: Verify reserved-slugs.ts is up to date
         if: ${{ needs.changes.outputs.frontend == 'true' }}

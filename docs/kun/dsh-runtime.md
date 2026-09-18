@@ -92,3 +92,63 @@ probe：
 6. **missing profile 的可发现性**。没装 profile 时 daemon 会静默跳过 `dsh`。`/health` 有原因，但 `multica daemon status` 对第一次接入的人不够显眼。
 
 本 fork 在发布前用 `scripts/setup-dsh-runtime.sh` 填这个缺口。桥接一旦上 npm，脚本应改为优先用包名、本地构建只作回退。
+
+## 视觉能力：模型声明与 `input` 键（DENE-591）
+
+dsh 的读图工具在发请求之前先查模型声明：`dsh-tool-fs` 的 `assertImageCapableRoute` 调 `llm.resolveModelInfo(provider, model)`，声明里没有 `image` 就直接抛
+
+```
+cannot read "...": model "..." does not declare image input; switch to an image-capable model
+```
+
+图片从来没有发出去过。所以"看不了图"既不是模型没眼睛，也不是 Multica 的问题——Multica 不管 `~/.dsh/settings.yaml`，这一层归 dsh。
+
+### 两个键，写错那个不报错
+
+声明用哪个键，取决于这条 provider 挂在哪个插件下：
+
+| 配置段 | 插件 | 模型条目里的键 | provider 级默认 |
+| --- | --- | --- | --- |
+| `llm-pi-ai:` | `@deepseek-ai/dsh-llm-pi-ai`（所有 OpenAI 兼容网关，本机的 `opencode1` / `opencode2` / `command-code`） | `input: ["text", "image"]` | `defaultInput:` |
+| `llm-deepseek:` | `@deepseek-ai/dsh-llm-deepseek`（原生 DeepSeek 目录路由） | `inputModalities: ["text", "image"]` | 无 |
+
+**这是 DENE-591 真正的坑**：`inputModalities` 是原生路由的拼法，pi-ai 的 schema 里没有这个键。schemastery 会把 schema 不认识的键直接丢掉——不报错、不告警、也不生效。写进 pi-ai 的 provider 里，`--dump-config` 依旧 rc=0，`--list-models` 依旧正常，读图依旧被拒，看起来就像"改了没用，大概要重开会话"。开新会话也一样没用。
+
+### 用探测脚本，不要手写
+
+即使键写对了，也不能凭模型名字判断该不该声明。同一个端点上有三种行为，配置侧看不出区别：
+
+1. 正常返回图片内容 → 该声明；
+2. 400 拒绝图片 part → 不能声明（会在回合中途炸掉）；
+3. **200 成功，但图被悄悄丢掉**，模型照样编一个答案 → 最危险的一种，声明了就等于让它对着没看见的图瞎说。
+
+所以判断只能靠实测。脚本会生成一张上红下蓝的 64×64 PNG，问模型这两个颜色，按回答分档：
+
+```bash
+node scripts/dsh-vision-probe.mjs                      # 只探测，打印结论
+node scripts/dsh-vision-probe.mjs --apply              # 顺便改写 settings.yaml（先备份）
+node scripts/dsh-vision-probe.mjs --provider opencode2 --json
+```
+
+- 判定：`vision` 答对 → 声明；`refused` 拒绝 / `blind` 偷偷丢图 → 撤销声明；`dead`（纯文本也 500）/ `quota`（429）→ **不动**，因为什么都没证明。
+- 同 `baseURL` + 同模型 id 的结论会传递到其它 provider 条目，所以额度用完的第二个账号不用等一周才能拿到声明。
+- 5xx 会重试再判——被重试掩盖掉的是误判，不是故障。
+- 备份写成 `settings.yaml.bak-vision-<时间戳>`；除声明行以外不改动文件任何一个字节；重复跑不产生改动。
+- 离线单测：`node scripts/dsh-vision-probe.test.mjs`（CI 已接）。
+
+### 本机实测结论（2026-09-19，OpenCode Zen Go 端点）
+
+30 个模型：**14 个真能读图**，9 个明确拒绝，2 个静默丢图，5 个模型本身就是死条目。
+
+- 能读图：`deepseek-flash`、`deepseek-v4-flash-vision-exp`、`deepseek-v4.1-flash`、`glm-5.3-flash`、`kimi-k2.6`、`kimi-k2.7-code`、`kimi-k3`、`mimo-v2.5`、`minimax-m3`、`omen-alpha`、`qwen3.6-plus`、`qwen3.7-plus`、`qwen3.8-flash`、`qwen3.8-max`
+- 明确拒绝：`deepseek-v4-flash`、`glm-5.1/5.2/5.3`、`hy3`、`hy4-preview`、`mimo-v2.5-pro`、`minimax-m2.5`、`qwen3.7-max`
+- **静默丢图（切勿声明）**：`deepseek-v4-pro`、`longcat-2.0`
+- 死条目（与视觉无关）：`gpt-5.6-luna`、`grok-4.6`、`minimax-m2.7`、`muse-spark-1.2/1.3-contributor`
+
+端到端验收：`dsh --profile multica --stdio` 用 `opencode2/deepseek-v4.1-flash` 跑 `read_image`，工具返回 ok，模型答出 `top=red, bottom=blue`。
+
+模型清单会变，换号、换端点、上游改模型之后重跑一次探测即可，不要照抄这张表。
+
+### Multica 侧的已知缺口
+
+dsh 的 `models` 帧（`server/pkg/agent/dsh.go` 的 `dshModelFrame`）只带 id / label / provider / thinking，不带 modality，所以 Multica 的模型选择器看不出哪个档位能读图。给一个 dsh 席位派看图的活之前，对照上面的清单选模型。要在 UI 里显示，得先让桥接把 `inputModalities` 透出来——那是桥接仓库的改动，不是本仓库。

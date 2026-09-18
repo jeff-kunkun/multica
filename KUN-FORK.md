@@ -36,6 +36,12 @@
 bash scripts/setup-dsh-runtime.sh
 ```
 
+模型能不能读图，由 `~/.dsh/settings.yaml` 的声明决定，而且 pi-ai 路由的键是 `input` 不是 `inputModalities`。用探测脚本实测，不要手写：
+
+```bash
+node scripts/dsh-vision-probe.mjs --apply
+```
+
 说明、已知坑、给上游的反馈建议见 [docs/kun/dsh-runtime.md](docs/kun/dsh-runtime.md)。
 
 ## Desktop 发版
