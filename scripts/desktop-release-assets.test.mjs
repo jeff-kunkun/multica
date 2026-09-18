@@ -444,3 +444,37 @@ test("--scope-dist is off unless asked for", () => {
     true,
   );
 });
+
+test("skips electron-builder staging trees so a two-arch Windows build is unambiguous", () => {
+  const dir = tempDir();
+  try {
+    // What `package.mjs --win --x64 --arm64` leaves behind: the installers at
+    // the root, plus one unpacked app tree per arch, each carrying the same
+    // `Multica.exe`.
+    writeFile(join(dir, "multica-desktop-0.4.64-win-x64.exe"), 9);
+    writeFile(join(dir, "multica-desktop-0.4.64-win-arm64.exe"), 7);
+    for (const staging of ["win-unpacked", "win-arm64-unpacked"]) {
+      mkdirSync(join(dir, staging, "resources"), { recursive: true });
+      writeFile(join(dir, staging, "Multica.exe"), 4);
+      writeFile(join(dir, staging, "resources", "app.asar.unpacked.zip"), 4);
+    }
+    // macOS stages the same way, inside a bundle rather than a `-unpacked` dir.
+    mkdirSync(join(dir, "mac-arm64", "Multica.app", "Contents"), {
+      recursive: true,
+    });
+    writeFile(
+      join(dir, "mac-arm64", "Multica.app", "Contents", "helper.zip"),
+      4,
+    );
+
+    assert.deepEqual(
+      collectLocalAssets(dir).map((asset) => asset.name),
+      [
+        "multica-desktop-0.4.64-win-arm64.exe",
+        "multica-desktop-0.4.64-win-x64.exe",
+      ],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -83,7 +83,25 @@ export function orderAssetsForUpload(assets) {
  * per-target subdirectories, so the walk is recursive; a basename that appears
  * twice would make the asset list ambiguous and is rejected rather than picked
  * arbitrarily.
+ *
+ * The recursion skips electron-builder's staging trees (see
+ * `isStagingDirectory`). They are inputs to the installers, not assets — and on
+ * Windows they are the reason a `--x64 --arm64` run cannot be walked naively:
+ * `win-unpacked/` and `win-arm64-unpacked/` each hold a `Multica.exe`, whose
+ * extension makes it look like an installer payload, so the second one hits the
+ * duplicate-name guard and fails the job after the packaging already succeeded
+ * (v0.4.64).
  */
+/**
+ * electron-builder staging output: the unpacked application trees it assembles
+ * before wrapping them into installers (`win-unpacked`, `linux-arm64-unpacked`,
+ * `mac-arm64/Multica.app`, ...). Nothing inside one is ever published, and the
+ * app executable's name collides across architectures.
+ */
+export function isStagingDirectory(name) {
+  return name.endsWith("-unpacked") || name.endsWith(".app");
+}
+
 export function collectLocalAssets(distDir) {
   const root = resolve(distDir);
   if (!existsSync(root) || !statSync(root).isDirectory()) {
@@ -96,7 +114,7 @@ export function collectLocalAssets(distDir) {
       const path = join(directory, entry.name);
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
-        walk(path);
+        if (!isStagingDirectory(entry.name)) walk(path);
         continue;
       }
       if (!entry.isFile() || !isReleaseAssetName(entry.name)) continue;
