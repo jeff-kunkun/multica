@@ -125,6 +125,9 @@ export const issueKeys = {
       projectId,
       assigneeTypes ?? null,
     ] as const,
+  /** Per-project issue shortlist behind the chat's @-picker (DENE-603). */
+  projectPicker: (wsId: string, projectId: string, limit: number) =>
+    [...issueKeys.all(wsId), "project-picker", projectId, limit] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
   /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
@@ -430,6 +433,40 @@ export function projectGanttIssuesOptions(
   return queryOptions({
     queryKey: issueKeys.projectGantt(wsId, projectId, assigneeTypes),
     queryFn: () => fetchProjectGanttIssues(projectId, assigneeTypes),
+  });
+}
+
+/** How many of a project's issues the chat's first-screen @-list offers. */
+export const PROJECT_ISSUE_PICKER_LIMIT = 8;
+
+/**
+ * The most recently touched OPEN issues of one project, for a picker that
+ * wants "the tasks I am likely to reference right now" rather than a browsable
+ * list. The floating chat binds it to the project the user is looking at, so
+ * the first screen of its @-menu is that project's work (DENE-603).
+ *
+ * Deliberately its own cache key: the bucketed workspace list caches a
+ * different shape, and a shortlist that borrowed it would be invalidated —
+ * and refetched at board scale — by every board interaction.
+ */
+export function projectIssuePickerOptions(
+  wsId: string,
+  projectId: string,
+  limit: number = PROJECT_ISSUE_PICKER_LIMIT,
+) {
+  return queryOptions({
+    queryKey: issueKeys.projectPicker(wsId, projectId, limit),
+    queryFn: async () => {
+      const res = await api.listIssues({
+        project_id: projectId,
+        open_only: true,
+        limit,
+        sort_by: "last_activity",
+        sort_direction: "desc",
+      });
+      return res.issues;
+    },
+    staleTime: 30_000,
   });
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef } from "react";
-import { FolderKanban, Image as ImageIcon, Plus, X } from "lucide-react";
+import { useRef, useState } from "react";
+import { ArrowLeftRight, FolderKanban, Image as ImageIcon, Plus, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -26,6 +26,10 @@ interface ChatAddMenuProps {
   projects?: Project[];
   /** The attached projects, in selection order. */
   projectIds?: string[];
+  /** The project the main UI is currently on. It heads the submenu's first
+   *  screen, which is otherwise limited to what is already attached — the
+   *  full workspace list is one click away (DENE-603 §3). */
+  currentProjectId?: string | null;
   /** Called with the COMPLETE next set — this menu toggles one entry at a
    *  time, but the set is what the session stores, so the caller never has to
    *  reconstruct it from an add/remove event. */
@@ -47,12 +51,26 @@ export function ChatAddMenu({
   onSelectFile,
   projects = [],
   projectIds = [],
+  currentProjectId,
   onProjectsChange,
   projectContextUnsupported,
   disabled,
 }: ChatAddMenuProps) {
   const { t } = useT("chat");
   const inputRef = useRef<HTMLInputElement>(null);
+  // Cross-project picking is the rare case: the submenu opens focused on the
+  // project at hand and only expands to the whole workspace on request. Reset
+  // on close so the next open starts focused again.
+  const [showAllProjects, setShowAllProjects] = useState(false);
+
+  // The focused screen. Falls back to the full list when it would otherwise be
+  // empty — an empty first screen teaches the user nothing and costs a click.
+  const focusedProjects = projects.filter(
+    (project) => project.id === currentProjectId || projectIds.includes(project.id),
+  );
+  const visibleProjects =
+    showAllProjects || focusedProjects.length === 0 ? projects : focusedProjects;
+  const canExpand = !showAllProjects && visibleProjects.length < projects.length;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -87,7 +105,7 @@ export function ChatAddMenu({
             </DropdownMenuItem>
           )}
           {onProjectsChange && (
-            <DropdownMenuSub>
+            <DropdownMenuSub onOpenChange={(open) => !open && setShowAllProjects(false)}>
               <DropdownMenuSubTrigger>
                 <FolderKanban />
                 <span className="flex-1">{t(($) => $.input.project_context)}</span>
@@ -98,7 +116,7 @@ export function ChatAddMenu({
                 )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="max-h-72 min-w-52 overflow-y-auto">
-                {projects.map((project) => (
+                {visibleProjects.map((project) => (
                   // Checkbox items keep the menu open on click (Base UI), which
                   // is the point: attaching two or three projects is one trip.
                   <DropdownMenuCheckboxItem
@@ -112,6 +130,18 @@ export function ChatAddMenu({
                     <span className="min-w-0 flex-1 truncate">{project.title}</span>
                   </DropdownMenuCheckboxItem>
                 ))}
+                {canExpand && (
+                  // Not a checkbox item: this opens the rest of the workspace
+                  // rather than attaching anything, so it must not close the
+                  // menu or look like a selection.
+                  <DropdownMenuItem
+                    closeOnClick={false}
+                    onClick={() => setShowAllProjects(true)}
+                  >
+                    <ArrowLeftRight />
+                    {t(($) => $.input.switch_project)}
+                  </DropdownMenuItem>
+                )}
                 {projects.length === 0 && (
                   <div className="px-2 py-1.5 text-caption text-muted-foreground">
                     {t(($) => $.input.no_projects)}

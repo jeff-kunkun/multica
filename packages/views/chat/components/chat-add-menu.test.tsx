@@ -52,20 +52,61 @@ async function openProjectSubmenu(props: Partial<React.ComponentProps<typeof Cha
 afterEach(cleanup);
 
 describe("ChatAddMenu project context", () => {
-  it("renders every project as a checkbox reflecting the attached set", async () => {
-    await openProjectSubmenu({ projectIds: [ALPHA.id] });
+  it("renders the attached projects as checkboxes reflecting the set", async () => {
+    await openProjectSubmenu({ projectIds: [ALPHA.id, BETA.id] });
 
     expect(
       await screen.findByRole("menuitemcheckbox", { name: /Project Alpha/ }),
     ).toBeChecked();
     expect(
       screen.getByRole("menuitemcheckbox", { name: /Project Beta/ }),
-    ).not.toBeChecked();
+    ).toBeChecked();
+  });
+
+  // DENE-603 §3: the first screen is the project at hand, not the workspace.
+  it("opens focused on the current project and hides the rest", async () => {
+    await openProjectSubmenu({ currentProjectId: ALPHA.id, projectIds: [] });
+
+    expect(await screen.findByRole("menuitemcheckbox", { name: /Project Alpha/ }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("menuitemcheckbox", { name: /Project Beta/ })).toBeNull();
+  });
+
+  it("reveals the whole workspace from the switch entry", async () => {
+    const onProjectsChange = await openProjectSubmenu({
+      currentProjectId: ALPHA.id,
+      projectIds: [],
+    });
+
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Switch to another project…" }),
+    );
+
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: /Project Beta/ }),
+    );
+    expect(onProjectsChange).toHaveBeenCalledWith([BETA.id]);
+  });
+
+  // An empty first screen would teach nothing and cost an extra click.
+  it("falls back to the full list when nothing is current or attached", async () => {
+    await openProjectSubmenu({ projectIds: [] });
+
+    expect(await screen.findByRole("menuitemcheckbox", { name: /Project Alpha/ }))
+      .toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: /Project Beta/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Switch to another project…" }))
+      .toBeNull();
   });
 
   // The whole point of DENE-522: a second project is ADDED, not swapped in.
   it("hands back the whole set when a second project is checked", async () => {
-    const onProjectsChange = await openProjectSubmenu({ projectIds: [ALPHA.id] });
+    const onProjectsChange = await openProjectSubmenu({
+      projectIds: [ALPHA.id],
+      currentProjectId: BETA.id,
+    });
 
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: /Project Beta/ }),
@@ -119,6 +160,7 @@ describe("ChatAddMenu project context", () => {
   it("warns about an outdated daemon without disabling selection", async () => {
     const onProjectsChange = await openProjectSubmenu({
       projectIds: [ALPHA.id],
+      currentProjectId: BETA.id,
       projectContextUnsupported: true,
     });
 

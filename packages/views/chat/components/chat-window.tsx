@@ -91,6 +91,10 @@ import {
   seedAcceptedPendingTask,
 } from "./use-chat-controller";
 import { useChatProjectContextSupport } from "./use-chat-project-context-support";
+import {
+  useChatProjectFollow,
+  useCurrentRouteProjectId,
+} from "./use-chat-project-follow";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, Attachment, ChatMessage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
@@ -120,6 +124,7 @@ export function ChatWindow() {
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
   const setSelectedProjectIds = useChatStore((s) => s.setSelectedProjectIds);
+  const setProjectContextLocked = useChatStore((s) => s.setProjectContextLocked);
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -244,6 +249,17 @@ export function ChatWindow() {
     if (live.length === selectedProjectIds.length) return;
     setSelectedProjectIds(live);
   }, [projectsLoaded, projects, selectedProjectIds, setSelectedProjectIds]);
+
+  // Bind the composer to the project the main UI is on, until the user picks
+  // one here (DENE-603). Placed after the pruning effect so a project that no
+  // longer exists is never the thing being followed.
+  const routeProjectId = useCurrentRouteProjectId(wsId);
+  useChatProjectFollow({
+    routeProjectId,
+    isOpen,
+    hasSession: !!currentSession,
+    projectsLoaded,
+  });
 
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
@@ -615,6 +631,9 @@ export function ChatWindow() {
       }
       qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
       qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+      // The send consumed the draft's project context — the next new chat
+      // follows the main UI again (DENE-603 §5).
+      setProjectContextLocked(false);
       return true;
     },
     [
@@ -629,6 +648,7 @@ export function ChatWindow() {
       cancelChatTask,
       qc,
       setActiveSession,
+      setProjectContextLocked,
       t,
     ],
   );
@@ -692,12 +712,14 @@ export function ChatWindow() {
       previousPendingTask: pendingTaskId,
     });
     setSelectedProjectIds([]);
+    setProjectContextLocked(false);
     setActiveSession(null);
     requestInputFocus();
   }, [
     activeSessionId,
     pendingTaskId,
     setSelectedProjectIds,
+    setProjectContextLocked,
     setActiveSession,
     requestInputFocus,
   ]);
@@ -727,6 +749,9 @@ export function ChatWindow() {
         to: projectIds,
         previousSessionId: activeSessionId,
       });
+      // An explicit pick here outranks the route: navigating around the app
+      // must not overwrite it mid-compose (DENE-603 §4).
+      setProjectContextLocked(true);
       const plan = planProjectContextChange({
         targetProjectIds: projectIds,
         activeSessionId,
@@ -752,6 +777,7 @@ export function ChatWindow() {
       currentSession,
       setSessionProjects,
       setSelectedProjectIds,
+      setProjectContextLocked,
       requestInputFocus,
     ],
   );
@@ -835,7 +861,12 @@ export function ChatWindow() {
       }
     : { width: renderWidth, height: renderHeight };
 
-  const contextItems = useChatContextItems(wsId);
+  // The @-list leads with the bound project's own tasks; the route's project
+  // is the fallback when the chat carries none.
+  const contextItems = useChatContextItems(
+    wsId,
+    activeProjectIds[0] ?? routeProjectId,
+  );
   const queuedTasks = pendingTask?.queued_tasks ?? [];
 
   return (
@@ -1023,6 +1054,7 @@ export function ChatWindow() {
         agentName={activeAgent?.name}
         projects={projects}
         projectIds={activeProjectIds}
+        currentProjectId={routeProjectId}
         onProjectsChange={handleProjectsChange}
         projectContextUnsupported={projectContextSupport === false}
         isProjectUpdating={

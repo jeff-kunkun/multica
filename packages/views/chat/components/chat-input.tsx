@@ -128,6 +128,9 @@ interface ChatInputProps {
   /** Attached projects, in selection order. A chat can carry several at once
    *  (DENE-522); each renders as its own chip above the editor. */
   projectIds?: string[];
+  /** The project the main UI is on, so the project submenu can open focused on
+   *  it instead of the whole workspace list (DENE-603). */
+  currentProjectId?: string | null;
   /** Called with the COMPLETE next set, never a delta. */
   onProjectsChange?: (projectIds: string[]) => void;
   isProjectUpdating?: boolean;
@@ -170,6 +173,7 @@ export function ChatInput({
   contextItems,
   projects = [],
   projectIds = [],
+  currentProjectId,
   onProjectsChange,
   isProjectUpdating,
   projectContextUnsupported,
@@ -750,6 +754,7 @@ export function ChatInput({
                   : undefined}
                 projects={projects}
                 projectIds={projectIds}
+                currentProjectId={currentProjectId}
                 onProjectsChange={projectSelectionEnabled ? onProjectsChange : undefined}
                 projectContextUnsupported={projectContextUnsupported}
               />

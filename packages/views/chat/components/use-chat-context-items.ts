@@ -4,7 +4,7 @@ import { issueStatusCategory } from "@multica/core/issues";
 import { useMemo } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { selectRecentContexts, useRecentContextStore, type RecentContextEntry } from "@multica/core/chat";
-import { issueDetailOptions } from "@multica/core/issues/queries";
+import { issueDetailOptions, projectIssuePickerOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import type { Issue, Project } from "@multica/core/types";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
@@ -18,7 +18,7 @@ function mentionKey(item: Pick<MentionItem, "type" | "id">): string {
 
 function issueToMentionItem(
   issue: Pick<Issue, "id" | "identifier" | "title" | "status"> & Partial<Pick<Issue, "status_category">>,
-  group: "current" | "recent",
+  group: "current" | "project" | "recent",
 ): MentionItem {
   return {
     id: issue.id,
@@ -80,7 +80,18 @@ export function parseCurrentContextRoute(pathname: string, searchParams: URLSear
   return null;
 }
 
-export function useChatContextItems(wsId: string): MentionItem[] {
+/**
+ * The @-menu's first screen for the floating chat.
+ *
+ * `currentProjectId` is the project the chat is bound to (DENE-603 §1): its
+ * open issues are listed as their own group, so referencing a task of the
+ * project you are looking at takes no search. Pass null to keep the plain
+ * current/recent list.
+ */
+export function useChatContextItems(
+  wsId: string,
+  currentProjectId?: string | null,
+): MentionItem[] {
   const { pathname, searchParams } = useNavigation();
   const currentRoute = parseCurrentContextRoute(pathname, searchParams);
   const recentEntries = useRecentContextStore(selectRecentContexts(wsId));
@@ -99,6 +110,11 @@ export function useChatContextItems(wsId: string): MentionItem[] {
     enabled: currentRoute?.type === "project",
   });
 
+  const { data: projectIssues = [] } = useQuery({
+    ...projectIssuePickerOptions(wsId, currentProjectId ?? ""),
+    enabled: !!wsId && !!currentProjectId,
+  });
+
   const recentQueries = useQueries({
     queries: visibleRecentEntries.map((entry) => ({
       ...(entry.type === "issue"
@@ -114,12 +130,19 @@ export function useChatContextItems(wsId: string): MentionItem[] {
     if (currentProject) currentItems.push(projectToMentionItem(currentProject, "current"));
 
     const hidden = new Set(currentItems.map(mentionKey));
+    // The issue being viewed is already in Current — listing it again under
+    // its project would be the same row twice.
+    const projectItems = (currentProjectId ? projectIssues : [])
+      .map((issue) => issueToMentionItem(issue, "project"))
+      .filter((item) => !hidden.has(mentionKey(item)));
+    for (const item of projectItems) hidden.add(mentionKey(item));
+
     const recentItems = visibleRecentEntries
       .map((entry, index) => hydrateRecentEntry(entry, recentQueries[index]?.data as Issue | Project | undefined))
       .filter((item) => !hidden.has(mentionKey(item)))
       .slice(0, MAX_RECENT_MENTION_ITEMS);
 
-    return [...currentItems, ...recentItems];
-  }, [currentIssue, currentProject, recentQueries, visibleRecentEntries]);
+    return [...currentItems, ...projectItems, ...recentItems];
+  }, [currentIssue, currentProject, currentProjectId, projectIssues, recentQueries, visibleRecentEntries]);
 }
 

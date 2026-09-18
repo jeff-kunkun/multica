@@ -329,6 +329,11 @@ export interface ChatState {
    *  carry several projects at once (DENE-522). Existing sessions remain
    *  bound to their server-persisted set. */
   selectedProjectIds: string[];
+  /** The user picked a project inside the chat, so the floating window stops
+   *  following the main UI's current project (DENE-603). Deliberately NOT
+   *  persisted: a reload re-initialises the window, which criterion 5 defines
+   *  as a reset back to the following state. */
+  projectContextLocked: boolean;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
   /** Attachment rows referenced by each input draft. */
@@ -349,6 +354,9 @@ export interface ChatState {
   setSelectedAgentId: (id: string) => void;
   /** Replaces the whole draft set; callers pass the complete selection. */
   setSelectedProjectIds: (ids: string[]) => void;
+  /** Lock on a manual pick inside the chat, unlock on new chat / send /
+   *  re-init so the window follows the main UI again. */
+  setProjectContextLocked: (locked: boolean) => void;
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
   /** Append a markdown fragment to a draft slot's text (upload write-back). */
@@ -415,6 +423,7 @@ export function createChatStore(options: ChatStoreOptions) {
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: initialAgentId,
     selectedProjectIds: readProjectIds(storage, wsKey(PROJECT_STORAGE_KEY)),
+    projectContextLocked: false,
     inputDrafts: initialDraftSlots.inputDrafts,
     inputDraftAttachments: initialDraftSlots.inputDraftAttachments,
     appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),
@@ -460,6 +469,11 @@ export function createChatStore(options: ChatStoreOptions) {
       if (ids.length > 0) storage.setItem(wsKey(PROJECT_STORAGE_KEY), JSON.stringify(ids));
       else storage.removeItem(wsKey(PROJECT_STORAGE_KEY));
       set({ selectedProjectIds: ids });
+    },
+    setProjectContextLocked: (locked) => {
+      if (get().projectContextLocked === locked) return;
+      logger.info("setProjectContextLocked", { to: locked });
+      set({ projectContextLocked: locked });
     },
     // Append-only until the server confirms. There is deliberately no capacity
     // cap: every entry in here is an UNconfirmed consume, and evicting one
@@ -695,6 +709,8 @@ export function createChatStore(options: ChatStoreOptions) {
       activeSessionId: nextSession,
       selectedAgentId: nextAgent,
       selectedProjectIds: nextProjects,
+      // A new workspace is a fresh context: follow its current project again.
+      projectContextLocked: false,
       inputDrafts: nextDrafts,
       inputDraftAttachments: nextDraftAttachments,
       appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),
