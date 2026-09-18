@@ -68,6 +68,7 @@
       "provider_auth_or_access": "The agent's model account isn't signed in any more. Sign in again, then retry.",
       "provider_quota_limit": "The agent's model account has run out of credit. Top it up or switch accounts, then retry.",
       "provider_capacity_or_rate_limit": "The model provider is busy or rate-limiting this account. Please try again in a moment.",
+      "provider_server_error": "The model provider returned an error on its own side — its API or its authentication service — even though the agent's account is valid. Signing in again won't help. Please try again in a moment.",
       "context_overflow": "This conversation got too long for the model. Start a new session, or break your request into smaller steps.",
       "runtime_missing_executable": "The agent's CLI couldn't be run on this machine. Check that it's installed correctly and on PATH, then retry.",
       "runtime_version_unsupported": "The agent's CLI is too old for this runtime. Upgrade it, then retry.",

@@ -105,6 +105,12 @@ func TestClassifyRules(t *testing.T) {
 		{"504 at end", "upstream returned 504", ReasonAgentProviderServerError},
 		{"service unavailable", "service unavailable, retry later", ReasonAgentProviderServerError},
 		{"bad gateway", "Bad Gateway: upstream rejected", ReasonAgentProviderServerError},
+		// DENE-596: the Grok CLI reports that its OWN credential recovery
+		// succeeded and the freshly authenticated inference call was refused
+		// anyway. The pair has to beat rule 3's bare "(401)" — landing in
+		// provider_auth_or_access tells the member to sign in again, which is
+		// the misleading advice this ticket exists to remove.
+		{"grok auth recovery then inference rejected", "Auth recovery succeeded\nsession/prompt: Internal error (code=-32603)\nauthenticated inference requests were still rejected (401)", ReasonAgentProviderServerError},
 
 		// 7. Provider network.
 		{"stream disconnected", "stream disconnected before completion", ReasonAgentProviderNetwork},
@@ -305,6 +311,41 @@ func TestNormalizeDaemonReasonUpgradesConcurrentRequestLimit(t *testing.T) {
 	}
 	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "you exceeded the token limit"); got != ReasonAgentContextOverflow {
 		t.Errorf("ordinary token overflow changed to %q", got)
+	}
+}
+
+// TestNormalizeDaemonReasonUpgradesGrokUpstreamAuthFault is DENE-596's
+// mixed-version half: a daemon predating the pair rule reports
+// provider_auth_or_access for the Grok blob (its own rule 3 takes the bare
+// 401), and that bucket is off the retry allowlist with "sign in again" copy.
+// The server recognises the pair in the raw text and puts the row in the
+// retryable provider-fault bucket instead of waiting for every host to update.
+func TestNormalizeDaemonReasonUpgradesGrokUpstreamAuthFault(t *testing.T) {
+	t.Parallel()
+
+	const raw = "grok session/prompt failed: Auth recovery succeeded; authenticated inference requests were still rejected (401); session/prompt: Internal error (code=-32603)"
+
+	for _, reason := range []string{
+		string(ReasonAgentProviderAuthOrAccess),
+		string(ReasonAgentUnknown),
+		"agent_error",
+	} {
+		if got := NormalizeDaemonReason(reason, raw); got != ReasonAgentProviderServerError {
+			t.Errorf("NormalizeDaemonReason(%q, grok upstream auth fault) = %q, want %q", reason, got, ReasonAgentProviderServerError)
+		}
+	}
+
+	// A refined reason the new rule does not enumerate keeps its verdict: an
+	// already-correct label says more than a witness appearing in the blob.
+	if got := NormalizeDaemonReason(string(ReasonAgentProviderNetwork), raw); got != ReasonAgentProviderNetwork {
+		t.Errorf("provider_network label changed to %q", got)
+	}
+	// And the upgrade cannot be reached by either half alone.
+	if got := NormalizeDaemonReason(string(ReasonAgentUnknown), "authenticated inference requests were still rejected (401)"); got != ReasonAgentUnknown {
+		t.Errorf("rejection half alone upgraded to %q", got)
+	}
+	if got := NormalizeDaemonReason(string(ReasonAgentProviderAuthOrAccess), "API Error: 401 Unauthorized"); got != ReasonAgentProviderAuthOrAccess {
+		t.Errorf("plain 401 auth rejection changed to %q", got)
 	}
 }
 
@@ -647,5 +688,68 @@ func TestClassifyKeepsDeadlineExceededAsProviderNetwork(t *testing.T) {
 
 	if got := Classify("post to provider: context deadline exceeded"); got != ReasonAgentProviderNetwork {
 		t.Errorf("Classify(provider deadline) = %q, want %q", got, ReasonAgentProviderNetwork)
+	}
+}
+
+// TestGrokUpstreamAuthFault pins DENE-596's classifier rule and, more
+// importantly, its blast radius.
+//
+// The rule exists because the Grok CLI proves the credential is good — it says
+// its own recovery succeeded — and the upstream then refuses the authenticated
+// call. Nothing about that is an expired login, so it must not reach
+// provider_auth_or_access (whose member copy says "sign in again") and it must
+// be retryable, which provider_server_error is as of this change.
+//
+// The negative cases are the point of the test: this rule matches a semantic
+// pair, not a status code. A lone 401, or either half of the pair on its own,
+// keeps the classification the classifier would have chosen before — so a
+// truncated log tail or a quoted fragment cannot pull an unrelated failure into
+// the retryable provider bucket.
+func TestGrokUpstreamAuthFault(t *testing.T) {
+	t.Parallel()
+
+	const full = "grok agent stdio: Auth recovery succeeded; authenticated inference requests were still rejected (401); session/prompt: Internal error (code=-32603)"
+
+	cases := []struct {
+		name string
+		in   string
+		want Reason
+	}{
+		{
+			// Verbatim shape from the report, wrapped in the daemon's own
+			// framing. Rule 3 would take this on "(401)" without the pair rule.
+			name: "both halves beat the bare 401",
+			in:   full,
+			want: ReasonAgentProviderServerError,
+		},
+		{
+			name: "ordering and wrapping do not matter",
+			in:   "turn failed: authenticated inference requests were still rejected. Auth recovery succeeded.",
+			want: ReasonAgentProviderServerError,
+		},
+		{
+			// The recovery half alone says nothing about an inference call.
+			name: "recovery half alone is not the witness",
+			in:   "Auth recovery succeeded",
+			want: ReasonAgentUnknown,
+		},
+		{
+			// The rejection half alone is still an unauthenticated-refusal
+			// shape; without the recovery half we cannot tell it from a real
+			// expired credential, so rule 3 keeps it.
+			name: "rejection half alone stays auth",
+			in:   "authenticated inference requests were still rejected (401)",
+			want: ReasonAgentProviderAuthOrAccess,
+		},
+		{
+			name: "a real expired credential is untouched",
+			in:   "API Error: 401 Unauthorized — token expired, run `grok login`",
+			want: ReasonAgentProviderAuthOrAccess,
+		},
+	}
+	for _, tc := range cases {
+		if got := Classify(tc.in); got != tc.want {
+			t.Errorf("%s: Classify(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
 	}
 }

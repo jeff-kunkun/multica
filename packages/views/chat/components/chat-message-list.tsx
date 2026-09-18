@@ -990,6 +990,11 @@ function FailureBubble({
     "agent_error.provider_capacity_or_rate_limit": t(
       ($) => $.message_list.failure.provider_capacity_or_rate_limit,
     ),
+    // A provider fault, not a credential problem. Worth its own line because
+    // the neighbouring provider_auth_or_access copy ("sign in again") is the
+    // wrong next step for it: the runtime has already proved the credential is
+    // good (DENE-596).
+    "agent_error.provider_server_error": t(($) => $.message_list.failure.provider_server_error),
     "agent_error.context_overflow": t(($) => $.message_list.failure.context_overflow),
     "agent_error.runtime_missing_executable": t(
       ($) => $.message_list.failure.runtime_missing_executable,
