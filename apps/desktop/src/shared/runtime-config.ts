@@ -27,6 +27,24 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
 /** Built-in self-hosted preset shown in the desktop server switcher. */
 export const SELF_HOSTED_PRESET_URL = "https://ai.ferryway.cc";
 
+/**
+ * Server this fork's desktop build connects to on entry, used whenever
+ * `~/.multica/desktop.json` is absent. Upstream falls back to official cloud;
+ * this fork's product line is self-hosted first (KUN-FORK.md), so a fresh
+ * install lands on the self-hosted instance and the settings switcher is only
+ * needed to move to official cloud or another instance.
+ *
+ * Official cloud stays reachable: switching to it writes an explicit
+ * `desktop.json` rather than deleting the file, so "no file" means exactly one
+ * thing.
+ */
+export const DEFAULT_ENTRY_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
+  schemaVersion: 1,
+  apiUrl: SELF_HOSTED_PRESET_URL,
+  wsUrl: deriveWsUrl(SELF_HOSTED_PRESET_URL),
+  appUrl: deriveAppUrl(SELF_HOSTED_PRESET_URL),
+});
+
 const OFFICIAL_CLOUD_HOSTS = new Set([
   "api.multica.ai",
   "multica.ai",

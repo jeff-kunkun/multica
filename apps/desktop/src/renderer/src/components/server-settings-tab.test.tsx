@@ -28,6 +28,7 @@ const translations = {
       preset_official_description: "multica.ai",
       preset_self_hosted: "Self-hosted",
       preset_self_hosted_description: "ai.ferryway.cc",
+      default_entry_badge: "Default entry",
       current_badge: "Current",
       custom_url: "Custom URL",
       custom_url_description: "http or https only",
@@ -96,6 +97,13 @@ describe("ServerSettingsTab", () => {
     expect(screen.getAllByText("Official cloud").length).toBeGreaterThan(0);
     expect(screen.getByText("desktop-api.multica.ai")).toBeInTheDocument();
     expect(screen.getByText("https://api.multica.ai")).toBeInTheDocument();
+    await waitFor(() => expect(mocks.getPrefs).toHaveBeenCalled());
+  });
+
+  it("marks the self-hosted preset as the entry default", async () => {
+    render(<ServerSettingsTab />);
+
+    expect(screen.getByText("Default entry")).toBeInTheDocument();
     await waitFor(() => expect(mocks.getPrefs).toHaveBeenCalled());
   });
 

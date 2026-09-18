@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_ENTRY_RUNTIME_CONFIG,
   DEFAULT_RUNTIME_CONFIG,
   SELF_HOSTED_PRESET_URL,
   deriveWsUrl,
@@ -156,6 +157,13 @@ describe("runtime config", () => {
       wsUrl: "wss://ai.ferryway.cc/ws",
       appUrl: "https://ai.ferryway.cc",
     });
+  });
+
+  it("enters on the self-hosted instance, not official cloud", () => {
+    expect(DEFAULT_ENTRY_RUNTIME_CONFIG).toEqual(
+      runtimeConfigFromServerUrl(SELF_HOSTED_PRESET_URL),
+    );
+    expect(isOfficialCloudConfig(DEFAULT_ENTRY_RUNTIME_CONFIG)).toBe(false);
   });
 
   it("rejects empty, non-http, and unparseable server URLs", () => {

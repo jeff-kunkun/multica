@@ -2,8 +2,8 @@ import { app } from "electron";
 import { mkdir, readFile, rename, unlink, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import {
+  DEFAULT_ENTRY_RUNTIME_CONFIG,
   DEFAULT_RUNTIME_CONFIG,
-  isOfficialCloudConfig,
   parseRuntimeConfig,
   runtimeConfigFromDevEnv,
   runtimeConfigFromServerUrl,
@@ -36,7 +36,7 @@ export async function loadRuntimeConfig(options: {
     return { ok: true, config: parseRuntimeConfig(raw) };
   } catch (err) {
     if (isMissingFileError(err)) {
-      return { ok: true, config: { ...DEFAULT_RUNTIME_CONFIG } };
+      return { ok: true, config: { ...DEFAULT_ENTRY_RUNTIME_CONFIG } };
     }
     return {
       ok: false,
@@ -61,11 +61,9 @@ export async function switchRuntimeConfig(options: {
         ? { ...DEFAULT_RUNTIME_CONFIG }
         : runtimeConfigFromServerUrl(options.target.url);
 
-    if (isOfficialCloudConfig(config)) {
-      await deleteRuntimeConfigFile(options.configPath);
-      return { ok: true, config };
-    }
-
+    // Both targets are written out. Deleting the file used to mean "official
+    // cloud", but the absent-file fallback is now the fork's self-hosted
+    // entry default, so official cloud has to be stated explicitly.
     await writeRuntimeConfigFile(options.configPath, config);
     return { ok: true, config };
   } catch (err) {
@@ -95,14 +93,6 @@ async function writeRuntimeConfigFile(
   } catch (err) {
     await unlink(temporaryPath).catch(() => undefined);
     throw err;
-  }
-}
-
-async function deleteRuntimeConfigFile(configPath: string): Promise<void> {
-  try {
-    await unlink(configPath);
-  } catch (err) {
-    if (!isMissingFileError(err)) throw err;
   }
 }
 

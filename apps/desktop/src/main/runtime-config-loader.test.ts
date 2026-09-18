@@ -43,7 +43,7 @@ describe("loadRuntimeConfig", () => {
     });
   });
 
-  it("uses cloud defaults when packaged config is absent", async () => {
+  it("enters on the self-hosted instance when packaged config is absent", async () => {
     const dir = await mkdtemp(join(tmpdir(), "multica-desktop-config-"));
     await expect(
       loadRuntimeConfig({
@@ -55,9 +55,9 @@ describe("loadRuntimeConfig", () => {
       ok: true,
       config: {
         schemaVersion: 1,
-        apiUrl: "https://api.multica.ai",
-        wsUrl: "wss://api.multica.ai/ws",
-        appUrl: "https://multica.ai",
+        apiUrl: "https://ai.ferryway.cc",
+        wsUrl: "wss://ai.ferryway.cc/ws",
+        appUrl: "https://ai.ferryway.cc",
       },
     });
   });
@@ -166,7 +166,7 @@ describe("switchRuntimeConfig", () => {
     });
   });
 
-  it("deletes desktop.json when switching back to official cloud", async () => {
+  it("writes official cloud explicitly when switching back to it", async () => {
     const path = await configPath();
     await writeFile(
       path,
@@ -187,8 +187,13 @@ describe("switchRuntimeConfig", () => {
         appUrl: "https://multica.ai",
       },
     });
-    await expect(access(path, fsConstants.F_OK)).rejects.toMatchObject({
-      code: "ENOENT",
+    // The absent-file fallback is the self-hosted entry default, so official
+    // cloud has to survive as an explicit file rather than a deletion.
+    expect(JSON.parse(await readFile(path, "utf-8"))).toEqual({
+      schemaVersion: 1,
+      apiUrl: "https://api.multica.ai",
+      wsUrl: "wss://api.multica.ai/ws",
+      appUrl: "https://multica.ai",
     });
     await expect(
       loadRuntimeConfig({ isDev: false, configPath: path, env: {} }),

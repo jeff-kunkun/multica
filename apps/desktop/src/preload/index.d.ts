@@ -43,8 +43,9 @@ interface DesktopAPI {
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig: RuntimeConfigResult;
   /**
-   * Write or delete ~/.multica/desktop.json for a server switch.
-   * Pass `null` to return to official cloud (deletes the file). The running
+   * Write ~/.multica/desktop.json for a server switch.
+   * Pass `null` to return to official cloud (written explicitly; the
+   * absent-file fallback is the self-hosted entry default). The running
    * session is unchanged until a full quit and reopen.
    */
   switchServer: (url: string | null) => Promise<RuntimeConfigSwitchResult>;

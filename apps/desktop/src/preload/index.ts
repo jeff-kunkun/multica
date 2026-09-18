@@ -146,7 +146,7 @@ const desktopAPI = {
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
   /**
-   * Persist a server switch. `null` deletes desktop.json (official cloud).
+   * Persist a server switch. `null` writes official cloud to desktop.json.
    * A string is treated as the target server URL. The live session is not
    * updated — the renderer must require a full quit and reopen.
    */

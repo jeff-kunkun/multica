@@ -21,7 +21,7 @@ import {
 import { useT } from "@multica/views/i18n";
 import { hasCompletedTransferExport } from "@multica/views/platform";
 import {
-  DEFAULT_RUNTIME_CONFIG,
+  DEFAULT_ENTRY_RUNTIME_CONFIG,
   SELF_HOSTED_PRESET_URL,
   desktopProfileName,
   isOfficialCloudConfig,
@@ -112,7 +112,7 @@ export function ServerSettingsTab() {
     }
   }, [pending, t]);
 
-  const displayed = config ?? DEFAULT_RUNTIME_CONFIG;
+  const displayed = config ?? DEFAULT_ENTRY_RUNTIME_CONFIG;
   const official = isOfficialCloudConfig(displayed);
   const selfHosted = displayed.apiUrl === SELF_HOSTED_CONFIG.apiUrl;
   const showExportHint =
@@ -193,7 +193,14 @@ export function ServerSettingsTab() {
           </SettingsRow>
 
           <SettingsRow
-            label={t(($) => $.desktop.server.preset_self_hosted)}
+            label={
+              <span className="flex flex-wrap items-center gap-2">
+                {t(($) => $.desktop.server.preset_self_hosted)}
+                <span className="rounded-full border border-border px-1.5 py-0.5 text-caption font-normal text-muted-foreground">
+                  {t(($) => $.desktop.server.default_entry_badge)}
+                </span>
+              </span>
+            }
             description={t(($) => $.desktop.server.preset_self_hosted_description)}
           >
             {selfHosted ? (
