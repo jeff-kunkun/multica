@@ -639,7 +639,19 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to lock project")
 		return
 	}
-	if err := qtx.ClearChatSessionProjectByProject(r.Context(), db.ClearChatSessionProjectByProjectParams{
+	// The session sets are the authoritative project binding (DENE-523), so a
+	// deleted project must drop out of every chat that attached it, and each
+	// affected session's mirrored primary column must follow the new head of
+	// its set (NULL when nothing is left). Order matters: drop the rows first,
+	// then re-point — the re-point reads the post-delete set.
+	if err := qtx.DeleteChatSessionProjectsForProject(r.Context(), db.DeleteChatSessionProjectsForProjectParams{
+		ProjectID:   project.ID,
+		WorkspaceID: project.WorkspaceID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear project chat context")
+		return
+	}
+	if err := qtx.RepointChatSessionPrimaryAfterProjectDelete(r.Context(), db.RepointChatSessionPrimaryAfterProjectDeleteParams{
 		ProjectID:   project.ID,
 		WorkspaceID: project.WorkspaceID,
 	}); err != nil {

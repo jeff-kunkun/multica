@@ -645,6 +645,17 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// TaskProjectContextData is one project attached to a daemon claim. The daemon
+// renders every entry into the brief's Project Context section and writes them
+// to .multica/project/resources.json, so an agent can work across several
+// projects (and their repositories) in one run.
+type TaskProjectContextData struct {
+	ID          string                `json:"id"`
+	Title       string                `json:"title"`
+	Description string                `json:"description,omitempty"`
+	Resources   []ProjectResourceData `json:"resources,omitempty"`
+}
+
 // ConnectedAppData keeps the daemon-claim wire field local to handler types
 // while sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
@@ -741,9 +752,15 @@ type AgentTaskResponse struct {
 	ProjectTitle         string                `json:"project_title,omitempty"`       // for surfacing in agent context
 	ProjectDescription   string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
 	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
-	CreatedAt            string                `json:"created_at"`
-	PriorSessionID       string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir         string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	// Projects is the task's full project set in priority order (DENE-523): a
+	// chat session can attach several projects, every other surface at most
+	// one. The singular project_* fields above mirror the FIRST entry so a
+	// daemon predating this field still renders the primary project. Mirror
+	// field: internal/daemon/types.go, same JSON name.
+	Projects       []TaskProjectContextData `json:"projects,omitempty"`
+	CreatedAt      string                   `json:"created_at"`
+	PriorSessionID string                   `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
+	PriorWorkDir   string                   `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback, and the daemon surfaces the continuity gap

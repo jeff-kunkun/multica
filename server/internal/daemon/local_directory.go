@@ -163,7 +163,23 @@ func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirector
 	if task.IsLeaderTask {
 		return nil, nil
 	}
-	return findLocalDirectoryAssignment(task.ProjectResources, daemonID)
+	// A task can carry several projects (a multi-project chat, DENE-523) and a
+	// run can only occupy one directory. Projects arrive in priority order, so
+	// the first one pinned to this daemon wins; the other projects' resources
+	// still reach the agent through the brief and resources.json, and their
+	// repos remain checkoutable. The per-project uniqueness rule below is
+	// unchanged — it is what stops a silent pick between two directories of
+	// the SAME project.
+	for _, project := range task.projectContexts() {
+		assignment, err := findLocalDirectoryAssignment(project.Resources, daemonID)
+		if err != nil {
+			return nil, err
+		}
+		if assignment != nil {
+			return assignment, nil
+		}
+	}
+	return nil, nil
 }
 
 // localDirectoryLockExempt reports whether a task may run inside an in_place

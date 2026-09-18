@@ -147,25 +147,6 @@ func (q *Queries) ClearChatMessageChannelMediaPending(ctx context.Context, arg C
 	return err
 }
 
-const clearChatSessionProjectByProject = `-- name: ClearChatSessionProjectByProject :exec
-UPDATE chat_session
-SET project_id = NULL
-WHERE project_id = $1 AND workspace_id = $2
-`
-
-type ClearChatSessionProjectByProjectParams struct {
-	ProjectID   pgtype.UUID `json:"project_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-// Project references are intentionally soft (no database FK). Keep chat
-// history while removing the context selection when a project is deleted.
-// Do not touch updated_at: context cleanup is not chat activity.
-func (q *Queries) ClearChatSessionProjectByProject(ctx context.Context, arg ClearChatSessionProjectByProjectParams) error {
-	_, err := q.db.Exec(ctx, clearChatSessionProjectByProject, arg.ProjectID, arg.WorkspaceID)
-	return err
-}
-
 const clearChatSessionSessionIfMatches = `-- name: ClearChatSessionSessionIfMatches :exec
 UPDATE chat_session
 SET session_id = NULL,
@@ -726,6 +707,41 @@ type DeleteChatSessionParams struct {
 // DeleteIssue.
 func (q *Queries) DeleteChatSession(ctx context.Context, arg DeleteChatSessionParams) error {
 	_, err := q.db.Exec(ctx, deleteChatSession, arg.ID, arg.WorkspaceID)
+	return err
+}
+
+const deleteChatSessionProjectsForProject = `-- name: DeleteChatSessionProjectsForProject :exec
+DELETE FROM chat_session_project
+WHERE project_id = $1 AND workspace_id = $2
+`
+
+type DeleteChatSessionProjectsForProjectParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Project deletion clears every session set that references it, then the
+// mirrored primary column is re-pointed (RepointChatSessionPrimaryAfterProjectDelete)
+// in the same transaction.
+func (q *Queries) DeleteChatSessionProjectsForProject(ctx context.Context, arg DeleteChatSessionProjectsForProjectParams) error {
+	_, err := q.db.Exec(ctx, deleteChatSessionProjectsForProject, arg.ProjectID, arg.WorkspaceID)
+	return err
+}
+
+const deleteChatSessionProjectsForSession = `-- name: DeleteChatSessionProjectsForSession :exec
+DELETE FROM chat_session_project
+WHERE chat_session_id = $1 AND workspace_id = $2
+`
+
+type DeleteChatSessionProjectsForSessionParams struct {
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+}
+
+// Replace semantics for one session: the writer deletes and re-inserts the
+// whole set inside one transaction so a partial set is never visible.
+func (q *Queries) DeleteChatSessionProjectsForSession(ctx context.Context, arg DeleteChatSessionProjectsForSessionParams) error {
+	_, err := q.db.Exec(ctx, deleteChatSessionProjectsForSession, arg.ChatSessionID, arg.WorkspaceID)
 	return err
 }
 
@@ -1418,6 +1434,31 @@ func (q *Queries) InitializeChatSessionTitle(ctx context.Context, arg Initialize
 		&i.ExplicitlyCreatedAt,
 	)
 	return i, err
+}
+
+const insertChatSessionProject = `-- name: InsertChatSessionProject :exec
+INSERT INTO chat_session_project (workspace_id, chat_session_id, project_id, position)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (chat_session_id, project_id) DO NOTHING
+`
+
+type InsertChatSessionProjectParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	ProjectID     pgtype.UUID `json:"project_id"`
+	Position      int32       `json:"position"`
+}
+
+// position is the caller's selection order. The unique index makes a duplicate
+// project in one request a no-op rather than an error.
+func (q *Queries) InsertChatSessionProject(ctx context.Context, arg InsertChatSessionProjectParams) error {
+	_, err := q.db.Exec(ctx, insertChatSessionProject,
+		arg.WorkspaceID,
+		arg.ChatSessionID,
+		arg.ProjectID,
+		arg.Position,
+	)
+	return err
 }
 
 const linkChatMessageToTask = `-- name: LinkChatMessageToTask :exec
@@ -2184,6 +2225,120 @@ func (q *Queries) ListChatMessagesPageForChannelContext(ctx context.Context, arg
 			&i.ChannelOutboundInstallationID,
 			&i.ChannelOutboundChatID,
 			&i.ChannelOutboundMessageIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChatSessionProjectIDs = `-- name: ListChatSessionProjectIDs :many
+SELECT project_id FROM chat_session_project
+WHERE chat_session_id = $1
+ORDER BY position ASC, created_at ASC, id ASC
+`
+
+// The session's project set in selection order. chat_session_project is the
+// authoritative set; chat_session.project_id is only its first entry. Ordered
+// by position because every row one replace writes shares a single transaction
+// timestamp, so created_at alone would order the set by random UUID.
+func (q *Queries) ListChatSessionProjectIDs(ctx context.Context, chatSessionID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listChatSessionProjectIDs, chatSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var project_id pgtype.UUID
+		if err := rows.Scan(&project_id); err != nil {
+			return nil, err
+		}
+		items = append(items, project_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChatSessionProjectIDsForSessions = `-- name: ListChatSessionProjectIDsForSessions :many
+SELECT chat_session_id, project_id FROM chat_session_project
+WHERE chat_session_id = ANY($1::uuid[])
+ORDER BY chat_session_id, position ASC, created_at ASC, id ASC
+`
+
+type ListChatSessionProjectIDsForSessionsRow struct {
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	ProjectID     pgtype.UUID `json:"project_id"`
+}
+
+// Batch form of ListChatSessionProjectIDs for list endpoints: one read for
+// every session on the page, ordered so the caller can group without sorting.
+func (q *Queries) ListChatSessionProjectIDsForSessions(ctx context.Context, chatSessionIds []pgtype.UUID) ([]ListChatSessionProjectIDsForSessionsRow, error) {
+	rows, err := q.db.Query(ctx, listChatSessionProjectIDsForSessions, chatSessionIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChatSessionProjectIDsForSessionsRow{}
+	for rows.Next() {
+		var i ListChatSessionProjectIDsForSessionsRow
+		if err := rows.Scan(&i.ChatSessionID, &i.ProjectID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChatSessionProjectsInWorkspace = `-- name: ListChatSessionProjectsInWorkspace :many
+SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.start_date, p.due_date FROM chat_session_project AS csp
+JOIN project AS p ON p.id = csp.project_id AND p.workspace_id = csp.workspace_id
+WHERE csp.chat_session_id = $1 AND csp.workspace_id = $2
+ORDER BY csp.position ASC, csp.created_at ASC, csp.id ASC
+`
+
+type ListChatSessionProjectsInWorkspaceParams struct {
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+}
+
+// Resolves a session's project set to project rows for the daemon claim. Both
+// the set and the projects are workspace-scoped, so a cross-tenant reference
+// degrades to "not in this set" instead of leaking another tenant's context,
+// and a stale or deleted project simply disappears from the result (soft
+// references, no FKs — see 493_chat_session_project).
+func (q *Queries) ListChatSessionProjectsInWorkspace(ctx context.Context, arg ListChatSessionProjectsInWorkspaceParams) ([]Project, error) {
+	rows, err := q.db.Query(ctx, listChatSessionProjectsInWorkspace, arg.ChatSessionID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Icon,
+			&i.Status,
+			&i.LeadType,
+			&i.LeadID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Priority,
+			&i.StartDate,
+			&i.DueDate,
 		); err != nil {
 			return nil, err
 		}
@@ -3233,6 +3388,36 @@ func (q *Queries) ReplaceImplicitChatSessionTitle(ctx context.Context, arg Repla
 	return i, err
 }
 
+const repointChatSessionPrimaryAfterProjectDelete = `-- name: RepointChatSessionPrimaryAfterProjectDelete :exec
+UPDATE chat_session AS cs
+SET project_id = (
+    SELECT csp.project_id
+    FROM chat_session_project AS csp
+    WHERE csp.chat_session_id = cs.id AND csp.workspace_id = cs.workspace_id
+    ORDER BY csp.position ASC, csp.created_at ASC, csp.id ASC
+    LIMIT 1
+)
+WHERE cs.project_id = $1 AND cs.workspace_id = $2
+`
+
+type RepointChatSessionPrimaryAfterProjectDeleteParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Project deletion shrinks every session set that referenced it (the caller
+// deletes those chat_session_project rows first, in the same transaction).
+// chat_session.project_id mirrors the head of that set, so a session whose
+// primary was the deleted project must move to the new head — or to NULL when
+// the set is now empty. Leaving the stale id behind would make the derived
+// column name a project the session no longer attaches.
+//
+// Do not touch updated_at: context cleanup is not chat activity.
+func (q *Queries) RepointChatSessionPrimaryAfterProjectDelete(ctx context.Context, arg RepointChatSessionPrimaryAfterProjectDeleteParams) error {
+	_, err := q.db.Exec(ctx, repointChatSessionPrimaryAfterProjectDelete, arg.ProjectID, arg.WorkspaceID)
+	return err
+}
+
 const setChatMessageChannelOutboundProvenanceByTask = `-- name: SetChatMessageChannelOutboundProvenanceByTask :execrows
 UPDATE chat_message
 SET channel_outbound_type = $1,
@@ -3595,6 +3780,11 @@ type UpdateChatSessionProjectParams struct {
 
 // Project context is user-editable session metadata. Do not touch updated_at:
 // changing context is not conversation activity and must not reorder history.
+//
+// DENE-523: this column is the session's PRIMARY project — the first entry of
+// its chat_session_project set — kept in sync by whoever writes that set. A
+// chat can carry several projects; this one is what older clients and older
+// daemons understand.
 func (q *Queries) UpdateChatSessionProject(ctx context.Context, arg UpdateChatSessionProjectParams) (ChatSession, error) {
 	row := q.db.QueryRow(ctx, updateChatSessionProject, arg.ProjectID, arg.ID, arg.WorkspaceID)
 	var i ChatSession
