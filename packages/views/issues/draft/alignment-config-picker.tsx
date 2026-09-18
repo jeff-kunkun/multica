@@ -161,8 +161,14 @@ export function AlignmentConfigPicker({
       {/* `w-80` and `align="start"`: the panel is anchored to a pill at the left
           end of a 576px dialog's toolbar, so it opens rightward and stays inside
           the dialog at both breakpoints. `side="top"` keeps it above the footer
-          it was opened from. */}
-      <PopoverContent align="start" side="top" className="w-80 p-0">
+          it was opened from, and the cap keeps all four sections reachable on a
+          short window instead of letting the machine list push the capability
+          boxes off the bottom — each section still scrolls its own body first. */}
+      <PopoverContent
+        align="start"
+        side="top"
+        className="max-h-[min(88dvh,44rem)] w-80 overflow-y-auto p-0"
+      >
         <Section
           icon={<Monitor className="size-3.5" aria-hidden="true" />}
           title={t(($) => $.alignment.config_runtime)}
