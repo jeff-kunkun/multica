@@ -443,12 +443,33 @@ type repoCheckoutResult struct {
 	Kept             string `json:"kept"`
 	UncommittedFiles int    `json:"uncommitted_files"`
 	UnpushedCommits  int    `json:"unpushed_commits"`
+	// Source is "local_directory" when the daemon answered from the directory
+	// the project pinned on this machine rather than cloning (DENE-595). Older
+	// daemons omit it; the generic summary they get is still true, since Path
+	// is where the code is either way.
+	Source string `json:"source,omitempty"`
 }
+
+// repoCheckoutSourceLocalDirectory mirrors the daemon-side constant.
+const repoCheckoutSourceLocalDirectory = "local_directory"
 
 // repoCheckoutSummary says what the checkout did. A kept checkout has to read
 // differently from a new branch off the default branch, or the agent works on
 // as if the checkout were fresh and loses track of what it holds.
 func repoCheckoutSummary(repoURL string, result repoCheckoutResult) string {
+	if result.Source == repoCheckoutSourceLocalDirectory {
+		// Say plainly that nothing was cloned. An agent told only "checked
+		// out <path>" would reasonably assume a fresh tree and start by
+		// resetting it — in the user's own working copy.
+		branch := result.BranchName
+		if branch == "" {
+			branch = "detached HEAD"
+		}
+		return fmt.Sprintf("Using the local directory this project is configured with: %s (branch: %s).\n"+
+			"%s was NOT cloned — this machine already holds it, and a second copy is what the local-directory setting exists to avoid.\n"+
+			"This is the user's own checkout: it may carry uncommitted work, and nothing here was reset, cleaned, or switched.",
+			result.Path, branch, repoURL)
+	}
 	if result.Kept == "" {
 		return fmt.Sprintf("Checked out %s → %s (branch: %s)", repoURL, result.Path, result.BranchName)
 	}

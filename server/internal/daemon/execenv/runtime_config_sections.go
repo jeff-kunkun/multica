@@ -403,7 +403,14 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		return
 	}
 	b.WriteString("## Repositories\n\n")
-	b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
+	if ctx.CodeSource.UsesLocalDirectory() {
+		// Pointing at Code Source rather than repeating the checkout
+		// instruction is the whole point: this list is what an agent read
+		// before cloning a repository the machine already had.
+		b.WriteString("Available in this workspace. This project is pinned to a local directory on this machine — read `## Code Source` below before checking anything out.\n\n")
+	} else {
+		b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
+	}
 	for _, repo := range ctx.Repos {
 		if repo.Description != "" {
 			fmt.Fprintf(b, "- %s — %s\n", repo.URL, repo.Description)
@@ -412,6 +419,70 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		}
 	}
 	b.WriteString("\n")
+}
+
+// executionModeSummary renders a local_directory execution mode in words. A
+// bare `worktree` tells an agent nothing about whether its edits land in the
+// user's working copy, which is the only thing it actually needs to know.
+func executionModeSummary(mode string) string {
+	switch mode {
+	case "worktree":
+		return "`worktree` — this task has its own git worktree of that repository; your edits do NOT touch the user's working copy, and you deliver work as a branch"
+	case "shared":
+		return "`shared` — you are in the user's own directory, and other tasks may be running in it at the same time; keep your work on your own branch"
+	default:
+		return "`in_place` — you are in the user's own directory and hold it exclusively for this task; your edits land in their working copy"
+	}
+}
+
+// writeCodeSource emits the Code Source section: where this task's code is, and
+// which repositories must NOT be checked out because the machine already holds
+// them.
+//
+// This section exists because the previous brief had no way to express "the
+// code is already here". A project carrying both a github_repo and a
+// local_directory resource read, to the agent, as one instruction — check the
+// repo out — so it cloned a second copy and worked in the one the user could
+// not see (DENE-595).
+func writeCodeSource(b *strings.Builder, ctx TaskContextForEnv) {
+	if !ctx.CodeSource.UsesLocalDirectory() {
+		return
+	}
+	src := ctx.CodeSource
+	b.WriteString("## Code Source\n\n")
+	b.WriteString("This project is pinned to a directory on THIS machine, so its code is already here. That is a rule, not a preference: do not clone a repository this directory already holds.\n\n")
+	fmt.Fprintf(b, "- Directory: `%s`\n", src.LocalPath)
+	fmt.Fprintf(b, "- Execution mode: %s\n", executionModeSummary(src.ExecutionMode))
+	if name := strings.TrimSpace(src.DisplayName); name != "" {
+		fmt.Fprintf(b, "- Matched project resource: local directory %q\n", name)
+	}
+	b.WriteString("\n")
+
+	if len(src.CoveredRepos) > 0 {
+		b.WriteString("Already on this machine — do NOT run `multica repo checkout` for these:\n\n")
+		for _, r := range src.CoveredRepos {
+			if r.Detail != "" {
+				fmt.Fprintf(b, "- %s → `%s`\n", r.URL, r.Detail)
+			} else {
+				fmt.Fprintf(b, "- %s\n", r.URL)
+			}
+		}
+		b.WriteString("\n")
+	}
+	if len(src.UnprovenRepos) > 0 {
+		b.WriteString("Configured but unverified — `multica repo checkout` will refuse these with the reason below rather than clone a second copy. Report the problem instead of working around it:\n\n")
+		for _, r := range src.UnprovenRepos {
+			fmt.Fprintf(b, "- %s — %s\n", r.URL, r.Detail)
+		}
+		b.WriteString("\n")
+	}
+	if len(src.RemoteRepos) > 0 {
+		b.WriteString("Not in that directory — check these out normally with `multica repo checkout <url>`:\n\n")
+		for _, r := range src.RemoteRepos {
+			fmt.Fprintf(b, "- %s\n", r.URL)
+		}
+		b.WriteString("\n")
+	}
 }
 
 // writeProjectContext emits the Project Context section when the task carries
@@ -478,7 +549,11 @@ func writeProjectResourceList(b *strings.Builder, ctx TaskContextForEnv, resourc
 		fmt.Fprintf(b, "- %s\n", formatProjectResource(r))
 	}
 	b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
-	b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
+	if ctx.CodeSource.UsesLocalDirectory() {
+		b.WriteString("A `github_repo` resource here does NOT mean \"clone this\": this project is pinned to a local directory on this machine, and `## Code Source` says which repositories are already present.\n\n")
+	} else {
+		b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
+	}
 }
 
 // writeInstructionPrecedence emits the "Agent Identity wins over the issue
@@ -1044,6 +1119,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	}
 
 	writeProjectContext(&b, ctx)
+	writeCodeSource(&b, ctx)
 
 	if kind == kindIssue {
 		writeInstructionPrecedence(&b)

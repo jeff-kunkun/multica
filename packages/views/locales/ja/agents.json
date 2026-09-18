@@ -1000,7 +1000,17 @@
     "tool_kind_command": "コマンド",
     "tool_kind_write": "編集",
     "tool_kind_read": "読み取り",
-    "tool_kind_misc": "その他"
+    "tool_kind_misc": "その他",
+    "details_source": "コードの取得元",
+    "details_source_path": "ディレクトリ",
+    "details_source_path_planned": "使用予定",
+    "details_source_mode": "実行モード",
+    "details_source_resource": "該当するリソース設定",
+    "source_local_directory": "このマシンのローカルディレクトリ",
+    "source_remote_checkout": "リモートから取得",
+    "source_mode_in_place": "1 回に 1 タスク、作業コピーを直接編集",
+    "source_mode_worktree": "タスクごとに専用の git worktree",
+    "source_mode_shared": "共有ディレクトリ、タスクは並行実行"
   },
   "task_failure": {
     "cancelled_by_system": "システムによってキャンセルされました",

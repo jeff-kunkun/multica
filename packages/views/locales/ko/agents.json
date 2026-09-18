@@ -1008,7 +1008,17 @@
     "tool_kind_command": "명령",
     "tool_kind_write": "편집",
     "tool_kind_read": "읽기",
-    "tool_kind_misc": "기타"
+    "tool_kind_misc": "기타",
+    "details_source": "코드 출처",
+    "details_source_path": "디렉터리",
+    "details_source_path_planned": "사용 예정",
+    "details_source_mode": "실행 모드",
+    "details_source_resource": "적용된 소스 설정",
+    "source_local_directory": "이 컴퓨터의 로컬 디렉터리",
+    "source_remote_checkout": "원격에서 체크아웃",
+    "source_mode_in_place": "한 번에 하나씩, 작업 사본을 직접 수정",
+    "source_mode_worktree": "실행마다 전용 git worktree",
+    "source_mode_shared": "공유 디렉터리, 병렬 실행"
   },
   "task_failure": {
     "cancelled_by_system": "시스템에서 취소함",

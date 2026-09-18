@@ -180,6 +180,32 @@ Prefer this form over pasting the project's URL. Web and desktop do unfurl a
 bare in-app project URL into that same chip, but mobile does not — there a
 pasted URL is handed to the system browser and takes the reader out of the app.
 
+## A local directory wins over a remote repo
+
+When a project carries a `local_directory` resource on the machine running a
+task, that directory IS the task's code. This is a rule, not a preference:
+`multica repo checkout <url>` returns the local path instead of cloning
+whenever a git remote in that directory (or in a subdirectory one level down,
+for `shared` umbrella directories) resolves to the same repository. The run's
+brief says so in its `## Code Source` section, listing which repositories are
+already present and which still need a checkout.
+
+`github_repo` is not deprecated by this — CI, cloud runners, and teammates with
+no local checkout all still need it, and a project pinned to one directory can
+reference other repositories that check out normally.
+
+Two consequences worth knowing before debugging:
+
+- A directory that carries the repository's NAME but no matching git remote
+  makes the checkout fail with HTTP 409 and an explanation. It does not fall
+  back to cloning: a silent fallback is what put two copies of one repository
+  on the same machine. Fix the directory or remove the resource.
+- A repository configured both ways shows a duplicate warning in the project's
+  resource list with a one-click merge that removes the redundant `github_repo`
+  rows. Nothing is removed automatically — the server compares a URL against a
+  path and can only match by repository name, which is enough to ask and not
+  enough to act.
+
 ## When to add a resource
 
 Add/update a project resource when the user asks for durable project context:

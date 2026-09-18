@@ -1134,7 +1134,17 @@
     "tool_kind_command": "Commands",
     "tool_kind_write": "Edits",
     "tool_kind_read": "Reads",
-    "tool_kind_misc": "Other"
+    "tool_kind_misc": "Other",
+    "details_source": "Code source",
+    "details_source_path": "Directory",
+    "details_source_path_planned": "Will use",
+    "details_source_mode": "Execution mode",
+    "details_source_resource": "From resource",
+    "source_local_directory": "Local directory on this machine",
+    "source_remote_checkout": "Remote checkout",
+    "source_mode_in_place": "One run at a time, in your working copy",
+    "source_mode_worktree": "Own git worktree per run",
+    "source_mode_shared": "Shared directory, runs in parallel"
   },
   "task_failure": {
     "cancelled_by_system": "Cancelled by the system",

@@ -145,7 +145,12 @@
     "mode_badge_shared_tooltip": "実行はこのフォルダ内で同時に進みます。タスクはサブリポジトリの worktree で自ら隔離し、Multica はディレクトリをロックしません。",
     "toast_local_mode_updated": "実行モードを更新しました",
     "toast_local_mode_update_failed": "実行モードを更新できませんでした",
-    "mode_badge_in_place": "直接"
+    "mode_badge_in_place": "直接",
+    "duplicate_title": "「{{repo}}」が二重に設定されています",
+    "duplicate_body": "ローカルディレクトリと {{remotes}} 件のリモートリポジトリ設定が同じリポジトリを指しています。そのマシンのタスクはローカルディレクトリを使うため、リモート設定はコードをもう一部ダウンロードさせるだけです。",
+    "duplicate_merge": "ローカルディレクトリに統合",
+    "duplicate_merging": "統合中...",
+    "duplicate_merged": "不要なリモート設定を削除しました"
   },
   "members": {
     "section_header": "メンバー",

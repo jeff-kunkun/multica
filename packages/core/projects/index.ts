@@ -25,3 +25,15 @@ export {
   useAddProjectMember,
   useRemoveProjectMember,
 } from "./member-queries";
+export {
+  normalizeRepoUrl,
+  repoNameFromUrl,
+  repoNameFromLocalPath,
+  githubRef,
+  localDirectoryRef,
+  executionModeOfResource,
+  findDuplicateSources,
+  findRedundantRemotes,
+  resolveTaskCodeSource,
+} from "./source-rule";
+export type { DuplicateSourceGroup, TaskCodeSource } from "./source-rule";

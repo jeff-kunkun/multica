@@ -357,3 +357,40 @@ func TestRepoCheckoutRetryDelay(t *testing.T) {
 		t.Fatalf("default delay = %s, want 1s", got)
 	}
 }
+
+// A local-directory answer must not read like a fresh clone. An agent told
+// "Checked out X → /path" reasonably assumes a disposable tree and may reset
+// or clean it — in the user's own working copy (DENE-595).
+func TestRepoCheckoutSummaryForLocalDirectory(t *testing.T) {
+	got := repoCheckoutSummary("https://github.com/jeff-kunkun/multica", repoCheckoutResult{
+		Path:       "/Users/kunkun/.agents/multica",
+		BranchName: "kun",
+		Source:     repoCheckoutSourceLocalDirectory,
+	})
+	for _, want := range []string{
+		"local directory",
+		"/Users/kunkun/.agents/multica",
+		"kun",
+		"was NOT cloned",
+		"nothing here was reset",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Checked out") {
+		t.Errorf("a local directory must not be reported as a checkout:\n%s", got)
+	}
+}
+
+// A daemon too old to send `source` still returns a usable path, and the
+// generic line it produces stays true.
+func TestRepoCheckoutSummaryWithoutSourceIsUnchanged(t *testing.T) {
+	got := repoCheckoutSummary("https://github.com/org/repo", repoCheckoutResult{
+		Path:       "/work/repo",
+		BranchName: "agent/test/task",
+	})
+	if !strings.Contains(got, "Checked out https://github.com/org/repo → /work/repo") {
+		t.Errorf("old-daemon summary changed:\n%s", got)
+	}
+}

@@ -146,7 +146,12 @@
     "mode_badge_shared_tooltip": "Runs execute at the same time in this folder. Tasks isolate themselves via per-repo worktrees; Multica does not lock the directory.",
     "toast_local_mode_updated": "Execution mode updated",
     "toast_local_mode_update_failed": "Could not update the execution mode",
-    "mode_badge_in_place": "Direct"
+    "mode_badge_in_place": "Direct",
+    "duplicate_title": "“{{repo}}” is configured twice",
+    "duplicate_body": "A local directory and {{remotes}} remote repository entry point at the same repository. Tasks on that machine use the local directory, so the remote entries only cause a second copy to be downloaded.",
+    "duplicate_merge": "Merge into local directory",
+    "duplicate_merging": "Merging...",
+    "duplicate_merged": "Removed the redundant remote entries"
   },
   "members": {
     "section_header": "Members",

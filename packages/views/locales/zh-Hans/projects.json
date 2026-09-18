@@ -145,7 +145,12 @@
     "mode_badge_shared_tooltip": "多次运行可以同时在这个文件夹里执行。任务靠各子仓自己的 worktree 隔离；Multica 不会给目录加锁。",
     "toast_local_mode_updated": "已更新执行方式",
     "toast_local_mode_update_failed": "无法更新执行方式",
-    "mode_badge_in_place": "原地"
+    "mode_badge_in_place": "原地",
+    "duplicate_title": "“{{repo}}” 配置了两次",
+    "duplicate_body": "一个本机目录和 {{remotes}} 条远端仓库配置指向同一个仓库。该机器上的任务会使用本机目录，远端配置只会让代码被重新下载一份。",
+    "duplicate_merge": "合并为本地目录",
+    "duplicate_merging": "正在合并…",
+    "duplicate_merged": "已移除多余的远端配置"
   },
   "members": {
     "section_header": "成员",

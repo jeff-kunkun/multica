@@ -53,6 +53,14 @@ import {
   validateLocalDirectory,
   type ValidateLocalDirectoryResult,
 } from "../../platform";
+// The source rule is pure and imported from its own module rather than the
+// projects query barrel: it must give the same answer in a test that mocks the
+// queries as it does in production, and a mocked barrel would strip it.
+import {
+  findDuplicateSources,
+  findRedundantRemotes,
+} from "@multica/core/projects/source-rule";
+import { DuplicateSourceBanner } from "./duplicate-source-banner";
 import { LocalDirectoryModeDialog } from "./local-directory-mode-dialog";
 import { localDirectoryLabel } from "./local-directory-label";
 import {
@@ -171,6 +179,35 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // 409 toast.
   const hasLocalDirectoryForCurrentDaemon =
     localDaemonId !== null && attachedLocalPaths.size > 0;
+
+  // Duplicate detection runs on the saved list rather than only at save time:
+  // this workspace already held five repositories configured both ways before
+  // the check existed, and a save-time-only warning would never reach them.
+  // Two github_repo rows for one URL are folded into the same group so a merge
+  // clears the repository completely — leaving one behind leaves the bug.
+  const duplicateGroups = findDuplicateSources(resources);
+  const redundantRemotes = findRedundantRemotes(resources);
+  const mergeGroups = duplicateGroups.map((group) => ({
+    ...group,
+    remotes: [
+      ...group.remotes,
+      ...redundantRemotes.filter((r) => !group.remotes.some((g) => g.id === r.id)),
+    ],
+  }));
+
+  const handleMergeIntoLocal = async (remotes: ProjectResource[]) => {
+    try {
+      // Sequential, not Promise.all: a partial failure must leave a list the
+      // user can read, and the next attempt re-derives what is still there.
+      for (const remote of remotes) {
+        await deleteResource.mutateAsync(remote.id);
+      }
+      toast.success(t(($) => $.resources.duplicate_merged));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t(($) => $.resources.toast_remove_failed);
+      toast.error(msg);
+    }
+  };
 
   const repoQuery = repoSearch.trim().toLowerCase();
   const filteredRepos =
@@ -405,6 +442,11 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
               {t(($) => $.resources.empty)}
             </p>
           )}
+          <DuplicateSourceBanner
+            groups={mergeGroups}
+            onMerge={handleMergeIntoLocal}
+            disabled={deleteResource.isPending}
+          />
           {resources.length > 0 && (
             <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
               {resources.map((resource) => (

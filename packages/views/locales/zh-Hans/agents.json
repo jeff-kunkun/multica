@@ -1107,7 +1107,17 @@
     "tool_kind_command": "命令",
     "tool_kind_write": "编辑",
     "tool_kind_read": "读取",
-    "tool_kind_misc": "其他"
+    "tool_kind_misc": "其他",
+    "details_source": "代码来源",
+    "details_source_path": "目录",
+    "details_source_path_planned": "将使用",
+    "details_source_mode": "执行模式",
+    "details_source_resource": "命中的来源配置",
+    "source_local_directory": "本机本地目录",
+    "source_remote_checkout": "远端拉取",
+    "source_mode_in_place": "一次一个任务，直接改你的工作副本",
+    "source_mode_worktree": "每个任务独立 git worktree",
+    "source_mode_shared": "共享目录，任务并发运行"
   },
   "task_failure": {
     "cancelled_by_system": "已由系统取消",

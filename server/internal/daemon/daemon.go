@@ -8111,9 +8111,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	skills = task.Agent.Skills
 	instructions = task.Agent.Instructions
 
+	// Resolve any local_directory assignment here so runTask can plumb
+	// LocalWorkDir into execenv. handleTask already validated + locked the
+	// path for worker tasks; leader tasks intentionally skip the assignment.
+	//
+	// Resolved BEFORE the brief is built, not after: the brief has to state
+	// which repositories this machine already holds, and it cannot do that
+	// without knowing whether a directory is pinned here at all (DENE-595).
+	localAssignment, _ := d.resolveLocalDirectoryAssignment(task)
+
 	// Prepare isolated execution environment.
-	// Repos are passed as metadata only — the agent checks them out on demand
-	// via `multica repo checkout <url>`.
+	// Repos the local directory does not already hold are passed as metadata
+	// only — the agent checks those out on demand via `multica repo checkout`.
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:             task.IssueID,
 		TriggerCommentID:    task.TriggerCommentID,
@@ -8133,6 +8142,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentSkills:                      convertSkillsForEnv(skills),
 		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
 		Repos:                            convertReposForEnv(task.Repos),
+		CodeSource:                       codeSourceForEnv(resolveTaskCodeSource(localAssignment, repoURLsOf(task.Repos), nil)),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
@@ -8210,10 +8220,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if provider == "openclaw" {
 		openclawBin = entry.Path
 	}
-	// Resolve any local_directory assignment again here so runTask can plumb
-	// LocalWorkDir into execenv. handleTask already validated + locked the
-	// path for worker tasks; leader tasks intentionally skip the assignment.
-	localAssignment, _ := d.resolveLocalDirectoryAssignment(task)
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
@@ -9149,6 +9155,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentID:     task.AgentID,
 		AgentName:   task.Agent.Name,
 		WorkDir:     env.WorkDir,
+		// The endpoint needs to know whether this project pinned a directory
+		// on this machine before it decides to clone anything (DENE-595).
+		LocalDirectory: localAssignment,
 	})
 	defer d.clearActiveRepoCheckoutTask(agentToken)
 

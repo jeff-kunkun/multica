@@ -145,7 +145,12 @@
     "mode_badge_shared_tooltip": "실행이 이 폴더에서 동시에 진행됩니다. 작업은 하위 저장소 worktree로 스스로 격리되며, Multica는 디렉터리를 잠그지 않습니다.",
     "toast_local_mode_updated": "실행 모드를 업데이트했습니다",
     "toast_local_mode_update_failed": "실행 모드를 업데이트하지 못했습니다",
-    "mode_badge_in_place": "직접"
+    "mode_badge_in_place": "직접",
+    "duplicate_title": "\"{{repo}}\"이(가) 두 번 설정되어 있습니다",
+    "duplicate_body": "로컬 디렉터리와 원격 저장소 설정 {{remotes}}개가 같은 저장소를 가리킵니다. 해당 컴퓨터의 작업은 로컬 디렉터리를 사용하므로, 원격 설정은 코드를 한 벌 더 내려받게 할 뿐입니다.",
+    "duplicate_merge": "로컬 디렉터리로 병합",
+    "duplicate_merging": "병합 중...",
+    "duplicate_merged": "중복된 원격 설정을 제거했습니다"
   },
   "members": {
     "section_header": "멤버",

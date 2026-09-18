@@ -150,6 +150,14 @@ type activeRepoCheckoutTask struct {
 	AgentID     string
 	AgentName   string
 	WorkDir     string
+	// LocalDirectory is the local_directory resource this project pinned on
+	// THIS machine, or nil when it pinned none. It is what makes
+	// /repo/checkout able to honour the rule that a project with a local
+	// directory uses that directory instead of cloning a second copy
+	// (DENE-595). Carried on the token-bound record rather than read from the
+	// request for the same reason every other identity field is: the caller
+	// must not be able to choose it.
+	LocalDirectory *localDirectoryAssignment
 }
 
 // registerActiveRepoCheckoutTask binds checkout identity to the active task.
@@ -495,6 +503,15 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		req.AgentName = activeTask.AgentName
 		req.WorkDir = authorizedWorkDir
 
+		// The local directory wins before any network work is considered.
+		// Deciding here rather than inside the cache is deliberate: the answer
+		// must be the same whether the repo is already cached or not, and the
+		// refusal below must not be reachable from a code path that could
+		// still fall through to a clone.
+		if handled := d.serveLocalDirectoryCheckout(w, activeTask, req); handled {
+			return
+		}
+
 		if d.repoCache == nil {
 			http.Error(w, "repo cache not initialized", http.StatusInternalServerError)
 			return
@@ -561,4 +578,49 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
 	}
+}
+
+// localDirectoryCheckoutSource is the value /repo/checkout reports in the
+// response's `source` field when it answered from the project's local
+// directory instead of the clone cache. A CLI too old to know the field prints
+// its generic "checked out" line, which stays true: the path it names is where
+// the code is.
+const localDirectoryCheckoutSource = "local_directory"
+
+// localCheckoutResponse is the /repo/checkout body for a local-directory
+// answer. It is a subset of repocache.WorktreeResult plus `source`, so an
+// existing client parses it unchanged.
+type localCheckoutResponse struct {
+	Path       string `json:"path"`
+	BranchName string `json:"branch_name,omitempty"`
+	Source     string `json:"source"`
+}
+
+// serveLocalDirectoryCheckout enforces the source rule for one checkout
+// request. Returns true when it has written the response and the caller must
+// not continue to the clone path.
+//
+// The refusal branch is why this returns a bool rather than a path: "could not
+// verify the local directory" must END the request. Letting it fall through to
+// the cache is exactly the silent remote re-clone this exists to stop.
+func (d *Daemon) serveLocalDirectoryCheckout(w http.ResponseWriter, activeTask activeRepoCheckoutTask, req repoCheckoutRequest) bool {
+	outcome := decideLocalCheckout(activeTask.LocalDirectory, req.URL, nil)
+	if outcome.Refusal != "" {
+		d.logger.Warn("repo checkout refused: local directory could not be verified",
+			"task_id", req.TaskID, "url", req.URL, "local_path", activeTask.LocalDirectory.AbsPath)
+		http.Error(w, outcome.Refusal, http.StatusConflict)
+		return true
+	}
+	if outcome.Path == "" {
+		return false
+	}
+	d.logger.Info("repo checkout served from the project's local directory",
+		"task_id", req.TaskID, "url", req.URL, "path", outcome.Path)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(localCheckoutResponse{
+		Path:       outcome.Path,
+		BranchName: currentGitBranch(outcome.Path),
+		Source:     localDirectoryCheckoutSource,
+	})
+	return true
 }
