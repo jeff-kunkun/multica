@@ -119,10 +119,13 @@ func TestPreparationHelperRoundTripsProjectResources(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("decode project resources: %v", err)
 	}
-	if len(got.Resources) != 1 {
-		t.Fatalf("project resources = %#v, want one resource", got.Resources)
+	if len(got.Projects) != 1 {
+		t.Fatalf("project entries = %#v, want one project", got.Projects)
 	}
-	resource := got.Resources[0]
+	if len(got.Projects[0].Resources) != 1 {
+		t.Fatalf("project resources = %#v, want one resource", got.Projects[0].Resources)
+	}
+	resource := got.Projects[0].Resources[0]
 	var ref struct {
 		URL string `json:"url"`
 	}

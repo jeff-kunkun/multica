@@ -241,7 +241,14 @@ func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sid
 // projectResourceFile is the on-disk JSON written into the agent's working
 // directory. Schema is intentionally a thin pass-through of the API response
 // so consumers (skills, future tooling) don't need a separate parser.
+//
+// projects[] holds every project attached to the task (DENE-523); a task with
+// one project — every surface except a multi-project chat — holds one entry.
 type projectResourceFile struct {
+	Projects []projectResourceFileEntry `json:"projects"`
+}
+
+type projectResourceFileEntry struct {
 	ProjectID          string                  `json:"project_id,omitempty"`
 	ProjectTitle       string                  `json:"project_title,omitempty"`
 	ProjectDescription string                  `json:"project_description,omitempty"`
@@ -272,28 +279,34 @@ func (p ProjectResourceForEnv) MarshalJSON() ([]byte, error) {
 // writeProjectResources writes .multica/project/resources.json into the
 // working directory when the task carries project context. The file is
 // always written when a project is attached (even with zero resources) so
-// agents can rely on its presence as a signal that a project exists.
+// agents can rely on its presence as a signal that a project exists. Every
+// attached project gets an entry, which is how a multi-project chat exposes
+// each project's repos and local directories (DENE-523).
 //
 // manifest, when non-nil, is populated with the .multica/project chain
 // of created directories and the resources.json file so CleanupSidecars
 // can undo them on local_directory teardown.
 func writeProjectResources(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
-	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
+	projects := ctx.projectContexts()
+	if len(projects) == 0 {
 		return nil
 	}
 	dir := filepath.Join(workDir, ".multica", "project")
 	if err := recordMkdirAll(dir, 0o755, manifest); err != nil {
 		return err
 	}
-	resources := ctx.ProjectResources
-	if resources == nil {
-		resources = []ProjectResourceForEnv{}
-	}
-	payload := projectResourceFile{
-		ProjectID:          ctx.ProjectID,
-		ProjectTitle:       ctx.ProjectTitle,
-		ProjectDescription: ctx.ProjectDescription,
-		Resources:          resources,
+	payload := projectResourceFile{Projects: make([]projectResourceFileEntry, 0, len(projects))}
+	for _, project := range projects {
+		resources := project.Resources
+		if resources == nil {
+			resources = []ProjectResourceForEnv{}
+		}
+		payload.Projects = append(payload.Projects, projectResourceFileEntry{
+			ProjectID:          project.ID,
+			ProjectTitle:       project.Title,
+			ProjectDescription: project.Description,
+			Resources:          resources,
+		})
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

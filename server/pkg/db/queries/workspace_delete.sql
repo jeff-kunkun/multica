@@ -530,6 +530,12 @@ WHERE chat_session_id IN (
 
 -- name: DeleteWorkspaceCommunicationRoots :exec
 WITH
+-- chat_session_project carries workspace_id precisely so teardown does not have
+-- to join through chat_session, which this same statement deletes (same no-FK
+-- chore as chat_draft_restore in DeleteWorkspaceLeafData).
+deleted_chat_session_projects AS (
+    DELETE FROM chat_session_project WHERE workspace_id = $1
+),
 deleted_sessions AS (
     DELETE FROM chat_session WHERE chat_session.workspace_id = $1
 ),

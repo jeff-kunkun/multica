@@ -417,34 +417,68 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 // writeProjectContext emits the Project Context section when the task carries
 // an active project. Project context is independent of the task surface: an
 // issue inherits it from its project, while a chat receives it from the
-// project selected on the chat session.
+// projects attached to the chat session.
+//
+// A chat can attach several projects (DENE-523). One project renders exactly
+// the section it always has — byte-identical, because this section is part of
+// the prompt-cache prefix on a resumed session (MUL-5377). Several render one
+// subsection each plus the attribution rule: with more than one project no
+// single one is authoritative for a new artifact, so the agent infers the
+// target from the request or asks.
 func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
-	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
+	projects := ctx.projectContexts()
+	if len(projects) == 0 {
 		return
 	}
 	b.WriteString("## Project Context\n\n")
-	if ctx.ProjectTitle != "" {
-		fmt.Fprintf(b, "The active project for this task is **%s**.\n\n", ctx.ProjectTitle)
-	}
-	if desc := strings.TrimSpace(ctx.ProjectDescription); desc != "" {
-		b.WriteString("Project description — durable context the project owner set for work in this project:\n\n")
-		b.WriteString(desc)
-		b.WriteString("\n\n")
-	}
-	if len(ctx.ProjectResources) > 0 {
-		resourcesFile := ".multica/project/resources.json"
-		if ctx.SidecarRoot != "" {
-			resourcesFile = filepath.ToSlash(filepath.Join(ctx.SidecarRoot, ".multica", "project", "resources.json"))
+	if len(projects) == 1 {
+		project := projects[0]
+		if project.Title != "" {
+			fmt.Fprintf(b, "The active project for this task is **%s**.\n\n", project.Title)
 		}
-		fmt.Fprintf(b, "Project resources (also written to `%s`):\n\n", resourcesFile)
-		for _, r := range ctx.ProjectResources {
-			fmt.Fprintf(b, "- %s\n", formatProjectResource(r))
+		if desc := strings.TrimSpace(project.Description); desc != "" {
+			b.WriteString("Project description — durable context the project owner set for work in this project:\n\n")
+			b.WriteString(desc)
+			b.WriteString("\n\n")
 		}
-		b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
-		b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
-	} else {
+		writeProjectResourceList(b, ctx, project.Resources)
+		return
+	}
+
+	fmt.Fprintf(b, "This task is bound to %d projects. Their descriptions and resources are aggregated below, and repositories from every one of them are available to `multica repo checkout` (see Repositories above). Treat all of them as context for this task.\n\n", len(projects))
+	for _, project := range projects {
+		if project.Title != "" {
+			fmt.Fprintf(b, "### Project: %s\n\n", project.Title)
+		} else {
+			b.WriteString("### Project\n\n")
+		}
+		if desc := strings.TrimSpace(project.Description); desc != "" {
+			b.WriteString(desc)
+			b.WriteString("\n\n")
+		}
+		writeProjectResourceList(b, ctx, project.Resources)
+	}
+	b.WriteString("When a deliverable must be attributed to one project — creating an issue, for example — infer the target from the request and the project descriptions above. If it is still ambiguous, ask the user which project to use instead of guessing.\n\n")
+}
+
+// writeProjectResourceList emits one project's resource list, or the
+// no-resources line, with the aggregated sidecar path. Shared by the
+// single-project and multi-project renderings so both name the same file.
+func writeProjectResourceList(b *strings.Builder, ctx TaskContextForEnv, resources []ProjectResourceForEnv) {
+	if len(resources) == 0 {
 		b.WriteString("This project has no resources attached yet.\n\n")
+		return
 	}
+	resourcesFile := ".multica/project/resources.json"
+	if ctx.SidecarRoot != "" {
+		resourcesFile = filepath.ToSlash(filepath.Join(ctx.SidecarRoot, ".multica", "project", "resources.json"))
+	}
+	fmt.Fprintf(b, "Project resources (also written to `%s`):\n\n", resourcesFile)
+	for _, r := range resources {
+		fmt.Fprintf(b, "- %s\n", formatProjectResource(r))
+	}
+	b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
+	b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
 }
 
 // writeInstructionPrecedence emits the "Agent Identity wins over the issue

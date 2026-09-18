@@ -116,6 +116,50 @@ export function canChangeBaseRole(
 }
 
 /**
+ * Runtime inheritance (DENE-505), as both front-end surfaces see it.
+ *
+ * `inherited` — this specialisation follows its base role's runtime profile:
+ * `runtime_id`, `runtime_mode`, `runtime_config`, `model`, `thinking_level` and
+ * `service_tier` are the base role's, and the server re-copies them whenever the
+ * base role's change.
+ * `independent` — it owns its runtime profile, the pre-feature behaviour.
+ * `unknown` — not a specialisation, or a backend that predates the field.
+ *
+ * `unknown` must render no inheritance affordance at all rather than assuming a
+ * state: a base role cannot inherit (`runtime_inherited: true` is a 400 for one)
+ * and an older backend cannot honour a toggle it never modelled. Read the flag
+ * with `=== true` / `=== false`, never truthiness, for exactly that reason.
+ */
+export type RuntimeInheritanceState = "inherited" | "independent" | "unknown";
+
+export function runtimeInheritanceState(
+  agent: Pick<Agent, "parent_agent_id" | "runtime_inherited">,
+): RuntimeInheritanceState {
+  if (!isSpecialization(agent)) return "unknown";
+  if (agent.runtime_inherited === true) return "inherited";
+  if (agent.runtime_inherited === false) return "independent";
+  return "unknown";
+}
+
+/**
+ * Whether the runtime-profile controls (runtime / model / thinking / speed) may
+ * be edited for this agent.
+ *
+ * While following the base role they are a copy of another agent's settings: the
+ * values are worth reading, so they stay on screen, but the server refuses any
+ * of them in the same request as `runtime_inherited: true` (and refuses them
+ * alone with "pass runtime_inherited=false first"), so offering an editable
+ * control could only produce a 400. Switching the toggle is the one way back to
+ * editing. Permission is the separate `canEdit` gate.
+ */
+export function canEditRuntimeProfile(
+  agent: Pick<Agent, "parent_agent_id" | "runtime_inherited">,
+  canEdit: boolean,
+): boolean {
+  return canEdit && runtimeInheritanceState(agent) !== "inherited";
+}
+
+/**
  * The prompt a specialisation actually runs with: the base role's prompt, a
  * blank line, then its own. Mirrors `composeAgentInstructions` on the server,
  * including the "no stray blank lines when one side is empty" rule — the
