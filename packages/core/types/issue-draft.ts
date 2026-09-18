@@ -145,7 +145,12 @@ export interface IssueDraft {
 /** A newly opened alignment conversation and its empty draft. */
 export interface IssueDraftSession {
   session_id: string;
-  /** The hidden carrier that executes this conversation. */
+  /** The hidden carrier that executes this conversation.
+   *
+   * It is also where the create-time execution choices live — the model and the
+   * reasoning effort are columns on this agent row, read by the daemon when it
+   * claims a turn, and they are deliberately not echoed here: the row is the one
+   * answer, and a second copy in the response is a copy that can disagree. */
   agent_id: string;
   /** Where this conversation actually runs. Seed the runtime picker from it so
    *  it can never disagree with what answers the next message. */

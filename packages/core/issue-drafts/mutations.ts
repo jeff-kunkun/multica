@@ -86,6 +86,13 @@ export function useStartIssueDraft(wsId: string) {
     mutationFn: async (input: {
       runtimeId: string;
       model?: string;
+      /**
+       * The reasoning effort the carrier runs at, empty/absent meaning "let the
+       * local CLI decide". Sent with `model` because both are read off the
+       * carrier agent row the daemon claims: writing either after the session
+       * exists would leave the first turn running the old value (DENE-514).
+       */
+      thinkingLevel?: string;
       /** What the user already typed at the entry point. */
       request: string;
       /**
@@ -132,6 +139,7 @@ export function useStartIssueDraft(wsId: string) {
       const session = await api.createIssueDraftSession({
         runtime_id: input.runtimeId,
         model: input.model?.trim() || undefined,
+        thinking_level: input.thinkingLevel?.trim() || undefined,
         draft: seedDraft(request, input.projectId, input.parentIssueId),
         capabilities: input.capabilities,
       });

@@ -1902,22 +1902,14 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		// Pi has a fixed token universe and a daemon-discovered per-model subset.
 		// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
 		// combination-invalid values are logged and omitted from the invocation.
-		if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
-			writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
+		//
+		// Shared with the issue-draft carrier create (DENE-514) rather than
+		// repeated: an alignment carrier that runs at the default effort while
+		// its picker says "Extra high" is the same lie as an agent whose saved
+		// level was silently dropped, and two copies of these three steps is
+		// how the two answers drift apart.
+		if !h.thinkingLevelAcceptedForRuntime(w, r, runtime, req.ThinkingLevel) {
 			return
-		}
-		// For ACP-catalog providers the provider name is not the capability answer
-		// — this runtime's own discovered catalog is. Keeps a Hermes Agent user's
-		// clear 400 instead of accepting a level the daemon would later drop.
-		if req.ThinkingLevel != "" {
-			switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
-			case acpEffortAbsent:
-				writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
-				return
-			case acpEffortUnknown:
-				writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(runtime.Provider))
-				return
-			}
 		}
 		if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))

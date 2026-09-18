@@ -8,6 +8,7 @@ import type {
 } from "../../types";
 import type { CreateMode } from "./create-mode-store";
 import type { QuickCreateActorType } from "./quick-create-store";
+import type { IssueDraftCapabilityKey } from "../../issue-drafts/capabilities";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 import { registerDraftCleanup } from "../../drafts/cleanup-registry";
@@ -70,6 +71,18 @@ export interface IssueCreateAlign {
   /** What the alignment conversation is asked to work on. Its own slot, like
    *  the agent prompt, so a mode switch never overwrites another face's body. */
   request: string;
+  /**
+   * Which built-in alignment methods the conversation opens with (DENE-514).
+   *
+   * Persisted, unlike the machine / model / effort beside it in the same panel:
+   * the capability set is a property of the alignment the user is describing, so
+   * a user who turned the map off and comes back to the entry point means it.
+   * `undefined` means "not chosen yet", which the panel resolves to the built-in
+   * default at read time rather than freezing the default into the draft; an
+   * EMPTY array is a real choice — "none of them" — and is sent as one (see
+   * `encodeIssueDraftCapabilities`).
+   */
+  capabilities?: IssueDraftCapabilityKey[];
   /**
    * The draft whose first turn the entry panel could not deliver (DENE-422).
    *

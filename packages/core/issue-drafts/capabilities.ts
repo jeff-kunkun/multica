@@ -28,6 +28,20 @@ export const ISSUE_DRAFT_CAPABILITIES = [
 
 export type IssueDraftCapabilityKey = (typeof ISSUE_DRAFT_CAPABILITIES)[number];
 
+/**
+ * What a picker that has never been touched shows — every box ticked.
+ *
+ * Deliberately spelled as the whole offered list rather than a separate literal:
+ * the server's built-in default is exactly the three keys this client offers
+ * (`issueDraftDefaultCapabilities` in issue_draft_capability.go, which the
+ * registry's own comment ties to "the same three the create entry point offers
+ * as checked boxes"), and a second list here is how the two drift apart. A
+ * selection the user never made still travels as this set, so the boxes on
+ * screen and the keys on the draft cannot disagree.
+ */
+export const DEFAULT_ISSUE_DRAFT_CAPABILITIES: readonly IssueDraftCapabilityKey[] =
+  ISSUE_DRAFT_CAPABILITIES;
+
 /** Whether a server-supplied capability key is one this client can offer. */
 export function isIssueDraftCapabilityKey(
   value: string,

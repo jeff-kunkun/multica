@@ -174,6 +174,12 @@ func (h *Handler) loadIssueDraftSession(w http.ResponseWriter, r *http.Request, 
 type CreateIssueDraftSessionRequest struct {
 	RuntimeID string `json:"runtime_id"`
 	Model     string `json:"model,omitempty"`
+	// ThinkingLevel is the reasoning effort the carrier runs at, empty meaning
+	// "whatever the local CLI is configured with". Validated against the target
+	// runtime exactly as agent create validates it, so a level the runtime
+	// cannot take is refused here rather than persisted and dropped by the
+	// daemon (DENE-514).
+	ThinkingLevel string `json:"thinking_level,omitempty"`
 	// Draft seeds the conversation with what the user already typed in the
 	// create entry point, so the first turn can answer it instead of asking
 	// for it again. Optional; omitted means an empty draft.
@@ -272,6 +278,17 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// The reasoning dial is part of what the user picked in the same panel as
+	// the machine, so it is validated against THAT runtime here rather than
+	// accepted and silently dropped: an alignment carrier that runs at the
+	// default effort while its picker says "Extra high" is a setting the user
+	// cannot trust. Same two checks as agent create (agent.go), shared so the
+	// sentences cannot drift.
+	thinkingLevel := strings.TrimSpace(req.ThinkingLevel)
+	if !h.thinkingLevelAcceptedForRuntime(w, r, runtime, thinkingLevel) {
+		return
+	}
+
 	flowID := uuid.NewString()
 	ownerUUID := parseUUID(userID)
 	model := strings.TrimSpace(req.Model)
@@ -304,6 +321,10 @@ func (h *Handler) CreateIssueDraftSession(w http.ResponseWriter, r *http.Request
 		OwnerID:      ownerUUID,
 		Instructions: policy.Instructions(capabilities),
 		Model:        pgtype.Text{String: model, Valid: model != ""},
+		ThinkingLevel: pgtype.Text{
+			String: thinkingLevel,
+			Valid:  thinkingLevel != "",
+		},
 		SystemKey: pgtype.Text{
 			String: fmt.Sprintf("issue_draft:%s", flowID),
 			Valid:  true,

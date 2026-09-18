@@ -8,6 +8,8 @@ import { ApiError, clientErrorMessage } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  DEFAULT_ISSUE_DRAFT_CAPABILITIES,
+  encodeIssueDraftCapabilities,
   IssueDraftSessionUnrecognizedError,
   issueDraftListOptions,
   unfinishedIssueDrafts,
@@ -35,8 +37,8 @@ import {
 } from "../editor";
 import { useT } from "../i18n";
 import { UnfinishedIssueDraftsBanner } from "../issues/draft/unfinished-issue-drafts";
+import { AlignmentConfigPicker } from "../issues/draft/alignment-config-picker";
 import { ClearablePillButton } from "../common/pill-button";
-import { RuntimePicker } from "../agents/components/runtime-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { AppLink, useNavigation } from "../navigation";
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
@@ -149,6 +151,20 @@ export function AlignCreatePanel({
     return () => cancelAnimationFrame(frame);
   }, [seedRequest, seedRetry]);
   const [runtimeId, setRuntimeId] = useState("");
+  // Model and reasoning level live here rather than in the draft store: they are
+  // frozen onto the carrier when the session is created and can never be changed
+  // afterwards, so persisting them would offer the next alignment a choice its
+  // conversation could not honour. The capability set IS persisted (it is a
+  // property of the alignment being described), so it rides the draft store like
+  // the request does.
+  const [model, setModel] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState("");
+  // The default is applied here, at read time, rather than written into the
+  // store on mount: a user who never opens the panel has expressed no opinion,
+  // and freezing the default into the draft would make it look like one — and
+  // would outlive a change to what the default IS.
+  const capabilities =
+    draft.align.capabilities ?? DEFAULT_ISSUE_DRAFT_CAPABILITIES;
 
   const draftsQuery = useQuery(issueDraftListOptions(wsId));
   const runtimesQuery = useQuery(runtimeListOptions(wsId));
@@ -257,8 +273,14 @@ export function AlignCreatePanel({
     const result = await start
       .mutateAsync({
         runtimeId: selectedRuntime.id,
+        model: model || undefined,
+        thinkingLevel: thinkingLevel || undefined,
         request,
         attachmentIds: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
+        // Only the boxes that are actually ticked, and always as a list: an
+        // emptied picker sends `[]` ("none of them") rather than omitting the
+        // field, which the server reads as "use the built-in default".
+        capabilities: encodeIssueDraftCapabilities(capabilities),
         // Stored on the draft at creation, so the whole group the conversation
         // settles on is filed under it — a project chosen here is not a display
         // preference the page reads back later.
@@ -378,17 +400,30 @@ export function AlignCreatePanel({
             }
             align="start"
           />
-          {/* Not clearable: the alignment has to run SOMEWHERE, so there is no
-              empty state to offer — unlike the project, which is optional by
-              design. */}
-          <RuntimePicker
-            variant="pill"
+          {/* One pill for the four choices the conversation cannot be started
+              without deciding (DENE-514): which machine, which model, how hard
+              it thinks, and which built-in alignment methods run. The machine
+              used to be a pill of its own and the other three could not be
+              chosen at all — the model and the effort are read off the carrier
+              agent row the daemon claims, so they are create-time settings, and
+              the methods are assembled into its prompt at creation. Not
+              clearable either way: the alignment has to run SOMEWHERE, so there
+              is no empty state to offer, unlike the project, which is optional
+              by design. */}
+          <AlignmentConfigPicker
             runtimes={runtimes}
             runtimesLoading={runtimesLoading}
             members={membersQuery.data ?? []}
             currentUserId={currentUserId}
-            selectedRuntimeId={runtimeId}
-            onSelect={setRuntimeId}
+            runtimeId={runtimeId}
+            onRuntimeChange={setRuntimeId}
+            model={model}
+            onModelChange={setModel}
+            thinkingLevel={thinkingLevel}
+            onThinkingLevelChange={setThinkingLevel}
+            capabilities={capabilities}
+            onCapabilitiesChange={(next) => setAlign({ capabilities: [...next] })}
+            disabled={start.isPending}
           />
         </div>
         {/* The way back to filing this as an issue. The body stays in the

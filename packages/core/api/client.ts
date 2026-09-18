@@ -1704,6 +1704,14 @@ export class ApiClient {
   async createIssueDraftSession(data: {
     runtime_id: string;
     model?: string;
+    /**
+     * Reasoning effort for the carrier, empty meaning the local CLI's own
+     * default. Frozen onto the carrier at creation like `model` — the daemon
+     * reads both off the agent row — and validated server-side against the
+     * target runtime, so a level this runtime cannot take is a 400 rather than a
+     * value that silently never runs (DENE-514).
+     */
+    thinking_level?: string;
     draft?: Partial<IssueDraftPayload>;
     /** Which alignment policy to open under. Omitted means the guided
      *  default; see packages/core/issue-drafts/policy.ts. */

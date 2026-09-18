@@ -2822,6 +2822,53 @@ describe("ApiClient issue drafts", () => {
     ).resolves.toMatchObject({ chat_session_id: "", revision: 0 });
   });
 
+  it("sends the reasoning effort with the session create and reads a malformed capability list as none", async () => {
+    // Two contracts in one call (DENE-514). The request half: the effort is part
+    // of the same create as the model, because both are frozen onto the carrier
+    // agent row and neither can be written afterwards. The response half: a
+    // backend that answers with a capability list this client cannot read must
+    // cost only the list — the session id is what the caller navigates to, and
+    // an unreadable list of methods is not a reason to strand a draft that was
+    // created.
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        session_id: "session-1",
+        agent_id: "agent-1",
+        runtime_id: "runtime-1",
+        draft: {
+          ...draft,
+          capabilities: { keys: "not a list", version: 7 },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.createIssueDraftSession({
+        runtime_id: "runtime-1",
+        model: "claude-opus-4-6",
+        thinking_level: "high",
+        capabilities: [],
+      }),
+    ).resolves.toMatchObject({
+      session_id: "session-1",
+      draft: { capabilities: { keys: [], version: "" } },
+    });
+
+    const call = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(call[0]).toContain("/api/issue-drafts");
+    expect(call[1].method).toBe("POST");
+    expect(JSON.parse(String(call[1].body))).toEqual({
+      runtime_id: "runtime-1",
+      model: "claude-opus-4-6",
+      thinking_level: "high",
+      // An emptied picker says "none" with an empty array; omitting the field
+      // would mean "the server's default set", the opposite request.
+      capabilities: [],
+    });
+  });
+
   it("treats a 404 on the list as a backend that predates the endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: "not found" }, 404));
     vi.stubGlobal("fetch", fetchMock);

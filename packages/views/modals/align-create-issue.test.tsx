@@ -11,6 +11,7 @@ import enIssues from "../locales/en/issues.json";
 import enModals from "../locales/en/modals.json";
 import enEditor from "../locales/en/editor.json";
 import enProjects from "../locales/en/projects.json";
+import enAgents from "../locales/en/agents.json";
 import { AlignCreatePanel } from "./align-create-issue";
 
 /**
@@ -27,6 +28,8 @@ import { AlignCreatePanel } from "./align-create-issue";
 interface CreateSessionInput {
   runtime_id: string;
   model?: string;
+  thinking_level?: string;
+  capabilities?: string[];
   draft?: Partial<IssueDraftPayload>;
 }
 
@@ -38,6 +41,8 @@ const mocks = vi.hoisted(() => ({
   listIssueDrafts: vi.fn(),
   listRuntimes: vi.fn(),
   listMembers: vi.fn(),
+  initiateListModels: vi.fn(),
+  getListModelsResult: vi.fn(),
   push: vi.fn(),
   close: vi.fn(),
   setAlign: vi.fn(),
@@ -56,6 +61,8 @@ vi.mock("@multica/core/api", async () => {
       listIssueDrafts: mocks.listIssueDrafts,
       listRuntimes: mocks.listRuntimes,
       listMembers: mocks.listMembers,
+      initiateListModels: mocks.initiateListModels,
+      getListModelsResult: mocks.getListModelsResult,
     },
   };
 });
@@ -91,7 +98,10 @@ const draftStore = {
     },
     manual: { title: "", description: "" },
     agent: { prompt: "" },
-    align: { request: "" },
+    align: { request: "" } as {
+      request: string;
+      capabilities?: string[];
+    },
     activeMode: "manual" as string,
   },
   setAlign: mocks.setAlign,
@@ -315,6 +325,7 @@ const TEST_RESOURCES = {
     modals: enModals,
     editor: enEditor,
     projects: enProjects,
+    agents: enAgents,
   },
 };
 
@@ -359,8 +370,43 @@ function renderPanel(props: {
   );
 }
 
+/** The catalog the configuration panel reads for the selected machine. One
+ *  model carries an effort dial and one does not, so "the chips follow the
+ *  model" is observable rather than assumed. */
+const MODEL_CATALOG = {
+  supported: true,
+  models: [
+    {
+      id: "claude-opus-4-6",
+      label: "claude-opus-4-6",
+      provider: "claude",
+      thinking: {
+        supported_levels: [
+          { value: "low", label: "Low" },
+          { value: "high", label: "High" },
+        ],
+      },
+    },
+    {
+      id: "claude-haiku-4-6",
+      label: "claude-haiku-4-6",
+      provider: "claude",
+    },
+  ],
+  unavailable_models: [],
+};
+
 function submitButton() {
   return screen.getByRole("button", { name: "Start aligning" });
+}
+
+/** Opens the composite configuration panel from its toolbar pill. The pill's
+ *  accessible name is the summary line, which changes with the selection — so
+ *  this finds it by its stable label instead. */
+async function openConfigPanel() {
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Alignment configuration" }),
+  );
 }
 
 function editor() {
@@ -407,6 +453,26 @@ beforeEach(() => {
   mocks.listIssueDrafts.mockImplementation(() => Promise.resolve(mocks.drafts));
   mocks.listRuntimes.mockImplementation(() => Promise.resolve(mocks.runtimes));
   mocks.listMembers.mockImplementation(() => Promise.resolve([]));
+  // The server's cached-catalog shape: `completed` on the first call, so
+  // `resolveRuntimeModels` answers without its 500ms poll — a real first-time
+  // discovery takes that path, and every client-side test that opened the panel
+  // would otherwise pay a wall-clock sleep per machine.
+  mocks.initiateListModels.mockResolvedValue({
+    id: "discovery-1",
+    status: "completed",
+    models: MODEL_CATALOG.models,
+    unavailable_models: [],
+    supported: true,
+    cached: false,
+  });
+  mocks.getListModelsResult.mockResolvedValue({
+    id: "discovery-1",
+    status: "completed",
+    models: MODEL_CATALOG.models,
+    unavailable_models: [],
+    supported: true,
+    cached: false,
+  });
   mocks.createIssueDraftSession.mockResolvedValue({
     session_id: "sess-new",
     agent_id: "agent-1",
@@ -425,10 +491,19 @@ beforeEach(() => {
   draftStore.draft.shared.attachments = [];
   draftStore.draft.shared.projectId = undefined;
   draftStore.draft.align.request = "";
+  // A real write, not just a recorded call: the panel derives what it will send
+  // from the draft slot, so a mock that only counted calls would leave it
+  // rendering — and submitting — the set from before the click.
+  draftStore.draft.align.capabilities = undefined;
   editorLive = true;
-  mocks.setAlign.mockImplementation((patch: { request?: string }) => {
-    draftStore.draft.align = { ...draftStore.draft.align, ...patch };
-  });
+  mocks.setAlign.mockImplementation(
+    (patch: { request?: string; capabilities?: string[] }) => {
+      writeDraftStore({
+        ...draftStore.draft,
+        align: { ...draftStore.draft.align, ...patch },
+      });
+    },
+  );
   mocks.setShared.mockImplementation((patch: { projectId?: string }) => {
     writeDraftStore({
       ...draftStore.draft,
@@ -528,7 +603,7 @@ describe("AlignCreatePanel", () => {
     expect(mocks.close).toHaveBeenCalled();
   });
 
-  it("runs the alignment on the machine picked in the toolbar", async () => {
+  it("runs the alignment on the machine picked in the configuration panel", async () => {
     // Which CLI the alignment runs on used to be decided silently and could
     // only be changed after the fact, on the detail page (DENE-443).
     mocks.runtimes = [ONLINE_RUNTIME, SECOND_ONLINE_RUNTIME];
@@ -536,16 +611,119 @@ describe("AlignCreatePanel", () => {
     await typeRequest("add dark mode");
 
     // Seeded with the machine the face would have chosen on its own, so the
-    // picker never starts empty.
-    const picker = await screen.findByRole("button", { name: /Local/ });
-    await userEvent.click(picker);
+    // pill never starts unset, and nothing is created until submit.
+    expect(mocks.createIssueDraftSession).not.toHaveBeenCalled();
+    await openConfigPanel();
     await userEvent.click(await screen.findByText("Codex on laptop"));
 
     await userEvent.click(submitButton());
     await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
     const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
     expect(input.runtime_id).toBe("rt-2");
-  });
+    // Changing the machine clears the model and the effort: both belong to the
+    // machine, and a value inherited from the previous one is a choice the user
+    // never made (and one the new runtime may not serve).
+    expect(input.model).toBeUndefined();
+    expect(input.thinking_level).toBeUndefined();
+    // A floating popover plus a model query is slower than this suite's other
+    // cases under a full parallel run; the budget is explicitly the panel's.
+  }, 15_000);
+
+  /**
+   * The panel is one decision in one place (DENE-514): the machine, the model
+   * it will be asked for, the reasoning effort, and which built-in alignment
+   * methods run. The last three could not be chosen anywhere before — the model
+   * and the effort are read off the carrier agent row at creation, and the
+   * methods are assembled into the carrier's prompt there.
+   */
+  it("sends the model, effort, and capability set the panel is showing", async () => {
+    mocks.runtimes = [ONLINE_RUNTIME];
+    renderPanel();
+    await typeRequest("add dark mode");
+
+    await openConfigPanel();
+    // The catalog is per machine and per model; the level chips come from the
+    // chosen model, so the model is picked first. Discovery is a poll, hence the
+    // explicit timeout.
+    await userEvent.click(
+      await screen.findByText("claude-opus-4-6", {}, { timeout: 3000 }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "High" }, { timeout: 3000 }),
+    );
+    // The panel opens on the built-in default — all three — so two clicks turn
+    // two of them OFF. Any subset is legitimate, and this one proves the
+    // changes travel in the registry's order rather than the click's.
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: /Decision map/ }),
+    );
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: /See the screen first/ }),
+    );
+
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.model).toBe("claude-opus-4-6");
+    expect(input.thinking_level).toBe("high");
+    // Registry order, not click order: the server composes the prompt in this
+    // order, so the recorded set has to be a function of the set itself.
+    expect(input.capabilities).toEqual(["grill"]);
+  }, 15_000);
+
+  /**
+   * Every box off is a request the server accepts — it is the picker's own
+   * "none of them" — and it must travel as an empty array. Omitting the field
+   * would mean "the server's built-in default", the opposite of what an emptied
+   * picker just asked for.
+   */
+  it("sends an empty capability list when every box is unchecked", async () => {
+    renderPanel();
+    await typeRequest("add dark mode");
+
+    await openConfigPanel();
+    for (const name of [/Decision map/, /Requirement interview/, /See the screen first/]) {
+      await userEvent.click(screen.getByRole("checkbox", { name }));
+    }
+
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.capabilities).toEqual([]);
+  }, 15_000);
+
+  it("starts from the built-in capability set, not from an empty one", async () => {
+    // The default is the whole offered list, which is also the server's own
+    // default: a client that has never opened the panel still asks for the
+    // methods, because "built in" is what the product means by them.
+    renderPanel();
+    await typeRequest("add dark mode");
+
+    await openConfigPanel();
+    for (const name of [/Decision map/, /Requirement interview/, /See the screen first/]) {
+      expect(screen.getByRole("checkbox", { name })).toBeChecked();
+    }
+  }, 15_000);
+
+  it("turns a capability back on after every box was cleared", async () => {
+    // The empty state must not be sticky: a set that can only shrink would make
+    // "none of them" a one-way door out of the product's own methods.
+    renderPanel();
+    await typeRequest("add dark mode");
+
+    await openConfigPanel();
+    for (const name of [/Decision map/, /Requirement interview/, /See the screen first/]) {
+      await userEvent.click(screen.getByRole("checkbox", { name }));
+    }
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: /See the screen first/ }),
+    );
+
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(mocks.createIssueDraftSession).toHaveBeenCalledTimes(1));
+    const input = mocks.createIssueDraftSession.mock.calls[0]![0] as CreateSessionInput;
+    expect(input.capabilities).toEqual(["grill-frontend-look"]);
+  }, 15_000);
 
   it("still opens the conversation when the first turn could not be sent", async () => {
     mocks.sendChatMessage.mockRejectedValue(new Error("network down"));
