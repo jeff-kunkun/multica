@@ -905,11 +905,23 @@ func parseUUIDLoose(s string) (pgtype.UUID, error) {
 }
 
 // claimProjectContext is the project-scoped context a daemon claim exposes to
-// the agent: the project identity the prompt names, the resource manifest
+// the agent: the project identities the prompt names, the resource manifest
 // execenv materializes into .multica/project/resources.json, and the repo list
 // `multica repo checkout` reads.
+//
+// A task can carry several projects (DENE-523): a chat session binds a set of
+// them, while an issue, autopilot, or quick-create task carries at most one.
+// Projects holds them in priority order; Repos is the union across all of
+// them, because `multica repo checkout` serves one flat list.
 type claimProjectContext struct {
-	ProjectID   string
+	Projects []claimProject
+	Repos    []RepoData
+}
+
+// claimProject is one attached project: the identity the brief names, the
+// resources the agent may open, and the repos lifted out of them.
+type claimProject struct {
+	ID          string
 	Title       string
 	Description string
 	Resources   []ProjectResourceData
@@ -919,23 +931,76 @@ type claimProjectContext struct {
 // applyTo copies the resolved context onto a claim response. Callers assign the
 // whole context or none of it, so a claim can never carry a project's title
 // without its resources.
+//
+// The singular fields stay populated from the FIRST project — the task's
+// primary one — so a daemon that predates projects[] still renders the primary
+// project's context instead of none. Projects[] is the full set.
 func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
-	resp.ProjectID = c.ProjectID
-	resp.ProjectTitle = c.Title
-	resp.ProjectDescription = c.Description
-	if len(c.Resources) > 0 {
-		resp.ProjectResources = c.Resources
+	if len(c.Projects) > 0 {
+		resp.Projects = make([]TaskProjectContextData, 0, len(c.Projects))
+		for _, p := range c.Projects {
+			resp.Projects = append(resp.Projects, TaskProjectContextData{
+				ID:          p.ID,
+				Title:       p.Title,
+				Description: p.Description,
+				Resources:   p.Resources,
+			})
+		}
+		primary := c.Projects[0]
+		resp.ProjectID = primary.ID
+		resp.ProjectTitle = primary.Title
+		resp.ProjectDescription = primary.Description
+		if len(primary.Resources) > 0 {
+			resp.ProjectResources = primary.Resources
+		}
 	}
 	resp.Repos = c.Repos
 }
 
-// resolveClaimProjectContext loads the project context for one daemon claim.
+// resolveClaimProjectContext loads the project context for one daemon claim
+// whose task carries at most one project (issue, autopilot, quick-create).
+// Chat tasks carry a set and go through resolveClaimChatProjectContext.
+func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, workspaceID pgtype.UUID) (claimProjectContext, error) {
+	if !projectID.Valid {
+		return h.resolveClaimProjectContexts(ctx, nil, workspaceID)
+	}
+	return h.resolveClaimProjectContexts(ctx, []pgtype.UUID{projectID}, workspaceID)
+}
+
+// resolveClaimChatProjectContext loads the project context of a chat turn: the
+// session's whole project set, in selection order, so one conversation can
+// carry several projects' descriptions and repositories (DENE-523).
+//
+// The set lives in chat_session_project. A session whose set is empty but
+// whose legacy chat_session.project_id is still set (a row written by a server
+// that predates the set, e.g. during a rolling deploy) degrades to that single
+// project rather than silently losing context the session still names.
+func (h *Handler) resolveClaimChatProjectContext(ctx context.Context, session db.ChatSession) (claimProjectContext, error) {
+	projects, err := h.Queries.ListChatSessionProjectsInWorkspace(ctx, db.ListChatSessionProjectsInWorkspaceParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   session.WorkspaceID,
+	})
+	if err != nil {
+		return claimProjectContext{}, fmt.Errorf("list chat session projects: %w", err)
+	}
+	projectIDs := make([]pgtype.UUID, 0, len(projects)+1)
+	for _, p := range projects {
+		projectIDs = append(projectIDs, p.ID)
+	}
+	if len(projectIDs) == 0 && session.ProjectID.Valid {
+		projectIDs = append(projectIDs, session.ProjectID)
+	}
+	return h.resolveClaimProjectContexts(ctx, projectIDs, session.WorkspaceID)
+}
+
+// resolveClaimProjectContexts loads the project context for one daemon claim
+// from the task's attached project set, in priority order.
 //
 // Every claim path (issue, chat, autopilot, quick-create) resolves the same
-// thing from a soft project reference, so the tenant and failure rules live
+// thing from soft project references, so the tenant and failure rules live
 // here once rather than in a copy per path:
 //
-//   - Both reads are workspace-scoped. project_resource carries its own
+//   - Every read is workspace-scoped. project_resource carries its own
 //     workspace_id, so a corrupt project reference cannot lift another tenant's
 //     repository URLs or local paths into a claim.
 //   - A read FAILURE is not "no project". It returns an error so the caller can
@@ -944,44 +1009,69 @@ func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
 //     the wrong repository (the same rule the chat-input load follows,
 //     MUL-4351).
 //   - A project that resolves to no row IS "no project": the reference is stale,
-//     deleted, or points outside this workspace, and the claim degrades to
-//     workspace context.
+//     deleted, or points outside this workspace, and it drops out of the set.
+//     Losing every project that way degrades the claim to workspace context.
 //
 // Repo precedence: project-bound github_repo resources override workspace repos
 // when present. Mixing both would just confuse the agent — if a project
 // explicitly attached its repos, those are the authoritative set. With no
-// project, no github_repo resources, or a stale reference, the workspace repos
-// are the fallback.
-func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, workspaceID pgtype.UUID) (claimProjectContext, error) {
+// project, no github_repo resources, or only stale references, the workspace
+// repos are the fallback.
+func (h *Handler) resolveClaimProjectContexts(ctx context.Context, projectIDs []pgtype.UUID, workspaceID pgtype.UUID) (claimProjectContext, error) {
 	var out claimProjectContext
 
-	if projectID.Valid {
+	resolved := make([]db.Project, 0, len(projectIDs))
+	for _, projectID := range projectIDs {
+		if !projectID.Valid {
+			continue
+		}
 		project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
 			ID:          projectID,
 			WorkspaceID: workspaceID,
 		})
 		switch {
 		case err == nil:
-			out.ProjectID = uuidToString(project.ID)
-			out.Title = project.Title
-			out.Description = project.Description.String
-
-			rows, resErr := h.Queries.ListProjectResourcesInWorkspace(ctx, db.ListProjectResourcesInWorkspaceParams{
-				ProjectID:   project.ID,
-				WorkspaceID: workspaceID,
-			})
-			if resErr != nil {
-				return claimProjectContext{}, fmt.Errorf("list project resources: %w", resErr)
+			if !containsProjectID(resolved, project.ID) {
+				resolved = append(resolved, project)
 			}
-			out.Resources, out.Repos = projectResourcesForClaim(rows)
 		case errors.Is(err, pgx.ErrNoRows):
-			// Stale/deleted/foreign reference: degrade to workspace context.
+			// Stale/deleted/foreign reference: drop it from the set.
 		default:
 			return claimProjectContext{}, fmt.Errorf("get project: %w", err)
 		}
 	}
 
-	if len(out.Repos) > 0 {
+	if len(resolved) > 0 {
+		ids := make([]pgtype.UUID, 0, len(resolved))
+		for _, project := range resolved {
+			ids = append(ids, project.ID)
+		}
+		rows, err := h.Queries.ListProjectResourcesForProjectsInWorkspace(ctx, db.ListProjectResourcesForProjectsInWorkspaceParams{
+			WorkspaceID: workspaceID,
+			ProjectIds:  ids,
+		})
+		if err != nil {
+			return claimProjectContext{}, fmt.Errorf("list project resources: %w", err)
+		}
+		byProject := make(map[string][]db.ProjectResource, len(resolved))
+		for _, row := range rows {
+			key := uuidToString(row.ProjectID)
+			byProject[key] = append(byProject[key], row)
+		}
+		for _, project := range resolved {
+			resources, repos := projectResourcesForClaim(byProject[uuidToString(project.ID)])
+			out.Projects = append(out.Projects, claimProject{
+				ID:          uuidToString(project.ID),
+				Title:       project.Title,
+				Description: project.Description.String,
+				Resources:   resources,
+				Repos:       repos,
+			})
+		}
+	}
+
+	if out.hasRepos() {
+		out.Repos = out.unionRepos()
 		return out, nil
 	}
 
@@ -1002,6 +1092,47 @@ func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, wor
 		}
 	}
 	return out, nil
+}
+
+// hasRepos reports whether any attached project contributed a repository.
+func (c claimProjectContext) hasRepos() bool {
+	for _, p := range c.Projects {
+		if len(p.Repos) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// unionRepos flattens every project's repos into the one list the daemon hands
+// to `multica repo checkout`. A URL attached to two projects appears once — it
+// is the same checkout either way, and the first project's ref wins because
+// projects arrive in priority order.
+func (c claimProjectContext) unionRepos() []RepoData {
+	var repos []RepoData
+	seen := make(map[string]struct{})
+	for _, p := range c.Projects {
+		for _, repo := range p.Repos {
+			if _, ok := seen[repo.URL]; ok {
+				continue
+			}
+			seen[repo.URL] = struct{}{}
+			repos = append(repos, repo)
+		}
+	}
+	return repos
+}
+
+// containsProjectID reports whether a project already resolved into the set —
+// a chat session's set cannot repeat a project (unique index), but the legacy
+// fallback path appends the primary column to a set that may already hold it.
+func containsProjectID(projects []db.Project, id pgtype.UUID) bool {
+	for _, project := range projects {
+		if uuidToString(project.ID) == uuidToString(id) {
+			return true
+		}
+	}
+	return false
 }
 
 // projectResourcesForClaim maps resource rows onto the claim wire shape and

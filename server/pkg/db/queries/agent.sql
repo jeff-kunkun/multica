@@ -38,6 +38,16 @@ FOR UPDATE;
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 
+-- name: GetAgentsByIDs :many
+-- Batch id lookup used to name the base role behind each specialisation in one
+-- read (DENE-301). Archived rows are included on purpose: a child keeps
+-- pointing at a parent that was archived before it, and the child's response
+-- should still name that base role instead of silently losing it. Workspace
+-- scoping is the caller's responsibility — every id here comes from a row the
+-- same request already loaded through a workspace-scoped query.
+SELECT * FROM agent
+WHERE id = ANY(sqlc.arg('ids')::uuid[]);
+
 -- name: LockAgentForAutopilotAssignment :one
 -- Serializes creating, retargeting, or resuming an active Autopilot with
 -- Runtime teardown. Teardown takes FOR UPDATE on this same Agent row before it
@@ -53,19 +63,30 @@ WHERE id = $1 AND workspace_id = $2 AND kind = 'user'
 FOR SHARE;
 
 -- name: CreateAgent :one
+-- parent_agent_id is NULL for a base role and points at one for a
+-- specialisation (DENE-301). Depth is not a column: the handler refuses a
+-- parent that is itself a child, so the tree can only ever be two levels deep.
+--
+-- runtime_inherited (DENE-505) is TRUE only for a specialisation that follows
+-- its base role's runtime profile. The handler has already resolved that
+-- profile into the runtime_* / model / thinking_level / service_tier
+-- parameters, so the row is born holding the values it will run with.
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     service_tier, conversation_starters,
-    composio_toolkit_allowlist, permission_mode
+    composio_toolkit_allowlist, permission_mode, parent_agent_id,
+    runtime_inherited
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
     $17, COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
     sqlc.narg('composio_toolkit_allowlist')::text[],
-    COALESCE(sqlc.narg('permission_mode'), 'private')
+    COALESCE(sqlc.narg('permission_mode'), 'private'),
+    sqlc.narg('parent_agent_id')::uuid,
+    COALESCE(sqlc.narg('runtime_inherited')::boolean, FALSE)
 )
 RETURNING *;
 
@@ -86,11 +107,15 @@ INSERT INTO agent (
 RETURNING *;
 
 -- name: DeleteSystemAgentByID :exec
--- Builder sessions own their hidden execution agent. Deleting the session
+-- Session carriers own their hidden execution agent. Deleting the session
 -- removes that carrier and its task rows; the kind guard prevents this cleanup
--- path from ever deleting a user-authored agent.
+-- path from ever deleting a user-authored agent, and the system_key prefixes
+-- list every per-session carrier kind so the shared DeleteChatSession path can
+-- clean up whichever flow created the conversation. Workspace-scoped system
+-- agents (Mika) are `kind = 'user'` and already out of reach here.
 DELETE FROM agent
-WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%';
+WHERE id = $1 AND kind = 'system'
+  AND (system_key LIKE 'agent_builder:%' OR system_key LIKE 'issue_draft:%');
 
 -- name: RebindAgentBuilderRuntime :one
 -- Re-points a builder carrier at another runtime mid-conversation. The carrier
@@ -115,6 +140,38 @@ SET runtime_id = @runtime_id,
     model = sqlc.narg('model'),
     updated_at = now()
 WHERE id = @id AND kind = 'system' AND system_key LIKE 'agent_builder:%'
+RETURNING *;
+
+-- name: RebindIssueDraftRuntime :one
+-- Re-points an alignment carrier at another runtime mid-conversation. Same
+-- contract as RebindAgentBuilderRuntime, including the model reset (model ids
+-- are per-runtime) and the requirement that callers hold
+-- LockChatSessionForRuntimeBind on the owning chat_session for the whole
+-- transaction. chat_session.runtime_id is deliberately left stale so the new
+-- runtime starts a fresh provider session instead of resuming the old one.
+UPDATE agent
+SET runtime_id = @runtime_id,
+    runtime_mode = @runtime_mode,
+    model = sqlc.narg('model'),
+    updated_at = now()
+WHERE id = @id AND kind = 'system' AND system_key LIKE 'issue_draft:%'
+RETURNING *;
+
+-- name: UpdateIssueDraftCarrierInstructions :one
+-- Swaps the alignment carrier's system prompt when its draft switches policy.
+-- The carrier is the agent the daemon reads instructions from at claim time, so
+-- this UPDATE — not the draft row — is what changes how the next reply behaves;
+-- the draft row only records which policy was installed.
+--
+-- Takes no lock: LockChatSessionForRuntimeBind already serialises the switch
+-- against a concurrent send, and a text swap on one hidden carrier has no
+-- ordering requirement of its own. The kind/system_key guard mirrors
+-- RebindIssueDraftRuntime so this path can never rewrite a user-authored
+-- agent's instructions.
+UPDATE agent
+SET instructions = @instructions,
+    updated_at = now()
+WHERE id = @id AND kind = 'system' AND system_key LIKE 'issue_draft:%'
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -149,9 +206,102 @@ UPDATE agent SET
     -- "turned off" the same way thinking_level's two-query pattern does for
     -- nullable text. A bool column cannot be cleared to NULL.
     auto_retry_enabled = COALESCE(sqlc.narg('auto_retry_enabled'), auto_retry_enabled),
+    -- Same tri-state for runtime inheritance (DENE-505): NULL leaves the flag
+    -- alone, FALSE switches a specialisation to its own runtime configuration,
+    -- TRUE makes it follow its base role again. Setting it back to "not
+    -- applicable" belongs to SetAgentParentAgent, which owns the detach.
+    runtime_inherited = COALESCE(sqlc.narg('runtime_inherited')::boolean, runtime_inherited),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: SetAgentParentAgent :one
+-- The ONLY writer of agent.parent_agent_id. COALESCE-based UpdateAgent cannot
+-- express "clear the column" (a NULL argument there means "leave it alone"),
+-- and the three states a caller has — untouched, set, cleared — do not collapse
+-- into one nullable parameter. The handler validates the two-level rule before
+-- calling this; the statement itself is unconditional so the same query serves
+-- the create path's initial bind, a re-parent, and the solidify transaction's
+-- detach.
+--
+-- runtime_inherited (DENE-505) rides along because it is only meaningful while
+-- parent_agent_id is set: detaching a specialisation clears the flag in the
+-- same statement that clears the parent, so no code path can leave a base role
+-- claiming it follows one. A caller that is not changing the flag passes NULL
+-- and keeps whatever the row had.
+UPDATE agent
+SET parent_agent_id = sqlc.narg('parent_agent_id')::uuid,
+    runtime_inherited = CASE
+        WHEN sqlc.narg('parent_agent_id')::uuid IS NULL THEN FALSE
+        ELSE COALESCE(sqlc.narg('runtime_inherited')::boolean, runtime_inherited)
+    END,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: SyncInheritedAgentRuntimeProfiles :many
+-- Copies a base role's runtime profile onto every specialisation that follows
+-- it (DENE-505), and is the single writer of that copy. One statement rather
+-- than a per-field diff: the whole profile is derived from one row, so
+-- re-deriving it is idempotent and cannot drift halfway.
+--
+-- Scope is every inherited child of @parent_agent_id, which covers the four
+-- moments the copy can go stale — the base role's own runtime edit, a
+-- specialisation flipping to "follow", a re-parent onto another base role, and
+-- a restore from the archive. Callers pass the FINAL parent id of the row they
+-- changed.
+--
+-- The DISTINCT guard keeps an unchanged child out of the write set: callers
+-- broadcast an agent:updated event per returned row, and an event that carries
+-- nothing new is noise for every client in the workspace.
+--
+-- Archived specialisations are skipped: they do not run, so they must not hold
+-- up a base role's edit. A restore re-runs this for its parent.
+UPDATE agent AS child
+SET runtime_id = parent.runtime_id,
+    runtime_mode = parent.runtime_mode,
+    runtime_config = parent.runtime_config,
+    model = parent.model,
+    thinking_level = parent.thinking_level,
+    service_tier = parent.service_tier,
+    updated_at = now()
+FROM agent AS parent
+WHERE child.parent_agent_id = parent.id
+  AND child.runtime_inherited
+  AND child.archived_at IS NULL
+  AND parent.id = @parent_agent_id
+  AND (child.runtime_id IS DISTINCT FROM parent.runtime_id
+    OR child.runtime_mode IS DISTINCT FROM parent.runtime_mode
+    OR child.runtime_config IS DISTINCT FROM parent.runtime_config
+    OR child.model IS DISTINCT FROM parent.model
+    OR child.thinking_level IS DISTINCT FROM parent.thinking_level
+    OR child.service_tier IS DISTINCT FROM parent.service_tier)
+RETURNING child.*;
+
+-- name: ListAgentChildren :many
+-- Base-role children for the delete guard and the solidify transaction
+-- (DENE-301). Archived specialisations are excluded: they no longer run, so
+-- they must neither block archiving the base role nor be rewritten when it is
+-- solidified. Partial index idx_agent_parent_agent_id serves this read.
+SELECT * FROM agent
+WHERE parent_agent_id = $1 AND archived_at IS NULL
+ORDER BY created_at ASC;
+
+-- name: CountAgentChildren :one
+-- Cheap existence/count probe behind the same archived filter as
+-- ListAgentChildren, for callers that only need to know whether a base role is
+-- still specialised.
+SELECT COUNT(*)::int FROM agent
+WHERE parent_agent_id = $1 AND archived_at IS NULL;
+
+-- name: CountAgentChildrenByParentIDs :many
+-- Batch form of CountAgentChildren for the agents list: the nested grouping
+-- needs a child count per base role, and one row per parent beats a query per
+-- agent on a list the UI renders on every workspace load. Parents with no
+-- children produce no row; callers default them to zero.
+SELECT parent_agent_id, COUNT(*)::int AS child_count FROM agent
+WHERE parent_agent_id = ANY(sqlc.arg('parent_ids')::uuid[]) AND archived_at IS NULL
+GROUP BY parent_agent_id;
 
 -- name: ClearAgentComposioToolkitAllowlist :one
 -- Explicit NULL-clear for composio_toolkit_allowlist. The COALESCE-based

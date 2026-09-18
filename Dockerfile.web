@@ -46,7 +46,13 @@ ARG NEXT_PUBLIC_APP_VERSION=dev
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 ENV STANDALONE=true
 
-# Build the web app (standalone output for minimal runtime)
+# Build the web app (standalone output for minimal runtime).
+# Node sizes its default heap from the machine's RAM, which on a small
+# self-host box (4 GiB and under) lands below what the Next build needs and
+# aborts with "Reached heap limit". Naming the ceiling lets such a box finish
+# the build against its swap instead.
+ARG WEB_BUILD_NODE_OPTIONS=--max-old-space-size=3072
+ENV NODE_OPTIONS=$WEB_BUILD_NODE_OPTIONS
 RUN pnpm --filter @multica/web build
 
 # --- Runtime ---

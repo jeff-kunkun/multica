@@ -247,6 +247,23 @@ func Classify(rawError string) Reason {
 	//    matching rule 13 by accident) and agent_error.unknown respectively;
 	//    neither is on the retry allowlist, so a transient cut ended the task
 	//    outright and max_attempts never applied (#6522).
+	//    DeepSeek/DSH adapter stream-death copy (DENE-235) is the same class:
+	//    the upstream SSE connection died before a terminal signal. parseSse
+	//    throws LlmError("SSE stream ended without [DONE]", "STREAM_CLOSED")
+	//    (and the payload-stream variant with the same STREAM_CLOSED code);
+	//    the witness is "stream ended without" so both phrasings match.
+	//    STREAM_CLOSED is not in DSH's DEFAULT_RETRYABLE_CODES
+	//    (EMPTY_RESPONSE / RATE_LIMIT / SERVER / TIMEOUT / TRANSPORT), so it
+	//    skips DSH's own retry and reaches Multica as agent_error.unknown.
+	//    unknown is not on retryableReasons — the only agent_error.* entries
+	//    there are provider_network (MUL-4910) and provider_capacity_or_rate_limit
+	//    (DENE-210) — so a transient cut became a terminal failure. The idle
+	//    watchdog ("DeepSeek stream idle timeout after Nms", TIMEOUT) and the
+	//    TRANSPORT wrap ("DeepSeek API stream from <baseURL> failed") are the
+	//    other two stream-death shapes from the same catch; TIMEOUT/TRANSPORT
+	//    are DSH-retryable and only arrive here after that budget is exhausted
+	//    (dsh-llm-retry recover() returns next(), the agent loop rethrows the
+	//    original LlmError). Semantic witnesses: baseURL and timeout ms vary.
 	//    Pi's OpenAI-compatible SDK surfaces a dropped LiteLLM/OpenAI call as
 	//    the bare strings "Connection error." and "Request timed out." on
 	//    turn_end.errorMessage (then exits 1). Those used to fall through to
@@ -260,6 +277,9 @@ func Classify(rawError string) Reason {
 			"stream disconnected",
 			opencodeStreamEndedPrefix,
 			codeartsStreamEndedPrefix,
+			"stream ended without",
+			"stream idle timeout",
+			"api stream from",
 			"connection closed",
 			"mid-response",
 			"error sending request",

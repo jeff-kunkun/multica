@@ -1,9 +1,17 @@
 // @vitest-environment node
-import { mkdtemp, writeFile } from "fs/promises";
+import { access, mkdtemp, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
-import { describe, expect, it } from "vitest";
-import { loadRuntimeConfig } from "./runtime-config-loader";
+import { describe, expect, it, vi } from "vitest";
+import { constants as fsConstants } from "fs";
+
+vi.mock("electron", () => ({
+  app: {
+    getPath: () => "/tmp",
+  },
+}));
+
+import { loadRuntimeConfig, switchRuntimeConfig } from "./runtime-config-loader";
 
 describe("loadRuntimeConfig", () => {
   it("uses dev env and ignores desktop.json during electron-vite dev", async () => {
@@ -87,5 +95,103 @@ describe("loadRuntimeConfig", () => {
       expect(result.error.message).toContain(configPath);
       expect(result.error.message).toContain("Invalid desktop runtime config JSON");
     }
+  });
+});
+
+describe("switchRuntimeConfig", () => {
+  async function configPath(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "multica-desktop-switch-"));
+    return join(dir, "desktop.json");
+  }
+
+  it("writes a self-hosted config and reads it back", async () => {
+    const path = await configPath();
+    const switched = await switchRuntimeConfig({
+      configPath: path,
+      target: { type: "url", url: "https://ai.ferryway.cc" },
+    });
+
+    expect(switched).toEqual({
+      ok: true,
+      config: {
+        schemaVersion: 1,
+        apiUrl: "https://ai.ferryway.cc",
+        wsUrl: "wss://ai.ferryway.cc/ws",
+        appUrl: "https://ai.ferryway.cc",
+      },
+    });
+    expect(JSON.parse(await readFile(path, "utf-8"))).toEqual({
+      schemaVersion: 1,
+      apiUrl: "https://ai.ferryway.cc",
+      wsUrl: "wss://ai.ferryway.cc/ws",
+      appUrl: "https://ai.ferryway.cc",
+    });
+    await expect(
+      loadRuntimeConfig({ isDev: false, configPath: path, env: {} }),
+    ).resolves.toEqual(switched);
+  });
+
+  it("rejects an invalid URL and leaves the original file unchanged", async () => {
+    const path = await configPath();
+    const original = JSON.stringify({
+      schemaVersion: 1,
+      apiUrl: "https://ai.ferryway.cc",
+      wsUrl: "wss://ai.ferryway.cc/ws",
+      appUrl: "https://ai.ferryway.cc",
+    });
+    await writeFile(path, original);
+
+    const switched = await switchRuntimeConfig({
+      configPath: path,
+      target: { type: "url", url: "ftp://evil.example" },
+    });
+
+    expect(switched.ok).toBe(false);
+    if (!switched.ok) {
+      expect(switched.error).toMatch(/http or https/);
+    }
+    expect(await readFile(path, "utf-8")).toBe(original);
+  });
+
+  it("does not create a file when the URL is invalid and none existed", async () => {
+    const path = await configPath();
+    const switched = await switchRuntimeConfig({
+      configPath: path,
+      target: { type: "url", url: "not a url" },
+    });
+
+    expect(switched.ok).toBe(false);
+    await expect(access(path, fsConstants.F_OK)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("deletes desktop.json when switching back to official cloud", async () => {
+    const path = await configPath();
+    await writeFile(
+      path,
+      JSON.stringify({ schemaVersion: 1, apiUrl: "https://ai.ferryway.cc" }),
+    );
+
+    const switched = await switchRuntimeConfig({
+      configPath: path,
+      target: { type: "official" },
+    });
+
+    expect(switched).toEqual({
+      ok: true,
+      config: {
+        schemaVersion: 1,
+        apiUrl: "https://api.multica.ai",
+        wsUrl: "wss://api.multica.ai/ws",
+        appUrl: "https://multica.ai",
+      },
+    });
+    await expect(access(path, fsConstants.F_OK)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      loadRuntimeConfig({ isDev: false, configPath: path, env: {} }),
+    ).resolves.toEqual(switched);
   });
 });

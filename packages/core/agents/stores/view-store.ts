@@ -23,7 +23,19 @@ export type AgentsScope = "mine" | "all" | "archived";
 
 export const AGENT_SCOPES: AgentsScope[] = ["mine", "all", "archived"];
 
-export type AgentGrouping = "none" | "squad";
+/**
+ * Row grouping for the agents list. "specialization" nests each specialisation
+ * under its base role (DENE-304) — one grouping at a time, because two levels
+ * of headers in one list cost more to read than they explain. Persisted with
+ * the rest of the view state; nothing about it belongs in the Query cache.
+ */
+export type AgentGrouping = "none" | "squad" | "specialization";
+
+export const AGENT_GROUPINGS: AgentGrouping[] = [
+  "none",
+  "squad",
+  "specialization",
+];
 
 export type AgentSortField = "lastActive" | "name" | "runs" | "created";
 

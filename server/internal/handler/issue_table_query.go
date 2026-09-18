@@ -96,6 +96,11 @@ type issueTableFiltersRequest struct {
 	WorkingOnly      bool                         `json:"working_only,omitempty"`
 	WorkingIssueIDs  []string                     `json:"working_issue_ids,omitempty"`
 	IncludeSubIssues *bool                        `json:"include_sub_issues,omitempty"`
+	// HideCompletedParents drops issues that are finished THROUGH: the issue's
+	// own status is terminal AND it has no unfinished sub-issue. A terminal
+	// parent that still has open children is deliberately kept — closing the
+	// parent is what would otherwise bury that work. (DENE-444)
+	HideCompletedParents bool `json:"hide_completed_parents,omitempty"`
 }
 
 type issueTableSortRequest struct {
@@ -696,6 +701,22 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 	}
 	if spec.Filters.IncludeSubIssues != nil && !*spec.Filters.IncludeSubIssues {
 		where = append(where, "i.parent_issue_id IS NULL")
+	}
+	if spec.Filters.HideCompletedParents {
+		terminalStatusKeys, err := h.terminalIssueStatusKeys(r.Context(), workspaceUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
+			return issueTableSQL{}, false
+		}
+		// Expanded from categories, so a custom "Shipped" status counts as
+		// finished exactly like the built-in `done`.
+		terminalRef := addArg(terminalStatusKeys)
+		where = append(where, fmt.Sprintf(
+			"NOT (i.status = ANY(%s::text[]) AND NOT EXISTS ("+
+				"SELECT 1 FROM issue child WHERE child.parent_issue_id = i.id "+
+				"AND NOT (child.status = ANY(%s::text[]))))",
+			terminalRef, terminalRef,
+		))
 	}
 	where = appendIssueTableSearchFilter(where, addArg, spec.Search)
 

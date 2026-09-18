@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Use for Multica platform actions the runtime brief does not fully cover: issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, skill import. Not for the product code you are working on."
+description: "Use for Multica platform actions the runtime brief does not fully cover: issue and PR contracts, close protocol, mentions, agents and base-role specialisations, squads, autopilots, projects, runtimes, skill import, workspace transfer. Not for the product code you are working on."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -20,12 +20,15 @@ Read the invariants below, then open the reference(s) your task actually needs
 | Open | When the task is about |
 |---|---|
 | `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, sub-issues and stages, who else is running |
+| `references/close-protocol.md` | Closing an issue: the eight `close.*` keys, conclusion / status / next owner / wake decision tables, blocked-close fields, dispatcher stage promotion |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config, skill binding |
+| `references/specialisations.md` | Base roles and specialisations: what a child inherits, the two-level cap, runtime following, solidify, the archive guard |
 | `references/squads.md` | Squads: leader routing, roster, recording leader activity, why a squad did or did not run |
 | `references/autopilots.md` | Autopilots: schedule / webhook / manual triggers, `create_issue` vs `run_only`, why one did not fire |
 | `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`, worktree mode) |
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
+| `references/transfer.md` | `multica transfer export` / `import` / `bind-runtimes`, and the kun `/transfer/*` endpoints |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
 
 Open what the task needs. A single-domain task usually needs one; a task that
@@ -33,7 +36,7 @@ crosses domains needs each domain it touches — creating a squad, assigning it 
 issue, then writing a mention needs `squads.md`, `issues.md` and `mentions.md`,
 and skipping one of those means acting on a contract you have not read.
 
-What is never right is reading all eight because you are not sure. Each
+What is never right is reading every reference because you are not sure. Each
 reference states its own contracts in full and none depends on another, so
 pick by domain and skip the rest.
 

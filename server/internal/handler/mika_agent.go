@@ -242,7 +242,13 @@ func (h *Handler) writeMikaAgentResponse(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	sessionResp := chatSessionToResponse(session)
-	out := mikaAgentResponse{AgentResponse: resp, OnboardingSession: &sessionResp}
+	responses := []ChatSessionResponse{sessionResp}
+	if err := h.hydrateChatSessionProjectIDs(r.Context(), responses); err != nil {
+		slog.Warn("mika agent: load onboarding session projects failed", append(logger.RequestAttrs(r), "error", err, "chat_session_id", uuidToString(session.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to open the Mika conversation")
+		return
+	}
+	out := mikaAgentResponse{AgentResponse: resp, OnboardingSession: &responses[0]}
 
 	if created {
 		writeJSON(w, http.StatusCreated, out)
