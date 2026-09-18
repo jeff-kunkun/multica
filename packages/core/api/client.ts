@@ -3624,6 +3624,10 @@ export class ApiClient {
     data: {
       agent_id: string;
       title?: string;
+      /** The session's project set, in selection order (DENE-522). Mutually
+       *  exclusive with `project_id` — the server rejects both at once rather
+       *  than silently preferring one. */
+      project_ids?: string[];
       project_id?: string | null;
     },
     workspaceSlug?: string,
@@ -3661,7 +3665,10 @@ export class ApiClient {
 
   async updateChatSession(
     id: string,
-    data: { title: string } | { project_id: string | null },
+    // One field per request: the server rejects a body that carries more than
+    // one of them. `project_ids` is the complete replacement set in selection
+    // order; an empty array clears the session's project context.
+    data: { title: string } | { project_id: string | null } | { project_ids: string[] },
   ): Promise<ChatSession> {
     return this.fetch(`/api/chat/sessions/${id}`, {
       method: "PATCH",

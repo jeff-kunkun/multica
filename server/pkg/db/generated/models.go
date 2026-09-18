@@ -102,6 +102,7 @@ type AgentRuntime struct {
 	ProfileID      pgtype.UUID        `json:"profile_id"`
 	CustomName     pgtype.Text        `json:"custom_name"`
 	PlanLimits     []byte             `json:"plan_limits"`
+	JevStatus      []byte             `json:"jev_status"`
 }
 
 type AgentSkill struct {
@@ -526,6 +527,15 @@ type ChatSession struct {
 	PinnedAt            pgtype.Timestamptz `json:"pinned_at"`
 	ProjectID           pgtype.UUID        `json:"project_id"`
 	ExplicitlyCreatedAt pgtype.Timestamptz `json:"explicitly_created_at"`
+}
+
+type ChatSessionProject struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+	Position      int32              `json:"position"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type ClientUsageDaily struct {

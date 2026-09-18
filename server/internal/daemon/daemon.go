@@ -529,6 +529,15 @@ type Daemon struct {
 	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	planLimitsMu sync.RWMutex
 	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
+	// jevStatus is the host-level JEV snapshot, refreshed once per heartbeat
+	// tick and shared by every runtime frame of that tick (the state directory
+	// is per-machine, not per-runtime).
+	jevStatusMu sync.RWMutex
+	jevStatus   *protocol.JevStatusSnapshot
+	// jevStateDirOverride points the reader at a fixture directory in tests.
+	// Empty in production, where the path follows XDG_STATE_HOME, then
+	// os.UserHomeDir()/.local/state/jev.
+	jevStateDirOverride string
 	// accountQuota tracks per-directory CLI account quota exhaustion: which
 	// account directory is out of quota, and until when. AGY reads it to fail
 	// over to another isolation slot; every other CLI reads it through the
@@ -4568,7 +4577,8 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
 	d.maybeRefreshPlanQuota()
-	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid))
+	d.refreshJevStatus()
+	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid), d.jevStatusSnapshot())
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -4719,7 +4729,8 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		return
 	}
 	hbCtx, cancel := context.WithTimeout(ctx, pendingWorkHeartbeatTimeout)
-	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID))
+	d.refreshJevStatus()
+	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID), d.jevStatusSnapshot())
 	cancel()
 	if err != nil {
 		if isRuntimeNotFoundError(err) {
@@ -6238,7 +6249,7 @@ func taskRunFailureReason(err error) string {
 // a queue on one directory does not consume the daemon's whole capacity. nil
 // is accepted (focused tests) and simply keeps the slot.
 func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger, lease *taskSlotLease) (release func(), abort bool) {
-	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
+	if !task.hasProjectResources() || d.cfg.DaemonID == "" {
 		return nil, false
 	}
 	assignment, err := d.resolveLocalDirectoryAssignment(task)
@@ -8126,6 +8137,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
+		Projects:                         convertProjectsForEnv(task.projectContexts()),
 		ChatSessionID:                    task.ChatSessionID,
 		ChatChannelType:                  task.ChatChannelType,
 		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
@@ -10377,6 +10389,25 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
+		}
+	}
+	return result
+}
+
+// convertProjectsForEnv maps the claim's project set into the execenv shape.
+// task.projectContexts() has already normalised the legacy singular fields of
+// an old server into a one-entry set.
+func convertProjectsForEnv(projects []ProjectContextData) []execenv.ProjectContextForEnv {
+	if len(projects) == 0 {
+		return nil
+	}
+	result := make([]execenv.ProjectContextForEnv, len(projects))
+	for i, p := range projects {
+		result[i] = execenv.ProjectContextForEnv{
+			ID:          p.ID,
+			Title:       p.Title,
+			Description: p.Description,
+			Resources:   convertProjectResourcesForEnv(p.Resources),
 		}
 	}
 	return result

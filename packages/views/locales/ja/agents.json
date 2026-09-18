@@ -131,6 +131,10 @@
     "base_role_hint_none": "独立したベースロールです。何も継承せず、後から特化をぶら下げられます。",
     "base_role_inherit_prompt": "ベースロールのプロンプトが、このエージェント自身のプロンプトの前に連結されます。",
     "base_role_inherit_skills_other": "{{count}} 件のスキルを読み取り専用で継承します。",
+    "runtime_inherited_tag": "継承",
+    "runtime_inherited_tag_hint": "ベースロールのランタイムで実行され、ベースロールの変更が自動的に反映されます。",
+    "runtime_independent_tag": "独自",
+    "runtime_independent_tag_hint": "この特化で個別に設定したランタイムで実行され、ベースロールには従いません。",
     "inherited_prompt_label": "ベースロールのプロンプト",
     "inherited_prompt_hint": "ここでは読み取り専用です。「{{name}}」で編集すると、すべての特化に反映されます。",
     "inherited_prompt_show": "表示",
@@ -223,6 +227,9 @@
     "prop_concurrency": "同時実行数",
     "prop_auto_retry": "自動リトライ",
     "prop_auto_retry_hint": "オフにすると、容量不足やネットワーク切断などの失敗は自動リトライせず、そのまま表示されます。手動での再実行はできます。",
+    "prop_runtime_inherit": "ベースロールのランタイムに従う",
+    "prop_runtime_inherit_hint_on": "ランタイム、モデル、思考レベル、速度はベースロールのもので、ベースロールの変更に追従します。オフにするとここで個別に設定できます。",
+    "prop_runtime_inherit_hint_off": "この特化は独自のランタイム、モデル、思考レベル、速度を使用します。オンにすると再びベースロールに従います。",
     "prop_owner": "オーナー",
     "prop_created": "作成日",
     "prop_updated": "更新日",
@@ -891,6 +898,16 @@
     "usage_empty": "過去30日の使用量はありません",
     "tokens_label": "トークン · 30日",
     "cost_label": "概算コスト · 30日"
+  },
+  "jev": {
+    "label": "JEV",
+    "status_active": "利用可能",
+    "status_fallback": "フォールバック",
+    "status_off": "無効",
+    "status_unknown": "不明",
+    "cooldown": "クールダウン残り {{when}}",
+    "reason_manual": "手動で停止中",
+    "reason_upstream": "上流が連続失敗"
   },
   "live_peek": {
     "current_issue_label": "現在の作業",

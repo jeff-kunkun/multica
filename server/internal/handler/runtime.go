@@ -45,9 +45,13 @@ type AgentRuntimeResponse struct {
 	// runtime_profile (MUL-3284); null for built-in runtimes.
 	ProfileID  *string                      `json:"profile_id"`
 	PlanLimits *protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
-	LastSeenAt *string                      `json:"last_seen_at"`
-	CreatedAt  string                       `json:"created_at"`
-	UpdatedAt  string                       `json:"updated_at"`
+	// Jev is the host-level fast-judgement-layer status last reported by the
+	// daemon for this runtime. Omitted when the column is NULL (no reporting
+	// daemon yet); clients must render that as unknown, never as active.
+	Jev        *protocol.JevStatusSnapshot `json:"jev,omitempty"`
+	LastSeenAt *string                     `json:"last_seen_at"`
+	CreatedAt  string                      `json:"created_at"`
+	UpdatedAt  string                      `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -63,6 +67,13 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		var snapshot protocol.PlanLimitsSnapshot
 		if json.Unmarshal(rt.PlanLimits, &snapshot) == nil {
 			planLimits = &snapshot
+		}
+	}
+	var jev *protocol.JevStatusSnapshot
+	if len(rt.JevStatus) > 0 {
+		var snapshot protocol.JevStatusSnapshot
+		if json.Unmarshal(rt.JevStatus, &snapshot) == nil {
+			jev = &snapshot
 		}
 	}
 
@@ -82,6 +93,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Visibility:   rt.Visibility,
 		ProfileID:    uuidToPtr(rt.ProfileID),
 		PlanLimits:   planLimits,
+		Jev:          jev,
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),

@@ -154,57 +154,57 @@ describe("isStillOnComposeTarget", () => {
   });
 });
 
-// The project-switch decision, shared by BOTH chat surfaces (the chat tab's
-// controller and the floating ChatWindow) so the stale-agent rule cannot drift.
-// Regression (MUL-5150 review): switching an existing session to another
-// project opens a fresh chat, and that chat MUST bind to the open session's
-// agent — not the stored `selectedAgentId`, which can be a stale preference for
-// a different agent (open session belongs to agent B while the persisted pick
-// is still agent A). Without pinning, the lazily-created session and its first
-// send would land on agent A.
+// The project-set decision, shared by BOTH chat surfaces (the chat tab's
+// controller and the floating ChatWindow) so they cannot drift apart.
 describe("planProjectContextChange", () => {
   const sessionB = { id: "sB", agent_id: "agent-b" };
 
   it("waits when an active session id is set but its row has not loaded yet", () => {
     expect(
       planProjectContextChange({
-        targetProjectId: "project-x",
+        targetProjectIds: ["project-x"],
         activeSessionId: "sB",
         currentSession: null,
       }),
     ).toEqual({ kind: "awaitSession" });
   });
 
-  it("detaches in place when the current session's project is removed", () => {
+  // Attaching a project to an open session used to start a FRESH chat pinned
+  // to that session's agent (MUL-5150), so a project the chat had just left
+  // could not bleed in through provider memory or a reused workdir. With a
+  // project SET (DENE-522) attaching drops nothing, so it stays in place —
+  // and the conversation the user is reading survives the change.
+  it("attaches to the open session in place instead of starting a fresh chat", () => {
     expect(
       planProjectContextChange({
-        targetProjectId: null,
+        targetProjectIds: ["project-x", "project-y"],
         activeSessionId: "sB",
         currentSession: sessionB,
       }),
-    ).toEqual({ kind: "detachCurrent", sessionId: "sB" });
+    ).toEqual({
+      kind: "updateCurrent",
+      sessionId: "sB",
+      projectIds: ["project-x", "project-y"],
+    });
   });
 
-  it("starts a fresh chat pinned to the open session's agent, ignoring a stale selectedAgentId", () => {
-    // The stale `selectedAgentId` never reaches this function — the plan pins
-    // the fresh chat to the open session's agent by construction, which is
-    // exactly what stops the switch from binding to the wrong agent.
+  it("detaches in place when the current session's set is emptied", () => {
     expect(
       planProjectContextChange({
-        targetProjectId: "project-x",
+        targetProjectIds: [],
         activeSessionId: "sB",
         currentSession: sessionB,
       }),
-    ).toEqual({ kind: "startFreshChat", agentId: "agent-b", projectId: "project-x" });
+    ).toEqual({ kind: "updateCurrent", sessionId: "sB", projectIds: [] });
   });
 
-  it("only adjusts the new-chat draft project when there is no open session", () => {
+  it("only adjusts the new-chat draft set when there is no open session", () => {
     expect(
       planProjectContextChange({
-        targetProjectId: "project-x",
+        targetProjectIds: ["project-x"],
         activeSessionId: null,
         currentSession: null,
       }),
-    ).toEqual({ kind: "setDraftProject", projectId: "project-x" });
+    ).toEqual({ kind: "setDraftProjects", projectIds: ["project-x"] });
   });
 });

@@ -167,14 +167,13 @@ export function ChatPage() {
     setComposingNew(true);
   };
 
-  const changeProjectContext = (projectId: string | null) => {
-    if (projectId === c.activeProjectId) return;
-    c.handleProjectChange(projectId);
-    // Removing a project stays in the current conversation. Choosing a
-    // project for an existing conversation starts a clean session, and a
-    // compact layout must stay in the compose pane after activeSessionId is
-    // cleared.
-    if (!c.currentSession || projectId !== null) setComposingNew(true);
+  const changeProjectContext = (projectIds: string[]) => {
+    c.handleProjectsChange(projectIds);
+    // Attaching or detaching a project now always stays in the current
+    // conversation (DENE-522) — no affordance here starts a clean session any
+    // more. Only a compose-pane selection still needs the compact layout
+    // pinned to the composer.
+    if (!c.currentSession) setComposingNew(true);
   };
 
   // URL → new chat: `?agent=<id>` is the deep link used by "DM" entry points
@@ -344,9 +343,9 @@ export function ChatPage() {
         agentRuntimeRequired={!c.isAgentRuntimeBound}
         agentName={c.activeAgent?.name}
         projects={c.projects}
-        projectId={c.activeProjectId}
+        projectIds={c.activeProjectIds}
         projectContextUnsupported={c.projectContextUnsupported}
-        onProjectChange={changeProjectContext}
+        onProjectsChange={changeProjectContext}
         isProjectUpdating={c.isProjectUpdating}
         focusRequest={c.focusInputRequest}
       />

@@ -8,6 +8,7 @@ import {
   baseRoleOptions,
   baseRoleOptionsFor,
   canChangeBaseRole,
+  canEditRuntimeProfile,
   childrenOf,
   composeEffectiveInstructions,
   hasInheritedPrompt,
@@ -16,6 +17,7 @@ import {
   isAgentHasChildrenError,
   isBaseRole,
   isSpecialization,
+  runtimeInheritanceState,
   solidifyTargets,
   specializationCount,
 } from "./specialization";
@@ -339,5 +341,71 @@ describe("solidifyTargets", () => {
       "Only Named Variant",
       "Nightly Variant",
     ]);
+  });
+});
+
+// DENE-506. The runtime-profile controls and the list's runtime tag both read
+// this one decision, so its boundary cases live here rather than in either
+// component's DOM test.
+describe("runtime inheritance state", () => {
+  it("reads the flag strictly, never by truthiness", () => {
+    expect(
+      runtimeInheritanceState(
+        agent({ parent_agent_id: "base-1", runtime_inherited: true }),
+      ),
+    ).toBe("inherited");
+    expect(
+      runtimeInheritanceState(
+        agent({ parent_agent_id: "base-1", runtime_inherited: false }),
+      ),
+    ).toBe("independent");
+  });
+
+  it("reports a base role as unknown even when the flag is present", () => {
+    // The server always sends false for a base role, and `true` is a 400 for
+    // one: either way there is no inheritance affordance to offer.
+    expect(runtimeInheritanceState(agent({ runtime_inherited: false }))).toBe(
+      "unknown",
+    );
+    expect(runtimeInheritanceState(agent({ runtime_inherited: true }))).toBe(
+      "unknown",
+    );
+    expect(runtimeInheritanceState(agent({}))).toBe("unknown");
+  });
+
+  it("reports a specialisation on a pre-feature backend as unknown", () => {
+    // An agent list read from a backend that never heard of the flag must not
+    // be offered a switch it cannot honour.
+    expect(runtimeInheritanceState(agent({ parent_agent_id: "base-1" }))).toBe(
+      "unknown",
+    );
+  });
+
+  it("locks the runtime profile only while following", () => {
+    const following = agent({
+      parent_agent_id: "base-1",
+      runtime_inherited: true,
+    });
+    const independent = agent({
+      parent_agent_id: "base-1",
+      runtime_inherited: false,
+    });
+    expect(canEditRuntimeProfile(following, true)).toBe(false);
+    expect(canEditRuntimeProfile(independent, true)).toBe(true);
+    // A base role and an older backend keep the pre-feature behaviour: the
+    // controls follow the permission gate alone.
+    expect(canEditRuntimeProfile(agent({}), true)).toBe(true);
+    expect(canEditRuntimeProfile(agent({ parent_agent_id: "base-1" }), true)).toBe(
+      true,
+    );
+  });
+
+  it("never grants edit rights the viewer does not have", () => {
+    expect(
+      canEditRuntimeProfile(
+        agent({ parent_agent_id: "base-1", runtime_inherited: false }),
+        false,
+      ),
+    ).toBe(false);
   });
 });
