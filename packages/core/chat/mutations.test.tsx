@@ -11,7 +11,7 @@ import type { ApiClient } from "../api/client";
 import {
   useConsumeChatDraftRestore,
   useSetChatSessionArchived,
-  useSetChatSessionProject,
+  useSetChatSessionProjects,
 } from "./mutations";
 import { chatKeys } from "./queries";
 import type { ChatSession } from "../types";
@@ -130,13 +130,13 @@ describe("useSetChatSessionArchived", () => {
   });
 });
 
-describe("useSetChatSessionProject", () => {
+describe("useSetChatSessionProjects", () => {
   let qc: QueryClient;
   let updateChatSession: ReturnType<
     typeof vi.fn<
       (
         id: string,
-        data: { title: string } | { project_id: string | null },
+        data: { title: string } | { project_id: string | null } | { project_ids: string[] },
       ) => Promise<ChatSession>
     >
   >;
@@ -152,43 +152,72 @@ describe("useSetChatSessionProject", () => {
     vi.restoreAllMocks();
   });
 
-  it("optimistically removes the project from the existing session", async () => {
-    updateChatSession.mockResolvedValue(makeSession({ project_id: null }));
+  it("optimistically removes every project from the existing session", async () => {
+    updateChatSession.mockResolvedValue(makeSession({ project_id: null, project_ids: [] }));
     qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [
-      makeSession({ project_id: "project-1" }),
+      makeSession({ project_id: "project-1", project_ids: ["project-1"] }),
     ]);
 
-    const { result } = renderHook(() => useSetChatSessionProject(), {
+    const { result } = renderHook(() => useSetChatSessionProjects(), {
       wrapper: createWrapper(qc),
     });
 
     await act(async () => {
-      await result.current.mutateAsync({ sessionId: "s1", projectId: null });
+      await result.current.mutateAsync({ sessionId: "s1", projectIds: [] });
     });
 
-    expect(updateChatSession).toHaveBeenCalledWith("s1", { project_id: null });
-    expect(qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!.project_id).toBeNull();
+    expect(updateChatSession).toHaveBeenCalledWith("s1", { project_ids: [] });
+    const row = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!;
+    expect(row.project_ids).toEqual([]);
+    expect(row.project_id).toBeNull();
   });
 
-  it("rolls the project back when the update fails", async () => {
-    updateChatSession.mockRejectedValue(new Error("boom"));
+  // project_id mirrors the head of the set server-side. If the optimistic
+  // patch left the old value there, every consumer still reading the singular
+  // field would show a project the set no longer leads with until the refetch.
+  it("mirrors the new head onto the singular project_id while in flight", async () => {
+    updateChatSession.mockResolvedValue(
+      makeSession({ project_id: "project-1", project_ids: ["project-1", "project-2"] }),
+    );
     qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [
-      makeSession({ project_id: "project-1" }),
+      makeSession({ project_id: "project-1", project_ids: ["project-1"] }),
     ]);
 
-    const { result } = renderHook(() => useSetChatSessionProject(), {
+    const { result } = renderHook(() => useSetChatSessionProjects(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        sessionId: "s1",
+        projectIds: ["project-1", "project-2"],
+      });
+    });
+
+    const row = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!;
+    expect(row.project_ids).toEqual(["project-1", "project-2"]);
+    expect(row.project_id).toBe("project-1");
+  });
+
+  it("rolls the project set back when the update fails", async () => {
+    updateChatSession.mockRejectedValue(new Error("boom"));
+    qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [
+      makeSession({ project_id: "project-1", project_ids: ["project-1"] }),
+    ]);
+
+    const { result } = renderHook(() => useSetChatSessionProjects(), {
       wrapper: createWrapper(qc),
     });
 
     await act(async () => {
       await expect(
-        result.current.mutateAsync({ sessionId: "s1", projectId: null }),
+        result.current.mutateAsync({ sessionId: "s1", projectIds: [] }),
       ).rejects.toThrow("boom");
     });
 
-    expect(
-      qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!.project_id,
-    ).toBe("project-1");
+    const row = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!;
+    expect(row.project_ids).toEqual(["project-1"]);
+    expect(row.project_id).toBe("project-1");
   });
 });
 

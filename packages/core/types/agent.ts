@@ -79,6 +79,31 @@ export interface PlanLimitsSnapshot {
   observed_at: number;
 }
 
+export type JevStatusValue = "active" | "fallback" | "unknown";
+
+/**
+ * Host-level JEV (fast judgement layer) status reported by the daemon. There is
+ * one state directory per machine, so every runtime of a daemon carries the
+ * same snapshot. `unknown` means "we cannot tell" (unreadable state files, or a
+ * daemon that predates the field) and must never be rendered as active.
+ *
+ * Any field beyond `status` is optional detail. Cooldown remaining is computed
+ * from `disabled_until`, never sent pre-computed, so the payload stays stable
+ * across heartbeats.
+ */
+export interface JevStatusSnapshot {
+  status: JevStatusValue;
+  model?: string;
+  manual?: boolean;
+  disabled_until?: number;
+  failures?: number;
+  reason?: string;
+  last_scene?: string;
+  last_outcome?: string;
+  last_decision_at?: number;
+  observed_at?: number;
+}
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -109,6 +134,11 @@ export interface RuntimeDevice {
    */
   profile_id?: string | null;
   plan_limits?: PlanLimitsSnapshot | null;
+  /**
+   * Host-level JEV status. Absent/null when the backend has no snapshot yet
+   * (older server or older daemon) — consumers must render that as unknown.
+   */
+  jev?: JevStatusSnapshot | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;

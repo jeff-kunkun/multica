@@ -201,6 +201,16 @@ SET plan_limits = @plan_limits
 WHERE id = @id
   AND plan_limits IS DISTINCT FROM @plan_limits;
 
+-- name: UpdateAgentRuntimeJevStatus :execrows
+-- Stores the normalized, credential-free JEV snapshot accepted by the heartbeat
+-- handler. Same IS DISTINCT FROM guard as plan_limits: the snapshot is a pure
+-- function of the local state files, so an unchanged observation costs zero
+-- writes and zero broadcasts.
+UPDATE agent_runtime
+SET jev_status = @jev_status
+WHERE id = @id
+  AND jev_status IS DISTINCT FROM @jev_status;
+
 -- name: TouchAgentRuntimesLastSeenBatch :many
 -- Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
 -- coalesces N per-runtime "bump last_seen_at" requests into a single UPDATE so a

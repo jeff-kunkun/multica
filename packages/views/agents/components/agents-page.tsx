@@ -78,7 +78,7 @@ import {
   flattenSpecializationItems,
   SPECIALIZATION_DERIVE_ROW_HEIGHT,
 } from "./agents-page-specializations";
-import { isSpecialization } from "../specialization";
+import { isSpecialization, runtimeInheritanceState } from "../specialization";
 import {
   AgentListToolbar,
   countActiveFilterDimensions,
@@ -735,23 +735,53 @@ function RuntimeCell({ row }: { row: AgentListRow }) {
     );
   }
   const runtime = row.runtime;
+  // DENE-506: which runtime a row shows is only half the answer for a
+  // specialisation — the other half is whether that value is its own choice or
+  // the base role's, which is what tells the reader a later change there will
+  // move this row too. The tag is omitted entirely when the backend does not
+  // serve `runtime_inherited` (`unknown`), never guessed.
+  const inheritance = runtimeInheritanceState(row.agent);
+  const inheritanceTag =
+    inheritance === "inherited"
+      ? {
+          label: t(($) => $.specialization.runtime_inherited_tag),
+          hint: t(($) => $.specialization.runtime_inherited_tag_hint),
+        }
+      : inheritance === "independent"
+        ? {
+            label: t(($) => $.specialization.runtime_independent_tag),
+            hint: t(($) => $.specialization.runtime_independent_tag_hint),
+          }
+        : null;
   return (
     <ListGridCell className="hidden @2xl:flex">
-      {runtime ? (
-        // Provider mark before the label: scanning this column for "which of
-        // these run on Codex" is a shape match, not a read.
-        <span className="inline-flex min-w-0 items-center gap-1.5">
-          <ProviderLogo
-            provider={runtime.provider}
-            className="h-3.5 w-3.5 shrink-0"
-          />
-          <span className="min-w-0 truncate text-caption text-muted-foreground">
-            {runtimeDisplayLabel(runtime)}
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        {runtime ? (
+          // Provider mark before the label: scanning this column for "which of
+          // these run on Codex" is a shape match, not a read.
+          <>
+            <ProviderLogo
+              provider={runtime.provider}
+              className="h-3.5 w-3.5 shrink-0"
+            />
+            <span className="min-w-0 truncate text-caption text-muted-foreground">
+              {runtimeDisplayLabel(runtime)}
+            </span>
+          </>
+        ) : (
+          <span className="text-caption text-faint-foreground">—</span>
+        )}
+        {inheritanceTag ? (
+          <span
+            data-testid="agents-runtime-inheritance"
+            data-inheritance={inheritance}
+            title={inheritanceTag.hint}
+            className="shrink-0 rounded-xs border border-border px-1 text-micro text-muted-foreground"
+          >
+            {inheritanceTag.label}
           </span>
-        </span>
-      ) : (
-        <span className="text-caption text-faint-foreground">—</span>
-      )}
+        ) : null}
+      </span>
     </ListGridCell>
   );
 }

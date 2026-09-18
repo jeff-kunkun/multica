@@ -306,6 +306,10 @@ func (d *Daemon) runWSHeartbeatSender(ctx context.Context, runtimeIDs []string, 
 
 func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writes chan<- *wsOutbound) {
 	d.maybeRefreshPlanQuota()
+	// Read the host-level JEV state once per tick; every runtime frame below
+	// carries the same pointer because the state directory is per-machine.
+	d.refreshJevStatus()
+	jev := d.jevStatusSnapshot()
 	for _, rid := range runtimeIDs {
 		if ctx.Err() != nil {
 			return
@@ -316,6 +320,7 @@ func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writ
 				RuntimeID:           rid,
 				SupportsBatchImport: true,
 				PlanLimits:          d.planLimitsForRuntime(rid),
+				Jev:                 jev,
 			}),
 		})
 		if err != nil {

@@ -35,6 +35,8 @@ export type {
   PlanLimitsStatus,
   PlanLimitWindow,
   PlanLimitsSnapshot,
+  JevStatusValue,
+  JevStatusSnapshot,
   RuntimeProfile,
   RuntimeProtocolFamily,
   RuntimeProfileVisibility,
