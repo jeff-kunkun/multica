@@ -12,11 +12,16 @@ import (
 // `jev disable --reason` note), and one long remark must not bounce a whole
 // heartbeat.
 const (
-	maxJevModelLen    = 64
-	maxJevReasonLen   = 200
-	maxJevSceneLen    = 64
-	maxJevOutcomeLen  = 64
-	maxJevDisabledDue = 10 * 365 * 24 * 60 * 60 // sanity bound on a unix-seconds cooldown
+	maxJevModelLen   = 64
+	maxJevReasonLen  = 200
+	maxJevSceneLen   = 64
+	maxJevOutcomeLen = 64
+	// maxJevDisabledUntil bounds disabled_until, which is an absolute unix
+	// timestamp (the daemon compares it against time.Now().Unix()), not a
+	// duration. The bound is 2100-01-01 so a garbage value cannot be stored
+	// while every real cooldown deadline passes through untouched — the UI
+	// derives "cooldown 42m" from this exact number.
+	maxJevDisabledUntil = 4102444800
 )
 
 // validateJevStatusSnapshot normalizes and encodes the credential-free JEV
@@ -56,8 +61,8 @@ func validateJevStatusSnapshot(snapshot *protocol.JevStatusSnapshot) ([]byte, er
 	if normalized.LastDecisionAt < 0 {
 		normalized.LastDecisionAt = 0
 	}
-	if normalized.DisabledUntil > maxJevDisabledDue {
-		normalized.DisabledUntil = maxJevDisabledDue
+	if normalized.DisabledUntil > maxJevDisabledUntil {
+		normalized.DisabledUntil = maxJevDisabledUntil
 	}
 
 	data, err := json.Marshal(normalized)

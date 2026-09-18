@@ -70,6 +70,28 @@ func TestValidateJevStatusSnapshot(t *testing.T) {
 		}
 	})
 
+	// disabled_until is an absolute unix timestamp, not a duration: the UI
+	// renders the cooldown as `disabled_until - now`, so clamping a real
+	// deadline would silently drop the "cooldown 42m" detail from every
+	// breaker-induced fallback.
+	t.Run("a real cooldown deadline survives untouched", func(t *testing.T) {
+		const deadline = int64(1_800_000_900)
+		data, err := validateJevStatusSnapshot(&protocol.JevStatusSnapshot{
+			Status:        protocol.JevStatusFallback,
+			DisabledUntil: deadline,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var snapshot protocol.JevStatusSnapshot
+		if err := json.Unmarshal(data, &snapshot); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if snapshot.DisabledUntil != deadline {
+			t.Fatalf("disabled_until = %d, want %d (a clamped deadline reads as long past and hides the cooldown)", snapshot.DisabledUntil, deadline)
+		}
+	})
+
 	t.Run("negative counters are clamped", func(t *testing.T) {
 		data, err := validateJevStatusSnapshot(&protocol.JevStatusSnapshot{
 			Status:         protocol.JevStatusActive,
