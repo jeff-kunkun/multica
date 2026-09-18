@@ -36,6 +36,8 @@ import { useT } from "../../i18n";
 import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
+import { IssueSurfacePinnedProvider } from "./pinned-context";
+import { ParentIssueLookupProvider } from "./parent-issue-context";
 import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
 import {
   useIssueSurfaceController,
@@ -233,12 +235,22 @@ function IssueSurfaceContent({
 
   return (
     <IssueSurfaceActionsProvider actions={controller.actions}>
+      {/* Parent lookup for the whole surface, fed from the UNFILTERED set:
+          a sub-issue card has to name its parent even when the active
+          filters hide the parent's own row. Table view resolves hierarchy
+          itself and contributes nothing here. (DENE-480) */}
+      <ParentIssueLookupProvider issues={controller.surfaceIssues}>
       {/* One shared right-click menu for every card/row this surface renders
           — see IssueContextMenuProvider. Inside the actions provider so the
           singleton's useIssueActions routes updates through surface
           actions. */}
       <IssueContextMenuProvider>
       <IssueSurfaceSelectionProvider selection={controller.selection}>
+      {/* The pinned block the server ranked, for the rows whose projection
+          flattens `IssueTableRow` away — the List badge and the two client
+          sorts (Swimlane cells, drag anchors). One provider, so every consumer
+          reads the same window. (DENE-500) */}
+      <IssueSurfacePinnedProvider pinnedIssueIds={controller.pinnedIssueIds}>
         {renderHeader ? (
           renderHeader(renderContext)
         ) : (
@@ -368,8 +380,10 @@ function IssueSurfaceContent({
             }
           />
         )}
+      </IssueSurfacePinnedProvider>
       </IssueSurfaceSelectionProvider>
       </IssueContextMenuProvider>
+      </ParentIssueLookupProvider>
     </IssueSurfaceActionsProvider>
   );
 }

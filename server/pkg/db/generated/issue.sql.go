@@ -14,7 +14,9 @@ import (
 const childIssueProgress = `-- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE status = ANY($2::text[]))::bigint AS done
+       COUNT(*) FILTER (WHERE status = ANY($2::text[]))::bigint AS done,
+       COUNT(*) FILTER (WHERE status = ANY($3::text[]))::bigint AS blocked,
+       COUNT(*) FILTER (WHERE status = ANY($4::text[]))::bigint AS active
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
@@ -24,16 +26,31 @@ GROUP BY parent_issue_id
 type ChildIssueProgressParams struct {
 	WorkspaceID        pgtype.UUID `json:"workspace_id"`
 	TerminalStatusKeys []string    `json:"terminal_status_keys"`
+	BlockedStatusKeys  []string    `json:"blocked_status_keys"`
+	ActiveStatusKeys   []string    `json:"active_status_keys"`
 }
 
 type ChildIssueProgressRow struct {
 	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
 	Total         int64       `json:"total"`
 	Done          int64       `json:"done"`
+	Blocked       int64       `json:"blocked"`
+	Active        int64       `json:"active"`
 }
 
+// Per-parent roll-up of its direct children. `done` counts terminal children
+// (done + cancelled); `blocked` and `active` are the two signals the project
+// views bubble onto the parent card: a stuck child must be visible without
+// expanding the parent, and a parent with no active child reads differently
+// from one whose pipeline is running. All three key sets are expanded from
+// categories by the handler, so custom statuses count under their category.
 func (q *Queries) ChildIssueProgress(ctx context.Context, arg ChildIssueProgressParams) ([]ChildIssueProgressRow, error) {
-	rows, err := q.db.Query(ctx, childIssueProgress, arg.WorkspaceID, arg.TerminalStatusKeys)
+	rows, err := q.db.Query(ctx, childIssueProgress,
+		arg.WorkspaceID,
+		arg.TerminalStatusKeys,
+		arg.BlockedStatusKeys,
+		arg.ActiveStatusKeys,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +58,13 @@ func (q *Queries) ChildIssueProgress(ctx context.Context, arg ChildIssueProgress
 	items := []ChildIssueProgressRow{}
 	for rows.Next() {
 		var i ChildIssueProgressRow
-		if err := rows.Scan(&i.ParentIssueID, &i.Total, &i.Done); err != nil {
+		if err := rows.Scan(
+			&i.ParentIssueID,
+			&i.Total,
+			&i.Done,
+			&i.Blocked,
+			&i.Active,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1203,6 +1226,142 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 			&i.Stage,
 			&i.Properties,
 			&i.Revision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssuesByOrigins = `-- name: ListIssuesByOrigins :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at FROM issue
+WHERE workspace_id = $1
+  AND origin_type = $2
+  AND origin_id = ANY($3::uuid[])
+`
+
+type ListIssuesByOriginsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	OriginType  pgtype.Text   `json:"origin_type"`
+	OriginIds   []pgtype.UUID `json:"origin_ids"`
+}
+
+// Finds every issue stamped with one of a set of (origin_type, origin_id)
+// pairs. The partial unique index on issue (origin_id) WHERE origin_type =
+// 'issue_draft' makes this the authoritative answer to "does this alignment
+// node already own an issue" — authoritative in a way a read by parent is not,
+// because a node's issue can be re-parented off the group and still own its
+// origin.
+func (q *Queries) ListIssuesByOrigins(ctx context.Context, arg ListIssuesByOriginsParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listIssuesByOrigins, arg.WorkspaceID, arg.OriginType, arg.OriginIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.Stage,
+			&i.Properties,
+			&i.Revision,
+			&i.LastActivityAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssuesWaitingOn = `-- name: ListIssuesWaitingOn :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at FROM issue
+WHERE workspace_id = $1
+  AND (
+    metadata @> $2::jsonb
+    OR metadata @> $3::jsonb
+  )
+`
+
+type ListIssuesWaitingOnParams struct {
+	WorkspaceID         pgtype.UUID `json:"workspace_id"`
+	WaitingOnIdentifier []byte      `json:"waiting_on_identifier"`
+	WaitingOnID         []byte      `json:"waiting_on_id"`
+}
+
+// DENE-232 Stage 3: waiters in this workspace whose close.waiting_on matches
+// the waited-on issue's identifier (PREFIX-N) or its UUID. Containment uses
+// idx_issue_metadata_gin (jsonb_path_ops). Callers filter terminal / backlog
+// waiters in Go with the same status resolver as child-done.
+func (q *Queries) ListIssuesWaitingOn(ctx context.Context, arg ListIssuesWaitingOnParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listIssuesWaitingOn, arg.WorkspaceID, arg.WaitingOnIdentifier, arg.WaitingOnID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.Stage,
+			&i.Properties,
+			&i.Revision,
+			&i.LastActivityAt,
 		); err != nil {
 			return nil, err
 		}

@@ -34,8 +34,9 @@ export function issueViewDetailOptions(wsId: string, id: string) {
 
 /**
  * Client-side mirror of the server's canManageIssueView: the owner, or a
- * workspace owner/admin for views shared to the workspace. Drives which
- * affordances render — the server re-checks on every write.
+ * workspace owner/admin for views shared to the workspace or a project.
+ * Project members do not gain manage rights. Drives which affordances
+ * render — the server re-checks on every write.
  */
 export function canManageIssueView(
   view: { owner_id: string; visibility: string },
@@ -44,5 +45,8 @@ export function canManageIssueView(
 ): boolean {
   if (!userId) return false;
   if (view.owner_id === userId) return true;
-  return view.visibility === "workspace" && (role === "owner" || role === "admin");
+  return (
+    (view.visibility === "workspace" || view.visibility === "project") &&
+    (role === "owner" || role === "admin")
+  );
 }

@@ -23,7 +23,7 @@ Two commands to set up everything — server, CLI, and configuration.
 
 ```bash
 # 1. Install CLI + provision the self-host server
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+curl -fsSL https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh | bash -s -- --with-server
 
 # 2. Configure CLI, authenticate, and start the daemon
 multica setup self-host
@@ -36,7 +36,7 @@ multica setup self-host
 
 ```powershell
 # 1. Install CLI + provision the self-host server
-$env:MULTICA_MODE="with-server"; irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+$env:MULTICA_MODE="with-server"; irm https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.ps1 | iex
 
 # 2. Configure CLI, authenticate, and start the daemon
 multica setup self-host
@@ -49,11 +49,13 @@ Open http://localhost:3000. To log in, configure `RESEND_API_KEY` in `.env` for 
 
 > **Prerequisites:** Docker and Docker Compose must be installed. The script checks for this and provides install links if missing.
 >
-> **CLI only?** If the self-host server is already running and you only need the CLI on a macOS/Linux machine, install it with Homebrew:
+> **CLI only?** If the self-host server is already running and you only need the CLI on a macOS/Linux machine:
 >
 > ```bash
-> brew install multica-ai/tap/multica
+> curl -fsSL https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh | bash
 > ```
+>
+> Not Homebrew: `multica-ai/tap` only carries the upstream build, and this fork ships its own CLI.
 
 ---
 
@@ -106,8 +108,10 @@ Each team member who wants to run AI agents locally needs to:
 ### a) Install the CLI and an AI agent
 
 ```bash
-brew install multica-ai/tap/multica
+curl -fsSL https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh | bash
 ```
+
+(`brew install multica-ai/tap/multica` would install the upstream CLI instead — this fork has no tap.)
 
 You also need at least one AI agent CLI installed:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
@@ -434,7 +438,7 @@ External cron / systemd timer / Kubernetes `CronJob` setups that call `SELECT ro
 If you installed via the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --stop
+curl -fsSL https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh | bash -s -- --stop
 ```
 
 If you cloned the repo manually:
@@ -470,6 +474,42 @@ Pin `MULTICA_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want 
 If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` or `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
 
 > **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** That's migration `103`'s fail-closed guard: it requires `task_usage_hourly` to be seeded before the legacy daily rollups are dropped. As of MUL-2957 `migrate up` runs that backfill automatically right before applying `103`, so the upgrade completes in a single invocation. If you are still on a pre-MUL-2957 binary or the auto-hook fails, run `backfill_task_usage_hourly` manually first, then re-run the upgrade. Full instructions in [Advanced Configuration → Usage Dashboard Rollup](SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
+
+## Auto-following an upstream branch
+
+A branch tip can move faster than anyone remembers to pull. If you run your own build from a checkout — a fork, a staging box, anything that should track `origin/<branch>` — install the autoupdate timer and let the machine notice instead of a person:
+
+```bash
+sudo scripts/install-selfhost-autoupdate.sh            # follows origin/kun, every 15 minutes
+sudo scripts/install-selfhost-autoupdate.sh --branch main --repo-dir /srv/multica
+```
+
+Each tick:
+
+1. `git fetch origin <branch>`.
+2. Compares `origin/<branch>` against the `commit` the running backend reports on `GET /health`. Equal → no-op, nothing is built.
+3. On drift: tags the current images `:prev`, `git reset --hard origin/<branch>`, rebuilds with `COMMIT`/`VERSION`/`DATE` set to the target SHA, and recreates the backend and frontend.
+4. Waits for `/readyz` **and** checks that `/health` now reports the target SHA — a build that did not take effect is treated as a failure, not a success.
+5. On any failure: restores the `:prev` images, resets the checkout to the previous SHA, recreates, and exits non-zero.
+
+The last run is always machine-readable:
+
+```bash
+cat /var/lib/multica/autoupdate.json
+# {"last_check_at":"...","deployed_commit":"...","target_commit":"...","result":"updated","error":"","duration_seconds":412}
+```
+
+`result` is one of `noop`, `updated`, `rolled_back` (the upgrade failed and the previous version is serving again), or `failed` (nothing was restored — read `error`).
+
+```bash
+systemctl list-timers multica-autoupdate.timer         # is it scheduled?
+systemctl start multica-autoupdate.service             # upgrade now, in the foreground
+systemctl disable --now multica-autoupdate.timer       # stop following the branch
+journalctl -u multica-autoupdate.service -n 200        # what happened
+```
+
+Requirements and limits worth knowing: this rebuilds from the checkout on the box (`docker-compose.selfhost.yml` + `docker-compose.selfhost.build.yml`), not from GHCR; it refuses to run against a checkout with modified tracked files rather than `git reset --hard` them away; and it uses the box's CPU and memory for the length of a build. Full runbook, including manual rollback, in [docs/kun/selfhost-autoupdate.md](docs/kun/selfhost-autoupdate.md).
+
 
 ---
 

@@ -32,8 +32,9 @@ import type {
 } from "@multica/core/types";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useViewBaseline } from "../surface/view-baseline-context";
+import { useIssuePinnedIds } from "../surface/pinned-context";
 import { filterIssues, type IssueFilters } from "../utils/filter";
-import { getMoveAnchors } from "../utils/drag-utils";
+import { computePosition, getMoveAnchors } from "../utils/drag-utils";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -194,16 +195,6 @@ function parseLaneId(id: string): { grouping: string; rawId: string } | null {
     grouping: rest.slice(0, firstColon),
     rawId: rest.slice(firstColon + 1),
   };
-}
-
-function computePosition(ids: string[], activeId: string, issueMap: Map<string, Issue>): number {
-  const idx = ids.indexOf(activeId);
-  if (idx === -1) return 0;
-  const getPos = (id: string) => issueMap.get(id)?.position ?? 0;
-  if (ids.length === 1) return issueMap.get(activeId)?.position ?? 0;
-  if (idx === 0) return getPos(ids[1]!) - 1;
-  if (idx === ids.length - 1) return getPos(ids[idx - 1]!) + 1;
-  return (getPos(ids[idx - 1]!) + getPos(ids[idx + 1]!)) / 2;
 }
 
 /**
@@ -642,6 +633,7 @@ function SwimLaneViewImpl({
   groupBranches?: IssueGroupBranches;
 }) {
   const { t } = useT("issues");
+  const pinnedIssueIds = useIssuePinnedIds();
   const paths = useWorkspacePaths();
   const viewStoreApi = useViewStoreApi();
   const viewBaseline = useViewBaseline();
@@ -869,7 +861,10 @@ function SwimLaneViewImpl({
         : null;
 
     const issueSource = swimlaneGrouping === "parent" ? mergedIssues : issues;
-    const sorted = sortIssues(issueSource, sortBy, sortDirection);
+    // The server already ranked this window; swapping in the client's own
+    // comparator would drop the pinned block, so the same leading key has to
+    // be passed through. (DENE-500)
+    const sorted = sortIssues(issueSource, sortBy, sortDirection, pinnedIssueIds);
     for (const issue of sorted) {
       let placed = false;
       for (const lane of laneGroups) {
@@ -907,7 +902,7 @@ function SwimLaneViewImpl({
       }
     }
     return result;
-  }, [issues, mergedIssues, laneGroups, sortedStatuses, sortBy, sortDirection, headerIssueIds, swimlaneGrouping]);
+  }, [issues, mergedIssues, laneGroups, sortedStatuses, sortBy, sortDirection, headerIssueIds, swimlaneGrouping, pinnedIssueIds]);
 
   const laneByKey = useMemo(() => {
     const map = new Map<string, LaneGroup>();
@@ -1262,7 +1257,12 @@ function SwimLaneViewImpl({
       }
 
       const finalIds = finalCells[finalOverCell.laneKey]?.[finalOverCell.status] ?? [];
-      const newPosition = computePosition(finalIds, activeId, issueMapRef.current);
+      const newPosition = computePosition(
+        finalIds,
+        activeId,
+        issueMapRef.current,
+        pinnedIssueIds,
+      );
       const currentIssue = issueMapRef.current.get(activeId);
       const targetLane = laneByKey.get(finalOverCell.laneKey);
       if (!targetLane) {
@@ -1295,7 +1295,7 @@ function SwimLaneViewImpl({
           ...targetLane.moveUpdates,
           ...(keepsStatus ? {} : { status: finalOverCell.status as IssueStatus }),
           position: newPosition,
-          ...getMoveAnchors(finalIds, activeId),
+          ...getMoveAnchors(finalIds, activeId, pinnedIssueIds),
         },
         () => {
           isSettlingRef.current = false;
@@ -1303,7 +1303,7 @@ function SwimLaneViewImpl({
         },
       );
     },
-    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi],
+    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi, pinnedIssueIds],
   );
 
   // Grid template: one column per status, fixed width COLUMN_WIDTH, gap COLUMN_GAP.

@@ -271,6 +271,32 @@ export interface IssueViewState {
   // board / list / swimlane so users can focus on top-level parent issues.
   // Purely a display filter — it never touches the parent/child relationship.
   showSubIssues: boolean;
+  /**
+   * Parent issues whose sub-issue list is expanded IN PLACE on the board /
+   * swimlane card. Purely presentational: the board still renders one card per
+   * parent, the children render inside that card rather than as sibling cards,
+   * so hiding sub-issues from the top level (`showSubIssues: false`) does not
+   * cost the user access to them. (DENE-444)
+   */
+  boardExpandedParents: string[];
+  /**
+   * Flips how `tableCollapsedParents` reads. `false` (workspace default) keeps
+   * the historical meaning — every parent starts expanded and the list names
+   * the collapsed ones. `true` (project surfaces) starts every parent
+   * collapsed, and the SAME list names the expanded ones. One list, one
+   * toggle action, no migration: a parent is collapsed when
+   * `collapsedByDefault !== list.includes(id)`. (DENE-444)
+   */
+  tableParentsCollapsedByDefault: boolean;
+  /**
+   * Hide a parent once it AND every one of its sub-issues is finished.
+   *
+   * Deliberately narrower than hiding the whole `done` category: a terminal
+   * parent that still has an unfinished — or blocked — child is exactly the
+   * row a project owner must still see, so it stays. Parents with no children
+   * are covered by their own terminal status. (DENE-444)
+   */
+  hideCompletedParents: boolean;
   listCollapsedStatuses: IssueStatusCategory[];
   /**
    * Board / list columns the user hid, as CATEGORIES.
@@ -334,6 +360,8 @@ export interface IssueViewState {
   toggleCardProperty: (key: keyof CardProperties) => void;
   toggleCardPropertyId: (propertyId: string) => void;
   toggleShowSubIssues: () => void;
+  toggleBoardParentExpanded: (issueId: string) => void;
+  toggleHideCompletedParents: () => void;
   toggleListCollapsed: (category: IssueStatusCategory) => void;
   setSwimlaneGrouping: (grouping: SwimlaneGrouping) => void;
   /** Update the lane order for the currently active swimlane grouping. */
@@ -370,6 +398,9 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   cardProperties: { ...DEFAULT_CARD_PROPERTIES },
   cardPropertyIds: [],
   showSubIssues: true,
+  boardExpandedParents: [],
+  tableParentsCollapsedByDefault: false,
+  hideCompletedParents: false,
   listCollapsedStatuses: [],
   hiddenStatusCategories: [...DEFAULT_HIDDEN_STATUS_CATEGORIES],
   ganttZoom: "week",
@@ -564,6 +595,14 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     })),
   toggleShowSubIssues: () =>
     set((state) => ({ showSubIssues: !state.showSubIssues })),
+  toggleBoardParentExpanded: (issueId) =>
+    set((state) => ({
+      boardExpandedParents: state.boardExpandedParents.includes(issueId)
+        ? state.boardExpandedParents.filter((id) => id !== issueId)
+        : [...state.boardExpandedParents, issueId],
+    })),
+  toggleHideCompletedParents: () =>
+    set((state) => ({ hideCompletedParents: !state.hideCompletedParents })),
   toggleListCollapsed: (status) =>
     set((state) => ({
       listCollapsedStatuses: state.listCollapsedStatuses.includes(status)
@@ -661,6 +700,9 @@ export const viewStorePersistOptions = (name: string) => ({
     cardProperties: state.cardProperties,
     cardPropertyIds: state.cardPropertyIds,
     showSubIssues: state.showSubIssues,
+    boardExpandedParents: state.boardExpandedParents,
+    tableParentsCollapsedByDefault: state.tableParentsCollapsedByDefault,
+    hideCompletedParents: state.hideCompletedParents,
     listCollapsedStatuses: state.listCollapsedStatuses,
     hiddenStatusCategories: state.hiddenStatusCategories,
     ganttZoom: state.ganttZoom,
@@ -749,6 +791,17 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
     tableCollapsedParents: Array.isArray(p.tableCollapsedParents)
       ? p.tableCollapsedParents
       : current.tableCollapsedParents,
+    boardExpandedParents: Array.isArray(p.boardExpandedParents)
+      ? p.boardExpandedParents
+      : current.boardExpandedParents,
+    // A surface-level default, not a user preference: never let a snapshot
+    // taken before the surface had it (or one copied from a saved view
+    // definition) flip a project surface back to expand-everything.
+    tableParentsCollapsedByDefault: current.tableParentsCollapsedByDefault,
+    hideCompletedParents:
+      typeof p.hideCompletedParents === "boolean"
+        ? p.hideCompletedParents
+        : current.hideCompletedParents,
   };
   return {
     ...merged,

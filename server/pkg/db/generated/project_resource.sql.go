@@ -227,6 +227,52 @@ func (q *Queries) ListProjectResourcesForProjects(ctx context.Context, projectId
 	return items, nil
 }
 
+const listProjectResourcesForProjectsInWorkspace = `-- name: ListProjectResourcesForProjectsInWorkspace :many
+SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
+WHERE workspace_id = $1 AND project_id = ANY($2::uuid[])
+ORDER BY project_id, position ASC, created_at ASC
+`
+
+type ListProjectResourcesForProjectsInWorkspaceParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	ProjectIds  []pgtype.UUID `json:"project_ids"`
+}
+
+// Workspace-scoped batch read for the multi-project daemon claim (DENE-523):
+// one query for every project attached to the task, under the same tenant rule
+// as ListProjectResourcesInWorkspace. project_resource carries its own
+// workspace_id, so a corrupt project reference cannot pull another tenant's
+// repository URLs or local paths into a claim response.
+func (q *Queries) ListProjectResourcesForProjectsInWorkspace(ctx context.Context, arg ListProjectResourcesForProjectsInWorkspaceParams) ([]ProjectResource, error) {
+	rows, err := q.db.Query(ctx, listProjectResourcesForProjectsInWorkspace, arg.WorkspaceID, arg.ProjectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectResource{}
+	for rows.Next() {
+		var i ProjectResource
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.WorkspaceID,
+			&i.ResourceType,
+			&i.ResourceRef,
+			&i.Label,
+			&i.Position,
+			&i.CreatedAt,
+			&i.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjectResourcesInWorkspace = `-- name: ListProjectResourcesInWorkspace :many
 SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
 WHERE project_id = $1 AND workspace_id = $2

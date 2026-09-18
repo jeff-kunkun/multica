@@ -314,3 +314,29 @@ describe("agent draft execution overrides", () => {
     expect(isDraftDescriptionWithinLimit("汉".repeat(256))).toBe(false);
   });
 });
+
+// DENE-304: attaching a new agent to a base role is part of the create body,
+// and an omitted base role has to stay omitted — the server reads a present
+// `parent_agent_id` as "make this a specialisation".
+describe("buildCreateAgentRequest parent_agent_id", () => {
+  it("sends the base role when one was chosen", () => {
+    const request = buildCreateAgentRequest({
+      draft: draft(),
+      runtimeId: "runtime-1",
+      parentAgentId: "agent-base",
+    });
+
+    expect(request.parent_agent_id).toBe("agent-base");
+  });
+
+  it("omits the field for an independent base role", () => {
+    for (const parentAgentId of [undefined, null, ""]) {
+      const request = buildCreateAgentRequest({
+        draft: draft(),
+        runtimeId: "runtime-1",
+        parentAgentId,
+      });
+      expect(request).not.toHaveProperty("parent_agent_id");
+    }
+  });
+});

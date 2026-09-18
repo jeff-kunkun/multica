@@ -18,6 +18,10 @@ import (
 type issueTableRowResponse struct {
 	Issue            IssueResponse `json:"issue"`
 	DirectChildCount int64         `json:"direct_child_count"`
+	// IsPinned is derived from this row's own `pin_rank` arm, so the row flag
+	// and the row order can never disagree. It is an appended response field:
+	// an older client ignores it and degrades to "right order, no badge".
+	IsPinned bool `json:"is_pinned"`
 }
 
 type issueTableRowsResponse struct {
@@ -214,6 +218,16 @@ func (h *Handler) issueTableOrderBy(
 	return resolved, true
 }
 
+// pinCursorRank reports the arm a page's last row came from, or nil when
+// pinned-first is off so the cursor keeps its pre-feature byte shape.
+func pinCursorRank(pinEnabled bool, pinRank int32) *int {
+	if !pinEnabled {
+		return nil
+	}
+	rank := int(pinRank)
+	return &rank
+}
+
 func normalizeIssueTableGroupKey(w http.ResponseWriter, group issueTableGroupSpec, groupKey *string) (*string, bool) {
 	if group.Kind == "none" {
 		if groupKey != nil && strings.TrimSpace(*groupKey) != "" {
@@ -332,6 +346,55 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 	}
 	limitRef := addArg(limit + 1)
 
+	// Pinned-first is a caller-scoped keyset dimension, not a separately
+	// fetched head block. Each arm materializes its own literal `pin_rank` and
+	// keeps its own index-ordered scan, and both arms share the one membership
+	// predicate above — so the row set, and with it `total`, the status facets
+	// and /table/groups, cannot drift. A machine credential (agent / task token)
+	// gets exactly the pre-feature query: pins are a per-human preference.
+	pinEnabled := false
+	var pinCallerID pgtype.UUID
+	if request.Query.Sort.PinnedFirst && !isMachineCredentialActor(r) {
+		if caller := requestUserID(r); caller != "" {
+			if parsed, err := util.ParseUUID(caller); err == nil {
+				pinCallerID = parsed
+				pinEnabled = true
+			}
+		}
+	}
+	pinPredicate := ""
+	plainPredicate := ""
+	pinSetHash := ""
+	if pinEnabled {
+		hash, err := h.issueTablePinnedSetHash(r.Context(), compiled.workspaceID, pinCallerID)
+		if err != nil {
+			slog.Warn("ListIssueTableRows pinned set failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to list table rows")
+			return
+		}
+		pinSetHash = hash
+		userRef := addArg(pinCallerID)
+		pinPredicate = fmt.Sprintf("i.id IN (SELECT pin.item_id FROM pinned_item pin WHERE pin.workspace_id = $1 AND pin.user_id = %s AND pin.item_type = 'issue')", userRef)
+		plainPredicate = fmt.Sprintf("NOT EXISTS (SELECT 1 FROM pinned_item pin WHERE pin.workspace_id = $1 AND pin.user_id = %s AND pin.item_type = 'issue' AND pin.item_id = i.id)", userRef)
+	}
+	// A cursor minted by a pinned-first request is only meaningful to another
+	// pinned-first request over the same pinned set — see issueTablePinnedSetHash.
+	if cursor != nil && cursor.PinSet != "" && (!pinEnabled || cursor.PinSet != pinSetHash) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":   "cursor_query_mismatch",
+			"message": "cursor does not belong to this table query",
+		})
+		return
+	}
+	pinnedArmExhausted := false
+	if pinEnabled && cursor != nil {
+		if cursor.PinRank == nil {
+			writeError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		pinnedArmExhausted = *cursor.PinRank != 0
+	}
+
 	// Pick the requested page before computing hierarchy metadata. The old query
 	// materialized every matching issue and aggregated every parent before LIMIT,
 	// which made a 51-row page spill the entire workspace membership to disk.
@@ -369,16 +432,65 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
   EXISTS (SELECT 1 FROM promoted_parents p WHERE p.id = i.id)
 )`, groupPredicate)
 	}
-	cte := fmt.Sprintf(`%spage AS MATERIALIZED (
-  SELECT i.*, (%s)::text AS table_sort_key
+	// The pinned arm's keyset position is (0, sort key); the plain arm's is
+	// (1, sort key). While pinned rows remain, the plain arm has not emitted
+	// anything yet — so it gets no sort-key predicate at all, otherwise plain
+	// rows sorting before the last pinned row would be skipped. Once the cursor
+	// comes from the plain arm both arms are drained and it pages alone.
+	pinnedArmCursor := "TRUE"
+	plainArmCursor := cursorPredicate
+	if pinEnabled && cursor != nil && !pinnedArmExhausted {
+		pinnedArmCursor = cursorPredicate
+		plainArmCursor = "TRUE"
+	}
+	armOrder := resolvedSort.orderBy()
+	pageColumnList := fmt.Sprintf("i.*, (%s)::text AS table_sort_key", resolvedSort.expression)
+	pageBody := ""
+	switch {
+	case pinEnabled && !pinnedArmExhausted:
+		pageBody = fmt.Sprintf(`  SELECT * FROM (
+    SELECT %s, 0 AS pin_rank
+    FROM %s i
+    WHERE (%s) AND %s AND (%s)
+    ORDER BY %s
+    LIMIT %s
+  ) AS pinned_arm
+  UNION ALL
+  SELECT * FROM (
+    SELECT %s, 1 AS pin_rank
+    FROM %s i
+    WHERE (%s) AND %s AND (%s)
+    ORDER BY %s
+    LIMIT %s
+  ) AS plain_arm`,
+			pageColumnList, pageSource, pagePredicate, pinnedArmCursor, pinPredicate, armOrder, limitRef,
+			pageColumnList, pageSource, pagePredicate, plainArmCursor, plainPredicate, armOrder, limitRef)
+	case pinEnabled:
+		pageBody = fmt.Sprintf(`  SELECT %s, 1 AS pin_rank
+  FROM %s i
+  WHERE (%s) AND %s AND (%s)
+  ORDER BY %s
+  LIMIT %s`,
+			pageColumnList, pageSource, pagePredicate, cursorPredicate, plainPredicate, armOrder, limitRef)
+	default:
+		pageBody = fmt.Sprintf(`  SELECT %s, 1 AS pin_rank
   FROM %s i
   WHERE (%s) AND %s
   ORDER BY %s
-  LIMIT %s
-)`, ctePrefix, resolvedSort.expression, pageSource, pagePredicate, cursorPredicate, resolvedSort.orderBy(), limitRef)
+  LIMIT %s`,
+			pageColumnList, pageSource, pagePredicate, cursorPredicate, armOrder, limitRef)
+	}
+	cte := fmt.Sprintf("%spage AS MATERIALIZED (\n%s\n)", ctePrefix, pageBody)
 	childCountExpr := "0::bigint"
 	if request.Hierarchy.Enabled {
 		childCountExpr = "(SELECT COUNT(*)::bigint FROM membership child WHERE child.parent_issue_id = i.id)"
+	}
+	// pin_rank has to be a materialized column of the CTE and part of the OUTER
+	// ORDER BY, not just the inner one: the outer `FROM page i` re-sorts the
+	// concatenated arms and would otherwise undo the pinned block silently.
+	pinOrderPrefix := ""
+	if pinEnabled {
+		pinOrderPrefix = "i.pin_rank, "
 	}
 
 	query := fmt.Sprintf(`%s
@@ -387,9 +499,9 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at,
 	       i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
 	       i.revision,
-	       %s AS direct_child_count, i.table_sort_key
+	       %s AS direct_child_count, i.table_sort_key, i.pin_rank
 	FROM page i
-	ORDER BY %s`, cte, childCountExpr, resolvedSort.orderBy())
+	ORDER BY %s%s`, cte, childCountExpr, pinOrderPrefix, resolvedSort.orderBy())
 
 	rows, err := h.DB.Query(r.Context(), query, args...)
 	if err != nil {
@@ -403,6 +515,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		issue      db.ListIssuesRow
 		childCount int64
 		sortKey    pgtype.Text
+		pinRank    int32
 	}
 	scanned := make([]scannedRow, 0, limit+1)
 	for rows.Next() {
@@ -433,6 +546,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			&row.issue.Revision,
 			&row.childCount,
 			&row.sortKey,
+			&row.pinRank,
 		); err != nil {
 			writeIssueTableQueryFailure(w, r, "failed to list table rows")
 			return
@@ -476,6 +590,8 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			SortIsNull:       !last.sortKey.Valid,
 			RowCreatedAt:     last.issue.CreatedAt.Time.UTC().Format(time.RFC3339Nano),
 			RowID:            util.UUIDToString(last.issue.ID),
+			PinRank:          pinCursorRank(pinEnabled, last.pinRank),
+			PinSet:           pinSetHash,
 		})
 	}
 
@@ -511,6 +627,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		responseRows[index] = issueTableRowResponse{
 			Issue:            issue,
 			DirectChildCount: row.childCount,
+			IsPinned:         row.pinRank == 0,
 		}
 	}
 

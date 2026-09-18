@@ -145,7 +145,18 @@ func (st *importState) importIssueStatuses(ctx context.Context, q *db.Queries, d
 		if err != nil && !isNoRows(err) {
 			return items, err
 		}
-		if exists && existing.Category != stt.Category {
+		// Built-in rows are platform-seeded, not user data: creating a workspace
+		// seeds the same 7 keys the source exported (see handler/workspace.go),
+		// so an import into a freshly created workspace always finds a same-key
+		// row on the very first batch. Under `fail` — the CLI's default — that
+		// used to 409 before the user saw a single preview row, which is exactly
+		// the runbook flow ("create an empty workspace, then import"). Both
+		// sides carry the seeded name/description/color, so skipping writes what
+		// overwrite would. A built-in is always its own category
+		// (issue_status_system_is_canonical), so the mismatch check below cannot
+		// fire for one and stays untouched for real data.
+		builtin := exists && existing.IsSystem && stt.IsSystem
+		if exists && existing.Category != stt.Category && !builtin {
 			item := ConfigImportItem{SourceID: stt.SourceID, Name: stt.Key, Action: ActionFailed, Reason: "category_mismatch", TargetID: uuidString(existing.ID)}
 			items = append(items, item)
 			if st.req.OnConflict == ConflictFail {
@@ -156,7 +167,7 @@ func (st *importState) importIssueStatuses(ctx context.Context, q *db.Queries, d
 		}
 		action := ActionCreated
 		if exists {
-			if st.req.OnConflict == ConflictRename {
+			if st.req.OnConflict == ConflictRename || (builtin && st.req.OnConflict == ConflictFail) {
 				action = ActionSkipped
 			} else {
 				var cerr error
@@ -1391,11 +1402,15 @@ func (st *importState) importIssueViews(ctx context.Context, q *db.Queries, dry 
 			if defVer == 0 {
 				defVer = 1
 			}
+			visibility := v.Visibility
+			if visibility == "" {
+				visibility = "private"
+			}
 			if isNew {
 				row, err := q.CreateIssueView(ctx, db.CreateIssueViewParams{
 					WorkspaceID: st.env.TargetID, OwnerID: st.env.ImporterID, Name: name,
 					ScopeType: v.ScopeType, ScopeID: mappedScope, ScopeVariant: variant,
-					Visibility: "workspace", DefinitionVersion: defVer, Query: query, Display: display,
+					Visibility: visibility, DefinitionVersion: defVer, Query: query, Display: display,
 				})
 				if err != nil {
 					return "", err
@@ -1403,7 +1418,7 @@ func (st *importState) importIssueViews(ctx context.Context, q *db.Queries, dry 
 				return uuidString(row.ID), nil
 			}
 			_, err := q.UpdateIssueView(ctx, db.UpdateIssueViewParams{
-				ID: id, WorkspaceID: st.env.TargetID, Name: name, Visibility: "workspace",
+				ID: id, WorkspaceID: st.env.TargetID, Name: name, Visibility: visibility,
 				ScopeVariant: variant, Query: query, Display: display, Revision: existing.Revision,
 			})
 			if err != nil {

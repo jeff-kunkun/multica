@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   api,
+  ApiError,
   clientErrorMessage,
   CONFIG_BUNDLE_FORMAT,
   CONFIG_BUNDLE_SCHEMA_VERSION,
@@ -54,12 +55,14 @@ import {
 } from "@multica/ui/components/ui/select";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
+import { isDesktopShell } from "../../platform";
 import {
   SettingsCard,
   SettingsRow,
   SettingsSection,
   SettingsTab,
 } from "./settings-layout";
+import { WorkspaceMigrationCard } from "./workspace-migration-card";
 
 type ImportPhase =
   | { step: "idle" }
@@ -120,6 +123,10 @@ function secretFillHref(item: SecretToFill, slug: string): string | null {
   }
 }
 
+function isConfigEndpointMissing(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404;
+}
+
 function conflictItems(report: ConfigImportReport): ConfigImportItem[] {
   return report.batches.flatMap((batch) =>
     batch.items.filter(
@@ -144,6 +151,7 @@ export function ConfigTransferTab() {
   const [exportSecrets, setExportSecrets] = useState<SecretOmitted[] | null>(
     null,
   );
+  const [endpointMissing, setEndpointMissing] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<LocalConfigBundleError | null>(
     null,
@@ -243,6 +251,11 @@ export function ConfigTransferTab() {
       setExportSecrets(bundle.secrets_omitted);
       toast.success(t(($) => $.config_transfer.export.success));
     } catch (err) {
+      if (isConfigEndpointMissing(err)) {
+        setEndpointMissing(true);
+        setExportError(null);
+        return;
+      }
       const message =
         clientErrorMessage(err) ?? t(($) => $.config_transfer.export.failed);
       setExportError(message);
@@ -271,6 +284,10 @@ export function ConfigTransferTab() {
       });
     } catch (err) {
       setImportPhase({ step: "idle" });
+      if (isConfigEndpointMissing(err)) {
+        setEndpointMissing(true);
+        return;
+      }
       toast.error(
         clientErrorMessage(err) ?? t(($) => $.config_transfer.import.failed),
       );
@@ -329,6 +346,10 @@ export function ConfigTransferTab() {
       // A partial failure still commits earlier batches, so refresh either way.
       await invalidateImportedQueries();
     } catch (err) {
+      if (isConfigEndpointMissing(err)) {
+        setEndpointMissing(true);
+        return;
+      }
       toast.error(
         clientErrorMessage(err) ?? t(($) => $.config_transfer.import.failed),
       );
@@ -359,6 +380,25 @@ export function ConfigTransferTab() {
         </Alert>
       ) : null}
 
+      <WorkspaceMigrationCard />
+
+      {endpointMissing ? (
+        <Alert data-testid="config-transfer-unsupported">
+          <AlertCircle />
+          <AlertTitle>
+            {t(($) => $.config_transfer.unsupported_title)}
+          </AlertTitle>
+          <AlertDescription>
+            <p>{t(($) => $.config_transfer.unsupported)}</p>
+            {isDesktopShell() ? (
+              <p>{t(($) => $.config_transfer.unsupported_use_migration)}</p>
+            ) : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {!endpointMissing ? (
+        <>
       <SettingsSection
         title={t(($) => $.config_transfer.export.title)}
         description={t(($) => $.config_transfer.export.description)}
@@ -739,6 +779,8 @@ export function ConfigTransferTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+        </>
+      ) : null}
     </SettingsTab>
   );
 }

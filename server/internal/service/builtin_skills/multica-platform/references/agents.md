@@ -9,6 +9,7 @@ parameter manual.
 - [Core model](#core-model)
 - [CLI / API entry points](#cli--api-entry-points)
 - [Copying an agent](#copying-an-agent)
+- [Specialisations (two-level inheritance)](#specialisations-two-level-inheritance)
 - [Field contracts](#field-contracts)
 - [Env and secrets](#env-and-secrets)
 - [Skill binding](#skill-binding)
@@ -75,7 +76,11 @@ objects (at most 3); pass `'[]'` on update to clear.
 The HTTP body accepts: `name`, `description`, `instructions`,
 `conversation_starters`, `avatar_url`, `runtime_id`, `runtime_config`,
 `custom_env`, `custom_args`, `model`, `thinking_level`, `service_tier`,
-`visibility`, `max_concurrent_tasks`, `mcp_config`, `skill_ids`.
+`visibility`, `max_concurrent_tasks`, `mcp_config`, `skill_ids`,
+`parent_agent_id` and `runtime_inherited` (specialisation only — see
+`references/specialisations.md`).
+`runtime_id` is required for a base role and optional for a specialisation that
+follows its base role.
 
 ## Copying an agent
 
@@ -111,6 +116,20 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
   the same secret-safe flags as `agent create` (`--custom-env*`, `--mcp-config*`,
   `--runtime-config`), or with `agent env set` after the copy exists.
 - `--no-skills` skips copying the source's skill bindings.
+
+## Specialisations (two-level inheritance)
+
+A **base role** is an agent with no parent; a **specialisation** hangs off
+exactly one of them and stores only its difference. Inheriting from one — the
+two-level cap, what a child picks up (the base role's prompt, its skills, and by
+default its runtime configuration), the `runtime_inherited` flag, the response
+fields that expose the link, and the solidify / archive escape hatches — is
+documented in `references/specialisations.md`. Open it whenever an agent has, or
+is getting, a `parent_agent_id`.
+
+This page still owns the create and update calls that set the link:
+`--parent-agent-id` attaches or re-points, and `--runtime-inherited=false` makes
+the child own its runtime instead of following the base role's.
 
 ## Field contracts
 
@@ -375,3 +394,13 @@ State-changing (require an explicit instruction — do not run speculatively):
   unknown provider-level literal is — model-specific gaps fail at run time.
 - "`set` and `add` are interchangeable for skills." `set` replaces all
   bindings; using it when you meant `add` silently removes capabilities.
+- "A specialisation clones the base role's configuration." It inherits the
+  prompt, the skill set, and (unless it opts out) the runtime configuration;
+  `max_concurrent_tasks`, `custom_args`, `custom_env`, `mcp_config` and
+  permissions stay independently set on each agent.
+- "A base-role edit needs a re-attach to reach its specialisations." It does not
+  — nothing is snapshotted, so the next claim of every specialisation already
+  sees the edit.
+- "Detaching a specialisation keeps the inherited prompt." It does not — the
+  child is left with only its own `instructions`. Solidify first to freeze the
+  text in.

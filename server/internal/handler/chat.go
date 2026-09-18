@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -35,6 +36,11 @@ type CreateChatSessionRequest struct {
 	AgentID   string  `json:"agent_id"`
 	Title     string  `json:"title"`
 	ProjectID *string `json:"project_id"`
+	// ProjectIDs is the multi-project form (DENE-523): a chat can carry several
+	// projects' context at once. project_id remains the single-project form
+	// older clients send; sending both is rejected rather than silently
+	// ignoring one of them. An empty array means "no project context".
+	ProjectIDs []string `json:"project_ids"`
 }
 
 func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
@@ -61,13 +67,11 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	projectID := pgtype.UUID{Valid: false}
-	if req.ProjectID != nil && strings.TrimSpace(*req.ProjectID) != "" {
-		projectID, ok = parseUUIDOrBadRequest(w, strings.TrimSpace(*req.ProjectID), "project_id")
-		if !ok {
-			return
-		}
+	projectIDs, ok := parseChatSessionProjectIDs(w, req.ProjectID, req.ProjectIDs)
+	if !ok {
+		return
 	}
+	projectID := primaryChatSessionProjectID(projectIDs)
 
 	// Verify agent exists in workspace.
 	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
@@ -112,18 +116,13 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
 		return
 	}
-	if projectID.Valid {
-		if _, err := qtx.LockProjectForChatSessionCreate(r.Context(), db.LockProjectForChatSessionCreateParams{
-			ID:          projectID,
-			WorkspaceID: workspaceUUID,
-		}); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				writeError(w, http.StatusNotFound, "project not found")
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "failed to lock project")
+	if err := h.lockChatSessionProjects(r.Context(), qtx, workspaceUUID, projectIDs); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "project not found")
 			return
 		}
+		writeError(w, http.StatusInternalServerError, "failed to lock project")
+		return
 	}
 
 	session, err := qtx.CreateChatSession(r.Context(), db.CreateChatSessionParams{
@@ -143,13 +142,24 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mark chat session explicit")
 		return
 	}
+	if err := h.insertChatSessionProjects(r.Context(), qtx, session, projectIDs); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to store chat session projects")
+		return
+	}
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit chat session create")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, chatSessionToResponse(session))
+	// Hydration mutates the slice element, so retain a concrete slice here
+	// rather than passing a temporary value to writeJSON.
+	responses := []ChatSessionResponse{chatSessionToResponse(session)}
+	if err := h.hydrateChatSessionProjectIDs(r.Context(), responses); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat session projects")
+		return
+	}
+	writeJSON(w, http.StatusCreated, responses[0])
 }
 
 func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
@@ -246,6 +256,10 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load chat channel metadata")
 		return
 	}
+	if err := h.hydrateChatSessionProjectIDs(r.Context(), resp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat session projects")
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -339,19 +353,27 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load chat channel metadata")
 		return
 	}
+	if err := h.hydrateChatSessionProjectIDs(r.Context(), responses); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat session projects")
+		return
+	}
 	writeJSON(w, http.StatusOK, responses[0])
 }
 
 type UpdateChatSessionRequest struct {
 	Title     *string         `json:"title"`
 	ProjectID json.RawMessage `json:"project_id"`
+	// ProjectIDs is the multi-project form (DENE-523): the complete replacement
+	// set, in selection order. RawMessage distinguishes an absent field from
+	// an explicit empty array, which clears the session's project context.
+	ProjectIDs json.RawMessage `json:"project_ids"`
 }
 
 // UpdateChatSession updates one user-editable field on a chat session. Title
-// is surfaced by inline rename; project_id controls the project context used
-// by subsequent turns. Status and pinned keep their dedicated endpoints,
-// agent/creator/workspace are immutable, and the resume pointers
-// (session_id / work_dir / runtime_id) remain daemon-owned.
+// is surfaced by inline rename; project_id (single) and project_ids (set)
+// control the project context used by subsequent turns. Status and pinned keep
+// their dedicated endpoints, agent/creator/workspace are immutable, and the
+// resume pointers (session_id / work_dir / runtime_id) remain daemon-owned.
 func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -367,8 +389,9 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 	hasTitle := req.Title != nil
 	hasProjectID := req.ProjectID != nil
-	if hasTitle == hasProjectID {
-		writeError(w, http.StatusBadRequest, "exactly one of title or project_id is required")
+	hasProjectIDs := req.ProjectIDs != nil
+	if !exactlyOneTrue(hasTitle, hasProjectID, hasProjectIDs) {
+		writeError(w, http.StatusBadRequest, "exactly one of title, project_id or project_ids is required")
 		return
 	}
 
@@ -382,7 +405,8 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		err     error
 	)
 	var projectIDChanged bool
-	if hasTitle {
+	switch {
+	case hasTitle:
 		title := strings.TrimSpace(*req.Title)
 		if title == "" {
 			writeError(w, http.StatusBadRequest, "title is required")
@@ -396,8 +420,10 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 			ID:    session.ID,
 			Title: title,
 		})
-	} else {
-		projectID := pgtype.UUID{Valid: false}
+	case hasProjectID:
+		// Single-project form: it replaces the whole set with one project (or
+		// clears it), which is exactly what an older client means by it.
+		var projectIDs []pgtype.UUID
 		if string(req.ProjectID) != "null" {
 			var rawProjectID string
 			if err := json.Unmarshal(req.ProjectID, &rawProjectID); err != nil {
@@ -409,46 +435,39 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "project_id must be a UUID or null")
 				return
 			}
-			projectID, ok = parseUUIDOrBadRequest(w, rawProjectID, "project_id")
+			projectID, ok := parseUUIDOrBadRequest(w, rawProjectID, "project_id")
 			if !ok {
 				return
 			}
+			projectIDs = []pgtype.UUID{projectID}
 		}
-
-		tx, txErr := h.TxStarter.Begin(r.Context())
-		if txErr != nil {
-			writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		updated, err = h.replaceChatSessionProjects(r.Context(), session, projectIDs)
+		projectIDChanged = true
+	default:
+		var raw []string
+		if err := json.Unmarshal(req.ProjectIDs, &raw); err != nil {
+			writeError(w, http.StatusBadRequest, "project_ids must be an array of UUIDs")
 			return
 		}
-		defer tx.Rollback(r.Context())
-		qtx := h.Queries.WithTx(tx)
-
-		if projectID.Valid {
-			if _, lockErr := qtx.LockProjectForChatSessionCreate(r.Context(), db.LockProjectForChatSessionCreateParams{
-				ID:          projectID,
-				WorkspaceID: session.WorkspaceID,
-			}); lockErr != nil {
-				if errors.Is(lockErr, pgx.ErrNoRows) {
-					writeError(w, http.StatusNotFound, "project not found")
-					return
-				}
-				writeError(w, http.StatusInternalServerError, "failed to lock project")
-				return
-			}
+		projectIDs, ok := parseChatSessionProjectIDList(w, raw)
+		if !ok {
+			return
 		}
-
-		updated, err = qtx.UpdateChatSessionProject(r.Context(), db.UpdateChatSessionProjectParams{
-			ID:          session.ID,
-			WorkspaceID: session.WorkspaceID,
-			ProjectID:   projectID,
-		})
-		if err == nil {
-			err = tx.Commit(r.Context())
-		}
+		updated, err = h.replaceChatSessionProjects(r.Context(), session, projectIDs)
 		projectIDChanged = true
 	}
-	if err != nil {
+	switch {
+	case errors.Is(err, errChatSessionProjectNotFound):
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	case err != nil:
 		writeError(w, http.StatusInternalServerError, "failed to update chat session")
+		return
+	}
+
+	responses := []ChatSessionResponse{chatSessionToResponse(updated)}
+	if err := h.hydrateChatSessionProjectIDs(r.Context(), responses); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat session projects")
 		return
 	}
 
@@ -461,11 +480,67 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	if projectIDChanged {
 		projectID := uuidToPtr(updated.ProjectID)
 		payload.ProjectID = &projectID
+		// The full set rides the same event: another device must patch every
+		// chip, not just the mirrored primary.
+		projectIDs := responses[0].ProjectIDs
+		payload.ProjectIDs = &projectIDs
 	}
 	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, payload)
 
-	writeJSON(w, http.StatusOK, chatSessionToResponse(updated))
+	writeJSON(w, http.StatusOK, responses[0])
 }
+
+// replaceChatSessionProjects rewrites a session's project set inside its own
+// transaction: validate the projects, store the ordered set, and mirror the
+// first project onto the legacy chat_session.project_id column. Returns the
+// updated session row, or errChatSessionProjectNotFound when a project is not
+// a member of this workspace.
+//
+// The set, not the column, is authoritative: a caller that used to pass one
+// project_id now passes a one-element set, so both request forms share one
+// write path and can never disagree.
+func (h *Handler) replaceChatSessionProjects(ctx context.Context, session db.ChatSession, projectIDs []pgtype.UUID) (db.ChatSession, error) {
+	tx, txErr := h.TxStarter.Begin(ctx)
+	if txErr != nil {
+		return db.ChatSession{}, txErr
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	if lockErr := h.lockChatSessionProjects(ctx, qtx, session.WorkspaceID, projectIDs); lockErr != nil {
+		if errors.Is(lockErr, pgx.ErrNoRows) {
+			return db.ChatSession{}, errChatSessionProjectNotFound
+		}
+		return db.ChatSession{}, lockErr
+	}
+	if delErr := qtx.DeleteChatSessionProjectsForSession(ctx, db.DeleteChatSessionProjectsForSessionParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   session.WorkspaceID,
+	}); delErr != nil {
+		return db.ChatSession{}, delErr
+	}
+	if insErr := h.insertChatSessionProjects(ctx, qtx, session, projectIDs); insErr != nil {
+		return db.ChatSession{}, insErr
+	}
+
+	updated, err := qtx.UpdateChatSessionProject(ctx, db.UpdateChatSessionProjectParams{
+		ID:          session.ID,
+		WorkspaceID: session.WorkspaceID,
+		ProjectID:   primaryChatSessionProjectID(projectIDs),
+	})
+	if err != nil {
+		return db.ChatSession{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.ChatSession{}, err
+	}
+	return updated, nil
+}
+
+// errChatSessionProjectNotFound means a project in the requested set does not
+// belong to the session's workspace — the same 404 an unknown project gets on
+// the single-project path, and never a hint that it exists elsewhere.
+var errChatSessionProjectNotFound = errors.New("chat session project not found")
 
 type SetChatSessionPinnedRequest struct {
 	Pinned bool `json:"pinned"`
@@ -512,7 +587,12 @@ func (h *Handler) SetChatSessionPinned(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:     timestampToString(updated.UpdatedAt),
 	})
 
-	writeJSON(w, http.StatusOK, chatSessionToResponse(updated))
+	responses := []ChatSessionResponse{chatSessionToResponse(updated)}
+	if err := h.hydrateChatSessionProjectIDs(r.Context(), responses); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat session projects")
+		return
+	}
+	writeJSON(w, http.StatusOK, responses[0])
 }
 
 type SetChatSessionArchivedRequest struct {
@@ -666,7 +746,12 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 		UpdatedAt:     timestampToString(updated.UpdatedAt),
 	})
 
-	writeJSON(w, http.StatusOK, chatSessionToResponse(updated))
+	responses := []ChatSessionResponse{chatSessionToResponse(updated)}
+	if err := h.hydrateChatSessionProjectIDs(r.Context(), responses); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat session projects")
+		return
+	}
+	writeJSON(w, http.StatusOK, responses[0])
 }
 
 // DeleteChatSession hard-deletes a chat session owned by the caller. The
@@ -756,6 +841,12 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	// editing. A no-op for ordinary chats, which never have one.
 	if err := qtx.DeleteAgentBuilderDraft(r.Context(), session.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete agent builder draft")
+		return
+	}
+	// Same no-FK chore, for the structured draft an alignment conversation was
+	// building. A no-op for ordinary chats, which never have one.
+	if err := qtx.DeleteIssueDraft(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete issue draft")
 		return
 	}
 
@@ -1913,8 +2004,12 @@ type ChatSessionResponse struct {
 	AgentID     string  `json:"agent_id"`
 	CreatorID   string  `json:"creator_id"`
 	ProjectID   *string `json:"project_id"`
-	Title       string  `json:"title"`
-	Status      string  `json:"status"`
+	// ProjectIDs is the session's full project set in selection order
+	// (DENE-523); ProjectID above mirrors its first entry for older clients.
+	// Always an array — empty when the session carries no project context.
+	ProjectIDs []string `json:"project_ids"`
+	Title      string   `json:"title"`
+	Status     string   `json:"status"`
 	// Only populated by list endpoints — single-session fetches return 0/false/nil.
 	// HasUnread is kept as a convenience (== UnreadCount > 0) for existing consumers.
 	HasUnread   bool             `json:"has_unread"`
@@ -1964,6 +2059,153 @@ func (h *Handler) hydrateChatSessionChannelMetadata(ctx context.Context, session
 			ChannelType: binding.ChannelType, InstallationID: uuidToString(binding.InstallationID), RouteRevision: binding.RouteRevision,
 		}
 		sessions[i].IsCurrentChannelRoute = &current
+	}
+	return nil
+}
+
+// chatSessionProjectMax caps how many projects one chat can attach. A
+// defensive ceiling, not a product limit: the brief carries every project's
+// description and resources, so an unbounded set would let one session bloat
+// the prompt. The UI picks two or three in practice.
+const chatSessionProjectMax = 10
+
+// parseChatSessionProjectIDs resolves the project set a create request carries
+// from either form: project_ids (the set) or project_id (one project, the form
+// older clients send). Sending both is an error rather than a silent
+// preference, and an empty project_ids means "no project context".
+//
+// Returns ok=false after writing the error response.
+func parseChatSessionProjectIDs(w http.ResponseWriter, reqProjectID *string, reqProjectIDs []string) ([]pgtype.UUID, bool) {
+	if reqProjectID != nil && reqProjectIDs != nil {
+		writeError(w, http.StatusBadRequest, "exactly one of project_id or project_ids is allowed")
+		return nil, false
+	}
+	if reqProjectIDs != nil {
+		return parseChatSessionProjectIDList(w, reqProjectIDs)
+	}
+	if reqProjectID == nil || strings.TrimSpace(*reqProjectID) == "" {
+		return nil, true
+	}
+	projectID, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(*reqProjectID), "project_id")
+	if !ok {
+		return nil, false
+	}
+	return []pgtype.UUID{projectID}, true
+}
+
+// parseChatSessionProjectIDList validates a project set's members and size.
+// Returns ok=false after writing the error response.
+func parseChatSessionProjectIDList(w http.ResponseWriter, raw []string) ([]pgtype.UUID, bool) {
+	if len(raw) > chatSessionProjectMax {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("too many projects: at most %d can be attached to one chat", chatSessionProjectMax))
+		return nil, false
+	}
+	projectIDs := make([]pgtype.UUID, 0, len(raw))
+	for _, value := range raw {
+		projectID, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(value), "project_ids")
+		if !ok {
+			return nil, false
+		}
+		projectIDs = append(projectIDs, projectID)
+	}
+	return projectIDs, true
+}
+
+// primaryChatSessionProjectID is the first project of a set — the one the
+// legacy chat_session.project_id column mirrors and the one an older daemon
+// renders.
+func primaryChatSessionProjectID(projectIDs []pgtype.UUID) pgtype.UUID {
+	if len(projectIDs) == 0 {
+		return pgtype.UUID{}
+	}
+	return projectIDs[0]
+}
+
+// exactlyOneTrue reports whether exactly one flag is set. The chat-session
+// update endpoint takes three mutually exclusive fields (title, project_id,
+// project_ids) and must reject "none" and "more than one" alike.
+func exactlyOneTrue(flags ...bool) bool {
+	count := 0
+	for _, flag := range flags {
+		if flag {
+			count++
+		}
+	}
+	return count == 1
+}
+
+// lockChatSessionProjects takes the row lock every chat-session write path
+// needs before it may point a session at a project. It conflicts with project
+// deletion, so a set cannot commit a soft project reference after the delete
+// transaction has already swept the sessions that referenced it (#5219).
+//
+// Returns pgx.ErrNoRows when a project is missing from this workspace.
+func (h *Handler) lockChatSessionProjects(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, projectIDs []pgtype.UUID) error {
+	for _, projectID := range projectIDs {
+		if _, err := qtx.LockProjectForChatSessionCreate(ctx, db.LockProjectForChatSessionCreateParams{
+			ID:          projectID,
+			WorkspaceID: workspaceID,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// insertChatSessionProjects stores a session's project set in selection order.
+// Callers have already validated and locked the projects; the unique index
+// makes a repeated project in one request a no-op.
+func (h *Handler) insertChatSessionProjects(ctx context.Context, qtx *db.Queries, session db.ChatSession, projectIDs []pgtype.UUID) error {
+	for position, projectID := range projectIDs {
+		if err := qtx.InsertChatSessionProject(ctx, db.InsertChatSessionProjectParams{
+			WorkspaceID:   session.WorkspaceID,
+			ChatSessionID: session.ID,
+			ProjectID:     projectID,
+			Position:      int32(position),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// hydrateChatSessionProjectIDs fills each response's project_ids from the
+// authoritative set in chat_session_project, in selection order.
+//
+// A session whose set is empty but whose legacy project_id is still set falls
+// back to that one project. That row was written by a server predating the set
+// (a rolling deploy) or landed before the backfill, and reporting "no project"
+// would drop context the session still names. chat_session.project_id is
+// likewise the source for the singular field, so the two never disagree.
+func (h *Handler) hydrateChatSessionProjectIDs(ctx context.Context, sessions []ChatSessionResponse) error {
+	for i := range sessions {
+		sessions[i].ProjectIDs = []string{}
+	}
+	if len(sessions) == 0 {
+		return nil
+	}
+
+	ids := make([]pgtype.UUID, 0, len(sessions))
+	for _, session := range sessions {
+		ids = append(ids, parseUUID(session.ID))
+	}
+	rows, err := h.Queries.ListChatSessionProjectIDsForSessions(ctx, ids)
+	if err != nil {
+		return err
+	}
+	bySession := make(map[string][]string, len(sessions))
+	for _, row := range rows {
+		key := uuidToString(row.ChatSessionID)
+		bySession[key] = append(bySession[key], uuidToString(row.ProjectID))
+	}
+	for i := range sessions {
+		if set, ok := bySession[sessions[i].ID]; ok {
+			sessions[i].ProjectIDs = set
+			continue
+		}
+		if sessions[i].ProjectID != nil {
+			sessions[i].ProjectIDs = []string{*sessions[i].ProjectID}
+		}
 	}
 	return nil
 }

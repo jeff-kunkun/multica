@@ -148,7 +148,7 @@ describe("issueTableRowPageOptions", () => {
       group_key: "todo",
       parent_id: null,
       total: issues.length,
-      rows: issues.map((issue) => ({ issue, direct_child_count: 0 })),
+      rows: issues.map((issue) => ({ issue, direct_child_count: 0, is_pinned: false })),
       branch_total: issues.length,
       next_cursor: null,
     };

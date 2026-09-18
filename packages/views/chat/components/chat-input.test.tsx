@@ -579,8 +579,8 @@ describe("ChatInput project context", () => {
   it("warns next to the chip when the agent's daemon cannot apply the project description", () => {
     renderInput({
       projects: [sampleProject],
-      projectId: "project-alpha",
-      onProjectChange: vi.fn(),
+      projectIds: ["project-alpha"],
+      onProjectsChange: vi.fn(),
       projectContextUnsupported: true,
     });
 
@@ -598,8 +598,8 @@ describe("ChatInput project context", () => {
   it("shows no daemon warning when support is current or unknown", () => {
     renderInput({
       projects: [sampleProject],
-      projectId: "project-alpha",
-      onProjectChange: vi.fn(),
+      projectIds: ["project-alpha"],
+      onProjectsChange: vi.fn(),
     });
 
     expect(
@@ -609,25 +609,79 @@ describe("ChatInput project context", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders the selected project chip and forwards context changes", () => {
-    const onProjectChange = vi.fn();
+  const sampleProjectB: ChatProject = {
+    ...sampleProject,
+    id: "project-beta",
+    title: "Project Beta",
+    icon: "\u{1F4D7}",
+  };
+
+  // Acceptance for DENE-522: every attached project is visible above the
+  // composer, not just the primary one.
+  it("renders one chip per attached project, in selection order", () => {
+    renderInput({
+      projects: [sampleProject, sampleProjectB],
+      projectIds: ["project-beta", "project-alpha"],
+      onProjectsChange: vi.fn(),
+    });
+
+    const chips = screen.getAllByRole("button", { name: "Change project context" });
+    expect(chips.map((chip) => chip.textContent)).toEqual([
+      "project-beta",
+      "project-alpha",
+    ]);
+  });
+
+  // The chips are the only affordance that drops ONE project; the "+" menu
+  // clears all of them. Removing the second must leave the first attached.
+  it("removes only the cleared project from the set", () => {
+    const onProjectsChange = vi.fn();
+    renderInput({
+      projects: [sampleProject, sampleProjectB],
+      projectIds: ["project-alpha", "project-beta"],
+      onProjectsChange,
+    });
+
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Remove project context" })[1]!,
+    );
+
+    expect(onProjectsChange).toHaveBeenCalledWith(["project-alpha"]);
+  });
+
+  // An id the project list does not know cannot be labelled or acted on, so it
+  // must not paint a blank pill.
+  it("skips a chip for a project the list does not know", () => {
     renderInput({
       projects: [sampleProject],
-      projectId: "project-alpha",
-      onProjectChange,
+      projectIds: ["project-alpha", "project-gone"],
+      onProjectsChange: vi.fn(),
+    });
+
+    expect(
+      screen.getAllByRole("button", { name: "Change project context" }),
+    ).toHaveLength(1);
+  });
+
+  it("renders the selected project chip and forwards context changes", () => {
+    const onProjectsChange = vi.fn();
+    renderInput({
+      projects: [sampleProject],
+      projectIds: ["project-alpha"],
+      onProjectsChange,
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Change project context" }));
 
-    expect(onProjectChange).toHaveBeenCalledWith(null);
+    expect(onProjectsChange).toHaveBeenCalledWith([]);
   });
 
   it("allows removing project context while the agent is running", () => {
-    const onProjectChange = vi.fn();
+    const onProjectsChange = vi.fn();
     renderInput({
       projects: [sampleProject],
-      projectId: "project-alpha",
-      onProjectChange,
+      projectIds: ["project-alpha"],
+      onProjectsChange,
       isRunning: true,
     });
 
@@ -636,7 +690,7 @@ describe("ChatInput project context", () => {
     });
     expect(projectControl).not.toBeDisabled();
     fireEvent.click(projectControl);
-    expect(onProjectChange).toHaveBeenCalledWith(null);
+    expect(onProjectsChange).toHaveBeenCalledWith([]);
   });
 
   it("swaps Stop for Queue Send when the running composer has content", async () => {
@@ -722,11 +776,11 @@ describe("ChatInput project context", () => {
       resolveSend = res;
     });
     const onSend = vi.fn<ChatInputOnSend>(() => sendPromise);
-    const onProjectChange = vi.fn();
+    const onProjectsChange = vi.fn();
     renderInput({
       projects: [sampleProject],
-      projectId: "project-alpha",
-      onProjectChange,
+      projectIds: ["project-alpha"],
+      onProjectsChange,
       onSend,
     });
 
@@ -761,7 +815,7 @@ describe("ChatInput project context", () => {
       screen.getByRole("button", { name: "Change project context" }),
     ).toHaveAttribute("data-project-picker-disabled", "true");
     fireEvent.click(screen.getByRole("button", { name: "Change project context" }));
-    expect(onProjectChange).not.toHaveBeenCalled();
+    expect(onProjectsChange).not.toHaveBeenCalled();
 
     // Resolve the pending send so the promise doesn't dangle past the test.
     await act(async () => {

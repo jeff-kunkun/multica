@@ -67,6 +67,34 @@ const (
 	modelAtCapacityWitness = "at capacity"
 )
 
+// upstreamAuthRecoveredWitness and upstreamAuthInferenceRejectedWitness are the
+// two halves of the Grok CLI's (xAI v1.0.30) report that its OWN credential
+// recovery completed and the freshly authenticated inference call was refused
+// anyway:
+//
+//	Auth recovery succeeded
+//	authenticated inference requests were still rejected (401)
+//	session/prompt: Internal error (code=-32603)
+//
+// That combination means the credential is provably good — the CLI validated
+// it a moment earlier — and the upstream still answered the authenticated call
+// with 401. It is a provider-side fault, not an expired login, so it must beat
+// rule 3's bare-401 rule: landing in provider_auth_or_access tells the member to
+// sign in again (the CLI's own "run grok login" advice), which cannot fix a
+// service that is rejecting valid credentials, and keeps the run off the
+// auto-retry allowlist.
+//
+// Both halves are required, and neither is a status code: the pair is what
+// proves "we authenticated, then were refused", so a stray 401 somewhere in a
+// log tail cannot pull an unrelated failure into the retryable provider bucket.
+// If xAI rewords either line the pair stops matching and the failure falls back
+// to today's rule-3 verdict — a safe regression that this rule can be widened
+// for. Do not relax it to the 401 alone.
+const (
+	upstreamAuthRecoveredWitness         = "auth recovery succeeded"
+	upstreamAuthInferenceRejectedWitness = "authenticated inference requests were still rejected"
+)
+
 // Classify maps a free-form error string from the agent runtime / CLI
 // to one of the 14 agent_error.* sub-reasons. Always returns a valid
 // Reason; falls back to ReasonAgentUnknown when no rule matches and for
@@ -117,6 +145,13 @@ func Classify(rawError string) Reason {
 	// quota phrasing and must not land here (DENE-224).
 	case containsAll(lower, modelSelectedWitness, modelAtCapacityWitness):
 		return ReasonAgentProviderCapacityOrRateLimit
+
+	// The runtime authenticated successfully and the upstream still rejected the
+	// authenticated call as unauthenticated. Must beat rule 3's bare-401 rule;
+	// see the witnesses' docstring. Same retryable provider-fault bucket as a
+	// 5xx, because that is what it is — a fault on the provider's side.
+	case containsAll(lower, upstreamAuthRecoveredWitness, upstreamAuthInferenceRejectedWitness):
+		return ReasonAgentProviderServerError
 
 	// 1. Context / token window overflow. Checked early so "token
 	//    limit" doesn't get swallowed by the broader "limit" / "quota"
@@ -206,7 +241,10 @@ func Classify(rawError string) Reason {
 
 	// 6. Provider 5xx / server error. The 5xx regex is checked here
 	//    rather than as plain string matches because the SQL uses an
-	//    anchored regex — see providerHTTP5xxRe's docstring.
+	//    anchored regex — see providerHTTP5xxRe's docstring. The Grok
+	//    "authenticated then still rejected (401)" shape is the
+	//    early-hit above and lands in this same bucket: a provider
+	//    fault, whichever layer of the provider produced it.
 	case containsAny(lower,
 		"server had an error",
 		"provider returned error",
@@ -247,6 +285,23 @@ func Classify(rawError string) Reason {
 	//    matching rule 13 by accident) and agent_error.unknown respectively;
 	//    neither is on the retry allowlist, so a transient cut ended the task
 	//    outright and max_attempts never applied (#6522).
+	//    DeepSeek/DSH adapter stream-death copy (DENE-235) is the same class:
+	//    the upstream SSE connection died before a terminal signal. parseSse
+	//    throws LlmError("SSE stream ended without [DONE]", "STREAM_CLOSED")
+	//    (and the payload-stream variant with the same STREAM_CLOSED code);
+	//    the witness is "stream ended without" so both phrasings match.
+	//    STREAM_CLOSED is not in DSH's DEFAULT_RETRYABLE_CODES
+	//    (EMPTY_RESPONSE / RATE_LIMIT / SERVER / TIMEOUT / TRANSPORT), so it
+	//    skips DSH's own retry and reaches Multica as agent_error.unknown.
+	//    unknown is not on retryableReasons — the only agent_error.* entries
+	//    there are provider_network (MUL-4910) and provider_capacity_or_rate_limit
+	//    (DENE-210) — so a transient cut became a terminal failure. The idle
+	//    watchdog ("DeepSeek stream idle timeout after Nms", TIMEOUT) and the
+	//    TRANSPORT wrap ("DeepSeek API stream from <baseURL> failed") are the
+	//    other two stream-death shapes from the same catch; TIMEOUT/TRANSPORT
+	//    are DSH-retryable and only arrive here after that budget is exhausted
+	//    (dsh-llm-retry recover() returns next(), the agent loop rethrows the
+	//    original LlmError). Semantic witnesses: baseURL and timeout ms vary.
 	//    Pi's OpenAI-compatible SDK surfaces a dropped LiteLLM/OpenAI call as
 	//    the bare strings "Connection error." and "Request timed out." on
 	//    turn_end.errorMessage (then exits 1). Those used to fall through to
@@ -260,6 +315,9 @@ func Classify(rawError string) Reason {
 			"stream disconnected",
 			opencodeStreamEndedPrefix,
 			codeartsStreamEndedPrefix,
+			"stream ended without",
+			"stream idle timeout",
+			"api stream from",
 			"connection closed",
 			"mid-response",
 			"error sending request",
@@ -521,6 +579,23 @@ var legacyConcurrentRequestLimitReasons = map[string]bool{
 	"agent_error":                           true,
 }
 
+// legacyUpstreamAuthFaultReasons are the stale buckets a daemon predating the
+// upstreamAuth* rule reports for this wire shape: provider_auth_or_access from
+// its own rule 3, which takes the bare "(401)" before anything else looks at
+// the text; unknown if its rules missed the blob entirely; and the pre-MUL-1949
+// coarse agent_error.
+//
+// The upgrade matters more than the label here. provider_auth_or_access is off
+// the retry allowlist, so an un-upgraded host terminates the run on its first
+// attempt and tells the member to sign in again — exactly the two outcomes
+// DENE-596 exists to remove, on precisely the hosts that hit this most. Waiting
+// for every daemon to update would leave them there.
+var legacyUpstreamAuthFaultReasons = map[string]bool{
+	string(ReasonAgentProviderAuthOrAccess): true,
+	string(ReasonAgentUnknown):              true,
+	"agent_error":                           true,
+}
+
 // NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
 // onto the taxonomy this server understands, using the raw error text as the
 // witness. It returns the reason unchanged when nothing applies.
@@ -540,6 +615,16 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	if legacyConcurrentRequestLimitReasons[reason] &&
 		strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
 		return ReasonAgentProviderCapacityOrRateLimit
+	}
+	// DENE-596: the same mixed-version gap on the Grok upstream-auth-fault
+	// shape. An installed daemon predating the rule above classifies the blob
+	// from its bare "(401)" and reports provider_auth_or_access, which is off
+	// the retry allowlist and whose member copy says "sign in again". Both of
+	// those are wrong here, and the pair of witnesses in the raw text is enough
+	// to say so at the server, without waiting on the daemon fleet.
+	if legacyUpstreamAuthFaultReasons[reason] &&
+		containsAll(strings.ToLower(rawError), upstreamAuthRecoveredWitness, upstreamAuthInferenceRejectedWitness) {
+		return ReasonAgentProviderServerError
 	}
 	if legacySkillBundleReasons[reason] &&
 		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {

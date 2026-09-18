@@ -24,6 +24,7 @@ import type {
 import type { IssueGroupBranches } from "./use-issue-group-branches";
 
 const EMPTY_ISSUES: Issue[] = [];
+const EMPTY_PINNED_IDS: ReadonlySet<string> = new Set();
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
 const EMPTY_PROJECTS: Project[] = [];
 
@@ -56,6 +57,10 @@ export interface IssueSurfaceData {
   projectIssues: Issue[];
   issues: Issue[];
   swimlaneIssues: Issue[];
+  /** Issue ids the ACTIVE branch projection served as pinned. Empty when the
+   *  surface's view mode has no server-ranked rows (Table owns its own rows,
+   *  and Gantt does not rank by pins at all). */
+  pinnedIssueIds: ReadonlySet<string>;
   /** Gantt only: the canvas rows the agents-working filter would leave on
    *  screen. `undefined` on every other view mode, where the header chip
    *  sources its count from the `working_agents` server facet instead. */
@@ -414,6 +419,11 @@ export function useIssueSurfaceData({
     projectIssues: surfaceIssues,
     issues,
     swimlaneIssues,
+    pinnedIssueIds: serverStatusBranches.enabled
+      ? serverStatusBranches.pinnedIssueIds
+      : serverGroupBranches.enabled
+        ? serverGroupBranches.pinnedIssueIds
+        : EMPTY_PINNED_IDS,
     ganttWorkingScopeIssues,
     filteredGanttIssues,
     ganttIssues,
