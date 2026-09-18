@@ -1221,6 +1221,7 @@ type DaemonHeartbeatRequest struct {
 	RuntimeID           string                       `json:"runtime_id"`
 	SupportsBatchImport bool                         `json:"supports_batch_import,omitempty"`
 	PlanLimits          *protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
+	Jev                 *protocol.JevStatusSnapshot  `json:"jev,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -1357,6 +1358,12 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid plan_limits")
 		return
 	}
+	jevStatusJSON, jevValidationErr := validateJevStatusSnapshot(req.Jev)
+	if jevValidationErr != nil {
+		outcome = "invalid_jev_status"
+		writeError(w, http.StatusBadRequest, "invalid jev")
+		return
+	}
 
 	updateStart := time.Now()
 	if err := h.recordHeartbeat(r.Context(), rt); err != nil {
@@ -1366,6 +1373,12 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.applyStoredPlanLimits(r.Context(), rt.ID, uuidToString(rt.WorkspaceID), planLimitsJSON); err != nil {
+		updateMs = time.Since(updateStart).Milliseconds()
+		outcome = "error_update"
+		writeError(w, http.StatusInternalServerError, "heartbeat failed")
+		return
+	}
+	if err := h.applyStoredJevStatus(r.Context(), rt.ID, uuidToString(rt.WorkspaceID), jevStatusJSON); err != nil {
 		updateMs = time.Since(updateStart).Milliseconds()
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
@@ -1420,7 +1433,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // captured each runtime's liveness state in a connection lease, so the hot
 // path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
 // fallback for a daemon that stops receiving WebSocket acknowledgements.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot, jev *protocol.JevStatusSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
@@ -1434,6 +1447,10 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	planLimitsJSON, err := validatePlanLimitsSnapshot(planLimits, state.Provider)
 	if err != nil {
 		return nil, fmt.Errorf("invalid plan_limits: %w", err)
+	}
+	jevStatusJSON, err := validateJevStatusSnapshot(jev)
+	if err != nil {
+		return nil, fmt.Errorf("invalid jev: %w", err)
 	}
 	if err := h.recordHeartbeatLease(ctx, runtimeID, lease); err != nil {
 		if isNotFound(err) {
@@ -1450,6 +1467,9 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		return nil, fmt.Errorf("invalid runtime_id: %w", err)
 	}
 	if err := h.applyStoredPlanLimits(ctx, runtimeUUID, state.WorkspaceID, planLimitsJSON); err != nil {
+		return nil, err
+	}
+	if err := h.applyStoredJevStatus(ctx, runtimeUUID, state.WorkspaceID, jevStatusJSON); err != nil {
 		return nil, err
 	}
 	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
@@ -1492,6 +1512,31 @@ func (h *Handler) applyStoredPlanLimits(ctx context.Context, runtimeUUID pgtype.
 		h.publish(protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
 			"runtime_id":          uuidToString(runtimeUUID),
 			"plan_limits_updated": true,
+		})
+	}
+	return nil
+}
+
+// applyStoredJevStatus persists the host-level JEV snapshot onto this runtime
+// row and, only when the row actually changed, asks clients to refetch runtime
+// state. Empty bytes mean the daemon did not send the field at all (an older
+// daemon) — the stored column stays untouched so a NULL keeps reading as
+// unknown instead of being overwritten with a stale value.
+func (h *Handler) applyStoredJevStatus(ctx context.Context, runtimeUUID pgtype.UUID, workspaceID string, jevStatusJSON []byte) error {
+	if len(jevStatusJSON) == 0 {
+		return nil
+	}
+	updated, err := h.Queries.UpdateAgentRuntimeJevStatus(ctx, db.UpdateAgentRuntimeJevStatusParams{
+		ID:        runtimeUUID,
+		JevStatus: jevStatusJSON,
+	})
+	if err != nil {
+		return fmt.Errorf("update runtime jev status: %w", err)
+	}
+	if updated > 0 && workspaceID != "" {
+		h.publish(protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
+			"runtime_id":  uuidToString(runtimeUUID),
+			"jev_updated": true,
 		})
 	}
 	return nil

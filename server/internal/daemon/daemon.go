@@ -529,6 +529,15 @@ type Daemon struct {
 	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	planLimitsMu sync.RWMutex
 	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
+	// jevStatus is the host-level JEV snapshot, refreshed once per heartbeat
+	// tick and shared by every runtime frame of that tick (the state directory
+	// is per-machine, not per-runtime).
+	jevStatusMu sync.RWMutex
+	jevStatus   *protocol.JevStatusSnapshot
+	// jevStateDirOverride points the reader at a fixture directory in tests.
+	// Empty in production, where the path follows XDG_STATE_HOME, then
+	// os.UserHomeDir()/.local/state/jev.
+	jevStateDirOverride string
 	// accountQuota tracks per-directory CLI account quota exhaustion: which
 	// account directory is out of quota, and until when. AGY reads it to fail
 	// over to another isolation slot; every other CLI reads it through the
@@ -4568,7 +4577,8 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
 	d.maybeRefreshPlanQuota()
-	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid))
+	d.refreshJevStatus()
+	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid), d.jevStatusSnapshot())
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -4719,7 +4729,8 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		return
 	}
 	hbCtx, cancel := context.WithTimeout(ctx, pendingWorkHeartbeatTimeout)
-	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID))
+	d.refreshJevStatus()
+	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID), d.jevStatusSnapshot())
 	cancel()
 	if err != nil {
 		if isRuntimeNotFoundError(err) {

@@ -892,6 +892,16 @@
     "tokens_label": "トークン · 30日",
     "cost_label": "概算コスト · 30日"
   },
+  "jev": {
+    "label": "JEV",
+    "status_active": "利用可能",
+    "status_fallback": "フォールバック",
+    "status_off": "無効",
+    "status_unknown": "不明",
+    "cooldown": "クールダウン残り {{when}}",
+    "reason_manual": "手動で停止中",
+    "reason_upstream": "上流が連続失敗"
+  },
   "live_peek": {
     "current_issue_label": "現在の作業",
     "no_current_issue": "タスクなし",

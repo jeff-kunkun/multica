@@ -999,6 +999,16 @@
     "tokens_label": "Token · 近 30 天",
     "cost_label": "费用估算 · 近 30 天"
   },
+  "jev": {
+    "label": "JEV",
+    "status_active": "可用",
+    "status_fallback": "已回落",
+    "status_off": "未启用",
+    "status_unknown": "未知",
+    "cooldown": "冷却剩余 {{when}}",
+    "reason_manual": "已手动停用",
+    "reason_upstream": "上游连续失败"
+  },
   "live_peek": {
     "current_issue_label": "正在处理",
     "no_current_issue": "暂无任务",

@@ -641,12 +641,13 @@ type (
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
-func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, planLimits *protocol.PlanLimitsSnapshot) (*HeartbeatResponse, error) {
+func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, planLimits *protocol.PlanLimitsSnapshot, jev *protocol.JevStatusSnapshot) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id":            runtimeID,
 		"supports_batch_import": true,
 		"plan_limits":           planLimits,
+		"jev":                   jev,
 	}, &resp); err != nil {
 		return nil, err
 	}

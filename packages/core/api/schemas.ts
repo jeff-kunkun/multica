@@ -1618,6 +1618,26 @@ export const PlanLimitsSnapshotSchema = z.object({
   observed_at: z.number().positive(),
 }).loose();
 
+/**
+ * Progressive daemon capability like plan_limits: a malformed or missing JEV
+ * snapshot is discarded (the resolver then reads it as unknown) rather than
+ * failing the whole runtime row. `status` itself falls back to "unknown" — a
+ * value we cannot interpret must never be presented as a working judgement
+ * layer.
+ */
+export const JevStatusSnapshotSchema = z.object({
+  status: z.enum(["active", "fallback", "unknown"]).catch("unknown"),
+  model: z.string().optional(),
+  manual: z.boolean().optional(),
+  disabled_until: z.number().optional(),
+  failures: z.number().optional(),
+  reason: z.string().optional(),
+  last_scene: z.string().optional(),
+  last_outcome: z.string().optional(),
+  last_decision_at: z.number().optional(),
+  observed_at: z.number().optional(),
+}).loose();
+
 export const AgentRuntimeSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -1634,6 +1654,7 @@ export const AgentRuntimeSchema = z.object({
   visibility: z.enum(["private", "public"]).default("private"),
   profile_id: z.string().nullable().optional(),
   plan_limits: PlanLimitsSnapshotSchema.nullable().optional().catch(undefined),
+  jev: JevStatusSnapshotSchema.nullable().optional().catch(undefined),
   last_seen_at: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),

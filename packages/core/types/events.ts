@@ -536,10 +536,12 @@ export interface InvitationRevokedPayload {
 }
 
 // Broadcast when a daemon heartbeat persisted a new credential-free
-// plan_limits snapshot. Routine 15s heartbeats do not reach the browser.
+// plan_limits or JEV snapshot. Routine 15s heartbeats do not reach the browser:
+// both flags are set only when the stored row actually changed.
 export interface DaemonHeartbeatPayload {
   runtime_id?: string;
   plan_limits_updated?: boolean;
+  jev_updated?: boolean;
 }
 
 export interface ChatSessionCreatedPayload {

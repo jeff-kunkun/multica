@@ -102,6 +102,7 @@ type AgentRuntime struct {
 	ProfileID      pgtype.UUID        `json:"profile_id"`
 	CustomName     pgtype.Text        `json:"custom_name"`
 	PlanLimits     []byte             `json:"plan_limits"`
+	JevStatus      []byte             `json:"jev_status"`
 }
 
 type AgentSkill struct {

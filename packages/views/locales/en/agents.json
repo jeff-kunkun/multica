@@ -1022,6 +1022,16 @@
     "tokens_label": "Tokens · 30d",
     "cost_label": "Est. cost · 30d"
   },
+  "jev": {
+    "label": "JEV",
+    "status_active": "Available",
+    "status_fallback": "Fallback",
+    "status_off": "Off",
+    "status_unknown": "Unknown",
+    "cooldown": "cooldown {{when}}",
+    "reason_manual": "Manually disabled",
+    "reason_upstream": "Upstream failing"
+  },
   "live_peek": {
     "current_issue_label": "Now on",
     "no_current_issue": "No issue",
