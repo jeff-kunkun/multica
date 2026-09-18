@@ -4011,8 +4011,7 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return nil
 	}
 
-	resp, err := d.refreshWorkspaceRepos(ctx, workspaceID)
-	if err != nil {
+	if _, err := d.refreshWorkspaceRepos(ctx, workspaceID); err != nil {
 		return fmt.Errorf("refresh workspace repos: %w", err)
 	}
 
@@ -4033,7 +4032,11 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	go func() {
 		defer d.bgSyncs.Done()
 		defer close(syncDone)
-		d.syncWorkspaceReposContext(context.WithoutCancel(ctx), workspaceID, resp.Repos)
+		// Only the requested repo: Sync walks its list serially, and a cold
+		// download of some other large repo can now legitimately hold its
+		// slot for hours. The rest are covered by the registration-time and
+		// task-registration background syncs.
+		d.syncWorkspaceReposContext(context.WithoutCancel(ctx), workspaceID, []RepoData{{URL: repoURL}})
 	}()
 	select {
 	case <-syncDone:

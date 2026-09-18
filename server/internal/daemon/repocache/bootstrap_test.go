@@ -300,10 +300,15 @@ func TestSyncAdoptsCompleteCacheFromBeforeTheMarker(t *testing.T) {
 	if out, err := runGitCombinedOutput("clone", "--bare", sourceRepo, barePath); err != nil {
 		t.Fatalf("legacy clone: %s: %v", out, err)
 	}
-	if cache.Lookup("ws-1", sourceRepo) != "" {
+	if IsReady(barePath) {
 		t.Fatal("precondition: a legacy cache has no marker yet")
 	}
 
+	// Lookup alone must surface it: after an upgrade the serial Sync loop may
+	// not reach this repo for a long time.
+	if cache.Lookup("ws-1", sourceRepo) == "" {
+		t.Fatal("Lookup must adopt a complete pre-marker cache")
+	}
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}

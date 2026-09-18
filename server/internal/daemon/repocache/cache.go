@@ -454,7 +454,12 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 // or was interrupted: only a cache carrying the ready marker is usable.
 func (c *Cache) Lookup(workspaceID, url string) string {
 	barePath := c.BarePath(workspaceID, url)
-	if IsReady(barePath) {
+	// Adopting here, not only in Sync, keeps an upgrade from hiding every
+	// pre-marker cache until the serial Sync loop reaches it, which can be a
+	// long time when an earlier repo is mid-download. It is safe without the
+	// repo lock: it only reads git state and writes the marker, and our own
+	// unfinished builds are excluded by buildingFile before any git call.
+	if IsReady(barePath) || adoptLegacyCacheContext(context.Background(), barePath) {
 		return barePath
 	}
 	return ""
@@ -673,7 +678,6 @@ func isBuilding(barePath string) bool {
 // least one ref, is not shallow, and is not one of our own unfinished builds:
 // an interrupted `git clone --bare` has no refs (git writes them after the
 // pack lands), and an interrupted sliced download carries buildingFile.
-// Callers must hold the repo lock.
 func adoptLegacyCacheContext(ctx context.Context, barePath string) bool {
 	if !isBareRepo(barePath) || isBuilding(barePath) || !hasAnyRefContext(ctx, barePath) || isShallowContext(ctx, barePath) {
 		return false
@@ -721,10 +725,6 @@ const (
 
 // filterUnsupportedMarker is what git prints when the server ignores --filter.
 const filterUnsupportedMarker = "filtering not recognized by server"
-
-func gitCloneBare(url, dest string) error {
-	return bootstrapBareContext(context.Background(), url, dest, nil)
-}
 
 // bootstrapBareContext builds the bare cache for url at dest, or resumes a
 // build an earlier call left unfinished. It never deletes dest: on any error
