@@ -39,6 +39,10 @@ import {
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
+import {
+  canEditRuntimeProfile,
+  runtimeInheritanceState,
+} from "../specialization";
 
 interface InspectorProps {
   agent: Agent;
@@ -124,6 +128,34 @@ export function AgentDetailInspector({
     runtime != null && isRuntimeUsableForUser(runtime, currentUserId);
   const canDiscoverRuntimeModels = isOnline && canReadRuntime;
   const nameInvalid = name.trim().length === 0;
+
+  // Runtime inheritance (DENE-505). `unknown` covers both a base role — which
+  // cannot follow anything — and a backend that predates the flag; neither may
+  // be offered a switch. While following, the runtime-profile controls below
+  // stay visible (they are the values this agent actually runs with) but
+  // read-only: the server 400s a runtime field sent alongside
+  // `runtime_inherited: true`, so the toggle is the only honest way out.
+  const runtimeInheritance = runtimeInheritanceState(agent);
+  const runtimeInherited = runtimeInheritance === "inherited";
+  const canEditRuntime = canEditRuntimeProfile(agent, canEdit);
+  const [inheritanceSaving, setInheritanceSaving] = useState(false);
+  const setRuntimeInheritance = useCallback(
+    async (inherited: boolean) => {
+      setInheritanceSaving(true);
+      try {
+        // The switch is driven by server state and the page patches the cache
+        // optimistically, then rolls it back and toasts on failure — so a
+        // refused write (a base role, a private base runtime) simply leaves the
+        // switch where it was. Not re-thrown: nothing here can recover.
+        await update({ runtime_inherited: inherited });
+      } catch {
+        // Handled by the page (`handleUpdate`).
+      } finally {
+        setInheritanceSaving(false);
+      }
+    },
+    [update],
+  );
 
   // Same query the Thinking / Speed fields already use, so switching model
   // costs no extra request. `null` = not authoritative (offline runtime, still
@@ -244,6 +276,25 @@ export function AgentDetailInspector({
         description={t(($) => $.inspector.section_execution_hint)}
       >
         <SettingsCard>
+          {runtimeInheritance !== "unknown" && (
+            <SettingsRow
+              label={t(($) => $.inspector.prop_runtime_inherit)}
+              description={
+                runtimeInherited
+                  ? t(($) => $.inspector.prop_runtime_inherit_hint_on)
+                  : t(($) => $.inspector.prop_runtime_inherit_hint_off)
+              }
+            >
+              <Switch
+                checked={runtimeInherited}
+                disabled={!canEdit || inheritanceSaving}
+                onCheckedChange={(checked) => {
+                  void setRuntimeInheritance(checked);
+                }}
+                aria-label={t(($) => $.inspector.prop_runtime_inherit)}
+              />
+            </SettingsRow>
+          )}
           <SettingsRow
             label={t(($) => $.inspector.prop_runtime)}
             size="select-wide"
@@ -255,7 +306,7 @@ export function AgentDetailInspector({
               runtimes={runtimes}
               members={members}
               currentUserId={currentUserId}
-              canEdit={canEdit}
+              canEdit={canEditRuntime}
               // Model, thinking level, and service tier are runtime/model
               // native. Clear them together so the new runtime resolves its
               // own defaults instead of inheriting incompatible tokens.
@@ -279,7 +330,7 @@ export function AgentDetailInspector({
               runtimeId={agent.runtime_id}
               runtimeOnline={canDiscoverRuntimeModels}
               value={agent.model ?? ""}
-              canEdit={canEdit}
+              canEdit={canEditRuntime}
               onChange={handleModelChange}
             />
           </SettingsRow>
@@ -290,7 +341,7 @@ export function AgentDetailInspector({
             provider={runtime?.provider ?? ""}
             model={agent.model ?? ""}
             value={agent.thinking_level ?? ""}
-            canEdit={canEdit}
+            canEdit={canEditRuntime}
             onChange={(thinkingLevel) =>
               update({ thinking_level: thinkingLevel })
             }
@@ -302,7 +353,7 @@ export function AgentDetailInspector({
             provider={runtime?.provider ?? ""}
             model={agent.model ?? ""}
             value={agent.service_tier ?? ""}
-            canEdit={canEdit}
+            canEdit={canEditRuntime}
             onChange={(serviceTier) => update({ service_tier: serviceTier })}
           />
           <SettingsRow
