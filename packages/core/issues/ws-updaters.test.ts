@@ -345,6 +345,31 @@ describe("onIssueMetadataChanged", () => {
     ).toEqual({ pr_number: 2 });
   });
 
+  it("patches the parent's children cache so the sub-issues close strip stays fresh", () => {
+    const child = { ...baseIssue, parent_issue_id: PARENT_ISSUE_ID };
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    qc.setQueryData<Issue[]>(childrenKey, [child, otherIssue]);
+    const unrelated = [otherIssue];
+    qc.setQueryData<Issue[]>(issueKeys.children(WS_ID, "parent-9"), unrelated);
+
+    onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, {
+      "close.conclusion": "delivered",
+      "close.status": "done",
+    });
+
+    const children = qc.getQueryData<Issue[]>(childrenKey);
+    expect(children?.find((i) => i.id === ISSUE_ID)?.metadata).toEqual({
+      "close.conclusion": "delivered",
+      "close.status": "done",
+    });
+    expect(children?.find((i) => i.id === OTHER_ISSUE_ID)?.metadata).toEqual(
+      otherIssue.metadata,
+    );
+    expect(qc.getQueryData<Issue[]>(issueKeys.children(WS_ID, "parent-9"))).toBe(
+      unrelated,
+    );
+  });
+
   it("leaves untouched caches as undefined (no spurious writes)", () => {
     onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { foo: "bar" });
 

@@ -1,0 +1,32 @@
+-- How many rounds this alignment has been confirmed in, and the revision the
+-- last of them confirmed.
+--
+-- A confirmed alignment used to be terminal: 'completed' pinned the issue and
+-- that was the end of the conversation. Reopening it starts another round on
+-- the SAME draft row and the same chat session — the group's identity is
+-- derived from the session (docs/design/issue-draft-group-finalize.md §3.1), so
+-- a new session would mean a new group rather than more work in this one — and
+-- these two columns are what make the second round legible:
+--
+--   - finalize_round counts reopens, so it is 0 while the draft has never been
+--     reopened. It is deliberately NOT part of node identity derivation: the
+--     round is not an idempotency key, it is the anchor for "which of these
+--     nodes are new". A confirm that finds finalize_round > 0 appends the
+--     payload nodes that own no issue yet instead of adopting the group whole.
+--     A retried confirm re-derives the same node ids, so the append is
+--     idempotent on its own and the column never has to be.
+--   - finalized_revision is the content revision the previous round confirmed,
+--     recorded when the draft is reopened (revision does not move between a
+--     confirm and the reopen that follows it), so a client can tell which
+--     draft version the increment starts from.
+--
+-- DEFAULT 0 backfills existing rows: every one of them has been confirmed at
+-- most once and never reopened.
+--
+-- No index and no CHECK change, so this needs no CONCURRENTLY and no NOT
+-- VALID + VALIDATE split. issue_draft.status already admits both 'completed'
+-- and 'ready' (migration 483), so going back from one to the other is an UPDATE,
+-- not a constraint change.
+ALTER TABLE issue_draft
+    ADD COLUMN IF NOT EXISTS finalize_round     INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS finalized_revision BIGINT;

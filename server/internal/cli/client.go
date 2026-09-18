@@ -92,13 +92,35 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s returned %d: %s", e.Method, e.Path, e.StatusCode, strings.TrimSpace(e.Body))
 }
 
+const (
+	// httpErrorBodyLimit caps how much of an error response the generic paths
+	// keep. Enough for {"error": "..."} plus context, small enough that a
+	// misbehaving endpoint cannot balloon CLI memory.
+	httpErrorBodyLimit = 4096
+	// transferErrorBodyLimit applies to /transfer/* failures. Those responses
+	// put the whole import report (one item per entity, so tens of thousands of
+	// bytes for a real workspace) next to "error"/"code" in the same JSON
+	// object. Truncating it mid-object left the CLI with unparseable JSON and
+	// nothing to show the user (DENE-318), so transfer errors keep the full
+	// structured body.
+	transferErrorBodyLimit = 1 << 20
+)
+
+// errorBodyLimit picks the read cap for a failing request path.
+func errorBodyLimit(path string) int64 {
+	if strings.Contains(path, "/transfer/") {
+		return transferErrorBodyLimit
+	}
+	return httpErrorBodyLimit
+}
+
 // newHTTPError builds a *HTTPError from an error response (status >= 400),
 // reading a capped slice of the body. Every Multica API helper funnels its
 // >= 400 responses through this so the top-level FormatError / ExitCodeFor can
 // classify the failure via errors.As(err, **HTTPError) regardless of which
 // HTTP verb the command used.
 func newHTTPError(method, path string, resp *http.Response) *HTTPError {
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit(path)))
 	return &HTTPError{
 		Method:     method,
 		Path:       path,
@@ -363,6 +385,45 @@ func (c *APIClient) DeleteJSONWithBody(ctx context.Context, path string, body an
 		return newHTTPError(http.MethodDelete, path, resp)
 	}
 	return nil
+}
+
+// PostEncoded performs a POST with a body the caller has already built and
+// optionally encoded.
+//
+// PostJSON marshals for you, which is exactly what the transfer sender cannot
+// use: it compresses the body, measures the compressed bytes, and has to
+// re-slice a body the edge dropped, so the bytes on the wire are its own. What
+// it still needs from this client is the transport, the auth/identity headers,
+// the size-capped error body, and the *HTTPError / *NetworkError classification
+// every caller of this package already branches on. contentEncoding, when set,
+// is sent verbatim as Content-Encoding and tells the server how the body was
+// encoded; the caller is responsible for the server understanding it (the
+// /transfer/* endpoints advertise that through /health).
+func (c *APIClient) PostEncoded(ctx context.Context, path, contentType, contentEncoding string, payload []byte, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", contentType)
+	if contentEncoding != "" {
+		req.Header.Set("Content-Encoding", contentEncoding)
+	}
+	c.setHeaders(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return newHTTPError(http.MethodPost, path, resp)
+	}
+	if out == nil {
+		return nil
+	}
+	return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
 }
 
 // PostJSON performs a POST request with a JSON body.

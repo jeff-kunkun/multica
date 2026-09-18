@@ -165,6 +165,63 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueS
 	return items, nil
 }
 
+const listProjectIDsInWorkspace = `-- name: ListProjectIDsInWorkspace :many
+SELECT id FROM project
+WHERE workspace_id = $1
+`
+
+func (q *Queries) ListProjectIDsInWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listProjectIDsInWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectIDsLedByMember = `-- name: ListProjectIDsLedByMember :many
+SELECT id FROM project
+WHERE workspace_id = $1
+  AND lead_type = 'member'
+  AND lead_id = $2
+`
+
+type ListProjectIDsLedByMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	LeadID      pgtype.UUID `json:"lead_id"`
+}
+
+func (q *Queries) ListProjectIDsLedByMember(ctx context.Context, arg ListProjectIDsLedByMemberParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listProjectIDsLedByMember, arg.WorkspaceID, arg.LeadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjects = `-- name: ListProjects :many
 SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
 WHERE workspace_id = $1

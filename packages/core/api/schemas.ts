@@ -17,6 +17,12 @@ import type {
   ChatDraftRestoresResponse,
   ChatPendingTask,
   ChatSession,
+  IssueDraft,
+  IssueDraftCapabilities,
+  IssueDraftPolicy,
+  IssueDraftRuntimeSwitch,
+  IssueDraftSession,
+  IssueDraftSummary,
   PrioritizeQueuedChatTaskResponse,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
@@ -76,8 +82,11 @@ import type {
   PluginSurfaceLaunch,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
+  RuntimeProviderPresetRequest,
+  RuntimeProviderPresetTicket,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  ProjectMember,
   ShareLink,
   ShareLinkInfo,
   Skill,
@@ -575,12 +584,14 @@ export const EMPTY_ISSUE_VIEW_PREFERENCE: IssueViewPreference = {
   updated_at: "",
 };
 
+export type IssueViewVisibility = "private" | "workspace" | "project";
+
 export interface CreateIssueViewRequest {
   name: string;
   scope_type: "workspace" | "my" | "project";
   scope_id?: string | null;
   scope_variant?: "assigned" | "created" | "involved" | "any" | "members" | "agents" | null;
-  visibility: "private" | "workspace";
+  visibility: IssueViewVisibility;
   definition_version: number;
   query: Record<string, unknown>;
   display: Record<string, unknown>;
@@ -1277,6 +1288,12 @@ export const IssueSchema = z.object({
   // Detail-only and potentially large. A malformed additive field must not
   // erase an otherwise usable issue returned by a mixed-version server.
   source_context: IssueSourceContextSchema.optional().catch(undefined),
+  // Provenance, detail-only and additive like source_context. `.catch(undefined)`
+  // rather than a hard string: these decide whether an "open the alignment"
+  // entry is offered, and a server that sends something unexpected must cost
+  // the entry, not the whole issue. (DENE-371)
+  origin_type: z.string().optional().catch(undefined),
+  origin_id: z.string().optional().catch(undefined),
 }).loose();
 
 export const ListIssuesResponseSchema = z.object({
@@ -1356,6 +1373,32 @@ export const SearchProjectsResponseSchema = z.object({
 
 export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
   projects: [],
+};
+
+export const ProjectMemberSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().optional().default(""),
+  project_id: z.string(),
+  member_id: z.string(),
+  added_by: z.string().nullable().optional().default(null),
+  created_at: z.string().optional().default(""),
+  name: z.string().optional().default(""),
+  email: z.string().optional().default(""),
+  avatar_url: z.string().nullable().optional().default(null),
+}).loose();
+
+export const ProjectMemberListSchema = z.array(ProjectMemberSchema);
+
+export const EMPTY_PROJECT_MEMBER: ProjectMember = {
+  id: "",
+  workspace_id: "",
+  project_id: "",
+  member_id: "",
+  added_by: null,
+  created_at: "",
+  name: "",
+  email: "",
+  avatar_url: null,
 };
 
 const IssueAssigneeGroupSchema = z.object({
@@ -1507,6 +1550,11 @@ export const ChildIssueProgressResponseSchema = z.object({
           parent_issue_id: z.string(),
           total: z.number(),
           done: z.number(),
+          // Added after the endpoint shipped: an installed client talking to
+          // an older backend gets 0, which reads as "nothing blocked / nothing
+          // running" — the same thing the UI showed before these existed.
+          blocked: z.number().catch(0).default(0),
+          active: z.number().catch(0).default(0),
         })
         .loose(),
     )
@@ -1593,6 +1641,21 @@ export const AgentRuntimeSchema = z.object({
 
 export const AgentRuntimeListSchema = z.array(AgentRuntimeSchema);
 
+/**
+ * The minimal skill shape embedded in an agent payload (the list/detail batch
+ * query joins id, name, description and enabled). Lenient on purpose: the
+ * fields are display-only, so a partially-filled row must still render as a
+ * chip rather than fail the enclosing agent.
+ */
+const AgentSkillSummarySchema = z
+  .object({
+    id: z.string().default(""),
+    name: z.string().default(""),
+    description: z.string().default(""),
+    enabled: z.boolean().optional().catch(undefined),
+  })
+  .loose();
+
 export const AgentSchema: z.ZodType<Agent> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
@@ -1613,6 +1676,24 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
     .catch(undefined),
   system_key: z.string().optional(),
   system_instructions: z.string().optional(),
+  // Two-level specialisation (DENE-301). Every field is optional-and-caught:
+  // a backend that predates the feature sends none of them, and a backend that
+  // sends a malformed one must degrade THAT field rather than drop the whole
+  // agent — the list is how the product is navigated. Empty string and absent
+  // both mean "base role" for the id; see `isSpecializationAgent`.
+  parent_agent_id: z.string().optional().catch(undefined),
+  parent_agent_name: z.string().optional().catch(undefined),
+  inherited_instructions: z.string().optional().catch(undefined),
+  inherited_skills: z
+    .array(AgentSkillSummarySchema)
+    .optional()
+    .catch(undefined),
+  child_count: z.number().optional().catch(undefined),
+  // Runtime inheritance (DENE-505). Optional-and-caught for the same reason as
+  // the fields above: a backend that predates the feature omits it, and an
+  // absent value has to read as "this agent owns its runtime" — the
+  // pre-feature behaviour — rather than dropping the agent row.
+  runtime_inherited: z.boolean().optional().catch(undefined),
   avatar_url: z.string().nullable().default(null),
   runtime_mode: z.string().catch("local"),
   runtime_config: z.record(z.string(), z.unknown()).default({}),
@@ -1650,6 +1731,32 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   // whole agent parse; UI treats undefined as enabled (`!== false`).
   auto_retry_enabled: z.boolean().optional().catch(undefined),
 }).loose() as z.ZodType<Agent>;
+
+// Malformed ROWS are dropped individually, the same way a blocked mention is
+// (MUL-4525): the agents list is how the whole product is navigated, and only
+// `id` is strictly required here — every other field defaults or catches. One
+// row without an id is an unusable row, not a reason to blank the workspace's
+// agents. A payload that is not an array at all still degrades to [].
+export const AgentListSchema: z.ZodType<Agent[]> = z
+  .array(z.unknown())
+  .catch([])
+  .default([])
+  .transform((items) =>
+    items.flatMap((item) => {
+      const parsed = AgentSchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  ) as unknown as z.ZodType<Agent[]>;
+
+/**
+ * Degraded answers for the two agent reads the UI is built on.
+ *
+ * An empty LIST is honest: the agents page renders its empty state instead of
+ * a screen of half-parsed rows. A single agent has no honest empty object — a
+ * blank-named agent would render as a real one — so `getAgent` degrades to
+ * `null` and the caller falls back to the list row it already has.
+ */
+export const EMPTY_AGENT_LIST: Agent[] = [];
 
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
@@ -2193,6 +2300,239 @@ export const AgentBuilderRuntimeSwitchSchema = z.object({
 export const agentBuilderRuntimeSwitchFallback = (
   requestedRuntimeID: string,
 ): AgentBuilderRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
+
+/**
+ * One sub-issue of an alignment draft.
+ *
+ * Every field falls back on its own, `key` and `title` included, and neither is
+ * required. Both are things the CONFIRM cares about (the server refuses a
+ * sub-issue with no key, and an issue with no title), but this is the read path
+ * for a payload the client itself wrote and may be midway through editing: an
+ * empty title is a row the user is looking at and can fix, and dropping it here
+ * would delete their work from the screen to punish a state the panel already
+ * refuses to confirm. `issueDraftIsCreatable` is where "this cannot be created"
+ * is decided.
+ */
+export const IssueDraftChildSchema = z.object({
+  key: z.string().catch(""),
+  title: z.string().catch(""),
+  description: z.string().catch(""),
+  status: z.string().catch(""),
+  priority: z.string().catch(""),
+  assignee_type: z.string().nullish().catch(null),
+  assignee_id: z.string().nullish().catch(null),
+  stage: z.number().int().nullish().catch(null),
+  assignee_hint: z.string().nullish().catch(null),
+}).loose();
+
+/**
+ * The structured issue an alignment draft has arrived at. Every field falls
+ * back to empty on its own: a draft written by a newer build must still
+ * restore the fields this build understands rather than discarding the
+ * conversation's work wholesale.
+ *
+ * `children` follows the same rule one level up, and its fallback is `[]` — a
+ * group with only its root. That covers three cases with one value, which is
+ * the point: a backend that predates groups sends no `children` at all, a
+ * malformed array is not something to render half of, and an alignment that
+ * settled on one issue legitimately has none.
+ */
+export const IssueDraftPayloadSchema = z.object({
+  title: z.string().catch(""),
+  description: z.string().catch(""),
+  status: z.string().catch(""),
+  priority: z.string().catch(""),
+  assignee_type: z.string().nullish().catch(null),
+  assignee_id: z.string().nullish().catch(null),
+  project_id: z.string().nullish().catch(null),
+  parent_issue_id: z.string().nullish().catch(null),
+  children: z.array(IssueDraftChildSchema).catch([]),
+}).loose();
+
+/**
+ * The alignment policy a draft runs under.
+ *
+ * Every field has a fallback, and the fallback is deliberately "nothing is
+ * known": an installed desktop client can talk to a backend that predates
+ * policies, and reporting a key it never sent would offer a switch that cannot
+ * land. `key: ""` is that state — the page hides the control instead.
+ */
+export const IssueDraftPolicySchema = z.object({
+  key: z.string().catch(""),
+  version: z.string().catch(""),
+  guided: z.boolean().catch(false),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_POLICY: IssueDraftPolicy = {
+  key: "",
+  version: "",
+  guided: false,
+};
+
+/** The fallback shape, as the schema's own output type: `key: ""` is the
+ *  documented "this backend has no policies" state and must survive `.catch`. */
+const UNKNOWN_ISSUE_DRAFT_POLICY = { key: "", version: "", guided: false };
+
+/**
+ * The built-in alignment capabilities a draft runs with.
+ *
+ * Same fallback rule as the policy above, and the same reason: a backend that
+ * predates capabilities sends no field at all, and reporting a key it never
+ * sent would draw a control the server cannot honour. `keys: []` is that state
+ * — this conversation runs no method this client can name.
+ *
+ * `keys` carries its own `.catch([])` rather than relying on the outer one,
+ * because a malformed list must cost the list and not the draft: the page still
+ * has a conversation to render, and the only thing an unreadable key list can
+ * change is which boxes are ticked.
+ */
+export const IssueDraftCapabilitiesSchema = z.object({
+  keys: z.array(z.string()).catch([]),
+  version: z.string().catch(""),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_CAPABILITIES: IssueDraftCapabilities = {
+  keys: [],
+  version: "",
+};
+
+/** The fallback shape as the schema's own output type, so a `.catch` on the
+ *  draft produces the same object as a missing field. */
+const UNKNOWN_ISSUE_DRAFT_CAPABILITIES = { keys: [], version: "" };
+
+/**
+ * One alignment draft.
+ *
+ * `status` deliberately has no `.catch()`: it decides whether the UI offers
+ * "confirm and create", and defaulting an unrecognised value would either
+ * offer a create the server will refuse or hide one it would accept. An
+ * unparseable draft falls back wholesale at the call site instead.
+ */
+export const IssueDraftSchema = z.object({
+  chat_session_id: z.string(),
+  workspace_id: z.string().catch(""),
+  status: z.enum(["draft", "ready", "completed", "abandoned"]),
+  revision: z.number().int().nonnegative(),
+  draft: IssueDraftPayloadSchema,
+  issue_id: z.string().nullish().catch(null),
+  // The round this alignment is on. `.catch(0)` rather than a hard number: an
+  // installed desktop client can talk to a backend that predates rounds, and
+  // "0 reopens" is exactly what such a backend means. It only ever feeds a
+  // label, so a missing field must cost the label and never the page
+  // (DENE-415).
+  finalize_round: z.number().int().nonnegative().catch(0),
+  finalized_revision: z.number().int().nullish().catch(null),
+  policy: IssueDraftPolicySchema.catch(() => UNKNOWN_ISSUE_DRAFT_POLICY),
+  // Same rule as `policy`, one axis over: the methods this conversation runs,
+  // and no guess at a set this backend never sent.
+  capabilities: IssueDraftCapabilitiesSchema.catch(
+    () => UNKNOWN_ISSUE_DRAFT_CAPABILITIES,
+  ),
+  created_at: z.string().catch(""),
+  updated_at: z.string().catch(""),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT: IssueDraft = {
+  chat_session_id: "",
+  workspace_id: "",
+  status: "draft",
+  revision: 0,
+  draft: {
+    title: "",
+    description: "",
+    status: "",
+    priority: "",
+  },
+  finalize_round: 0,
+  finalized_revision: null,
+  policy: EMPTY_ISSUE_DRAFT_POLICY,
+  capabilities: EMPTY_ISSUE_DRAFT_CAPABILITIES,
+  created_at: "",
+  updated_at: "",
+};
+
+export const IssueDraftSessionSchema = z.object({
+  session_id: z.string(),
+  agent_id: z.string().catch(""),
+  runtime_id: z.string().catch(""),
+  draft: IssueDraftSchema,
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_SESSION: IssueDraftSession = {
+  session_id: "",
+  agent_id: "",
+  runtime_id: "",
+  draft: EMPTY_ISSUE_DRAFT,
+};
+
+export const IssueDraftSummarySchema = IssueDraftSchema.extend({
+  title: z.string().catch(""),
+  runtime_id: z.string().catch(""),
+  last_message_content: z.string().catch(""),
+  last_message_role: z.string().catch(""),
+  last_message_at: z.string().catch(""),
+}).loose();
+
+export const IssueDraftListSchema = z.object({
+  drafts: z.array(IssueDraftSummarySchema).catch([]),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_LIST: { drafts: IssueDraftSummary[] } = {
+  drafts: [],
+};
+
+/**
+ * One issue a confirm created, as the response reports it.
+ *
+ * `id` has no fallback: a row without an id is a link that cannot resolve, and
+ * a confirmation list is made of links. The rest fall back, so one unexpected
+ * field cannot turn a real created issue into a parse failure.
+ */
+export const IssueDraftCreatedIssueSchema = z.object({
+  id: z.string().min(1),
+  identifier: z.string().catch(""),
+  title: z.string().catch(""),
+  status: z.string().catch(""),
+  stage: z.number().int().nullish().catch(null),
+  assignee_type: z.string().nullish().catch(null),
+  assignee_id: z.string().nullish().catch(null),
+  parent_issue_id: z.string().nullish().catch(null),
+}).loose();
+
+/**
+ * The result of confirming a draft.
+ *
+ * `issue_id` has no fallback on purpose. This endpoint returns 2xx only after
+ * an issue exists, and the caller navigates to that issue; an empty id would
+ * send the user to a route that cannot resolve while the issue it names is
+ * already live. An unparseable success body is a hard parse failure at the
+ * call site instead — the client re-confirms, which is safe because the
+ * protocol returns the same group for every repeat.
+ *
+ * `issues` is the other half, and it DOES have a fallback: a backend that
+ * predates groups does not send it, and a malformed row must not turn a confirm
+ * that succeeded into a failed request. `z.array(...).catch([])` drops the
+ * whole array when any row is unusable — deliberately, and not one row at a
+ * time: the group is a single judgement, and "5 issues, one of them
+ * unrenderable" and "we cannot tell how many" should both show the user the
+ * same thing (the parent alone, which is `[issue_id]`).
+ */
+export const IssueDraftFinalizeSchema = z.object({
+  draft: IssueDraftSchema,
+  issue_id: z.string().min(1),
+  issues: z.array(IssueDraftCreatedIssueSchema).catch([]),
+}).loose();
+
+export const IssueDraftRuntimeSwitchSchema = z.object({
+  runtime_id: z.string(),
+}).loose();
+
+// Same reasoning as agentBuilderRuntimeSwitchFallback: a 2xx means the carrier
+// was rebound to the requested runtime, so reporting "unknown" would leave the
+// picker showing a runtime that no longer executes anything.
+export const issueDraftRuntimeSwitchFallback = (
+  requestedRuntimeID: string,
+): IssueDraftRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
 
 // Squad list responses carry lightweight membership previews used by hover
 // cards. member_count / member_preview are additive and default cleanly.
@@ -3161,6 +3501,97 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   created_at: "",
   updated_at: "",
 };
+
+// A model entry with no `id` cannot be keyed or activated, so `id` is required
+// and an entry without one drops the whole response to the fallback rather than
+// rendering a row that would write an empty model id.
+const RuntimeProviderPresetModelSchema = z
+  .object({
+    id: z.string(),
+    name: z.string().optional(),
+    context_window: z.number().optional(),
+  })
+  .loose();
+
+// `has_key` carries a default because the field only exists on daemons new
+// enough to know about it, and "no key recorded" is the safe reading of its
+// absence. `key_mask` is a string the daemon chose; nothing here reconstructs
+// or validates a key value, and there is no field for one.
+const RuntimeProviderPresetSchema = z
+  .object({
+    id: z.string(),
+    api: z.string().optional(),
+    base_url: z.string().optional(),
+    api_key_env: z.string().optional(),
+    key_mask: z.string().optional(),
+    has_key: z.boolean().default(false),
+    active: z.boolean().optional(),
+    models: z.array(RuntimeProviderPresetModelSchema).default([]),
+  })
+  .loose();
+
+const RuntimeProviderPresetActiveSchema = z
+  .object({
+    provider: z.string().default(""),
+    model: z.string().default(""),
+  })
+  .loose();
+
+export const RuntimeProviderPresetRequestSchema = z
+  .object({
+    id: z.string().default(""),
+    runtime_id: z.string().default(""),
+    provider: z.string().default(""),
+    action: z.string().default(""),
+    // Kept as a plain string, not an enum: a status this client does not know
+    // must still parse and be handled by the poll loop's default branch —
+    // rejecting it here would turn "newer server" into "malformed response".
+    status: z.string(),
+    providers: z.array(RuntimeProviderPresetSchema).optional(),
+    active: RuntimeProviderPresetActiveSchema.optional(),
+    cleared_active: z.boolean().optional(),
+    error: z.string().optional(),
+    created_at: z.string().default(""),
+    updated_at: z.string().default(""),
+  })
+  .loose();
+
+// Fallback for an unparseable preset response. `failed` is the only honest
+// choice: `completed` would fabricate an empty preset list and silently erase
+// the caller's view of the machine's real configuration, while `pending` would
+// spin until the client-side poll timeout. `failed` surfaces the error
+// immediately and keeps the section's retry affordance live.
+export const MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST: RuntimeProviderPresetRequest =
+  {
+    id: "",
+    runtime_id: "",
+    provider: "",
+    action: "",
+    status: "failed",
+    error: "invalid provider preset response",
+    created_at: "",
+    updated_at: "",
+  };
+
+// The POST answers with the ticket only. An upsert body carries the API key,
+// and echoing the request back would put the secret on a second path for
+// nothing, so the server returns `{id, status}` and the refreshed list arrives
+// through the poll.
+export const RuntimeProviderPresetTicketSchema = z
+  .object({
+    id: z.string(),
+    status: z.string(),
+  })
+  .loose();
+
+// `failed` (not `pending`) on a malformed ticket: the poll loop treats a
+// terminal non-completed status as a failure, so this surfaces the contract
+// drift instead of polling on an empty id until the timeout.
+export const MALFORMED_RUNTIME_PROVIDER_PRESET_TICKET: RuntimeProviderPresetTicket =
+  {
+    id: "",
+    status: "failed",
+  };
 
 export const DingTalkInstallationSchema = z.object({
   id: z.string(),

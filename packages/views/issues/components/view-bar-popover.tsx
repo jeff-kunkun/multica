@@ -168,6 +168,11 @@ function SortablePanelRow({
             {t(($) => $.view_bar.builtin_tag)}
           </span>
         )}
+        {item.view?.visibility === "project" && (
+          <span className="shrink-0 text-caption text-muted-foreground">
+            {t(($) => $.view_bar.project_shared_tag)}
+          </span>
+        )}
       </button>
       {isView && item.view && (
         <DropdownMenu>

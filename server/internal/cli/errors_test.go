@@ -339,6 +339,42 @@ func TestExtractServerMessage(t *testing.T) {
 	}
 }
 
+// A 409 from /transfer/config carries the whole import report after
+// "code"/"error". Anything that caps the read (an older client, a proxy) cuts
+// that object off mid-report, and the user used to get the generic "Request
+// conflict" template while the server had named the exact entity that already
+// existed (DENE-318). The fields before the truncation must survive.
+func TestExtractServerMessageFromTruncatedBody(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "report truncated after the message",
+			body: `{"code":"config_import_conflict","error":"entity already exists: Bug","report":{"batches":[{"entity_type":"issue_statuses","items":[{"action":"failed"`,
+			want: "entity already exists: Bug",
+		},
+		{
+			name: "prose truncated away, machine code survives",
+			body: `{"code":"config_import_conflict","error":"entity already exi`,
+			want: "",
+		},
+		{
+			name: "nested value cut open before the message",
+			body: `{"report":{"batches":[{"items":[`,
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractServerMessage(tc.body); got != tc.want {
+				t.Errorf("extractServerMessage(%q) = %q, want %q", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHTTPTimeout(t *testing.T) {
 	cases := []struct {
 		name string
@@ -596,6 +632,9 @@ func TestServerErrorCode(t *testing.T) {
 		{"empty body", httpErr(""), ""},
 		{"non-JSON body", httpErr("plain text refusal"), ""},
 		{"malformed JSON", httpErr(`{"code":`), ""},
+		// The code rides in front of a report far larger than any read cap, so
+		// a command must still find it when the body arrives truncated.
+		{"truncated body", httpErr(`{"code":"config_import_conflict","error":"entity already exists: Bug","report":{"batches":[`), "config_import_conflict"},
 		// A server that put prose in `code` must not have it treated as an
 		// identifier a command can branch on.
 		{"prose in code", httpErr(`{"code":"You do not have access"}`), ""},
