@@ -285,14 +285,14 @@ func (s routingStore) HasComment(ctx context.Context, workspaceID, issueID strin
 	})
 }
 
-func (s routingStore) PostComment(ctx context.Context, workspaceID, issueID string, kind routing.CommentKind, body string) error {
+func (s routingStore) PostComment(ctx context.Context, workspaceID, issueID string, kind routing.CommentKind, body string) (bool, error) {
 	wsID, err := util.ParseUUID(workspaceID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	id, err := util.ParseUUID(issueID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	// author_type='system', author_id=zero UUID, matching the other
 	// platform-authored comments. Clients branch on author_type.
@@ -305,11 +305,11 @@ func (s routingStore) PostComment(ctx context.Context, workspaceID, issueID stri
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The unique index rejected a duplicate: a concurrent Route call got
-		// there first. Nothing to publish and nothing to report.
-		return nil
+		// there first. Nothing to publish, and the caller must not notify.
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if s.h.Bus != nil {
 		s.h.Bus.Publish(events.Event{
@@ -329,7 +329,7 @@ func (s routingStore) PostComment(ctx context.Context, workspaceID, issueID stri
 			},
 		})
 	}
-	return nil
+	return true, nil
 }
 
 // Subscribe adds the notification target to the issue and writes the inbox row

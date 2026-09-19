@@ -124,14 +124,19 @@ func (f *fakeStore) HasComment(_ context.Context, _, _ string, kind CommentKind)
 	return len(f.comments[kind]) > 0, f.fail("has_comment")
 }
 
-func (f *fakeStore) PostComment(_ context.Context, _, _ string, kind CommentKind, body string) error {
+func (f *fakeStore) PostComment(_ context.Context, _, _ string, kind CommentKind, body string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("post_comment"); err != nil {
-		return err
+		return false, err
+	}
+	// Mirrors the unique index: one comment of each kind per issue, and the
+	// second writer is told it did not write.
+	if len(f.comments[kind]) > 0 {
+		return false, nil
 	}
 	f.comments[kind] = append(f.comments[kind], body)
-	return nil
+	return true, nil
 }
 
 func (f *fakeStore) Subscribe(_ context.Context, _, _, userID string) error {
