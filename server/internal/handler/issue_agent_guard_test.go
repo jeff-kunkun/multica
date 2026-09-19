@@ -31,6 +31,9 @@ func seedDelegatedTask(t *testing.T, agentID, issueID string) string {
 		"completed_at":       testutil.Raw("now()"),
 		"originator_source":  "delegation",
 		"originator_user_id": testUserID,
+		// agent_task_queue_accountable_matches_originator requires the pair to
+		// agree whenever originator_user_id is set.
+		"accountable_user_id": testUserID,
 	})
 }
 
@@ -124,8 +127,12 @@ func TestHaltIssueCancelsActiveRunsAndPreservesHumanTriggers(t *testing.T) {
 	})
 	active := []string{"queued", "dispatched", "running", "waiting_local_directory", "deferred"}
 	taskIDs := make(map[string]string, len(active))
+	// One agent per status: idx_one_pending_task_per_issue_agent_thread is
+	// unique over (issue, agent, thread) for queued/dispatched, so seeding all
+	// five states onto a single agent collides before the halt ever runs.
 	for _, status := range active {
-		taskIDs[status] = insertIssueTaskWithStatus(t, agentID, issueID, status)
+		statusAgent := createHandlerTestAgent(t, "Guard Halt Agent "+status, []byte("[]"))
+		taskIDs[status] = insertIssueTaskWithStatus(t, statusAgent, issueID, status)
 	}
 
 	req := newRequest(http.MethodPost, "/api/issues/"+issueID+"/halt", nil)
