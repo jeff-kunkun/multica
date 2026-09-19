@@ -180,6 +180,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		toolUseCount := 0
 		unreadableAssistantCount := 0
 		var planLimits *protocol.PlanLimitsSnapshot
+		var numTurns int
+		var lastContextTokens *int64
 
 		// On cancellation / timeout, terminate claude (and every MCP server and
 		// tool subprocess it spawned) BEFORE unblocking the scanner. EOF stdin
@@ -255,6 +257,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resultIsError = msg.IsError
 				terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
+				numTurns = msg.NumTurns
+				if msg.Usage != nil {
+					value := msg.Usage.InputTokens + msg.Usage.CacheReadInputTokens + msg.Usage.CacheCreationInputTokens
+					lastContextTokens = &value
+				}
 				if resultUsage := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
 				}
@@ -357,14 +364,16 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		resCh <- Result{
-			Status:         finalStatus,
-			Output:         finalOutput,
-			Error:          finalError,
-			DurationMs:     duration.Milliseconds(),
-			SessionID:      reportedSessionID,
-			Usage:          usage,
-			PlanLimits:     planLimits,
-			ResumeRejected: resumeRejected,
+			Status:            finalStatus,
+			Output:            finalOutput,
+			Error:             finalError,
+			DurationMs:        duration.Milliseconds(),
+			SessionID:         reportedSessionID,
+			Usage:             usage,
+			NumTurns:          numTurns,
+			LastContextTokens: lastContextTokens,
+			PlanLimits:        planLimits,
+			ResumeRejected:    resumeRejected,
 		}
 	}()
 

@@ -1078,6 +1078,30 @@ export interface IssueUsageSummary {
   metered_task_count?: number;
   unreported_task_count?: number;
   task_count: number;
+  runs?: IssueUsageRun[];
+  attribution_source_counts?: Record<string, number>;
+  trigger_evidence_kind_counts?: Record<string, number>;
+}
+
+export interface IssueUsageRun {
+  task_id: string;
+  provider?: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  num_turns?: number;
+  resumed?: boolean;
+  session_id?: string;
+  last_context_tokens?: number;
+  queue_to_claim_ms?: number;
+  prepare_ms?: number;
+  spawn_to_first_output_ms?: number;
+  total_ms?: number;
+  attribution_source?: string;
+  trigger_evidence_kind?: string;
 }
 
 // `cost_usd_ticks` + `uncosted_*`: the cost split every usage row carries.

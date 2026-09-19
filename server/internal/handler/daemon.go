@@ -5062,7 +5062,15 @@ type TaskUsagePayload struct {
 	// Absent or 0 from every daemon that doesn't have one (older builds, and
 	// every provider except Grok today) — stored as NULL so the reader knows
 	// to fall back to rate-table estimation rather than reading a real $0.
-	CostUSDTicks int64 `json:"cost_usd_ticks"`
+	CostUSDTicks         int64  `json:"cost_usd_ticks"`
+	NumTurns             int    `json:"num_turns"`
+	Resumed              bool   `json:"resumed"`
+	SessionID            string `json:"session_id,omitempty"`
+	LastContextTokens    *int64 `json:"last_context_tokens,omitempty"`
+	QueueToClaimMS       *int64 `json:"queue_to_claim_ms,omitempty"`
+	PrepareMS            *int64 `json:"prepare_ms,omitempty"`
+	SpawnToFirstOutputMS *int64 `json:"spawn_to_first_output_ms,omitempty"`
+	TotalMS              *int64 `json:"total_ms,omitempty"`
 }
 
 // authoritativeCostTicks converts a reported cost into the nullable column.
@@ -5074,6 +5082,13 @@ func authoritativeCostTicks(ticks int64) pgtype.Int8 {
 		return pgtype.Int8{}
 	}
 	return pgtype.Int8{Int64: ticks, Valid: true}
+}
+
+func nullableInt8(value *int64) pgtype.Int8 {
+	if value == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *value, Valid: true}
 }
 
 func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
@@ -5114,14 +5129,22 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			provider = runtimeProvider
 		}
 		if err := h.Queries.UpsertTaskUsage(r.Context(), db.UpsertTaskUsageParams{
-			TaskID:           parseUUID(taskID),
-			Provider:         provider,
-			Model:            u.Model,
-			InputTokens:      u.InputTokens,
-			OutputTokens:     u.OutputTokens,
-			CacheReadTokens:  u.CacheReadTokens,
-			CacheWriteTokens: u.CacheWriteTokens,
-			CostUsdTicks:     authoritativeCostTicks(u.CostUSDTicks),
+			TaskID:               parseUUID(taskID),
+			Provider:             provider,
+			Model:                u.Model,
+			InputTokens:          u.InputTokens,
+			OutputTokens:         u.OutputTokens,
+			CacheReadTokens:      u.CacheReadTokens,
+			CacheWriteTokens:     u.CacheWriteTokens,
+			CostUsdTicks:         authoritativeCostTicks(u.CostUSDTicks),
+			NumTurns:             int32(u.NumTurns),
+			Resumed:              u.Resumed,
+			SessionID:            pgtype.Text{String: u.SessionID, Valid: u.SessionID != ""},
+			LastContextTokens:    nullableInt8(u.LastContextTokens),
+			QueueToClaimMs:       nullableInt8(u.QueueToClaimMS),
+			PrepareMs:            nullableInt8(u.PrepareMS),
+			SpawnToFirstOutputMs: nullableInt8(u.SpawnToFirstOutputMS),
+			TotalMs:              nullableInt8(u.TotalMS),
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
@@ -5882,7 +5905,9 @@ func (h *Handler) hydrateTaskUsage(ctx context.Context, issueID pgtype.UUID, res
 	for _, row := range rows {
 		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
 			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
-			row.CacheWriteTokens, row.CostUsdTicks)
+			row.CacheWriteTokens, row.CostUsdTicks, row.NumTurns, row.Resumed,
+			row.SessionID, row.LastContextTokens, row.QueueToClaimMs, row.PrepareMs,
+			row.SpawnToFirstOutputMs, row.TotalMs, row.AttributionSource, row.TriggerEvidenceKind)
 	}
 	attachTaskUsage(resp, byTask)
 }
@@ -5911,7 +5936,9 @@ func (h *Handler) hydrateAgentTaskUsage(ctx context.Context, agentID pgtype.UUID
 	for _, row := range rows {
 		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
 			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
-			row.CacheWriteTokens, row.CostUsdTicks)
+			row.CacheWriteTokens, row.CostUsdTicks, row.NumTurns, row.Resumed,
+			row.SessionID, row.LastContextTokens, row.QueueToClaimMs, row.PrepareMs,
+			row.SpawnToFirstOutputMs, row.TotalMs, "", "")
 	}
 	attachTaskUsage(resp, byTask)
 	return nil
@@ -5927,6 +5954,16 @@ func appendTaskUsage(
 	cacheReadTokens int64,
 	cacheWriteTokens int64,
 	costUsdTicks pgtype.Int8,
+	numTurns int32,
+	resumed bool,
+	sessionID pgtype.Text,
+	lastContextTokens pgtype.Int8,
+	queueToClaimMS pgtype.Int8,
+	prepareMS pgtype.Int8,
+	spawnToFirstOutputMS pgtype.Int8,
+	totalMS pgtype.Int8,
+	attributionSource string,
+	triggerEvidenceKind string,
 ) {
 	var cost *int64
 	if costUsdTicks.Valid {
@@ -5934,15 +5971,43 @@ func appendTaskUsage(
 		cost = &value
 	}
 	id := uuidToString(taskID)
-	byTask[id] = append(byTask[id], TaskUsageData{
-		Provider:         provider,
-		Model:            model,
-		InputTokens:      inputTokens,
-		OutputTokens:     outputTokens,
-		CacheReadTokens:  cacheReadTokens,
-		CacheWriteTokens: cacheWriteTokens,
-		CostUsdTicks:     cost,
-	})
+	data := TaskUsageData{
+		Provider:            provider,
+		Model:               model,
+		InputTokens:         inputTokens,
+		OutputTokens:        outputTokens,
+		CacheReadTokens:     cacheReadTokens,
+		CacheWriteTokens:    cacheWriteTokens,
+		CostUsdTicks:        cost,
+		NumTurns:            numTurns,
+		Resumed:             resumed,
+		AttributionSource:   attributionSource,
+		TriggerEvidenceKind: triggerEvidenceKind,
+	}
+	if sessionID.Valid {
+		data.SessionID = sessionID.String
+	}
+	if lastContextTokens.Valid {
+		value := lastContextTokens.Int64
+		data.LastContextTokens = &value
+	}
+	if queueToClaimMS.Valid {
+		value := queueToClaimMS.Int64
+		data.QueueToClaimMS = &value
+	}
+	if prepareMS.Valid {
+		value := prepareMS.Int64
+		data.PrepareMS = &value
+	}
+	if spawnToFirstOutputMS.Valid {
+		value := spawnToFirstOutputMS.Int64
+		data.SpawnToFirstOutputMS = &value
+	}
+	if totalMS.Valid {
+		value := totalMS.Int64
+		data.TotalMS = &value
+	}
+	byTask[id] = append(byTask[id], data)
 }
 
 func attachTaskUsage(resp []AgentTaskResponse, byTask map[string][]TaskUsageData) {
@@ -6036,6 +6101,62 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to get issue usage")
 		return
 	}
+	runRows, err := h.Queries.ListIssueTaskUsage(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list issue usage runs")
+		return
+	}
+	attributionRows, err := h.Queries.ListIssueUsageAttribution(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to group issue usage")
+		return
+	}
+	bySource := map[string]int32{}
+	byEvidence := map[string]int32{}
+	for _, group := range attributionRows {
+		source := group.AttributionSource
+		evidence := group.TriggerEvidenceKind
+		bySource[source] += group.TaskCount
+		byEvidence[evidence] += group.TaskCount
+	}
+	runs := make([]map[string]any, 0, len(runRows))
+	for _, run := range runRows {
+		item := map[string]any{
+			"task_id":               uuidToString(run.TaskID),
+			"provider":              run.Provider,
+			"model":                 run.Model,
+			"input_tokens":          run.InputTokens,
+			"output_tokens":         run.OutputTokens,
+			"cache_read_tokens":     run.CacheReadTokens,
+			"cache_write_tokens":    run.CacheWriteTokens,
+			"num_turns":             run.NumTurns,
+			"resumed":               run.Resumed,
+			"attribution_source":    run.AttributionSource,
+			"trigger_evidence_kind": run.TriggerEvidenceKind,
+		}
+		if run.CostUsdTicks.Valid {
+			item["cost_usd_ticks"] = run.CostUsdTicks.Int64
+		}
+		if run.SessionID.Valid {
+			item["session_id"] = run.SessionID.String
+		}
+		if run.LastContextTokens.Valid {
+			item["last_context_tokens"] = run.LastContextTokens.Int64
+		}
+		if run.QueueToClaimMs.Valid {
+			item["queue_to_claim_ms"] = run.QueueToClaimMs.Int64
+		}
+		if run.PrepareMs.Valid {
+			item["prepare_ms"] = run.PrepareMs.Int64
+		}
+		if run.SpawnToFirstOutputMs.Valid {
+			item["spawn_to_first_output_ms"] = run.SpawnToFirstOutputMs.Int64
+		}
+		if run.TotalMs.Valid {
+			item["total_ms"] = run.TotalMs.Int64
+		}
+		runs = append(runs, item)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total_input_tokens":       row.TotalInputTokens,
@@ -6051,10 +6172,13 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		// task_count is the legacy count of tasks with usage. Keep it stable for
 		// installed clients while the explicit coverage fields distinguish runs
 		// from metered runs.
-		"task_count":            row.TaskCount,
-		"terminal_task_count":   row.TerminalTaskCount,
-		"metered_task_count":    row.MeteredTaskCount,
-		"unreported_task_count": row.UnreportedTaskCount,
+		"task_count":                   row.TaskCount,
+		"terminal_task_count":          row.TerminalTaskCount,
+		"metered_task_count":           row.MeteredTaskCount,
+		"unreported_task_count":        row.UnreportedTaskCount,
+		"runs":                         runs,
+		"attribution_source_counts":    bySource,
+		"trigger_evidence_kind_counts": byEvidence,
 	})
 }
 

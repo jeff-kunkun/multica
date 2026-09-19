@@ -1411,7 +1411,15 @@ type TaskUsage struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	// Provider-reported cost in 1e-10 USD. NULL when the provider reports none; those rows are priced client-side from the static rate table.
-	CostUsdTicks pgtype.Int8 `json:"cost_usd_ticks"`
+	CostUsdTicks         pgtype.Int8 `json:"cost_usd_ticks"`
+	NumTurns             int32       `json:"num_turns"`
+	Resumed              bool        `json:"resumed"`
+	SessionID            pgtype.Text `json:"session_id"`
+	LastContextTokens    pgtype.Int8 `json:"last_context_tokens"`
+	QueueToClaimMs       pgtype.Int8 `json:"queue_to_claim_ms"`
+	PrepareMs            pgtype.Int8 `json:"prepare_ms"`
+	SpawnToFirstOutputMs pgtype.Int8 `json:"spawn_to_first_output_ms"`
+	TotalMs              pgtype.Int8 `json:"total_ms"`
 }
 
 type TaskUsageHourly struct {

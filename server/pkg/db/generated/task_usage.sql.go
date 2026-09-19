@@ -90,7 +90,7 @@ func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID)
 }
 
 const getTaskUsage = `-- name: GetTaskUsage :many
-SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at, cost_usd_ticks FROM task_usage
+SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at, cost_usd_ticks, num_turns, resumed, session_id, last_context_tokens, queue_to_claim_ms, prepare_ms, spawn_to_first_output_ms, total_ms FROM task_usage
 WHERE task_id = $1
 ORDER BY model
 `
@@ -116,6 +116,14 @@ func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]TaskU
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CostUsdTicks,
+			&i.NumTurns,
+			&i.Resumed,
+			&i.SessionID,
+			&i.LastContextTokens,
+			&i.QueueToClaimMs,
+			&i.PrepareMs,
+			&i.SpawnToFirstOutputMs,
+			&i.TotalMs,
 		); err != nil {
 			return nil, err
 		}
@@ -136,7 +144,15 @@ SELECT
     tu.output_tokens,
     tu.cache_read_tokens,
     tu.cache_write_tokens,
-    tu.cost_usd_ticks
+    tu.cost_usd_ticks,
+    tu.num_turns,
+    tu.resumed,
+    tu.session_id,
+    tu.last_context_tokens,
+    tu.queue_to_claim_ms,
+    tu.prepare_ms,
+    tu.spawn_to_first_output_ms,
+    tu.total_ms
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.agent_id = $1
@@ -150,14 +166,22 @@ type ListAgentTaskUsageParams struct {
 }
 
 type ListAgentTaskUsageRow struct {
-	TaskID           pgtype.UUID `json:"task_id"`
-	Provider         string      `json:"provider"`
-	Model            string      `json:"model"`
-	InputTokens      int64       `json:"input_tokens"`
-	OutputTokens     int64       `json:"output_tokens"`
-	CacheReadTokens  int64       `json:"cache_read_tokens"`
-	CacheWriteTokens int64       `json:"cache_write_tokens"`
-	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
+	TaskID               pgtype.UUID `json:"task_id"`
+	Provider             string      `json:"provider"`
+	Model                string      `json:"model"`
+	InputTokens          int64       `json:"input_tokens"`
+	OutputTokens         int64       `json:"output_tokens"`
+	CacheReadTokens      int64       `json:"cache_read_tokens"`
+	CacheWriteTokens     int64       `json:"cache_write_tokens"`
+	CostUsdTicks         pgtype.Int8 `json:"cost_usd_ticks"`
+	NumTurns             int32       `json:"num_turns"`
+	Resumed              bool        `json:"resumed"`
+	SessionID            pgtype.Text `json:"session_id"`
+	LastContextTokens    pgtype.Int8 `json:"last_context_tokens"`
+	QueueToClaimMs       pgtype.Int8 `json:"queue_to_claim_ms"`
+	PrepareMs            pgtype.Int8 `json:"prepare_ms"`
+	SpawnToFirstOutputMs pgtype.Int8 `json:"spawn_to_first_output_ms"`
+	TotalMs              pgtype.Int8 `json:"total_ms"`
 }
 
 // Per-(task, provider, model) usage rows for one agent's explicitly requested
@@ -182,6 +206,14 @@ func (q *Queries) ListAgentTaskUsage(ctx context.Context, arg ListAgentTaskUsage
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
 			&i.CostUsdTicks,
+			&i.NumTurns,
+			&i.Resumed,
+			&i.SessionID,
+			&i.LastContextTokens,
+			&i.QueueToClaimMs,
+			&i.PrepareMs,
+			&i.SpawnToFirstOutputMs,
+			&i.TotalMs,
 		); err != nil {
 			return nil, err
 		}
@@ -710,7 +742,17 @@ SELECT
     tu.output_tokens,
     tu.cache_read_tokens,
     tu.cache_write_tokens,
-    tu.cost_usd_ticks
+    tu.cost_usd_ticks,
+    tu.num_turns,
+    tu.resumed,
+    tu.session_id,
+    tu.last_context_tokens,
+    tu.queue_to_claim_ms,
+    tu.prepare_ms,
+    tu.spawn_to_first_output_ms,
+    tu.total_ms,
+    COALESCE(NULLIF(atq.originator_source, ''), 'unattributed')::text AS attribution_source,
+    COALESCE(NULLIF(atq.trigger_evidence_kind, ''), 'unknown')::text AS trigger_evidence_kind
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1
@@ -718,14 +760,24 @@ ORDER BY tu.task_id, tu.model
 `
 
 type ListIssueTaskUsageRow struct {
-	TaskID           pgtype.UUID `json:"task_id"`
-	Provider         string      `json:"provider"`
-	Model            string      `json:"model"`
-	InputTokens      int64       `json:"input_tokens"`
-	OutputTokens     int64       `json:"output_tokens"`
-	CacheReadTokens  int64       `json:"cache_read_tokens"`
-	CacheWriteTokens int64       `json:"cache_write_tokens"`
-	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
+	TaskID               pgtype.UUID `json:"task_id"`
+	Provider             string      `json:"provider"`
+	Model                string      `json:"model"`
+	InputTokens          int64       `json:"input_tokens"`
+	OutputTokens         int64       `json:"output_tokens"`
+	CacheReadTokens      int64       `json:"cache_read_tokens"`
+	CacheWriteTokens     int64       `json:"cache_write_tokens"`
+	CostUsdTicks         pgtype.Int8 `json:"cost_usd_ticks"`
+	NumTurns             int32       `json:"num_turns"`
+	Resumed              bool        `json:"resumed"`
+	SessionID            pgtype.Text `json:"session_id"`
+	LastContextTokens    pgtype.Int8 `json:"last_context_tokens"`
+	QueueToClaimMs       pgtype.Int8 `json:"queue_to_claim_ms"`
+	PrepareMs            pgtype.Int8 `json:"prepare_ms"`
+	SpawnToFirstOutputMs pgtype.Int8 `json:"spawn_to_first_output_ms"`
+	TotalMs              pgtype.Int8 `json:"total_ms"`
+	AttributionSource    string      `json:"attribution_source"`
+	TriggerEvidenceKind  string      `json:"trigger_evidence_kind"`
 }
 
 // Per-(task, provider, model) usage rows for every task on one issue — the
@@ -758,6 +810,16 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
 			&i.CostUsdTicks,
+			&i.NumTurns,
+			&i.Resumed,
+			&i.SessionID,
+			&i.LastContextTokens,
+			&i.QueueToClaimMs,
+			&i.PrepareMs,
+			&i.SpawnToFirstOutputMs,
+			&i.TotalMs,
+			&i.AttributionSource,
+			&i.TriggerEvidenceKind,
 		); err != nil {
 			return nil, err
 		}
@@ -770,8 +832,8 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 }
 
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec
-INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, num_turns, resumed, session_id, last_context_tokens, queue_to_claim_ms, prepare_ms, spawn_to_first_output_ms, total_ms, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
 ON CONFLICT (task_id, provider, model)
 DO UPDATE SET
     input_tokens = EXCLUDED.input_tokens,
@@ -779,18 +841,34 @@ DO UPDATE SET
     cache_read_tokens = EXCLUDED.cache_read_tokens,
     cache_write_tokens = EXCLUDED.cache_write_tokens,
     cost_usd_ticks = EXCLUDED.cost_usd_ticks,
+    num_turns = EXCLUDED.num_turns,
+    resumed = EXCLUDED.resumed,
+    session_id = EXCLUDED.session_id,
+    last_context_tokens = EXCLUDED.last_context_tokens,
+    queue_to_claim_ms = EXCLUDED.queue_to_claim_ms,
+    prepare_ms = EXCLUDED.prepare_ms,
+    spawn_to_first_output_ms = EXCLUDED.spawn_to_first_output_ms,
+    total_ms = EXCLUDED.total_ms,
     updated_at = now()
 `
 
 type UpsertTaskUsageParams struct {
-	TaskID           pgtype.UUID `json:"task_id"`
-	Provider         string      `json:"provider"`
-	Model            string      `json:"model"`
-	InputTokens      int64       `json:"input_tokens"`
-	OutputTokens     int64       `json:"output_tokens"`
-	CacheReadTokens  int64       `json:"cache_read_tokens"`
-	CacheWriteTokens int64       `json:"cache_write_tokens"`
-	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
+	TaskID               pgtype.UUID `json:"task_id"`
+	Provider             string      `json:"provider"`
+	Model                string      `json:"model"`
+	InputTokens          int64       `json:"input_tokens"`
+	OutputTokens         int64       `json:"output_tokens"`
+	CacheReadTokens      int64       `json:"cache_read_tokens"`
+	CacheWriteTokens     int64       `json:"cache_write_tokens"`
+	CostUsdTicks         pgtype.Int8 `json:"cost_usd_ticks"`
+	NumTurns             int32       `json:"num_turns"`
+	Resumed              bool        `json:"resumed"`
+	SessionID            pgtype.Text `json:"session_id"`
+	LastContextTokens    pgtype.Int8 `json:"last_context_tokens"`
+	QueueToClaimMs       pgtype.Int8 `json:"queue_to_claim_ms"`
+	PrepareMs            pgtype.Int8 `json:"prepare_ms"`
+	SpawnToFirstOutputMs pgtype.Int8 `json:"spawn_to_first_output_ms"`
+	TotalMs              pgtype.Int8 `json:"total_ms"`
 }
 
 // Bumps `updated_at` on INSERT and on conflict so the hourly-rollup worker
@@ -810,6 +888,14 @@ func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams
 		arg.CacheReadTokens,
 		arg.CacheWriteTokens,
 		arg.CostUsdTicks,
+		arg.NumTurns,
+		arg.Resumed,
+		arg.SessionID,
+		arg.LastContextTokens,
+		arg.QueueToClaimMs,
+		arg.PrepareMs,
+		arg.SpawnToFirstOutputMs,
+		arg.TotalMs,
 	)
 	return err
 }

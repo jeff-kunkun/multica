@@ -190,7 +190,9 @@ type Task struct {
 	// agent never sees the daemon's own (often workspace-owner) credential.
 	// Empty or non-task-scoped values are fatal for writable agent tasks; the
 	// daemon must not fall back to its own token. See MUL-3292.
-	AuthToken string `json:"auth_token,omitempty"`
+	AuthToken      string `json:"auth_token,omitempty"`
+	CreatedAt      string `json:"created_at,omitempty"`
+	QueueToClaimMS *int64 `json:"-"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon
@@ -298,7 +300,15 @@ type TaskUsageEntry struct {
 	// Omitted when the agent reports no cost, which is the common case — the
 	// server then leaves the column NULL and the client estimates from the
 	// pricing table instead. See agent.TokenUsage.CostUSDTicks.
-	CostUSDTicks int64 `json:"cost_usd_ticks,omitempty"`
+	CostUSDTicks         int64  `json:"cost_usd_ticks,omitempty"`
+	NumTurns             int    `json:"num_turns,omitempty"`
+	Resumed              bool   `json:"resumed,omitempty"`
+	SessionID            string `json:"session_id,omitempty"`
+	LastContextTokens    *int64 `json:"last_context_tokens,omitempty"`
+	QueueToClaimMS       *int64 `json:"queue_to_claim_ms,omitempty"`
+	PrepareMS            *int64 `json:"prepare_ms,omitempty"`
+	SpawnToFirstOutputMS *int64 `json:"spawn_to_first_output_ms,omitempty"`
+	TotalMS              *int64 `json:"total_ms,omitempty"`
 }
 
 // TaskResult is the outcome of executing a task.
@@ -323,8 +333,10 @@ type TaskResult struct {
 	// abandoned as unresumable (GH #6066). Forwarded on every terminal path,
 	// including the completed one: a fresh-session retry that SUCCEEDS is
 	// precisely when the abandoned id would otherwise stay selectable.
-	RetiredSessionID string           `json:"-"`
-	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	RetiredSessionID  string           `json:"-"`
+	Usage             []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	NumTurns          int              `json:"-"`
+	LastContextTokens *int64           `json:"-"`
 }
 
 // PluginHookTool is one agent-trigger plugin hook, as the agent will see it.
