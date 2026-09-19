@@ -50,6 +50,18 @@ type localDirectoryRef struct {
 	DaemonID      string `json:"daemon_id"`
 	Label         string `json:"label,omitempty"`
 	ExecutionMode string `json:"execution_mode,omitempty"`
+	// RealPath is the directory's identity as the machine reported it at pick
+	// time; empty on rows written before it existed. The daemon re-resolves
+	// the real path itself (resolveRealPath) and uses that for the mutex, so
+	// this field is carried for identity/display only, never as the key.
+	RealPath string `json:"real_path,omitempty"`
+	// RepoKey is the normalized identity of the repository the directory
+	// holds, or "" when it holds none or nobody looked.
+	RepoKey string `json:"repo_key,omitempty"`
+	// WorktreeRoot is where parallel mode puts this directory's working
+	// copies. Empty means the default: the repository's sibling
+	// `<repo>.multica-worktrees`. See execenv.DefaultWorktreeRoot.
+	WorktreeRoot string `json:"worktree_root,omitempty"`
 }
 
 // localDirectoryAssignment is the resolved view of a task's local_directory
@@ -170,16 +182,40 @@ func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirector
 	// repos remain checkoutable. The per-project uniqueness rule below is
 	// unchanged — it is what stops a silent pick between two directories of
 	// the SAME project.
-	for _, project := range task.projectContexts() {
-		assignment, err := findLocalDirectoryAssignment(project.Resources, daemonID)
-		if err != nil {
-			return nil, err
-		}
-		if assignment != nil {
-			return assignment, nil
-		}
+	chosen, _, err := localDirectoryPlanForTask(task, daemonID)
+	return chosen, err
+}
+
+// localDirectoryPlanForTask is localDirectoryAssignmentForTask plus the other
+// directories this machine holds for the task's projects. Those are read-only
+// for the run: one run writes one directory (DENE-617 invariant 1), and the
+// brief names the rest so the agent can read them without discovering them by
+// accident.
+//
+// Across several projects (a multi-project chat, DENE-523) the first project
+// that pins a directory here decides the writable one; every other local
+// directory of every project on this machine — including that project's own
+// lower-priority rows — is read-only.
+func localDirectoryPlanForTask(task Task, daemonID string) (chosen *localDirectoryAssignment, readOnly []*localDirectoryAssignment, err error) {
+	if task.IsLeaderTask {
+		return nil, nil, nil
 	}
-	return nil, nil
+	for _, project := range task.projectContexts() {
+		picked, rest, err := resolveLocalDirectories(project.Resources, daemonID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if chosen == nil && picked != nil {
+			chosen = picked
+			readOnly = append(readOnly, rest...)
+			continue
+		}
+		if picked != nil {
+			readOnly = append(readOnly, picked)
+		}
+		readOnly = append(readOnly, rest...)
+	}
+	return chosen, readOnly, nil
 }
 
 // localDirectoryLockExempt reports whether a task may run inside an in_place
@@ -209,65 +245,71 @@ func localDirectoryLockExempt(task Task) bool {
 	return task.ChatSessionID != ""
 }
 
-// findLocalDirectoryAssignment scans the task's project resources for one of
-// type local_directory whose daemon_id matches this daemon. Returns nil
-// (without error) when no such resource exists — the task takes the regular
-// github_repo / worktree code path. Returns an error only when the matching
-// resource is structurally broken (bad JSON, missing fields) OR when more
-// than one resource is pinned to this daemon — that's a server-side
-// invariant violation, and silently picking the first match would let the
-// agent write into an arbitrary directory the user didn't intend.
+// findLocalDirectoryAssignment picks the local_directory this daemon runs the
+// task in, and reports the project's OTHER directories on this machine as
+// read-only context.
 //
-// Server-side `findLocalDirectoryConflict` enforces a single local_directory
-// per (project, daemon), so two matches here means either the constraint
-// was bypassed (older API client) or the data was corrupted. Either way,
-// fail fast rather than guess.
+// One run writes one directory (DENE-617 invariant 1). Which one is not a
+// race: resources arrive in `position` order (ListProjectResources orders by
+// it), so the FIRST local_directory pinned to this daemon is the project's
+// default working directory on this machine, and reordering the list in the UI
+// is how a user changes it. The rest are still real directories the agent may
+// need to read, so they are handed over as read-only rather than hidden.
+//
+// This replaces an error. Until DENE-617 a second local_directory on the same
+// daemon failed the task, because the server enforced one per (project,
+// daemon) and two rows could only mean corrupted data — picking one would have
+// been a guess. Now several are legal and the order states the answer, so
+// there is nothing left to guess.
+//
+// Returns nil (without error) when no local_directory is pinned to this
+// daemon — the task takes the regular github_repo / remote checkout path.
+// Errors only on a structurally broken ref (bad JSON, missing daemon_id, a
+// path that is not absolute): a directory the daemon cannot even name is not
+// something to silently skip past on the way to someone else's directory.
 func findLocalDirectoryAssignment(resources []ProjectResourceData, daemonID string) (*localDirectoryAssignment, error) {
-	var match *localDirectoryAssignment
+	chosen, _, err := resolveLocalDirectories(resources, daemonID)
+	return chosen, err
+}
+
+// resolveLocalDirectories is findLocalDirectoryAssignment plus the read-only
+// remainder, split out so the brief can name the directories the agent may
+// read without the assignment path having to care.
+func resolveLocalDirectories(resources []ProjectResourceData, daemonID string) (chosen *localDirectoryAssignment, readOnly []*localDirectoryAssignment, err error) {
 	for _, r := range resources {
 		if r.ResourceType != localDirectoryResourceType {
 			continue
 		}
 		var ref localDirectoryRef
 		if err := json.Unmarshal(r.ResourceRef, &ref); err != nil {
-			return nil, fmt.Errorf("local_directory: parse resource_ref: %w", err)
+			return nil, nil, fmt.Errorf("local_directory: parse resource_ref: %w", err)
 		}
 		ref.DaemonID = strings.TrimSpace(ref.DaemonID)
 		if ref.DaemonID == "" {
-			return nil, errors.New("local_directory: resource_ref missing daemon_id")
+			return nil, nil, errors.New("local_directory: resource_ref missing daemon_id")
 		}
 		if ref.DaemonID != daemonID {
-			// A different daemon owns this resource. Skip silently; the
-			// project may have multiple local_directory resources, one
-			// per daemon, and other daemons will resolve their own row.
+			// A different machine owns this resource. Skip silently; a
+			// project carries one set of directories per machine, and the
+			// other daemons resolve their own rows.
 			continue
-		}
-		if match != nil {
-			// Server-side invariant: at most one local_directory per
-			// (project, daemon). Two matches here means the constraint
-			// was bypassed by an older API client or by direct DB writes.
-			// Either way, refuse to guess which directory the user meant.
-			return nil, fmt.Errorf(
-				"local_directory: project has multiple local_directory resources for this daemon (%q and %q); remove the extra in project settings",
-				match.AbsPath,
-				strings.TrimSpace(ref.LocalPath),
-			)
 		}
 		absPath, err := normalizeLocalPath(ref.LocalPath)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		realPath, err := resolveRealPath(absPath)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		match = &localDirectoryAssignment{
-			Ref:      ref,
-			AbsPath:  absPath,
-			RealPath: realPath,
+		entry := &localDirectoryAssignment{Ref: ref, AbsPath: absPath, RealPath: realPath}
+		if chosen == nil {
+			chosen = entry
+			continue
 		}
+		readOnly = append(readOnly, entry)
 	}
-	return match, nil
+	return chosen, readOnly, nil
 }
 
 // normalizeLocalPath strips whitespace and resolves the path to an absolute

@@ -101,7 +101,7 @@ func TestResolveTaskCodeSourceSortsReposIntoBuckets(t *testing.T) {
 	// decided by the directory alone.
 	remotes := fakeRemotes(map[string][]string{base: {"https://github.com/kun/BNB.git"}})
 
-	src := resolveTaskCodeSource(assignment(t, base, "in_place"), base, []string{
+	src := resolveTaskCodeSource(assignment(t, base, "in_place"), nil, base, []string{
 		"https://github.com/kun/BNB",       // proven
 		"https://github.com/kun/ai100",     // named but unproven
 		"https://github.com/kun/elsewhere", // genuinely remote
@@ -125,7 +125,7 @@ func TestResolveTaskCodeSourceSortsReposIntoBuckets(t *testing.T) {
 }
 
 func TestResolveTaskCodeSourceWithoutAssignmentKeepsEveryRepoRemote(t *testing.T) {
-	src := resolveTaskCodeSource(nil, "", []string{"https://github.com/o/a", "https://github.com/o/b"}, fakeRemotes(nil))
+	src := resolveTaskCodeSource(nil, nil, "", []string{"https://github.com/o/a", "https://github.com/o/b"}, fakeRemotes(nil))
 	if src.Kind != codeSourceKindRemoteCheckout {
 		t.Fatalf("kind = %q, want remote_checkout", src.Kind)
 	}
@@ -141,7 +141,7 @@ func TestExecutionModeIsReportedEvenWhenTheRefOmitsIt(t *testing.T) {
 	// An absent execution_mode means in_place. A brief that showed it blank
 	// would leave the agent unable to tell whether its edits land in the
 	// user's working copy.
-	src := resolveTaskCodeSource(assignment(t, t.TempDir(), ""), "", nil, fakeRemotes(nil))
+	src := resolveTaskCodeSource(assignment(t, t.TempDir(), ""), nil, "", nil, fakeRemotes(nil))
 	if src.ExecutionMode != localDirectoryModeInPlace {
 		t.Fatalf("execution mode = %q, want in_place", src.ExecutionMode)
 	}
@@ -216,7 +216,7 @@ func TestCodeSourceReportsTheWorktreeAsTheTasksDirectory(t *testing.T) {
 		workDir: {"git@github.com:jeff-kunkun/multica.git"},
 	})
 
-	src := resolveTaskCodeSource(assignment(t, userDir, "worktree"), workDir,
+	src := resolveTaskCodeSource(assignment(t, userDir, "worktree"), nil, workDir,
 		[]string{"https://github.com/jeff-kunkun/multica"}, remotes)
 
 	if src.LocalPath != workDir {
@@ -239,7 +239,7 @@ func TestCodeSourceDemotesARepoTheWorktreeCannotReach(t *testing.T) {
 		workDir: {"git@github.com:kun/umbrella.git"},
 	})
 
-	src := resolveTaskCodeSource(assignment(t, base, "worktree"), workDir,
+	src := resolveTaskCodeSource(assignment(t, base, "worktree"), nil, workDir,
 		[]string{"https://github.com/kun/online-tarot"}, remotes)
 
 	if len(src.CoveredRepos) != 0 {

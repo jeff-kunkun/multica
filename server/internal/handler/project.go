@@ -324,14 +324,17 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 
 	// Pre-validate every resource payload before opening a transaction so an
 	// invalid ref produces a clean 400 with no DB work. For local_directory we
-	// also enforce one row per daemon_id within the batch — the daemon-side
-	// resolver picks the first match by daemon_id, so two rows on the same
-	// daemon would silently route the agent into whichever sorts first.
-	// The standalone POST/PUT paths run the same check via
-	// findLocalDirectoryConflict; this loop just covers the bundled-create
-	// surface, where there is no existing row to compare against yet.
+	// also apply the two identity rules WITHIN the batch: one row per
+	// directory per machine, and one row per repository per machine
+	// (DENE-617). The standalone POST/PUT paths run the same rules via
+	// findLocalDirectoryConflictReason against the stored rows; this loop
+	// covers the bundled-create surface, where there is nothing stored yet.
+	//
+	// Several directories on one machine are legal here too — that is the
+	// rule this relaxed. What is not legal is the same one twice.
 	normalizedRefs := make([]json.RawMessage, len(req.Resources))
 	localDirSeen := map[string]int{}
+	localRepoSeen := map[string]int{}
 	for i, res := range req.Resources {
 		res.ResourceType = strings.TrimSpace(res.ResourceType)
 		if res.ResourceType == "" {
@@ -350,11 +353,25 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: "+err.Error())
 				return
 			}
-			if prev, ok := localDirSeen[ld.DaemonID]; ok {
-				writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: duplicate local_directory for daemon (already at index "+strconv.Itoa(prev)+"); each daemon may attach at most one local_directory per project")
+			// Keyed on (machine, directory identity). Identity is the
+			// resolved real_path when the client measured one, so a symlink
+			// and its target are one directory rather than two.
+			identityKey := ld.DaemonID + "\x00" + localDirectoryIdentity(ld)
+			if prev, ok := localDirSeen[identityKey]; ok {
+				writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: "+ld.LocalPath+" is already in this list (index "+strconv.Itoa(prev)+")")
 				return
 			}
-			localDirSeen[ld.DaemonID] = i
+			localDirSeen[identityKey] = i
+			// A repository that cannot be identified carries no key and never
+			// collides — which is what keeps several plain folders legal.
+			if ld.RepoKey != "" {
+				repoKey := ld.DaemonID + "\x00" + ld.RepoKey
+				if prev, ok := localRepoSeen[repoKey]; ok {
+					writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: this repository is already in this list (index "+strconv.Itoa(prev)+") on the same machine; a second checkout of it would be a second copy of the same code")
+					return
+				}
+				localRepoSeen[repoKey] = i
+			}
 			// Same worktree gate the standalone POST/PUT paths run. This
 			// bundled-create surface skipped it, so a project created with a
 			// worktree local_directory could store a mode the machine cannot

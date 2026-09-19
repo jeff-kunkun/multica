@@ -102,21 +102,25 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 		}
 	})
 
-	t.Run("two local_directory rows on this daemon fail fast", func(t *testing.T) {
-		// Server-side findLocalDirectoryConflict enforces one
-		// local_directory per (project, daemon). If two rows are
-		// somehow present (older API client, direct DB writes), the
-		// daemon must refuse to guess which directory to execute in.
+	t.Run("two local_directory rows on this daemon pick the first", func(t *testing.T) {
+		// A project may pin several directories on one machine
+		// (DENE-617). Resources arrive in `position` order, so the
+		// first is the project's default working directory here and
+		// the rest are read-only for the run — see
+		// TestSeveralLocalDirectoriesPickTheFirstAndKeepTheRestReadOnly
+		// for the full rule. Until then this was an error, because the
+		// server allowed only one row and two could only mean the
+		// constraint had been bypassed.
 		tmp2 := t.TempDir()
-		_, err := findLocalDirectoryAssignment([]ProjectResourceData{
+		got, err := findLocalDirectoryAssignment([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: thisDaemon})},
 			{ID: "r2", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp2, DaemonID: thisDaemon})},
 		}, thisDaemon)
-		if err == nil {
-			t.Fatalf("expected error for two local_directory rows pinned to this daemon")
+		if err != nil {
+			t.Fatalf("err: %v", err)
 		}
-		if !strings.Contains(err.Error(), "multiple local_directory") {
-			t.Errorf("error %q did not mention multiple local_directory", err)
+		if got == nil || got.AbsPath != filepath.Clean(tmp) {
+			t.Fatalf("assignment = %+v, want the first row %q", got, filepath.Clean(tmp))
 		}
 	})
 

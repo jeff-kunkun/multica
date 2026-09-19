@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/repoident"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -170,6 +171,55 @@ type localDirectoryRef struct {
 	DaemonID      string `json:"daemon_id"`
 	Label         string `json:"label,omitempty"`
 	ExecutionMode string `json:"execution_mode,omitempty"`
+	// RealPath is the directory's IDENTITY: the symlink-resolved absolute
+	// path, as the machine holding it reported at pick time. It is what the
+	// (project, real_path) uniqueness rule keys on, so two routes to one
+	// directory — a symlink and its target, /tmp and /private/tmp — cannot be
+	// bound twice under two spellings (DENE-617).
+	//
+	// Optional on the wire because a client that predates it, or a browser
+	// that cannot call realpath, still has to be able to save a directory.
+	// Absent means "use local_path as the identity": that is exactly what the
+	// rule did before this field existed, so old rows keep their meaning and
+	// the DB index (which coalesces the two) agrees with this package.
+	RealPath string `json:"real_path,omitempty"`
+	// RepoKey is the repository this directory holds, normalized by
+	// repoident from the directory's git remote. Empty for a plain folder, a
+	// repo with no remote, or any client that did not report one — and an
+	// empty key is never equal to another empty key, so those never collide.
+	//
+	// Its only job is duplicate detection against a github_repo pointing at
+	// the same repository, and against a second checkout of that repository
+	// on the same machine.
+	RepoKey string `json:"repo_key,omitempty"`
+	// WorktreeRoot is where parallel mode puts its working copies. It exists
+	// so those copies land on the USER's disk, beside their repository,
+	// instead of inside the Multica workspace where a workspace GC would
+	// reclaim a directory the user still wanted to look at (DENE-617).
+	//
+	// Empty means "the daemon picks the default", which is the repository's
+	// sibling `<repo>.multica-worktrees`. Only parallel mode reads it.
+	WorktreeRoot string `json:"worktree_root,omitempty"`
+	// IsGitRepo is what the machine holding the directory saw at pick time.
+	// The server cannot look at a filesystem on someone else's laptop, so
+	// this is the only way it can refuse parallel mode on a folder that has
+	// no repository to branch from — a resource whose every task would fail.
+	//
+	// A pointer because the three states differ: true (a repo), false (proven
+	// not a repo — reject parallel), and absent (nobody checked — allow, and
+	// let the daemon refuse authoritatively at task time).
+	IsGitRepo *bool `json:"is_git_repo,omitempty"`
+}
+
+// localDirectoryIdentity is the value the (project, real_path) uniqueness rule
+// compares. Kept as one function because the DB index computes the same
+// COALESCE and the two must not drift: a rule the application enforces on one
+// value while the database enforces it on another is two rules.
+func localDirectoryIdentity(ref localDirectoryRef) string {
+	if p := strings.TrimSpace(ref.RealPath); p != "" {
+		return p
+	}
+	return strings.TrimSpace(ref.LocalPath)
 }
 
 // requireModeCapableDaemon rejects saving a local_directory ref that asks for
@@ -329,6 +379,32 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 	default:
 		return nil, fmt.Errorf("local_directory: execution_mode must be %q, %q or %q, got %q",
 			localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeShared, payload.ExecutionMode)
+	}
+	payload.RealPath = strings.TrimSpace(payload.RealPath)
+	if payload.RealPath != "" && !isAbsoluteLocalPath(payload.RealPath) {
+		return nil, errors.New("local_directory: real_path must be an absolute path")
+	}
+	// Normalize rather than trust: the client may send a full remote URL or an
+	// already-normalized key, and repoident maps both onto the same value.
+	// A key it cannot identify is dropped — storing an unidentifiable string
+	// would make two unrelated directories compare equal under the
+	// (project, daemon, repo_key) rule.
+	payload.RepoKey = string(repoident.NormalizeURL(payload.RepoKey))
+	payload.WorktreeRoot = strings.TrimSpace(payload.WorktreeRoot)
+	if payload.WorktreeRoot != "" && !isAbsoluteLocalPath(payload.WorktreeRoot) {
+		return nil, errors.New("local_directory: worktree_root must be an absolute path")
+	}
+	// Parallel mode branches from a repository. A directory the machine
+	// holding it proved has none cannot run a single task in that mode, so it
+	// is refused here rather than at the first run (DENE-617 invariant 12).
+	// Absent is not proof and stays allowed: the daemon re-checks at task time.
+	if payload.ExecutionMode == localDirectoryModeWorktree &&
+		payload.IsGitRepo != nil && !*payload.IsGitRepo {
+		return nil, fmt.Errorf(
+			"local_directory: %q is not a git repository, so it cannot use parallel (worktree) mode — "+
+				"parallel mode delivers work as a branch and needs a repository to branch from. "+
+				"Keep it on in_place, or create a git repository in that folder first",
+			payload.LocalPath)
 	}
 	out, err := json.Marshal(payload)
 	if err != nil {
@@ -550,11 +626,11 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if conflict, err := h.findLocalDirectoryConflict(r.Context(), project.ID, req.ResourceType, normalizedRef, pgtype.UUID{}); err != nil {
+	if conflict, reason, err := h.findLocalDirectoryConflictReason(r.Context(), project.ID, req.ResourceType, normalizedRef, pgtype.UUID{}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
 		return
 	} else if conflict {
-		writeError(w, http.StatusConflict, "this daemon already has a local_directory attached to the project; remove it before adding another")
+		writeError(w, http.StatusConflict, reason)
 		return
 	}
 
@@ -657,11 +733,11 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 		nextRef = normalized
 	}
 
-	if conflict, err := h.findLocalDirectoryConflict(r.Context(), project.ID, existing.ResourceType, nextRef, existing.ID); err != nil {
+	if conflict, reason, err := h.findLocalDirectoryConflictReason(r.Context(), project.ID, existing.ResourceType, nextRef, existing.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
 		return
 	} else if conflict {
-		writeError(w, http.StatusConflict, "another local_directory on this daemon is already attached to the project")
+		writeError(w, http.StatusConflict, reason)
 		return
 	}
 
@@ -791,31 +867,52 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// findLocalDirectoryConflict enforces "at most one local_directory resource
-// per (project, daemon)". The daemon picks the first matching daemon_id row
-// out of a task's resources (findLocalDirectoryAssignment), so letting a
-// project carry two rows for the same daemon would mean the agent silently
-// writes into whichever happens to come back first — a safety hazard for a
-// feature that operates directly on the user's real working directory.
+// findLocalDirectoryConflict enforces the two identity rules a project's local
+// directories must satisfy (DENE-617):
 //
-// The DB-level UNIQUE(project_id, resource_type, resource_ref) constraint
-// alone is not enough here: it only fires on full ref-JSON equality, so a
-// different local_path or even a typoed label on the same daemon would slip
-// through. We do the daemon-scoped check here in application code instead.
+//  1. (project, daemon_id, real_path) — one row per DIRECTORY on one machine.
+//     Binding the same directory twice is never a thing a user meant; it just
+//     makes the choice of which row wins arbitrary. daemon_id is in the key
+//     because a path string only names a directory on the machine holding it.
+//  2. (project, daemon_id, repo_key), when repo_key is non-empty — one row per
+//     REPOSITORY per machine. Two checkouts of one repository on one machine
+//     are two copies of the same code, which is the duplication this whole
+//     change exists to stop.
+//
+// What it deliberately no longer enforces is "at most one local_directory per
+// (project, daemon)". A project can legitimately span several directories on
+// one machine — four unrelated plain folders, a repo plus its docs checkout —
+// and the old rule made that impossible. What made the old rule necessary was
+// the daemon picking an ARBITRARY matching row; it now takes the first in
+// `position` order and exposes the rest read-only, so "which directory" has a
+// stated answer instead of a race.
+//
+// Both rules are also Postgres partial unique indexes (migrations 498/499), so
+// a client that bypasses this API cannot create the state either. This copy
+// exists to turn the constraint violation into a message naming the directory.
 //
 // `excludeID` lets the update path ignore the row being edited.
 func (h *Handler) findLocalDirectoryConflict(ctx context.Context, projectID pgtype.UUID, resourceType string, normalizedRef json.RawMessage, excludeID pgtype.UUID) (bool, error) {
+	conflict, _, err := h.findLocalDirectoryConflictReason(ctx, projectID, resourceType, normalizedRef, excludeID)
+	return conflict, err
+}
+
+// findLocalDirectoryConflictReason is findLocalDirectoryConflict plus the
+// sentence explaining which rule fired, so the caller can say which directory
+// is already bound instead of a generic refusal.
+func (h *Handler) findLocalDirectoryConflictReason(ctx context.Context, projectID pgtype.UUID, resourceType string, normalizedRef json.RawMessage, excludeID pgtype.UUID) (bool, string, error) {
 	if resourceType != "local_directory" {
-		return false, nil
+		return false, "", nil
 	}
 	var incoming localDirectoryRef
 	if err := json.Unmarshal(normalizedRef, &incoming); err != nil {
-		return false, err
+		return false, "", err
 	}
 	rows, err := h.Queries.ListProjectResources(ctx, projectID)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
+	incomingIdentity := localDirectoryIdentity(incoming)
 	for _, row := range rows {
 		if row.ResourceType != "local_directory" {
 			continue
@@ -827,15 +924,22 @@ func (h *Handler) findLocalDirectoryConflict(ctx context.Context, projectID pgty
 		if err := json.Unmarshal(row.ResourceRef, &existing); err != nil {
 			continue
 		}
-		// Daemon-scoped uniqueness: one local_directory per daemon per
-		// project. Different daemons can each carry one row (one per
-		// user device); the daemon-side resolver routes each daemon to
-		// its own assignment by daemon_id.
-		if existing.DaemonID == incoming.DaemonID {
-			return true, nil
+		if existing.DaemonID != incoming.DaemonID {
+			// A path string names a directory only on the machine holding it.
+			// Two machines may each carry /Users/me/code/app for one project.
+			continue
+		}
+		if incomingIdentity != "" && localDirectoryIdentity(existing) == incomingIdentity {
+			return true, fmt.Sprintf(
+				"%q is already added to this project", existing.LocalPath), nil
+		}
+		if incoming.RepoKey != "" && existing.RepoKey == incoming.RepoKey {
+			return true, fmt.Sprintf(
+				"this repository is already added on this machine as %q — a second checkout of it would be a second copy of the same code",
+				existing.LocalPath), nil
 		}
 	}
-	return false, nil
+	return false, "", nil
 }
 
 // DeleteProjectResource removes a resource from a project.

@@ -1285,6 +1285,33 @@
       "reconnect_failed": "Couldn't reconnect the daemon",
       "try_again_moment": "Please try again in a moment.",
       "try_again": "Please try again."
+    },
+    "worktree_cleanup": {
+      "title": "Working copies on this machine",
+      "description": "Parallel mode makes one working copy per task, beside the repository, on your own drive. They stay there so you can open them after a run — this is where you decide when Multica may clear them out.",
+      "scanning": "Looking for working copies…",
+      "daemon_offline": "Start the local daemon to see the working copies on this machine.",
+      "load_failed": "Could not read the working copies on this machine.",
+      "enable_title": "Clear out merged copies automatically",
+      "enable_description": "Off by default. When on, a copy is removed only if it is Multica's, idle, clean, already merged, and older than the window below — any one of those failing keeps it.",
+      "min_age_title": "Keep for at least",
+      "min_age_description": "Days after a copy's last run before it can be cleared. Days, not hours: a run you meant to come back to on Monday should still be there after a holiday.",
+      "trunk_title": "Merge into",
+      "trunk_description": "The branch a copy's work must already be in. Leave empty to use each repository's own default branch.",
+      "trunk_placeholder": "main",
+      "summary": "{{count}} working copies · {{total}} on disk · {{reclaimable}} would be cleared",
+      "advisory": "Automatic cleanup is off, so nothing below will be removed. This is what it would do if you switched it on.",
+      "empty": "No working copies on this machine yet. Parallel mode creates one per task.",
+      "last_run": "last run {{days}}d ago",
+      "remove_now": "Clear now",
+      "removed": "Working copy cleared",
+      "reason_removable": "Merged, clean and idle — this one would be cleared.",
+      "reason_uncommitted": "Kept: it still has uncommitted changes. Multica never removes a copy holding work that is nowhere else.",
+      "reason_unmerged": "Kept: its branch is not in the trunk branch yet.",
+      "reason_too_recent": "Kept: its last run is too recent.",
+      "reason_in_use": "Kept: a task is running in it right now.",
+      "reason_not_ours": "Kept: Multica did not create this one, so it is not Multica's to remove.",
+      "reason_unknown": "Kept: its state could not be read, and unknown is not permission to delete."
     }
   },
   "members": {

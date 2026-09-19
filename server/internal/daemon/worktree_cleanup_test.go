@@ -1,0 +1,199 @@
+package daemon
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+)
+
+// The machine's side of cleanup (DENE-617): where the copies are, which are
+// busy, and what the policy is. The policy RULES are execenv's, tested there.
+
+// withProfile points cli.ProfileDir at a temp directory so the state reads and
+// writes its own files rather than the developer's real ~/.multica.
+//
+// The variable matters: cli.multicaConfigRoot only honours
+// MULTICA_TASK_CONFIG_ROOT, and falls back to $HOME for anything else. Setting
+// some other name would leave these tests writing a real settings file — with
+// cleanup ENABLED — into the profile of whoever ran them.
+func withProfile(t *testing.T) *worktreeCleanupState {
+	t.Helper()
+	t.Setenv(cli.TaskConfigRootEnv, t.TempDir())
+	return newWorktreeCleanupState("")
+}
+
+// The guard for the paragraph above: if the override ever stops being honoured,
+// these tests must fail rather than quietly start writing to a real profile.
+func TestCleanupStateWritesUnderTheOverriddenProfileRoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(cli.TaskConfigRootEnv, root)
+	state := newWorktreeCleanupState("")
+
+	path, err := state.path(worktreeCleanupSettingsFileName)
+	if err != nil {
+		t.Fatalf("path: %v", err)
+	}
+	if filepath.Dir(path) != filepath.Clean(root) {
+		t.Fatalf("settings path %q is outside the overridden profile root %q", path, root)
+	}
+	if err := state.SaveSettings(execenv.WorktreeCleanupSettings{Enabled: true}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("settings were not written where path() said: %v", err)
+	}
+}
+
+// The default is OFF. A machine whose owner has never opened the screen must
+// not be deleting anything, and a missing settings file is exactly that case.
+func TestCleanupIsDisabledUntilTheUserEnablesIt(t *testing.T) {
+	state := withProfile(t)
+
+	settings := state.Settings()
+	if settings.Enabled {
+		t.Fatal("cleanup is enabled with no settings file; a user who never opened the screen would be deleting copies")
+	}
+	if settings.MinAgeDays != execenv.DefaultWorktreeCleanupMinAgeDays {
+		t.Fatalf("MinAgeDays = %d, want the %d-day default", settings.MinAgeDays, execenv.DefaultWorktreeCleanupMinAgeDays)
+	}
+
+	if err := state.SaveSettings(execenv.WorktreeCleanupSettings{Enabled: true, MinAgeDays: 7, TrunkBranch: " main "}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	saved := state.Settings()
+	if !saved.Enabled || saved.MinAgeDays != 7 || saved.TrunkBranch != "main" {
+		t.Fatalf("settings round-tripped as %+v", saved)
+	}
+
+	// A zero or negative window is the default, never "delete immediately".
+	if err := state.SaveSettings(execenv.WorktreeCleanupSettings{Enabled: true, MinAgeDays: 0}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	if got := state.Settings().MinAgeDays; got != execenv.DefaultWorktreeCleanupMinAgeDays {
+		t.Fatalf("MinAgeDays = %d after saving 0, want the default", got)
+	}
+}
+
+// A truncated or hand-edited settings file reads as the default rather than
+// failing the daemon — and the default is the safe direction.
+func TestUnreadableSettingsFallBackToDisabled(t *testing.T) {
+	state := withProfile(t)
+	path, err := state.path(worktreeCleanupSettingsFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"enabled": tr`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if state.Settings().Enabled {
+		t.Fatal("a corrupt settings file read as enabled")
+	}
+}
+
+// Working copies now live outside the Multica workspace entirely, so the only
+// way the screen can find them is the daemon recording each root it uses.
+func TestRootsAreRecordedAndDroppedWhenTheyDisappear(t *testing.T) {
+	state := withProfile(t)
+	root := t.TempDir()
+
+	for i := 0; i < 2; i++ {
+		if err := state.RecordRoot(root, "/repo"); err != nil {
+			t.Fatalf("RecordRoot: %v", err)
+		}
+	}
+	roots := state.Roots()
+	if len(roots) != 1 || filepath.Clean(roots[0].Root) != filepath.Clean(root) {
+		t.Fatalf("roots = %+v, want exactly one entry for %q", roots, root)
+	}
+	if roots[0].GitRoot != "/repo" || roots[0].LastUsedAt.IsZero() {
+		t.Fatalf("root entry = %+v, want its repository and a timestamp", roots[0])
+	}
+
+	// A repository the user deleted should stop appearing in a disk report.
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Roots(); len(got) != 0 {
+		t.Fatalf("roots = %+v after the directory was removed, want none", got)
+	}
+}
+
+// A copy a task is running in is reported as in use, and stops being so when
+// the task lets go. Counted, because one task enters a copy more than once.
+func TestActiveCopiesAreCountedNotFlagged(t *testing.T) {
+	state := withProfile(t)
+	path := "/Users/me/code/app.multica-worktrees/task-1"
+
+	state.MarkActive(path)
+	state.MarkActive(path)
+	if !state.activeSnapshot()[filepath.Clean(path)] {
+		t.Fatal("a copy with a task in it is not reported as in use")
+	}
+	state.ReleaseActive(path)
+	if !state.activeSnapshot()[filepath.Clean(path)] {
+		t.Fatal("the first release cleared the flag while the copy was still in use")
+	}
+	state.ReleaseActive(path)
+	if state.activeSnapshot()[filepath.Clean(path)] {
+		t.Fatal("the copy is still reported as in use after every hold was released")
+	}
+}
+
+// Removal is bounded by the roots this daemon recorded. A path it never put a
+// working copy in is never a path this code deletes, whatever the request says.
+func TestRemoveRefusesAPathOutsideEveryRecordedRoot(t *testing.T) {
+	state := withProfile(t)
+	stranger := filepath.Join(t.TempDir(), "somebody-elses-worktree")
+	if err := os.MkdirAll(stranger, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Remove(stranger); err == nil {
+		t.Fatal("removed a directory under a root this daemon never recorded")
+	}
+	if _, err := os.Stat(stranger); err != nil {
+		t.Fatalf("the directory was removed anyway: %v", err)
+	}
+	if err := state.Remove(""); err == nil {
+		t.Fatal("an empty path was accepted")
+	}
+}
+
+// Invariant 6 at the machine level: with the policy off, the automatic pass
+// removes nothing — even a copy that satisfies every other condition.
+func TestAutomaticCleanupDoesNothingWhileDisabled(t *testing.T) {
+	state := withProfile(t)
+	root := t.TempDir()
+	copyPath := filepath.Join(root, "task-1")
+	if err := os.MkdirAll(copyPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.RecordRoot(root, "/repo"); err != nil {
+		t.Fatal(err)
+	}
+	state.nowFunc = func() time.Time { return time.Now().Add(365 * 24 * time.Hour) }
+
+	removed, bytes, errs := state.RunAutomatic()
+	if removed != 0 || bytes != 0 || len(errs) != 0 {
+		t.Fatalf("RunAutomatic with cleanup disabled removed %d copies (%d bytes, errs %v)", removed, bytes, errs)
+	}
+	if _, err := os.Stat(copyPath); err != nil {
+		t.Fatalf("the copy was removed while cleanup was off: %v", err)
+	}
+
+	// And the report is still produced, so the user can read the verdicts
+	// before switching anything on.
+	report := state.Scan()
+	if report.Settings.Enabled {
+		t.Fatal("the report claims cleanup is enabled")
+	}
+	if len(report.Items) != 1 || report.Items[0].KeepReason != execenv.KeepNotMulticaCreated {
+		t.Fatalf("items = %+v, want the unrecorded copy kept as %q", report.Items, execenv.KeepNotMulticaCreated)
+	}
+}

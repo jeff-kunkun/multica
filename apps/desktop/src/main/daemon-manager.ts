@@ -304,6 +304,14 @@ function invalidateActiveProfile(): void {
   recoveryPolicy.reset();
 }
 
+/** Loopback health port of the current Desktop daemon, or null while the
+ *  target API URL is still unknown. The daemon serves its machine-local
+ *  endpoints (repo checkout, worktree cleanup) there. */
+export async function activeDaemonHealthPort(): Promise<number | null> {
+  const profile = await ensureActiveProfile();
+  return profile ? profile.port : null;
+}
+
 /** Profile directory the current Desktop daemon reads and writes. Null until
  *  the target API URL is known — callers must not fall back to ~/.multica. */
 export async function activeDaemonProfileDir(): Promise<string | null> {

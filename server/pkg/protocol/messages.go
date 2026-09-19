@@ -33,6 +33,18 @@ const (
 	// isolation, so it is the milder failure — but the server still gates on
 	// the capability so the user learns at save time, not from a queue.
 	DaemonCapabilityLocalSharedV1 = "local-shared-v1"
+	// DaemonCapabilityLocalWorktreeUserRootV1 advertises that the daemon puts
+	// a parallel-mode working copy on the USER's disk, beside their
+	// repository, instead of inside the Multica workspace (DENE-617).
+	//
+	// Gated because worktree_root is a promise about WHERE a copy will be and
+	// who may reclaim it. A daemon that predates the move json-skips the field
+	// and creates the copy inside its env root, where the workspace GC deletes
+	// it — the exact thing a user who picked a location asked not to happen.
+	// So the server strips worktree_root before dispatching to such a daemon:
+	// it then behaves exactly as it does today, rather than appearing to honour
+	// a setting it cannot implement.
+	DaemonCapabilityLocalWorktreeUserRootV1 = "local-worktree-user-root-v1"
 	// DaemonCapabilitySourceContextQuickCreateV1 advertises support for the
 	// two-section quick-create prompt that keeps a new instruction separate
 	// from immutable historical source context.

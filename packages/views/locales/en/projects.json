@@ -151,7 +151,10 @@
     "duplicate_body": "A local directory and {{remotes}} remote repository entry point at the same repository. Tasks on that machine use the local directory, so the remote entries only cause a second copy to be downloaded.",
     "duplicate_merge": "Merge into local directory",
     "duplicate_merging": "Merging...",
-    "duplicate_merged": "Removed the redundant remote entries"
+    "duplicate_merged": "Removed the redundant remote entries",
+    "mode_worktree_cost": "Costs disk on YOUR drive: a full working copy per task, created under {{path}}. You can open them, and Multica never deletes one that still has uncommitted changes.",
+    "mode_worktree_cost_unknown_path": "Costs disk on YOUR drive: a full working copy per task, created in a folder next to this repository. You can open them, and Multica never deletes one that still has uncommitted changes.",
+    "local_directory_default_hint": "Tasks on this machine run in the first directory in this list. Drag to reorder; the others stay available read-only."
   },
   "members": {
     "section_header": "Members",

@@ -198,17 +198,26 @@ describe("CreateProjectModal — local directory execution mode", () => {
   // actually run worktree mode on starts on parallel, because that is the mode
   // that fits — and the user sees it selected in a control they can flip before
   // creating anything.
-  it("preselects parallel for a git repository", async () => {
+  // DENE-617: a git repository preselects DIRECT, like everything else. This
+  // used to start on parallel, which also agreed — silently — to a full
+  // working copy per task on the user's own drive. Parallel stays one click
+  // away, with its cost stated next to it.
+  it("preselects direct for a git repository, and leaves parallel selectable", async () => {
     const user = userEvent.setup();
     renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
 
     await pickLocalDirectory(user);
 
-    expect(screen.getByRole("button", { name: /^Parallel$/i })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /^Direct$/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Edit this folder directly/i })).toHaveAttribute(
       "aria-checked",
       "true",
     );
+    expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).not.toBeDisabled();
   });
 
   it("preselects direct for a plain folder", async () => {
@@ -221,11 +230,11 @@ describe("CreateProjectModal — local directory execution mode", () => {
     expect(screen.getByRole("button", { name: /^Direct$/i })).toBeInTheDocument();
   });
 
-  // A machine that has not advertised the capability must not be preselected
-  // into parallel: the server gates this create, and a rejection would fail the
-  // whole project creation over a mode the user never chose. It stays
-  // SELECTABLE — an un-advertised machine may still be able to run it, and only
-  // the server can say (#7113).
+  // Since DENE-617 every folder preselects direct, so this case is no longer
+  // ABOUT the preselection — it is here to prove that an un-advertised machine
+  // does not get its option taken away. Only the server can say whether such a
+  // machine can run parallel mode, and guessing "no" sent a user off to update
+  // the one piece already on the newest release (#7113).
   it("preselects direct when the machine has not advertised the capability", async () => {
     runtimeWorktreeMetadata = "daemon_cannot";
     const user = userEvent.setup();
@@ -277,8 +286,8 @@ describe("CreateProjectModal — local directory execution mode", () => {
     await pickLocalDirectory(user);
 
     // The compact button uses the short label; the picker carries the full
-    // title. A git repo preselects parallel, so that is the label here.
-    expect(screen.getByRole("button", { name: /^Parallel$/i })).toBeInTheDocument();
+    // title. Every folder preselects direct (DENE-617), so that is the label.
+    expect(screen.getByRole("button", { name: /^Direct$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Change directory/i })).toBeInTheDocument();
   });
 

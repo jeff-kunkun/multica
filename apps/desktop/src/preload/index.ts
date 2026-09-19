@@ -243,6 +243,13 @@ const desktopAPI = {
   /** Validate that a path is an existing readable+writable directory. */
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
+  /** This machine's parallel-copy cleanup: report, policy, one-off removal.
+   *  Served by the local daemon — the paths and sizes exist only here. */
+  worktreeCleanupReport: () => ipcRenderer.invoke("worktree-cleanup:report"),
+  saveWorktreeCleanupSettings: (settings: unknown) =>
+    ipcRenderer.invoke("worktree-cleanup:save-settings", settings),
+  removeWorktreeCopy: (path: string) =>
+    ipcRenderer.invoke("worktree-cleanup:remove", path),
   listLocalDirectorySharedOverrides: () =>
     ipcRenderer.invoke("local-directory:list-shared-overrides"),
   setLocalDirectorySharedOverride: (input: {

@@ -150,7 +150,10 @@
     "duplicate_body": "一个本机目录和 {{remotes}} 条远端仓库配置指向同一个仓库。该机器上的任务会使用本机目录，远端配置只会让代码被重新下载一份。",
     "duplicate_merge": "合并为本地目录",
     "duplicate_merging": "正在合并…",
-    "duplicate_merged": "已移除多余的远端配置"
+    "duplicate_merged": "已移除多余的远端配置",
+    "mode_worktree_cost": "占用的是你自己的磁盘：每个任务一份完整工作副本，建在 {{path}} 下。你随时能进去看；还有未提交改动的副本，Multica 绝不会删。",
+    "mode_worktree_cost_unknown_path": "占用的是你自己的磁盘：每个任务一份完整工作副本，建在这个仓库旁边的目录里。你随时能进去看；还有未提交改动的副本，Multica 绝不会删。",
+    "local_directory_default_hint": "这台机器上的任务跑在列表里的第一个目录。拖动可以换顺序，其余目录仍然可读。"
   },
   "members": {
     "section_header": "成员",

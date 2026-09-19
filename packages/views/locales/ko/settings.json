@@ -1016,6 +1016,33 @@
       "reconnect_failed": "데몬에 다시 연결하지 못했습니다",
       "try_again_moment": "잠시 후 다시 시도하세요.",
       "try_again": "다시 시도하세요."
+    },
+    "worktree_cleanup": {
+      "title": "이 컴퓨터의 작업 사본",
+      "description": "병렬 모드는 작업마다 저장소 옆, 사용자 본인의 드라이브에 작업 사본을 만듭니다. 실행 후에 열어볼 수 있도록 그대로 남습니다. Multica가 언제 정리해도 되는지를 여기서 정합니다.",
+      "scanning": "작업 사본을 찾는 중…",
+      "daemon_offline": "로컬 데몬을 시작하면 이 컴퓨터의 작업 사본을 볼 수 있습니다.",
+      "load_failed": "이 컴퓨터의 작업 사본을 읽지 못했습니다.",
+      "enable_title": "병합된 사본 자동 정리",
+      "enable_description": "기본값은 꺼짐입니다. 켜더라도 Multica가 만들었고, 실행 중이 아니고, 커밋하지 않은 변경이 없고, 이미 병합되었고, 아래 기간을 넘긴 사본만 삭제합니다. 하나라도 어긋나면 남겨 둡니다.",
+      "min_age_title": "최소 보관 기간",
+      "min_age_description": "마지막 실행 이후 며칠이 지나야 정리 대상이 되는지. 시간이 아니라 일 단위입니다. 월요일에 다시 보려던 실행은 휴가 후에도 남아 있어야 하니까요.",
+      "trunk_title": "병합 대상",
+      "trunk_description": "사본의 작업이 이미 들어가 있어야 하는 브랜치. 비워 두면 각 저장소의 기본 브랜치를 사용합니다.",
+      "trunk_placeholder": "main",
+      "summary": "작업 사본 {{count}}개 · 디스크 {{total}} · 정리 가능 {{reclaimable}}",
+      "advisory": "자동 정리가 꺼져 있어 아래 항목은 삭제되지 않습니다. 켰을 때 일어날 일입니다.",
+      "empty": "이 컴퓨터에는 아직 작업 사본이 없습니다. 병렬 모드가 작업마다 하나씩 만듭니다.",
+      "last_run": "마지막 실행 {{days}}일 전",
+      "remove_now": "지금 정리",
+      "removed": "작업 사본을 정리했습니다",
+      "reason_removable": "병합됨·깨끗함·실행 중 아님 — 이 사본은 정리됩니다.",
+      "reason_uncommitted": "보관: 커밋하지 않은 변경이 남아 있습니다. 다른 곳에 없는 작업을 Multica가 삭제하는 일은 없습니다.",
+      "reason_unmerged": "보관: 브랜치가 아직 트렁크에 들어가지 않았습니다.",
+      "reason_too_recent": "보관: 마지막 실행이 너무 최근입니다.",
+      "reason_in_use": "보관: 지금 작업이 실행 중입니다.",
+      "reason_not_ours": "보관: Multica가 만든 것이 아니므로 Multica가 삭제할 대상이 아닙니다.",
+      "reason_unknown": "보관: 상태를 읽을 수 없었고, 알 수 없음은 삭제해도 된다는 뜻이 아닙니다."
     }
   },
   "members": {
