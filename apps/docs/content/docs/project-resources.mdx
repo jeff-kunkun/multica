@@ -46,13 +46,15 @@ If your directory is an ordinary git repo you can clone, **use `github_repo` ins
 1. Make sure Desktop's local daemon is online.
 2. Open the project's **Resources**, or the **Local directory** tab of the create-project dialog — the same choice is available before the project exists.
 3. Choose "Add local directory", then pick the folder to use.
-4. Pick how runs should use it — **Direct** or **Parallel**, described under "How runs share the directory". Desktop preselects **Parallel** when the folder is a git repository the runtime on that machine can isolate, and **Direct** otherwise. Change it right there, or later from **Resources** with the pencil next to the directory.
+4. Pick how runs should use it — **Direct** or **Parallel**, described under "How runs share the directory". A new directory always starts on **Direct**: runs happen in the folder you just picked, which costs no extra disk. **Parallel** is an explicit choice because it makes a full working copy per run on your own drive; the dialog names the folder those copies land in before you pick it. Change it right there, or later from **Resources** with the pencil next to the directory.
 
-Preselection applies only to a directory you are linking now. A directory linked earlier keeps the mode it was saved with — an existing setup is never switched under you.
+A directory linked earlier keeps the mode it was saved with — an existing setup is never switched under you.
 
 The directory must be an absolute path, must already exist, and must be readable and writable by the current daemon. These paths are rejected: system roots and drive roots (`/`, `C:\`), home directories themselves and the parents of home directories (such as `/Users`, `/home`, `/root`), and system directories such as `/etc`, `/var`, `/tmp`, `/usr`, and `/opt`. If the chosen path is a symlink, it is resolved to its real path first and validated again by the same rules; the serial lock also applies to the real path.
 
-Each project can link at most one local directory per daemon. Different computers on a team can each link their own directory for the same project.
+A project can link **several** local directories on one computer — four unrelated plain folders, or a repository plus a separate docs checkout. What it cannot link twice is the same directory (matched on its resolved real path, so a symlink and its target count as one) or a second checkout of a repository it already has on that computer. Different computers can each link their own directories for the same project.
+
+**One run writes one directory.** Runs on a computer use the first local directory for that computer in the resource list; drag the list to change which. The others are handed to the agent read-only and named in its brief, so it can read them without treating them as a second place to work.
 
 <Callout type="warning">
 In the default `in_place` mode a local directory is not an isolated environment: the agent directly sees and modifies your current branch and uncommitted files, and Multica does not automatically switch branches, stash, commit, push, or open PRs. Worktree mode changes this — see "How runs share the directory" below.
@@ -72,7 +74,9 @@ Waiting does not modify the directory. A waiting run can be cancelled; otherwise
 
 ### `worktree` — "Parallel"
 
-Each run gets its own [git worktree](https://git-scm.com/docs/git-worktree) of your repo, created inside the runtime's own workspace directory. **Runs on the same directory run concurrently — none of them wait**, and none of them write to your working copy.
+Each run gets its own [git worktree](https://git-scm.com/docs/git-worktree) of your repo, created **next to your repository on your own drive** — `<repo>.multica-worktrees/<run>` by default. **Runs on the same directory run concurrently — none of them wait**, and none of them write to your working copy.
+
+The copies sit beside the repository rather than inside it, so they never appear in your own `git status` and you do not have to add anything to `.gitignore`. They are on your disk rather than in Multica's workspace for one reason: when a run fails, that copy is the only record of how far it got, and it should not disappear on a cleanup schedule you never agreed to. The cost is that the space is yours — see "Clearing out working copies" below.
 
 Requires the directory to be a git repository with at least one commit. If it is not, runs fail with an explicit error rather than quietly falling back to serial execution. The runtime on that machine must also implement the mode. It declares that when it connects, and Multica gates on the declaration rather than on a version number — a development build can carry a version string that looks new enough while having none of the implementation. The declaration is checked twice: saving the resource is refused, with a hint to update the app on that machine, while its runtime does not declare the capability; and each run is checked again against the runtime that actually claims it — so a machine downgraded after the resource was saved has its runs cancelled with a reason instead of silently running them in place. Asking for `worktree` is asking for isolation; editing your working copy instead is never the fallback.
 
@@ -86,7 +90,25 @@ What the agent sees, and what you get back:
 - **Nothing is silently dropped.** Anything the agent leaves uncommitted is committed to that branch before the worktree is removed, including when the run fails partway. In the rare case that commit itself cannot be made — for example a repo with `commit.gpgSign` and no signing key available to the runtime — the worktree is deliberately kept instead of removed, the run is reported as failed, and `git worktree list` in your repo points at the directory holding the work.
 - **A run that changes nothing leaves nothing behind.** Its branch is deleted rather than left as an empty entry in `git branch` — unless it is the issue's branch carrying earlier runs' work, which always survives.
 
-Because the worktree lives in the runtime's workspace directory, it is reclaimed on the normal cleanup schedule. Two things persist in your repo: the branch, and one hidden ref per branch under `refs/multica/local-state/` recording who owns it and what your directory looked like when it was last continued. The hidden refs never appear in `git branch`; list them with `git for-each-ref refs/multica`. Multica deletes each one with its branch, and drops any whose branch you deleted yourself the next time a run starts on that repo — or you can remove them at once with `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d`.
+Two things persist in your repo: the branch, and one hidden ref per branch under `refs/multica/local-state/` recording who owns it and what your directory looked like when it was last continued. The hidden refs never appear in `git branch`; list them with `git for-each-ref refs/multica`. Multica deletes each one with its branch, and drops any whose branch you deleted yourself the next time a run starts on that repo — or you can remove them at once with `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d`.
+
+#### Clearing out working copies
+
+A run that finishes cleanly removes its own working copy. One that survives is one a run could **not** finish — an unresolved merge, a commit that failed, a machine that went down — and it stays on disk on purpose: it is the only place that run's state can still be inspected.
+
+Automatic cleanup of those leftovers is a setting on the computer, not on the project, because disk is a property of the computer. It lives in Desktop's daemon settings and is **off by default**. The list of copies and what would happen to each is shown whether the switch is on or off, so you can read the policy's verdict before agreeing to it.
+
+With the switch on, a copy is removed only when **all** of these hold:
+
+1. Multica created it — a worktree you made with `git worktree add` is never touched;
+2. no run is using it;
+3. its last run finished longer ago than the window you set (14 days by default);
+4. `git status --porcelain` in it is empty — files your `.gitignore` covers, such as `node_modules`, do not count;
+5. its branch is already merged into the trunk branch.
+
+Any one of those failing keeps the copy, and the settings screen says which one. Rule 4 is the important one: a merged branch says nothing about what is still sitting in the directory uncommitted, and that is exactly what a failed run leaves behind. Removal always goes through `git worktree remove`, so your repository is never left with a stale `.git/worktrees` entry that would block that name later.
+
+You can also clear a single copy from that list. That says *which* copy, not "ignore the rules" — the same five conditions are re-checked against the directory as it is at that moment.
 
 <Callout type="warn">
 **Self-hosted operators:** isolation for this mode is enforced by the server (at save time and again when a runtime claims each run), so a runtime downgraded at any point is caught. The combination that is *not* caught is rolling the server back to a build that predates this feature while runtimes that do not implement the mode are still connected — an old server has no gate, and such a runtime ignores `execution_mode` and would execute the run in place. Do not roll the server back past this release while `worktree` resources exist unless every runtime on those machines is up to date.

@@ -393,6 +393,11 @@ type Daemon struct {
 	// as in_place on a server that does not accept execution_mode=shared.
 	localSharedOverrides *localSharedOverrideStore
 
+	// worktreeCleanup owns this machine's parallel-copy cleanup: the roots it
+	// has used, which copies are busy, and the policy (off by default) that
+	// decides whether a finished one may be removed (DENE-617).
+	worktreeCleanup *worktreeCleanupState
+
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
@@ -771,6 +776,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	} else {
 		d.localSharedOverrides = newLocalSharedOverrideStore("")
 	}
+	d.worktreeCleanup = newWorktreeCleanupState(cfg.Profile)
 	return d
 }
 
@@ -8118,7 +8124,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Resolved BEFORE the brief is built, not after: the brief has to state
 	// which repositories this machine already holds, and it cannot do that
 	// without knowing whether a directory is pinned here at all (DENE-595).
-	localAssignment, _ := d.resolveLocalDirectoryAssignment(task)
+	localAssignment, readOnlyLocalDirs, _ := d.resolveLocalDirectoryPlan(task)
 
 	// Prepare isolated execution environment.
 	// Repos the local directory does not already hold are passed as metadata
@@ -8142,7 +8148,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentSkills:                      convertSkillsForEnv(skills),
 		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
 		Repos:                            convertReposForEnv(task.Repos),
-		CodeSource:                       codeSourceForEnv(resolveTaskCodeSource(localAssignment, repoURLsOf(task.Repos), nil)),
+		CodeSource:                       codeSourceForEnv(resolveTaskCodeSource(localAssignment, readOnlyLocalDirs, repoURLsOf(task.Repos), nil)),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
@@ -8511,7 +8517,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Task:                  taskCtx,
 		}
 		if localAssignment.UsesWorktree() {
-			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
+			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{
+				LocalPath: localAssignment.AbsPath,
+				// Empty when the resource names no location; execenv then
+				// uses the repository's sibling (DefaultWorktreeRoot). An
+				// older server that does not send the field, or a newer one
+				// that stripped it for a daemon lacking the capability, lands
+				// on the same default — which is what this daemon implements
+				// either way (DENE-617).
+				WorktreeRoot: strings.TrimSpace(localAssignment.Ref.WorktreeRoot),
+			}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
 			// enough that worktree tasks still overlap for the run itself.
@@ -8614,6 +8629,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// already durable, so DurableWorkDir deliberately stays absent instead of
 	// duplicating the same path under two lifecycle meanings.
 	if env.LocalWorktree != nil {
+		// Remember where this repository's working copies live, and keep this
+		// one off the cleanup candidate list while the task is in it. The
+		// record is what lets the settings screen find copies that sit outside
+		// the Multica workspace entirely (DENE-617).
+		if err := d.worktreeCleanup.RecordRoot(env.LocalWorktree.WorktreeRoot, env.LocalWorktree.GitRoot); err != nil {
+			taskLog.Warn("could not record the worktree root for cleanup; copies there will not appear in the storage screen",
+				"root", env.LocalWorktree.WorktreeRoot, "error", err)
+		}
+		d.worktreeCleanup.MarkActive(env.LocalWorktree.Path)
+		defer d.worktreeCleanup.ReleaseActive(env.LocalWorktree.Path)
 		defer func() {
 			if taskResult.WorkDir == "" {
 				taskResult.WorkDir = env.WorkDir

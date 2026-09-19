@@ -28,10 +28,6 @@ import type {
   LocalDirectoryResourceRef,
   ProjectResource,
 } from "@multica/core/types";
-import {
-  runtimeAdvertisesLocalWorktree,
-  runtimeListOptions,
-} from "@multica/core/runtimes";
 import { useConfigStore } from "@multica/core/config";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
@@ -104,6 +100,20 @@ type ModeDialogState = {
   resource?: ProjectResource & { resource_ref: LocalDirectoryResourceRef };
   /** Only used when adding. */
   label?: string;
+  /**
+   * Identity this machine measured at pick time (DENE-617). Only the machine
+   * holding the directory can produce these, so they are carried from the
+   * pick to the save rather than re-derived: the server has a string, not a
+   * filesystem.
+   */
+  realPath?: string;
+  repoKey?: string;
+  /**
+   * Where parallel mode would put the working copies. Shown in the dialog
+   * BEFORE the user commits to that mode — its cost is a copy per task on
+   * their own disk, and a cost you only discover afterwards is not a choice.
+   */
+  defaultWorktreeRoot?: string;
 };
 
 export function ProjectResourcesSection({ projectId }: { projectId: string }) {
@@ -133,12 +143,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const desktopMode = isDesktopShell();
   const localDaemonId = daemonStatus.daemonId;
 
-  // Only ever used to decide what to PRESELECT. Whether the machine can run
-  // worktree mode is the server's call — it knows its own version, the client
-  // would have to infer it from data the server wrote, and that inference is
-  // what told a user on the newest release to upgrade it (#7113). The save is
-  // gated server-side and surfaced here as an inline error instead.
-  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   // The one thing the client must still check up front: whether this server
   // performs that gate at all. One declared boolean, no inference — servers
   // that predate it drop execution_mode and answer 201.
@@ -150,17 +154,11 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     canSetLocalOverride: canPersist,
   });
   const sharedUsesLocalOverride = !serverAcceptsShared && canPersist;
-  // Keyed on the resource's OWN daemon, not the machine the browser happens to
-  // be on: a resource is pinned to one machine, and its mode can legitimately
-  // be changed from the web app or from a different device. Using the local
-  // daemon here would report "too old" for every resource whenever the viewer
-  // is not on that machine.
-  // Capability, not version, and judged by the daemon's newest runtime row —
-  // see runtimeAdvertisesLocalWorktree for why an any-match would keep saying
-  // yes after a downgrade.
-  const advertisesWorktree = (daemonId: string | null) =>
-    runtimeAdvertisesLocalWorktree(runtimes, daemonId);
-
+  // The daemon's worktree capability is deliberately NOT read here any more.
+  // It existed only to decide what to PRESELECT, and a new directory now
+  // always starts on in-place (DENE-617): whether a machine COULD run
+  // parallel mode is no longer a reason to start the user there. Whether it
+  // MAY is still the server's call, gated on save and surfaced inline.
   const attachedUrls = new Set(
     resources.filter(isGithubRef).map((r) => r.resource_ref.url),
   );
@@ -170,15 +168,22 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       .filter((r) => r.resource_ref.daemon_id === localDaemonId)
       .map((r) => r.resource_ref.local_path),
   );
-  // Per (project, daemon) we allow at most one local_directory — the
-  // daemon-side resolver picks the first match by daemon_id, so two rows
-  // on the same daemon would silently route the agent into one of them.
-  // The server enforces this at the API boundary; the UI mirrors the
-  // restriction by hiding the "Add" affordance once a row exists for the
-  // current daemon, otherwise users would only discover the limit on a
-  // 409 toast.
-  const hasLocalDirectoryForCurrentDaemon =
-    localDaemonId !== null && attachedLocalPaths.size > 0;
+  // A project may hold SEVERAL directories on one machine (DENE-617): four
+  // unrelated plain folders, a repository plus its docs checkout. What it may
+  // not hold is the same directory twice, or two checkouts of one repository.
+  // Both are the server's rules (and Postgres indexes); the UI checks the
+  // first one at pick time so the answer arrives while the folder is still on
+  // screen, instead of as a 409 afterwards.
+  //
+  // Which of them a run writes is no longer ambiguous either: resources are
+  // ordered, and the first local directory on this machine is the working
+  // directory. The rest reach the agent read-only.
+  const attachedRealPaths = new Set(
+    resources
+      .filter(isLocalDirectoryRef)
+      .filter((r) => r.resource_ref.daemon_id === localDaemonId)
+      .map((r) => r.resource_ref.real_path || r.resource_ref.local_path),
+  );
 
   // Duplicate detection runs on the saved list rather than only at save time:
   // this workspace already held five repositories configured both ways before
@@ -234,13 +239,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
         toast.error(t(($) => $.resources.toast_local_daemon_not_running));
         return;
       }
-      // Race guard: the button gates on this already, but if the picker
-      // is opened while a concurrent resource-create lands the user
-      // would otherwise see a 409. Surface a clearer message instead.
-      if (attachedLocalPaths.size > 0) {
-        toast.error(t(($) => $.resources.toast_local_daemon_already_attached));
-        return;
-      }
       const picked = await pickDirectory();
       if (!picked.ok) {
         if (picked.reason && picked.reason !== "cancelled") {
@@ -271,6 +269,14 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
         );
         return;
       }
+      // Refuse the same directory twice while the folder is still on screen.
+      // Identity is the resolved real path, so picking a symlink to a folder
+      // already added is caught too — comparing the typed strings would not.
+      const identity = validation.real_path || path;
+      if (attachedRealPaths.has(identity)) {
+        toast.error(t(($) => $.resources.toast_local_already_attached));
+        return;
+      }
       // Ask for the execution mode before creating. It is part of what the
       // user is choosing — whether tasks edit this folder or hand back a
       // branch — not a setting to discover afterwards.
@@ -278,18 +284,19 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       setModeDialog({
         path,
         daemonId: localDaemonId,
-        // Same preselection rule as the create-project flow: a git repo this
-        // daemon can actually run worktree mode on starts on parallel, anything
-        // else starts on direct. Only the PRESELECTION differs by folder — the
-        // user still confirms, and existing resources keep whatever they have.
-        mode:
-          validation.is_git_repo === true &&
-          serverValidatesWorktree &&
-          advertisesWorktree(localDaemonId)
-            ? "worktree"
-            : "in_place",
+        // Always in place (DENE-617 invariant 3). A new directory runs tasks
+        // IN the folder the user just picked, which is what "I added my
+        // project folder" plainly means and costs no disk. Parallel mode is
+        // the one that copies the repository per task onto their own drive,
+        // so it is an explicit choice, never a preselection — this used to
+        // start on parallel for any git repository, and the copies it made
+        // were the surprise this change removes.
+        mode: "in_place",
         isGitRepo: validation.is_git_repo,
         label: fallbackLabel,
+        realPath: validation.real_path,
+        repoKey: validation.repo_key,
+        defaultWorktreeRoot: validation.default_worktree_root,
       });
       setAddOpen(false);
     } catch (err) {
@@ -341,6 +348,15 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
             daemon_id: localDaemonId,
             label: modeDialog.label ?? modeDialog.path,
             execution_mode: apiMode,
+            // Identity and repository, measured on this machine at pick time.
+            // Omitted rather than sent empty when unknown: an empty repo_key
+            // means "unidentifiable", and the server must be able to tell that
+            // apart from a key it was never given.
+            ...(modeDialog.realPath ? { real_path: modeDialog.realPath } : {}),
+            ...(modeDialog.repoKey ? { repo_key: modeDialog.repoKey } : {}),
+            ...(modeDialog.isGitRepo === undefined
+              ? {}
+              : { is_git_repo: modeDialog.isGitRepo }),
           },
         });
       }
@@ -583,10 +599,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 size="sm"
                 className="h-7 justify-start px-2 text-caption text-muted-foreground hover:text-foreground"
                 disabled={
-                  picking ||
-                  createResource.isPending ||
-                  !daemonStatus.running ||
-                  hasLocalDirectoryForCurrentDaemon
+                  picking || createResource.isPending || !daemonStatus.running
                 }
                 onClick={() => {
                   void handleAttachLocalDirectory();
@@ -600,9 +613,9 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                   {t(($) => $.resources.local_daemon_offline_hint)}
                 </p>
               )}
-              {daemonStatus.running && hasLocalDirectoryForCurrentDaemon && (
+              {daemonStatus.running && attachedRealPaths.size > 0 && (
                 <p className="px-2 pt-0.5 text-micro text-muted-foreground">
-                  {t(($) => $.resources.local_daemon_already_attached_hint)}
+                  {t(($) => $.resources.local_directory_default_hint)}
                 </p>
               )}
             </div>
@@ -626,6 +639,10 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           )}
           sharedUnavailable={sharedUnavailable}
           sharedUsesLocalOverride={sharedUsesLocalOverride}
+          worktreeRootPreview={
+            modeDialog.defaultWorktreeRoot ??
+            modeDialog.resource?.resource_ref.worktree_root
+          }
           errorMessage={modeError ?? undefined}
           saving={modeSaving}
           confirmLabel={

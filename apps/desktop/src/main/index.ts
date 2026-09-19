@@ -7,6 +7,7 @@ import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { setupWorktreeCleanup } from "./worktree-cleanup";
 import { applyFallbackPathDirs } from "./path-fallback";
 import { setupWorkspaceTransfer } from "./workspace-transfer-ipc";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
@@ -859,6 +860,7 @@ if (!gotTheLock) {
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
     setupLocalDirectory(() => mainWindow);
+    setupWorktreeCleanup();
     setupWorkspaceTransfer(() => mainWindow);
 
     app.on("activate", () => {

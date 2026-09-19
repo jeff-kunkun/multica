@@ -32,6 +32,17 @@ interface LocalDirectoryModeDialogProps {
   /** Set when shared is selectable but will be honoured locally, not stored
    *  as `execution_mode=shared` on the connected server. */
   sharedUsesLocalOverride?: boolean;
+  /**
+   * Where parallel mode would put this folder's working copies — the
+   * repository's sibling, on the user's own disk.
+   *
+   * Shown while the option is still a choice. Parallel mode's cost is a full
+   * working copy (plus its dependencies) per task, charged to the user's own
+   * drive; naming the directory is what turns that from a surprise into a
+   * decision. Absent on web and on older desktop builds, which cannot read
+   * the filesystem — the copy still lands there, we just cannot say so.
+   */
+  worktreeRootPreview?: string;
   /** Server-side rejection to show inline (e.g. a 422 that only the API can detect). */
   errorMessage?: string;
   saving?: boolean;
@@ -58,6 +69,7 @@ export function LocalDirectoryModeDialog({
   unavailableReason,
   sharedUnavailable,
   sharedUsesLocalOverride,
+  worktreeRootPreview,
   errorMessage,
   saving = false,
   confirmLabel,
@@ -92,6 +104,7 @@ export function LocalDirectoryModeDialog({
           unavailableReason={unavailableReason}
           sharedUnavailable={sharedUnavailable}
           sharedUsesLocalOverride={sharedUsesLocalOverride}
+          worktreeRootPreview={worktreeRootPreview}
         />
 
         {errorMessage && (
@@ -124,6 +137,7 @@ interface LocalDirectoryModeOptionsProps {
   unavailableReason?: WorktreeUnavailableReason;
   sharedUnavailable?: boolean;
   sharedUsesLocalOverride?: boolean;
+  worktreeRootPreview?: string;
 }
 
 /**
@@ -139,6 +153,7 @@ export function LocalDirectoryModeOptions({
   unavailableReason,
   sharedUnavailable = false,
   sharedUsesLocalOverride = false,
+  worktreeRootPreview,
 }: LocalDirectoryModeOptionsProps) {
   const { t } = useT("projects");
   const worktreeDisabled = unavailableReason !== undefined;
@@ -166,6 +181,16 @@ export function LocalDirectoryModeOptions({
             : unavailableReason === "server_outdated"
               ? t(($) => $.resources.mode_worktree_needs_server_upgrade)
               : undefined
+        }
+        note={
+          // Two keys, not one with an empty interpolation: a sentence that
+          // promises to name the directory and then names nothing is worse
+          // than one that says where copies go without the exact path.
+          worktreeDisabled
+            ? undefined
+            : worktreeRootPreview
+              ? t(($) => $.resources.mode_worktree_cost, { path: worktreeRootPreview })
+              : t(($) => $.resources.mode_worktree_cost_unknown_path)
         }
         onSelect={() => onChange("worktree")}
       />

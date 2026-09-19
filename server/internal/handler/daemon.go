@@ -3755,6 +3755,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	//
 	// Shared mode runs the same gate for the milder failure: an old daemon
 	// would take the mutex and serialise a directory the user asked to share.
+	//
+	// Same question, opposite answer, for worktree_root: an old daemon simply
+	// ignores it and behaves as it always has, so that one is narrowed out of
+	// the payload rather than refused. Done BEFORE the gates read the resource
+	// set, so the gates and the daemon reason about one payload.
+	supportsUserWorktreeRoot := requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeUserRootV1)
+	resp.ProjectResources = filterResourcesForDaemonCapabilities(resp.ProjectResources, supportsUserWorktreeRoot)
+	for i := range resp.Projects {
+		resp.Projects[i].Resources = filterResourcesForDaemonCapabilities(resp.Projects[i].Resources, supportsUserWorktreeRoot)
+	}
+
 	reason := worktreeClaimBlockReason(
 		resp.ProjectResources,
 		runtime,
@@ -3850,6 +3861,61 @@ func sharedClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRun
 		"This machine's Multica runtime does not support shared-workspace mode, which %q is set to use. "+
 			"Update the Multica app on that machine to the latest version, then re-run this task. "+
 			"Refusing to run rather than falling back to the exclusive in-place lock, which would silently queue tasks the resource asked to run concurrently.")
+}
+
+// filterResourcesForDaemonCapabilities narrows a claim's resource set to what
+// the claiming daemon can actually act on (DENE-617 invariant 15).
+//
+// One field needs it today: worktree_root. A daemon that predates the move of
+// parallel working copies onto the user's disk json-skips the field and builds
+// the copy inside its own env root — where the workspace GC reclaims it. The
+// user who chose a location would then see their setting ignored, silently and
+// permanently, with the copy vanishing on a schedule they never agreed to.
+//
+// Stripping it at the dispatch point means such a daemon behaves EXACTLY as it
+// does today — no new failure, no partially-honoured setting — and the rule
+// stays where it can be stated once: what a daemon receives is a subset of
+// what it declared it can handle. Old daemons need no change to keep working
+// (invariant 18).
+//
+// The resource is otherwise untouched: the directory, the daemon binding and
+// the execution mode are still what the project configured, because those an
+// old daemon does implement.
+func filterResourcesForDaemonCapabilities(resources []ProjectResourceData, supportsUserWorktreeRoot bool) []ProjectResourceData {
+	if supportsUserWorktreeRoot || len(resources) == 0 {
+		return resources
+	}
+	out := make([]ProjectResourceData, len(resources))
+	copy(out, resources)
+	for i := range out {
+		if out[i].ResourceType != "local_directory" {
+			continue
+		}
+		stripped, changed := stripRefField(out[i].ResourceRef, "worktree_root")
+		if changed {
+			out[i].ResourceRef = stripped
+		}
+	}
+	return out
+}
+
+// stripRefField removes one key from a resource ref, leaving every other key —
+// including keys written by a newer server this binary cannot interpret —
+// byte-for-byte intact in value. Reports whether the key was there.
+func stripRefField(ref json.RawMessage, key string) (json.RawMessage, bool) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(ref, &fields); err != nil {
+		return ref, false
+	}
+	if _, ok := fields[key]; !ok {
+		return ref, false
+	}
+	delete(fields, key)
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return ref, false
+	}
+	return out, true
 }
 
 // localDirectoryModeClaimBlockReason is the shared body of the per-mode claim

@@ -54,7 +54,25 @@ Common resource types:
   checkout `ref`, and optional prompt-only `default_branch_hint`;
 - `local_directory` — daemon-local path context, with `resource_ref.local_path`,
   `daemon_id`, optional label, and optional `execution_mode` (`in_place`, the
-  default, `worktree`, or `shared`).
+  default, `worktree`, or `shared`). It may also carry `real_path` (the
+  symlink-resolved path, which is the directory's identity), `repo_key` (the
+  normalized identity of the repository it holds, empty when there is none),
+  `worktree_root` (where parallel mode puts working copies) and `is_git_repo`.
+
+A project may hold SEVERAL `local_directory` resources on one machine — four
+unrelated plain folders, or a repository plus its docs checkout. Two rules,
+enforced by the database, bound that:
+
+- one row per directory per machine, keyed on `real_path` (falling back to
+  `local_path` for rows written before that field existed);
+- one row per repository per machine, keyed on `repo_key` when it is non-empty.
+  An empty `repo_key` means "unidentifiable" and never collides, which is what
+  keeps plain folders legal.
+
+A run writes exactly ONE directory: the first `local_directory` for that
+machine in `position` order. The rest reach the agent read-only and are listed
+in the brief's `## Code Source`. Reorder the resources to change which one a
+run writes.
 
 ## CLI
 
@@ -98,7 +116,30 @@ a second task waits in `waiting_local_directory`.
 
 `worktree` gives each task its own git worktree of that repo, so tasks run
 concurrently and each delivers its work as a branch in the user's repo instead
-of editing the working copy. Every task of one conversation shares that branch —
+of editing the working copy. The working copy is created on the USER's disk,
+beside their repository — `<repo>.multica-worktrees/<task>` by default, or
+under `resource_ref.worktree_root` when set. It is never inside the repository
+working tree (it would show up in their `git status`) and never inside the
+Multica workspace (the workspace GC would reclaim the one place a failed run's
+state can be inspected). A daemon that does not advertise
+`local-worktree-user-root-v1` does not receive `worktree_root` at all and keeps
+its older behaviour.
+
+Working copies are removed when a task finishes cleanly. One that survives is
+one a run could NOT finish — an unresolved merge, a failed commit, a dead
+daemon — and it stays on disk on purpose. Automatic cleanup of those is a
+machine-level setting, OFF by default (Desktop → daemon settings). When on, a
+copy is removed only if ALL of: Multica created it, no task is in it, its last
+run is older than the configured window (default 14 days), `git status
+--porcelain` is empty, and its branch is already merged into trunk. Any one
+failing keeps it, and the settings screen shows which. Removal always goes
+through `git worktree remove`.
+
+Parallel mode is never preselected when a directory is added: a new
+`local_directory` defaults to `in_place`, and moving to `worktree` is an
+explicit choice, because its cost is a working copy per task on the user's own
+drive. A directory proven not to be a git repository (`is_git_repo: false`) is
+refused in `worktree` mode at save time. Every task of one conversation shares that branch —
 `agent/<agent>/<issue>` for an issue, `agent/<agent>/chat-<session>` for a chat
 — and each turn's worktree starts from the previous turn's work rather than from
 `HEAD`; a task with no conversation behind it gets `agent/<agent>/<task>`.

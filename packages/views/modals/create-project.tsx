@@ -69,10 +69,6 @@ import {
   validateLocalDirectory,
 } from "../platform/local-directory";
 import { useLocalDaemonStatus } from "../platform/use-local-daemon-status";
-import {
-  runtimeAdvertisesLocalWorktree,
-  runtimeListOptions,
-} from "@multica/core/runtimes";
 import { useConfigStore } from "@multica/core/config";
 import type { LocalDirectoryExecutionMode } from "@multica/core/types";
 import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-dialog";
@@ -210,22 +206,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [localIsGitRepo, setLocalIsGitRepo] = useState<boolean | undefined>(undefined);
   const [localModeOpen, setLocalModeOpen] = useState(false);
 
-  // Worktree mode needs a daemon new enough to implement it; the server refuses
-  // to save the resource otherwise. In this flow the resource is attached in the
-  // same call that creates the project, so an un-caught rejection would fail the
-  // whole creation — check up front and disable the option instead.
-  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
-  // Capability, not version: a dev-built daemon reports a git-describe string
-  // that the version floor exempts, so the version check passed for a binary
-  // with no worktree implementation (MUL-5707). A backend too old to record the
-  // capability at all is its own answer — blaming this machine for that sent a
-  // user off to update the one piece already on the newest release (#7113).
-  // Preselection only — the server gates the save, including on this bundled
-  // create path, and rejects with a message the modal surfaces.
-  const localAdvertisesWorktree = runtimeAdvertisesLocalWorktree(
-    runtimes,
-    daemonStatus.daemonId,
-  );
+  // The daemon's worktree capability is no longer read here. It only ever fed
+  // the preselection, and a new directory now always starts on direct
+  // (DENE-617), so "could this machine run parallel mode" no longer decides
+  // anything before the user has chosen. Whether it MAY is still the server's
+  // call: it gates the save, including on this bundled create path, and
+  // rejects with a message the modal surfaces.
+  //
   // One declared boolean from the live server. Servers older than the worktree
   // save gate drop execution_mode and answer 201, so "the backend will check"
   // is only true once the backend says it checks (#7113).
@@ -243,23 +230,17 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     canSetLocalOverride,
   });
   const sharedUsesLocalOverride = !serverAcceptsShared && canSetLocalOverride;
-  // Preselection, not a default behavior change: when the folder is a git repo
-  // and the machine has advertised that it can run worktree mode, parallel is
-  // the better fit, so it starts selected — visibly, in a control the user can
-  // flip in one click before creating anything. A plain folder starts on
-  // direct, and so does a machine that has not advertised: it may still be able
-  // to (an old row proves nothing), but choosing it FOR the user is how a
-  // rejected save would turn into a failed project creation. Shared is never
-  // preselected: it is an opt-in for umbrella directories whose tasks already
-  // isolate themselves.
+  // Always direct (DENE-617 invariant 3). A new directory runs tasks IN the
+  // folder the user just picked — what "I added my project folder" plainly
+  // means, and it costs no disk.
   //
-  // `localIsGitRepo === undefined` (an older desktop build that doesn't report
-  // it) preselects direct. The asymmetry is deliberate: permissive about what
-  // the user MAY choose, conservative about what we choose FOR them.
-  const preselectedLocalMode: LocalDirectoryExecutionMode =
-    localIsGitRepo === true && localAdvertisesWorktree && worktreeUnavailableReason === undefined
-      ? "worktree"
-      : "in_place";
+  // This used to preselect parallel for any git repository the machine could
+  // isolate. The reasoning was that parallel is the better fit; the cost was
+  // that agreeing to it also agreed to a full working copy per task, on the
+  // user's own drive, which nothing in the flow said out loud. Whether a
+  // machine CAN run parallel mode is not a reason to start the user there —
+  // it is still one click away, now with its cost stated next to it.
+  const preselectedLocalMode: LocalDirectoryExecutionMode = "in_place";
   // Never submit a mode the picker would have blocked — the folder can change
   // after a mode was chosen (pick a git repo, choose worktree, then pick a
   // plain folder), and the stale worktree choice would fail at task time.

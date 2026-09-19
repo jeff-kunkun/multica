@@ -39,6 +39,19 @@ export type ValidateLocalDirectoryResult = {
    * treat `undefined` as "unknown" rather than "not a repo".
    */
   is_git_repo?: boolean;
+  /**
+   * The symlink-resolved absolute path — the directory's identity for the
+   * server's "one row per directory" rule (DENE-617). Absent from an older
+   * desktop build, in which case the server falls back to the typed path,
+   * which is what it compared before the field existed.
+   */
+  real_path?: string;
+  /** Normalized identity of the repository the directory holds, or absent
+   *  when there is none to identify. Drives duplicate detection only. */
+  repo_key?: string;
+  /** Where parallel mode would put working copies by default: the
+   *  repository's sibling. A preview — the daemon decides. */
+  default_worktree_root?: string;
 };
 
 interface DesktopLocalDirectoryAPI {

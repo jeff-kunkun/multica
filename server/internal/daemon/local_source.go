@@ -172,6 +172,15 @@ type taskCodeSource struct {
 	// RemoteRepos are the repo URLs genuinely absent from the directory; these
 	// still use `multica repo checkout`.
 	RemoteRepos []string
+	// ReadOnlyDirs are the project's other local directories on this machine.
+	// The run may read them; only LocalPath is writable (DENE-617).
+	ReadOnlyDirs []readOnlyLocalDir
+}
+
+// readOnlyLocalDir is one local directory the run may read but not write.
+type readOnlyLocalDir struct {
+	Path string
+	Name string
 }
 
 type codeSourceWarning struct {
@@ -186,7 +195,7 @@ const (
 
 // resolveTaskCodeSource classifies every repo attached to the task against the
 // local directory the project pinned on this machine.
-func resolveTaskCodeSource(assignment *localDirectoryAssignment, repoURLs []string, remotesOf gitRemotesFunc) taskCodeSource {
+func resolveTaskCodeSource(assignment *localDirectoryAssignment, readOnly []*localDirectoryAssignment, repoURLs []string, remotesOf gitRemotesFunc) taskCodeSource {
 	if assignment == nil {
 		return taskCodeSource{Kind: codeSourceKindRemoteCheckout, RemoteRepos: append([]string(nil), repoURLs...)}
 	}
@@ -199,6 +208,12 @@ func resolveTaskCodeSource(assignment *localDirectoryAssignment, repoURLs []stri
 		LocalPath:     assignment.AbsPath,
 		ExecutionMode: mode,
 		DisplayName:   assignment.DisplayName(),
+	}
+	for _, dir := range readOnly {
+		if dir == nil {
+			continue
+		}
+		src.ReadOnlyDirs = append(src.ReadOnlyDirs, readOnlyLocalDir{Path: dir.AbsPath, Name: dir.DisplayName()})
 	}
 	for _, url := range repoURLs {
 		res := resolveLocalRepo(assignment, url, remotesOf)
@@ -304,6 +319,9 @@ func codeSourceForEnv(src taskCodeSource) execenv.CodeSourceForEnv {
 	}
 	for _, url := range src.RemoteRepos {
 		out.RemoteRepos = append(out.RemoteRepos, execenv.CodeSourceRepoForEnv{URL: url})
+	}
+	for _, d := range src.ReadOnlyDirs {
+		out.ReadOnlyDirs = append(out.ReadOnlyDirs, execenv.CodeSourceDirForEnv{Path: d.Path, Name: d.Name})
 	}
 	return out
 }

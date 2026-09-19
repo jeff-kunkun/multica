@@ -117,6 +117,31 @@ export interface LocalDirectoryResourceRef {
   daemon_id: string;
   label?: string;
   execution_mode?: LocalDirectoryExecutionMode;
+  /**
+   * Symlink-resolved absolute path — the directory's IDENTITY. The server's
+   * "one row per directory per machine" rule keys on it, so a symlink and its
+   * target cannot be bound twice (DENE-617). Absent on rows written before it
+   * existed; the server then falls back to `local_path`.
+   */
+  real_path?: string;
+  /**
+   * Normalized identity of the repository this directory holds
+   * (`host/owner/name`). Empty or absent means unidentifiable — a plain
+   * folder, or a repository with no remote — and those never collide.
+   */
+  repo_key?: string;
+  /**
+   * Where parallel mode puts this directory's working copies. Absent means the
+   * daemon's default: the repository's sibling `<repo>.multica-worktrees`, on
+   * the user's own disk.
+   */
+  worktree_root?: string;
+  /**
+   * What the machine holding the directory saw at pick time. `false` refuses
+   * parallel mode at save; absent means nobody checked, and the daemon
+   * re-checks authoritatively at task time.
+   */
+  is_git_repo?: boolean;
 }
 
 export type ProjectResourceRef =

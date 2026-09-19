@@ -483,6 +483,17 @@ func writeCodeSource(b *strings.Builder, ctx TaskContextForEnv) {
 		}
 		b.WriteString("\n")
 	}
+	if len(src.ReadOnlyDirs) > 0 {
+		b.WriteString("Also on this machine, READ-ONLY for this run — one run writes one directory, and the one above is it. Read these for context; do not edit, build into, or commit in them:\n\n")
+		for _, d := range src.ReadOnlyDirs {
+			if strings.TrimSpace(d.Name) != "" {
+				fmt.Fprintf(b, "- `%s` (%s)\n", d.Path, d.Name)
+			} else {
+				fmt.Fprintf(b, "- `%s`\n", d.Path)
+			}
+		}
+		b.WriteString("\nIf the work really belongs in one of them, say so and stop rather than writing there: which directory a run may write is the project's setting, not a call to make mid-task.\n\n")
+	}
 }
 
 // writeProjectContext emits the Project Context section when the task carries

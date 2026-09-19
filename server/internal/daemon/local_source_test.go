@@ -99,7 +99,7 @@ func TestResolveTaskCodeSourceSortsReposIntoBuckets(t *testing.T) {
 	}
 	remotes := fakeRemotes(map[string][]string{base: {"https://github.com/kun/BNB.git"}})
 
-	src := resolveTaskCodeSource(assignment(t, base, "worktree"), []string{
+	src := resolveTaskCodeSource(assignment(t, base, "worktree"), nil, []string{
 		"https://github.com/kun/BNB",       // proven
 		"https://github.com/kun/ai100",     // named but unproven
 		"https://github.com/kun/elsewhere", // genuinely remote
@@ -123,7 +123,7 @@ func TestResolveTaskCodeSourceSortsReposIntoBuckets(t *testing.T) {
 }
 
 func TestResolveTaskCodeSourceWithoutAssignmentKeepsEveryRepoRemote(t *testing.T) {
-	src := resolveTaskCodeSource(nil, []string{"https://github.com/o/a", "https://github.com/o/b"}, fakeRemotes(nil))
+	src := resolveTaskCodeSource(nil, nil, []string{"https://github.com/o/a", "https://github.com/o/b"}, fakeRemotes(nil))
 	if src.Kind != codeSourceKindRemoteCheckout {
 		t.Fatalf("kind = %q, want remote_checkout", src.Kind)
 	}
@@ -139,7 +139,7 @@ func TestExecutionModeIsReportedEvenWhenTheRefOmitsIt(t *testing.T) {
 	// An absent execution_mode means in_place. A brief that showed it blank
 	// would leave the agent unable to tell whether its edits land in the
 	// user's working copy.
-	src := resolveTaskCodeSource(assignment(t, t.TempDir(), ""), nil, fakeRemotes(nil))
+	src := resolveTaskCodeSource(assignment(t, t.TempDir(), ""), nil, nil, fakeRemotes(nil))
 	if src.ExecutionMode != localDirectoryModeInPlace {
 		t.Fatalf("execution mode = %q, want in_place", src.ExecutionMode)
 	}

@@ -69,6 +69,17 @@ type CodeSourceForEnv struct {
 	// `multica repo checkout`. A project with a local directory may reference
 	// other repositories, and those must keep working.
 	RemoteRepos []CodeSourceRepoForEnv
+	// ReadOnlyDirs are the project's OTHER local directories on this machine.
+	// One run writes one directory (DENE-617 invariant 1) — these are real
+	// directories the agent may read, and naming them is what stops it from
+	// discovering one by accident and treating it as a second place to work.
+	ReadOnlyDirs []CodeSourceDirForEnv
+}
+
+// CodeSourceDirForEnv is one local directory the task may read but not write.
+type CodeSourceDirForEnv struct {
+	Path string
+	Name string
 }
 
 // CodeSourceRepoForEnv is one repository in a CodeSourceForEnv bucket. Detail
