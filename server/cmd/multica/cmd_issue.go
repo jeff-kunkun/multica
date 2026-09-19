@@ -2502,7 +2502,9 @@ func formatUsageGroups(value any) string {
 		return "—"
 	}
 	keys := make([]string, 0, len(groups))
-	for key := range groups { keys = append(keys, key) }
+	for key := range groups {
+		keys = append(keys, key)
+	}
 	sort.Strings(keys)
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {

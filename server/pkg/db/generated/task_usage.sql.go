@@ -757,7 +757,6 @@ FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1
 ORDER BY tu.task_id, tu.model
-LIMIT 500
 `
 
 type ListIssueTaskUsageRow struct {
@@ -793,8 +792,6 @@ type ListIssueTaskUsageRow struct {
 // Ordering is by task then model so the client can group by task_id in one
 // pass. Uses idx_agent_task_queue_issue_id (migration 035) + the task_usage
 // task_id index (migration 032).
-// Cap the issue usage execution log so a long-lived issue cannot produce an
-// unbounded response. The aggregate query above remains complete.
 func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) ([]ListIssueTaskUsageRow, error) {
 	rows, err := q.db.Query(ctx, listIssueTaskUsage, issueID)
 	if err != nil {

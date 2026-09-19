@@ -6088,6 +6088,12 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// maxIssueUsageRuns caps the per-run execution log GetIssueUsage returns so a
+// long-lived issue cannot produce an unbounded response. The cap lives here,
+// not in ListIssueTaskUsage: that query also feeds hydrateTaskUsage, where
+// dropping rows would silently blank the usage of arbitrary runs in the issue
+// execution log (its ORDER BY is task_id, so a SQL LIMIT drops by UUID order,
+// not by recency). The aggregate totals above stay complete either way.
 const maxIssueUsageRuns = 500
 
 type issueUsageRunResponse struct {
