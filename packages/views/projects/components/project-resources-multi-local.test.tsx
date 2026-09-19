@@ -206,3 +206,93 @@ describe("ProjectResourcesSection — several local directories on one machine",
     expect(createMock).not.toHaveBeenCalled();
   });
 });
+
+// The landing folder is not just visible before the user commits to parallel
+// mode — it is theirs to change, and a location the daemon would refuse is
+// caught while the dialog is still open rather than by a failed task later.
+describe("ProjectResourcesSection — where parallel-mode copies land", () => {
+  beforeEach(() => {
+    createMock.mockClear();
+    toastErrorMock.mockClear();
+    pickedPath.current = "/Users/me/code/docs";
+    validation.current = {
+      ok: true,
+      is_git_repo: true,
+      real_path: "/Users/me/code/docs",
+      git_root: "/Users/me/code/docs",
+      default_worktree_root: "/Users/me/code/docs.multica-worktrees",
+    };
+  });
+
+  async function chooseParallel() {
+    fireEvent.click(screen.getByRole("button", { name: /add local directory/i }));
+    await waitFor(() => expect(screen.getAllByRole("radio")).toHaveLength(3));
+    fireEvent.click(screen.getAllByRole("radio")[1]!);
+    return screen.findByLabelText(/working copies go in/i);
+  }
+
+  it("stores a location the user typed, and the default as absent", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    const field = await chooseParallel();
+    expect(field).toHaveValue("/Users/me/code/docs.multica-worktrees");
+
+    // Confirming without touching it stores nothing: "beside the repository"
+    // follows a repository the user later moves, a stored literal would not.
+    fireEvent.click(screen.getByRole("button", { name: /add folder/i }));
+    await waitFor(() => expect(createMock).toHaveBeenCalled());
+    const ref = (createMock.mock.calls[0]?.[0] as { resource_ref: Record<string, unknown> })
+      .resource_ref;
+    expect("worktree_root" in ref).toBe(false);
+    expect(ref.execution_mode).toBe("worktree");
+  });
+
+  it("stores a location the user chose", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    const field = await chooseParallel();
+    fireEvent.change(field, { target: { value: "/Volumes/Fast/copies" } });
+    fireEvent.click(screen.getByRole("button", { name: /add folder/i }));
+
+    await waitFor(() => expect(createMock).toHaveBeenCalled());
+    const ref = (createMock.mock.calls[0]?.[0] as { resource_ref: Record<string, unknown> })
+      .resource_ref;
+    expect(ref.worktree_root).toBe("/Volumes/Fast/copies");
+  });
+
+  // A folder inside the repository would appear in the user's own git status
+  // and need a .gitignore entry — the daemon refuses it, so the dialog does.
+  it("refuses a landing folder inside the repository, before saving", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    const field = await chooseParallel();
+    fireEvent.change(field, { target: { value: "/Users/me/code/docs/.worktrees" } });
+
+    expect(await screen.findByText(/inside the repository/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /add folder/i }));
+    await waitFor(() => expect(createMock).not.toHaveBeenCalled());
+  });
+
+  it("refuses a relative landing folder", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    const field = await chooseParallel();
+    fireEvent.change(field, { target: { value: "copies" } });
+
+    expect(await screen.findByText(/absolute path/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /add folder/i }));
+    await waitFor(() => expect(createMock).not.toHaveBeenCalled());
+  });
+
+  // The field belongs to parallel mode alone. Showing it beside two modes that
+  // ignore it invites an edit that does nothing.
+  it("shows the landing folder only while parallel is the choice", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    fireEvent.click(screen.getByRole("button", { name: /add local directory/i }));
+    await waitFor(() => expect(screen.getAllByRole("radio")).toHaveLength(3));
+
+    expect(screen.queryByLabelText(/working copies go in/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("radio")[1]!);
+    expect(await screen.findByLabelText(/working copies go in/i)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("radio")[0]!);
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/working copies go in/i)).not.toBeInTheDocument(),
+    );
+  });
+});
