@@ -310,6 +310,8 @@ var concurrentIndexCleanups = map[string]string{
 	"482_stage_wakeup_failure_parent_index":                     "idx_stage_wakeup_failure_parent",
 	"486_issue_draft_origin_unique":                             "idx_issue_origin_issue_draft_unique",
 	"488_agent_parent_index":                                    "idx_agent_parent_agent_id",
+	"498_project_resource_local_directory_identity":             "idx_project_resource_local_directory_identity",
+	"499_project_resource_local_directory_repo":                 "idx_project_resource_local_directory_repo",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
