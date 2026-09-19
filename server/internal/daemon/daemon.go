@@ -9198,9 +9198,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	thinkingLevel := ""
 	serviceTier := ""
+	claudeAutoCompactTokens := 0
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel
 		serviceTier = task.Agent.ServiceTier
+		if provider == "claude" && len(task.Agent.RuntimeConfig) > 0 {
+			claudeAutoCompactTokens = decodeClaudeRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
+		}
 	}
 	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
 		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
@@ -9221,6 +9225,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
 		TurnInterruptTimeout:       d.cfg.CodexTurnInterruptTimeout,
 		ThreadHandshakeTimeout:     d.cfg.CodexThreadHandshakeTimeout,
+		ClaudeAutoCompactTokens:    claudeAutoCompactTokens,
 		ResumeSessionID:            task.PriorSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
 		// resume gates (a dropped resume is surfaced via the prompt instead). If it
