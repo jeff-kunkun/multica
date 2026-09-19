@@ -227,6 +227,7 @@
     "switchable_role_default": "Default",
     "switchable_role_fallback": "Fallback",
     "switchable_role_batch": "Batch",
+    "switchable_models_edit": "Edit",
     "accounts_entry": "Accounts & sign-in"
   },
   "inspector": {

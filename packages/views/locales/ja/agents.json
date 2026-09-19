@@ -203,6 +203,7 @@
     "switchable_role_default": "デフォルト",
     "switchable_role_fallback": "フォールバック",
     "switchable_role_batch": "バッチ用",
+    "switchable_models_edit": "編集",
     "accounts_entry": "アカウントとログイン"
   },
   "inspector": {

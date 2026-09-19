@@ -11,6 +11,7 @@ import {
   Lock,
   MessageSquare,
   MoreHorizontal,
+  Pencil,
   Plus,
   Server,
   Trash2,
@@ -453,6 +454,11 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             ? () => setTabNavIntent("custom_args")
             : undefined
         }
+        onEditSwitchableModels={
+          canEdit.allowed && !isArchived
+            ? () => setTabNavIntent("general")
+            : undefined
+        }
       />
 
       {!canEdit.allowed && (
@@ -601,6 +607,7 @@ function DetailHeader({
   onAssign,
   onArchive,
   onOpenAccounts,
+  onEditSwitchableModels,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
@@ -619,6 +626,9 @@ function DetailHeader({
   onArchive?: () => void;
   /** Jumps to the tab that explains account slots and sign-in commands. */
   onOpenAccounts?: () => void;
+  /** Jumps to the settings field that edits or clears the lineup. Absent for
+   *  readers and archived agents, who have nothing to open. */
+  onEditSwitchableModels?: () => void;
 }) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
@@ -690,7 +700,10 @@ function DetailHeader({
                   </button>
                 ) : null}
               </div>
-              <SwitchableModelsRow models={agent.switchable_models} />
+              <SwitchableModelsRow
+                models={agent.switchable_models}
+                onEdit={onEditSwitchableModels}
+              />
             </div>
           </div>
 
@@ -753,8 +766,12 @@ const SWITCHABLE_MODEL_GROUPS = [
 
 function SwitchableModelsRow({
   models,
+  onEdit,
 }: {
   models: AgentSwitchableModel[] | undefined;
+  /** Opens the settings field that owns this lineup, so the row a reader
+   *  notices first is also where editing starts. */
+  onEdit?: () => void;
 }) {
   const { t } = useT("agents");
   // Same reader the inspector's editor uses, so this row and the switch there
@@ -806,6 +823,17 @@ function SwitchableModelsRow({
           </span>
         );
       })}
+      {onEdit ? (
+        <button
+          type="button"
+          onClick={onEdit}
+          data-testid="switchable-models-edit"
+          className="inline-flex items-center gap-1.5 rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+          {t(($) => $.detail.switchable_models_edit)}
+        </button>
+      ) : null}
     </div>
   );
 }

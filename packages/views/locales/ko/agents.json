@@ -211,6 +211,7 @@
     "switchable_role_default": "기본",
     "switchable_role_fallback": "대체",
     "switchable_role_batch": "배치용",
+    "switchable_models_edit": "편집",
     "accounts_entry": "계정 및 로그인"
   },
   "inspector": {

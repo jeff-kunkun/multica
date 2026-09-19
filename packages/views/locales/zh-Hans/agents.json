@@ -211,6 +211,7 @@
     "switchable_role_default": "默认档",
     "switchable_role_fallback": "降级链",
     "switchable_role_batch": "可借档",
+    "switchable_models_edit": "编辑",
     "accounts_entry": "账号与登录"
   },
   "inspector": {
