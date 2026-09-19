@@ -37,6 +37,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
@@ -203,6 +204,13 @@ type Handler struct {
 	PluginService          *service.PluginService
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
+	// Routing decides who should hold an issue after it is created or changes
+	// status (DENE-633). One instance per process, because its circuit breaker
+	// is the only thing keeping a broken routing model from being dialled once
+	// per ticket — a per-request router would have nothing to remember. Always
+	// non-nil; whether it does anything is a per-workspace setting it reads
+	// for itself.
+	Routing *routing.Router
 	// Entitlements supplies workspace-scoped commercial gates. A nil provider
 	// preserves self-hosted behavior without extra reads.
 	Entitlements entitlement.Provider
@@ -502,6 +510,11 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		LLM: llmClient,
 		cfg: cfg,
 	}
+	// Built after the literal because the store it reads through is a view of
+	// the finished handler. The judge runs on the same internal LLM layer as
+	// chat titling; an unconfigured deployment gets a disabled client, which
+	// makes every routing call take the else branch instead of failing.
+	h.Routing = routing.New(h.RoutingStore(), routing.LLMJudge{Gen: llmClient})
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 	// The default passthrough scheduler reports sweeper-race recoveries so the
 	// daemon:register refresh fires even without the production batched wiring.

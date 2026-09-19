@@ -3224,6 +3224,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// understood label_ids and skip its legacy post-create attach fallback.
 	labelResponses := labelsToResponse(res.Labels)
 	resp.Labels = &labelResponses
+
+	// Routing hook (DENE-633). A new issue is born in some status, which is
+	// the same question every later status change asks, so it goes through the
+	// same entry point. This call and the status change that may follow it
+	// moments later can both be in flight at once; the conditional writes and
+	// the one-comment-per-kind index are what make that safe.
+	h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
+
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -3800,6 +3808,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
 		h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
+		// Routing hook (DENE-633): the status is now what it is, so ask who
+		// should be holding this ticket. Routing never writes a status of its
+		// own, so this cannot loop back here.
+		h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -4493,6 +4505,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// comparison here left childDoneCompleted empty and silently skipped
 		// notifyParentsOfBatchChildDone entirely. (MUL-6243)
 		if statusChanged {
+			h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
 			prevTerminal := isTerminalChildStatus(
 				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
 			nowTerminal := isTerminalChildStatus(

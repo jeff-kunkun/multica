@@ -1,0 +1,212 @@
+package routing
+
+import (
+	"context"
+	"errors"
+	"sync"
+)
+
+// fakeStore records every write so a test can assert not just the result but
+// that nothing else was touched — most of this package's rules are about what
+// it must NOT do.
+type fakeStore struct {
+	mu sync.Mutex
+
+	settings Settings
+	issue    Issue
+	roster   map[string]Agent
+	prop     ReviewerProperty
+	hasProp  bool
+	target   Member
+
+	// slot occupancy, as the database would enforce it
+	assigneeTaken bool
+	reviewerTaken bool
+
+	comments map[CommentKind][]string
+	subs     []string
+	handoffs []string
+	assigns  []string
+	reviewer []string
+
+	errOn map[string]error
+}
+
+func newFakeStore() *fakeStore {
+	return &fakeStore{
+		settings: Settings{Enabled: true, Model: "test-model", ConfidenceThreshold: 0.7},
+		issue: Issue{
+			ID:          "issue-1",
+			Title:       "做一件事",
+			Status:      "todo",
+			CreatorType: "member",
+			CreatorID:   "user-1",
+			ProjectName: "game",
+		},
+		roster: map[string]Agent{
+			"布尔玛":   {ID: "a-bulma", Name: "布尔玛"},
+			"孙悟空":   {ID: "a-goku", Name: "孙悟空"},
+			"贝吉塔":   {ID: "a-vegeta", Name: "贝吉塔"},
+			"比克":    {ID: "a-piccolo", Name: "比克"},
+			"布尔玛游戏": {ID: "a-bulma-g", Name: "布尔玛游戏"},
+			"孙悟空游戏": {ID: "a-goku-g", Name: "孙悟空游戏"},
+			"贝吉塔游戏": {ID: "a-vegeta-g", Name: "贝吉塔游戏"},
+			"比克游戏":  {ID: "a-piccolo-g", Name: "比克游戏"},
+		},
+		prop: ReviewerProperty{ID: "prop-1", Options: map[string]string{
+			"布尔玛游戏": "o-bulma-g", "孙悟空游戏": "o-goku-g",
+			"贝吉塔游戏": "o-vegeta-g", "比克游戏": "o-piccolo-g",
+			OptionNoReview: "o-none", OptionHuman: "o-human",
+		}},
+		hasProp:  true,
+		target:   Member{UserID: "user-1", Name: "Kun"},
+		comments: map[CommentKind][]string{},
+		errOn:    map[string]error{},
+	}
+}
+
+func (f *fakeStore) fail(op string) error { return f.errOn[op] }
+
+func (f *fakeStore) Settings(context.Context, string) (Settings, error) {
+	return f.settings, f.fail("settings")
+}
+func (f *fakeStore) Issue(context.Context, string, string) (Issue, error) {
+	return f.issue, f.fail("issue")
+}
+func (f *fakeStore) Roster(context.Context, string) (map[string]Agent, error) {
+	return f.roster, f.fail("roster")
+}
+func (f *fakeStore) Reviewer(context.Context, string) (ReviewerProperty, bool, error) {
+	return f.prop, f.hasProp, f.fail("reviewer")
+}
+
+func (f *fakeStore) AssignAgentIfUnassigned(_ context.Context, _, _ string, seat Seat) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("assign"); err != nil {
+		return false, err
+	}
+	if f.assigneeTaken || f.issue.AssigneeType != "" {
+		return false, nil
+	}
+	f.assigneeTaken = true
+	f.assigns = append(f.assigns, seat.Name)
+	return true, nil
+}
+
+func (f *fakeStore) SetReviewerIfUnset(_ context.Context, _, _, _, optionID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("set_reviewer"); err != nil {
+		return false, err
+	}
+	if f.reviewerTaken || f.issue.Reviewer != "" {
+		return false, nil
+	}
+	f.reviewerTaken = true
+	f.reviewer = append(f.reviewer, optionID)
+	return true, nil
+}
+
+func (f *fakeStore) Handoff(_ context.Context, _, _, assigneeType, assigneeID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("handoff"); err != nil {
+		return err
+	}
+	f.handoffs = append(f.handoffs, assigneeType+":"+assigneeID)
+	return nil
+}
+
+func (f *fakeStore) HasComment(_ context.Context, _, _ string, kind CommentKind) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.comments[kind]) > 0, f.fail("has_comment")
+}
+
+func (f *fakeStore) PostComment(_ context.Context, _, _ string, kind CommentKind, body string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("post_comment"); err != nil {
+		return err
+	}
+	f.comments[kind] = append(f.comments[kind], body)
+	return nil
+}
+
+func (f *fakeStore) Subscribe(_ context.Context, _, _, userID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("subscribe"); err != nil {
+		return err
+	}
+	f.subs = append(f.subs, userID)
+	return nil
+}
+
+func (f *fakeStore) NotifyTarget(context.Context, string, Issue) (Member, error) {
+	return f.target, f.fail("notify_target")
+}
+
+// wrote reports whether this store saw any value write at all. Several rules
+// are stated as "does not change any value", and this is how they are checked.
+func (f *fakeStore) wrote() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.assigns) > 0 || len(f.reviewer) > 0 || len(f.handoffs) > 0
+}
+
+func (f *fakeStore) commentCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, v := range f.comments {
+		n += len(v)
+	}
+	return n
+}
+
+// fakeJudge answers whatever the test tells it to, and counts calls so tests
+// can prove no request was made.
+type fakeJudge struct {
+	mu      sync.Mutex
+	verdict Verdict
+	advice  Advice
+	err     error
+	calls   int
+}
+
+func (j *fakeJudge) Assign(context.Context, string, JudgeState) (Verdict, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.calls++
+	return j.verdict, j.err
+}
+
+func (j *fakeJudge) Unblock(context.Context, string, JudgeState) (Advice, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.calls++
+	return j.advice, j.err
+}
+
+func (j *fakeJudge) callCount() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.calls
+}
+
+func confidentVerdict() Verdict {
+	return Verdict{
+		ExecutorTier: "strong", ExecutorConfidence: 0.9,
+		Reviewer: ReviewerSeat, ReviewerTier: "strongest", ReviewerConfidence: 0.9,
+		Reason: "中等复杂度",
+	}
+}
+
+var errUpstream = errors.New("upstream exploded")
+
+func newRouter(store Store, judge Judge) *Router {
+	r := New(store, judge)
+	return r
+}
