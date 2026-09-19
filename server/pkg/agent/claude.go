@@ -38,10 +38,13 @@ func claudeTerminateGrace() time.Duration {
 // claudeBackend implements Backend by spawning the Claude Code CLI
 // with --output-format stream-json.
 type claudeBackend struct {
-	cfg              Config
-	autoCompactProbe sync.Once
-	autoCompactOK    bool
+	cfg Config
 }
+
+var claudeAutoCompactProbeCache = struct {
+	sync.Mutex
+	supported map[string]bool
+}{supported: make(map[string]bool)}
 
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
@@ -380,16 +383,32 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 // unknown option, so sending --autocompact without this capability check would
 // turn every task into an immediate failure on older installations.
 func (b *claudeBackend) supportsAutoCompact(ctx context.Context, execPath string) bool {
-	b.autoCompactProbe.Do(func() {
-		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		out, err := outputOwned(b.cfg.commandAt(execPath).exec(probeCtx, "--help"), b.cfg.Logger)
-		b.autoCompactOK = err == nil && strings.Contains(string(out), "--autocompact")
-		if !b.autoCompactOK && b.cfg.Logger != nil {
-			b.cfg.Logger.Warn("Claude Code does not advertise --autocompact; omitting the flag")
+	claudeAutoCompactProbeCache.Lock()
+	if supported, ok := claudeAutoCompactProbeCache.supported[execPath]; ok {
+		claudeAutoCompactProbeCache.Unlock()
+		return supported
+	}
+	claudeAutoCompactProbeCache.Unlock()
+
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := outputOwned(b.cfg.commandAt(execPath).exec(probeCtx, "--help"), b.cfg.Logger)
+	if err != nil {
+		// A cancelled or otherwise failed probe is transient. Do not cache it:
+		// the next task gets another chance to establish the capability.
+		if b.cfg.Logger != nil {
+			b.cfg.Logger.Warn("Claude Code capability probe failed; omitting --autocompact for this task", "error", err)
 		}
-	})
-	return b.autoCompactOK
+		return false
+	}
+	supported := strings.Contains(string(out), "--autocompact")
+	claudeAutoCompactProbeCache.Lock()
+	claudeAutoCompactProbeCache.supported[execPath] = supported
+	claudeAutoCompactProbeCache.Unlock()
+	if !supported && b.cfg.Logger != nil {
+		b.cfg.Logger.Warn("Claude Code does not advertise --autocompact; omitting the flag")
+	}
+	return supported
 }
 
 func stripClaudeAutoCompactArgs(args []string) []string {
@@ -834,10 +853,16 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--effort": blockedWithValue,
 }
 
+const (
+	DefaultClaudeAutoCompactTokens = 200000
+	MinClaudeAutoCompactTokens     = 100000
+	MaxClaudeAutoCompactTokens     = 1000000
+)
+
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
-	const defaultAutoCompactTokens = 200000
-	const minAutoCompactTokens = 100000
-	const maxAutoCompactTokens = 1000000
+	const defaultAutoCompactTokens = DefaultClaudeAutoCompactTokens
+	const minAutoCompactTokens = MinClaudeAutoCompactTokens
+	const maxAutoCompactTokens = MaxClaudeAutoCompactTokens
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",

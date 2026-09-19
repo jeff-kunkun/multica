@@ -3,6 +3,8 @@ package daemon
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 func TestDecodeClaudeRuntimeConfigRange(t *testing.T) {
@@ -13,8 +15,8 @@ func TestDecodeClaudeRuntimeConfigRange(t *testing.T) {
 	}{
 		{"missing", `{}`, 0},
 		{"valid", `{"autocompact_tokens":500000}`, 500000},
-		{"too small", `{"autocompact_tokens":50000}`, defaultClaudeAutoCompactTokens},
-		{"too large", `{"autocompact_tokens":2000000}`, defaultClaudeAutoCompactTokens},
+		{"too small", `{"autocompact_tokens":50000}`, agent.DefaultClaudeAutoCompactTokens},
+		{"too large", `{"autocompact_tokens":2000000}`, agent.DefaultClaudeAutoCompactTokens},
 		{"malformed", `{"autocompact_tokens":`, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

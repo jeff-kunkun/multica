@@ -1515,6 +1515,8 @@ type commentAgentTrigger struct {
 	Source         commentAgentTriggerSource
 	Squad          *db.Squad
 	AlreadyPending bool
+	// ForceFreshSession is set only when a changed comment is edited.
+	ForceFreshSession bool
 	// NonLeaderAgentReply marks an agent comment, not authored by the leader,
 	// that the assigned-squad-leader fallback routes to that leader. The author
 	// need not be a squad member. Completion may replay it only if creation
@@ -1987,7 +1989,7 @@ func isNoteComment(content string) bool {
 // (MUL-4525 §2): blocked mentions from resolution plus queued / coalesced /
 // deferred / blocked from enqueue. UI-suppressed triggers (the user unchecked
 // them) are removed before enqueue and produce no outcome.
-func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID) []CommentTriggerOutcome {
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID, forceFreshSession ...bool) []CommentTriggerOutcome {
 	if isNoteComment(comment.Content) {
 		return nil
 	}
@@ -1996,6 +1998,11 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 		OriginatorUserID:        originatorUserID,
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
+	if len(forceFreshSession) > 0 && forceFreshSession[0] {
+		for i := range triggers {
+			triggers[i].ForceFreshSession = true
+		}
+	}
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	return commentTriggerOutcomes(targets, enqueued)
@@ -2580,11 +2587,39 @@ func logCommentEnqueueFailure(msg string, err error, attrs ...any) {
 // enqueueSingleCommentTrigger enqueues one resolved trigger and returns the
 // enqueue error (nil on success) so the caller can surface a
 // trigger_outcome (MUL-4525 §2).
+func (h *Handler) enqueueIssueCommentTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if trigger.ForceFreshSession {
+		return h.TaskService.EnqueueTaskForIssueFresh(ctx, issue, commentID)
+	}
+	return h.TaskService.EnqueueTaskForIssue(ctx, issue, commentID)
+}
+
+func (h *Handler) enqueueMentionCommentTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if trigger.ForceFreshSession {
+		return h.TaskService.EnqueueTaskForMentionFresh(ctx, issue, trigger.Agent.ID, commentID)
+	}
+	return h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, commentID)
+}
+
+func (h *Handler) enqueueThreadParentCommentTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if trigger.ForceFreshSession {
+		return h.TaskService.EnqueueTaskForThreadParentFresh(ctx, issue, trigger.Agent.ID, commentID)
+	}
+	return h.TaskService.EnqueueTaskForThreadParent(ctx, issue, trigger.Agent.ID, commentID)
+}
+
+func (h *Handler) enqueueSquadLeaderCommentTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if trigger.ForceFreshSession {
+		return h.TaskService.EnqueueTaskForSquadLeaderFresh(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, commentID)
+	}
+	return h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, commentID)
+}
+
 func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, trigger commentAgentTrigger) error {
 	switch trigger.Source {
 	case commentTriggerSourceIssueAssignee:
 		if trigger.Squad != nil {
-			if _, err := h.TaskService.EnqueueTaskForSquadLeaderFresh(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
+			if _, err := h.enqueueSquadLeaderCommentTask(ctx, issue, trigger, triggerCommentID); err != nil {
 				logCommentEnqueueFailure("enqueue squad leader task failed", err,
 					"issue_id", uuidToString(issue.ID),
 					"squad_id", uuidToString(trigger.Squad.ID),
@@ -2593,19 +2628,19 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 			}
 			return nil
 		}
-		if _, err := h.TaskService.EnqueueTaskForIssueFresh(ctx, issue, triggerCommentID); err != nil {
+		if _, err := h.enqueueIssueCommentTask(ctx, issue, trigger, triggerCommentID); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", uuidToString(issue.ID), "error", err)
 			return err
 		}
 	case commentTriggerSourceMentionSquadLeader:
-		if _, err := h.TaskService.EnqueueTaskForSquadLeaderFresh(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
+		if _, err := h.enqueueSquadLeaderCommentTask(ctx, issue, trigger, triggerCommentID); err != nil {
 			logCommentEnqueueFailure("enqueue squad leader mention task failed", err,
 				"issue_id", uuidToString(issue.ID),
 				"agent_id", uuidToString(trigger.Agent.ID))
 			return err
 		}
 	case commentTriggerSourceMentionAgent:
-		if _, err := h.TaskService.EnqueueTaskForMentionFresh(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
+		if _, err := h.enqueueMentionCommentTask(ctx, issue, trigger, triggerCommentID); err != nil {
 			logCommentEnqueueFailure("enqueue mention agent task failed", err,
 				"issue_id", uuidToString(issue.ID),
 				"agent_id", uuidToString(trigger.Agent.ID))
@@ -2619,9 +2654,9 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 		// for the thread-parent path. Gating on the source as well would keep
 		// the thread-parent path demoted for no reason (MUL-7006).
 		if trigger.Squad != nil {
-			_, err = h.TaskService.EnqueueTaskForSquadLeaderFresh(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID)
+			_, err = h.enqueueSquadLeaderCommentTask(ctx, issue, trigger, triggerCommentID)
 		} else {
-			_, err = h.TaskService.EnqueueTaskForThreadParentFresh(ctx, issue, trigger.Agent.ID, triggerCommentID)
+			_, err = h.enqueueThreadParentCommentTask(ctx, issue, trigger, triggerCommentID)
 		}
 		if err != nil {
 			logCommentEnqueueFailure("enqueue routed comment agent task failed", err,
@@ -3494,7 +3529,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, existing.ID)
-		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs)
+		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs, true)
 	}
 
 	// Fetch reactions and attachments for the updated comment.

@@ -3,12 +3,8 @@ package daemon
 import (
 	"encoding/json"
 	"log/slog"
-)
 
-const (
-	defaultClaudeAutoCompactTokens = 200000
-	minClaudeAutoCompactTokens     = 100000
-	maxClaudeAutoCompactTokens     = 1000000
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 type claudeRuntimeConfig struct {
@@ -29,12 +25,12 @@ func decodeClaudeRuntimeConfig(raw json.RawMessage, logger *slog.Logger) int {
 	if cfg.AutoCompactTokens == 0 {
 		return 0
 	}
-	if cfg.AutoCompactTokens < minClaudeAutoCompactTokens || cfg.AutoCompactTokens > maxClaudeAutoCompactTokens {
+	if cfg.AutoCompactTokens < agent.MinClaudeAutoCompactTokens || cfg.AutoCompactTokens > agent.MaxClaudeAutoCompactTokens {
 		if logger != nil {
 			logger.Warn("claude runtime_config: autocompact_tokens outside supported range; using default",
-				"value", cfg.AutoCompactTokens, "min", minClaudeAutoCompactTokens, "max", maxClaudeAutoCompactTokens)
+				"value", cfg.AutoCompactTokens, "min", agent.MinClaudeAutoCompactTokens, "max", agent.MaxClaudeAutoCompactTokens)
 		}
-		return defaultClaudeAutoCompactTokens
+		return agent.DefaultClaudeAutoCompactTokens
 	}
 	return cfg.AutoCompactTokens
 }
