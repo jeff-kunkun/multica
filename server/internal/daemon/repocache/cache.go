@@ -97,8 +97,20 @@ func gitTimeout() time.Duration {
 	return DefaultGitTimeout
 }
 
-func newGitCommand(args ...string) *exec.Cmd {
-	cmd := exec.Command("git", args...)
+// gitBinaryKey carries the git executable a call tree should run. Tests use it
+// to put a fake git in front of one Cache call without touching the process
+// PATH, which every other goroutine in the process shares.
+type gitBinaryKey struct{}
+
+func gitBinary(ctx context.Context) string {
+	if path, ok := ctx.Value(gitBinaryKey{}).(string); ok && path != "" {
+		return path
+	}
+	return "git"
+}
+
+func newGitCommand(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.Command(gitBinary(ctx), args...)
 	// A daemon can outlive the checkout it was launched from. Run Git from the
 	// filesystem root instead of inheriting a cwd that may have been deleted.
 	cmd.Dir = filepath.VolumeName(os.TempDir()) + string(os.PathSeparator)
@@ -122,7 +134,7 @@ func runGitCombinedOutputWithTimeoutContext(parent context.Context, timeout time
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
-	cmd := newGitCommand(args...)
+	cmd := newGitCommand(ctx, args...)
 	out, err := processtree.CombinedOutput(ctx, cmd, 5*time.Second)
 	if ctx.Err() == context.DeadlineExceeded {
 		return out, fmt.Errorf("git command timed out after %s: %w", timeout, ctx.Err())
@@ -137,7 +149,7 @@ func runGitCombinedOutputStdinContext(parent context.Context, stdin string, args
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
-	cmd := newGitCommand(args...)
+	cmd := newGitCommand(ctx, args...)
 	cmd.Stdin = strings.NewReader(stdin)
 	out, err := processtree.CombinedOutput(ctx, cmd, 5*time.Second)
 	if ctx.Err() == context.DeadlineExceeded {
@@ -169,7 +181,7 @@ func runGitOutputWithTimeoutContext(parent context.Context, timeout time.Duratio
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
-	cmd := newGitCommand(args...)
+	cmd := newGitCommand(ctx, args...)
 	out, err := processtree.Output(ctx, cmd, 5*time.Second)
 	if ctx.Err() == context.DeadlineExceeded {
 		return out, fmt.Errorf("git command timed out after %s: %w", timeout, ctx.Err())
@@ -193,7 +205,7 @@ func runGitWithTimeoutContext(parent context.Context, timeout time.Duration, arg
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
-	cmd := newGitCommand(args...)
+	cmd := newGitCommand(ctx, args...)
 	err := processtree.Run(ctx, cmd, 5*time.Second)
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("git command timed out after %s: %w", timeout, ctx.Err())

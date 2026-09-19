@@ -1418,8 +1418,9 @@ func (d *Daemon) recoveryContext() context.Context {
 // otherwise.
 //
 // Callers must NOT replace workspaceState pointers — only mutate fields in
-// place — because ensureRepoReady holds workspaceState.repoRefreshMu through
-// long repo-sync calls. See syncWorkspacesFromAPI for the same invariant.
+// place — because repo-allowlist refreshes hold workspaceState.repoRefreshMu
+// across an API round trip, and a swapped pointer would leave them locking a
+// mutex nobody else sees. See syncWorkspacesFromAPI for the same invariant.
 func (d *Daemon) removeStaleRuntime(runtimeID string) (string, bool) {
 	d.mu.Lock()
 	var workspaceID string
@@ -4440,8 +4441,8 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			// Only intervene further if the workspace lost all of its
 			// runtimes (most commonly because handleRuntimeGone pruned them
 			// and its inline re-register failed). The pointer is not replaced
-			// here either — ensureRepoReady holds repoRefreshMu from the
-			// original pointer.
+			// here either — a repo-allowlist refresh in flight holds
+			// repoRefreshMu from the original pointer.
 			if !d.workspaceNeedsRuntimeRecovery(id) {
 				continue
 			}

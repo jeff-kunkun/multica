@@ -12,12 +12,11 @@ import (
 	"time"
 )
 
-// stallGitFetchFor puts a git wrapper first on PATH that blocks every `fetch`
-// touching a path containing marker until release() is called, and passes every
-// other invocation straight to the real git. It stands in for a repository
-// whose first-time download takes a long time. The returned function reads the
-// command lines the wrapper saw for marker.
-func stallGitFetchFor(t *testing.T, marker string) (release func(), seen func() string) {
+// withFakeGit returns a context whose git commands run script (a POSIX shell
+// body that sees the real git as $REAL_GIT) instead of the real git. Only call
+// trees handed this context see the fake: the process PATH is left alone,
+// because every other goroutine in the test binary shares it.
+func withFakeGit(t *testing.T, script string) context.Context {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell git wrapper is POSIX-only")
@@ -26,20 +25,31 @@ func stallGitFetchFor(t *testing.T, marker string) (release func(), seen func() 
 	if err != nil {
 		t.Skipf("git not found: %v", err)
 	}
-	binDir := t.TempDir()
-	releaseFile := filepath.Join(binDir, "release")
-	logFile := filepath.Join(binDir, "seen.log")
-	script := "#!/bin/sh\n" +
-		"case \"$*\" in\n" +
-		"  *" + marker + "*)\n" +
-		"    echo \"$*\" >> '" + logFile + "'\n" +
-		"    case \" $* \" in *' fetch '*) while [ ! -e '" + releaseFile + "' ]; do sleep 0.02; done ;; esac ;;\n" +
-		"esac\n" +
-		"exec '" + realGit + "' \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(script), 0o755); err != nil {
+	fake := filepath.Join(t.TempDir(), "git")
+	body := "#!/bin/sh\nREAL_GIT='" + realGit + "'\n" + script
+	if err := os.WriteFile(fake, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return context.WithValue(context.Background(), gitBinaryKey{}, fake)
+}
+
+// stallGitFetchFor returns a context whose git blocks every `fetch` touching a
+// path containing marker until release() is called, and passes every other
+// invocation straight to the real git. It stands in for a repository whose
+// first-time download takes a long time. The returned function reads the
+// command lines the wrapper saw for marker.
+func stallGitFetchFor(t *testing.T, marker string) (ctx context.Context, release func(), seen func() string) {
+	t.Helper()
+	stateDir := t.TempDir()
+	releaseFile := filepath.Join(stateDir, "release")
+	logFile := filepath.Join(stateDir, "seen.log")
+	ctx = withFakeGit(t, ""+
+		"case \"$*\" in\n"+
+		"  *"+marker+"*)\n"+
+		"    echo \"$*\" >> '"+logFile+"'\n"+
+		"    case \" $* \" in *' fetch '*) while [ ! -e '"+releaseFile+"' ]; do sleep 0.02; done ;; esac ;;\n"+
+		"esac\n"+
+		"exec \"$REAL_GIT\" \"$@\"\n")
 
 	release = func() {
 		if err := os.WriteFile(releaseFile, nil, 0o644); err != nil {
@@ -51,7 +61,7 @@ func stallGitFetchFor(t *testing.T, marker string) (release func(), seen func() 
 		data, _ := os.ReadFile(logFile)
 		return string(data)
 	}
-	return release, seen
+	return ctx, release, seen
 }
 
 func waitFor(t *testing.T, what string, cond func() bool) {
@@ -76,7 +86,7 @@ func TestLongDownloadDoesNotBlockOtherRepos(t *testing.T) {
 	}
 	slowURL := createTestRepoAt(t, slowDir)
 	fastURL := createTestRepo(t)
-	release, seen := stallGitFetchFor(t, "slowrepo-dene598")
+	slowCtx, release, seen := stallGitFetchFor(t, "slowrepo-dene598")
 
 	cache := New(t.TempDir(), testLogger())
 	const ws = "ws-1"
@@ -85,7 +95,7 @@ func TestLongDownloadDoesNotBlockOtherRepos(t *testing.T) {
 	// the fast one while it is stuck.
 	syncDone := make(chan error, 1)
 	go func() {
-		syncDone <- cache.Sync(ws, []RepoInfo{{URL: slowURL}, {URL: fastURL}})
+		syncDone <- cache.SyncContext(slowCtx, ws, []RepoInfo{{URL: slowURL}, {URL: fastURL}})
 	}()
 
 	waitFor(t, "the fast repo to be cached while the slow one downloads", func() bool {
@@ -128,7 +138,7 @@ func TestLongDownloadDoesNotBlockOtherRepos(t *testing.T) {
 
 	// A second Sync of the slow repo joins the download in flight.
 	joined := make(chan error, 1)
-	go func() { joined <- cache.Sync(ws, []RepoInfo{{URL: slowURL}}) }()
+	go func() { joined <- cache.SyncContext(slowCtx, ws, []RepoInfo{{URL: slowURL}}) }()
 	select {
 	case err := <-joined:
 		t.Fatalf("joining Sync returned before the download finished: %v", err)
@@ -259,26 +269,14 @@ func TestCreateWorktreeReportsStaleWhenFetchFails(t *testing.T) {
 // TestBootstrapGivesUpWhenHistoryStopsGrowing: a remote that answers every
 // deepen with nothing must end the download, not spin under the repo lock.
 func TestBootstrapGivesUpWhenHistoryStopsGrowing(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell git wrapper is POSIX-only")
-	}
-	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Skipf("git not found: %v", err)
-	}
-	sourceURL := createDeepTestRepo(t, 5)
-	binDir := t.TempDir()
 	// Every --deepen succeeds without fetching anything.
-	script := "#!/bin/sh\ncase \"$*\" in *--deepen=*) exit 0 ;; esac\nexec '" + realGit + "' \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fakeGit := withFakeGit(t, "case \"$*\" in *--deepen=*) exit 0 ;; esac\nexec \"$REAL_GIT\" \"$@\"\n")
+	sourceURL := createDeepTestRepo(t, 5)
 
 	dest := filepath.Join(t.TempDir(), "repo.git")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(fakeGit, 30*time.Second)
 	defer cancel()
-	err = bootstrapBareContext(ctx, sourceURL, dest, testLogger(), nil)
+	err := bootstrapBareContext(ctx, sourceURL, dest, testLogger(), nil)
 	if err == nil || !strings.Contains(err.Error(), "history stopped growing") {
 		t.Fatalf("bootstrap error = %v, want the no-progress breaker", err)
 	}
