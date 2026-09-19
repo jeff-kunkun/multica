@@ -237,6 +237,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "assistant":
 				assistantEventCount++
 				turn := b.handleAssistant(msg, msgCh, usage)
+				if turn.lastContextTokens != nil {
+					lastContextTokens = turn.lastContextTokens
+				}
 				toolUseCount += turn.toolUses
 				if !turn.understood {
 					unreadableAssistantCount++
@@ -258,10 +261,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
 				numTurns = msg.NumTurns
-				if msg.Usage != nil {
-					value := msg.Usage.InputTokens + msg.Usage.CacheReadInputTokens + msg.Usage.CacheCreationInputTokens
-					lastContextTokens = &value
-				}
 				if resultUsage := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
 				}
@@ -393,6 +392,8 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 
 	// Accumulate token usage per model.
 	if content.Usage != nil && content.Model != "" {
+		value := content.Usage.InputTokens + content.Usage.CacheReadInputTokens + content.Usage.CacheCreationInputTokens
+		turn.lastContextTokens = &value
 		u := usage[content.Model]
 		u.InputTokens += content.Usage.InputTokens
 		u.OutputTokens += content.Usage.OutputTokens

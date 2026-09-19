@@ -9477,21 +9477,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			spawnToFirstOutputMS = &value
 		}
 	}
-	if finished, ok := phaseSamples[taskPhaseFinished]; ok {
-		value := finished.TotalElapsed.Milliseconds()
-		totalMS = &value
-	} else {
-		value := phaseRecorder.Elapsed().Milliseconds()
-		if queueToClaimMS != nil {
-			value += *queueToClaimMS
-		}
-		totalMS = &value
+	// phaseRecorder starts when the daemon begins handling the claimed task;
+	// include the queue wait explicitly so total_ms covers task creation to
+	// completion. The deferred taskPhaseFinished mark runs after this snapshot.
+	value := phaseRecorder.Elapsed().Milliseconds()
+	if queueToClaimMS != nil {
+		value += *queueToClaimMS
 	}
+	totalMS = &value
 	var usageEntries []TaskUsageEntry
 	for model, u := range result.Usage {
-		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
-			continue
-		}
 		usageEntries = append(usageEntries, TaskUsageEntry{
 			Provider:             provider,
 			Model:                model,
@@ -9501,7 +9496,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CacheWriteTokens:     u.CacheWriteTokens,
 			CostUSDTicks:         u.CostUSDTicks,
 			NumTurns:             result.NumTurns,
-			Resumed:              task.PriorSessionID != "",
+			Resumed:              task.PriorSessionID != "" && !result.ResumeRejected && !result.ResumeRejectedTransient,
 			SessionID:            result.SessionID,
 			LastContextTokens:    result.LastContextTokens,
 			QueueToClaimMS:       queueToClaimMS,

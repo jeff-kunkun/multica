@@ -1102,7 +1102,7 @@ describe("ApiClient", () => {
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
-    );
+    ));
 
     const usage = await new ApiClient("https://api.example.test").getIssueUsage("issue-1");
     expect(usage.runs?.[0]).toMatchObject({ resumed: true, num_turns: 3, total_ms: 44 });
@@ -1110,7 +1110,7 @@ describe("ApiClient", () => {
   });
 
   it("falls back safely when issue usage response is malformed", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ runs: "bad" }), { status: 200 })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(["bad"]), { status: 200 })));
     await expect(new ApiClient("https://api.example.test").getIssueUsage("issue-1")).resolves.toEqual({
       total_input_tokens: 0,
       total_output_tokens: 0,

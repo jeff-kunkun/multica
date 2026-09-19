@@ -6088,6 +6088,29 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
+const maxIssueUsageRuns = 500
+
+type issueUsageRunResponse struct {
+	TaskID               string  `json:"task_id"`
+	Provider             string  `json:"provider"`
+	Model                string  `json:"model"`
+	InputTokens          int64   `json:"input_tokens"`
+	OutputTokens         int64   `json:"output_tokens"`
+	CacheReadTokens      int64   `json:"cache_read_tokens"`
+	CacheWriteTokens     int64   `json:"cache_write_tokens"`
+	CostUSDTicks         *int64  `json:"cost_usd_ticks,omitempty"`
+	NumTurns             int32   `json:"num_turns"`
+	Resumed              bool    `json:"resumed"`
+	SessionID            *string `json:"session_id,omitempty"`
+	LastContextTokens    *int64  `json:"last_context_tokens,omitempty"`
+	QueueToClaimMS       *int64  `json:"queue_to_claim_ms,omitempty"`
+	PrepareMS            *int64  `json:"prepare_ms,omitempty"`
+	SpawnToFirstOutputMS *int64  `json:"spawn_to_first_output_ms,omitempty"`
+	TotalMS              *int64  `json:"total_ms,omitempty"`
+	AttributionSource    string  `json:"attribution_source"`
+	TriggerEvidenceKind  string  `json:"trigger_evidence_kind"`
+}
+
 // GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.
 func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
@@ -6119,41 +6142,51 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		bySource[source] += group.TaskCount
 		byEvidence[evidence] += group.TaskCount
 	}
-	runs := make([]map[string]any, 0, len(runRows))
+	if len(runRows) > maxIssueUsageRuns {
+		runRows = runRows[:maxIssueUsageRuns]
+	}
+	runs := make([]issueUsageRunResponse, 0, len(runRows))
 	for _, run := range runRows {
-		item := map[string]any{
-			"task_id":               uuidToString(run.TaskID),
-			"provider":              run.Provider,
-			"model":                 run.Model,
-			"input_tokens":          run.InputTokens,
-			"output_tokens":         run.OutputTokens,
-			"cache_read_tokens":     run.CacheReadTokens,
-			"cache_write_tokens":    run.CacheWriteTokens,
-			"num_turns":             run.NumTurns,
-			"resumed":               run.Resumed,
-			"attribution_source":    run.AttributionSource,
-			"trigger_evidence_kind": run.TriggerEvidenceKind,
+		item := issueUsageRunResponse{
+			TaskID:              uuidToString(run.TaskID),
+			Provider:            run.Provider,
+			Model:               run.Model,
+			InputTokens:         run.InputTokens,
+			OutputTokens:        run.OutputTokens,
+			CacheReadTokens:     run.CacheReadTokens,
+			CacheWriteTokens:    run.CacheWriteTokens,
+			NumTurns:            run.NumTurns,
+			Resumed:             run.Resumed,
+			AttributionSource:   run.AttributionSource,
+			TriggerEvidenceKind: run.TriggerEvidenceKind,
 		}
 		if run.CostUsdTicks.Valid {
-			item["cost_usd_ticks"] = run.CostUsdTicks.Int64
+			value := run.CostUsdTicks.Int64
+			item.CostUSDTicks = &value
 		}
 		if run.SessionID.Valid {
-			item["session_id"] = run.SessionID.String
+			value := run.SessionID.String
+			item.SessionID = &value
 		}
 		if run.LastContextTokens.Valid {
-			item["last_context_tokens"] = run.LastContextTokens.Int64
+			value := run.LastContextTokens.Int64
+			item.LastContextTokens = &value
 		}
 		if run.QueueToClaimMs.Valid {
-			item["queue_to_claim_ms"] = run.QueueToClaimMs.Int64
+			value := run.QueueToClaimMs.Int64
+			item.QueueToClaimMS = &value
 		}
 		if run.PrepareMs.Valid {
-			item["prepare_ms"] = run.PrepareMs.Int64
+			value := run.PrepareMs.Int64
+			item.PrepareMS = &value
 		}
 		if run.SpawnToFirstOutputMs.Valid {
-			item["spawn_to_first_output_ms"] = run.SpawnToFirstOutputMs.Int64
+			value := run.SpawnToFirstOutputMs.Int64
+			item.SpawnToFirstOutputMS = &value
 		}
 		if run.TotalMs.Valid {
-			item["total_ms"] = run.TotalMs.Int64
+			value := run.TotalMs.Int64
+			item.TotalMS = &value
 		}
 		runs = append(runs, item)
 	}

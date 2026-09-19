@@ -1,4 +1,5 @@
 ALTER TABLE task_usage
+    -- total_ms includes queue_to_claim_ms; it measures task creation to run end.
     ADD COLUMN IF NOT EXISTS num_turns INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS resumed BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS session_id TEXT,

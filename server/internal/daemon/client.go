@@ -557,10 +557,6 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 }
 
 func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
-	return c.ReportTaskUsageWithMetrics(ctx, taskID, usage)
-}
-
-func (c *Client) ReportTaskUsageWithMetrics(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
 	if len(usage) == 0 {
 		return nil
 	}
