@@ -403,6 +403,24 @@ func TestStripClaudeAutoCompactArgs(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeArgsAutocompactRangeFallsBackToDefault(t *testing.T) {
+	for _, value := range []int{50000, 2000000} {
+		args := buildClaudeArgs(ExecOptions{ClaudeAutoCompactTokens: value}, slog.Default())
+		found := false
+		for i := range args {
+			if args[i] == "--autocompact" && i+1 < len(args) {
+				if args[i+1] != "200000" {
+					t.Fatalf("value %d produced autocompact %q", value, args[i+1])
+				}
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("value %d did not produce --autocompact", value)
+		}
+	}
+}
+
 func TestBuildClaudeArgsUsesStrictMCPForManagedConfig(t *testing.T) {
 	t.Parallel()
 

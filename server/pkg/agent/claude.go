@@ -836,6 +836,8 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	const defaultAutoCompactTokens = 200000
+	const minAutoCompactTokens = 100000
+	const maxAutoCompactTokens = 1000000
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
@@ -874,6 +876,12 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	// value wins naturally under the CLI's last-value-wins parsing.
 	autoCompactTokens := opts.ClaudeAutoCompactTokens
 	if autoCompactTokens <= 0 {
+		autoCompactTokens = defaultAutoCompactTokens
+	} else if autoCompactTokens < minAutoCompactTokens || autoCompactTokens > maxAutoCompactTokens {
+		if logger != nil {
+			logger.Warn("Claude autocompact token window outside supported range; using default",
+				"value", autoCompactTokens, "min", minAutoCompactTokens, "max", maxAutoCompactTokens)
+		}
 		autoCompactTokens = defaultAutoCompactTokens
 	}
 	args = append(args, "--autocompact", fmt.Sprintf("%d", autoCompactTokens))
