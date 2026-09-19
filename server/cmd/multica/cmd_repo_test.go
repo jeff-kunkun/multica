@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -392,5 +393,50 @@ func TestRepoCheckoutSummaryWithoutSourceIsUnchanged(t *testing.T) {
 	})
 	if !strings.Contains(got, "Checked out https://github.com/org/repo → /work/repo") {
 		t.Errorf("old-daemon summary changed:\n%s", got)
+	}
+}
+
+// DENE-598: when the wait on a first-time download runs out, the error is the
+// daemon's own progress report, not a bare "deadline exceeded".
+func TestRunRepoCheckoutTimeoutReportsWhatItWaitedOn(t *testing.T) {
+	const progress = "the first-time cache of https://github.com/org/repo.git is not finished yet: downloading files, step 3 of 3 (40 of 100, about 2m0s left)"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Multica-Retryable", "repo-busy")
+		w.Header().Set("X-Multica-Repo-Building", "1")
+		w.Header().Set("Retry-After", "0")
+		http.Error(w, progress, http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_DAEMON_PORT", strings.TrimPrefix(srv.URL, "http://127.0.0.1:"))
+	t.Setenv("MULTICA_TOKEN", "mat_repo_checkout_test")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	cmd := &cobra.Command{}
+	cmd.SetContext(ctx)
+	err := runRepoCheckout(cmd, []string{"https://github.com/org/repo.git"})
+	if err == nil {
+		t.Fatal("runRepoCheckout unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "40 of 100") {
+		t.Fatalf("timeout error = %q, want it to carry the download progress", err)
+	}
+}
+
+func TestRepoCheckoutStaleWarning(t *testing.T) {
+	const repoURL = "https://github.com/org/repo.git"
+	if got := repoCheckoutStaleWarning(repoURL, repoCheckoutResult{Path: "/work/repo"}); got != "" {
+		t.Fatalf("a fresh checkout produced a warning: %q", got)
+	}
+	got := repoCheckoutStaleWarning(repoURL, repoCheckoutResult{Path: "/work/repo", Stale: true, StaleReason: "git fetch: timed out"})
+	for _, want := range []string{"WARNING", "OUT OF DATE", "/work/repo", "git fetch: timed out", "git fetch origin"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stale warning %q does not mention %q", got, want)
+		}
+	}
+	// A daemon that flags staleness without a reason still gets a warning.
+	if got := repoCheckoutStaleWarning(repoURL, repoCheckoutResult{Path: "/work/repo", Stale: true}); !strings.Contains(got, "OUT OF DATE") {
+		t.Errorf("reasonless stale warning = %q", got)
 	}
 }

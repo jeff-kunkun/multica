@@ -686,6 +686,13 @@ type Daemon struct {
 	// deleted bare clone and an unrelated `not empty` cleanup failure.
 	bgSyncs sync.WaitGroup
 
+	// repoFirstCacheWait overrides repoFirstCacheWaitSlice; zero means the
+	// default. Overridable in tests.
+	repoFirstCacheWait time.Duration
+	// repoDownloads holds the first-time downloads ensureRepoReady started and
+	// that are still running, keyed by repoDownloadKey. Guarded by mu.
+	repoDownloads map[string]chan struct{}
+
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
 	// envRootBusyWait is how long a task that is entitled to a prior env root
@@ -4002,44 +4009,24 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	//     sibling's refresh is fresh enough for our gate read.
 	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
 
-	if err := ws.repoRefreshMu.Lock(ctx); err != nil {
+	ready, buildDone, err := d.refreshRepoAllowance(ctx, ws, workspaceID, repoURL, cacheHitOnEntry)
+	if err != nil || ready {
 		return err
 	}
-	defer ws.repoRefreshMu.Unlock()
 
-	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
+	// repoRefreshMu is released by now, on purpose. The wait below can outlast
+	// any request, and the lock is workspace-wide: holding it here made every
+	// other repository's checkout in the workspace queue behind one cold
+	// download.
+	waitSlice := d.repoFirstCacheWait
+	if waitSlice <= 0 {
+		waitSlice = repoFirstCacheWaitSlice
 	}
-
-	if _, err := d.refreshWorkspaceRepos(ctx, workspaceID); err != nil {
-		return fmt.Errorf("refresh workspace repos: %w", err)
-	}
-
-	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
-		return ErrRepoNotConfigured
-	}
-
-	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
-	}
-
-	// The download belongs to the shared cache, not to the task that happened
-	// to ask first. Run it detached from the request so a stopped or timed-out
-	// task does not kill it: it keeps going for the next caller, which finds
-	// either a ready cache or the repo lock held by this same download.
-	syncDone := make(chan struct{})
-	d.bgSyncs.Add(1)
-	go func() {
-		defer d.bgSyncs.Done()
-		defer close(syncDone)
-		// Only the requested repo: Sync walks its list serially, and a cold
-		// download of some other large repo can now legitimately hold its
-		// slot for hours. The rest are covered by the registration-time and
-		// task-registration background syncs.
-		d.syncWorkspaceReposContext(context.WithoutCancel(ctx), workspaceID, []RepoData{{URL: repoURL}})
-	}()
+	wait := time.NewTimer(waitSlice)
+	defer wait.Stop()
 	select {
-	case <-syncDone:
+	case <-buildDone:
+	case <-wait.C:
 	case <-ctx.Done():
 		return context.Cause(ctx)
 	}
@@ -4048,11 +4035,117 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return nil
 	}
 
+	if reporter, ok := d.repoCache.(repoBuildReporter); ok {
+		if status, _, building := reporter.BuildInProgress(workspaceID, repoURL); building && status.Active {
+			return &repocache.RepoBuildingError{URL: repoURL, Status: status}
+		}
+	}
+
 	if syncErr := d.workspaceLastRepoSyncErr(workspaceID); syncErr != "" {
 		return fmt.Errorf("repo is configured but not synced: %s", syncErr)
 	}
 
 	return fmt.Errorf("repo is configured but not synced")
+}
+
+// repoFirstCacheWaitSlice is how long one /repo/checkout request waits on a
+// first-time download before answering "still downloading, here is how far".
+// A large repository takes far longer than any request may block, so the
+// request returns progress and the CLI asks again; the download itself is not
+// tied to either.
+const repoFirstCacheWaitSlice = 10 * time.Second
+
+// repoBuildReporter is the repo cache's view of first-time downloads. Optional
+// so test daemons can run with a minimal repoCacheBackend.
+type repoBuildReporter interface {
+	BuildInProgress(workspaceID, url string) (repocache.BuildStatus, <-chan struct{}, bool)
+}
+
+// refreshRepoAllowance is the part of ensureRepoReady that runs under the
+// workspace's repoRefreshMu: refresh the allowlist and settings, then check
+// the cache. ready=true means the checkout can proceed; otherwise buildDone
+// closes when the repository's download ends. The download is started in here
+// so that a sibling request arriving a moment later finds it registered.
+func (d *Daemon) refreshRepoAllowance(ctx context.Context, ws *workspaceState, workspaceID, repoURL string, cacheHitOnEntry bool) (ready bool, buildDone <-chan struct{}, err error) {
+	if err := ws.repoRefreshMu.Lock(ctx); err != nil {
+		return false, nil, err
+	}
+	defer ws.repoRefreshMu.Unlock()
+
+	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) {
+		if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+			return true, nil, nil
+		}
+		// A sibling on the same cold miss already refreshed and started the
+		// download; its refresh is fresh enough for us too.
+		if done := d.repoDownloadInFlight(workspaceID, repoURL); done != nil {
+			return false, done, nil
+		}
+	}
+
+	if _, err := d.refreshWorkspaceRepos(ctx, workspaceID); err != nil {
+		return false, nil, fmt.Errorf("refresh workspace repos: %w", err)
+	}
+
+	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
+		return false, nil, ErrRepoNotConfigured
+	}
+
+	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+		return true, nil, nil
+	}
+	return false, d.startRepoDownload(ctx, workspaceID, repoURL), nil
+}
+
+func repoDownloadKey(workspaceID, repoURL string) string {
+	return workspaceID + "\x00" + repoURL
+}
+
+func (d *Daemon) repoDownloadInFlight(workspaceID, repoURL string) <-chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if done, ok := d.repoDownloads[repoDownloadKey(workspaceID, repoURL)]; ok {
+		return done
+	}
+	return nil
+}
+
+// startRepoDownload makes sure the repository's first-time download is running
+// and returns a channel that closes when it ends.
+//
+// The download belongs to the shared cache, not to the task that happened to
+// ask first. It runs detached from the request so a stopped or timed-out task
+// does not kill it: it keeps going for the next caller. A checkout retries
+// every few seconds for as long as the download lasts, so a request that finds
+// one already running joins it rather than parking one more goroutine behind it.
+func (d *Daemon) startRepoDownload(ctx context.Context, workspaceID, repoURL string) <-chan struct{} {
+	key := repoDownloadKey(workspaceID, repoURL)
+	d.mu.Lock()
+	if done, ok := d.repoDownloads[key]; ok {
+		d.mu.Unlock()
+		return done
+	}
+	syncDone := make(chan struct{})
+	if d.repoDownloads == nil {
+		d.repoDownloads = make(map[string]chan struct{})
+	}
+	d.repoDownloads[key] = syncDone
+	d.mu.Unlock()
+
+	d.bgSyncs.Add(1)
+	go func() {
+		defer d.bgSyncs.Done()
+		defer func() {
+			d.mu.Lock()
+			delete(d.repoDownloads, key)
+			d.mu.Unlock()
+			close(syncDone)
+		}()
+		// Only the requested repo: the rest are covered by the registration-time
+		// and task-registration background syncs.
+		d.syncWorkspaceReposContext(context.WithoutCancel(ctx), workspaceID, []RepoData{{URL: repoURL}})
+	}()
+	return syncDone
 }
 
 // DefaultTokenRenewalInterval is how often the daemon asks the server to

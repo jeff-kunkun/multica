@@ -3,6 +3,7 @@
 package repocache
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -221,6 +222,12 @@ type Cache struct {
 	// worktree admin dirs) don't tolerate parallel mutations on the same
 	// repo. Separate repos are independent and run concurrently.
 	repoLocks sync.Map // barePath -> *repoLock
+
+	// builds tracks the first-time downloads running in this process, so a
+	// second caller joins the one in flight instead of queueing behind it and
+	// a waiting checkout can be told how far along it is.
+	buildsMu sync.Mutex
+	builds   map[string]*buildTracker // barePath -> in-flight download
 }
 
 // ErrRepoBusy means a foreground checkout could not acquire its repository
@@ -228,6 +235,158 @@ type Cache struct {
 // turn this into a retryable HTTP response instead of waiting until their
 // transport deadline expires.
 var ErrRepoBusy = errors.New("repository is busy")
+
+// ErrRepoBuilding means the repository's first-time cache has not finished
+// downloading. It is not a failure and not corruption: the slices fetched so
+// far are kept, and the download resumes from them. Match it with errors.Is;
+// the concrete *RepoBuildingError carries the progress.
+var ErrRepoBuilding = errors.New("repository's first-time cache is still downloading")
+
+// RepoBuildingError is ErrRepoBuilding with the progress known at the time.
+type RepoBuildingError struct {
+	URL    string
+	Status BuildStatus
+}
+
+func (e *RepoBuildingError) Error() string {
+	return fmt.Sprintf("the first-time cache of %s is not finished yet: %s. "+
+		"Nothing is broken and nothing needs deleting: the cache is not corrupted, the part already downloaded is kept, "+
+		"and deleting it would only restart the download from zero. Run the same checkout again to keep waiting",
+		e.URL, e.Status.Describe(time.Now()))
+}
+
+func (e *RepoBuildingError) Is(target error) bool { return target == ErrRepoBuilding }
+
+// Build phases, in the order a first-time download goes through them.
+const (
+	BuildPhaseSnapshot = "snapshot" // depth-1 snapshot of every branch
+	BuildPhaseHistory  = "history"  // deepen slices back to full history
+	BuildPhaseFiles    = "files"    // default branch file contents (blobless only)
+)
+
+// BuildStatus is how far a first-time download has got.
+type BuildStatus struct {
+	// Active is false when the cache directory is unfinished but nothing in
+	// this process is downloading it (an interrupted download awaiting resume).
+	Active bool
+	Phase  string
+	// Done and Total count history slices in BuildPhaseHistory (Total unknown,
+	// left 0) and files in BuildPhaseFiles.
+	Done, Total    int
+	StartedAt      time.Time
+	PhaseStartedAt time.Time
+}
+
+// Remaining estimates the time left. Only the files phase has a known total;
+// git does not say how much history is left, and a guess there would be the
+// same kind of lie this status exists to replace.
+func (s BuildStatus) Remaining(now time.Time) (time.Duration, bool) {
+	if !s.Active || s.Phase != BuildPhaseFiles || s.Done <= 0 || s.Total <= s.Done {
+		return 0, false
+	}
+	elapsed := now.Sub(s.PhaseStartedAt)
+	if elapsed <= 0 {
+		return 0, false
+	}
+	return time.Duration(float64(elapsed) / float64(s.Done) * float64(s.Total-s.Done)), true
+}
+
+// Describe renders the status as one clause for an error or a progress line.
+func (s BuildStatus) Describe(now time.Time) string {
+	if !s.Active {
+		return "an earlier download was interrupted and resumes from where it stopped"
+	}
+	running := now.Sub(s.StartedAt).Round(time.Second)
+	switch s.Phase {
+	case BuildPhaseHistory:
+		return fmt.Sprintf("downloading history, step 2 of 3 (%d slice%s fetched, running for %s; git does not report how much history is left)",
+			s.Done, pluralSuffix(s.Done), running)
+	case BuildPhaseFiles:
+		if left, ok := s.Remaining(now); ok {
+			return fmt.Sprintf("downloading files, step 3 of 3 (%d of %d, about %s left)", s.Done, s.Total, left.Round(time.Second))
+		}
+		return fmt.Sprintf("downloading files, step 3 of 3 (%d of %d)", s.Done, s.Total)
+	default:
+		return fmt.Sprintf("downloading the first snapshot, step 1 of 3 (running for %s)", running)
+	}
+}
+
+func pluralSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// buildTracker is one in-flight first-time download. done closes when it ends;
+// err is valid only after that.
+type buildTracker struct {
+	mu     sync.Mutex
+	status BuildStatus
+	done   chan struct{}
+	err    error
+}
+
+func (t *buildTracker) report(phase string, done, total int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.status.Phase != phase {
+		t.status.Phase = phase
+		t.status.PhaseStartedAt = time.Now()
+	}
+	t.status.Done, t.status.Total = done, total
+}
+
+func (t *buildTracker) snapshot() BuildStatus {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.status
+}
+
+// beginOrJoinBuild returns the in-flight download for barePath, or registers a
+// new one and reports owner=true. The owner must call endBuild.
+func (c *Cache) beginOrJoinBuild(barePath string) (t *buildTracker, owner bool) {
+	c.buildsMu.Lock()
+	defer c.buildsMu.Unlock()
+	if t, ok := c.builds[barePath]; ok {
+		return t, false
+	}
+	now := time.Now()
+	t = &buildTracker{
+		status: BuildStatus{Active: true, Phase: BuildPhaseSnapshot, StartedAt: now, PhaseStartedAt: now},
+		done:   make(chan struct{}),
+	}
+	if c.builds == nil {
+		c.builds = make(map[string]*buildTracker)
+	}
+	c.builds[barePath] = t
+	return t, true
+}
+
+func (c *Cache) endBuild(barePath string, t *buildTracker, err error) {
+	c.buildsMu.Lock()
+	delete(c.builds, barePath)
+	c.buildsMu.Unlock()
+	t.err = err
+	close(t.done)
+}
+
+// BuildInProgress reports whether the repository's cache is unfinished. ok is
+// false for a ready cache and for a repository never seen. done is non-nil only
+// while a download is running in this process, and closes when it ends.
+func (c *Cache) BuildInProgress(workspaceID, url string) (status BuildStatus, done <-chan struct{}, ok bool) {
+	barePath := c.BarePath(workspaceID, url)
+	c.buildsMu.Lock()
+	t := c.builds[barePath]
+	c.buildsMu.Unlock()
+	if t != nil {
+		return t.snapshot(), t.done, true
+	}
+	if !IsReady(barePath) && isBareRepo(barePath) {
+		return BuildStatus{}, nil, true
+	}
+	return BuildStatus{}, nil, false
+}
 
 // Activity is the path-free repository coordination state exposed through the
 // daemon health endpoint. It is diagnostic only.
@@ -395,58 +554,119 @@ func (c *Cache) CancelMaintenance() {
 // if a repo is temporarily removed and re-added).
 //
 // Per-repo mutation serializes against CreateWorktree on the same bare path
-// via lockForRepo. Different repos run sequentially within a single Sync call
-// but concurrent Sync calls (different workspaces, or the same workspace
-// re-synced while checkouts are running) do not block each other.
+// via lockForRepo. Different repos are independent and run concurrently, so one
+// slow or stuck repository never delays the rest of the list.
 func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 	return c.SyncContext(context.Background(), workspaceID, repos)
 }
 
+// syncConcurrency bounds how many repositories one Sync call works on at once.
+// It caps the daemon's network and disk fan-out on a workspace with many
+// repositories; it is not a fairness mechanism.
+const syncConcurrency = 4
+
 // SyncContext is Sync with cancellation propagated through repo lock waits,
-// clone, fetch, and ref-layout migration.
+// clone, fetch, and ref-layout migration. It returns the error of the earliest
+// failing repository in list order, so the result does not depend on timing.
 func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []RepoInfo) error {
 	wsDir := filepath.Join(c.root, workspaceID)
 	if err := os.MkdirAll(wsDir, 0o755); err != nil {
 		return fmt.Errorf("create workspace cache dir: %w", err)
 	}
 
-	var firstErr error
-	for _, repo := range repos {
-		if err := ctx.Err(); err != nil {
-			return context.Cause(ctx)
-		}
+	errs := make([]error, len(repos))
+	sem := make(chan struct{}, syncConcurrency)
+	var wg sync.WaitGroup
+	for i, repo := range repos {
 		if repo.URL == "" {
 			continue
 		}
-		barePath := filepath.Join(wsDir, bareDirName(repo.URL))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				errs[i] = context.Cause(ctx)
+				return
+			}
+			errs[i] = c.syncRepoContext(ctx, repo.URL, filepath.Join(wsDir, bareDirName(repo.URL)))
+		}()
+	}
+	wg.Wait()
 
-		repoLock := c.lockForRepo(barePath)
-		if err := repoLock.LockContext(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	for _, err := range errs {
+		if err != nil {
 			return err
 		}
-		if IsReady(barePath) || adoptLegacyCacheContext(ctx, barePath) {
-			// Already cached — fetch latest.
-			c.logger.Info("repo cache: fetching", "url", repo.URL, "path", barePath)
-			if err := gitFetchContext(ctx, barePath); err != nil {
-				c.logger.Warn("repo cache: fetch failed", "url", repo.URL, "error", err)
-				if firstErr == nil {
-					firstErr = err
-				}
-			}
-		} else {
-			// Not cached, or a previous download was interrupted — build the
-			// cache, resuming from whatever slices already landed.
-			c.logger.Info("repo cache: downloading", "url", repo.URL, "path", barePath, "resuming", isBareRepo(barePath))
-			if err := bootstrapBareContext(ctx, repo.URL, barePath, c.logger); err != nil {
-				c.logger.Error("repo cache: download incomplete, progress kept for the next attempt", "url", repo.URL, "error", err)
-				if firstErr == nil {
-					firstErr = err
-				}
+	}
+	return nil
+}
+
+// syncRepoContext brings one repository's cache up to date: a fetch when it is
+// ready, otherwise the first-time download (or a resume of one).
+//
+// A first-time download is single-flight per repository. A caller that arrives
+// while one is running waits for that download's outcome instead of queueing on
+// the repo lock, where it would pile up for the whole download and then run a
+// fetch the fresh cache does not need.
+func (c *Cache) syncRepoContext(ctx context.Context, url, barePath string) error {
+	if !IsReady(barePath) {
+		tracker, owner := c.beginOrJoinBuild(barePath)
+		if !owner {
+			select {
+			case <-tracker.done:
+				return tracker.err
+			case <-ctx.Done():
+				return context.Cause(ctx)
 			}
 		}
-		repoLock.Unlock()
+		err := c.buildRepoContext(ctx, url, barePath, tracker)
+		c.endBuild(barePath, tracker, err)
+		return err
 	}
-	return firstErr
+
+	repoLock := c.lockForRepo(barePath)
+	if err := repoLock.LockContext(ctx); err != nil {
+		return err
+	}
+	defer repoLock.Unlock()
+	return c.fetchCachedRepoContext(ctx, url, barePath)
+}
+
+func (c *Cache) fetchCachedRepoContext(ctx context.Context, url, barePath string) error {
+	c.logger.Info("repo cache: fetching", "url", url, "path", barePath)
+	if err := gitFetchContext(ctx, barePath); err != nil {
+		c.logger.Warn("repo cache: fetch failed", "url", url, "error", err)
+		return err
+	}
+	return nil
+}
+
+// buildRepoContext runs as the owner of tracker. The readiness checks repeat
+// under the lock because a pre-marker cache is adopted, not downloaded.
+func (c *Cache) buildRepoContext(ctx context.Context, url, barePath string, tracker *buildTracker) error {
+	repoLock := c.lockForRepo(barePath)
+	if err := repoLock.LockContext(ctx); err != nil {
+		return err
+	}
+	defer repoLock.Unlock()
+
+	if IsReady(barePath) || adoptLegacyCacheContext(ctx, barePath) {
+		return c.fetchCachedRepoContext(ctx, url, barePath)
+	}
+	// Not cached, or a previous download was interrupted — build the cache,
+	// resuming from whatever slices already landed.
+	c.logger.Info("repo cache: downloading", "url", url, "path", barePath, "resuming", isBareRepo(barePath))
+	if err := bootstrapBareContext(ctx, url, barePath, c.logger, tracker.report); err != nil {
+		c.logger.Error("repo cache: download incomplete, progress kept for the next attempt", "url", url, "error", err)
+		return err
+	}
+	return nil
 }
 
 // Lookup returns the local bare clone path for a repo URL within a workspace.
@@ -714,6 +934,10 @@ const (
 	bootstrapInitialDeepen = 64
 	bootstrapDeepenGrowth  = 4
 	bootstrapMaxDeepen     = 1 << 20
+	// bootstrapMaxStalledDeepens is how many deepen steps in a row may fetch
+	// nothing before the download gives up. More than one, because each retry
+	// asks for a geometrically larger slice than the last.
+	bootstrapMaxStalledDeepens = 3
 
 	// Blob batches are sized by count because a missing blob's size is unknown
 	// until it arrives. The batch grows while batches finish quickly and
@@ -736,7 +960,12 @@ const filterUnsupportedMarker = "filtering not recognized by server"
 // order: the depth-1 snapshot, the deepen slices back to full history, and
 // (blobless only) the default branch's file contents. The ready marker is
 // written only after all three. Callers must hold the repo lock.
-func bootstrapBareContext(ctx context.Context, url, dest string, logger *slog.Logger) error {
+//
+// progress, when non-nil, is told the phase and how far it has got.
+func bootstrapBareContext(ctx context.Context, url, dest string, logger *slog.Logger, progress func(phase string, done, total int)) error {
+	if progress == nil {
+		progress = func(string, int, int) {}
+	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return fmt.Errorf("create cache dir: %w", err)
 	}
@@ -767,10 +996,13 @@ func bootstrapBareContext(ctx context.Context, url, dest string, logger *slog.Lo
 	}
 
 	step := bootstrapInitialDeepen
+	slices, stalled := 0, 0
 	for isShallowContext(ctx, dest) {
 		if err := ctx.Err(); err != nil {
 			return context.Cause(ctx)
 		}
+		progress(BuildPhaseHistory, slices, 0)
+		boundary := shallowBoundary(dest)
 		if out, err := runGitCombinedOutputContext(ctx, "-C", dest, "fetch", "--deepen="+strconv.Itoa(step), "origin"); err != nil {
 			if sliceTimedOut(ctx, err) && step > 1 {
 				// The slice outgrew one timeout window on this link. Nothing
@@ -780,6 +1012,18 @@ func bootstrapBareContext(ctx context.Context, url, dest string, logger *slog.Lo
 				continue
 			}
 			return fmt.Errorf("git fetch --deepen=%d: %s: %w", step, strings.TrimSpace(string(out)), err)
+		}
+		// A deepen that exits 0 yet leaves the shallow boundary where it was
+		// fetched nothing. Without this the loop would spin on such a remote
+		// forever while holding the repo lock.
+		if bytes.Equal(boundary, shallowBoundary(dest)) {
+			stalled++
+			if stalled >= bootstrapMaxStalledDeepens {
+				return fmt.Errorf("git fetch --deepen=%d: history stopped growing after %d slices (%d attempts in a row fetched nothing); the remote may not serve its full history", step, slices, stalled)
+			}
+		} else {
+			stalled = 0
+			slices++
 		}
 		if logger != nil {
 			logger.Info("repo cache: history slice fetched", "path", dest, "deepen", step)
@@ -792,7 +1036,7 @@ func bootstrapBareContext(ctx context.Context, url, dest string, logger *slog.Lo
 	// Non-fatal: getRemoteDefaultBranch has fallbacks when origin/HEAD is unset.
 	_ = runGitContext(ctx, "-C", dest, "remote", "set-head", "origin", "--auto")
 	pointBareHeadAtDefaultBranchContext(ctx, dest)
-	if err := prefetchDefaultBranchBlobsContext(ctx, dest, logger); err != nil {
+	if err := prefetchDefaultBranchBlobsContext(ctx, dest, logger, progress); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -802,6 +1046,13 @@ func bootstrapBareContext(ctx context.Context, url, dest string, logger *slog.Lo
 		return fmt.Errorf("write ready marker: %w", err)
 	}
 	return nil
+}
+
+// shallowBoundary returns the commits history is currently cut at. It changes
+// whenever a deepen step actually lands more history.
+func shallowBoundary(barePath string) []byte {
+	data, _ := os.ReadFile(filepath.Join(barePath, "shallow"))
+	return data
 }
 
 // pointBareHeadAtDefaultBranchContext reproduces the one thing `git clone
@@ -834,7 +1085,10 @@ func pointBareHeadAtDefaultBranchContext(ctx context.Context, barePath string) {
 // pack that survives an interruption; a resume recomputes what is still
 // missing. Blobs only reachable from other branches or older commits are still
 // fetched on demand, which is what keeps the cache small.
-func prefetchDefaultBranchBlobsContext(ctx context.Context, barePath string, logger *slog.Logger) error {
+func prefetchDefaultBranchBlobsContext(ctx context.Context, barePath string, logger *slog.Logger, progress func(phase string, done, total int)) error {
+	if progress == nil {
+		progress = func(string, int, int) {}
+	}
 	// Read the promisor flag strictly: isPartialCloneContext folds every
 	// failure into "not partial", and here that would declare a cache ready
 	// while its files are still missing.
@@ -873,6 +1127,7 @@ func prefetchDefaultBranchBlobsContext(ctx context.Context, barePath string, log
 		if err := ctx.Err(); err != nil {
 			return context.Cause(ctx)
 		}
+		progress(BuildPhaseFiles, total-len(missing), total)
 		n := min(batch, len(missing))
 		started := time.Now()
 		// The same invocation git itself uses for a lazy promisor fetch.
@@ -1102,6 +1357,11 @@ type WorktreeResult struct {
 	// that no remote-tracking ref reaches.
 	UncommittedFiles int `json:"uncommitted_files,omitempty"`
 	UnpushedCommits  int `json:"unpushed_commits,omitempty"`
+	// Stale is set when the fetch before the checkout failed or timed out, so
+	// the checkout was built from whatever the cache last held and may be
+	// behind the remote. StaleReason is the fetch error.
+	Stale       bool   `json:"stale,omitempty"`
+	StaleReason string `json:"stale_reason,omitempty"`
 }
 
 // Reasons CreateWorktree keeps an existing checkout, reported in
@@ -1130,6 +1390,11 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams) (*WorktreeResult, error) {
 	barePath := c.Lookup(params.WorkspaceID, params.RepoURL)
 	if barePath == "" {
+		// An unfinished first-time download is not "not found", and it is not
+		// corruption either. Say which, so nobody deletes hours of progress.
+		if status, _, building := c.BuildInProgress(params.WorkspaceID, params.RepoURL); building {
+			return nil, &RepoBuildingError{URL: params.RepoURL, Status: status}
+		}
 		return nil, fmt.Errorf("repo not found in cache: %s (workspace: %s)", params.RepoURL, params.WorkspaceID)
 	}
 
@@ -1165,16 +1430,18 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// to the modern remote-tracking layout on first run, so subsequent fetches
 	// never collide with the refs/heads/agent/* branches that worktree creation
 	// locks in this same bare repo.
-	if err := gitFetchContext(ctx, barePath); err != nil {
+	var fetchErr error
+	if fetchErr = gitFetchContext(ctx, barePath); fetchErr != nil {
 		if ctx.Err() != nil {
 			return nil, context.Cause(ctx)
 		}
-		// Non-fatal: preserve cached state and continue, but make the warning
-		// loud enough that it's findable in the daemon log. The agent will
-		// receive an older snapshot than the remote head.
+		// Non-fatal: preserve cached state and continue. The agent will receive
+		// an older snapshot than the remote head, so the result carries the
+		// failure back to the task (WorktreeResult.Stale); the daemon log alone
+		// is somewhere the task never looks.
 		c.logger.Warn("repo checkout: fetch failed, agent will see possibly stale code",
 			"url", params.RepoURL,
-			"error", err,
+			"error", fetchErr,
 		)
 	}
 	if err := ctx.Err(); err != nil {
@@ -1203,7 +1470,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// explicit error before reaching here, so this branch only fires for the
 	// default-branch case.
 	if baseRef == "" {
-		return nil, fmt.Errorf("cannot resolve default branch for %s: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). The cache may be corrupted; delete it and retry", params.RepoURL, barePath)
+		return nil, fmt.Errorf("cannot resolve default branch for %s: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). Do not delete the cache: it finished downloading and deleting it only forces the whole download again. Name the branch explicitly with --ref <branch>; if the remote really has no branches yet, push one first", params.RepoURL, barePath)
 	}
 
 	// Build branch name: agent/{sanitized-name}/{task-id}
@@ -1240,7 +1507,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		}
 
 		c.logCheckoutReady("repo checkout: isolated checkout ready", params.RepoURL, baseRef, result)
-		return result, nil
+		return result.withFetchFailure(fetchErr), nil
 	}
 
 	// If worktree already exists (reused environment from a prior task),
@@ -1266,7 +1533,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		}
 
 		c.logCheckoutReady("repo checkout: existing worktree updated", params.RepoURL, baseRef, result)
-		return result, nil
+		return result.withFetchFailure(fetchErr), nil
 	}
 
 	// Create a new worktree. createWorktree may rename the branch to avoid
@@ -1296,10 +1563,21 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		"base", baseRef,
 	)
 
-	return &WorktreeResult{
+	result := &WorktreeResult{
 		Path:       worktreePath,
 		BranchName: actualBranch,
-	}, nil
+	}
+	return result.withFetchFailure(fetchErr), nil
+}
+
+// withFetchFailure marks the result stale when the pre-checkout fetch failed.
+func (r *WorktreeResult) withFetchFailure(fetchErr error) *WorktreeResult {
+	if fetchErr != nil {
+		r.Stale = true
+		// Git's stderr is multi-line; the reason is shown inline to the agent.
+		r.StaleReason = strings.Join(strings.Fields(fetchErr.Error()), " ")
+	}
+	return r
 }
 
 // logCheckoutReady logs how CreateWorktree left an existing or isolated

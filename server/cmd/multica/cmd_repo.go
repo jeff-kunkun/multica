@@ -388,6 +388,11 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	client := &http.Client{}
 	checkoutURL := fmt.Sprintf("http://127.0.0.1:%s/repo/checkout", daemonPort)
 	var body []byte
+	// lastWait is the daemon's latest explanation of why the checkout is not
+	// ready. It becomes the error if the wait runs out, so a timeout says what
+	// was being waited on instead of a bare "deadline exceeded".
+	var lastWait string
+	var lastProgressAt time.Time
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, checkoutURL, bytes.NewReader(data))
 		if err != nil {
@@ -397,6 +402,9 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		req.Header.Set("Authorization", "Bearer "+taskToken)
 		resp, err := client.Do(req)
 		if err != nil {
+			if ctx.Err() != nil && lastWait != "" {
+				return fmt.Errorf("checkout is not ready yet, gave up waiting: %s", lastWait)
+			}
 			return fmt.Errorf("connect to daemon: %w", err)
 		}
 		body, err = io.ReadAll(resp.Body)
@@ -408,12 +416,20 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("close daemon checkout response: %w", closeErr)
 		}
 		if resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("X-Multica-Retryable") == "repo-busy" {
+			lastWait = strings.TrimSpace(string(body))
+			// A first-time download can take far longer than this command
+			// waits. Show how far it is so the agent sees a moving download,
+			// not a hang.
+			if resp.Header.Get("X-Multica-Repo-Building") != "" && time.Since(lastProgressAt) >= repoCheckoutProgressInterval {
+				fmt.Fprintf(os.Stderr, "Waiting: %s\n", lastWait)
+				lastProgressAt = time.Now()
+			}
 			delay := repoCheckoutRetryDelay(resp.Header.Get("Retry-After"), time.Now())
 			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return fmt.Errorf("connect to daemon: %w", context.Cause(ctx))
+				return fmt.Errorf("checkout is not ready yet, gave up waiting: %s", lastWait)
 			case <-timer.C:
 				continue
 			}
@@ -431,8 +447,32 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stdout, "%s\n", result.Path)
 	fmt.Fprintln(os.Stderr, repoCheckoutSummary(repoURL, result))
+	if warning := repoCheckoutStaleWarning(repoURL, result); warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
+	}
 
 	return nil
+}
+
+// repoCheckoutProgressInterval spaces out the progress lines printed while
+// waiting on a first-time download.
+const repoCheckoutProgressInterval = 30 * time.Second
+
+// repoCheckoutStaleWarning is printed when the daemon could not refresh the
+// repository before the checkout. The checkout still succeeded, which is
+// exactly why it must be said out loud: without it the agent builds on an old
+// base and nothing anywhere on the task says so.
+func repoCheckoutStaleWarning(repoURL string, result repoCheckoutResult) string {
+	if !result.Stale {
+		return ""
+	}
+	reason := strings.TrimSpace(result.StaleReason)
+	if reason == "" {
+		reason = "no reason reported"
+	}
+	return fmt.Sprintf("WARNING: the code in %s may be OUT OF DATE. Fetching the latest %s failed (%s), so this checkout was built from what the daemon had cached earlier.\n"+
+		"Before relying on it, run `git fetch origin` inside the checkout and compare with the remote branch; if that also fails, say in your result that the work is based on a possibly stale revision.",
+		result.Path, repoURL, reason)
 }
 
 // repoCheckoutResult is the daemon's /repo/checkout response. Daemons older
@@ -452,6 +492,11 @@ type repoCheckoutResult struct {
 	// checkout Path is: the user's own in in_place and shared, this task's
 	// private worktree in worktree mode. Daemons older than DENE-595 omit it.
 	ExecutionMode string `json:"execution_mode,omitempty"`
+	// Stale reports that the fetch before the checkout failed, so the code may
+	// be behind the remote; StaleReason is the fetch error. Daemons older than
+	// DENE-598 omit both and only log the failure.
+	Stale       bool   `json:"stale,omitempty"`
+	StaleReason string `json:"stale_reason,omitempty"`
 }
 
 // repoCheckoutSourceLocalDirectory mirrors the daemon-side constant.

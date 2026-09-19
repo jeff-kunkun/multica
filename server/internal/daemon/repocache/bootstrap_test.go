@@ -1,6 +1,7 @@
 package repocache
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -63,8 +64,10 @@ func TestHeadOnlyDirectoryIsNotReady(t *testing.T) {
 		WorkspaceID: "ws-1", RepoURL: sourceRepo, WorkDir: t.TempDir(),
 		AgentName: "agent", TaskID: "11111111-1111-1111-1111-111111111111",
 	})
-	if err == nil || !strings.Contains(err.Error(), "repo not found in cache") {
-		t.Fatalf("CreateWorktree error = %v, want repo not found in cache", err)
+	// Refused, and named for what it is (DENE-598): unfinished, not missing
+	// and not corrupted.
+	if !errors.Is(err, ErrRepoBuilding) {
+		t.Fatalf("CreateWorktree error = %v, want ErrRepoBuilding", err)
 	}
 
 	// Sync must treat it as unfinished and complete it in place.
@@ -225,7 +228,7 @@ func TestPrefetchDefaultBranchBlobs(t *testing.T) {
 		t.Fatalf("ensure refspec: %v", err)
 	}
 
-	if err := prefetchDefaultBranchBlobsContext(t.Context(), barePath, nil); err != nil {
+	if err := prefetchDefaultBranchBlobsContext(t.Context(), barePath, nil, nil); err != nil {
 		t.Fatalf("prefetch failed: %v", err)
 	}
 	if got := missingBlobCount(t, barePath, "refs/remotes/origin/HEAD"); got != 0 {

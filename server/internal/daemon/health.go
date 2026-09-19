@@ -335,6 +335,9 @@ const (
 	repoCheckoutRetryAfter      = 2 * time.Second
 	repoCheckoutRetryHeader     = "X-Multica-Retryable"
 	repoCheckoutRetryValueBusy  = "repo-busy"
+	// repoCheckoutBuildingHeader marks a retryable 503 whose cause is an
+	// unfinished first-time cache; the body is then the download's progress.
+	repoCheckoutBuildingHeader = "X-Multica-Repo-Building"
 )
 
 // healthHandler returns the /health HTTP handler. Extracted from serveHealth
@@ -522,6 +525,9 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 				d.logger.Debug("repo checkout readiness cancelled", "url", req.URL, "error", err)
 				return
 			}
+			if d.writeRepoBuilding(w, req, err) {
+				return
+			}
 			statusCode := http.StatusInternalServerError
 			if errors.Is(err, ErrRepoNotConfigured) {
 				statusCode = http.StatusBadRequest
@@ -560,6 +566,9 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			result, err = d.repoCache.CreateWorktree(params)
 		}
 		if err != nil {
+			if d.writeRepoBuilding(w, req, err) {
+				return
+			}
 			if errors.Is(err, repocache.ErrRepoBusy) && req.RetryBusy {
 				w.Header().Set(repoCheckoutRetryHeader, repoCheckoutRetryValueBusy)
 				w.Header().Set("Retry-After", fmt.Sprintf("%.0f", repoCheckoutRetryAfter.Seconds()))
@@ -578,6 +587,29 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
 	}
+}
+
+// writeRepoBuilding answers a checkout that arrived while the repository's
+// first-time cache is still downloading. Returns true when it wrote the response.
+//
+// A retry-aware client gets the same 503 + Retry-After contract as a busy
+// repository, so it keeps waiting, plus repoCheckoutBuildingHeader so it can
+// tell "downloading, here is how far" from a generic busy. The body is the
+// progress either way: a client that does not retry shows it as its error,
+// which is still the truth and still says not to delete anything.
+func (d *Daemon) writeRepoBuilding(w http.ResponseWriter, req repoCheckoutRequest, err error) bool {
+	var building *repocache.RepoBuildingError
+	if !errors.As(err, &building) {
+		return false
+	}
+	d.logger.Info("repo checkout waiting on first-time cache", "url", req.URL, "task_id", req.TaskID, "progress", building.Status.Describe(time.Now()))
+	if req.RetryBusy {
+		w.Header().Set(repoCheckoutRetryHeader, repoCheckoutRetryValueBusy)
+		w.Header().Set(repoCheckoutBuildingHeader, "1")
+		w.Header().Set("Retry-After", fmt.Sprintf("%.0f", repoCheckoutRetryAfter.Seconds()))
+	}
+	http.Error(w, building.Error(), http.StatusServiceUnavailable)
+	return true
 }
 
 // localDirectoryCheckoutSource is the value /repo/checkout reports in the
