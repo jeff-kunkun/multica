@@ -56,10 +56,7 @@ import {
 // The source rule is pure and imported from its own module rather than the
 // projects query barrel: it must give the same answer in a test that mocks the
 // queries as it does in production, and a mocked barrel would strip it.
-import {
-  findDuplicateSources,
-  findRedundantRemotes,
-} from "@multica/core/projects/source-rule";
+import { findDuplicateSources } from "@multica/core/projects/source-rule";
 import { DuplicateSourceBanner } from "./duplicate-source-banner";
 import { LocalDirectoryModeDialog } from "./local-directory-mode-dialog";
 import { localDirectoryLabel } from "./local-directory-label";
@@ -183,17 +180,12 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // Duplicate detection runs on the saved list rather than only at save time:
   // this workspace already held five repositories configured both ways before
   // the check existed, and a save-time-only warning would never reach them.
-  // Two github_repo rows for one URL are folded into the same group so a merge
-  // clears the repository completely — leaving one behind leaves the bug.
-  const duplicateGroups = findDuplicateSources(resources);
-  const redundantRemotes = findRedundantRemotes(resources);
-  const mergeGroups = duplicateGroups.map((group) => ({
-    ...group,
-    remotes: [
-      ...group.remotes,
-      ...redundantRemotes.filter((r) => !group.remotes.some((g) => g.id === r.id)),
-    ],
-  }));
+  // findDuplicateSources already collects EVERY github_repo row naming the
+  // repository, including two rows spelling one URL differently, so a merge
+  // clears it completely. Nothing else may be folded into a group: it is
+  // offered as "merge <name>", and a row for a different repository inside it
+  // would be deleted by a button that never mentioned it.
+  const mergeGroups = findDuplicateSources(resources);
 
   const handleMergeIntoLocal = async (remotes: ProjectResource[]) => {
     try {

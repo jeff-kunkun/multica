@@ -35,6 +35,30 @@ const RESOURCES = [
     created_at: "2026-08-18T00:00:00Z",
     created_by: "u1",
   },
+  // A second repository, also configured twice. It shares nothing with the
+  // group above and must survive that group's merge untouched.
+  {
+    id: "remote-tarot-1",
+    project_id: "p1",
+    workspace_id: "workspace-1",
+    resource_type: "github_repo",
+    resource_ref: { url: "https://github.com/kun/online-tarot" },
+    label: null,
+    position: 2,
+    created_at: "2026-08-18T00:00:00Z",
+    created_by: "u1",
+  },
+  {
+    id: "remote-tarot-2",
+    project_id: "p1",
+    workspace_id: "workspace-1",
+    resource_type: "github_repo",
+    resource_ref: { url: "git@github.com:kun/online-tarot.git" },
+    label: null,
+    position: 3,
+    created_at: "2026-08-18T00:00:00Z",
+    created_by: "u1",
+  },
   {
     id: "local-1",
     project_id: "p1",
@@ -46,7 +70,7 @@ const RESOURCES = [
       execution_mode: "worktree",
     },
     label: "multica",
-    position: 2,
+    position: 4,
     created_at: "2026-08-18T00:00:00Z",
     created_by: "u1",
   },
@@ -123,5 +147,19 @@ describe("ProjectResourcesSection — duplicate code sources", () => {
     expect(deleted).toEqual(expect.arrayContaining(["remote-1", "remote-2"]));
     // Deleting the directory the user explicitly pointed at is not a merge.
     expect(deleted).not.toContain("local-1");
+  });
+
+  // Named regression: the button says "multica", so merging multica must not
+  // delete online-tarot's rows. It did, because every redundant remote in the
+  // project was folded into every group.
+  it("merging one repository leaves another repository's rows alone", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /merge into local directory/i }));
+
+    await waitFor(() => expect(deleteMock).toHaveBeenCalled());
+    const deleted = deleteMock.mock.calls.map((c) => c[0]);
+    expect(deleted).not.toContain("remote-tarot-1");
+    expect(deleted).not.toContain("remote-tarot-2");
   });
 });

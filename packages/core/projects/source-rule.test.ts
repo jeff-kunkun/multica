@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { ProjectResource } from "../types";
 import {
   findDuplicateSources,
-  findRedundantRemotes,
   normalizeRepoUrl,
   repoNameFromLocalPath,
   repoNameFromUrl,
@@ -69,9 +68,11 @@ describe("normalizeRepoUrl", () => {
 
   it("does not make two unidentifiable inputs equal", () => {
     expect(normalizeRepoUrl("nonsense")).toBe(normalizeRepoUrl("other"));
-    // ...which is why callers must check for "" before comparing. The
-    // duplicate finders below are what actually enforce that.
-    expect(findRedundantRemotes([remote("a", "nonsense"), remote("b", "other")])).toEqual([]);
+    // ...which is why callers must check for "" before comparing; the
+    // duplicate finder below is what actually enforces that.
+    expect(
+      findDuplicateSources([remote("a", "nonsense"), remote("b", "other")]),
+    ).toEqual([]);
   });
 });
 
@@ -115,19 +116,24 @@ describe("findDuplicateSources", () => {
     ).toEqual([]);
   });
 
+  it("never puts another repository's rows in a group", () => {
+    // The merge button is labelled with one repository's name and deletes
+    // exactly the rows in its group, so a row from elsewhere in the group is
+    // a deletion the user was never shown. A second repository with its own
+    // duplicate rows must stay untouched by the first one's merge.
+    const groups = findDuplicateSources([
+      local("l1", "/Users/kunkun/.agents/multica"),
+      remote("r1", "https://github.com/jeff-kunkun/multica"),
+      remote("t1", "https://github.com/kun/online-tarot"),
+      remote("t2", "git@github.com:kun/online-tarot.git"),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.repoName).toBe("multica");
+    expect(groups[0]!.remotes.map((r) => r.id)).toEqual(["r1"]);
+  });
+
   it("does not flag a directory whose name cannot be read", () => {
     expect(findDuplicateSources([remote("r1", "https://github.com/o/r"), local("l1", "")])).toEqual([]);
-  });
-});
-
-describe("findRedundantRemotes", () => {
-  it("keeps the first row of an identity and reports the rest", () => {
-    const rows = [
-      remote("r1", "https://github.com/jeff-kunkun/multica"),
-      remote("r2", "git@github.com:jeff-kunkun/multica.git"),
-      remote("r3", "https://github.com/other/thing"),
-    ];
-    expect(findRedundantRemotes(rows).map((r) => r.id)).toEqual(["r2"]);
   });
 });
 

@@ -114,8 +114,11 @@ export interface DuplicateSourceGroup {
  * it stores a URL and an absolute path, and only the machine holding that path
  * can read its git remotes. A name match is therefore strong enough to ASK
  * ("these look like the same repository — merge them?") and never strong enough
- * to remove a resource on the user's behalf. Two `github_repo` rows for one URL
- * are a different problem and are reported by {@link findRedundantRemotes}.
+ * to remove a resource on the user's behalf.
+ *
+ * A group holds EVERY `github_repo` row whose name matches, including two rows
+ * spelling one URL differently, so merging a group clears that repository
+ * completely — and touches nothing outside it.
  */
 export function findDuplicateSources(resources: ProjectResource[]): DuplicateSourceGroup[] {
   const locals = resources.filter((r) => r.resource_type === "local_directory");
@@ -133,26 +136,6 @@ export function findDuplicateSources(resources: ProjectResource[]): DuplicateSou
     if (matched.length > 0) groups.push({ repoName: name, local, remotes: matched });
   }
   return groups;
-}
-
-/**
- * `github_repo` rows that point at the SAME repository as an earlier row. This
- * is an unambiguous duplicate — identical identity, no filesystem guess — so
- * unlike {@link findDuplicateSources} it needs no local directory to be present.
- * Returned in the order they would be removed: the first row of each identity
- * is kept.
- */
-export function findRedundantRemotes(resources: ProjectResource[]): ProjectResource[] {
-  const seen = new Set<string>();
-  const redundant: ProjectResource[] = [];
-  for (const r of resources) {
-    const url = githubRef(r)?.url ?? "";
-    const key = normalizeRepoUrl(url);
-    if (!key) continue;
-    if (seen.has(key)) redundant.push(r);
-    else seen.add(key);
-  }
-  return redundant;
 }
 
 /** Where a task's code comes from, and which resource decided it. */

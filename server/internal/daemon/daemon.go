@@ -8142,7 +8142,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentSkills:                      convertSkillsForEnv(skills),
 		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
 		Repos:                            convertReposForEnv(task.Repos),
-		CodeSource:                       codeSourceForEnv(resolveTaskCodeSource(localAssignment, repoURLsOf(task.Repos), nil)),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
@@ -8767,6 +8766,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	prepareComplete = true
 	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
+
+	// Resolve the code source now that env.WorkDir exists. It has to name the
+	// directory the agent will actually be in: in worktree mode that is the
+	// task's own checkout, and naming the user's pinned path instead would tell
+	// the agent to commit into the working copy the mode exists to protect
+	// (DENE-595).
+	taskCtx.CodeSource = codeSourceForEnv(resolveTaskCodeSource(localAssignment, env.WorkDir, repoURLsOf(task.Repos), nil))
 
 	// usesCustomProfileCommand is the same provenance the backend receives as
 	// agent.Config.BuiltinRuntime: it separates the provider's own discovered

@@ -200,6 +200,13 @@ Two consequences worth knowing before debugging:
   makes the checkout fail with HTTP 409 and an explanation. It does not fall
   back to cloning: a silent fallback is what put two copies of one repository
   on the same machine. Fix the directory or remove the resource.
+- Which directory you get depends on the resource's `execution_mode`. In
+  `in_place` and `shared` it is the user's own checkout: it may carry
+  uncommitted work, and nothing there was reset. In `worktree` it is this
+  task's private worktree of that repository, not the user's copy — commit
+  there and deliver a branch. A repository that lives beside the pinned
+  directory but has no counterpart inside the worktree is refused rather than
+  answered with the user's path.
 - A repository configured both ways shows a duplicate warning in the project's
   resource list with a one-click merge that removes the redundant `github_repo`
   rows. Nothing is removed automatically — the server compares a URL against a

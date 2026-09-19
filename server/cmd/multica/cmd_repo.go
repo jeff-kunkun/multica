@@ -448,10 +448,18 @@ type repoCheckoutResult struct {
 	// daemons omit it; the generic summary they get is still true, since Path
 	// is where the code is either way.
 	Source string `json:"source,omitempty"`
+	// ExecutionMode is the pinned resource's execution mode. It decides whose
+	// checkout Path is: the user's own in in_place and shared, this task's
+	// private worktree in worktree mode. Daemons older than DENE-595 omit it.
+	ExecutionMode string `json:"execution_mode,omitempty"`
 }
 
 // repoCheckoutSourceLocalDirectory mirrors the daemon-side constant.
 const repoCheckoutSourceLocalDirectory = "local_directory"
+
+// repoCheckoutModeWorktree mirrors the daemon-side execution mode in which the
+// task runs in its own worktree rather than the user's directory.
+const repoCheckoutModeWorktree = "worktree"
 
 // repoCheckoutSummary says what the checkout did. A kept checkout has to read
 // differently from a new branch off the default branch, or the agent works on
@@ -465,10 +473,19 @@ func repoCheckoutSummary(repoURL string, result repoCheckoutResult) string {
 		if branch == "" {
 			branch = "detached HEAD"
 		}
+		// Whose checkout this is changes what the agent may do in it, so the
+		// two cases must not share a sentence. Saying "the user's own checkout"
+		// about a worktree invites the agent to treat the user's working copy
+		// as off-limits when it is not even the directory it was handed — and
+		// the reverse mistake, in in_place, is worse.
+		ownership := "This is the user's own checkout: it may carry uncommitted work, and nothing here was reset, cleaned, or switched."
+		if result.ExecutionMode == repoCheckoutModeWorktree {
+			ownership = "This is this task's own git worktree of that directory, not the user's working copy: commit here and deliver the branch."
+		}
 		return fmt.Sprintf("Using the local directory this project is configured with: %s (branch: %s).\n"+
 			"%s was NOT cloned — this machine already holds it, and a second copy is what the local-directory setting exists to avoid.\n"+
-			"This is the user's own checkout: it may carry uncommitted work, and nothing here was reset, cleaned, or switched.",
-			result.Path, branch, repoURL)
+			"%s",
+			result.Path, branch, repoURL, ownership)
 	}
 	if result.Kept == "" {
 		return fmt.Sprintf("Checked out %s → %s (branch: %s)", repoURL, result.Path, result.BranchName)
