@@ -70,7 +70,10 @@ const mockUpdateAgent = vi.hoisted(() => vi.fn());
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
-vi.mock("@multica/core/agents", () => ({
+// Stubs the hooks; the pure readers stay real, so the lineup row is exercised
+// through the same normalisation the inspector's editor writes against.
+vi.mock("@multica/core/agents", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/agents")>()),
   isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
     agent.runtime_bound !== false && agent.runtime_id.length > 0,
   useWorkspacePresenceMap: () => ({ byAgent: new Map() }),

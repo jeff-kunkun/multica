@@ -227,6 +227,9 @@
     "prop_concurrency": "同時実行数",
     "prop_auto_retry": "自動リトライ",
     "prop_auto_retry_hint": "オフにすると、容量不足やネットワーク切断などの失敗は自動リトライせず、そのまま表示されます。手動での再実行はできます。",
+    "prop_switchable_models": "切り替え可能なモデル",
+    "prop_switchable_models_hint_on": "このエージェントはモデル構成を記録しています。デフォルト、順序付きのフォールバック、バッチ用に借りられるモデルです。表示専用で、実行は常に上のモデルです。",
+    "prop_switchable_models_hint_off": "オフは単一モデルです。上のモデルだけを表示します。フォールバックやバッチ用モデルを記録するにはオンにしてください。",
     "prop_runtime_inherit": "ベースロールのランタイムに従う",
     "prop_runtime_inherit_hint_on": "ランタイム、モデル、思考レベル、速度はベースロールのもので、ベースロールの変更に追従します。オフにするとここで個別に設定できます。",
     "prop_runtime_inherit_hint_off": "この特化は独自のランタイム、モデル、思考レベル、速度を使用します。オンにすると再びベースロールに従います。",
@@ -408,6 +411,16 @@
     "remove": "候補 {{number}} を削除",
     "preview_label": "新しいチャットのプレビュー",
     "preview_defaults": "これは組み込みの初期値です。上で候補を1件追加すると3件すべて置き換わります。"
+  },
+  "switchable_models": {
+    "add": "モデルを追加",
+    "model_label": "{{number}} 番目のモデル ID",
+    "model_placeholder": "claude-opus-5",
+    "role_label": "{{number}} 番目のモデルの役割",
+    "note_label": "{{number}} 番目のモデルのメモ",
+    "note_placeholder": "どんなときに使うか",
+    "remove": "{{number}} 番目のモデルを削除",
+    "blank_ignored": "モデル ID が未入力の行は保存されません。"
   },
   "tab_body": {
     "common": {

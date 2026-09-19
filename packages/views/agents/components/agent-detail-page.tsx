@@ -27,6 +27,7 @@ import type {
 import {
   type AgentPresenceDetail,
   isAgentRuntimeBound,
+  selectAgentSwitchableModels,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
@@ -756,11 +757,9 @@ function SwitchableModelsRow({
   models: AgentSwitchableModel[] | undefined;
 }) {
   const { t } = useT("agents");
-  const entries = Array.isArray(models)
-    ? models.filter(
-        (m) => typeof m?.model === "string" && m.model.trim().length > 0,
-      )
-    : [];
+  // Same reader the inspector's editor uses, so this row and the switch there
+  // can never disagree about whether the agent is on a lineup or a single model.
+  const entries = selectAgentSwitchableModels({ switchable_models: models });
   if (entries.length === 0) return null;
 
   const roleLabel = (role: AgentSwitchableModelRole) => {

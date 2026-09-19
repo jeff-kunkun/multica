@@ -251,6 +251,9 @@
     "prop_concurrency": "Concurrency",
     "prop_auto_retry": "Auto retry",
     "prop_auto_retry_hint": "When off, failures such as capacity limits or network cuts surface immediately instead of retrying. You can still retry a run yourself.",
+    "prop_switchable_models": "Model lineup",
+    "prop_switchable_models_hint_on": "This agent documents a lineup: a default model, an ordered fallback chain and models it may borrow for batch work. Display only — dispatch always runs the model above.",
+    "prop_switchable_models_hint_off": "Off means a single model: this agent shows only the model above. Turn it on to document a fallback chain or batch models.",
     "prop_runtime_inherit": "Follow the base role's runtime",
     "prop_runtime_inherit_hint_on": "Runtime, model, thinking level, and speed are the base role's and update with it. Turn off to configure them here instead.",
     "prop_runtime_inherit_hint_off": "This specialization uses its own runtime, model, thinking level, and speed. Turn on to follow the base role again.",
@@ -533,6 +536,16 @@
     "remove": "Remove suggestion {{number}}",
     "preview_label": "Preview of a new chat",
     "preview_defaults": "These are the built-in defaults. Add a suggestion above to replace all three."
+  },
+  "switchable_models": {
+    "add": "Add model",
+    "model_label": "Model {{number}} id",
+    "model_placeholder": "claude-opus-5",
+    "role_label": "Model {{number}} role",
+    "note_label": "Model {{number}} note",
+    "note_placeholder": "When this one is used",
+    "remove": "Remove model {{number}}",
+    "blank_ignored": "Rows without a model id are not saved."
   },
   "tab_body": {
     "common": {
