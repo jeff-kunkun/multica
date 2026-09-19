@@ -862,3 +862,19 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 			"error", err)
 	}
 }
+
+// StartAssignedAgent starts the run an assignment implies, for callers that
+// wrote the assignee themselves rather than going through the issue update
+// path — today, the routing layer.
+//
+// Assignment IS the wake-up in this product: an agent handed an issue starts
+// working on it, which is why routing never needs to mention a seat it just
+// dispatched. Everything that decides whether a run may start — backlog
+// parking, runtime readiness, the squad-leader fallback — lives in
+// maybeEnqueueOnAssign and is deliberately NOT re-implemented here.
+//
+// Best-effort and actor-less: routing is not a member or an agent, so the
+// assignment is attributed to the platform the same way its comments are.
+func (s *IssueService) StartAssignedAgent(ctx context.Context, issue db.Issue) {
+	s.maybeEnqueueOnAssign(ctx, issue, "system", "", time.Time{})
+}

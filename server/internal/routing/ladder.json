@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "Pure data. Editing this file changes which seats routing can pick and how",
+    "a project maps to a direction; it never requires a code change.",
+    "",
+    "tiers are ordered strongest first. `base` is the generic seat name; a",
+    "direction-specialised seat is named base+direction by workspace convention",
+    "(e.g. 孙悟空 + 游戏 = 孙悟空游戏), which is how routing resolves one without",
+    "a second lookup table. A tier whose seat does not exist in the workspace is",
+    "skipped at candidate-build time rather than failing the call.",
+    "",
+    "KNOWN DRIFT (DENE-633): this ladder is a transcription of the ladder named",
+    "in the issue. The live roster has since grown past it — 孙悟饭 (gpt-6-astra),",
+    "特兰克斯 (gpt-5.6-sol) and 克林 (gpt-5.6-luna) exist as base seats and are not",
+    "listed here, and 贝吉塔 and 比克 still share one model, so the two bottom rungs",
+    "are the same strength. Straightening the ladder is configuration work that",
+    "belongs to whoever owns the roster; when it happens, this file is the only",
+    "edit."
+  ],
+  "tiers": [
+    { "key": "strongest", "base": "布尔玛", "label": "最强" },
+    { "key": "strong", "base": "孙悟空", "label": "强" },
+    { "key": "medium", "base": "贝吉塔", "label": "中" },
+    { "key": "weak", "base": "比克", "label": "弱" }
+  ],
+  "directions": ["游戏", "出海", "自媒体", "学术"],
+  "_projects_comment": [
+    "project name -> direction. A project absent from this map, or an issue with",
+    "no project at all, routes to the generic (undirected) rung of the ladder;",
+    "the decision comment says the direction is unknown rather than guessing one."
+  ],
+  "projects": {
+    "game": "游戏",
+    "game-multica": "游戏",
+    "game-relay": "游戏"
+  }
+}

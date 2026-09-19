@@ -1900,6 +1900,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/rerun", h.RerunIssue)
+					// Manual re-run of the routing pass (DENE-633). Same
+					// module the create/status hooks call, just synchronous
+					// and with the outcome in the response — `multica issue
+					// route` is this endpoint.
+					r.Post("/route", h.RouteIssue)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
 					r.Get("/task-runs", h.ListTasksByIssue)
