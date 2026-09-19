@@ -55,6 +55,7 @@ import type {
   IssueTriggerPreviewParams,
   Reaction,
   IssueReaction,
+  IssueAgentGuardResponse,
   Workspace,
   WorkspaceRepo,
   WorkspaceMcpServer,
@@ -262,6 +263,7 @@ import {
 } from "./config-transfer";
 import {
   AgentTaskListSchema,
+  IssueAgentGuardResponseSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
@@ -2785,6 +2787,20 @@ export class ApiClient {
     });
     if (!task) throw new Error("Invalid task cancellation response");
     return task;
+  }
+
+  async haltIssue(issueId: string): Promise<IssueAgentGuardResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/halt`, { method: "POST" });
+    return parseWithFallback(raw, IssueAgentGuardResponseSchema, { issue_id: issueId, halted: true }, {
+      endpoint: "POST /api/issues/:id/halt",
+    });
+  }
+
+  async resumeIssue(issueId: string): Promise<IssueAgentGuardResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/resume`, { method: "POST" });
+    return parseWithFallback(raw, IssueAgentGuardResponseSchema, { issue_id: issueId, halted: false }, {
+      endpoint: "POST /api/issues/:id/resume",
+    });
   }
 
   async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
