@@ -344,7 +344,8 @@
       "plugins": "Plugins",
       "mcp": "MCP",
       "billing": "账单与套餐",
-      "config_transfer": "配置导出/导入"
+      "config_transfer": "配置导出/导入",
+      "routing": "路由"
     },
     "groups": {
       "personal": "个人设置",
@@ -1521,6 +1522,39 @@
       "degrade_label": "标签无法映射",
       "degrade_reaction": "表情反应的人无法映射",
       "degrade_reparented": "评论挂到了更上一层的祖先"
+    }
+  },
+  "routing": {
+    "title": "路由",
+    "description": "票出生、以及每次状态变化时，自动判断这张票现在该谁拿着：填上执行席与验收席。路由从不改状态——状态是事实，只有干活的席位知道。",
+    "section_title": "路由模型",
+    "enabled_label": "启用自动选派",
+    "enabled_description": "关掉之后系统按原有逻辑工作：票上不会出现任何路由痕迹，也不会 @ 任何人。已经写进票里的值保留。",
+    "model_label": "路由模型",
+    "model_description": "判断交给哪个模型。留空等于没配好——开关开着也不会工作。",
+    "model_placeholder": "例如 gpt-5.6-luna",
+    "threshold_label": "置信度阈值",
+    "threshold_description": "低于这个值就不填那一格，改成 @ 你一次并说明原因。默认 0.70。",
+    "no_credentials_note": "这里不存任何密钥，凭据归部署的模型配置管。",
+    "filters_title": "候选筛选层",
+    "filters_placeholder": "以后支持，本版不实现。今天的候选只按方向预筛加置信度过闸。",
+    "states": {
+      "off": {
+        "chip": "已关闭",
+        "detail": "未启用时按原有逻辑工作。"
+      },
+      "incomplete": {
+        "chip": "未完成",
+        "detail": "开关开了，但还差一个路由模型——现在仍然完全走原版。"
+      },
+      "enabled": {
+        "chip": "已启用",
+        "detail": "新票会被自动选派，判断会写在票下的路由评论里。"
+      },
+      "ineffective": {
+        "chip": "未生效",
+        "detail": "模型被拒、连不通、已删除，或正在失败后的冷却期。完全走原版，票上不会出现任何提示。"
+      }
     }
   }
 }

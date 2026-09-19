@@ -19,6 +19,7 @@ import {
   CreditCard,
   Server,
   ArrowDownUp,
+  Route,
 } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
@@ -41,6 +42,7 @@ import { LabelsTab } from "./labels-tab";
 import { IssueStatusesTab } from "./issue-statuses-tab";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
+import { RoutingTab } from "./routing-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
@@ -186,6 +188,12 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
           Zap,
           <QuickActionsTab />,
           true,
+        ),
+        entry(
+          "routing",
+          t(($) => $.page.tabs.routing),
+          Route,
+          <RoutingTab />,
         ),
       ],
     },

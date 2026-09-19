@@ -344,7 +344,8 @@
       "plugins": "Plugins",
       "mcp": "MCP",
       "billing": "결제 및 요금제",
-      "config_transfer": "구성 내보내기/가져오기"
+      "config_transfer": "구성 내보내기/가져오기",
+      "routing": "라우팅"
     },
     "groups": {
       "personal": "개인 설정",
@@ -1521,6 +1522,39 @@
       "degrade_label": "라벨을 매핑할 수 없음",
       "degrade_reaction": "리액션 주체를 매핑할 수 없음",
       "degrade_reparented": "댓글을 더 위의 상위 작업에 연결"
+    }
+  },
+  "routing": {
+    "title": "라우팅",
+    "description": "이슈가 생성될 때와 상태가 바뀔 때마다 지금 누가 맡아야 하는지 판단해 담당석과 검수석을 채웁니다. 상태는 절대 바꾸지 않습니다.",
+    "section_title": "라우팅 모델",
+    "enabled_label": "자동 배정 사용",
+    "enabled_description": "끄면 이전과 똑같이 동작합니다. 이슈에 라우팅 흔적도, 멘션도 남지 않습니다. 이미 기록된 값은 유지됩니다.",
+    "model_label": "라우팅 모델",
+    "model_description": "판단을 맡길 모델. 비워 두면 스위치를 켜도 아무 일도 하지 않습니다.",
+    "model_placeholder": "예: gpt-5.6-luna",
+    "threshold_label": "신뢰도 임계값",
+    "threshold_description": "이보다 낮으면 해당 칸을 비워 두고 이유와 함께 한 번만 멘션합니다. 기본값 0.70.",
+    "no_credentials_note": "여기에는 어떤 비밀 값도 저장되지 않습니다. 자격 증명은 배포의 모델 설정이 관리합니다.",
+    "filters_title": "후보 필터",
+    "filters_placeholder": "이후 지원 예정이며 이번 버전에는 없습니다.",
+    "states": {
+      "off": {
+        "chip": "꺼짐",
+        "detail": "꺼져 있는 동안에는 이전과 똑같이 동작합니다."
+      },
+      "incomplete": {
+        "chip": "미완료",
+        "detail": "스위치는 켜져 있지만 모델이 선택되지 않았습니다. 사실상 꺼짐과 같습니다."
+      },
+      "enabled": {
+        "chip": "사용 중",
+        "detail": "새 이슈가 자동 배정되고, 판단 근거는 이슈 댓글에 남습니다."
+      },
+      "ineffective": {
+        "chip": "적용 안 됨",
+        "detail": "모델이 거부되었거나 연결할 수 없거나 삭제되었거나, 연속 실패 후 쿨다운 중입니다. 꺼짐과 같게 동작하며 이슈에는 아무것도 표시되지 않습니다."
+      }
     }
   }
 }
