@@ -159,3 +159,35 @@ func TestUnconfiguredLLMLeavesTheTicketAlone(t *testing.T) {
 		t.Fatalf("settings health = %+v, want ineffective with a reason", rep)
 	}
 }
+
+// TestHealthReportsAnUnconfiguredLLMBeforeAnyTicketRuns.
+//
+// The breaker only learns that a deployment has no internal LLM when a ticket
+// fails against it, so a fresh server would show a green "enabled" chip while
+// nothing can possibly work. Whether a generator has anywhere to send a
+// request is answerable on the spot, so it is answered on the spot.
+func TestHealthReportsAnUnconfiguredLLMBeforeAnyTicketRuns(t *testing.T) {
+	r := newRouter(newFakeStore(), LLMJudge{Gen: llm.New(llm.Config{})})
+
+	rep, err := r.Health(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if rep.State != StateIneffective || rep.Usable {
+		t.Fatalf("got %+v, want ineffective before the first ticket", rep)
+	}
+	if rep.Reason != NotConfiguredReason {
+		t.Fatalf("reason = %q, want %q", rep.Reason, NotConfiguredReason)
+	}
+}
+
+// TestHealthTrustsAJudgeThatCannotAnswer. Claiming a fault on a guess is the
+// mistake this whole surface exists to avoid, so a judge with no availability
+// opinion is read as available and the real call decides.
+func TestHealthTrustsAJudgeThatCannotAnswer(t *testing.T) {
+	r := newRouter(newFakeStore(), &fakeJudge{verdict: confidentVerdict()})
+	rep, _ := r.Health(context.Background(), "ws")
+	if rep.State != StateEnabled || !rep.Usable {
+		t.Fatalf("got %+v, want enabled for a judge that reports no availability", rep)
+	}
+}

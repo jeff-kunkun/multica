@@ -322,8 +322,9 @@ Consequences for how you work:
   did. It is the same code the hooks run, so on an issue they already handled
   it will report that there was nothing left to fill.
 
-When routing is **not working** — the model was rejected, is unreachable, or
-the breaker is cooling down after repeated failures — issues are left entirely
+When routing is **not working** — the model was rejected, is unreachable, the
+breaker is cooling down after repeated failures, or the deployment never
+configured a server-internal LLM — issues are left entirely
 alone, exactly as if routing were off. Nothing is posted on a ticket about it.
 The reason is shown in one place only: Settings → Routing, which reports the
 state, the reason, when the model last answered, and offers a re-check. If

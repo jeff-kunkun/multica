@@ -99,6 +99,13 @@ export function RoutingTab() {
         (old: Workspace[] | undefined) =>
           old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
+      // The health report is derived from the settings that were just
+      // replaced, so the cached copy is stale the moment this resolves.
+      // Without this the chip keeps describing the previous configuration for
+      // up to a refetch interval.
+      await qc.invalidateQueries({
+        queryKey: workspaceKeys.routingHealth(workspace.id),
+      });
     },
     enabled: !!workspace && canManage,
     isEqual: (a, b) =>
@@ -127,7 +134,9 @@ export function RoutingTab() {
   // The draft wins over the server report while an edit is in flight: a person
   // who just switched routing off should not keep reading a red chip about the
   // model they stopped using. Health only decides the enabled/ineffective
-  // split, and only once the draft itself says enabled.
+  // split, and only once the draft itself says enabled — and only on the
+  // server's explicit `ineffective`, so a health report that has not caught up
+  // with the switch yet cannot report a fault that does not exist.
   const state = routingState(draft, health.data);
 
   return (

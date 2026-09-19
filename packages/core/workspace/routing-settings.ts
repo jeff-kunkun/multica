@@ -90,14 +90,27 @@ export function normalizeThreshold(value: unknown): number {
  *
  * `ineffective` is never derived here: it depends on live model health, which
  * only the server knows. Pass the server's health report to get it.
+ *
+ * The gate is the server's own `state`, and deliberately NOT `usable === false`.
+ * `usable` means "state is enabled", so it is also false for a workspace that
+ * has routing switched off or has not chosen a model yet, and false in the
+ * fallback a client uses when it cannot read the response at all. Reading it as
+ * "the model is broken" turns three harmless situations into a red chip — most
+ * visibly the first one anybody hits: flip the switch, type a model, and the
+ * health still cached from a second ago says `off`.
+ *
+ * An unreadable response therefore lands on `enabled` with no success
+ * timestamp, which renders as "enabled, not self-checked yet" — the honest
+ * reading of "this client does not know", and not the green "connected" claim
+ * that would hide a real fault.
  */
 export function routingState(
   settings: RoutingSettings,
-  health?: { usable: boolean } | null,
+  health?: { state?: string } | null,
 ): RoutingState {
   if (!settings.enabled) return "off";
   if (settings.model.trim() === "") return "incomplete";
-  if (health && health.usable === false) return "ineffective";
+  if (health?.state === "ineffective") return "ineffective";
   return "enabled";
 }
 

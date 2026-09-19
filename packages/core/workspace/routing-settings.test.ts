@@ -91,11 +91,36 @@ describe("routingState", () => {
     ).toBe("enabled");
   });
 
-  it("is ineffective only when the server reports the model unusable", () => {
+  it("is ineffective only when the server says ineffective in so many words", () => {
     const configured = { enabled: true, model: "m", confidence_threshold: 0.7 };
-    expect(routingState(configured, { usable: false })).toBe("ineffective");
-    expect(routingState(configured, { usable: true })).toBe("enabled");
+    expect(routingState(configured, { state: "ineffective" })).toBe("ineffective");
+    expect(routingState(configured, { state: "enabled" })).toBe("enabled");
     expect(routingState(configured, null)).toBe("enabled");
+  });
+
+  // The cases that used to be misread as a broken model. Each of these is a
+  // health report whose `usable` is false for a reason that has nothing to do
+  // with the model: two describe settings this client can already see are
+  // newer, and one is the fallback for a response it could not read at all.
+  it.each([
+    ["health still describing the switched-off workspace", "off"],
+    ["health still describing the workspace before a model was typed", "incomplete"],
+    ["the fallback used when the response cannot be read", "off"],
+  ])("does not report a fault for %s", (_label, state) => {
+    expect(
+      routingState({ enabled: true, model: "m", confidence_threshold: 0.7 }, { state }),
+    ).toBe("enabled");
+  });
+
+  it("ignores a state name this client does not know", () => {
+    // Forward compatibility: a newer server growing a fifth state must not
+    // light the red chip on a guess.
+    expect(
+      routingState(
+        { enabled: true, model: "m", confidence_threshold: 0.7 },
+        { state: "degraded" },
+      ),
+    ).toBe("enabled");
   });
 
   it("treats only enabled as active", () => {

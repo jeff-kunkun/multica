@@ -493,6 +493,15 @@ func (r *Router) Health(ctx context.Context, workspaceID string) (HealthReport, 
 	if !h.LastFailure.IsZero() {
 		out.LastFailureAt = h.LastFailure.Unix()
 	}
+	// Checked before the breaker: a deployment with no internal LLM at all is
+	// answerable on the spot, and making the reader wait for a ticket to fail
+	// first would leave the settings section green while nothing can work.
+	if a, ok := r.Judge.(Availability); ok && out.State == StateEnabled && !a.Available() {
+		out.State = StateIneffective
+		out.Reason = NotConfiguredReason
+		out.Usable = false
+		return out, nil
+	}
 	if out.State == StateEnabled && h.Open {
 		out.State = StateIneffective
 		// Reason is set ONLY here. A failure reason shown next to a healthy

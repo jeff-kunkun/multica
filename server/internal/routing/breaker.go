@@ -215,7 +215,7 @@ func classifyFatal(err error) (bool, string) {
 		// The deployment has no internal LLM at all. Retrying once per ticket
 		// is pure waste, and it is a settings-level fact, not a ticket-level
 		// one — see reportUnavailable, which keeps it off the ticket.
-		return true, "this deployment has no internal LLM configured"
+		return true, NotConfiguredReason
 	}
 	var se httpStatusError
 	if !errors.As(err, &se) {
