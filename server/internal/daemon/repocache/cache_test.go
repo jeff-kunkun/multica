@@ -18,6 +18,37 @@ func testLogger() *slog.Logger {
 	return slog.Default()
 }
 
+func TestFetchCooldownSkipsRecentStampAndExpires(t *testing.T) {
+	cache := New(t.TempDir(), testLogger())
+	cache.SetFetchCooldown(5 * time.Minute)
+	bare := t.TempDir()
+	now := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
+	if err := os.WriteFile(filepath.Join(bare, lastFetchedFile), []byte(now.Add(-time.Minute).Format(time.RFC3339Nano)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cache.fetchDue(bare, now) {
+		t.Fatal("fetch was due inside the cooldown window")
+	}
+	if !cache.fetchDue(bare, now.Add(5*time.Minute)) {
+		t.Fatal("fetch was still suppressed after the cooldown window")
+	}
+}
+
+func TestFetchCooldownMissingOrInvalidStampFetches(t *testing.T) {
+	cache := New(t.TempDir(), testLogger())
+	cache.SetFetchCooldown(time.Minute)
+	bare := t.TempDir()
+	if !cache.fetchDue(bare, time.Now()) {
+		t.Fatal("missing stamp suppressed a fetch")
+	}
+	if err := os.WriteFile(filepath.Join(bare, lastFetchedFile), []byte("not-a-time"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !cache.fetchDue(bare, time.Now()) {
+		t.Fatal("invalid stamp suppressed a fetch")
+	}
+}
+
 func TestGitEnv(t *testing.T) {
 	t.Parallel()
 	env := gitEnv()

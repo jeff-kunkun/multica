@@ -734,10 +734,12 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
 	repocache.SetGitTimeout(cfg.RepoCacheGitTimeout)
+	cache := repocache.New(cacheRoot, logger)
+	cache.SetFetchCooldown(cfg.RepoCacheFetchCooldown)
 	d := &Daemon{
 		cfg:                       cfg,
 		client:                    client,
-		repoCache:                 repocache.New(cacheRoot, logger),
+		repoCache:                 cache,
 		skillCache:                NewSkillBundleCache(skillCacheRoot),
 		logger:                    logger,
 		workspaces:                make(map[string]*workspaceState),
@@ -8971,6 +8973,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// prompt has to be the thing that tells it (MUL-6881).
 	if env.LocalWorktree != nil && len(env.LocalWorktree.ReplayConflicts) > 0 {
 		promptOptions = append(promptOptions, WithWorktreeReplayConflicts(env.LocalWorktree.ReplayConflicts))
+	}
+	if env.LocalWorktree != nil && env.LocalWorktree.StaleBaselineNotice != "" {
+		promptOptions = append(promptOptions, WithStaleLocalBaseline(env.LocalWorktree.StaleBaselineNotice))
+	}
+	if command := dependencyInstallCommand(env.WorkDir); command != "" {
+		promptOptions = append(promptOptions, WithDependencyInstallCommand(command))
 	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 

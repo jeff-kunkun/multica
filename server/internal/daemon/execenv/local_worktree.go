@@ -177,6 +177,11 @@ type LocalWorktree struct {
 	// of the same conversation left behind, instead of forking a new one from
 	// the user's HEAD.
 	Continued bool
+	// StaleBaselineNotice explains why the local repository could not be
+	// fast-forwarded to its tracking branch before this worktree was created.
+	// It is surfaced in the run's opening message so the agent does not mistake
+	// an intentionally preserved, older baseline for the latest remote code.
+	StaleBaselineNotice string `json:"stale_baseline_notice,omitempty"`
 	// ReplayConflicts names the files where the user's edits since the previous
 	// turn could not be merged with what the branch already carries. The
 	// worktree is handed to the agent WITH those conflicts in it — resolving
@@ -369,6 +374,13 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	}
 	pruneOrphanedStateRefs(gitRoot, logger)
 
+	// A pinned local directory is the source of truth for this task. Refresh
+	// its tracking branch before taking the snapshot, but only when the user's
+	// checkout is clean and the update is a true fast-forward. Dirty or
+	// diverged repositories are deliberately left alone; the notice travels
+	// with the prepared worktree and is rendered in the agent's first message.
+	staleBaselineNotice := refreshLocalBaseline(gitRoot, logger)
+
 	headSHA, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("execenv: repository %q has no commit to branch from "+
@@ -418,17 +430,18 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	}
 
 	wt := &LocalWorktree{
-		GitRoot:       gitRoot,
-		Path:          worktreePath,
-		WorktreeRoot:  worktreeRoot,
-		WorkDir:       filepath.Join(worktreePath, rel),
-		Branch:        actualBranch,
-		BaseCommit:    plan.base,
-		Continued:     plan.continues,
-		createdBranch: createdBranch,
-		userState:     userState,
-		priorState:    plan.priorState,
-		owner:         plan.owner,
+		GitRoot:             gitRoot,
+		Path:                worktreePath,
+		WorktreeRoot:        worktreeRoot,
+		WorkDir:             filepath.Join(worktreePath, rel),
+		Branch:              actualBranch,
+		StaleBaselineNotice: staleBaselineNotice,
+		BaseCommit:          plan.base,
+		Continued:           plan.continues,
+		createdBranch:       createdBranch,
+		userState:           userState,
+		priorState:          plan.priorState,
+		owner:               plan.owner,
 		// A branch a sibling task forked because the conversation's own branch
 		// was busy is delivered once and never continued, so it records nothing.
 		tracksState: plan.tracksState && actualBranch == plan.name,
@@ -537,6 +550,77 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		)
 	}
 	return wt, nil
+}
+
+// refreshLocalBaseline updates a clean local checkout to its fetched upstream
+// tip when that update is a fast-forward. It never resets, merges, or touches
+// a dirty/diverged checkout. A non-empty return value is safe to show in the
+// run prompt and explains why the task intentionally started from an older
+// baseline.
+func refreshLocalBaseline(gitRoot string, logger *slog.Logger) string {
+	branch, err := runGitTrimmed(gitRoot, "symbolic-ref", "--short", "HEAD")
+	if err != nil || branch == "" {
+		// Detached HEADs have no tracking branch to refresh.
+		return ""
+	}
+	upstream, err := runGitTrimmed(gitRoot, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	if err != nil || upstream == "" {
+		return ""
+	}
+
+	if err := fetchOrigin(gitRoot); err != nil {
+		notice := fmt.Sprintf("The local checkout on branch %q may be stale: refreshing its upstream %q failed (%s). Do not assume this baseline is the latest remote code.", branch, upstream, strings.Join(strings.Fields(err.Error()), " "))
+		if logger != nil {
+			logger.Warn("execenv: local baseline refresh failed", "git_root", gitRoot, "branch", branch, "upstream", upstream, "error", err)
+		}
+		return notice
+	}
+
+	status, statusErr := runGit(gitRoot, "status", "--porcelain", "--untracked-files=all")
+	if statusErr != nil {
+		return fmt.Sprintf("The local checkout on branch %q may be stale: its working tree could not be checked before refresh (%s).", branch, strings.Join(strings.Fields(statusErr.Error()), " "))
+	}
+	if strings.TrimSpace(status) != "" {
+		return fmt.Sprintf("The local checkout on branch %q may be stale: it has local edits, so Multica left it untouched instead of fast-forwarding to %q.", branch, upstream)
+	}
+
+	counts, countErr := runGitTrimmed(gitRoot, "rev-list", "--left-right", "--count", "HEAD..."+upstream)
+	if countErr != nil {
+		return fmt.Sprintf("The local checkout on branch %q may be stale: could not compare it with %q (%s).", branch, upstream, strings.Join(strings.Fields(countErr.Error()), " "))
+	}
+	fields := strings.Fields(counts)
+	if len(fields) != 2 {
+		return fmt.Sprintf("The local checkout on branch %q may be stale: git returned an unexpected comparison with %q.", branch, upstream)
+	}
+	ahead, aheadErr := strconv.Atoi(fields[0])
+	behind, behindErr := strconv.Atoi(fields[1])
+	if aheadErr != nil || behindErr != nil {
+		return fmt.Sprintf("The local checkout on branch %q may be stale: git returned an invalid comparison with %q.", branch, upstream)
+	}
+	if behind == 0 {
+		return ""
+	}
+	if ahead != 0 {
+		return fmt.Sprintf("The local checkout on branch %q may be stale: it diverges from %q (%d local commit%s, %d upstream commit%s), so Multica left it untouched.", branch, upstream, ahead, pluralSuffix(ahead), behind, pluralSuffix(behind))
+	}
+
+	if _, err := runGit(gitRoot, "merge", "--ff-only", upstream); err != nil {
+		if logger != nil {
+			logger.Warn("execenv: local baseline fast-forward failed", "git_root", gitRoot, "branch", branch, "upstream", upstream, "error", err)
+		}
+		return fmt.Sprintf("The local checkout on branch %q may be stale: it is %d commit%s behind %q, but the fast-forward failed. Multica left it untouched.", branch, behind, pluralSuffix(behind), upstream)
+	}
+	if logger != nil {
+		logger.Info("execenv: fast-forwarded local baseline", "git_root", gitRoot, "branch", branch, "upstream", upstream, "commits", behind)
+	}
+	return ""
+}
+
+func pluralSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // Finalize commits whatever the agent left behind, removes the worktree, and
