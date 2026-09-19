@@ -1538,6 +1538,15 @@
     "no_credentials_note": "ここに認証情報は保存されません。デプロイのモデル設定で管理します。",
     "filters_title": "候補フィルター",
     "filters_placeholder": "今後対応予定。今回は未実装です。",
+    "health_checking": "確認中…",
+    "health_recheck": "再チェック",
+    "health_connected": "接続済み · {{when}}に自己チェック",
+    "health_never_checked": "サーバー起動以降、まだ呼び出していません",
+    "health_retry_in": "約 {{minutes}} 分後に再試行",
+    "health_reason_label": "理由",
+    "health_time_just_now": "たった今",
+    "health_time_minutes_ago": "{{n}} 分前",
+    "health_time_hours_ago": "{{n}} 時間前",
     "states": {
       "off": {
         "chip": "オフ",

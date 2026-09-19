@@ -1538,6 +1538,15 @@
     "no_credentials_note": "여기에는 어떤 비밀 값도 저장되지 않습니다. 자격 증명은 배포의 모델 설정이 관리합니다.",
     "filters_title": "후보 필터",
     "filters_placeholder": "이후 지원 예정이며 이번 버전에는 없습니다.",
+    "health_checking": "확인 중…",
+    "health_recheck": "다시 확인",
+    "health_connected": "연결됨 · {{when}} 자체 점검",
+    "health_never_checked": "서버가 시작된 뒤 아직 호출하지 않았습니다",
+    "health_retry_in": "약 {{minutes}}분 후 재시도",
+    "health_reason_label": "원인",
+    "health_time_just_now": "방금",
+    "health_time_minutes_ago": "{{n}}분 전",
+    "health_time_hours_ago": "{{n}}시간 전",
     "states": {
       "off": {
         "chip": "꺼짐",

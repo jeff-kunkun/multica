@@ -216,7 +216,12 @@ func (s routingStore) AssignAgentIfUnassigned(ctx context.Context, workspaceID, 
 	if err != nil {
 		return false, err
 	}
-	s.publishIssueUpdated(issue)
+	// The conditional write only fires while the slot is empty, so the value
+	// this call replaced is known without a second read: nothing.
+	prev := issue
+	prev.AssigneeType = pgtype.Text{}
+	prev.AssigneeID = pgtype.UUID{}
+	s.publishIssueUpdated(prev, issue)
 	// Assignment IS the wake-up: the seat's run starts from the assignment,
 	// so routing never needs to mention an agent it just dispatched.
 	s.h.IssueService.StartAssignedAgent(ctx, issue)
@@ -245,7 +250,10 @@ func (s routingStore) SetReviewerIfUnset(ctx context.Context, workspaceID, issue
 	if err != nil {
 		return false, err
 	}
-	s.publishIssueUpdated(issue)
+	// A property write, not an assignment: prev == next on the assignee pair,
+	// so assignee_changed comes out false and no spurious owner-change lands
+	// in the timeline.
+	s.publishIssueUpdated(issue, issue)
 	return true, nil
 }
 
@@ -262,13 +270,20 @@ func (s routingStore) Handoff(ctx context.Context, workspaceID, issueID, assigne
 	if err != nil {
 		return err
 	}
+	// Read the row this write replaces. A handoff is the one routing write
+	// that overwrites an existing owner, so the previous pair has to come
+	// from the database rather than be inferred.
+	prev, err := s.h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: wsID})
+	if err != nil {
+		return err
+	}
 	issue, err := s.h.Queries.ReassignIssue(ctx, db.ReassignIssueParams{
 		ID: id, WorkspaceID: wsID, AssigneeType: assigneeType, AssigneeID: target,
 	})
 	if err != nil {
 		return err
 	}
-	s.publishIssueUpdated(issue)
+	s.publishIssueUpdated(prev, issue)
 	if assigneeType == "agent" {
 		s.h.IssueService.StartAssignedAgent(ctx, issue)
 	}
@@ -420,7 +435,25 @@ func (s routingStore) member(ctx context.Context, m db.Member) routing.Member {
 	return out
 }
 
-func (s routingStore) publishIssueUpdated(issue db.Issue) {
+// publishIssueUpdated announces a routing write.
+//
+// prevAssigneeType / prevAssigneeID are the values the issue held BEFORE this
+// write, and they are not optional bookkeeping: the activity log, the
+// subscriber listener and the client's assignee-grouped lists all key on
+// `assignee_changed` plus the previous pair. Publishing without them made
+// routing's reassignments invisible in `multica issue timeline` — the very
+// command the spec names as the way to verify there is no loop and no double
+// assignment — and left no audit trail for an owner changed by the system
+// (DENE-633 review, F3).
+//
+// A human newly holding the issue therefore now gets the ordinary
+// `issue_assigned` notification in addition to the routing comment's @. That
+// is two notifications of two different kinds, not the same one twice: the
+// spec requires the @ because assigning a person starts no run, and the
+// assignment notification is what every other assignment in the product
+// already produces. Suppressing either would make routing's writes either
+// silent or untraceable.
+func (s routingStore) publishIssueUpdated(prev, issue db.Issue) {
 	if s.h.Bus == nil {
 		return
 	}
@@ -428,8 +461,31 @@ func (s routingStore) publishIssueUpdated(issue db.Issue) {
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
 		ActorType:   "system",
-		Payload:     map[string]any{"issue": issueToResponse(issue, "")},
+		Payload:     RoutingIssueUpdatedPayload(prev, issue),
 	})
+}
+
+// RoutingIssueUpdatedPayload builds the issue:updated payload for a routing
+// write. Exported so the listener test in cmd/server can drive the REAL
+// payload through the REAL activity listener: the bug this replaces was a
+// payload that satisfied every test in its own package and still produced no
+// timeline row downstream, and only a test that crosses that boundary can
+// catch the next one.
+//
+// The types matter as much as the keys. The listeners read the previous pair
+// with `payload["prev_assignee_type"].(*string)`, so a plain string here would
+// type-assert to nil and silently drop the "from" half of the record.
+func RoutingIssueUpdatedPayload(prev, issue db.Issue) map[string]any {
+	assigneeChanged := prev.AssigneeType.String != issue.AssigneeType.String ||
+		uuidToString(prev.AssigneeID) != uuidToString(issue.AssigneeID)
+	return map[string]any{
+		"issue":              issueToResponse(issue, ""),
+		"assignee_changed":   assigneeChanged,
+		"prev_assignee_type": textToPtr(prev.AssigneeType),
+		"prev_assignee_id":   uuidToPtr(prev.AssigneeID),
+		"creator_type":       issue.CreatorType,
+		"creator_id":         uuidToString(issue.CreatorID),
+	}
 }
 
 func clipRunes(s string, limit int) string {

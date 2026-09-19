@@ -1606,12 +1606,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// because opening an issue is what asks for it; executable
 					// bytes stay off the authenticated app/API origin.
 					r.Get("/plugins/{installationId}/surfaces/{surfaceKey}/launch", h.GetPluginSurfaceLaunch)
+					// Routing health is member-visible for the same reason the
+					// settings section is: everyone in the workspace can see
+					// that routing is on, so everyone should be able to see
+					// that it is currently broken. Only admins can change it.
+					r.Get("/routing/health", h.GetRoutingHealth)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
+					// The re-check button. It makes an outbound request, so it
+					// sits with the other admin actions rather than with the
+					// read above.
+					r.Post("/routing/health/check", h.CheckRoutingHealth)
 					r.Get("/config/export", h.ExportWorkspaceConfig)
 					r.Post("/config/import", h.ImportWorkspaceConfig)
 					r.Post("/transfer/config", h.ImportWorkspaceTransferConfig)

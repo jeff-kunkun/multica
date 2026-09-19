@@ -94,3 +94,80 @@ func (h *Handler) RouteIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
+
+// routingHealthResponse is the read-only health report the settings section
+// renders. It is the ONLY surface on which a routing failure is visible to a
+// person: the design keeps tickets quiet, so without this a broken model shows
+// up nowhere but the server log (DENE-633 review, F2).
+//
+// It carries no credential and no model output — only the switch state, the
+// model identifier the workspace itself typed in, and whether the last call
+// worked.
+type routingHealthResponse struct {
+	State             string  `json:"state"`
+	Usable            bool    `json:"usable"`
+	Reason            string  `json:"reason"`
+	RetryAfterSeconds int     `json:"retry_after_seconds"`
+	LastSuccessAt     int64   `json:"last_success_at"`
+	LastFailureAt     int64   `json:"last_failure_at"`
+	Model             string  `json:"model"`
+	Threshold         float64 `json:"threshold"`
+}
+
+func routingHealthPayload(rep routing.HealthReport) routingHealthResponse {
+	return routingHealthResponse{
+		State:             string(rep.State),
+		Usable:            rep.Usable,
+		Reason:            rep.Reason,
+		RetryAfterSeconds: rep.RetryAfterSeconds,
+		LastSuccessAt:     rep.LastSuccessAt,
+		LastFailureAt:     rep.LastFailureAt,
+		Model:             rep.Model,
+		Threshold:         rep.Threshold,
+	}
+}
+
+// GetRoutingHealth backs GET /api/workspaces/{id}/routing/health.
+//
+// It reads breaker state; it never dials the model. An open settings tab
+// polling this must not become an outbound request loop, and probing here
+// would defeat the very cooldown it is reporting on.
+func (h *Handler) GetRoutingHealth(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	if h.Routing == nil {
+		// No router wired at all: the product is the pre-routing product, and
+		// saying "off" is the honest answer rather than an error the settings
+		// page would have to interpret.
+		writeJSON(w, http.StatusOK, routingHealthResponse{State: string(routing.StateOff)})
+		return
+	}
+	rep, err := h.Routing.Health(r.Context(), workspaceID)
+	if err != nil {
+		slog.Warn("routing health failed",
+			append(logger.RequestAttrs(r), "workspace_id", workspaceID, "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to read routing health")
+		return
+	}
+	writeJSON(w, http.StatusOK, routingHealthPayload(rep))
+}
+
+// CheckRoutingHealth backs POST /api/workspaces/{id}/routing/health/check —
+// the "re-check" button. It dials the model once on purpose, which is the only
+// way out of a cooldown short of waiting it out.
+func (h *Handler) CheckRoutingHealth(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	if h.Routing == nil {
+		writeJSON(w, http.StatusOK, routingHealthResponse{State: string(routing.StateOff)})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), routeTimeout)
+	defer cancel()
+	rep, err := h.Routing.Probe(ctx, workspaceID)
+	if err != nil {
+		slog.Warn("routing probe failed",
+			append(logger.RequestAttrs(r), "workspace_id", workspaceID, "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to check the routing model")
+		return
+	}
+	writeJSON(w, http.StatusOK, routingHealthPayload(rep))
+}

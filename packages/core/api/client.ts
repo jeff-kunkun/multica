@@ -248,6 +248,10 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  parseRoutingHealth,
+  type RoutingHealth,
+} from "../workspace/routing-health";
+import {
   parseConfigBundle,
   parseConfigImportReport,
   reportFromImportError,
@@ -2937,6 +2941,31 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+  }
+
+  /**
+   * Read whether routing is actually working for this workspace.
+   *
+   * Read-only and cheap: the server reports breaker state and never dials the
+   * model, so an open settings tab cannot turn into an outbound request loop.
+   */
+  async getRoutingHealth(workspaceId: string): Promise<RoutingHealth> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/routing/health`,
+    );
+    return parseRoutingHealth(raw);
+  }
+
+  /**
+   * The "re-check" button. This one DOES dial the model, which is the only way
+   * out of a cooldown short of waiting it out.
+   */
+  async checkRoutingHealth(workspaceId: string): Promise<RoutingHealth> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/routing/health/check`,
+      { method: "POST" },
+    );
+    return parseRoutingHealth(raw);
   }
 
   async exportWorkspaceConfig(workspaceId: string): Promise<ConfigBundle> {

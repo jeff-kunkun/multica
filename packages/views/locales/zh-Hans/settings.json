@@ -1538,6 +1538,15 @@
     "no_credentials_note": "这里不存任何密钥，凭据归部署的模型配置管。",
     "filters_title": "候选筛选层",
     "filters_placeholder": "以后支持，本版不实现。今天的候选只按方向预筛加置信度过闸。",
+    "health_checking": "自检中…",
+    "health_recheck": "重新自检",
+    "health_connected": "已连通 · {{when}}自检",
+    "health_never_checked": "服务端启动以来还没有发起过调用",
+    "health_retry_in": "约 {{minutes}} 分钟后重试",
+    "health_reason_label": "原因",
+    "health_time_just_now": "刚刚",
+    "health_time_minutes_ago": "{{n}} 分钟前",
+    "health_time_hours_ago": "{{n}} 小时前",
     "states": {
       "off": {
         "chip": "已关闭",

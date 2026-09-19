@@ -315,9 +315,19 @@ Consequences for how you work:
   slot, no comment, no mention.
 - Routing comments are capped at one of each kind per issue, so flipping a
   status back and forth does not re-dispatch or re-notify.
+- Every slot routing writes is recorded like any other assignment: the change
+  shows up in `multica issue timeline`, so you can tell a routed owner from one
+  a person set, and see that nothing assigned the issue twice.
 - `multica issue route <id>` re-runs the same pass by hand and prints what it
   did. It is the same code the hooks run, so on an issue they already handled
   it will report that there was nothing left to fill.
+
+When routing is **not working** — the model was rejected, is unreachable, or
+the breaker is cooling down after repeated failures — issues are left entirely
+alone, exactly as if routing were off. Nothing is posted on a ticket about it.
+The reason is shown in one place only: Settings → Routing, which reports the
+state, the reason, when the model last answered, and offers a re-check. If
+automatic dispatch seems to have stopped, that section is where to look.
 
 ## Claim ownership without duplicating a run
 

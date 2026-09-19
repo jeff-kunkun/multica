@@ -1,14 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { api } from "@multica/core/api";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useCurrentMember } from "@multica/core/permissions";
-import { workspaceListOptions } from "@multica/core/workspace/queries";
+import {
+  routingHealthOptions,
+  workspaceKeys,
+  workspaceListOptions,
+} from "@multica/core/workspace/queries";
+import type { RoutingHealth } from "@multica/core/workspace/routing-health";
 import {
   normalizeThreshold,
   parseRoutingSettings,
@@ -101,7 +107,28 @@ export function RoutingTab() {
       a.confidence_threshold === b.confidence_threshold,
   });
 
-  const state = routingState(draft);
+  // Live health from the server. Without it the fourth state is unreachable:
+  // the stored fields cannot know that the model is rejected or cooling down,
+  // and the routing design deliberately keeps that off every ticket — so a
+  // failure the section did not show would be visible nowhere but the server
+  // log (DENE-633 review, F2).
+  const health = useQuery({
+    ...routingHealthOptions(workspace?.id ?? ""),
+    enabled: !!workspace?.id,
+  });
+
+  const recheck = useMutation({
+    mutationFn: () => api.checkRoutingHealth(workspace?.id ?? ""),
+    onSuccess: (next) => {
+      qc.setQueryData(workspaceKeys.routingHealth(workspace?.id ?? ""), next);
+    },
+  });
+
+  // The draft wins over the server report while an edit is in flight: a person
+  // who just switched routing off should not keep reading a red chip about the
+  // model they stopped using. Health only decides the enabled/ineffective
+  // split, and only once the draft itself says enabled.
+  const state = routingState(draft, health.data);
 
   return (
     <SettingsTab
@@ -109,7 +136,13 @@ export function RoutingTab() {
       description={t(($) => $.routing.description)}
     >
       <SettingsSection>
-        <StateBanner state={state} />
+        <StateBanner
+          state={state}
+          health={health.data}
+          canManage={canManage}
+          checking={recheck.isPending}
+          onRecheck={() => recheck.mutate()}
+        />
       </SettingsSection>
 
       <SettingsSection title={t(($) => $.routing.section_title)}>
@@ -183,7 +216,19 @@ export function RoutingTab() {
  * somebody who flipped the switch and walked away will otherwise believe
  * routing is working while the product behaves exactly as it did before.
  */
-function StateBanner({ state }: { state: RoutingState }) {
+function StateBanner({
+  state,
+  health,
+  canManage,
+  checking,
+  onRecheck,
+}: {
+  state: RoutingState;
+  health?: RoutingHealth;
+  canManage: boolean;
+  checking: boolean;
+  onRecheck: () => void;
+}) {
   const { t } = useT("settings");
   const chip: Record<
     RoutingState,
@@ -198,8 +243,24 @@ function StateBanner({ state }: { state: RoutingState }) {
     ineffective: { variant: "destructive" },
   };
 
+  const lastCheckedLabel = (
+    translate: typeof t,
+    unixSeconds: number,
+  ): string => {
+    const { unit, n } = timeAgoBucket(unixSeconds);
+    if (unit === "now") return translate(($) => $.routing.health_time_just_now);
+    if (unit === "minutes")
+      return translate(($) => $.routing.health_time_minutes_ago, { n });
+    return translate(($) => $.routing.health_time_hours_ago, { n });
+  };
+
+  const detail =
+    state === "ineffective" && health?.reason
+      ? `${t(($) => $.routing.states.ineffective.detail)} ${t(($) => $.routing.health_reason_label)}: ${health.reason}`
+      : t(($) => $.routing.states[state].detail);
+
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-surface-border px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
+    <div className="flex flex-col gap-2 rounded-lg border border-surface-border px-4 py-3 sm:flex-row sm:items-start sm:gap-4">
       <Badge
         variant={chip[state].variant}
         className={chip[state].className}
@@ -207,9 +268,60 @@ function StateBanner({ state }: { state: RoutingState }) {
       >
         {t(($) => $.routing.states[state].chip)}
       </Badge>
-      <p className="text-caption leading-5 text-muted-foreground">
-        {t(($) => $.routing.states[state].detail)}
-      </p>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="text-caption leading-5 text-muted-foreground">{detail}</p>
+        {state === "enabled" && (
+          <p className="text-caption leading-5 text-muted-foreground">
+            {health?.last_success_at
+              ? t(($) => $.routing.health_connected, {
+                  when: lastCheckedLabel(t, health.last_success_at),
+                })
+              : t(($) => $.routing.health_never_checked)}
+          </p>
+        )}
+        {state === "ineffective" && health?.retry_after_seconds ? (
+          <p className="text-caption leading-5 text-muted-foreground">
+            {t(($) => $.routing.health_retry_in, {
+              minutes: Math.max(1, Math.round(health.retry_after_seconds / 60)),
+            })}
+          </p>
+        ) : null}
+      </div>
+      {/* Offered for both live states, not just the broken one: a person who
+          just typed a model identifier wants to know it works before they
+          find out from a ticket that never got dispatched. */}
+      {canManage && (state === "enabled" || state === "ineffective") && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={checking}
+          onClick={onRecheck}
+          className="shrink-0"
+        >
+          {checking
+            ? t(($) => $.routing.health_checking)
+            : t(($) => $.routing.health_recheck)}
+        </Button>
+      )}
     </div>
   );
+}
+
+/**
+ * How long ago, as a unit plus a count. The caller resolves the copy, because
+ * only it holds a properly typed `t`.
+ *
+ * Deliberately coarse: what this describes is "the last time the routing model
+ * answered", and the reader wants to know whether that was recent, not when
+ * exactly.
+ */
+export function timeAgoBucket(
+  unixSeconds: number,
+  now: number = Date.now(),
+): { unit: "now" | "minutes" | "hours"; n: number } {
+  const minutes = Math.floor((now / 1000 - unixSeconds) / 60);
+  if (minutes < 1) return { unit: "now", n: 0 };
+  if (minutes < 60) return { unit: "minutes", n: minutes };
+  return { unit: "hours", n: Math.floor(minutes / 60) };
 }
