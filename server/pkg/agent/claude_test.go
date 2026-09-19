@@ -364,6 +364,7 @@ func TestBuildClaudeArgsInheritsMCPByDefault(t *testing.T) {
 		"--verbose",
 		"--permission-mode", "bypassPermissions",
 		"--disallowedTools", "AskUserQuestion",
+		"--autocompact", "200000",
 	}
 
 	if len(args) != len(expected) {
@@ -373,6 +374,32 @@ func TestBuildClaudeArgsInheritsMCPByDefault(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
 		}
+	}
+}
+
+func TestBuildClaudeArgsAutocompactCanBeConfiguredAndOverridden(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{
+		ClaudeAutoCompactTokens: 300000,
+		CustomArgs:              []string{"--autocompact", "500000"},
+	}, slog.Default())
+	var values []string
+	for i, arg := range args {
+		if arg == "--autocompact" && i+1 < len(args) {
+			values = append(values, args[i+1])
+		}
+	}
+	if !slices.Equal(values, []string{"300000", "500000"}) {
+		t.Fatalf("autocompact values = %v, want configured default followed by custom override", values)
+	}
+}
+
+func TestStripClaudeAutoCompactArgs(t *testing.T) {
+	got := stripClaudeAutoCompactArgs([]string{"-p", "--autocompact", "200000", "--autocompact", "500000", "--verbose"})
+	want := []string{"-p", "--verbose"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("stripClaudeAutoCompactArgs = %v, want %v", got, want)
 	}
 }
 

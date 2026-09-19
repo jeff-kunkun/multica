@@ -38,7 +38,9 @@ func claudeTerminateGrace() time.Duration {
 // claudeBackend implements Backend by spawning the Claude Code CLI
 // with --output-format stream-json.
 type claudeBackend struct {
-	cfg Config
+	cfg              Config
+	autoCompactProbe sync.Once
+	autoCompactOK    bool
 }
 
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -54,6 +56,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildClaudeArgs(opts, b.cfg.Logger)
+	if !b.supportsAutoCompact(ctx, execPath) {
+		args = stripClaudeAutoCompactArgs(args)
+	}
 
 	// If the caller provided an MCP config, write it to a temp file and pass
 	// --mcp-config <path> so the agent uses a controlled set of MCP servers
@@ -369,6 +374,36 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// supportsAutoCompact probes the installed CLI once. Claude Code exits on an
+// unknown option, so sending --autocompact without this capability check would
+// turn every task into an immediate failure on older installations.
+func (b *claudeBackend) supportsAutoCompact(ctx context.Context, execPath string) bool {
+	b.autoCompactProbe.Do(func() {
+		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		out, err := outputOwned(b.cfg.commandAt(execPath).exec(probeCtx, "--help"), b.cfg.Logger)
+		b.autoCompactOK = err == nil && strings.Contains(string(out), "--autocompact")
+		if !b.autoCompactOK && b.cfg.Logger != nil {
+			b.cfg.Logger.Warn("Claude Code does not advertise --autocompact; omitting the flag")
+		}
+	})
+	return b.autoCompactOK
+}
+
+func stripClaudeAutoCompactArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--autocompact" {
+			if i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
 
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage) assistantTurn {
