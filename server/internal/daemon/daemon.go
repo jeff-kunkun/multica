@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log/slog"
+	"maps"
 	"math/rand"
 	"net"
 	"net/http"
@@ -8898,6 +8899,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if selfBin, err := resolveSelfExecutable(); err == nil {
 		binDir := filepath.Dir(selfBin)
 		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+	}
+	// Point every package manager at the machine-global dependency store.
+	// Without it each task installs a private copy of the same packages: on
+	// this machine 44 task directories held 53 GB of node_modules, and the
+	// half installed by npm (which copies) accounted for essentially all of
+	// the real duplication. A pnpm install against a warm shared store costs
+	// ~82 MB of physical disk for a 2.15 GB node_modules tree, because the
+	// files are cloned out of the store rather than written again.
+	//
+	// Set before custom_env is layered on, so an agent that genuinely needs
+	// its own store or cache can still override any of these names.
+	if d.cfg.SharedPackageStoreEnabled {
+		storeEnv, err := execenv.PreparePackageStore(d.cfg.WorkspacesRoot)
+		if err != nil {
+			// Not fatal: a task that cannot share packages still runs, it just
+			// installs its own copies the way it did before.
+			taskLog.Warn("shared package store: prepare failed; task will use per-tool defaults", "error", err)
+		} else {
+			maps.Copy(agentEnv, storeEnv)
+		}
 	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.

@@ -69,6 +69,11 @@ type DiskUsageReport struct {
 	// against per-task numbers that do not contain it.
 	RepoCacheSizeBytes int64 `json:"repo_cache_size_bytes"`
 	RepoCacheCount     int   `json:"repo_cache_count"`
+	// PackageStoreSizeBytes is the shared dependency store (.pkg-store).
+	// Excluded from Total* for the same reason as the repo cache: it is one
+	// machine-global directory the task dirs point INTO, so folding it into
+	// per-task totals would charge every task for bytes it does not hold.
+	PackageStoreSizeBytes int64 `json:"package_store_size_bytes"`
 }
 
 // DiskUsageRoot pairs a workspaces root with the profile it was derived from
@@ -102,6 +107,10 @@ type AggregateDiskUsageReport struct {
 	TotalArtifactRatio      float64         `json:"total_artifact_ratio"`
 	TotalRepoCacheSizeBytes int64           `json:"total_repo_cache_size_bytes"`
 	TotalRepoCacheCount     int             `json:"total_repo_cache_count"`
+	// TotalPackageStoreSizeBytes sums each root's store. Two roots on one
+	// machine have two stores (each anchored to its own workspaces root), so
+	// this is a sum and not a shared figure counted once.
+	TotalPackageStoreSizeBytes int64 `json:"total_package_store_size_bytes"`
 }
 
 // ScanDiskUsageRoots scans every root in order and returns the combined report.
@@ -127,6 +136,7 @@ func ScanDiskUsageRoots(roots []DiskUsageRoot, artifactPatterns []string) (Aggre
 		agg.TotalArtifactSizeBytes += report.TotalArtifactSizeBytes
 		agg.TotalRepoCacheSizeBytes += report.RepoCacheSizeBytes
 		agg.TotalRepoCacheCount += report.RepoCacheCount
+		agg.TotalPackageStoreSizeBytes += report.PackageStoreSizeBytes
 	}
 	agg.TotalArtifactRatio = ratio(agg.TotalArtifactSizeBytes, agg.TotalSizeBytes)
 	return agg, nil
@@ -182,6 +192,14 @@ func ScanDiskUsage(workspacesRoot string, artifactPatterns []string) (DiskUsageR
 		// total disagree with the user's file manager for no stated reason.
 		if wsEntry.Name() == reposDirName {
 			report.RepoCacheSizeBytes, report.RepoCacheCount = repoCacheSize(filepath.Join(workspacesRoot, wsEntry.Name()))
+			continue
+		}
+		// The shared dependency store is likewise not a workspace. Measure it
+		// so the reported footprint accounts for every large directory under
+		// the root, and so an operator can see what the sharing actually costs
+		// against what it saves across the task dirs.
+		if wsEntry.Name() == execenv.PackageStoreDirName {
+			report.PackageStoreSizeBytes = dirSize(filepath.Join(workspacesRoot, wsEntry.Name()))
 			continue
 		}
 		// Other dot-directories are daemon-internal caches (skill bundles and
