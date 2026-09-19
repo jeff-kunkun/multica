@@ -49,6 +49,61 @@ func TestFetchCooldownMissingOrInvalidStampFetches(t *testing.T) {
 	}
 }
 
+func TestCreateWorktreeContextUsesResolvedRefForFetchCooldown(t *testing.T) {
+	source := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	const workspaceID = "ws-fetch-cooldown"
+	if err := cache.Sync(workspaceID, []RepoInfo{{URL: source}}); err != nil {
+		t.Fatalf("Sync failed: %v", err)
+	}
+	bare := cache.Lookup(workspaceID, source)
+	if bare == "" {
+		t.Fatal("cache lookup returned empty path")
+	}
+	cache.SetFetchCooldown(time.Hour)
+	markFetched(bare, nil)
+
+	defaultRef := getRemoteDefaultBranch(bare)
+	branch := strings.TrimPrefix(defaultRef, "refs/remotes/origin/")
+	if branch == defaultRef {
+		t.Fatalf("default ref = %q, want an origin remote-tracking branch", defaultRef)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "fetches.log")
+	ctx := withFakeGit(t, "case \"$*\" in\n"+
+		"  *' fetch '*) echo \"$*\" >> '"+logPath+"' ;;\n"+
+		"esac\n"+"exec \"$REAL_GIT\" \"$@\"\n")
+
+	if _, err := cache.CreateWorktreeContext(ctx, WorktreeParams{
+		WorkspaceID: workspaceID,
+		RepoURL:     source,
+		Ref:         branch,
+		WorkDir:     t.TempDir(),
+		AgentName:   "cooldown",
+		TaskID:      "task-resolved-ref",
+	}); err != nil {
+		t.Fatalf("CreateWorktreeContext(resolved ref): %v", err)
+	}
+	if got, _ := os.ReadFile(logPath); strings.Contains(string(got), " fetch ") {
+		t.Fatalf("resolved ref triggered a fetch inside cooldown: %s", got)
+	}
+
+	_, err := cache.CreateWorktreeContext(ctx, WorktreeParams{
+		WorkspaceID: workspaceID,
+		RepoURL:     source,
+		Ref:         "missing-branch",
+		WorkDir:     t.TempDir(),
+		AgentName:   "cooldown",
+		TaskID:      "task-missing-ref",
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot resolve requested ref") {
+		t.Fatalf("CreateWorktreeContext(missing ref) error = %v, want unresolved-ref error", err)
+	}
+	if got, _ := os.ReadFile(logPath); !strings.Contains(string(got), " fetch origin") {
+		t.Fatalf("missing ref did not force a fetch: %s", got)
+	}
+}
+
 func TestGitEnv(t *testing.T) {
 	t.Parallel()
 	env := gitEnv()

@@ -526,11 +526,6 @@ func New(root string, logger *slog.Logger) *Cache {
 	return &Cache{root: root, logger: logger}
 }
 
-// DefaultFetchCooldown avoids re-fetching the same repository for every task
-// created during a short burst. An explicit ref that is not already present
-// still forces a fetch (see CreateWorktreeContext).
-const DefaultFetchCooldown = 5 * time.Minute
-
 // SetFetchCooldown changes the cache-wide fetch de-duplication window.
 // Non-positive values disable the window and fetch every time.
 func (c *Cache) SetFetchCooldown(d time.Duration) {
@@ -758,17 +753,22 @@ func (c *Cache) fetchDue(barePath string, now time.Time) bool {
 	return now.Sub(stamp) >= c.fetchCooldown
 }
 
-func (c *Cache) fetchDueForCheckout(barePath, ref string) bool {
+func (c *Cache) fetchDueForCheckout(ctx context.Context, barePath, ref string) bool {
 	if c.fetchDue(barePath, time.Now()) {
 		return true
 	}
 	// A caller naming an object we do not have locally is explicitly asking for
 	// it; the cooldown must never turn that into a misleading missing-ref error.
-	if strings.TrimSpace(ref) == "" {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
 		return false
 	}
-	_, err := runGitOutputContext(context.Background(), "-C", barePath, "rev-parse", "--verify", ref+"^{commit}")
-	return err != nil
+	for _, candidate := range requestedRefCandidates(ref) {
+		if gitRefExistsContext(ctx, barePath, candidate+"^{commit}") {
+			return false
+		}
+	}
+	return true
 }
 
 func markFetched(barePath string, logger *slog.Logger) {
@@ -1512,7 +1512,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// never collide with the refs/heads/agent/* branches that worktree creation
 	// locks in this same bare repo.
 	var fetchErr error
-	if c.fetchDueForCheckout(barePath, params.Ref) {
+	if c.fetchDueForCheckout(ctx, barePath, params.Ref) {
 		fetchErr = gitFetchContext(ctx, barePath)
 		if fetchErr == nil {
 			markFetched(barePath, c.logger)
@@ -2121,17 +2121,21 @@ func resolveBaseRefContext(ctx context.Context, barePath, requestedRef string) (
 
 	// Prefer remote-tracking branches for human branch names. Then allow full
 	// local refs, tags, and raw commits that exist in the fetched bare cache.
-	candidates := []string{
-		"refs/remotes/origin/" + ref,
-		"refs/tags/" + ref,
-		ref,
-	}
+	candidates := requestedRefCandidates(ref)
 	for _, candidate := range candidates {
 		if gitRefExistsContext(ctx, barePath, candidate+"^{commit}") {
 			return candidate, nil
 		}
 	}
 	return "", fmt.Errorf("cannot resolve requested ref %q in repo cache at %s", ref, barePath)
+}
+
+func requestedRefCandidates(ref string) []string {
+	return []string{
+		"refs/remotes/origin/" + ref,
+		"refs/tags/" + ref,
+		ref,
+	}
 }
 
 func gitRefExists(repoPath, ref string) bool {

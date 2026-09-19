@@ -38,11 +38,13 @@ import (
 //     recorded as delivered.
 
 const (
-	// gitTimeout bounds every git invocation this file makes. These are all
-	// local-only operations (no network), so a slow one means a wedged index
-	// lock rather than a slow remote; failing the task beats hanging a daemon
-	// slot forever.
+	// gitTimeout bounds every local git invocation this file makes. The one
+	// network-capable baseline fetch uses localBaselineFetchTimeout below.
 	gitTimeout = 2 * time.Minute
+	// localBaselineFetchTimeout is deliberately shorter than gitRootLockWait:
+	// a remote that stops responding must not hold the per-repository lock until
+	// sibling tasks have all timed out waiting for it.
+	localBaselineFetchTimeout = 45 * time.Second
 
 	// maxUntrackedFiles / maxUntrackedBytes bound the untracked content a task
 	// will replay. `--exclude-standard` already drops anything gitignored
@@ -568,10 +570,13 @@ func refreshLocalBaseline(gitRoot string, logger *slog.Logger) string {
 		return ""
 	}
 
-	if err := fetchOrigin(gitRoot); err != nil {
-		notice := fmt.Sprintf("The local checkout on branch %q may be stale: refreshing its upstream %q failed (%s). Do not assume this baseline is the latest remote code.", branch, upstream, strings.Join(strings.Fields(err.Error()), " "))
+	fetchCtx, cancelFetch := context.WithTimeout(context.Background(), localBaselineFetchTimeout)
+	fetchErr := fetchOrigin(fetchCtx, gitRoot)
+	cancelFetch()
+	if fetchErr != nil {
+		notice := fmt.Sprintf("The local checkout on branch %q may be stale: refreshing its upstream %q failed (%s). Do not assume this baseline is the latest remote code.", branch, upstream, strings.Join(strings.Fields(fetchErr.Error()), " "))
 		if logger != nil {
-			logger.Warn("execenv: local baseline refresh failed", "git_root", gitRoot, "branch", branch, "upstream", upstream, "error", err)
+			logger.Warn("execenv: local baseline refresh failed", "git_root", gitRoot, "branch", branch, "upstream", upstream, "error", fetchErr)
 		}
 		return notice
 	}
