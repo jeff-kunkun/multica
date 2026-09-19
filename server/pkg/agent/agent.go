@@ -36,9 +36,14 @@ type ExecOptions struct {
 	//
 	// A backend must therefore NOT assume this is populated, and adding a new
 	// backend that only reads SystemPrompt will silently receive nothing.
-	SystemPrompt              string
-	ThreadName                string
-	MaxTurns                  int
+	SystemPrompt string
+	ThreadName   string
+	MaxTurns     int
+	// ClaudeAutoCompactTokens asks Claude Code to compact its conversation
+	// automatically once the configured token ceiling is reached. Zero uses
+	// the daemon default; a value supplied through custom_args remains the
+	// final CLI value and therefore takes precedence.
+	ClaudeAutoCompactTokens   int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
 	// FirstTurnNoProgressTimeout optionally overrides the Codex first-turn
