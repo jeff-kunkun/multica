@@ -2862,6 +2862,34 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		resp.ThreadName = issue.Title
 		issueNumber = issue.Number
+		// Inline a bounded issue snapshot so a fresh daemon run can orient without
+		// repeating the mandatory issue/comment reads. Older daemons ignore these
+		// additive fields.
+		resp.IssueTitle = issue.Title
+		if issue.Description.Valid {
+			resp.IssueDescription = issue.Description.String
+		}
+		resp.IssueStatus = issue.Status
+		resp.IssueAssigneeType = issue.AssigneeType.String
+		resp.IssueAssigneeID = uuidToString(issue.AssigneeID)
+		resp.IssueContextGeneratedAt = time.Now().UTC().Format(time.RFC3339)
+		if roots, err := h.Queries.ListRootCommentsForIssue(r.Context(), db.ListRootCommentsForIssueParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, RowLimit: 200}); err == nil {
+			for _, root := range roots {
+				content := root.Content
+				if len(content) > 240 {
+					content = content[:240] + "…"
+					resp.IssueContextTruncated = true
+				}
+				resp.IssueCommentSummaries = append(resp.IssueCommentSummaries, IssueContextComment{ID: uuidToString(root.ID), ThreadID: uuidToString(root.ID), AuthorType: root.AuthorType, Content: content, CreatedAt: root.CreatedAt.Time.UTC().Format(time.RFC3339)})
+			}
+		}
+		if task.TriggerCommentID.Valid {
+			if rows, err := h.Queries.ListThreadCommentsForIssuePaged(r.Context(), db.ListThreadCommentsForIssuePagedParams{AnchorID: task.TriggerCommentID, IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, ReplyLimit: 30}); err == nil {
+				for _, row := range rows {
+					resp.IssueTriggerThread = append(resp.IssueTriggerThread, IssueContextComment{ID: uuidToString(row.ID), ThreadID: uuidToString(task.TriggerCommentID), AuthorType: row.AuthorType, Content: row.Content, CreatedAt: row.CreatedAt.Time.UTC().Format(time.RFC3339)})
+				}
+			}
+		}
 
 		// Squad-leader briefing injection: keyed off the task being a
 		// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -3104,6 +3132,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						if cnt > 0 {
 							resp.NewCommentCount = int(cnt)
 							resp.NewCommentsSince = startedAt.Time.UTC().Format(time.RFC3339)
+							if rows, listErr := h.Queries.ListCommentsSinceForIssue(r.Context(), db.ListCommentsSinceForIssueParams{IssueID: comment.IssueID, WorkspaceID: comment.WorkspaceID, CreatedAt: startedAt, Limit: 100}); listErr == nil {
+								for _, row := range rows {
+									if uuidToString(row.ID) == triggerCommentID || uuidToString(row.AuthorID) == uuidToString(task.AgentID) || row.DeletedAt.Valid {
+										continue
+									}
+									resp.IssueNewComments = append(resp.IssueNewComments, IssueContextComment{ID: uuidToString(row.ID), Content: row.Content, AuthorType: row.AuthorType, CreatedAt: row.CreatedAt.Time.UTC().Format(time.RFC3339)})
+								}
+							}
 						}
 					}
 				}
