@@ -9485,15 +9485,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		value += *queueToClaimMS
 	}
 	totalMS = &value
-	// Keep a durable run row even when the provider failed before reporting any
-	// token counters. The timing, turn count, session and trigger metadata are
-	// still useful; an empty usage map must not erase the run from the log.
-	usageByModel := result.Usage
-	if len(usageByModel) == 0 {
-		usageByModel = map[string]agent.TokenUsage{model: {}}
-	}
 	var usageEntries []TaskUsageEntry
-	for model, u := range usageByModel {
+	for model, u := range result.Usage {
 		usageEntries = append(usageEntries, TaskUsageEntry{
 			Provider:             provider,
 			Model:                model,
