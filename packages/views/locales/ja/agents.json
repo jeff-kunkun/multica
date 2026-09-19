@@ -550,6 +550,7 @@
       "created_toast": "{{name}} を追加しました",
       "updated_toast": "{{name}} を保存しました",
       "save_failed_toast": "プロバイダを保存できませんでした。",
+      "refresh_failed_toast": "プロバイダは保存されましたが、モデル一覧を更新できませんでした。",
       "deleted_toast": "{{name}} を削除しました",
       "deleted_cleared_toast": "{{name}} を削除しました。CLI に既定モデルがなくなりました。",
       "delete_failed_toast": "プロバイダを削除できませんでした。"
