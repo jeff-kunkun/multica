@@ -58,6 +58,7 @@ function renderFollow(
         isOpen: true,
         hasSession: false,
         projectsLoaded: true,
+        routeProjectKnown: true,
         ...params,
       }),
     { wrapper: wrapper() },

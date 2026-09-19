@@ -49,8 +49,9 @@ export function useChatProjectFollow(params: {
   isOpen: boolean;
   hasSession: boolean;
   projectsLoaded: boolean;
+  routeProjectKnown: boolean;
 }) {
-  const { routeProjectId, isOpen, hasSession, projectsLoaded } = params;
+  const { routeProjectId, isOpen, hasSession, projectsLoaded, routeProjectKnown } = params;
   const selectedProjectIds = useChatStore((s) => s.selectedProjectIds);
   const locked = useChatStore((s) => s.projectContextLocked);
   const setSelectedProjectIds = useChatStore((s) => s.setSelectedProjectIds);
@@ -63,6 +64,7 @@ export function useChatProjectFollow(params: {
       locked,
       hasSession,
       projectsLoaded,
+      routeProjectKnown,
     });
     if (next) setSelectedProjectIds(next);
   }, [
@@ -72,6 +74,7 @@ export function useChatProjectFollow(params: {
     locked,
     hasSession,
     projectsLoaded,
+    routeProjectKnown,
     setSelectedProjectIds,
   ]);
 }

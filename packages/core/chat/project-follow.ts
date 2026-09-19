@@ -19,6 +19,11 @@ export interface ProjectFollowInput {
   /** The project list has resolved. Following before it does would bind an id
    *  the composer cannot render yet. */
   projectsLoaded: boolean;
+  /** The route's project is in the loaded project list. The composer prunes
+   *  ids the list does not know, so following one (stale list, project created
+   *  elsewhere) would be pruned and re-followed in a loop until the list
+   *  refetches. */
+  routeProjectKnown: boolean;
 }
 
 /**
@@ -37,11 +42,13 @@ export interface ProjectFollowInput {
  *     a project.
  */
 export function planFollowedProjectIds(input: ProjectFollowInput): string[] | null {
-  const { routeProjectId, selectedProjectIds, locked, hasSession, projectsLoaded } = input;
+  const { routeProjectId, selectedProjectIds, locked, hasSession, projectsLoaded, routeProjectKnown } =
+    input;
   if (hasSession) return null;
   if (locked) return null;
   if (!projectsLoaded) return null;
   if (!routeProjectId) return null;
+  if (!routeProjectKnown) return null;
   const next = [routeProjectId];
   return sameProjectIds(next, selectedProjectIds) ? null : next;
 }

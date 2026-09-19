@@ -259,6 +259,7 @@ export function ChatWindow() {
     isOpen,
     hasSession: !!currentSession,
     projectsLoaded,
+    routeProjectKnown: projects.some((project) => project.id === routeProjectId),
   });
 
   const qc = useQueryClient();

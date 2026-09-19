@@ -9,6 +9,7 @@ function input(overrides: Partial<ProjectFollowInput> = {}): ProjectFollowInput 
     locked: false,
     hasSession: false,
     projectsLoaded: true,
+    routeProjectKnown: true,
     ...overrides,
   };
 }
@@ -38,6 +39,11 @@ describe("planFollowedProjectIds", () => {
 
   it("waits for the project list", () => {
     expect(planFollowedProjectIds(input({ projectsLoaded: false }))).toBeNull();
+  });
+
+  it("does not follow a project the loaded list does not know", () => {
+    // The composer prunes unknown ids; following one would ping-pong with it.
+    expect(planFollowedProjectIds(input({ routeProjectKnown: false }))).toBeNull();
   });
 
   it("keeps the current set on a route that names no project", () => {
