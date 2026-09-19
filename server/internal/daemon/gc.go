@@ -82,6 +82,18 @@ type gcStats struct {
 
 // runGC performs a single GC scan across all workspace directories.
 func (d *Daemon) runGC(ctx context.Context) {
+	// Parallel-mode working copies first, because they are the only thing this
+	// cycle touches that does NOT live under WorkspacesRoot (DENE-617). They
+	// sit beside the user's repository, so the walk below can never reach
+	// them, and the early return on a missing workspaces root must not skip
+	// them either — hence before it rather than alongside the other pruners.
+	//
+	// The consent for this pass is the machine's own cleanup policy, which is
+	// off until the user switches it on; GCEnabled gating it as well only ever
+	// means less deleting, which is the safe direction for a directory on
+	// somebody else's disk.
+	d.runWorktreeCleanup()
+
 	root := d.cfg.WorkspacesRoot
 	entries, err := os.ReadDir(root)
 	if err != nil {

@@ -1,8 +1,12 @@
 package daemon
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,4 +200,112 @@ func TestAutomaticCleanupDoesNothingWhileDisabled(t *testing.T) {
 	if len(report.Items) != 1 || report.Items[0].KeepReason != execenv.KeepNotMulticaCreated {
 		t.Fatalf("items = %+v, want the unrecorded copy kept as %q", report.Items, execenv.KeepNotMulticaCreated)
 	}
+}
+
+// The entry point (DENE-617 S1). Everything above tests the machine's rules;
+// this tests that something in production actually RUNS them. The feature's
+// whole promise — "turn it on and merged, aged, clean copies go away" — is a
+// promise about a scheduled pass, and a pass nothing calls keeps none of it.
+//
+// It drives d.runGC, the daemon's live periodic cycle, rather than
+// RunAutomatic: deleting the call inside runGC must turn this red.
+func TestPeriodicGCRunsTheAutomaticWorktreeCleanup(t *testing.T) {
+	t.Setenv(cli.TaskConfigRootEnv, t.TempDir())
+	d := newGCTestDaemon(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+
+	repo, root, copyPath := newCleanableWorktree(t)
+	if err := d.worktreeCleanup.RecordRoot(root, repo); err != nil {
+		t.Fatalf("RecordRoot: %v", err)
+	}
+	if err := d.worktreeCleanup.SaveSettings(execenv.WorktreeCleanupSettings{
+		Enabled: true, MinAgeDays: 14, TrunkBranch: "main",
+	}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	// Sanity: the copy qualifies, so a green result below means the pass ran
+	// rather than that there was nothing to remove.
+	report := d.worktreeCleanup.Scan()
+	if len(report.Items) != 1 || !report.Items[0].Eligible() {
+		t.Fatalf("fixture is not a removal candidate: %+v", report.Items)
+	}
+
+	d.runGC(context.Background())
+
+	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
+		t.Fatalf("the GC cycle left the qualifying copy at %q (stat err %v); automatic cleanup is not wired to anything", copyPath, err)
+	}
+	// Removal went through git, so the repository has no orphan metadata left.
+	if out := runGitForGC(t, repo, "worktree", "list"); strings.Contains(out, copyPath) {
+		t.Fatalf("git still lists the removed copy:\n%s", out)
+	}
+}
+
+// The same cycle with the policy off removes nothing (invariant 6): the switch
+// is the user's consent, and the GC cycle must not be a way around it.
+func TestPeriodicGCRemovesNothingWhileCleanupIsDisabled(t *testing.T) {
+	t.Setenv(cli.TaskConfigRootEnv, t.TempDir())
+	d := newGCTestDaemon(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+
+	repo, root, copyPath := newCleanableWorktree(t)
+	if err := d.worktreeCleanup.RecordRoot(root, repo); err != nil {
+		t.Fatalf("RecordRoot: %v", err)
+	}
+
+	d.runGC(context.Background())
+
+	if _, err := os.Stat(copyPath); err != nil {
+		t.Fatalf("the GC cycle removed a copy while cleanup was switched off: %v", err)
+	}
+}
+
+// newCleanableWorktree builds a real repository plus one Multica-owned working
+// copy that satisfies every one of the five conditions: recorded as ours, idle,
+// clean, merged into main (its branch has no commits of its own) and long past
+// the retention window. Returns the repository, the worktree root and the copy.
+func newCleanableWorktree(t *testing.T) (repo, root, copyPath string) {
+	t.Helper()
+	base := t.TempDir()
+	repo = filepath.Join(base, "app")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitForGC(t, repo, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForGC(t, repo, "add", ".")
+	runGitForGC(t, repo, "commit", "-m", "initial")
+
+	// Beside the repository, never inside it (invariant 5).
+	root = filepath.Join(base, "app.multica-worktrees")
+	copyPath = filepath.Join(root, "task-1")
+	runGitForGC(t, repo, "worktree", "add", "-b", "multica/task-1", copyPath, "main")
+
+	// The ownership record execenv writes next to a copy it created. Written
+	// here rather than through execenv because the writer is unexported; the
+	// layout is the one readWorktreeRecord reads.
+	rec := execenv.WorktreeRecord{
+		Path:      copyPath,
+		GitRoot:   repo,
+		Branch:    "multica/task-1",
+		CreatedAt: time.Now().Add(-90 * 24 * time.Hour).UTC(),
+		LastRunAt: time.Now().Add(-60 * 24 * time.Hour).UTC(),
+	}
+	payload, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordDir := filepath.Join(root, ".multica")
+	if err := os.MkdirAll(recordDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recordDir, filepath.Base(copyPath)+".json"), payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return repo, root, copyPath
 }

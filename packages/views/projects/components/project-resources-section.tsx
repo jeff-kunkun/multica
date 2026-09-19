@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowDown,
+  ArrowUp,
   ChevronRight,
   FolderGit,
   FolderOpen,
@@ -56,6 +58,11 @@ import { findDuplicateSources } from "@multica/core/projects/source-rule";
 import { DuplicateSourceBanner } from "./duplicate-source-banner";
 import { LocalDirectoryModeDialog } from "./local-directory-mode-dialog";
 import { localDirectoryLabel } from "./local-directory-label";
+import {
+  canMoveLocalDirectory,
+  moveLocalDirectory,
+  type MoveDirection,
+} from "./local-directory-order";
 import { worktreeRootForSave, worktreeRootProblem } from "./worktree-root";
 import {
   apiExecutionMode,
@@ -451,6 +458,41 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     }
   };
 
+  // Which local directory a run WRITES is the first one on this machine, so
+  // reordering is the control over that — not a cosmetic list preference. The
+  // rule lives in local-directory-order.ts; this only sends what it decided.
+  const handleMoveLocalDirectory = async (
+    resource: ProjectResource,
+    direction: MoveDirection,
+  ) => {
+    const patches = moveLocalDirectory(
+      resources,
+      resource.id,
+      localDaemonId,
+      direction,
+    );
+    if (patches.length === 0) return;
+    try {
+      // Sequential, not concurrent: the list is a handful of rows, and two
+      // position writes racing on one project would leave an order neither
+      // request asked for.
+      for (const patch of patches) {
+        // Position only — resending resource_ref on an unrelated edit is how
+        // a rename silently dropped a directory's isolation (#7113).
+        await updateResource.mutateAsync({
+          resourceId: patch.resourceId,
+          data: { position: patch.position },
+        });
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.resources.toast_local_mode_update_failed),
+      );
+    }
+  };
+
   const handleRemove = async (resource: ProjectResource) => {
     try {
       await deleteResource.mutateAsync(resource.id);
@@ -534,6 +576,21 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                     )
                   }
                   canEdit={desktopMode}
+                  canMoveUp={canMoveLocalDirectory(
+                    resources,
+                    resource.id,
+                    localDaemonId,
+                    "up",
+                  )}
+                  canMoveDown={canMoveLocalDirectory(
+                    resources,
+                    resource.id,
+                    localDaemonId,
+                    "down",
+                  )}
+                  onMove={(direction) =>
+                    void handleMoveLocalDirectory(resource, direction)
+                  }
                   onRemove={() => handleRemove(resource)}
                   onRenameLocalDirectory={handleRenameLocalDirectory}
                   onEditLocalDirectoryMode={(target) => {
@@ -731,6 +788,10 @@ interface ResourceRowProps {
   localDaemonId: string | null;
   localSharedOverride: boolean;
   canEdit: boolean;
+  /** False at the ends of this machine's group, and on every other row type. */
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMove: (direction: MoveDirection) => void;
   onRemove: () => void;
   onRenameLocalDirectory: (
     resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
@@ -746,6 +807,9 @@ function ResourceRow({
   localDaemonId,
   localSharedOverride,
   canEdit,
+  canMoveUp,
+  canMoveDown,
+  onMove,
   onRemove,
   onRenameLocalDirectory,
   onEditLocalDirectoryMode,
@@ -792,6 +856,9 @@ function ResourceRow({
         localDaemonId={localDaemonId}
         localSharedOverride={localSharedOverride}
         canEdit={canEdit}
+        canMoveUp={canMoveUp}
+        canMoveDown={canMoveDown}
+        onMove={onMove}
         onRemove={onRemove}
         onRename={onRenameLocalDirectory}
         onEditMode={onEditLocalDirectoryMode}
@@ -821,6 +888,9 @@ interface LocalDirectoryRowProps {
   localDaemonId: string | null;
   localSharedOverride: boolean;
   canEdit: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMove: (direction: MoveDirection) => void;
   onRemove: () => void;
   onRename: (
     resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
@@ -836,6 +906,9 @@ function LocalDirectoryRow({
   localDaemonId,
   localSharedOverride,
   canEdit,
+  canMoveUp,
+  canMoveDown,
+  onMove,
   onRemove,
   onRename,
   onEditMode,
@@ -948,6 +1021,35 @@ function LocalDirectoryRow({
             {t(($) => $.resources.mode_badge_shared_tooltip)}
           </TooltipContent>
         </Tooltip>
+      )}
+      {/* Reordering, not decoration: the first directory on this machine is the
+          one a run writes, so these are how the user picks it. Rendered only
+          when there IS a sibling to move past, because a permanently disabled
+          arrow on a single-directory project is a control that never means
+          anything. */}
+      {!editing && (canMoveUp || canMoveDown) && (
+        <>
+          <button
+            type="button"
+            disabled={!canMoveUp}
+            onClick={() => onMove("up")}
+            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent disabled:opacity-30 disabled:hover:bg-transparent"
+            title={t(($) => $.resources.local_directory_move_up_tooltip)}
+            aria-label={t(($) => $.resources.local_directory_move_up_tooltip)}
+          >
+            <ArrowUp className="size-3 text-muted-foreground" />
+          </button>
+          <button
+            type="button"
+            disabled={!canMoveDown}
+            onClick={() => onMove("down")}
+            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent disabled:opacity-30 disabled:hover:bg-transparent"
+            title={t(($) => $.resources.local_directory_move_down_tooltip)}
+            aria-label={t(($) => $.resources.local_directory_move_down_tooltip)}
+          >
+            <ArrowDown className="size-3 text-muted-foreground" />
+          </button>
+        </>
       )}
       {/* Not gated on `mismatch`: switching the mode only rewrites a field, so
           it works from the web app or another device, unlike rename (whose

@@ -3866,35 +3866,70 @@ func sharedClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRun
 // filterResourcesForDaemonCapabilities narrows a claim's resource set to what
 // the claiming daemon can actually act on (DENE-617 invariant 15).
 //
-// One field needs it today: worktree_root. A daemon that predates the move of
-// parallel working copies onto the user's disk json-skips the field and builds
-// the copy inside its own env root — where the workspace GC reclaims it. The
-// user who chose a location would then see their setting ignored, silently and
+// Two things need it, and the capability bit covers both because they shipped
+// together: a daemon declaring local-worktree-user-root-v1 is a daemon built
+// after this change, and one that does not is the daemon this function exists
+// to protect.
+//
+// One is the worktree_root field. A daemon that predates the move of parallel
+// working copies onto the user's disk json-skips the field and builds the copy
+// inside its own env root — where the workspace GC reclaims it. The user who
+// chose a location would then see their setting ignored, silently and
 // permanently, with the copy vanishing on a schedule they never agreed to.
 //
-// Stripping it at the dispatch point means such a daemon behaves EXACTLY as it
+// The other is the COUNT. Before this change a project held at most one
+// local_directory per daemon, and an old daemon's findLocalDirectoryAssignment
+// enforces that by failing the task outright when it sees a second one for
+// itself — correct then, because a second row could only mean corruption; a
+// task-killing error now, because a second row is a feature. It receives the
+// first row in position order, which is the same row the new daemon would
+// choose as its working directory, and the read-only extras — the part it
+// cannot implement — simply never reach it.
+//
+// Narrowing at the dispatch point means such a daemon behaves EXACTLY as it
 // does today — no new failure, no partially-honoured setting — and the rule
 // stays where it can be stated once: what a daemon receives is a subset of
 // what it declared it can handle. Old daemons need no change to keep working
 // (invariant 18).
 //
-// The resource is otherwise untouched: the directory, the daemon binding and
+// What survives is otherwise untouched: the directory, the daemon binding and
 // the execution mode are still what the project configured, because those an
 // old daemon does implement.
 func filterResourcesForDaemonCapabilities(resources []ProjectResourceData, supportsUserWorktreeRoot bool) []ProjectResourceData {
 	if supportsUserWorktreeRoot || len(resources) == 0 {
 		return resources
 	}
-	out := make([]ProjectResourceData, len(resources))
-	copy(out, resources)
-	for i := range out {
-		if out[i].ResourceType != "local_directory" {
+	// Position order is the caller's: every query feeding this payload orders
+	// by position, and position is what decides which directory a run writes.
+	// Keeping the first occurrence per daemon_id is therefore the same choice
+	// a current daemon makes, not an arbitrary one.
+	seenDaemon := map[string]bool{}
+	out := make([]ProjectResourceData, 0, len(resources))
+	for _, res := range resources {
+		if res.ResourceType != "local_directory" {
+			out = append(out, res)
 			continue
 		}
-		stripped, changed := stripRefField(out[i].ResourceRef, "worktree_root")
-		if changed {
-			out[i].ResourceRef = stripped
+		var ref struct {
+			DaemonID string `json:"daemon_id"`
 		}
+		// An unparseable ref is left in place rather than dropped: this
+		// function narrows what a daemon receives, and a row it cannot read is
+		// not a row it can prove is a duplicate. The daemon's own parser
+		// reports the malformed ref, which is where that error belongs.
+		if err := json.Unmarshal(res.ResourceRef, &ref); err == nil {
+			key := strings.TrimSpace(ref.DaemonID)
+			if key != "" {
+				if seenDaemon[key] {
+					continue
+				}
+				seenDaemon[key] = true
+			}
+		}
+		if stripped, changed := stripRefField(res.ResourceRef, "worktree_root"); changed {
+			res.ResourceRef = stripped
+		}
+		out = append(out, res)
 	}
 	return out
 }

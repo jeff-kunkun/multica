@@ -326,6 +326,26 @@ func (s *worktreeCleanupState) RunAutomatic() (removed int, bytes int64, errs []
 	return removed, bytes, errs
 }
 
+// runWorktreeCleanup is the automatic pass's one production entry point: the
+// daemon's periodic GC cycle calls it, and it is what makes the setting on the
+// storage screen do something rather than describe something.
+//
+// It reports nothing when there was nothing to do. A machine whose owner never
+// switched cleanup on runs this every cycle and must stay silent, so only a
+// removal or a failure reaches the log.
+func (d *Daemon) runWorktreeCleanup() {
+	removed, bytes, errs := d.worktreeCleanup.RunAutomatic()
+	if d.logger == nil {
+		return
+	}
+	for _, err := range errs {
+		d.logger.Warn("gc: worktree cleanup failed for one copy", "error", err)
+	}
+	if removed > 0 {
+		d.logger.Info("gc: worktree copies reclaimed", "removed", removed, "bytes_reclaimed", bytes)
+	}
+}
+
 // writeJSONFileAtomic writes v as indented JSON through a temp file and a
 // rename, so a reader never sees a half-written policy.
 func writeJSONFileAtomic(path string, v any) error {

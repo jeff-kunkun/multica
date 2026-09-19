@@ -152,7 +152,9 @@
     "duplicate_merged": "Removed the redundant remote entries",
     "mode_worktree_cost": "Costs disk on YOUR drive: a full working copy per task, created under {{path}}. You can open them, and Multica never deletes one that still has uncommitted changes.",
     "mode_worktree_cost_unknown_path": "Costs disk on YOUR drive: a full working copy per task, created in a folder next to this repository. You can open them, and Multica never deletes one that still has uncommitted changes.",
-    "local_directory_default_hint": "Tasks on this machine run in the first directory in this list. Drag to reorder; the others stay available read-only.",
+    "local_directory_default_hint": "Tasks on this machine run in the first directory in this list. Use the arrows to reorder; the others stay available read-only.",
+    "local_directory_move_up_tooltip": "Move up",
+    "local_directory_move_down_tooltip": "Move down",
     "mode_worktree_root_label": "Working copies go in",
     "mode_worktree_root_not_absolute": "Use an absolute path — a relative one would land wherever the daemon happens to be running.",
     "mode_worktree_root_inside_repo": "This is inside the repository. Copies there would show up in your own git status and need a .gitignore entry — pick a folder beside it instead."
