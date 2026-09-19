@@ -344,7 +344,8 @@
       "plugins": "Plugins",
       "mcp": "MCP",
       "billing": "Billing",
-      "config_transfer": "Export & import"
+      "config_transfer": "Export & import",
+      "routing": "Routing"
     },
     "groups": {
       "personal": "Personal",
@@ -1401,6 +1402,39 @@
       "reason_db_error": "database error",
       "confirm_title": "Import this configuration?",
       "confirm_description": "This writes configuration into the current workspace. It cannot be undone from this page."
+    }
+  },
+  "routing": {
+    "title": "Routing",
+    "description": "When an issue is created and whenever its status changes, decide who should be holding it and fill the executor and reviewer slots. Routing never changes status — status is a fact only whoever is doing the work knows.",
+    "section_title": "Routing model",
+    "enabled_label": "Enable automatic dispatch",
+    "enabled_description": "Switched off, the product behaves exactly as it did before: no routing comments, no mentions. Values already written to issues are kept.",
+    "model_label": "Routing model",
+    "model_description": "The model that makes the call. Left empty, routing is unconfigured and does nothing even with the switch on.",
+    "model_placeholder": "e.g. gpt-5.6-luna",
+    "threshold_label": "Confidence threshold",
+    "threshold_description": "Below this, the slot is left empty and you are mentioned once with the reason instead. Defaults to 0.70.",
+    "no_credentials_note": "No credentials are stored here — they belong to the deployment's model configuration.",
+    "filters_title": "Candidate filters",
+    "filters_placeholder": "Supported later; not implemented in this version. Today candidates are narrowed by direction and gated by confidence.",
+    "states": {
+      "off": {
+        "chip": "Off",
+        "detail": "While off, everything works exactly as it did before."
+      },
+      "incomplete": {
+        "chip": "Incomplete",
+        "detail": "The switch is on but no model is chosen — this still behaves exactly like off."
+      },
+      "enabled": {
+        "chip": "Enabled",
+        "detail": "New issues are dispatched automatically, and each decision is explained in a comment on the issue."
+      },
+      "ineffective": {
+        "chip": "Not in effect",
+        "detail": "The model was rejected, is unreachable, was deleted, or is cooling down after repeated failures. Behaves like off; nothing appears on any issue."
+      }
     }
   }
 }
