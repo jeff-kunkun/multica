@@ -395,6 +395,14 @@ func TestBuildClaudeArgsAutocompactCanBeConfiguredAndOverridden(t *testing.T) {
 	}
 }
 
+func TestStripClaudeAutoCompactArgs(t *testing.T) {
+	got := stripClaudeAutoCompactArgs([]string{"-p", "--autocompact", "200000", "--autocompact", "500000", "--verbose"})
+	want := []string{"-p", "--verbose"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("stripClaudeAutoCompactArgs = %v, want %v", got, want)
+	}
+}
+
 func TestBuildClaudeArgsUsesStrictMCPForManagedConfig(t *testing.T) {
 	t.Parallel()
 

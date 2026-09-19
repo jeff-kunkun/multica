@@ -9203,12 +9203,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		thinkingLevel = task.Agent.ThinkingLevel
 		serviceTier = task.Agent.ServiceTier
 		if provider == "claude" && len(task.Agent.RuntimeConfig) > 0 {
-			var runtimeConfig struct {
-				AutoCompactTokens int `json:"autocompact_tokens"`
-			}
-			if err := json.Unmarshal(task.Agent.RuntimeConfig, &runtimeConfig); err == nil {
-				claudeAutoCompactTokens = runtimeConfig.AutoCompactTokens
-			}
+			claudeAutoCompactTokens = decodeClaudeRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 		}
 	}
 	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),

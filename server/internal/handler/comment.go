@@ -2584,7 +2584,7 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 	switch trigger.Source {
 	case commentTriggerSourceIssueAssignee:
 		if trigger.Squad != nil {
-			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
+			if _, err := h.TaskService.EnqueueTaskForSquadLeaderFresh(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
 				logCommentEnqueueFailure("enqueue squad leader task failed", err,
 					"issue_id", uuidToString(issue.ID),
 					"squad_id", uuidToString(trigger.Squad.ID),
@@ -2593,19 +2593,19 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 			}
 			return nil
 		}
-		if _, err := h.TaskService.EnqueueTaskForIssue(ctx, issue, triggerCommentID); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForIssueFresh(ctx, issue, triggerCommentID); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", uuidToString(issue.ID), "error", err)
 			return err
 		}
 	case commentTriggerSourceMentionSquadLeader:
-		if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForSquadLeaderFresh(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
 			logCommentEnqueueFailure("enqueue squad leader mention task failed", err,
 				"issue_id", uuidToString(issue.ID),
 				"agent_id", uuidToString(trigger.Agent.ID))
 			return err
 		}
 	case commentTriggerSourceMentionAgent:
-		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForMentionFresh(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
 			logCommentEnqueueFailure("enqueue mention agent task failed", err,
 				"issue_id", uuidToString(issue.ID),
 				"agent_id", uuidToString(trigger.Agent.ID))
@@ -2619,9 +2619,9 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 		// for the thread-parent path. Gating on the source as well would keep
 		// the thread-parent path demoted for no reason (MUL-7006).
 		if trigger.Squad != nil {
-			_, err = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID)
+			_, err = h.TaskService.EnqueueTaskForSquadLeaderFresh(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID)
 		} else {
-			_, err = h.TaskService.EnqueueTaskForThreadParent(ctx, issue, trigger.Agent.ID, triggerCommentID)
+			_, err = h.TaskService.EnqueueTaskForThreadParentFresh(ctx, issue, trigger.Agent.ID, triggerCommentID)
 		}
 		if err != nil {
 			logCommentEnqueueFailure("enqueue routed comment agent task failed", err,
