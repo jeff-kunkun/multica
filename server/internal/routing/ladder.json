@@ -9,29 +9,43 @@
     "a second lookup table. A tier whose seat does not exist in the workspace is",
     "skipped at candidate-build time rather than failing the call.",
     "",
-    "KNOWN DRIFT (DENE-633): this ladder is a transcription of the ladder named",
-    "in the issue. The live roster has since grown past it — 孙悟饭 (gpt-6-astra),",
-    "特兰克斯 (gpt-5.6-sol) and 克林 (gpt-5.6-luna) exist as base seats and are not",
-    "listed here, and 贝吉塔 and 比克 still share one model, so the two bottom rungs",
-    "are the same strength. Straightening the ladder is configuration work that",
-    "belongs to whoever owns the roster; when it happens, this file is the only",
-    "edit."
+    "The rung order is the strength each base seat declares in its own agent",
+    "instructions (最强 / 强 / 中 / 弱). Two seats sharing a declared label are",
+    "ordered by model strength, which is the only tie-break applied here.",
+    "",
+    "KNOWN DRIFT (DENE-638): 贝吉塔 declares 中 but runs the same",
+    "command-code2/deepseek-v4.1-flash as 比克 (弱), while 克林 (弱) runs the",
+    "stronger gpt-5.6-luna. The 中 rung is therefore not actually stronger than",
+    "the 弱 rungs below it. Resolving that means changing a seat's model or its",
+    "declared strength — a roster decision, not a ladder edit — so this file",
+    "records the declared order rather than inventing a different one."
   ],
   "tiers": [
     { "key": "strongest", "base": "布尔玛", "label": "最强" },
+    { "key": "strongest_alt", "base": "孙悟饭", "label": "最强·次" },
     { "key": "strong", "base": "孙悟空", "label": "强" },
+    { "key": "strong_alt", "base": "特兰克斯", "label": "强·次" },
     { "key": "medium", "base": "贝吉塔", "label": "中" },
-    { "key": "weak", "base": "比克", "label": "弱" }
+    { "key": "weak", "base": "克林", "label": "弱" },
+    { "key": "weakest", "base": "比克", "label": "弱·次" }
   ],
   "directions": ["游戏", "出海", "自媒体", "学术"],
   "_projects_comment": [
     "project name -> direction. A project absent from this map, or an issue with",
     "no project at all, routes to the generic (undirected) rung of the ladder;",
-    "the decision comment says the direction is unknown rather than guessing one."
+    "the decision comment says the direction is unknown rather than guessing one.",
+    "",
+    "Only projects whose direction is unambiguous from the project itself are",
+    "listed. The remaining live projects — Nexus-GPU, AI100, bnb contract,",
+    "RelayVPS, tarot, ego-lens, Multica 魔改, Agent mono仓库管理 — are left out on",
+    "purpose: a wrong direction sends work to a seat carrying the wrong domain",
+    "pack, which is worse than routing undirected. They go in once the roster",
+    "owner names each one's direction."
   ],
   "projects": {
     "game": "游戏",
     "game-multica": "游戏",
-    "game-relay": "游戏"
+    "game-relay": "游戏",
+    "自媒体": "自媒体"
   }
 }
