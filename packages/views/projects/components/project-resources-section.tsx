@@ -314,15 +314,36 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // when they made one, otherwise the default this machine computed (adding)
   // or the location already stored (editing).
   const worktreeRootShown =
-    modeDialog?.worktreeRoot ??
-    modeDialog?.defaultWorktreeRoot ??
-    modeDialog?.resource?.resource_ref.worktree_root;
+    modeDialog?.worktreeRoot ?? modeDialog?.defaultWorktreeRoot;
   const worktreeRootToStore = modeDialog
     ? worktreeRootForSave(
         worktreeRootShown ?? "",
         modeDialog.defaultWorktreeRoot ?? undefined,
       )
     : undefined;
+
+  // Re-measures a directory that is already saved, and folds the result into
+  // the open dialog. Late and best-effort by design: the dialog must be usable
+  // the instant it opens, and a machine that cannot answer must not block it.
+  const refreshMeasuredDirectory = async (path: string) => {
+    try {
+      const measured = await validateLocalDirectory(path);
+      if (!measured.ok) return;
+      setModeDialog((current) =>
+        current && current.path === path
+          ? {
+              ...current,
+              isGitRepo: measured.is_git_repo,
+              gitRoot: measured.git_root,
+              defaultWorktreeRoot: measured.default_worktree_root,
+            }
+          : current,
+      );
+    } catch {
+      // Unmeasurable is the same as unmeasured: the stored value is shown and
+      // the daemon still has the final say.
+    }
+  };
 
   const handleConfirmMode = async (mode: LocalDirectoryExecutionMode) => {
     if (!modeDialog || modeSaving) return;
@@ -527,13 +548,23 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                           target.resource_ref.local_path,
                         ),
                       ),
-                      // The path is already saved, so there is nothing to
-                      // re-validate from the browser; the desktop check only
-                      // runs at pick time. Unknown means the option stays
-                      // available and the daemon has the final say.
+                      // Opened with what the row already knows; the measured
+                      // fields below arrive a moment later. Unknown means the
+                      // option stays available and the daemon has the final
+                      // say, so the dialog is useful before they land.
                       isGitRepo: undefined,
                       resource: target,
+                      worktreeRoot: target.resource_ref.worktree_root,
                     });
+                    // Upgrading an existing directory to parallel is the same
+                    // decision as choosing it when adding one, so it gets the
+                    // same information: where the copies would land, and
+                    // whether a folder typed there sits inside the repository.
+                    // Only this machine can measure that, and only for a
+                    // directory it holds — a resource pinned elsewhere, or a
+                    // web client, simply gets no measurement and falls back to
+                    // showing the stored value.
+                    void refreshMeasuredDirectory(target.resource_ref.local_path);
                   }}
                 />
               ))}

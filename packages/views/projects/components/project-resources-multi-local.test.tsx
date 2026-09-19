@@ -13,6 +13,7 @@ import { renderWithI18n } from "../../test/i18n";
 // wiring the component owns.
 
 const createMock = vi.fn().mockResolvedValue({});
+const updateMock = vi.fn().mockResolvedValue({});
 
 const existing = [
   {
@@ -37,7 +38,7 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("@multica/core/projects", () => ({
   projectResourcesOptions: () => ({ queryKey: ["project-resources"], queryFn: vi.fn() }),
   useCreateProjectResource: () => ({ mutateAsync: createMock, isPending: false }),
-  useUpdateProjectResource: () => ({ mutateAsync: vi.fn() }),
+  useUpdateProjectResource: () => ({ mutateAsync: updateMock }),
   useDeleteProjectResource: () => ({ mutateAsync: vi.fn() }),
 }));
 
@@ -294,5 +295,60 @@ describe("ProjectResourcesSection — where parallel-mode copies land", () => {
     await waitFor(() =>
       expect(screen.queryByLabelText(/working copies go in/i)).not.toBeInTheDocument(),
     );
+  });
+});
+
+// Upgrading an EXISTING directory to parallel is the same decision as choosing
+// it while adding one, so the dialog has to tell the user the same thing: where
+// the copies would land, and whether a folder typed there is inside the repo.
+describe("ProjectResourcesSection — upgrading an existing directory to parallel", () => {
+  beforeEach(() => {
+    createMock.mockClear();
+    updateMock.mockClear();
+    toastErrorMock.mockClear();
+    validation.current = {
+      ok: true,
+      is_git_repo: true,
+      real_path: "/Users/me/code/app",
+      git_root: "/Users/me/code/app",
+      default_worktree_root: "/Users/me/code/app.multica-worktrees",
+    };
+  });
+
+  async function openModeEditor() {
+    fireEvent.click(
+      await screen.findByRole("button", { name: /change how runs use this folder/i }),
+    );
+    await waitFor(() => expect(screen.getAllByRole("radio")).toHaveLength(3));
+  }
+
+  it("measures the saved directory and offers its landing folder", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    await openModeEditor();
+    fireEvent.click(screen.getAllByRole("radio")[1]!);
+
+    // The measurement arrives after the dialog opens; the field appears with it.
+    const field = await screen.findByLabelText(/working copies go in/i);
+    expect(field).toHaveValue("/Users/me/code/app.multica-worktrees");
+  });
+
+  it("saves a changed landing folder onto the existing resource", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    await openModeEditor();
+    fireEvent.click(screen.getAllByRole("radio")[1]!);
+    const field = await screen.findByLabelText(/working copies go in/i);
+    fireEvent.change(field, { target: { value: "/Volumes/Fast/copies" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalled());
+    const payload = updateMock.mock.calls[0]?.[0] as {
+      data: { resource_ref: Record<string, unknown> };
+    };
+    expect(payload.data.resource_ref.execution_mode).toBe("worktree");
+    expect(payload.data.resource_ref.worktree_root).toBe("/Volumes/Fast/copies");
+    // Every other field survives: the server replaces the whole ref rather
+    // than deep-merging it.
+    expect(payload.data.resource_ref.local_path).toBe("/Users/me/code/app");
+    expect(payload.data.resource_ref.real_path).toBe("/Users/me/code/app");
   });
 });
