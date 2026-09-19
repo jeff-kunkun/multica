@@ -32,6 +32,7 @@ import type {
   WorkspaceSubscriptionEntitlements,
   WorkspaceSubscriptionSummary,
   IssueLimitUsage,
+  IssueAgentGuardResponse,
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPrices,
   CreateWorkspaceSubscriptionCheckoutResponse,
@@ -1124,6 +1125,12 @@ export const IssueTriggerPreviewSchema = z.object({
 // unknown keys land as `unknown` to a caller, but the field itself defaults
 // to {} so consumers never need to nil-guard `issue.metadata`.
 const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({});
+
+export const IssueAgentGuardResponseSchema = z.object({
+  issue_id: z.string(),
+  halted: z.boolean(),
+  metadata: IssueMetadataSchema.optional(),
+}).loose() satisfies z.ZodType<IssueAgentGuardResponse>;
 
 const SourceContextAttachmentSchema = z.object({
   id: z.string(),

@@ -6,6 +6,7 @@ import { ChevronRight, Loader2, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import { issueTasksOptions } from "@multica/core/issues/queries";
+import { useHaltIssueRuns, useResumeIssueRuns } from "@multica/core/issues/mutations";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import type { AgentTask } from "@multica/core/types";
 import { useTimeAgo } from "../../i18n";
@@ -57,8 +58,10 @@ import { useStatusLabel, useTriggerText } from "./task-run-labels";
 
 interface ExecutionLogSectionProps {
   issueId: string;
+  workspaceId?: string;
   /** Shown in the usage dialog's subtitle so the panel names what it totals. */
   identifier?: string;
+  halted?: boolean;
 }
 
 // Past-runs sort priority: newest first by timestamp. When two runs
@@ -70,11 +73,13 @@ const PAST_STATUS_RANK: Record<string, number> = {
   completed: 2,
 };
 
-export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSectionProps) {
+export function ExecutionLogSection({ issueId, workspaceId, identifier, halted = false }: ExecutionLogSectionProps) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
   const [showPast, setShowPast] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const haltMutation = useHaltIssueRuns(issueId, workspaceId);
+  const resumeMutation = useResumeIssueRuns(issueId, workspaceId);
 
   // Cache key registered in `issueKeys.tasks` (packages/core/issues/queries.ts)
   // so the global useRealtimeSync `task:` prefix path invalidates it via
@@ -120,7 +125,7 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
     });
   }, [tasks]);
 
-  if (activeTasks.length === 0 && pastTasks.length === 0) return null;
+  if (activeTasks.length === 0 && pastTasks.length === 0 && !halted) return null;
 
   return (
     // `@container/execution-log`: the header's three items only fit side by
@@ -165,6 +170,25 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
           alone={activeTasks.length === 0}
           onOpen={() => setUsageOpen(true)}
         />
+        <button
+          type="button"
+          className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-caption text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={haltMutation.isPending || resumeMutation.isPending}
+          onClick={() => {
+            const mutation = halted ? resumeMutation : haltMutation;
+            mutation.mutate(undefined, {
+              onError: (error) => toast.error(
+                error instanceof Error
+                  ? error.message
+                  : t(($) => halted ? $.execution_log.resume_failed : $.execution_log.halt_failed),
+              ),
+            });
+          }}
+          aria-label={halted ? t(($) => $.execution_log.resume_all) : t(($) => $.execution_log.halt_all)}
+        >
+          {(haltMutation.isPending || resumeMutation.isPending) ? <Loader2 className="!size-3 animate-spin" /> : <Square className="!size-3" />}
+          {halted ? t(($) => $.execution_log.resume_all) : t(($) => $.execution_log.halt_all)}
+        </button>
       </div>
       {open && (
         <div className="space-y-0.5 pl-2">

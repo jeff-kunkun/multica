@@ -362,6 +362,20 @@ var issueRerunCmd = &cobra.Command{
 	RunE:  runIssueRerun,
 }
 
+var issueHaltCmd = &cobra.Command{
+	Use:   "halt <issue-id>",
+	Short: "Stop all runs on an issue and block agent triggers",
+	Args:  exactArgs(1),
+	RunE:  runIssueHalt,
+}
+
+var issueResumeCmd = &cobra.Command{
+	Use:   "resume <issue-id>",
+	Short: "Allow agent runs on an issue again",
+	Args:  exactArgs(1),
+	RunE:  runIssueResume,
+}
+
 var issueCancelTaskCmd = &cobra.Command{
 	Use:   "cancel-task <run-id>",
 	Short: "Cancel an in-progress or queued run (interrupts in-flight agent)",
@@ -499,6 +513,8 @@ func init() {
 	issueCmd.AddCommand(issueUsageCmd)
 	issueCmd.AddCommand(issueRerunCmd)
 	issueCmd.AddCommand(issueCancelTaskCmd)
+	issueCmd.AddCommand(issueHaltCmd)
+	issueCmd.AddCommand(issueResumeCmd)
 	issueCmd.AddCommand(issueSearchCmd)
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
@@ -615,6 +631,8 @@ func init() {
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
+	issueHaltCmd.Flags().String("output", "json", "Output format: table or json")
+	issueResumeCmd.Flags().String("output", "json", "Output format: table or json")
 	// issue cancel-task
 	issueCancelTaskCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCancelTaskCmd.Flags().String("issue", "", "Issue ID/key to scope short run ID prefix resolution")
@@ -2602,6 +2620,37 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 	}
 	agent := loadActorDisplayLookup(ctx, client).agent(strVal(task, "agent_id"))
 	fmt.Fprintf(os.Stdout, "Re-enqueued run %s on agent %s\n", strVal(task, "id"), agent)
+	return nil
+}
+
+func runIssueHalt(cmd *cobra.Command, args []string) error {
+	return runIssueGuardCommand(cmd, args[0], "halt", "halt issue")
+}
+
+func runIssueResume(cmd *cobra.Command, args []string) error {
+	return runIssueGuardCommand(cmd, args[0], "resume", "resume issue")
+}
+
+func runIssueGuardCommand(cmd *cobra.Command, input, action, label string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	issueRef, err := resolveIssueRef(ctx, client, input)
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/"+action, map[string]any{}, &result); err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Fprintf(os.Stdout, "Issue %s -> halted=%v\n", issueRef.ID, result["halted"])
 	return nil
 }
 
