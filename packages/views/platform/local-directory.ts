@@ -52,6 +52,9 @@ export type ValidateLocalDirectoryResult = {
   /** Where parallel mode would put working copies by default: the
    *  repository's sibling. A preview — the daemon decides. */
   default_worktree_root?: string;
+  /** The repository root containing the directory, when there is one. Lets
+   *  the picker refuse a worktree root inside the user's own repository. */
+  git_root?: string;
 };
 
 interface DesktopLocalDirectoryAPI {

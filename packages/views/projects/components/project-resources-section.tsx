@@ -59,6 +59,7 @@ import {
 import { DuplicateSourceBanner } from "./duplicate-source-banner";
 import { LocalDirectoryModeDialog } from "./local-directory-mode-dialog";
 import { localDirectoryLabel } from "./local-directory-label";
+import { worktreeRootForSave, worktreeRootProblem } from "./worktree-root";
 import {
   apiExecutionMode,
   displayedExecutionMode,
@@ -114,6 +115,12 @@ type ModeDialogState = {
    * their own disk, and a cost you only discover afterwards is not a choice.
    */
   defaultWorktreeRoot?: string;
+  /** The repository root, when the machine could read it — only used to warn
+   *  that a typed landing folder sits inside the repository. */
+  gitRoot?: string;
+  /** What the user has typed for the landing folder, once they have edited
+   *  it. Undefined means "still the default", which is stored as absent. */
+  worktreeRoot?: string;
 };
 
 export function ProjectResourcesSection({ projectId }: { projectId: string }) {
@@ -297,6 +304,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
         realPath: validation.real_path,
         repoKey: validation.repo_key,
         defaultWorktreeRoot: validation.default_worktree_root,
+        gitRoot: validation.git_root,
       });
       setAddOpen(false);
     } catch (err) {
@@ -310,8 +318,30 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     }
   };
 
+  // What the dialog currently shows as the landing folder: the user's edit
+  // when they made one, otherwise the default this machine computed (adding)
+  // or the location already stored (editing).
+  const worktreeRootShown =
+    modeDialog?.worktreeRoot ??
+    modeDialog?.defaultWorktreeRoot ??
+    modeDialog?.resource?.resource_ref.worktree_root;
+  const worktreeRootToStore = modeDialog
+    ? worktreeRootForSave(
+        worktreeRootShown ?? "",
+        modeDialog.defaultWorktreeRoot ?? undefined,
+      )
+    : undefined;
+
   const handleConfirmMode = async (mode: LocalDirectoryExecutionMode) => {
     if (!modeDialog || modeSaving) return;
+    // A landing folder the daemon would refuse must not be saved: the refusal
+    // would arrive as a failed task, long after the dialog is gone.
+    if (
+      mode === "worktree" &&
+      worktreeRootProblem(worktreeRootShown ?? "", modeDialog.gitRoot) !== undefined
+    ) {
+      return;
+    }
     setModeSaving(true);
     setModeError(null);
     const apiMode = apiExecutionMode(mode, serverAcceptsShared);
@@ -329,13 +359,22 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           setModeDialog(null);
           return;
         }
-        if (apiChanged) {
+        const rootChanged = (ref.worktree_root ?? "") !== (worktreeRootToStore ?? "");
+        if (apiChanged || rootChanged) {
           await updateResource.mutateAsync({
             resourceId: modeDialog.resource.id,
             data: {
               // Spread first so every other ref field survives the edit — the
-              // server replaces the whole ref, it does not deep-merge.
-              resource_ref: { ...ref, execution_mode: apiMode },
+              // server replaces the whole ref, it does not deep-merge. The
+              // landing folder is then set or REMOVED, so clearing it back to
+              // the default is expressible.
+              resource_ref: {
+                ...ref,
+                execution_mode: apiMode,
+                ...(worktreeRootToStore
+                  ? { worktree_root: worktreeRootToStore }
+                  : { worktree_root: undefined }),
+              },
             },
           });
         }
@@ -357,6 +396,10 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
             ...(modeDialog.isGitRepo === undefined
               ? {}
               : { is_git_repo: modeDialog.isGitRepo }),
+            // Only a location the user actually chose is stored. The default
+            // is "beside the repository", which follows a repository they
+            // later move; a stored literal would keep pointing at the old place.
+            ...(worktreeRootToStore ? { worktree_root: worktreeRootToStore } : {}),
           },
         });
       }
@@ -639,9 +682,12 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           )}
           sharedUnavailable={sharedUnavailable}
           sharedUsesLocalOverride={sharedUsesLocalOverride}
-          worktreeRootPreview={
-            modeDialog.defaultWorktreeRoot ??
-            modeDialog.resource?.resource_ref.worktree_root
+          worktreeRootPreview={worktreeRootShown}
+          gitRoot={modeDialog.gitRoot}
+          onWorktreeRootChange={(next) =>
+            setModeDialog((current) =>
+              current ? { ...current, worktreeRoot: next } : current,
+            )
           }
           errorMessage={modeError ?? undefined}
           saving={modeSaving}

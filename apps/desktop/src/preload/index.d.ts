@@ -134,6 +134,8 @@ interface DesktopAPI {
     /** Where parallel mode would put working copies by default: the
      *  repository's sibling. Previewed before the user picks that mode. */
     default_worktree_root?: string;
+    /** The repository root containing the directory, when there is one. */
+    git_root?: string;
   }>;
   /** Report on this machine's parallel-mode working copies and the cleanup
    *  policy in force. Served by the local daemon (DENE-617). */

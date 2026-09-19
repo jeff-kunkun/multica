@@ -64,6 +64,12 @@ export interface ValidateLocalDirectoryResult {
    * own disk and they are entitled to see where it lands.
    */
   default_worktree_root?: string;
+  /**
+   * The repository root containing the directory, when there is one. The
+   * picker needs it to tell the user that a worktree root they typed sits
+   * inside their own repository — the rule execenv enforces at task time.
+   */
+  git_root?: string;
 }
 
 const run = promisify(execFile);
@@ -182,6 +188,7 @@ async function validateLocalDirectory(
   if (isGitRepo) {
     const gitRoot = await gitTopLevel(path);
     if (gitRoot) {
+      result.git_root = gitRoot;
       result.default_worktree_root = defaultWorktreeRoot(gitRoot);
       const key = await repoKeyOf(gitRoot);
       if (key) result.repo_key = key;
