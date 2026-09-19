@@ -835,6 +835,9 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 }
 
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
+	const defaultAutoCompactTokens = 200000
+	const minAutoCompactTokens = 100000
+	const maxAutoCompactTokens = 1000000
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
@@ -868,6 +871,20 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
 	}
+	// Claude Code supports --autocompact from 100k through 1M tokens. Put the
+	// daemon default before custom args so an explicit per-agent custom_args
+	// value wins naturally under the CLI's last-value-wins parsing.
+	autoCompactTokens := opts.ClaudeAutoCompactTokens
+	if autoCompactTokens <= 0 {
+		autoCompactTokens = defaultAutoCompactTokens
+	} else if autoCompactTokens < minAutoCompactTokens || autoCompactTokens > maxAutoCompactTokens {
+		if logger != nil {
+			logger.Warn("Claude autocompact token window outside supported range; using default",
+				"value", autoCompactTokens, "min", minAutoCompactTokens, "max", maxAutoCompactTokens)
+		}
+		autoCompactTokens = defaultAutoCompactTokens
+	}
+	args = append(args, "--autocompact", fmt.Sprintf("%d", autoCompactTokens))
 	// SystemPrompt is intentionally not forwarded as --append-system-prompt:
 	// Claude Code loads the per-task CLAUDE.md the daemon writes into the
 	// workdir, so inlining the same runtime brief would duplicate it on every
