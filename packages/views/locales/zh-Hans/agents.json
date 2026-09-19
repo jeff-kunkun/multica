@@ -657,6 +657,7 @@
       "created_toast": "已添加 {{name}}",
       "updated_toast": "已保存 {{name}}",
       "save_failed_toast": "保存供应商失败。",
+      "refresh_failed_toast": "供应商已保存，但模型列表刷新失败。",
       "deleted_toast": "已删除 {{name}}",
       "deleted_cleared_toast": "已删除 {{name}}。CLI 现在没有默认模型。",
       "delete_failed_toast": "删除供应商失败。"

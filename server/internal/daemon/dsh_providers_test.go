@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -184,6 +185,40 @@ func TestDshProviderUpsertPreservesUnknownKeys(t *testing.T) {
 	// And the edit landed.
 	if got := dshMapPath(t, settings, dshProviderRootKey, dshProvidersKey, "command-code", "baseURL"); got != "https://api.example.invalid/provider/v2" {
 		t.Errorf("baseURL not updated: got %#v", got)
+	}
+}
+
+func TestDshProviderRefreshDiscoversModelsFromEndpoint(t *testing.T) {
+	home := dshTestHome(t)
+	seedDshHome(t, home)
+	var gotPath, gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek/deepseek-v4.1-flash","name":"DeepSeek V4.1 Flash"},{"id":"qwen/qwen3"}]}`))
+	}))
+	defer server.Close()
+
+	dshApplyOK(t, providerActionUpsert, map[string]any{
+		"id":          "command-code",
+		"api":         "openai-completions",
+		"base_url":    server.URL + "/v1",
+		"api_key_env": "COMMAND_CODE_API_KEY",
+		"models":      []map[string]any{{"id": "stale-model"}},
+	})
+	snapshot := dshApplyOK(t, providerActionRefresh, map[string]any{"id": "command-code"})
+	if gotPath != "/v1/models" {
+		t.Fatalf("request path = %q, want /v1/models", gotPath)
+	}
+	if gotAuth != "Bearer sk-test-existing" {
+		t.Fatalf("authorization = %q, want stored key", gotAuth)
+	}
+	if len(snapshot.Providers) != 1 || len(snapshot.Providers[0].Models) != 2 {
+		t.Fatalf("refreshed providers = %#v", snapshot.Providers)
+	}
+	if snapshot.Providers[0].Models[0].ID != "deepseek/deepseek-v4.1-flash" {
+		t.Fatalf("first model = %#v", snapshot.Providers[0].Models[0])
 	}
 }
 
