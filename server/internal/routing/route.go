@@ -372,27 +372,38 @@ func (r *Router) deliver(ctx context.Context, workspaceID string, issue Issue, k
 		return out, nil
 	}
 
+	target := Member{}
 	if mention {
-		target, err := r.Store.NotifyTarget(ctx, workspaceID, issue)
+		target, err = r.Store.NotifyTarget(ctx, workspaceID, issue)
 		if err != nil {
 			return out, err
 		}
 		if target.UserID != "" {
-			// Subscribe first. A mention that reaches the issue before the
-			// subscription exists is a name in a comment nobody is told about,
-			// and there is nothing on the ticket that shows the difference.
-			if err := r.Store.Subscribe(ctx, workspaceID, issue.ID, target.UserID); err != nil {
-				return out, err
-			}
 			body = body + "\n\n" + mentionLink(target)
-			out.Mentioned = true
 		}
 	}
 
-	if err := r.Store.PostComment(ctx, workspaceID, issue.ID, kind, body); err != nil {
+	// The comment is written BEFORE anyone is notified, and the notification
+	// is conditional on that write having won. HasComment above is a cheap
+	// filter, not the guard: two Route calls on the same new issue can both
+	// pass it, and only the unique index can decide which one posts. If the
+	// loser notified anyway, the person would be pinged about a decision
+	// comment that is not theirs and does not exist.
+	written, err := r.Store.PostComment(ctx, workspaceID, issue.ID, kind, body)
+	if err != nil {
 		return out, err
 	}
+	if !written {
+		return out, nil
+	}
 	out.Commented = true
+
+	if target.UserID != "" {
+		if err := r.Store.Subscribe(ctx, workspaceID, issue.ID, target.UserID); err != nil {
+			return out, err
+		}
+		out.Mentioned = true
+	}
 	return out, nil
 }
 

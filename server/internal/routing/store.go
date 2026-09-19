@@ -112,7 +112,11 @@ type Store interface {
 	Handoff(ctx context.Context, workspaceID, issueID, assigneeType, assigneeID string) error
 
 	HasComment(ctx context.Context, workspaceID, issueID string, kind CommentKind) (bool, error)
-	PostComment(ctx context.Context, workspaceID, issueID string, kind CommentKind, body string) error
+	// PostComment writes one routing comment and reports whether THIS call
+	// wrote it. False means a concurrent Route call got there first and the
+	// database rejected the duplicate — the caller must then not perform the
+	// notification work that belongs to the comment it did not post.
+	PostComment(ctx context.Context, workspaceID, issueID string, kind CommentKind, body string) (written bool, err error)
 	// Subscribe adds a user to the issue's subscribers. A mention alone very
 	// often does not notify; notification follows subscription, so every @
 	// this package writes is paired with one of these.

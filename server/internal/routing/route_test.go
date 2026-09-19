@@ -560,3 +560,46 @@ func TestRouteNeverReportsAStatusWrite(t *testing.T) {
 		t.Fatal("Store grew a status write; routing must never advance status")
 	}
 }
+
+func TestLosingTheCommentRaceNotifiesNobody(t *testing.T) {
+	// Two Route calls on the same new issue both pass the HasComment filter;
+	// only the unique index decides which one posts. The loser must not
+	// notify, or somebody gets pinged about a decision comment that is not
+	// theirs and is not on the issue.
+	store := newFakeStore()
+	// Pre-seed the comment WITHOUT letting HasComment see it, which is exactly
+	// the window the index closes.
+	store.comments[KindAssignment] = []string{"posted by the concurrent call"}
+
+	blind := &blindReadStore{fakeStore: store}
+
+	judge := &fakeJudge{verdict: Verdict{
+		ExecutorTier: "strong", ExecutorConfidence: 0.1,
+		Reviewer: ReviewerNone, ReviewerConfidence: 0.1,
+	}}
+
+	out, err := newRouter(blind, judge).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Mentioned {
+		t.Error("the loser of the comment race notified somebody")
+	}
+	if out.Commented {
+		t.Error("the loser of the comment race reported posting a comment")
+	}
+	if len(store.subs) != 0 {
+		t.Errorf("subs = %v, want none from the loser", store.subs)
+	}
+	if got := len(store.comments[KindAssignment]); got != 1 {
+		t.Errorf("issue carries %d assignment comments, want 1", got)
+	}
+}
+
+// blindReadStore reports no existing comment however many there are, so a test
+// can drive the path where only the database's uniqueness check is left.
+type blindReadStore struct{ *fakeStore }
+
+func (b *blindReadStore) HasComment(context.Context, string, string, CommentKind) (bool, error) {
+	return false, nil
+}
