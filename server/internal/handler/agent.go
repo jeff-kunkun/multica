@@ -1070,13 +1070,23 @@ type CoalescedCommentData struct {
 // ("the provider says this was free") and must stay distinguishable from
 // "the provider said nothing".
 type TaskUsageData struct {
-	Provider         string `json:"provider,omitempty"`
-	Model            string `json:"model"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	CostUsdTicks     *int64 `json:"cost_usd_ticks,omitempty"`
+	Provider             string `json:"provider,omitempty"`
+	Model                string `json:"model"`
+	InputTokens          int64  `json:"input_tokens"`
+	OutputTokens         int64  `json:"output_tokens"`
+	CacheReadTokens      int64  `json:"cache_read_tokens"`
+	CacheWriteTokens     int64  `json:"cache_write_tokens"`
+	CostUsdTicks         *int64 `json:"cost_usd_ticks,omitempty"`
+	NumTurns             int32  `json:"num_turns,omitempty"`
+	Resumed              bool   `json:"resumed,omitempty"`
+	SessionID            string `json:"session_id,omitempty"`
+	LastContextTokens    *int64 `json:"last_context_tokens,omitempty"`
+	QueueToClaimMS       *int64 `json:"queue_to_claim_ms,omitempty"`
+	PrepareMS            *int64 `json:"prepare_ms,omitempty"`
+	SpawnToFirstOutputMS *int64 `json:"spawn_to_first_output_ms,omitempty"`
+	TotalMS              *int64 `json:"total_ms,omitempty"`
+	AttributionSource    string `json:"attribution_source,omitempty"`
+	TriggerEvidenceKind  string `json:"trigger_evidence_kind,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

@@ -2480,7 +2480,7 @@ func runIssueUsage(cmd *cobra.Command, args []string) error {
 	// JSON numbers decode to float64; formatIssueUsageTokens and
 	// formatMetadataValue render them as clean integers (no scientific
 	// notation for large cache-token counts).
-	headers := []string{"INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "RUNS", "METERED_RUNS", "UNREPORTED"}
+	headers := []string{"INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "RUNS", "METERED_RUNS", "UNREPORTED", "ATTRIBUTION_SOURCE", "TRIGGER_EVIDENCE"}
 	rows := [][]string{{
 		formatIssueUsageTokens(result["total_input_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
 		formatIssueUsageTokens(result["total_output_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
@@ -2489,9 +2489,26 @@ func runIssueUsage(cmd *cobra.Command, args []string) error {
 		formatMetadataValue(terminal),
 		formatMetadataValue(metered),
 		formatMetadataValue(unreported),
+		formatUsageGroups(result["attribution_source_counts"]),
+		formatUsageGroups(result["trigger_evidence_kind_counts"]),
 	}}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+func formatUsageGroups(value any) string {
+	groups, ok := value.(map[string]any)
+	if !ok || len(groups) == 0 {
+		return "—"
+	}
+	keys := make([]string, 0, len(groups))
+	for key := range groups { keys = append(keys, key) }
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+formatMetadataValue(groups[key]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func formatIssueUsageTokens(value, terminal, metered, usageRows any, coverageKnown bool) string {

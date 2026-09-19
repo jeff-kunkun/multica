@@ -6056,6 +6056,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, lease *taskSlotLease
 	phaseRecorder := newTaskPhaseRecorder(taskLog.With("task_id", task.ID, "runtime_id", task.RuntimeID), time.Now)
 	ctx = withTaskPhaseRecorder(ctx, phaseRecorder)
 	phaseRecorder.Mark(taskPhaseClaimed)
+	if createdAt, err := time.Parse(time.RFC3339Nano, task.CreatedAt); err == nil {
+		value := time.Since(createdAt).Milliseconds()
+		task.QueueToClaimMS = &value
+	}
 	defer phaseRecorder.Mark(taskPhaseFinished)
 	agentName := "agent"
 	if task.Agent != nil {
@@ -9460,19 +9464,52 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	)
 
 	// Convert agent usage map to task usage entries.
-	var usageEntries []TaskUsageEntry
-	for model, u := range result.Usage {
-		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
-			continue
+	phaseSamples := phaseRecorder.Snapshot()
+	var queueToClaimMS, prepareMS, spawnToFirstOutputMS, totalMS *int64
+	queueToClaimMS = task.QueueToClaimMS
+	if sample, ok := phaseSamples[taskPhaseEnvironmentReady]; ok {
+		value := sample.TotalElapsed.Milliseconds()
+		prepareMS = &value
+	}
+	if runtimeStarted, ok := phaseSamples[taskPhaseRuntimeStarted]; ok {
+		if firstOutput, ok := phaseSamples[taskPhaseFirstOutputReceived]; ok {
+			value := firstOutput.TotalElapsed.Milliseconds() - runtimeStarted.TotalElapsed.Milliseconds()
+			spawnToFirstOutputMS = &value
 		}
+	}
+	// phaseRecorder starts when the daemon begins handling the claimed task;
+	// include the queue wait explicitly so total_ms covers task creation to
+	// completion. The deferred taskPhaseFinished mark runs after this snapshot.
+	value := phaseRecorder.Elapsed().Milliseconds()
+	if queueToClaimMS != nil {
+		value += *queueToClaimMS
+	}
+	totalMS = &value
+	// Keep a durable run row even when the provider failed before reporting any
+	// token counters. The timing, turn count, session and trigger metadata are
+	// still useful; an empty usage map must not erase the run from the log.
+	usageByModel := result.Usage
+	if len(usageByModel) == 0 {
+		usageByModel = map[string]agent.TokenUsage{model: {}}
+	}
+	var usageEntries []TaskUsageEntry
+	for model, u := range usageByModel {
 		usageEntries = append(usageEntries, TaskUsageEntry{
-			Provider:         provider,
-			Model:            model,
-			InputTokens:      u.InputTokens,
-			OutputTokens:     u.OutputTokens,
-			CacheReadTokens:  u.CacheReadTokens,
-			CacheWriteTokens: u.CacheWriteTokens,
-			CostUSDTicks:     u.CostUSDTicks,
+			Provider:             provider,
+			Model:                model,
+			InputTokens:          u.InputTokens,
+			OutputTokens:         u.OutputTokens,
+			CacheReadTokens:      u.CacheReadTokens,
+			CacheWriteTokens:     u.CacheWriteTokens,
+			CostUSDTicks:         u.CostUSDTicks,
+			NumTurns:             result.NumTurns,
+			Resumed:              task.PriorSessionID != "" && !result.ResumeRejected && !result.ResumeRejectedTransient,
+			SessionID:            result.SessionID,
+			LastContextTokens:    result.LastContextTokens,
+			QueueToClaimMS:       queueToClaimMS,
+			PrepareMS:            prepareMS,
+			SpawnToFirstOutputMS: spawnToFirstOutputMS,
+			TotalMS:              totalMS,
 		})
 	}
 

@@ -6,8 +6,8 @@
 -- cost_usd_ticks is the provider's own price for this usage (1e-10 USD), NULL
 -- when it reports none. It is overwritten like the token counters so a
 -- corrected report replaces the previous figure rather than accumulating.
-INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, sqlc.narg('cost_usd_ticks'), now())
+INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, num_turns, resumed, session_id, last_context_tokens, queue_to_claim_ms, prepare_ms, spawn_to_first_output_ms, total_ms, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, sqlc.narg('cost_usd_ticks'), sqlc.arg('num_turns'), sqlc.arg('resumed'), sqlc.narg('session_id'), sqlc.narg('last_context_tokens'), sqlc.narg('queue_to_claim_ms'), sqlc.narg('prepare_ms'), sqlc.narg('spawn_to_first_output_ms'), sqlc.narg('total_ms'), now())
 ON CONFLICT (task_id, provider, model)
 DO UPDATE SET
     input_tokens = EXCLUDED.input_tokens,
@@ -15,6 +15,14 @@ DO UPDATE SET
     cache_read_tokens = EXCLUDED.cache_read_tokens,
     cache_write_tokens = EXCLUDED.cache_write_tokens,
     cost_usd_ticks = EXCLUDED.cost_usd_ticks,
+    num_turns = EXCLUDED.num_turns,
+    resumed = EXCLUDED.resumed,
+    session_id = EXCLUDED.session_id,
+    last_context_tokens = EXCLUDED.last_context_tokens,
+    queue_to_claim_ms = EXCLUDED.queue_to_claim_ms,
+    prepare_ms = EXCLUDED.prepare_ms,
+    spawn_to_first_output_ms = EXCLUDED.spawn_to_first_output_ms,
+    total_ms = EXCLUDED.total_ms,
     updated_at = now();
 
 -- name: GetTaskUsage :many
@@ -35,6 +43,8 @@ ORDER BY model;
 -- Ordering is by task then model so the client can group by task_id in one
 -- pass. Uses idx_agent_task_queue_issue_id (migration 035) + the task_usage
 -- task_id index (migration 032).
+-- Cap the issue usage execution log so a long-lived issue cannot produce an
+-- unbounded response. The aggregate query above remains complete.
 SELECT
     tu.task_id,
     tu.provider,
@@ -43,11 +53,22 @@ SELECT
     tu.output_tokens,
     tu.cache_read_tokens,
     tu.cache_write_tokens,
-    tu.cost_usd_ticks
+    tu.cost_usd_ticks,
+    tu.num_turns,
+    tu.resumed,
+    tu.session_id,
+    tu.last_context_tokens,
+    tu.queue_to_claim_ms,
+    tu.prepare_ms,
+    tu.spawn_to_first_output_ms,
+    tu.total_ms,
+    COALESCE(NULLIF(atq.originator_source, ''), 'unattributed')::text AS attribution_source,
+    COALESCE(NULLIF(atq.trigger_evidence_kind, ''), 'unknown')::text AS trigger_evidence_kind
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1
-ORDER BY tu.task_id, tu.model;
+ORDER BY tu.task_id, tu.model
+LIMIT 500;
 
 -- name: ListAgentTaskUsage :many
 -- Per-(task, provider, model) usage rows for one agent's explicitly requested
@@ -62,7 +83,15 @@ SELECT
     tu.output_tokens,
     tu.cache_read_tokens,
     tu.cache_write_tokens,
-    tu.cost_usd_ticks
+    tu.cost_usd_ticks,
+    tu.num_turns,
+    tu.resumed,
+    tu.session_id,
+    tu.last_context_tokens,
+    tu.queue_to_claim_ms,
+    tu.prepare_ms,
+    tu.spawn_to_first_output_ms,
+    tu.total_ms
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.agent_id = sqlc.arg('agent_id')
