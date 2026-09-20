@@ -127,6 +127,21 @@ describe("runProviderPresetAction payloads", () => {
       { id: "command-code" },
     );
   });
+
+  it("sends a delete payload with only the provider id", async () => {
+    getProviderPresetResult.mockResolvedValue(
+      request({ action: "delete", providers: [] }),
+    );
+
+    await runProviderPresetAction("rt-1", { action: "delete", id: "command-code" });
+
+    expect(initiateProviderPresetAction).toHaveBeenCalledWith(
+      "rt-1",
+      PROVIDER_PRESET_PROVIDER,
+      "delete",
+      { id: "command-code" },
+    );
+  });
 });
 
 describe("runProviderPresetAction results", () => {

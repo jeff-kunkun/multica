@@ -378,6 +378,23 @@ The family read returns a compact row — task, issue, agent, status, started �
 not the full execution-log record. If you need a run's detail, follow the task
 id with `multica issue run-messages`.
 
+## Stop every run on one issue
+
+Use the issue-level guard when an agent chain must stop immediately:
+
+```bash
+multica issue halt <issue-id>    # cancel queued/dispatched/running runs and block agent triggers
+multica issue resume <issue-id>  # clear the halt guard; a human comment is still needed to reset a chain budget
+```
+
+The guard is issue-scoped. A human comment clears it and resets the
+delegation-chain budget; `resume` only clears an explicit halt and does not
+reset an already-exceeded budget. Direct human-triggered runs are never
+consumed by that budget. Workspace settings may override the default chain
+limit of six runs with the `agent_chain_budget` setting; currently this is
+configured by writing the workspace `settings` JSON directly (there is no CLI
+command for it yet).
+
 Rows come back running-first, newest-first within a status, and the family read
 is capped at 20. When the cap truncates the answer the CLI prints a warning on
 stderr — read it. Without that warning a short list means "nobody else is

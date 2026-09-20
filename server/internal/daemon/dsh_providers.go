@@ -121,10 +121,12 @@ type dshProviderUpsertPayload struct {
 // dshProviderModelsPayload asks the endpoint for its own catalog. The key may
 // be typed into the form (api_key) or already stored for an existing preset
 // (id), because editing an endpoint without retyping the key is the ordinary
-// path.
+// path. API travels with it: it decides whether the key is sent as a Bearer
+// token or as an x-api-key, and getting that wrong reads as a rejected key.
 type dshProviderModelsPayload struct {
 	ID      string `json:"id"`
 	BaseURL string `json:"base_url"`
+	API     string `json:"api"`
 	APIKey  string `json:"api_key"`
 }
 
@@ -454,6 +456,7 @@ func dshListProviderModels(ctx context.Context, dshHome string, payload json.Raw
 	id := strings.TrimSpace(input.ID)
 	baseURL := strings.TrimSpace(input.BaseURL)
 	apiKey := strings.TrimSpace(input.APIKey)
+	api := strings.TrimSpace(input.API)
 
 	settings, credentials, err := loadDshProviderDocuments(dshHome)
 	if err != nil {
@@ -461,8 +464,9 @@ func dshListProviderModels(ctx context.Context, dshHome string, payload json.Raw
 	}
 	// Editing an endpoint without retyping the credential is the ordinary
 	// path, so a blank key falls back to the one the named preset already
-	// references — never to some other preset's key.
-	if id != "" && (baseURL == "" || apiKey == "") {
+	// references — never to some other preset's key. The protocol falls back
+	// the same way, because it decides which header carries that key.
+	if id != "" && (baseURL == "" || apiKey == "" || api == "") {
 		entry := yamlMapValue(yamlMapValue(yamlMapValue(settings.root, dshProviderRootKey), dshProvidersKey), id)
 		if entry == nil || entry.Kind != yaml.MappingNode {
 			return nil, fmt.Errorf("provider %q is not configured", id)
@@ -473,6 +477,9 @@ func dshListProviderModels(ctx context.Context, dshHome string, payload json.Raw
 		if apiKey == "" {
 			apiKey = dshStoredAPIKey(credentials, yamlScalarValue(yamlMapValue(entry, "apiKeyEnv")))
 		}
+		if api == "" {
+			api = strings.TrimSpace(yamlScalarValue(yamlMapValue(entry, "api")))
+		}
 	}
 	if baseURL == "" {
 		return nil, errors.New("base_url is required to fetch a model list")
@@ -482,7 +489,7 @@ func dshListProviderModels(ctx context.Context, dshHome string, payload json.Raw
 			"No API key is available to fetch a model list. Enter the key and try again.", nil)
 	}
 
-	discovered, err := fetchProviderModels(ctx, baseURL, apiKey)
+	discovered, err := fetchProviderModels(ctx, baseURL, api, apiKey)
 	if err != nil {
 		return nil, err
 	}

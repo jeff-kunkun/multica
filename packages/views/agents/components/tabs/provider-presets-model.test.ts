@@ -163,10 +163,16 @@ describe("validateProviderPresetForm", () => {
     );
   });
 
-  it("requires at least one model with an id", () => {
+  it("requires at least one model, because saving verifies one against the endpoint", () => {
     expect(
       validateProviderPresetForm({ ...valid(), models: [{ id: "  ", name: "x" }] }),
     ).toContain("models_required");
+    expect(validateProviderPresetForm({ ...valid(), models: [] })).toContain(
+      "models_required",
+    );
+    expect(
+      validateProviderPresetForm({ ...valid(), models: [{ id: "m1", name: "" }] }),
+    ).not.toContain("models_required");
   });
 });
 

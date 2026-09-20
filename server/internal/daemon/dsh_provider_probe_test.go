@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -42,11 +44,13 @@ type dshFakeGateway struct {
 	modelCalls int
 	chatCalls  int
 
-	lastModelsAuth string
-	lastChatAuth   string
-	lastChatKey    string
-	lastChatPath   string
-	lastChatBody   map[string]any
+	lastModelsAuth    string
+	lastModelsKey     string
+	lastModelsVersion string
+	lastChatAuth      string
+	lastChatKey       string
+	lastChatPath      string
+	lastChatBody      map[string]any
 }
 
 func dshDefaultFakeGateway() *dshFakeGateway {
@@ -126,6 +130,19 @@ func (g *dshFakeGateway) calls() (models, chats int) {
 	return g.modelCalls, g.chatCalls
 }
 
+// catalogSize is the byte length of the listing's answer. A test that is about
+// a real-sized catalog has to prove its fixture is one, or it passes with the
+// truncation bug still in place.
+func (g *dshFakeGateway) catalogSize() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	body, err := json.Marshal(map[string]any{"object": "list", "data": g.catalog})
+	if err != nil {
+		return 0
+	}
+	return len(body)
+}
+
 func (g *dshFakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -134,6 +151,8 @@ func (g *dshFakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models"):
 		g.modelCalls++
 		g.lastModelsAuth = r.Header.Get("Authorization")
+		g.lastModelsKey = r.Header.Get("x-api-key")
+		g.lastModelsVersion = r.Header.Get("anthropic-version")
 		w.Header().Set("Content-Type", "application/json")
 		if g.modelsStatus != 0 {
 			w.WriteHeader(g.modelsStatus)
@@ -305,6 +324,107 @@ func TestDshProviderModelsReusesStoredCredential(t *testing.T) {
 	}
 	if got := dshInstalledGateway.lastModelsAuth; got != "Bearer sk-test-existing" {
 		t.Errorf("listing auth = %q, want the stored credential", got)
+	}
+}
+
+// TestDshProviderModelsReadsACatalogLargerThanTheDisplayLimit is the regression
+// for a read bound applied in the wrong place: the 400-byte limit exists to
+// truncate a gateway's error prose, and sharing it with the success path cut a
+// real catalog in half, so every listing and every save failed with
+// "unexpected end of JSON input" — a failure that reads as the gateway's fault.
+func TestDshProviderModelsReadsACatalogLargerThanTheDisplayLimit(t *testing.T) {
+	dshTestHome(t)
+	gateway := dshInstalledGateway
+	ids := make([]string, 0, 12)
+	for i := 0; i < 12; i++ {
+		ids = append(ids, fmt.Sprintf("deepseek/deepseek-v4.1-flash-%02d", i))
+	}
+	gateway.serve(ids...)
+
+	// The fixture has to be bigger than the bound that caused the bug, or this
+	// test would have passed while it was live.
+	if size := gateway.catalogSize(); size <= providerProbeDetailLimit {
+		t.Fatalf("fixture catalog is %d bytes, must exceed the %d-byte display limit", size, providerProbeDetailLimit)
+	}
+
+	snapshot := dshApplyOK(t, providerActionModels, map[string]any{
+		"base_url": "https://api.example.invalid/provider/v1",
+		"api_key":  "sk-test-xxxx",
+	})
+	if len(snapshot.Models) != len(ids) {
+		t.Fatalf("models = %d, want all %d entries of the catalog", len(snapshot.Models), len(ids))
+	}
+	if snapshot.Models[len(ids)-1].ID != ids[len(ids)-1] {
+		t.Errorf("last model = %q, want %q", snapshot.Models[len(ids)-1].ID, ids[len(ids)-1])
+	}
+
+	// And the save that consumes the same listing has to survive it too.
+	dshApplyOK(t, providerActionUpsert, map[string]any{
+		"id":       "big-catalog",
+		"api":      providerAPIOpenAICompletions,
+		"base_url": "https://api.example.invalid/provider/v1",
+		"models":   []map[string]any{{"id": ids[11]}},
+		"api_key":  "sk-test-xxxx",
+	})
+}
+
+// TestDshProviderModelsSendsTheCredentialTheRouteExpects pins that step one
+// obeys the same header rule as step two. A Bearer token sent to an
+// anthropic-messages gateway is answered with 401, which reads as a rejected
+// key and blocks every save behind the listing.
+func TestDshProviderModelsSendsTheCredentialTheRouteExpects(t *testing.T) {
+	dshTestHome(t)
+	gateway := dshInstalledGateway
+	gateway.serveMessagesModel("claude-sonnet-5")
+
+	dshApplyOK(t, providerActionModels, map[string]any{
+		"base_url": "https://api.example.invalid/provider/v1",
+		"api":      providerAPIAnthropicMessages,
+		"api_key":  "sk-ant-typed",
+	})
+	if got := gateway.lastModelsKey; got != "sk-ant-typed" {
+		t.Errorf("anthropic listing sent x-api-key = %q", got)
+	}
+	if got := gateway.lastModelsAuth; got != "" {
+		t.Errorf("anthropic listing also sent Authorization = %q, want none", got)
+	}
+	if got := gateway.lastModelsVersion; got != providerAnthropicVersion {
+		t.Errorf("anthropic listing sent anthropic-version = %q, want %q", got, providerAnthropicVersion)
+	}
+}
+
+// TestDshProviderModelsTakesTheProtocolFromTheStoredPreset covers the other
+// way a caller names the route: editing an existing preset without retyping
+// anything. The header rule has to come off the entry, or a previously working
+// anthropic preset stops listing its models after an unrelated edit.
+func TestDshProviderModelsTakesTheProtocolFromTheStoredPreset(t *testing.T) {
+	home := dshTestHome(t)
+	dshWriteTestFile(t, filepath.Join(home, dshSettingsFileName), `llm-pi-ai:
+  providers:
+    anthropic-gw:
+      apiKeyEnv: ANTHROPIC_GW_KEY
+      api: anthropic-messages
+      baseURL: https://api.example.invalid/provider/v1
+      models:
+        - id: claude-sonnet-5
+`)
+	dshWriteTestFile(t, filepath.Join(home, dshCredentialsFileName), `version: 3
+refs:
+  ANTHROPIC_GW_KEY: sk-ant-stored
+`)
+	gateway := dshInstalledGateway
+	gateway.serveMessagesModel("claude-sonnet-5")
+
+	snapshot := dshApplyOK(t, providerActionModels, map[string]any{"id": "anthropic-gw"})
+
+	if len(snapshot.Models) == 0 {
+		t.Fatal("no models returned for a stored anthropic preset")
+	}
+	if got := gateway.lastModelsKey; got != "sk-ant-stored" {
+		t.Errorf("x-api-key = %q, want the stored credential", got)
+	}
+	if got := gateway.lastModelsAuth; got != "" {
+		t.Errorf("Authorization = %q, want none for an anthropic preset", got)
 	}
 }
 
@@ -577,6 +697,136 @@ func TestDshProviderUpsertRefusesWithoutCredential(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Route inference
 // ---------------------------------------------------------------------------
+
+// TestDshProviderUpsertAcceptsAHandTypedModelWithoutACatalog pins the fallback
+// the parent ticket keeps: the listing fills a form in, it is not a
+// precondition for a save. A gateway with no /models still has to be
+// configurable by hand — otherwise the change makes those gateways strictly
+// harder to save than before it, and the manual path the error copy points at
+// is a dead end.
+func TestDshProviderUpsertAcceptsAHandTypedModelWithoutACatalog(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed} {
+		t.Run(fmt.Sprintf("HTTP %d", status), func(t *testing.T) {
+			home := dshTestHome(t)
+			gateway := dshInstalledGateway
+			gateway.failModels(status)
+
+			dshApplyOK(t, providerActionUpsert, map[string]any{
+				"id":       "no-catalog",
+				"api":      providerAPIOpenAICompletions,
+				"base_url": "https://api.example.invalid/provider/v1",
+				"models":   []map[string]any{{"id": "hand/typed-model"}},
+				"api_key":  "sk-test-xxxx",
+			})
+
+			// The completion is the step that proved it, and it ran on the
+			// hand-typed id.
+			if _, chats := gateway.calls(); chats != 1 {
+				t.Fatalf("chat probes = %d, want the completion to still run", chats)
+			}
+			if got := gateway.lastChatBody["model"]; got != "hand/typed-model" {
+				t.Errorf("probe model = %#v", got)
+			}
+			settings := dshSettingsAfter(t, home)
+			// Nothing answered the protocol question, so the caller's declared
+			// value is what the route records.
+			if got := dshMapPath(t, settings, dshProviderRootKey, dshProvidersKey, "no-catalog", "api"); got != providerAPIOpenAICompletions {
+				t.Errorf("api = %#v, want the declared protocol", got)
+			}
+			if got := dshMapPath(t, settings, dshProviderRootKey, dshProvidersKey, "no-catalog", "models", 0, "id"); got != "hand/typed-model" {
+				t.Errorf("model id = %#v", got)
+			}
+		})
+	}
+}
+
+// TestDshProviderUpsertWithoutACatalogStillRefusesAnUnusableModel pins that
+// dropping the listing does not drop the check that matters: with no catalog to
+// consult, the completion is the only gate left, and it has to stay shut.
+func TestDshProviderUpsertWithoutACatalogStillRefusesAnUnusableModel(t *testing.T) {
+	home := dshTestHome(t)
+	gateway := dshInstalledGateway
+	gateway.failModels(http.StatusNotFound)
+	gateway.failChat(http.StatusForbidden, `{"error":{"code":"MODEL_NOT_IN_PLAN"}}`)
+
+	err := dshUpsertVerify(t, map[string]any{
+		"id":       "no-catalog",
+		"api":      providerAPIOpenAICompletions,
+		"base_url": "https://api.example.invalid/provider/v1",
+		"models":   []map[string]any{{"id": "hand/typed-model"}},
+		"api_key":  "sk-test-xxxx",
+	})
+	failure := dshFailure(t, err)
+	if failure.Kind != providerProbeKindModelNotInPlan {
+		t.Fatalf("kind = %q, want %q", failure.Kind, providerProbeKindModelNotInPlan)
+	}
+	if settings := dshSettingsAfter(t, home); len(settings) != 0 {
+		t.Errorf("a refused save wrote settings.yaml: %#v", settings)
+	}
+}
+
+// TestDshProviderFailureKeepsTheGatewayBodyOutOfParams pins what error_params
+// is: the daemon's own facts. The gateway's prose leaves in `error`, which goes
+// through the credential filter; a raw second copy in params is how a key
+// fragment a gateway echoed back travels to the server and into the UI under a
+// name that promises it holds no provider text.
+func TestDshProviderFailureKeepsTheGatewayBodyOutOfParams(t *testing.T) {
+	const secret = "sk-abcdefghijklmnopqrstuvwxyz012345"
+	dshTestHome(t)
+	gateway := dshInstalledGateway
+	gateway.serve("m1")
+	gateway.failChat(http.StatusBadRequest,
+		fmt.Sprintf(`{"error":"invalid api key %s"}`, secret))
+
+	err := dshUpsertVerify(t, map[string]any{
+		"id":       "leaky",
+		"api":      providerAPIOpenAICompletions,
+		"base_url": "https://api.example.invalid/provider/v1",
+		"models":   []map[string]any{{"id": "m1"}},
+		"api_key":  "sk-test-xxxx",
+	})
+	failure := dshFailure(t, err)
+	for key, value := range failure.Params {
+		if strings.Contains(value, secret) {
+			t.Errorf("error_params[%q] carries the gateway body: %q", key, value)
+		}
+		if strings.Contains(value, "invalid api key") {
+			t.Errorf("error_params[%q] carries gateway prose: %q", key, value)
+		}
+	}
+	// The message is where that prose belongs, and it is filtered there.
+	if strings.Contains(failure.Message, secret) {
+		t.Errorf("the gateway's echoed key survived into the message: %s", failure.Message)
+	}
+	if !strings.Contains(failure.Message, "[REDACTED API KEY]") {
+		t.Errorf("message was not passed through the credential filter: %s", failure.Message)
+	}
+	if !strings.Contains(failure.Message, "invalid api key") {
+		t.Errorf("message dropped the gateway's reason entirely: %s", failure.Message)
+	}
+}
+
+// TestDshProviderFailureTextIsBounded pins the other half of the display limit:
+// it still applies where it was meant to. A gateway that answers with a page of
+// HTML must not put that page into a message.
+func TestDshProviderFailureTextIsBounded(t *testing.T) {
+	dshTestHome(t)
+	gateway := dshInstalledGateway
+	gateway.serve("m1")
+	gateway.failChat(http.StatusBadRequest, strings.Repeat("<html>nope</html>", 200))
+
+	err := dshUpsertVerify(t, map[string]any{
+		"id":       "verbose",
+		"api":      providerAPIOpenAICompletions,
+		"base_url": "https://api.example.invalid/provider/v1",
+		"models":   []map[string]any{{"id": "m1"}},
+		"api_key":  "sk-test-xxxx",
+	})
+	failure := dshFailure(t, err)
+	if len(failure.Message) > providerProbeDetailLimit+200 {
+		t.Errorf("message is %d bytes, want the body truncated to ~%d", len(failure.Message), providerProbeDetailLimit)
+	}
+}
 
 // TestDshProviderUpsertInfersDeepSeekThinkingFormat pins the compat switch
 // whose absence is invisible: the reply renders blank and nothing errors.

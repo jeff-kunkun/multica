@@ -242,7 +242,10 @@ func TestValidProviderPresetAction(t *testing.T) {
 			t.Errorf("%q should be accepted", action)
 		}
 	}
-	for _, action := range []string{"", "List", "remove"} {
+	// `refresh` wrote the endpoint's whole catalog into the preset, which both
+	// overwrote the user's own selection and could mix two wire protocols in
+	// one route. `models` + `upsert` replace it.
+	for _, action := range []string{"", "List", "remove", "refresh"} {
 		if validProviderPresetAction(action) {
 			t.Errorf("%q should be rejected", action)
 		}

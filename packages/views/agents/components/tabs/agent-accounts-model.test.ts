@@ -6,6 +6,7 @@
 // component suite must NOT re-run this matrix through a mount — it points here.
 
 import { describe, expect, it } from "vitest";
+import { accountSlotFamily } from "@multica/core/agents/account-slot-families";
 import {
   AGENT_ACCOUNT_CLIS,
   type AccountsViewState,
@@ -14,8 +15,7 @@ import {
   accountLeverLabel,
   accountStatus,
   accountsViewState,
-  agySlotAccountId,
-  agySlotNumberOf,
+  accountSlotNumberOf,
   canManageAccounts,
   cliForProvider,
   formatQuotaResetAt,
@@ -27,7 +27,11 @@ import {
   planAccountSwitch,
   quotaSwitchCandidate,
   resolveCurrentAccount,
-  withAgySlots,
+  boundDirectoryFor,
+  nextSlotForGroup,
+  removableSlots,
+  slotAccountId,
+  withAccountSlots,
 } from "./agent-accounts-model";
 
 const RUNTIME_HOME = "/Users/you";
@@ -319,23 +323,31 @@ describe("groupAccountsByCli", () => {
   });
 });
 
-describe("withAgySlots", () => {
+describe("withAccountSlots", () => {
   const AGY_CUSTOM = account({
     cli: "agy",
     account: "work",
     home: `${RUNTIME_HOME}/.gemini-work`,
     lever: "custom_args:--gemini_dir",
   });
+  const CLAUDE_DEFAULT = account({
+    cli: "claude",
+    account: "default",
+    home: `${RUNTIME_HOME}/.claude`,
+    lever: "env:CLAUDE_CONFIG_DIR",
+  });
   const ids = (list: readonly AgentAccount[]) => list.map((entry) => entry.account);
+  const groupIds = (list: readonly AgentAccount[], cli: string) =>
+    ids(groupAccountsByCli(list).find((group) => group.cli === cli)?.accounts ?? []);
 
   it("keeps a reported slot row and synthesizes the ones without a directory", () => {
-    const merged = withAgySlots([AGY_DEFAULT, AGY_ACCOUNT2], [1, 2, 3], RUNTIME_HOME);
+    const merged = withAccountSlots(
+      [AGY_DEFAULT, AGY_ACCOUNT2],
+      { agy: [1, 2, 3] },
+      RUNTIME_HOME,
+    );
 
-    expect(ids(groupAccountsByCli(merged)[0]!.accounts)).toEqual([
-      "default",
-      "account2",
-      "account3",
-    ]);
+    expect(groupIds(merged, "agy")).toEqual(["default", "account2", "account3"]);
     // A reported row keeps the daemon's own directory and sign-in state.
     expect(merged[1]).toBe(AGY_ACCOUNT2);
     const synthesized = merged.find((entry) => entry.account === "account3");
@@ -351,38 +363,83 @@ describe("withAgySlots", () => {
     });
   });
 
-  it("drops a numbered directory the agent's slot list does not carry", () => {
-    const merged = withAgySlots([AGY_DEFAULT, AGY_ACCOUNT2], [1], RUNTIME_HOME);
+  it("synthesizes a manual family's slot with that family's directory and env lever", () => {
+    const merged = withAccountSlots(
+      [DSH_DEFAULT, CLAUDE_DEFAULT],
+      { dsh: [1, 2], claude: [1, 3] },
+      RUNTIME_HOME,
+    );
+
+    expect(merged.find((entry) => entry.cli === "dsh" && entry.account === "account2")).toEqual({
+      cli: "dsh",
+      account: "account2",
+      home: `${RUNTIME_HOME}/.dsh-account2`,
+      base_url: "",
+      key_ref: "",
+      lever: "env:DSH_HOME",
+      signed_in: false,
+      quota_reset_at: 0,
+    });
+    expect(
+      merged.find((entry) => entry.cli === "claude" && entry.account === "account3"),
+    ).toMatchObject({
+      home: `${RUNTIME_HOME}/.claude-account3`,
+      lever: "env:CLAUDE_CONFIG_DIR",
+    });
+  });
+
+  it("drops a numbered agy directory the rotation list does not carry", () => {
+    const merged = withAccountSlots([AGY_DEFAULT, AGY_ACCOUNT2], { agy: [1] }, RUNTIME_HOME);
 
     expect(ids(merged)).toEqual(["default"]);
   });
 
+  it("keeps a reported directory of a manual family whatever its list says", () => {
+    // `~/.dsh-account2` was switchable before slots existed. An agent that
+    // never saved a dsh list must not lose it — the list of a family that does
+    // not rotate only ever ADDS rows.
+    const merged = withAccountSlots([DSH_DEFAULT, DSH_ACCOUNT2], { dsh: [1] }, RUNTIME_HOME);
+
+    expect(groupIds(merged, "dsh")).toEqual(["default", "account2"]);
+    expect(merged).toContain(DSH_ACCOUNT2);
+    expect(groupIds(withAccountSlots([DSH_DEFAULT, DSH_ACCOUNT2], {}, RUNTIME_HOME), "dsh")).toEqual([
+      "default",
+      "account2",
+    ]);
+  });
+
   it("always carries slot 1, even from an empty list", () => {
-    const merged = withAgySlots([AGY_CUSTOM], [], RUNTIME_HOME);
+    const merged = withAccountSlots([AGY_CUSTOM], { agy: [] }, RUNTIME_HOME);
 
     expect(ids(merged)).toEqual(["work", "default"]);
     expect(merged[1]?.home).toBe(`${RUNTIME_HOME}/.gemini`);
   });
 
-  it("leaves the report untouched when the machine has no AGY directory", () => {
-    // A dsh-only host must not grow a synthesized AGY group: there is no AGY
-    // surface to edit, and the drawer's add button has to stay a description.
-    const merged = withAgySlots(
+  it("never invents a group for a CLI the machine did not report", () => {
+    // A dsh-only host must not grow a synthesized AGY or Claude group: there
+    // is no surface to edit there.
+    const merged = withAccountSlots(
       [DSH_DEFAULT, CODEX_DEFAULT],
-      [1, 2, 3],
+      { agy: [1, 2, 3], claude: [1, 2] },
       RUNTIME_HOME,
     );
 
-    expect(merged).toEqual([DSH_DEFAULT, CODEX_DEFAULT]);
-    expect(groupAccountsByCli(merged).some((group) => group.cli === "agy")).toBe(
-      false,
-    );
+    expect(merged).toHaveLength(2);
+    expect(merged).toContain(DSH_DEFAULT);
+    expect(merged).toContain(CODEX_DEFAULT);
+    expect(groupAccountsByCli(merged).map((group) => group.cli)).toEqual(["dsh", "codex"]);
+  });
+
+  it("never gives a CLI without a family a slot, even when a list names it", () => {
+    const merged = withAccountSlots([CODEX_DEFAULT], { codex: [1, 2] }, RUNTIME_HOME);
+
+    expect(merged).toEqual([CODEX_DEFAULT]);
   });
 
   it("leaves accounts outside the numbered convention and every other CLI alone", () => {
-    const merged = withAgySlots(
+    const merged = withAccountSlots(
       [AGY_DEFAULT, AGY_CUSTOM, DSH_DEFAULT, CODEX_DEFAULT],
-      [1, 5],
+      { agy: [1, 5] },
       RUNTIME_HOME,
     );
 
@@ -392,18 +449,14 @@ describe("withAgySlots", () => {
     expect(merged).toContain(AGY_CUSTOM);
     expect(merged).toContain(DSH_DEFAULT);
     expect(merged).toContain(CODEX_DEFAULT);
-    expect(ids(merged)).toEqual(["work", "default", "default", "default", "account5"]);
+    expect(merged).toHaveLength(5);
     // Inside the group `default` leads and the numbered slot sorts before the
     // named custom directory, exactly as the group sort already did.
-    expect(ids(groupAccountsByCli(merged).find((group) => group.cli === "agy")!.accounts)).toEqual([
-      "default",
-      "account5",
-      "work",
-    ]);
+    expect(groupIds(merged, "agy")).toEqual(["default", "account5", "work"]);
   });
 
   it("keeps a synthesized directory relative when the host home is unknown", () => {
-    const merged = withAgySlots([AGY_DEFAULT], [1, 2], null);
+    const merged = withAccountSlots([AGY_DEFAULT], { agy: [1, 2] }, null);
 
     // `planAccountSwitch` refuses a relative home, so an unresolved host home
     // ends as "this account cannot be bound" rather than a guessed path.
@@ -413,12 +466,93 @@ describe("withAgySlots", () => {
   });
 
   it("names the slot directories the same way the daemon does", () => {
-    expect(agySlotAccountId(1)).toBe("default");
-    expect(agySlotAccountId(2)).toBe("account2");
-    expect(agySlotNumberOf(AGY_DEFAULT)).toBe(1);
-    expect(agySlotNumberOf(AGY_ACCOUNT2)).toBe(2);
-    expect(agySlotNumberOf(AGY_CUSTOM)).toBeNull();
-    expect(agySlotNumberOf(DSH_DEFAULT)).toBeNull();
+    expect(slotAccountId(1)).toBe("default");
+    expect(slotAccountId(2)).toBe("account2");
+    expect(accountSlotNumberOf(AGY_DEFAULT)).toBe(1);
+    expect(accountSlotNumberOf(AGY_ACCOUNT2)).toBe(2);
+    expect(accountSlotNumberOf(AGY_CUSTOM)).toBeNull();
+    expect(accountSlotNumberOf(DSH_DEFAULT)).toBe(1);
+    expect(accountSlotNumberOf(DSH_ACCOUNT2)).toBe(2);
+    // No family, no slot — whatever the directory happens to be called.
+    expect(accountSlotNumberOf(CODEX_DEFAULT)).toBeNull();
+    expect(accountSlotNumberOf({ cli: "codex", account: "account2" })).toBeNull();
+  });
+});
+
+describe("nextSlotForGroup", () => {
+  const groupOf = (accounts: AgentAccount[]) => groupAccountsByCli(accounts)[0]!;
+
+  it("offers the first free number to every family with a writable lever", () => {
+    expect(nextSlotForGroup(groupOf([AGY_DEFAULT]), { agy: [1, 2, 3] })).toBe(4);
+    expect(nextSlotForGroup(groupOf([DSH_DEFAULT]), { dsh: [1] })).toBe(2);
+    expect(nextSlotForGroup(groupOf([DSH_DEFAULT]), {})).toBe(2);
+  });
+
+  it("skips a number whose directory is already listed in a manual family", () => {
+    expect(nextSlotForGroup(groupOf([DSH_DEFAULT, DSH_ACCOUNT2]), { dsh: [1] })).toBe(3);
+  });
+
+  it("offers nothing to a CLI without a family, whatever lever it reports", () => {
+    expect(nextSlotForGroup(groupOf([CODEX_DEFAULT]), {})).toBeNull();
+    // Even a future daemon advertising a lever cannot conjure a registry: the
+    // family table is what says a bound slot reaches the task.
+    const levered = account({
+      cli: "codex",
+      account: "default",
+      home: `${RUNTIME_HOME}/.codex`,
+      lever: "env:CODEX_HOME",
+    });
+    expect(nextSlotForGroup(groupOf([levered]), {})).toBeNull();
+  });
+
+  it("offers nothing when the daemon reported the family's lever as unwritable", () => {
+    const readonly = account({
+      cli: "dsh",
+      account: "default",
+      home: `${RUNTIME_HOME}/.dsh`,
+      lever: "",
+    });
+    expect(nextSlotForGroup(groupOf([readonly]), { dsh: [1] })).toBeNull();
+  });
+
+  it("offers nothing once the family is full", () => {
+    const full = Array.from({ length: 32 }, (_, index) => index + 1);
+    expect(nextSlotForGroup(groupOf([DSH_DEFAULT]), { dsh: full })).toBeNull();
+  });
+});
+
+describe("removableSlots", () => {
+  it("lets every numbered agy slot go, because the list IS the rotation set", () => {
+    expect(removableSlots([AGY_DEFAULT, AGY_ACCOUNT2], { agy: [1, 2, 3] }).agy).toEqual([2, 3]);
+  });
+
+  it("only drops a manual family's slot that exists nowhere but in the list", () => {
+    // account2 is on disk: the daemon keeps reporting it, so a drop would be a
+    // control that does nothing.
+    expect(removableSlots([DSH_DEFAULT, DSH_ACCOUNT2], { dsh: [1, 2, 3] }).dsh).toEqual([3]);
+  });
+
+  it("never offers slot 1 or a CLI without a family", () => {
+    const result = removableSlots([DSH_DEFAULT, CODEX_DEFAULT], { dsh: [1], codex: [1, 2] });
+    expect(result.dsh).toEqual([]);
+    expect(result.codex).toBeUndefined();
+  });
+});
+
+describe("boundDirectoryFor", () => {
+  it("reads each family's binding from the place its lever writes", () => {
+    const binding = {
+      custom_args: ["--gemini_dir", "/Users/you/.gemini-account2"],
+      custom_env: { DSH_HOME: " /Users/you/.dsh-account3 " },
+    };
+    expect(boundDirectoryFor(binding, accountSlotFamily("agy")!)).toBe(
+      "/Users/you/.gemini-account2",
+    );
+    expect(boundDirectoryFor(binding, accountSlotFamily("dsh")!)).toBe(
+      "/Users/you/.dsh-account3",
+    );
+    expect(boundDirectoryFor(binding, accountSlotFamily("claude")!)).toBe("");
+    expect(boundDirectoryFor(null, accountSlotFamily("dsh")!)).toBe("");
   });
 });
 

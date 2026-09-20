@@ -29,7 +29,63 @@ describe("parseRoutingHealth", () => {
       last_failure_at: 1_700_000_300,
       model: "gpt-5.6-luna",
       threshold: 0.8,
+      gateway_host: "",
+      gateway_default_model: "",
+      gateway_configured: true,
+      // A backend that predates the workspace gateway omits all three; the
+      // defaults have to read as "the deployment endpoint, no workspace key",
+      // which is what such a backend means.
+      gateway_scope: "deployment",
+      gateway_key_set: false,
+      workspace_key_storable: false,
     });
+  });
+
+  it("narrows an unrecognised gateway scope to the deployment", () => {
+    expect(
+      parseRoutingHealth({ state: "enabled", gateway_scope: "tenant" })
+        .gateway_scope,
+    ).toBe("deployment");
+    expect(
+      parseRoutingHealth({ state: "enabled", gateway_scope: "workspace" })
+        .gateway_scope,
+    ).toBe("workspace");
+  });
+
+  it("never reads a non-boolean key flag as a stored key", () => {
+    // `=== true`, not truthy: a server that starts sending this as a string
+    // must not put a green "a key is saved" over a workspace that has none.
+    expect(
+      parseRoutingHealth({ state: "enabled", gateway_key_set: "yes" })
+        .gateway_key_set,
+    ).toBe(false);
+  });
+
+  it("reports the gateway the model id is actually sent to", () => {
+    const health = parseRoutingHealth({
+      state: "enabled",
+      usable: true,
+      model: "gpt-5.6-luna",
+      gateway_host: "api.openai.com",
+      gateway_default_model: "gpt-5.6-mini",
+      gateway_configured: true,
+    });
+    expect(health.gateway_host).toBe("api.openai.com");
+    expect(health.gateway_default_model).toBe("gpt-5.6-mini");
+    expect(health.gateway_configured).toBe(true);
+  });
+
+  it("only calls the deployment unconfigured when the server says so", () => {
+    // Absent is not "no LLM": an older backend omits the field entirely, and
+    // reading that as unconfigured would put a red warning under a section
+    // that works. Only an explicit false counts.
+    expect(parseRoutingHealth({ state: "enabled" }).gateway_configured).toBe(
+      true,
+    );
+    expect(
+      parseRoutingHealth({ state: "enabled", gateway_configured: false })
+        .gateway_configured,
+    ).toBe(false);
   });
 
   // The malformed-response matrix. Every one of these must degrade to "we do

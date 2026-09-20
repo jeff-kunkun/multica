@@ -11,6 +11,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // Talking to a provider gateway.
@@ -102,8 +105,16 @@ const (
 	// providerProbeMaxTokens is the smallest completion a gateway accepts.
 	providerProbeMaxTokens = 1
 
+	// providerProbeBodyLimit bounds a successful body. It has to be a real
+	// limit rather than a display one: a model catalog runs past a kilobyte
+	// after a handful of entries, and truncating it turns a valid answer into
+	// "unexpected end of JSON input" — a failure that looks like the gateway's
+	// and is actually ours.
+	providerProbeBodyLimit = 2 << 20
+
 	// providerProbeDetailLimit caps how much of a gateway's error body is
-	// echoed back. The body is not ours to trust and the useful part is
+	// echoed back, and it applies only where that body is echoed: the
+	// classify step. The body is not ours to trust and the useful part is
 	// always at the front.
 	providerProbeDetailLimit = 400
 )
@@ -164,10 +175,20 @@ type dshVerifyRequest struct {
 
 // dshVerifyProviderRoute runs both probe steps and returns what the write
 // needs: the protocol to record and the compat switch the model family needs.
+//
+// Step one is optional; step two is not. The listing supplies candidate ids and
+// the endpoint metadata the protocol is read from, but the completion is what
+// proves the route runs — and a gateway that publishes no catalog is exactly
+// the case a hand-typed id has to keep working for. So a 404/405 from /models
+// skips the checks that need a catalog and still runs the completion against
+// the protocol the caller declared.
 func dshVerifyProviderRoute(ctx context.Context, request dshVerifyRequest) (*dshProviderRoute, error) {
-	models, err := fetchProviderModels(ctx, request.BaseURL, request.APIKey)
+	models, err := fetchProviderModels(ctx, request.BaseURL, request.API, request.APIKey)
 	if err != nil {
-		return nil, err
+		if !providerFailureHasKind(err, providerProbeKindModelsUnavailable) {
+			return nil, err
+		}
+		return verifyProviderRouteWithoutCatalog(ctx, request)
 	}
 
 	// Every model the preset will carry has to exist, and all of them have to
@@ -223,6 +244,44 @@ func dshVerifyProviderRoute(ctx context.Context, request dshVerifyRequest) (*dsh
 // providerParamAPI is the key a surface reads the recorded protocol from.
 const providerParamAPI = "api"
 
+// providerFailureHasKind reports whether err is a probe failure of this kind.
+func providerFailureHasKind(err error, kind string) bool {
+	var failure *providerConfigFailure
+	return errors.As(err, &failure) && failure.Kind == kind
+}
+
+// verifyProviderRouteWithoutCatalog is step two alone, for an endpoint that
+// publishes no /models. There is nothing to check the caller's protocol
+// against, so their choice is taken as declared — the completion is the check,
+// and it is the one that decides whether the save is worth keeping.
+func verifyProviderRouteWithoutCatalog(ctx context.Context, request dshVerifyRequest) (*dshProviderRoute, error) {
+	modelID := strings.TrimSpace(request.ModelID)
+	if modelID == "" {
+		return nil, providerFailure(providerProbeKindUnknownModel,
+			"This endpoint publishes no model list, so a model id has to be given.",
+			nil)
+	}
+	api := providerDeclaredAPI(request.API)
+	if err := probeProviderChat(ctx, request.BaseURL, request.APIKey, api, modelID); err != nil {
+		return nil, err
+	}
+	return &dshProviderRoute{
+		API:            api,
+		ThinkingFormat: providerThinkingFormatForModel(modelID),
+		Model:          providerDiscoveredModel{ID: modelID},
+	}, nil
+}
+
+// providerDeclaredAPI normalizes the protocol a caller claims when the gateway
+// does not describe it. Only the two protocols a route can speak are accepted:
+// anything else would be written into settings.yaml as a route nothing reads.
+func providerDeclaredAPI(declared string) string {
+	if strings.TrimSpace(declared) == providerAPIAnthropicMessages {
+		return providerAPIAnthropicMessages
+	}
+	return providerAPIOpenAICompletions
+}
+
 func unknownProviderModel(id string) *providerConfigFailure {
 	return providerFailure(providerProbeKindUnknownModel,
 		fmt.Sprintf("Model %q does not exist on this endpoint. Pick one from the fetched model list.", id),
@@ -275,7 +334,7 @@ func providerThinkingFormatForModel(modelID string) string {
 
 // fetchProviderModels is probe step one: the catalog, with the key attached.
 // It authenticates without spending tokens, which is why it runs first.
-func fetchProviderModels(ctx context.Context, baseURL, apiKey string) ([]providerDiscoveredModel, error) {
+func fetchProviderModels(ctx context.Context, baseURL, api, apiKey string) ([]providerDiscoveredModel, error) {
 	endpoint, err := providerEndpointURL(baseURL, "/models")
 	if err != nil {
 		return nil, err
@@ -285,7 +344,7 @@ func fetchProviderModels(ctx context.Context, baseURL, apiKey string) ([]provide
 		return nil, providerFailure(providerProbeKindUnreachable,
 			fmt.Sprintf("Could not build a model-list request for %s: %v", baseURL, err), nil)
 	}
-	request.Header.Set("Authorization", "Bearer "+apiKey)
+	applyProviderAuth(request, api, apiKey)
 	request.Header.Set("Accept", "application/json")
 
 	status, body, err := doProviderRequest(request)
@@ -307,6 +366,20 @@ func fetchProviderModels(ctx context.Context, baseURL, apiKey string) ([]provide
 			fmt.Sprintf("%s returned an empty model list.", baseURL), nil)
 	}
 	return models, nil
+}
+
+// applyProviderAuth attaches the credential the way the route's protocol
+// expects it. The two conventions are not interchangeable: an
+// anthropic-messages gateway reads x-api-key and answers a Bearer token with
+// 401, which is indistinguishable from a bad key unless both probe steps agree
+// on which header carries it.
+func applyProviderAuth(request *http.Request, api, apiKey string) {
+	if strings.HasPrefix(strings.TrimSpace(api), "anthropic") {
+		request.Header.Set("x-api-key", apiKey)
+		request.Header.Set("anthropic-version", providerAnthropicVersion)
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+apiKey)
 }
 
 // probeProviderChat is probe step two: one minimal completion. This is the
@@ -339,12 +412,7 @@ func probeProviderChat(ctx context.Context, baseURL, apiKey, api, modelID string
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	if api == providerAPIAnthropicMessages {
-		request.Header.Set("x-api-key", apiKey)
-		request.Header.Set("anthropic-version", providerAnthropicVersion)
-	} else {
-		request.Header.Set("Authorization", "Bearer "+apiKey)
-	}
+	applyProviderAuth(request, api, apiKey)
 
 	status, responseBody, err := doProviderRequest(request)
 	if err != nil {
@@ -359,6 +427,11 @@ func probeProviderChat(ctx context.Context, baseURL, apiKey, api, modelID string
 // doProviderRequest performs one probe request. The message it returns never
 // contains the key: only the endpoint, the transport error and the response
 // body reach it, and the response body is the gateway's own words.
+//
+// The body is read to providerProbeBodyLimit, not to the display limit: this
+// function cannot tell a success from a failure body, and a bound meant for
+// error prose must not decide whether a catalog parses. Truncation for display
+// happens in the classify step, which is the only place that echoes it.
 func doProviderRequest(request *http.Request) (int, []byte, error) {
 	response, err := providerProbeClient.Do(request)
 	if err != nil {
@@ -371,7 +444,7 @@ func doProviderRequest(request *http.Request) (int, []byte, error) {
 	}
 	defer response.Body.Close()
 
-	body, readErr := io.ReadAll(io.LimitReader(response.Body, providerProbeDetailLimit))
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, providerProbeBodyLimit))
 	if readErr != nil {
 		return 0, nil, providerFailure(providerProbeKindUnreachable,
 			fmt.Sprintf("Could not read the response from %s: %v", request.URL.Host, readErr), nil)
@@ -447,7 +520,9 @@ var (
 // cancelled billing period this is already a 429, which is why the rate-limit
 // branch is here too and not only on the chat step.
 func classifyModelListFailure(status int, body []byte, baseURL string) error {
-	detail := strings.TrimSpace(string(body))
+	// Matching reads the body as received; everything that leaves this
+	// function is the bounded, redacted copy.
+	matches := string(body)
 
 	switch {
 	case status == http.StatusNotFound || status == http.StatusMethodNotAllowed:
@@ -458,7 +533,7 @@ func classifyModelListFailure(status int, body []byte, baseURL string) error {
 		return providerFailure(providerProbeKindInvalidCredential,
 			fmt.Sprintf("The provider rejected this API key (HTTP %d). Check the key and try again.", status),
 			map[string]string{"status": fmt.Sprintf("%d", status)})
-	case status == http.StatusForbidden && !providerPlanRejectedPattern.MatchString(detail):
+	case status == http.StatusForbidden && !providerPlanRejectedPattern.MatchString(matches):
 		return providerFailure(providerProbeKindInvalidCredential,
 			fmt.Sprintf("The provider refused this API key (HTTP %d). Check the key and try again.", status),
 			map[string]string{"status": fmt.Sprintf("%d", status)})
@@ -468,14 +543,19 @@ func classifyModelListFailure(status int, body []byte, baseURL string) error {
 
 // classifyGatewayFailure maps one gateway rejection onto a kind. modelID is
 // empty for the listing step, which never names a model.
+//
+// Only the daemon's own facts go into params — a status, a model id, a reset
+// instant, an action — and deliberately not the gateway's body. Params travel
+// to the server and into the UI; `error` already carries the bounded, redacted
+// prose for the kind whose copy needs it, and a second copy of the raw body
+// under a name that promises it holds no provider text is exactly how a key
+// fragment a gateway echoed back escapes the redaction pass.
 func classifyGatewayFailure(status int, body []byte, modelID string) error {
-	detail := strings.TrimSpace(string(body))
+	matches := string(body)
+	detail := providerDetailForEcho(body)
 	params := map[string]string{"status": fmt.Sprintf("%d", status)}
 	if modelID != "" {
 		params["model"] = modelID
-	}
-	if detail != "" {
-		params["detail"] = detail
 	}
 
 	switch {
@@ -483,13 +563,13 @@ func classifyGatewayFailure(status int, body []byte, modelID string) error {
 		return providerFailure(providerProbeKindInvalidCredential,
 			fmt.Sprintf("The provider rejected this API key (HTTP %d). Check the key and try again.", status), params)
 
-	case providerPlanRejectedPattern.MatchString(detail):
+	case providerPlanRejectedPattern.MatchString(matches):
 		return providerFailure(providerProbeKindModelNotInPlan,
 			fmt.Sprintf("The current plan does not include model %q. Pick another model or upgrade the plan.", modelID),
 			params)
 
-	case status == http.StatusTooManyRequests || providerRateLimitedPattern.MatchString(detail):
-		reset := providerResetPhrase(detail)
+	case status == http.StatusTooManyRequests || providerRateLimitedPattern.MatchString(matches):
+		reset := providerResetPhrase(matches)
 		if reset != "" {
 			params["reset_at_local"] = reset
 		}
@@ -504,13 +584,13 @@ func classifyGatewayFailure(status int, body []byte, modelID string) error {
 		params["action"] = "regenerate_key"
 		return providerFailure(providerProbeKindRateLimited, message, params)
 
-	case providerUnsupportedModelMatch.MatchString(detail):
+	case providerUnsupportedModelMatch.MatchString(matches):
 		return providerFailure(providerProbeKindUnknownModel,
 			fmt.Sprintf("Model %q does not exist on this endpoint. Pick one from the fetched model list.", modelID),
 			params)
 
-	case providerWrongEndpointPattern.MatchString(detail):
-		wanted := providerWrongEndpointPattern.FindStringSubmatch(detail)[1]
+	case providerWrongEndpointPattern.MatchString(matches):
+		wanted := providerWrongEndpointPattern.FindStringSubmatch(matches)[1]
 		return providerFailure(providerProbeKindEndpointMismatch,
 			fmt.Sprintf("Model %q must be called on %s. The route is chosen from the model's supported endpoints.", modelID, wanted),
 			params)
@@ -521,7 +601,7 @@ func classifyGatewayFailure(status int, body []byte, modelID string) error {
 	}
 
 	return providerFailure(providerProbeKindProviderError,
-		fmt.Sprintf("The provider rejected the request (HTTP %d): %s", status, providerProbeDetail(detail)), params)
+		fmt.Sprintf("The provider rejected the request (HTTP %d): %s", status, providerEchoedText(detail)), params)
 }
 
 // providerResetPhrase renders the reset instant in the machine's own timezone,
@@ -541,9 +621,38 @@ func providerResetPhrase(detail string) string {
 	return ""
 }
 
-func providerProbeDetail(detail string) string {
-	if detail == "" {
+// providerDetailForEcho renders a gateway body for anything that leaves this
+// process, whether it lands in a message or in error_params. Two things happen
+// here, and neither is cosmetic:
+//
+//   - It is truncated to providerProbeDetailLimit. A rejected request can
+//     answer with a page of HTML, and the useful part is at the front.
+//   - It is redacted. Gateways do echo the submitted credential back inside
+//     their error prose, and this text crosses to the server and into the UI
+//     exactly like `error` does, so it gets the same pass. error_params are
+//     the daemon's own facts only as long as nothing raw is put in them.
+func providerDetailForEcho(body []byte) string {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) > providerProbeDetailLimit {
+		// Cut on a rune boundary so the result is still valid text.
+		cut := providerProbeDetailLimit
+		for cut > 0 && !utf8.RuneStart(trimmed[cut]) {
+			cut--
+		}
+		trimmed = trimmed[:cut] + "…"
+	}
+	return redact.Text(trimmed)
+}
+
+// providerEchoedText is providerDetailForEcho's output read as a sentence. The
+// placeholder is for a rejection with no body at all, which is a fact worth
+// stating rather than an empty tail after the colon.
+func providerEchoedText(echoed string) string {
+	if echoed == "" {
 		return "no response body"
 	}
-	return detail
+	return echoed
 }
