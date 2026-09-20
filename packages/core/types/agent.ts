@@ -511,6 +511,25 @@ export interface TaskUsage {
   cache_read_tokens: number;
   cache_write_tokens: number;
   cost_usd_ticks?: number;
+  // Run-level metadata the daemon reports alongside the token counters
+  // (DENE-666). It describes the RUN, not the (provider, model) slice, so the
+  // same values repeat on every slice of a run that spilled across models —
+  // read it with `runMetadata`, which takes the first slice that carries each
+  // field rather than summing.
+  //
+  // `TaskUsageSchema` has parsed these since they landed; this interface had
+  // not caught up, so the fields arrived on the wire and were invisible to
+  // TypeScript. Every one stays optional: a pre-DENE-666 server sends none.
+  num_turns?: number;
+  resumed?: boolean;
+  session_id?: string;
+  last_context_tokens?: number;
+  queue_to_claim_ms?: number;
+  prepare_ms?: number;
+  spawn_to_first_output_ms?: number;
+  total_ms?: number;
+  attribution_source?: string;
+  trigger_evidence_kind?: string;
 }
 
 /**

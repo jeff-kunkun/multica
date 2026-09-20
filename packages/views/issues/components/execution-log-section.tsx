@@ -86,7 +86,12 @@ export function ExecutionLogSection({ issueId, workspaceId, identifier, halted =
   // a `["issues", "tasks"]` prefix-match — no local WS subscriptions
   // needed, and the cache stays fresh even when this component isn't
   // mounted (e.g. user cancels from agent-side, then navigates here).
-  const { data: tasks = [] } = useQuery(issueTasksOptions(issueId));
+  const {
+    data: tasks = [],
+    isPending: tasksPending,
+    isError: tasksFailed,
+    refetch: refetchTasks,
+  } = useQuery(issueTasksOptions(issueId));
 
   const activeTasks = useMemo(
     () =>
@@ -231,6 +236,9 @@ export function ExecutionLogSection({ issueId, workspaceId, identifier, halted =
         onOpenChange={setUsageOpen}
         identifier={identifier ?? ""}
         tasks={tasks}
+        isPending={tasksPending}
+        isError={tasksFailed}
+        onRetry={() => void refetchTasks()}
       />
     </div>
   );
@@ -272,7 +280,28 @@ export function IssueUsageTotal({
     () => summarizeTaskUsageAcross(tasks.map((task) => task.usage)),
     [tasks, pricings],
   );
-  if (!total) return null;
+
+  // No run on this issue reported usage. Previously this returned null, which
+  // removed the only door to the breakdown at exactly the moment the reader
+  // most needs to know WHY there is no figure — "is metering off, or did this
+  // issue really not run?". Keep the door, drop the numbers: the label opens
+  // the same view, which explains the absence. Still never "0 · $0.00" — a
+  // run from before usage reporting was not free.
+  if (!total) {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={<button type="button" onClick={onOpen} />}
+          className={`flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-caption text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground ${
+            alone ? "ml-auto" : ""
+          }`}
+        >
+          {t(($) => $.execution_log.usage_label)}
+        </TooltipTrigger>
+        <TooltipContent>{t(($) => $.execution_log.usage_total_tooltip)}</TooltipContent>
+      </Tooltip>
+    );
+  }
 
   // Two thresholds because the header has two shapes, and the tier should cost
   // the reader a figure only where the row genuinely runs out: beside the

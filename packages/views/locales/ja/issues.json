@@ -678,7 +678,8 @@
       "source_backfill": "バックフィルされた帰属",
       "source_unattributed": "責任メンバーを解決できません"
     },
-    "usage_total_tooltip": "このタスクのトークン使用量 — クリックで実行ごとの内訳"
+    "usage_total_tooltip": "このタスクのトークン使用量 — クリックで実行ごとの内訳",
+    "usage_label": "トークン費用"
   },
   "usage_detail": {
     "title": "使用量の内訳",
@@ -704,7 +705,38 @@
     "total": "合計",
     "note_unpriced_other": "{{count}} 回の実行は使用量が記録されておらず、合計に含まれません。",
     "note_unmapped": "{{models}} は価格が未登録です。トークンは集計されますが費用は含まれません。",
-    "note_estimate": "費用は公開モデル料金からの概算です（プロバイダーが独自の費用を返した分を除く）。"
+    "note_estimate": "費用は公開モデル料金からの概算です（プロバイダーが独自の費用を返した分を除く）。",
+    "empty_hint": "使用量は実行終了時にデーモンが記録します。使用量レポート導入前の実行や、レポートしないデーモン上の実行には数値がありません。更新済みのデーモンで再実行すると収集が始まります。",
+    "loading": "実行履歴を読み込み中…",
+    "load_failed": "この課題の実行履歴を読み込めませんでした。",
+    "retry": "再試行"
+  },
+  "run_cost": {
+    "section": "この実行のトークン費用",
+    "segment": {
+      "input": "新規入力",
+      "cacheWrite": "キャッシュ書き込み",
+      "cacheRead": "キャッシュ読み取り",
+      "output": "出力"
+    },
+    "figure_cost": "この実行",
+    "figure_cost_hint": "この課題の {{pct}}%",
+    "figure_cost_hint_unknown": "課題内の比率は算出できません",
+    "figure_cache": "キャッシュヒット率",
+    "figure_cache_hint": "読み取り {{reads}} · 書き込み {{writes}}",
+    "figure_largest": "最大の構成要素",
+    "figure_largest_hint": "{{pct}}% · {{tokens}} トークン",
+    "fact_turns": "ターン数",
+    "fact_start": "セッション",
+    "fact_start_resumed": "再開",
+    "fact_start_cold": "コールドスタート",
+    "fact_last_context": "最終ステップの文脈量",
+    "fact_queue": "待機",
+    "fact_prepare": "準備",
+    "fact_first_output": "初回出力まで",
+    "fact_trigger": "トリガー元",
+    "facts_unavailable": "この実行はターン数と区間所要時間を報告していません。実行メタデータ報告より古いデーモンで動作しました。",
+    "note_no_prompt_split": "プロバイダーはこの 4 区分で課金し、報告もこの 4 区分だけです。トークンはランタイムブリーフ・ツールスキーマ・履歴・ツール結果には割り当てられないため、本ビューではその分割を行いません。"
   },
   "terminate_dialog": {
     "title": "この実行を停止しますか？",
