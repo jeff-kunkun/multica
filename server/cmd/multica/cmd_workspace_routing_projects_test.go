@@ -125,3 +125,39 @@ func TestRoutingProjectsListMergesWorkspaceRowsOverDefaults(t *testing.T) {
 		t.Errorf("rows = %v", seen)
 	}
 }
+
+// Matching is case-insensitive in the router, so two rows that differ only in
+// case are one row with two spellings — and the router would pick between them
+// at random. Re-setting replaces, and unset finds, whatever case was typed.
+func TestRoutingProjectsSetReplacesARowTypedInAnotherCase(t *testing.T) {
+	var patched map[string]any
+	routingProjectsServer(t, map[string]any{
+		"routing": map[string]any{"projects": map[string]any{"Tarot": "出海"}},
+	}, &patched)
+
+	if err := runWorkspaceRoutingProjectsSet(newRoutingProjectsTestCmd(), []string{"tarot", "通用"}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	settings, _ := patched["settings"].(map[string]any)
+	block, _ := settings["routing"].(map[string]any)
+	projects, _ := block["projects"].(map[string]any)
+	if len(projects) != 1 || projects["tarot"] != "通用" {
+		t.Errorf("projects = %v, want the single row replaced", projects)
+	}
+}
+
+func TestRoutingProjectsUnsetFindsARowTypedInAnotherCase(t *testing.T) {
+	var patched map[string]any
+	routingProjectsServer(t, map[string]any{
+		"routing": map[string]any{"projects": map[string]any{"Tarot": "出海"}},
+	}, &patched)
+
+	if err := runWorkspaceRoutingProjectsUnset(newRoutingProjectsTestCmd(), []string{"tarot"}); err != nil {
+		t.Fatalf("unset: %v", err)
+	}
+	settings, _ := patched["settings"].(map[string]any)
+	block, _ := settings["routing"].(map[string]any)
+	if _, present := block["projects"]; present {
+		t.Errorf("row survived unset: %v", block)
+	}
+}

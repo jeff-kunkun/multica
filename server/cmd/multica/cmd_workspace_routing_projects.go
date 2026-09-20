@@ -81,6 +81,26 @@ func routingProjectRows(settings map[string]any) map[string]string {
 	return rows
 }
 
+// routingProjectKey is how a project name is compared, here and in the
+// router: trimmed and case-folded. Two rows that fold to the same key are the
+// same row, so the table must never hold both — the router keeps one of them
+// at random, and the direction would flip between two routed issues.
+func routingProjectKey(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+// findRoutingProjectRow returns the stored spelling of the row this project
+// name addresses, whatever case it was typed in.
+func findRoutingProjectRow(rows map[string]string, project string) (string, bool) {
+	key := routingProjectKey(project)
+	for stored := range rows {
+		if routingProjectKey(stored) == key {
+			return stored, true
+		}
+	}
+	return "", false
+}
+
 // validRoutingDirection accepts a declared direction or the generic marker.
 func validRoutingDirection(direction string) bool {
 	if direction == routing.GenericDirection {
@@ -172,11 +192,11 @@ func runWorkspaceRoutingProjectsList(cmd *cobra.Command, _ []string) error {
 	rows := make([]row, 0, len(own)+len(routing.DefaultLadder.Projects))
 	seen := map[string]bool{}
 	for k, v := range own {
-		seen[strings.ToLower(strings.TrimSpace(k))] = true
+		seen[routingProjectKey(k)] = true
 		rows = append(rows, row{Project: k, Direction: v, Source: "workspace"})
 	}
 	for k, v := range routing.DefaultLadder.Projects {
-		if !seen[strings.ToLower(strings.TrimSpace(k))] {
+		if !seen[routingProjectKey(k)] {
 			rows = append(rows, row{Project: k, Direction: v, Source: "default"})
 		}
 	}
@@ -215,6 +235,11 @@ func runWorkspaceRoutingProjectsSet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	rows := routingProjectRows(settings)
+	// Re-typing an existing project in another case replaces that row rather
+	// than adding a second one the router would pick between at random.
+	if stored, ok := findRoutingProjectRow(rows, project); ok {
+		delete(rows, stored)
+	}
 	rows[project] = direction
 	if err := writeRoutingProjectRows(ctx, client, wsID, settings, rows); err != nil {
 		return err
@@ -237,10 +262,11 @@ func runWorkspaceRoutingProjectsUnset(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	rows := routingProjectRows(settings)
-	if _, ok := rows[project]; !ok {
+	stored, ok := findRoutingProjectRow(rows, project)
+	if !ok {
 		return fmt.Errorf("this workspace has no row for %q (shipped defaults cannot be removed; override one with `set`)", project)
 	}
-	delete(rows, project)
+	delete(rows, stored)
 	if err := writeRoutingProjectRows(ctx, client, wsID, settings, rows); err != nil {
 		return err
 	}
