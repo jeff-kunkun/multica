@@ -22,6 +22,35 @@ WHERE id = sqlc.arg('id')::uuid
   AND assignee_id IS NULL
 RETURNING *;
 
+-- name: SetIssueReviewerIfUnset :one
+-- Fills the reviewer slot only while it is still empty. reviewer_type IS NULL
+-- is the empty slot; 'none' ("needs no acceptance pass") is a written value
+-- and blocks this write exactly like a named reviewer does. Returns no row
+-- when the slot already held an answer.
+UPDATE issue
+SET reviewer_type = sqlc.arg('reviewer_type')::text,
+    reviewer_id = sqlc.narg('reviewer_id')::uuid,
+    revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
+    updated_at = now()
+WHERE id = sqlc.arg('id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND reviewer_type IS NULL
+RETURNING *;
+
+-- name: ClearIssueReviewer :execrows
+-- Drops a reviewer reference that no longer points at anybody. The reviewer
+-- pair is a reference, not a copy of a name, so the one thing it needs from
+-- the rest of the server is to be released when its target is archived — the
+-- same cleanup the no-foreign-keys rule requires for every other reference.
+UPDATE issue
+SET reviewer_type = NULL,
+    reviewer_id = NULL,
+    updated_at = now()
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND reviewer_type = sqlc.arg('reviewer_type')::text
+  AND reviewer_id = sqlc.arg('reviewer_id')::uuid;
+
 -- name: SetIssuePropertyValueIfUnset :one
 -- Fills one property slot only while it is still empty. Mirrors
 -- SetIssuePropertyValue, with the `properties ? key` guard moved into the

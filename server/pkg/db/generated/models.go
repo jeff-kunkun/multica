@@ -809,6 +809,8 @@ type Issue struct {
 	Properties         []byte             `json:"properties"`
 	Revision           int64              `json:"revision"`
 	LastActivityAt     pgtype.Timestamptz `json:"last_activity_at"`
+	ReviewerType       pgtype.Text        `json:"reviewer_type"`
+	ReviewerID         pgtype.UUID        `json:"reviewer_id"`
 }
 
 type IssueDependency struct {

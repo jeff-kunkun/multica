@@ -44,6 +44,8 @@ function issue(overrides: Partial<Issue> = {}): Issue {
     priority: "high",
     assignee_type: "agent",
     assignee_id: "agent-1",
+    reviewer_type: null,
+    reviewer_id: null,
     creator_type: "agent",
     creator_id: "agent-1",
     parent_issue_id: "parent-1",

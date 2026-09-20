@@ -59,7 +59,7 @@ func TestHumanAssigneeIssueIsNeverTouched(t *testing.T) {
 			store.issue.Status = status
 			store.issue.AssigneeType = "member"
 			store.issue.AssigneeID = "user-9"
-			store.issue.Reviewer = OptionHuman
+			store.issue.Reviewer = ReviewerRef{Kind: ReviewerMember, ID: "user-1", Name: "Kun"}
 			judge := &fakeJudge{verdict: confidentVerdict()}
 
 			out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
@@ -116,8 +116,8 @@ func TestTodoFillsBothSlotsAndDoesNotMention(t *testing.T) {
 	if len(store.assigns) != 1 || store.assigns[0] != "孙悟空游戏" {
 		t.Errorf("assigns = %v, want [孙悟空游戏]", store.assigns)
 	}
-	if len(store.reviewer) != 1 || store.reviewer[0] != "o-bulma-g" {
-		t.Errorf("reviewer writes = %v, want [o-bulma-g]", store.reviewer)
+	if len(store.reviewer) != 1 || store.reviewer[0] != "布尔玛游戏" {
+		t.Errorf("reviewer writes = %v, want [布尔玛游戏]", store.reviewer)
 	}
 	// Dispatched to an agent: somebody is on it, so an @ would be noise.
 	if out.Mentioned {
@@ -138,7 +138,7 @@ func TestTodoDoesNotOverwriteSlotsSomebodyElseFilled(t *testing.T) {
 	store := newFakeStore()
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-piccolo-g"
-	store.issue.Reviewer = "布尔玛游戏"
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerAgent, ID: "a-bulma-g", Name: "布尔玛游戏"}
 	judge := &fakeJudge{verdict: confidentVerdict()}
 
 	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
@@ -203,7 +203,7 @@ func TestLowConfidenceStillDispatchesToTheFallbackRung(t *testing.T) {
 	if len(store.assigns) != 1 || store.assigns[0] != "孙悟空游戏" {
 		t.Errorf("assigns = %v, want the fallback rung (孙悟空游戏), not the unconfident pick", store.assigns)
 	}
-	if len(store.reviewer) != 1 || store.reviewer[0] != "o-bulma-g" {
+	if len(store.reviewer) != 1 || store.reviewer[0] != "布尔玛游戏" {
 		t.Errorf("reviewer = %v, want the rung above the executor", store.reviewer)
 	}
 	if out.Action != ActionAssigned {
@@ -232,8 +232,8 @@ func TestReviewerIsNeverTheSeatThatDidTheWork(t *testing.T) {
 		t.Fatalf("reviewer writes = %v", store.reviewer)
 	}
 	// Promoted one rung up rather than accepting a self-review.
-	if store.reviewer[0] != "o-bulma-g" {
-		t.Errorf("reviewer = %q, want the rung above the executor (o-bulma-g)", store.reviewer[0])
+	if store.reviewer[0] != "布尔玛游戏" {
+		t.Errorf("reviewer = %q, want the rung above the executor (布尔玛游戏)", store.reviewer[0])
 	}
 }
 
@@ -247,8 +247,12 @@ func TestReviewerCollisionOnTopRungFallsBackToAHuman(t *testing.T) {
 	if _, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(store.reviewer) != 1 || store.reviewer[0] != "o-human" {
-		t.Errorf("reviewer = %v, want [o-human]", store.reviewer)
+	// The slot names the PERSON, not the 「交给人」 placeholder the old select
+	// property could only offer. That is the second thing DENE-633 buys: the
+	// in-review handoff hands the ticket to whoever the slot names instead of
+	// re-deriving a target at handoff time.
+	if len(store.reviewer) != 1 || store.reviewer[0] != "Kun" {
+		t.Errorf("reviewer = %v, want [Kun] — the named notify target", store.reviewer)
 	}
 }
 
@@ -264,11 +268,11 @@ func TestNoReviewNeededWritesAValueRatherThanLeavingTheSlotEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ReviewerWritten != OptionNoReview {
-		t.Errorf("ReviewerWritten = %q, want %q", out.ReviewerWritten, OptionNoReview)
+	if out.ReviewerWritten.Kind != ReviewerNoReview {
+		t.Errorf("ReviewerWritten = %q, want %q", out.ReviewerWritten.Label(), LabelNoReview)
 	}
-	if len(store.reviewer) != 1 || store.reviewer[0] != "o-none" {
-		t.Errorf("reviewer = %v, want [o-none]", store.reviewer)
+	if len(store.reviewer) != 1 || store.reviewer[0] != LabelNoReview {
+		t.Errorf("reviewer = %v, want [不需要验收]", store.reviewer)
 	}
 	if out.Mentioned {
 		t.Error("mentioned somebody on an issue that will run to completion by itself")
@@ -280,7 +284,7 @@ func TestInReviewHandsOffToAgentWithoutMentioning(t *testing.T) {
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-goku-g"
-	store.issue.Reviewer = "布尔玛游戏"
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerAgent, ID: "a-bulma-g", Name: "布尔玛游戏"}
 	judge := &fakeJudge{}
 
 	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
@@ -307,7 +311,7 @@ func TestInReviewHandsOffToAPersonWithAMention(t *testing.T) {
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-goku-g"
-	store.issue.Reviewer = OptionHuman
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerMember, ID: "user-1", Name: "Kun"}
 	judge := &fakeJudge{}
 
 	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
@@ -334,7 +338,7 @@ func TestInReviewWithNoReviewNeededChangesNothing(t *testing.T) {
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-goku-g"
-	store.issue.Reviewer = OptionNoReview
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerNoReview}
 
 	out, err := newRouter(store, &fakeJudge{}).Route(context.Background(), "ws", "issue-1")
 	if err != nil {
@@ -350,7 +354,7 @@ func TestInReviewHandsOffAtMostOnce(t *testing.T) {
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-goku-g"
-	store.issue.Reviewer = "布尔玛游戏"
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerAgent, ID: "a-bulma-g", Name: "布尔玛游戏"}
 	r := newRouter(store, &fakeJudge{})
 
 	for i := 0; i < 3; i++ {
@@ -371,7 +375,7 @@ func TestBlockedAdvisesWithoutChangingAnyValue(t *testing.T) {
 	store.issue.Status = "blocked"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-piccolo-g"
-	store.issue.Reviewer = "布尔玛游戏"
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerAgent, ID: "a-bulma-g", Name: "布尔玛游戏"}
 	judge := &fakeJudge{advice: Advice{Cause: "tier", SuggestedTier: "strong", Reason: "这活比看上去重"}}
 
 	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
@@ -538,9 +542,15 @@ func TestBrokenVerdictBranchFallsBackRatherThanGuessing(t *testing.T) {
 	}
 }
 
-func TestWorkspaceWithoutAReviewerPropertyStillDispatches(t *testing.T) {
+// Before DENE-633 the reviewer lived in a workspace select property, so a
+// workspace that had never provisioned it had NO reviewer slot at all and this
+// test covered dispatching without one. The slot is now a column on every
+// issue, so the state it was really guarding — "the reviewer question is
+// already answered, dispatch the executor anyway and leave the answer alone" —
+// is what it checks now.
+func TestAnAlreadyAnsweredReviewerSlotStillDispatchesTheExecutor(t *testing.T) {
 	store := newFakeStore()
-	store.hasProp = false
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerNoReview}
 	judge := &fakeJudge{verdict: confidentVerdict()}
 
 	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
@@ -550,8 +560,11 @@ func TestWorkspaceWithoutAReviewerPropertyStillDispatches(t *testing.T) {
 	if len(store.assigns) != 1 {
 		t.Errorf("assigns = %v, want one", store.assigns)
 	}
-	if out.ReviewerWritten != "" {
-		t.Errorf("wrote a reviewer slot that does not exist: %q", out.ReviewerWritten)
+	if !out.ReviewerWritten.Empty() {
+		t.Errorf("overwrote an answered reviewer slot: %+v", out.ReviewerWritten)
+	}
+	if len(store.reviewer) != 0 {
+		t.Errorf("reviewer writes = %v, want none", store.reviewer)
 	}
 }
 
@@ -624,7 +637,7 @@ func TestLowConfidenceReportsTheFallbackWithAReadableReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Action != ActionAssigned || out.ExecutorWritten == nil || out.ReviewerWritten == "" {
+	if out.Action != ActionAssigned || out.ExecutorWritten == nil || out.ReviewerWritten.Empty() {
 		t.Fatalf("outcome = %+v, want both slots written", out)
 	}
 	for _, want := range []string{"executor fell back to 孙悟空游戏: confidence 47% < threshold 70%", "reviewer fell back to 布尔玛游戏: confidence 38% < threshold 70%"} {
@@ -640,7 +653,7 @@ func TestLowConfidenceReportsTheFallbackWithAReadableReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second pass: unexpected error: %v", err)
 	}
-	if out.Action != ActionDeclined || out.ExecutorWritten != nil || out.ReviewerWritten != "" {
+	if out.Action != ActionDeclined || out.ExecutorWritten != nil || !out.ReviewerWritten.Empty() {
 		t.Errorf("second pass: outcome = %+v, want declined with no write", out)
 	}
 	if len(store.assigns) != 1 || len(store.reviewer) != 1 {
@@ -656,7 +669,7 @@ func TestUnconfidentReviewerIsNamedInTheReasonButStillFilled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Action != ActionAssigned || out.ExecutorWritten == nil || out.ReviewerWritten == "" {
+	if out.Action != ActionAssigned || out.ExecutorWritten == nil || out.ReviewerWritten.Empty() {
 		t.Errorf("outcome = %+v, want assigned with both slots written", out)
 	}
 	if !strings.Contains(out.Reason, "reviewer fell back") || strings.Contains(out.Reason, "executor") {
@@ -677,7 +690,7 @@ func TestFullFillCarriesNoReason(t *testing.T) {
 
 func TestBrokenTierAnswerReportsTheFallbackAndNamesTheTier(t *testing.T) {
 	store := newFakeStore()
-	store.hasProp = false
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerNoReview}
 	v := confidentVerdict()
 	v.ExecutorTier = "godlike"
 	out, err := newRouter(store, &fakeJudge{verdict: v}).Route(context.Background(), "ws", "issue-1")
@@ -749,7 +762,7 @@ func TestInReviewFillsAnEmptyReviewerSlotAndHandsOff(t *testing.T) {
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-goku-g"
-	store.issue.Reviewer = ""
+	store.issue.Reviewer = ReviewerRef{}
 	judge := &fakeJudge{verdict: confidentVerdict()}
 
 	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
@@ -759,11 +772,11 @@ func TestInReviewFillsAnEmptyReviewerSlotAndHandsOff(t *testing.T) {
 	if out.Action != ActionHandedOff {
 		t.Fatalf("action = %q, want %q (reason %q)", out.Action, ActionHandedOff, out.Reason)
 	}
-	if out.ReviewerWritten != "布尔玛游戏" {
-		t.Errorf("reviewer written = %q, want 布尔玛游戏", out.ReviewerWritten)
+	if out.ReviewerWritten.Label() != "布尔玛游戏" {
+		t.Errorf("reviewer written = %q, want 布尔玛游戏", out.ReviewerWritten.Label())
 	}
-	if len(store.reviewer) != 1 || store.reviewer[0] != "o-bulma-g" {
-		t.Errorf("reviewer slot = %v, want [o-bulma-g]", store.reviewer)
+	if len(store.reviewer) != 1 || store.reviewer[0] != "布尔玛游戏" {
+		t.Errorf("reviewer slot = %v, want [布尔玛游戏]", store.reviewer)
 	}
 	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-bulma-g" {
 		t.Errorf("handoffs = %v, want [agent:a-bulma-g]", store.handoffs)
@@ -782,16 +795,16 @@ func TestInReviewDecidedReviewerIsNeverTheExecutor(t *testing.T) {
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-bulma-g" // the seat the judge is about to name
-	store.issue.Reviewer = ""
+	store.issue.Reviewer = ReviewerRef{}
 	judge := &fakeJudge{verdict: confidentVerdict()}
 
 	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ReviewerWritten != OptionHuman {
+	if out.ReviewerWritten.Kind != ReviewerMember {
 		t.Errorf("reviewer = %q, want %q — the top rung did the work, so the check falls to a person",
-			out.ReviewerWritten, OptionHuman)
+			out.ReviewerWritten.Label(), LabelHuman)
 	}
 	if len(store.handoffs) != 1 || store.handoffs[0] != "member:user-1" {
 		t.Errorf("handoffs = %v, want [member:user-1]", store.handoffs)
@@ -804,7 +817,7 @@ func TestInReviewDecisionNeverTouchesStatus(t *testing.T) {
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-goku-g"
-	store.issue.Reviewer = ""
+	store.issue.Reviewer = ReviewerRef{}
 
 	if _, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).
 		Route(context.Background(), "ws", "issue-1"); err != nil {
@@ -824,7 +837,7 @@ func TestOffLadderExecutorFallsBackToTheTopRungNotAPerson(t *testing.T) {
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-trunks" // not on the ladder: no tier label
-	store.issue.Reviewer = ""
+	store.issue.Reviewer = ReviewerRef{}
 	// An unusable verdict, so the ladder fallback is what answers.
 	judge := &fakeJudge{verdict: Verdict{
 		ExecutorTier: "strong", ExecutorConfidence: 0.9,
@@ -835,9 +848,9 @@ func TestOffLadderExecutorFallsBackToTheTopRungNotAPerson(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ReviewerWritten != "布尔玛游戏" {
+	if out.ReviewerWritten.Label() != "布尔玛游戏" {
 		t.Errorf("reviewer = %q, want 布尔玛游戏 — an unlabelled executor must not force a human check",
-			out.ReviewerWritten)
+			out.ReviewerWritten.Label())
 	}
 	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-bulma-g" {
 		t.Errorf("handoffs = %v, want [agent:a-bulma-g]", store.handoffs)
@@ -851,7 +864,7 @@ func TestTopRungExecutorStillFallsBackToAPerson(t *testing.T) {
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-bulma-g"
-	store.issue.Reviewer = ""
+	store.issue.Reviewer = ReviewerRef{}
 	judge := &fakeJudge{verdict: Verdict{
 		ExecutorTier: "strong", ExecutorConfidence: 0.9,
 		Reviewer: ReviewerSeat, ReviewerTier: "strongest", ReviewerConfidence: 0.1,
@@ -861,7 +874,7 @@ func TestTopRungExecutorStillFallsBackToAPerson(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ReviewerWritten != OptionHuman {
-		t.Errorf("reviewer = %q, want %q", out.ReviewerWritten, OptionHuman)
+	if out.ReviewerWritten.Kind != ReviewerMember {
+		t.Errorf("reviewer = %q, want %q", out.ReviewerWritten.Label(), LabelHuman)
 	}
 }

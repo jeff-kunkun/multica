@@ -42,9 +42,9 @@ func (r *Router) assignmentComment(
 	threshold float64,
 	executor *Seat,
 	executorSource string,
-	reviewerName string,
+	reviewer ReviewerRef,
 	reviewerFallback bool,
-	needExecutor, needReviewer, hasReviewerSlot bool,
+	needExecutor, needReviewer bool,
 	stillUnassigned bool,
 ) string {
 	var b strings.Builder
@@ -69,25 +69,24 @@ func (r *Router) assignmentComment(
 
 	// Reviewer slot.
 	switch {
-	case !hasReviewerSlot:
-		b.WriteString("- **验收席**：本工作区的「验收席」属性不可用（已归档，或同名属性是别的类型），这一格没写\n")
 	case !needReviewer:
-		b.WriteString(fmt.Sprintf("- **验收席**：已有值「%s」，未改动\n", issue.Reviewer))
-	case reviewerFallback && reviewerName == OptionHuman:
-		b.WriteString(fmt.Sprintf("- **验收席**：交给人（**兜底**——裁决置信度 %s 低于阈值 %s，执行席已在最强档，没有更高一档可验）\n",
-			pct(v.ReviewerConfidence), pct(threshold)))
-	case reviewerFallback && reviewerName != "":
+		b.WriteString(fmt.Sprintf("- **验收席**：已有值「%s」，未改动\n", issue.Reviewer.Label()))
+	case reviewerFallback && reviewer.Kind == ReviewerMember:
+		b.WriteString(fmt.Sprintf("- **验收席**：%s（**兜底**——裁决置信度 %s 低于阈值 %s，执行席已在最强档，没有更高一档可验）\n",
+			reviewer.Label(), pct(v.ReviewerConfidence), pct(threshold)))
+	case reviewerFallback && !reviewer.Empty():
 		b.WriteString(fmt.Sprintf("- **验收席**：%s（**兜底**——裁决置信度 %s 低于阈值 %s，按「比执行席高一档」选的）\n",
-			reviewerName, pct(v.ReviewerConfidence), pct(threshold)))
-	case reviewerName == OptionNoReview:
+			reviewer.Label(), pct(v.ReviewerConfidence), pct(threshold)))
+	case reviewer.Kind == ReviewerNoReview:
 		b.WriteString(fmt.Sprintf("- **验收席**：本票不需要验收（置信度 %s）。要人复核就自己填一个\n", pct(v.ReviewerConfidence)))
-	case reviewerName == OptionHuman:
-		b.WriteString(fmt.Sprintf("- **验收席**：交给人（置信度 %s）——判为这次验收需要沟通\n", pct(v.ReviewerConfidence)))
-	case reviewerName != "":
+	case reviewer.Kind == ReviewerMember:
+		b.WriteString(fmt.Sprintf("- **验收席**：%s（置信度 %s）——判为这次验收需要沟通，交给人\n",
+			reviewer.Label(), pct(v.ReviewerConfidence)))
+	case !reviewer.Empty():
 		b.WriteString(fmt.Sprintf("- **验收席**：%s（置信度 %s ≥ 阈值 %s）\n",
-			reviewerName, pct(v.ReviewerConfidence), pct(threshold)))
+			reviewer.Label(), pct(v.ReviewerConfidence), pct(threshold)))
 	default:
-		b.WriteString("- **验收席**：⚠️ 未填——这一格在本次裁决与写入之间被别人占了，或「验收席」属性里没有这个选项\n")
+		b.WriteString("- **验收席**：⚠️ 未填——这一格在本次裁决与写入之间被别人占了\n")
 	}
 
 	b.WriteString(directionLine(issue, match))

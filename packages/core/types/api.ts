@@ -1,4 +1,4 @@
-import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
+import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType, IssueReviewerType } from "./issue";
 import type { PropertyFilterValue } from "./property";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
@@ -62,6 +62,10 @@ export interface UpdateIssueRequest {
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
+  /** 验收席. Send the pair as null to clear it back to undecided, or
+   *  reviewer_type "none" with a null id for "needs no acceptance pass". */
+  reviewer_type?: IssueReviewerType | null;
+  reviewer_id?: string | null;
   position?: number;
   start_date?: string | null;
   due_date?: string | null;

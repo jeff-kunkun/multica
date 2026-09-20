@@ -564,6 +564,8 @@ const mockIssue: Issue = {
   priority: "high",
   assignee_type: "member",
   assignee_id: "user-1",
+  reviewer_type: null,
+  reviewer_id: null,
   creator_type: "member",
   creator_id: "user-1",
   parent_issue_id: null,

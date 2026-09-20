@@ -30,10 +30,58 @@ type Issue struct {
 	ParentExecutor string
 	HasChildren    bool
 
-	// Reviewer is the current value of the reviewer property, resolved to its
-	// option NAME. Empty means the slot is empty — the only condition under
-	// which routing may write it.
-	Reviewer string
+	// Reviewer is the ticket's reviewer slot. A zero Kind means the slot is
+	// empty — the only condition under which routing may write it.
+	Reviewer ReviewerRef
+}
+
+// ReviewerTarget is what the reviewer slot holds. The values are the strings
+// stored in issue.reviewer_type, so the module and the column agree by
+// construction.
+type ReviewerTarget string
+
+const (
+	// ReviewerEmpty is the unfilled slot.
+	ReviewerEmpty ReviewerTarget = ""
+	// ReviewerAgent — a seat accepts the ticket. ID is the agent id.
+	ReviewerAgent ReviewerTarget = "agent"
+	// ReviewerMember — a person accepts the ticket. ID is the user id.
+	ReviewerMember ReviewerTarget = "member"
+	// ReviewerNoReview — this ticket needs no acceptance pass. It is a
+	// WRITTEN value and carries no id: an empty slot would be re-judged on
+	// every later status change, and the fill-only-empty-slots rule would
+	// never close.
+	ReviewerNoReview ReviewerTarget = "none"
+)
+
+// ReviewerRef is the reviewer slot's value: a reference to an actor, the same
+// shape as the assignee pair. Name is display only — it is resolved from the
+// roster on read and never stored, which is the whole point of the reference:
+// renaming or archiving a seat cannot leave a ticket pointing at a name that
+// no longer means anybody.
+type ReviewerRef struct {
+	Kind ReviewerTarget
+	ID   string
+	Name string
+}
+
+// Empty reports the one state routing may write over.
+func (r ReviewerRef) Empty() bool { return r.Kind == ReviewerEmpty }
+
+// Label is what the decision comment prints for this slot.
+func (r ReviewerRef) Label() string {
+	switch r.Kind {
+	case ReviewerNoReview:
+		return LabelNoReview
+	case ReviewerMember:
+		if r.Name != "" {
+			return r.Name
+		}
+		return LabelHuman
+	case ReviewerAgent:
+		return r.Name
+	}
+	return ""
 }
 
 // AssignedToHuman reports the one case routing never touches at all. A ticket
@@ -48,24 +96,10 @@ type Member struct {
 	Name   string
 }
 
-// ReviewerProperty is the workspace's reviewer slot definition.
-type ReviewerProperty struct {
-	ID string
-	// Options maps option name to option id. Routing addresses options by
-	// name — seat names plus the two fixed non-seat values — so ids stay an
-	// implementation detail of the property system.
-	Options map[string]string
-}
-
-// Fixed non-seat option names on the reviewer property.
+// Labels for the two non-seat answers, used in routing comments only.
 const (
-	// OptionNoReview is written when the judge decides this ticket needs no
-	// separate acceptance pass. It is a value rather than an empty slot so
-	// the slot stops being re-judged on every later status change.
-	OptionNoReview = "不需要验收"
-	// OptionHuman is written when acceptance needs a person. Which person is
-	// not stored here: it is the same target the @ rule resolves.
-	OptionHuman = "交给人"
+	LabelNoReview = "不需要验收"
+	LabelHuman    = "交给人"
 )
 
 // CommentKind identifies a routing comment. It is also the de-duplication key:
@@ -95,23 +129,15 @@ type Store interface {
 	Issue(ctx context.Context, workspaceID, issueID string) (Issue, error)
 	// Roster maps agent name to agent for the whole workspace.
 	Roster(ctx context.Context, workspaceID string) (map[string]Agent, error)
-	// Reviewer returns the reviewer property definition, provisioning it on
-	// the workspace's behalf when it is missing: the reviewer slot is a
-	// fixture of routing, not a field each workspace has to invent, so a
-	// workspace that switched routing on gets both halves of it.
-	//
-	// ok=false means the slot is deliberately unavailable — archived, which
-	// is how a workspace turns the reviewer half off, or occupied by a
-	// same-named property of another type. Routing then fills the executor
-	// slot only and says so, rather than failing the whole call.
-	Reviewer(ctx context.Context, workspaceID string) (prop ReviewerProperty, ok bool, err error)
-
 	// AssignAgentIfUnassigned fills the executor slot only while it is still
 	// empty. Reports whether THIS call wrote it. Starting the seat's run is
 	// the store's job, because assignment is what wakes an agent.
 	AssignAgentIfUnassigned(ctx context.Context, workspaceID, issueID string, seat Seat) (written bool, err error)
 	// SetReviewerIfUnset fills the reviewer slot only while it is still empty.
-	SetReviewerIfUnset(ctx context.Context, workspaceID, issueID, propertyID, optionID string) (written bool, err error)
+	// The slot is a field on the issue, not a workspace property, so there is
+	// nothing to provision and nothing that can be missing: every workspace
+	// with routing on has it.
+	SetReviewerIfUnset(ctx context.Context, workspaceID, issueID string, ref ReviewerRef) (written bool, err error)
 	// Handoff reassigns an issue that already has an assignee. Unlike the two
 	// above this is not a fill: the in-review row hands the ticket from the
 	// seat that did the work to the seat or person that accepts it.

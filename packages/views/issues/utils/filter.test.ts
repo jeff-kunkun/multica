@@ -33,6 +33,8 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     priority: "medium",
     assignee_type: null,
     assignee_id: null,
+    reviewer_type: null,
+    reviewer_id: null,
     creator_type: "member",
     creator_id: "u-1",
     parent_issue_id: null,
