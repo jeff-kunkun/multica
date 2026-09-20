@@ -80,8 +80,8 @@ type JudgeState struct {
 // Judge answers the two questions Route cannot answer deterministically.
 // Implementations must not write anything anywhere.
 type Judge interface {
-	Assign(ctx context.Context, model string, st JudgeState) (Verdict, error)
-	Unblock(ctx context.Context, model string, st JudgeState) (Advice, error)
+	Assign(ctx context.Context, target Target, st JudgeState) (Verdict, error)
+	Unblock(ctx context.Context, target Target, st JudgeState) (Advice, error)
 }
 
 // TextGenerator is the slice of the server-internal LLM layer this package
@@ -97,7 +97,28 @@ type TextGenerator interface {
 // is reused is the discipline — a bounded branch set, one threshold living in
 // one place, and no write when the answer is not clear — not the program.
 type LLMJudge struct {
+	// Gen is the deployment's own generator (MULTICA_LLM_*). It serves every
+	// workspace that did not bring its own gateway, which is all of them until
+	// somebody fills the endpoint pair in.
 	Gen TextGenerator
+	// Dial builds a generator for a workspace-owned gateway. Nil means this
+	// build cannot honour a workspace endpoint at all, and such a target falls
+	// back to Gen rather than failing — an unwired factory is a deployment
+	// fact, not a reason to stop routing.
+	//
+	// It is a factory rather than a cache on purpose: one call per routing
+	// pass is cheap next to the model round-trip it is about to make, while a
+	// cache keyed by credential would keep a rotated-away key alive in memory
+	// for as long as the process runs.
+	Dial func(baseURL, apiKey string) TextGenerator
+}
+
+// generator picks the endpoint one call goes to.
+func (j LLMJudge) generator(t Target) TextGenerator {
+	if t.Override() && j.Dial != nil {
+		return j.Dial(t.BaseURL, t.APIKey)
+	}
+	return j.Gen
 }
 
 // Availability is the optional half of Judge: an implementation that can say,
@@ -107,7 +128,7 @@ type LLMJudge struct {
 // is reported the moment somebody opens the settings section, instead of only
 // after the first ticket has failed against it.
 type Availability interface {
-	Available() bool
+	Available(target Target) bool
 }
 
 // Available reports whether the generator behind this judge has anywhere to
@@ -117,7 +138,14 @@ type Availability interface {
 // only honest reading of "unknown" is to let the real call decide, and
 // claiming a fault on a guess is exactly the mistake this whole surface is
 // supposed to avoid.
-func (j LLMJudge) Available() bool {
+func (j LLMJudge) Available(t Target) bool {
+	// A workspace that supplied both halves has somewhere to send a request by
+	// construction, whatever the deployment did or did not configure. Reading
+	// the deployment client here is what used to report "this deployment has
+	// no internal LLM" at a workspace that had just typed in its own.
+	if t.Override() && j.Dial != nil {
+		return true
+	}
 	type enabler interface{ Enabled() bool }
 	if e, ok := j.Gen.(enabler); ok {
 		return e.Enabled()
@@ -125,9 +153,10 @@ func (j LLMJudge) Available() bool {
 	return true
 }
 
-// NotConfiguredReason is the wording shown for a deployment with no internal
-// LLM. Named once so Health and the breaker cannot drift apart on it.
-const NotConfiguredReason = "this deployment has no internal LLM configured"
+// NotConfiguredReason is the wording shown when neither the workspace nor the
+// deployment has an endpoint to call. Named once so Health and the breaker
+// cannot drift apart on it.
+const NotConfiguredReason = "no routing endpoint is configured — set one for this workspace, or configure the deployment's internal LLM"
 
 // ErrJudgeUnavailable reports that no answer could be obtained. Route turns it
 // into the else branch; it never becomes a partial write.
@@ -155,8 +184,8 @@ You are not changing anything on the ticket. Respond with a JSON object with key
 // Assign asks the todo-row question. Any transport, decoding, or contract
 // failure returns an error wrapping ErrJudgeUnavailable; the caller must not
 // be able to mistake a broken call for a low-confidence answer.
-func (j LLMJudge) Assign(ctx context.Context, model string, st JudgeState) (Verdict, error) {
-	raw, err := j.ask(ctx, model, assignSystemPrompt, st)
+func (j LLMJudge) Assign(ctx context.Context, target Target, st JudgeState) (Verdict, error) {
+	raw, err := j.ask(ctx, target, assignSystemPrompt, st)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -177,8 +206,8 @@ func (j LLMJudge) Assign(ctx context.Context, model string, st JudgeState) (Verd
 }
 
 // Unblock asks the blocked-row question.
-func (j LLMJudge) Unblock(ctx context.Context, model string, st JudgeState) (Advice, error) {
-	raw, err := j.ask(ctx, model, unblockSystemPrompt, st)
+func (j LLMJudge) Unblock(ctx context.Context, target Target, st JudgeState) (Advice, error) {
+	raw, err := j.ask(ctx, target, unblockSystemPrompt, st)
 	if err != nil {
 		return Advice{}, err
 	}
@@ -189,15 +218,16 @@ func (j LLMJudge) Unblock(ctx context.Context, model string, st JudgeState) (Adv
 	return a, nil
 }
 
-func (j LLMJudge) ask(ctx context.Context, model, system string, st JudgeState) (string, error) {
-	if j.Gen == nil {
+func (j LLMJudge) ask(ctx context.Context, target Target, system string, st JudgeState) (string, error) {
+	gen := j.generator(target)
+	if gen == nil {
 		return "", ErrJudgeUnavailable
 	}
 	payload, err := json.Marshal(st)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrJudgeUnavailable, err)
 	}
-	raw, err := j.Gen.GenerateJSON(ctx, model, system, string(payload), 0, 400)
+	raw, err := gen.GenerateJSON(ctx, target.Model, system, string(payload), 0, 400)
 	if err != nil {
 		// Both errors are wrapped, not formatted in: the breaker classifies
 		// 401/402/403/429 out of the upstream error with errors.As, and a %v

@@ -181,14 +181,14 @@ type fakeJudge struct {
 	calls   int
 }
 
-func (j *fakeJudge) Assign(context.Context, string, JudgeState) (Verdict, error) {
+func (j *fakeJudge) Assign(context.Context, Target, JudgeState) (Verdict, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.calls++
 	return j.verdict, j.err
 }
 
-func (j *fakeJudge) Unblock(context.Context, string, JudgeState) (Advice, error) {
+func (j *fakeJudge) Unblock(context.Context, Target, JudgeState) (Advice, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.calls++

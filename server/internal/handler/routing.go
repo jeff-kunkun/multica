@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -112,10 +114,52 @@ type routingHealthResponse struct {
 	LastFailureAt     int64   `json:"last_failure_at"`
 	Model             string  `json:"model"`
 	Threshold         float64 `json:"threshold"`
+	// Gateway* describe WHERE the model identifier above is sent. The box in
+	// the settings section is a model id and nothing else, which left the
+	// reader with no way to answer "which model is this, on whose endpoint?" —
+	// the endpoint and the key are deployment configuration (MULTICA_LLM_*),
+	// not workspace configuration, so they are not editable here and were
+	// therefore not shown at all. Not showing them did not make the dependency
+	// go away; it only made it invisible.
+	//
+	// GatewayHost is HOST ONLY, parsed out of MULTICA_LLM_BASE_URL. The raw
+	// value may carry a path and, in a URL a person pasted, userinfo
+	// credentials; taking the host drops both. GatewayDefaultModel is
+	// MULTICA_LLM_DEFAULT_MODEL, which is what an empty model box would fall
+	// back to elsewhere in the product. Neither is a secret, and the API key
+	// itself is never represented here in any form, masked or otherwise.
+	GatewayHost         string `json:"gateway_host"`
+	GatewayDefaultModel string `json:"gateway_default_model"`
+	// GatewayConfigured is false when there is no endpoint to call at all —
+	// neither one this workspace supplied nor one the deployment did. It used
+	// to mean only the second, which read as "nothing you can do here" at a
+	// workspace that could in fact fix it from this very screen.
+	GatewayConfigured bool `json:"gateway_configured"`
+	// GatewayScope names WHOSE endpoint GatewayHost is: "workspace" when this
+	// workspace supplied its own, "deployment" otherwise. The host alone does
+	// not say, and the two answers lead to different next actions — edit the
+	// field above, or go talk to whoever runs the server.
+	GatewayScope string `json:"gateway_scope"`
+	// GatewayKeySet reports that a workspace key is stored AND openable. It
+	// is never the key, and it is false for a key sealed under a deployment
+	// secret this server no longer has — which is a state that must read as
+	// "type it again", not as a green chip.
+	GatewayKeySet bool `json:"gateway_key_set"`
+	// WorkspaceKeyStorable is false when this deployment has no secretbox, so
+	// the section can disable the key field up front instead of letting
+	// somebody type a credential into a form that will refuse it.
+	WorkspaceKeyStorable bool `json:"workspace_key_storable"`
 }
 
-func routingHealthPayload(rep routing.HealthReport) routingHealthResponse {
-	return routingHealthResponse{
+// Gateway scope values. Named because the client switches on them.
+const (
+	gatewayScopeWorkspace  = "workspace"
+	gatewayScopeDeployment = "deployment"
+)
+
+func (h *Handler) routingHealthPayload(rep routing.HealthReport) routingHealthResponse {
+	deploymentConfigured := h.cfg.LLMAPIKey != "" && h.cfg.LLMBaseURL != ""
+	resp := routingHealthResponse{
 		State:             string(rep.State),
 		Usable:            rep.Usable,
 		Reason:            rep.Reason,
@@ -124,7 +168,40 @@ func routingHealthPayload(rep routing.HealthReport) routingHealthResponse {
 		LastFailureAt:     rep.LastFailureAt,
 		Model:             rep.Model,
 		Threshold:         rep.Threshold,
+		// The deployment default is reported whichever gateway is in use: it
+		// is what an empty model box falls back to, and that stays true for a
+		// workspace running on its own endpoint.
+		GatewayDefaultModel:  h.cfg.LLMDefaultModel,
+		GatewayKeySet:        rep.KeySet,
+		WorkspaceKeyStorable: h.RoutingSecrets != nil,
 	}
+	if rep.UsesWorkspaceGateway {
+		resp.GatewayHost = gatewayHost(rep.BaseURL)
+		resp.GatewayScope = gatewayScopeWorkspace
+		resp.GatewayConfigured = true
+		return resp
+	}
+	resp.GatewayHost = gatewayHost(h.cfg.LLMBaseURL)
+	resp.GatewayScope = gatewayScopeDeployment
+	resp.GatewayConfigured = deploymentConfigured
+	return resp
+}
+
+// gatewayHost reduces MULTICA_LLM_BASE_URL to the host a reader recognises.
+//
+// A value that does not parse as a URL is reported as empty rather than echoed
+// back: the point of this field is to name a host, and echoing an unparseable
+// string is how a pasted credential would reach the client.
+func gatewayHost(baseURL string) string {
+	trimmed := strings.TrimSpace(baseURL)
+	if trimmed == "" {
+		return ""
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // GetRoutingHealth backs GET /api/workspaces/{id}/routing/health.
@@ -148,7 +225,7 @@ func (h *Handler) GetRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read routing health")
 		return
 	}
-	writeJSON(w, http.StatusOK, routingHealthPayload(rep))
+	writeJSON(w, http.StatusOK, h.routingHealthPayload(rep))
 }
 
 // CheckRoutingHealth backs POST /api/workspaces/{id}/routing/health/check —
@@ -169,5 +246,5 @@ func (h *Handler) CheckRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to check the routing model")
 		return
 	}
-	writeJSON(w, http.StatusOK, routingHealthPayload(rep))
+	writeJSON(w, http.StatusOK, h.routingHealthPayload(rep))
 }
