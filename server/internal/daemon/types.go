@@ -136,27 +136,37 @@ type Task struct {
 	NewCommentCount               int                    `json:"new_comment_count,omitempty"`                // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
 	NewCommentsSince              string                 `json:"new_comments_since,omitempty"`               // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	NewCommentsDeltaKnown         bool                   `json:"new_comments_delta_known,omitempty"`         // the server actually computed the issue-wide delta this claim (both reads succeeded). A zero NewCommentCount means "nothing was said" only when this is true; otherwise the zero is a failed read, a cold start, or an old server, and the prompt must not present it as the comment scan's answer (MUL-6984)
-	ChatSessionID                 string                 `json:"chat_session_id,omitempty"`                  // non-empty for chat tasks
-	ChatChannelType               string                 `json:"chat_channel_type,omitempty"`                // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Drives the channel-awareness block in the prompt
-	ChatChannelDeliversFiles      bool                   `json:"chat_channel_delivers_files,omitempty"`      // server capability: this deployment carries a file the agent produces the last hop into this conversation. Absent on a server predating it, which reads as false — the run is told to describe its file in words, and the worst case is a delivery that could have happened did not. Must never be re-derived from chat_channel_type: whether the hop exists depends on the SERVER's storage and adapter wiring, which no daemon can see (MUL-4899)
-	ChatType                      string                 `json:"chat_type,omitempty"`                        // "group" when the channel conversation is a shared room, "p2p" for a 1:1 with the bot. Empty for a web chat or an old server; the per-turn prompt then reports unknown rather than guessing 1:1
-	ChatInThread                  bool                   `json:"chat_in_thread,omitempty"`                   // true when the latest @mention was a thread reply; selects which read command the prompt tells the agent to start with
-	ChatMessage                   string                 `json:"chat_message,omitempty"`                     // user message content for chat tasks
-	ChatMessageAttachments        []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`         // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
-	ChatIntro                     bool                   `json:"chat_intro,omitempty"`                       // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
-	RegenerateQuickActionsFor     string                 `json:"regenerate_quick_actions_for,omitempty"`     // set only by servers predating server-side quick-actions generation (MUL-5573). Read as a REFUSAL marker, never executed: see the guard in runTask
-	AutopilotRunID                string                 `json:"autopilot_run_id,omitempty"`                 // non-empty for autopilot run_only tasks
-	AutopilotID                   string                 `json:"autopilot_id,omitempty"`                     // autopilot that spawned this run
-	AutopilotTitle                string                 `json:"autopilot_title,omitempty"`                  // autopilot title used as task context
-	AutopilotDescription          string                 `json:"autopilot_description,omitempty"`            // autopilot description used as task prompt
-	AutopilotSource               string                 `json:"autopilot_source,omitempty"`                 // manual, schedule, webhook, or api
-	AutopilotTriggerPayload       json.RawMessage        `json:"autopilot_trigger_payload,omitempty"`        // optional trigger payload for webhook/api runs
-	QuickCreatePrompt             string                 `json:"quick_create_prompt,omitempty"`              // user's natural-language input for quick-create tasks
-	QuickCreatePriority           string                 `json:"quick_create_priority,omitempty"`            // explicit priority selected in quick-create
-	QuickCreateDueDate            string                 `json:"quick_create_due_date,omitempty"`            // explicit calendar due date selected in quick-create
-	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
-	QuickCreateSourceContext      json.RawMessage        `json:"quick_create_source_context,omitempty"`      // immutable historical context, separate from the new instruction
-	HandoffNote                   string                 `json:"handoff_note,omitempty"`                     // legacy assignment handoff instruction; rendered only in the per-turn prompt
+	IssueTitle                    string                 `json:"issue_title,omitempty"`
+	IssueDescription              string                 `json:"issue_description,omitempty"`
+	IssueStatus                   string                 `json:"issue_status,omitempty"`
+	IssueAssigneeType             string                 `json:"issue_assignee_type,omitempty"`
+	IssueAssigneeID               string                 `json:"issue_assignee_id,omitempty"`
+	IssueCommentSummaries         []IssueContextComment  `json:"issue_comment_summaries,omitempty"`
+	IssueTriggerThread            []IssueContextComment  `json:"issue_trigger_thread,omitempty"`
+	IssueNewComments              []IssueContextComment  `json:"issue_new_comments,omitempty"`
+	IssueContextGeneratedAt       string                 `json:"issue_context_generated_at,omitempty"`
+	IssueContextTruncated         bool                   `json:"issue_context_truncated,omitempty"`
+	ChatSessionID                 string                 `json:"chat_session_id,omitempty"`              // non-empty for chat tasks
+	ChatChannelType               string                 `json:"chat_channel_type,omitempty"`            // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Drives the channel-awareness block in the prompt
+	ChatChannelDeliversFiles      bool                   `json:"chat_channel_delivers_files,omitempty"`  // server capability: this deployment carries a file the agent produces the last hop into this conversation. Absent on a server predating it, which reads as false — the run is told to describe its file in words, and the worst case is a delivery that could have happened did not. Must never be re-derived from chat_channel_type: whether the hop exists depends on the SERVER's storage and adapter wiring, which no daemon can see (MUL-4899)
+	ChatType                      string                 `json:"chat_type,omitempty"`                    // "group" when the channel conversation is a shared room, "p2p" for a 1:1 with the bot. Empty for a web chat or an old server; the per-turn prompt then reports unknown rather than guessing 1:1
+	ChatInThread                  bool                   `json:"chat_in_thread,omitempty"`               // true when the latest @mention was a thread reply; selects which read command the prompt tells the agent to start with
+	ChatMessage                   string                 `json:"chat_message,omitempty"`                 // user message content for chat tasks
+	ChatMessageAttachments        []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`     // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
+	ChatIntro                     bool                   `json:"chat_intro,omitempty"`                   // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
+	RegenerateQuickActionsFor     string                 `json:"regenerate_quick_actions_for,omitempty"` // set only by servers predating server-side quick-actions generation (MUL-5573). Read as a REFUSAL marker, never executed: see the guard in runTask
+	AutopilotRunID                string                 `json:"autopilot_run_id,omitempty"`             // non-empty for autopilot run_only tasks
+	AutopilotID                   string                 `json:"autopilot_id,omitempty"`                 // autopilot that spawned this run
+	AutopilotTitle                string                 `json:"autopilot_title,omitempty"`              // autopilot title used as task context
+	AutopilotDescription          string                 `json:"autopilot_description,omitempty"`        // autopilot description used as task prompt
+	AutopilotSource               string                 `json:"autopilot_source,omitempty"`             // manual, schedule, webhook, or api
+	AutopilotTriggerPayload       json.RawMessage        `json:"autopilot_trigger_payload,omitempty"`    // optional trigger payload for webhook/api runs
+	QuickCreatePrompt             string                 `json:"quick_create_prompt,omitempty"`          // user's natural-language input for quick-create tasks
+	QuickCreatePriority           string                 `json:"quick_create_priority,omitempty"`        // explicit priority selected in quick-create
+	QuickCreateDueDate            string                 `json:"quick_create_due_date,omitempty"`        // explicit calendar due date selected in quick-create
+	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`  // attachments uploaded in the quick-create prompt and bound by issue create
+	QuickCreateSourceContext      json.RawMessage        `json:"quick_create_source_context,omitempty"`  // immutable historical context, separate from the new instruction
+	HandoffNote                   string                 `json:"handoff_note,omitempty"`                 // legacy assignment handoff instruction; rendered only in the per-turn prompt
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
@@ -217,6 +227,16 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+}
+
+type IssueContextComment struct {
+	ID             string `json:"id"`
+	ThreadID       string `json:"thread_id,omitempty"`
+	AuthorType     string `json:"author_type,omitempty"`
+	Content        string `json:"content"`
+	CreatedAt      string `json:"created_at,omitempty"`
+	ReplyCount     int    `json:"reply_count,omitempty"`
+	LastActivityAt string `json:"last_activity_at,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

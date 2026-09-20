@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -44,6 +45,18 @@ import (
 // current request, so this is a defense-in-depth floor rather than the steady
 // state poll interval.
 const claimPollHintMinDelay = time.Second
+
+func truncateUTF8(s string, maxBytes int) (string, bool) {
+	if len(s) <= maxBytes {
+		return s, false
+	}
+	cut := s[:maxBytes]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		_, size := utf8.DecodeLastRuneInString(cut)
+		cut = cut[:len(cut)-size]
+	}
+	return cut, true
+}
 
 // ---------------------------------------------------------------------------
 // Daemon workspace ownership helpers
@@ -2862,6 +2875,38 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		resp.ThreadName = issue.Title
 		issueNumber = issue.Number
+		// Inline a bounded issue snapshot so a fresh daemon run can orient without
+		// repeating the mandatory issue/comment reads. Older daemons ignore these
+		// additive fields.
+		resp.IssueTitle = issue.Title
+		if issue.Description.Valid {
+			resp.IssueDescription = issue.Description.String
+		}
+		resp.IssueStatus = issue.Status
+		resp.IssueAssigneeType = issue.AssigneeType.String
+		resp.IssueAssigneeID = uuidToString(issue.AssigneeID)
+		resp.IssueContextGeneratedAt = time.Now().UTC().Format(time.RFC3339)
+		if roots, err := h.Queries.ListRootCommentsForIssue(r.Context(), db.ListRootCommentsForIssueParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, RowLimit: 200}); err == nil {
+			for _, root := range roots {
+				content, truncated := truncateUTF8(root.Content, 240-len("…"))
+				if truncated {
+					content += "…"
+					resp.IssueContextTruncated = true
+				}
+				resp.IssueCommentSummaries = append(resp.IssueCommentSummaries, IssueContextComment{
+					ID: uuidToString(root.ID), ThreadID: uuidToString(root.ID), AuthorType: root.AuthorType,
+					Content: content, CreatedAt: root.CreatedAt.Time.UTC().Format(time.RFC3339), ReplyCount: int(root.ReplyCount),
+					LastActivityAt: root.LastActivityAt.Time.UTC().Format(time.RFC3339),
+				})
+			}
+		}
+		if task.TriggerCommentID.Valid {
+			if rows, err := h.Queries.ListThreadCommentsForIssuePaged(r.Context(), db.ListThreadCommentsForIssuePagedParams{AnchorID: task.TriggerCommentID, IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, ReplyLimit: 30}); err == nil {
+				for _, row := range rows {
+					resp.IssueTriggerThread = append(resp.IssueTriggerThread, IssueContextComment{ID: uuidToString(row.ID), ThreadID: uuidToString(task.TriggerCommentID), AuthorType: row.AuthorType, Content: row.Content, CreatedAt: row.CreatedAt.Time.UTC().Format(time.RFC3339)})
+				}
+			}
+		}
 
 		// Squad-leader briefing injection: keyed off the task being a
 		// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -3104,6 +3149,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						if cnt > 0 {
 							resp.NewCommentCount = int(cnt)
 							resp.NewCommentsSince = startedAt.Time.UTC().Format(time.RFC3339)
+							if rows, listErr := h.Queries.ListCommentsSinceForIssue(r.Context(), db.ListCommentsSinceForIssueParams{IssueID: comment.IssueID, WorkspaceID: comment.WorkspaceID, CreatedAt: startedAt, Limit: 100}); listErr == nil {
+								for _, row := range rows {
+									if uuidToString(row.ID) == triggerCommentID || uuidToString(row.AuthorID) == uuidToString(task.AgentID) || row.DeletedAt.Valid {
+										continue
+									}
+									resp.IssueNewComments = append(resp.IssueNewComments, IssueContextComment{ID: uuidToString(row.ID), Content: row.Content, AuthorType: row.AuthorType, CreatedAt: row.CreatedAt.Time.UTC().Format(time.RFC3339)})
+								}
+							}
 						}
 					}
 				}
