@@ -104,18 +104,20 @@ import {
   providerPresetFailureFrom,
   providerPresetFormFrom,
   providerPresetKeyState,
-  providerPresetModelLabel,
   providerPresetModels,
   providerPresetNeedsKeyRegeneration,
   providerPresetSummaryLine,
   providerPresetUpsertInput,
   providerPresetsViewState,
-  providerSeatModelDisplay,
-  providerSeatModelString,
   reduceProviderPresetSave,
   supportsProviderPresets,
   validateProviderPresetForm,
 } from "./provider-presets-model";
+import {
+  providerPresetModelLabel,
+  providerSeatModelDisplay,
+  providerSeatModelString,
+} from "../provider-seat-model";
 
 export interface AgentProviderPresetsSectionProps {
   runtimeDevice?: RuntimeDevice;
