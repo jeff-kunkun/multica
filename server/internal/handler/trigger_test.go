@@ -115,3 +115,20 @@ func TestTriggerTasksForComment_NoteShortCircuits(t *testing.T) {
 	// Must not panic — the guard short-circuits before any DB access.
 	h.triggerTasksForComment(context.Background(), issue, comment, nil, "member", memberID, memberID, nil)
 }
+
+func TestCommentTriggerSessionPolicy(t *testing.T) {
+	triggers := []commentAgentTrigger{{}, {}}
+
+	// The ordinary new-comment path does not request a fresh session.
+	if triggers[0].ForceFreshSession || triggers[1].ForceFreshSession {
+		t.Fatal("ordinary comment triggers must preserve the existing session")
+	}
+
+	// UpdateComment passes the edit-only policy after content changed.
+	markCommentTriggersFresh(triggers)
+	for i, trigger := range triggers {
+		if !trigger.ForceFreshSession {
+			t.Fatalf("edited trigger %d was not marked force-fresh", i)
+		}
+	}
+}

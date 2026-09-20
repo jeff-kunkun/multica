@@ -1999,13 +1999,20 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	if len(forceFreshSession) > 0 && forceFreshSession[0] {
-		for i := range triggers {
-			triggers[i].ForceFreshSession = true
-		}
+		markCommentTriggersFresh(triggers)
 	}
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	return commentTriggerOutcomes(targets, enqueued)
+}
+
+// markCommentTriggersFresh applies the edit-only session policy after trigger
+// resolution. Ordinary comment creation and replay paths leave this unset so
+// their tasks continue the existing session.
+func markCommentTriggersFresh(triggers []commentAgentTrigger) {
+	for i := range triggers {
+		triggers[i].ForceFreshSession = true
+	}
 }
 
 // noteBlockedRuntimeTargets leaves one system comment per agent refused for an
