@@ -1572,7 +1572,7 @@
     "model_discover_loaded": "{{count}} models loaded from this endpoint.",
     "model_placeholder": "e.g. gpt-5.6-luna",
     "threshold_label": "Confidence threshold",
-    "threshold_description": "Below this, the slot is left empty and you are mentioned once with the reason instead. Defaults to 0.70.",
+    "threshold_description": "Below this the ticket is still dispatched, to the fallback rung (the generic strong seat), and the routing comment says so. Defaults to 0.60.",
     "gateway_endpoint_workspace": "The model id is sent to this workspace’s own endpoint: {{host}}.",
     "gateway_endpoint_deployment": "The model id is sent to the deployment’s shared LLM endpoint: {{host}}.",
     "gateway_protocol_systemone": "This endpoint is TypeSafe System One (Jev): routing asks it for a typed judgment with the probabilities behind it, so the confidence it gates on is measured rather than self-reported.",

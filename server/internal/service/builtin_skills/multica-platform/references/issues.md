@@ -315,17 +315,17 @@ Consequences for how you work:
   slot, no comment, no mention.
 - Routing comments are capped at one of each kind per issue, so flipping a
   status back and forth does not re-dispatch or re-notify.
-- Every slot routing writes is recorded like any other assignment: the change
-  shows up in `multica issue timeline`, so you can tell a routed owner from one
-  a person set, and see that nothing assigned the issue twice.
+- Every slot routing writes shows up in `multica issue timeline`, so a routed
+  owner is distinguishable from one a person set.
 - `multica issue route <id>` re-runs the same pass by hand and prints what it
-  did. It is the same code the hooks run, so on an issue they already handled
-  it will report that there was nothing left to fill.
-- Read `action` in `--output json` as what was WRITTEN. `assigned`: at least
-  one slot was filled (`executor` / `reviewer` name which; a slot left empty is
-  named in `reason`). `declined`: the judge answered and nothing was written;
-  `reason` says why per slot (`executor not filled: confidence 67% < threshold
-  70%`). `noop`: nothing to decide. Only `assigned` is a dispatch.
+  did — the same code the hooks run.
+- Read `action` in `--output json` as what was WRITTEN. `assigned`: a slot was
+  filled. `declined`: nothing was written, which now means somebody else won
+  the write. `noop`: nothing to decide. Only `assigned` is a dispatch.
+- **Low confidence dispatches anyway**, to the ladder's fallback rung (the
+  generic strong seat) — `reason` reads `executor fell back to 孙悟空:
+  confidence 47% < threshold 60%`. The reviewer slot falls back to one rung
+  above the executor, or 「交给人」 at the top rung.
 - The project -> direction table decides which direction SEAT on a rung gets
   the work; it never changes the rung or the confidence. It is workspace data:
   `multica workspace routing-projects list | set <project> <direction> | unset

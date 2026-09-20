@@ -192,76 +192,79 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	threshold := settings.Threshold()
 
 	// --- executor slot ---------------------------------------------------
+	// Routing always dispatches. A verdict under the threshold is a weak
+	// answer, not a missing one: it lands on the ladder's fallback rung — the
+	// generic strong seat — instead of leaving the ticket in todo for somebody
+	// to notice. The confidence stays visible in the decision comment, and
+	// changing a seat is one click; a ticket nobody picked up is invisible.
 	var executor *Seat
-	executorConfident := executorFromLabel || verdict.ExecutorConfidence >= threshold
-	var unfilled []string
-	if needExecutor && !executorConfident {
-		unfilled = append(unfilled, "executor not filled: confidence "+pct(verdict.ExecutorConfidence)+" < threshold "+pct(threshold))
-	}
-	if needExecutor && executorConfident {
-		seat := labelSeat
-		if !executorFromLabel {
-			s, ok := SeatByTier(candidates, verdict.ExecutorTier)
-			if !ok {
-				// The judge named a rung that is not on the ladder. That is a
-				// broken answer, not an unconfident one: treat it as unfilled.
-				executorConfident = false
-				unfilled = append(unfilled, "executor not filled: judge named tier \""+verdict.ExecutorTier+"\", which has no seat")
-			}
-			seat = s
+	var notes []string
+	executorSource := ""
+	if needExecutor {
+		seat, source, why := r.pickExecutor(candidates, labelSeat, labelSeatOK, verdict, threshold)
+		written, err := r.Store.AssignAgentIfUnassigned(ctx, workspaceID, issue.ID, seat)
+		if err != nil {
+			return out, err
 		}
-		if executorConfident {
-			written, err := r.Store.AssignAgentIfUnassigned(ctx, workspaceID, issue.ID, seat)
-			if err != nil {
-				return out, err
+		if written {
+			executor, executorSource = &seat, source
+			out.ExecutorWritten = &seat
+			if why != "" {
+				notes = append(notes, "executor fell back to "+seat.Name+": "+why)
 			}
-			if written {
-				executor = &seat
-				out.ExecutorWritten = &seat
-			} else {
-				unfilled = append(unfilled, "executor not filled: the slot was taken before this call wrote it")
-			}
+		} else {
+			notes = append(notes, "executor not filled: the slot was taken before this call wrote it")
 		}
 	}
 
 	// --- reviewer slot ---------------------------------------------------
+	// Same rule for the second slot: an automatic dispatch fills both. An
+	// unusable verdict falls back to one rung above the executor — the
+	// ladder's own answer to "nobody checks their own work" — and to a person
+	// when the executor already sits on the top rung.
 	reviewerName := ""
-	reviewerConfident := verdict.ReviewerConfidence >= threshold
-	if needReviewer && !reviewerConfident {
-		unfilled = append(unfilled, "reviewer not filled: confidence "+pct(verdict.ReviewerConfidence)+" < threshold "+pct(threshold))
-	}
-	if needReviewer && reviewerConfident {
+	reviewerFallback := false
+	if needReviewer {
 		name, ok := r.reviewerOptionName(verdict, candidates, executor, issue)
-		if ok {
-			if optID, exists := prop.Options[name]; exists {
-				written, err := r.Store.SetReviewerIfUnset(ctx, workspaceID, issue.ID, prop.ID, optID)
-				if err != nil {
-					return out, err
-				}
-				if written {
-					reviewerName = name
-					out.ReviewerWritten = name
-				} else {
-					unfilled = append(unfilled, "reviewer not filled: the slot was taken before this call wrote it")
-				}
-			} else {
-				r.log().Warn("routing: reviewer option missing from property",
-					"workspace_id", workspaceID, "issue_id", issue.ID, "option", name)
-				reviewerConfident = false
-				unfilled = append(unfilled, "reviewer not filled: option \""+name+"\" is missing from the reviewer property")
-			}
+		why := ""
+		switch {
+		case !ok:
+			why = "judge named tier \"" + verdict.ReviewerTier + "\", which has no seat here"
+		case verdict.ReviewerConfidence < threshold:
+			ok = false
+			why = "confidence " + pct(verdict.ReviewerConfidence) + " < threshold " + pct(threshold)
+		}
+		if !ok {
+			name = r.fallbackReviewer(candidates, executor, issue)
+			reviewerFallback = true
+			notes = append(notes, "reviewer fell back to "+name+": "+why)
+		}
+		optID, exists := prop.Options[name]
+		if !exists {
+			r.log().Warn("routing: reviewer option missing from property",
+				"workspace_id", workspaceID, "issue_id", issue.ID, "option", name)
+			notes = append(notes, "reviewer not filled: option \""+name+"\" is missing from the reviewer property")
 		} else {
-			reviewerConfident = false
-			unfilled = append(unfilled, "reviewer not filled: judge named tier \""+verdict.ReviewerTier+"\", which has no seat")
+			written, err := r.Store.SetReviewerIfUnset(ctx, workspaceID, issue.ID, prop.ID, optID)
+			if err != nil {
+				return out, err
+			}
+			if written {
+				reviewerName = name
+				out.ReviewerWritten = name
+			} else {
+				notes = append(notes, "reviewer not filled: the slot was taken before this call wrote it")
+			}
 		}
 	}
 
 	// The action reports the writes, not the fact that this row ran. A partial
-	// fill is still "assigned", and Reason carries the slot that stayed empty.
+	// fill is still "assigned", and Reason carries what was not written and
+	// every slot that took a fallback.
 	if out.ExecutorWritten != nil || out.ReviewerWritten != "" {
 		out.Action = ActionAssigned
 	}
-	out.Reason = strings.Join(unfilled, "; ")
+	out.Reason = strings.Join(notes, "; ")
 
 	// --- notify ----------------------------------------------------------
 	// The one condition that earns an @: the ticket is in a state where
@@ -269,10 +272,64 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	// so the ticket sits in todo until a person notices.
 	stillUnassigned := needExecutor && executor == nil
 	body := r.assignmentComment(issue, match, candidates, verdict, threshold,
-		executor, reviewerName, needExecutor, needReviewer, hasReviewerSlot, stillUnassigned,
-		executorFromLabel)
+		executor, executorSource, reviewerName, reviewerFallback,
+		needExecutor, needReviewer, hasReviewerSlot, stillUnassigned)
 
 	return r.deliver(ctx, workspaceID, issue, KindAssignment, body, stillUnassigned, out)
+}
+
+// Where the executor seat came from, for the decision comment.
+const (
+	pickLabel    = "label"
+	pickJudge    = "judge"
+	pickFallback = "fallback"
+)
+
+// pickExecutor resolves the executor seat, and always resolves one: candidates
+// is non-empty by the time it is called, and every branch ends on a seat. The
+// tier label on the ticket wins, then the judge's rung when it is confident
+// and exists in this workspace, and the ladder's fallback rung otherwise. The
+// third return value is why the fallback happened, empty when it did not.
+func (r *Router) pickExecutor(candidates []Seat, labelSeat Seat, labelled bool, v Verdict, threshold float64) (Seat, string, string) {
+	if labelled {
+		return labelSeat, pickLabel, ""
+	}
+	seat, ok := SeatByTier(candidates, v.ExecutorTier)
+	why := ""
+	switch {
+	case ok && v.ExecutorConfidence >= threshold:
+		return seat, pickJudge, ""
+	case ok:
+		why = "confidence " + pct(v.ExecutorConfidence) + " < threshold " + pct(threshold)
+	default:
+		why = "judge named tier \"" + v.ExecutorTier + "\", which has no seat here"
+	}
+	fallback, fallbackOK := r.Ladder.FallbackSeat(candidates)
+	if !fallbackOK {
+		// Unreachable while candidates is non-empty; keeping the judge's seat
+		// is still better than returning nothing.
+		return seat, pickJudge, ""
+	}
+	return fallback, pickFallback, why
+}
+
+// fallbackReviewer is the reviewer the ladder implies when the judge cannot
+// name one: the rung above whoever is doing the work, because a seat may not
+// accept its own output, and a person when there is no rung above.
+func (r *Router) fallbackReviewer(candidates []Seat, executor *Seat, issue Issue) string {
+	holder := Seat{}
+	switch {
+	case executor != nil:
+		holder = *executor
+	case issue.AssigneeType == "agent":
+		holder = Seat{ID: issue.AssigneeID}
+	default:
+		return OptionHuman
+	}
+	if stronger, ok := StrongerThan(candidates, holder); ok {
+		return stronger.Name
+	}
+	return OptionHuman
 }
 
 // reviewerOptionName turns a verdict branch into the option name to write.

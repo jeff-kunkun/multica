@@ -1565,7 +1565,7 @@
     "model_discover_loaded": "已从这个端点读取 {{count}} 个模型。",
     "model_placeholder": "例如 gpt-5.6-luna",
     "threshold_label": "置信度阈值",
-    "threshold_description": "低于这个值就不填那一格，改成 @ 你一次并说明原因。默认 0.70。",
+    "threshold_description": "低于这个值仍然派，只是改用兜底档（通用强档）并在路由评论里标出来。默认 0.60。",
     "gateway_endpoint_workspace": "模型 id 发往本工作区自己的端点：{{host}}。",
     "gateway_endpoint_deployment": "模型 id 发往部署共用的 LLM 端点：{{host}}。",
     "gateway_protocol_systemone": "这个端点是 TypeSafe System One（Jev）：路由问它的是一个带概率分布的判断，用来卡阈值的置信度是算出来的，不是模型自己写的。",

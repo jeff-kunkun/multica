@@ -34,9 +34,12 @@ import (
 const SettingsKey = "routing"
 
 // DefaultConfidenceThreshold is the threshold applied when settings carry no
-// explicit one. Below it, the corresponding slot is left empty rather than
-// filled with a guess.
-const DefaultConfidenceThreshold = 0.70
+// explicit one. It no longer decides whether a slot gets filled — routing
+// always dispatches — only whether the judge's own pick is used or the
+// ladder's fallback rung is. Measured verdicts on real tickets cluster in the
+// 0.5-0.7 band, so a floor above that band sent every ticket to the fallback
+// and threw the judge's answer away.
+const DefaultConfidenceThreshold = 0.60
 
 // Settings is the whole routing configuration: an on/off switch, the model the
 // judge runs on, the confidence threshold, and — optionally — the endpoint and
