@@ -77,6 +77,9 @@ const HEALTHY = {
   last_failure_at: 0,
   model: "gpt-5.6-luna",
   threshold: 0.7,
+  gateway_host: "api.openai.com",
+  gateway_default_model: "gpt-5.6-mini",
+  gateway_configured: true,
 };
 
 beforeEach(() => {
@@ -208,6 +211,38 @@ describe("RoutingTab", () => {
     render();
     expect(await screen.findByText(/self-checked|自检/)).toBeTruthy();
     expect(getRoutingHealth).toHaveBeenCalledWith("ws-1");
+  });
+
+  // The box holds a bare model id, so "which model is this, on whose
+  // endpoint?" has to be answerable from the section itself. The endpoint is
+  // deployment config and cannot be edited here — which is why naming it is
+  // the whole point (canonical parsing matrix:
+  // packages/core/workspace/routing-health.test.ts).
+  it("names the endpoint the model id is sent to", async () => {
+    workspace.current.settings = {
+      routing: { enabled: true, model: "gpt-5.6-luna", confidence_threshold: 0.7 },
+    };
+    const { qc } = render();
+    await healthSettled(qc);
+    expect(await screen.findByText(/api\.openai\.com/)).toBeTruthy();
+    expect(screen.getByText(/gpt-5\.6-mini/)).toBeTruthy();
+  });
+
+  // The single most common reason routing silently does nothing, and the one
+  // a workspace admin cannot fix from this screen.
+  it("warns when the deployment has no internal LLM at all", async () => {
+    workspace.current.settings = {
+      routing: { enabled: true, model: "gpt-5.6-luna", confidence_threshold: 0.7 },
+    };
+    getRoutingHealth.mockResolvedValue({
+      ...HEALTHY,
+      gateway_host: "",
+      gateway_default_model: "",
+      gateway_configured: false,
+    });
+    const { qc } = render();
+    await healthSettled(qc);
+    expect(await screen.findByText(/MULTICA_LLM_BASE_URL/)).toBeTruthy();
   });
 
   it("re-checks on demand and adopts the fresh report", async () => {

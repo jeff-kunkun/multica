@@ -1563,6 +1563,9 @@
     "threshold_label": "確信度のしきい値",
     "threshold_description": "これを下回る場合はその欄を埋めず、理由を添えて一度だけメンションします。既定は 0.70。",
     "no_credentials_note": "ここに認証情報は保存されません。デプロイのモデル設定で管理します。",
+    "gateway_endpoint": "ここに入力したモデル id は、このデプロイの LLM エンドポイント {{host}} に送られます。",
+    "gateway_default_model": "そのデプロイ自体の既定モデルは {{model}} です。",
+    "gateway_unset": "このデプロイには内部 LLM エンドポイント（MULTICA_LLM_BASE_URL / MULTICA_LLM_API_KEY）が設定されていません。ここに何を入力してもルーティングは動きません。サーバー運用者だけが変更できます。",
     "filters_title": "候補フィルター",
     "filters_placeholder": "今後対応予定。今回は未実装です。",
     "health_checking": "確認中…",
@@ -1574,39 +1577,6 @@
     "health_time_just_now": "たった今",
     "health_time_minutes_ago": "{{n}} 分前",
     "health_time_hours_ago": "{{n}} 時間前",
-    "states": {
-      "off": {
-        "chip": "オフ",
-        "detail": "オフの間は従来どおりに動作します。"
-      },
-      "incomplete": {
-        "chip": "未完了",
-        "detail": "スイッチはオンですがモデルが未選択です。実質オフと同じ動作です。"
-      },
-      "enabled": {
-        "chip": "有効",
-        "detail": "新しい課題が自動でアサインされ、判断は課題のコメントに残ります。"
-      },
-      "ineffective": {
-        "chip": "無効",
-        "detail": "モデルが拒否・到達不可・削除済み、または連続失敗後のクールダウン中です。オフと同じ動作で、課題には何も表示されません。"
-      }
-    }
-  },
-  "routing": {
-    "title": "ルーティング",
-    "description": "課題の作成時とステータス変更のたびに、いま誰が持つべきかを判断し、担当席とレビュー席を埋めます。ステータスは決して変更しません。",
-    "section_title": "ルーティングモデル",
-    "enabled_label": "自動アサインを有効にする",
-    "enabled_description": "オフの場合は従来どおりに動作し、課題にルーティングの痕跡もメンションも残りません。すでに書き込まれた値は保持されます。",
-    "model_label": "ルーティングモデル",
-    "model_description": "判断を行うモデル。未設定ならスイッチがオンでも何も行いません。",
-    "model_placeholder": "例: gpt-5.6-luna",
-    "threshold_label": "確信度のしきい値",
-    "threshold_description": "これを下回る場合はその欄を埋めず、理由を添えて一度だけメンションします。既定は 0.70。",
-    "no_credentials_note": "ここに認証情報は保存されません。デプロイのモデル設定で管理します。",
-    "filters_title": "候補フィルター",
-    "filters_placeholder": "今後対応予定。今回は未実装です。",
     "states": {
       "off": {
         "chip": "オフ",

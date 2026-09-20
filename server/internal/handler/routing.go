@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -112,19 +114,59 @@ type routingHealthResponse struct {
 	LastFailureAt     int64   `json:"last_failure_at"`
 	Model             string  `json:"model"`
 	Threshold         float64 `json:"threshold"`
+	// Gateway* describe WHERE the model identifier above is sent. The box in
+	// the settings section is a model id and nothing else, which left the
+	// reader with no way to answer "which model is this, on whose endpoint?" —
+	// the endpoint and the key are deployment configuration (MULTICA_LLM_*),
+	// not workspace configuration, so they are not editable here and were
+	// therefore not shown at all. Not showing them did not make the dependency
+	// go away; it only made it invisible.
+	//
+	// GatewayHost is HOST ONLY, parsed out of MULTICA_LLM_BASE_URL. The raw
+	// value may carry a path and, in a URL a person pasted, userinfo
+	// credentials; taking the host drops both. GatewayDefaultModel is
+	// MULTICA_LLM_DEFAULT_MODEL, which is what an empty model box would fall
+	// back to elsewhere in the product. Neither is a secret, and the API key
+	// itself is never represented here in any form, masked or otherwise.
+	GatewayHost         string `json:"gateway_host"`
+	GatewayDefaultModel string `json:"gateway_default_model"`
+	// GatewayConfigured is false when this deployment has no internal LLM at
+	// all, which is the single most common reason routing cannot work and the
+	// one a workspace admin cannot fix from this screen.
+	GatewayConfigured bool `json:"gateway_configured"`
 }
 
-func routingHealthPayload(rep routing.HealthReport) routingHealthResponse {
+func (h *Handler) routingHealthPayload(rep routing.HealthReport) routingHealthResponse {
 	return routingHealthResponse{
-		State:             string(rep.State),
-		Usable:            rep.Usable,
-		Reason:            rep.Reason,
-		RetryAfterSeconds: rep.RetryAfterSeconds,
-		LastSuccessAt:     rep.LastSuccessAt,
-		LastFailureAt:     rep.LastFailureAt,
-		Model:             rep.Model,
-		Threshold:         rep.Threshold,
+		State:               string(rep.State),
+		Usable:              rep.Usable,
+		Reason:              rep.Reason,
+		RetryAfterSeconds:   rep.RetryAfterSeconds,
+		LastSuccessAt:       rep.LastSuccessAt,
+		LastFailureAt:       rep.LastFailureAt,
+		Model:               rep.Model,
+		Threshold:           rep.Threshold,
+		GatewayHost:         gatewayHost(h.cfg.LLMBaseURL),
+		GatewayDefaultModel: h.cfg.LLMDefaultModel,
+		GatewayConfigured:   h.cfg.LLMAPIKey != "" && h.cfg.LLMBaseURL != "",
 	}
+}
+
+// gatewayHost reduces MULTICA_LLM_BASE_URL to the host a reader recognises.
+//
+// A value that does not parse as a URL is reported as empty rather than echoed
+// back: the point of this field is to name a host, and echoing an unparseable
+// string is how a pasted credential would reach the client.
+func gatewayHost(baseURL string) string {
+	trimmed := strings.TrimSpace(baseURL)
+	if trimmed == "" {
+		return ""
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // GetRoutingHealth backs GET /api/workspaces/{id}/routing/health.
@@ -148,7 +190,7 @@ func (h *Handler) GetRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read routing health")
 		return
 	}
-	writeJSON(w, http.StatusOK, routingHealthPayload(rep))
+	writeJSON(w, http.StatusOK, h.routingHealthPayload(rep))
 }
 
 // CheckRoutingHealth backs POST /api/workspaces/{id}/routing/health/check —
@@ -169,5 +211,5 @@ func (h *Handler) CheckRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to check the routing model")
 		return
 	}
-	writeJSON(w, http.StatusOK, routingHealthPayload(rep))
+	writeJSON(w, http.StatusOK, h.routingHealthPayload(rep))
 }

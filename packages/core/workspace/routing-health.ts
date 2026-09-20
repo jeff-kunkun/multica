@@ -30,6 +30,20 @@ export interface RoutingHealth {
   last_failure_at: number;
   model: string;
   threshold: number;
+  /**
+   * Host of the deployment's LLM endpoint (`MULTICA_LLM_BASE_URL`), host only.
+   * Empty when the deployment configured none, or when the configured value
+   * did not parse as a URL.
+   *
+   * It is shown, not edited: the endpoint and the key are deployment
+   * configuration, so a workspace admin reading this section can see what the
+   * model id is sent to but cannot change it from here.
+   */
+  gateway_host: string;
+  /** `MULTICA_LLM_DEFAULT_MODEL`, the deployment's own default. */
+  gateway_default_model: string;
+  /** False when this deployment has no internal LLM configured at all. */
+  gateway_configured: boolean;
 }
 
 /**
@@ -47,6 +61,9 @@ export const RoutingHealthSchema = z.object({
   last_failure_at: z.number().optional(),
   model: z.string().optional(),
   threshold: z.number().optional(),
+  gateway_host: z.string().optional(),
+  gateway_default_model: z.string().optional(),
+  gateway_configured: z.boolean().optional(),
 });
 
 /**
@@ -65,6 +82,9 @@ export const UNKNOWN_ROUTING_HEALTH: RoutingHealth = {
   last_failure_at: 0,
   model: "",
   threshold: 0,
+  gateway_host: "",
+  gateway_default_model: "",
+  gateway_configured: false,
 };
 
 const KNOWN_STATES: readonly RoutingState[] = [
@@ -100,6 +120,16 @@ export function parseRoutingHealth(raw: unknown): RoutingHealth {
     last_failure_at: toCount(parsed.last_failure_at),
     model: typeof parsed.model === "string" ? parsed.model : "",
     threshold: typeof parsed.threshold === "number" ? parsed.threshold : 0,
+    gateway_host:
+      typeof parsed.gateway_host === "string" ? parsed.gateway_host : "",
+    gateway_default_model:
+      typeof parsed.gateway_default_model === "string"
+        ? parsed.gateway_default_model
+        : "",
+    // A backend that predates the field omits it; "absent" must not read as
+    // "this deployment has no LLM", which would put a scary line under a
+    // section that is working fine.
+    gateway_configured: parsed.gateway_configured !== false,
   };
 }
 
