@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/repoident"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -170,6 +171,55 @@ type localDirectoryRef struct {
 	DaemonID      string `json:"daemon_id"`
 	Label         string `json:"label,omitempty"`
 	ExecutionMode string `json:"execution_mode,omitempty"`
+	// RealPath is the directory's IDENTITY: the symlink-resolved absolute
+	// path, as the machine holding it reported at pick time. It is what the
+	// (project, real_path) uniqueness rule keys on, so two routes to one
+	// directory — a symlink and its target, /tmp and /private/tmp — cannot be
+	// bound twice under two spellings (DENE-617).
+	//
+	// Optional on the wire because a client that predates it, or a browser
+	// that cannot call realpath, still has to be able to save a directory.
+	// Absent means "use local_path as the identity": that is exactly what the
+	// rule did before this field existed, so old rows keep their meaning and
+	// the DB index (which coalesces the two) agrees with this package.
+	RealPath string `json:"real_path,omitempty"`
+	// RepoKey is the repository this directory holds, normalized by
+	// repoident from the directory's git remote. Empty for a plain folder, a
+	// repo with no remote, or any client that did not report one — and an
+	// empty key is never equal to another empty key, so those never collide.
+	//
+	// Its only job is duplicate detection against a github_repo pointing at
+	// the same repository, and against a second checkout of that repository
+	// on the same machine.
+	RepoKey string `json:"repo_key,omitempty"`
+	// WorktreeRoot is where parallel mode puts its working copies. It exists
+	// so those copies land on the USER's disk, beside their repository,
+	// instead of inside the Multica workspace where a workspace GC would
+	// reclaim a directory the user still wanted to look at (DENE-617).
+	//
+	// Empty means "the daemon picks the default", which is the repository's
+	// sibling `<repo>.multica-worktrees`. Only parallel mode reads it.
+	WorktreeRoot string `json:"worktree_root,omitempty"`
+	// IsGitRepo is what the machine holding the directory saw at pick time.
+	// The server cannot look at a filesystem on someone else's laptop, so
+	// this is the only way it can refuse parallel mode on a folder that has
+	// no repository to branch from — a resource whose every task would fail.
+	//
+	// A pointer because the three states differ: true (a repo), false (proven
+	// not a repo — reject parallel), and absent (nobody checked — allow, and
+	// let the daemon refuse authoritatively at task time).
+	IsGitRepo *bool `json:"is_git_repo,omitempty"`
+}
+
+// localDirectoryIdentity is the value the (project, real_path) uniqueness rule
+// compares. Kept as one function because the DB index computes the same
+// COALESCE and the two must not drift: a rule the application enforces on one
+// value while the database enforces it on another is two rules.
+func localDirectoryIdentity(ref localDirectoryRef) string {
+	if p := strings.TrimSpace(ref.RealPath); p != "" {
+		return p
+	}
+	return strings.TrimSpace(ref.LocalPath)
 }
 
 // requireModeCapableDaemon rejects saving a local_directory ref that asks for
@@ -329,6 +379,32 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 	default:
 		return nil, fmt.Errorf("local_directory: execution_mode must be %q, %q or %q, got %q",
 			localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeShared, payload.ExecutionMode)
+	}
+	payload.RealPath = strings.TrimSpace(payload.RealPath)
+	if payload.RealPath != "" && !isAbsoluteLocalPath(payload.RealPath) {
+		return nil, errors.New("local_directory: real_path must be an absolute path")
+	}
+	// Normalize rather than trust: the client may send a full remote URL or an
+	// already-normalized key, and repoident maps both onto the same value.
+	// A key it cannot identify is dropped — storing an unidentifiable string
+	// would make two unrelated directories compare equal under the
+	// (project, daemon, repo_key) rule.
+	payload.RepoKey = string(repoident.NormalizeURL(payload.RepoKey))
+	payload.WorktreeRoot = strings.TrimSpace(payload.WorktreeRoot)
+	if payload.WorktreeRoot != "" && !isAbsoluteLocalPath(payload.WorktreeRoot) {
+		return nil, errors.New("local_directory: worktree_root must be an absolute path")
+	}
+	// Parallel mode branches from a repository. A directory the machine
+	// holding it proved has none cannot run a single task in that mode, so it
+	// is refused here rather than at the first run (DENE-617 invariant 12).
+	// Absent is not proof and stays allowed: the daemon re-checks at task time.
+	if payload.ExecutionMode == localDirectoryModeWorktree &&
+		payload.IsGitRepo != nil && !*payload.IsGitRepo {
+		return nil, fmt.Errorf(
+			"local_directory: %q is not a git repository, so it cannot use parallel (worktree) mode — "+
+				"parallel mode delivers work as a branch and needs a repository to branch from. "+
+				"Keep it on in_place, or create a git repository in that folder first",
+			payload.LocalPath)
 	}
 	out, err := json.Marshal(payload)
 	if err != nil {
@@ -550,11 +626,11 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if conflict, err := h.findLocalDirectoryConflict(r.Context(), project.ID, req.ResourceType, normalizedRef, pgtype.UUID{}); err != nil {
+	if conflict, reason, err := h.findLocalDirectoryConflictReason(r.Context(), project.ID, req.ResourceType, normalizedRef, pgtype.UUID{}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
 		return
 	} else if conflict {
-		writeError(w, http.StatusConflict, "this daemon already has a local_directory attached to the project; remove it before adding another")
+		writeError(w, http.StatusConflict, reason)
 		return
 	}
 
@@ -657,11 +733,11 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 		nextRef = normalized
 	}
 
-	if conflict, err := h.findLocalDirectoryConflict(r.Context(), project.ID, existing.ResourceType, nextRef, existing.ID); err != nil {
+	if conflict, reason, err := h.findLocalDirectoryConflictReason(r.Context(), project.ID, existing.ResourceType, nextRef, existing.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
 		return
 	} else if conflict {
-		writeError(w, http.StatusConflict, "another local_directory on this daemon is already attached to the project")
+		writeError(w, http.StatusConflict, reason)
 		return
 	}
 
@@ -791,31 +867,52 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// findLocalDirectoryConflict enforces "at most one local_directory resource
-// per (project, daemon)". The daemon picks the first matching daemon_id row
-// out of a task's resources (findLocalDirectoryAssignment), so letting a
-// project carry two rows for the same daemon would mean the agent silently
-// writes into whichever happens to come back first — a safety hazard for a
-// feature that operates directly on the user's real working directory.
+// findLocalDirectoryConflict enforces the two identity rules a project's local
+// directories must satisfy (DENE-617):
 //
-// The DB-level UNIQUE(project_id, resource_type, resource_ref) constraint
-// alone is not enough here: it only fires on full ref-JSON equality, so a
-// different local_path or even a typoed label on the same daemon would slip
-// through. We do the daemon-scoped check here in application code instead.
+//  1. (project, daemon_id, real_path) — one row per DIRECTORY on one machine.
+//     Binding the same directory twice is never a thing a user meant; it just
+//     makes the choice of which row wins arbitrary. daemon_id is in the key
+//     because a path string only names a directory on the machine holding it.
+//  2. (project, daemon_id, repo_key), when repo_key is non-empty — one row per
+//     REPOSITORY per machine. Two checkouts of one repository on one machine
+//     are two copies of the same code, which is the duplication this whole
+//     change exists to stop.
+//
+// What it deliberately no longer enforces is "at most one local_directory per
+// (project, daemon)". A project can legitimately span several directories on
+// one machine — four unrelated plain folders, a repo plus its docs checkout —
+// and the old rule made that impossible. What made the old rule necessary was
+// the daemon picking an ARBITRARY matching row; it now takes the first in
+// `position` order and exposes the rest read-only, so "which directory" has a
+// stated answer instead of a race.
+//
+// Both rules are also Postgres partial unique indexes (migrations 498/499), so
+// a client that bypasses this API cannot create the state either. This copy
+// exists to turn the constraint violation into a message naming the directory.
 //
 // `excludeID` lets the update path ignore the row being edited.
 func (h *Handler) findLocalDirectoryConflict(ctx context.Context, projectID pgtype.UUID, resourceType string, normalizedRef json.RawMessage, excludeID pgtype.UUID) (bool, error) {
+	conflict, _, err := h.findLocalDirectoryConflictReason(ctx, projectID, resourceType, normalizedRef, excludeID)
+	return conflict, err
+}
+
+// findLocalDirectoryConflictReason is findLocalDirectoryConflict plus the
+// sentence explaining which rule fired, so the caller can say which directory
+// is already bound instead of a generic refusal.
+func (h *Handler) findLocalDirectoryConflictReason(ctx context.Context, projectID pgtype.UUID, resourceType string, normalizedRef json.RawMessage, excludeID pgtype.UUID) (bool, string, error) {
 	if resourceType != "local_directory" {
-		return false, nil
+		return false, "", nil
 	}
 	var incoming localDirectoryRef
 	if err := json.Unmarshal(normalizedRef, &incoming); err != nil {
-		return false, err
+		return false, "", err
 	}
 	rows, err := h.Queries.ListProjectResources(ctx, projectID)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
+	incomingIdentity := localDirectoryIdentity(incoming)
 	for _, row := range rows {
 		if row.ResourceType != "local_directory" {
 			continue
@@ -827,15 +924,22 @@ func (h *Handler) findLocalDirectoryConflict(ctx context.Context, projectID pgty
 		if err := json.Unmarshal(row.ResourceRef, &existing); err != nil {
 			continue
 		}
-		// Daemon-scoped uniqueness: one local_directory per daemon per
-		// project. Different daemons can each carry one row (one per
-		// user device); the daemon-side resolver routes each daemon to
-		// its own assignment by daemon_id.
-		if existing.DaemonID == incoming.DaemonID {
-			return true, nil
+		if existing.DaemonID != incoming.DaemonID {
+			// A path string names a directory only on the machine holding it.
+			// Two machines may each carry /Users/me/code/app for one project.
+			continue
+		}
+		if incomingIdentity != "" && localDirectoryIdentity(existing) == incomingIdentity {
+			return true, fmt.Sprintf(
+				"%q is already added to this project", existing.LocalPath), nil
+		}
+		if incoming.RepoKey != "" && existing.RepoKey == incoming.RepoKey {
+			return true, fmt.Sprintf(
+				"this repository is already added on this machine as %q — a second checkout of it would be a second copy of the same code",
+				existing.LocalPath), nil
 		}
 	}
-	return false, nil
+	return false, "", nil
 }
 
 // DeleteProjectResource removes a resource from a project.
@@ -905,11 +1009,23 @@ func parseUUIDLoose(s string) (pgtype.UUID, error) {
 }
 
 // claimProjectContext is the project-scoped context a daemon claim exposes to
-// the agent: the project identity the prompt names, the resource manifest
+// the agent: the project identities the prompt names, the resource manifest
 // execenv materializes into .multica/project/resources.json, and the repo list
 // `multica repo checkout` reads.
+//
+// A task can carry several projects (DENE-523): a chat session binds a set of
+// them, while an issue, autopilot, or quick-create task carries at most one.
+// Projects holds them in priority order; Repos is the union across all of
+// them, because `multica repo checkout` serves one flat list.
 type claimProjectContext struct {
-	ProjectID   string
+	Projects []claimProject
+	Repos    []RepoData
+}
+
+// claimProject is one attached project: the identity the brief names, the
+// resources the agent may open, and the repos lifted out of them.
+type claimProject struct {
+	ID          string
 	Title       string
 	Description string
 	Resources   []ProjectResourceData
@@ -919,23 +1035,76 @@ type claimProjectContext struct {
 // applyTo copies the resolved context onto a claim response. Callers assign the
 // whole context or none of it, so a claim can never carry a project's title
 // without its resources.
+//
+// The singular fields stay populated from the FIRST project — the task's
+// primary one — so a daemon that predates projects[] still renders the primary
+// project's context instead of none. Projects[] is the full set.
 func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
-	resp.ProjectID = c.ProjectID
-	resp.ProjectTitle = c.Title
-	resp.ProjectDescription = c.Description
-	if len(c.Resources) > 0 {
-		resp.ProjectResources = c.Resources
+	if len(c.Projects) > 0 {
+		resp.Projects = make([]TaskProjectContextData, 0, len(c.Projects))
+		for _, p := range c.Projects {
+			resp.Projects = append(resp.Projects, TaskProjectContextData{
+				ID:          p.ID,
+				Title:       p.Title,
+				Description: p.Description,
+				Resources:   p.Resources,
+			})
+		}
+		primary := c.Projects[0]
+		resp.ProjectID = primary.ID
+		resp.ProjectTitle = primary.Title
+		resp.ProjectDescription = primary.Description
+		if len(primary.Resources) > 0 {
+			resp.ProjectResources = primary.Resources
+		}
 	}
 	resp.Repos = c.Repos
 }
 
-// resolveClaimProjectContext loads the project context for one daemon claim.
+// resolveClaimProjectContext loads the project context for one daemon claim
+// whose task carries at most one project (issue, autopilot, quick-create).
+// Chat tasks carry a set and go through resolveClaimChatProjectContext.
+func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, workspaceID pgtype.UUID) (claimProjectContext, error) {
+	if !projectID.Valid {
+		return h.resolveClaimProjectContexts(ctx, nil, workspaceID)
+	}
+	return h.resolveClaimProjectContexts(ctx, []pgtype.UUID{projectID}, workspaceID)
+}
+
+// resolveClaimChatProjectContext loads the project context of a chat turn: the
+// session's whole project set, in selection order, so one conversation can
+// carry several projects' descriptions and repositories (DENE-523).
+//
+// The set lives in chat_session_project. A session whose set is empty but
+// whose legacy chat_session.project_id is still set (a row written by a server
+// that predates the set, e.g. during a rolling deploy) degrades to that single
+// project rather than silently losing context the session still names.
+func (h *Handler) resolveClaimChatProjectContext(ctx context.Context, session db.ChatSession) (claimProjectContext, error) {
+	projects, err := h.Queries.ListChatSessionProjectsInWorkspace(ctx, db.ListChatSessionProjectsInWorkspaceParams{
+		ChatSessionID: session.ID,
+		WorkspaceID:   session.WorkspaceID,
+	})
+	if err != nil {
+		return claimProjectContext{}, fmt.Errorf("list chat session projects: %w", err)
+	}
+	projectIDs := make([]pgtype.UUID, 0, len(projects)+1)
+	for _, p := range projects {
+		projectIDs = append(projectIDs, p.ID)
+	}
+	if len(projectIDs) == 0 && session.ProjectID.Valid {
+		projectIDs = append(projectIDs, session.ProjectID)
+	}
+	return h.resolveClaimProjectContexts(ctx, projectIDs, session.WorkspaceID)
+}
+
+// resolveClaimProjectContexts loads the project context for one daemon claim
+// from the task's attached project set, in priority order.
 //
 // Every claim path (issue, chat, autopilot, quick-create) resolves the same
-// thing from a soft project reference, so the tenant and failure rules live
+// thing from soft project references, so the tenant and failure rules live
 // here once rather than in a copy per path:
 //
-//   - Both reads are workspace-scoped. project_resource carries its own
+//   - Every read is workspace-scoped. project_resource carries its own
 //     workspace_id, so a corrupt project reference cannot lift another tenant's
 //     repository URLs or local paths into a claim.
 //   - A read FAILURE is not "no project". It returns an error so the caller can
@@ -944,44 +1113,69 @@ func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
 //     the wrong repository (the same rule the chat-input load follows,
 //     MUL-4351).
 //   - A project that resolves to no row IS "no project": the reference is stale,
-//     deleted, or points outside this workspace, and the claim degrades to
-//     workspace context.
+//     deleted, or points outside this workspace, and it drops out of the set.
+//     Losing every project that way degrades the claim to workspace context.
 //
 // Repo precedence: project-bound github_repo resources override workspace repos
 // when present. Mixing both would just confuse the agent — if a project
 // explicitly attached its repos, those are the authoritative set. With no
-// project, no github_repo resources, or a stale reference, the workspace repos
-// are the fallback.
-func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, workspaceID pgtype.UUID) (claimProjectContext, error) {
+// project, no github_repo resources, or only stale references, the workspace
+// repos are the fallback.
+func (h *Handler) resolveClaimProjectContexts(ctx context.Context, projectIDs []pgtype.UUID, workspaceID pgtype.UUID) (claimProjectContext, error) {
 	var out claimProjectContext
 
-	if projectID.Valid {
+	resolved := make([]db.Project, 0, len(projectIDs))
+	for _, projectID := range projectIDs {
+		if !projectID.Valid {
+			continue
+		}
 		project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
 			ID:          projectID,
 			WorkspaceID: workspaceID,
 		})
 		switch {
 		case err == nil:
-			out.ProjectID = uuidToString(project.ID)
-			out.Title = project.Title
-			out.Description = project.Description.String
-
-			rows, resErr := h.Queries.ListProjectResourcesInWorkspace(ctx, db.ListProjectResourcesInWorkspaceParams{
-				ProjectID:   project.ID,
-				WorkspaceID: workspaceID,
-			})
-			if resErr != nil {
-				return claimProjectContext{}, fmt.Errorf("list project resources: %w", resErr)
+			if !containsProjectID(resolved, project.ID) {
+				resolved = append(resolved, project)
 			}
-			out.Resources, out.Repos = projectResourcesForClaim(rows)
 		case errors.Is(err, pgx.ErrNoRows):
-			// Stale/deleted/foreign reference: degrade to workspace context.
+			// Stale/deleted/foreign reference: drop it from the set.
 		default:
 			return claimProjectContext{}, fmt.Errorf("get project: %w", err)
 		}
 	}
 
-	if len(out.Repos) > 0 {
+	if len(resolved) > 0 {
+		ids := make([]pgtype.UUID, 0, len(resolved))
+		for _, project := range resolved {
+			ids = append(ids, project.ID)
+		}
+		rows, err := h.Queries.ListProjectResourcesForProjectsInWorkspace(ctx, db.ListProjectResourcesForProjectsInWorkspaceParams{
+			WorkspaceID: workspaceID,
+			ProjectIds:  ids,
+		})
+		if err != nil {
+			return claimProjectContext{}, fmt.Errorf("list project resources: %w", err)
+		}
+		byProject := make(map[string][]db.ProjectResource, len(resolved))
+		for _, row := range rows {
+			key := uuidToString(row.ProjectID)
+			byProject[key] = append(byProject[key], row)
+		}
+		for _, project := range resolved {
+			resources, repos := projectResourcesForClaim(byProject[uuidToString(project.ID)])
+			out.Projects = append(out.Projects, claimProject{
+				ID:          uuidToString(project.ID),
+				Title:       project.Title,
+				Description: project.Description.String,
+				Resources:   resources,
+				Repos:       repos,
+			})
+		}
+	}
+
+	if out.hasRepos() {
+		out.Repos = out.unionRepos()
 		return out, nil
 	}
 
@@ -1002,6 +1196,47 @@ func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, wor
 		}
 	}
 	return out, nil
+}
+
+// hasRepos reports whether any attached project contributed a repository.
+func (c claimProjectContext) hasRepos() bool {
+	for _, p := range c.Projects {
+		if len(p.Repos) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// unionRepos flattens every project's repos into the one list the daemon hands
+// to `multica repo checkout`. A URL attached to two projects appears once — it
+// is the same checkout either way, and the first project's ref wins because
+// projects arrive in priority order.
+func (c claimProjectContext) unionRepos() []RepoData {
+	var repos []RepoData
+	seen := make(map[string]struct{})
+	for _, p := range c.Projects {
+		for _, repo := range p.Repos {
+			if _, ok := seen[repo.URL]; ok {
+				continue
+			}
+			seen[repo.URL] = struct{}{}
+			repos = append(repos, repo)
+		}
+	}
+	return repos
+}
+
+// containsProjectID reports whether a project already resolved into the set —
+// a chat session's set cannot repeat a project (unique index), but the legacy
+// fallback path appends the primary column to a set that may already hold it.
+func containsProjectID(projects []db.Project, id pgtype.UUID) bool {
+	for _, project := range projects {
+		if uuidToString(project.ID) == uuidToString(id) {
+			return true
+		}
+	}
+	return false
 }
 
 // projectResourcesForClaim maps resource rows onto the claim wire shape and

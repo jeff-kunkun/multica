@@ -69,14 +69,48 @@ func (q *Queries) DeleteTaskTokensByTask(ctx context.Context, taskID pgtype.UUID
 	return err
 }
 
-const getTaskTokenByHash = `-- name: GetTaskTokenByHash :one
-SELECT id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at FROM task_token
-WHERE token_hash = $1 AND expires_at > now()
+const getTaskTokenActorByHash = `-- name: GetTaskTokenActorByHash :one
+SELECT tt.id,
+       tt.token_hash,
+       tt.task_id,
+       tt.agent_id,
+       tt.workspace_id,
+       tt.user_id,
+       tt.expires_at,
+       tt.created_at,
+       a.kind AS agent_kind,
+       a.system_key AS agent_system_key
+FROM task_token tt
+JOIN agent a ON a.id = tt.agent_id
+WHERE tt.token_hash = $1 AND tt.expires_at > now()
 `
 
-func (q *Queries) GetTaskTokenByHash(ctx context.Context, tokenHash string) (TaskToken, error) {
-	row := q.db.QueryRow(ctx, getTaskTokenByHash, tokenHash)
-	var i TaskToken
+type GetTaskTokenActorByHashRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	TokenHash      string             `json:"token_hash"`
+	TaskID         pgtype.UUID        `json:"task_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	AgentKind      string             `json:"agent_kind"`
+	AgentSystemKey pgtype.Text        `json:"agent_system_key"`
+}
+
+// The one lookup the auth middleware performs for an `mat_` token, plus the
+// carrier identity behind it.
+//
+// agent.kind / agent.system_key ride along on the same round trip because the
+// middleware has to decide the request's capability scope before any handler
+// runs: hidden per-session carriers (currently the `issue_draft:*` alignment
+// conversation) hold a deliberately narrower token than an ordinary task, and a
+// second query on every authenticated agent request to learn that would buy
+// nothing. The join is on the primary key of agent, and agent_id carries an
+// index of its own, so this is still a single index lookup per request.
+func (q *Queries) GetTaskTokenActorByHash(ctx context.Context, tokenHash string) (GetTaskTokenActorByHashRow, error) {
+	row := q.db.QueryRow(ctx, getTaskTokenActorByHash, tokenHash)
+	var i GetTaskTokenActorByHashRow
 	err := row.Scan(
 		&i.ID,
 		&i.TokenHash,
@@ -86,6 +120,8 @@ func (q *Queries) GetTaskTokenByHash(ctx context.Context, tokenHash string) (Tas
 		&i.UserID,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.AgentKind,
+		&i.AgentSystemKey,
 	)
 	return i, err
 }

@@ -403,7 +403,14 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		return
 	}
 	b.WriteString("## Repositories\n\n")
-	b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
+	if ctx.CodeSource.UsesLocalDirectory() {
+		// Pointing at Code Source rather than repeating the checkout
+		// instruction is the whole point: this list is what an agent read
+		// before cloning a repository the machine already had.
+		b.WriteString("Available in this workspace. This project is pinned to a local directory on this machine — read `## Code Source` below before checking anything out.\n\n")
+	} else {
+		b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
+	}
 	for _, repo := range ctx.Repos {
 		if repo.Description != "" {
 			fmt.Fprintf(b, "- %s — %s\n", repo.URL, repo.Description)
@@ -414,36 +421,149 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("\n")
 }
 
+// executionModeSummary renders a local_directory execution mode in words. A
+// bare `worktree` tells an agent nothing about whether its edits land in the
+// user's working copy, which is the only thing it actually needs to know.
+func executionModeSummary(mode string) string {
+	switch mode {
+	case "worktree":
+		return "`worktree` — this task has its own git worktree of that repository; your edits do NOT touch the user's working copy, and you deliver work as a branch"
+	case "shared":
+		return "`shared` — you are in the user's own directory, and other tasks may be running in it at the same time; keep your work on your own branch"
+	default:
+		return "`in_place` — you are in the user's own directory and hold it exclusively for this task; your edits land in their working copy"
+	}
+}
+
+// writeCodeSource emits the Code Source section: where this task's code is, and
+// which repositories must NOT be checked out because the machine already holds
+// them.
+//
+// This section exists because the previous brief had no way to express "the
+// code is already here". A project carrying both a github_repo and a
+// local_directory resource read, to the agent, as one instruction — check the
+// repo out — so it cloned a second copy and worked in the one the user could
+// not see (DENE-595).
+func writeCodeSource(b *strings.Builder, ctx TaskContextForEnv) {
+	if !ctx.CodeSource.UsesLocalDirectory() {
+		return
+	}
+	src := ctx.CodeSource
+	b.WriteString("## Code Source\n\n")
+	b.WriteString("This project is pinned to a directory on THIS machine, so its code is already here. That is a rule, not a preference: do not clone a repository this directory already holds.\n\n")
+	fmt.Fprintf(b, "- Directory: `%s`\n", src.LocalPath)
+	fmt.Fprintf(b, "- Execution mode: %s\n", executionModeSummary(src.ExecutionMode))
+	if name := strings.TrimSpace(src.DisplayName); name != "" {
+		fmt.Fprintf(b, "- Matched project resource: local directory %q\n", name)
+	}
+	b.WriteString("\n")
+
+	if len(src.CoveredRepos) > 0 {
+		b.WriteString("Already on this machine — do NOT run `multica repo checkout` for these:\n\n")
+		for _, r := range src.CoveredRepos {
+			if r.Detail != "" {
+				fmt.Fprintf(b, "- %s → `%s`\n", r.URL, r.Detail)
+			} else {
+				fmt.Fprintf(b, "- %s\n", r.URL)
+			}
+		}
+		b.WriteString("\n")
+	}
+	if len(src.UnprovenRepos) > 0 {
+		b.WriteString("Configured but unverified — `multica repo checkout` will refuse these with the reason below rather than clone a second copy. Report the problem instead of working around it:\n\n")
+		for _, r := range src.UnprovenRepos {
+			fmt.Fprintf(b, "- %s — %s\n", r.URL, r.Detail)
+		}
+		b.WriteString("\n")
+	}
+	if len(src.RemoteRepos) > 0 {
+		b.WriteString("Not in that directory — check these out normally with `multica repo checkout <url>`:\n\n")
+		for _, r := range src.RemoteRepos {
+			fmt.Fprintf(b, "- %s\n", r.URL)
+		}
+		b.WriteString("\n")
+	}
+	if len(src.ReadOnlyDirs) > 0 {
+		b.WriteString("Also on this machine, READ-ONLY for this run — one run writes one directory, and the one above is it. Read these for context; do not edit, build into, or commit in them:\n\n")
+		for _, d := range src.ReadOnlyDirs {
+			if strings.TrimSpace(d.Name) != "" {
+				fmt.Fprintf(b, "- `%s` (%s)\n", d.Path, d.Name)
+			} else {
+				fmt.Fprintf(b, "- `%s`\n", d.Path)
+			}
+		}
+		b.WriteString("\nIf the work really belongs in one of them, say so and stop rather than writing there: which directory a run may write is the project's setting, not a call to make mid-task.\n\n")
+	}
+}
+
 // writeProjectContext emits the Project Context section when the task carries
 // an active project. Project context is independent of the task surface: an
 // issue inherits it from its project, while a chat receives it from the
-// project selected on the chat session.
+// projects attached to the chat session.
+//
+// A chat can attach several projects (DENE-523). One project renders exactly
+// the section it always has — byte-identical, because this section is part of
+// the prompt-cache prefix on a resumed session (MUL-5377). Several render one
+// subsection each plus the attribution rule: with more than one project no
+// single one is authoritative for a new artifact, so the agent infers the
+// target from the request or asks.
 func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
-	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
+	projects := ctx.projectContexts()
+	if len(projects) == 0 {
 		return
 	}
 	b.WriteString("## Project Context\n\n")
-	if ctx.ProjectTitle != "" {
-		fmt.Fprintf(b, "The active project for this task is **%s**.\n\n", ctx.ProjectTitle)
-	}
-	if desc := strings.TrimSpace(ctx.ProjectDescription); desc != "" {
-		b.WriteString("Project description — durable context the project owner set for work in this project:\n\n")
-		b.WriteString(desc)
-		b.WriteString("\n\n")
-	}
-	if len(ctx.ProjectResources) > 0 {
-		resourcesFile := ".multica/project/resources.json"
-		if ctx.SidecarRoot != "" {
-			resourcesFile = filepath.ToSlash(filepath.Join(ctx.SidecarRoot, ".multica", "project", "resources.json"))
+	if len(projects) == 1 {
+		project := projects[0]
+		if project.Title != "" {
+			fmt.Fprintf(b, "The active project for this task is **%s**.\n\n", project.Title)
 		}
-		fmt.Fprintf(b, "Project resources (also written to `%s`):\n\n", resourcesFile)
-		for _, r := range ctx.ProjectResources {
-			fmt.Fprintf(b, "- %s\n", formatProjectResource(r))
+		if desc := strings.TrimSpace(project.Description); desc != "" {
+			b.WriteString("Project description — durable context the project owner set for work in this project:\n\n")
+			b.WriteString(desc)
+			b.WriteString("\n\n")
 		}
-		b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
-		b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
-	} else {
+		writeProjectResourceList(b, ctx, project.Resources)
+		return
+	}
+
+	fmt.Fprintf(b, "This task is bound to %d projects. Their descriptions and resources are aggregated below, and repositories from every one of them are available to `multica repo checkout` (see Repositories above). Treat all of them as context for this task.\n\n", len(projects))
+	for _, project := range projects {
+		if project.Title != "" {
+			fmt.Fprintf(b, "### Project: %s\n\n", project.Title)
+		} else {
+			b.WriteString("### Project\n\n")
+		}
+		if desc := strings.TrimSpace(project.Description); desc != "" {
+			b.WriteString(desc)
+			b.WriteString("\n\n")
+		}
+		writeProjectResourceList(b, ctx, project.Resources)
+	}
+	b.WriteString("When a deliverable must be attributed to one project — creating an issue, for example — infer the target from the request and the project descriptions above. If it is still ambiguous, ask the user which project to use instead of guessing.\n\n")
+}
+
+// writeProjectResourceList emits one project's resource list, or the
+// no-resources line, with the aggregated sidecar path. Shared by the
+// single-project and multi-project renderings so both name the same file.
+func writeProjectResourceList(b *strings.Builder, ctx TaskContextForEnv, resources []ProjectResourceForEnv) {
+	if len(resources) == 0 {
 		b.WriteString("This project has no resources attached yet.\n\n")
+		return
+	}
+	resourcesFile := ".multica/project/resources.json"
+	if ctx.SidecarRoot != "" {
+		resourcesFile = filepath.ToSlash(filepath.Join(ctx.SidecarRoot, ".multica", "project", "resources.json"))
+	}
+	fmt.Fprintf(b, "Project resources (also written to `%s`):\n\n", resourcesFile)
+	for _, r := range resources {
+		fmt.Fprintf(b, "- %s\n", formatProjectResource(r))
+	}
+	b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
+	if ctx.CodeSource.UsesLocalDirectory() {
+		b.WriteString("A `github_repo` resource here does NOT mean \"clone this\": this project is pinned to a local directory on this machine, and `## Code Source` says which repositories are already present.\n\n")
+	} else {
+		b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
 	}
 }
 
@@ -1010,6 +1130,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	}
 
 	writeProjectContext(&b, ctx)
+	writeCodeSource(&b, ctx)
 
 	if kind == kindIssue {
 		writeInstructionPrecedence(&b)

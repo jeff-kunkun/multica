@@ -388,6 +388,11 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	client := &http.Client{}
 	checkoutURL := fmt.Sprintf("http://127.0.0.1:%s/repo/checkout", daemonPort)
 	var body []byte
+	// lastWait is the daemon's latest explanation of why the checkout is not
+	// ready. It becomes the error if the wait runs out, so a timeout says what
+	// was being waited on instead of a bare "deadline exceeded".
+	var lastWait string
+	var lastProgressAt time.Time
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, checkoutURL, bytes.NewReader(data))
 		if err != nil {
@@ -397,6 +402,9 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		req.Header.Set("Authorization", "Bearer "+taskToken)
 		resp, err := client.Do(req)
 		if err != nil {
+			if ctx.Err() != nil && lastWait != "" {
+				return fmt.Errorf("checkout is not ready yet, gave up waiting: %s", lastWait)
+			}
 			return fmt.Errorf("connect to daemon: %w", err)
 		}
 		body, err = io.ReadAll(resp.Body)
@@ -408,12 +416,20 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("close daemon checkout response: %w", closeErr)
 		}
 		if resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("X-Multica-Retryable") == "repo-busy" {
+			lastWait = strings.TrimSpace(string(body))
+			// A first-time download can take far longer than this command
+			// waits. Show how far it is so the agent sees a moving download,
+			// not a hang.
+			if resp.Header.Get("X-Multica-Repo-Building") != "" && time.Since(lastProgressAt) >= repoCheckoutProgressInterval {
+				fmt.Fprintf(os.Stderr, "Waiting: %s\n", lastWait)
+				lastProgressAt = time.Now()
+			}
 			delay := repoCheckoutRetryDelay(resp.Header.Get("Retry-After"), time.Now())
 			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return fmt.Errorf("connect to daemon: %w", context.Cause(ctx))
+				return fmt.Errorf("checkout is not ready yet, gave up waiting: %s", lastWait)
 			case <-timer.C:
 				continue
 			}
@@ -431,8 +447,32 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stdout, "%s\n", result.Path)
 	fmt.Fprintln(os.Stderr, repoCheckoutSummary(repoURL, result))
+	if warning := repoCheckoutStaleWarning(repoURL, result); warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
+	}
 
 	return nil
+}
+
+// repoCheckoutProgressInterval spaces out the progress lines printed while
+// waiting on a first-time download.
+const repoCheckoutProgressInterval = 30 * time.Second
+
+// repoCheckoutStaleWarning is printed when the daemon could not refresh the
+// repository before the checkout. The checkout still succeeded, which is
+// exactly why it must be said out loud: without it the agent builds on an old
+// base and nothing anywhere on the task says so.
+func repoCheckoutStaleWarning(repoURL string, result repoCheckoutResult) string {
+	if !result.Stale {
+		return ""
+	}
+	reason := strings.TrimSpace(result.StaleReason)
+	if reason == "" {
+		reason = "no reason reported"
+	}
+	return fmt.Sprintf("WARNING: the code in %s may be OUT OF DATE. Fetching the latest %s failed (%s), so this checkout was built from what the daemon had cached earlier.\n"+
+		"Before relying on it, run `git fetch origin` inside the checkout and compare with the remote branch; if that also fails, say in your result that the work is based on a possibly stale revision.",
+		result.Path, repoURL, reason)
 }
 
 // repoCheckoutResult is the daemon's /repo/checkout response. Daemons older
@@ -443,12 +483,55 @@ type repoCheckoutResult struct {
 	Kept             string `json:"kept"`
 	UncommittedFiles int    `json:"uncommitted_files"`
 	UnpushedCommits  int    `json:"unpushed_commits"`
+	// Source is "local_directory" when the daemon answered from the directory
+	// the project pinned on this machine rather than cloning (DENE-595). Older
+	// daemons omit it; the generic summary they get is still true, since Path
+	// is where the code is either way.
+	Source string `json:"source,omitempty"`
+	// ExecutionMode is the pinned resource's execution mode. It decides whose
+	// checkout Path is: the user's own in in_place and shared, this task's
+	// private worktree in worktree mode. Daemons older than DENE-595 omit it.
+	ExecutionMode string `json:"execution_mode,omitempty"`
+	// Stale reports that the fetch before the checkout failed, so the code may
+	// be behind the remote; StaleReason is the fetch error. Daemons older than
+	// DENE-598 omit both and only log the failure.
+	Stale       bool   `json:"stale,omitempty"`
+	StaleReason string `json:"stale_reason,omitempty"`
 }
+
+// repoCheckoutSourceLocalDirectory mirrors the daemon-side constant.
+const repoCheckoutSourceLocalDirectory = "local_directory"
+
+// repoCheckoutModeWorktree mirrors the daemon-side execution mode in which the
+// task runs in its own worktree rather than the user's directory.
+const repoCheckoutModeWorktree = "worktree"
 
 // repoCheckoutSummary says what the checkout did. A kept checkout has to read
 // differently from a new branch off the default branch, or the agent works on
 // as if the checkout were fresh and loses track of what it holds.
 func repoCheckoutSummary(repoURL string, result repoCheckoutResult) string {
+	if result.Source == repoCheckoutSourceLocalDirectory {
+		// Say plainly that nothing was cloned. An agent told only "checked
+		// out <path>" would reasonably assume a fresh tree and start by
+		// resetting it — in the user's own working copy.
+		branch := result.BranchName
+		if branch == "" {
+			branch = "detached HEAD"
+		}
+		// Whose checkout this is changes what the agent may do in it, so the
+		// two cases must not share a sentence. Saying "the user's own checkout"
+		// about a worktree invites the agent to treat the user's working copy
+		// as off-limits when it is not even the directory it was handed — and
+		// the reverse mistake, in in_place, is worse.
+		ownership := "This is the user's own checkout: it may carry uncommitted work, and nothing here was reset, cleaned, or switched."
+		if result.ExecutionMode == repoCheckoutModeWorktree {
+			ownership = "This is this task's own git worktree of that directory, not the user's working copy: commit here and deliver the branch."
+		}
+		return fmt.Sprintf("Using the local directory this project is configured with: %s (branch: %s).\n"+
+			"%s was NOT cloned — this machine already holds it, and a second copy is what the local-directory setting exists to avoid.\n"+
+			"%s",
+			result.Path, branch, repoURL, ownership)
+	}
 	if result.Kept == "" {
 		return fmt.Sprintf("Checked out %s → %s (branch: %s)", repoURL, result.Path, result.BranchName)
 	}

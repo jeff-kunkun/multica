@@ -29,8 +29,24 @@ comments do not create durable project resources.
 A project's `description` is also durable context: when an issue (or a
 quick-create task) is bound to a project, the project description is injected
 into the agent's brief under `## Project Context` and written to
-`.multica/project/resources.json` as `project_description`. Use it for
-project-wide rules/context that should apply to every task in the project.
+`.multica/project/resources.json` as that project's `project_description`. Use
+it for project-wide rules/context that should apply to every task in the
+project.
+
+A Chat can attach SEVERAL projects at once (a 2–3 project comparison or a
+cross-repo task is the common case). The brief then aggregates every attached
+project — one `### Project: <title>` subsection each with its own description
+and resources, plus the union of their `github_repo` resources in the
+Repositories list — and `.multica/project/resources.json` carries one entry per
+project under `projects[]`. Two rules follow from that:
+
+- No single project is authoritative in a multi-project Chat. When a
+  deliverable must belong to one project (creating an issue, for example),
+  infer the target from the request and the descriptions; ask the user when it
+  stays ambiguous.
+- `multica repo checkout` serves every attached project's repositories, so a
+  cross-repo task needs no extra setup. A URL attached to two projects appears
+  once.
 
 Common resource types:
 
@@ -38,7 +54,25 @@ Common resource types:
   checkout `ref`, and optional prompt-only `default_branch_hint`;
 - `local_directory` — daemon-local path context, with `resource_ref.local_path`,
   `daemon_id`, optional label, and optional `execution_mode` (`in_place`, the
-  default, `worktree`, or `shared`).
+  default, `worktree`, or `shared`). It may also carry `real_path` (the
+  symlink-resolved path, which is the directory's identity), `repo_key` (the
+  normalized identity of the repository it holds, empty when there is none),
+  `worktree_root` (where parallel mode puts working copies) and `is_git_repo`.
+
+A project may hold SEVERAL `local_directory` resources on one machine — four
+unrelated plain folders, or a repository plus its docs checkout. Two rules,
+enforced by the database, bound that:
+
+- one row per directory per machine, keyed on `real_path` (falling back to
+  `local_path` for rows written before that field existed);
+- one row per repository per machine, keyed on `repo_key` when it is non-empty.
+  An empty `repo_key` means "unidentifiable" and never collides, which is what
+  keeps plain folders legal.
+
+A run writes exactly ONE directory: the first `local_directory` for that
+machine in `position` order. The rest reach the agent read-only and are listed
+in the brief's `## Code Source`. Reorder the resources to change which one a
+run writes.
 
 ## CLI
 
@@ -82,7 +116,30 @@ a second task waits in `waiting_local_directory`.
 
 `worktree` gives each task its own git worktree of that repo, so tasks run
 concurrently and each delivers its work as a branch in the user's repo instead
-of editing the working copy. Every task of one conversation shares that branch —
+of editing the working copy. The working copy is created on the USER's disk,
+beside their repository — `<repo>.multica-worktrees/<task>` by default, or
+under `resource_ref.worktree_root` when set. It is never inside the repository
+working tree (it would show up in their `git status`) and never inside the
+Multica workspace (the workspace GC would reclaim the one place a failed run's
+state can be inspected). A daemon that does not advertise
+`local-worktree-user-root-v1` does not receive `worktree_root` at all and keeps
+its older behaviour.
+
+Working copies are removed when a task finishes cleanly. One that survives is
+one a run could NOT finish — an unresolved merge, a failed commit, a dead
+daemon — and it stays on disk on purpose. Automatic cleanup of those is a
+machine-level setting, OFF by default (Desktop → daemon settings). When on, a
+copy is removed only if ALL of: Multica created it, no task is in it, its last
+run is older than the configured window (default 14 days), `git status
+--porcelain` is empty, and its branch is already merged into trunk. Any one
+failing keeps it, and the settings screen shows which. Removal always goes
+through `git worktree remove`.
+
+Parallel mode is never preselected when a directory is added: a new
+`local_directory` defaults to `in_place`, and moving to `worktree` is an
+explicit choice, because its cost is a working copy per task on the user's own
+drive. A directory proven not to be a git repository (`is_git_repo: false`) is
+refused in `worktree` mode at save time. Every task of one conversation shares that branch —
 `agent/<agent>/<issue>` for an issue, `agent/<agent>/chat-<session>` for a chat
 — and each turn's worktree starts from the previous turn's work rather than from
 `HEAD`; a task with no conversation behind it gets `agent/<agent>/<task>`.
@@ -163,6 +220,39 @@ contract as an `issue` mention.
 Prefer this form over pasting the project's URL. Web and desktop do unfurl a
 bare in-app project URL into that same chip, but mobile does not — there a
 pasted URL is handed to the system browser and takes the reader out of the app.
+
+## A local directory wins over a remote repo
+
+When a project carries a `local_directory` resource on the machine running a
+task, that directory IS the task's code. This is a rule, not a preference:
+`multica repo checkout <url>` returns the local path instead of cloning
+whenever a git remote in that directory (or in a subdirectory one level down,
+for `shared` umbrella directories) resolves to the same repository. The run's
+brief says so in its `## Code Source` section, listing which repositories are
+already present and which still need a checkout.
+
+`github_repo` is not deprecated by this — CI, cloud runners, and teammates with
+no local checkout all still need it, and a project pinned to one directory can
+reference other repositories that check out normally.
+
+Two consequences worth knowing before debugging:
+
+- A directory that carries the repository's NAME but no matching git remote
+  makes the checkout fail with HTTP 409 and an explanation. It does not fall
+  back to cloning: a silent fallback is what put two copies of one repository
+  on the same machine. Fix the directory or remove the resource.
+- Which directory you get depends on the resource's `execution_mode`. In
+  `in_place` and `shared` it is the user's own checkout: it may carry
+  uncommitted work, and nothing there was reset. In `worktree` it is this
+  task's private worktree of that repository, not the user's copy — commit
+  there and deliver a branch. A repository that lives beside the pinned
+  directory but has no counterpart inside the worktree is refused rather than
+  answered with the user's path.
+- A repository configured both ways shows a duplicate warning in the project's
+  resource list with a one-click merge that removes the redundant `github_repo`
+  rows. Nothing is removed automatically — the server compares a URL against a
+  path and can only match by repository name, which is enough to ask and not
+  enough to act.
 
 ## When to add a resource
 

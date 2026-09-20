@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import type {
   Agent,
   AgentRuntime,
+  AgentSwitchableModel,
   MemberWithUser,
 } from "@multica/core/types";
 import {
@@ -12,6 +13,9 @@ import {
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
   isAgentAutoRetryEnabled,
+  normaliseSwitchableModelsDraft,
+  selectAgentSwitchableModels,
+  switchableModelsEqual,
 } from "@multica/core/agents";
 import {
   isRuntimeUsableForUser,
@@ -39,6 +43,11 @@ import {
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
+import { SwitchableModelsEditor } from "./switchable-models-editor";
+import {
+  canEditRuntimeProfile,
+  runtimeInheritanceState,
+} from "../specialization";
 
 interface InspectorProps {
   agent: Agent;
@@ -125,6 +134,34 @@ export function AgentDetailInspector({
   const canDiscoverRuntimeModels = isOnline && canReadRuntime;
   const nameInvalid = name.trim().length === 0;
 
+  // Runtime inheritance (DENE-505). `unknown` covers both a base role — which
+  // cannot follow anything — and a backend that predates the flag; neither may
+  // be offered a switch. While following, the runtime-profile controls below
+  // stay visible (they are the values this agent actually runs with) but
+  // read-only: the server 400s a runtime field sent alongside
+  // `runtime_inherited: true`, so the toggle is the only honest way out.
+  const runtimeInheritance = runtimeInheritanceState(agent);
+  const runtimeInherited = runtimeInheritance === "inherited";
+  const canEditRuntime = canEditRuntimeProfile(agent, canEdit);
+  const [inheritanceSaving, setInheritanceSaving] = useState(false);
+  const setRuntimeInheritance = useCallback(
+    async (inherited: boolean) => {
+      setInheritanceSaving(true);
+      try {
+        // The switch is driven by server state and the page patches the cache
+        // optimistically, then rolls it back and toasts on failure — so a
+        // refused write (a base role, a private base runtime) simply leaves the
+        // switch where it was. Not re-thrown: nothing here can recover.
+        await update({ runtime_inherited: inherited });
+      } catch {
+        // Handled by the page (`handleUpdate`).
+      } finally {
+        setInheritanceSaving(false);
+      }
+    },
+    [update],
+  );
+
   // Same query the Thinking / Speed fields already use, so switching model
   // costs no extra request. `null` = not authoritative (offline runtime, still
   // loading, or discovery failed) and must not trigger any clearing.
@@ -152,6 +189,71 @@ export function AgentDetailInspector({
         }),
       ),
     [agent.service_tier, agent.thinking_level, modelCatalog, runtime?.provider, update],
+  );
+
+  // Display-only model lineup (DENE-200). Until DENE-610 it was writable only
+  // through `multica agent update --switchable-models`, so an agent that had
+  // picked one up could not be put back on a single model from the UI at all.
+  const savedSwitchableModels = useMemo(
+    () => selectAgentSwitchableModels(agent),
+    [agent],
+  );
+  const [switchableRows, setSwitchableRows] = useState<AgentSwitchableModel[]>(
+    savedSwitchableModels,
+  );
+  // The switch is local, not derived: a freshly added row has no model yet, so
+  // the saved lineup is still empty while the editor must stay open.
+  const [switchableOpen, setSwitchableOpen] = useState(
+    savedSwitchableModels.length > 0,
+  );
+
+  useEffect(() => {
+    const next = selectAgentSwitchableModels(agent);
+    setSwitchableRows(next);
+    setSwitchableOpen(next.length > 0);
+    // Reset only when moving to another agent, for the same reason the profile
+    // draft above does: an autosave in flight must not be clobbered by the
+    // cache update it caused.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.id]);
+
+  const switchableDraft = useMemo(
+    () => normaliseSwitchableModelsDraft(switchableRows),
+    [switchableRows],
+  );
+  const saveSwitchableModels = useCallback(
+    async (next: AgentSwitchableModel[]) => {
+      await update({ switchable_models: next });
+    },
+    [update],
+  );
+  const switchableAutoSave = useAutoSave({
+    value: switchableDraft,
+    savedValue: savedSwitchableModels,
+    onSave: saveSwitchableModels,
+    enabled: canEdit,
+    isEqual: switchableModelsEqual,
+  });
+  const { saveNow: saveSwitchableNow } = switchableAutoSave;
+  const toggleSwitchable = useCallback(
+    (enabled: boolean) => {
+      setSwitchableOpen(enabled);
+      if (enabled) {
+        // Seed the lineup with the model the agent actually runs, so the
+        // first row already says something true.
+        setSwitchableRows((rows) =>
+          rows.length > 0
+            ? rows
+            : [{ model: agent.model ?? "", role: "default", note: "" }],
+        );
+        return;
+      }
+      // Back to a single model. Written immediately rather than on the debounce
+      // so the header chip clears with the switch.
+      setSwitchableRows([]);
+      saveSwitchableNow([]);
+    },
+    [agent.model, saveSwitchableNow],
   );
 
   return (
@@ -244,6 +346,25 @@ export function AgentDetailInspector({
         description={t(($) => $.inspector.section_execution_hint)}
       >
         <SettingsCard>
+          {runtimeInheritance !== "unknown" && (
+            <SettingsRow
+              label={t(($) => $.inspector.prop_runtime_inherit)}
+              description={
+                runtimeInherited
+                  ? t(($) => $.inspector.prop_runtime_inherit_hint_on)
+                  : t(($) => $.inspector.prop_runtime_inherit_hint_off)
+              }
+            >
+              <Switch
+                checked={runtimeInherited}
+                disabled={!canEdit || inheritanceSaving}
+                onCheckedChange={(checked) => {
+                  void setRuntimeInheritance(checked);
+                }}
+                aria-label={t(($) => $.inspector.prop_runtime_inherit)}
+              />
+            </SettingsRow>
+          )}
           <SettingsRow
             label={t(($) => $.inspector.prop_runtime)}
             size="select-wide"
@@ -255,7 +376,7 @@ export function AgentDetailInspector({
               runtimes={runtimes}
               members={members}
               currentUserId={currentUserId}
-              canEdit={canEdit}
+              canEdit={canEditRuntime}
               // Model, thinking level, and service tier are runtime/model
               // native. Clear them together so the new runtime resolves its
               // own defaults instead of inheriting incompatible tokens.
@@ -279,7 +400,7 @@ export function AgentDetailInspector({
               runtimeId={agent.runtime_id}
               runtimeOnline={canDiscoverRuntimeModels}
               value={agent.model ?? ""}
-              canEdit={canEdit}
+              canEdit={canEditRuntime}
               onChange={handleModelChange}
             />
           </SettingsRow>
@@ -290,7 +411,7 @@ export function AgentDetailInspector({
             provider={runtime?.provider ?? ""}
             model={agent.model ?? ""}
             value={agent.thinking_level ?? ""}
-            canEdit={canEdit}
+            canEdit={canEditRuntime}
             onChange={(thinkingLevel) =>
               update({ thinking_level: thinkingLevel })
             }
@@ -302,9 +423,41 @@ export function AgentDetailInspector({
             provider={runtime?.provider ?? ""}
             model={agent.model ?? ""}
             value={agent.service_tier ?? ""}
-            canEdit={canEdit}
+            canEdit={canEditRuntime}
             onChange={(serviceTier) => update({ service_tier: serviceTier })}
           />
+          <SettingsRow
+            label={t(($) => $.inspector.prop_switchable_models)}
+            description={
+              switchableOpen
+                ? t(($) => $.inspector.prop_switchable_models_hint_on)
+                : t(($) => $.inspector.prop_switchable_models_hint_off)
+            }
+          >
+            <Switch
+              checked={switchableOpen}
+              disabled={!canEdit}
+              onCheckedChange={toggleSwitchable}
+              aria-label={t(($) => $.inspector.prop_switchable_models)}
+            />
+          </SettingsRow>
+          {switchableOpen ? (
+            <div className="px-4 py-3.5">
+              <SwitchableModelsEditor
+                value={switchableRows}
+                onChange={setSwitchableRows}
+                disabled={!canEdit}
+              />
+              <div className="mt-2 flex justify-end">
+                <SettingsSaveState
+                  status={switchableAutoSave.status}
+                  savingLabel={ts(($) => $.auto_save.saving)}
+                  savedLabel={ts(($) => $.auto_save.saved)}
+                  errorLabel={ts(($) => $.auto_save.failed)}
+                />
+              </div>
+            </div>
+          ) : null}
           <SettingsRow
             label={t(($) => $.inspector.prop_concurrency)}
             size="select-wide"

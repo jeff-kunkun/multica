@@ -78,6 +78,7 @@
     "searching": "Searching...",
     "no_results": "No results",
     "group_current": "Current page",
+    "group_project": "Current project",
     "group_recent": "Recently viewed",
     "group_search": "Search results",
     "group_cancelled": "Cancelled"

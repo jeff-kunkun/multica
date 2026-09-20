@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+
+	"github.com/multica-ai/multica/server/pkg/llm"
 )
 
 // Action is what a Route call did, for logging, the CLI, and tests.
@@ -348,6 +350,16 @@ func (r *Router) routeBlocked(ctx context.Context, workspaceID string, settings 
 // keeps a dead model from leaving a trail of identical comments.
 func (r *Router) reportUnavailable(ctx context.Context, workspaceID string, issue Issue, cause error) (Outcome, error) {
 	r.Breaker.Fail(workspaceID, cause)
+	if errors.Is(cause, llm.ErrNotConfigured) {
+		// "This deployment never configured an internal LLM" is a fact about
+		// the deployment, not about this ticket. Commenting and @-ing on
+		// every issue would punish a workspace for an admin's omission, and
+		// the spec puts diagnosis in one place: the settings section, which
+		// reads this through Health.
+		r.log().Warn("routing: internal LLM not configured",
+			"workspace_id", workspaceID, "issue_id", issue.ID)
+		return Outcome{State: StateIneffective, Action: ActionSkipped, Reason: "internal LLM not configured"}, nil
+	}
 	r.log().Warn("routing: judge unavailable",
 		"workspace_id", workspaceID, "issue_id", issue.ID, "error", cause)
 	out := Outcome{State: StateEnabled, Action: ActionUnavailable, Reason: cause.Error()}
@@ -438,3 +450,97 @@ func (r *Router) judgeState(issue Issue, direction string, candidates []Seat) Ju
 // route a workspace that has routing switched off, so the CLI can say so
 // instead of reporting a silent no-op.
 var ErrNotEnabled = errors.New("routing: not enabled for this workspace")
+
+// HealthReport is what the settings section renders. It is assembled from the
+// stored settings plus live breaker state, and it is the only surface on which
+// a routing failure is visible to a person — tickets stay quiet by design.
+type HealthReport struct {
+	// State is the same four-way classification the settings section shows.
+	State State
+	// Usable is false exactly when State is not enabled. The client gates the
+	// ineffective chip on this rather than re-deriving it.
+	Usable bool
+	// Reason is human-readable, and empty unless something is wrong.
+	Reason string
+	// RetryAfterSeconds is how long the cooldown still has to run.
+	RetryAfterSeconds int
+	// LastSuccessAt / LastFailureAt are unix seconds, zero for never.
+	LastSuccessAt int64
+	LastFailureAt int64
+	Model         string
+	Threshold     float64
+}
+
+// Health answers "is routing actually working for this workspace right now".
+//
+// It reads; it never dials the model. A settings page that probed on every
+// render would turn an open tab into an outbound request loop, and would also
+// defeat the breaker it is reporting on. Probe is the explicit re-check.
+func (r *Router) Health(ctx context.Context, workspaceID string) (HealthReport, error) {
+	settings, err := r.Store.Settings(ctx, workspaceID)
+	if err != nil {
+		return HealthReport{}, err
+	}
+	out := HealthReport{
+		State:     settings.State(),
+		Model:     settings.Model,
+		Threshold: settings.Threshold(),
+	}
+	h := r.Breaker.Health(workspaceID)
+	if !h.LastSuccess.IsZero() {
+		out.LastSuccessAt = h.LastSuccess.Unix()
+	}
+	if !h.LastFailure.IsZero() {
+		out.LastFailureAt = h.LastFailure.Unix()
+	}
+	// Checked before the breaker: a deployment with no internal LLM at all is
+	// answerable on the spot, and making the reader wait for a ticket to fail
+	// first would leave the settings section green while nothing can work.
+	if a, ok := r.Judge.(Availability); ok && out.State == StateEnabled && !a.Available() {
+		out.State = StateIneffective
+		out.Reason = NotConfiguredReason
+		out.Usable = false
+		return out, nil
+	}
+	if out.State == StateEnabled && h.Open {
+		out.State = StateIneffective
+		// Reason is set ONLY here. A failure reason shown next to a healthy
+		// chip reads as a current fault; the failure timestamp carries "it
+		// stumbled once" without claiming routing is down.
+		out.Reason = h.Reason
+		out.RetryAfterSeconds = int(h.Retry.Seconds())
+	}
+	out.Usable = out.State == StateEnabled
+	return out, nil
+}
+
+// Probe dials the routing model once, on purpose, and folds the answer into
+// the breaker. It is what the "re-check" button in the settings section runs:
+// the only way out of a cooldown that is shorter than waiting for it.
+//
+// It asks the judge a fixed, trivial question rather than a second kind of
+// request, so a probe that passes is evidence about the call routing actually
+// makes.
+func (r *Router) Probe(ctx context.Context, workspaceID string) (HealthReport, error) {
+	settings, err := r.Store.Settings(ctx, workspaceID)
+	if err != nil {
+		return HealthReport{}, err
+	}
+	if settings.State() != StateEnabled {
+		// Nothing to dial, and dialling anyway would be the one case where
+		// a disabled workspace makes an outbound request.
+		return r.Health(ctx, workspaceID)
+	}
+	_, err = r.Judge.Assign(ctx, settings.Model, JudgeState{
+		Title:              "Routing self-check",
+		DescriptionSummary: "Connectivity probe issued from the routing settings section. Answer with any tier.",
+		Status:             "todo",
+		Candidates:         []string{"strong"},
+	})
+	if err != nil {
+		r.Breaker.Fail(workspaceID, err)
+	} else {
+		r.Breaker.Succeed(workspaceID)
+	}
+	return r.Health(ctx, workspaceID)
+}

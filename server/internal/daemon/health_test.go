@@ -668,6 +668,54 @@ func TestRepoCheckoutReturnsRetryableBusyToCapableClient(t *testing.T) {
 	}
 }
 
+// DENE-598: a checkout that arrives during a first-time download is answered
+// with the progress and told to retry — never a bare "busy", never an error
+// that reads like corruption.
+func TestRepoCheckoutReportsFirstTimeDownloadProgress(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-checkout"
+	const repoURL = "https://github.com/org/repo.git"
+	cache := &buildingRepoCache{recordingRepoCache: recordingRepoCache{lookupPath: "/cache/org/repo.git"}}
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1","retry_busy":true}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(body))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(repoCheckoutRetryHeader); got != repoCheckoutRetryValueBusy {
+		t.Fatalf("%s = %q, want %q so older retry-aware clients keep waiting", repoCheckoutRetryHeader, got, repoCheckoutRetryValueBusy)
+	}
+	if got := rec.Header().Get(repoCheckoutBuildingHeader); got == "" {
+		t.Fatalf("%s header missing", repoCheckoutBuildingHeader)
+	}
+	got := rec.Body.String()
+	for _, want := range []string{"40 of 100", "not corrupted"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("body %q does not mention %q", got, want)
+		}
+	}
+	if strings.Contains(got, "delete it and retry") || strings.Contains(got, "repository is busy") {
+		t.Errorf("body reads as corruption or a generic busy: %q", got)
+	}
+}
+
+type buildingRepoCache struct {
+	recordingRepoCache
+}
+
+func (c *buildingRepoCache) CreateWorktreeContext(_ context.Context, params repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	now := time.Now()
+	return nil, &repocache.RepoBuildingError{URL: params.RepoURL, Status: repocache.BuildStatus{
+		Active: true, Phase: repocache.BuildPhaseFiles, Done: 40, Total: 100,
+		StartedAt: now.Add(-time.Minute), PhaseStartedAt: now.Add(-30 * time.Second),
+	}}
+}
+
 func newRepoCheckoutTestDaemon(t *testing.T, workspaceID, repoURL, workDir string, cache repoCacheBackend) *Daemon {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

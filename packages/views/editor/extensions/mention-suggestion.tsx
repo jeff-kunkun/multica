@@ -72,8 +72,10 @@ export interface MentionItem {
   id: string;
   label: string;
   type: "member" | "agent" | "squad" | "issue" | "project" | "all";
-  /** Optional grouping hint for injected context items. */
-  group?: "current" | "recent" | "search";
+  /** Optional grouping hint for injected context items. `project` is the
+   *  chat's current-project shortlist — the tasks of the project the user is
+   *  looking at (DENE-603). */
+  group?: "current" | "project" | "recent" | "search";
   /** Secondary text shown beside the label (e.g. issue title) */
   description?: string;
   /** Issue status for StatusIcon rendering */
@@ -115,6 +117,7 @@ interface MentionGroup {
 
 function groupItems(items: MentionItem[], query: string): MentionGroup[] {
   const current: MentionItem[] = [];
+  const project: MentionItem[] = [];
   const recent: MentionItem[] = [];
   const search: MentionItem[] = [];
   const users: MentionItem[] = [];
@@ -126,6 +129,8 @@ function groupItems(items: MentionItem[], query: string): MentionGroup[] {
       cancelled.push(item);
     } else if (item.group === "current") {
       current.push(item);
+    } else if (item.group === "project") {
+      project.push(item);
     } else if (item.group === "recent") {
       recent.push(item);
     } else if (item.group === "search") {
@@ -139,6 +144,7 @@ function groupItems(items: MentionItem[], query: string): MentionGroup[] {
 
   const groups: MentionGroup[] = [];
   if (current.length > 0) groups.push({ label: "Current", items: current });
+  if (project.length > 0) groups.push({ label: "Project", items: project });
   if (recent.length > 0) groups.push({ label: "Recent", items: recent });
   if (search.length > 0) groups.push({ label: "Search", items: search });
   if (users.length > 0) groups.push({ label: "Users", items: users });
@@ -220,7 +226,7 @@ function isDemotedCancelled(item: MentionItem, query: string): boolean {
  * `description`; project rows carry the title in `label`.
  */
 function isPinnedAboveTruncation(item: MentionItem, query: string): boolean {
-  if (item.group === "current" || item.group === "recent") return true;
+  if (item.group === "current" || item.group === "project" || item.group === "recent") return true;
   if (!query) return false;
   if (item.type === "issue") {
     return isIssueDirectHit(
@@ -449,10 +455,13 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       );
     }
 
-    const hasContextGroups = orderedItems.some((item) => item.group === "current" || item.group === "recent");
+    const hasContextGroups = orderedItems.some(
+      (item) => item.group === "current" || item.group === "project" || item.group === "recent",
+    );
     const contextLayout = hasContextGroups;
     const groupLabel = (label: string): string => {
       if (label === "Current") return t(($) => $.mention.group_current);
+      if (label === "Project") return t(($) => $.mention.group_project);
       if (label === "Recent") return t(($) => $.mention.group_recent);
       if (label === "Search") return t(($) => $.mention.group_search);
       if (label === "Users") return t(($) => $.mention.group_users);

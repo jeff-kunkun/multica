@@ -37,6 +37,9 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 		"artifact_ttl", d.cfg.GCArtifactTTL,
 		"repo_ttl", d.cfg.GCRepoTTL,
 		"repo_maintenance_enabled", d.cfg.GCRepoMaintenanceEnabled,
+		"shared_package_store", d.cfg.SharedPackageStoreEnabled,
+		"package_store_prune_interval", d.cfg.GCPackageStorePruneInterval,
+		"package_store_max_bytes", d.cfg.GCPackageStoreMaxBytes,
 		"artifact_patterns", d.cfg.GCArtifactPatterns,
 		"managed_artifact_subpaths", execenv.ManagedReclaimableArtifactSubpaths(),
 	)
@@ -76,12 +79,25 @@ type gcStats struct {
 	repoCachesReclaimed           int            // bare repo caches under .repos evicted past their TTL
 	taskTempDirsReclaimed         int            // per-task temp dirs under the temp base reclaimed after their owning execution ended
 	taskRootIndexEntriesReclaimed int            // abandoned stable-root records and unpublished entries reclaimed past the orphan TTL
+	packageStoreBytesReclaimed    int64          // bytes freed from the shared package store under .pkg-store
 	bytesReclaimed                int64          // total bytes freed in this cycle
 	byPattern                     map[string]int // configured basename or managed path label -> reclaim count
 }
 
 // runGC performs a single GC scan across all workspace directories.
 func (d *Daemon) runGC(ctx context.Context) {
+	// Parallel-mode working copies first, because they are the only thing this
+	// cycle touches that does NOT live under WorkspacesRoot (DENE-617). They
+	// sit beside the user's repository, so the walk below can never reach
+	// them, and the early return on a missing workspaces root must not skip
+	// them either — hence before it rather than alongside the other pruners.
+	//
+	// The consent for this pass is the machine's own cleanup policy, which is
+	// off until the user switches it on; GCEnabled gating it as well only ever
+	// means less deleting, which is the safe direction for a directory on
+	// somebody else's disk.
+	d.runWorktreeCleanup()
+
 	root := d.cfg.WorkspacesRoot
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -158,6 +174,12 @@ func (d *Daemon) runGC(ctx context.Context) {
 		stats.bytesReclaimed += storeBytes
 	}
 
+	// Drop unreferenced packages from the shared dependency store. Like the
+	// repo cache it is a sibling of the task dirs, so the walk above never
+	// sees it, and unlike every other pruner here the reclamation decision
+	// belongs to pnpm rather than to a clock we own.
+	d.prunePackageStore(ctx, root, stats)
+
 	// Reclaim per-task temp dirs whose owning execution is gone. These are the
 	// agent process's TMPDIR and live under the system temp base, not under
 	// WorkspacesRoot, so the task walk above has never seen them and the only
@@ -173,7 +195,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 		}
 	}
 
-	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.hermesSessionStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 || stats.taskTempDirsReclaimed > 0 || stats.taskRootIndexEntriesReclaimed > 0 {
+	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.hermesSessionStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 || stats.taskTempDirsReclaimed > 0 || stats.taskRootIndexEntriesReclaimed > 0 || stats.packageStoreBytesReclaimed > 0 {
 		d.logger.Info("gc: cycle complete",
 			"cleaned", stats.cleaned,
 			"orphaned", stats.orphaned,
@@ -186,6 +208,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 			"repo_caches_reclaimed", stats.repoCachesReclaimed,
 			"task_temp_dirs_reclaimed", stats.taskTempDirsReclaimed,
 			"task_root_index_entries_reclaimed", stats.taskRootIndexEntriesReclaimed,
+			"package_store_bytes_reclaimed", stats.packageStoreBytesReclaimed,
 			"bytes_reclaimed", stats.bytesReclaimed,
 			"by_pattern", stats.byPattern,
 		)

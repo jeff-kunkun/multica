@@ -2263,3 +2263,249 @@ func TestParseConversationStarters(t *testing.T) {
 		}
 	})
 }
+
+// runtime_inherited (DENE-505) is the one field whose MEANING differs between
+// the two commands: on create a specialisation follows its base role unless
+// told otherwise (so --runtime-id stops being required), while on update both
+// values are explicit switches. What must not happen is a `false` that never
+// reaches the server — the caller would believe the agent had been taken off
+// its base role's runtime while it kept following it.
+func TestAgentRuntimeInheritedFlag(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody = nil
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	createCmd := func(t *testing.T, flags map[string]string) *cobra.Command {
+		t.Helper()
+		cmd := &cobra.Command{Use: "create"}
+		cmd.Flags().String("name", "", "")
+		cmd.Flags().String("runtime-id", "", "")
+		cmd.Flags().String("parent-agent-id", "", "")
+		cmd.Flags().Bool("runtime-inherited", false, "")
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().String("profile", "", "")
+		for flag, value := range flags {
+			if err := cmd.Flags().Set(flag, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return cmd
+	}
+
+	t.Run("create lets a specialisation omit the runtime", func(t *testing.T) {
+		if err := runAgentCreate(createCmd(t, map[string]string{
+			"name": "TestAgent", "parent-agent-id": "base-1",
+		}), nil); err != nil {
+			t.Fatalf("runAgentCreate: %v", err)
+		}
+		if gotBody["parent_agent_id"] != "base-1" {
+			t.Fatalf("body parent_agent_id = %v, want base-1", gotBody["parent_agent_id"])
+		}
+		if _, ok := gotBody["runtime_id"]; ok {
+			t.Fatalf("no runtime was given and none should be sent: %v", gotBody)
+		}
+		if _, ok := gotBody["runtime_inherited"]; ok {
+			t.Fatalf("omitted flag must leave the server's follow default alone: %v", gotBody)
+		}
+	})
+
+	t.Run("create still requires a runtime for an independent agent", func(t *testing.T) {
+		err := runAgentCreate(createCmd(t, map[string]string{
+			"name": "TestAgent", "runtime-inherited": "false",
+		}), nil)
+		if err == nil || !strings.Contains(err.Error(), "--runtime-id is required") {
+			t.Fatalf("expected the runtime requirement, got %v", err)
+		}
+	})
+
+	t.Run("create sends an explicit opt-out", func(t *testing.T) {
+		if err := runAgentCreate(createCmd(t, map[string]string{
+			"name": "TestAgent", "parent-agent-id": "base-1",
+			"runtime-id": "runtime-1", "runtime-inherited": "false",
+		}), nil); err != nil {
+			t.Fatalf("runAgentCreate: %v", err)
+		}
+		if gotBody["runtime_inherited"] != false {
+			t.Fatalf("body runtime_inherited = %v, want false", gotBody["runtime_inherited"])
+		}
+		if gotBody["runtime_id"] != "runtime-1" {
+			t.Fatalf("body runtime_id = %v, want runtime-1", gotBody["runtime_id"])
+		}
+	})
+
+	t.Run("create refuses inheritance without a base role", func(t *testing.T) {
+		err := runAgentCreate(createCmd(t, map[string]string{
+			"name": "TestAgent", "runtime-id": "runtime-1", "runtime-inherited": "true",
+		}), nil)
+		if err == nil || !strings.Contains(err.Error(), "--parent-agent-id") {
+			t.Fatalf("expected the base-role requirement, got %v", err)
+		}
+	})
+
+	t.Run("update sends an explicit opt-out", func(t *testing.T) {
+		cmd := &cobra.Command{Use: "update"}
+		cmd.Flags().String("name", "", "")
+		cmd.Flags().Bool("runtime-inherited", false, "")
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().String("profile", "", "")
+		if err := cmd.Flags().Set("runtime-inherited", "false"); err != nil {
+			t.Fatal(err)
+		}
+		if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
+			t.Fatalf("runAgentUpdate: %v", err)
+		}
+		if gotBody["runtime_inherited"] != false {
+			t.Fatalf("body runtime_inherited = %v, want false", gotBody["runtime_inherited"])
+		}
+	})
+}
+
+// parent_agent_id is a TRI-STATE keyed on the field being present in the
+// request body: absent = no change, "" = detach, id = attach. A CLI that
+// dropped the empty value would leave `multica agent update --parent-agent-id
+// ""` silently doing nothing — the detach would look applied and not be.
+func TestAgentParentAgentIDFlagTriState(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+
+	var gotBody map[string]any
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody = nil
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	updateCmd := func(t *testing.T, set bool, value string) *cobra.Command {
+		t.Helper()
+		cmd := &cobra.Command{Use: "update"}
+		cmd.Flags().String("name", "", "")
+		cmd.Flags().String("parent-agent-id", "", "")
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().String("profile", "", "")
+		if err := cmd.Flags().Set("name", "TestAgent"); err != nil {
+			t.Fatal(err)
+		}
+		if set {
+			if err := cmd.Flags().Set("parent-agent-id", value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return cmd
+	}
+
+	t.Run("attach sends the id", func(t *testing.T) {
+		if err := runAgentUpdate(updateCmd(t, true, "base-1"), []string{"agent-123"}); err != nil {
+			t.Fatalf("runAgentUpdate: %v", err)
+		}
+		if gotBody["parent_agent_id"] != "base-1" {
+			t.Fatalf("body parent_agent_id = %v, want base-1", gotBody["parent_agent_id"])
+		}
+	})
+
+	t.Run("detach sends an explicit empty string", func(t *testing.T) {
+		if err := runAgentUpdate(updateCmd(t, true, ""), []string{"agent-123"}); err != nil {
+			t.Fatalf("runAgentUpdate: %v", err)
+		}
+		value, ok := gotBody["parent_agent_id"]
+		if !ok {
+			t.Fatalf("detach must send the field; body was %v", gotBody)
+		}
+		if value != "" {
+			t.Fatalf("body parent_agent_id = %v, want empty string", value)
+		}
+	})
+
+	t.Run("omitted flag leaves the field out", func(t *testing.T) {
+		if err := runAgentUpdate(updateCmd(t, false, ""), []string{"agent-123"}); err != nil {
+			t.Fatalf("runAgentUpdate: %v", err)
+		}
+		if _, ok := gotBody["parent_agent_id"]; ok {
+			t.Fatalf("omitted flag should not be sent: %v", gotBody)
+		}
+	})
+
+	// On create there is no third state to express: an agent that is not a
+	// specialisation simply has no parent, so an empty value must not be sent
+	// as an explicit null-ish field.
+	t.Run("create omits an empty parent", func(t *testing.T) {
+		cmd := &cobra.Command{Use: "create"}
+		cmd.Flags().String("name", "", "")
+		cmd.Flags().String("runtime-id", "", "")
+		cmd.Flags().String("parent-agent-id", "", "")
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().String("profile", "", "")
+		for flag, value := range map[string]string{
+			"name": "TestAgent", "runtime-id": "runtime-1", "parent-agent-id": "  ",
+		} {
+			if err := cmd.Flags().Set(flag, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := runAgentCreate(cmd, nil); err != nil {
+			t.Fatalf("runAgentCreate: %v", err)
+		}
+		if _, ok := gotBody["parent_agent_id"]; ok {
+			t.Fatalf("blank parent must not be sent: %v", gotBody)
+		}
+	})
+
+	t.Run("solidify posts to the solidify endpoint", func(t *testing.T) {
+		cmd := &cobra.Command{Use: "solidify"}
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().String("profile", "", "")
+		if err := runAgentSolidify(cmd, []string{"agent-123"}); err != nil {
+			t.Fatalf("runAgentSolidify: %v", err)
+		}
+		if gotPath != "/api/agents/agent-123/solidify" {
+			t.Fatalf("path = %q, want /api/agents/agent-123/solidify", gotPath)
+		}
+	})
+}

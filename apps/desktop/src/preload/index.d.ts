@@ -1,5 +1,8 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
-import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type {
+  RuntimeConfigResult,
+  RuntimeConfigSwitchResult,
+} from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
@@ -12,11 +15,22 @@ import type {
   UpdaterPreferences,
 } from "../shared/updater-types";
 import type {
+  WorktreeCleanupResult,
+  WorktreeCleanupSettings,
+} from "../main/worktree-cleanup";
+import type {
   DaemonStatus,
   DaemonPrefs,
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
+import type {
+  TransferJobState,
+  TransferPickPathResult,
+  TransferProgressEvent,
+  TransferRunRequest,
+  TransferRunResult,
+} from "../shared/workspace-transfer";
 
 interface DesktopAPI {
   /** Absolute home directory captured in the preload process. */
@@ -32,6 +46,13 @@ interface DesktopAPI {
   onSystemLocaleChanged: (callback: (locale: string) => void) => () => void;
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig: RuntimeConfigResult;
+  /**
+   * Write ~/.multica/desktop.json for a server switch.
+   * Pass `null` to return to official cloud (written explicitly; the
+   * absent-file fallback is the self-hosted entry default). The running
+   * session is unchanged until a full quit and reopen.
+   */
+  switchServer: (url: string | null) => Promise<RuntimeConfigSwitchResult>;
   /** Main tabbed window or a dedicated issue-only window. */
   windowContext: DesktopWindowContext;
   /** Read any freeze/crash breadcrumb from a previous session, so the renderer
@@ -104,7 +125,27 @@ interface DesktopAPI {
     /** Whether the path sits inside a git working tree. Only set when ok=true.
      *  Drives the worktree execution-mode option in the resource UI. */
     is_git_repo?: boolean;
+    /** Symlink-resolved absolute path — the directory's identity for the
+     *  "one row per directory" rule (DENE-617). */
+    real_path?: string;
+    /** Normalized identity of the repository this directory holds, from its
+     *  `origin` remote. Absent when there is none to identify. */
+    repo_key?: string;
+    /** Where parallel mode would put working copies by default: the
+     *  repository's sibling. Previewed before the user picks that mode. */
+    default_worktree_root?: string;
+    /** The repository root containing the directory, when there is one. */
+    git_root?: string;
   }>;
+  /** Report on this machine's parallel-mode working copies and the cleanup
+   *  policy in force. Served by the local daemon (DENE-617). */
+  worktreeCleanupReport: () => Promise<WorktreeCleanupResult>;
+  /** Save this machine's cleanup policy and return a fresh report. */
+  saveWorktreeCleanupSettings: (
+    settings: WorktreeCleanupSettings,
+  ) => Promise<WorktreeCleanupResult>;
+  /** Remove one working copy now. The daemon still applies every keep rule. */
+  removeWorktreeCopy: (path: string) => Promise<WorktreeCleanupResult>;
   /** Local skip-mutex overrides for folders stored as in_place on a server
    *  that does not accept execution_mode=shared. */
   listLocalDirectorySharedOverrides: () => Promise<
@@ -132,6 +173,18 @@ interface DesktopAPI {
   openIssueWindow: (
     request: IssueWindowRequest,
   ) => Promise<{ ok: true } | { ok: false; reason: "invalid_request" }>;
+  pickTransferExportPath: (input?: {
+    slug?: string;
+  }) => Promise<TransferPickPathResult>;
+  pickTransferImportPath: () => Promise<TransferPickPathResult>;
+  runWorkspaceTransfer: (request: TransferRunRequest) => Promise<TransferRunResult>;
+  onTransferProgress: (
+    callback: (event: TransferProgressEvent) => void,
+  ) => () => void;
+  getTransferJobState: () => Promise<TransferJobState>;
+  onTransferJobState: (
+    callback: (state: TransferJobState) => void,
+  ) => () => void;
 }
 
 type DaemonReauthResult =

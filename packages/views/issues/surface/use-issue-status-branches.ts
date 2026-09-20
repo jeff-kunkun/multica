@@ -20,6 +20,7 @@ import {
   issueKeys,
   issueTableRowPageOptions,
 } from "@multica/core/issues/queries";
+import { pinnedIssueIdsFromRows } from "@multica/core/issues/surface/pinned-first";
 import type {
   Issue,
   IssueStatusCategory,
@@ -161,6 +162,8 @@ function statusCountsFromFacets(
 export interface IssueStatusBranches {
   enabled: boolean;
   issues: Issue[];
+  /** Issue ids this window's own `/table/rows` pages reported as pinned. */
+  pinnedIssueIds: ReadonlySet<string>;
   pagination: IssueStatusPagination;
   total: number;
   isTotalKnown: boolean;
@@ -394,6 +397,16 @@ export function useIssueStatusBranches({
     statuses,
   ]);
 
+  const pinnedIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const queryResult of pageResults) {
+      for (const id of pinnedIssueIdsFromRows(queryResult.data?.rows ?? [])) {
+        ids.add(id);
+      }
+    }
+    return ids;
+  }, [pageResults]);
+
   const counts = useMemo(
     () => statusCountsFromFacets(facets, catalog, query.filters.statuses),
     [facets, catalog, query.filters.statuses],
@@ -478,6 +491,7 @@ export function useIssueStatusBranches({
   return {
     enabled,
     issues,
+    pinnedIssueIds,
     pagination,
     total,
     isTotalKnown,

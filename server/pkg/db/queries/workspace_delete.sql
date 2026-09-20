@@ -317,8 +317,24 @@ deleted_hourly_dirty AS (
 deleted_hourly AS (
     DELETE FROM task_usage_hourly WHERE workspace_id = $1
 ),
+-- Stage-barrier wake failures are workspace-keyed rows with no foreign key, so
+-- nothing else removes them. The Stage 4 writer was removed in DENE-520, but the
+-- table and migrations stay for self-hosted workspaces that already applied
+-- them, so the teardown keeps sweeping whatever a pre-removal build left behind.
+deleted_stage_wakeup_failures AS (
+    DELETE FROM stage_wakeup_failure WHERE workspace_id = $1
+),
 deleted_attachments AS (
     DELETE FROM attachment WHERE workspace_id = $1
+),
+-- Same no-FK chore for the resumable attachment staging (DENE-443). Both
+-- tables are keyed by workspace_id, so the teardown never has to assemble the
+-- (sha256, offset) pairs it is dropping first.
+deleted_transfer_attachment_chunks AS (
+    DELETE FROM transfer_attachment_upload_chunk WHERE workspace_id = $1
+),
+deleted_transfer_attachment_uploads AS (
+    DELETE FROM transfer_attachment_upload WHERE workspace_id = $1
 ),
 deleted_channel_outbound_cards AS (
     DELETE FROM channel_outbound_card_message
@@ -337,6 +353,10 @@ deleted_draft_restores AS (
 -- does not have to join through chat_session, which it deletes in this same CTE.
 deleted_agent_builder_drafts AS (
     DELETE FROM agent_builder_draft WHERE workspace_id = $1
+),
+-- Same no-FK chore for the alignment conversations' structured drafts.
+deleted_issue_drafts AS (
+    DELETE FROM issue_draft WHERE workspace_id = $1
 ),
 deleted_comment_reactions AS (
     DELETE FROM comment_reaction WHERE workspace_id = $1
@@ -510,6 +530,12 @@ WHERE chat_session_id IN (
 
 -- name: DeleteWorkspaceCommunicationRoots :exec
 WITH
+-- chat_session_project carries workspace_id precisely so teardown does not have
+-- to join through chat_session, which this same statement deletes (same no-FK
+-- chore as chat_draft_restore in DeleteWorkspaceLeafData).
+deleted_chat_session_projects AS (
+    DELETE FROM chat_session_project WHERE workspace_id = $1
+),
 deleted_sessions AS (
     DELETE FROM chat_session WHERE chat_session.workspace_id = $1
 ),

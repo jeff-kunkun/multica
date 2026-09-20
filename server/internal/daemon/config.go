@@ -17,6 +17,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -90,6 +91,22 @@ const (
 	// reclaimed on liveness and never touch this knob.
 	DefaultGCTaskTempLegacyTTL     = time.Duration(0)
 	DefaultAutoUpdateCheckInterval = 6 * time.Hour // how often the daemon polls GitHub for a newer CLI release
+	// DefaultGCPackageStorePruneInterval bounds how often the shared package
+	// store is pruned. `pnpm store prune` walks the whole store, so it runs on
+	// its own slow cadence rather than every GC cycle.
+	DefaultGCPackageStorePruneInterval = 24 * time.Hour
+	// DefaultGCPackageStoreMaxBytes is the size the shared store has to exceed
+	// before it is pruned at all.
+	//
+	// Measured on pnpm 10: `pnpm store prune` does not treat an installed
+	// node_modules as a reference — it empties the store of everything no
+	// pnpm-tracked project claims, which in a daemon's store is everything. It
+	// is therefore a cache reset, not a fine-grained eviction: safe for live
+	// task directories (a clone owns its blocks, a hardlink keeps the inode)
+	// but it costs the next task a cold install. Running it on a timer alone
+	// would trade the whole point of the store for a tidy number, so it only
+	// runs once the store is genuinely large.
+	DefaultGCPackageStoreMaxBytes int64 = 20 << 30 // 20 GiB
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -122,12 +139,16 @@ type Config struct {
 	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
 	GCArtifactTTL                  time.Duration         // once a task has been completed for at least this long, drop regenerable artifacts: pattern-matched build outputs when the parent record keeps the directory (an open issue), and the exact daemon-managed Codex cache for every task kind (default: 12h, set 0 to disable both)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
+	RepoCacheGitTimeout            time.Duration         // upper bound for one git subprocess on the shared repo cache; a cold download is fetched in slices, so this bounds a slice rather than the whole repo (default: 10m)
 	GCRepoTTL                      time.Duration         // evict a cached bare repo under .repos once no task has created a worktree from it for this long, it has no worktrees left, and it is no longer attached to any watched workspace (default: 30d, set 0 to disable)
 	GCRepoMaintenanceEnabled       bool                  // run reflog expiry and git gc after stale agent refs are removed (default: true; disable independently as an operational kill switch)
 	GCCodexSessionTTL              time.Duration         // reclaim a per-issue Codex session store (~/.codex/multica-sessions/<agent>/<issue>) untouched for at least this long, so a done/abandoned issue's conversation history does not accumulate forever (default: 14d, set 0 to disable)
 	GCHermesMemoryTTL              time.Duration         // reclaim a per-agent Hermes memory store (<profile dir>/hermes-state/<agent>/<profile>) untouched for at least this long, so a deleted agent's memory does not sit on disk forever (default: 90d, set 0 to disable)
 	GCHermesSessionTTL             time.Duration         // reclaim a per-conversation Hermes session store (<profile dir>/hermes-sessions/<agent>/<profile>/<conversation>) untouched for at least this long, so a done or abandoned conversation's transcript does not accumulate forever (default: 14d, set 0 to disable)
 	GCTaskTempLegacyTTL            time.Duration         // reclaim a per-task temp dir (<temp base>/multica-task-*) that carries no execution lock — i.e. left by a daemon predating the lock — once nothing inside it has been touched for this long. Dirs that DO carry the lock are reclaimed on liveness, never on age, so this knob does not apply to them. Neither does it reclaim a dir holding no task content — an old empty leftover, or a shell left by a daemon that died between creating the dir and publishing its lock — because holding no content is exactly what a dir currently being published looks like (default: 0, disabled — see DefaultGCTaskTempLegacyTTL)
+	SharedPackageStoreEnabled      bool                  // point package managers at the machine-global dependency store under <WorkspacesRoot>/.pkg-store so tasks share downloaded packages instead of each installing a private copy (default: true)
+	GCPackageStorePruneInterval    time.Duration         // lower bound between two prunes of the shared pnpm store (default: 24h, set 0 to disable pruning)
+	GCPackageStoreMaxBytes         int64                 // prune the shared pnpm store only once it exceeds this size, because a prune empties it and costs the next task a cold install (default: 20 GiB, set 0 to prune on the interval alone)
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
 	AutoReloadEnabled              bool                  // restart when the multica binary on disk no longer matches the running version (default: true for CLI-launched daemons)
@@ -587,7 +608,20 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	repoCacheGitTimeout, err := durationFromEnv("MULTICA_REPO_CACHE_GIT_TIMEOUT", repocache.DefaultGitTimeout)
+	if err != nil {
+		return Config{}, err
+	}
 	gcRepoMaintenanceEnabled := boolFromEnv("MULTICA_GC_REPO_MAINTENANCE_ENABLED", true)
+	sharedPackageStoreEnabled := boolFromEnv("MULTICA_SHARED_PACKAGE_STORE", true)
+	gcPackageStorePruneInterval, err := durationFromEnv("MULTICA_GC_PACKAGE_STORE_PRUNE_INTERVAL", DefaultGCPackageStorePruneInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	gcPackageStoreMaxBytes, err := bytesFromEnv("MULTICA_GC_PACKAGE_STORE_MAX_BYTES", DefaultGCPackageStoreMaxBytes)
+	if err != nil {
+		return Config{}, err
+	}
 	gcArtifactPatterns := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", DefaultGCArtifactPatterns)
 
 	// Auto-update config: default -> env override -> CLI override.
@@ -640,7 +674,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCArtifactTTL:                   gcArtifactTTL,
 		GCArtifactPatterns:              gcArtifactPatterns,
 		GCRepoTTL:                       gcRepoTTL,
+		RepoCacheGitTimeout:             repoCacheGitTimeout,
 		GCRepoMaintenanceEnabled:        gcRepoMaintenanceEnabled,
+		SharedPackageStoreEnabled:       sharedPackageStoreEnabled,
+		GCPackageStorePruneInterval:     gcPackageStorePruneInterval,
+		GCPackageStoreMaxBytes:          gcPackageStoreMaxBytes,
 		GCCodexSessionTTL:               gcCodexSessionTTL,
 		GCHermesMemoryTTL:               gcHermesMemoryTTL,
 		GCHermesSessionTTL:              gcHermesSessionTTL,

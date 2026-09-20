@@ -4,6 +4,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/llm"
 )
 
 // Breaker keeps a broken model from being dialled once per ticket.
@@ -18,7 +20,11 @@ import (
 type Breaker struct {
 	mu    sync.Mutex
 	state map[string]*breakerEntry
-	now   func() time.Time
+	// lastSuccess survives Succeed clearing the entry: "the model answered at
+	// T" is what the settings section shows while everything is healthy, and
+	// that is precisely when there is no entry left to hang it on.
+	lastSuccess map[string]time.Time
+	now         func() time.Time
 
 	// failuresToTrip is how many consecutive ordinary failures (timeouts,
 	// 5xx, malformed replies) open the breaker. Authentication, payment, and
@@ -31,6 +37,53 @@ type breakerEntry struct {
 	consecutiveFailures int
 	openUntil           time.Time
 	reason              string
+	lastFailure         time.Time
+	lastFailureReason   string
+	lastSuccess         time.Time
+}
+
+// Health is the read-only view the settings section renders. It is the ONLY
+// place a routing failure is visible to a person: the state table keeps
+// tickets quiet, so without this report a broken model is invisible outside
+// the server log (DENE-633 review, F2).
+type Health struct {
+	// Open reports whether the breaker is cooling down right now.
+	Open bool
+	// Reason is why it opened, in words meant for a human.
+	Reason string
+	// Retry is how long the cooldown still has to run. Zero when not open.
+	Retry time.Duration
+	// LastSuccess is when the routing model last answered. Zero means never
+	// since this process started — the state is in-memory, like the breaker.
+	LastSuccess time.Time
+	// LastFailure and LastFailureReason describe the most recent failure even
+	// when it did not open the breaker, so "two stumbles ago" is visible
+	// before the third one takes routing out.
+	LastFailure       time.Time
+	LastFailureReason string
+}
+
+// Health reports the current state for a workspace without mutating it,
+// except for expiring a cooldown that has already elapsed — the same
+// bookkeeping Open does, because a report that still said "cooling down" a
+// minute after the cooldown ended would be wrong.
+func (b *Breaker) Health(workspaceID string) Health {
+	if b == nil {
+		return Health{}
+	}
+	open, retry, reason := b.Open(workspaceID)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := Health{Open: open, Retry: retry, Reason: reason}
+	if e := b.state[workspaceID]; e != nil {
+		out.LastFailure = e.lastFailure
+		out.LastFailureReason = e.lastFailureReason
+		out.LastSuccess = e.lastSuccess
+	}
+	if ls, ok := b.lastSuccess[workspaceID]; ok && ls.After(out.LastSuccess) {
+		out.LastSuccess = ls
+	}
+	return out
 }
 
 // DefaultFailuresToTrip and DefaultCooldown are the shipped policy: three
@@ -44,6 +97,7 @@ const (
 func NewBreaker() *Breaker {
 	return &Breaker{
 		state:          map[string]*breakerEntry{},
+		lastSuccess:    map[string]time.Time{},
 		now:            time.Now,
 		failuresToTrip: DefaultFailuresToTrip,
 		cooldown:       DefaultCooldown,
@@ -84,6 +138,10 @@ func (b *Breaker) Succeed(workspaceID string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.state, workspaceID)
+	if b.lastSuccess == nil {
+		b.lastSuccess = map[string]time.Time{}
+	}
+	b.lastSuccess[workspaceID] = b.now()
 }
 
 // Fail records a failed call and opens the breaker when warranted.
@@ -104,9 +162,17 @@ func (b *Breaker) Fail(workspaceID string, err error) {
 		b.state[workspaceID] = e
 	}
 	e.consecutiveFailures++
+	e.lastFailure = b.now()
+	if err != nil {
+		e.lastFailureReason = err.Error()
+	}
+	if ls, ok := b.lastSuccess[workspaceID]; ok {
+		e.lastSuccess = ls
+	}
 	if fatal, reason := classifyFatal(err); fatal {
 		e.openUntil = b.now().Add(b.cooldown)
 		e.reason = reason
+		e.lastFailureReason = reason
 		return
 	}
 	if e.consecutiveFailures >= b.failuresToTrip {
@@ -116,9 +182,15 @@ func (b *Breaker) Fail(workspaceID string, err error) {
 }
 
 // httpStatusError is the shape this package needs out of an upstream error.
+//
+// The OpenAI SDK carries the status as a struct FIELD, which no interface can
+// match, so this used to be satisfied by nothing a real call produced and the
+// whole 401/402/403/429 branch was dead in production (DENE-633 review, F1).
+// pkg/llm now wraps every failed completion in *llm.StatusError, whose
+// Status() method is this contract; TestBreakerTripsOnRealUpstreamStatus
+// drives a real upstream 401 through the real client to keep it that way.
 type httpStatusError interface {
 	error
-	// StatusCode mirrors the openai-go *Error field name.
 	Status() int
 }
 
@@ -139,6 +211,12 @@ func (e *FatalStatusError) Unwrap() error { return e.Err }
 func (e *FatalStatusError) Status() int   { return e.Code }
 
 func classifyFatal(err error) (bool, string) {
+	if errors.Is(err, llm.ErrNotConfigured) {
+		// The deployment has no internal LLM at all. Retrying once per ticket
+		// is pure waste, and it is a settings-level fact, not a ticket-level
+		// one — see reportUnavailable, which keeps it off the ticket.
+		return true, NotConfiguredReason
+	}
 	var se httpStatusError
 	if !errors.As(err, &se) {
 		return false, ""

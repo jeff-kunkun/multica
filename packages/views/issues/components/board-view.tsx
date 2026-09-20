@@ -34,6 +34,7 @@ import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import type { ChildProgress } from "./list-row";
 import type { IssueCreateDefaults } from "../surface/types";
+import { useIssuePinnedIds } from "../surface/pinned-context";
 import type {
   IssueStatusPageState,
   IssueStatusPagination,
@@ -267,6 +268,7 @@ function BoardViewImpl({
   groupBranches?: IssueGroupBranches;
 }) {
   const { t } = useT("issues");
+  const pinnedIssueIds = useIssuePinnedIds();
   const storeGrouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
   const boardWsId = useWorkspaceId();
@@ -635,7 +637,7 @@ function BoardViewImpl({
           activeId,
           {
             ...getMoveUpdates(finalGroup, currentIssue.position, currentIssue),
-            ...getMoveAnchors(targetIds, activeId),
+            ...getMoveAnchors(targetIds, activeId, pinnedIssueIds),
           },
           beginSettle(),
         );
@@ -644,7 +646,7 @@ function BoardViewImpl({
       }
 
       const finalIds = finalColumns[finalCol]!;
-      const newPosition = computePosition(finalIds, activeId, map);
+      const newPosition = computePosition(finalIds, activeId, map, pinnedIssueIds);
       const currentIssue = map.get(activeId);
 
       if (
@@ -664,13 +666,13 @@ function BoardViewImpl({
         activeId,
         {
           ...getMoveUpdates(finalGroup, newPosition, currentIssue),
-          ...getMoveAnchors(finalIds, activeId),
+          ...getMoveAnchors(finalIds, activeId, pinnedIssueIds),
         },
         beginSettle(),
       );
       applyPropertyGroupValue(finalGroup, activeId);
     },
-    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue, t],
+    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue, t, pinnedIssueIds],
   );
 
   // An aborted drag (pointercancel, window resize, tab hide, Escape) fires

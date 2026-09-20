@@ -1,7 +1,9 @@
 import { ipcMain, dialog, BrowserWindow } from "electron";
-import { access, stat } from "fs/promises";
+import { execFile } from "child_process";
+import { access, realpath, stat } from "fs/promises";
 import { constants as fsConstants } from "fs";
 import { basename, dirname, isAbsolute, join } from "path";
+import { promisify } from "util";
 import { activeDaemonProfileDir } from "./daemon-manager";
 import {
   localDirectoryOverridesPath,
@@ -39,6 +41,115 @@ export interface ValidateLocalDirectoryResult {
    * user save a resource whose very first task fails.
    */
   is_git_repo?: boolean;
+  /**
+   * The symlink-resolved absolute path. This is the directory's IDENTITY:
+   * the server's "one row per directory" rule keys on it, so /tmp/x and
+   * /private/tmp/x cannot be bound twice under two spellings (DENE-617).
+   *
+   * Only this machine can compute it — the server holds a string, not a
+   * filesystem — which is why it is reported here and stored on the resource.
+   */
+  real_path?: string;
+  /**
+   * The normalized identity of the repository this directory holds, taken
+   * from its `origin` remote. Absent for a plain folder, a repository with no
+   * remote, or a git that could not be run: all of those are "unidentifiable",
+   * and an unidentifiable directory never collides with another.
+   */
+  repo_key?: string;
+  /**
+   * Where parallel mode would put this directory's working copies by default:
+   * the repository's sibling. Shown in the picker BEFORE the user commits to
+   * parallel mode, because the cost of that mode is a copy per task on their
+   * own disk and they are entitled to see where it lands.
+   */
+  default_worktree_root?: string;
+  /**
+   * The repository root containing the directory, when there is one. The
+   * picker needs it to tell the user that a worktree root they typed sits
+   * inside their own repository — the rule execenv enforces at task time.
+   */
+  git_root?: string;
+}
+
+const run = promisify(execFile);
+
+/**
+ * The repository root containing `path`, or "" when it is not in one.
+ * `--show-toplevel` is what git itself uses, so a subdirectory of a repo
+ * answers with the repo — matching what the daemon resolves at task time.
+ */
+async function gitTopLevel(path: string): Promise<string> {
+  try {
+    const { stdout } = await run("git", ["-C", path, "rev-parse", "--show-toplevel"], {
+      timeout: 5000,
+    });
+    return stdout.trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The normalized identity of the repository at `gitRoot`, from its `origin`
+ * remote. Normalization mirrors `server/internal/repoident`: strip transport,
+ * credentials, port and a `.git` suffix, lowercase the rest. The two must
+ * agree or a duplicate the server rejects would look fine here.
+ */
+async function repoKeyOf(gitRoot: string): Promise<string> {
+  if (!gitRoot) return "";
+  try {
+    const { stdout } = await run("git", ["-C", gitRoot, "remote", "get-url", "origin"], {
+      timeout: 5000,
+    });
+    return normalizeRepoKey(stdout.trim());
+  } catch {
+    return "";
+  }
+}
+
+export function normalizeRepoKey(raw: string): string {
+  let s = (raw ?? "").trim();
+  if (!s) return "";
+  // A filesystem path is a location on one machine, not a repository identity.
+  if (/^([/.~]|\\\\|[a-zA-Z]:[\\/]|file:\/\/)/.test(s)) return "";
+  const scheme = /^(https?|ssh|git|git\+ssh):\/\//i.exec(s);
+  if (scheme) {
+    s = s.slice(scheme[0].length);
+  } else {
+    // scp-like `user@host:owner/repo` — one colon separates host from path.
+    const colon = s.indexOf(":");
+    if (colon >= 0 && !s.slice(0, colon).includes("/")) {
+      s = `${s.slice(0, colon)}/${s.slice(colon + 1).replace(/^\/+/, "")}`;
+    }
+  }
+  // Credentials are not identity: one repo cloned by two users is one repo.
+  const at = s.lastIndexOf("@");
+  const firstSlash = s.indexOf("/");
+  if (at >= 0 && (firstSlash < 0 || at < firstSlash)) s = s.slice(at + 1);
+  s = s.replace(/^\/+/, "").replace(/\/+$/, "");
+  const slash = s.indexOf("/");
+  if (slash < 0) return "";
+  const host = s.slice(0, slash).split(":")[0]!.trim().toLowerCase();
+  const rest = s
+    .slice(slash + 1)
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "")
+    .replace(/^\/+|\/+$/g, "")
+    .toLowerCase();
+  if (!host || !rest) return "";
+  return `${host}/${rest}`;
+}
+
+/**
+ * The default landing place for parallel-mode working copies: the
+ * repository's sibling `<repo>.multica-worktrees`. Mirrors
+ * execenv.DefaultWorktreeRoot — the picker only PREVIEWS it, the daemon
+ * decides, and the two must name the same directory or the preview lies.
+ */
+export function defaultWorktreeRoot(gitRoot: string): string {
+  if (!gitRoot) return "";
+  return join(dirname(gitRoot), `${basename(gitRoot)}.multica-worktrees`);
 }
 
 async function validateLocalDirectory(
@@ -65,7 +176,25 @@ async function validateLocalDirectory(
   } catch {
     return { ok: false, reason: "not_writable" };
   }
-  return { ok: true, is_git_repo: await isInsideGitWorkTree(path) };
+  const isGitRepo = await isInsideGitWorkTree(path);
+  const result: ValidateLocalDirectoryResult = { ok: true, is_git_repo: isGitRepo };
+  try {
+    result.real_path = await realpath(path);
+  } catch {
+    // Unresolvable means "no better identity than what the user typed"; the
+    // server falls back to local_path, which is what it compared before this
+    // field existed.
+  }
+  if (isGitRepo) {
+    const gitRoot = await gitTopLevel(path);
+    if (gitRoot) {
+      result.git_root = gitRoot;
+      result.default_worktree_root = defaultWorktreeRoot(gitRoot);
+      const key = await repoKeyOf(gitRoot);
+      if (key) result.repo_key = key;
+    }
+  }
+  return result;
 }
 
 /**

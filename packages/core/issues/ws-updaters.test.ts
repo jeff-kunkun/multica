@@ -129,7 +129,7 @@ function seedTableRow(qc: QueryClient, issue = baseIssue) {
     group_key: null,
     parent_id: null,
     total: 1,
-    rows: [{ issue, direct_child_count: 0 }],
+    rows: [{ issue, direct_child_count: 0, is_pinned: false }],
     branch_total: 1,
     next_cursor: null,
   });
@@ -343,6 +343,31 @@ describe("onIssueMetadataChanged", () => {
       qc.getQueryData<IssueTableRowsResponse>(tableRowKey)?.rows[0]?.issue
         .metadata,
     ).toEqual({ pr_number: 2 });
+  });
+
+  it("patches the parent's children cache so the sub-issues close strip stays fresh", () => {
+    const child = { ...baseIssue, parent_issue_id: PARENT_ISSUE_ID };
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    qc.setQueryData<Issue[]>(childrenKey, [child, otherIssue]);
+    const unrelated = [otherIssue];
+    qc.setQueryData<Issue[]>(issueKeys.children(WS_ID, "parent-9"), unrelated);
+
+    onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, {
+      "close.conclusion": "delivered",
+      "close.status": "done",
+    });
+
+    const children = qc.getQueryData<Issue[]>(childrenKey);
+    expect(children?.find((i) => i.id === ISSUE_ID)?.metadata).toEqual({
+      "close.conclusion": "delivered",
+      "close.status": "done",
+    });
+    expect(children?.find((i) => i.id === OTHER_ISSUE_ID)?.metadata).toEqual(
+      otherIssue.metadata,
+    );
+    expect(qc.getQueryData<Issue[]>(issueKeys.children(WS_ID, "parent-9"))).toBe(
+      unrelated,
+    );
   });
 
   it("leaves untouched caches as undefined (no spurious writes)", () => {

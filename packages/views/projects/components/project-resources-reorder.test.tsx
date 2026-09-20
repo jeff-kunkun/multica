@@ -1,0 +1,160 @@
+// @vitest-environment jsdom
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { renderWithI18n } from "../../test/i18n";
+
+// Reordering the local directories on this machine (DENE-617). The hint tells
+// the user the FIRST directory is the one tasks write in, so the list needs an
+// entry point that changes which one that is — the hint described a gesture
+// that did not exist.
+//
+// The ordering rule itself is the canonical matrix in
+// local-directory-order.test.ts; this covers the wiring: which controls the
+// rows offer, and what they send.
+
+const updateMock = vi.fn().mockResolvedValue({});
+
+const existing = [
+  {
+    id: "r1",
+    resource_type: "local_directory",
+    resource_ref: {
+      local_path: "/Users/me/code/app",
+      real_path: "/Users/me/code/app",
+      daemon_id: "daemon-1",
+      label: "app",
+    },
+    position: 0,
+  },
+  {
+    id: "r2",
+    resource_type: "local_directory",
+    resource_ref: {
+      local_path: "/Users/me/code/docs",
+      real_path: "/Users/me/code/docs",
+      daemon_id: "daemon-1",
+      label: "docs",
+    },
+    position: 1,
+  },
+  // Another machine's directory: never a neighbour, and never gets arrows.
+  {
+    id: "r3",
+    resource_type: "local_directory",
+    resource_ref: {
+      local_path: "/Users/me/code/other",
+      real_path: "/Users/me/code/other",
+      daemon_id: "daemon-2",
+      label: "other",
+    },
+    position: 2,
+  },
+];
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: (options: { queryKey?: unknown[] }) =>
+    options?.queryKey?.[0] === "project-resources" ? { data: existing } : { data: [] },
+  queryOptions: (options: unknown) => options,
+}));
+
+vi.mock("@multica/core/projects", () => ({
+  projectResourcesOptions: () => ({ queryKey: ["project-resources"], queryFn: vi.fn() }),
+  useCreateProjectResource: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateProjectResource: () => ({ mutateAsync: updateMock }),
+  useDeleteProjectResource: () => ({ mutateAsync: vi.fn() }),
+}));
+
+vi.mock("@multica/core/config", () => ({
+  useConfigStore: (
+    selector: (state: {
+      localWorktreeSupported: boolean;
+      localSharedSupported: boolean;
+    }) => unknown,
+  ) => selector({ localWorktreeSupported: true, localSharedSupported: true }),
+}));
+
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
+vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ id: "workspace-1", slug: "ws", repos: [] }),
+}));
+
+vi.mock("../../platform/local-directory", () => ({
+  isDesktopShell: () => true,
+  pickDirectory: vi.fn(),
+  validateLocalDirectory: vi.fn(),
+}));
+vi.mock("../../platform/use-local-daemon-status", () => ({
+  useLocalDaemonStatus: () => ({
+    daemonId: "daemon-1",
+    deviceName: "MacBook",
+    running: true,
+  }),
+}));
+vi.mock("../../platform/use-local-directory-shared-overrides", () => ({
+  useLocalDirectorySharedOverrides: () => ({
+    canPersist: true,
+    hasOverride: () => false,
+    setOverride: vi.fn().mockResolvedValue({ ok: true }),
+    refresh: vi.fn(),
+  }),
+}));
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+import { ProjectResourcesSection } from "./project-resources-section";
+
+describe("ProjectResourcesSection — choosing which directory tasks write in", () => {
+  beforeEach(() => {
+    updateMock.mockClear();
+  });
+
+  it("offers move controls only where a move is possible", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    // Two directories on this machine: both rows carry the pair so the row
+    // does not reflow, but only the move that exists is enabled — up on the
+    // second, down on the first. The other machine's row has neither control,
+    // because its order is not this machine's to change.
+    const enabled = (name: RegExp) =>
+      screen.queryAllByRole("button", { name }).filter((b) => !b.hasAttribute("disabled"));
+    expect(screen.getAllByRole("button", { name: /move up/i })).toHaveLength(2);
+    expect(enabled(/move up/i)).toHaveLength(1);
+    expect(enabled(/move down/i)).toHaveLength(1);
+  });
+
+  it("promotes the second directory to the working directory", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    const moveUp = screen
+      .getAllByRole("button", { name: /move up/i })
+      .find((b) => !b.hasAttribute("disabled"));
+    expect(moveUp).toBeDefined();
+    fireEvent.click(moveUp!);
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalled());
+    const byId = new Map(
+      updateMock.mock.calls.map(([call]) => [call.resourceId, call.data]),
+    );
+    // Only position travels: resending resource_ref on an unrelated edit is
+    // how a rename once dropped a directory's isolation (#7113).
+    for (const data of byId.values()) {
+      expect(Object.keys(data as object)).toEqual(["position"]);
+    }
+    const promoted = byId.get("r2") as { position: number } | undefined;
+    const demoted = byId.get("r1") as { position: number } | undefined;
+    expect(promoted).toBeDefined();
+    expect(promoted!.position).toBeLessThan(
+      demoted ? demoted.position : existing[0]!.position,
+    );
+  });
+
+  // The hint promises the first directory is the one tasks write in. It must
+  // not promise a gesture the list does not have.
+  it("describes the reorder control the list actually offers", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    const hint = screen.getByText(/run in the first directory/i);
+    expect(hint.textContent ?? "").not.toMatch(/drag/i);
+  });
+});

@@ -305,7 +305,14 @@ func (c *Client) Chat(ctx context.Context, params openai.ChatCompletionNewParams
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
 
-	return c.sdk.Chat.Completions.New(ctx, params)
+	completion, err := c.sdk.Chat.Completions.New(ctx, params)
+	if err != nil {
+		// Wrap so the upstream status is readable as behaviour (Status() int)
+		// rather than as an SDK struct field only this package can see. See
+		// status.go; the SDK error stays reachable through errors.As.
+		return nil, withStatus(err)
+	}
+	return completion, nil
 }
 
 // ChatStream performs a streaming chat completion, returning the SDK stream so

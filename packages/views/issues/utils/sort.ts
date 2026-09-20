@@ -23,7 +23,38 @@ function compareOptionalDate(
   return dir * (new Date(a).getTime() - new Date(b).getTime());
 }
 
+/**
+ * Sort a client-materialized issue window.
+ *
+ * `pinnedIds` is the pinned-first leading key the server already ranks by, for
+ * the one view whose own projection would otherwise throw the served order
+ * away (Swimlane). It is the row's own `is_pinned` membership, so a client sort
+ * can never lead with a row the server did not rank. Gantt deliberately does
+ * not pass it: its rows are a time axis, not a ranked list. (DENE-500)
+ *
+ * Only the leading key is added — the pinned block is ordered by the ACTIVE
+ * sort field, not by the sidebar's pin position, and the rest of the window is
+ * untouched. `toSorted` is stable, so equal keys keep their served order.
+ */
 export function sortIssues(
+  issues: Issue[],
+  field: SortField,
+  direction: SortDirection,
+  pinnedIds?: ReadonlySet<string>
+): Issue[] {
+  if (pinnedIds && pinnedIds.size > 0) {
+    return sortByField(issues, field, direction).toSorted(
+      (a, b) => pinnedRank(a, pinnedIds) - pinnedRank(b, pinnedIds)
+    );
+  }
+  return sortByField(issues, field, direction);
+}
+
+function pinnedRank(issue: Issue, pinnedIds: ReadonlySet<string>): number {
+  return pinnedIds.has(issue.id) ? 0 : 1;
+}
+
+function sortByField(
   issues: Issue[],
   field: SortField,
   direction: SortDirection

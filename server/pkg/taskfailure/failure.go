@@ -197,7 +197,17 @@ const (
 	ReasonAgentProviderCapacityOrRateLimit Reason = "agent_error.provider_capacity_or_rate_limit"
 
 	// ReasonAgentProviderServerError: provider 5xx, internal error,
-	// service unavailable, bad gateway. Transient — short backoff.
+	// service unavailable, bad gateway. Transient — short backoff and
+	// retry.
+	//
+	// Also the bucket for an upstream that rejects a request the runtime
+	// has just authenticated (DENE-596): the Grok CLI reports "Auth
+	// recovery succeeded" together with "authenticated inference requests
+	// were still rejected (401)". The credential is provably good, so the
+	// refusal is the provider's own fault and the member response is to
+	// wait, not to sign in again. Classify routes that wire shape here
+	// instead of to provider_auth_or_access, whose copy tells them to
+	// re-authenticate.
 	ReasonAgentProviderServerError Reason = "agent_error.provider_server_error"
 
 	// ReasonAgentProviderNetwork: stream disconnected, dial tcp

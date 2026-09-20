@@ -1,10 +1,80 @@
 package handler
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// TestPlanLimitsForResponseAgesOutWindowlessSnapshots is the DENE-606
+// regression. A window-less "exhausted" snapshot carries no reset boundary, so
+// nothing in it bounds its own life. Before this rule the API served one until
+// something replaced it, and for a runtime whose probe cannot answer (dsh with
+// no balance key in the daemon's environment) nothing ever did: the runtime read
+// as out of quota indefinitely, and `multica runtime list` reported that to the
+// agents choosing where to dispatch work.
+func TestPlanLimitsForResponseAgesOutWindowlessSnapshots(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	previous := planLimitsNow
+	planLimitsNow = func() time.Time { return now }
+	t.Cleanup(func() { planLimitsNow = previous })
+
+	reset := now.Add(20 * time.Minute).Unix()
+	used := 100.0
+	raw := func(snapshot protocol.PlanLimitsSnapshot) []byte {
+		data, err := json.Marshal(snapshot)
+		if err != nil {
+			t.Fatalf("marshal fixture: %v", err)
+		}
+		return data
+	}
+
+	tests := []struct {
+		name string
+		raw  []byte
+		want bool
+	}{
+		{
+			name: "window-less exhausted is dropped once it has aged out",
+			raw: raw(protocol.PlanLimitsSnapshot{
+				Provider:   "dsh",
+				Status:     protocol.PlanLimitsStatusExhausted,
+				ObservedAt: now.Add(-2 * time.Hour).Unix(),
+			}),
+		},
+		{
+			name: "window-less exhausted is served while still fresh",
+			raw: raw(protocol.PlanLimitsSnapshot{
+				Provider:   "dsh",
+				Status:     protocol.PlanLimitsStatusExhausted,
+				ObservedAt: now.Add(-2 * time.Minute).Unix(),
+			}),
+			want: true,
+		},
+		{
+			name: "a reported window keeps a stale snapshot meaningful",
+			raw: raw(protocol.PlanLimitsSnapshot{
+				Provider:   "grok",
+				Status:     protocol.PlanLimitsStatusExhausted,
+				ObservedAt: now.Add(-6 * time.Hour).Unix(),
+				Windows:    []protocol.PlanLimitWindow{{Name: "credits", UsedPercent: &used, ResetsAt: &reset}},
+			}),
+			want: true,
+		},
+		{name: "no stored snapshot", raw: nil},
+		{name: "unreadable snapshot", raw: []byte("{")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := planLimitsForResponse(tc.raw)
+			if (got != nil) != tc.want {
+				t.Fatalf("snapshot = %+v, want present=%v", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestValidatePlanLimitsSnapshot(t *testing.T) {
 	t.Parallel()

@@ -212,6 +212,28 @@ describe("useRealtimeSync — ws instance change", () => {
     });
   });
 
+  it("invalidates runtime queries when a heartbeat reports a new JEV status", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const heartbeat = vi
+      .mocked(ws.on)
+      .mock.calls.find((call) => call[0] === "daemon:heartbeat")?.[1];
+    expect(heartbeat).toBeDefined();
+
+    invalidateSpy.mockClear();
+    heartbeat?.(
+      { runtime_id: "rt-1", jev_updated: true },
+      undefined,
+      undefined,
+    );
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: runtimeKeys.all("ws-1"),
+    });
+  });
+
   it("does not refetch runtimes on a heartbeat without a plan-limits change", () => {
     vi.useFakeTimers();
     try {

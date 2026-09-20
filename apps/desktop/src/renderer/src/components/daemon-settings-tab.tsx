@@ -18,6 +18,7 @@ import {
   formatUptime,
 } from "../../../shared/daemon-types";
 import { daemonStateLabel } from "./daemon-i18n";
+import { WorktreeCleanupSection } from "./worktree-cleanup-section";
 
 // One row inside the diagnostics block. Values that are likely to be
 // long IDs / URLs render as monospaced + truncated with a tooltip.
@@ -185,6 +186,11 @@ export function DaemonSettingsTab() {
           {cliInstalled !== false && <span />}
         </SettingsRow>
       </SettingsCard>
+
+      {/* Local storage. Sits with the daemon because both are properties of
+          THIS machine, and because the daemon is what can see the disk at all
+          (DENE-617). */}
+      <WorktreeCleanupSection />
 
       {/* Diagnostics — moved out of the logs panel so the panel can focus
           on logs. These fields matter for support tickets and bug reports,

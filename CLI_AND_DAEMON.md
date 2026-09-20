@@ -4,11 +4,14 @@ The `multica` CLI connects your local machine to Multica. It handles authenticat
 
 ## Installation
 
-### Homebrew (macOS/Linux)
+### Install script (macOS/Linux)
 
 ```bash
-brew install multica-ai/tap/multica
+curl -fsSL https://raw.githubusercontent.com/jeff-kunkun/multica/kun/scripts/install.sh | bash
 ```
+
+This fork publishes its own CLI archives, so there is no Homebrew tap to install
+from — `multica-ai/tap` carries the upstream build.
 
 ### Build from Source
 
@@ -20,12 +23,6 @@ cp server/bin/multica /usr/local/bin/multica
 ```
 
 ### Update
-
-```bash
-brew upgrade multica-ai/tap/multica
-```
-
-For install script or manual installs, use:
 
 ```bash
 multica update
@@ -270,6 +267,7 @@ Daemon behavior is configured via flags or environment variables:
 | GC artifact TTL (completed tasks) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
 | GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
 | GC repo cache TTL (`.repos`) | — | `MULTICA_GC_REPO_TTL` | `720h` (30d; set `0` to disable) |
+| Repo cache git timeout | — | `MULTICA_REPO_CACHE_GIT_TIMEOUT` | `10m` (bounds one git command, i.e. one download slice — not the whole repo) |
 | GC repo maintenance | — | `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` (set `false`/`0` to disable heavy Git maintenance only) |
 | GC Hermes memory TTL (per-agent `memories/`) | — | `MULTICA_GC_HERMES_MEMORY_TTL` | `2160h` (90d; set `0` to disable) |
 | GC Hermes session TTL (per-conversation `state.db`) | — | `MULTICA_GC_HERMES_SESSION_TTL` | `336h` (14d; set `0` to disable) |
@@ -287,6 +285,7 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and applies several disk
 - **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it.
 - **Managed-cache reclamation** — the exact managed path above is reclaimed for *every* task kind once the task has been completed for `MULTICA_GC_ARTIFACT_TTL`, not just for issue tasks whose issue is still open. It applies even while the parent record says the directory itself must stay — an active chat session, a still-running autopilot run — and even when the parent record could not be reached this cycle, because the contents are regenerable and the next run re-provisions them on demand. A task currently running on the directory is never touched. Set `MULTICA_GC_ARTIFACT_TTL=0` to disable this along with the rest of artifact cleanup.
 
+- **Repo cache download** — a cold cache under `.repos/` is built as a blobless partial clone (full clone when the server has no filter support) in resumable slices: a depth-1 snapshot, history deepened step by step, then the default branch's file contents in batches. Git cannot resume an interrupted transfer, so each finished slice is what survives a timeout, a stopped task or a daemon restart; the next attempt continues from there and the directory is never wiped on failure. A cache is usable only once it carries the `.multica_cache_ready` marker — a directory that merely has `HEAD` is a download in progress. The download belongs to the daemon, not to the task that asked first, so stopping that task does not stop it. `MULTICA_REPO_CACHE_GIT_TIMEOUT` bounds a single slice; slices that outgrow it on a slow link are retried smaller.
 - **Repo cache eviction** — the bare git clones under `.repos/` are shared object stores: each task workdir is a `git worktree` off one of them rather than its own clone, so a task's `.git` is only a pointer file. They are evicted only when all of the following hold: the repo is no longer attached to any workspace this daemon watches, it has no worktrees left, and no task has created a worktree from it for `MULTICA_GC_REPO_TTL`. A cache created before this stamp existed is not treated as ancient — its clock starts at the first GC cycle that sees it, so upgrading does not wipe every cache. Evicting is safe by construction: the next task that needs the repo re-clones it on demand, so a wrong eviction costs a clone, not a failure.
 
   Short worktree cleanup and eligible cache eviction continue on every GC cycle, including while agents are active. Heavy repo maintenance (`reflog expire` and `git gc`) starts only while the daemon is otherwise idle. A checkout or newly claimed task cancels it and takes priority; interrupted work remains pending for a later idle GC cycle. Operators can disable only these heavy commands with `MULTICA_GC_REPO_MAINTENANCE_ENABLED=false` without disabling worktree cleanup or cache eviction.

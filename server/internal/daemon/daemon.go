@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log/slog"
+	"maps"
 	"math/rand"
 	"net"
 	"net/http"
@@ -393,6 +394,11 @@ type Daemon struct {
 	// as in_place on a server that does not accept execution_mode=shared.
 	localSharedOverrides *localSharedOverrideStore
 
+	// worktreeCleanup owns this machine's parallel-copy cleanup: the roots it
+	// has used, which copies are busy, and the policy (off by default) that
+	// decides whether a finished one may be removed (DENE-617).
+	worktreeCleanup *worktreeCleanupState
+
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
@@ -529,11 +535,23 @@ type Daemon struct {
 	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	planLimitsMu sync.RWMutex
 	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
-	// agyQuota tracks per-directory AGY/Antigravity individual-quota exhaustion
-	// so the same agent can fail over to another isolation slot. Guarded by
-	// agyQuotaMu; persisted under ~/.multica so a daemon restart keeps the X.
-	agyQuotaMu sync.Mutex
-	agyQuota   map[string]time.Time // gemini dir -> reset_at
+	// jevStatus is the host-level JEV snapshot, refreshed once per heartbeat
+	// tick and shared by every runtime frame of that tick (the state directory
+	// is per-machine, not per-runtime).
+	jevStatusMu sync.RWMutex
+	jevStatus   *protocol.JevStatusSnapshot
+	// jevStateDirOverride points the reader at a fixture directory in tests.
+	// Empty in production, where the path follows XDG_STATE_HOME, then
+	// os.UserHomeDir()/.local/state/jev.
+	jevStateDirOverride string
+	// accountQuota tracks per-directory CLI account quota exhaustion: which
+	// account directory is out of quota, and until when. AGY reads it to fail
+	// over to another isolation slot; every other CLI reads it through the
+	// `agent_accounts` channel, which is how a quota-exhausted dsh or claude
+	// account becomes visible at all (DENE-466). Guarded by accountQuotaMu;
+	// persisted under ~/.multica so a daemon restart keeps the X.
+	accountQuotaMu sync.Mutex
+	accountQuota   map[string]time.Time // account dir -> reset_at
 	// Live Claude/Codex/Gemini/Grok/Kimi/GLM/MiniMax/DeepSeek usage probes
 	// (cc-switch style). Throttled
 	// separately from the 15s heartbeat so we do not hammer unofficial APIs.
@@ -674,6 +692,13 @@ type Daemon struct {
 	// deleted bare clone and an unrelated `not empty` cleanup failure.
 	bgSyncs sync.WaitGroup
 
+	// repoFirstCacheWait overrides repoFirstCacheWaitSlice; zero means the
+	// default. Overridable in tests.
+	repoFirstCacheWait time.Duration
+	// repoDownloads holds the first-time downloads ensureRepoReady started and
+	// that are still running, keyed by repoDownloadKey. Guarded by mu.
+	repoDownloads map[string]chan struct{}
+
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
 	// envRootBusyWait is how long a task that is entitled to a prior env root
@@ -708,6 +733,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
+	repocache.SetGitTimeout(cfg.RepoCacheGitTimeout)
 	d := &Daemon{
 		cfg:                       cfg,
 		client:                    client,
@@ -759,6 +785,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	} else {
 		d.localSharedOverrides = newLocalSharedOverrideStore("")
 	}
+	d.worktreeCleanup = newWorktreeCleanupState(cfg.Profile)
 	return d
 }
 
@@ -1398,8 +1425,9 @@ func (d *Daemon) recoveryContext() context.Context {
 // otherwise.
 //
 // Callers must NOT replace workspaceState pointers — only mutate fields in
-// place — because ensureRepoReady holds workspaceState.repoRefreshMu through
-// long repo-sync calls. See syncWorkspacesFromAPI for the same invariant.
+// place — because repo-allowlist refreshes hold workspaceState.repoRefreshMu
+// across an API round trip, and a swapped pointer would leave them locking a
+// mutex nobody else sees. See syncWorkspacesFromAPI for the same invariant.
 func (d *Daemon) removeStaleRuntime(runtimeID string) (string, bool) {
 	d.mu.Lock()
 	var workspaceID string
@@ -2864,10 +2892,23 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 // web UI can expand AGY account-slot paths. Browsers cannot read process.env.HOME.
 // Logged-in Gemini dirs ride along so the settings page can show a green check
 // without putting AGY-unknown flags in custom_args.
+//
+// The three AGY keys stay byte-for-byte as they were — custom-args-tab.tsx
+// still consumes home_dir / agy_logged_in_dirs / agy_quota_exhausted until the
+// account surface converges (DENE-305-D). The multi-CLI channel is additive and
+// lives in agentAccountsReport.
 func (d *Daemon) withRegistrationHostMeta(req map[string]any) map[string]any {
 	req = withHostHomeDir(req)
 	if exhausted := d.agyQuotaOverlay(time.Now()); len(exhausted) > 0 {
 		req["agy_quota_exhausted"] = exhausted
+	}
+	// agent_accounts is always written, even when empty: its presence is how a
+	// consumer tells "this host has no accounts" from "this daemon predates the
+	// channel". agent_accounts_error only joins it when the probe failed.
+	accounts, probeErr := d.agentAccountsReport(time.Now())
+	req["agent_accounts"] = accounts
+	if probeErr != "" {
+		req["agent_accounts_error"] = probeErr
 	}
 	return req
 }
@@ -3976,30 +4017,25 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	//     sibling's refresh is fresh enough for our gate read.
 	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
 
-	if err := ws.repoRefreshMu.Lock(ctx); err != nil {
+	ready, buildDone, err := d.refreshRepoAllowance(ctx, ws, workspaceID, repoURL, cacheHitOnEntry)
+	if err != nil || ready {
 		return err
 	}
-	defer ws.repoRefreshMu.Unlock()
 
-	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
+	// repoRefreshMu is released by now, on purpose. The wait below can outlast
+	// any request, and the lock is workspace-wide: holding it here made every
+	// other repository's checkout in the workspace queue behind one cold
+	// download.
+	waitSlice := d.repoFirstCacheWait
+	if waitSlice <= 0 {
+		waitSlice = repoFirstCacheWaitSlice
 	}
-
-	resp, err := d.refreshWorkspaceRepos(ctx, workspaceID)
-	if err != nil {
-		return fmt.Errorf("refresh workspace repos: %w", err)
-	}
-
-	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
-		return ErrRepoNotConfigured
-	}
-
-	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
-	}
-
-	d.syncWorkspaceReposContext(ctx, workspaceID, resp.Repos)
-	if err := ctx.Err(); err != nil {
+	wait := time.NewTimer(waitSlice)
+	defer wait.Stop()
+	select {
+	case <-buildDone:
+	case <-wait.C:
+	case <-ctx.Done():
 		return context.Cause(ctx)
 	}
 
@@ -4007,11 +4043,117 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return nil
 	}
 
+	if reporter, ok := d.repoCache.(repoBuildReporter); ok {
+		if status, _, building := reporter.BuildInProgress(workspaceID, repoURL); building && status.Active {
+			return &repocache.RepoBuildingError{URL: repoURL, Status: status}
+		}
+	}
+
 	if syncErr := d.workspaceLastRepoSyncErr(workspaceID); syncErr != "" {
 		return fmt.Errorf("repo is configured but not synced: %s", syncErr)
 	}
 
 	return fmt.Errorf("repo is configured but not synced")
+}
+
+// repoFirstCacheWaitSlice is how long one /repo/checkout request waits on a
+// first-time download before answering "still downloading, here is how far".
+// A large repository takes far longer than any request may block, so the
+// request returns progress and the CLI asks again; the download itself is not
+// tied to either.
+const repoFirstCacheWaitSlice = 10 * time.Second
+
+// repoBuildReporter is the repo cache's view of first-time downloads. Optional
+// so test daemons can run with a minimal repoCacheBackend.
+type repoBuildReporter interface {
+	BuildInProgress(workspaceID, url string) (repocache.BuildStatus, <-chan struct{}, bool)
+}
+
+// refreshRepoAllowance is the part of ensureRepoReady that runs under the
+// workspace's repoRefreshMu: refresh the allowlist and settings, then check
+// the cache. ready=true means the checkout can proceed; otherwise buildDone
+// closes when the repository's download ends. The download is started in here
+// so that a sibling request arriving a moment later finds it registered.
+func (d *Daemon) refreshRepoAllowance(ctx context.Context, ws *workspaceState, workspaceID, repoURL string, cacheHitOnEntry bool) (ready bool, buildDone <-chan struct{}, err error) {
+	if err := ws.repoRefreshMu.Lock(ctx); err != nil {
+		return false, nil, err
+	}
+	defer ws.repoRefreshMu.Unlock()
+
+	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) {
+		if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+			return true, nil, nil
+		}
+		// A sibling on the same cold miss already refreshed and started the
+		// download; its refresh is fresh enough for us too.
+		if done := d.repoDownloadInFlight(workspaceID, repoURL); done != nil {
+			return false, done, nil
+		}
+	}
+
+	if _, err := d.refreshWorkspaceRepos(ctx, workspaceID); err != nil {
+		return false, nil, fmt.Errorf("refresh workspace repos: %w", err)
+	}
+
+	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
+		return false, nil, ErrRepoNotConfigured
+	}
+
+	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+		return true, nil, nil
+	}
+	return false, d.startRepoDownload(ctx, workspaceID, repoURL), nil
+}
+
+func repoDownloadKey(workspaceID, repoURL string) string {
+	return workspaceID + "\x00" + repoURL
+}
+
+func (d *Daemon) repoDownloadInFlight(workspaceID, repoURL string) <-chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if done, ok := d.repoDownloads[repoDownloadKey(workspaceID, repoURL)]; ok {
+		return done
+	}
+	return nil
+}
+
+// startRepoDownload makes sure the repository's first-time download is running
+// and returns a channel that closes when it ends.
+//
+// The download belongs to the shared cache, not to the task that happened to
+// ask first. It runs detached from the request so a stopped or timed-out task
+// does not kill it: it keeps going for the next caller. A checkout retries
+// every few seconds for as long as the download lasts, so a request that finds
+// one already running joins it rather than parking one more goroutine behind it.
+func (d *Daemon) startRepoDownload(ctx context.Context, workspaceID, repoURL string) <-chan struct{} {
+	key := repoDownloadKey(workspaceID, repoURL)
+	d.mu.Lock()
+	if done, ok := d.repoDownloads[key]; ok {
+		d.mu.Unlock()
+		return done
+	}
+	syncDone := make(chan struct{})
+	if d.repoDownloads == nil {
+		d.repoDownloads = make(map[string]chan struct{})
+	}
+	d.repoDownloads[key] = syncDone
+	d.mu.Unlock()
+
+	d.bgSyncs.Add(1)
+	go func() {
+		defer d.bgSyncs.Done()
+		defer func() {
+			d.mu.Lock()
+			delete(d.repoDownloads, key)
+			d.mu.Unlock()
+			close(syncDone)
+		}()
+		// Only the requested repo: the rest are covered by the registration-time
+		// and task-registration background syncs.
+		d.syncWorkspaceReposContext(context.WithoutCancel(ctx), workspaceID, []RepoData{{URL: repoURL}})
+	}()
+	return syncDone
 }
 
 // DefaultTokenRenewalInterval is how often the daemon asks the server to
@@ -4306,8 +4448,8 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			// Only intervene further if the workspace lost all of its
 			// runtimes (most commonly because handleRuntimeGone pruned them
 			// and its inline re-register failed). The pointer is not replaced
-			// here either — ensureRepoReady holds repoRefreshMu from the
-			// original pointer.
+			// here either — a repo-allowlist refresh in flight holds
+			// repoRefreshMu from the original pointer.
 			if !d.workspaceNeedsRuntimeRecovery(id) {
 				continue
 			}
@@ -4552,7 +4694,8 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
 	d.maybeRefreshPlanQuota()
-	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid))
+	d.refreshJevStatus()
+	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid), d.jevStatusSnapshot())
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -4587,11 +4730,12 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingProviderConfig != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
+			"provider_config", resp.PendingProviderConfig != nil,
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
 		)
@@ -4602,6 +4746,11 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
+		}
+	}
+	if resp.PendingProviderConfig != nil {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			go d.handleProviderConfig(ctx, *rt, *resp.PendingProviderConfig)
 		}
 	}
 	if resp.PendingLocalSkills != nil {
@@ -4697,7 +4846,8 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		return
 	}
 	hbCtx, cancel := context.WithTimeout(ctx, pendingWorkHeartbeatTimeout)
-	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID))
+	d.refreshJevStatus()
+	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID), d.jevStatusSnapshot())
 	cancel()
 	if err != nil {
 		if isRuntimeNotFoundError(err) {
@@ -4970,6 +5120,14 @@ func (d *Daemon) reportModelListResult(ctx context.Context, rt Runtime, requestI
 	})
 }
 
+// reportProviderConfigResult delivers a provider-preset report to the server
+// with the same retry semantics as the other runtime async reports.
+func (d *Daemon) reportProviderConfigResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
+	d.reportRuntimeResultWithRetry(ctx, "provider_config", rt.ID, requestID, func(ctx context.Context) error {
+		return d.client.ReportProviderConfigResult(ctx, rt.ID, requestID, payload)
+	})
+}
+
 // reportRuntimeResultWithRetry retries `fn` on 5xx / network errors and
 // stops on success, 4xx, or after exhausting runtimeReportBackoffs.
 //
@@ -5021,6 +5179,45 @@ func (d *Daemon) reportRuntimeResultWithRetry(ctx context.Context, kind, runtime
 	}
 	d.logger.Error("runtime async report exhausted retries",
 		"kind", kind, "runtime_id", runtimeID, "request_id", requestID, "error", lastErr)
+}
+
+// handleProviderConfig executes one provider-preset action against this host's
+// own agent configuration and reports the refreshed snapshot back.
+//
+// The request payload is never logged: an upsert for a provider carries the
+// API key the user just typed, and it is on its way into their credentials
+// file rather than into our logs. The log line names the request and the
+// action, which is what a failure report needs.
+func (d *Daemon) handleProviderConfig(ctx context.Context, rt Runtime, pending PendingProviderConfig) {
+	d.logger.Info("runtime provider config requested",
+		"runtime_id", rt.ID, "request_id", pending.ID,
+		"provider", pending.Provider, "action", pending.Action)
+
+	payload := map[string]any{}
+	snapshot, err := applyProviderConfig(pending.Provider, pending.Action, pending.Payload)
+	if err != nil {
+		d.logger.Warn("runtime provider config failed",
+			"runtime_id", rt.ID, "request_id", pending.ID,
+			"provider", pending.Provider, "action", pending.Action, "error", err)
+		payload["status"] = "failed"
+		// The message is returned to a browser, so it goes through the shared
+		// credential filter even though this action's own errors are built
+		// from file paths and field names: a decode or encode error is the one
+		// place a value from the body can end up inside a message.
+		payload["error"] = redact.Text(err.Error())
+	} else {
+		// Every action answers with the refreshed list, so the client can
+		// redraw from this reply alone.
+		payload["status"] = "completed"
+		payload["providers"] = snapshot.Providers
+		if snapshot.Active != nil {
+			payload["active"] = snapshot.Active
+		}
+		if snapshot.ClearedActive {
+			payload["cleared_active"] = true
+		}
+	}
+	d.reportProviderConfigResult(ctx, rt, pending.ID, payload)
 }
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.
@@ -6169,7 +6366,7 @@ func taskRunFailureReason(err error) string {
 // a queue on one directory does not consume the daemon's whole capacity. nil
 // is accepted (focused tests) and simply keeps the slot.
 func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger, lease *taskSlotLease) (release func(), abort bool) {
-	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
+	if !task.hasProjectResources() || d.cfg.DaemonID == "" {
 		return nil, false
 	}
 	assignment, err := d.resolveLocalDirectoryAssignment(task)
@@ -8031,9 +8228,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	skills = task.Agent.Skills
 	instructions = task.Agent.Instructions
 
+	// Resolve any local_directory assignment here so runTask can plumb
+	// LocalWorkDir into execenv. handleTask already validated + locked the
+	// path for worker tasks; leader tasks intentionally skip the assignment.
+	//
+	// Resolved BEFORE the brief is built, not after: the brief has to state
+	// which repositories this machine already holds, and it cannot do that
+	// without knowing whether a directory is pinned here at all (DENE-595).
+	localAssignment, readOnlyLocalDirs, _ := d.resolveLocalDirectoryPlan(task)
+
 	// Prepare isolated execution environment.
-	// Repos are passed as metadata only — the agent checks them out on demand
-	// via `multica repo checkout <url>`.
+	// Repos the local directory does not already hold are passed as metadata
+	// only — the agent checks those out on demand via `multica repo checkout`.
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:             task.IssueID,
 		TriggerCommentID:    task.TriggerCommentID,
@@ -8057,6 +8263,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
+		Projects:                         convertProjectsForEnv(task.projectContexts()),
 		ChatSessionID:                    task.ChatSessionID,
 		ChatChannelType:                  task.ChatChannelType,
 		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
@@ -8129,10 +8336,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if provider == "openclaw" {
 		openclawBin = entry.Path
 	}
-	// Resolve any local_directory assignment again here so runTask can plumb
-	// LocalWorkDir into execenv. handleTask already validated + locked the
-	// path for worker tasks; leader tasks intentionally skip the assignment.
-	localAssignment, _ := d.resolveLocalDirectoryAssignment(task)
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
@@ -8424,7 +8627,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Task:                  taskCtx,
 		}
 		if localAssignment.UsesWorktree() {
-			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
+			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{
+				LocalPath: localAssignment.AbsPath,
+				// Empty when the resource names no location; execenv then
+				// uses the repository's sibling (DefaultWorktreeRoot). An
+				// older server that does not send the field, or a newer one
+				// that stripped it for a daemon lacking the capability, lands
+				// on the same default — which is what this daemon implements
+				// either way (DENE-617).
+				WorktreeRoot: strings.TrimSpace(localAssignment.Ref.WorktreeRoot),
+			}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
 			// enough that worktree tasks still overlap for the run itself.
@@ -8527,6 +8739,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// already durable, so DurableWorkDir deliberately stays absent instead of
 	// duplicating the same path under two lifecycle meanings.
 	if env.LocalWorktree != nil {
+		// Remember where this repository's working copies live, and keep this
+		// one off the cleanup candidate list while the task is in it. The
+		// record is what lets the settings screen find copies that sit outside
+		// the Multica workspace entirely (DENE-617).
+		if err := d.worktreeCleanup.RecordRoot(env.LocalWorktree.WorktreeRoot, env.LocalWorktree.GitRoot); err != nil {
+			taskLog.Warn("could not record the worktree root for cleanup; copies there will not appear in the storage screen",
+				"root", env.LocalWorktree.WorktreeRoot, "error", err)
+		}
+		d.worktreeCleanup.MarkActive(env.LocalWorktree.Path)
+		defer d.worktreeCleanup.ReleaseActive(env.LocalWorktree.Path)
 		defer func() {
 			if taskResult.WorkDir == "" {
 				taskResult.WorkDir = env.WorkDir
@@ -8681,6 +8903,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
+	// Resolve the code source now that env.WorkDir exists. It has to name the
+	// directory the agent will actually be in: in worktree mode that is the
+	// task's own checkout, and naming the user's pinned path instead would tell
+	// the agent to commit into the working copy the mode exists to protect
+	// (DENE-595).
+	taskCtx.CodeSource = codeSourceForEnv(resolveTaskCodeSource(localAssignment, readOnlyLocalDirs, env.WorkDir, repoURLsOf(task.Repos), nil))
+
 	// usesCustomProfileCommand is the same provenance the backend receives as
 	// agent.Config.BuiltinRuntime: it separates the provider's own discovered
 	// binary from an arbitrary command speaking its protocol. Reused here so
@@ -8790,6 +9019,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		binDir := filepath.Dir(selfBin)
 		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
 	}
+	// Point every package manager at the machine-global dependency store.
+	// Without it each task installs a private copy of the same packages: on
+	// this machine 44 task directories held 53 GB of node_modules, and the
+	// half installed by npm (which copies) accounted for essentially all of
+	// the real duplication. A pnpm install against a warm shared store costs
+	// ~82 MB of physical disk for a 2.15 GB node_modules tree, because the
+	// files are cloned out of the store rather than written again.
+	//
+	// Set before custom_env is layered on, so an agent that genuinely needs
+	// its own store or cache can still override any of these names.
+	if d.cfg.SharedPackageStoreEnabled {
+		storeEnv, err := execenv.PreparePackageStore(d.cfg.WorkspacesRoot)
+		if err != nil {
+			// Not fatal: a task that cannot share packages still runs, it just
+			// installs its own copies the way it did before.
+			taskLog.Warn("shared package store: prepare failed; task will use per-tool defaults", "error", err)
+		} else {
+			maps.Copy(agentEnv, storeEnv)
+		}
+	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
@@ -8855,8 +9104,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare dsh session root: %w", err)
 		}
-		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
-		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
+		applyDshTaskEnv(agentEnv, dshSessionRoot)
 	}
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
@@ -9069,6 +9317,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentID:     task.AgentID,
 		AgentName:   task.Agent.Name,
 		WorkDir:     env.WorkDir,
+		// The endpoint needs to know whether this project pinned a directory
+		// on this machine before it decides to clone anything (DENE-595).
+		LocalDirectory: localAssignment,
 	})
 	defer d.clearActiveRepoCheckoutTask(agentToken)
 
@@ -9186,6 +9437,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
 	d.recordPlanLimits(task.RuntimeID, result.PlanLimits)
+	// Record the account-level quota hit on the SAME terminal result, and only
+	// here: the AGY path above already accounts for antigravity while it fails
+	// over, and every other CLI would otherwise have no way to learn that one of
+	// its accounts is out of quota (DENE-466). Reading it after the retries is
+	// what keeps a failure a retry recovered from out of the store.
+	d.recordRunAccountQuota(provider, agentCustomEnv, result, time.Now())
 	phaseRecorder.Mark(taskPhaseTurnCompleted)
 
 	elapsed := time.Since(taskStart).Round(time.Second)
@@ -10308,6 +10565,25 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 	return result
 }
 
+// convertProjectsForEnv maps the claim's project set into the execenv shape.
+// task.projectContexts() has already normalised the legacy singular fields of
+// an old server into a one-entry set.
+func convertProjectsForEnv(projects []ProjectContextData) []execenv.ProjectContextForEnv {
+	if len(projects) == 0 {
+		return nil
+	}
+	result := make([]execenv.ProjectContextForEnv, len(projects))
+	for i, p := range projects {
+		result[i] = execenv.ProjectContextForEnv{
+			ID:          p.ID,
+			Title:       p.Title,
+			Description: p.Description,
+			Resources:   convertProjectResourcesForEnv(p.Resources),
+		}
+	}
+	return result
+}
+
 // markActiveEnvRoot records that a task is currently using the given env root,
 // so the GC loop won't reclaim its artifacts mid-execution. Calls are
 // reference-counted so a reuse path marked twice (predicted + prior) only
@@ -10793,6 +11069,34 @@ func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, e
 		return "", err
 	}
 	return path, nil
+}
+
+// dshPermissionModeEnv selects the DeepSeek Harness sandbox/approval posture.
+// DSH reads it in its own profile config; when unset it falls back to
+// workspace-write, whose seatbelt policy only permits writes inside the task
+// worktree. That default broke real work (DENE-329: `hdiutil create` needs a
+// disk-image device and failed with "Operation not permitted"), and every other
+// runtime the daemon launches already runs without an OS sandbox.
+const dshPermissionModeEnv = "DSH_PERMISSION_MODE"
+
+// dshPermissionModeFullAccess also sets DSH's approval mode to never, so one
+// variable covers both the sandbox and the approval prompt.
+const dshPermissionModeFullAccess = "danger-full-access"
+
+// applyDshTaskEnv adds the dsh-only variables to an env map that has already
+// had the agent's custom_env layered onto it. The session root and telemetry
+// switch are daemon-owned and unconditional; the permission mode is only a
+// default, so an agent that sets DSH_PERMISSION_MODE in custom_env (e.g. back
+// to workspace-write) keeps its own value.
+func applyDshTaskEnv(agentEnv map[string]string, sessionRoot string) {
+	if agentEnv == nil {
+		return
+	}
+	agentEnv["MULTICA_DSH_SESSION_ROOT"] = sessionRoot
+	agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
+	if _, ok := agentEnv[dshPermissionModeEnv]; !ok {
+		agentEnv[dshPermissionModeEnv] = dshPermissionModeFullAccess
+	}
 }
 
 // prepareDshTaskSessionRoot keeps DSH transcripts private to one Multica

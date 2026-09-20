@@ -35,6 +35,66 @@ type ProjectResourceForEnv struct {
 	Label        string          `json:"label,omitempty"` // optional user-supplied label
 }
 
+// ProjectContextForEnv is one project attached to the task, in priority order
+// (DENE-523). A chat session can attach several at once; the brief renders a
+// section per project and resources.json carries them all.
+type ProjectContextForEnv struct {
+	ID          string
+	Title       string
+	Description string
+	Resources   []ProjectResourceForEnv
+}
+
+// CodeSourceForEnv describes where a task's code lives and why. Populated by
+// the daemon, which is the only component that can see the machine's
+// filesystem; rendered verbatim into the brief's `## Code Source` section.
+type CodeSourceForEnv struct {
+	// Kind is "local_directory" or "remote_checkout"; empty means the daemon
+	// did not resolve a source (older daemon, or a task with no project).
+	Kind string
+	// LocalPath is the pinned directory, ExecutionMode how tasks share it.
+	LocalPath     string
+	ExecutionMode string
+	// DisplayName is the resource's label, or the directory's basename.
+	DisplayName string
+	// CoveredRepos are repo URLs PROVEN to already live in LocalPath — a git
+	// remote there resolves to the same repository. The brief tells the agent
+	// not to check these out.
+	CoveredRepos []CodeSourceRepoForEnv
+	// UnprovenRepos are repos the directory is named after but that could not
+	// be verified. Named with their reason instead of silently cloned or
+	// silently skipped: both of those are a wrong answer presented as fact.
+	UnprovenRepos []CodeSourceRepoForEnv
+	// RemoteRepos genuinely are not in the directory and still use
+	// `multica repo checkout`. A project with a local directory may reference
+	// other repositories, and those must keep working.
+	RemoteRepos []CodeSourceRepoForEnv
+	// ReadOnlyDirs are the project's OTHER local directories on this machine.
+	// One run writes one directory (DENE-617 invariant 1) — these are real
+	// directories the agent may read, and naming them is what stops it from
+	// discovering one by accident and treating it as a second place to work.
+	ReadOnlyDirs []CodeSourceDirForEnv
+}
+
+// CodeSourceDirForEnv is one local directory the task may read but not write.
+type CodeSourceDirForEnv struct {
+	Path string
+	Name string
+}
+
+// CodeSourceRepoForEnv is one repository in a CodeSourceForEnv bucket. Detail
+// carries the resolved local path (covered) or the reason (unproven).
+type CodeSourceRepoForEnv struct {
+	URL    string
+	Detail string
+}
+
+// UsesLocalDirectory reports whether this task's code comes from a directory
+// the user pinned on this machine.
+func (c CodeSourceForEnv) UsesLocalDirectory() bool {
+	return c.Kind == "local_directory" && strings.TrimSpace(c.LocalPath) != ""
+}
+
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
 	WorkspacesRoot  string // base path for all envs (e.g., ~/multica_workspaces)
@@ -166,11 +226,24 @@ type TaskContextForEnv struct {
 	AgentInstructions             string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills                   []SkillContextForEnv
 	DisabledRuntimeSkills         []RuntimeSkillRefForEnv
-	Repos                         []RepoContextForEnv     // workspace repos available for checkout
-	ProjectID                     string                  // active project for this task, when present
-	ProjectTitle                  string                  // human-readable project title
-	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
-	ProjectResources              []ProjectResourceForEnv // resources attached to the project
+	Repos                         []RepoContextForEnv // workspace repos available for checkout
+	// CodeSource is the resolved answer to "where does this task's code come
+	// from" (DENE-595). Zero value means the historical behavior: no directory
+	// pinned on this machine, every repo checked out on demand. When the
+	// project DOES pin a directory here, the brief has to say so — an agent
+	// told only "run multica repo checkout" cloned a second copy of a
+	// repository the machine already held and then worked in the copy the user
+	// was not looking at.
+	CodeSource         CodeSourceForEnv
+	ProjectID          string                  // active project for this task, when present
+	ProjectTitle       string                  // human-readable project title
+	ProjectDescription string                  // durable project-level context, rendered into the brief's Project Context section
+	ProjectResources   []ProjectResourceForEnv // resources attached to the project
+	// Projects is the task's project set in priority order (DENE-523). The
+	// singular Project* fields above mirror its first entry and remain the
+	// only source for a server that predates projects[]; projectContexts()
+	// normalises both shapes so rendering reads one path.
+	Projects []ProjectContextForEnv
 	// SidecarRoot, when set, is where this task's sidecar files were written
 	// instead of the cwd (Environment.SidecarRoot). The brief names the
 	// absolute paths it implies — the default relative paths would point at a
@@ -257,7 +330,27 @@ type TaskContextForEnv struct {
 	InitiatorEmail string
 }
 
-// SkillContextForEnv represents a skill to be written into the execution environment.
+// projectContexts returns the task's attached projects in priority order.
+//
+// Projects is the authoritative set; the singular Project* fields mirror its
+// first entry and are all a server predating projects[] sends. Normalising
+// here keeps the brief and the resources.json sidecar reading one shape, and
+// leaves the single-project output byte-identical to before DENE-523.
+func (ctx TaskContextForEnv) projectContexts() []ProjectContextForEnv {
+	if len(ctx.Projects) > 0 {
+		return ctx.Projects
+	}
+	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
+		return nil
+	}
+	return []ProjectContextForEnv{{
+		ID:          ctx.ProjectID,
+		Title:       ctx.ProjectTitle,
+		Description: ctx.ProjectDescription,
+		Resources:   ctx.ProjectResources,
+	}}
+}
+
 // IssueStatusForEnv is one active custom workspace status rendered into the
 // brief (MUL-6460). Name and Description are user-authored text and MUST pass
 // through the brief sanitizers before rendering; Key is constrained by the
@@ -270,6 +363,7 @@ type IssueStatusForEnv struct {
 	Description string
 }
 
+// SkillContextForEnv represents a skill to be written into the execution environment.
 type SkillContextForEnv struct {
 	Name        string
 	Description string

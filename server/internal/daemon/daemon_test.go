@@ -4402,6 +4402,117 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	}
 }
 
+// The shared cache download must outlive the request that started it: a task
+// that is stopped or times out while waiting must not take the download down
+// with it (DENE-594).
+func TestEnsureRepoReadyCancelledRequestDoesNotStopDownload(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createDaemonTestRepo(t)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: sourceRepo}},
+			ReposVersion: "v1",
+		})
+	})
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
+	cache := d.repoCache.(*repocache.Cache)
+
+	// Hold the repo lock so the download is still pending when the request
+	// gives up, then let it proceed.
+	release := make(chan struct{})
+	held := make(chan struct{})
+	lockDone := make(chan struct{})
+	go func() {
+		defer close(lockDone)
+		_ = cache.WithRepoLock(cache.BarePath("ws-1", sourceRepo), func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := d.ensureRepoReady(ctx, "ws-1", sourceRepo); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ensureRepoReady error = %v, want deadline exceeded", err)
+	}
+
+	close(release)
+	<-lockDone
+	d.waitBackgroundSyncs()
+	if d.repoCache.Lookup("ws-1", sourceRepo) == "" {
+		t.Fatal("the download must finish after the requesting task went away")
+	}
+}
+
+// DENE-598: a first-time download can run for hours. While it does, a checkout
+// of it is told "still downloading" instead of hanging, and a checkout of any
+// other repository in the same workspace is not held up behind it.
+func TestEnsureRepoReadyLongDownloadDoesNotBlockTheWorkspace(t *testing.T) {
+	t.Parallel()
+
+	slowRepo := createDaemonTestRepo(t)
+	readyRepo := createDaemonTestRepo(t)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: slowRepo}, {URL: readyRepo}},
+			ReposVersion: "v1",
+		})
+	})
+	d.repoFirstCacheWait = 100 * time.Millisecond
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
+	cache := d.repoCache.(*repocache.Cache)
+	if err := cache.Sync("ws-1", []repocache.RepoInfo{{URL: readyRepo}}); err != nil {
+		t.Fatalf("seed ready repo: %v", err)
+	}
+
+	// Hold the slow repo's lock: its download starts and stays in flight.
+	release := make(chan struct{})
+	held := make(chan struct{})
+	lockDone := make(chan struct{})
+	go func() {
+		defer close(lockDone)
+		_ = cache.WithRepoLock(cache.BarePath("ws-1", slowRepo), func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+
+	err := d.ensureRepoReady(context.Background(), "ws-1", slowRepo)
+	if !errors.Is(err, repocache.ErrRepoBuilding) {
+		t.Fatalf("ensureRepoReady(slow) error = %v, want ErrRepoBuilding", err)
+	}
+
+	// The download is still running, and the workspace is not locked by it.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := d.ensureRepoReady(ctx, "ws-1", readyRepo); err != nil {
+		t.Fatalf("ensureRepoReady(ready) during the slow download: %v", err)
+	}
+
+	// A retry joins the download in flight rather than starting another.
+	inFlight := d.repoDownloadInFlight("ws-1", slowRepo)
+	if inFlight == nil {
+		t.Fatal("expected the slow download to be in flight")
+	}
+	if got := d.startRepoDownload(context.Background(), "ws-1", slowRepo); got != inFlight {
+		t.Fatal("a retry started a second download instead of joining the one in flight")
+	}
+
+	close(release)
+	<-lockDone
+	d.waitBackgroundSyncs()
+	if err := d.ensureRepoReady(context.Background(), "ws-1", slowRepo); err != nil {
+		t.Fatalf("ensureRepoReady(slow) after the download finished: %v", err)
+	}
+}
+
 func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 	t.Parallel()
 

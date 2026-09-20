@@ -345,6 +345,9 @@ type ChatSessionUpdatedPayload = {
   chat_session_id: string;
   title?: string;
   project_id?: string | null;
+  /** The session's full project set, sent on the same events that carry
+   *  `project_id` (DENE-522). Absent on rename/pin/archive. */
+  project_ids?: string[];
   pinned?: boolean;
   status?: "active" | "archived";
   updated_at?: string;
@@ -380,6 +383,11 @@ export function applyChatSessionUpdatedToCache(
             ...s,
             title: payload.title ?? s.title,
             ...("project_id" in payload ? { project_id: payload.project_id } : {}),
+            // Same `in` rule as project_id: an explicit empty array clears the
+            // set, while an absent field leaves this tab's set alone. A server
+            // predating project_ids sends only project_id, and the singular
+            // patch above still moves the chip.
+            ...("project_ids" in payload ? { project_ids: payload.project_ids } : {}),
             pinned: payload.pinned ?? s.pinned,
             status: payload.status ?? s.status,
             updated_at: payload.updated_at ?? s.updated_at,
@@ -729,7 +737,7 @@ export interface RealtimeSyncStores {
  * both here (invalidation fallback) and by per-page useWSEvent hooks (granular
  * updates). Daemon register events invalidate runtimes globally. Routine
  * heartbeats stay off the prefix path to avoid a 15s refetch storm; a
- * plan_limits snapshot change is handled by a dedicated listener.
+ * plan_limits or JEV snapshot change is handled by a dedicated listener.
  *
  * @param ws - WebSocket client instance (null when not yet connected)
  * @param stores - Platform-created Zustand store instances for auth and workspace
@@ -1006,7 +1014,15 @@ export function useRealtimeSync(
 
     const unsubDaemonHeartbeat = ws.on("daemon:heartbeat", (p) => {
       const payload = p as DaemonHeartbeatPayload;
-      if (payload?.plan_limits_updated !== true) return;
+      // The server sets a flag only when the stored row actually changed, so a
+      // routine beat still short-circuits. JEV reuses this event rather than
+      // opening a second one.
+      if (
+        payload?.plan_limits_updated !== true &&
+        payload?.jev_updated !== true
+      ) {
+        return;
+      }
       const wsId = getCurrentWsId();
       if (wsId) qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     });

@@ -56,6 +56,22 @@ runtimes use a linked worktree; Linux and Windows Codex use task-local Git
 metadata so a task can stage and commit without making the shared repository
 cache writable.
 
+Two outcomes of `repo checkout` are reports, not failures to work around:
+
+- **First-time cache still downloading.** The first checkout of a large
+  repository can take far longer than one command waits. The command prints
+  `Waiting: ...` lines with the phase and progress (and a time estimate once
+  the total is known), and if its wait runs out it exits with that same
+  progress. Nothing is corrupted: run the same command again to keep waiting.
+  Never delete the daemon's repository cache to "fix" this — the download keeps
+  running in the background and resumes from what it has; deleting restarts it
+  from zero. Other repositories check out normally in the meantime.
+- **`WARNING: ... may be OUT OF DATE`.** The checkout succeeded, but the daemon
+  could not fetch the latest commits first, so the code is whatever it had
+  cached. Run `git fetch origin` inside the checkout and compare before relying
+  on it; if that fails too, state in your result that the work is based on a
+  possibly stale revision.
+
 Running `repo checkout` again where the repository is already checked out
 (the same task, a follow-up turn, or a reused workdir) never silently discards
 work:

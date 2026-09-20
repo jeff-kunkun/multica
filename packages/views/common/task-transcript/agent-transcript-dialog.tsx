@@ -96,6 +96,7 @@ import {
   ToolDetailSurface,
 } from "./detail-surfaces";
 import { languageForPath } from "./diff-highlight";
+import { TaskSourceRows } from "../task-source/task-source-rows";
 import { useLocale, useT } from "../../i18n";
 import {
   formatTokens,
@@ -323,7 +324,8 @@ export function AgentTranscriptDialog({
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const locale = useLocale();
-  const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, open);
+  const wsId = useWorkspaceId();
+  const formatText = useTraceIssueLabels(wsId, task.issue_id, items, open);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
   const [query, setQuery] = useState("");
@@ -1002,6 +1004,22 @@ export function AgentTranscriptDialog({
                           }
                         />
                       )}
+                      {/* Where this run's code came from, and which resource
+                          decided it. Sits above the branch because the branch
+                          only makes sense once you know the directory. */}
+                      <TaskSourceRows
+                        wsId={wsId}
+                        daemonId={runtimeInfo?.daemon_id ?? null}
+                        task={task}
+                        renderRow={(row) => (
+                          <RunDetailRow
+                            key={row.label}
+                            label={row.label}
+                            value={row.value}
+                            mono={row.mono}
+                          />
+                        )}
+                      />
                       {task.branch_name && (
                         <RunDetailRow
                           label={t(($) => $.transcript.details_branch)}

@@ -65,6 +65,9 @@ func seedBloblessCache(t *testing.T, cache *Cache, workspaceID, sourceRepo strin
 	if !isPartialClone(barePath) {
 		t.Fatal("seeded cache is not a partial clone; the filter was ignored")
 	}
+	if err := markReady(barePath); err != nil {
+		t.Fatalf("mark cache ready: %v", err)
+	}
 	return barePath
 }
 
@@ -194,10 +197,12 @@ func TestIsPartialClone(t *testing.T) {
 	sourceRepo := createFilterableTestRepo(t)
 	cache := New(t.TempDir(), testLogger())
 
-	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+	// A server that does not allow filters yields an ordinary full cache.
+	fullSource := createTestRepo(t)
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: fullSource}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
-	if isPartialClone(cache.Lookup("ws-1", sourceRepo)) {
+	if isPartialClone(cache.Lookup("ws-1", fullSource)) {
 		t.Fatal("an ordinary full cache must not be reported as a partial clone")
 	}
 

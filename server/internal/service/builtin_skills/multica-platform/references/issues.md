@@ -11,6 +11,10 @@ Product contracts the runtime brief does not fully encode.
 - [Sub-issues: todo starts work now, backlog parks it](#sub-issues-todo-starts-work-now-backlog-parks-it)
 - [Incorrect to correct](#incorrect-to-correct)
 
+Closing is its own contract: the eight `close.*` keys, the decision tables
+and the dispatcher promotion rules live in `references/close-protocol.md`.
+Read them there before you close anything.
+
 ## PR linking and close intent are two distinct contracts
 
 The GitHub webhook runs two separate scans over an incoming PR. They are not the
@@ -187,8 +191,10 @@ multica issue property unset <issue-id> --name Environment
 - Agents cannot create or edit property definitions (owner/admin humans only).
   If a needed property does not exist, propose it in a comment instead.
 - Where state belongs: workflow state a human should see and filter by goes in
-  a property; the stage the issue is at goes in its status; everything else —
-  what you did this run, what you found — goes in the result comment.
+  a property; the stage the issue is at goes in its status; a Close protocol
+  finish writes the eight `close.*` keys (see `references/close-protocol.md`);
+  everything else — what you did this run, what you found — goes in the result
+  comment.
 - `issue list` filters and sorts by property with the same name addressing:
 
 ```bash
@@ -269,6 +275,60 @@ writes the literal `done` key.
 - **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
   `todo` when no active task / retry remains — that is the main server-owned
   status write on the agent-run path.
+- **Completed issue-triggered tasks** are the mirror case, and they write no
+  status at all: a run that reaches `/complete` cleanly while the issue is
+  still `in_progress` with nothing queued behind it leaves a system comment
+  carrying `completion-stall:run-completed-without-terminal-status`, naming the
+  current assignee and the parent issue. It reports the stall; it never moves
+  the issue and never starts a run, so deciding whether to continue the work or
+  close the issue out is the dispatcher's job. One issue gets at most one such
+  comment per 30 minutes, and an issue that still has a non-terminal child is
+  never signalled — dispatching sub-issues and staying `in_progress` is the
+  documented way to record that the work continues below. A run ending is therefore still not the issue ending,
+  and an agent that delivered part of its acceptance criteria must write the
+  status itself instead of relying on the completion path.
+
+## Automatic routing (off unless the workspace turned it on)
+
+When a workspace enables routing in Settings → Routing, the server asks one
+question on issue creation and on every status change: given this status, who
+should be holding this issue. It answers by filling slots, never by changing
+status — routing has no status write at all, so nothing below can move an
+issue for you.
+
+What it may do, and only when the slot is still **empty**:
+
+- **`todo`** — fill the assignee with a seat from the tier ladder, and fill the
+  workspace's 验收席 property with a seat, 「交给人」, or 「不需要验收」.
+- **`in_review`** — hand the issue to whatever 验收席 holds: reassign to that
+  seat (which starts its run), or reassign to a person and @ them. 「不需要验收」
+  is left alone.
+- **`blocked`** — post one advice comment and @ somebody. **No value is
+  changed.**
+- **`in_progress` / `done` / `cancelled` / `backlog`** — nothing at all.
+
+Consequences for how you work:
+
+- A value you set yourself is never overwritten. Assigning an issue, or
+  filling 验收席 by hand, permanently opts that slot out.
+- An issue whose assignee is a **person** is not touched in any way — no
+  slot, no comment, no mention.
+- Routing comments are capped at one of each kind per issue, so flipping a
+  status back and forth does not re-dispatch or re-notify.
+- Every slot routing writes is recorded like any other assignment: the change
+  shows up in `multica issue timeline`, so you can tell a routed owner from one
+  a person set, and see that nothing assigned the issue twice.
+- `multica issue route <id>` re-runs the same pass by hand and prints what it
+  did. It is the same code the hooks run, so on an issue they already handled
+  it will report that there was nothing left to fill.
+
+When routing is **not working** — the model was rejected, is unreachable, the
+breaker is cooling down after repeated failures, or the deployment never
+configured a server-internal LLM — issues are left entirely
+alone, exactly as if routing were off. Nothing is posted on a ticket about it.
+The reason is shown in one place only: Settings → Routing, which reports the
+state, the reason, when the model last answered, and offers a re-check. If
+automatic dispatch seems to have stopped, that section is where to look.
 
 ## Automatic routing (off unless the workspace turned it on)
 

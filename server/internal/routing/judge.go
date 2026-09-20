@@ -100,6 +100,35 @@ type LLMJudge struct {
 	Gen TextGenerator
 }
 
+// Availability is the optional half of Judge: an implementation that can say,
+// without making a call, that it has nothing to call at all.
+//
+// Health uses it so a deployment that never configured a server-internal LLM
+// is reported the moment somebody opens the settings section, instead of only
+// after the first ticket has failed against it.
+type Availability interface {
+	Available() bool
+}
+
+// Available reports whether the generator behind this judge has anywhere to
+// send a request.
+//
+// A generator that cannot answer the question is treated as available: the
+// only honest reading of "unknown" is to let the real call decide, and
+// claiming a fault on a guess is exactly the mistake this whole surface is
+// supposed to avoid.
+func (j LLMJudge) Available() bool {
+	type enabler interface{ Enabled() bool }
+	if e, ok := j.Gen.(enabler); ok {
+		return e.Enabled()
+	}
+	return true
+}
+
+// NotConfiguredReason is the wording shown for a deployment with no internal
+// LLM. Named once so Health and the breaker cannot drift apart on it.
+const NotConfiguredReason = "this deployment has no internal LLM configured"
+
 // ErrJudgeUnavailable reports that no answer could be obtained. Route turns it
 // into the else branch; it never becomes a partial write.
 var ErrJudgeUnavailable = errors.New("routing: judge unavailable")

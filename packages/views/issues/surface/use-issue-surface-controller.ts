@@ -5,6 +5,7 @@ import { hashKey, keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type {
   Issue,
+  PinnedItem,
   IssueStatusCategory,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
@@ -15,6 +16,8 @@ import type {
 } from "@multica/core/types";
 import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useAuthStore } from "@multica/core/auth";
+import { pinListOptions } from "@multica/core/pins";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { statusFilterColumns, visibleStatusCategories } from "@multica/core/issues";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
@@ -24,6 +27,10 @@ import {
   buildIssueSurfaceQueryPlan,
   type IssueSurfaceQueryPlan,
 } from "@multica/core/issues/surface/query-plan";
+import {
+  withPinnedFirstSort,
+  withoutPinnedFirstSort,
+} from "@multica/core/issues/surface/pinned-first";
 import {
   assigneeTypesForActorKind,
   type IssueScope,
@@ -73,6 +80,9 @@ export interface IssueSurfaceController {
   projectIssues: Issue[];
   issues: Issue[];
   swimlaneIssues: Issue[];
+  /** Issue ids the active branch projection served as pinned. Table ignores it
+   *  (its rows carry `is_pinned` directly); Gantt never ranks by pins. */
+  pinnedIssueIds: ReadonlySet<string>;
   /** Agents currently working inside THIS surface, under the surface's active
    *  filters — the header chip's count, so clicking it leaves exactly these
    *  agents' rows (MUL-4884, MUL-5525). `undefined` means the projection has
@@ -176,6 +186,7 @@ function useDebouncedTableSearch(value: string, delayMs = 250) {
  * default alone was enough to rebuild the derived Sets, the table query spec,
  * and the branch query list once per render (MUL-5477). */
 const EMPTY_LIST: never[] = [];
+const EMPTY_PINNED_ITEMS: PinnedItem[] = [];
 
 /**
  * Pin a derived value's identity to its CONTENT.
@@ -228,6 +239,8 @@ export function useIssueSurfaceController({
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
+  const hideCompletedParents = useViewStore((s) => s.hideCompletedParents);
+  const tableHierarchy = useViewStore((s) => s.tableHierarchy);
   const ganttShowCompleted = useViewStore((s) => s.ganttShowCompleted);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
@@ -238,6 +251,23 @@ export function useIssueSurfaceController({
   const catalog = useIssueStatuses(wsId);
   const { hasCustomStatuses } = catalog;
   const [tableSearch, setTableSearch] = useState("");
+
+  // Pinned-first is opt-in on the wire. `pinned_first` is a field an older
+  // server rejects with a 400 for the WHOLE page (its decoder uses
+  // DisallowUnknownFields), so it is only sent once this user is known to have
+  // at least one issue pin — the same rollout shape `hide_completed_parents`
+  // used. The pin list is also what makes the setting reactive: pinning or
+  // unpinning invalidates it, the spec identity changes, and the rows re-rank.
+  // (DENE-500)
+  const currentUserId = useAuthStore((s) => s.user?.id ?? "");
+  const { data: pinnedItems = EMPTY_PINNED_ITEMS } = useQuery({
+    ...pinListOptions(wsId, currentUserId),
+    enabled: !!currentUserId,
+  });
+  const hasIssuePins = useMemo(
+    () => pinnedItems.some((pin) => pin.item_type === "issue"),
+    [pinnedItems],
+  );
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
   const fallbackMode = modes[0] ?? "list";
@@ -322,6 +352,12 @@ export function useIssueSurfaceController({
       : grouping;
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
   const usesTable = effectiveViewMode === "table";
+  // The two modes whose own layout IS the parent/child relationship: the
+  // Table's hierarchy tree, and a swimlane grouped by parent. Both need the
+  // sub-issues the flat "show sub-issues" filter would take away.
+  const parentAwareLayout =
+    (usesTable && tableHierarchy) ||
+    (effectiveViewMode === "swimlane" && swimlaneGrouping === "parent");
   const activeSearch = usesTable ? tableSearch : search;
   const debouncedActiveSearch = useDebouncedTableSearch(activeSearch);
   const usesServerStatusSurface =
@@ -487,7 +523,14 @@ export function useIssueSurfaceController({
         ...(agentRunningFilter
           ? { working_issue_ids: [...workingIssueIDs] }
           : {}),
-        include_sub_issues: showSubIssues,
+        // A parent-aware layout already restricts what it shows at the top
+        // level: the Table's root branch asks for rows whose parent is outside
+        // the membership window, its child branches ask for one parent's
+        // children by id, and a parent swimlane IS a lane of children. Sending
+        // the flat `parent_issue_id IS NULL` filter alongside either one would
+        // empty every child branch and every lane. (DENE-444)
+        include_sub_issues: showSubIssues || parentAwareLayout,
+        ...(hideCompletedParents ? { hide_completed_parents: true } : {}),
       },
       ...(debouncedActiveSearch ? { search: debouncedActiveSearch } : {}),
       sort: {
@@ -505,8 +548,10 @@ export function useIssueSurfaceController({
     includeNoAssignee,
     labelFilters,
     priorityFilters,
+    hideCompletedParents,
     scope,
     showSubIssues,
+    parentAwareLayout,
     sort.sort_by,
     sort.sort_direction,
     statusFilters,
@@ -518,7 +563,12 @@ export function useIssueSurfaceController({
   // the Table's own `useQueries` list — keys off this object's identity. Pin it
   // to the content so an unstable dependency upstream cannot rebuild all of
   // them for a query that did not change.
-  const tableQuerySpec = useStableByContent(derivedTableQuerySpec);
+  const tableQuerySpec = useStableByContent(
+    useMemo(
+      () => withPinnedFirstSort(derivedTableQuerySpec, hasIssuePins),
+      [derivedTableQuerySpec, hasIssuePins],
+    ),
+  );
 
   const [activeTableFacet, setActiveTableFacet] =
     useState<IssueTableFacetSpec | null>(null);
@@ -540,15 +590,22 @@ export function useIssueSurfaceController({
     // The request shape remains total while disabled.
     return facets.length > 0 ? facets : [{ kind: "status" }];
   }, [activeTableFacet, usesServerStatusSurface]);
+  // Facets are pure counts, so they read the pins-free twin of the spec: a pin
+  // toggle then re-pages the rows without re-running the workspace-wide
+  // aggregation behind every filter submenu. (DENE-500)
+  const tableCountQuerySpec = useMemo(
+    () => withoutPinnedFirstSort(tableQuerySpec),
+    [tableQuerySpec],
+  );
   const tableFacetRequest = useMemo(
     () => ({
-      query: tableQuerySpec,
+      query: tableCountQuerySpec,
       facets: requestedFacets,
       // Status surfaces consume the facet total as their authoritative empty
       // state. Table rows/groups already own the displayed total.
       include_total: usesServerStatusSurface,
     }),
-    [requestedFacets, tableQuerySpec, usesServerStatusSurface],
+    [requestedFacets, tableCountQuerySpec, usesServerStatusSurface],
   );
   const tableFacetsQuery = useQuery({
     ...issueTableFacetsOptions(wsId, tableFacetRequest),
@@ -567,10 +624,11 @@ export function useIssueSurfaceController({
   // does not change the query identity — the number must not flicker when you
   // click the very chip it labels.
   const workingAgentsQuerySpec = useMemo<IssueTableQuerySpec>(() => {
-    if (!agentRunningFilter) return tableQuerySpec;
-    const { working_issue_ids: _working, ...filters } = tableQuerySpec.filters;
-    return { ...tableQuerySpec, filters };
-  }, [agentRunningFilter, tableQuerySpec]);
+    if (!agentRunningFilter) return tableCountQuerySpec;
+    const { working_issue_ids: _working, ...filters } =
+      tableCountQuerySpec.filters;
+    return { ...tableCountQuerySpec, filters };
+  }, [agentRunningFilter, tableCountQuerySpec]);
   const workingAgentsFacetRequest = useMemo(
     () => ({
       query: workingAgentsQuerySpec,

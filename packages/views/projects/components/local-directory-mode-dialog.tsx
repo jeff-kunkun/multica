@@ -12,8 +12,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import { Input } from "@multica/ui/components/ui/input";
 import { useT } from "../../i18n/use-t";
 import type { WorktreeUnavailableReason } from "./local-directory-mode";
+import { worktreeRootProblem } from "./worktree-root";
 
 export type { WorktreeUnavailableReason } from "./local-directory-mode";
 
@@ -32,6 +34,24 @@ interface LocalDirectoryModeDialogProps {
   /** Set when shared is selectable but will be honoured locally, not stored
    *  as `execution_mode=shared` on the connected server. */
   sharedUsesLocalOverride?: boolean;
+  /**
+   * Where parallel mode would put this folder's working copies — the
+   * repository's sibling, on the user's own disk.
+   *
+   * Shown while the option is still a choice. Parallel mode's cost is a full
+   * working copy (plus its dependencies) per task, charged to the user's own
+   * drive; naming the directory is what turns that from a surprise into a
+   * decision. Absent on web and on older desktop builds, which cannot read
+   * the filesystem — the copy still lands there, we just cannot say so.
+   */
+  worktreeRootPreview?: string;
+  /** The repository root, when the machine could read it. Used only to warn
+   *  that a typed landing folder sits inside the repository. */
+  gitRoot?: string;
+  /** Called when the user edits where parallel-mode copies should land. When
+   *  absent the location is shown but not editable — a surface that cannot
+   *  check a path should not invite one to be typed. */
+  onWorktreeRootChange?: (next: string) => void;
   /** Server-side rejection to show inline (e.g. a 422 that only the API can detect). */
   errorMessage?: string;
   saving?: boolean;
@@ -58,6 +78,9 @@ export function LocalDirectoryModeDialog({
   unavailableReason,
   sharedUnavailable,
   sharedUsesLocalOverride,
+  worktreeRootPreview,
+  gitRoot,
+  onWorktreeRootChange,
   errorMessage,
   saving = false,
   confirmLabel,
@@ -92,6 +115,9 @@ export function LocalDirectoryModeDialog({
           unavailableReason={unavailableReason}
           sharedUnavailable={sharedUnavailable}
           sharedUsesLocalOverride={sharedUsesLocalOverride}
+          worktreeRootPreview={worktreeRootPreview}
+          gitRoot={gitRoot}
+          onWorktreeRootChange={onWorktreeRootChange}
         />
 
         {errorMessage && (
@@ -124,6 +150,9 @@ interface LocalDirectoryModeOptionsProps {
   unavailableReason?: WorktreeUnavailableReason;
   sharedUnavailable?: boolean;
   sharedUsesLocalOverride?: boolean;
+  worktreeRootPreview?: string;
+  gitRoot?: string;
+  onWorktreeRootChange?: (next: string) => void;
 }
 
 /**
@@ -139,9 +168,13 @@ export function LocalDirectoryModeOptions({
   unavailableReason,
   sharedUnavailable = false,
   sharedUsesLocalOverride = false,
+  worktreeRootPreview,
+  gitRoot,
+  onWorktreeRootChange,
 }: LocalDirectoryModeOptionsProps) {
   const { t } = useT("projects");
   const worktreeDisabled = unavailableReason !== undefined;
+  const rootProblem = worktreeRootProblem(worktreeRootPreview ?? "", gitRoot);
 
   return (
     <div className="flex flex-col gap-2">
@@ -167,8 +200,51 @@ export function LocalDirectoryModeOptions({
               ? t(($) => $.resources.mode_worktree_needs_server_upgrade)
               : undefined
         }
+        note={
+          // Two keys, not one with an empty interpolation: a sentence that
+          // promises to name the directory and then names nothing is worse
+          // than one that says where copies go without the exact path.
+          worktreeDisabled
+            ? undefined
+            : worktreeRootPreview
+              ? t(($) => $.resources.mode_worktree_cost, { path: worktreeRootPreview })
+              : t(($) => $.resources.mode_worktree_cost_unknown_path)
+        }
         onSelect={() => onChange("worktree")}
       />
+      {/* The landing folder, editable, and only while parallel is the choice
+          in front of the user — it is the one mode it applies to, and showing
+          a path field next to two modes that ignore it invites the wrong
+          edit. Shown as read-only text where the platform cannot check it
+          (web has no filesystem), because a field that silently accepts a
+          path nothing validated is worse than one that does not exist. */}
+      {value === "worktree" && !worktreeDisabled && worktreeRootPreview && (
+        <div className="ml-7 flex flex-col gap-1">
+          <label className="text-micro text-muted-foreground" htmlFor="worktree-root">
+            {t(($) => $.resources.mode_worktree_root_label)}
+          </label>
+          {onWorktreeRootChange ? (
+            <Input
+              id="worktree-root"
+              className="font-mono text-micro"
+              value={worktreeRootPreview}
+              aria-invalid={rootProblem !== undefined}
+              onChange={(e) => onWorktreeRootChange(e.target.value)}
+            />
+          ) : (
+            <div className="rounded-md bg-muted px-2.5 py-1.5 font-mono text-micro text-muted-foreground break-all">
+              {worktreeRootPreview}
+            </div>
+          )}
+          {rootProblem && (
+            <p className="text-micro text-destructive">
+              {rootProblem === "not_absolute"
+                ? t(($) => $.resources.mode_worktree_root_not_absolute)
+                : t(($) => $.resources.mode_worktree_root_inside_repo)}
+            </p>
+          )}
+        </div>
+      )}
       <ModeOption
         icon={<Folders className="size-4" />}
         title={t(($) => $.resources.mode_shared_title)}

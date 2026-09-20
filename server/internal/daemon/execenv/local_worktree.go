@@ -38,11 +38,6 @@ import (
 //     recorded as delivered.
 
 const (
-	// localWorktreeDirName is the env-root-relative directory holding the
-	// worktree. Kept short: on Windows the worktree path plus the deepest
-	// repo path must stay under MAX_PATH for tools that predate long paths.
-	localWorktreeDirName = "worktree"
-
 	// gitTimeout bounds every git invocation this file makes. These are all
 	// local-only operations (no network), so a slow one means a wedged index
 	// lock rather than a slow remote; failing the task beats hanging a daemon
@@ -79,9 +74,17 @@ type LocalWorktreeParams struct {
 	// or any subdirectory of it; the worktree always covers the whole repo,
 	// and the agent's cwd is the matching subdirectory inside it.
 	LocalPath string
-	// EnvRoot is the daemon-owned task env root. The worktree is created
-	// inside it so the ordinary env-root GC reclaims it.
+	// EnvRoot is the daemon-owned task env root. The snapshot index and the
+	// task's own sidecar files live here; the working copy no longer does —
+	// see WorktreeRoot.
 	EnvRoot string
+	// WorktreeRoot is where the working copy goes. Empty means the default:
+	// the repository's sibling `<repo>.multica-worktrees` (DefaultWorktreeRoot).
+	//
+	// It is on the USER's disk, not in the Multica workspace, because a copy
+	// the workspace GC can reclaim is a copy that disappears exactly when
+	// someone wants to look at why a run failed (DENE-617).
+	WorktreeRoot string
 	// AgentName and TaskID name the branch a task with no conversation behind
 	// it gets: agent/<name>/<short-task-id>.
 	AgentName string
@@ -142,8 +145,13 @@ func localWorktreeConversation(params PrepareParams) (key, id string) {
 type LocalWorktree struct {
 	// GitRoot is the user's repository root — the repo that owns the branch.
 	GitRoot string
-	// Path is the worktree root inside the env root.
+	// Path is the working copy's directory, inside WorktreeRoot.
 	Path string
+	// WorktreeRoot is the directory holding this repository's Multica working
+	// copies — the user's disk, beside their repository. Carried so teardown
+	// can drop the copy's ownership record from the same place Prepare wrote
+	// it (DENE-617).
+	WorktreeRoot string
 	// WorkDir is the agent's cwd: Path, plus the offset of LocalPath inside
 	// the repo when the user pointed the resource at a subdirectory.
 	WorkDir string
@@ -320,7 +328,18 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		return nil, fmt.Errorf("execenv: %q is not inside its repository root %q", localPath, gitRoot)
 	}
 
-	worktreePath := filepath.Join(params.EnvRoot, localWorktreeDirName)
+	worktreeRoot, err := ResolveWorktreeRoot(gitRoot, params.WorktreeRoot)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("execenv: create worktree root %q: %w", worktreeRoot, err)
+	}
+	// Named after the task's env root directory, which the daemon already
+	// builds from the conversation key plus a unique suffix
+	// (`dene-617-926d754d34e9`). That makes the copy identifiable in a file
+	// browser while keeping the one-copy-per-task mapping the env root had.
+	worktreePath := filepath.Join(worktreeRoot, filepath.Base(params.EnvRoot))
 
 	// Everything below mutates the repo's worktree admin state or its refs, so
 	// take the per-repo lock first. It covers the stale-path cleanup, which runs
@@ -384,9 +403,24 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		return nil, err
 	}
 
+	// Record the copy as Multica's before anything else can fail. Cleanup only
+	// ever removes a copy it can prove it made, so a missing record is not a
+	// cosmetic gap — it permanently exempts this directory from cleanup.
+	if recErr := writeWorktreeRecord(worktreeRoot, WorktreeRecord{
+		Path:        worktreePath,
+		GitRoot:     gitRoot,
+		Branch:      actualBranch,
+		TaskID:      params.TaskID,
+		WorkspaceID: params.WorkspaceID,
+	}); recErr != nil && logger != nil {
+		logger.Warn("execenv: could not record the task worktree as Multica-created; automatic cleanup will leave it alone",
+			"path", worktreePath, "root", worktreeRoot, "error", recErr)
+	}
+
 	wt := &LocalWorktree{
 		GitRoot:       gitRoot,
 		Path:          worktreePath,
+		WorktreeRoot:  worktreeRoot,
 		WorkDir:       filepath.Join(worktreePath, rel),
 		Branch:        actualBranch,
 		BaseCommit:    plan.base,
@@ -862,6 +896,10 @@ func removeLocalWorktreeDir(gitRoot, worktreePath string, logger *slog.Logger) e
 	// Lstat verifies the path entry itself is gone. Stat would treat a broken
 	// symlink as absent even though a stale entry still occupies the handoff path.
 	if _, statErr := os.Lstat(worktreePath); errors.Is(statErr, os.ErrNotExist) {
+		// The copy is gone, so its ownership record describes nothing. Dropped
+		// from the directory holding the copy, which is the worktree root
+		// writeWorktreeRecord wrote it under (DENE-617).
+		removeWorktreeRecord(filepath.Dir(worktreePath), worktreePath)
 		return nil
 	} else if statErr != nil {
 		return fmt.Errorf("confirm worktree removal: %w", statErr)

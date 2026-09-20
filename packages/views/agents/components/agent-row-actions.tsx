@@ -37,6 +37,8 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
 import { AppLink, useIntentNavigate } from "../../navigation";
+import { agentHasChildrenNames, isAgentHasChildrenError } from "../specialization";
+import { SolidifyUnbindDialog } from "./solidify-unbind-dialog";
 
 interface AgentRowActionsProps {
   agent: Agent;
@@ -50,6 +52,12 @@ interface AgentRowActionsProps {
   // this agent's config as a template. A href rather than a callback so the
   // menu item is a real link (modifier-click opens it in a new tab).
   duplicateHref: string;
+  /**
+   * Active specialisations of this agent, from the list the row was rendered
+   * from. Only needed to unblock an archive: the server's 409 names them but
+   * carries no ids, and "solidify & unbind" is per child (DENE-304).
+   */
+  childAgents?: readonly Agent[];
 }
 
 /**
@@ -68,6 +76,7 @@ export function AgentRowActions({
   presence,
   canManage,
   duplicateHref,
+  childAgents = [],
 }: AgentRowActionsProps) {
   const { t } = useT("agents");
   const { t: tCommon } = useT("common");
@@ -78,6 +87,16 @@ export function AgentRowActions({
 
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  // Set when the archive came back as "this base role still has
+  // specialisations": the row menu offers the way out instead of only
+  // surfacing the refusal.
+  const [blockedByChildren, setBlockedByChildren] = useState(false);
+  // The child names that refusal carried. The server counts every active
+  // child, including ones this viewer cannot see, so they — not the visible
+  // rows — decide how many rows the dialog lists (DENE-384).
+  const [refusedChildNames, setRefusedChildNames] = useState<readonly string[]>(
+    [],
+  );
 
   const isArchived = !!agent.archived_at;
   const runningCount = presence?.runningCount ?? 0;
@@ -106,6 +125,14 @@ export function AgentRowActions({
       invalidateAgents();
       toast.success(t(($) => $.row_actions.agent_archived_toast));
     } catch (e) {
+      // A base role with specialisations is refused (409 agent_has_children).
+      // The refusal is readable and actionable, so it opens the dialog that
+      // lists them and offers "solidify & unbind" rather than a raw toast.
+      if (isAgentHasChildrenError(e)) {
+        setRefusedChildNames(agentHasChildrenNames(e));
+        setBlockedByChildren(true);
+        return;
+      }
       toast.error(e instanceof Error ? e.message : t(($) => $.row_actions.archive_failed_toast));
     }
   };
@@ -272,6 +299,19 @@ export function AgentRowActions({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+      )}
+
+      {blockedByChildren && (
+        <SolidifyUnbindDialog
+          parent={agent}
+          // The active rows hanging off this base role, as the list knows
+          // them. Solidify is per child, so the dialog needs the ids — the
+          // server's refusal only carries names.
+          children={childAgents.filter((child) => !child.archived_at)}
+          serverChildNames={refusedChildNames}
+          onClose={() => setBlockedByChildren(false)}
+          onArchived={invalidateAgents}
+        />
       )}
     </>
   );

@@ -1,7 +1,7 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import type { Agent } from "@multica/core/types";
+import type { Agent, AgentRuntime } from "@multica/core/types";
 import type { AgentActivity } from "@multica/core/agents";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
@@ -19,6 +19,7 @@ import { AgentsPage } from "./agents-page";
 const mocks = vi.hoisted(() => ({
   agents: [] as Agent[],
   agentsLoading: false,
+  runtimes: [] as AgentRuntime[],
   runCounts: [] as Array<{ agent_id: string; run_count: number }>,
   runCountsPending: false,
   activity: {
@@ -31,7 +32,7 @@ const mocks = vi.hoisted(() => ({
   },
   viewState: {
     scope: "all",
-    grouping: "none" as "none" | "squad",
+    grouping: "none" as "none" | "squad" | "specialization",
     sortField: "lastActive" as string,
     sortDirection: "desc" as string,
     hiddenColumns: ["model", "created"] as string[],
@@ -76,6 +77,9 @@ vi.mock("@tanstack/react-query", () => ({
     }
     if (key === "squads") {
       return { data: mocks.squads, isLoading: false, isPending: false };
+    }
+    if (key === "runtimes") {
+      return { data: mocks.runtimes, isLoading: false, isPending: false };
     }
     return { data: [], isLoading: false, isPending: false };
   },
@@ -128,6 +132,7 @@ vi.mock("@multica/core/agents/stores", () => ({
     selector(mocks.viewState),
   AGENT_DEFAULT_HIDDEN_COLUMNS: ["model", "created"],
   AGENT_SCOPES: ["mine", "all", "archived"],
+  AGENT_GROUPINGS: ["none", "squad", "specialization"],
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -164,6 +169,7 @@ vi.mock("@multica/core/workspace/queries", () => ({
 
 vi.mock("@multica/core/runtimes", () => ({
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
+  runtimeDisplayLabel: (runtime: { name: string }) => runtime.name,
 }));
 
 // View-layer children with heavy / portal deps — stub to keep the test focused
@@ -173,7 +179,9 @@ vi.mock("./agent-row-actions", () => ({ AgentRowActions: () => null }));
 vi.mock("./agent-list-toolbar", () => ({
   AgentListToolbar: (props: {
     grouping: string;
-    onGroupingChange: (grouping: "none" | "squad") => void;
+    onGroupingChange: (
+      grouping: "none" | "squad" | "specialization",
+    ) => void;
     onToggleFilter: (key: string, value: string) => void;
   }) => (
     <div data-testid="agent-list-toolbar">
@@ -182,6 +190,12 @@ vi.mock("./agent-list-toolbar", () => ({
         onClick={() => props.onGroupingChange("squad")}
       >
         Group by squad
+      </button>
+      <button
+        type="button"
+        onClick={() => props.onGroupingChange("specialization")}
+      >
+        Group by base role
       </button>
       <button
         type="button"
@@ -303,6 +317,7 @@ function betaPrecedesAlpha(): boolean {
 beforeEach(() => {
   mocks.agents = [ALPHA, BETA];
   mocks.agentsLoading = false;
+  mocks.runtimes = [];
   mocks.runCounts = [];
   mocks.runCountsPending = false;
   mocks.activity = { byAgent: new Map(), loading: false };
@@ -491,5 +506,272 @@ describe("AgentsPage squad filter and grouping", () => {
     expect(screen.getAllByText("Gamma Agent")).toHaveLength(2);
     expect(screen.getByText("Alpha Agent")).toBeInTheDocument();
     expect(screen.getByText("Beta Agent")).toBeInTheDocument();
+  });
+});
+
+// DENE-304: the nested view is what makes a specialisation visible as a
+// specialisation. These pin the wiring (switch → grouping, fold control,
+// derive entry destination); the grouping/pairing matrix itself is the
+// canonical `.test.ts` next to `agents-page-specializations.ts`.
+describe("AgentsPage base-role nesting", () => {
+  const BASE_ROLE = makeAgent({
+    id: "a-base",
+    name: "Base Role",
+    child_count: 1,
+  });
+  const VARIANT = makeAgent({
+    id: "a-variant",
+    name: "Variant Agent",
+    parent_agent_id: "a-base",
+    parent_agent_name: "Base Role",
+  });
+
+  beforeEach(() => {
+    mocks.viewState.sortField = "name";
+    mocks.viewState.sortDirection = "asc";
+  });
+
+  it("renders a specialisation nested under its base role", () => {
+    mocks.agents = [BASE_ROLE, VARIANT];
+    mocks.viewState.grouping = "specialization";
+
+    renderPage();
+
+    expect(screen.getByText("Base Role")).toBeInTheDocument();
+    expect(screen.getByText("Variant Agent")).toBeInTheDocument();
+    // The relationship is labelled on both ends: a count chip on the base
+    // role, and a tag + origin line on the child.
+    expect(screen.getByTestId("agents-specialization-count")).toHaveTextContent(
+      "1 specialization",
+    );
+    expect(screen.getByTestId("agents-specialization-chip")).toHaveTextContent(
+      "Specialization",
+    );
+    expect(screen.getByText("from Base Role")).toBeInTheDocument();
+    // Fold control is available because the base role has a specialisation.
+    expect(
+      screen.getByTestId("agents-specialization-toggle"),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("folds a group away and back without leaving the nested view", () => {
+    mocks.agents = [BASE_ROLE, VARIANT];
+    mocks.viewState.grouping = "specialization";
+
+    renderPage();
+
+    fireEvent.click(screen.getByTestId("agents-specialization-toggle"));
+    expect(screen.queryByText("Variant Agent")).not.toBeInTheDocument();
+    // The base row stays, and its count still says what is hidden.
+    expect(screen.getByText("Base Role")).toBeInTheDocument();
+    expect(screen.getByTestId("agents-specialization-count")).toHaveTextContent(
+      "1 specialization",
+    );
+
+    fireEvent.click(screen.getByTestId("agents-specialization-toggle"));
+    expect(screen.getByText("Variant Agent")).toBeInTheDocument();
+  });
+
+  it("turns the nested view on from the toolbar switch and persists it", () => {
+    mocks.agents = [BASE_ROLE, VARIANT];
+    mocks.viewState.grouping = "none";
+    const setGrouping = vi.fn();
+    mocks.viewState.setGrouping = setGrouping;
+
+    renderPage();
+
+    fireEvent.click(screen.getByText("Group by base role"));
+    expect(setGrouping).toHaveBeenCalledWith("specialization");
+  });
+
+  it("stays flat when the persisted grouping is one this build does not know", () => {
+    mocks.agents = [BASE_ROLE, VARIANT];
+    // A value written by a newer build (or a corrupt persisted payload) must
+    // not produce an empty list.
+    mocks.viewState.grouping = "bogus" as "none";
+
+    renderPage();
+
+    expect(screen.getByText("Base Role")).toBeInTheDocument();
+    expect(screen.getByText("Variant Agent")).toBeInTheDocument();
+    // Flat means flat: no fold control and no derive entry, even though the
+    // relationship is still labelled on the row itself.
+    expect(
+      screen.queryByTestId("agents-specialization-toggle"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-derive-specialization"),
+    ).not.toBeInTheDocument();
+    // The indent belongs to the nested layout, not to the agent.
+    expect(
+      screen.queryByTestId("agents-specialization-indent"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("agents-specialization-chip")).toBeInTheDocument();
+  });
+
+  it("gives a flat-fallback specialisation no fold control and no indent", () => {
+    // Only the child is visible (its base role is out of scope), so it renders
+    // as its own row. It can never hold children, and there is no parent row
+    // above it — a chevron or an indent elbow would both point at nothing.
+    mocks.agents = [VARIANT];
+    mocks.viewState.grouping = "specialization";
+
+    renderPage();
+
+    expect(screen.getByText("Variant Agent")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-specialization-toggle"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("agents-specialization-chip")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-specialization-indent"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("derives a specialisation from the base role via the create flow", () => {
+    mocks.agents = [BASE_ROLE, VARIANT];
+    mocks.viewState.grouping = "specialization";
+    const push = vi.fn();
+    renderWithI18n(
+      <NavigationProvider value={makeAdapter({ push })}>
+        <AgentsPage />
+      </NavigationProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId("agents-derive-specialization"));
+    expect(push).toHaveBeenCalledWith(
+      "/test-workspace/agents/new/manual?parent=a-base",
+    );
+  });
+
+  // DENE-384: the empty derive entry under every base role and the fold
+  // control that folds nothing turned one agent into two rows and read as a
+  // broken list.
+  it("adds no fold control or derive entry to a base role with no specialisations", () => {
+    mocks.agents = [makeAgent({ id: "a-lonely", name: "Lonely Role" })];
+    mocks.viewState.grouping = "specialization";
+
+    renderPage();
+
+    expect(screen.getByText("Lonely Role")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-specialization-toggle"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-derive-specialization"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-specialization-count"),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// DENE-506: for a specialisation the runtime cell has to answer a second
+// question the runtime's name cannot — is that value the base role's, or this
+// agent's own choice? Without it a row that will silently follow the base role
+// reads exactly like one that will not. The state matrix lives in
+// `specialization.test.ts`; this pins that the list renders it.
+describe("AgentsPage runtime inheritance tag", () => {
+  const RUNTIME = {
+    id: "runtime-1",
+    workspace_id: "workspace-1",
+    daemon_id: "daemon-1",
+    name: "Local Codex",
+    runtime_mode: "local",
+    provider: "codex",
+    launch_header: "",
+    status: "online",
+    device_info: "Mac",
+    metadata: {},
+    owner_id: "user-1",
+    visibility: "private",
+    last_seen_at: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  } satisfies AgentRuntime;
+
+  const BASE_ROLE = makeAgent({
+    id: "a-base",
+    name: "Base Role",
+    child_count: 3,
+    runtime_id: RUNTIME.id,
+  });
+  const follows = makeAgent({
+    id: "a-follows",
+    name: "Following Variant",
+    parent_agent_id: "a-base",
+    parent_agent_name: "Base Role",
+    runtime_id: RUNTIME.id,
+    runtime_inherited: true,
+  });
+  const owns = makeAgent({
+    id: "a-owns",
+    name: "Independent Variant",
+    parent_agent_id: "a-base",
+    parent_agent_name: "Base Role",
+    runtime_id: RUNTIME.id,
+    runtime_inherited: false,
+  });
+  const legacy = makeAgent({
+    id: "a-legacy",
+    name: "Legacy Variant",
+    parent_agent_id: "a-base",
+    parent_agent_name: "Base Role",
+    runtime_id: RUNTIME.id,
+  });
+
+  beforeEach(() => {
+    mocks.viewState.sortField = "name";
+    mocks.viewState.sortDirection = "asc";
+    mocks.viewState.grouping = "specialization";
+    mocks.runtimes = [RUNTIME];
+  });
+
+  it("labels each specialisation row with inherited or independent", () => {
+    mocks.agents = [BASE_ROLE, follows, owns];
+
+    renderPage();
+
+    const tags = screen.getAllByTestId("agents-runtime-inheritance");
+    expect(tags.map((tag) => tag.getAttribute("data-inheritance"))).toEqual([
+      "inherited",
+      "independent",
+    ]);
+    expect(tags[0]).toHaveTextContent("Inherited");
+    expect(tags[1]).toHaveTextContent("Own runtime");
+    // The runtime itself is still shown next to the tag.
+    expect(screen.getAllByText("Local Codex")).toHaveLength(3);
+  });
+
+  it("leaves a base role untagged — it cannot inherit anything", () => {
+    mocks.agents = [BASE_ROLE, follows];
+
+    renderPage();
+
+    expect(screen.getAllByTestId("agents-runtime-inheritance")).toHaveLength(1);
+  });
+
+  it("tags nothing on a backend that does not serve the flag", () => {
+    // An older backend omits `runtime_inherited` entirely; guessing a state
+    // would be worse than saying nothing.
+    mocks.agents = [BASE_ROLE, legacy];
+
+    renderPage();
+
+    expect(screen.getByText("Legacy Variant")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agents-runtime-inheritance"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the tag in the flat list too", () => {
+    mocks.viewState.grouping = "none";
+    mocks.agents = [BASE_ROLE, follows];
+
+    renderPage();
+
+    expect(screen.getByTestId("agents-runtime-inheritance")).toHaveTextContent(
+      "Inherited",
+    );
   });
 });

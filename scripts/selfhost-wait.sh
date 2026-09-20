@@ -56,12 +56,26 @@ frontend_port=$(compose_host_port frontend 3000 "${FRONTEND_PORT:-3000}")
 backend_url="http://localhost:${backend_port}"
 frontend_url="http://localhost:${frontend_port}"
 
+# Three knobs, all with the interactive defaults, so an unattended caller can
+# ask a stricter question without a second copy of the port-discovery logic:
+#   WAIT_PATH     what to poll — /health only proves the process answers, and
+#                 the autoupdater wants /readyz (db + migrations) before it
+#                 declares an upgrade good
+#   WAIT_ATTEMPTS poll count, 2s apart
+#   WAIT_STRICT   1 = non-zero exit on the deadline, so a caller can roll back
+wait_path=${WAIT_PATH:-/health}
+wait_attempts=${WAIT_ATTEMPTS:-30}
+wait_strict=${WAIT_STRICT:-0}
+case "$wait_attempts" in
+'' | *[!0-9]*) wait_attempts=30 ;;
+esac
+
 health_ok() {
-  curl -sf "${backend_url}/health" >/dev/null 2>&1
+  curl -sf "${backend_url}${wait_path}" >/dev/null 2>&1
 }
 
-echo "==> Waiting for backend to be ready..."
-for _ in $(seq 1 30); do
+echo "==> Waiting for backend to be ready (${wait_path})..."
+for _ in $(seq 1 "$wait_attempts"); do
   if health_ok; then
     break
   fi
@@ -72,6 +86,10 @@ if ! health_ok; then
   echo ""
   echo "Services are still starting. Check logs:"
   echo "  ${compose_cmd[*]} ${compose_files[*]} logs"
+  if [ "$wait_strict" = "1" ]; then
+    echo "Gave up after ${wait_attempts} attempts on ${wait_path}."
+    exit 1
+  fi
   exit 0
 fi
 

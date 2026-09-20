@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -28,6 +29,65 @@ func durationFromEnv(key string, fallback time.Duration) (time.Duration, error) 
 		return 0, fmt.Errorf("%s: invalid duration %q: %w", key, value, err)
 	}
 	return d, nil
+}
+
+// bytesFromEnv reads a byte count, accepting a plain number of bytes or a
+// binary size suffix ("20GiB", "512mb", "2G"). Sizes are the natural unit for
+// a cache ceiling and nobody should have to spell 20 GiB in decimal.
+func bytesFromEnv(key string, fallback int64) (int64, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+	n, err := parseByteSize(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s: invalid size %q: %w", key, value, err)
+	}
+	return n, nil
+}
+
+// byteSizeUnits maps a normalised suffix to its multiplier. Both the "kb" and
+// "kib" spellings mean 1024: a disk-cache ceiling is never quoted in powers of
+// ten, and honouring the SI reading would silently shrink every configured
+// limit by 7% at the GiB scale.
+var byteSizeUnits = []struct {
+	suffix string
+	scale  int64
+}{
+	{"tib", 1 << 40}, {"gib", 1 << 30}, {"mib", 1 << 20}, {"kib", 1 << 10},
+	{"tb", 1 << 40}, {"gb", 1 << 30}, {"mb", 1 << 20}, {"kb", 1 << 10},
+	{"t", 1 << 40}, {"g", 1 << 30}, {"m", 1 << 20}, {"k", 1 << 10},
+	{"b", 1},
+}
+
+func parseByteSize(value string) (int64, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	for _, unit := range byteSizeUnits {
+		if !strings.HasSuffix(normalized, unit.suffix) {
+			continue
+		}
+		number := strings.TrimSpace(strings.TrimSuffix(normalized, unit.suffix))
+		amount, err := strconv.ParseFloat(number, 64)
+		if err != nil {
+			return 0, err
+		}
+		if amount < 0 {
+			return 0, fmt.Errorf("negative size")
+		}
+		scaled := amount * float64(unit.scale)
+		if scaled > float64(math.MaxInt64) {
+			return 0, fmt.Errorf("size overflows int64")
+		}
+		return int64(scaled), nil
+	}
+	n, err := strconv.ParseInt(normalized, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("negative size")
+	}
+	return n, nil
 }
 
 // dayUnit matches a decimal number (with optional leading digits) followed by

@@ -91,6 +91,22 @@ type HealthResponse struct {
 	// individual quota is exhausted until reset_at. Always present (possibly
 	// empty) so Desktop can clear a recovered X without waiting for register.
 	AgyQuotaExhausted []agyQuotaExhaustedEntry `json:"agy_quota_exhausted"`
+	// AgentAccounts is the live multi-CLI account overlay: every existing
+	// account directory of every CLI this daemon knows how to probe, with its
+	// binding lever and credential-existence status. Always present, possibly
+	// empty — Desktop merges it onto runtime metadata so the account surface
+	// updates after a login without waiting for the next re-register, and
+	// reads the empty array as "no accounts" rather than "no answer".
+	//
+	// No credential value can appear here: see AgentAccount, which has no field
+	// able to carry one.
+	AgentAccounts []AgentAccount `json:"agent_accounts"`
+	// AgentAccountsError explains why the probe failed, and is omitted when it
+	// did not. It is what separates the account surface's empty state from its
+	// error state, so it is required rather than optional: with only an empty
+	// AgentAccounts the two are indistinguishable and the UI would offer
+	// editing affordances over a list it could not read.
+	AgentAccountsError string `json:"agent_accounts_error,omitempty"`
 }
 
 type healthWorkspace struct {
@@ -134,6 +150,14 @@ type activeRepoCheckoutTask struct {
 	AgentID     string
 	AgentName   string
 	WorkDir     string
+	// LocalDirectory is the local_directory resource this project pinned on
+	// THIS machine, or nil when it pinned none. It is what makes
+	// /repo/checkout able to honour the rule that a project with a local
+	// directory uses that directory instead of cloning a second copy
+	// (DENE-595). Carried on the token-bound record rather than read from the
+	// request for the same reason every other identity field is: the caller
+	// must not be able to choose it.
+	LocalDirectory *localDirectoryAssignment
 }
 
 // registerActiveRepoCheckoutTask binds checkout identity to the active task.
@@ -311,6 +335,9 @@ const (
 	repoCheckoutRetryAfter      = 2 * time.Second
 	repoCheckoutRetryHeader     = "X-Multica-Retryable"
 	repoCheckoutRetryValueBusy  = "repo-busy"
+	// repoCheckoutBuildingHeader marks a retryable 503 whose cause is an
+	// unfinished first-time cache; the body is then the download's progress.
+	repoCheckoutBuildingHeader = "X-Multica-Repo-Building"
 )
 
 // healthHandler returns the /health HTTP handler. Extracted from serveHealth
@@ -343,6 +370,12 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			status = "running"
 		}
 
+		// The account probe never decides liveness: a host whose home is
+		// unreadable still answers 200 with the error in the body, because a
+		// /health that fails would take the daemon down for a display-only
+		// channel.
+		agentAccounts, agentAccountsErr := d.agentAccountsReport(time.Now())
+
 		resp := HealthResponse{
 			Status:                status,
 			PID:                   os.Getpid(),
@@ -365,6 +398,8 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			PlanLimits:          d.planLimitsByProvider(),
 			AgyLoggedInDirs:     currentAgyLoggedInDirs(),
 			AgyQuotaExhausted:   d.agyQuotaOverlay(time.Now()),
+			AgentAccounts:       agentAccounts,
+			AgentAccountsError:  agentAccountsErr,
 		}
 		if reporter, ok := d.repoCache.(interface{ Activity() repocache.Activity }); ok {
 			activity := reporter.Activity()
@@ -406,6 +441,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
+	mux.HandleFunc("/worktrees/cleanup", d.worktreeCleanupHandler())
 
 	srv := &http.Server{Handler: mux}
 
@@ -471,6 +507,15 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		req.AgentName = activeTask.AgentName
 		req.WorkDir = authorizedWorkDir
 
+		// The local directory wins before any network work is considered.
+		// Deciding here rather than inside the cache is deliberate: the answer
+		// must be the same whether the repo is already cached or not, and the
+		// refusal below must not be reachable from a code path that could
+		// still fall through to a clone.
+		if handled := d.serveLocalDirectoryCheckout(w, activeTask, req); handled {
+			return
+		}
+
 		if d.repoCache == nil {
 			http.Error(w, "repo cache not initialized", http.StatusInternalServerError)
 			return
@@ -479,6 +524,9 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		if err := d.ensureRepoReady(r.Context(), req.WorkspaceID, req.URL); err != nil {
 			if r.Context().Err() != nil {
 				d.logger.Debug("repo checkout readiness cancelled", "url", req.URL, "error", err)
+				return
+			}
+			if d.writeRepoBuilding(w, req, err) {
 				return
 			}
 			statusCode := http.StatusInternalServerError
@@ -519,6 +567,9 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			result, err = d.repoCache.CreateWorktree(params)
 		}
 		if err != nil {
+			if d.writeRepoBuilding(w, req, err) {
+				return
+			}
 			if errors.Is(err, repocache.ErrRepoBusy) && req.RetryBusy {
 				w.Header().Set(repoCheckoutRetryHeader, repoCheckoutRetryValueBusy)
 				w.Header().Set("Retry-After", fmt.Sprintf("%.0f", repoCheckoutRetryAfter.Seconds()))
@@ -537,4 +588,78 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
 	}
+}
+
+// writeRepoBuilding answers a checkout that arrived while the repository's
+// first-time cache is still downloading. Returns true when it wrote the response.
+//
+// A retry-aware client gets the same 503 + Retry-After contract as a busy
+// repository, so it keeps waiting, plus repoCheckoutBuildingHeader so it can
+// tell "downloading, here is how far" from a generic busy. The body is the
+// progress either way: a client that does not retry shows it as its error,
+// which is still the truth and still says not to delete anything.
+func (d *Daemon) writeRepoBuilding(w http.ResponseWriter, req repoCheckoutRequest, err error) bool {
+	var building *repocache.RepoBuildingError
+	if !errors.As(err, &building) {
+		return false
+	}
+	d.logger.Info("repo checkout waiting on first-time cache", "url", req.URL, "task_id", req.TaskID, "progress", building.Status.Describe(time.Now()))
+	if req.RetryBusy {
+		w.Header().Set(repoCheckoutRetryHeader, repoCheckoutRetryValueBusy)
+		w.Header().Set(repoCheckoutBuildingHeader, "1")
+		w.Header().Set("Retry-After", fmt.Sprintf("%.0f", repoCheckoutRetryAfter.Seconds()))
+	}
+	http.Error(w, building.Error(), http.StatusServiceUnavailable)
+	return true
+}
+
+// localDirectoryCheckoutSource is the value /repo/checkout reports in the
+// response's `source` field when it answered from the project's local
+// directory instead of the clone cache. A CLI too old to know the field prints
+// its generic "checked out" line, which stays true: the path it names is where
+// the code is.
+const localDirectoryCheckoutSource = "local_directory"
+
+// localCheckoutResponse is the /repo/checkout body for a local-directory
+// answer. It is a subset of repocache.WorktreeResult plus `source`, so an
+// existing client parses it unchanged.
+type localCheckoutResponse struct {
+	Path       string `json:"path"`
+	BranchName string `json:"branch_name,omitempty"`
+	Source     string `json:"source"`
+	// ExecutionMode is the pinned resource's execution mode. The CLI needs it
+	// to describe the path: in in_place and shared it is the user's own
+	// checkout, in worktree it is this task's private one. Additive — a CLI
+	// that does not know the field keeps its old wording.
+	ExecutionMode string `json:"execution_mode,omitempty"`
+}
+
+// serveLocalDirectoryCheckout enforces the source rule for one checkout
+// request. Returns true when it has written the response and the caller must
+// not continue to the clone path.
+//
+// The refusal branch is why this returns a bool rather than a path: "could not
+// verify the local directory" must END the request. Letting it fall through to
+// the cache is exactly the silent remote re-clone this exists to stop.
+func (d *Daemon) serveLocalDirectoryCheckout(w http.ResponseWriter, activeTask activeRepoCheckoutTask, req repoCheckoutRequest) bool {
+	outcome := decideLocalCheckout(activeTask.LocalDirectory, activeTask.WorkDir, req.URL, nil)
+	if outcome.Refusal != "" {
+		d.logger.Warn("repo checkout refused: local directory could not be verified",
+			"task_id", req.TaskID, "url", req.URL, "local_path", activeTask.LocalDirectory.AbsPath)
+		http.Error(w, outcome.Refusal, http.StatusConflict)
+		return true
+	}
+	if outcome.Path == "" {
+		return false
+	}
+	d.logger.Info("repo checkout served from the project's local directory",
+		"task_id", req.TaskID, "url", req.URL, "path", outcome.Path)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(localCheckoutResponse{
+		Path:          outcome.Path,
+		BranchName:    currentGitBranch(outcome.Path),
+		Source:        localDirectoryCheckoutSource,
+		ExecutionMode: outcome.ExecutionMode,
+	})
+	return true
 }

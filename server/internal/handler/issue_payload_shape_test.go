@@ -140,6 +140,12 @@ func fullyPopulatedIssue(t *testing.T) db.Issue {
 		ParentIssueID:  parseUUID("55555555-5555-5555-5555-555555555555"),
 		ProjectID:      parseUUID("66666666-6666-6666-6666-666666666666"),
 		Position:       1024.5,
+		// Provenance is omitempty in BOTH renderings, so a fixture without it
+		// would hide the pair from the drift guard entirely: the guard would
+		// stay green while one rendering emitted the keys and the other did
+		// not (DENE-371).
+		OriginType:     pgtype.Text{String: "issue_draft", Valid: true},
+		OriginID:       parseUUID("88888888-8888-8888-8888-888888888888"),
 		Stage:          pgtype.Int4{Int32: 2, Valid: true},
 		StartDate:      pgtype.Date{Time: utcDate(2026, time.January, 1), Valid: true},
 		DueDate:        pgtype.Date{Time: utcDate(2026, time.February, 1), Valid: true},

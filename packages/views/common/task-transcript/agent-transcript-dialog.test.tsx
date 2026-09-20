@@ -8,9 +8,21 @@ import { api } from "@multica/core/api";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { AgentRuntime, AgentTask } from "@multica/core/types/agent";
 import { useTranscriptViewStore } from "@multica/core/agents/stores";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderWithI18n } from "../../test/i18n";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
+
+// The dialog reads server state (this run's code source), so it needs the
+// QueryClient every app that mounts it already provides. Retries off and a
+// per-render cache, so a query nobody stubbed settles once instead of retrying
+// past the end of the test.
+function withQueryClient(ui: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: Infinity } },
+  });
+  return <QueryClientProvider client={client}>{ui}</QueryClientProvider>;
+}
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("./use-trace-issue-labels", () => ({
@@ -222,14 +234,16 @@ function renderDialog(
   } = {},
 ) {
   return renderWithI18n(
-    <AgentTranscriptDialog
-      open
-      onOpenChange={vi.fn()}
-      task={options.task ?? baseTask}
-      items={dialogItems}
-      agentName="Codex"
-      isLive={options.isLive}
-    />,
+    withQueryClient(
+      <AgentTranscriptDialog
+        open
+        onOpenChange={vi.fn()}
+        task={options.task ?? baseTask}
+        items={dialogItems}
+        agentName="Codex"
+        isLive={options.isLive}
+      />,
+    ),
     { locale: options.locale },
   );
 }
@@ -325,17 +339,19 @@ describe("AgentTranscriptDialog", () => {
   // and the header already carries it.
   it("states the agent once in the header, not on every prose row", () => {
     renderWithI18n(
-      <AgentTranscriptDialog
-        open
-        onOpenChange={vi.fn()}
-        task={{ ...baseTask, agent_id: "agent-1" }}
-        items={[
-          { seq: 1, type: "text", content: "Cleanup done. Starting tests:" },
-          { seq: 2, type: "text", content: "Now adding the Feishu row:" },
-          { seq: 3, type: "text", content: "Now the version bump:" },
-        ]}
-        agentName="【Chores|Opus5】Multica Helper"
-      />,
+      withQueryClient(
+        <AgentTranscriptDialog
+          open
+          onOpenChange={vi.fn()}
+          task={{ ...baseTask, agent_id: "agent-1" }}
+          items={[
+            { seq: 1, type: "text", content: "Cleanup done. Starting tests:" },
+            { seq: 2, type: "text", content: "Now adding the Feishu row:" },
+            { seq: 3, type: "text", content: "Now the version bump:" },
+          ]}
+          agentName="【Chores|Opus5】Multica Helper"
+        />,
+      ),
     );
 
     expect(screen.getAllByTestId("rich-content")).toHaveLength(3);

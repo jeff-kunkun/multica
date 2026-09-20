@@ -192,6 +192,9 @@ func (q *Queries) DeleteWorkspaceComments(ctx context.Context, workspaceID pgtyp
 
 const deleteWorkspaceCommunicationRoots = `-- name: DeleteWorkspaceCommunicationRoots :exec
 WITH
+deleted_chat_session_projects AS (
+    DELETE FROM chat_session_project WHERE workspace_id = $1
+),
 deleted_sessions AS (
     DELETE FROM chat_session WHERE chat_session.workspace_id = $1
 ),
@@ -208,6 +211,9 @@ deleted_channel_installations AS (
 DELETE FROM lark_installation WHERE lark_installation.workspace_id = $1
 `
 
+// chat_session_project carries workspace_id precisely so teardown does not have
+// to join through chat_session, which this same statement deletes (same no-FK
+// chore as chat_draft_restore in DeleteWorkspaceLeafData).
 func (q *Queries) DeleteWorkspaceCommunicationRoots(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspaceCommunicationRoots, workspaceID)
 	return err
@@ -300,8 +306,17 @@ deleted_hourly_dirty AS (
 deleted_hourly AS (
     DELETE FROM task_usage_hourly WHERE workspace_id = $1
 ),
+deleted_stage_wakeup_failures AS (
+    DELETE FROM stage_wakeup_failure WHERE workspace_id = $1
+),
 deleted_attachments AS (
     DELETE FROM attachment WHERE workspace_id = $1
+),
+deleted_transfer_attachment_chunks AS (
+    DELETE FROM transfer_attachment_upload_chunk WHERE workspace_id = $1
+),
+deleted_transfer_attachment_uploads AS (
+    DELETE FROM transfer_attachment_upload WHERE workspace_id = $1
 ),
 deleted_channel_outbound_cards AS (
     DELETE FROM channel_outbound_card_message
@@ -317,6 +332,9 @@ deleted_draft_restores AS (
 ),
 deleted_agent_builder_drafts AS (
     DELETE FROM agent_builder_draft WHERE workspace_id = $1
+),
+deleted_issue_drafts AS (
+    DELETE FROM issue_draft WHERE workspace_id = $1
 ),
 deleted_comment_reactions AS (
     DELETE FROM comment_reaction WHERE workspace_id = $1
@@ -488,9 +506,17 @@ WHERE channel_media_pending_object.workspace_id = $1
 // here is still removed by this teardown rather than by the FK cascade. The
 // former single statement combined all three with OR, which cost a full scan of
 // task_token (MUL-5999); split, each path is an index scan.
+// Stage-barrier wake failures are workspace-keyed rows with no foreign key, so
+// nothing else removes them. The Stage 4 writer was removed in DENE-520, but the
+// table and migrations stay for self-hosted workspaces that already applied
+// them, so the teardown keeps sweeping whatever a pre-removal build left behind.
+// Same no-FK chore for the resumable attachment staging (DENE-443). Both
+// tables are keyed by workspace_id, so the teardown never has to assemble the
+// (sha256, offset) pairs it is dropping first.
 // Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
 // than the session set because that column exists precisely so this statement
 // does not have to join through chat_session, which it deletes in this same CTE.
+// Same no-FK chore for the alignment conversations' structured drafts.
 // Keep the two-system cleanup ledger until object storage has been settled.
 // Moving every row out of pending also prevents a concurrent media bind from
 // attaching an object after the workspace teardown commits. The reconciler

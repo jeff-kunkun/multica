@@ -27,6 +27,7 @@ export const workspaceKeys = {
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
+  routingHealth: (wsId: string) => ["workspaces", wsId, "routing-health"] as const,
 };
 
 export function workspaceListOptions() {
@@ -41,6 +42,25 @@ export function workspaceBySlugOptions(slug: string) {
   return queryOptions({
     ...workspaceListOptions(),
     select: (list: Workspace[]) => list.find((w) => w.slug === slug) ?? null,
+  });
+}
+
+/**
+ * Whether routing is actually working for this workspace right now.
+ *
+ * The routing design keeps failures off tickets, so the settings section is
+ * the only place a person can learn that the routing model is rejected or
+ * cooling down (DENE-633). The read is cheap — the server reports breaker
+ * state and never dials the model — but it is still refetched on an interval
+ * rather than continuously, because a cooldown ends on a clock and the chip
+ * should stop lying without the person reloading.
+ */
+export function routingHealthOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.routingHealth(wsId),
+    queryFn: () => api.getRoutingHealth(wsId),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 }
 

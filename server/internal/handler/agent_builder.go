@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
@@ -341,11 +342,20 @@ func (h *Handler) SaveAgentBuilderDraft(w http.ResponseWriter, r *http.Request) 
 
 // resolveBuilderRuntime loads a runtime the caller is allowed to execute a
 // builder conversation on. Shared by session create and runtime switch so both
-// enforce the same three gates in the same order: it exists in this workspace,
-// this member may use it (private runtimes stay owner/admin-only), and it is
-// online. verb names the attempted action in the offline error so the two call
-// sites read naturally.
+// enforce the same three gates in the same order.
 func (h *Handler) resolveBuilderRuntime(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID pgtype.UUID, runtimeID, verb string) (db.AgentRuntime, bool) {
+	return h.resolveSessionCarrierRuntime(w, r, workspaceID, workspaceUUID, runtimeID, "an agent builder session", verb)
+}
+
+// resolveSessionCarrierRuntime loads a runtime the caller is allowed to run a
+// hidden-carrier conversation on. Every carrier flow (agent builder, issue
+// draft) admits a runtime through exactly these three gates in this order: it
+// exists in this workspace, this member may use it (private runtimes stay
+// owner/admin-only), and it is online. flow and verb only name the attempted
+// action in the offline error so each call site reads naturally — a second copy
+// of the gates per flow is how one of them ends up missing the private-runtime
+// check.
+func (h *Handler) resolveSessionCarrierRuntime(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID pgtype.UUID, runtimeID, flow, verb string) (db.AgentRuntime, bool) {
 	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
 	if !ok {
 		return db.AgentRuntime{}, false
@@ -367,10 +377,46 @@ func (h *Handler) resolveBuilderRuntime(w http.ResponseWriter, r *http.Request, 
 		return db.AgentRuntime{}, false
 	}
 	if runtime.Status != "online" {
-		writeError(w, http.StatusConflict, fmt.Sprintf("runtime must be online to %s an agent builder session", verb))
+		writeError(w, http.StatusConflict, fmt.Sprintf("runtime must be online to %s %s", verb, flow))
 		return db.AgentRuntime{}, false
 	}
 	return runtime, true
+}
+
+// thinkingLevelAcceptedForRuntime validates a reasoning effort for an agent row
+// against the runtime it will actually run on, writing the 400 itself when it
+// refuses.
+//
+// It exists because agent create and the issue-draft carrier create have to
+// answer the same two questions and neither may answer differently (DENE-514):
+//
+//   - Is this a value this provider understands at all? A fixed-enum provider
+//     rejects an unknown literal here rather than persisting a word the daemon
+//     will drop.
+//   - For an ACP-catalog provider, does the catalog this runtime reported
+//     actually advertise an effort? The provider name is not the answer there,
+//     and this is the check that keeps a level from being frozen onto an agent
+//     that cannot take one.
+//
+// An empty level means "let the local CLI decide" and is always accepted — it
+// is the picker's own empty option, not a missing value.
+func (h *Handler) thinkingLevelAcceptedForRuntime(w http.ResponseWriter, r *http.Request, runtime db.AgentRuntime, level string) bool {
+	if !agent.IsKnownThinkingValue(runtime.Provider, level) {
+		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, level))
+		return false
+	}
+	if level == "" {
+		return true
+	}
+	switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
+	case acpEffortAbsent:
+		writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
+		return false
+	case acpEffortUnknown:
+		writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(runtime.Provider))
+		return false
+	}
+	return true
 }
 
 type SwitchAgentBuilderRuntimeRequest struct {

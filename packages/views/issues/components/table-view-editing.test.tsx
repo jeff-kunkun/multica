@@ -381,6 +381,7 @@ describe("TableView cell editors under data refresh", () => {
                 rows: serverIssues.map((issue) => ({
                   issue,
                   direct_child_count: 0,
+                  is_pinned: false,
                 })),
               }
             : previous,

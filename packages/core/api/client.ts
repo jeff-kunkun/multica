@@ -2,6 +2,12 @@ import { configStore } from "../config";
 import type {
   Issue,
   IssuePriority,
+  IssueDraft,
+  IssueDraftPayload,
+  IssueDraftSession,
+  IssueDraftSummary,
+  IssueDraftFinalizeResult,
+  IssueDraftRuntimeSwitch,
   CreateIssueRequest,
   MoveIssueRequest,
   UpdateIssueRequest,
@@ -76,6 +82,9 @@ import type {
   DashboardFailureByAgent,
   RuntimeUpdate,
   RuntimeModelListRequest,
+  RuntimeProviderPresetAction,
+  RuntimeProviderPresetRequest,
+  RuntimeProviderPresetTicket,
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
@@ -96,6 +105,7 @@ import type {
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
+  ProjectMember,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -238,6 +248,10 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  parseRoutingHealth,
+  type RoutingHealth,
+} from "../workspace/routing-health";
+import {
   parseConfigBundle,
   parseConfigImportReport,
   reportFromImportError,
@@ -269,6 +283,18 @@ import {
   AgentRuntimeListSchema,
   AgentBuilderRuntimeSwitchSchema,
   AgentBuilderSessionSchema,
+  IssueDraftSchema,
+  IssueDraftSessionSchema,
+  IssueDraftListSchema,
+  IssueDraftFinalizeSchema,
+  IssueDraftRuntimeSwitchSchema,
+  EMPTY_ISSUE_DRAFT,
+  EMPTY_ISSUE_DRAFT_SESSION,
+  EMPTY_ISSUE_DRAFT_LIST,
+  issueDraftRuntimeSwitchFallback,
+  AgentSchema,
+  AgentListSchema,
+  EMPTY_AGENT_LIST,
   AgentBuilderSessionListSchema,
   EMPTY_AGENT_BUILDER_SESSION_LIST,
   agentBuilderRuntimeSwitchFallback,
@@ -328,6 +354,8 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
+  ProjectMemberListSchema,
+  ProjectMemberSchema,
   SquadSchema,
   SquadListSchema,
   SquadMemberListSchema,
@@ -424,6 +452,10 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  RuntimeProviderPresetRequestSchema,
+  MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
+  RuntimeProviderPresetTicketSchema,
+  MALFORMED_RUNTIME_PROVIDER_PRESET_TICKET,
   SkillSchema,
   EMPTY_SKILL,
   SkillImportResultSchema,
@@ -460,6 +492,7 @@ import {
   EMPTY_JOIN_SHARE_LINK_RESPONSE,
   type IssueView,
   type IssueViewPreference,
+  type IssueViewVisibility,
   type CreateIssueViewRequest,
 } from "./schemas";
 
@@ -1269,7 +1302,13 @@ export class ApiClient {
   }
 
   async getChildIssueProgress(): Promise<{
-    progress: { parent_issue_id: string; total: number; done: number }[];
+    progress: {
+      parent_issue_id: string;
+      total: number;
+      done: number;
+      blocked: number;
+      active: number;
+    }[];
   }> {
     const raw = await this.fetch<unknown>("/api/issues/child-progress");
     return parseWithFallback(
@@ -1499,15 +1538,50 @@ export class ApiClient {
   }
 
   // Agents
+  //
+  // Both reads go through the zod boundary (DENE-304). Installed desktop
+  // builds talk to newer servers, and the agents list is the surface the whole
+  // product is navigated from: a malformed row must degrade to the empty state
+  // rather than throw during render. The two-level specialisation fields
+  // (`parent_agent_id`, `inherited_*`, `child_count`) are optional-and-caught
+  // in AgentSchema, so a backend that predates them still yields agents.
   async listAgents(params?: { workspace_id?: string; include_archived?: boolean }): Promise<Agent[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
-    return this.fetch(`/api/agents?${search}`);
+    const raw = await this.fetch<unknown>(`/api/agents?${search}`);
+    return parseWithFallback(raw, AgentListSchema, EMPTY_AGENT_LIST, {
+      endpoint: "GET /api/agents",
+    });
   }
 
-  async getAgent(id: string): Promise<Agent> {
-    return this.fetch(`/api/agents/${id}`);
+  /**
+   * Reads one agent, including the inherited half of a specialisation
+   * (`inherited_instructions` / `inherited_skills`) that only this endpoint
+   * loads. Degrades to `null` instead of a blank-named agent when the payload
+   * fails validation; callers fall back to the list row they already hold.
+   */
+  async getAgent(id: string): Promise<Agent | null> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`);
+    return parseWithFallback<Agent | null>(raw, AgentSchema, null, {
+      endpoint: "GET /api/agents/:id",
+    });
+  }
+
+  /**
+   * Bakes a specialisation's inherited prompt into its own `instructions` and
+   * detaches it from its base role (DENE-301) — the documented escape hatch
+   * that lets the base role be archived. Server-side this is `POST
+   * /api/agents/{id}/solidify`; every refusal is a 409 with a readable reason
+   * (not a specialisation, parent gone, parent has no prompt).
+   */
+  async solidifyAgent(id: string): Promise<Agent | null> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/solidify`, {
+      method: "POST",
+    });
+    return parseWithFallback<Agent | null>(raw, AgentSchema, null, {
+      endpoint: "POST /api/agents/:id/solidify",
+    });
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
@@ -1623,6 +1697,196 @@ export class ApiClient {
       AgentBuilderRuntimeSwitchSchema,
       agentBuilderRuntimeSwitchFallback(data.runtime_id),
       { endpoint: "PATCH /api/agent-builder/sessions/{id}/runtime" },
+    );
+  }
+
+  /**
+   * Opens an alignment conversation: a hidden carrier, its chat session, and
+   * an empty draft, created together server-side. Nothing about an issue
+   * exists yet — `finalizeIssueDraft` is the only call that creates one.
+   */
+  async createIssueDraftSession(data: {
+    runtime_id: string;
+    model?: string;
+    /**
+     * Reasoning effort for the carrier, empty meaning the local CLI's own
+     * default. Frozen onto the carrier at creation like `model` — the daemon
+     * reads both off the agent row — and validated server-side against the
+     * target runtime, so a level this runtime cannot take is a 400 rather than a
+     * value that silently never runs (DENE-514).
+     */
+    thinking_level?: string;
+    draft?: Partial<IssueDraftPayload>;
+    /** Which alignment policy to open under. Omitted means the guided
+     *  default; see packages/core/issue-drafts/policy.ts. */
+    policy?: string;
+    /**
+     * Which built-in alignment methods the carrier is given. Omitted means the
+     * server's built-in default set; an empty array means "none", which is how
+     * the picker's all-unchecked state is expressed. The keys this client
+     * offers are in packages/core/issue-drafts/capabilities.ts.
+     */
+    capabilities?: string[];
+  }): Promise<IssueDraftSession> {
+    const raw = await this.fetch<unknown>("/api/issue-drafts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      IssueDraftSessionSchema,
+      EMPTY_ISSUE_DRAFT_SESSION,
+      { endpoint: "POST /api/issue-drafts" },
+    );
+  }
+
+  /**
+   * The caller's alignment conversations. They are hidden from every chat list
+   * (their carrier is `kind = 'system'`), so this is the only route back to
+   * one. A 404 means the backend predates the endpoint: degrade to "no drafts"
+   * rather than erroring the surface that lists them.
+   *
+   * `status: "all"` widens the read from "alignments I can still act on" to
+   * "every alignment I have", terminal ones included — the records the chat
+   * sidebar lists (DENE-371). The parameter is additive: a backend that
+   * predates it ignores the query string and answers with the live drafts
+   * only, which leaves the record surfaces empty rather than broken.
+   */
+  async listIssueDrafts(options?: { status?: "all" }): Promise<IssueDraftSummary[]> {
+    const path =
+      options?.status === "all" ? "/api/issue-drafts?status=all" : "/api/issue-drafts";
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(path);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return [];
+      throw err;
+    }
+    return parseWithFallback(
+      raw,
+      IssueDraftListSchema,
+      EMPTY_ISSUE_DRAFT_LIST,
+      { endpoint: "GET /api/issue-drafts" },
+    ).drafts;
+  }
+
+  /**
+   * Saves what the conversation has agreed so far. `expected_revision` is the
+   * revision the caller was looking at; a save built on a superseded view is
+   * rejected with 409 rather than overwriting what it never saw.
+   */
+  async updateIssueDraft(
+    sessionId: string,
+    data: {
+      draft: IssueDraftPayload;
+      status?: "draft" | "ready";
+      expected_revision: number;
+    },
+  ): Promise<IssueDraft> {
+    const raw = await this.fetch<unknown>(`/api/issue-drafts/${sessionId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
+      endpoint: "PATCH /api/issue-drafts/{id}",
+    });
+  }
+
+  /** Discards a draft. The conversation itself is left alone. */
+  async abandonIssueDraft(sessionId: string): Promise<IssueDraft> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-drafts/${sessionId}/abandon`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
+      endpoint: "POST /api/issue-drafts/{id}/abandon",
+    });
+  }
+
+  /**
+   * Starts another round on an alignment that already produced its group, so
+   * the same conversation can be continued and the next confirm adds only the
+   * nodes that own no issue yet.
+   *
+   * The same session and the same draft row, never a new one — the group's
+   * identity is derived from the session, so a second session would mean a
+   * second group. Idempotent by construction: only a `completed` draft
+   * reopens, and an open round (`draft` / `ready`) answers with the row as it
+   * stands, so a client may call it on load as well as on an explicit
+   * "continue aligning" (DENE-414).
+   *
+   * Parsed with a fallback like the other draft writes: this is a lifecycle
+   * move whose answer the caller re-reads from the list anyway, and a body that
+   * cannot be parsed must not turn a reopen that committed into a failed
+   * request.
+   */
+  async reopenIssueDraft(sessionId: string): Promise<IssueDraft> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-drafts/${sessionId}/reopen`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
+      endpoint: "POST /api/issue-drafts/{id}/reopen",
+    });
+  }
+
+  /**
+   * Confirms a draft into an issue. Safe to retry: the protocol creates at
+   * most one issue per draft and every repeat returns that same `issue_id`.
+   *
+   * No fallback — see IssueDraftFinalizeSchema. A 2xx means the issue exists,
+   * and the caller navigates to it, so an unparseable body must throw rather
+   * than hand the router an empty id.
+   */
+  async finalizeIssueDraft(
+    sessionId: string,
+    data: { expected_revision: number },
+  ): Promise<IssueDraftFinalizeResult> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-drafts/${sessionId}/finalize`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+    return IssueDraftFinalizeSchema.parse(raw);
+  }
+
+  /**
+   * Switches a live alignment conversation's policy: guided questions, plain
+   * dialogue, or the front-end look round. The keys are the server registry's;
+   * the client's whitelist is packages/core/issue-drafts/policy.ts.
+   *
+   * The response is the updated draft, including the policy version the server
+   * recorded — the audit value, not an echo of the request. It is parsed with a
+   * fallback because a caller that cannot read the body can still re-read the
+   * list; the switch itself already committed server-side.
+   */
+  async switchIssueDraftPolicy(
+    sessionId: string,
+    data: { policy: string },
+  ): Promise<IssueDraft> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-drafts/${sessionId}/policy`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
+      endpoint: "PATCH /api/issue-drafts/{id}/policy",
+    });
+  }
+
+  /** Rebinds a live alignment conversation to another runtime. Callers must
+   *  not show the new runtime as selected until this resolves. */
+  async switchIssueDraftRuntime(
+    sessionId: string,
+    data: { runtime_id: string },
+  ): Promise<IssueDraftRuntimeSwitch> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-drafts/${sessionId}/runtime`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(
+      raw,
+      IssueDraftRuntimeSwitchSchema,
+      issueDraftRuntimeSwitchFallback(data.runtime_id),
+      { endpoint: "PATCH /api/issue-drafts/{id}/runtime" },
     );
   }
 
@@ -2386,6 +2650,56 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
   }
 
+  // Provider presets are the machine's own agent-CLI configuration, so this is
+  // the same park-then-poll contract as every other runtime action the server
+  // cannot perform itself: the POST enqueues one action for the runtime's
+  // daemon and answers with a ticket, the GET carries the outcome.
+  //
+  // `payload` is opaque to the server (it forwards it to the daemon unchanged)
+  // and is validated here only insofar as both ends are parsed. On an upsert it
+  // carries the API key, which is why the server's POST reply is a ticket
+  // rather than the record: echoing the body back would put the secret on a
+  // second path for nothing.
+  async initiateProviderPresetAction(
+    runtimeId: string,
+    provider: string,
+    action: RuntimeProviderPresetAction,
+    payload?: unknown,
+  ): Promise<RuntimeProviderPresetTicket> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/provider-presets`,
+      {
+        method: "POST",
+        body: JSON.stringify({ provider, action, payload }),
+      },
+    );
+    return parseWithFallback<RuntimeProviderPresetTicket>(
+      raw,
+      RuntimeProviderPresetTicketSchema,
+      MALFORMED_RUNTIME_PROVIDER_PRESET_TICKET,
+      { endpoint: "POST /api/runtimes/{id}/provider-presets" },
+    );
+  }
+
+  async getProviderPresetResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeProviderPresetRequest> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/provider-presets/${requestId}`,
+    );
+    return parseWithFallback<RuntimeProviderPresetRequest>(
+      raw,
+      RuntimeProviderPresetRequestSchema,
+      {
+        ...MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
+        id: requestId,
+        runtime_id: runtimeId,
+      },
+      { endpoint: "GET /api/runtimes/{id}/provider-presets/{requestId}" },
+    );
+  }
+
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {
     const raw = await this.fetch<unknown>(`/api/agents/${agentId}/tasks`);
     return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
@@ -2627,6 +2941,31 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+  }
+
+  /**
+   * Read whether routing is actually working for this workspace.
+   *
+   * Read-only and cheap: the server reports breaker state and never dials the
+   * model, so an open settings tab cannot turn into an outbound request loop.
+   */
+  async getRoutingHealth(workspaceId: string): Promise<RoutingHealth> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/routing/health`,
+    );
+    return parseRoutingHealth(raw);
+  }
+
+  /**
+   * The "re-check" button. This one DOES dial the model, which is the only way
+   * out of a cooldown short of waiting it out.
+   */
+  async checkRoutingHealth(workspaceId: string): Promise<RoutingHealth> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/routing/health/check`,
+      { method: "POST" },
+    );
+    return parseRoutingHealth(raw);
   }
 
   async exportWorkspaceConfig(workspaceId: string): Promise<ConfigBundle> {
@@ -3314,6 +3653,10 @@ export class ApiClient {
     data: {
       agent_id: string;
       title?: string;
+      /** The session's project set, in selection order (DENE-522). Mutually
+       *  exclusive with `project_id` — the server rejects both at once rather
+       *  than silently preferring one. */
+      project_ids?: string[];
       project_id?: string | null;
     },
     workspaceSlug?: string,
@@ -3351,7 +3694,10 @@ export class ApiClient {
 
   async updateChatSession(
     id: string,
-    data: { title: string } | { project_id: string | null },
+    // One field per request: the server rejects a body that carries more than
+    // one of them. `project_ids` is the complete replacement set in selection
+    // order; an empty array clears the session's project context.
+    data: { title: string } | { project_id: string | null } | { project_ids: string[] },
   ): Promise<ChatSession> {
     return this.fetch(`/api/chat/sessions/${id}`, {
       method: "PATCH",
@@ -3714,6 +4060,46 @@ export class ApiClient {
     });
   }
 
+  async listProjectMembers(projectId: string): Promise<ProjectMember[]> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/members`);
+    const parsed = parseWithFallback<ProjectMember[] | null>(
+      raw,
+      ProjectMemberListSchema,
+      null,
+      { endpoint: "GET /api/projects/:id/members" },
+    );
+    if (parsed === null) {
+      throw new Error("GET /api/projects/:id/members failed schema validation");
+    }
+    return parsed;
+  }
+
+  async addProjectMember(
+    projectId: string,
+    data: { member_id: string },
+  ): Promise<ProjectMember> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const parsed = parseWithFallback<ProjectMember | null>(
+      raw,
+      ProjectMemberSchema,
+      null,
+      { endpoint: "POST /api/projects/:id/members" },
+    );
+    if (parsed === null) {
+      throw new Error("POST /api/projects/:id/members failed schema validation");
+    }
+    return parsed;
+  }
+
+  async removeProjectMember(projectId: string, memberId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/members/${memberId}`, {
+      method: "DELETE",
+    });
+  }
+
   // Labels
   async listLabels(resourceType: LabelResourceType = "issue"): Promise<ListLabelsResponse> {
     const raw = await this.fetch<unknown>(`/api/labels?resource_type=${resourceType}`);
@@ -4052,7 +4438,7 @@ export class ApiClient {
     id: string,
     data: {
       name?: string;
-      visibility?: "private" | "workspace";
+      visibility?: IssueViewVisibility;
       scope_variant?: string | null;
       query?: Record<string, unknown>;
       display?: Record<string, unknown>;

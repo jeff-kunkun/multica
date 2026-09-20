@@ -33,6 +33,18 @@ const (
 	// isolation, so it is the milder failure — but the server still gates on
 	// the capability so the user learns at save time, not from a queue.
 	DaemonCapabilityLocalSharedV1 = "local-shared-v1"
+	// DaemonCapabilityLocalWorktreeUserRootV1 advertises that the daemon puts
+	// a parallel-mode working copy on the USER's disk, beside their
+	// repository, instead of inside the Multica workspace (DENE-617).
+	//
+	// Gated because worktree_root is a promise about WHERE a copy will be and
+	// who may reclaim it. A daemon that predates the move json-skips the field
+	// and creates the copy inside its env root, where the workspace GC deletes
+	// it — the exact thing a user who picked a location asked not to happen.
+	// So the server strips worktree_root before dispatching to such a daemon:
+	// it then behaves exactly as it does today, rather than appearing to honour
+	// a setting it cannot implement.
+	DaemonCapabilityLocalWorktreeUserRootV1 = "local-worktree-user-root-v1"
 	// DaemonCapabilitySourceContextQuickCreateV1 advertises support for the
 	// two-section quick-create prompt that keeps a new instruction separate
 	// from immutable historical source context.
@@ -162,6 +174,7 @@ type WorkspacesChangedPayload struct{}
 // newer server stays safe on an older daemon.
 const (
 	PendingWorkKindModelList        = "model_list"
+	PendingWorkKindProviderConfig   = "provider_config"
 	PendingWorkKindLocalSkills      = "local_skills"
 	PendingWorkKindLocalSkillImport = "local_skill_import"
 )
@@ -379,6 +392,12 @@ type ChatSessionUpdatedPayload struct {
 	// ProjectID is set only by the project-context update path. The double
 	// pointer distinguishes an omitted field from an explicit JSON null.
 	ProjectID **string `json:"project_id,omitempty"`
+	// ProjectIDs carries the session's FULL project set in selection order on
+	// the same path (DENE-523), so another device patches the whole set rather
+	// than the mirrored primary alone. nil on rename/pin/archive — the receiver
+	// leaves the existing set untouched — and an empty non-nil slice when the
+	// set was cleared.
+	ProjectIDs *[]string `json:"project_ids,omitempty"`
 	// Pinned is set only by the pin/unpin path; nil on a plain rename so a
 	// receiver leaves the existing pin state untouched.
 	Pinned *bool `json:"pinned,omitempty"`
@@ -396,12 +415,53 @@ type DaemonHeartbeatRequestPayload struct {
 	RuntimeID           string              `json:"runtime_id"`
 	SupportsBatchImport bool                `json:"supports_batch_import,omitempty"`
 	PlanLimits          *PlanLimitsSnapshot `json:"plan_limits,omitempty"`
+	// Jev is the host-level JEV (fast judgement layer) status observed by the
+	// daemon. There is one state directory per machine, so every runtime frame
+	// of a daemon carries the same snapshot. Daemons that predate the field
+	// omit it; the server then leaves the stored column untouched (NULL reads
+	// as unknown), which is why a reporting daemon must always send a snapshot
+	// — even an `unknown` one — instead of nil.
+	Jev *JevStatusSnapshot `json:"jev,omitempty"`
 }
 
 const (
 	PlanLimitsStatusAvailable = "available"
 	PlanLimitsStatusExhausted = "exhausted"
 )
+
+const (
+	// JevStatusActive means the judgement layer is callable.
+	JevStatusActive = "active"
+	// JevStatusFallback means it is suspended (manual disable or breaker
+	// cooldown) and callers are on the fallback path.
+	JevStatusFallback = "fallback"
+	// JevStatusUnknown means the daemon could not read the state files, so no
+	// claim about availability may be made.
+	JevStatusUnknown = "unknown"
+)
+
+// JevStatusSnapshot is a credential-free view of the local JEV state directory
+// (`$XDG_STATE_HOME/jev`, default `~/.local/state/jev`). API keys, base URLs and
+// account identifiers live in `~/.config/jev/runtime.env` and are deliberately
+// never read or reported. Cooldown remaining is computed by the client from
+// DisabledUntil, so the payload stays a pure function of the observed files.
+type JevStatusSnapshot struct {
+	Status        string `json:"status"`
+	Model         string `json:"model,omitempty"`
+	Manual        bool   `json:"manual,omitempty"`
+	DisabledUntil int64  `json:"disabled_until,omitempty"`
+	Failures      int    `json:"failures,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	LastScene     string `json:"last_scene,omitempty"`
+	LastOutcome   string `json:"last_outcome,omitempty"`
+	// LastDecisionAt is the tail line's `at` as unix seconds.
+	LastDecisionAt int64 `json:"last_decision_at,omitempty"`
+	// ObservedAt is the newest mtime of the two state files, in unix seconds.
+	// It must never be time.Now(): the storage UPDATE is guarded by
+	// IS DISTINCT FROM, so a wall-clock value would rewrite and rebroadcast on
+	// every heartbeat. Zero is valid and reserved for the unreadable case.
+	ObservedAt int64 `json:"observed_at"`
+}
 
 // PlanLimitsSnapshot is a credential-free view of the subscription windows
 // reported by the provider CLI running beside the daemon. Provider-specific
@@ -446,6 +506,7 @@ type DaemonHeartbeatAckPayload struct {
 	RuntimeGone             bool                                    `json:"runtime_gone,omitempty"`
 	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
+	PendingProviderConfig   *DaemonHeartbeatPendingProviderConfig   `json:"pending_provider_config,omitempty"`
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
 	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
 	// PendingLocalSkillImports carries multiple import requests in a single
@@ -470,6 +531,18 @@ type DaemonHeartbeatPendingUpdate struct {
 // enumerate the runtime's supported models.
 type DaemonHeartbeatPendingModelList struct {
 	ID string `json:"id"`
+}
+
+// DaemonHeartbeatPendingProviderConfig describes a request for the daemon to
+// read or edit one of the host's agent provider presets. Payload is opaque to
+// the server — it is the action body as the caller wrote it, forwarded
+// unchanged — and it is the only heartbeat payload that may carry a credential
+// on its way to the daemon.
+type DaemonHeartbeatPendingProviderConfig struct {
+	ID       string          `json:"id"`
+	Provider string          `json:"provider"`
+	Action   string          `json:"action"`
+	Payload  json.RawMessage `json:"payload,omitempty"`
 }
 
 // DaemonHeartbeatPendingLocalSkills describes a request for the runtime's

@@ -50,3 +50,40 @@ func TestParseFlexDuration_Invalid(t *testing.T) {
 		}
 	}
 }
+
+func TestBytesFromEnv(t *testing.T) {
+	const key = "MULTICA_TEST_BYTE_SIZE"
+	for _, tc := range []struct {
+		value string
+		want  int64
+	}{
+		{"", 7},
+		{"0", 0},
+		{"4096", 4096},
+		{"20GiB", 20 << 30},
+		{"20gb", 20 << 30}, // a cache ceiling is never quoted in powers of ten
+		{"512mb", 512 << 20},
+		{"1.5g", 1536 << 20},
+		{"2T", 2 << 40},
+	} {
+		t.Run("value="+tc.value, func(t *testing.T) {
+			t.Setenv(key, tc.value)
+			got, err := bytesFromEnv(key, 7)
+			if err != nil {
+				t.Fatalf("bytesFromEnv(%q): %v", tc.value, err)
+			}
+			if got != tc.want {
+				t.Errorf("bytesFromEnv(%q) = %d, want %d", tc.value, got, tc.want)
+			}
+		})
+	}
+
+	for _, bad := range []string{"-1", "lots", "12 gigs", "-3GiB"} {
+		t.Run("rejects="+bad, func(t *testing.T) {
+			t.Setenv(key, bad)
+			if _, err := bytesFromEnv(key, 7); err == nil {
+				t.Errorf("bytesFromEnv(%q) accepted an invalid size", bad)
+			}
+		})
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -460,6 +461,28 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			Filename:     header.Filename,
 			ContentType:  contentType,
 			SizeBytes:    int64(len(data)),
+		}
+
+		// An alignment carrier gets here through the single write its
+		// read-only token is granted (middleware/issue_draft_scope.go). That
+		// grant is for the file it made for its OWN chat reply, so the two
+		// things that would make it anything else are refused here: an upload
+		// with no task binding (a loose row the carrier could hand out as a
+		// URL), and a binding that aims the row at an issue, a comment or
+		// another session. The task_id branch below then does the rest — it
+		// pins the row to the token's own task, which is the carrier's own
+		// conversation.
+		if r.Header.Get(middleware.IssueDraftScopeHeader) == middleware.IssueDraftScopeValue {
+			if r.FormValue("task_id") == "" {
+				writeError(w, http.StatusForbidden, "an alignment carrier may only upload to its own chat reply")
+				return
+			}
+			for _, field := range []string{"issue_id", "comment_id", "chat_session_id"} {
+				if r.FormValue(field) != "" {
+					writeError(w, http.StatusForbidden, "an alignment carrier may not bind an upload to "+field)
+					return
+				}
+			}
 		}
 
 		if issueID := r.FormValue("issue_id"); issueID != "" {

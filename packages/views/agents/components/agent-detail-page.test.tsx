@@ -23,22 +23,29 @@ const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
 // The DM tests exercise the header action wiring plus the real permission
 // rules (via auth + member fixtures); the tabbed body and avatar/presence
-// widgets are irrelevant weight, so they're stubbed.
+// widgets are irrelevant weight, so they're stubbed. The last props the pane
+// was handed are recorded, so the page→pane contract stays testable without
+// mounting the whole tab machine.
+const panePropsRef = vi.hoisted(() => ({
+  current: null as Record<string, unknown> | null,
+}));
 vi.mock("./agent-overview-pane", () => ({
-  AgentOverviewPane: ({
-    agent,
-    onUpdate,
-  }: {
+  AgentOverviewPane: (props: {
     agent: Agent;
     onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
-  }) => (
-    <button
-      type="button"
-      onClick={() => void onUpdate(agent.id, { model: "new-model" })}
-    >
-      update model
-    </button>
-  ),
+  }) => {
+    panePropsRef.current = props as unknown as Record<string, unknown>;
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          void props.onUpdate(props.agent.id, { model: "new-model" })
+        }
+      >
+        update model
+      </button>
+    );
+  },
 }));
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => <div>actor-avatar</div>,
@@ -63,7 +70,10 @@ const mockUpdateAgent = vi.hoisted(() => vi.fn());
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
-vi.mock("@multica/core/agents", () => ({
+// Stubs the hooks; the pure readers stay real, so the lineup row is exercised
+// through the same normalisation the inspector's editor writes against.
+vi.mock("@multica/core/agents", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/agents")>()),
   isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
     agent.runtime_bound !== false && agent.runtime_id.length > 0,
   useWorkspacePresenceMap: () => ({ byAgent: new Map() }),
@@ -259,6 +269,47 @@ describe("AgentDetailPage switchable models", () => {
       await screen.findByRole("button", { name: "Assign work" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("Model lineup")).not.toBeInTheDocument();
+  });
+
+  // The lineup row is where DENE-610 was reported from: the reader sees it in
+  // the header and has to find the editor. This entry is that jump.
+  it("opens the general settings tab from the lineup row's edit entry", async () => {
+    membersRef.current = [{ user_id: "user-1", role: "admin" }];
+    agentsRef.current = [
+      {
+        ...baseAgent,
+        switchable_models: [
+          { model: "claude-opus-5", role: "default", note: "" },
+        ],
+      },
+    ];
+
+    renderPage();
+
+    const edit = await screen.findByTestId("switchable-models-edit");
+    fireEvent.click(edit);
+
+    await waitFor(() =>
+      expect(panePropsRef.current?.navIntent).toBe("general"),
+    );
+  });
+
+  it("hides the lineup edit entry from a member who cannot edit", async () => {
+    agentsRef.current = [
+      {
+        ...baseAgent,
+        switchable_models: [
+          { model: "claude-opus-5", role: "default", note: "" },
+        ],
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByText("Model lineup")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("switchable-models-edit"),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -523,5 +574,31 @@ describe("AgentDetailPage DM button", () => {
       "Bind a runtime before running this agent.",
     );
     expect(mockModalOpen).not.toHaveBeenCalled();
+  });
+});
+
+// DENE-384: the base role's prompt rides on the DETAIL read, and the payload
+// looks the same whether that read failed or the base role has no prompt. The
+// page is the only layer that can tell them apart, so it is the page that has
+// to say which one the Instructions tab is looking at. (Which flag maps to
+// which state is the canonical matrix in `specialization.test.ts`; this pins
+// the wiring that fed a real acceptance pass the wrong copy.)
+describe("AgentDetailPage inherited-prompt read state", () => {
+  it("passes a failed detail read through as a read failure", async () => {
+    agentsRef.current = [
+      {
+        ...baseAgent,
+        parent_agent_id: "agent-base",
+        parent_agent_name: "Base Role",
+      },
+    ];
+    mockGetAgent.mockRejectedValue(new Error("network down"));
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(panePropsRef.current?.inheritedPromptState).toBe("failed"),
+    );
+    expect(typeof panePropsRef.current?.onRetryInheritedPrompt).toBe("function");
   });
 });

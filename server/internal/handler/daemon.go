@@ -213,7 +213,17 @@ type DaemonRegisterRequest struct {
 	// AgyQuotaExhausted is the host-level overlay of Gemini directories whose
 	// individual quota is exhausted until reset_at (unix seconds).
 	AgyQuotaExhausted []AgyQuotaExhaustedEntry `json:"agy_quota_exhausted"`
-	Runtimes          []struct {
+	// AgentAccounts is the host's read-only multi-CLI account report. Nil
+	// (field absent) means the daemon predates the channel; a non-nil empty
+	// slice means it reports accounts and found none. The two are NOT
+	// collapsed, because the account surface renders "no accounts" and "too
+	// old to know" differently. json.Unmarshal preserves the difference: []
+	// yields an empty non-nil slice, an absent key leaves nil.
+	AgentAccounts []AgentAccountEntry `json:"agent_accounts"`
+	// AgentAccountsError is the probe failure the daemon wants surfaced. Only
+	// meaningful alongside a non-nil AgentAccounts, and never required.
+	AgentAccountsError string `json:"agent_accounts_error"`
+	Runtimes           []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -236,6 +246,37 @@ type AgyQuotaExhaustedEntry struct {
 	ResetAt int64  `json:"reset_at"`
 }
 
+// AgentAccountEntry mirrors daemon.AgentAccount — one read-only CLI account row
+// the daemon reported. Mirror field: internal/daemon/agent_accounts.go
+// AgentAccount, same JSON names.
+//
+// There is deliberately no credential field. The shape can carry a directory,
+// an account id, a binding lever name and a credential-EXISTENCE bool, and
+// nothing else, so a compromised or buggy daemon cannot smuggle a key value
+// through this channel and into stored runtime metadata.
+type AgentAccountEntry struct {
+	CLI      string `json:"cli"`
+	Account  string `json:"account"`
+	Home     string `json:"home"`
+	BaseURL  string `json:"base_url"`
+	KeyRef   string `json:"key_ref"`
+	Lever    string `json:"lever"`
+	SignedIn bool   `json:"signed_in"`
+	// QuotaResetAt is unix seconds; 0 means "not known to be exhausted".
+	QuotaResetAt int64 `json:"quota_reset_at"`
+}
+
+// Stored bounds for the agent_accounts channel, matching the daemon-side caps.
+// Metadata is re-serialized onto every runtime row of the workspace, so this
+// path must not be able to grow without limit.
+const (
+	maxAgentAccounts = 32
+	// maxAgentAccountsErrorLen bounds the stored probe error, which the UI
+	// prints as a single diagnostic line. The daemon composes it from paths and
+	// os errors, so a pathological path is the realistic way it grows.
+	maxAgentAccountsErrorLen = 1024
+)
+
 func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capabilities any) map[string]any {
 	meta := map[string]any{
 		"version":      version,
@@ -252,7 +293,75 @@ func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capa
 	if exhausted := absoluteAgyQuotaExhausted(req.AgyQuotaExhausted); len(exhausted) > 0 {
 		meta["agy_quota_exhausted"] = exhausted
 	}
+	// Presence, not length, decides whether the channel is recorded: an empty
+	// report is a real answer the account surface renders as its empty state,
+	// and dropping the key would make it indistinguishable from an old daemon.
+	if req.AgentAccounts != nil {
+		meta["agent_accounts"] = sanitizeAgentAccounts(req.AgentAccounts)
+	}
+	if probeErr := truncateMetadataString(strings.TrimSpace(req.AgentAccountsError), maxAgentAccountsErrorLen); probeErr != "" {
+		meta["agent_accounts_error"] = probeErr
+	}
 	return meta
+}
+
+func truncateMetadataString(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	// Cut on a rune boundary: the tail of a multi-byte path must not leave
+	// invalid UTF-8 in the stored JSON.
+	return strings.ToValidUTF8(value[:limit], "")
+}
+
+// sanitizeAgentAccounts keeps only the rows a consumer can render, reusing the
+// same host-path rule as the AGY keys so a stored `home` is always something
+// the UI can show. Rows without a usable CLI family or home are dropped rather
+// than repaired: inventing an identity would show an account the daemon never
+// reported.
+func sanitizeAgentAccounts(entries []AgentAccountEntry) []map[string]any {
+	limit := len(entries)
+	if limit > maxAgentAccounts {
+		limit = maxAgentAccounts
+	}
+	out := make([]map[string]any, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	now := time.Now().Unix()
+	for _, entry := range entries {
+		cli := strings.TrimSpace(entry.CLI)
+		home := absoluteHostHomeDir(entry.Home)
+		if cli == "" || home == "" {
+			continue
+		}
+		// Identity is the pair, not the directory alone: two CLIs can be
+		// pointed at the same directory by different levers.
+		key := cli + "\x00" + home
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		// A deadline in the past is "no longer exhausted", which the channel
+		// spells as 0. Keeping the stale value would render an exhausted badge
+		// that never clears until the next daemon restart.
+		resetAt := entry.QuotaResetAt
+		if resetAt <= now {
+			resetAt = 0
+		}
+		out = append(out, map[string]any{
+			"cli":            cli,
+			"account":        strings.TrimSpace(entry.Account),
+			"home":           home,
+			"base_url":       strings.TrimSpace(entry.BaseURL),
+			"key_ref":        strings.TrimSpace(entry.KeyRef),
+			"lever":          strings.TrimSpace(entry.Lever),
+			"signed_in":      entry.SignedIn,
+			"quota_reset_at": resetAt,
+		})
+		if len(out) >= maxAgentAccounts {
+			break
+		}
+	}
+	return out
 }
 
 func absoluteAgyQuotaExhausted(entries []AgyQuotaExhaustedEntry) []map[string]any {
@@ -1112,6 +1221,7 @@ type DaemonHeartbeatRequest struct {
 	RuntimeID           string                       `json:"runtime_id"`
 	SupportsBatchImport bool                         `json:"supports_batch_import,omitempty"`
 	PlanLimits          *protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
+	Jev                 *protocol.JevStatusSnapshot  `json:"jev,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -1248,6 +1358,12 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid plan_limits")
 		return
 	}
+	jevStatusJSON, jevValidationErr := validateJevStatusSnapshot(req.Jev)
+	if jevValidationErr != nil {
+		outcome = "invalid_jev_status"
+		writeError(w, http.StatusBadRequest, "invalid jev")
+		return
+	}
 
 	updateStart := time.Now()
 	if err := h.recordHeartbeat(r.Context(), rt); err != nil {
@@ -1257,6 +1373,12 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.applyStoredPlanLimits(r.Context(), rt.ID, uuidToString(rt.WorkspaceID), planLimitsJSON); err != nil {
+		updateMs = time.Since(updateStart).Milliseconds()
+		outcome = "error_update"
+		writeError(w, http.StatusInternalServerError, "heartbeat failed")
+		return
+	}
+	if err := h.applyStoredJevStatus(r.Context(), rt.ID, uuidToString(rt.WorkspaceID), jevStatusJSON); err != nil {
 		updateMs = time.Since(updateStart).Milliseconds()
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
@@ -1291,6 +1413,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if ack.PendingModelList != nil {
 		resp["pending_model_list"] = ack.PendingModelList
 	}
+	if ack.PendingProviderConfig != nil {
+		resp["pending_provider_config"] = ack.PendingProviderConfig
+	}
 	if ack.PendingLocalSkills != nil {
 		resp["pending_local_skills"] = ack.PendingLocalSkills
 	}
@@ -1308,7 +1433,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // captured each runtime's liveness state in a connection lease, so the hot
 // path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
 // fallback for a daemon that stops receiving WebSocket acknowledgements.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot, jev *protocol.JevStatusSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
@@ -1322,6 +1447,10 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	planLimitsJSON, err := validatePlanLimitsSnapshot(planLimits, state.Provider)
 	if err != nil {
 		return nil, fmt.Errorf("invalid plan_limits: %w", err)
+	}
+	jevStatusJSON, err := validateJevStatusSnapshot(jev)
+	if err != nil {
+		return nil, fmt.Errorf("invalid jev: %w", err)
 	}
 	if err := h.recordHeartbeatLease(ctx, runtimeID, lease); err != nil {
 		if isNotFound(err) {
@@ -1338,6 +1467,9 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		return nil, fmt.Errorf("invalid runtime_id: %w", err)
 	}
 	if err := h.applyStoredPlanLimits(ctx, runtimeUUID, state.WorkspaceID, planLimitsJSON); err != nil {
+		return nil, err
+	}
+	if err := h.applyStoredJevStatus(ctx, runtimeUUID, state.WorkspaceID, jevStatusJSON); err != nil {
 		return nil, err
 	}
 	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
@@ -1380,6 +1512,31 @@ func (h *Handler) applyStoredPlanLimits(ctx context.Context, runtimeUUID pgtype.
 		h.publish(protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
 			"runtime_id":          uuidToString(runtimeUUID),
 			"plan_limits_updated": true,
+		})
+	}
+	return nil
+}
+
+// applyStoredJevStatus persists the host-level JEV snapshot onto this runtime
+// row and, only when the row actually changed, asks clients to refetch runtime
+// state. Empty bytes mean the daemon did not send the field at all (an older
+// daemon) — the stored column stays untouched so a NULL keeps reading as
+// unknown instead of being overwritten with a stale value.
+func (h *Handler) applyStoredJevStatus(ctx context.Context, runtimeUUID pgtype.UUID, workspaceID string, jevStatusJSON []byte) error {
+	if len(jevStatusJSON) == 0 {
+		return nil
+	}
+	updated, err := h.Queries.UpdateAgentRuntimeJevStatus(ctx, db.UpdateAgentRuntimeJevStatusParams{
+		ID:        runtimeUUID,
+		JevStatus: jevStatusJSON,
+	})
+	if err != nil {
+		return fmt.Errorf("update runtime jev status: %w", err)
+	}
+	if updated > 0 && workspaceID != "" {
+		h.publish(protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
+			"runtime_id":  uuidToString(runtimeUUID),
+			"jev_updated": true,
 		})
 	}
 	return nil
@@ -1493,7 +1650,9 @@ func (h *Handler) recordHeartbeatState(
 // HTTP slow-log can stay structured. The WS path discards them.
 type heartbeatMetrics struct {
 	ProbeModelMs, PopModelMs, ProbeSkillsMs, PopSkillsMs, ProbeImportMs, PopImportMs int64
+	ProbeProviderMs, PopProviderMs                                                   int64
 	ProbeModelTimedOut, ProbeSkillsTimedOut, ProbeImportTimedOut                     bool
+	ProbeProviderTimedOut                                                            bool
 }
 
 // processHeartbeat pulls pending actions for both HTTP and WebSocket
@@ -1558,6 +1717,38 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 			slog.Warn("model list HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeModelMs)
 		} else {
 			slog.Warn("model list HasPending failed", "error", probeModelErr, "runtime_id", runtimeID)
+		}
+	}
+
+	// Probe then claim the provider-preset queue. The claimed record is the
+	// one carrier allowed to hold an api_key: it goes straight into the ack
+	// below, and the store has already persisted the same request without it.
+	probeProviderStart := time.Now()
+	probeProviderCtx, cancelProbeProvider := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
+	hasProviderConfig, probeProviderErr := h.ProviderPresetStore.HasPending(probeProviderCtx, runtimeID)
+	cancelProbeProvider()
+	m.ProbeProviderMs = time.Since(probeProviderStart).Milliseconds()
+	switch {
+	case probeProviderErr == nil && hasProviderConfig:
+		popStart := time.Now()
+		pendingProvider, popErr := h.ProviderPresetStore.PopPending(ctx, runtimeID)
+		m.PopProviderMs = time.Since(popStart).Milliseconds()
+		if popErr != nil {
+			slog.Warn("provider preset PopPending failed", "error", popErr, "runtime_id", runtimeID)
+		} else if pendingProvider != nil {
+			ack.PendingProviderConfig = &protocol.DaemonHeartbeatPendingProviderConfig{
+				ID:       pendingProvider.ID,
+				Provider: pendingProvider.Provider,
+				Action:   pendingProvider.Action,
+				Payload:  pendingProvider.Payload,
+			}
+		}
+	case probeProviderErr != nil:
+		if errors.Is(probeProviderErr, context.DeadlineExceeded) || errors.Is(probeProviderErr, context.Canceled) {
+			m.ProbeProviderTimedOut = true
+			slog.Warn("provider preset HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeProviderMs)
+		} else {
+			slog.Warn("provider preset HasPending failed", "error", probeProviderErr, "runtime_id", runtimeID)
 		}
 	}
 
@@ -2166,6 +2357,62 @@ func (h *Handler) rejectClaimSkillLoad(task *db.AgentTaskQueue, err error) *clai
 	}
 }
 
+// inheritParentInstructions returns the prompt an agent actually RUNS with
+// (DENE-302): a specialisation's own instructions prefixed by its base role's,
+// composed with composeAgentInstructions — the same function the solidify
+// endpoint bakes into a child's row, so the text a user freezes and the text a
+// run dispatches with cannot drift.
+//
+// The base role is re-read on every claim and nothing is cached or snapshotted:
+// an edit on either side of the relationship reaches the agent's next task,
+// which is the point of inheriting from a live row instead of copying it at
+// attach time.
+//
+// The two failures are deliberately different, following rejectClaimSourceLoad:
+//
+//   - The read FAILED (transient: DB blip, timeout, reset). The caller must
+//     preserve the task for redelivery rather than dispatch. A swallowed error
+//     here is indistinguishable from a base role that genuinely has no prompt,
+//     so half the effective prompt would go missing with nothing to notice it.
+//   - The base role row is GONE (ErrNoRows). There is nothing left to inherit
+//     and the specialisation's own prompt still runs, so this degrades to a
+//     non-specialisation turn. It is defensive only: the agent API refuses to
+//     archive a base role that still has active specialisations and has no hard
+//     delete, so no request path produces this state.
+func (h *Handler) inheritParentInstructions(ctx context.Context, agent db.Agent) (string, error) {
+	if !agent.ParentAgentID.Valid {
+		return agent.Instructions, nil
+	}
+	parent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          agent.ParentAgentID,
+		WorkspaceID: agent.WorkspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("daemon claim: base role no longer resolves; dispatching with the specialisation's own instructions",
+				"agent_id", uuidToString(agent.ID), "parent_agent_id", uuidToString(agent.ParentAgentID))
+			return agent.Instructions, nil
+		}
+		return "", err
+	}
+	return composeAgentInstructions(parent.Instructions, agent.Instructions), nil
+}
+
+// rejectClaimParentInstructions preserves a claim whose base role prompt could
+// not be read, for the reason in rejectClaimSkillLoad: the claim-build path hit
+// a transient read, and the stale-dispatched reclaim redelivers it. Dispatching
+// the plain child prompt instead would silently drop inherited rules that the
+// agent's configuration says it has.
+func (h *Handler) rejectClaimParentInstructions(task *db.AgentTaskQueue, err error) *claimBuildFailure {
+	slog.Error("task claim: base role instructions load failed; preserving task for redelivery",
+		"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID), "error", err)
+	return &claimBuildFailure{
+		outcome: "error_parent_instructions",
+		status:  http.StatusInternalServerError,
+		message: "failed to load agent instructions",
+	}
+}
+
 // rejectClaimOnWorkspaceMismatch enforces the claim's tenant boundary against
 // the workspace that OWNS the task's context (issue / chat session / autopilot
 // / quick-create), which is the only authority for MULTICA_WORKSPACE_ID in the
@@ -2497,10 +2744,20 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
 		runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 	}
+	// Inherited prompt first, at the innermost layer (DENE-302): parent + child
+	// compose what this agent IS, and everything appended below — the Mika
+	// system layer and then the squad briefing — stacks on top of that one
+	// effective value. Composing after a squad briefing would bury the base
+	// role's rules under task context; composing here also means both squad
+	// append points (issue-bound and quick-create) share the result for free.
+	instructions, err := h.inheritParentInstructions(r.Context(), agent)
+	if err != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimParentInstructions(task, err)
+	}
 	resp.Agent = &TaskAgentData{
 		ID:                    uuidToString(agent.ID),
 		Name:                  agent.Name,
-		Instructions:          agent.Instructions,
+		Instructions:          instructions,
 		CustomEnv:             customEnv,
 		CustomArgs:            customArgs,
 		McpConfig:             mcpConfig,
@@ -2520,7 +2777,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// Composing here covers every task kind, because this is the single
 	// place a claimed task's agent payload is assembled.
 	if agent.SystemKey.String == service.MikaSystemKey {
-		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
+		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, resp.Agent.Instructions)
 	}
 	if useSkillRefs {
 		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, agent.SystemKey.String, legacySkillRedirects)
@@ -3005,8 +3262,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				h.rejectClaimSourceLoad(r.Context(), task, deliveryErr, "channel task delivery", uuidToString(task.ID))
 		}
 		// A web chat can opt into the same durable project context as an
-		// issue-bound task.
-		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), cs.ProjectID, cs.WorkspaceID)
+		// issue-bound task — and, unlike an issue, it can carry several
+		// projects at once (DENE-523).
+		projectCtx, projectErr := h.resolveClaimChatProjectContext(r.Context(), cs)
 		if projectErr != nil {
 			slog.Error("chat claim: load project context failed; preserving task for redelivery",
 				"task_id", uuidToString(task.ID),
@@ -3497,6 +3755,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	//
 	// Shared mode runs the same gate for the milder failure: an old daemon
 	// would take the mutex and serialise a directory the user asked to share.
+	//
+	// Same question, opposite answer, for worktree_root: an old daemon simply
+	// ignores it and behaves as it always has, so that one is narrowed out of
+	// the payload rather than refused. Done BEFORE the gates read the resource
+	// set, so the gates and the daemon reason about one payload.
+	supportsUserWorktreeRoot := requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeUserRootV1)
+	resp.ProjectResources = filterResourcesForDaemonCapabilities(resp.ProjectResources, supportsUserWorktreeRoot)
+	for i := range resp.Projects {
+		resp.Projects[i].Resources = filterResourcesForDaemonCapabilities(resp.Projects[i].Resources, supportsUserWorktreeRoot)
+	}
+
 	reason := worktreeClaimBlockReason(
 		resp.ProjectResources,
 		runtime,
@@ -3592,6 +3861,96 @@ func sharedClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRun
 		"This machine's Multica runtime does not support shared-workspace mode, which %q is set to use. "+
 			"Update the Multica app on that machine to the latest version, then re-run this task. "+
 			"Refusing to run rather than falling back to the exclusive in-place lock, which would silently queue tasks the resource asked to run concurrently.")
+}
+
+// filterResourcesForDaemonCapabilities narrows a claim's resource set to what
+// the claiming daemon can actually act on (DENE-617 invariant 15).
+//
+// Two things need it, and the capability bit covers both because they shipped
+// together: a daemon declaring local-worktree-user-root-v1 is a daemon built
+// after this change, and one that does not is the daemon this function exists
+// to protect.
+//
+// One is the worktree_root field. A daemon that predates the move of parallel
+// working copies onto the user's disk json-skips the field and builds the copy
+// inside its own env root — where the workspace GC reclaims it. The user who
+// chose a location would then see their setting ignored, silently and
+// permanently, with the copy vanishing on a schedule they never agreed to.
+//
+// The other is the COUNT. Before this change a project held at most one
+// local_directory per daemon, and an old daemon's findLocalDirectoryAssignment
+// enforces that by failing the task outright when it sees a second one for
+// itself — correct then, because a second row could only mean corruption; a
+// task-killing error now, because a second row is a feature. It receives the
+// first row in position order, which is the same row the new daemon would
+// choose as its working directory, and the read-only extras — the part it
+// cannot implement — simply never reach it.
+//
+// Narrowing at the dispatch point means such a daemon behaves EXACTLY as it
+// does today — no new failure, no partially-honoured setting — and the rule
+// stays where it can be stated once: what a daemon receives is a subset of
+// what it declared it can handle. Old daemons need no change to keep working
+// (invariant 18).
+//
+// What survives is otherwise untouched: the directory, the daemon binding and
+// the execution mode are still what the project configured, because those an
+// old daemon does implement.
+func filterResourcesForDaemonCapabilities(resources []ProjectResourceData, supportsUserWorktreeRoot bool) []ProjectResourceData {
+	if supportsUserWorktreeRoot || len(resources) == 0 {
+		return resources
+	}
+	// Position order is the caller's: every query feeding this payload orders
+	// by position, and position is what decides which directory a run writes.
+	// Keeping the first occurrence per daemon_id is therefore the same choice
+	// a current daemon makes, not an arbitrary one.
+	seenDaemon := map[string]bool{}
+	out := make([]ProjectResourceData, 0, len(resources))
+	for _, res := range resources {
+		if res.ResourceType != "local_directory" {
+			out = append(out, res)
+			continue
+		}
+		var ref struct {
+			DaemonID string `json:"daemon_id"`
+		}
+		// An unparseable ref is left in place rather than dropped: this
+		// function narrows what a daemon receives, and a row it cannot read is
+		// not a row it can prove is a duplicate. The daemon's own parser
+		// reports the malformed ref, which is where that error belongs.
+		if err := json.Unmarshal(res.ResourceRef, &ref); err == nil {
+			key := strings.TrimSpace(ref.DaemonID)
+			if key != "" {
+				if seenDaemon[key] {
+					continue
+				}
+				seenDaemon[key] = true
+			}
+		}
+		if stripped, changed := stripRefField(res.ResourceRef, "worktree_root"); changed {
+			res.ResourceRef = stripped
+		}
+		out = append(out, res)
+	}
+	return out
+}
+
+// stripRefField removes one key from a resource ref, leaving every other key —
+// including keys written by a newer server this binary cannot interpret —
+// byte-for-byte intact in value. Reports whether the key was there.
+func stripRefField(ref json.RawMessage, key string) (json.RawMessage, bool) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(ref, &fields); err != nil {
+		return ref, false
+	}
+	if _, ok := fields[key]; !ok {
+		return ref, false
+	}
+	delete(fields, key)
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return ref, false
+	}
+	return out, true
 }
 
 // localDirectoryModeClaimBlockReason is the shared body of the per-mode claim
@@ -4198,6 +4557,13 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// Wake the owning runtime now so queued work that was blocked by this
 	// task's agent capacity or serialization key is re-claimed immediately.
 	h.TaskService.NotifyTaskFinished(*task)
+
+	// Completion-path mirror of the failure sweep inside HandleFailedTasks: a
+	// run that ended cleanly does not imply the issue reached a terminal
+	// status, and until now nothing observed that combination. Deliberately
+	// AFTER reconcileCommentsOnCompletion — that is what may enqueue the
+	// follow-up run which takes this issue off the stalled list.
+	h.TaskService.HandleCompletedTasks(r.Context(), []db.AgentTaskQueue{*task})
 
 	// Best-effort revoke of any agent task token minted at claim time.
 	// The token would naturally expire at the 24h watermark and is also

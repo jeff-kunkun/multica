@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowDown,
+  ArrowUp,
   ChevronRight,
   FolderGit,
   FolderOpen,
@@ -28,10 +30,6 @@ import type {
   LocalDirectoryResourceRef,
   ProjectResource,
 } from "@multica/core/types";
-import {
-  runtimeAdvertisesLocalWorktree,
-  runtimeListOptions,
-} from "@multica/core/runtimes";
 import { useConfigStore } from "@multica/core/config";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
@@ -53,8 +51,19 @@ import {
   validateLocalDirectory,
   type ValidateLocalDirectoryResult,
 } from "../../platform";
+// The source rule is pure and imported from its own module rather than the
+// projects query barrel: it must give the same answer in a test that mocks the
+// queries as it does in production, and a mocked barrel would strip it.
+import { findDuplicateSources } from "@multica/core/projects/source-rule";
+import { DuplicateSourceBanner } from "./duplicate-source-banner";
 import { LocalDirectoryModeDialog } from "./local-directory-mode-dialog";
 import { localDirectoryLabel } from "./local-directory-label";
+import {
+  canMoveLocalDirectory,
+  moveLocalDirectory,
+  type MoveDirection,
+} from "./local-directory-order";
+import { worktreeRootForSave, worktreeRootProblem } from "./worktree-root";
 import {
   apiExecutionMode,
   displayedExecutionMode,
@@ -96,6 +105,26 @@ type ModeDialogState = {
   resource?: ProjectResource & { resource_ref: LocalDirectoryResourceRef };
   /** Only used when adding. */
   label?: string;
+  /**
+   * Identity this machine measured at pick time (DENE-617). Only the machine
+   * holding the directory can produce these, so they are carried from the
+   * pick to the save rather than re-derived: the server has a string, not a
+   * filesystem.
+   */
+  realPath?: string;
+  repoKey?: string;
+  /**
+   * Where parallel mode would put the working copies. Shown in the dialog
+   * BEFORE the user commits to that mode — its cost is a copy per task on
+   * their own disk, and a cost you only discover afterwards is not a choice.
+   */
+  defaultWorktreeRoot?: string;
+  /** The repository root, when the machine could read it — only used to warn
+   *  that a typed landing folder sits inside the repository. */
+  gitRoot?: string;
+  /** What the user has typed for the landing folder, once they have edited
+   *  it. Undefined means "still the default", which is stored as absent. */
+  worktreeRoot?: string;
 };
 
 export function ProjectResourcesSection({ projectId }: { projectId: string }) {
@@ -125,12 +154,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const desktopMode = isDesktopShell();
   const localDaemonId = daemonStatus.daemonId;
 
-  // Only ever used to decide what to PRESELECT. Whether the machine can run
-  // worktree mode is the server's call — it knows its own version, the client
-  // would have to infer it from data the server wrote, and that inference is
-  // what told a user on the newest release to upgrade it (#7113). The save is
-  // gated server-side and surfaced here as an inline error instead.
-  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   // The one thing the client must still check up front: whether this server
   // performs that gate at all. One declared boolean, no inference — servers
   // that predate it drop execution_mode and answer 201.
@@ -142,17 +165,11 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     canSetLocalOverride: canPersist,
   });
   const sharedUsesLocalOverride = !serverAcceptsShared && canPersist;
-  // Keyed on the resource's OWN daemon, not the machine the browser happens to
-  // be on: a resource is pinned to one machine, and its mode can legitimately
-  // be changed from the web app or from a different device. Using the local
-  // daemon here would report "too old" for every resource whenever the viewer
-  // is not on that machine.
-  // Capability, not version, and judged by the daemon's newest runtime row —
-  // see runtimeAdvertisesLocalWorktree for why an any-match would keep saying
-  // yes after a downgrade.
-  const advertisesWorktree = (daemonId: string | null) =>
-    runtimeAdvertisesLocalWorktree(runtimes, daemonId);
-
+  // The daemon's worktree capability is deliberately NOT read here any more.
+  // It existed only to decide what to PRESELECT, and a new directory now
+  // always starts on in-place (DENE-617): whether a machine COULD run
+  // parallel mode is no longer a reason to start the user there. Whether it
+  // MAY is still the server's call, gated on save and surfaced inline.
   const attachedUrls = new Set(
     resources.filter(isGithubRef).map((r) => r.resource_ref.url),
   );
@@ -162,15 +179,46 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       .filter((r) => r.resource_ref.daemon_id === localDaemonId)
       .map((r) => r.resource_ref.local_path),
   );
-  // Per (project, daemon) we allow at most one local_directory — the
-  // daemon-side resolver picks the first match by daemon_id, so two rows
-  // on the same daemon would silently route the agent into one of them.
-  // The server enforces this at the API boundary; the UI mirrors the
-  // restriction by hiding the "Add" affordance once a row exists for the
-  // current daemon, otherwise users would only discover the limit on a
-  // 409 toast.
-  const hasLocalDirectoryForCurrentDaemon =
-    localDaemonId !== null && attachedLocalPaths.size > 0;
+  // A project may hold SEVERAL directories on one machine (DENE-617): four
+  // unrelated plain folders, a repository plus its docs checkout. What it may
+  // not hold is the same directory twice, or two checkouts of one repository.
+  // Both are the server's rules (and Postgres indexes); the UI checks the
+  // first one at pick time so the answer arrives while the folder is still on
+  // screen, instead of as a 409 afterwards.
+  //
+  // Which of them a run writes is no longer ambiguous either: resources are
+  // ordered, and the first local directory on this machine is the working
+  // directory. The rest reach the agent read-only.
+  const attachedRealPaths = new Set(
+    resources
+      .filter(isLocalDirectoryRef)
+      .filter((r) => r.resource_ref.daemon_id === localDaemonId)
+      .map((r) => r.resource_ref.real_path || r.resource_ref.local_path),
+  );
+
+  // Duplicate detection runs on the saved list rather than only at save time:
+  // this workspace already held five repositories configured both ways before
+  // the check existed, and a save-time-only warning would never reach them.
+  // findDuplicateSources already collects EVERY github_repo row naming the
+  // repository, including two rows spelling one URL differently, so a merge
+  // clears it completely. Nothing else may be folded into a group: it is
+  // offered as "merge <name>", and a row for a different repository inside it
+  // would be deleted by a button that never mentioned it.
+  const mergeGroups = findDuplicateSources(resources);
+
+  const handleMergeIntoLocal = async (remotes: ProjectResource[]) => {
+    try {
+      // Sequential, not Promise.all: a partial failure must leave a list the
+      // user can read, and the next attempt re-derives what is still there.
+      for (const remote of remotes) {
+        await deleteResource.mutateAsync(remote.id);
+      }
+      toast.success(t(($) => $.resources.duplicate_merged));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t(($) => $.resources.toast_remove_failed);
+      toast.error(msg);
+    }
+  };
 
   const repoQuery = repoSearch.trim().toLowerCase();
   const filteredRepos =
@@ -195,13 +243,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     try {
       if (!localDaemonId || !daemonStatus.running) {
         toast.error(t(($) => $.resources.toast_local_daemon_not_running));
-        return;
-      }
-      // Race guard: the button gates on this already, but if the picker
-      // is opened while a concurrent resource-create lands the user
-      // would otherwise see a 409. Surface a clearer message instead.
-      if (attachedLocalPaths.size > 0) {
-        toast.error(t(($) => $.resources.toast_local_daemon_already_attached));
         return;
       }
       const picked = await pickDirectory();
@@ -234,6 +275,14 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
         );
         return;
       }
+      // Refuse the same directory twice while the folder is still on screen.
+      // Identity is the resolved real path, so picking a symlink to a folder
+      // already added is caught too — comparing the typed strings would not.
+      const identity = validation.real_path || path;
+      if (attachedRealPaths.has(identity)) {
+        toast.error(t(($) => $.resources.toast_local_already_attached));
+        return;
+      }
       // Ask for the execution mode before creating. It is part of what the
       // user is choosing — whether tasks edit this folder or hand back a
       // branch — not a setting to discover afterwards.
@@ -241,18 +290,20 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       setModeDialog({
         path,
         daemonId: localDaemonId,
-        // Same preselection rule as the create-project flow: a git repo this
-        // daemon can actually run worktree mode on starts on parallel, anything
-        // else starts on direct. Only the PRESELECTION differs by folder — the
-        // user still confirms, and existing resources keep whatever they have.
-        mode:
-          validation.is_git_repo === true &&
-          serverValidatesWorktree &&
-          advertisesWorktree(localDaemonId)
-            ? "worktree"
-            : "in_place",
+        // Always in place (DENE-617 invariant 3). A new directory runs tasks
+        // IN the folder the user just picked, which is what "I added my
+        // project folder" plainly means and costs no disk. Parallel mode is
+        // the one that copies the repository per task onto their own drive,
+        // so it is an explicit choice, never a preselection — this used to
+        // start on parallel for any git repository, and the copies it made
+        // were the surprise this change removes.
+        mode: "in_place",
         isGitRepo: validation.is_git_repo,
         label: fallbackLabel,
+        realPath: validation.real_path,
+        repoKey: validation.repo_key,
+        defaultWorktreeRoot: validation.default_worktree_root,
+        gitRoot: validation.git_root,
       });
       setAddOpen(false);
     } catch (err) {
@@ -266,8 +317,51 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     }
   };
 
+  // What the dialog currently shows as the landing folder: the user's edit
+  // when they made one, otherwise the default this machine computed (adding)
+  // or the location already stored (editing).
+  const worktreeRootShown =
+    modeDialog?.worktreeRoot ?? modeDialog?.defaultWorktreeRoot;
+  const worktreeRootToStore = modeDialog
+    ? worktreeRootForSave(
+        worktreeRootShown ?? "",
+        modeDialog.defaultWorktreeRoot ?? undefined,
+      )
+    : undefined;
+
+  // Re-measures a directory that is already saved, and folds the result into
+  // the open dialog. Late and best-effort by design: the dialog must be usable
+  // the instant it opens, and a machine that cannot answer must not block it.
+  const refreshMeasuredDirectory = async (path: string) => {
+    try {
+      const measured = await validateLocalDirectory(path);
+      if (!measured.ok) return;
+      setModeDialog((current) =>
+        current && current.path === path
+          ? {
+              ...current,
+              isGitRepo: measured.is_git_repo,
+              gitRoot: measured.git_root,
+              defaultWorktreeRoot: measured.default_worktree_root,
+            }
+          : current,
+      );
+    } catch {
+      // Unmeasurable is the same as unmeasured: the stored value is shown and
+      // the daemon still has the final say.
+    }
+  };
+
   const handleConfirmMode = async (mode: LocalDirectoryExecutionMode) => {
     if (!modeDialog || modeSaving) return;
+    // A landing folder the daemon would refuse must not be saved: the refusal
+    // would arrive as a failed task, long after the dialog is gone.
+    if (
+      mode === "worktree" &&
+      worktreeRootProblem(worktreeRootShown ?? "", modeDialog.gitRoot) !== undefined
+    ) {
+      return;
+    }
     setModeSaving(true);
     setModeError(null);
     const apiMode = apiExecutionMode(mode, serverAcceptsShared);
@@ -285,13 +379,22 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           setModeDialog(null);
           return;
         }
-        if (apiChanged) {
+        const rootChanged = (ref.worktree_root ?? "") !== (worktreeRootToStore ?? "");
+        if (apiChanged || rootChanged) {
           await updateResource.mutateAsync({
             resourceId: modeDialog.resource.id,
             data: {
               // Spread first so every other ref field survives the edit — the
-              // server replaces the whole ref, it does not deep-merge.
-              resource_ref: { ...ref, execution_mode: apiMode },
+              // server replaces the whole ref, it does not deep-merge. The
+              // landing folder is then set or REMOVED, so clearing it back to
+              // the default is expressible.
+              resource_ref: {
+                ...ref,
+                execution_mode: apiMode,
+                ...(worktreeRootToStore
+                  ? { worktree_root: worktreeRootToStore }
+                  : { worktree_root: undefined }),
+              },
             },
           });
         }
@@ -304,6 +407,19 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
             daemon_id: localDaemonId,
             label: modeDialog.label ?? modeDialog.path,
             execution_mode: apiMode,
+            // Identity and repository, measured on this machine at pick time.
+            // Omitted rather than sent empty when unknown: an empty repo_key
+            // means "unidentifiable", and the server must be able to tell that
+            // apart from a key it was never given.
+            ...(modeDialog.realPath ? { real_path: modeDialog.realPath } : {}),
+            ...(modeDialog.repoKey ? { repo_key: modeDialog.repoKey } : {}),
+            ...(modeDialog.isGitRepo === undefined
+              ? {}
+              : { is_git_repo: modeDialog.isGitRepo }),
+            // Only a location the user actually chose is stored. The default
+            // is "beside the repository", which follows a repository they
+            // later move; a stored literal would keep pointing at the old place.
+            ...(worktreeRootToStore ? { worktree_root: worktreeRootToStore } : {}),
           },
         });
       }
@@ -339,6 +455,41 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       );
     } finally {
       setModeSaving(false);
+    }
+  };
+
+  // Which local directory a run WRITES is the first one on this machine, so
+  // reordering is the control over that — not a cosmetic list preference. The
+  // rule lives in local-directory-order.ts; this only sends what it decided.
+  const handleMoveLocalDirectory = async (
+    resource: ProjectResource,
+    direction: MoveDirection,
+  ) => {
+    const patches = moveLocalDirectory(
+      resources,
+      resource.id,
+      localDaemonId,
+      direction,
+    );
+    if (patches.length === 0) return;
+    try {
+      // Sequential, not concurrent: the list is a handful of rows, and two
+      // position writes racing on one project would leave an order neither
+      // request asked for.
+      for (const patch of patches) {
+        // Position only — resending resource_ref on an unrelated edit is how
+        // a rename silently dropped a directory's isolation (#7113).
+        await updateResource.mutateAsync({
+          resourceId: patch.resourceId,
+          data: { position: patch.position },
+        });
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.resources.toast_local_mode_update_failed),
+      );
     }
   };
 
@@ -405,6 +556,11 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
               {t(($) => $.resources.empty)}
             </p>
           )}
+          <DuplicateSourceBanner
+            groups={mergeGroups}
+            onMerge={handleMergeIntoLocal}
+            disabled={deleteResource.isPending}
+          />
           {resources.length > 0 && (
             <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
               {resources.map((resource) => (
@@ -420,6 +576,21 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                     )
                   }
                   canEdit={desktopMode}
+                  canMoveUp={canMoveLocalDirectory(
+                    resources,
+                    resource.id,
+                    localDaemonId,
+                    "up",
+                  )}
+                  canMoveDown={canMoveLocalDirectory(
+                    resources,
+                    resource.id,
+                    localDaemonId,
+                    "down",
+                  )}
+                  onMove={(direction) =>
+                    void handleMoveLocalDirectory(resource, direction)
+                  }
                   onRemove={() => handleRemove(resource)}
                   onRenameLocalDirectory={handleRenameLocalDirectory}
                   onEditLocalDirectoryMode={(target) => {
@@ -434,13 +605,23 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                           target.resource_ref.local_path,
                         ),
                       ),
-                      // The path is already saved, so there is nothing to
-                      // re-validate from the browser; the desktop check only
-                      // runs at pick time. Unknown means the option stays
-                      // available and the daemon has the final say.
+                      // Opened with what the row already knows; the measured
+                      // fields below arrive a moment later. Unknown means the
+                      // option stays available and the daemon has the final
+                      // say, so the dialog is useful before they land.
                       isGitRepo: undefined,
                       resource: target,
+                      worktreeRoot: target.resource_ref.worktree_root,
                     });
+                    // Upgrading an existing directory to parallel is the same
+                    // decision as choosing it when adding one, so it gets the
+                    // same information: where the copies would land, and
+                    // whether a folder typed there sits inside the repository.
+                    // Only this machine can measure that, and only for a
+                    // directory it holds — a resource pinned elsewhere, or a
+                    // web client, simply gets no measurement and falls back to
+                    // showing the stored value.
+                    void refreshMeasuredDirectory(target.resource_ref.local_path);
                   }}
                 />
               ))}
@@ -541,10 +722,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 size="sm"
                 className="h-7 justify-start px-2 text-caption text-muted-foreground hover:text-foreground"
                 disabled={
-                  picking ||
-                  createResource.isPending ||
-                  !daemonStatus.running ||
-                  hasLocalDirectoryForCurrentDaemon
+                  picking || createResource.isPending || !daemonStatus.running
                 }
                 onClick={() => {
                   void handleAttachLocalDirectory();
@@ -558,9 +736,9 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                   {t(($) => $.resources.local_daemon_offline_hint)}
                 </p>
               )}
-              {daemonStatus.running && hasLocalDirectoryForCurrentDaemon && (
+              {daemonStatus.running && attachedRealPaths.size > 0 && (
                 <p className="px-2 pt-0.5 text-micro text-muted-foreground">
-                  {t(($) => $.resources.local_daemon_already_attached_hint)}
+                  {t(($) => $.resources.local_directory_default_hint)}
                 </p>
               )}
             </div>
@@ -584,6 +762,13 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           )}
           sharedUnavailable={sharedUnavailable}
           sharedUsesLocalOverride={sharedUsesLocalOverride}
+          worktreeRootPreview={worktreeRootShown}
+          gitRoot={modeDialog.gitRoot}
+          onWorktreeRootChange={(next) =>
+            setModeDialog((current) =>
+              current ? { ...current, worktreeRoot: next } : current,
+            )
+          }
           errorMessage={modeError ?? undefined}
           saving={modeSaving}
           confirmLabel={
@@ -603,6 +788,10 @@ interface ResourceRowProps {
   localDaemonId: string | null;
   localSharedOverride: boolean;
   canEdit: boolean;
+  /** False at the ends of this machine's group, and on every other row type. */
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMove: (direction: MoveDirection) => void;
   onRemove: () => void;
   onRenameLocalDirectory: (
     resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
@@ -618,6 +807,9 @@ function ResourceRow({
   localDaemonId,
   localSharedOverride,
   canEdit,
+  canMoveUp,
+  canMoveDown,
+  onMove,
   onRemove,
   onRenameLocalDirectory,
   onEditLocalDirectoryMode,
@@ -664,6 +856,9 @@ function ResourceRow({
         localDaemonId={localDaemonId}
         localSharedOverride={localSharedOverride}
         canEdit={canEdit}
+        canMoveUp={canMoveUp}
+        canMoveDown={canMoveDown}
+        onMove={onMove}
         onRemove={onRemove}
         onRename={onRenameLocalDirectory}
         onEditMode={onEditLocalDirectoryMode}
@@ -693,6 +888,9 @@ interface LocalDirectoryRowProps {
   localDaemonId: string | null;
   localSharedOverride: boolean;
   canEdit: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMove: (direction: MoveDirection) => void;
   onRemove: () => void;
   onRename: (
     resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
@@ -708,6 +906,9 @@ function LocalDirectoryRow({
   localDaemonId,
   localSharedOverride,
   canEdit,
+  canMoveUp,
+  canMoveDown,
+  onMove,
   onRemove,
   onRename,
   onEditMode,
@@ -820,6 +1021,35 @@ function LocalDirectoryRow({
             {t(($) => $.resources.mode_badge_shared_tooltip)}
           </TooltipContent>
         </Tooltip>
+      )}
+      {/* Reordering, not decoration: the first directory on this machine is the
+          one a run writes, so these are how the user picks it. Rendered only
+          when there IS a sibling to move past, because a permanently disabled
+          arrow on a single-directory project is a control that never means
+          anything. */}
+      {!editing && (canMoveUp || canMoveDown) && (
+        <>
+          <button
+            type="button"
+            disabled={!canMoveUp}
+            onClick={() => onMove("up")}
+            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent disabled:opacity-30 disabled:hover:bg-transparent"
+            title={t(($) => $.resources.local_directory_move_up_tooltip)}
+            aria-label={t(($) => $.resources.local_directory_move_up_tooltip)}
+          >
+            <ArrowUp className="size-3 text-muted-foreground" />
+          </button>
+          <button
+            type="button"
+            disabled={!canMoveDown}
+            onClick={() => onMove("down")}
+            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent disabled:opacity-30 disabled:hover:bg-transparent"
+            title={t(($) => $.resources.local_directory_move_down_tooltip)}
+            aria-label={t(($) => $.resources.local_directory_move_down_tooltip)}
+          >
+            <ArrowDown className="size-3 text-muted-foreground" />
+          </button>
+        </>
       )}
       {/* Not gated on `mismatch`: switching the mode only rewrites a field, so
           it works from the web app or another device, unlike rename (whose

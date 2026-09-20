@@ -150,10 +150,20 @@ func (d *Daemon) applyLocalSharedOverride(a *localDirectoryAssignment) {
 }
 
 func (d *Daemon) resolveLocalDirectoryAssignment(task Task) (*localDirectoryAssignment, error) {
-	assignment, err := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	assignment, _, err := d.resolveLocalDirectoryPlan(task)
+	return assignment, err
+}
+
+// resolveLocalDirectoryPlan is resolveLocalDirectoryAssignment plus the
+// project's other local directories on this machine, which the run may read
+// but not write (DENE-617 invariant 1). The shared-mode override applies only
+// to the writable one: it decides whether THIS run takes the path mutex, and
+// a directory nothing runs in has no mutex to skip.
+func (d *Daemon) resolveLocalDirectoryPlan(task Task) (*localDirectoryAssignment, []*localDirectoryAssignment, error) {
+	assignment, readOnly, err := localDirectoryPlanForTask(task, d.cfg.DaemonID)
 	if err != nil || assignment == nil {
-		return assignment, err
+		return assignment, readOnly, err
 	}
 	d.applyLocalSharedOverride(assignment)
-	return assignment, nil
+	return assignment, readOnly, nil
 }

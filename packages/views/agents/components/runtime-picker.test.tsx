@@ -77,6 +77,29 @@ function trigger(container: HTMLElement): HTMLButtonElement {
   return element;
 }
 
+describe("RuntimePicker pill variant", () => {
+  // DENE-443 put this picker on the create dialog's alignment toolbar, where a
+  // labelled full-width form row does not fit. The chrome differs; the LIST
+  // must not — a second rendering of the machine rows is how two pickers drift.
+  it("drops the label row and still selects from the same list", () => {
+    const { container, onSelect } = renderPicker({ variant: "pill" });
+
+    expect(container.querySelector('[data-slot="popover-trigger"]')?.textContent)
+      .toContain("Claude (a.local)");
+    // The form row's label is the pill's own name, so it is not repeated.
+    expect(container.textContent).not.toContain("Runtime");
+
+    fireEvent.click(trigger(container));
+    const rows = document.querySelectorAll<HTMLButtonElement>(
+      '[data-slot="popover-content"] button',
+    );
+    expect(rows.length).toBe(RUNTIMES.length);
+    fireEvent.click(rows[rows.length - 1]!);
+
+    expect(onSelect).toHaveBeenCalledWith("rt-b");
+  });
+});
+
 describe("RuntimePicker (creation studio)", () => {
   beforeEach(() => cleanup());
   afterEach(() => cleanup());
@@ -119,5 +142,54 @@ describe("RuntimePicker (creation studio)", () => {
       fireEvent.click(button);
     }
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The empty-selection seed is an effect, and its caller builds `onSelect`
+   * inline — so keying the effect on the callback identity made it fire once
+   * per render of the parent. The alignment page is a parent that re-renders
+   * while it writes (a rebind invalidates its own query and its own list), so
+   * that turned one empty selection into an endless switch loop: 53 PATCHes in
+   * a second, and a navigation that never committed (DENE-319). One empty
+   * selection means one seed.
+   */
+  it("seeds an empty selection once, not once per render", () => {
+    const { rerender, onSelect } = renderPicker({ selectedRuntimeId: "" });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("rt-a");
+
+    for (let render = 0; render < 5; render += 1) {
+      rerender(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <RuntimePicker
+            runtimes={RUNTIMES}
+            members={MEMBERS}
+            currentUserId={ME}
+            selectedRuntimeId=""
+            onSelect={(id) => onSelect(id)}
+          />
+        </I18nProvider>,
+      );
+    }
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  // A parent that ignores the seed (nothing on the server left to rebind) must
+  // not be asked again just because its runtimes array is rebuilt each render.
+  it("does not reseed when only the runtimes array identity changes", () => {
+    const { rerender, onSelect } = renderPicker({ selectedRuntimeId: "" });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <RuntimePicker
+          runtimes={[...RUNTIMES]}
+          members={MEMBERS}
+          currentUserId={ME}
+          selectedRuntimeId=""
+          onSelect={onSelect}
+        />
+      </I18nProvider>,
+    );
+    expect(onSelect).toHaveBeenCalledTimes(1);
   });
 });

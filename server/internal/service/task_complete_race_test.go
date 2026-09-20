@@ -317,6 +317,64 @@ func TestProviderCapacityRetrySchedule(t *testing.T) {
 	}
 }
 
+// TestProviderServerErrorRetrySchedule locks in DENE-596's schedule for the
+// provider-fault bucket: first run + two deferred retries, same shape as the
+// capacity schedule and for the same reason — an upstream that just answered
+// 5xx, or just refused a credential it had accepted seconds earlier, is not
+// fixed by resending in the same instant. max_attempts<=1 still disables retry.
+//
+// Before this, provider_server_error was off the allowlist entirely: the Grok
+// 401 shape terminated the run on its first attempt and showed the member
+// "sign in again" copy. Neither of those was true.
+func TestProviderServerErrorRetrySchedule(t *testing.T) {
+	const srvReason = "agent_error.provider_server_error"
+
+	ceilingCases := []struct {
+		reason string
+		max    int32
+		want   int32
+	}{
+		{srvReason, 2, providerServerErrorMaxAttempts},
+		{srvReason, 1, 1}, // disabled → stays disabled, not revived
+		{srvReason, 5, 5}, // higher configured budget → kept (widen-only)
+	}
+	for _, tc := range ceilingCases {
+		if got := retryAttemptCeiling(tc.reason, tc.max); got != tc.want {
+			t.Errorf("ceiling(%q, %d) = %d, want %d", tc.reason, tc.max, got, tc.want)
+		}
+	}
+
+	for _, failedAttempt := range []int32{1, 2} {
+		if got := retryDelayForAttempt(srvReason, failedAttempt); got != providerServerErrorRetryWait {
+			t.Errorf("retryDelayForAttempt(%q, %d) = %s, want %s", srvReason, failedAttempt, got, providerServerErrorRetryWait)
+		}
+	}
+
+	mkTask := func(attempt, max int32) db.AgentTaskQueue {
+		return db.AgentTaskQueue{
+			Attempt:     attempt,
+			MaxAttempts: max,
+			IssueID:     pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+		}
+	}
+	eligCases := []struct {
+		name    string
+		attempt int32
+		max     int32
+		want    bool
+	}{
+		{"provider fault first run retries", 1, 2, true},
+		{"provider fault second run still retries", 2, 2, true},
+		{"provider fault third run is the ceiling", 3, 2, false},
+		{"provider fault with retry disabled (max_attempts=1) never retries", 1, 1, false},
+	}
+	for _, tc := range eligCases {
+		if got := retryEligible(srvReason, mkTask(tc.attempt, tc.max), retryEnabledAgent()); got != tc.want {
+			t.Errorf("%s: retryEligible(%q, attempt=%d/max=%d) = %v, want %v", tc.name, srvReason, tc.attempt, tc.max, got, tc.want)
+		}
+	}
+}
+
 // TestAgentAutoRetrySwitchGatesRetryEligible is the DENE-217 unit gate: the
 // per-agent switch sits inside retryEligible so FailTask and
 // MaybeRetryFailedTask cannot disagree. Default-on (column DEFAULT TRUE)
@@ -333,6 +391,7 @@ func TestAgentAutoRetrySwitchGatesRetryEligible(t *testing.T) {
 	reasons := []string{
 		"agent_error.provider_network",
 		"agent_error.provider_capacity_or_rate_limit",
+		"agent_error.provider_server_error",
 		"runtime_offline",
 		"timeout",
 		"codex_semantic_inactivity",
@@ -366,6 +425,11 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// session; the delay (not a fresh session) is what avoids colliding
 		// with the same limit.
 		{reason: "agent_error.provider_capacity_or_rate_limit", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
+		// Provider fault (DENE-596): a 5xx, or an upstream that refuses a
+		// credential the runtime has just authenticated. Retryable for the
+		// same reason provider_network is — the request was fine — and
+		// resume-safe because nothing about the conversation was rejected.
+		{reason: "agent_error.provider_server_error", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
@@ -388,6 +452,23 @@ func TestTaskFailureClassifiers(t *testing.T) {
 				t.Fatalf("retryableReasons[%q] = %v, want %v", tc.reason, got, tc.wantRetry)
 			}
 		})
+	}
+}
+
+// TestDSHStreamClosedRetriesViaExistingProviderNetworkBucket pins DENE-235:
+// STREAM_CLOSED classifies as provider_network, and that bucket is already
+// on retryableReasons. Do not add a new agent_error.* bucket — unknown stays
+// off the allowlist, which is why the misclassification was terminal.
+func TestDSHStreamClosedRetriesViaExistingProviderNetworkBucket(t *testing.T) {
+	reason := taskfailure.Classify("STREAM_CLOSED: SSE stream ended without [DONE]")
+	if reason != taskfailure.ReasonAgentProviderNetwork {
+		t.Fatalf("Classify(STREAM_CLOSED) = %q, want %q", reason, taskfailure.ReasonAgentProviderNetwork)
+	}
+	if !retryableReasons[string(reason)] {
+		t.Fatal("agent_error.provider_network must stay on retryableReasons; STREAM_CLOSED retries through the existing bucket, not a new one")
+	}
+	if retryableReasons[string(taskfailure.ReasonAgentUnknown)] {
+		t.Fatal("agent_error.unknown must stay off retryableReasons: that is the misclassification this fix removes")
 	}
 }
 

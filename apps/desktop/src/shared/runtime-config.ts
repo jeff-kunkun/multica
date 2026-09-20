@@ -13,12 +13,43 @@ export type RuntimeConfigResult =
   | { ok: true; config: RuntimeConfig }
   | { ok: false; error: RuntimeConfigError };
 
+export type RuntimeConfigSwitchResult =
+  | { ok: true; config: RuntimeConfig }
+  | { ok: false; error: string };
+
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
   schemaVersion: 1,
   apiUrl: "https://api.multica.ai",
   wsUrl: "wss://api.multica.ai/ws",
   appUrl: "https://multica.ai",
 });
+
+/** Built-in self-hosted preset shown in the desktop server switcher. */
+export const SELF_HOSTED_PRESET_URL = "https://ai.ferryway.cc";
+
+/**
+ * Server this fork's desktop build connects to on entry, used whenever
+ * `~/.multica/desktop.json` is absent. Upstream falls back to official cloud;
+ * this fork's product line is self-hosted first (KUN-FORK.md), so a fresh
+ * install lands on the self-hosted instance and the settings switcher is only
+ * needed to move to official cloud or another instance.
+ *
+ * Official cloud stays reachable: switching to it writes an explicit
+ * `desktop.json` rather than deleting the file, so "no file" means exactly one
+ * thing.
+ */
+export const DEFAULT_ENTRY_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
+  schemaVersion: 1,
+  apiUrl: SELF_HOSTED_PRESET_URL,
+  wsUrl: deriveWsUrl(SELF_HOSTED_PRESET_URL),
+  appUrl: deriveAppUrl(SELF_HOSTED_PRESET_URL),
+});
+
+const OFFICIAL_CLOUD_HOSTS = new Set([
+  "api.multica.ai",
+  "multica.ai",
+  "www.multica.ai",
+]);
 
 const LOCAL_DEV_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
   schemaVersion: 1,
@@ -91,6 +122,74 @@ export function deriveWsUrl(apiUrl: string): string {
   url.search = "";
   url.hash = "";
   return trimTrailingSlash(url.toString());
+}
+
+export function isOfficialCloudConfig(config: RuntimeConfig): boolean {
+  return (
+    config.apiUrl === DEFAULT_RUNTIME_CONFIG.apiUrl &&
+    config.appUrl === DEFAULT_RUNTIME_CONFIG.appUrl
+  );
+}
+
+/** Desktop CLI profile name for a target API URL (`desktop-<host>`). */
+export function desktopProfileName(apiUrl: string): string {
+  try {
+    const url = new URL(apiUrl);
+    const host = url.host.replace(/:/g, "-").toLowerCase();
+    return `desktop-${host}`;
+  } catch {
+    return "desktop";
+  }
+}
+
+export function runtimeConfigHost(config: RuntimeConfig): string {
+  try {
+    return new URL(config.appUrl).host;
+  } catch {
+    try {
+      return new URL(config.apiUrl).host;
+    } catch {
+      return config.appUrl || config.apiUrl;
+    }
+  }
+}
+
+/**
+ * Build a runtime config from a user-entered server URL.
+ *
+ * Official cloud hosts always resolve to `DEFAULT_RUNTIME_CONFIG`. Any other
+ * http(s) origin becomes apiUrl; wsUrl/appUrl are derived. Credentials, path,
+ * query, and hash are stripped so `desktop.json` never stores secrets.
+ */
+export function runtimeConfigFromServerUrl(raw: string): RuntimeConfig {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    throw new Error("Server URL is required");
+  }
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error("Server URL must be a valid http or https URL");
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Server URL must use http or https");
+  }
+
+  const host = url.hostname.replace(/\.$/, "").toLowerCase();
+  if (OFFICIAL_CLOUD_HOSTS.has(host)) {
+    return { ...DEFAULT_RUNTIME_CONFIG };
+  }
+
+  const apiUrl = `${url.protocol}//${url.host}`;
+  return {
+    schemaVersion: 1,
+    apiUrl,
+    wsUrl: deriveWsUrl(apiUrl),
+    appUrl: deriveAppUrl(apiUrl),
+  };
 }
 
 // Convention: api hosts are exposed at `api.<web-host>` (api.multica.ai →

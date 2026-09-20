@@ -2065,6 +2065,10 @@ func printAggregateDiskUsage(w io.Writer, agg daemon.AggregateDiskUsageReport, b
 		fmt.Fprintf(w, "Repo cache (.repos): %s across %d repo(s) in all roots, not included above.\n",
 			formatBytes(agg.TotalRepoCacheSizeBytes), agg.TotalRepoCacheCount)
 	}
+	if agg.TotalPackageStoreSizeBytes > 0 {
+		fmt.Fprintf(w, "Package store (.pkg-store): %s in all roots, not included above.\n",
+			formatBytes(agg.TotalPackageStoreSizeBytes))
+	}
 }
 
 func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
@@ -2072,6 +2076,7 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 	if report.TotalTaskCount == 0 {
 		fmt.Fprintln(w, "(no run directories)")
 		printRepoCacheLine(w, report)
+		printPackageStoreLine(w, report)
 		return
 	}
 	rows := make([][]string, 0, len(report.Tasks))
@@ -2105,6 +2110,7 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 			formatBytes(report.TotalArtifactSizeBytes), report.TotalArtifactRatio*100)
 	}
 	printRepoCacheLine(w, report)
+	printPackageStoreLine(w, report)
 }
 
 // printRepoCacheLine reports the bare-repo cache on its own line. Every task
@@ -2120,11 +2126,23 @@ func printRepoCacheLine(w io.Writer, report daemon.DiskUsageReport) {
 		formatBytes(report.RepoCacheSizeBytes), report.RepoCacheCount)
 }
 
+// printPackageStoreLine reports the shared dependency store. It is the
+// counterpart of the artifact column: every byte here is a byte the task
+// directories no longer each hold a private copy of.
+func printPackageStoreLine(w io.Writer, report daemon.DiskUsageReport) {
+	if report.PackageStoreSizeBytes <= 0 {
+		return
+	}
+	fmt.Fprintf(w, "Package store (.pkg-store): %s shared by every run, not included above. Unreferenced packages are pruned every MULTICA_GC_PACKAGE_STORE_PRUNE_INTERVAL.\n",
+		formatBytes(report.PackageStoreSizeBytes))
+}
+
 func printDiskUsageWorkspaceTable(w io.Writer, report daemon.DiskUsageReport) {
 	fmt.Fprintf(w, "Workspaces root: %s\n", report.WorkspacesRoot)
 	if report.TotalWorkspaceCount == 0 {
 		fmt.Fprintln(w, "(no workspaces)")
 		printRepoCacheLine(w, report)
+		printPackageStoreLine(w, report)
 		return
 	}
 	rows := make([][]string, 0, len(report.Workspaces))
@@ -2155,6 +2173,7 @@ func printDiskUsageWorkspaceTable(w io.Writer, report daemon.DiskUsageReport) {
 			formatBytes(report.TotalArtifactSizeBytes), report.TotalArtifactRatio*100)
 	}
 	printRepoCacheLine(w, report)
+	printPackageStoreLine(w, report)
 }
 
 // printDiskUsageOtherRootsHint warns that workspace roots OTHER than the one

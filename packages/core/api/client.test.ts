@@ -2135,6 +2135,62 @@ describe("ApiClient explicit workspace targeting", () => {
     expect(runtimes[0]?.id).toBe("runtime-1");
     expect(runtimes[0]?.plan_limits).toBeUndefined();
   });
+
+  it("degrades an unrecognised JEV status to unknown instead of dropping the runtime", async () => {
+    stubOk([
+      {
+        id: "runtime-1",
+        workspace_id: "ws-1",
+        daemon_id: "daemon-1",
+        name: "Codex",
+        runtime_mode: "local",
+        provider: "codex",
+        launch_header: "Codex",
+        status: "online",
+        device_info: "devbox",
+        metadata: {},
+        owner_id: "user-1",
+        visibility: "private",
+        last_seen_at: "2026-08-21T00:00:00Z",
+        created_at: "2026-08-21T00:00:00Z",
+        updated_at: "2026-08-21T00:00:00Z",
+        jev: { status: "degraded", observed_at: 1_800_000_000 },
+      },
+    ]);
+
+    const runtimes = await new ApiClient("https://api.example.test").listRuntimes();
+
+    expect(runtimes).toHaveLength(1);
+    expect(runtimes[0]?.jev?.status).toBe("unknown");
+  });
+
+  it("discards a JEV snapshot that is not an object", async () => {
+    stubOk([
+      {
+        id: "runtime-2",
+        workspace_id: "ws-1",
+        daemon_id: "daemon-1",
+        name: "Codex",
+        runtime_mode: "local",
+        provider: "codex",
+        launch_header: "Codex",
+        status: "online",
+        device_info: "devbox",
+        metadata: {},
+        owner_id: "user-1",
+        visibility: "private",
+        last_seen_at: "2026-08-21T00:00:00Z",
+        created_at: "2026-08-21T00:00:00Z",
+        updated_at: "2026-08-21T00:00:00Z",
+        jev: "not-an-object",
+      },
+    ]);
+
+    const runtimes = await new ApiClient("https://api.example.test").listRuntimes();
+
+    expect(runtimes).toHaveLength(1);
+    expect(runtimes[0]?.jev).toBeUndefined();
+  });
 });
 
 describe("ApiClient model discovery response schema", () => {
@@ -2746,5 +2802,368 @@ describe("ApiClient session expiry", () => {
     expect(store.getState().status).toBe("unauthenticated");
     expect(store.getState().expired).toBe(true);
     expect(storage.getItem("multica_token")).toBeNull();
+  });
+});
+
+describe("ApiClient issue drafts", () => {
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  const draft = {
+    chat_session_id: "session-1",
+    workspace_id: "ws-1",
+    status: "ready",
+    revision: 3,
+    draft: { title: "Align first", description: "", status: "", priority: "" },
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:01:00Z",
+  };
+
+  it("confirms a draft and reports the issue the server created", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        draft: { ...draft, status: "completed", issue_id: "issue-9" },
+        issue_id: "issue-9",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.finalizeIssueDraft("session-1", { expected_revision: 3 }),
+    ).resolves.toMatchObject({ issue_id: "issue-9" });
+
+    const call = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(call[0]).toContain("/api/issue-drafts/session-1/finalize");
+    expect(call[1].method).toBe("POST");
+    expect(JSON.parse(String(call[1].body))).toEqual({ expected_revision: 3 });
+  });
+
+  it("throws rather than reporting an empty issue id for a malformed confirm body", async () => {
+    // Every other endpoint here degrades to an empty shape, but this one must
+    // not: the caller navigates to `issue_id`, and an empty string would send
+    // the user to a route that cannot resolve while the issue it names is
+    // already live. Re-confirming is safe — the protocol returns the same
+    // issue — so throwing is the recoverable answer.
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ draft, issue_id: null }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.finalizeIssueDraft("session-1", { expected_revision: 3 }),
+    ).rejects.toThrow();
+  });
+
+  it("degrades a malformed draft body to an empty draft instead of throwing", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ session_id: 7, draft: "not an object" }))
+      .mockResolvedValueOnce(jsonResponse({ drafts: "not a list" }))
+      .mockResolvedValueOnce(jsonResponse({ chat_session_id: "session-1", status: "bogus" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.createIssueDraftSession({ runtime_id: "runtime-1" }),
+    ).resolves.toMatchObject({ session_id: "", draft: { status: "draft" } });
+    await expect(client.listIssueDrafts()).resolves.toEqual([]);
+    await expect(
+      client.updateIssueDraft("session-1", {
+        draft: { title: "t", description: "", status: "", priority: "" },
+        expected_revision: 0,
+      }),
+    ).resolves.toMatchObject({ chat_session_id: "", revision: 0 });
+  });
+
+  it("sends the reasoning effort with the session create and reads a malformed capability list as none", async () => {
+    // Two contracts in one call (DENE-514). The request half: the effort is part
+    // of the same create as the model, because both are frozen onto the carrier
+    // agent row and neither can be written afterwards. The response half: a
+    // backend that answers with a capability list this client cannot read must
+    // cost only the list — the session id is what the caller navigates to, and
+    // an unreadable list of methods is not a reason to strand a draft that was
+    // created.
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        session_id: "session-1",
+        agent_id: "agent-1",
+        runtime_id: "runtime-1",
+        draft: {
+          ...draft,
+          capabilities: { keys: "not a list", version: 7 },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.createIssueDraftSession({
+        runtime_id: "runtime-1",
+        model: "claude-opus-4-6",
+        thinking_level: "high",
+        capabilities: [],
+      }),
+    ).resolves.toMatchObject({
+      session_id: "session-1",
+      draft: { capabilities: { keys: [], version: "" } },
+    });
+
+    const call = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(call[0]).toContain("/api/issue-drafts");
+    expect(call[1].method).toBe("POST");
+    expect(JSON.parse(String(call[1].body))).toEqual({
+      runtime_id: "runtime-1",
+      model: "claude-opus-4-6",
+      thinking_level: "high",
+      // An emptied picker says "none" with an empty array; omitting the field
+      // would mean "the server's default set", the opposite request.
+      capabilities: [],
+    });
+  });
+
+  it("treats a 404 on the list as a backend that predates the endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: "not found" }, 404));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listIssueDrafts()).resolves.toEqual([]);
+  });
+
+  it("switches the alignment policy and reports the version the server recorded", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        ...draft,
+        policy: { key: "conversation", version: "1", guided: false },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.switchIssueDraftPolicy("session-1", { policy: "conversation" }),
+    ).resolves.toMatchObject({
+      policy: { key: "conversation", version: "1", guided: false },
+    });
+
+    const call = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(call[0]).toContain("/api/issue-drafts/session-1/policy");
+    expect(call[1].method).toBe("PATCH");
+    expect(JSON.parse(String(call[1].body))).toEqual({ policy: "conversation" });
+  });
+
+  it("reports no policy at all for a body from a backend that has none", async () => {
+    // The installed-desktop case: an older backend simply has no `policy`, and
+    // the page must read that as "nothing to switch" rather than as the guided
+    // default it would then offer to change.
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ drafts: [draft] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listIssueDrafts()).resolves.toMatchObject([
+      { policy: { key: "", version: "", guided: false } },
+    ]);
+  });
+
+  it("falls back to the requested runtime id for a malformed runtime switch body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ runtime_id: 42 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.switchIssueDraftRuntime("session-1", { runtime_id: "runtime-b" }),
+    ).resolves.toEqual({ runtime_id: "runtime-b" });
+  });
+});
+
+// DENE-304. The two-level specialisation fields are read on the agents list
+// (relationship + child_count) and on agent detail (the inherited prompt and
+// skills). Both endpoints now pass through the zod boundary, so an installed
+// desktop client talking to a drifted backend degrades instead of throwing
+// during render.
+describe("ApiClient agent specialisation reads (DENE-304)", () => {
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  it("parses the relationship fields the list serves", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse([
+        {
+          id: "agent-base",
+          name: "Base Role",
+          child_count: 2,
+        },
+        {
+          id: "agent-child",
+          name: "Variant",
+          parent_agent_id: "agent-base",
+          parent_agent_name: "Base Role",
+          child_count: 0,
+        },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const agents = await client.listAgents({ workspace_id: "ws-1" });
+
+    expect(agents[0]?.child_count).toBe(2);
+    expect(agents[0]?.parent_agent_id).toBeUndefined();
+    expect(agents[1]?.parent_agent_id).toBe("agent-base");
+    expect(agents[1]?.parent_agent_name).toBe("Base Role");
+  });
+
+  it("parses the inherited half served by agent detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          id: "agent-child",
+          name: "Variant",
+          instructions: "child half",
+          parent_agent_id: "agent-base",
+          parent_agent_name: "Base Role",
+          inherited_instructions: "parent half",
+          inherited_skills: [
+            { id: "skill-1", name: "Review", description: "how to review" },
+          ],
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const agent = await client.getAgent("agent-child");
+
+    expect(agent?.inherited_instructions).toBe("parent half");
+    expect(agent?.inherited_skills).toEqual([
+      { id: "skill-1", name: "Review", description: "how to review" },
+    ]);
+  });
+
+  it("keeps the agents list renderable when the whole payload is malformed", async () => {
+    // Not an array at all: there is nothing to salvage, and the empty list is
+    // the honest degrade (the page renders its empty state).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ agents: [] })),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listAgents()).resolves.toEqual([]);
+  });
+
+  // DENE-505. The runtime-inheritance flag is read on the list and on detail
+  // to decide whether the config panel offers "inherit from the base role" or
+  // an independent runtime. Same optional-and-caught contract as the rest of
+  // the specialisation fields: absent means "owns its runtime" (the
+  // pre-feature behaviour), and a malformed value costs the flag, not the row.
+  it("parses the runtime inheritance flag and degrades a malformed one alone", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse([
+          { id: "agent-base", name: "Base Role", runtime_inherited: false },
+          {
+            id: "agent-child",
+            name: "Variant",
+            parent_agent_id: "agent-base",
+            runtime_inherited: true,
+          },
+          {
+            id: "agent-drifted",
+            name: "Drifted",
+            parent_agent_id: "agent-base",
+            runtime_inherited: "yes",
+          },
+        ]),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const agents = await client.listAgents();
+
+    expect(agents[0]?.runtime_inherited).toBe(false);
+    expect(agents[1]?.runtime_inherited).toBe(true);
+    expect(agents[2]?.runtime_inherited).toBeUndefined();
+    expect(agents[2]?.parent_agent_id).toBe("agent-base");
+  });
+
+  it("drops only the unusable row, keeping the rest of the agents list", async () => {
+    // One row without an id must not blank the surface the whole product is
+    // navigated from.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse([
+          { name: "No id at all" },
+          { id: "agent-ok", name: "Usable" },
+        ]),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const agents = await client.listAgents();
+    expect(agents.map((agent) => agent.id)).toEqual(["agent-ok"]);
+  });
+
+  it("degrades a malformed agent detail to null, never to a blank agent", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse("not-an-agent")),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.getAgent("agent-1")).resolves.toBeNull();
+  });
+
+  it("drops only the malformed specialisation fields, keeping the agent", async () => {
+    // A newer/older backend can send a wrong type for the inherited list or
+    // the count; neither may cost the agent its other fields.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse([
+          {
+            id: "agent-child",
+            name: "Variant",
+            parent_agent_id: "agent-base",
+            inherited_instructions: 42,
+            inherited_skills: "nope",
+            child_count: "many",
+          },
+        ]),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const agents = await client.listAgents();
+    expect(agents).toHaveLength(1);
+    expect(agents[0]?.id).toBe("agent-child");
+    expect(agents[0]?.parent_agent_id).toBe("agent-base");
+    expect(agents[0]?.inherited_instructions).toBeUndefined();
+    expect(agents[0]?.inherited_skills).toBeUndefined();
+    expect(agents[0]?.child_count).toBeUndefined();
+  });
+
+  it("solidifies a specialisation through its own endpoint", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ id: "agent-child", name: "Variant" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const agent = await client.solidifyAgent("agent-child");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/agents/agent-child/solidify",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(agent?.id).toBe("agent-child");
   });
 });
