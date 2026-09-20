@@ -157,19 +157,44 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "ladder has no seat in this workspace"}, nil
 	}
 
-	verdict, err := r.Judge.Assign(ctx, settings.Target(), r.judgeState(issue, direction, candidates))
-	if err != nil {
-		return r.reportUnavailable(ctx, workspaceID, issue, err)
+	// A tier label on the ticket is an answer, not a hint: when it names a
+	// rung that exists, the executor slot is filled from it and the judge is
+	// never asked about strength. A ticket that also needs a reviewer still
+	// goes to the judge — for the reviewer question only.
+	requestedTier, labelled := r.Ladder.RequestedTier(issue.Labels)
+	labelSeat, labelSeatOK := Seat{}, false
+	if labelled {
+		labelSeat, labelSeatOK = SeatByTier(candidates, requestedTier)
 	}
-	r.Breaker.Succeed(workspaceID)
+	executorFromLabel := needExecutor && labelSeatOK
+
+	var verdict Verdict
+	if needReviewer || !executorFromLabel {
+		v, err := r.Judge.Assign(ctx, settings.Target(), r.judgeState(issue, direction, candidates))
+		if err != nil {
+			return r.reportUnavailable(ctx, workspaceID, issue, err)
+		}
+		r.Breaker.Succeed(workspaceID)
+		verdict = v
+	}
 
 	threshold := settings.Threshold()
 
 	// --- executor slot ---------------------------------------------------
 	var executor *Seat
-	executorConfident := verdict.ExecutorConfidence >= threshold
+	executorConfident := executorFromLabel || verdict.ExecutorConfidence >= threshold
 	if needExecutor && executorConfident {
-		if seat, ok := SeatByTier(candidates, verdict.ExecutorTier); ok {
+		seat := labelSeat
+		if !executorFromLabel {
+			s, ok := SeatByTier(candidates, verdict.ExecutorTier)
+			if !ok {
+				// The judge named a rung that is not on the ladder. That is a
+				// broken answer, not an unconfident one: treat it as unfilled.
+				executorConfident = false
+			}
+			seat = s
+		}
+		if executorConfident {
 			written, err := r.Store.AssignAgentIfUnassigned(ctx, workspaceID, issue.ID, seat)
 			if err != nil {
 				return out, err
@@ -178,10 +203,6 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 				executor = &seat
 				out.ExecutorWritten = &seat
 			}
-		} else {
-			// The judge named a rung that is not on the ladder. That is a
-			// broken answer, not an unconfident one: treat it as unfilled.
-			executorConfident = false
 		}
 	}
 
@@ -216,7 +237,8 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	// so the ticket sits in todo until a person notices.
 	stillUnassigned := needExecutor && executor == nil
 	body := r.assignmentComment(issue, direction, candidates, verdict, threshold,
-		executor, reviewerName, needExecutor, needReviewer, hasReviewerSlot, stillUnassigned)
+		executor, reviewerName, needExecutor, needReviewer, hasReviewerSlot, stillUnassigned,
+		executorFromLabel)
 
 	return r.deliver(ctx, workspaceID, issue, KindAssignment, body, stillUnassigned, out)
 }

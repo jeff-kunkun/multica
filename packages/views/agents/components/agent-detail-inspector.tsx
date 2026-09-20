@@ -43,6 +43,7 @@ import {
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
+import { RoutingTierSettingField } from "./inspector/routing-tier-setting-field";
 import { SwitchableModelsEditor } from "./switchable-models-editor";
 import {
   canEditRuntimeProfile,
@@ -425,6 +426,13 @@ export function AgentDetailInspector({
             value={agent.service_tier ?? ""}
             canEdit={canEditRuntime}
             onChange={(serviceTier) => update({ service_tier: serviceTier })}
+          />
+          <RoutingTierSettingField
+            label={t(($) => $.inspector.prop_routing_tier)}
+            description={t(($) => $.inspector.prop_routing_tier_hint)}
+            value={agent.routing_tier ?? ""}
+            canEdit={canEdit}
+            onChange={(routingTier) => update({ routing_tier: routingTier })}
           />
           <SettingsRow
             label={t(($) => $.inspector.prop_switchable_models)}

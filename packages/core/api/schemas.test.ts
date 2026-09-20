@@ -2627,6 +2627,52 @@ describe("AgentSchema auto_retry_enabled", () => {
   });
 });
 
+describe("AgentSchema routing_tier", () => {
+  const baseAgent = {
+    id: "agent-1",
+    workspace_id: "ws-1",
+    runtime_id: "rt-1",
+    name: "Lambda",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    runtime_mode: "local",
+    runtime_config: {},
+    custom_args: [],
+    visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
+    status: "idle",
+    max_concurrent_tasks: 1,
+    model: "",
+    owner_id: null,
+    skills: [],
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    archived_at: null,
+    archived_by: null,
+  };
+
+  it("parses an agent from a backend that predates the field", () => {
+    const parsed = AgentSchema.parse(baseAgent);
+    expect(parsed.id).toBe("agent-1");
+    expect(parsed.routing_tier).toBeUndefined();
+  });
+
+  it("keeps the rung a newer backend sent", () => {
+    const parsed = AgentSchema.parse({ ...baseAgent, routing_tier: "strong" });
+    expect(parsed.routing_tier).toBe("strong");
+  });
+
+  // A malformed rung must cost the rung, not the agent: dropping the row
+  // would empty the agent list over one bad column.
+  it("degrades a malformed routing_tier without dropping the agent", () => {
+    const parsed = AgentSchema.parse({ ...baseAgent, routing_tier: 3 });
+    expect(parsed.id).toBe("agent-1");
+    expect(parsed.routing_tier).toBeUndefined();
+  });
+});
+
 describe("alignment group drift", () => {
   const ENDPOINT = { endpoint: "POST /api/issue-drafts/{id}/finalize" };
 

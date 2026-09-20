@@ -162,16 +162,29 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 	}
 	out := make(map[string]routing.Agent, len(agents))
 	for _, a := range agents {
-		out[a.Name] = routing.Agent{ID: util.UUIDToString(a.ID), Name: a.Name}
+		out[a.Name] = routing.Agent{
+			ID:   util.UUIDToString(a.ID),
+			Name: a.Name,
+			Tier: a.RoutingTier.String,
+		}
 	}
 	return out, nil
 }
 
+// Reviewer returns the workspace's reviewer slot, provisioning it when it is
+// missing. The slot is a product fixture rather than a field each workspace
+// invents, so routing does not degrade to executor-only just because nobody
+// clicked through the settings page. See routing_reviewer_property.go.
 func (s routingStore) Reviewer(ctx context.Context, workspaceID string) (routing.ReviewerProperty, bool, error) {
 	wsID, err := util.ParseUUID(workspaceID)
 	if err != nil {
 		return routing.ReviewerProperty{}, false, err
 	}
+	return s.ensureReviewerProperty(ctx, wsID)
+}
+
+// findReviewerProperty reads the slot without creating it.
+func (s routingStore) findReviewerProperty(ctx context.Context, wsID pgtype.UUID) (routing.ReviewerProperty, bool, error) {
 	props, err := s.h.Queries.ListIssueProperties(ctx, db.ListIssuePropertiesParams{
 		WorkspaceID: wsID,
 		// Archived definitions are excluded, which is also how the switch
@@ -187,12 +200,7 @@ func (s routingStore) Reviewer(ctx context.Context, workspaceID string) (routing
 		if p.Name != ReviewerPropertyName || p.Type != "select" {
 			continue
 		}
-		cfg := parsePropertyConfig(p.Config)
-		options := make(map[string]string, len(cfg.Options))
-		for _, o := range cfg.Options {
-			options[o.Name] = o.ID
-		}
-		return routing.ReviewerProperty{ID: util.UUIDToString(p.ID), Options: options}, true, nil
+		return reviewerPropertyView(p.ID, parsePropertyConfig(p.Config)), true, nil
 	}
 	return routing.ReviewerProperty{}, false, nil
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -172,6 +173,12 @@ type AgentResponse struct {
 	// ServiceTier is the runtime-native Codex execution tier persisted for
 	// this agent (empty = inherit local Codex configuration).
 	ServiceTier string `json:"service_tier"`
+	// RoutingTier is the seat's strength rung for automatic dispatch
+	// (DENE-633): one of the ladder's tier keys, or empty for a seat that is
+	// not on the ladder. It is tagged by a person rather than derived from
+	// `model`, because the same model at another thinking_level is another
+	// rung.
+	RoutingTier string `json:"routing_tier"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
 	// agent is allowed to mount as MCP at task dispatch — for ANY run that
 	// passes the agent's invocation permission, using the agent OWNER's
@@ -297,6 +304,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
+		RoutingTier:              a.RoutingTier.String,
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
@@ -1686,6 +1694,10 @@ type CreateAgentRequest struct {
 	Model              string                     `json:"model"`
 	ThinkingLevel      string                     `json:"thinking_level"`
 	ServiceTier        string                     `json:"service_tier"`
+	// RoutingTier is the seat's rung on the dispatch ladder (DENE-633).
+	// Empty on a specialisation inherits the base role's rung: a direction
+	// seat is the same strength as the seat it specialises.
+	RoutingTier string `json:"routing_tier"`
 	// ComposioToolkitAllowlist seeds the per-task overlay gate (MUL-3869). On
 	// create only the calling user can be the owner, so we accept the field
 	// unconditionally here; the cross-owner permission gate lives on PUT.
@@ -2042,6 +2054,21 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	createdModel := pgtype.Text{String: req.Model, Valid: req.Model != ""}
 	createdThinkingLevel := pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""}
 	createdServiceTier := pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""}
+	routingTierKey, tierOK := routing.DefaultLadder.NormalizeTier(req.RoutingTier)
+	if !tierOK {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf(
+			"routing_tier %q is not a known tier; expected one of %s",
+			req.RoutingTier, strings.Join(routing.DefaultLadder.TierKeys(), ", ")))
+		return
+	}
+	createdRoutingTier := pgtype.Text{String: routingTierKey, Valid: routingTierKey != ""}
+	if parentAgent.ID.Valid && routingTierKey == "" {
+		// A specialisation with no rung of its own sits on its base role's
+		// rung. Strength follows the runtime profile it was cloned from, so
+		// leaving the 16 direction seats untagged would take them all off the
+		// ladder the moment tags become how rungs are decided.
+		createdRoutingTier = parentAgent.RoutingTier
+	}
 	if inheritRuntime {
 		createdRuntimeMode = parentAgent.RuntimeMode
 		createdRuntimeID = parentAgent.RuntimeID
@@ -2078,6 +2105,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Model:                    createdModel,
 		ThinkingLevel:            createdThinkingLevel,
 		ServiceTier:              createdServiceTier,
+		RoutingTier:              createdRoutingTier,
 		ConversationStarters:     sp,
 		ComposioToolkitAllowlist: allowlist,
 		ParentAgentID:            parentAgentUUID,
@@ -2214,6 +2242,10 @@ type UpdateAgentRequest struct {
 	// ServiceTier follows the same tri-state contract as ThinkingLevel:
 	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
 	ServiceTier *string `json:"service_tier"`
+	// RoutingTier follows the same tri-state contract: omitted preserves,
+	// empty takes the seat off the routing ladder, and a tier key or its
+	// Chinese label sets the rung (DENE-633).
+	RoutingTier *string `json:"routing_tier"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -2776,6 +2808,28 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// routing_tier is workspace configuration rather than a runtime override:
+	// it says how strong this seat is for automatic dispatch. A key or its
+	// label is accepted, only the key is stored, and anything else is refused
+	// rather than written — an unknown rung would silently take the seat off
+	// the ladder with nothing on the agent page to show it.
+	shouldClearRoutingTier := false
+	if req.RoutingTier != nil {
+		value := strings.TrimSpace(*req.RoutingTier)
+		if value == "" {
+			shouldClearRoutingTier = true
+		} else {
+			key, ok := routing.DefaultLadder.NormalizeTier(value)
+			if !ok {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf(
+					"routing_tier %q is not a known tier; expected one of %s",
+					value, strings.Join(routing.DefaultLadder.TierKeys(), ", ")))
+				return
+			}
+			params.RoutingTier = pgtype.Text{String: key, Valid: true}
+		}
+	}
+
 	shouldClearServiceTier := false
 	if req.ServiceTier != nil {
 		value := *req.ServiceTier
@@ -2899,6 +2953,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent service_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear service_tier: "+err.Error())
+			return
+		}
+	}
+	if shouldClearRoutingTier {
+		updated, err = h.Queries.ClearAgentRoutingTier(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent routing_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear routing_tier: "+err.Error())
 			return
 		}
 	}

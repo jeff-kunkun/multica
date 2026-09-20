@@ -686,6 +686,13 @@ export interface Agent {
    */
   service_tier?: string;
   /**
+   * Seat strength on the automatic-dispatch ladder (DENE-633): one of the
+   * routing tier keys, or empty for a seat that is not on the ladder. A
+   * person tags it; it is deliberately NOT derived from `model`, because the
+   * same model at another thinking level is another rung.
+   */
+  routing_tier?: string;
+  /**
    * Platform auto-retry switch (DENE-217). When `false`, FailTask /
    * MaybeRetryFailedTask never spawn a retry child. Older backends omit
    * the field; treat `undefined` as enabled. Only `=== false` is off.
@@ -928,6 +935,11 @@ export interface UpdateAgentRequest {
    * clears it, and a non-empty value stores a runtime-catalog ID.
    */
   service_tier?: string;
+  /**
+   * Seat strength on the dispatch ladder. Omitted preserves the saved value,
+   * `""` takes the seat off the ladder, and a tier key sets the rung.
+   */
+  routing_tier?: string;
   /** Replaces the display-only model lineup wholesale; `[]` clears it. */
   switchable_models?: AgentSwitchableModel[];
   /**
