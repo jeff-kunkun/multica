@@ -251,7 +251,9 @@
     "edit_description_title": "説明を編集",
     "description_placeholder": "このエージェントは何をしますか？",
     "save": "保存",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "prop_routing_tier": "割り当てティア",
+    "prop_routing_tier_hint": "チケットの担当を自動で決めるとき、この席がどれだけ強いかを表します。強さはモデル・思考レベル・プロンプトの組み合わせで決まるため、同じモデルでも別のティアに置けます。ティアのない席は対象外です。"
   },
   "overview": {
     "agent_context": "エージェント",
@@ -299,7 +301,14 @@
     "service_tier_standard_description": "通常速度と標準使用量",
     "service_tier_tooltip": "速度 · {{value}}",
     "service_tier_clear": "ランタイムのデフォルト",
-    "service_tier_clear_title": "速度の上書きをクリアし、ローカルの Codex 設定に任せます"
+    "service_tier_clear_title": "速度の上書きをクリアし、ローカルの Codex 設定に任せます",
+    "routing_tier_strongest": "最強",
+    "routing_tier_strong": "強",
+    "routing_tier_medium": "中",
+    "routing_tier_weak": "軽量",
+    "routing_tier_none": "対象外",
+    "routing_tier_none_title": "自動割り当ての対象になりません。手動の指名は引き続き可能です",
+    "routing_tier_tooltip": "割り当てティア · {{value}}"
   },
   "model_dropdown": {
     "label": "モデル",

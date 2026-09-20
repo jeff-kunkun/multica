@@ -57,6 +57,7 @@ type Agent struct {
 	AutoRetryEnabled      bool        `json:"auto_retry_enabled"`
 	ParentAgentID         pgtype.UUID `json:"parent_agent_id"`
 	RuntimeInherited      bool        `json:"runtime_inherited"`
+	RoutingTier           pgtype.Text `json:"routing_tier"`
 }
 
 type AgentBuilderDraft struct {

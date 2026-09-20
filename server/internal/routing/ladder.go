@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -70,36 +71,126 @@ func SeatName(base, direction string) string {
 // Candidates narrows the workspace roster to the seats routing may pick for
 // this direction: one seat per tier, in ladder order.
 //
+// The rung a seat sits on comes from the tag a human put on that seat, not
+// from its name. That is the whole point of the tag: strength is a judgement
+// about model AND thinking level AND prompt, so it is something the person who
+// configured the seat knows and nothing the server can infer. A tier nobody
+// tagged falls back to the base-name convention in ladder.json, which is how a
+// workspace that has tagged nothing yet still routes.
+//
 // This is the whole of today's filter chain. The chain is where a future
 // execution-only model would be inserted — a second stage appended here leaves
 // Route's shape and both call sites untouched.
 func (l Ladder) Candidates(direction string, roster map[string]Agent) []Seat {
+	tagged := l.taggedByTier(roster)
 	seats := make([]Seat, 0, len(l.Tiers))
 	for _, t := range l.Tiers {
-		name := SeatName(t.Base, direction)
-		a, ok := roster[name]
-		if !ok && direction != "" {
-			// A direction with no specialised seat on this rung falls back to
-			// the generic seat rather than dropping the rung: losing a rung
-			// silently narrows the ladder the judge is choosing from.
-			a, ok = roster[t.Base]
-			if ok {
-				seats = append(seats, Seat{ID: a.ID, Name: a.Name, TierKey: t.Key, TierLabel: t.Label})
-				continue
-			}
-		}
-		if !ok {
+		if a, dir, ok := l.pickTagged(tagged[t.Key], direction); ok {
+			seats = append(seats, Seat{ID: a.ID, Name: a.Name, TierKey: t.Key, TierLabel: t.Label, Direction: dir})
 			continue
 		}
-		seats = append(seats, Seat{ID: a.ID, Name: a.Name, TierKey: t.Key, TierLabel: t.Label, Direction: direction})
+		if seat, ok := l.pickByName(t, direction, roster); ok {
+			seats = append(seats, seat)
+		}
 	}
 	return seats
+}
+
+// taggedByTier groups the roster by the tier key each seat was tagged with.
+// Untagged seats and seats carrying a tier this ladder does not declare are
+// dropped: an unknown rung is not a rung.
+func (l Ladder) taggedByTier(roster map[string]Agent) map[string][]Agent {
+	out := make(map[string][]Agent, len(l.Tiers))
+	for _, a := range roster {
+		key, ok := l.NormalizeTier(a.Tier)
+		if !ok || key == "" {
+			continue
+		}
+		out[key] = append(out[key], a)
+	}
+	for key := range out {
+		sort.Slice(out[key], func(i, j int) bool { return out[key][i].Name < out[key][j].Name })
+	}
+	return out
+}
+
+// pickTagged chooses one seat out of the tagged seats on a rung: the one
+// specialised for this direction when there is one, otherwise the undirected
+// seat, otherwise the first by name so the choice is stable across calls.
+func (l Ladder) pickTagged(seats []Agent, direction string) (Agent, string, bool) {
+	if len(seats) == 0 {
+		return Agent{}, "", false
+	}
+	if direction != "" {
+		for _, a := range seats {
+			if l.seatDirection(a.Name) == direction {
+				return a, direction, true
+			}
+		}
+	}
+	for _, a := range seats {
+		if l.seatDirection(a.Name) == "" {
+			return a, "", true
+		}
+	}
+	return seats[0], l.seatDirection(seats[0].Name), true
+}
+
+// seatDirection reads the direction off a seat name by the naming convention
+// (base + direction). A name matching no known direction is undirected.
+func (l Ladder) seatDirection(name string) string {
+	for _, d := range l.Directions {
+		if d != "" && strings.HasSuffix(name, d) {
+			return d
+		}
+	}
+	return ""
+}
+
+// pickByName is the untagged fallback: the original base-name convention.
+//
+// A seat that carries a tag is never placed by its name, on any rung. The tag
+// is the seat's own statement about its strength, and a name convention that
+// could still drag it onto another rung would make tagging advisory.
+func (l Ladder) pickByName(t Tier, direction string, roster map[string]Agent) (Seat, bool) {
+	if t.Base == "" {
+		return Seat{}, false
+	}
+	lookup := func(name string) (Agent, bool) {
+		a, ok := roster[name]
+		if !ok {
+			return Agent{}, false
+		}
+		if key, valid := l.NormalizeTier(a.Tier); valid && key != "" {
+			return Agent{}, false
+		}
+		return a, true
+	}
+	name := SeatName(t.Base, direction)
+	a, ok := lookup(name)
+	if !ok && direction != "" {
+		// A direction with no specialised seat on this rung falls back to the
+		// generic seat rather than dropping the rung: losing a rung silently
+		// narrows the ladder the judge is choosing from.
+		if a, ok = lookup(t.Base); ok {
+			return Seat{ID: a.ID, Name: a.Name, TierKey: t.Key, TierLabel: t.Label}, true
+		}
+	}
+	if !ok {
+		return Seat{}, false
+	}
+	return Seat{ID: a.ID, Name: a.Name, TierKey: t.Key, TierLabel: t.Label, Direction: direction}, true
 }
 
 // Agent is the slice of an agent record routing needs.
 type Agent struct {
 	ID   string
 	Name string
+	// Tier is the tier key a human tagged this seat with, empty when the seat
+	// carries no tag. It is the authoritative rung: strength is not derivable
+	// from the model id, because the same model at a different thinking level
+	// is a different rung and two seats may sit on one model deliberately.
+	Tier string
 }
 
 // SeatByTier finds the candidate on a named rung.
@@ -135,4 +226,68 @@ func (l Ladder) TierKeys() []string {
 		keys = append(keys, t.Key)
 	}
 	return keys
+}
+
+// Tier lookup helpers. The API stores a tier KEY; a person types a LABEL.
+// Both name the same rung, so both are accepted at the boundary and only the
+// key is ever persisted — one vocabulary in the database, two spellings for
+// whoever is typing.
+
+// TierByKey finds a rung by its key.
+func (l Ladder) TierByKey(key string) (Tier, bool) {
+	for _, t := range l.Tiers {
+		if strings.EqualFold(t.Key, key) {
+			return t, true
+		}
+	}
+	return Tier{}, false
+}
+
+// NormalizeTier resolves a key or a label to the canonical tier key. An empty
+// input normalises to empty with ok=true: "no tier" is a legal value, it is
+// how a seat says it is not on the ladder.
+func (l Ladder) NormalizeTier(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", true
+	}
+	for _, t := range l.Tiers {
+		if strings.EqualFold(t.Key, raw) || strings.EqualFold(t.Label, raw) {
+			return t.Key, true
+		}
+	}
+	return "", false
+}
+
+// TierLabels lists the human labels in ladder order, strongest first.
+func (l Ladder) TierLabels() []string {
+	out := make([]string, 0, len(l.Tiers))
+	for _, t := range l.Tiers {
+		out = append(out, t.Label)
+	}
+	return out
+}
+
+// RequestedTier reads the rung a human asked for off the issue's labels.
+//
+// A label naming a tier is authoritative: the person writing the ticket
+// already knows how hard it is, so asking a model to re-derive that is a guess
+// layered on top of an answer. Routing only judges what nobody told it.
+//
+// Two labels naming different rungs is a contradiction, not a vote: nothing is
+// requested and the judge decides, because picking one of two conflicting
+// instructions silently is worse than asking.
+func (l Ladder) RequestedTier(labels []string) (string, bool) {
+	found := ""
+	for _, raw := range labels {
+		key, ok := l.NormalizeTier(raw)
+		if !ok || key == "" {
+			continue
+		}
+		if found != "" && found != key {
+			return "", false
+		}
+		found = key
+	}
+	return found, found != ""
 }

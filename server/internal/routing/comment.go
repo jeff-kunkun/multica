@@ -39,6 +39,7 @@ func (r *Router) assignmentComment(
 	reviewerName string,
 	needExecutor, needReviewer, hasReviewerSlot bool,
 	stillUnassigned bool,
+	executorFromLabel bool,
 ) string {
 	var b strings.Builder
 	b.WriteString("## 自动选派\n\n")
@@ -47,6 +48,9 @@ func (r *Router) assignmentComment(
 	switch {
 	case !needExecutor:
 		b.WriteString("- **执行席**：由你指定，未改动\n")
+	case executor != nil && executorFromLabel:
+		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，按票上的「%s」标签选的，没问模型）→ 已派出，run 已启动\n",
+			executor.Name, executor.TierLabel, executor.TierLabel))
 	case executor != nil:
 		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，置信度 %s ≥ 阈值 %s）→ 已派出，run 已启动\n",
 			executor.Name, executor.TierLabel, pct(v.ExecutorConfidence), pct(threshold)))

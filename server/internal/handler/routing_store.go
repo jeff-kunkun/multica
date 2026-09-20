@@ -162,7 +162,11 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 	}
 	out := make(map[string]routing.Agent, len(agents))
 	for _, a := range agents {
-		out[a.Name] = routing.Agent{ID: util.UUIDToString(a.ID), Name: a.Name}
+		out[a.Name] = routing.Agent{
+			ID:   util.UUIDToString(a.ID),
+			Name: a.Name,
+			Tier: a.RoutingTier.String,
+		}
 	}
 	return out, nil
 }

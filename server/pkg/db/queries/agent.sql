@@ -75,14 +75,15 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
-    service_tier, conversation_starters,
+    service_tier, routing_tier, conversation_starters,
     composio_toolkit_allowlist, permission_mode, parent_agent_id,
     runtime_inherited
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
-    $17, COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
+    $17, sqlc.narg('routing_tier'),
+    COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
     sqlc.narg('composio_toolkit_allowlist')::text[],
     COALESCE(sqlc.narg('permission_mode'), 'private'),
     sqlc.narg('parent_agent_id')::uuid,
@@ -206,6 +207,7 @@ UPDATE agent SET
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
+    routing_tier = COALESCE(sqlc.narg('routing_tier'), routing_tier),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     switchable_models = COALESCE(sqlc.narg('switchable_models'), switchable_models),
@@ -333,6 +335,13 @@ RETURNING *;
 -- Explicit NULL-clear for service_tier. COALESCE-based UpdateAgent cannot
 -- set the column back to NULL, so the API routes "Runtime default" here.
 UPDATE agent SET service_tier = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentRoutingTier :one
+-- Explicit NULL-clear for routing_tier. COALESCE-based UpdateAgent cannot set
+-- the column back to NULL, so "this seat is not on the ladder" routes here.
+UPDATE agent SET routing_tier = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
