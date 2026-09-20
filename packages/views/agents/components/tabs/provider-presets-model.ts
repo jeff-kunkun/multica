@@ -176,7 +176,8 @@ export type ProviderPresetFieldError =
   | "base_url_required"
   | "base_url_invalid"
   | "api_invalid"
-  | "api_key_env_invalid";
+  | "api_key_env_invalid"
+  | "models_required";
 
 /**
  * A preset id becomes a YAML mapping key under `llm-pi-ai.providers` and is
@@ -208,6 +209,12 @@ export function validateProviderPresetForm(
   const env = form.apiKeyEnv.trim();
   // Empty is valid and means "let the daemon derive one from the id".
   if (env && !ENV_NAME_PATTERN.test(env)) errors.push("api_key_env_invalid");
+
+  // A save is a health check, and the check runs one completion against a
+  // model — so a preset with no model has nothing to verify and the daemon
+  // refuses to write it. Catch that here, where it is a field error, instead
+  // of turning it into a toast after a round trip through the user's machine.
+  if (providerPresetModels(form).length === 0) errors.push("models_required");
 
   return errors;
 }

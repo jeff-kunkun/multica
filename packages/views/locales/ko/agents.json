@@ -560,7 +560,6 @@
       "created_toast": "{{name}}을(를) 추가했습니다",
       "updated_toast": "{{name}}을(를) 저장했습니다",
       "save_failed_toast": "공급자를 저장하지 못했습니다.",
-      "refresh_failed_toast": "공급자는 저장했지만 모델 목록을 새로 고치지 못했습니다.",
       "deleted_toast": "{{name}}을(를) 삭제했습니다",
       "deleted_cleared_toast": "{{name}}을(를) 삭제했습니다. 이제 CLI에 기본 모델이 없습니다.",
       "delete_failed_toast": "공급자를 삭제하지 못했습니다."

@@ -165,19 +165,6 @@ function ProviderPresets({ runtimeId }: { runtimeId: string }) {
         action: "upsert",
         preset: providerPresetUpsertInput(form),
       });
-      // URL-backed providers are the source of truth for their model ids. A
-      // refresh runs on the daemon, where the stored key is available, so the
-      // browser never needs to read or forward the credential.
-      try {
-        await mutation.mutateAsync({ action: "refresh", id: form.id.trim() });
-      } catch (refreshError) {
-        toast.warning(
-          errorText(
-            refreshError,
-            t(($) => $.tab_body.providers.refresh_failed_toast),
-          ),
-        );
-      }
       toast.success(
         form.editingId
           ? t(($) => $.tab_body.providers.updated_toast, { name: form.id.trim() })
@@ -623,6 +610,11 @@ function ProviderPresetDialog({
               <Plus className="size-3.5" aria-hidden="true" />
               {t(($) => $.tab_body.providers.add_model_action)}
             </Button>
+            {has("models_required") ? (
+              <FieldError>
+                {t(($) => $.tab_body.providers.error_models_required)}
+              </FieldError>
+            ) : null}
           </Field>
         </FieldGroup>
 

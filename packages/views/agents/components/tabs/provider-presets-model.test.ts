@@ -163,10 +163,16 @@ describe("validateProviderPresetForm", () => {
     );
   });
 
-  it("allows an empty model list so the daemon can discover models from the endpoint", () => {
+  it("requires at least one model, because saving verifies one against the endpoint", () => {
     expect(
       validateProviderPresetForm({ ...valid(), models: [{ id: "  ", name: "x" }] }),
-    ).toEqual([]);
+    ).toContain("models_required");
+    expect(validateProviderPresetForm({ ...valid(), models: [] })).toContain(
+      "models_required",
+    );
+    expect(
+      validateProviderPresetForm({ ...valid(), models: [{ id: "m1", name: "" }] }),
+    ).not.toContain("models_required");
   });
 });
 

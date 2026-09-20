@@ -5196,7 +5196,7 @@ func (d *Daemon) handleProviderConfig(ctx context.Context, rt Runtime, pending P
 		"provider", pending.Provider, "action", pending.Action)
 
 	payload := map[string]any{}
-	snapshot, err := applyProviderConfig(pending.Provider, pending.Action, pending.Payload)
+	snapshot, err := applyProviderConfig(ctx, pending.Provider, pending.Action, pending.Payload)
 	if err != nil {
 		d.logger.Warn("runtime provider config failed",
 			"runtime_id", rt.ID, "request_id", pending.ID,
@@ -5207,6 +5207,19 @@ func (d *Daemon) handleProviderConfig(ctx context.Context, rt Runtime, pending P
 		// from file paths and field names: a decode or encode error is the one
 		// place a value from the body can end up inside a message.
 		payload["error"] = redact.Text(err.Error())
+		// The kind is what a localized surface renders, and the message above
+		// is only its fallback. Parameters are the daemon's own facts — a
+		// model id from the caller's body, a reset instant, a status code —
+		// and never a gateway's prose, which is why they need no redaction
+		// pass: the classify step keeps the raw body out of them and lets the
+		// filtered `error` above carry the one copy that goes out.
+		var failure *providerConfigFailure
+		if errors.As(err, &failure) && failure.Kind != "" {
+			payload["error_kind"] = failure.Kind
+			if len(failure.Params) > 0 {
+				payload["error_params"] = failure.Params
+			}
+		}
 	} else {
 		// Every action answers with the refreshed list, so the client can
 		// redraw from this reply alone.
@@ -5217,6 +5230,9 @@ func (d *Daemon) handleProviderConfig(ctx context.Context, rt Runtime, pending P
 		}
 		if snapshot.ClearedActive {
 			payload["cleared_active"] = true
+		}
+		if len(snapshot.Models) > 0 {
+			payload["models"] = snapshot.Models
 		}
 	}
 	d.reportProviderConfigResult(ctx, rt, pending.ID, payload)

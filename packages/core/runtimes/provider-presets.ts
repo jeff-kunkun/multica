@@ -165,8 +165,6 @@ function providerPresetPayload(
     }
     case "delete":
       return { id: input.id };
-    case "refresh":
-      return { id: input.id };
     case "activate":
       // An empty model asks the daemon for the preset's first model, which is
       // what "use this provider" means when the user did not pick one.
@@ -176,7 +174,6 @@ function providerPresetPayload(
 
 export type ProviderPresetActionInput =
   | { action: "upsert"; preset: RuntimeProviderPresetUpsertInput }
-  | { action: "refresh"; id: string }
   | { action: "delete"; id: string }
   | { action: "activate"; id: string; model?: string };
 

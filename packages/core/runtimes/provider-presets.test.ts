@@ -128,17 +128,17 @@ describe("runProviderPresetAction payloads", () => {
     );
   });
 
-  it("sends a refresh payload with only the provider id", async () => {
+  it("sends a delete payload with only the provider id", async () => {
     getProviderPresetResult.mockResolvedValue(
-      request({ action: "refresh", providers: [preset()] }),
+      request({ action: "delete", providers: [] }),
     );
 
-    await runProviderPresetAction("rt-1", { action: "refresh", id: "command-code" });
+    await runProviderPresetAction("rt-1", { action: "delete", id: "command-code" });
 
     expect(initiateProviderPresetAction).toHaveBeenCalledWith(
       "rt-1",
       PROVIDER_PRESET_PROVIDER,
-      "refresh",
+      "delete",
       { id: "command-code" },
     );
   });
