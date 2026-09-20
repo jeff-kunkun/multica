@@ -15,7 +15,7 @@ export const ROUTING_SETTINGS_KEY = "routing";
  * DefaultConfidenceThreshold on the server; a client that guessed a different
  * default would show a threshold the server does not apply.
  */
-export const DEFAULT_CONFIDENCE_THRESHOLD = 0.7;
+export const DEFAULT_CONFIDENCE_THRESHOLD = 0.6;
 
 export interface RoutingSettings {
   enabled: boolean;

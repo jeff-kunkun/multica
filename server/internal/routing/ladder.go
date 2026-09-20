@@ -24,6 +24,10 @@ type Ladder struct {
 	Tiers      []Tier            `json:"tiers"`
 	Directions []string          `json:"directions"`
 	Projects   map[string]string `json:"projects"`
+	// Fallback names the rung an unconfident verdict lands on. Routing always
+	// dispatches, so "the judge was not sure" has to resolve to a seat; this
+	// is that seat, chosen once as data rather than per call.
+	Fallback string `json:"fallback_tier"`
 }
 
 // DefaultLadder is the shipped ladder. Parsed once at init; a malformed
@@ -38,6 +42,11 @@ func mustLoadLadder() Ladder {
 	}
 	if len(l.Tiers) == 0 {
 		panic("routing: ladder.json declares no tiers")
+	}
+	if l.Fallback != "" {
+		if _, ok := l.TierByKey(l.Fallback); !ok {
+			panic("routing: ladder.json names fallback_tier " + l.Fallback + ", which is not a declared tier")
+		}
 	}
 	return l
 }
@@ -363,4 +372,21 @@ func (l Ladder) RequestedTier(labels []string) (string, bool) {
 		found = key
 	}
 	return found, found != ""
+}
+
+// FallbackSeat is the seat routing dispatches to when the judge's answer is
+// unusable — under the threshold, or naming a rung this workspace has no seat
+// on. It prefers the ladder's declared fallback rung and otherwise takes the
+// strongest candidate present, because a ticket parked in todo costs more than
+// a seat a person has to change.
+func (l Ladder) FallbackSeat(candidates []Seat) (Seat, bool) {
+	if len(candidates) == 0 {
+		return Seat{}, false
+	}
+	if l.Fallback != "" {
+		if seat, ok := SeatByTier(candidates, l.Fallback); ok {
+			return seat, true
+		}
+	}
+	return candidates[0], true
 }

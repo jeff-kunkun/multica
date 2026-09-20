@@ -1565,7 +1565,7 @@
     "model_discover_loaded": "このエンドポイントから {{count}} 件のモデルを取得しました。",
     "model_placeholder": "例: gpt-5.6-luna",
     "threshold_label": "確信度のしきい値",
-    "threshold_description": "これを下回る場合はその欄を埋めず、理由を添えて一度だけメンションします。既定は 0.70。",
+    "threshold_description": "これを下回っても割り当ては行い、フォールバック段（汎用の強）を使ってルーティングコメントに明記します。既定は 0.60。",
     "gateway_endpoint_workspace": "モデル id はこのワークスペース独自のエンドポイントに送信されます：{{host}}。",
     "gateway_endpoint_deployment": "モデル id はデプロイ共通の LLM エンドポイントに送信されます：{{host}}。",
     "gateway_protocol_systemone": "このエンドポイントは TypeSafe System One（Jev）です。ルーティングは確率分布付きの型付き判断を求めるため、しきい値に使う確信度はモデルの自己申告ではなく実測値になります。",

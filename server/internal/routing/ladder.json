@@ -23,6 +23,12 @@
     { "key": "medium", "base": "贝吉塔", "label": "中" },
     { "key": "weak", "base": "比克", "label": "弱" }
   ],
+  "_fallback_comment": [
+    "The rung an unconfident verdict lands on. Routing never leaves the",
+    "executor slot empty: a ticket nobody picked up is invisible, while a seat",
+    "picked one rung off is visible and one click to change."
+  ],
+  "fallback_tier": "strong",
   "directions": ["游戏", "出海", "自媒体", "学术"],
   "_projects_comment": [
     "project name -> direction. These rows are only the DEFAULTS shipped with",

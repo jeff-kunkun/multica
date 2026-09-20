@@ -186,10 +186,13 @@ func TestSecondRouteCallWritesNothingMore(t *testing.T) {
 	}
 }
 
-func TestLowConfidenceLeavesSlotEmptyAndMentionsOnce(t *testing.T) {
+func TestLowConfidenceStillDispatchesToTheFallbackRung(t *testing.T) {
+	// Routing never parks a ticket for lack of confidence: an unconfident
+	// verdict lands on the ladder's fallback rung, both slots come out filled,
+	// and nobody is pinged — somebody is working on it.
 	store := newFakeStore()
 	judge := &fakeJudge{verdict: Verdict{
-		ExecutorTier: "strong", ExecutorConfidence: 0.4,
+		ExecutorTier: "weak", ExecutorConfidence: 0.4,
 		Reviewer: ReviewerSeat, ReviewerTier: "strongest", ReviewerConfidence: 0.2,
 	}}
 
@@ -197,21 +200,21 @@ func TestLowConfidenceLeavesSlotEmptyAndMentionsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if store.wrote() {
-		t.Errorf("wrote a value below the threshold: %v %v", store.assigns, store.reviewer)
+	if len(store.assigns) != 1 || store.assigns[0] != "孙悟空游戏" {
+		t.Errorf("assigns = %v, want the fallback rung (孙悟空游戏), not the unconfident pick", store.assigns)
 	}
-	if !out.Mentioned {
-		t.Error("left the issue undispatched without notifying anybody")
+	if len(store.reviewer) != 1 || store.reviewer[0] != "o-bulma-g" {
+		t.Errorf("reviewer = %v, want the rung above the executor", store.reviewer)
 	}
-	if len(store.subs) != 1 || store.subs[0] != "user-1" {
-		t.Errorf("subs = %v, want [user-1] — a mention that does not subscribe does not notify", store.subs)
+	if out.Action != ActionAssigned {
+		t.Errorf("action = %q, want %q", out.Action, ActionAssigned)
+	}
+	if out.Mentioned {
+		t.Error("pinged a person about a ticket that was dispatched")
 	}
 	body := store.comments[KindAssignment][0]
-	if !strings.Contains(body, "mention://member/user-1") {
-		t.Errorf("comment carries no mention link:\n%s", body)
-	}
-	if !strings.Contains(body, "未填") {
-		t.Errorf("comment does not say the slot was left empty:\n%s", body)
+	if !strings.Contains(body, "兜底") {
+		t.Errorf("comment does not say the pick was a fallback:\n%s", body)
 	}
 }
 
@@ -511,10 +514,10 @@ func TestUnknownProjectDoesNotGuessADirection(t *testing.T) {
 	}
 }
 
-func TestBrokenVerdictBranchIsNotTreatedAsLowConfidence(t *testing.T) {
-	// A tier the ladder does not have is a broken answer. It must leave the
-	// slot empty and notify, exactly like an unconfident one — never fall
-	// through to some other seat.
+func TestBrokenVerdictBranchFallsBackRatherThanGuessing(t *testing.T) {
+	// A tier the ladder does not have is a broken answer, not a licence to
+	// improvise: the ticket goes to the declared fallback rung, and the reason
+	// names the tier so the drift is visible.
 	store := newFakeStore()
 	v := confidentVerdict()
 	v.ExecutorTier = "godlike"
@@ -524,11 +527,14 @@ func TestBrokenVerdictBranchIsNotTreatedAsLowConfidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(store.assigns) != 0 {
-		t.Errorf("assigned %v from an unrecognised tier", store.assigns)
+	if len(store.assigns) != 1 || store.assigns[0] != "孙悟空游戏" {
+		t.Errorf("assigns = %v, want the fallback rung", store.assigns)
 	}
-	if !out.Mentioned {
-		t.Error("left the issue undispatched without notifying")
+	if !strings.Contains(out.Reason, `"godlike"`) {
+		t.Errorf("reason = %q, want it to name the tier the judge invented", out.Reason)
+	}
+	if out.Mentioned {
+		t.Error("pinged a person about a ticket that was dispatched")
 	}
 }
 
@@ -606,39 +612,43 @@ func (b *blindReadStore) HasComment(context.Context, string, string, CommentKind
 
 // --- DENE-706: the reported action is the write, not the attempt -----------
 
-func TestLowConfidenceReportsDeclinedWithAReadableReason(t *testing.T) {
+func TestLowConfidenceReportsTheFallbackWithAReadableReason(t *testing.T) {
 	store := newFakeStore()
 	judge := &fakeJudge{verdict: Verdict{
-		ExecutorTier: "strong", ExecutorConfidence: 0.67,
+		ExecutorTier: "weak", ExecutorConfidence: 0.47,
 		Reviewer: ReviewerSeat, ReviewerTier: "strongest", ReviewerConfidence: 0.38,
 	}}
 	router := newRouter(store, judge)
 
-	// Twice: the slots stay empty, so the second pass is judged again and has
-	// to tell the same truth rather than drifting back to "assigned".
-	for pass := 1; pass <= 2; pass++ {
-		out, err := router.Route(context.Background(), "ws", "issue-1")
-		if err != nil {
-			t.Fatalf("pass %d: unexpected error: %v", pass, err)
-		}
-		if out.Action != ActionDeclined {
-			t.Errorf("pass %d: action = %q, want %q — nothing was written", pass, out.Action, ActionDeclined)
-		}
-		if out.ExecutorWritten != nil || out.ReviewerWritten != "" {
-			t.Errorf("pass %d: outcome claims a write: %+v", pass, out)
-		}
-		for _, want := range []string{"executor not filled: confidence 67% < threshold 70%", "reviewer not filled: confidence 38% < threshold 70%"} {
-			if !strings.Contains(out.Reason, want) {
-				t.Errorf("pass %d: reason = %q, want it to contain %q", pass, out.Reason, want)
-			}
+	out, err := router.Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Action != ActionAssigned || out.ExecutorWritten == nil || out.ReviewerWritten == "" {
+		t.Fatalf("outcome = %+v, want both slots written", out)
+	}
+	for _, want := range []string{"executor fell back to 孙悟空游戏: confidence 47% < threshold 70%", "reviewer fell back to 布尔玛游戏: confidence 38% < threshold 70%"} {
+		if !strings.Contains(out.Reason, want) {
+			t.Errorf("reason = %q, want it to contain %q", out.Reason, want)
 		}
 	}
-	if store.wrote() {
-		t.Errorf("wrote a value below the threshold: %v %v", store.assigns, store.reviewer)
+
+	// Second pass: the conditional writes see slots that already hold a value,
+	// so nothing is written twice and the outcome says so rather than claiming
+	// a second dispatch.
+	out, err = router.Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("second pass: unexpected error: %v", err)
+	}
+	if out.Action != ActionDeclined || out.ExecutorWritten != nil || out.ReviewerWritten != "" {
+		t.Errorf("second pass: outcome = %+v, want declined with no write", out)
+	}
+	if len(store.assigns) != 1 || len(store.reviewer) != 1 {
+		t.Errorf("second pass wrote again: assigns=%v reviewer=%v", store.assigns, store.reviewer)
 	}
 }
 
-func TestPartialFillIsAssignedAndNamesTheSlotLeftEmpty(t *testing.T) {
+func TestUnconfidentReviewerIsNamedInTheReasonButStillFilled(t *testing.T) {
 	store := newFakeStore()
 	v := confidentVerdict()
 	v.ReviewerConfidence = 0.38
@@ -646,10 +656,10 @@ func TestPartialFillIsAssignedAndNamesTheSlotLeftEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Action != ActionAssigned || out.ExecutorWritten == nil {
-		t.Errorf("outcome = %+v, want assigned with an executor", out)
+	if out.Action != ActionAssigned || out.ExecutorWritten == nil || out.ReviewerWritten == "" {
+		t.Errorf("outcome = %+v, want assigned with both slots written", out)
 	}
-	if !strings.Contains(out.Reason, "reviewer not filled") || strings.Contains(out.Reason, "executor not filled") {
+	if !strings.Contains(out.Reason, "reviewer fell back") || strings.Contains(out.Reason, "executor") {
 		t.Errorf("reason = %q, want only the reviewer slot named", out.Reason)
 	}
 }
@@ -665,7 +675,7 @@ func TestFullFillCarriesNoReason(t *testing.T) {
 	}
 }
 
-func TestBrokenTierAnswerReportsDeclined(t *testing.T) {
+func TestBrokenTierAnswerReportsTheFallbackAndNamesTheTier(t *testing.T) {
 	store := newFakeStore()
 	store.hasProp = false
 	v := confidentVerdict()
@@ -674,8 +684,8 @@ func TestBrokenTierAnswerReportsDeclined(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Action != ActionDeclined || !strings.Contains(out.Reason, `"godlike"`) {
-		t.Errorf("outcome = %+v, want declined naming the tier", out)
+	if out.Action != ActionAssigned || !strings.Contains(out.Reason, `"godlike"`) {
+		t.Errorf("outcome = %+v, want assigned with a reason naming the tier", out)
 	}
 }
 

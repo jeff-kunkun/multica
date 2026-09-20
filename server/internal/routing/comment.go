@@ -41,10 +41,11 @@ func (r *Router) assignmentComment(
 	v Verdict,
 	threshold float64,
 	executor *Seat,
+	executorSource string,
 	reviewerName string,
+	reviewerFallback bool,
 	needExecutor, needReviewer, hasReviewerSlot bool,
 	stillUnassigned bool,
-	executorFromLabel bool,
 ) string {
 	var b strings.Builder
 	b.WriteString("## 自动选派\n\n")
@@ -53,15 +54,17 @@ func (r *Router) assignmentComment(
 	switch {
 	case !needExecutor:
 		b.WriteString("- **执行席**：由你指定，未改动\n")
-	case executor != nil && executorFromLabel:
+	case executor != nil && executorSource == pickLabel:
 		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，按票上的「%s」标签选的，没问模型）→ 已派出，run 已启动\n",
 			executor.Name, executor.TierLabel, executor.TierLabel))
+	case executor != nil && executorSource == pickFallback:
+		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，**兜底档**——裁决置信度 %s 低于阈值 %s，或它点的档位这里没有席位）→ 仍然派出，run 已启动。觉得档位不对直接改，改了路由不会再碰\n",
+			executor.Name, executor.TierLabel, pct(v.ExecutorConfidence), pct(threshold)))
 	case executor != nil:
 		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，置信度 %s ≥ 阈值 %s）→ 已派出，run 已启动\n",
 			executor.Name, executor.TierLabel, pct(v.ExecutorConfidence), pct(threshold)))
 	default:
-		b.WriteString(fmt.Sprintf("- **执行席**：⚠️ 未填（置信度 %s < 阈值 %s）\n",
-			pct(v.ExecutorConfidence), pct(threshold)))
+		b.WriteString("- **执行席**：⚠️ 未填——这一格在本次裁决与写入之间被别人占了\n")
 	}
 
 	// Reviewer slot.
@@ -70,6 +73,12 @@ func (r *Router) assignmentComment(
 		b.WriteString("- **验收席**：本工作区的「验收席」属性不可用（已归档，或同名属性是别的类型），这一格没写\n")
 	case !needReviewer:
 		b.WriteString(fmt.Sprintf("- **验收席**：已有值「%s」，未改动\n", issue.Reviewer))
+	case reviewerFallback && reviewerName == OptionHuman:
+		b.WriteString(fmt.Sprintf("- **验收席**：交给人（**兜底**——裁决置信度 %s 低于阈值 %s，执行席已在最强档，没有更高一档可验）\n",
+			pct(v.ReviewerConfidence), pct(threshold)))
+	case reviewerFallback && reviewerName != "":
+		b.WriteString(fmt.Sprintf("- **验收席**：%s（**兜底**——裁决置信度 %s 低于阈值 %s，按「比执行席高一档」选的）\n",
+			reviewerName, pct(v.ReviewerConfidence), pct(threshold)))
 	case reviewerName == OptionNoReview:
 		b.WriteString(fmt.Sprintf("- **验收席**：本票不需要验收（置信度 %s）。要人复核就自己填一个\n", pct(v.ReviewerConfidence)))
 	case reviewerName == OptionHuman:
@@ -78,8 +87,7 @@ func (r *Router) assignmentComment(
 		b.WriteString(fmt.Sprintf("- **验收席**：%s（置信度 %s ≥ 阈值 %s）\n",
 			reviewerName, pct(v.ReviewerConfidence), pct(threshold)))
 	default:
-		b.WriteString(fmt.Sprintf("- **验收席**：⚠️ 未填（置信度 %s < 阈值 %s）\n",
-			pct(v.ReviewerConfidence), pct(threshold)))
+		b.WriteString("- **验收席**：⚠️ 未填——这一格在本次裁决与写入之间被别人占了，或「验收席」属性里没有这个选项\n")
 	}
 
 	b.WriteString(directionLine(issue, match))
