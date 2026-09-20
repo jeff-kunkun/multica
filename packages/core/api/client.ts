@@ -55,6 +55,7 @@ import type {
   IssueTriggerPreviewParams,
   Reaction,
   IssueReaction,
+  IssueAgentGuardResponse,
   Workspace,
   WorkspaceRepo,
   WorkspaceMcpServer,
@@ -262,6 +263,7 @@ import {
 } from "./config-transfer";
 import {
   AgentTaskListSchema,
+  IssueAgentGuardResponseSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
@@ -345,6 +347,7 @@ import {
   CreateIssueResponseSchema,
   IssueSchema,
   AgentTaskSchema,
+  IssueUsageSummarySchema,
   SourceContextPreviewSchema,
   CommentSubIssueTaskResponseSchema,
   ListWebhookDeliveriesResponseSchema,
@@ -2773,7 +2776,14 @@ export class ApiClient {
   }
 
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
-    return this.fetch(`/api/issues/${issueId}/usage`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/usage`);
+    return parseWithFallback<IssueUsageSummary>(raw, IssueUsageSummarySchema, {
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      total_cache_read_tokens: 0,
+      total_cache_write_tokens: 0,
+      task_count: 0,
+    }, { endpoint: "GET /api/issues/:id/usage" });
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
@@ -2785,6 +2795,20 @@ export class ApiClient {
     });
     if (!task) throw new Error("Invalid task cancellation response");
     return task;
+  }
+
+  async haltIssue(issueId: string): Promise<IssueAgentGuardResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/halt`, { method: "POST" });
+    return parseWithFallback(raw, IssueAgentGuardResponseSchema, { issue_id: issueId, halted: true }, {
+      endpoint: "POST /api/issues/:id/halt",
+    });
+  }
+
+  async resumeIssue(issueId: string): Promise<IssueAgentGuardResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/resume`, { method: "POST" });
+    return parseWithFallback(raw, IssueAgentGuardResponseSchema, { issue_id: issueId, halted: false }, {
+      endpoint: "POST /api/issues/:id/resume",
+    });
   }
 
   async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {

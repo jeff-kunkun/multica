@@ -123,48 +123,29 @@ type agentCLIProbe struct {
 // CLIs themselves use — each witness is documented with why it is the right
 // signal, because a wrong witness shows a confident, wrong status pill.
 var agentCLIProbes = []agentCLIProbe{
-	{
-		CLI:         agyCLIName,
-		BaseDir:     ".gemini",
-		AccountGlob: ".gemini-account*",
-		Lever:       agentLeverAgyGeminiDir,
-		// Same witnesses the slot failover already trusts (agyDirHasLogin),
-		// so the green check and the new channel cannot disagree about a
-		// Gemini directory.
-		Witnesses: agentFileWitnesses(agyCredentialRelativePaths...),
-	},
-	{
-		CLI:         "dsh",
-		BaseDir:     ".dsh",
-		AccountGlob: ".dsh-account*",
-		Lever:       agentLeverDshHome,
-		// DSH keeps its login record in <home>/.credentials.yaml — a
-		// versioned store (version/refs/records) that DSH writes on login.
-		// Verified against a real ~/.dsh; it is the only auth-looking file the
-		// CLI creates there, so it is the sharpest signal available.
-		Witnesses: agentFileWitnesses(".credentials.yaml"),
-	},
-	{
-		CLI:         "claude",
-		BaseDir:     ".claude",
-		AccountGlob: ".claude-account*",
-		Lever:       agentLeverClaudeHome,
-		Witnesses: []agentCredentialWitness{
-			// The same file pkg/agent's readClaudeAccessToken reads, so the
-			// plan-limits probe and this channel agree wherever it exists.
-			{Rel: ".credentials.json"},
-			// macOS Claude Code keeps the OAuth token in the login Keychain
-			// and leaves no .credentials.json on disk, so the witness above is
-			// a false negative on every signed-in macOS install. oauthAccount
-			// in <home>/.claude.json is the account record Claude Code writes
-			// alongside it. Known cost: that record can outlive a logout, so a
-			// macOS row can read signed_in=true for an account that needs a
-			// fresh login. The alternative — shelling out to `security` —
-			// costs a subprocess per account per heartbeat, which this
-			// liveness path must not pay.
-			{FromHome: true, Rel: ".claude.json", JSONKey: "oauthAccount"},
-		},
-	},
+	// Same witnesses the slot failover already trusts (agyDirHasLogin), so the
+	// green check and the new channel cannot disagree about a Gemini directory.
+	slotFamilyProbe(agyCLIName, agentFileWitnesses(agyCredentialRelativePaths...)),
+	// DSH keeps its login record in <home>/.credentials.yaml — a versioned
+	// store (version/refs/records) that DSH writes on login. Verified against a
+	// real ~/.dsh; it is the only auth-looking file the CLI creates there, so it
+	// is the sharpest signal available.
+	slotFamilyProbe("dsh", agentFileWitnesses(".credentials.yaml")),
+	slotFamilyProbe("claude", []agentCredentialWitness{
+		// The same file pkg/agent's readClaudeAccessToken reads, so the
+		// plan-limits probe and this channel agree wherever it exists.
+		{Rel: ".credentials.json"},
+		// macOS Claude Code keeps the OAuth token in the login Keychain and
+		// leaves no .credentials.json on disk, so the witness above is a false
+		// negative on every signed-in macOS install. oauthAccount in
+		// <home>/.claude.json is the account record Claude Code writes
+		// alongside it. Known cost: that record can outlive a logout, so a
+		// macOS row can read signed_in=true for an account that needs a fresh
+		// login. The alternative — shelling out to `security` — costs a
+		// subprocess per account per heartbeat, which this liveness path must
+		// not pay.
+		{FromHome: true, Rel: ".claude.json", JSONKey: "oauthAccount"},
+	}),
 	{
 		CLI:     "codex",
 		BaseDir: ".codex",
@@ -184,6 +165,25 @@ var agentCLIProbes = []agentCLIProbe{
 		// Cursor install from reporting as signed in.
 		Witnesses: []agentCredentialWitness{{Rel: "cli-config.json", JSONKey: "authInfo"}},
 	},
+}
+
+// slotFamilyProbe builds the probe of a CLI that owns a numbered slot registry.
+// Its directory layout and lever come from pkg/agent's account slot family
+// table — the file the frontend's slot registry is generated from — so the
+// directories this probe reports and the ones the UI registers cannot drift.
+func slotFamilyProbe(cli string, witnesses []agentCredentialWitness) agentCLIProbe {
+	family, ok := agent.AccountSlotFamilyFor(cli)
+	if !ok {
+		// The table is embedded; a missing family is a programming error.
+		panic("daemon: no account slot family for " + cli)
+	}
+	return agentCLIProbe{
+		CLI:         family.CLI,
+		BaseDir:     family.BaseDir,
+		AccountGlob: family.AccountGlob(),
+		Lever:       family.Lever,
+		Witnesses:   witnesses,
+	}
 }
 
 func agentFileWitnesses(rels ...string) []agentCredentialWitness {

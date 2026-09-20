@@ -76,6 +76,9 @@ const (
 	// ReasonIssueLimitReached means a create_issue Autopilot was admitted for a
 	// run, but Cloud's effective workspace issue-count limit blocked the issue.
 	ReasonIssueLimitReached ReasonCode = "issue_limit_reached"
+	// ReasonChainBudgetExceeded means an agent-originated delegation chain hit
+	// the workspace budget and needs a human comment or explicit resume.
+	ReasonChainBudgetExceeded ReasonCode = "chain_budget_exceeded"
 	// ReasonInternalError: an unexpected server error prevented a clean decision.
 	ReasonInternalError ReasonCode = "internal_error"
 )

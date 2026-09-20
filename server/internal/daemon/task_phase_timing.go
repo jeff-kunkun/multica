@@ -40,6 +40,7 @@ type taskPhaseRecorder struct {
 	started  time.Time
 	previous time.Time
 	marked   map[taskPhase]struct{}
+	samples  map[taskPhase]taskPhaseSample
 }
 
 func newTaskPhaseRecorder(logger *slog.Logger, now func() time.Time) *taskPhaseRecorder {
@@ -53,6 +54,7 @@ func newTaskPhaseRecorder(logger *slog.Logger, now func() time.Time) *taskPhaseR
 		started:  started,
 		previous: started,
 		marked:   make(map[taskPhase]struct{}),
+		samples:  make(map[taskPhase]taskPhaseSample),
 	}
 }
 
@@ -79,6 +81,7 @@ func (r *taskPhaseRecorder) Mark(phase taskPhase) taskPhaseSample {
 	}
 	r.marked[phase] = struct{}{}
 	r.previous = now
+	r.samples[phase] = sample
 	if r.logger != nil {
 		r.logger.Info("task phase recorded",
 			"task_phase", phase,
@@ -87,6 +90,30 @@ func (r *taskPhaseRecorder) Mark(phase taskPhase) taskPhaseSample {
 		)
 	}
 	return sample
+}
+
+// Snapshot returns the phase samples captured so far. It is intentionally a
+// copy so reporting a completed run cannot race a deferred terminal mark.
+func (r *taskPhaseRecorder) Snapshot() map[taskPhase]taskPhaseSample {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[taskPhase]taskPhaseSample, len(r.samples))
+	for phase, sample := range r.samples {
+		out[phase] = sample
+	}
+	return out
+}
+
+func (r *taskPhaseRecorder) Elapsed() time.Duration {
+	if r == nil {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.now().Sub(r.started)
 }
 
 type taskPhaseRecorderContextKey struct{}

@@ -776,6 +776,21 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
+-- name: CountDelegatedTasksSinceHumanComment :one
+-- Counts agent-originated runs after the most recent human comment. Direct
+-- member actions are deliberately excluded so a human can always explicitly
+-- start work, while agent-to-agent and system handoffs consume the chain
+-- budget.
+SELECT COUNT(*)::bigint
+FROM agent_task_queue task
+WHERE task.issue_id = $1
+  AND task.originator_source IN ('delegation', 'comment_source', 'owner_fallback', 'unattributed')
+  AND task.created_at > COALESCE((
+      SELECT MAX(created_at)
+      FROM comment
+      WHERE issue_id = $1 AND author_type = 'member'
+  ), 'epoch'::timestamptz);
+
 -- name: CancelPendingTasksByIssueAndAgent :many
 -- Cancels the not-yet-started tasks for a single (issue, agent) pair, so the
 -- manual rerun flow can enqueue a replacement without colliding with

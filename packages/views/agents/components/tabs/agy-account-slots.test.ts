@@ -1,41 +1,33 @@
 // @vitest-environment node
 //
-// Canonical suite for the AGY slot vocabulary (DENE-175, narrowed by DENE-309).
+// Canonical suite for the AGY-specific vocabulary (DENE-175, narrowed by
+// DENE-309 and again by DENE-678).
 //
-// DENE-309 retired the slot block that used to live in the custom-args tab, so
-// this file covers what is still on the code path: the `--gemini_dir` lever,
-// the host-home resolution the slot directories derive from, and the
-// parse/write pair for `runtime_config.agy_slots` — the key the backend reads
-// to decide which numbered accounts a quota-exhausted agent may rotate to.
-// The `agy_logged_in_dirs` / `agy_quota_exhausted` metadata keys stay on the
-// daemon's API surface, but this client reads per-account state from the
-// `agent_accounts` report instead, so their parsers are gone.
+// What is still AGY's own: the `--gemini_dir` lever, the host-home resolution
+// its slot directories derive from, and the login command. The numbered slot
+// registry became one entry of the per-CLI family table; its parse/write
+// matrix — including the frozen `agy_slots` key — is `account-slots.test.ts`.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { accountSlotFamily } from "@multica/core/agents/account-slot-families";
+import { slotDirectoryLeaf } from "./account-slots";
 import {
-  AGY_SLOTS_RUNTIME_KEY,
-  accountDirectoryLeaf,
-  detectAgyAccountSlot,
   expandHomePrefix,
   formatAgyLoginCommand,
   getGeminiDir,
   inferHomeDirFromGeminiPath,
   isAbsoluteFsPath,
   joinHomeDir,
-  nextAccountNumber,
-  normalizeAccountNumbers,
-  numberedSlotId,
-  parseAccountNumber,
-  parseAgySlotsConfig,
   resolveHomeDir,
   runtimeHomeDir,
   setGeminiDir,
-  writeAgySlotsConfig,
 } from "./agy-account-slots";
+
+const AGY = accountSlotFamily("agy")!;
 
 /** How the accounts model builds a numbered slot's directory on this host. */
 function slotDirectory(home: string | null, slot: number): string {
-  const leaf = accountDirectoryLeaf(slot);
+  const leaf = slotDirectoryLeaf(AGY, slot);
   return home ? joinHomeDir(home, leaf) : leaf;
 }
 
@@ -60,17 +52,6 @@ describe("agy account slots", () => {
       "--model",
       "flash",
     ]);
-  });
-
-  it("detects the default, isolated, and custom slots including account 4+", () => {
-    expect(detectAgyAccountSlot("")).toBe("account1");
-    expect(detectAgyAccountSlot("/Users/you/.gemini")).toBe("account1");
-    expect(detectAgyAccountSlot("~/.gemini")).toBe("account1");
-    expect(detectAgyAccountSlot("/Users/you/.gemini-account2")).toBe("account2");
-    expect(detectAgyAccountSlot("~/.gemini-account2")).toBe("account2");
-    expect(detectAgyAccountSlot("/Users/you/.gemini-account3")).toBe("account3");
-    expect(detectAgyAccountSlot("/Users/you/.gemini-account4")).toBe("account4");
-    expect(detectAgyAccountSlot("/Users/you/.gemini-work")).toBe("custom");
   });
 
   it("expands ~ against a home directory and infers home from a Gemini path", () => {
@@ -146,41 +127,5 @@ describe("agy account slots", () => {
     expect(formatAgyLoginCommand("/Users/you/.gemini-account4")).toBe(
       "agy --gemini_dir=/Users/you/.gemini-account4",
     );
-  });
-
-  it("maps numbered slots onto isolated directories", () => {
-    expect(accountDirectoryLeaf(1)).toBe(".gemini");
-    expect(accountDirectoryLeaf(2)).toBe(".gemini-account2");
-    expect(accountDirectoryLeaf(4)).toBe(".gemini-account4");
-    expect(numberedSlotId(4)).toBe("account4");
-    expect(parseAccountNumber("account4")).toBe(4);
-    expect(parseAccountNumber("custom")).toBeNull();
-  });
-
-  it("adds the next unused account number so plus yields account 4", () => {
-    expect(nextAccountNumber([1, 2, 3])).toBe(4);
-    expect(nextAccountNumber([1, 2, 4])).toBe(3);
-    expect(nextAccountNumber([1])).toBe(2);
-    expect(normalizeAccountNumbers([4, 1, 4, 0, 99])).toEqual([1, 4]);
-  });
-
-  it("persists the numbered slot list under the key the backend reads", () => {
-    expect(AGY_SLOTS_RUNTIME_KEY).toBe("agy_slots");
-    expect(parseAgySlotsConfig({})).toEqual([1, 2, 3]);
-    expect(parseAgySlotsConfig({ agy_slots: { accounts: [1, 4, 5] } })).toEqual([
-      1, 4, 5,
-    ]);
-    expect(parseAgySlotsConfig({}, "/Users/you/.gemini-account4")).toEqual([
-      1, 2, 3, 4,
-    ]);
-    expect(writeAgySlotsConfig({ mode: "local" }, [1, 4])).toEqual({
-      mode: "local",
-      agy_slots: { accounts: [1, 4] },
-    });
-    // A slot set that arrives unsorted or out of range is stored normalised, so
-    // the backend's own normalisation cannot disagree with what the UI saved.
-    expect(writeAgySlotsConfig({}, [4, 4, 0, 40])).toEqual({
-      agy_slots: { accounts: [1, 4] },
-    });
   });
 });

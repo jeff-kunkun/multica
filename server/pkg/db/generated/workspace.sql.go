@@ -252,6 +252,26 @@ func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, 
 	return i, err
 }
 
+const getWorkspaceAgentChainBudget = `-- name: GetWorkspaceAgentChainBudget :one
+SELECT CASE
+    WHEN settings->>'agent_chain_budget' ~ '^[0-9]+$'
+         AND (settings->>'agent_chain_budget')::int > 0
+      THEN (settings->>'agent_chain_budget')::int
+    ELSE 6
+  END::int AS budget
+FROM workspace
+WHERE id = $1
+`
+
+// Workspace-level chain budget. Invalid or absent settings fail safe to the
+// product default instead of making enqueue paths fail on a cast error.
+func (q *Queries) GetWorkspaceAgentChainBudget(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceAgentChainBudget, id)
+	var budget int32
+	err := row.Scan(&budget)
+	return budget, err
+}
+
 const getWorkspaceAttributionFailClosed = `-- name: GetWorkspaceAttributionFailClosed :one
 SELECT attribution_fail_closed FROM workspace
 WHERE id = $1

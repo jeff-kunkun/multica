@@ -97,6 +97,24 @@ func TestBuildQuickCreatePromptSeparatesInstructionFromCapturedContext(t *testin
 	}
 }
 
+func TestBuildPromptIncludesStaleBaselineAndDeterministicInstallGuidance(t *testing.T) {
+	out := BuildPrompt(Task{IssueID: "issue-1"}, "claude",
+		WithStaleLocalBaseline("The local checkout may be stale: local edits prevented a fast-forward."),
+		WithDependencyInstallCommand("pnpm install --frozen-lockfile"),
+	)
+	for _, want := range []string{
+		"## Local baseline may be stale",
+		"local edits prevented a fast-forward",
+		"## Dependency setup",
+		"pnpm install --frozen-lockfile",
+		"warm shared package store",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("BuildPrompt output missing %q", want)
+		}
+	}
+}
+
 func TestBuildQuickCreatePromptLargestAcceptedSourceContextFitsBudget(t *testing.T) {
 	const emptyObject = `{"text":""}`
 	snapshot := []byte(`{"text":"` + strings.Repeat("x", service.SourceContextMaxAgentSnapshotBytes-len(emptyObject)) + `"}`)

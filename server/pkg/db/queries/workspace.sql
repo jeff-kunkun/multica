@@ -39,6 +39,18 @@ WHERE slug = $1;
 SELECT attribution_fail_closed FROM workspace
 WHERE id = $1;
 
+-- name: GetWorkspaceAgentChainBudget :one
+-- Workspace-level chain budget. Invalid or absent settings fail safe to the
+-- product default instead of making enqueue paths fail on a cast error.
+SELECT CASE
+    WHEN settings->>'agent_chain_budget' ~ '^[0-9]+$'
+         AND (settings->>'agent_chain_budget')::int > 0
+      THEN (settings->>'agent_chain_budget')::int
+    ELSE 6
+  END::int AS budget
+FROM workspace
+WHERE id = $1;
+
 -- name: CreateWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)

@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -31,11 +32,20 @@ func detectGitRepo(dir string) (string, bool) {
 	return "", false
 }
 
-// fetchOrigin runs `git fetch origin` to ensure the local repo has the latest remote refs.
-func fetchOrigin(gitRoot string) error {
-	cmd := exec.Command("git", "-C", gitRoot, "fetch", "origin")
+// fetchOrigin runs `git fetch origin` to ensure the local repo has the latest
+// remote refs. The caller supplies a bounded context because this is a
+// network-capable operation.
+func fetchOrigin(ctx context.Context, gitRoot string) error {
+	// The repository lock is held for the baseline decision, so the caller must
+	// bound ctx to keep a stalled remote from blocking sibling tasks.
+	cmd := exec.CommandContext(ctx, "git", "-C", gitRoot, "fetch", "origin")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.WaitDelay = 5 * time.Second
 
 	if out, err := cmd.CombinedOutput(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("git fetch origin: %w", ctx.Err())
+		}
 		return fmt.Errorf("git fetch origin: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil

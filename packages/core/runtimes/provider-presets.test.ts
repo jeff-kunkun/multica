@@ -127,6 +127,21 @@ describe("runProviderPresetAction payloads", () => {
       { id: "command-code" },
     );
   });
+
+  it("sends a refresh payload with only the provider id", async () => {
+    getProviderPresetResult.mockResolvedValue(
+      request({ action: "refresh", providers: [preset()] }),
+    );
+
+    await runProviderPresetAction("rt-1", { action: "refresh", id: "command-code" });
+
+    expect(initiateProviderPresetAction).toHaveBeenCalledWith(
+      "rt-1",
+      PROVIDER_PRESET_PROVIDER,
+      "refresh",
+      { id: "command-code" },
+    );
+  });
 });
 
 describe("runProviderPresetAction results", () => {
