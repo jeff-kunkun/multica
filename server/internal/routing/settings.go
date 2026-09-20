@@ -25,6 +25,7 @@ package routing
 import (
 	"encoding/json"
 	"math"
+	"strings"
 )
 
 // SettingsKey is the key under which routing configuration lives inside the
@@ -38,13 +39,21 @@ const SettingsKey = "routing"
 const DefaultConfidenceThreshold = 0.70
 
 // Settings is the whole routing configuration: an on/off switch, the model the
-// judge runs on, and the confidence threshold. Deliberately three fields and
-// no credentials — the model's credentials belong to the existing LLM
-// configuration, and this package never reads or stores a key.
+// judge runs on, the confidence threshold, and — optionally — the endpoint and
+// key that model lives behind.
+//
+// The gateway pair started out absent on purpose: the judge borrowed the
+// deployment's MULTICA_LLM_* configuration, so a workspace had nothing to
+// configure. That holds for a deployment with one workspace and one operator.
+// It stops holding the moment routing is handed to a team on a shared
+// self-hosted instance: "ask whoever runs the server to edit an env var and
+// restart" is not a setting, and it is the same answer for every workspace on
+// the box. Both fields stay OPTIONAL — empty means the deployment gateway, so
+// every workspace configured before they existed keeps working unchanged.
 //
 // The JSON field names are the cross-surface contract. The desktop settings
-// section writes exactly these three names, and changing one is a breaking
-// change for any workspace already configured.
+// section writes exactly these names, and changing one is a breaking change
+// for any workspace already configured.
 type Settings struct {
 	Enabled bool `json:"enabled"`
 	// Model is a model identifier passed through to the server-internal LLM
@@ -56,6 +65,59 @@ type Settings struct {
 	// is written to a slot. Zero or out of range means "unset" and yields
 	// DefaultConfidenceThreshold; it is never treated as "accept everything".
 	ConfidenceThreshold float64 `json:"confidence_threshold"`
+	// BaseURL is this workspace's own OpenAI-compatible endpoint for the
+	// judge. Empty means "use the deployment's MULTICA_LLM_BASE_URL", which is
+	// the only thing that existed before a workspace could bring its own.
+	//
+	// It is NOT a secret and is deliberately stored in the clear: a reader who
+	// cannot see which endpoint their tickets are described to cannot consent
+	// to it. The key that goes with it is a different matter — see below.
+	BaseURL string `json:"base_url"`
+	// APIKeyEnc is the workspace key, sealed with the deployment's routing
+	// secretbox and base64-encoded. It is the ONLY field here that a client
+	// never receives: the workspace read path strips it, and the settings
+	// write path carries the stored value forward rather than accepting one.
+	//
+	// Ciphertext rather than plaintext because `workspace.settings` is a
+	// shared JSONB column that lands in every database dump; sealed, a dump
+	// without the deployment secret carries nothing usable.
+	APIKeyEnc string `json:"api_key_enc,omitempty"`
+	// APIKey is the opened form of APIKeyEnc. It is populated by the store
+	// after decryption and is never serialised — `json:"-"` is load-bearing,
+	// because this struct is marshalled back into the settings column.
+	APIKey string `json:"-"`
+}
+
+// Target is where one judge call is sent: which model, on whose endpoint,
+// with whose key. Route resolves it once from Settings and passes it down, so
+// no layer below has to know whether the workspace brought its own gateway.
+type Target struct {
+	Model   string
+	BaseURL string
+	APIKey  string
+}
+
+// Override reports whether this target names a workspace-owned gateway rather
+// than the deployment's.
+//
+// Both halves are required. A base URL with no key would silently fall back to
+// the deployment key against somebody else's endpoint — which is how a
+// deployment credential gets sent to a host the operator never chose — and a
+// key with no base URL would send a workspace credential to the deployment
+// endpoint. Neither is ever what the person filling in the form meant, so a
+// half-filled pair uses the deployment gateway and the settings section says
+// so.
+func (t Target) Override() bool {
+	return strings.TrimSpace(t.BaseURL) != "" && strings.TrimSpace(t.APIKey) != ""
+}
+
+// Target resolves where this workspace's judge calls go.
+func (s Settings) Target() Target {
+	return Target{
+		Model:   s.Model,
+		BaseURL: strings.TrimSpace(s.BaseURL),
+		APIKey:  strings.TrimSpace(s.APIKey),
+	}
 }
 
 // State is what the settings section shows and what Route branches on. It is

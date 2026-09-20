@@ -157,7 +157,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "ladder has no seat in this workspace"}, nil
 	}
 
-	verdict, err := r.Judge.Assign(ctx, settings.Model, r.judgeState(issue, direction, candidates))
+	verdict, err := r.Judge.Assign(ctx, settings.Target(), r.judgeState(issue, direction, candidates))
 	if err != nil {
 		return r.reportUnavailable(ctx, workspaceID, issue, err)
 	}
@@ -334,7 +334,7 @@ func (r *Router) routeBlocked(ctx context.Context, workspaceID string, settings 
 		return out, err
 	}
 	candidates := r.Ladder.Candidates(direction, roster)
-	advice, err := r.Judge.Unblock(ctx, settings.Model, r.judgeState(issue, direction, candidates))
+	advice, err := r.Judge.Unblock(ctx, settings.Target(), r.judgeState(issue, direction, candidates))
 	if err != nil {
 		return r.reportUnavailable(ctx, workspaceID, issue, err)
 	}
@@ -469,6 +469,24 @@ type HealthReport struct {
 	LastFailureAt int64
 	Model         string
 	Threshold     float64
+	// BaseURL is the workspace's own endpoint, empty when it uses the
+	// deployment gateway. Reported raw; the handler reduces it to a host
+	// before it reaches a client, because a pasted URL can carry userinfo.
+	BaseURL string
+	// KeySet reports that a workspace key is stored and openable. It is a
+	// boolean and never the key: "is one saved?" is the only question the
+	// settings section needs answered, and it is the only one that can be
+	// answered without putting a credential on the wire.
+	//
+	// A stored-but-unopenable key (deployment secret rotated, row restored
+	// into a different deployment) reports false, which is what makes the
+	// settings section say "type it again" instead of showing a green chip
+	// over a key nothing can use.
+	KeySet bool
+	// UsesWorkspaceGateway is true when this workspace's calls go to its own
+	// endpoint rather than the deployment's. Derived from the pair, so a
+	// half-filled pair reports false and the section can say why.
+	UsesWorkspaceGateway bool
 }
 
 // Health answers "is routing actually working for this workspace right now".
@@ -481,10 +499,14 @@ func (r *Router) Health(ctx context.Context, workspaceID string) (HealthReport, 
 	if err != nil {
 		return HealthReport{}, err
 	}
+	target := settings.Target()
 	out := HealthReport{
-		State:     settings.State(),
-		Model:     settings.Model,
-		Threshold: settings.Threshold(),
+		State:                settings.State(),
+		Model:                settings.Model,
+		Threshold:            settings.Threshold(),
+		BaseURL:              target.BaseURL,
+		KeySet:               target.APIKey != "",
+		UsesWorkspaceGateway: target.Override(),
 	}
 	h := r.Breaker.Health(workspaceID)
 	if !h.LastSuccess.IsZero() {
@@ -496,7 +518,7 @@ func (r *Router) Health(ctx context.Context, workspaceID string) (HealthReport, 
 	// Checked before the breaker: a deployment with no internal LLM at all is
 	// answerable on the spot, and making the reader wait for a ticket to fail
 	// first would leave the settings section green while nothing can work.
-	if a, ok := r.Judge.(Availability); ok && out.State == StateEnabled && !a.Available() {
+	if a, ok := r.Judge.(Availability); ok && out.State == StateEnabled && !a.Available(target) {
 		out.State = StateIneffective
 		out.Reason = NotConfiguredReason
 		out.Usable = false
@@ -531,7 +553,7 @@ func (r *Router) Probe(ctx context.Context, workspaceID string) (HealthReport, e
 		// a disabled workspace makes an outbound request.
 		return r.Health(ctx, workspaceID)
 	}
-	_, err = r.Judge.Assign(ctx, settings.Model, JudgeState{
+	_, err = r.Judge.Assign(ctx, settings.Target(), JudgeState{
 		Title:              "Routing self-check",
 		DescriptionSummary: "Connectivity probe issued from the routing settings section. Answer with any tier.",
 		Status:             "todo",

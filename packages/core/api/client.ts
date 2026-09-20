@@ -253,6 +253,10 @@ import {
   type RoutingHealth,
 } from "../workspace/routing-health";
 import {
+  parseRoutingModels,
+  type RoutingModels,
+} from "../workspace/routing-models";
+import {
   parseConfigBundle,
   parseConfigImportReport,
   reportFromImportError,
@@ -2990,6 +2994,18 @@ export class ApiClient {
       { method: "POST" },
     );
     return parseRoutingHealth(raw);
+  }
+
+  /**
+   * Discover model ids from the routing target. The server resolves the
+   * workspace/deployment endpoint and keeps the API key entirely server-side.
+   */
+  async listRoutingModels(workspaceId: string): Promise<RoutingModels> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/routing/models`,
+      { method: "POST" },
+    );
+    return parseRoutingModels(raw);
   }
 
   async exportWorkspaceConfig(workspaceId: string): Promise<ConfigBundle> {

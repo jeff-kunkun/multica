@@ -121,6 +121,10 @@ func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	if settings == nil {
 		settings = map[string]any{}
 	}
+	// The routing gateway key lives in this column and must never leave the
+	// server. Stripped here, in the one function every workspace response goes
+	// through, rather than at each of its call sites.
+	settings = redactRoutingSettings(settings)
 	var repos any
 	if w.Repos != nil {
 		json.Unmarshal(w.Repos, &repos)
@@ -407,7 +411,20 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
 	if req.Settings != nil {
-		s, _ := json.Marshal(req.Settings)
+		// The client cannot echo back the routing key it was never sent, so
+		// the stored one is carried forward unless this write explicitly sets
+		// or clears it. Without this, any unrelated settings save wipes it.
+		var stored []byte
+		if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
+			stored = existing.Settings
+		}
+		merged, ok := h.applyRoutingSecret(req.Settings, stored)
+		if !ok {
+			writeError(w, http.StatusServiceUnavailable,
+				"this deployment cannot store a routing key (no MULTICA_ROUTING_SECRET_KEY or JWT_SECRET)")
+			return
+		}
+		s, _ := json.Marshal(merged)
 		params.Settings = s
 	}
 	if req.Repos != nil {

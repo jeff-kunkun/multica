@@ -44,6 +44,9 @@
 //     Sends the tail of the conversation: up to 6 messages, the reply being
 //     answered capped at 3000 runes (2000 head + 1000 tail) and each older
 //     message at 800.
+//   - Routing model discovery — server/internal/handler/routing.go. Sends only
+//     the bearer credential to the configured OpenAI-compatible `/models`
+//     endpoint; no issue or workspace content leaves the server.
 //
 // Both consumers send private chat content, which is why an unconfigured
 // deployment making zero upstream requests is a contract rather than a side
@@ -66,6 +69,8 @@
 //     fall back to it, and when it too is empty we fall back to a sane
 //     built-in default so a misconfigured deployment still returns a clear
 //     upstream error rather than a 400 from our own layer.
+//   - Model discovery is exposed through the same client so callers cannot
+//     import the OpenAI SDK directly. It returns only model identifiers.
 //
 // Base URL and API key are configurable so the same layer can target OpenAI,
 // an OpenAI-compatible gateway, or a self-hosted model server.
@@ -282,6 +287,31 @@ func (c *Client) Enabled() bool { return c != nil && c.enabled }
 
 // DefaultModel returns the effective default model (never empty).
 func (c *Client) DefaultModel() string { return c.defaultModel }
+
+// ListModels asks the configured OpenAI-compatible endpoint for its model
+// catalog. The caller receives identifiers only; credentials and the raw
+// upstream response stay inside this package.
+func (c *Client) ListModels(ctx context.Context) ([]string, error) {
+	if !c.Enabled() {
+		return nil, ErrNotConfigured
+	}
+
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+
+	page, err := c.sdk.Models.List(ctx)
+	if err != nil {
+		return nil, withStatus(err)
+	}
+
+	models := make([]string, 0, len(page.Data))
+	for _, model := range page.Data {
+		if id := strings.TrimSpace(model.ID); id != "" {
+			models = append(models, id)
+		}
+	}
+	return models, nil
+}
 
 // applyDefaultModel fills in the default model when the caller left it blank.
 func (c *Client) applyDefaultModel(params *openai.ChatCompletionNewParams) {
