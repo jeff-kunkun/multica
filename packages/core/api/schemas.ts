@@ -2027,6 +2027,29 @@ const TaskUsageSchema = z.object({
   trigger_evidence_kind: z.string().optional(),
 }).loose();
 
+// Where this run's code lives, decided once on the server (DENE-619). A closed
+// set of kinds, but parsed as a plain string with a `.catch`: the UI switches
+// on it with a default branch, so a kind added by a newer backend renders as
+// "somewhere this client does not know about" rather than erasing the task.
+//
+// kind === "unresolvable" is a real value, not an error: the run has no code
+// source and `code` says why. Absent entirely from a task claimed before the
+// server recorded decisions.
+export const CodeDecisionSchema = z.object({
+  kind: z.string().default("unresolvable"),
+  path: z.string().optional().catch(undefined),
+  repo_path: z.string().optional().catch(undefined),
+  worktree_root: z.string().optional().catch(undefined),
+  execution_mode: z.string().optional().catch(undefined),
+  display_name: z.string().optional().catch(undefined),
+  resource_id: z.string().optional().catch(undefined),
+  project_id: z.string().optional().catch(undefined),
+  url: z.string().optional().catch(undefined),
+  session_id: z.string().optional().catch(undefined),
+  code: z.string().optional().catch(undefined),
+  reason: z.string().optional().catch(undefined),
+}).loose();
+
 export const AgentTaskSchema = z.object({
   cancelled_by_comment_change: z.boolean().optional().catch(undefined),
   cancelled_by: TaskCancellationActorSchema.optional().catch(undefined),
@@ -2060,6 +2083,9 @@ export const AgentTaskSchema = z.object({
   durable_work_dir: z.string().optional().catch(undefined),
   relative_durable_work_dir: z.string().optional().catch(undefined),
   branch_name: z.string().optional().catch(undefined),
+  // Additive display metadata, degraded independently: a malformed decision
+  // must cost the row its "where did this run" line, not the execution log.
+  code_decision: CodeDecisionSchema.optional().catch(undefined),
   attribution: TaskAttributionSchema.optional(),
   // Per-run token usage. Same independent-degradation rule as the coverage
   // arrays above: usage is additive display metadata, so one malformed entry

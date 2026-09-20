@@ -337,6 +337,34 @@ export interface TaskCancellationActor {
   name?: string;
 }
 
+/**
+ * Server-side answer to "which code does this run use". Shipped with the task
+ * and stored on it, so a later read reports where the run actually went rather
+ * than where a run starting now would go.
+ */
+export interface CodeDecision {
+  kind: string;
+  /** Absolute directory the agent works in. Empty for remote_cache. */
+  path?: string;
+  /** For local_worktree: the repository the parallel copy is made from. */
+  repo_path?: string;
+  /** For local_worktree: where parallel copies are placed. */
+  worktree_root?: string;
+  execution_mode?: string;
+  /** Label to show instead of the absolute path, which leaks the account name. */
+  display_name?: string;
+  resource_id?: string;
+  project_id?: string;
+  /** For remote_cache: the repository URL that will be checked out. */
+  url?: string;
+  /** For shared_scratch: the session whose scratch directory is reused. */
+  session_id?: string;
+  /** For unresolvable: the machine-readable failure code. */
+  code?: string;
+  /** For unresolvable: a sentence naming what could not be resolved. */
+  reason?: string;
+}
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -470,6 +498,17 @@ export interface AgentTask {
    * Older backends omit it — render conditionally.
    */
   branch_name?: string;
+  /**
+   * Where this run's code lives, decided on the server so the daemon, the
+   * desktop app and the web app all show one answer (DENE-619).
+   *
+   * `kind` is a closed set server-side — local_in_place / local_shared /
+   * local_worktree / remote_cache / shared_scratch / unresolvable — but switch
+   * on it with a default branch: a newer backend may add one. `unresolvable`
+   * is a value, not a missing field; `code` and `reason` say why. Older
+   * backends omit the whole object — render conditionally.
+   */
+  code_decision?: CodeDecision;
   /**
    * Resolved accountable-human provenance of this run (MUL-4302 §9): who it ran
    * "on behalf of", how that was resolved, and the evidence/lineage. Present on

@@ -682,6 +682,39 @@ describe("AgentTaskListSchema", () => {
     trigger_comment_id: "comment-3",
   };
 
+  it("carries the server's code decision, and degrades a malformed one alone", () => {
+    const parsed = AgentTaskListSchema.parse([
+      {
+        ...task,
+        code_decision: {
+          kind: "local_worktree",
+          path: "/Users/me/code/app.multica-worktrees/dene-619-142f15c86d34",
+          repo_path: "/Users/me/code/app",
+          display_name: "app",
+          execution_mode: "worktree",
+        },
+      },
+      // Failure is a value, not a missing field: the run has no code source
+      // and the UI must be able to say why.
+      { ...task, id: "task-2", code_decision: { kind: "unresolvable", code: "malformed_resource", reason: "resource_ref is not readable" } },
+      // A kind this client predates still parses; the UI's default branch
+      // renders it rather than losing the whole row.
+      { ...task, id: "task-3", code_decision: { kind: "something_newer", path: "/x" } },
+      { ...task, id: "task-4" },
+      { ...task, id: "task-5", code_decision: "local_in_place" },
+    ]);
+
+    expect(parsed[0]?.code_decision?.kind).toBe("local_worktree");
+    expect(parsed[0]?.code_decision?.display_name).toBe("app");
+    expect(parsed[1]?.code_decision?.code).toBe("malformed_resource");
+    expect(parsed[2]?.code_decision?.kind).toBe("something_newer");
+    expect(parsed[3]?.code_decision).toBeUndefined();
+    // A malformed decision costs the row its decision, not its execution log.
+    expect(parsed[4]?.code_decision).toBeUndefined();
+    expect(parsed[4]?.id).toBe("task-5");
+    expect(parsed[4]?.status).toBe("queued");
+  });
+
   it("preserves planned and delivered comment IDs for a task run", () => {
     const parsed = AgentTaskListSchema.parse([
       {
