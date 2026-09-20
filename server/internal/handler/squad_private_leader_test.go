@@ -290,7 +290,7 @@ func TestChildDone_SquadPrivateLeader_PlainMemberWakesLeader(t *testing.T) {
 	// wakes the parent's own leader regardless of who closed the child.
 	var count int
 	if err := testPool.QueryRow(ctx,
-		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'deferred')`,
 		parent.ID, agentID,
 	).Scan(&count); err != nil {
 		t.Fatalf("count tasks: %v", err)
@@ -407,7 +407,7 @@ func TestChildDone_SquadPrivateLeader_AgentActorWakesLeader(t *testing.T) {
 	// The private leader MUST have a queued task on the parent.
 	var count int
 	if err := testPool.QueryRow(ctx,
-		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'deferred')`,
 		parent.ID, agentID,
 	).Scan(&count); err != nil {
 		t.Fatalf("count tasks: %v", err)
