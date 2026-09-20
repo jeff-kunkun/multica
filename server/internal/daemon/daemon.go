@@ -540,6 +540,9 @@ type Daemon struct {
 	// is per-machine, not per-runtime).
 	jevStatusMu sync.RWMutex
 	jevStatus   *protocol.JevStatusSnapshot
+	// jevConfigPathOverride points the runtime.env reader at a fixture file in
+	// tests, so they never read the developer's own JEV credentials.
+	jevConfigPathOverride string
 	// jevStateDirOverride points the reader at a fixture directory in tests.
 	// Empty in production, where the path follows XDG_STATE_HOME, then
 	// os.UserHomeDir()/.local/state/jev.
@@ -9103,6 +9106,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if rootsValue, ok := composeOpenclawIncludeRoots(env.OpenclawIncludeRoot, os.Getenv("OPENCLAW_INCLUDE_ROOTS")); ok {
 		agentEnv["OPENCLAW_INCLUDE_ROOTS"] = rootsValue
 	}
+	// Export this machine's JEV credentials under both the names that read
+	// them: JEV_* for the `jev` CLI, TYPESAFE_* for the documented curl and
+	// the TypeSafe SDKs. Without this the SDK path 403s on a machine where
+	// `jev status` reports healthy, because nothing ever sets TYPESAFE_API_KEY
+	// for a daemon that launchd or make started.
+	//
+	// Set before custom_env is layered on, so an agent pinned to a different
+	// TypeSafe account can still override any of these names.
+	maps.Copy(agentEnv, d.jevTaskEnv())
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
 	// Bedrock). These are set per-agent via the agent settings UI.
