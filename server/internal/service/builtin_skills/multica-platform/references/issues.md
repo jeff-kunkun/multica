@@ -4,7 +4,6 @@ Product contracts the runtime brief does not fully encode.
 
 - [PR linking and close intent are two distinct contracts](#pr-linking-and-close-intent-are-two-distinct-contracts)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)
-- [Editing comments without overwriting concurrent work](#editing-comments-without-overwriting-concurrent-work)
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
 - [Status changes have server side effects](#status-changes-have-server-side-effects)
 - [Claim ownership without duplicating a run](#claim-ownership-without-duplicating-a-run)
@@ -12,26 +11,19 @@ Product contracts the runtime brief does not fully encode.
 - [Sub-issues: todo starts work now, backlog parks it](#sub-issues-todo-starts-work-now-backlog-parks-it)
 - [Incorrect to correct](#incorrect-to-correct)
 
-Closing is its own contract: the eight `close.*` keys, the decision tables
-and the dispatcher promotion rules live in `references/close-protocol.md`.
-Read them there before you close anything.
+Closing is its own contract; read `references/close-protocol.md` for its `close.*` keys, decision tables, and dispatcher promotion rules.
 
 ## Editing comments without overwriting concurrent work
 
-Read the comment's current `revision`, then supply that positive value when
-updating its body. Agent-authored bodies must use `--content-file`.
+Read the comment's current `revision`, then supply it when updating. Agent
+bodies must use `--content-file`.
 
 ```bash
 multica issue comment list <issue-id> --output json
 multica issue comment update <comment-id> --content-file ./comment.md --expected-revision <revision>
 ```
 
-If another editor changed the comment, the server rejects the stale revision.
-Read the latest body and reconcile the edits before retrying; do not simply
-advance the revision and overwrite the other edit. Authors can edit their own
-comments; workspace owners and admins can edit any comment. Existing attachments
-remain unchanged. Content edits have the same agent-trigger behavior as edits
-in the app, so do not use an update as a silent bookkeeping operation.
+If another editor changed the comment, reconcile the latest body before retrying; do not advance the revision and overwrite it. Authors, workspace owners, and admins can edit comments; attachments remain unchanged.
 
 ## PR linking and close intent are two distinct contracts
 

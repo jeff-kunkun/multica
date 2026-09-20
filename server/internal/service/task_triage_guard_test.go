@@ -35,7 +35,7 @@ func TestRetryEligibleExcludesTriageRuns(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := retryEligible("timeout", issueLinked(tc.context)); got != tc.want {
+			if got := retryEligible("timeout", issueLinked(tc.context), retryEnabledAgent()); got != tc.want {
 				t.Errorf("retryEligible with context %q = %v, want %v", tc.context, got, tc.want)
 			}
 		})

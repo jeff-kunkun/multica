@@ -731,6 +731,11 @@ type AgentTaskResponse struct {
 	// the cap, so the brief can say the list is incomplete instead of
 	// presenting a truncated catalog as the whole one.
 	IssueStatusesOmitted int                   `json:"issue_statuses_omitted,omitempty"`
+	IssueStateDeltaKnown bool                  `json:"issue_state_delta_known,omitempty"`
+	IssueChangedFields   []string              `json:"issue_changed_fields,omitempty"`
+	IssueStatus          string                `json:"issue_status,omitempty"`
+	IssueAssigneeType    string                `json:"issue_assignee_type,omitempty"`
+	IssueAssigneeID      string                `json:"issue_assignee_id,omitempty"`
 	ThreadName           string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Status               string                `json:"status"`
 	Priority             int32                 `json:"priority"`
