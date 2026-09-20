@@ -45,8 +45,13 @@ func TestClaimTaskByRuntime_InlinesIssueContextComments(t *testing.T) {
 }
 
 func TestTruncateUTF8(t *testing.T) {
-	got, truncated := truncateUTF8("前缀中文内容", 9)
-	if !truncated || got != "前缀中" {
+	// The budget deliberately lands inside the third rune: a byte-wise cut
+	// would return half a character, which is what this guards against.
+	got, truncated := truncateUTF8("前缀中文内容", 8)
+	if !truncated || got != "前缀" {
 		t.Fatalf("truncateUTF8 = %q, %t; want valid rune boundary", got, truncated)
+	}
+	if got, truncated := truncateUTF8("短", 16); truncated || got != "短" {
+		t.Fatalf("truncateUTF8 = %q, %t; want the input unchanged", got, truncated)
 	}
 }
