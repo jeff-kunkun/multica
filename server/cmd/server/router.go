@@ -1645,6 +1645,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// sits with the other admin actions rather than with the
 					// read above.
 					r.Post("/routing/health/check", h.CheckRoutingHealth)
+					// Model discovery also makes an outbound request with the
+					// workspace/deployment credential, so keep it admin-only.
+					r.Post("/routing/models", h.ListRoutingModels)
 					r.Get("/config/export", h.ExportWorkspaceConfig)
 					r.Post("/config/import", h.ImportWorkspaceConfig)
 					r.Post("/transfer/config", h.ImportWorkspaceTransferConfig)

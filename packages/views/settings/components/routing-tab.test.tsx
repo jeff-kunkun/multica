@@ -11,6 +11,7 @@ import { renderWithI18n } from "../../test/i18n";
 const updateWorkspace = vi.hoisted(() => vi.fn());
 const getRoutingHealth = vi.hoisted(() => vi.fn());
 const checkRoutingHealth = vi.hoisted(() => vi.fn());
+const listRoutingModels = vi.hoisted(() => vi.fn());
 const member = vi.hoisted(() => ({ role: "owner" as "owner" | "admin" | "member" }));
 const workspace = vi.hoisted(() => ({
   current: {
@@ -25,7 +26,12 @@ vi.mock("@multica/core/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/api")>();
   return {
     ...actual,
-    api: { updateWorkspace, getRoutingHealth, checkRoutingHealth },
+    api: {
+      updateWorkspace,
+      getRoutingHealth,
+      checkRoutingHealth,
+      listRoutingModels,
+    },
   };
 });
 
@@ -91,6 +97,8 @@ beforeEach(() => {
   getRoutingHealth.mockResolvedValue(HEALTHY);
   checkRoutingHealth.mockReset();
   checkRoutingHealth.mockResolvedValue(HEALTHY);
+  listRoutingModels.mockReset();
+  listRoutingModels.mockResolvedValue({ models: [] });
   updateWorkspace.mockImplementation(async (_id: string, body: { settings?: unknown }) => ({
     ...workspace.current,
     settings: body.settings,
@@ -123,6 +131,28 @@ describe("RoutingTab", () => {
     };
     render();
     expect(chip()?.getAttribute("data-state")).toBe("enabled");
+  });
+
+  it("fills an empty model from the saved gateway catalog", async () => {
+    workspace.current.settings = {
+      routing: { enabled: true, model: "", base_url: "https://gw.example/v1" },
+    };
+    getRoutingHealth.mockResolvedValue({
+      ...HEALTHY,
+      gateway_scope: "workspace",
+      gateway_host: "gw.example",
+      gateway_key_set: true,
+    });
+    listRoutingModels.mockResolvedValue({ models: ["gateway-model", "backup-model"] });
+
+    render();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/routing model|路由模型/i)).toHaveValue(
+        "gateway-model",
+      ),
+    );
+    expect(listRoutingModels).toHaveBeenCalledWith("ws-1");
   });
 
   it("saves the stored fields under the routing key and leaves the rest of settings alone", async () => {

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,12 +14,15 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/llm"
 )
 
 // routeTimeout bounds one detached routing pass. Generous enough for a small
 // JSON completion, short enough that a hung model cannot accumulate goroutines
 // across a busy workspace.
 const routeTimeout = 45 * time.Second
+
+const routingModelListTimeout = 20 * time.Second
 
 // RouteIssueAsync is the hook. Both call sites — issue creation and status
 // change — call this one function; adding routing behaviour for another status
@@ -247,4 +251,73 @@ func (h *Handler) CheckRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, h.routingHealthPayload(rep))
+}
+
+// routingModelListResponse is deliberately smaller than the OpenAI model
+// object. The settings page needs an id to fill the routing model field; it
+// must not become a second proxy that forwards provider metadata or a raw
+// upstream response to every workspace member.
+type routingModelListResponse struct {
+	Models []string `json:"models"`
+}
+
+// ListRoutingModels backs POST /api/workspaces/{id}/routing/models.
+//
+// It uses the same target resolution as routing itself: a complete workspace
+// URL/key pair wins, otherwise the deployment LLM settings are used. The key
+// is read and used only inside the server, and the response contains model ids
+// only. This is an explicit admin action because it makes an outbound request
+// with a stored credential.
+func (h *Handler) ListRoutingModels(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	settings, err := (routingStore{h: h}).Settings(r.Context(), workspaceID)
+	if err != nil {
+		slog.Warn("routing model discovery settings failed",
+			append(logger.RequestAttrs(r), "workspace_id", workspaceID, "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to read routing settings")
+		return
+	}
+
+	target := settings.Target()
+	if !target.Override() {
+		target.BaseURL = strings.TrimSpace(h.cfg.LLMBaseURL)
+		target.APIKey = strings.TrimSpace(h.cfg.LLMAPIKey)
+	}
+	if strings.TrimSpace(target.BaseURL) == "" {
+		writeError(w, http.StatusServiceUnavailable, "no routing endpoint is configured")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), routingModelListTimeout)
+	defer cancel()
+	models, err := llm.New(llm.Config{
+		APIKey:     target.APIKey,
+		BaseURL:    target.BaseURL,
+		MaxRetries: h.cfg.LLMMaxRetries,
+	}).ListModels(ctx)
+	if err != nil {
+		slog.Warn("routing model discovery failed",
+			append(logger.RequestAttrs(r), "workspace_id", workspaceID, "error", err)...)
+		// Do not echo the upstream error: compatible clients sometimes include
+		// the request URL or provider response, while the UI only needs a safe
+		// retryable failure state.
+		writeError(w, http.StatusBadGateway, "failed to list models from the routing endpoint")
+		return
+	}
+
+	seen := make(map[string]struct{}, len(models))
+	clean := make([]string, 0, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if _, exists := seen[model]; exists {
+			continue
+		}
+		seen[model] = struct{}{}
+		clean = append(clean, model)
+	}
+	sort.Strings(clean)
+	writeJSON(w, http.StatusOK, routingModelListResponse{Models: clean})
 }

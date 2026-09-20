@@ -1,6 +1,11 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -127,6 +132,71 @@ func TestKeyStorabilityIsReported(t *testing.T) {
 	}
 	if !(&Handler{RoutingSecrets: box}).routingHealthPayload(routingHealthReportForTest()).WorkspaceKeyStorable {
 		t.Fatal("WorkspaceKeyStorable = false with a secretbox wired")
+	}
+}
+
+func TestListRoutingModelsUsesWorkspaceTargetAndReturnsIDsOnly(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	var gotAuthorization string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthorization = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"model-z","object":"model","created":0,"owned_by":"test"},{"id":"model-a","object":"model","created":0,"owned_by":"test"},{"id":"model-a","object":"model","created":0,"owned_by":"test"}]}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	previousSettings := []byte{}
+	if err := testPool.QueryRow(context.Background(), `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previousSettings); err != nil {
+		t.Fatalf("read workspace settings: %v", err)
+	}
+	previousSecrets := testHandler.RoutingSecrets
+	box, err := NewRoutingSecretBox("routing-model-list-test-secret")
+	if err != nil {
+		t.Fatalf("NewRoutingSecretBox: %v", err)
+	}
+	testHandler.RoutingSecrets = box
+	sealed, ok := testHandler.sealRoutingKey("workspace-model-key")
+	if !ok {
+		t.Fatal("sealRoutingKey refused the test key")
+	}
+	settings, _ := json.Marshal(map[string]any{
+		"routing": map[string]any{
+			"enabled": true, "model": "", "base_url": upstream.URL, "api_key_enc": sealed,
+		},
+	})
+	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET settings = $1 WHERE id = $2`, settings, testWorkspaceID); err != nil {
+		t.Fatalf("write workspace settings: %v", err)
+	}
+	t.Cleanup(func() {
+		restore := previousSettings
+		if len(restore) == 0 {
+			restore = []byte(`{}`)
+		}
+		_, _ = testPool.Exec(context.Background(), `UPDATE workspace SET settings = $1 WHERE id = $2`, restore, testWorkspaceID)
+		testHandler.RoutingSecrets = previousSecrets
+	})
+
+	req := withURLParam(newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/routing/models", nil), "id", testWorkspaceID)
+	resp := httptest.NewRecorder()
+	testHandler.ListRoutingModels(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("ListRoutingModels status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if gotAuthorization != "Bearer workspace-model-key" {
+		t.Fatalf("upstream authorization = %q, want workspace key", gotAuthorization)
+	}
+	if strings.Contains(resp.Body.String(), "workspace-model-key") {
+		t.Fatalf("response leaked the workspace key: %s", resp.Body.String())
+	}
+	var got routingModelListResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, want := strings.Join(got.Models, ","), "model-a,model-z"; got != want {
+		t.Fatalf("models = %q, want %q", got, want)
 	}
 }
 

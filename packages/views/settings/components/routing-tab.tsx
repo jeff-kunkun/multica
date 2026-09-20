@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -42,11 +42,10 @@ import { useAutoSave } from "./use-auto-save";
  * Hiding the slot while routing is off is done by archiving the property
  * definition, which the property panel already honours.
  *
- * The model field is a free-text identifier rather than a picker. The routing
- * judge runs on an OpenAI-compatible gateway, not on the per-workspace runtime
- * model catalog the agent seats use, so there is no workspace-scoped list to
- * pick from and offering one would let a workspace choose a model its gateway
- * does not serve.
+ * The model field accepts manual ids but also gets a catalog from the selected
+ * OpenAI-compatible gateway. The server keeps the credential on its side,
+ * returns ids only, and the first id fills an empty field; manual entry stays
+ * available for gateways that do not implement `/models`.
  *
  * Which gateway is now a workspace decision. It did not used to be: the judge
  * borrowed the deployment's MULTICA_LLM_* configuration, which is fine for one
@@ -78,6 +77,9 @@ export function RoutingTab() {
   const [model, setModel] = useState(saved.model);
   const [threshold, setThreshold] = useState(String(saved.confidence_threshold));
   const [baseUrl, setBaseUrl] = useState(saved.base_url);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const autoDiscoverKey = useRef("");
+  const autoFilledModel = useRef("");
   // Held apart from the auto-saved draft on purpose. Auto-save fires while
   // somebody is still typing, and a half-typed credential saved to the server
   // is both useless and a real key sitting in a row nobody will think to
@@ -93,6 +95,9 @@ export function RoutingTab() {
     setThreshold(String(next.confidence_threshold));
     setBaseUrl(next.base_url);
     setKeyInput("");
+    setAvailableModels([]);
+    autoDiscoverKey.current = "";
+    autoFilledModel.current = "";
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace?.id]);
 
@@ -105,6 +110,29 @@ export function RoutingTab() {
     }),
     [enabled, model, threshold, baseUrl],
   );
+
+  const discoverModels = useMutation({
+    mutationFn: async () => {
+      if (!workspace) throw new Error("workspace is not selected");
+      return api.listRoutingModels(workspace.id);
+    },
+    onSuccess: (result) => {
+      setAvailableModels(result.models);
+      // Discovery is an aid, not an override: keep a model somebody already
+      // chose, and only fill the empty state the user asked us to complete.
+      if (result.models.length > 0) {
+        const first = result.models[0];
+        if (first) {
+          setModel((current) => {
+            if (current.trim() !== "") return current;
+            autoFilledModel.current = first;
+            return first;
+          });
+        }
+      }
+    },
+    onError: () => setAvailableModels([]),
+  });
 
   useAutoSave({
     value: draft,
@@ -144,6 +172,46 @@ export function RoutingTab() {
     ...routingHealthOptions(workspace?.id ?? ""),
     enabled: !!workspace?.id,
   });
+
+  // A workspace that already has URL + key saved should not need to touch the
+  // form again after an app restart. Discover once for the current target;
+  // manual re-entry remains available after a provider that has no /models.
+  useEffect(() => {
+    const healthData = health.data;
+    if (
+      !workspace ||
+      !canManage ||
+      !enabled ||
+      !healthData?.gateway_configured ||
+      (saved.base_url.trim() !== "" && !healthData.gateway_key_set) ||
+      discoverModels.isPending
+    ) {
+      return;
+    }
+    const key = [
+      workspace.id,
+      healthData.gateway_scope,
+      healthData.gateway_host,
+      healthData.gateway_key_set,
+      saved.base_url,
+    ].join("|");
+    if (autoDiscoverKey.current === key) return;
+    autoDiscoverKey.current = key;
+    // A half-filled custom pair falls back to the deployment gateway. Do not
+    // fill from that fallback, because the next key save would silently leave
+    // a deployment-only model selected for the new workspace gateway.
+    if (model.trim() !== "" && autoFilledModel.current !== model.trim()) return;
+    if (autoFilledModel.current === model.trim()) setModel("");
+    discoverModels.mutate();
+  }, [
+    canManage,
+    discoverModels,
+    enabled,
+    health.data,
+    model,
+    saved.base_url,
+    workspace,
+  ]);
 
   const recheck = useMutation({
     mutationFn: () => api.checkRoutingHealth(workspace?.id ?? ""),
@@ -220,12 +288,33 @@ export function RoutingTab() {
             size="text"
           >
             <Input
+              list="routing-model-options"
               value={model}
               disabled={!canManage}
               placeholder={t(($) => $.routing.model_placeholder)}
               onChange={(e) => setModel(e.target.value)}
               aria-label={t(($) => $.routing.model_label)}
             />
+            {availableModels.length > 0 ? (
+              <datalist id="routing-model-options">
+                {availableModels.map((availableModel) => (
+                  <option key={availableModel} value={availableModel} />
+                ))}
+              </datalist>
+            ) : null}
+            <p className="text-micro text-muted-foreground">
+              {discoverModels.isPending
+                ? t(($) => $.routing.model_discovering)
+                : discoverModels.isError
+                  ? t(($) => $.routing.model_discover_failed)
+                  : discoverModels.isSuccess && availableModels.length === 0
+                    ? t(($) => $.routing.model_discover_empty)
+                    : availableModels.length > 0
+                      ? t(($) => $.routing.model_discover_loaded, {
+                          count: availableModels.length,
+                        })
+                      : null}
+            </p>
           </SettingsRow>
 
           <SettingsRow
