@@ -1074,6 +1074,9 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	// silently returns false for non-identifier strings, falling through to
 	// the UUID path below.
 	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+		if !h.requireIssueVisible(w, r, issue) {
+			return db.Issue{}, false
+		}
 		return issue, true
 	}
 
@@ -1095,6 +1098,13 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
+		return db.Issue{}, false
+	}
+	// Sharing scope decides whether this issue exists for the caller at all
+	// (DENE-698). Every issue-scoped endpoint funnels through here, so the
+	// check belongs here rather than once per handler; a hidden issue answers
+	// exactly as a missing one does.
+	if !h.requireIssueVisible(w, r, issue) {
 		return db.Issue{}, false
 	}
 	return issue, true
