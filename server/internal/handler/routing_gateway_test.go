@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/routing"
@@ -68,4 +69,67 @@ func TestRoutingHealthPayloadReportsAnUnconfiguredDeployment(t *testing.T) {
 	if h.routingHealthPayload(routingHealthReportForTest()).GatewayConfigured {
 		t.Fatal("GatewayConfigured = true with no base URL")
 	}
+}
+
+// TestWorkspaceGatewayWinsInThePayload. When the workspace brought its own
+// endpoint, the settings section must name THAT host and say whose it is —
+// showing the deployment's is how somebody debugs against the wrong server.
+func TestWorkspaceGatewayWinsInThePayload(t *testing.T) {
+	h := &Handler{cfg: Config{
+		LLMAPIKey:  "sk-deployment",
+		LLMBaseURL: "https://deployment.example/v1",
+	}}
+	rep := routingHealthReportForTest()
+	rep.BaseURL = "https://sk-pasted:x@workspace.example/v1"
+	rep.KeySet = true
+	rep.UsesWorkspaceGateway = true
+
+	got := h.routingHealthPayload(rep)
+	if got.GatewayHost != "workspace.example" {
+		t.Fatalf("GatewayHost = %q, want the workspace host", got.GatewayHost)
+	}
+	if got.GatewayScope != gatewayScopeWorkspace {
+		t.Fatalf("GatewayScope = %q, want %q", got.GatewayScope, gatewayScopeWorkspace)
+	}
+	if !got.GatewayKeySet {
+		t.Fatal("GatewayKeySet = false with a workspace key stored")
+	}
+	// Userinfo in the pasted URL must not survive into the client payload.
+	if strings.Contains(got.GatewayHost, "sk-pasted") {
+		t.Fatalf("GatewayHost leaked the raw url: %q", got.GatewayHost)
+	}
+}
+
+// TestWorkspaceGatewayMakesAnUnconfiguredDeploymentConfigured is the state
+// that used to read as a dead end: no deployment LLM, and a workspace that
+// just supplied its own. GatewayConfigured=false there tells the reader there
+// is nothing they can do, at the exact moment they have already done it.
+func TestWorkspaceGatewayMakesAnUnconfiguredDeploymentConfigured(t *testing.T) {
+	h := &Handler{cfg: Config{}}
+	rep := routingHealthReportForTest()
+	rep.BaseURL = "https://workspace.example/v1"
+	rep.KeySet = true
+	rep.UsesWorkspaceGateway = true
+	if !h.routingHealthPayload(rep).GatewayConfigured {
+		t.Fatal("GatewayConfigured = false for a workspace running on its own gateway")
+	}
+}
+
+// TestKeyStorabilityIsReported so the section can disable the key field up
+// front rather than accepting a credential it will then refuse.
+func TestKeyStorabilityIsReported(t *testing.T) {
+	if (&Handler{}).routingHealthPayload(routingHealthReportForTest()).WorkspaceKeyStorable {
+		t.Fatal("WorkspaceKeyStorable = true with no secretbox")
+	}
+	box, err := NewRoutingSecretBox("deployment-jwt-secret")
+	if err != nil {
+		t.Fatalf("NewRoutingSecretBox: %v", err)
+	}
+	if !(&Handler{RoutingSecrets: box}).routingHealthPayload(routingHealthReportForTest()).WorkspaceKeyStorable {
+		t.Fatal("WorkspaceKeyStorable = false with a secretbox wired")
+	}
+}
+
+func containsAny(s, sub string) bool {
+	return len(sub) > 0 && len(s) >= len(sub) && strings.Contains(s, sub)
 }

@@ -80,6 +80,9 @@ const HEALTHY = {
   gateway_host: "api.openai.com",
   gateway_default_model: "gpt-5.6-mini",
   gateway_configured: true,
+  gateway_scope: "deployment" as const,
+  gateway_key_set: false,
+  workspace_key_storable: true,
 };
 
 beforeEach(() => {
@@ -122,7 +125,7 @@ describe("RoutingTab", () => {
     expect(chip()?.getAttribute("data-state")).toBe("enabled");
   });
 
-  it("saves the three fields under the routing key and leaves the rest of settings alone", async () => {
+  it("saves the stored fields under the routing key and leaves the rest of settings alone", async () => {
     workspace.current.settings = { theme: "dark" };
     render();
 
@@ -135,10 +138,14 @@ describe("RoutingTab", () => {
       { settings: Record<string, unknown> },
     ];
     expect(body.settings.theme).toBe("dark");
+    // No api_key: the key is write-only and is sent ONLY when somebody typed
+    // one. If an ordinary save carried `api_key: ""`, it would clear the
+    // stored key every time anybody edited the model.
     expect(body.settings.routing).toEqual({
       enabled: false,
       model: "gpt-5.6-luna",
       confidence_threshold: 0.7,
+      base_url: "",
     });
   });
 
@@ -155,12 +162,64 @@ describe("RoutingTab", () => {
     expect(body.settings.routing.model).toBe("");
   });
 
-  it("stores no credential field of any kind", () => {
+  // The key box is write-only by construction: the server strips the stored
+  // key from every response, so there is nothing for this field to render
+  // back. These three tests are the whole contract of that box.
+  it("never renders a stored key back into the field", async () => {
+    getRoutingHealth.mockResolvedValue({ ...HEALTHY, gateway_key_set: true });
+    const { qc } = render();
+    await healthSettled(qc);
+    const key = screen.getByLabelText(/api key|api 密钥|api key/i) as HTMLInputElement;
+    expect(key.value).toBe("");
+    expect(key.type).toBe("password");
+    // Not even a mask. The placeholder says a key exists; it does not stand
+    // in for one, so nothing here can be mistaken for an editable value.
+    expect(key.placeholder).not.toMatch(/[*•]/);
+  });
+
+  it("sends the typed key only when the save button is pressed", async () => {
     render();
-    // The section must never grow a key/token input: credentials belong to the
-    // deployment's model configuration.
-    expect(document.querySelector('input[type="password"]')).toBeNull();
-    expect(screen.queryByLabelText(/api key|secret|token/i)).toBeNull();
+    const key = screen.getByLabelText(/api key|api 密钥/i);
+    await userEvent.type(key, "sk-live-abc");
+    // Typing alone must not write: auto-save would store half-typed keys.
+    expect(updateWorkspace).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: /save key|保存 key/i }));
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
+    const [, body] = updateWorkspace.mock.calls.at(-1) as [
+      string,
+      { settings: { routing: Record<string, unknown> } },
+    ];
+    expect(body.settings.routing.api_key).toBe("sk-live-abc");
+    // And the box is emptied, so a credential is not left sitting in the DOM.
+    await waitFor(() => expect((key as HTMLInputElement).value).toBe(""));
+  });
+
+  it("saves the endpoint url with the ordinary fields", async () => {
+    render();
+    await userEvent.type(
+      screen.getByLabelText(/endpoint url|端点 url/i),
+      "https://gw.example/v1",
+    );
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
+    const [, body] = updateWorkspace.mock.calls.at(-1) as [
+      string,
+      { settings: { routing: Record<string, unknown> } },
+    ];
+    expect(body.settings.routing.base_url).toBe("https://gw.example/v1");
+    expect("api_key" in body.settings.routing).toBe(false);
+  });
+
+  it("disables the key field on a deployment that cannot store one", async () => {
+    getRoutingHealth.mockResolvedValue({
+      ...HEALTHY,
+      workspace_key_storable: false,
+    });
+    const { qc } = render();
+    await healthSettled(qc);
+    await waitFor(() =>
+      expect(screen.getByLabelText(/api key|api 密钥/i)).toBeDisabled(),
+    );
   });
 
   it("is read-only for a plain member", async () => {

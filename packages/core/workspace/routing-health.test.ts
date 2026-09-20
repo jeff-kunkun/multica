@@ -32,7 +32,33 @@ describe("parseRoutingHealth", () => {
       gateway_host: "",
       gateway_default_model: "",
       gateway_configured: true,
+      // A backend that predates the workspace gateway omits all three; the
+      // defaults have to read as "the deployment endpoint, no workspace key",
+      // which is what such a backend means.
+      gateway_scope: "deployment",
+      gateway_key_set: false,
+      workspace_key_storable: false,
     });
+  });
+
+  it("narrows an unrecognised gateway scope to the deployment", () => {
+    expect(
+      parseRoutingHealth({ state: "enabled", gateway_scope: "tenant" })
+        .gateway_scope,
+    ).toBe("deployment");
+    expect(
+      parseRoutingHealth({ state: "enabled", gateway_scope: "workspace" })
+        .gateway_scope,
+    ).toBe("workspace");
+  });
+
+  it("never reads a non-boolean key flag as a stored key", () => {
+    // `=== true`, not truthy: a server that starts sending this as a string
+    // must not put a green "a key is saved" over a workspace that has none.
+    expect(
+      parseRoutingHealth({ state: "enabled", gateway_key_set: "yes" })
+        .gateway_key_set,
+    ).toBe(false);
   });
 
   it("reports the gateway the model id is actually sent to", () => {

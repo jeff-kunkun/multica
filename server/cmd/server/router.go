@@ -1193,6 +1193,30 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// VCS and channel secrets gives operators an isolated rotation and blast
 	// radius; without it, saving a `secret` config field fails closed rather
 	// than storing plaintext.
+	// The routing gateway key is derived, not configured: a self-hosted
+	// instance that already boots has JWT_SECRET, and asking an operator for a
+	// second env var before a workspace can save its own routing key would
+	// reintroduce exactly the "go SSH into the server" step that workspace
+	// configuration exists to remove. MULTICA_ROUTING_SECRET_KEY still wins
+	// when set, for a deployment that wants this credential on its own key.
+	if routingKey, err := secretbox.LoadKey("MULTICA_ROUTING_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(routingKey)
+		if err != nil {
+			slog.Error("routing: secretbox.New failed; workspace routing keys cannot be stored", "error", err)
+		} else {
+			h.RoutingSecrets = box
+		}
+	} else if jwtSecret := strings.TrimSpace(os.Getenv("JWT_SECRET")); jwtSecret != "" {
+		box, err := handler.NewRoutingSecretBox(jwtSecret)
+		if err != nil {
+			slog.Error("routing: derived secretbox failed; workspace routing keys cannot be stored", "error", err)
+		} else {
+			h.RoutingSecrets = box
+		}
+	} else {
+		slog.Info("Workspace routing keys disabled (no MULTICA_ROUTING_SECRET_KEY and no JWT_SECRET)")
+	}
+
 	if pluginKey, err := secretbox.LoadKey("MULTICA_PLUGIN_SECRET_KEY"); err == nil {
 		box, err := secretbox.New(pluginKey)
 		if err != nil {
