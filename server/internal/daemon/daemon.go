@@ -2197,6 +2197,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
+	// Independent of gcLoop and of GCEnabled: the storage screen's cleanup
+	// switch is this pass's only gate (DENE-648).
+	go d.worktreeCleanupLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
 
