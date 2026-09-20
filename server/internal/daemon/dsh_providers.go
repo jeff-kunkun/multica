@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +56,7 @@ const (
 // the server's request actions; both sides spell them the same way.
 const (
 	providerActionList     = "list"
+	providerActionModels   = "models"
 	providerActionUpsert   = "upsert"
 	providerActionDelete   = "delete"
 	providerActionActivate = "activate"
@@ -95,6 +97,10 @@ type providerConfigSnapshot struct {
 	Providers     []providerPresetEntry `json:"providers"`
 	Active        *providerPresetActive `json:"active,omitempty"`
 	ClearedActive bool                  `json:"cleared_active,omitempty"`
+	// Models is what the endpoint says it serves, filled only by the models
+	// action. The provider's ids travel verbatim — escaping them for Multica's
+	// provider/model string is the caller's concern, not this one's.
+	Models []providerPresetModel `json:"models,omitempty"`
 }
 
 // dshProviderUpsertPayload is the upsert body. APIKey is write-only: it is
@@ -106,6 +112,20 @@ type dshProviderUpsertPayload struct {
 	APIKeyEnv string                `json:"api_key_env"`
 	Models    []providerPresetModel `json:"models"`
 	APIKey    string                `json:"api_key"`
+	// VerifyModel names the model the save-time health check runs against.
+	// Empty means the preset's first model, which is also what activate picks
+	// when it is not told.
+	VerifyModel string `json:"verify_model"`
+}
+
+// dshProviderModelsPayload asks the endpoint for its own catalog. The key may
+// be typed into the form (api_key) or already stored for an existing preset
+// (id), because editing an endpoint without retyping the key is the ordinary
+// path.
+type dshProviderModelsPayload struct {
+	ID      string `json:"id"`
+	BaseURL string `json:"base_url"`
+	APIKey  string `json:"api_key"`
 }
 
 // dshProviderIDPayload covers the actions that only name a preset.
@@ -131,7 +151,7 @@ type dshProviderActivatePayload struct {
 // older daemon answers a newer server's request honestly instead of writing
 // something plausible into the wrong file.
 type providerConfigDriver interface {
-	Apply(action string, payload json.RawMessage) (*providerConfigSnapshot, error)
+	Apply(ctx context.Context, action string, payload json.RawMessage) (*providerConfigSnapshot, error)
 }
 
 var providerConfigDrivers = map[string]providerConfigDriver{
@@ -139,12 +159,12 @@ var providerConfigDrivers = map[string]providerConfigDriver{
 }
 
 // applyProviderConfig routes one action to its provider driver.
-func applyProviderConfig(provider, action string, payload json.RawMessage) (*providerConfigSnapshot, error) {
+func applyProviderConfig(ctx context.Context, provider, action string, payload json.RawMessage) (*providerConfigSnapshot, error) {
 	driver, ok := providerConfigDrivers[provider]
 	if !ok {
 		return nil, fmt.Errorf("unsupported provider %q", provider)
 	}
-	return driver.Apply(action, payload)
+	return driver.Apply(ctx, action, payload)
 }
 
 // dshProviderDriver reads and writes DSH's own configuration files. The
@@ -152,7 +172,7 @@ func applyProviderConfig(provider, action string, payload json.RawMessage) (*pro
 // a user with a relocated DSH_HOME) can point it elsewhere.
 type dshProviderDriver struct{}
 
-func (dshProviderDriver) Apply(action string, payload json.RawMessage) (*providerConfigSnapshot, error) {
+func (dshProviderDriver) Apply(ctx context.Context, action string, payload json.RawMessage) (*providerConfigSnapshot, error) {
 	dshHome, err := dshHomePath()
 	if err != nil {
 		return nil, err
@@ -165,8 +185,10 @@ func (dshProviderDriver) Apply(action string, payload json.RawMessage) (*provide
 		}
 		snapshot := dshSnapshot(settings, credentials)
 		return &snapshot, nil
+	case providerActionModels:
+		return dshListProviderModels(ctx, dshHome, payload)
 	case providerActionUpsert:
-		return dshUpsertProvider(dshHome, payload)
+		return dshUpsertProvider(ctx, dshHome, payload)
 	case providerActionDelete:
 		return dshDeleteProvider(dshHome, payload)
 	case providerActionActivate:
@@ -421,7 +443,78 @@ func dshPresetModels(entry *yaml.Node) []providerPresetModel {
 // Actions
 // ---------------------------------------------------------------------------
 
-func dshUpsertProvider(dshHome string, payload json.RawMessage) (*providerConfigSnapshot, error) {
+// dshListProviderModels asks the endpoint what it serves. It writes nothing:
+// the answer is candidate metadata the caller may adopt, and settings.yaml
+// stays the only thing that decides what a route carries.
+func dshListProviderModels(ctx context.Context, dshHome string, payload json.RawMessage) (*providerConfigSnapshot, error) {
+	var input dshProviderModelsPayload
+	if err := decodeDshProviderPayload(payload, &input); err != nil {
+		return nil, err
+	}
+	id := strings.TrimSpace(input.ID)
+	baseURL := strings.TrimSpace(input.BaseURL)
+	apiKey := strings.TrimSpace(input.APIKey)
+
+	settings, credentials, err := loadDshProviderDocuments(dshHome)
+	if err != nil {
+		return nil, err
+	}
+	// Editing an endpoint without retyping the credential is the ordinary
+	// path, so a blank key falls back to the one the named preset already
+	// references — never to some other preset's key.
+	if id != "" && (baseURL == "" || apiKey == "") {
+		entry := yamlMapValue(yamlMapValue(yamlMapValue(settings.root, dshProviderRootKey), dshProvidersKey), id)
+		if entry == nil || entry.Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("provider %q is not configured", id)
+		}
+		if baseURL == "" {
+			baseURL = strings.TrimSpace(yamlScalarValue(yamlMapValue(entry, "baseURL")))
+		}
+		if apiKey == "" {
+			apiKey = dshStoredAPIKey(credentials, yamlScalarValue(yamlMapValue(entry, "apiKeyEnv")))
+		}
+	}
+	if baseURL == "" {
+		return nil, errors.New("base_url is required to fetch a model list")
+	}
+	if apiKey == "" {
+		return nil, providerFailure(providerProbeKindMissingCredential,
+			"No API key is available to fetch a model list. Enter the key and try again.", nil)
+	}
+
+	discovered, err := fetchProviderModels(ctx, baseURL, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	snapshot := dshSnapshot(settings, credentials)
+	snapshot.Models = make([]providerPresetModel, 0, len(discovered))
+	for _, model := range discovered {
+		snapshot.Models = append(snapshot.Models, providerPresetModel{
+			ID:            model.ID,
+			Name:          model.Name,
+			ContextWindow: model.ContextWindow,
+		})
+	}
+	return &snapshot, nil
+}
+
+// dshStoredAPIKey reads the credential a preset's apiKeyEnv reference points
+// at. It is the one place a key is read back out of the file, and it exists so
+// the health check can use the credential the save would leave behind.
+func dshStoredAPIKey(credentials *dshYAMLDocument, apiKeyEnv string) string {
+	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
+	if apiKeyEnv == "" {
+		return ""
+	}
+	return strings.TrimSpace(yamlScalarValue(yamlMapValue(yamlMapValue(credentials.root, dshRefsKey), apiKeyEnv)))
+}
+
+// dshUpsertProvider writes one preset, but only after the route has answered
+// both probes. A save that cannot be verified does not land: "the form said it
+// was fine" is the failure this action exists to remove, and a preset that
+// only fails at the next agent run fails hours later on a machine nobody is
+// watching.
+func dshUpsertProvider(ctx context.Context, dshHome string, payload json.RawMessage) (*providerConfigSnapshot, error) {
 	var input dshProviderUpsertPayload
 	if err := decodeDshProviderPayload(payload, &input); err != nil {
 		return nil, err
@@ -430,18 +523,18 @@ func dshUpsertProvider(dshHome string, payload json.RawMessage) (*providerConfig
 	if id == "" {
 		return nil, errors.New("provider id is required")
 	}
+	if len(input.Models) == 0 {
+		return nil, errors.New("at least one model is required")
+	}
 	for i, model := range input.Models {
 		if strings.TrimSpace(model.ID) == "" {
 			return nil, fmt.Errorf("model %d has no id", i+1)
 		}
 	}
-	apiKeyEnv := strings.TrimSpace(input.APIKeyEnv)
-	if apiKeyEnv == "" {
-		apiKeyEnv = dshDefaultAPIKeyEnv(id)
-	}
 
 	// Both files are parsed before either is written, so a corrupt file is
-	// refused without a partial edit landing beside it.
+	// refused without a partial edit landing beside it — and, since the health
+	// check follows, without a network round trip either.
 	settings, credentials, err := loadDshProviderDocuments(dshHome)
 	if err != nil {
 		return nil, err
@@ -449,14 +542,57 @@ func dshUpsertProvider(dshHome string, payload json.RawMessage) (*providerConfig
 
 	providers := yamlMapMapping(yamlMapMapping(settings.root, dshProviderRootKey), dshProvidersKey)
 	entry := yamlMapMapping(providers, id)
-	yamlMapSet(entry, "apiKeyEnv", yamlScalarNode(apiKeyEnv))
-	yamlMapSet(entry, "api", yamlScalarNode(input.API))
-	yamlMapSet(entry, "baseURL", yamlScalarNode(input.BaseURL))
-	if len(input.Models) == 0 {
-		yamlMapDelete(entry, "models")
-	} else {
-		yamlMapSet(entry, "models", dshModelsNode(input.Models, yamlMapValue(entry, "models")))
+	// A blank api_key_env names no change: reusing the reference the preset
+	// already has is what keeps "edit the endpoint, leave the credential
+	// alone" from silently re-pointing the preset at a different variable.
+	apiKeyEnv := strings.TrimSpace(input.APIKeyEnv)
+	if apiKeyEnv == "" {
+		apiKeyEnv = strings.TrimSpace(yamlScalarValue(yamlMapValue(entry, "apiKeyEnv")))
 	}
+	if apiKeyEnv == "" {
+		apiKeyEnv = dshDefaultAPIKeyEnv(id)
+	}
+
+	apiKey := strings.TrimSpace(input.APIKey)
+	if apiKey == "" {
+		apiKey = dshStoredAPIKey(credentials, apiKeyEnv)
+	}
+	if apiKey == "" {
+		return nil, providerFailure(providerProbeKindMissingCredential,
+			"No API key is available to verify this provider. Enter the key and save again.", nil)
+	}
+
+	verifyModel := strings.TrimSpace(input.VerifyModel)
+	if verifyModel == "" {
+		verifyModel = strings.TrimSpace(input.Models[0].ID)
+	}
+	modelIDs := make([]string, 0, len(input.Models))
+	for _, model := range input.Models {
+		modelIDs = append(modelIDs, strings.TrimSpace(model.ID))
+	}
+	route, err := dshVerifyProviderRoute(ctx, dshVerifyRequest{
+		BaseURL:  strings.TrimSpace(input.BaseURL),
+		APIKey:   apiKey,
+		ModelID:  verifyModel,
+		ModelIDs: modelIDs,
+		API:      input.API,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	yamlMapSet(entry, "apiKeyEnv", yamlScalarNode(apiKeyEnv))
+	// The protocol is the one the endpoint's own answer implies; the caller's
+	// choice stands only for a gateway that does not describe its endpoints.
+	yamlMapSet(entry, "api", yamlScalarNode(route.API))
+	yamlMapSet(entry, "baseURL", yamlScalarNode(input.BaseURL))
+	// Set, never delete: a compat switch the user set by hand is not this
+	// feature's to remove, and a family that needs one gets it without the
+	// user knowing the key exists.
+	if route.ThinkingFormat != "" {
+		yamlMapSet(yamlMapMapping(entry, "compat"), "thinkingFormat", yamlScalarNode(route.ThinkingFormat))
+	}
+	yamlMapSet(entry, "models", dshModelsNode(input.Models, yamlMapValue(entry, "models")))
 
 	// The key is written first: a credentials write that fails leaves settings
 	// untouched, while the reverse order could publish a preset whose key
