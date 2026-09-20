@@ -1488,6 +1488,7 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 
 func (s *TaskService) EnqueueTaskForMentionFresh(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, true, "", pgtype.UUID{}, pgtype.UUID{})
+}
 
 // CoalesceDeferredChildDoneWake refreshes the durable child-done wake window
 // when another sibling finishes before the parent run becomes claimable.
@@ -1543,6 +1544,7 @@ func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Is
 
 func (s *TaskService) EnqueueTaskForSquadLeaderFresh(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, true, "", pgtype.UUID{}, pgtype.UUID{})
+}
 
 // EnqueueDeferredTaskForSquadLeader is the child-done debounce variant of the
 // squad-leader enqueue path.
