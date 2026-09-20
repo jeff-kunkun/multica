@@ -5,7 +5,9 @@ SELECT i.*,
        COALESCE(iss.visibility, 'workspace')::text AS issue_visibility,
        COALESCE(iss.creator_type, '')::text AS issue_creator_type,
        iss.creator_id AS issue_creator_id,
-       iss.project_id AS issue_project_id
+       iss.project_id AS issue_project_id,
+       COALESCE(iss.assignee_type, '')::text AS issue_assignee_type,
+       iss.assignee_id AS issue_assignee_id
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
@@ -83,7 +85,9 @@ SELECT i.*,
        COALESCE(iss.visibility, 'workspace')::text AS issue_visibility,
        COALESCE(iss.creator_type, '')::text AS issue_creator_type,
        iss.creator_id AS issue_creator_id,
-       iss.project_id AS issue_project_id
+       iss.project_id AS issue_project_id,
+       COALESCE(iss.assignee_type, '')::text AS issue_assignee_type,
+       iss.assignee_id AS issue_assignee_id
 FROM inbox_item i
 JOIN selected_ids selected ON selected.id = i.id
 LEFT JOIN issue iss ON iss.id = i.issue_id
@@ -154,10 +158,10 @@ RETURNING recipient_type, recipient_id;
 -- Sharing scope (DENE-698). A notification about an issue the recipient
 -- cannot see must not appear in their inbox or its count. The recipient IS
 -- the viewer here, so the matrix is expressed directly against their member
--- row rather than through the handler's visibilityViewer: creator, or
--- workspace scope unless guest, or project scope through a project they can
--- reach (explicit membership, a project they lead, or the owner/admin
--- fallback over all projects). Keep in step with
+-- row rather than through the handler's visibilityViewer: creator or
+-- assignee, or workspace scope unless guest, or project scope through a
+-- project they can reach (explicit membership, a project they lead, or the
+-- owner/admin fallback over all projects). Keep in step with
 -- visibilityViewer.issueVisibilitySQL in internal/handler/visibility.go.
 SELECT count(*) FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
@@ -167,6 +171,7 @@ WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3
   AND (
     iss.id IS NULL
     OR (iss.creator_type = 'member' AND iss.creator_id = i.recipient_id)
+    OR (iss.assignee_type = 'member' AND iss.assignee_id = i.recipient_id)
     OR (iss.visibility = 'workspace' AND COALESCE(m.role, '') <> 'guest')
     OR (iss.visibility = 'project' AND iss.project_id IS NOT NULL AND (
           COALESCE(m.role, '') IN ('owner', 'admin')
@@ -212,6 +217,7 @@ FROM (
       AND (
         iss.id IS NULL
         OR (iss.creator_type = 'member' AND iss.creator_id = i.recipient_id)
+        OR (iss.assignee_type = 'member' AND iss.assignee_id = i.recipient_id)
         OR (iss.visibility = 'workspace' AND m.role <> 'guest')
         OR (iss.visibility = 'project' AND iss.project_id IS NOT NULL AND (
               m.role IN ('owner', 'admin')

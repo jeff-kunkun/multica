@@ -52,6 +52,12 @@ const DefaultVisibility = VisibilityPrivate
 type Relation struct {
 	// IsCreator: the caller created the resource.
 	IsCreator bool
+	// IsAssignee: the resource is assigned to the caller. Assigning work to
+	// somebody is itself an act of sharing — an issue whose assignee cannot
+	// open it is a state the product must not be able to reach — so the
+	// assignee sees it at any scope, exactly like the creator. Only issues
+	// have assignees; always false for a project or a repository.
+	IsAssignee bool
 	// InProject: the resource belongs to a project and that project is in the
 	// caller's accessible set, as returned by the handler's
 	// listAccessibleProjectIDs (project_member rows, led projects, and every
@@ -139,12 +145,15 @@ func (r Role) CanWrite() bool {
 // answer must surface as "not found", never as "forbidden", and must hold in
 // lists, search, aggregates and notifications alike.
 //
+// Creator and assignee are above the scope tiers: both are named on the
+// resource itself, so no amount of narrowing hides it from them.
+//
 // Unknown tiers and unknown scopes see nothing.
 func CanSee(role Role, vis Visibility, rel Relation) bool {
 	if !role.Valid() {
 		return false
 	}
-	if rel.IsCreator {
+	if rel.IsCreator || rel.IsAssignee {
 		return true
 	}
 	switch vis {

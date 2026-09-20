@@ -128,9 +128,16 @@ func (v visibilityViewer) inProject(projectID pgtype.UUID) bool {
 // and which project it sits in.
 func (v visibilityViewer) relation(creatorType string, creatorID, projectID pgtype.UUID) permission.Relation {
 	return permission.Relation{
-		IsCreator: creatorType == "member" && creatorID.Valid && v.userID.Valid && creatorID.Bytes == v.userID.Bytes,
+		IsCreator: v.isMe(creatorType, creatorID),
 		InProject: v.inProject(projectID),
 	}
+}
+
+// isMe answers a polymorphic actor column: assignee_type / assignee_id and
+// creator_type / creator_id both name a member or an agent, and only a member
+// can be this viewer.
+func (v visibilityViewer) isMe(actorType string, actorID pgtype.UUID) bool {
+	return actorType == "member" && actorID.Valid && v.userID.Valid && actorID.Bytes == v.userID.Bytes
 }
 
 func (v visibilityViewer) canSee(vis string, rel permission.Relation) bool {
@@ -144,13 +151,20 @@ func (v visibilityViewer) canSee(vis string, rel permission.Relation) bool {
 // columns the decision needs rather than a row type. sqlc gives each list
 // query its own row struct, and every one of them has to answer this question
 // the same way.
-func (v visibilityViewer) canSeeIssueFields(visibility, creatorType string, creatorID, projectID pgtype.UUID) bool {
-	return v.canSee(visibility, v.relation(creatorType, creatorID, projectID))
+func (v visibilityViewer) canSeeIssueFields(
+	visibility, creatorType string, creatorID, projectID pgtype.UUID,
+	assigneeType string, assigneeID pgtype.UUID,
+) bool {
+	rel := v.relation(creatorType, creatorID, projectID)
+	rel.IsAssignee = v.isMe(assigneeType, assigneeID)
+	return v.canSee(visibility, rel)
 }
 
 // canSeeIssue is canSeeIssueFields over a full issue row.
 func (v visibilityViewer) canSeeIssue(issue db.Issue) bool {
-	return v.canSeeIssueFields(issue.Visibility, issue.CreatorType, issue.CreatorID, issue.ProjectID)
+	return v.canSeeIssueFields(
+		issue.Visibility, issue.CreatorType, issue.CreatorID, issue.ProjectID,
+		issue.AssigneeType.String, issue.AssigneeID)
 }
 
 // canSeeProject: a project is its own project, so "in project" means the
@@ -210,7 +224,8 @@ func (v visibilityViewer) filterProjects(projects []db.Project) []db.Project {
 //
 // The disjunction mirrors permission.CanSee exactly:
 //
-//	creator OR (workspace scope, unless guest) OR (project scope AND reachable)
+//	creator OR assignee OR (workspace scope, unless guest)
+//	OR (project scope AND reachable)
 //
 // An unknown tier yields FALSE — fail closed, same as the matrix.
 func (v visibilityViewer) issueVisibilitySQL(alias string, addArg func(any) string) string {
@@ -220,8 +235,11 @@ func (v visibilityViewer) issueVisibilitySQL(alias string, addArg func(any) stri
 	if !v.role.Valid() || !v.userID.Valid {
 		return "FALSE"
 	}
-	parts := []string{fmt.Sprintf(
-		"(%s.creator_type = 'member' AND %s.creator_id = %s::uuid)", alias, alias, addArg(v.userID)),
+	parts := []string{
+		fmt.Sprintf("(%s.creator_type = 'member' AND %s.creator_id = %s::uuid)",
+			alias, alias, addArg(v.userID)),
+		fmt.Sprintf("(%s.assignee_type = 'member' AND %s.assignee_id = %s::uuid)",
+			alias, alias, addArg(v.userID)),
 	}
 	if v.role != permission.RoleGuest {
 		parts = append(parts, fmt.Sprintf("%s.visibility = 'workspace'", alias))

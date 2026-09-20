@@ -196,6 +196,7 @@ WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3
   AND (
     iss.id IS NULL
     OR (iss.creator_type = 'member' AND iss.creator_id = i.recipient_id)
+    OR (iss.assignee_type = 'member' AND iss.assignee_id = i.recipient_id)
     OR (iss.visibility = 'workspace' AND COALESCE(m.role, '') <> 'guest')
     OR (iss.visibility = 'project' AND iss.project_id IS NOT NULL AND (
           COALESCE(m.role, '') IN ('owner', 'admin')
@@ -225,10 +226,10 @@ type CountUnreadInboxParams struct {
 // Sharing scope (DENE-698). A notification about an issue the recipient
 // cannot see must not appear in their inbox or its count. The recipient IS
 // the viewer here, so the matrix is expressed directly against their member
-// row rather than through the handler's visibilityViewer: creator, or
-// workspace scope unless guest, or project scope through a project they can
-// reach (explicit membership, a project they lead, or the owner/admin
-// fallback over all projects). Keep in step with
+// row rather than through the handler's visibilityViewer: creator or
+// assignee, or workspace scope unless guest, or project scope through a
+// project they can reach (explicit membership, a project they lead, or the
+// owner/admin fallback over all projects). Keep in step with
 // visibilityViewer.issueVisibilitySQL in internal/handler/visibility.go.
 func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countUnreadInbox, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
@@ -253,6 +254,7 @@ FROM (
       AND (
         iss.id IS NULL
         OR (iss.creator_type = 'member' AND iss.creator_id = i.recipient_id)
+        OR (iss.assignee_type = 'member' AND iss.assignee_id = i.recipient_id)
         OR (iss.visibility = 'workspace' AND m.role <> 'guest')
         OR (iss.visibility = 'project' AND iss.project_id IS NOT NULL AND (
               m.role IN ('owner', 'admin')
@@ -484,7 +486,9 @@ SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severit
        COALESCE(iss.visibility, 'workspace')::text AS issue_visibility,
        COALESCE(iss.creator_type, '')::text AS issue_creator_type,
        iss.creator_id AS issue_creator_id,
-       iss.project_id AS issue_project_id
+       iss.project_id AS issue_project_id,
+       COALESCE(iss.assignee_type, '')::text AS issue_assignee_type,
+       iss.assignee_id AS issue_assignee_id
 FROM inbox_item i
 JOIN selected_ids selected ON selected.id = i.id
 LEFT JOIN issue iss ON iss.id = i.issue_id
@@ -498,27 +502,29 @@ type ListArchivedInboxItemsParams struct {
 }
 
 type ListArchivedInboxItemsRow struct {
-	ID               pgtype.UUID        `json:"id"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	RecipientType    string             `json:"recipient_type"`
-	RecipientID      pgtype.UUID        `json:"recipient_id"`
-	Type             string             `json:"type"`
-	Severity         string             `json:"severity"`
-	IssueID          pgtype.UUID        `json:"issue_id"`
-	Title            string             `json:"title"`
-	Body             pgtype.Text        `json:"body"`
-	Read             bool               `json:"read"`
-	Archived         bool               `json:"archived"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	ActorType        pgtype.Text        `json:"actor_type"`
-	ActorID          pgtype.UUID        `json:"actor_id"`
-	Details          []byte             `json:"details"`
-	IssueStatus      pgtype.Text        `json:"issue_status"`
-	IssuePriority    pgtype.Text        `json:"issue_priority"`
-	IssueVisibility  string             `json:"issue_visibility"`
-	IssueCreatorType string             `json:"issue_creator_type"`
-	IssueCreatorID   pgtype.UUID        `json:"issue_creator_id"`
-	IssueProjectID   pgtype.UUID        `json:"issue_project_id"`
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	RecipientType     string             `json:"recipient_type"`
+	RecipientID       pgtype.UUID        `json:"recipient_id"`
+	Type              string             `json:"type"`
+	Severity          string             `json:"severity"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	Title             string             `json:"title"`
+	Body              pgtype.Text        `json:"body"`
+	Read              bool               `json:"read"`
+	Archived          bool               `json:"archived"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	ActorType         pgtype.Text        `json:"actor_type"`
+	ActorID           pgtype.UUID        `json:"actor_id"`
+	Details           []byte             `json:"details"`
+	IssueStatus       pgtype.Text        `json:"issue_status"`
+	IssuePriority     pgtype.Text        `json:"issue_priority"`
+	IssueVisibility   string             `json:"issue_visibility"`
+	IssueCreatorType  string             `json:"issue_creator_type"`
+	IssueCreatorID    pgtype.UUID        `json:"issue_creator_id"`
+	IssueProjectID    pgtype.UUID        `json:"issue_project_id"`
+	IssueAssigneeType string             `json:"issue_assignee_type"`
+	IssueAssigneeID   pgtype.UUID        `json:"issue_assignee_id"`
 }
 
 // Archived counterpart of ListInboxItems, backing the inbox's "Archived"
@@ -573,6 +579,8 @@ func (q *Queries) ListArchivedInboxItems(ctx context.Context, arg ListArchivedIn
 			&i.IssueCreatorType,
 			&i.IssueCreatorID,
 			&i.IssueProjectID,
+			&i.IssueAssigneeType,
+			&i.IssueAssigneeID,
 		); err != nil {
 			return nil, err
 		}
@@ -591,7 +599,9 @@ SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severit
        COALESCE(iss.visibility, 'workspace')::text AS issue_visibility,
        COALESCE(iss.creator_type, '')::text AS issue_creator_type,
        iss.creator_id AS issue_creator_id,
-       iss.project_id AS issue_project_id
+       iss.project_id AS issue_project_id,
+       COALESCE(iss.assignee_type, '')::text AS issue_assignee_type,
+       iss.assignee_id AS issue_assignee_id
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
@@ -605,27 +615,29 @@ type ListInboxItemsParams struct {
 }
 
 type ListInboxItemsRow struct {
-	ID               pgtype.UUID        `json:"id"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	RecipientType    string             `json:"recipient_type"`
-	RecipientID      pgtype.UUID        `json:"recipient_id"`
-	Type             string             `json:"type"`
-	Severity         string             `json:"severity"`
-	IssueID          pgtype.UUID        `json:"issue_id"`
-	Title            string             `json:"title"`
-	Body             pgtype.Text        `json:"body"`
-	Read             bool               `json:"read"`
-	Archived         bool               `json:"archived"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	ActorType        pgtype.Text        `json:"actor_type"`
-	ActorID          pgtype.UUID        `json:"actor_id"`
-	Details          []byte             `json:"details"`
-	IssueStatus      pgtype.Text        `json:"issue_status"`
-	IssuePriority    pgtype.Text        `json:"issue_priority"`
-	IssueVisibility  string             `json:"issue_visibility"`
-	IssueCreatorType string             `json:"issue_creator_type"`
-	IssueCreatorID   pgtype.UUID        `json:"issue_creator_id"`
-	IssueProjectID   pgtype.UUID        `json:"issue_project_id"`
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	RecipientType     string             `json:"recipient_type"`
+	RecipientID       pgtype.UUID        `json:"recipient_id"`
+	Type              string             `json:"type"`
+	Severity          string             `json:"severity"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	Title             string             `json:"title"`
+	Body              pgtype.Text        `json:"body"`
+	Read              bool               `json:"read"`
+	Archived          bool               `json:"archived"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	ActorType         pgtype.Text        `json:"actor_type"`
+	ActorID           pgtype.UUID        `json:"actor_id"`
+	Details           []byte             `json:"details"`
+	IssueStatus       pgtype.Text        `json:"issue_status"`
+	IssuePriority     pgtype.Text        `json:"issue_priority"`
+	IssueVisibility   string             `json:"issue_visibility"`
+	IssueCreatorType  string             `json:"issue_creator_type"`
+	IssueCreatorID    pgtype.UUID        `json:"issue_creator_id"`
+	IssueProjectID    pgtype.UUID        `json:"issue_project_id"`
+	IssueAssigneeType string             `json:"issue_assignee_type"`
+	IssueAssigneeID   pgtype.UUID        `json:"issue_assignee_id"`
 }
 
 func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) ([]ListInboxItemsRow, error) {
@@ -659,6 +671,8 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			&i.IssueCreatorType,
 			&i.IssueCreatorID,
 			&i.IssueProjectID,
+			&i.IssueAssigneeType,
+			&i.IssueAssigneeID,
 		); err != nil {
 			return nil, err
 		}

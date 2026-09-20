@@ -1278,7 +1278,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		if !openViewer.bypasses() {
 			visible := issues[:0]
 			for _, issue := range issues {
-				if openViewer.canSeeIssueFields(issue.Visibility, issue.CreatorType, issue.CreatorID, issue.ProjectID) {
+				if openViewer.canSeeIssueFields(
+					issue.Visibility, issue.CreatorType, issue.CreatorID, issue.ProjectID,
+					issue.AssigneeType.String, issue.AssigneeID) {
 					visible = append(visible, issue)
 				}
 			}

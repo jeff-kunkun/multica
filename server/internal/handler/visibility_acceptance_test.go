@@ -226,3 +226,46 @@ func TestSharingChangesAreLocatableInTheAuditLog(t *testing.T) {
 		t.Fatalf("the project's own change left %d audit rows, want 1", projectRows)
 	}
 }
+
+// Assigning work is itself an act of sharing: the assignee opens and updates
+// the issue even though nobody widened its scope, and it is in the list they
+// read. Without this, a member could be handed work they cannot see — the
+// assignment would silently do nothing.
+func TestAssigneeSeesAPrivateIssueTheyWereGiven(t *testing.T) {
+	requireDB(t)
+
+	author := visibilityTestMember(t, "Vis Assigner", "vis-assigner@multica.ai")
+	worker := visibilityTestMember(t, "Vis Worker", "vis-worker@multica.ai")
+	stranger := visibilityTestMember(t, "Vis Bystander", "vis-bystander@multica.ai")
+
+	issueID := dbfx.Issue(t, "yours to do", testutil.Cols{
+		"creator_type":  "member",
+		"creator_id":    author,
+		"visibility":    "private",
+		"assignee_type": "member",
+		"assignee_id":   worker,
+	})
+
+	get := func(userID string) *testutil.Response {
+		req := withURLParam(newRequestAs(userID, "GET", "/api/issues/"+issueID, nil), "id", issueID)
+		return testutil.Call(t, testHandler.GetIssue, req)
+	}
+	get(worker).Want(200)
+	get(stranger).Want(404)
+
+	listPath := "/api/issues?workspace_id=" + testWorkspaceID
+	if _, ok := issueIDsInList(t, worker, listPath)[issueID]; !ok {
+		t.Fatal("the assignee cannot find their own assigned issue in the list")
+	}
+	if _, ok := issueIDsInList(t, stranger, listPath)[issueID]; ok {
+		t.Fatal("an uninvolved member sees an issue assigned to somebody else")
+	}
+
+	// The scope itself did not move: assignment names one person, it does not
+	// widen the tier.
+	var visibility string
+	dbfx.QueryRow(t, `SELECT visibility FROM issue WHERE id = $1`, issueID).Scan(&visibility)
+	if visibility != "private" {
+		t.Fatalf("assignment changed the scope to %q; it must stay private", visibility)
+	}
+}
