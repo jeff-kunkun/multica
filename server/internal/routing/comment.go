@@ -62,7 +62,7 @@ func (r *Router) assignmentComment(
 	// Reviewer slot.
 	switch {
 	case !hasReviewerSlot:
-		b.WriteString("- **验收席**：本工作区还没有「验收席」属性，这一格没写\n")
+		b.WriteString("- **验收席**：本工作区的「验收席」属性不可用（已归档，或同名属性是别的类型），这一格没写\n")
 	case !needReviewer:
 		b.WriteString(fmt.Sprintf("- **验收席**：已有值「%s」，未改动\n", issue.Reviewer))
 	case reviewerName == OptionNoReview:

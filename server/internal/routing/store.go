@@ -95,9 +95,15 @@ type Store interface {
 	Issue(ctx context.Context, workspaceID, issueID string) (Issue, error)
 	// Roster maps agent name to agent for the whole workspace.
 	Roster(ctx context.Context, workspaceID string) (map[string]Agent, error)
-	// Reviewer returns the reviewer property definition. ok=false means the
-	// workspace has no reviewer slot; routing then fills the executor slot
-	// only and says so, rather than failing the whole call.
+	// Reviewer returns the reviewer property definition, provisioning it on
+	// the workspace's behalf when it is missing: the reviewer slot is a
+	// fixture of routing, not a field each workspace has to invent, so a
+	// workspace that switched routing on gets both halves of it.
+	//
+	// ok=false means the slot is deliberately unavailable — archived, which
+	// is how a workspace turns the reviewer half off, or occupied by a
+	// same-named property of another type. Routing then fills the executor
+	// slot only and says so, rather than failing the whole call.
 	Reviewer(ctx context.Context, workspaceID string) (prop ReviewerProperty, ok bool, err error)
 
 	// AssignAgentIfUnassigned fills the executor slot only while it is still
