@@ -982,6 +982,17 @@ func TestParseProviderModelsAcceptsBothCapacitySpellings(t *testing.T) {
 	if models[1].ContextWindow != 200000 {
 		t.Errorf("context_window spelling ignored: %+v", models[1])
 	}
+
+	// `models` is the other envelope spelling the same listing comes in. It
+	// was supported before this feature consolidated the fetch, and dropping
+	// it would silently break a gateway that answers this way.
+	renamed, err := parseProviderModels([]byte(`{"models":[{"id":"m2","name":"Second"}]}`))
+	if err != nil {
+		t.Fatalf("parse the models envelope: %v", err)
+	}
+	if len(renamed) != 1 || renamed[0].ID != "m2" {
+		t.Errorf("models envelope = %+v", renamed)
+	}
 }
 
 // ---------------------------------------------------------------------------

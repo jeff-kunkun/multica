@@ -464,17 +464,23 @@ func providerEndpointURL(baseURL, path string) (string, error) {
 	return trimmed + path, nil
 }
 
-// providerModelsResponse is the OpenAI-compatible listing. Two spellings of
-// the capacity field are in the wild and both mean the same thing.
+// providerModelsEntry is one row of an OpenAI-compatible listing. Two spellings
+// of the capacity field are in the wild and both mean the same thing.
+type providerModelsEntry struct {
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	ContextLength      int64    `json:"context_length"`
+	ContextWindow      int64    `json:"context_window"`
+	MaxTokens          int64    `json:"max_tokens"`
+	SupportedEndpoints []string `json:"supported_endpoints"`
+}
+
+// providerModelsResponse is the listing envelope. `data` is the OpenAI spelling
+// and `models` the other one in the wild; a gateway that answers with either is
+// answering the question, and the wrapper's name is not part of any protocol.
 type providerModelsResponse struct {
-	Data []struct {
-		ID                 string   `json:"id"`
-		Name               string   `json:"name"`
-		ContextLength      int64    `json:"context_length"`
-		ContextWindow      int64    `json:"context_window"`
-		MaxTokens          int64    `json:"max_tokens"`
-		SupportedEndpoints []string `json:"supported_endpoints"`
-	} `json:"data"`
+	Data   []providerModelsEntry `json:"data"`
+	Models []providerModelsEntry `json:"models"`
 }
 
 func parseProviderModels(body []byte) ([]providerDiscoveredModel, error) {
@@ -482,8 +488,12 @@ func parseProviderModels(body []byte) ([]providerDiscoveredModel, error) {
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, err
 	}
-	models := make([]providerDiscoveredModel, 0, len(parsed.Data))
-	for _, entry := range parsed.Data {
+	entries := parsed.Data
+	if len(entries) == 0 {
+		entries = parsed.Models
+	}
+	models := make([]providerDiscoveredModel, 0, len(entries))
+	for _, entry := range entries {
 		id := strings.TrimSpace(entry.ID)
 		if id == "" {
 			continue
