@@ -86,6 +86,12 @@ type Settings struct {
 	// after decryption and is never serialised — `json:"-"` is load-bearing,
 	// because this struct is marshalled back into the settings column.
 	APIKey string `json:"-"`
+	// Projects is this workspace's project -> direction table: project name
+	// (exact, or `prefix*`) to one of the ladder's directions, or "通用" for a
+	// project that is deliberately general-purpose. Rows here are laid over
+	// the shipped defaults in ladder.json and win, so classifying a project is
+	// a settings write and never a release.
+	Projects map[string]string `json:"projects,omitempty"`
 }
 
 // Target is where one judge call is sent: which model, on whose endpoint,

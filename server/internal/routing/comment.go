@@ -16,14 +16,19 @@ func pct(v float64) string {
 	return strconv.FormatFloat(v*100, 'f', 0, 64) + "%"
 }
 
-func directionLine(issue Issue, direction string) string {
-	if direction == "" {
-		if issue.ProjectName == "" {
-			return "- **方向**：未知（本票没有所属 project），从通用档位里选"
-		}
+func directionLine(issue Issue, match DirectionMatch) string {
+	switch {
+	case issue.ProjectName == "":
+		return "- **方向**：未知（本票没有所属 project），从通用档位里选"
+	case match.Invalid != "":
+		return fmt.Sprintf("- **方向**：未知（对照表把 project「%s」写成了「%s」，但没有这个方向），从通用档位里选",
+			issue.ProjectName, match.Invalid)
+	case !match.Known:
 		return fmt.Sprintf("- **方向**：未知（project「%s」不在对照表里），从通用档位里选", issue.ProjectName)
+	case match.Direction == "":
+		return fmt.Sprintf("- **方向**：%s（对照表把 project「%s」归为通用），从通用档位里选", GenericDirection, issue.ProjectName)
 	}
-	return fmt.Sprintf("- **方向**：%s（来自 project「%s」）", direction, issue.ProjectName)
+	return fmt.Sprintf("- **方向**：%s（来自 project「%s」）", match.Direction, issue.ProjectName)
 }
 
 // assignmentComment is the todo-row decision comment: what went into each
@@ -31,7 +36,7 @@ func directionLine(issue Issue, direction string) string {
 // and the verdict.
 func (r *Router) assignmentComment(
 	issue Issue,
-	direction string,
+	match DirectionMatch,
 	candidates []Seat,
 	v Verdict,
 	threshold float64,
@@ -77,7 +82,7 @@ func (r *Router) assignmentComment(
 			pct(v.ReviewerConfidence), pct(threshold)))
 	}
 
-	b.WriteString(directionLine(issue, direction))
+	b.WriteString(directionLine(issue, match))
 	b.WriteString("\n")
 	b.WriteString("- **候选**：" + seatNames(candidates) + "\n")
 	if strings.TrimSpace(v.Reason) != "" {

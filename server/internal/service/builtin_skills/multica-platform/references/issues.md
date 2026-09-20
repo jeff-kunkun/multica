@@ -321,6 +321,15 @@ Consequences for how you work:
 - `multica issue route <id>` re-runs the same pass by hand and prints what it
   did. It is the same code the hooks run, so on an issue they already handled
   it will report that there was nothing left to fill.
+- Read `action` in `--output json` as what was WRITTEN. `assigned`: at least
+  one slot was filled (`executor` / `reviewer` name which; a slot left empty is
+  named in `reason`). `declined`: the judge answered and nothing was written;
+  `reason` says why per slot (`executor not filled: confidence 67% < threshold
+  70%`). `noop`: nothing to decide. Only `assigned` is a dispatch.
+- The project -> direction table decides which direction SEAT on a rung gets
+  the work; it never changes the rung or the confidence. It is workspace data:
+  `multica workspace routing-projects list | set <project> <direction> | unset
+  <project>` (exact name or `prefix*`; a listed direction, or `通用`).
 
 When routing is **not working** — the model was rejected, is unreachable, the
 breaker is cooling down after repeated failures, or the deployment never
@@ -329,37 +338,6 @@ alone, exactly as if routing were off. Nothing is posted on a ticket about it.
 The reason is shown in one place only: Settings → Routing, which reports the
 state, the reason, when the model last answered, and offers a re-check. If
 automatic dispatch seems to have stopped, that section is where to look.
-
-## Automatic routing (off unless the workspace turned it on)
-
-When a workspace enables routing in Settings → Routing, the server asks one
-question on issue creation and on every status change: given this status, who
-should be holding this issue. It answers by filling slots, never by changing
-status — routing has no status write at all, so nothing below can move an
-issue for you.
-
-What it may do, and only when the slot is still **empty**:
-
-- **`todo`** — fill the assignee with a seat from the tier ladder, and fill the
-  workspace's 验收席 property with a seat, 「交给人」, or 「不需要验收」.
-- **`in_review`** — hand the issue to whatever 验收席 holds: reassign to that
-  seat (which starts its run), or reassign to a person and @ them. 「不需要验收」
-  is left alone.
-- **`blocked`** — post one advice comment and @ somebody. **No value is
-  changed.**
-- **`in_progress` / `done` / `cancelled` / `backlog`** — nothing at all.
-
-Consequences for how you work:
-
-- A value you set yourself is never overwritten. Assigning an issue, or
-  filling 验收席 by hand, permanently opts that slot out.
-- An issue whose assignee is a **person** is not touched in any way — no
-  slot, no comment, no mention.
-- Routing comments are capped at one of each kind per issue, so flipping a
-  status back and forth does not re-dispatch or re-notify.
-- `multica issue route <id>` re-runs the same pass by hand and prints what it
-  did. It is the same code the hooks run, so on an issue they already handled
-  it will report that there was nothing left to fill.
 
 ## Claim ownership without duplicating a run
 
