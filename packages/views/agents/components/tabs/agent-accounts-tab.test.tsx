@@ -11,7 +11,13 @@
 
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -547,9 +553,15 @@ describe("AgentAccountsTab drawer", () => {
     });
     await openDrawer();
 
+    // Read-only is said with its reason — and it is a different sentence from
+    // the one a switchable-but-manual group gets, so "cannot add" and "cannot
+    // switch" are no longer rendered as the same thing (DENE-678).
     expect(
-      screen.getByText("This CLI cannot be switched from here yet."),
+      screen.getByText(/builds a separate Codex directory for every task/i),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /add codex account/i }),
+    ).not.toBeInTheDocument();
     // Only the two dsh rows are selectable; the codex row is static.
     expect(screen.getAllByRole("radio")).toHaveLength(2);
     expect(
@@ -670,7 +682,7 @@ describe("AgentAccountsTab agy slots", () => {
     // Slot 3 has no directory on disk, so the daemon never reported it: the
     // row exists because the agent's own slot list says it may rotate there.
     fireEvent.click(
-      screen.getByRole("button", { name: /add numbered account/i }),
+      screen.getByRole("button", { name: "Add Antigravity account 3" }),
     );
     expect(screen.getByRole("radio", { name: /account3/ })).toBeInTheDocument();
 
@@ -697,7 +709,7 @@ describe("AgentAccountsTab agy slots", () => {
     await openDrawer();
     // Dropping a slot that is neither selected nor in effect only changes the
     // rotation list, so the write carries no `custom_args`.
-    fireEvent.click(screen.getByRole("button", { name: /remove slot 3/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Antigravity account 3 from this agent" }));
     saveAndSwitch();
 
     expect(onSave).toHaveBeenCalledTimes(1);
@@ -719,7 +731,7 @@ describe("AgentAccountsTab agy slots", () => {
     await openDrawer();
     // Opening selects the account in effect, so dropping it must move the
     // selection back to slot 1 rather than leave a row that no longer exists.
-    fireEvent.click(screen.getByRole("button", { name: /remove slot 2/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Antigravity account 2 from this agent" }));
 
     expect(
       screen.queryByRole("radio", { name: /account2/ }),
@@ -745,7 +757,7 @@ describe("AgentAccountsTab agy slots", () => {
 
     await openDrawer();
     fireEvent.click(
-      screen.getByRole("button", { name: /add numbered account/i }),
+      screen.getByRole("button", { name: "Add Antigravity account 3" }),
     );
     expect(
       screen.getByRole("button", { name: /save and switch/i }),
@@ -798,7 +810,7 @@ describe("AgentAccountsTab agy slots", () => {
 
     // A slot edit still commits, and the write repairs the pair: the account
     // the agent launches with is now also one it may rotate to.
-    fireEvent.click(screen.getByRole("button", { name: /remove slot 3/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Antigravity account 3 from this agent" }));
     saveAndSwitch();
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
@@ -847,7 +859,7 @@ describe("AgentAccountsTab agy slots", () => {
     });
 
     await openDrawer();
-    fireEvent.click(screen.getByRole("button", { name: /remove slot 4/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Antigravity account 4 from this agent" }));
 
     // Slot 4 is gone from the pending list, but nothing is saved: the account
     // in effect is still the one the agent launches with.
@@ -859,6 +871,96 @@ describe("AgentAccountsTab agy slots", () => {
 // `packages/views/locales/parity.test.ts`. This is the narrow guard for the
 // keys THIS surface added: all four bundles must carry the same account keys,
 // or one locale silently falls back to English.
+// DENE-678: the slot registry is per CLI family. The parse/write matrix lives in
+// `account-slots.test.ts` and the add/drop rules in
+// `agent-accounts-model.test.ts`; this block only checks that a non-agy family
+// is wired to the same controls and the same single write path.
+describe("AgentAccountsTab slots of a family that does not rotate", () => {
+  const CLAUDE_DEFAULT = account("claude", "default", `${RUNTIME_HOME}/.claude`, {
+    lever: "env:CLAUDE_CONFIG_DIR",
+  });
+
+  it("registers a dsh account, binds DSH_HOME to it and stores dsh_slots", async () => {
+    const { onSave } = renderTab({
+      device: runtimeWith("dsh", [DSH_DEFAULT, AGY_DEFAULT]),
+      agent: { ...baseAgent, runtime_config: { agy_slots: { accounts: [1, 2] } } },
+    });
+
+    await openDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Add DSH account 2" }));
+    // The slot has no directory on disk yet, so the row is synthesized — and
+    // the drawer says out loud that nothing here rotates on its own.
+    expect(screen.getByText(/no automatic rotation here/i)).toBeInTheDocument();
+
+    fireEvent.click(
+      within(screen.getByRole("radiogroup", { name: "DSH accounts" })).getByRole(
+        "radio",
+        { name: /account2/ },
+      ),
+    );
+    saveAndSwitch();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(updateAgentEnv).toHaveBeenCalledWith("agent-1", {
+      custom_env: { DSH_HOME: `${RUNTIME_HOME}/.dsh-account2` },
+    });
+    // Only the edited family is written; agy's stored key rides along untouched.
+    expect(onSave).toHaveBeenCalledWith({
+      runtime_config: {
+        agy_slots: { accounts: [1, 2] },
+        dsh_slots: { accounts: [1, 2] },
+      },
+    });
+  });
+
+  it("registers a claude account under claude_slots and binds CLAUDE_CONFIG_DIR", async () => {
+    const { onSave } = renderTab({
+      device: runtimeWith("claude", [CLAUDE_DEFAULT]),
+    });
+
+    await openDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Add Claude account 2" }));
+    selectAccount(/account2/);
+    saveAndSwitch();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(updateAgentEnv).toHaveBeenCalledWith("agent-1", {
+      custom_env: { CLAUDE_CONFIG_DIR: `${RUNTIME_HOME}/.claude-account2` },
+    });
+    expect(onSave).toHaveBeenCalledWith({
+      runtime_config: { claude_slots: { accounts: [1, 2] } },
+    });
+  });
+
+  it("offers no drop for a directory the daemon keeps reporting", async () => {
+    renderTab({
+      device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2]),
+      agent: { ...baseAgent, runtime_config: { dsh_slots: { accounts: [1, 2, 3] } } },
+    });
+
+    await openDrawer();
+    expect(
+      screen.getByRole("button", { name: "Remove DSH account 3 from this agent" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Remove DSH account 2 from this agent" }),
+    ).not.toBeInTheDocument();
+    // The next free number skips both the registered and the reported ones.
+    expect(screen.getByRole("button", { name: "Add DSH account 4" })).toBeInTheDocument();
+  });
+
+  it("tells a rotating group apart from a manual one", async () => {
+    renderTab({
+      device: runtimeWith("antigravity", [AGY_DEFAULT, DSH_DEFAULT, CODEX_DEFAULT]),
+    });
+
+    await openDrawer();
+    expect(screen.getByText(/moves to the next signed-in account/i)).toBeInTheDocument();
+    expect(screen.getByText(/no automatic rotation here/i)).toBeInTheDocument();
+    expect(screen.getByText(/separate Codex directory for every task/i)).toBeInTheDocument();
+  });
+});
+
 describe("agents locale bundles", () => {
   it("ship the same accounts keys in all four locales", () => {
     const bundles = {
