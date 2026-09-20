@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -188,6 +189,13 @@ func (dshProviderDriver) Apply(ctx context.Context, action string, payload json.
 		settings, credentials, err := loadDshProviderDocuments(dshHome)
 		if err != nil {
 			return nil, err
+		}
+		// Claim presets that predate the ledger, so the replay that repairs a
+		// reset DSH also covers the configuration this machine already had.
+		// Best-effort: an unwritable ledger must not stop the user from seeing
+		// the presets that are in front of them.
+		if err := adoptDshLedgerPresets(dshHome, settings); err != nil {
+			slog.Default().Warn("dsh provider ledger adoption failed", "error", err)
 		}
 		snapshot := dshSnapshot(settings, credentials)
 		return &snapshot, nil

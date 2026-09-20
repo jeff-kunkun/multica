@@ -218,11 +218,12 @@ func TestDshProviderReplayReportsMissingCredential(t *testing.T) {
 }
 
 // TestDshProviderReplayWithNothingRecordedFails: a machine that never saved a
-// preset has nothing to put back, and saying so beats writing an empty
-// provider section and reporting success.
+// preset and has none configured now has nothing to put back, and saying so
+// beats writing an empty provider section and reporting success. (A machine
+// that does have presets is never in this state — adoption records them.)
 func TestDshProviderReplayWithNothingRecordedFails(t *testing.T) {
 	home := dshTestHome(t)
-	seedDshHome(t, home)
+	dshResetSettings(t, home)
 
 	err := dshApply(t, providerActionReplay, nil)
 	if err == nil {
@@ -282,5 +283,106 @@ func TestDshProviderUpsertWritesThinkingFormatForAnyDeepSeekModel(t *testing.T) 
 	if got := dshThinkingFormat(dshProviderEntry(t, home, "command-code")); got != providerThinkingFormatDeepSeek {
 		t.Errorf("compat.thinkingFormat = %q, want %q — the preset carries a DeepSeek model even though the probe verified another one",
 			got, providerThinkingFormatDeepSeek)
+	}
+}
+
+// TestDshProviderListAdoptsPresetConfiguredBeforeTheLedger is the case the
+// ledger would otherwise miss entirely: every preset on a machine that was
+// working before this feature shipped was configured without passing through
+// save, activate or delete, so nothing recorded it. Reading the provider list —
+// which is what opening the section does — has to claim them, or the replay
+// button on that very screen answers "nothing to replay" on the one machine it
+// was built for.
+func TestDshProviderListAdoptsPresetConfiguredBeforeTheLedger(t *testing.T) {
+	home := dshTestHome(t)
+	seedDshHome(t, home)
+
+	dshApplyOK(t, providerActionList, nil)
+
+	dshResetSettings(t, home)
+	snapshot := dshApplyOK(t, providerActionReplay, nil)
+
+	entry := dshProviderEntry(t, home, "command-code")
+	if entry == nil {
+		t.Fatal("replay restored nothing: the preset was never adopted into the ledger")
+	}
+	if got := entry["baseURL"]; got != "https://api.example.invalid/provider/v1" {
+		t.Errorf("baseURL = %v", got)
+	}
+	if got := entry["apiKeyEnv"]; got != "COMMAND_CODE_API_KEY" {
+		t.Errorf("apiKeyEnv = %v — the restored preset no longer names the key the credentials file holds", got)
+	}
+	if got := dshThinkingFormat(entry); got != providerThinkingFormatDeepSeek {
+		t.Errorf("compat.thinkingFormat = %q, want %q", got, providerThinkingFormatDeepSeek)
+	}
+	if got := dshMapPath(t, dshSettingsOrEmpty(t, home), dshActiveModelKey, "model"); got != "deepseek/deepseek-v4.1-flash" {
+		t.Errorf("agent-default-model.model = %v", got)
+	}
+	if len(snapshot.Providers) != 1 || !snapshot.Providers[0].HasKey {
+		t.Errorf("restored snapshot = %#v, want one preset still holding its key", snapshot.Providers)
+	}
+}
+
+// TestDshProviderListDoesNotRerecordOverTheLedger. Adoption fills the gap and
+// stops there: the ledger is the record of what Multica wrote, and a
+// settings.yaml the user has since edited must not quietly become the record —
+// otherwise a reset that happens to be read before it is noticed would replace
+// the saved configuration with whatever state the file was left in.
+func TestDshProviderListDoesNotRerecordOverTheLedger(t *testing.T) {
+	home := dshTestHome(t)
+	dshApplyOK(t, providerActionUpsert, dshUpsertBody("command-code", "deepseek/deepseek-v4.1-flash"))
+
+	dshWriteTestFile(t, filepath.Join(home, dshSettingsFileName), `llm-pi-ai:
+  providers:
+    command-code:
+      apiKeyEnv: MULTICA_COMMAND_CODE_API_KEY
+      api: openai-completions
+      baseURL: https://moved.example.invalid/v1
+      models:
+        - id: deepseek/deepseek-v4.1-flash
+`)
+	dshApplyOK(t, providerActionList, nil)
+	dshResetSettings(t, home)
+	dshApplyOK(t, providerActionReplay, nil)
+
+	if got := dshProviderEntry(t, home, "command-code")["baseURL"]; got != "https://api.example.invalid/provider/v1" {
+		t.Errorf("baseURL = %v, want the endpoint Multica saved", got)
+	}
+}
+
+// TestDshProviderListDoesNotAdoptDeletedPreset. Delete removes the preset from
+// settings.yaml as well as from the ledger, so a later list has nothing to
+// adopt — pinned because adoption is the one path that could undo a delete.
+func TestDshProviderListDoesNotAdoptDeletedPreset(t *testing.T) {
+	home := dshTestHome(t)
+	dshApplyOK(t, providerActionUpsert, dshUpsertBody("command-code", "deepseek/deepseek-v4.1-flash"))
+	dshApplyOK(t, providerActionUpsert, dshUpsertBody("keeper", "deepseek/deepseek-v4.1-flash"))
+	dshApplyOK(t, providerActionDelete, map[string]any{"id": "command-code"})
+
+	dshApplyOK(t, providerActionList, nil)
+	dshResetSettings(t, home)
+	dshApplyOK(t, providerActionReplay, nil)
+
+	if entry := dshProviderEntry(t, home, "command-code"); entry != nil {
+		t.Errorf("a deleted preset came back through adoption: %#v", entry)
+	}
+	if dshProviderEntry(t, home, "keeper") == nil {
+		t.Error("replay dropped the preset that was not deleted")
+	}
+}
+
+// TestDshProviderAdoptionNeverRecordsTheKey. Adoption reads a file the user
+// wrote by hand, so it meets shapes the upsert path never produces; the
+// credential must stay out of the ledger on this path too.
+func TestDshProviderAdoptionNeverRecordsTheKey(t *testing.T) {
+	home := dshTestHome(t)
+	path := dshTestLedger(t)
+	seedDshHome(t, home)
+
+	dshApplyOK(t, providerActionList, nil)
+
+	recorded := dshReadTestFile(t, path)
+	if strings.Contains(recorded, "sk-test-existing") {
+		t.Errorf("adoption copied an API key into the ledger:\n%s", recorded)
 	}
 }

@@ -249,6 +249,17 @@ func dshLedgerPresetFromEntry(entry *yaml.Node) dshLedgerPreset {
 // nothing to do with the file. A restored preset with no credential is reported
 // as `has_key: false` in the snapshot rather than written and called fine.
 func dshReplayProviders(dshHome string) (*providerConfigSnapshot, error) {
+	settings, credentials, err := loadDshProviderDocuments(dshHome)
+	if err != nil {
+		return nil, err
+	}
+	// Whatever survives in the file is worth recording before it is read back:
+	// a partial reset leaves presets the ledger may never have seen, and they
+	// are the ones the NEXT reset would lose for good.
+	if err := adoptDshLedgerPresets(dshHome, settings); err != nil {
+		return nil, err
+	}
+
 	ledger, _, err := loadDshLedger()
 	if err != nil {
 		return nil, err
@@ -256,11 +267,6 @@ func dshReplayProviders(dshHome string) (*providerConfigSnapshot, error) {
 	recorded := ledger.Homes[dshHome]
 	if recorded == nil || len(recorded.Providers) == 0 {
 		return nil, fmt.Errorf("no provider preset was ever saved for %s, so there is nothing to replay", dshHome)
-	}
-
-	settings, credentials, err := loadDshProviderDocuments(dshHome)
-	if err != nil {
-		return nil, err
 	}
 
 	ids := make([]string, 0, len(recorded.Providers))
@@ -361,4 +367,73 @@ func replayDshActive(settings *dshYAMLDocument, active *providerPresetActive) bo
 	yamlMapSet(entry, "provider", yamlScalarNode(active.Provider))
 	yamlMapSet(entry, "model", yamlScalarNode(active.Model))
 	return true
+}
+
+// ---------------------------------------------------------------------------
+// Adoption
+// ---------------------------------------------------------------------------
+
+// adoptDshLedgerPresets claims presets that settings.yaml already has and the
+// ledger does not.
+//
+// Recording only on save, activate and delete would protect nothing that exists
+// today: every preset configured before this feature shipped — which on a
+// working machine is all of them — has never passed through those three
+// actions, so it is absent from the ledger and a replay for that home fails
+// with "nothing to replay". The user would have to re-save each preset by hand,
+// and no screen tells them to.
+//
+// So a read of the provider list writes the gap back. What is already recorded
+// is left exactly as it is: the ledger is the record of what Multica wrote, and
+// a settings.yaml that has since been edited must not quietly become the new
+// truth. A preset the user deleted cannot return this way either — delete
+// removes it from settings.yaml too, so there is nothing here to adopt.
+func adoptDshLedgerPresets(dshHome string, settings *dshYAMLDocument) error {
+	providers := yamlMapValue(yamlMapValue(settings.root, dshProviderRootKey), dshProvidersKey)
+	activeMapping := yamlMapValue(settings.root, dshActiveModelKey)
+	activeProvider := strings.TrimSpace(yamlScalarValue(yamlMapValue(activeMapping, "provider")))
+	activeModel := strings.TrimSpace(yamlScalarValue(yamlMapValue(activeMapping, "model")))
+
+	hasProviders := providers != nil && providers.Kind == yaml.MappingNode
+	if !hasProviders && (activeProvider == "" || activeModel == "") {
+		return nil
+	}
+
+	ledger, path, err := loadDshLedger()
+	if err != nil {
+		return err
+	}
+	// Reading the entry for a home that has none would create an empty bucket;
+	// nothing to adopt should leave the file untouched, including uncreated.
+	recorded := ledger.Homes[dshHome]
+	changed := false
+
+	if hasProviders {
+		for i := 0; i+1 < len(providers.Content); i += 2 {
+			id := providers.Content[i].Value
+			entry := providers.Content[i+1]
+			if id == "" || entry == nil || entry.Kind != yaml.MappingNode {
+				continue
+			}
+			if recorded != nil {
+				if _, ok := recorded.Providers[id]; ok {
+					continue
+				}
+			}
+			ledger.home(dshHome).Providers[id] = dshLedgerPresetFromEntry(entry)
+			recorded = ledger.Homes[dshHome]
+			changed = true
+		}
+	}
+
+	if activeProvider != "" && activeModel != "" && (recorded == nil || recorded.Active == nil) {
+		ledger.home(dshHome).Active = &providerPresetActive{Provider: activeProvider, Model: activeModel}
+		recorded = ledger.Homes[dshHome]
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+	return saveDshLedger(ledger, path)
 }
