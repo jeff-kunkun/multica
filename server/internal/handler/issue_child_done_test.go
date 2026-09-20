@@ -154,10 +154,12 @@ func TestChildDoneNotifiesParent(t *testing.T) {
 	}
 }
 
-// TestChildDoneUnstagedBurstWakesParentOnce exercises the default (unstaged)
-// barrier with three siblings. Every completion may write its own top-level
-// system comment under concurrent delivery, but the parent assignee must keep
-// one durable deferred wake inside the short coalescing window.
+// TestChildDoneUnstagedBurstWakesParentOnce pins the unstaged barrier: an
+// unstaged sibling set is one implicit stage, so only the last completion
+// crosses stageBarrierClosed. Three siblings finishing back to back must
+// therefore leave exactly one system comment and one parent wake (#4320 /
+// MUL-3508). This is a regression nail on the barrier, NOT evidence of any
+// debounce downstream of it.
 func TestChildDoneUnstagedBurstWakesParentOnce(t *testing.T) {
 	fx := newChildDoneFixture(t, "in_progress")
 
@@ -205,11 +207,11 @@ func TestChildDoneUnstagedBurstWakesParentOnce(t *testing.T) {
 	if err := testPool.QueryRow(context.Background(), `
 		SELECT count(*) FROM agent_task_queue
 		 WHERE issue_id = $1 AND agent_id = $2
-		   AND status IN ('queued', 'dispatched', 'deferred')`, fx.parent.ID, agentID).Scan(&wakes); err != nil {
+		   AND status IN ('queued', 'dispatched')`, fx.parent.ID, agentID).Scan(&wakes); err != nil {
 		t.Fatalf("count parent wakes: %v", err)
 	}
 	if wakes != 1 {
-		t.Fatalf("expected one deferred parent wake, got %d", wakes)
+		t.Fatalf("expected one parent wake, got %d", wakes)
 	}
 }
 
@@ -346,7 +348,7 @@ func countPendingTasksForAgent(t *testing.T, issueID, agentID string) int {
 	if err := testPool.QueryRow(context.Background(),
 		`SELECT count(*) FROM agent_task_queue
 		   WHERE issue_id = $1 AND agent_id = $2
-			 AND status IN ('queued', 'dispatched', 'running', 'deferred')`,
+		     AND status IN ('queued', 'dispatched', 'running')`,
 		issueID, agentID,
 	).Scan(&n); err != nil {
 		t.Fatalf("count pending tasks: %v", err)
@@ -667,7 +669,7 @@ func TestStageLeaderPrepareTimeoutRetryCanAdvanceNextStage(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		SELECT id::text, is_leader_task, squad_id::text, trigger_comment_id::text
 		FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'deferred')
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
 		ORDER BY created_at DESC
 		LIMIT 1
 	`, fx.parent.ID, sq.LeaderID).Scan(&originalID, &originalLeader, &originalSquadID, &originalTriggerID); err != nil {

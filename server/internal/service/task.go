@@ -200,16 +200,7 @@ const (
 	// stretching this global crash-recovery window.
 	claimResponseRecoveryWindow = 90 * time.Second
 	prepareLeaseDuration        = 45 * time.Second
-	// childDoneWakeDebounce keeps a burst of sibling completions from starting
-	// one parent run per system comment. The deferred row is durable, so a
-	// process restart still leaves the wake for the normal fire_at promoter.
-	childDoneWakeDebounce = 5 * time.Second
 )
-
-// ChildDoneWakeDebounce is the short coalescing window used by the handler's
-// parent wake path. Keep the policy in the service package so both agent and
-// squad parent triggers use the same duration.
-const ChildDoneWakeDebounce = childDoneWakeDebounce
 
 func (s *TaskService) trackTaskForReclaim(task db.AgentTaskQueue, checkAfter time.Time) {
 	if !task.RuntimeID.Valid || !task.ID.Valid || task.Status != "dispatched" {
@@ -1490,33 +1481,6 @@ func (s *TaskService) EnqueueTaskForMentionFresh(ctx context.Context, issue db.I
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, true, "", pgtype.UUID{}, pgtype.UUID{})
 }
 
-// CoalesceDeferredChildDoneWake refreshes the durable child-done wake window
-// when another sibling finishes before the parent run becomes claimable.
-// pgx.ErrNoRows means there was no existing deferred wake and the caller may
-// create the first one.
-func (s *TaskService) CoalesceDeferredChildDoneWake(ctx context.Context, issueID, agentID, triggerCommentID pgtype.UUID, fireAt time.Time) (bool, error) {
-	_, err := s.Queries.CoalesceDeferredChildDoneWake(ctx, db.CoalesceDeferredChildDoneWakeParams{
-		IssueID:          issueID,
-		AgentID:          agentID,
-		TriggerCommentID: triggerCommentID,
-		FireAt:           pgtype.Timestamptz{Time: fireAt, Valid: true},
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-// EnqueueDeferredTaskForMention creates a durable, short-lived child-done
-// wake. It remains inert until fireAt and is promoted by the normal deferred
-// task sweeper.
-func (s *TaskService) EnqueueDeferredTaskForMention(ctx context.Context, issue db.Issue, agentID, triggerCommentID pgtype.UUID, fireAt time.Time) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithOptions(ctx, issue, agentID, triggerCommentID, nil, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{Time: fireAt, Valid: true}, true)
-}
-
 // EnqueueTaskForThreadParent creates a queued task for the agent who authored
 // the direct parent comment a member replied to.
 func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -1546,12 +1510,6 @@ func (s *TaskService) EnqueueTaskForSquadLeaderFresh(ctx context.Context, issue 
 	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, true, "", pgtype.UUID{}, pgtype.UUID{})
 }
 
-// EnqueueDeferredTaskForSquadLeader is the child-done debounce variant of the
-// squad-leader enqueue path.
-func (s *TaskService) EnqueueDeferredTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID, squadID, triggerCommentID pgtype.UUID, fireAt time.Time) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithOptions(ctx, issue, leaderID, triggerCommentID, nil, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{Time: fireAt, Valid: true}, true)
-}
-
 // EnqueueTaskForSquadLeaderByActor is the assign/promote variant of
 // EnqueueTaskForSquadLeader. actorUserID is the member who performed the
 // assign/promote and becomes the accountable human (MUL-4302 §4); invalid when
@@ -1571,10 +1529,6 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 }
 
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithOptions(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, pgtype.Timestamptz{}, false)
-}
-
-func (s *TaskService) enqueueMentionTaskWithOptions(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, childDoneDebounce bool) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -1630,8 +1584,6 @@ func (s *TaskService) enqueueMentionTaskWithOptions(ctx context.Context, issue d
 		DelegatedFromTaskID:  attrDelegatedFrom,
 		TriggerEvidenceKind:  attrEvidenceKind,
 		TriggerEvidenceRefID: attrEvidenceRef,
-		FireAt:               fireAt,
-		ChildDoneDebounce:    pgtype.Bool{Bool: childDoneDebounce, Valid: childDoneDebounce},
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
@@ -1650,12 +1602,10 @@ func (s *TaskService) enqueueMentionTaskWithOptions(ctx context.Context, issue d
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
-	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader, "status", task.Status)
+	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
 	// See EnqueueTaskForIssue for ordering rationale.
-	if task.Status == "queued" {
-		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
-		s.NotifyTaskEnqueued(ctx, task)
-	}
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
 }
 
