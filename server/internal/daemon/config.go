@@ -107,6 +107,10 @@ const (
 	// would trade the whole point of the store for a tidy number, so it only
 	// runs once the store is genuinely large.
 	DefaultGCPackageStoreMaxBytes int64 = 20 << 30 // 20 GiB
+	// DefaultRepoCacheFetchCooldown suppresses duplicate remote fetches during
+	// a short burst of task checkouts. Set MULTICA_REPO_CACHE_FETCH_COOLDOWN=0
+	// to restore the pre-window behaviour.
+	DefaultRepoCacheFetchCooldown = 5 * time.Minute
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -140,6 +144,7 @@ type Config struct {
 	GCArtifactTTL                  time.Duration         // once a task has been completed for at least this long, drop regenerable artifacts: pattern-matched build outputs when the parent record keeps the directory (an open issue), and the exact daemon-managed Codex cache for every task kind (default: 12h, set 0 to disable both)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
 	RepoCacheGitTimeout            time.Duration         // upper bound for one git subprocess on the shared repo cache; a cold download is fetched in slices, so this bounds a slice rather than the whole repo (default: 10m)
+	RepoCacheFetchCooldown         time.Duration         // minimum time between successful fetches of one cached repo (default: 5m, set 0 to fetch every checkout)
 	GCRepoTTL                      time.Duration         // evict a cached bare repo under .repos once no task has created a worktree from it for this long, it has no worktrees left, and it is no longer attached to any watched workspace (default: 30d, set 0 to disable)
 	GCRepoMaintenanceEnabled       bool                  // run reflog expiry and git gc after stale agent refs are removed (default: true; disable independently as an operational kill switch)
 	GCCodexSessionTTL              time.Duration         // reclaim a per-issue Codex session store (~/.codex/multica-sessions/<agent>/<issue>) untouched for at least this long, so a done/abandoned issue's conversation history does not accumulate forever (default: 14d, set 0 to disable)
@@ -612,6 +617,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	repoCacheFetchCooldown, err := durationFromEnv("MULTICA_REPO_CACHE_FETCH_COOLDOWN", DefaultRepoCacheFetchCooldown)
+	if err != nil {
+		return Config{}, err
+	}
 	gcRepoMaintenanceEnabled := boolFromEnv("MULTICA_GC_REPO_MAINTENANCE_ENABLED", true)
 	sharedPackageStoreEnabled := boolFromEnv("MULTICA_SHARED_PACKAGE_STORE", true)
 	gcPackageStorePruneInterval, err := durationFromEnv("MULTICA_GC_PACKAGE_STORE_PRUNE_INTERVAL", DefaultGCPackageStorePruneInterval)
@@ -675,6 +684,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCArtifactPatterns:              gcArtifactPatterns,
 		GCRepoTTL:                       gcRepoTTL,
 		RepoCacheGitTimeout:             repoCacheGitTimeout,
+		RepoCacheFetchCooldown:          repoCacheFetchCooldown,
 		GCRepoMaintenanceEnabled:        gcRepoMaintenanceEnabled,
 		SharedPackageStoreEnabled:       sharedPackageStoreEnabled,
 		GCPackageStorePruneInterval:     gcPackageStorePruneInterval,

@@ -403,6 +403,11 @@ type Handler struct {
 	// PluginSurfaceTokens seal short-lived launch claims. Nil disables surface
 	// launches; wired from a domain-separated MULTICA_PLUGIN_SECRET_KEY at boot.
 	PluginSurfaceTokens *secretbox.Box
+	// RoutingSecrets seals the per-workspace routing gateway key. Nil means
+	// this deployment cannot store one, and the settings write REFUSES a key
+	// rather than dropping it; routing then uses the deployment gateway, which
+	// is what it did before workspaces could bring their own.
+	RoutingSecrets *secretbox.Box
 	// PRRefresh drives the GitHub API snapshot pipeline for PR cards (MUL-5265):
 	// webhook / page-visit / TTL triggers → authenticated GraphQL fetch →
 	// head-SHA-guarded atomic snapshot write. Always non-nil, but inert (every
@@ -514,7 +519,20 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	// the finished handler. The judge runs on the same internal LLM layer as
 	// chat titling; an unconfigured deployment gets a disabled client, which
 	// makes every routing call take the else branch instead of failing.
-	h.Routing = routing.New(h.RoutingStore(), routing.LLMJudge{Gen: llmClient})
+	h.Routing = routing.New(h.RoutingStore(), routing.LLMJudge{
+		Gen: llmClient,
+		// A workspace that supplies its own endpoint and key gets its own
+		// client. The retry budget is the deployment's, because it is a
+		// property of how long this server is willing to hold a goroutine, not
+		// of whose endpoint is on the other end.
+		Dial: func(baseURL, apiKey string) routing.TextGenerator {
+			return llm.New(llm.Config{
+				APIKey:     apiKey,
+				BaseURL:    baseURL,
+				MaxRetries: cfg.LLMMaxRetries,
+			})
+		},
+	})
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 	// The default passthrough scheduler reports sweeper-race recoveries so the
 	// daemon:register refresh fires even without the production batched wiring.

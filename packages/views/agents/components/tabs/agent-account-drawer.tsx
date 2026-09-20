@@ -10,17 +10,19 @@
 //
 // Nothing in this file performs a side effect. Picking a row is local state —
 // the design's rule is that a selection made inside the drawer only takes
-// effect once "save and switch" (owned by the tab) commits it. The AGY group's
-// "add account" and row drops are the same kind of local edit: they hand a slot
+// effect once "save and switch" (owned by the tab) commits it. A group's "add
+// account" and row drops are the same kind of local edit: they hand a slot
 // number to the tab, which keeps the pending list until that same button
 // commits it.
 //
-// The drawer works on the list the tab hands it, which for AGY is the agent's
-// own numbered slots (`runtime_config.agy_slots`) rather than the machine's
-// directory listing, so a slot added here appears immediately even before its
-// directory exists.
+// The drawer works on the list the tab hands it, which already has the agent's
+// registered slots folded in (`withAccountSlots`), so a slot added here appears
+// immediately even before its directory exists. Which groups can take a slot is
+// the tab's answer (`nextSlots`), derived from the per-CLI family table — this
+// file never asks which CLI it is looking at.
 
 import { useState } from "react";
+import { accountSlotFamily } from "@multica/core/agents/account-slot-families";
 import { Check, Copy, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
@@ -42,8 +44,8 @@ import {
   type AgentAccountCli,
   type AgentAccountGroup,
   accountLeverLabel,
+  accountSlotNumberOf,
   accountStatus,
-  agySlotNumberOf,
   formatQuotaResetAt,
   parseAccountLever,
 } from "./agent-accounts-model";
@@ -280,14 +282,15 @@ export interface AgentAccountDrawerProps {
   onSave: () => void;
   nowMs: number;
   /**
-   * Numbered AGY slot `Add account` would append to this agent's slot list, or
-   * null when this agent has no AGY group to attach a slot to (and its cap is
-   * not a factor). Slots are the only account kind this client can add.
+   * Per CLI, the numbered slot "add account" would register. A CLI with no
+   * entry cannot take a slot: it owns no slot registry (codex, cursor), its
+   * lever is not writable, or it reached the cap.
    */
-  nextSlot: number | null;
-  onAddSlot: () => void;
-  /** Drop a numbered AGY slot. Never called with slot 1, which cannot be dropped. */
-  onRemoveSlot: (slot: number) => void;
+  nextSlots: Readonly<Record<string, number>>;
+  /** Per CLI, the slots whose row a drop really removes. Never contains slot 1. */
+  removableSlots: Readonly<Record<string, readonly number[]>>;
+  onAddSlot: (cli: AgentAccountCli) => void;
+  onRemoveSlot: (cli: AgentAccountCli, slot: number) => void;
 }
 
 /**
@@ -305,7 +308,8 @@ export function AgentAccountDrawer({
   saving,
   onSave,
   nowMs,
-  nextSlot,
+  nextSlots,
+  removableSlots,
   onAddSlot,
   onRemoveSlot,
 }: AgentAccountDrawerProps) {
@@ -316,7 +320,7 @@ export function AgentAccountDrawer({
     groups
       .flatMap((group) => group.accounts)
       .find((account) => accountKey(account) === selectedKey) ?? null;
-  const [adding, setAdding] = useState(false);
+  const canAddAnywhere = Object.keys(nextSlots).length > 0;
 
   const command = selected ? accountLoginCommand(selected) : "";
 
@@ -343,155 +347,189 @@ export function AgentAccountDrawer({
         </SheetHeader>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-          {groups.map((group) => (
-            <section key={group.cli} className="space-y-2">
-              <div className="flex min-w-0 items-baseline gap-1.5 px-0.5 text-micro tracking-wide text-faint-foreground uppercase">
-                <span className="shrink-0 font-medium">
-                  {agentCliLabel(group.cli)}
-                </span>
-                {accountLeverLabel(group.lever) ? (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <span className="truncate font-mono normal-case" translate="no">
-                      {accountLeverLabel(group.lever)}
+          {groups.map((group) => {
+            const family = accountSlotFamily(group.cli);
+            const nextSlot = nextSlots[group.cli];
+            return (
+              <section key={group.cli} className="space-y-2">
+                <div className="flex min-h-6 min-w-0 items-center gap-2 px-0.5">
+                  <div className="flex min-w-0 flex-1 items-baseline gap-1.5 text-micro tracking-wide text-faint-foreground uppercase">
+                    <span className="shrink-0 font-medium">
+                      {agentCliLabel(group.cli)}
                     </span>
-                  </>
-                ) : null}
-              </div>
+                    {accountLeverLabel(group.lever) ? (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="truncate font-mono normal-case" translate="no">
+                          {accountLeverLabel(group.lever)}
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
+                  {nextSlot !== undefined ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      className="shrink-0 text-muted-foreground"
+                      onClick={() => onAddSlot(group.cli)}
+                      aria-label={t(($) => $.tab_body.accounts.add_slot_aria, {
+                        cli: agentCliLabel(group.cli),
+                        n: nextSlot,
+                      })}
+                    >
+                      <Plus className="size-3.5" aria-hidden="true" />
+                      {t(($) => $.tab_body.accounts.add_slot_action)}
+                    </Button>
+                  ) : null}
+                </div>
 
-              {group.switchable ? null : (
+                {/* Three different situations, said apart: a group that rotates
+                    on its own, one that is switched by hand, and one that cannot
+                    be switched at all — with the reason, because "no add button"
+                    alone reads as an oversight. */}
                 <p className="px-0.5 text-caption text-muted-foreground">
-                  {t(($) => $.tab_body.accounts.group_readonly_hint)}
+                  {!group.switchable
+                    ? family
+                      ? t(($) => $.tab_body.accounts.group_readonly_hint)
+                      : t(($) => $.tab_body.accounts.group_task_scoped_hint, {
+                          cli: agentCliLabel(group.cli),
+                        })
+                    : family?.rotatesOnQuota === true
+                      ? t(($) => $.tab_body.accounts.group_rotation_hint)
+                      : t(($) => $.tab_body.accounts.group_manual_hint)}
                 </p>
-              )}
 
-              <div
-                className="overflow-hidden rounded-lg border border-border bg-background"
-                {...(group.switchable
-                  ? {
-                      role: "radiogroup" as const,
-                      "aria-label": t(
-                        ($) => $.tab_body.accounts.drawer_groups_aria,
-                        { cli: agentCliLabel(group.cli) },
-                      ),
+                <div
+                  className="overflow-hidden rounded-lg border border-border bg-background"
+                  {...(group.switchable
+                    ? {
+                        role: "radiogroup" as const,
+                        "aria-label": t(
+                          ($) => $.tab_body.accounts.drawer_groups_aria,
+                          { cli: agentCliLabel(group.cli) },
+                        ),
+                      }
+                    : {})}
+                >
+                  {group.accounts.map((account, index) => {
+                    const key = accountKey(account);
+                    const isCurrent =
+                      current != null && accountKey(current) === key;
+                    const isSelected = key === selectedKey;
+                    // Which rows can be dropped is the tab's answer: slot 1 is
+                    // the CLI's own directory, and a directory the daemon keeps
+                    // reporting would stay listed whatever this agent's list says.
+                    const slot = accountSlotNumberOf(account);
+                    const removable =
+                      group.switchable &&
+                      slot !== null &&
+                      removableSlots[group.cli]?.includes(slot) === true;
+                    const rowClassName = cn(
+                      "flex w-full min-w-0 items-center gap-2.5 px-3 py-2.5 text-left",
+                      // A selected row keeps its selected background on hover —
+                      // the design's rule is that the state must stay readable
+                      // while the pointer is on it.
+                      isSelected && "bg-surface-selected hover:bg-surface-selected",
+                      !isSelected && group.switchable && "hover:bg-surface-hover",
+                      !isSelected && !group.switchable && "opacity-70",
+                    );
+                    const body = (
+                      <>
+                        <AgentCliBadge cli={account.cli} showLabel={false} />
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              "block truncate text-caption",
+                              isSelected ? "font-semibold" : "font-medium",
+                            )}
+                          >
+                            {account.account}
+                          </span>
+                          <span
+                            className="block truncate font-mono text-micro text-muted-foreground"
+                            translate="no"
+                          >
+                            {account.home}
+                          </span>
+                        </span>
+                        {isCurrent ? (
+                          <AccountActivePill />
+                        ) : (
+                          <AccountStatusPill account={account} nowMs={nowMs} />
+                        )}
+                        {group.switchable ? (
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              "shrink-0 rounded-md border px-1.5 py-0.5 text-micro",
+                              isSelected
+                                ? "border-foreground/30 text-foreground"
+                                : "border-border text-muted-foreground",
+                            )}
+                          >
+                            {t(($) => $.tab_body.accounts.row_edit_action)}
+                          </span>
+                        ) : null}
+                      </>
+                    );
+
+                    if (!group.switchable) {
+                      return (
+                        <div
+                          key={key}
+                          className={cn(
+                            rowClassName,
+                            index > 0 && "border-t border-border",
+                          )}
+                        >
+                          {body}
+                        </div>
+                      );
                     }
-                  : {})}
-              >
-                {group.accounts.map((account, index) => {
-                  const key = accountKey(account);
-                  const isCurrent =
-                    current != null && accountKey(current) === key;
-                  const isSelected = key === selectedKey;
-                  // AGY is the one CLI with a slot registry, so it is the one
-                  // group whose rows can be added to and dropped from. Slot 1
-                  // is the CLI's own directory and is always present.
-                  const slot = agySlotNumberOf(account);
-                  const removable =
-                    group.switchable && slot !== null && slot > 1;
-                  const rowClassName = cn(
-                    "flex w-full min-w-0 items-center gap-2.5 px-3 py-2.5 text-left",
-                    // A selected row keeps its selected background on hover —
-                    // the design's rule is that the state must stay readable
-                    // while the pointer is on it.
-                    isSelected && "bg-surface-selected hover:bg-surface-selected",
-                    !isSelected && group.switchable && "hover:bg-surface-hover",
-                    !isSelected && !group.switchable && "opacity-70",
-                  );
-                  const body = (
-                    <>
-                      <AgentCliBadge cli={account.cli} showLabel={false} />
-                      <span className="min-w-0 flex-1">
-                        <span
-                          className={cn(
-                            "block truncate text-caption",
-                            isSelected ? "font-semibold" : "font-medium",
-                          )}
-                        >
-                          {account.account}
-                        </span>
-                        <span
-                          className="block truncate font-mono text-micro text-muted-foreground"
-                          translate="no"
-                        >
-                          {account.home}
-                        </span>
-                      </span>
-                      {isCurrent ? (
-                        <AccountActivePill />
-                      ) : (
-                        <AccountStatusPill account={account} nowMs={nowMs} />
-                      )}
-                      {group.switchable ? (
-                        <span
-                          aria-hidden="true"
-                          className={cn(
-                            "shrink-0 rounded-md border px-1.5 py-0.5 text-micro",
-                            isSelected
-                              ? "border-foreground/30 text-foreground"
-                              : "border-border text-muted-foreground",
-                          )}
-                        >
-                          {t(($) => $.tab_body.accounts.row_edit_action)}
-                        </span>
-                      ) : null}
-                    </>
-                  );
 
-                  if (!group.switchable) {
                     return (
+                      // The drop control is a sibling, not a child: a button
+                      // inside the row's radio would be invalid and would put its
+                      // label into the radio's accessible name.
                       <div
                         key={key}
                         className={cn(
-                          rowClassName,
+                          "flex items-stretch",
                           index > 0 && "border-t border-border",
                         )}
                       >
-                        {body}
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={isSelected}
+                          onClick={() => onSelect(account)}
+                          className={cn(rowClassName, "flex-1")}
+                        >
+                          {body}
+                        </button>
+                        {removable && slot !== null ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="me-1.5 shrink-0 self-center text-muted-foreground hover:text-destructive"
+                            onClick={() => onRemoveSlot(group.cli, slot)}
+                            aria-label={t(
+                              ($) => $.tab_body.accounts.remove_slot_aria,
+                              { cli: agentCliLabel(group.cli), n: slot },
+                            )}
+                          >
+                            <Trash2 className="size-3.5" aria-hidden="true" />
+                          </Button>
+                        ) : null}
                       </div>
                     );
-                  }
-
-                  return (
-                    // The drop control is a sibling, not a child: a button
-                    // inside the row's radio would be invalid and would put its
-                    // label into the radio's accessible name.
-                    <div
-                      key={key}
-                      className={cn(
-                        "flex items-stretch",
-                        index > 0 && "border-t border-border",
-                      )}
-                    >
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={isSelected}
-                        onClick={() => onSelect(account)}
-                        className={cn(rowClassName, "flex-1")}
-                      >
-                        {body}
-                      </button>
-                      {removable && slot !== null ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="me-1.5 shrink-0 self-center text-muted-foreground hover:text-destructive"
-                          onClick={() => onRemoveSlot(slot)}
-                          aria-label={t(
-                            ($) => $.tab_body.accounts.remove_slot_aria,
-                            { n: slot },
-                          )}
-                        >
-                          <Trash2 className="size-3.5" aria-hidden="true" />
-                        </Button>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
+                  })}
+                </div>
+              </section>
+            );
+          })}
 
           {selected ? (
             <section className="space-y-2 rounded-lg border border-border bg-muted/40 p-3">
@@ -526,41 +564,14 @@ export function AgentAccountDrawer({
             </section>
           ) : null}
 
-          {nextSlot === null
-            ? adding
-              ? (
-                  <p className="rounded-lg border border-dashed border-border p-3 text-caption text-muted-foreground">
-                    {t(($) => $.tab_body.accounts.add_hint)}
-                  </p>
-                )
-              : null
-            : (
-                <p className="rounded-lg border border-dashed border-border p-3 text-caption text-muted-foreground">
-                  {t(($) => $.tab_body.accounts.add_slot_hint, { n: nextSlot })}
-                </p>
-              )}
+          {canAddAnywhere ? (
+            <p className="rounded-lg border border-dashed border-border p-3 text-caption text-muted-foreground">
+              {t(($) => $.tab_body.accounts.add_slot_hint)}
+            </p>
+          ) : null}
         </div>
 
-        <SheetFooter className="flex-row items-center justify-between gap-2 border-t border-border p-4">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="flex-1 sm:flex-none"
-            // With an AGY group this button really extends the agent's slot
-            // list. A CLI without a slot registry has nothing to append, so the
-            // same button explains where its directories come from instead of
-            // pretending to create one.
-            aria-expanded={nextSlot === null ? adding : undefined}
-            onClick={
-              nextSlot === null ? () => setAdding((value) => !value) : onAddSlot
-            }
-          >
-            <Plus className="size-3.5" aria-hidden="true" />
-            {nextSlot === null
-              ? t(($) => $.tab_body.accounts.add_action)
-              : t(($) => $.tab_body.accounts.add_slot_action)}
-          </Button>
+        <SheetFooter className="flex-row items-center justify-end gap-2 border-t border-border p-4">
           <Button
             type="button"
             size="sm"

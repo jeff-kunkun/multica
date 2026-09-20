@@ -18,14 +18,24 @@
 import { parseWithFallback } from "@multica/core/api/schema";
 import { z } from "zod";
 import {
-  accountDirectoryLeaf,
+  type AccountSlotFamily,
+  ACCOUNT_SLOT_FAMILIES,
+  MAX_ACCOUNT_SLOT_NUMBER,
+  accountSlotFamily,
+} from "@multica/core/agents/account-slot-families";
+import {
+  type AccountSlotLists,
+  nextAccountNumber,
+  normalizeAccountNumbers,
+  numberedSlotId,
+  parseAccountNumber,
+  slotDirectoryLeaf,
+} from "./account-slots";
+import {
   expandHomePrefix,
   getGeminiDir,
   isAbsoluteFsPath,
   joinHomeDir,
-  normalizeAccountNumbers,
-  numberedSlotId,
-  parseAccountNumber,
   resolveHomeDir,
   setGeminiDir,
 } from "./agy-account-slots";
@@ -383,75 +393,166 @@ export function groupAccountsByCli(accounts: readonly AgentAccount[]): AgentAcco
 }
 
 /**
- * The numbered AGY slot an account stands for, or null when it lives outside
- * the numbered convention (`~/.gemini-accountN`). The daemon reports the CLI's
- * own directory (`~/.gemini`) as `default`, and that is slot 1.
+ * The numbered slot an account stands for, or null when its CLI owns no slot
+ * registry (codex, cursor) or the account lives outside the numbered convention
+ * (a custom directory). The daemon reports a CLI's own directory as `default`,
+ * and that is slot 1.
  */
-export function agySlotNumberOf(account: AgentAccount): number | null {
-  if (account.cli !== "agy") return null;
+export function accountSlotNumberOf(account: Pick<AgentAccount, "cli" | "account">): number | null {
+  if (!accountSlotFamily(account.cli)) return null;
   if (account.account === DEFAULT_ACCOUNT_ID) return 1;
   return parseAccountNumber(account.account);
 }
 
 /** Account id the daemon gives a numbered slot's directory (`default`, `account2`, …). */
-export function agySlotAccountId(slot: number): string {
+export function slotAccountId(slot: number): string {
   return slot <= 1 ? DEFAULT_ACCOUNT_ID : numberedSlotId(slot);
 }
 
 /**
- * Fold the agent's own numbered-slot list (`runtime_config.agy_slots`, the
- * rotation allow-list the backend reads) into the daemon's account report, so
- * the drawer edits slots instead of the machine's directory listing.
- *
- * A slot the daemon reported keeps its real directory, sign-in state and quota
- * deadline. A slot with no directory on disk yet is synthesized, so a slot
- * added a moment ago is visible — and bindable — before its directory exists;
- * it reads as "not signed in" because nothing reported it. Accounts of the
- * same CLI outside the numbered convention (a custom `--gemini_dir`) are left
- * exactly as reported: they are real directories this agent can be bound to,
- * and dropping them would leave the account in effect without a row.
+ * The raw value an agent's binding holds for a family's lever — the
+ * `--gemini_dir` argument or the env key's value — or `""` when unbound.
  */
-export function withAgySlots(
-  accounts: readonly AgentAccount[],
-  slots: readonly number[],
-  runtimeHome: string | null | undefined,
-): AgentAccount[] {
-  // No reported AGY directory means this machine has no AGY surface at all, so
-  // the slot list has nothing to describe — synthesizing slots here would
-  // invent an AGY group for an agent that never had one.
-  if (!accounts.some((account) => account.cli === "agy")) return [...accounts];
+export function boundDirectoryFor(
+  agent: AgentAccountBinding | null | undefined,
+  family: AccountSlotFamily,
+): string {
+  const lever = parseAccountLever(family.lever);
+  if (lever.kind === "env") return envBinding(agent, lever.key);
+  if (lever.kind === "custom_args" && lever.flag === GEMINI_DIR_FLAG) {
+    return getGeminiDir([...(agent?.custom_args ?? [])]).trim();
+  }
+  return "";
+}
 
-  const home = (runtimeHome ?? "").trim();
+/** Reported accounts of one family, split into numbered slots and the rest. */
+function splitFamilyAccounts(
+  accounts: readonly AgentAccount[],
+  family: AccountSlotFamily,
+): { reported: Map<number, AgentAccount>; others: AgentAccount[] } {
   const reported = new Map<number, AgentAccount>();
   const others: AgentAccount[] = [];
   for (const account of accounts) {
-    const slot = agySlotNumberOf(account);
+    if (account.cli !== family.cli) continue;
+    const slot = accountSlotNumberOf(account);
     if (slot === null || reported.has(slot)) {
       others.push(account);
       continue;
     }
     reported.set(slot, account);
   }
+  return { reported, others };
+}
 
-  const rows = normalizeAccountNumbers(slots).map((slot): AgentAccount => {
-    const account = reported.get(slot);
-    if (account) return account;
-    const leaf = accountDirectoryLeaf(slot);
-    return {
-      cli: "agy",
-      account: agySlotAccountId(slot),
-      // With no host home the leaf stays relative and `planAccountSwitch`
-      // refuses it as `invalid_home` rather than binding a guessed path.
-      home: home ? joinHomeDir(home, leaf) : leaf,
-      base_url: "",
-      key_ref: "",
-      lever: `custom_args:${GEMINI_DIR_FLAG}`,
-      signed_in: false,
-      quota_reset_at: 0,
-    };
-  });
+/**
+ * Fold the agent's registered slots (`runtime_config[family.runtimeConfigKey]`)
+ * into the daemon's account report, family by family.
+ *
+ * A slot the daemon reported keeps its real directory, sign-in state and quota
+ * deadline. A registered slot with no directory on disk yet is synthesized, so
+ * a slot added a moment ago is visible — and bindable — before its directory
+ * exists; it reads as "not signed in" because nothing reported it.
+ *
+ * The two kinds of family differ in what the list may hide:
+ * - a rotating family (agy) shows exactly its list — that list is the rotation
+ *   allow-list the backend reads, so the drawer has to edit it rather than the
+ *   machine's directory listing;
+ * - a manual family (dsh, claude) shows its list PLUS every numbered directory
+ *   the daemon reported. Those directories were switchable before slots
+ *   existed, and an agent that never saved a list must not lose them.
+ *
+ * Accounts outside the numbered convention (a custom directory) and CLIs with
+ * no family are left exactly as reported.
+ */
+export function withAccountSlots(
+  accounts: readonly AgentAccount[],
+  lists: AccountSlotLists,
+  runtimeHome: string | null | undefined,
+): AgentAccount[] {
+  const home = (runtimeHome ?? "").trim();
+  const out = accounts.filter((account) => !accountSlotFamily(account.cli));
 
-  return [...others, ...rows];
+  for (const family of ACCOUNT_SLOT_FAMILIES) {
+    // No reported directory means this machine has no surface for the CLI at
+    // all — synthesizing slots here would invent a group for an agent that
+    // never had one.
+    if (!accounts.some((account) => account.cli === family.cli)) continue;
+
+    const { reported, others } = splitFamilyAccounts(accounts, family);
+    const registered = lists[family.cli] ?? [];
+    const slots = family.rotatesOnQuota
+      ? normalizeAccountNumbers(registered)
+      : normalizeAccountNumbers([...registered, ...reported.keys()]);
+
+    out.push(...others);
+    for (const slot of slots) {
+      const account = reported.get(slot);
+      if (account) {
+        out.push(account);
+        continue;
+      }
+      const leaf = slotDirectoryLeaf(family, slot);
+      out.push({
+        // The family table is generated from the daemon's own CLI ids, all of
+        // which are `AgentAccountCli` members; `accountSlotFamily` above is
+        // what proved this id has a family.
+        cli: family.cli as AgentAccountCli,
+        account: slotAccountId(slot),
+        // With no host home the leaf stays relative and `planAccountSwitch`
+        // refuses it as `invalid_home` rather than binding a guessed path.
+        home: home ? joinHomeDir(home, leaf) : leaf,
+        base_url: "",
+        key_ref: "",
+        lever: family.lever,
+        signed_in: false,
+        quota_reset_at: 0,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Slots whose row a drop really removes, per CLI. Slot 1 is the CLI's own
+ * directory and is never droppable. In a manual family a directory the daemon
+ * reported stays listed whatever the registry says, so offering to drop it
+ * would be a control that does nothing; only a registered slot that exists
+ * nowhere but in this agent's list can go.
+ */
+export function removableSlots(
+  reportedAccounts: readonly AgentAccount[],
+  lists: AccountSlotLists,
+): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  for (const family of ACCOUNT_SLOT_FAMILIES) {
+    const { reported } = splitFamilyAccounts(reportedAccounts, family);
+    out[family.cli] = normalizeAccountNumbers(lists[family.cli] ?? []).filter(
+      (slot) => slot > 1 && (family.rotatesOnQuota || !reported.has(slot)),
+    );
+  }
+  return out;
+}
+
+/**
+ * The slot number "add account" would register for a group, or null when the
+ * group cannot take one. The rule is about the family, never about one CLI id:
+ * it owns a slot registry (which exists only for a lever the daemon can really
+ * rebind), the daemon reported that lever as writable, and the cap is not
+ * reached. Numbers already shown in the group are skipped, so a manual family
+ * never offers a slot whose directory is already listed.
+ */
+export function nextSlotForGroup(
+  group: AgentAccountGroup,
+  lists: AccountSlotLists,
+): number | null {
+  if (!accountSlotFamily(group.cli) || !group.switchable) return null;
+  const used = [...(lists[group.cli] ?? [])];
+  for (const account of group.accounts) {
+    const slot = accountSlotNumberOf(account);
+    if (slot !== null) used.push(slot);
+  }
+  const next = nextAccountNumber(used);
+  return next <= MAX_ACCOUNT_SLOT_NUMBER ? next : null;
 }
 
 /** Canonical flat order used whenever this model picks "the" account. */

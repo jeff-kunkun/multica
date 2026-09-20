@@ -9,6 +9,7 @@ import {
   DEFAULT_CONFIDENCE_THRESHOLD,
   parseRoutingSettings,
   normalizeThreshold,
+  routingGatewayIsComplete,
   routingIsActive,
   routingState,
   withRoutingSettings,
@@ -18,9 +19,9 @@ describe("parseRoutingSettings", () => {
   it("reads a complete block", () => {
     expect(
       parseRoutingSettings({
-        routing: { enabled: true, model: "gpt-5.6-luna", confidence_threshold: 0.85 },
+        routing: { enabled: true, model: "gpt-5.6-luna", confidence_threshold: 0.85, base_url: "" },
       }),
-    ).toEqual({ enabled: true, model: "gpt-5.6-luna", confidence_threshold: 0.85 });
+    ).toEqual({ enabled: true, model: "gpt-5.6-luna", confidence_threshold: 0.85, base_url: "" });
   });
 
   // Every one of these must read as switched off: a payload the client cannot
@@ -70,7 +71,7 @@ describe("normalizeThreshold", () => {
 describe("routingState", () => {
   it("is off while the switch is off, whatever else is set", () => {
     expect(
-      routingState({ enabled: false, model: "m", confidence_threshold: 0.7 }),
+      routingState({ enabled: false, model: "m", confidence_threshold: 0.7, base_url: "" }),
     ).toBe("off");
   });
 
@@ -78,21 +79,21 @@ describe("routingState", () => {
     // The state that exists because the product must not look enabled when it
     // is doing nothing.
     expect(
-      routingState({ enabled: true, model: "", confidence_threshold: 0.7 }),
+      routingState({ enabled: true, model: "", confidence_threshold: 0.7, base_url: "" }),
     ).toBe("incomplete");
     expect(
-      routingState({ enabled: true, model: "   ", confidence_threshold: 0.7 }),
+      routingState({ enabled: true, model: "   ", confidence_threshold: 0.7, base_url: "" }),
     ).toBe("incomplete");
   });
 
   it("is enabled when the switch is on and a model is chosen", () => {
     expect(
-      routingState({ enabled: true, model: "m", confidence_threshold: 0.7 }),
+      routingState({ enabled: true, model: "m", confidence_threshold: 0.7, base_url: "" }),
     ).toBe("enabled");
   });
 
   it("is ineffective only when the server says ineffective in so many words", () => {
-    const configured = { enabled: true, model: "m", confidence_threshold: 0.7 };
+    const configured = { enabled: true, model: "m", confidence_threshold: 0.7, base_url: "" };
     expect(routingState(configured, { state: "ineffective" })).toBe("ineffective");
     expect(routingState(configured, { state: "enabled" })).toBe("enabled");
     expect(routingState(configured, null)).toBe("enabled");
@@ -108,7 +109,7 @@ describe("routingState", () => {
     ["the fallback used when the response cannot be read", "off"],
   ])("does not report a fault for %s", (_label, state) => {
     expect(
-      routingState({ enabled: true, model: "m", confidence_threshold: 0.7 }, { state }),
+      routingState({ enabled: true, model: "m", confidence_threshold: 0.7, base_url: "" }, { state }),
     ).toBe("enabled");
   });
 
@@ -117,7 +118,7 @@ describe("routingState", () => {
     // light the red chip on a guess.
     expect(
       routingState(
-        { enabled: true, model: "m", confidence_threshold: 0.7 },
+        { enabled: true, model: "m", confidence_threshold: 0.7, base_url: "" },
         { state: "degraded" },
       ),
     ).toBe("enabled");
@@ -136,13 +137,40 @@ describe("withRoutingSettings", () => {
     expect(
       withRoutingSettings(
         { theme: "dark", other: { a: 1 } },
-        { enabled: true, model: " m ", confidence_threshold: 0.9 },
+        { enabled: true, model: " m ", confidence_threshold: 0.9, base_url: "" },
       ),
     ).toEqual({
       theme: "dark",
       other: { a: 1 },
-      routing: { enabled: true, model: "m", confidence_threshold: 0.9 },
+      routing: { enabled: true, model: "m", confidence_threshold: 0.9, base_url: "" },
     });
+  });
+
+  // The key is write-only and lives outside RoutingSettings: the three cases
+  // are what keeps an unrelated settings save from deleting a stored key.
+  it("omits the key field entirely when no key was typed", () => {
+    const out = withRoutingSettings(null, {
+      enabled: true,
+      model: "m",
+      confidence_threshold: 0.7,
+      base_url: "https://gw.example/v1",
+    });
+    expect("api_key" in (out.routing as Record<string, unknown>)).toBe(false);
+  });
+
+  it("sends an empty key only when one was explicitly passed", () => {
+    const cleared = withRoutingSettings(
+      null,
+      { enabled: true, model: "m", confidence_threshold: 0.7, base_url: "" },
+      "",
+    );
+    expect((cleared.routing as Record<string, unknown>).api_key).toBe("");
+    const set = withRoutingSettings(
+      null,
+      { enabled: true, model: "m", confidence_threshold: 0.7, base_url: "" },
+      "  sk-live  ",
+    );
+    expect((set.routing as Record<string, unknown>).api_key).toBe("sk-live");
   });
 
   it("normalizes an out-of-range threshold before it is stored", () => {
@@ -150,14 +178,26 @@ describe("withRoutingSettings", () => {
       enabled: true,
       model: "m",
       confidence_threshold: 9,
+      base_url: "",
     });
     expect((out.routing as { confidence_threshold: number }).confidence_threshold).toBe(
       DEFAULT_CONFIDENCE_THRESHOLD,
     );
   });
 
+  it("treats a half-filled endpoint pair as incomplete", () => {
+    expect(routingGatewayIsComplete("https://gw.example/v1", true)).toBe(true);
+    expect(routingGatewayIsComplete("https://gw.example/v1", false)).toBe(false);
+    expect(routingGatewayIsComplete("", true)).toBe(false);
+    // A key typed but not yet saved still counts: the button that saves it
+    // and the note that warns about a half-filled pair must not disagree.
+    expect(routingGatewayIsComplete("https://gw.example/v1", false, "sk-new")).toBe(true);
+    // An explicit clear un-completes the pair even with one stored.
+    expect(routingGatewayIsComplete("https://gw.example/v1", true, "")).toBe(false);
+  });
+
   it("round-trips through parse", () => {
-    const next = { enabled: true, model: "m", confidence_threshold: 0.42 };
+    const next = { enabled: true, model: "m", confidence_threshold: 0.42, base_url: "" };
     expect(parseRoutingSettings(withRoutingSettings({}, next))).toEqual(next);
   });
 });

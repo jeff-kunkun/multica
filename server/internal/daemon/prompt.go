@@ -2,7 +2,10 @@ package daemon
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
@@ -65,6 +68,8 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	b.WriteString(buildSharedWorkspaceBlock(opts.sharedWorkspace))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
+	b.WriteString(buildStaleLocalBaselineBlock(opts.staleLocalBaselineNotice))
+	b.WriteString(buildDependencyInstallBlock(opts.dependencyInstallCommand))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -77,9 +82,11 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 // daemon's own execution context can answer. Kept behind PromptOption so the
 // common BuildPrompt(task, provider) call sites stay unchanged.
 type promptOpts struct {
-	sharedLocalDirectory    bool
-	sharedWorkspace         bool
-	worktreeReplayConflicts []string
+	sharedLocalDirectory     bool
+	sharedWorkspace          bool
+	worktreeReplayConflicts  []string
+	staleLocalBaselineNotice string
+	dependencyInstallCommand string
 }
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
@@ -114,6 +121,20 @@ func WithWorktreeReplayConflicts(files []string) PromptOption {
 	return func(o *promptOpts) { o.worktreeReplayConflicts = files }
 }
 
+// WithStaleLocalBaseline explains that a local_directory worktree could not
+// safely advance its source checkout to the remote tracking tip.
+func WithStaleLocalBaseline(notice string) PromptOption {
+	return func(o *promptOpts) { o.staleLocalBaselineNotice = strings.TrimSpace(notice) }
+}
+
+// WithDependencyInstallCommand adds the deterministic install command for a
+// checkout whose lockfile is present. The daemon points pnpm at its warm
+// shared store before launching the provider, so this is a cheap, repeatable
+// setup step rather than a fresh network download for every task.
+func WithDependencyInstallCommand(command string) PromptOption {
+	return func(o *promptOpts) { o.dependencyInstallCommand = strings.TrimSpace(command) }
+}
+
 // buildSharedLocalDirectoryBlock warns an unlocked turn that its working
 // directory is shared live. Deliberately guidance and not a prohibition: the
 // mutex never covered the user's own editor either, so refusing writes here
@@ -142,6 +163,40 @@ func buildSharedWorkspaceBlock(shared bool) string {
 	return b.String()
 }
 
+func buildStaleLocalBaselineBlock(notice string) string {
+	if strings.TrimSpace(notice) == "" {
+		return ""
+	}
+	return "## Local baseline may be stale\n\n" + strings.TrimSpace(notice) + " Treat the files in this worktree as the authoritative snapshot for this turn, and mention the stale baseline if it affects your conclusion.\n\n"
+}
+
+func buildDependencyInstallBlock(command string) string {
+	if strings.TrimSpace(command) == "" {
+		return ""
+	}
+	return "## Dependency setup\n\n" + "If you need the repository's JavaScript dependencies, run `" + strings.TrimSpace(command) + "` before typechecking or tests. The daemon has configured pnpm to use a warm shared package store, so this is the deterministic lockfile install for this checkout.\n\n"
+}
+
+// dependencyInstallCommand walks from the task cwd toward the filesystem
+// root so a task pointed at a nested package still sees the repository's
+// top-level lockfile. Keep this deliberately narrow: only pnpm's frozen
+// install is guaranteed to be deterministic and to use the daemon's warm
+// shared store.
+func dependencyInstallCommand(workDir string) string {
+	if strings.TrimSpace(workDir) == "" {
+		return ""
+	}
+	for dir := filepath.Clean(workDir); ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, "pnpm-lock.yaml")); err == nil {
+			return "pnpm install --frozen-lockfile"
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+	}
+}
+
 // maxConflictListBytes bounds the RENDERED file list, in bytes of the escaped
 // output rather than in entries: a git path can be as long as the filesystem
 // allows, so a per-entry count bounds nothing. 4 KiB is roughly a thousand
@@ -151,6 +206,66 @@ func buildSharedWorkspaceBlock(shared bool) string {
 // re-sent every turn the merge stays open, and a pathological repository must
 // not be able to spend that turn on filenames.
 const maxConflictListBytes = 4 << 10
+
+const maxIssueContextBytes = 12 << 10
+
+func buildIssueContextBlock(task Task) string {
+	if task.IssueTitle == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Issue context (server snapshot)\n\n")
+	fmt.Fprintf(&b, "Title: %s\nStatus: %s\n", task.IssueTitle, task.IssueStatus)
+	if task.IssueAssigneeType != "" || task.IssueAssigneeID != "" {
+		fmt.Fprintf(&b, "Assignee: %s %s\n", task.IssueAssigneeType, task.IssueAssigneeID)
+	}
+	if task.IssueDescription != "" {
+		fmt.Fprintf(&b, "Description:\n%s\n", task.IssueDescription)
+	}
+	warm := task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable
+	if warm {
+		if !task.NewCommentsDeltaKnown {
+			b.WriteString("The server could not confirm the comment delta for this resumed run; scan the issue comments with the CLI before acting.\n")
+		} else if task.NewCommentCount == 0 {
+			b.WriteString("The server checked the issue: no new comments arrived since the previous run.\n")
+		}
+		if len(task.IssueNewComments) > 0 {
+			b.WriteString("New comments since the previous run:\n")
+			for _, c := range task.IssueNewComments {
+				fmt.Fprintf(&b, "- [%s] %s\n", c.ID, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
+			}
+		}
+	} else {
+		if len(task.IssueCommentSummaries) > 0 {
+			b.WriteString("Comment thread summaries:\n")
+			for _, c := range task.IssueCommentSummaries {
+				fmt.Fprintf(&b, "- thread %s (%s, author=%s, replies=%d, last_activity=%s): %s\n", c.ThreadID, c.CreatedAt, c.AuthorType, c.ReplyCount, c.LastActivityAt, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
+			}
+		}
+		if len(task.IssueTriggerThread) > 0 {
+			b.WriteString("Triggering thread (root plus recent replies):\n")
+			for _, c := range task.IssueTriggerThread {
+				fmt.Fprintf(&b, "- [%s] %s\n", c.ID, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
+			}
+		}
+	}
+	if task.IssueContextTruncated {
+		b.WriteString("Some snapshot text was truncated; use the CLI reads in the brief to fill gaps.\n")
+	}
+	b.WriteString("Snapshot generated at " + task.IssueContextGeneratedAt + ". Changes after this time require a CLI read.\n\n")
+	out := b.String()
+	if len(out) <= maxIssueContextBytes {
+		return out
+	}
+	marker := "\n[context truncated; use CLI]\n\n"
+	budget := maxIssueContextBytes - len(marker)
+	cut := out[:budget]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		_, size := utf8.DecodeLastRuneInString(cut)
+		cut = cut[:len(cut)-size]
+	}
+	return cut + marker
+}
 
 // buildWorktreeReplayConflictBlock tells the turn that its own working tree
 // starts out mid-merge, and that finishing that merge comes before the task.
@@ -208,6 +323,12 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 		apply(&opts)
 	}
 	body := buildPromptBody(task, provider)
+	if block := buildIssueContextBlock(task); block != "" {
+		if !strings.HasSuffix(body, "\n\n") {
+			body += "\n"
+		}
+		body += block
+	}
 	// Run-scoped context is appended, never prepended: everything ahead of it
 	// is stable across runs of a resumed session, and appending keeps it after
 	// the cached prefix (MUL-5377).

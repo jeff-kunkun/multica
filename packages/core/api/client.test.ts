@@ -1074,6 +1074,52 @@ describe("ApiClient", () => {
     expect(tasks[2]?.usage?.[0]?.output_tokens).toBe(0);
   });
 
+  it("parses issue usage run metadata and attribution groups", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          total_input_tokens: 12,
+          total_output_tokens: 4,
+          total_cache_read_tokens: 8,
+          total_cache_write_tokens: 1,
+          task_count: 1,
+          runs: [{
+            task_id: "task-1",
+            model: "claude-opus-5",
+            num_turns: 3,
+            resumed: true,
+            session_id: "session-1",
+            queue_to_claim_ms: 11,
+            prepare_ms: 22,
+            spawn_to_first_output_ms: 33,
+            total_ms: 44,
+            attribution_source: "direct_human",
+            trigger_evidence_kind: "comment",
+          }],
+          attribution_source_counts: { direct_human: 1 },
+          trigger_evidence_kind_counts: { comment: 1 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ));
+
+    const usage = await new ApiClient("https://api.example.test").getIssueUsage("issue-1");
+    expect(usage.runs?.[0]).toMatchObject({ resumed: true, num_turns: 3, total_ms: 44 });
+    expect(usage.attribution_source_counts).toEqual({ direct_human: 1 });
+  });
+
+  it("falls back safely when issue usage response is malformed", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(["bad"]), { status: 200 })));
+    await expect(new ApiClient("https://api.example.test").getIssueUsage("issue-1")).resolves.toEqual({
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      total_cache_read_tokens: 0,
+      total_cache_write_tokens: 0,
+      task_count: 0,
+    });
+  });
+
   it("keeps agent detail task history on the lightweight endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

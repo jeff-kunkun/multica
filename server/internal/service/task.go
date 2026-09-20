@@ -163,6 +163,13 @@ const maxSynthesizedFallbackCommentRunes = 8000
 
 const oversizedFallbackCommentNotice = "This task completed, but its output was too large to post safely. The raw output was not posted. Review the task in this issue's Execution log."
 
+func failureCommentBody(failureReason, errMsg string) string {
+	if failureReason == string(taskfailure.ReasonAgentProviderQuotaLimit) {
+		return "Provider quota exhausted; no automatic retry was created. Switch this agent to another available account or seat, then retry. Provider error: " + errMsg
+	}
+	return errMsg
+}
+
 // truncateFallbackCommentBody bounds a synthesized completion-fallback comment
 // body. Unlike truncateForSummary (which flattens newlines for a one-line row
 // snapshot), it preserves genuine final messages below the cap verbatim. Output
@@ -708,6 +715,11 @@ func ResolveAutopilotTriggerPrincipal(ctx context.Context, q *db.Queries, trigge
 // run never starts.
 var ErrAttributionFailClosed = errors.New("attribution: no precise accountable human and enqueue refused (fail-closed policy, policy read failed, or no agent owner)")
 
+// ErrAgentChainBudgetExceeded is returned when an agent-originated enqueue is
+// refused by the per-issue delegation budget. Human-originated enqueues never
+// return this error.
+var ErrAgentChainBudgetExceeded = errors.New("agent delegation chain budget exceeded")
+
 // ErrDuplicatePendingTask means a fresh enqueue lost the race to a concurrent
 // one: a queued/dispatched task for the same (issue, agent) already exists, so
 // the pending-task unique index rejected the insert (#5914). This is a benign
@@ -718,6 +730,93 @@ var ErrAttributionFailClosed = errors.New("attribution: no precise accountable h
 // including the index name, is logged once at debug and never wrapped in) so no
 // upper-layer log or response can leak the constraint name (#5914, Elon review).
 var ErrDuplicatePendingTask = errors.New("a pending task for this issue and agent already exists")
+
+const (
+	agentHaltedMetadataKey      = "agent_halted"
+	agentChainBudgetNotifiedKey = "agent_chain_budget_notified"
+)
+
+// admitAgentChain is the single admission gate shared by issue-assignee,
+// mention, thread-parent, and child-done wakeups. It intentionally sits after
+// attribution resolution: a member's own action is always direct_human and is
+// never consumed by the chain budget, while agent/system-triggered work is.
+func (s *TaskService) admitAgentChain(ctx context.Context, issue db.Issue, triggerCommentID, actorUserID pgtype.UUID, attr attribution.Result) error {
+	if actorUserID.Valid {
+		return nil
+	}
+	// Only the explicit direct_human source is exempt. This also covers
+	// autonomous trigger-owner/rule-owner runs: they are system-originated,
+	// not a human action taken while the issue is halted.
+	agentOriginated := attr.Source != attribution.SourceDirectHuman
+	if !agentOriginated && triggerCommentID.Valid {
+		if comment, err := s.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+			ID: triggerCommentID, WorkspaceID: issue.WorkspaceID,
+		}); err == nil && comment.AuthorType != "member" {
+			agentOriginated = true
+		}
+	}
+	if !agentOriginated {
+		return nil
+	}
+
+	current, err := s.Queries.GetIssue(ctx, issue.ID)
+	if err == nil {
+		issue = current
+	}
+	metadata := util.JSONObjectOrEmpty(issue.Metadata)
+	if halted, ok := metadata[agentHaltedMetadataKey].(bool); ok && halted {
+		return ErrAgentChainBudgetExceeded
+	}
+
+	budget, err := s.Queries.GetWorkspaceAgentChainBudget(ctx, issue.WorkspaceID)
+	if err != nil || budget <= 0 {
+		budget = 6
+	}
+	count, err := s.Queries.CountDelegatedTasksSinceHumanComment(ctx, issue.ID)
+	if err != nil || count < int64(budget) {
+		return nil
+	}
+
+	// Set the notice marker first. The metadata mutation is conditional, so
+	// concurrent agents create at most one explanatory system comment.
+	_, markErr := s.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+		ID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		Key: agentChainBudgetNotifiedKey, Value: []byte("true"),
+	})
+	if markErr == nil {
+		s.createAgentChainBudgetNotice(ctx, issue, budget)
+	}
+	return ErrAgentChainBudgetExceeded
+}
+
+func (s *TaskService) createAgentChainBudgetNotice(ctx context.Context, issue db.Issue, budget int32) {
+	creator := "the issue creator"
+	mention := ""
+	if issue.CreatorType == "member" && issue.CreatorID.Valid {
+		if user, err := s.Queries.GetUser(ctx, issue.CreatorID); err == nil {
+			creator = user.Name
+			creator = strings.ReplaceAll(strings.ReplaceAll(creator, "[", ""), "]", "")
+			mention = fmt.Sprintf("[@%s](mention://member/%s) ", creator, util.UUIDToString(issue.CreatorID))
+		}
+	}
+	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		AuthorType: "system", AuthorID: pgtype.UUID{Valid: true},
+		Content: fmt.Sprintf("%sAgent delegation chain reached the limit of %d runs. Add a human comment to reset the budget and continue.", mention, budget),
+		Type:    "system", ParentID: pgtype.UUID{},
+	})
+	if err != nil {
+		slog.Warn("agent chain budget notice: create system comment failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		return
+	}
+	if s.Bus != nil {
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventCommentCreated,
+			WorkspaceID: util.UUIDToString(issue.WorkspaceID), ActorType: "system",
+			Payload: map[string]any{"comment": created.Comment(), "issue_title": issue.Title, "issue_revision": created.IssueRevision},
+		})
+	}
+}
 
 // isDuplicatePendingTaskErr reports whether err is the pending-task unique-index
 // violation (a concurrent enqueue won the race). Accept both names while v1 and
@@ -1120,6 +1219,14 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	return s.enqueueIssueTask(ctx, issue, commentID, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{})
 }
 
+func (s *TaskService) EnqueueTaskForIssueFresh(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	var commentID pgtype.UUID
+	if len(triggerCommentID) > 0 {
+		commentID = triggerCommentID[0]
+	}
+	return s.enqueueIssueTask(ctx, issue, commentID, true, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{})
+}
+
 // EnqueueDeferredChannelIssueTask persists the assigned task for a media-backed
 // channel /issue turn without making it claimable yet. The fireAt deadline is a
 // crash-safe fallback; the channel router promotes the task as soon as the
@@ -1276,6 +1383,9 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Warn("task enqueue refused: attribution fail-closed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(issue.AssigneeID))
 		return db.AgentTaskQueue{}, err
 	}
+	if err := s.admitAgentChain(ctx, issue, triggerCommentID, actorUserID, attr); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
@@ -1367,10 +1477,18 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{})
 }
 
+func (s *TaskService) EnqueueTaskForMentionFresh(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, true, "", pgtype.UUID{}, pgtype.UUID{})
+}
+
 // EnqueueTaskForThreadParent creates a queued task for the agent who authored
 // the direct parent comment a member replied to.
 func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{})
+}
+
+func (s *TaskService) EnqueueTaskForThreadParentFresh(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, true, "", pgtype.UUID{}, pgtype.UUID{})
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -1386,6 +1504,10 @@ func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.I
 // sub-issue done callback). See migration 127.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{})
+}
+
+func (s *TaskService) EnqueueTaskForSquadLeaderFresh(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, true, "", pgtype.UUID{}, pgtype.UUID{})
 }
 
 // EnqueueTaskForSquadLeaderByActor is the assign/promote variant of
@@ -1431,6 +1553,9 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	attr, err = s.applyAttributionFallback(ctx, attr, agent)
 	if err != nil {
 		slog.Warn("mention task enqueue refused: attribution fail-closed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, err
+	}
+	if err := s.admitAgentChain(ctx, issue, triggerCommentID, actorUserID, attr); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
 	originatorUserID := attr.UserID
@@ -5010,7 +5135,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// in addition to the coordinator recovery signal, preserving visibility on
 	// both sides of a cross-issue handoff.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(failureCommentBody(failureReason, errMsg)), "system", task.TriggerCommentID, task.ID)
 	}
 
 	// Quick-create tasks: push a failure inbox notification to the

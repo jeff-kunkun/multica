@@ -2127,6 +2127,29 @@ func (q *Queries) CountDelegatedFailureRecoveryTasks(ctx context.Context, failed
 	return count, err
 }
 
+const countDelegatedTasksSinceHumanComment = `-- name: CountDelegatedTasksSinceHumanComment :one
+SELECT COUNT(*)::bigint
+FROM agent_task_queue task
+WHERE task.issue_id = $1
+  AND task.originator_source IN ('delegation', 'comment_source', 'owner_fallback', 'unattributed')
+  AND task.created_at > COALESCE((
+      SELECT MAX(created_at)
+      FROM comment
+      WHERE issue_id = $1 AND author_type = 'member'
+  ), 'epoch'::timestamptz)
+`
+
+// Counts agent-originated runs after the most recent human comment. Direct
+// member actions are deliberately excluded so a human can always explicitly
+// start work, while agent-to-agent and system handoffs consume the chain
+// budget.
+func (q *Queries) CountDelegatedTasksSinceHumanComment(ctx context.Context, issueID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDelegatedTasksSinceHumanComment, issueID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countRunningTasks = `-- name: CountRunningTasks :one
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
