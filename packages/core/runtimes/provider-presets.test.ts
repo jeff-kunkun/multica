@@ -145,6 +145,25 @@ describe("runProviderPresetAction payloads", () => {
       { id: "command-code" },
     );
   });
+
+  // Replay restores what the daemon already recorded for its own DSH home
+  // (DENE-683), so the request names nothing — and above all carries no key:
+  // the credential is the one field a replay cannot put back, and the one the
+  // client has never held.
+  it("sends a replay payload with no fields at all", async () => {
+    getProviderPresetResult.mockResolvedValue(
+      request({ action: "replay", providers: [preset()] }),
+    );
+
+    await runProviderPresetAction("rt-1", { action: "replay" });
+
+    expect(initiateProviderPresetAction).toHaveBeenCalledWith(
+      "rt-1",
+      PROVIDER_PRESET_PROVIDER,
+      "replay",
+      {},
+    );
+  });
 });
 
 describe("runProviderPresetAction results", () => {
