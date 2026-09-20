@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/permission"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
@@ -3847,11 +3848,20 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 	}
 	switch assigneeType.String {
 	case "member":
-		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		target, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 			UserID:      assigneeID,
 			WorkspaceID: wsUUID,
-		}); err != nil {
+		})
+		if err != nil {
 			return http.StatusBadRequest, "assignee_id does not refer to a member of this workspace"
+		}
+		// Owning an issue is work, and a guest cannot do work: they can
+		// neither change its status nor comment on it, so an issue parked
+		// on a guest is an issue nobody is carrying. This is the assignment
+		// half of DENE-695's "guests cannot be assigned or @-triggered";
+		// the write half is middleware.GuestReadOnly.
+		if !permission.AllowedInWorkspace(permission.Role(target.Role), permission.WorkspaceBeAssigned) {
+			return http.StatusBadRequest, "guests cannot be assigned work"
 		}
 		return 0, ""
 	case "agent":

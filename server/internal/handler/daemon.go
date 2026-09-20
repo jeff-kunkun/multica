@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/permission"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -88,11 +89,32 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	_, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
-	if ok && userID != "" {
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
+	if !ok {
+		return false
+	}
+	if !daemonAccessAllowedForTier(member.Role) {
+		writeError(w, http.StatusNotFound, "not found")
+		return false
+	}
+	if userID != "" {
 		h.MembershipCache.Set(r.Context(), userID, workspaceID)
 	}
-	return ok
+	return true
+}
+
+// daemonAccessAllowedForTier keeps guests off the daemon API entirely.
+// Registering a machine, claiming a task or reporting a run is workspace
+// infrastructure, not content, so there is no read half of it worth granting;
+// the tier that may not write has no business on these routes at all.
+//
+// This is also why the membership cache above is only written for tiers that
+// pass: MembershipCache stores "is a member" and nothing else, so a cached
+// entry must never stand for a guest. UpdateMember already invalidates on a
+// tier change, so a demoted member loses the cached entry at demotion time
+// rather than at TTL.
+func daemonAccessAllowedForTier(role string) bool {
+	return permission.Role(role).CanWrite()
 }
 
 // requireDaemonRuntimeAccess looks up a runtime and verifies the caller owns its workspace.
@@ -193,8 +215,11 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
 		return true
 	}
-	_, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
 	if err != nil {
+		return false
+	}
+	if !daemonAccessAllowedForTier(member.Role) {
 		return false
 	}
 	h.MembershipCache.Set(r.Context(), userID, workspaceID)
