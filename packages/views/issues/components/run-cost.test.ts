@@ -168,6 +168,12 @@ describe("runMetadata", () => {
     expect(runMetadata([usage({ resumed: false })]).resumed).toBe(false);
   });
 
+  it("reads an absent resumed as cold start when the run reported other metadata", () => {
+    // The wire shape the server actually sends: `resumed` is `omitempty`, so
+    // a cold start is an absent field, never `false`.
+    expect(runMetadata([usage({ num_turns: 7, session_id: "s-1" })]).resumed).toBe(false);
+  });
+
   it("returns an empty record for a pre-metadata run", () => {
     expect(runMetadata([usage()])).toEqual({});
     expect(runMetadata(undefined)).toEqual({});

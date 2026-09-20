@@ -237,7 +237,9 @@ export function ExecutionLogSection({ issueId, workspaceId, identifier, halted =
         identifier={identifier ?? ""}
         tasks={tasks}
         isPending={tasksPending}
-        isError={tasksFailed}
+        // A failed background refetch keeps the cached runs; only a load that
+        // left nothing to show is a failure worth replacing the view with.
+        isError={tasksFailed && tasks.length === 0}
         onRetry={() => void refetchTasks()}
       />
     </div>

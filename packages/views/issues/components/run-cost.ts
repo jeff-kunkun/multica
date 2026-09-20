@@ -182,6 +182,19 @@ export function runMetadata(usage: readonly TaskUsage[] | undefined): RunMetadat
       meta.triggerEvidenceKind = slice.trigger_evidence_kind;
     }
   }
+  // The server serialises `resumed` with `omitempty`, so a cold start never
+  // arrives as `false` — it arrives as an absent field, exactly like a
+  // pre-DENE-666 row. Tell them apart by the metadata that travels with it: a
+  // run that reported turns, a session or a total duration came from a daemon
+  // that reports `resumed` too, so its silence means "cold start".
+  if (
+    meta.resumed === undefined &&
+    (meta.numTurns !== undefined ||
+      meta.sessionId !== undefined ||
+      meta.totalMs !== undefined)
+  ) {
+    meta.resumed = false;
+  }
   return meta;
 }
 
