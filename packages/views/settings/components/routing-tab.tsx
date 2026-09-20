@@ -201,9 +201,7 @@ export function RoutingTab() {
             />
           </SettingsRow>
         </SettingsCard>
-        <p className="px-0.5 text-caption text-muted-foreground">
-          {t(($) => $.routing.no_credentials_note)}
-        </p>
+        <GatewayNote health={health.data} />
       </SettingsSection>
 
       {/* Placeholder for the candidate filter chain. Kept visible and clearly
@@ -215,6 +213,51 @@ export function RoutingTab() {
         </div>
       </SettingsSection>
     </SettingsTab>
+  );
+}
+
+/**
+ * Where the model id above is sent.
+ *
+ * The box is a bare model identifier, which left the obvious question — "which
+ * model is this, and on whose endpoint?" — answerable nowhere in the product.
+ * The endpoint and the key are deployment configuration (MULTICA_LLM_BASE_URL
+ * / MULTICA_LLM_API_KEY), shared with chat auto-titling, so they are not
+ * editable per workspace; that is a reason to NAME them here, not a reason to
+ * hide them. A reader who can see the host can tell at a glance whether the
+ * model they are about to type exists on it.
+ *
+ * The unconfigured case is the important one: it is the single most common
+ * reason routing silently does nothing, and it is the one a workspace admin
+ * cannot fix from this screen — so it says so, and says who can.
+ */
+function GatewayNote({ health }: { health?: RoutingHealth }) {
+  const { t } = useT("settings");
+  if (health && health.gateway_configured === false) {
+    return (
+      <p className="px-0.5 text-caption leading-5 text-destructive">
+        {t(($) => $.routing.gateway_unset)}
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1 px-0.5">
+      {health?.gateway_host ? (
+        <p className="text-caption leading-5 text-muted-foreground">
+          {t(($) => $.routing.gateway_endpoint, { host: health.gateway_host })}
+        </p>
+      ) : null}
+      {health?.gateway_default_model ? (
+        <p className="text-caption leading-5 text-muted-foreground">
+          {t(($) => $.routing.gateway_default_model, {
+            model: health.gateway_default_model,
+          })}
+        </p>
+      ) : null}
+      <p className="text-caption leading-5 text-muted-foreground">
+        {t(($) => $.routing.no_credentials_note)}
+      </p>
+    </div>
   );
 }
 
