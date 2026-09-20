@@ -10631,6 +10631,7 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
+			Access:       r.Access,
 		}
 	}
 	return result

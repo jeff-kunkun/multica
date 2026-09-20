@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/coderesolve"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/routing"
@@ -651,6 +652,14 @@ type ProjectResourceData struct {
 	ResourceType string          `json:"resource_type"`
 	ResourceRef  json.RawMessage `json:"resource_ref"`
 	Label        string          `json:"label,omitempty"`
+	// Access is "read-write" for the single directory this run writes in and
+	// "read-only" for every other local_directory on the machine (DENE-619).
+	// Empty for resource types that have no access dimension, such as a
+	// repository, which is checked out rather than written in place. The
+	// daemon carries it into .multica/project/resources.json and the brief, so
+	// an agent can read across a project's directories while only one of them
+	// is its workspace. Mirror field: internal/daemon/types.go, same JSON name.
+	Access string `json:"access,omitempty"`
 }
 
 // TaskProjectContextData is one project attached to a daemon claim. The daemon
@@ -760,6 +769,14 @@ type AgentTaskResponse struct {
 	ProjectTitle         string                `json:"project_title,omitempty"`       // for surfacing in agent context
 	ProjectDescription   string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
 	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
+	// CodeDecision states which code this run uses, computed once on the
+	// server by internal/coderesolve and shipped with the task so the daemon
+	// and the desktop UI read one answer instead of each deriving it from the
+	// resource list (DENE-619). Failure is a value here (kind=unresolvable
+	// with a code), never a missing field: a daemon that reads no decision is
+	// talking to a server that predates it, which is a different situation
+	// from a run whose code source could not be resolved.
+	CodeDecision *coderesolve.Decision `json:"code_decision,omitempty"`
 	// Projects is the task's full project set in priority order (DENE-523): a
 	// chat session can attach several projects, every other surface at most
 	// one. The singular project_* fields above mirror the FIRST entry so a
@@ -1207,6 +1224,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		Error:                  textToPtr(t.Error),
 		FailureReason:          failureReason,
 		BranchName:             branchName,
+		CodeDecision:           codeDecisionFromRow(t.CodeDecision),
 		Attempt:                t.Attempt,
 		MaxAttempts:            t.MaxAttempts,
 		ParentTaskID:           uuidToPtr(t.ParentTaskID),
