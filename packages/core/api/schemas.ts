@@ -4033,6 +4033,22 @@ export const MemberWithUserSchema = z.object({
   avatar_url: z.string().nullable().optional().default(null),
 }).loose();
 
+export const MemberWithUserListSchema = z.array(MemberWithUserSchema);
+
+/** Fallback for a single-member write whose response drifted. `role` is the
+ *  least privileged known tier so a garbled reply never paints someone as an
+ *  owner; the row re-reads the truth on the next list invalidation. */
+export const EMPTY_MEMBER_WITH_USER: MemberWithUser = {
+  id: "",
+  workspace_id: "",
+  user_id: "",
+  role: "guest",
+  created_at: "",
+  name: "",
+  email: "",
+  avatar_url: null,
+};
+
 export {
   ConfigBundleSchema,
   ConfigImportReportSchema,

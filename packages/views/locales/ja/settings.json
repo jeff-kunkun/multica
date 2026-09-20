@@ -1357,6 +1357,10 @@
       "member": {
         "label": "メンバー",
         "description": "タスクの作成と作業"
+      },
+      "guest": {
+        "label": "ゲスト",
+        "description": "読み取り専用。共有されたものだけが見えます"
       }
     },
     "share_links_title": "共有リンク",
@@ -1378,7 +1382,32 @@
     "expiry_24h": "24時間",
     "expiry_7d": "7日",
     "expiry_30d": "30日",
-    "expiry_never": "無期限"
+    "expiry_never": "無期限",
+    "role_blocked": {
+      "guest_unreleased": "ゲストはまだ利用できません — 読み取り専用の制御を準備中です",
+      "owner_requires_owner": "owner を付与できるのは owner だけです"
+    },
+    "role_select_label": "{{name}} の権限",
+    "unknown_role": "不明な権限",
+    "unknown_role_title": "このメンバーの権限はこのバージョンでは扱えません。アプリを更新してください。",
+    "role_impact_title": "{{name}} を {{role}} に変更しました",
+    "role_impact_gained": "追加：{{items}}",
+    "role_impact_lost": "削除：{{items}}",
+    "role_impact_none": "ほかに変わるものはありません。",
+    "members_loading": "メンバーを読み込み中…",
+    "empty_title": "メンバーがいません",
+    "empty_description": "このワークスペースに同僚を招待しましょう。",
+    "empty_action": "メンバーを招待",
+    "capabilities": {
+      "view_shared": "共有されたものを見る",
+      "see_workspace_scope": "ワークスペース全体の内容を見る",
+      "create_resources": "issue・プロジェクト・リポジトリの作成",
+      "comment_and_edit": "コメント・編集・ステータス変更",
+      "be_assigned": "担当割り当てとエージェント起動",
+      "manage_members": "メンバー招待と権限変更",
+      "workspace_settings": "ワークスペース設定・連携・キー",
+      "billing_and_transfer": "請求・譲渡・削除"
+    }
   },
   "integrations": {
     "description": "ツールを接続して、各連携を管理します。",
