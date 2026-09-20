@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -56,6 +59,7 @@ const (
 const (
 	providerActionList     = "list"
 	providerActionUpsert   = "upsert"
+	providerActionRefresh  = "refresh"
 	providerActionDelete   = "delete"
 	providerActionActivate = "activate"
 )
@@ -167,6 +171,8 @@ func (dshProviderDriver) Apply(action string, payload json.RawMessage) (*provide
 		return &snapshot, nil
 	case providerActionUpsert:
 		return dshUpsertProvider(dshHome, payload)
+	case providerActionRefresh:
+		return dshRefreshProvider(dshHome, payload)
 	case providerActionDelete:
 		return dshDeleteProvider(dshHome, payload)
 	case providerActionActivate:
@@ -174,6 +180,119 @@ func (dshProviderDriver) Apply(action string, payload json.RawMessage) (*provide
 	default:
 		return nil, fmt.Errorf("unsupported action %q", action)
 	}
+}
+
+type dshRemoteModel struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	ContextWindow int64  `json:"context_window"`
+}
+
+type dshRemoteModelsResponse struct {
+	Data   []dshRemoteModel `json:"data"`
+	Models []dshRemoteModel `json:"models"`
+}
+
+// dshRefreshProvider discovers the models exposed by a configured URL and
+// writes them into DSH's provider entry. The request runs on the user's
+// machine, next to the credential file, so the API key never crosses the
+// browser/server boundary.
+func dshRefreshProvider(dshHome string, payload json.RawMessage) (*providerConfigSnapshot, error) {
+	var input dshProviderIDPayload
+	if err := decodeDshProviderPayload(payload, &input); err != nil {
+		return nil, err
+	}
+	id := strings.TrimSpace(input.ID)
+	if id == "" {
+		return nil, errors.New("provider id is required")
+	}
+
+	settings, credentials, err := loadDshProviderDocuments(dshHome)
+	if err != nil {
+		return nil, err
+	}
+	entry := yamlMapValue(yamlMapValue(yamlMapValue(settings.root, dshProviderRootKey), dshProvidersKey), id)
+	if entry == nil || entry.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("provider %q is not configured", id)
+	}
+	baseURL := strings.TrimSpace(yamlScalarValue(yamlMapValue(entry, "baseURL")))
+	if baseURL == "" {
+		return nil, fmt.Errorf("provider %q has no API endpoint", id)
+	}
+	api := strings.TrimSpace(yamlScalarValue(yamlMapValue(entry, "api")))
+	keyEnv := strings.TrimSpace(yamlScalarValue(yamlMapValue(entry, "apiKeyEnv")))
+	key := strings.TrimSpace(yamlScalarValue(yamlMapValue(yamlMapValue(credentials.root, dshRefsKey), keyEnv)))
+	if key == "" {
+		return nil, fmt.Errorf("provider %q has no stored API key", id)
+	}
+
+	models, err := fetchDshRemoteModels(baseURL, api, key)
+	if err != nil {
+		return nil, fmt.Errorf("refresh models for provider %q: %w", id, err)
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("refresh models for provider %q: endpoint returned no models", id)
+	}
+	yamlMapSet(entry, "models", dshModelsNode(models, yamlMapValue(entry, "models")))
+	if err := writeDshYAMLFile(settings.path, settings, dshExistingFileMode(settings.path, 0o600)); err != nil {
+		return nil, err
+	}
+	snapshot := dshSnapshot(settings, credentials)
+	return &snapshot, nil
+}
+
+func fetchDshRemoteModels(baseURL, api, key string) ([]providerPresetModel, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, errors.New("API endpoint must be a full http:// or https:// URL")
+	}
+	if !strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/models") {
+		u.Path = strings.TrimRight(u.Path, "/") + "/models"
+	}
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("build model request: %w", err)
+	}
+	if strings.HasPrefix(api, "anthropic-") {
+		req.Header.Set("x-api-key", key)
+		req.Header.Set("anthropic-version", "2023-06-01")
+	} else {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	res, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request endpoint: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return nil, fmt.Errorf("endpoint returned HTTP %d", res.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(res.Body, 2<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read endpoint response: %w", err)
+	}
+	var decoded dshRemoteModelsResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return nil, fmt.Errorf("decode endpoint response: %w", err)
+	}
+	items := decoded.Data
+	if len(items) == 0 {
+		items = decoded.Models
+	}
+	models := make([]providerPresetModel, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		models = append(models, providerPresetModel{ID: id, Name: strings.TrimSpace(item.Name), ContextWindow: item.ContextWindow})
+	}
+	return models, nil
 }
 
 // dshHomePath resolves DSH's home exactly as the rest of the daemon does:

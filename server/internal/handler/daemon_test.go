@@ -1964,6 +1964,119 @@ func TestGetIssueUsageReportsUsageCoverage(t *testing.T) {
 	}
 }
 
+// DENE-666: the run-metadata columns exist so the cost baseline can split
+// resumed runs from cold starts and read where a run spent its wall clock.
+// This pins the whole wire path — daemon report -> task_usage -> GetIssueUsage
+// runs[] + attribution grouping — because every field is new on both ends and
+// a silent NULL here reads as "no data" rather than as a bug.
+func TestReportTaskUsageRoundTripsRunMetadata(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var agentID, runtimeID string
+	dbfx.QueryRow(t, `
+		SELECT id, runtime_id FROM agent
+		WHERE workspace_id = $1 AND runtime_id IS NOT NULL
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
+	issueID := dbfx.Issue(t, "issue usage run metadata")
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id":          issueID,
+		"runtime_id":        runtimeID,
+		"status":            "completed",
+		"started_at":        testutil.Raw("now() - interval '2 minutes'"),
+		"completed_at":      testutil.Raw("now() - interval '1 minute'"),
+		"originator_source": "direct_human",
+	})
+
+	report := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/usage", map[string]any{
+		"usage": []map[string]any{{
+			"provider":                 "anthropic",
+			"model":                    "claude-opus-5",
+			"input_tokens":             120,
+			"output_tokens":            30,
+			"num_turns":                7,
+			"resumed":                  true,
+			"session_id":               "session-dene-666",
+			"last_context_tokens":      4096,
+			"queue_to_claim_ms":        11,
+			"prepare_ms":               22,
+			"spawn_to_first_output_ms": 33,
+			"total_ms":                 44,
+		}},
+	}, testWorkspaceID, "test-daemon-usage")
+	report = withURLParam(report, "taskId", taskID)
+	testutil.Call(t, testHandler.ReportTaskUsage, report).Want(http.StatusOK)
+
+	read := newRequest("GET", "/api/issues/"+issueID+"/usage", nil)
+	read = withURLParam(read, "id", issueID)
+	var got struct {
+		Runs []struct {
+			TaskID               string  `json:"task_id"`
+			NumTurns             int32   `json:"num_turns"`
+			Resumed              bool    `json:"resumed"`
+			SessionID            *string `json:"session_id"`
+			LastContextTokens    *int64  `json:"last_context_tokens"`
+			QueueToClaimMS       *int64  `json:"queue_to_claim_ms"`
+			PrepareMS            *int64  `json:"prepare_ms"`
+			SpawnToFirstOutputMS *int64  `json:"spawn_to_first_output_ms"`
+			TotalMS              *int64  `json:"total_ms"`
+			AttributionSource    string  `json:"attribution_source"`
+		} `json:"runs"`
+		AttributionSourceCounts map[string]int `json:"attribution_source_counts"`
+	}
+	testutil.Call(t, testHandler.GetIssueUsage, read).Want(http.StatusOK).JSON(&got)
+
+	var run *struct {
+		TaskID               string  `json:"task_id"`
+		NumTurns             int32   `json:"num_turns"`
+		Resumed              bool    `json:"resumed"`
+		SessionID            *string `json:"session_id"`
+		LastContextTokens    *int64  `json:"last_context_tokens"`
+		QueueToClaimMS       *int64  `json:"queue_to_claim_ms"`
+		PrepareMS            *int64  `json:"prepare_ms"`
+		SpawnToFirstOutputMS *int64  `json:"spawn_to_first_output_ms"`
+		TotalMS              *int64  `json:"total_ms"`
+		AttributionSource    string  `json:"attribution_source"`
+	}
+	for i := range got.Runs {
+		if got.Runs[i].TaskID == taskID {
+			run = &got.Runs[i]
+		}
+	}
+	if run == nil {
+		t.Fatalf("task %s missing from runs (%d returned) — the execution log cannot answer per-run cost", taskID, len(got.Runs))
+	}
+	if run.NumTurns != 7 || !run.Resumed {
+		t.Errorf("num_turns/resumed = %d/%t, want 7/true", run.NumTurns, run.Resumed)
+	}
+	if run.SessionID == nil || *run.SessionID != "session-dene-666" {
+		t.Errorf("session_id = %v, want session-dene-666", run.SessionID)
+	}
+	for _, field := range []struct {
+		name string
+		got  *int64
+		want int64
+	}{
+		{"last_context_tokens", run.LastContextTokens, 4096},
+		{"queue_to_claim_ms", run.QueueToClaimMS, 11},
+		{"prepare_ms", run.PrepareMS, 22},
+		{"spawn_to_first_output_ms", run.SpawnToFirstOutputMS, 33},
+		{"total_ms", run.TotalMS, 44},
+	} {
+		if field.got == nil || *field.got != field.want {
+			t.Errorf("%s = %v, want %d", field.name, field.got, field.want)
+		}
+	}
+	if run.AttributionSource != "direct_human" {
+		t.Errorf("attribution_source = %q, want direct_human", run.AttributionSource)
+	}
+	if got.AttributionSourceCounts["direct_human"] < 1 {
+		t.Errorf("attribution_source_counts = %v, want direct_human counted", got.AttributionSourceCounts)
+	}
+}
+
 func TestGetDaemonWorkspaceRepos_WithDaemonToken(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

@@ -60,6 +60,7 @@ const (
 const (
 	ProviderPresetActionList     = "list"
 	ProviderPresetActionUpsert   = "upsert"
+	ProviderPresetActionRefresh  = "refresh"
 	ProviderPresetActionDelete   = "delete"
 	ProviderPresetActionActivate = "activate"
 )
@@ -161,7 +162,7 @@ func ownsRuntime(member db.Member, rt db.AgentRuntime) bool {
 func validProviderPresetAction(action string) bool {
 	switch action {
 	case ProviderPresetActionList, ProviderPresetActionUpsert,
-		ProviderPresetActionDelete, ProviderPresetActionActivate:
+		ProviderPresetActionRefresh, ProviderPresetActionDelete, ProviderPresetActionActivate:
 		return true
 	default:
 		return false

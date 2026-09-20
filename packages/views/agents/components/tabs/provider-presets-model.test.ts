@@ -163,10 +163,10 @@ describe("validateProviderPresetForm", () => {
     );
   });
 
-  it("requires at least one model with an id", () => {
+  it("allows an empty model list so the daemon can discover models from the endpoint", () => {
     expect(
       validateProviderPresetForm({ ...valid(), models: [{ id: "  ", name: "x" }] }),
-    ).toContain("models_required");
+    ).toEqual([]);
   });
 });
 

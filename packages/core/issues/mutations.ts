@@ -1198,6 +1198,28 @@ export function useCancelIssueRun(issueId: string) {
   });
 }
 
+export function useHaltIssueRuns(issueId: string, workspaceId?: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.haltIssue(issueId),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+      if (workspaceId) client.invalidateQueries({ queryKey: issueKeys.detail(workspaceId, issueId) });
+    },
+  });
+}
+
+export function useResumeIssueRuns(issueId: string, workspaceId?: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.resumeIssue(issueId),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+      if (workspaceId) client.invalidateQueries({ queryKey: issueKeys.detail(workspaceId, issueId) });
+    },
+  });
+}
+
 export function useRetryIssueRun(issueId: string) {
   const client = useQueryClient();
   return useMutation({

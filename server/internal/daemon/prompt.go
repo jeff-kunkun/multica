@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
@@ -65,6 +67,8 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	b.WriteString(buildSharedWorkspaceBlock(opts.sharedWorkspace))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
+	b.WriteString(buildStaleLocalBaselineBlock(opts.staleLocalBaselineNotice))
+	b.WriteString(buildDependencyInstallBlock(opts.dependencyInstallCommand))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -77,9 +81,11 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 // daemon's own execution context can answer. Kept behind PromptOption so the
 // common BuildPrompt(task, provider) call sites stay unchanged.
 type promptOpts struct {
-	sharedLocalDirectory    bool
-	sharedWorkspace         bool
-	worktreeReplayConflicts []string
+	sharedLocalDirectory     bool
+	sharedWorkspace          bool
+	worktreeReplayConflicts  []string
+	staleLocalBaselineNotice string
+	dependencyInstallCommand string
 }
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
@@ -114,6 +120,20 @@ func WithWorktreeReplayConflicts(files []string) PromptOption {
 	return func(o *promptOpts) { o.worktreeReplayConflicts = files }
 }
 
+// WithStaleLocalBaseline explains that a local_directory worktree could not
+// safely advance its source checkout to the remote tracking tip.
+func WithStaleLocalBaseline(notice string) PromptOption {
+	return func(o *promptOpts) { o.staleLocalBaselineNotice = strings.TrimSpace(notice) }
+}
+
+// WithDependencyInstallCommand adds the deterministic install command for a
+// checkout whose lockfile is present. The daemon points pnpm at its warm
+// shared store before launching the provider, so this is a cheap, repeatable
+// setup step rather than a fresh network download for every task.
+func WithDependencyInstallCommand(command string) PromptOption {
+	return func(o *promptOpts) { o.dependencyInstallCommand = strings.TrimSpace(command) }
+}
+
 // buildSharedLocalDirectoryBlock warns an unlocked turn that its working
 // directory is shared live. Deliberately guidance and not a prohibition: the
 // mutex never covered the user's own editor either, so refusing writes here
@@ -140,6 +160,40 @@ func buildSharedWorkspaceBlock(shared bool) string {
 	b.WriteString("Your working directory is a shared workspace: the project owner set it to run tasks concurrently, so other tasks on this machine may be working in it right now and no task holds a lock on it. Multica keeps its own runtime files out of this directory; nothing here was written for you except by the workspace itself.\n\n")
 	b.WriteString("Follow the workspace's own conventions for isolation — typically a task-specific branch or worktree inside the sub-repository you are changing. Do not edit a shared checkout's mainline (main/dev) in place, do not run commands that rewrite files across the whole directory, and when you must change a file other tasks may also touch, say so in your reply.\n\n")
 	return b.String()
+}
+
+func buildStaleLocalBaselineBlock(notice string) string {
+	if strings.TrimSpace(notice) == "" {
+		return ""
+	}
+	return "## Local baseline may be stale\n\n" + strings.TrimSpace(notice) + " Treat the files in this worktree as the authoritative snapshot for this turn, and mention the stale baseline if it affects your conclusion.\n\n"
+}
+
+func buildDependencyInstallBlock(command string) string {
+	if strings.TrimSpace(command) == "" {
+		return ""
+	}
+	return "## Dependency setup\n\n" + "If you need the repository's JavaScript dependencies, run `" + strings.TrimSpace(command) + "` before typechecking or tests. The daemon has configured pnpm to use a warm shared package store, so this is the deterministic lockfile install for this checkout.\n\n"
+}
+
+// dependencyInstallCommand walks from the task cwd toward the filesystem
+// root so a task pointed at a nested package still sees the repository's
+// top-level lockfile. Keep this deliberately narrow: only pnpm's frozen
+// install is guaranteed to be deterministic and to use the daemon's warm
+// shared store.
+func dependencyInstallCommand(workDir string) string {
+	if strings.TrimSpace(workDir) == "" {
+		return ""
+	}
+	for dir := filepath.Clean(workDir); ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, "pnpm-lock.yaml")); err == nil {
+			return "pnpm install --frozen-lockfile"
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+	}
 }
 
 // maxConflictListBytes bounds the RENDERED file list, in bytes of the escaped

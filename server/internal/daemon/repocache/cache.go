@@ -226,8 +226,9 @@ type CachedRepo struct {
 
 // Cache manages bare git clones for workspace repositories.
 type Cache struct {
-	root   string // base directory for all caches (e.g. ~/multica_workspaces/.repos)
-	logger *slog.Logger
+	root          string // base directory for all caches (e.g. ~/multica_workspaces/.repos)
+	logger        *slog.Logger
+	fetchCooldown time.Duration
 	// repoLocks maps bare repo path → dedicated mutex. Any mutating operation
 	// on a given bare repo (clone, fetch, worktree add, ref update) must
 	// hold its lock — git's own lockfiles (packed-refs.lock, config.lock,
@@ -519,7 +520,16 @@ func (l *repoLock) cancelMaintenanceAndWait() {
 
 // New creates a new repo cache rooted at the given directory.
 func New(root string, logger *slog.Logger) *Cache {
+	// The daemon supplies its configured default through SetFetchCooldown.
+	// Keeping the library constructor uncoupled preserves the explicit Fetch
+	// semantics expected by callers that use Cache directly (including tests).
 	return &Cache{root: root, logger: logger}
+}
+
+// SetFetchCooldown changes the cache-wide fetch de-duplication window.
+// Non-positive values disable the window and fetch every time.
+func (c *Cache) SetFetchCooldown(d time.Duration) {
+	c.fetchCooldown = d
 }
 
 // lockForRepo returns the mutex dedicated to the given bare repo path. See
@@ -651,11 +661,16 @@ func (c *Cache) syncRepoContext(ctx context.Context, url, barePath string) error
 }
 
 func (c *Cache) fetchCachedRepoContext(ctx context.Context, url, barePath string) error {
+	if !c.fetchDue(barePath, time.Now()) {
+		c.logger.Debug("repo cache: fetch skipped inside cooldown", "url", url, "path", barePath)
+		return nil
+	}
 	c.logger.Info("repo cache: fetching", "url", url, "path", barePath)
 	if err := gitFetchContext(ctx, barePath); err != nil {
 		c.logger.Warn("repo cache: fetch failed", "url", url, "error", err)
 		return err
 	}
+	markFetched(barePath, c.logger)
 	return nil
 }
 
@@ -678,6 +693,7 @@ func (c *Cache) buildRepoContext(ctx context.Context, url, barePath string, trac
 		c.logger.Error("repo cache: download incomplete, progress kept for the next attempt", "url", url, "error", err)
 		return err
 	}
+	markFetched(barePath, c.logger)
 	return nil
 }
 
@@ -715,6 +731,55 @@ func (c *Cache) BarePath(workspaceID, url string) string {
 // disables it by default. So the signal has to be written explicitly, at the
 // one place that means a repo was really used — CreateWorktree.
 const lastUsedFile = ".multica_last_used"
+
+// lastFetchedFile records the last successful remote refresh. It is separate
+// from lastUsedFile: a checkout can be used repeatedly while the cache still
+// needs no network request, and a background Sync can refresh a repo nobody
+// has checked out yet.
+const lastFetchedFile = ".multica_last_fetched"
+
+func (c *Cache) fetchDue(barePath string, now time.Time) bool {
+	if c.fetchCooldown <= 0 {
+		return true
+	}
+	data, err := os.ReadFile(filepath.Join(barePath, lastFetchedFile))
+	if err != nil {
+		return true
+	}
+	stamp, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(data)))
+	if err != nil || now.Before(stamp) {
+		return true
+	}
+	return now.Sub(stamp) >= c.fetchCooldown
+}
+
+func (c *Cache) fetchDueForCheckout(ctx context.Context, barePath, ref string) bool {
+	if c.fetchDue(barePath, time.Now()) {
+		return true
+	}
+	// A caller naming an object we do not have locally is explicitly asking for
+	// it; the cooldown must never turn that into a misleading missing-ref error.
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return false
+	}
+	for _, candidate := range requestedRefCandidates(ref) {
+		if gitRefExistsContext(ctx, barePath, candidate+"^{commit}") {
+			return false
+		}
+	}
+	return true
+}
+
+func markFetched(barePath string, logger *slog.Logger) {
+	if barePath == "" {
+		return
+	}
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := os.WriteFile(filepath.Join(barePath, lastFetchedFile), []byte(stamp), 0o644); err != nil && logger != nil {
+		logger.Warn("repo cache: write last-fetched stamp failed", "repo", barePath, "error", err)
+	}
+}
 
 // MarkUsed records that this bare repo was just used for a checkout. Callers
 // must already hold the repo lock. Best-effort: a failed stamp only risks the
@@ -784,7 +849,11 @@ func (c *Cache) WithRepoMaintenance(ctx context.Context, barePath string, fn fun
 // Fetch runs `git fetch origin` on a cached bare clone to get latest refs.
 func (c *Cache) Fetch(barePath string) error {
 	return c.WithRepoLock(barePath, func() error {
-		return gitFetch(barePath)
+		if err := gitFetch(barePath); err != nil {
+			return err
+		}
+		markFetched(barePath, c.logger)
+		return nil
 	})
 }
 
@@ -1443,7 +1512,15 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// never collide with the refs/heads/agent/* branches that worktree creation
 	// locks in this same bare repo.
 	var fetchErr error
-	if fetchErr = gitFetchContext(ctx, barePath); fetchErr != nil {
+	if c.fetchDueForCheckout(ctx, barePath, params.Ref) {
+		fetchErr = gitFetchContext(ctx, barePath)
+		if fetchErr == nil {
+			markFetched(barePath, c.logger)
+		}
+	} else {
+		c.logger.Debug("repo checkout: fetch skipped inside cooldown", "url", params.RepoURL, "path", barePath, "ref", params.Ref)
+	}
+	if fetchErr != nil {
 		if ctx.Err() != nil {
 			return nil, context.Cause(ctx)
 		}
@@ -2055,17 +2132,21 @@ func resolveBaseRefContext(ctx context.Context, barePath, requestedRef string) (
 
 	// Prefer remote-tracking branches for human branch names. Then allow full
 	// local refs, tags, and raw commits that exist in the fetched bare cache.
-	candidates := []string{
-		"refs/remotes/origin/" + ref,
-		"refs/tags/" + ref,
-		ref,
-	}
+	candidates := requestedRefCandidates(ref)
 	for _, candidate := range candidates {
 		if gitRefExistsContext(ctx, barePath, candidate+"^{commit}") {
 			return candidate, nil
 		}
 	}
 	return "", fmt.Errorf("cannot resolve requested ref %q in repo cache at %s", ref, barePath)
+}
+
+func requestedRefCandidates(ref string) []string {
+	return []string{
+		"refs/remotes/origin/" + ref,
+		"refs/tags/" + ref,
+		ref,
+	}
 }
 
 func gitRefExists(repoPath, ref string) bool {

@@ -181,6 +181,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		toolUseCount := 0
 		unreadableAssistantCount := 0
 		var planLimits *protocol.PlanLimitsSnapshot
+		var numTurns int
+		var lastContextTokens *int64
 
 		// On cancellation / timeout, terminate claude (and every MCP server and
 		// tool subprocess it spawned) BEFORE unblocking the scanner. EOF stdin
@@ -236,6 +238,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "assistant":
 				assistantEventCount++
 				turn := b.handleAssistant(msg, msgCh, usage, seenUsage)
+				if turn.lastContextTokens != nil {
+					lastContextTokens = turn.lastContextTokens
+				}
 				toolUseCount += turn.toolUses
 				if !turn.understood {
 					unreadableAssistantCount++
@@ -256,6 +261,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resultIsError = msg.IsError
 				terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
+				numTurns = msg.NumTurns
 				if resultUsage := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
 				}
@@ -358,14 +364,16 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		resCh <- Result{
-			Status:         finalStatus,
-			Output:         finalOutput,
-			Error:          finalError,
-			DurationMs:     duration.Milliseconds(),
-			SessionID:      reportedSessionID,
-			Usage:          usage,
-			PlanLimits:     planLimits,
-			ResumeRejected: resumeRejected,
+			Status:            finalStatus,
+			Output:            finalOutput,
+			Error:             finalError,
+			DurationMs:        duration.Milliseconds(),
+			SessionID:         reportedSessionID,
+			Usage:             usage,
+			NumTurns:          numTurns,
+			LastContextTokens: lastContextTokens,
+			PlanLimits:        planLimits,
+			ResumeRejected:    resumeRejected,
 		}
 	}()
 
@@ -390,6 +398,10 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 	// placeholder, and subagent totals require the final result's modelUsage.
 	// https://code.claude.com/docs/en/agent-sdk/cost-tracking#track-per-step-usage
 	_, counted := seenUsage[content.ID]
+	if content.Usage != nil && content.Model != "" {
+		value := content.Usage.InputTokens + content.Usage.CacheReadInputTokens + content.Usage.CacheCreationInputTokens
+		turn.lastContextTokens = &value
+	}
 	if msg.ParentToolUseID == "" && content.Usage != nil && content.Model != "" &&
 		(content.ID == "" || !counted) && claudeUsageHasTokens(
 		content.Usage.InputTokens, 0, content.Usage.CacheReadInputTokens, content.Usage.CacheCreationInputTokens,

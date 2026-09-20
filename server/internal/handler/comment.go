@@ -1945,6 +1945,18 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// the agent task path (TaskService.createAgentComment) — both reply paths
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(issue.WorkspaceID), authorType, authorID)
+	if authorType == "member" {
+		// Any human comment is an explicit acknowledgement / release of the
+		// chain guard. Clear both the halt latch and the one-shot notice marker
+		// before resolving this comment's own agent triggers.
+		for _, key := range []string{"agent_halted", "agent_chain_budget_notified"} {
+			if _, clearErr := h.Queries.DeleteIssueMetadataKey(r.Context(), db.DeleteIssueMetadataKeyParams{
+				ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key,
+			}); clearErr != nil && !errors.Is(clearErr, pgx.ErrNoRows) {
+				slog.Warn("clear issue agent chain guard after human comment failed", "issue_id", issueID, "key", key, "error", clearErr)
+			}
+		}
+	}
 
 	originatorUserID := h.invokeOriginatorFromRequest(r, authorType, authorID)
 	// The comment is already saved; a blocked mention must not fail the whole
@@ -2292,6 +2304,9 @@ func commentBlockedTargetOutcomes(targets []commentMentionTarget) []CommentTrigg
 // infrastructure error that stays an unclassified internal error rather than
 // leaking the raw message.
 func commentEnqueueFailureReason(err error) DispatchReasonCode {
+	if errors.Is(err, service.ErrAgentChainBudgetExceeded) {
+		return ReasonChainBudgetExceeded
+	}
 	if errors.Is(err, service.ErrAttributionFailClosed) {
 		return ReasonAttributionBlocked
 	}

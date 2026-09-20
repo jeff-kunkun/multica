@@ -54,6 +54,12 @@ export interface IssueReaction {
 export type IssueMetadataValue = string | number | boolean;
 export type IssueMetadata = Record<string, IssueMetadataValue>;
 
+export interface IssueAgentGuardResponse {
+  issue_id: string;
+  halted: boolean;
+  metadata?: IssueMetadata;
+}
+
 export interface SourceContextAttachment {
   id: string;
   source_attachment_id?: string;

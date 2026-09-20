@@ -676,6 +676,7 @@
       "created_toast": "Added {{name}}",
       "updated_toast": "Saved {{name}}",
       "save_failed_toast": "Could not save the provider.",
+      "refresh_failed_toast": "Provider saved, but its models could not be refreshed.",
       "deleted_toast": "Deleted {{name}}",
       "deleted_cleared_toast": "Deleted {{name}}. The CLI now has no default model.",
       "delete_failed_toast": "Could not delete the provider."

@@ -1939,6 +1939,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/unsubscribe/subtree", h.UnsubscribeFromIssueSubtree)
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
+					r.Post("/halt", h.HaltIssue)
+					r.Post("/resume", h.ResumeIssue)
 					r.Post("/rerun", h.RerunIssue)
 					// Manual re-run of the routing pass (DENE-633). Same
 					// module the create/status hooks call, just synchronous

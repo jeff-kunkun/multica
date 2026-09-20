@@ -24,6 +24,24 @@ afterEach(() => {
 // app in past incidents. The contract is: a malformed response degrades to
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
+  describe("issue run guard", () => {
+    it("falls back safely when halt/resume responses are malformed", async () => {
+      stubFetchJson({ issue_id: 42, halted: "yes" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.haltIssue("issue-1")).resolves.toEqual({
+        issue_id: "issue-1",
+        halted: true,
+      });
+
+      stubFetchJson(null);
+      await expect(client.resumeIssue("issue-1")).resolves.toEqual({
+        issue_id: "issue-1",
+        halted: false,
+      });
+    });
+  });
+
   describe("GitHub repository import", () => {
     it("falls back safely when installation or repository responses are malformed", async () => {
       stubFetchJson({ installations: "not-an-array", configured: true });

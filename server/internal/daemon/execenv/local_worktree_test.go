@@ -138,6 +138,117 @@ func prepareForTest(t *testing.T, localPath string) *LocalWorktree {
 	return wt
 }
 
+func TestRefreshLocalBaselineFastForwardsCleanTrackingBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	if err := os.MkdirAll(remote, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, remote, "init", "--bare")
+	gitRun(t, repo, "remote", "add", "origin", remote)
+	gitRun(t, repo, "push", "-u", "origin", "main")
+
+	other := filepath.Join(t.TempDir(), "other")
+	gitRun(t, t.TempDir(), "clone", remote, other)
+	gitRun(t, other, "config", "user.name", "Other")
+	gitRun(t, other, "config", "user.email", "other@test.com")
+	writeFile(t, filepath.Join(other, "remote.txt"), "remote\n")
+	gitRun(t, other, "add", ".")
+	gitRun(t, other, "commit", "-m", "remote update")
+	gitRun(t, other, "push", "origin", "main")
+
+	if notice := refreshLocalBaseline(repo, worktreeTestLogger()); notice != "" {
+		t.Fatalf("refreshLocalBaseline notice = %q, want empty", notice)
+	}
+	if got := gitRun(t, repo, "rev-parse", "HEAD"); got != gitRun(t, other, "rev-parse", "HEAD") {
+		t.Fatalf("local HEAD = %s, want remote HEAD", got)
+	}
+}
+
+func TestRefreshLocalBaselineLeavesDirtyCheckoutAndExplainsIt(t *testing.T) {
+	repo := newTestRepo(t)
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	if err := os.MkdirAll(remote, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, remote, "init", "--bare")
+	gitRun(t, repo, "remote", "add", "origin", remote)
+	gitRun(t, repo, "push", "-u", "origin", "main")
+	other := filepath.Join(t.TempDir(), "other")
+	gitRun(t, t.TempDir(), "clone", remote, other)
+	gitRun(t, other, "config", "user.name", "Other")
+	gitRun(t, other, "config", "user.email", "other@test.com")
+	writeFile(t, filepath.Join(other, "remote.txt"), "remote\n")
+	gitRun(t, other, "add", ".")
+	gitRun(t, other, "commit", "-m", "remote update")
+	gitRun(t, other, "push", "origin", "main")
+
+	headBefore := gitRun(t, repo, "rev-parse", "HEAD")
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "local edit\n")
+	notice := refreshLocalBaseline(repo, worktreeTestLogger())
+	if !strings.Contains(notice, "local edits") {
+		t.Fatalf("notice = %q, want local-edit explanation", notice)
+	}
+	if got := gitRun(t, repo, "rev-parse", "HEAD"); got != headBefore {
+		t.Fatalf("dirty local HEAD moved from %s to %s", headBefore, got)
+	}
+}
+
+func TestRefreshLocalBaselineLeavesDivergedCheckoutUntouched(t *testing.T) {
+	repo := newTestRepo(t)
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	if err := os.MkdirAll(remote, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, remote, "init", "--bare")
+	gitRun(t, repo, "remote", "add", "origin", remote)
+	gitRun(t, repo, "push", "-u", "origin", "main")
+
+	other := filepath.Join(t.TempDir(), "other")
+	gitRun(t, t.TempDir(), "clone", remote, other)
+	gitRun(t, other, "config", "user.name", "Other")
+	gitRun(t, other, "config", "user.email", "other@test.com")
+
+	writeFile(t, filepath.Join(repo, "local.txt"), "local\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "local update")
+	localHead := gitRun(t, repo, "rev-parse", "HEAD")
+
+	writeFile(t, filepath.Join(other, "remote.txt"), "remote\n")
+	gitRun(t, other, "add", ".")
+	gitRun(t, other, "commit", "-m", "remote update")
+	gitRun(t, other, "push", "origin", "main")
+
+	notice := refreshLocalBaseline(repo, worktreeTestLogger())
+	if !strings.Contains(notice, "diverges") {
+		t.Fatalf("notice = %q, want divergence explanation", notice)
+	}
+	if got := gitRun(t, repo, "rev-parse", "HEAD"); got != localHead {
+		t.Fatalf("diverged local HEAD moved from %s to %s", localHead, got)
+	}
+}
+
+func TestRefreshLocalBaselineFetchFailureLeavesHeadUntouched(t *testing.T) {
+	repo := newTestRepo(t)
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	if err := os.MkdirAll(remote, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, remote, "init", "--bare")
+	gitRun(t, repo, "remote", "add", "origin", remote)
+	gitRun(t, repo, "push", "-u", "origin", "main")
+	headBefore := gitRun(t, repo, "rev-parse", "HEAD")
+	gitRun(t, repo, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "missing.git"))
+
+	notice := refreshLocalBaseline(repo, worktreeTestLogger())
+	if !strings.Contains(notice, "refreshing its upstream") || !strings.Contains(notice, "failed") {
+		t.Fatalf("notice = %q, want fetch-failure explanation", notice)
+	}
+	if got := gitRun(t, repo, "rev-parse", "HEAD"); got != headBefore {
+		t.Fatalf("failed refresh moved HEAD from %s to %s", headBefore, got)
+	}
+}
+
 // The agent must see the user's uncommitted work, not a clean HEAD checkout.
 // This is the property that makes worktree mode usable rather than confusing:
 // otherwise the agent silently reviews code the user hasn't got open.
