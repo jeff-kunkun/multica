@@ -1949,6 +1949,109 @@ func (q *Queries) ClearAgentThinkingLevel(ctx context.Context, id pgtype.UUID) (
 	return i, err
 }
 
+const coalesceDeferredChildDoneWake = `-- name: CoalesceDeferredChildDoneWake :one
+UPDATE agent_task_queue
+SET fire_at = $1,
+    trigger_comment_id = $2::uuid,
+    coalesced_comment_ids = array_append(coalesced_comment_ids, trigger_comment_id)
+WHERE id = (
+    SELECT t.id
+    FROM agent_task_queue t
+    WHERE t.issue_id = $3
+      AND t.agent_id = $4
+      AND t.status = 'deferred'
+      AND t.context->>'child_done_debounce' = 'true'
+      AND t.fire_at > now()
+    ORDER BY t.created_at DESC
+    LIMIT 1
+    FOR UPDATE
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name
+`
+
+type CoalesceDeferredChildDoneWakeParams struct {
+	FireAt           pgtype.Timestamptz `json:"fire_at"`
+	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+}
+
+// Child-done notifications are separate top-level comments, hence separate
+// comment threads. Keep their parent wake in one short deferred window instead
+// of letting each completion start a fresh run. The trigger update also moves
+// the task to the newest system comment so the eventual prompt points at the
+// latest progress snapshot.
+func (q *Queries) CoalesceDeferredChildDoneWake(ctx context.Context, arg CoalesceDeferredChildDoneWakeParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, coalesceDeferredChildDoneWake,
+		arg.FireAt,
+		arg.TriggerCommentID,
+		arg.IssueID,
+		arg.AgentID,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
+		&i.DurableWorkDir,
+		&i.ChannelContextRevision,
+		&i.CommentThreadID,
+		&i.CancelledByType,
+		&i.CancelledByID,
+		&i.CancelledByName,
+	)
+	return i, err
+}
+
 const completeAgentTask = `-- name: CompleteAgentTask :one
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2,
@@ -2354,23 +2457,28 @@ INSERT INTO agent_task_queue (
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
-    id
+    fire_at, id
 )
 SELECT
-    $1, $2, $3, 'queued', $4, $5,
-    COALESCE($6::uuid[], '{}'),
-    $7,
-    COALESCE($8::boolean, FALSE),
+    $1, $2, $3,
+    CASE WHEN $5::timestamptz IS NULL THEN 'queued' ELSE 'deferred' END,
+    $4, $6,
+    COALESCE($7::uuid[], '{}'),
+    $8,
     COALESCE($9::boolean, FALSE),
-    $10,
+    COALESCE($10::boolean, FALSE),
     $11,
+    $12,
     CASE
-        WHEN COALESCE($12::text, '') <> ''
-        THEN jsonb_build_object('head_sha', $12::text)
+        WHEN COALESCE($13::text, '') <> ''
+             AND COALESCE($14::boolean, FALSE)
+        THEN jsonb_build_object('head_sha', $13::text, 'child_done_debounce', TRUE)
+        WHEN COALESCE($13::text, '') <> ''
+        THEN jsonb_build_object('head_sha', $13::text)
+        WHEN COALESCE($14::boolean, FALSE)
+        THEN jsonb_build_object('child_done_debounce', TRUE)
         ELSE NULL
     END,
-    $13,
-    $14,
     $15,
     $16,
     $17,
@@ -2379,35 +2487,40 @@ SELECT
     $20,
     $21,
     $22,
-    COALESCE($23::uuid, gen_random_uuid())
+    $23,
+    $24,
+    $5,
+    COALESCE($25::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name
 `
 
 type CreateAgentTaskParams struct {
-	AgentID              pgtype.UUID   `json:"agent_id"`
-	RuntimeID            pgtype.UUID   `json:"runtime_id"`
-	IssueID              pgtype.UUID   `json:"issue_id"`
-	Priority             int32         `json:"priority"`
-	TriggerCommentID     pgtype.UUID   `json:"trigger_comment_id"`
-	CoalescedCommentIds  []pgtype.UUID `json:"coalesced_comment_ids"`
-	TriggerSummary       pgtype.Text   `json:"trigger_summary"`
-	ForceFreshSession    pgtype.Bool   `json:"force_fresh_session"`
-	IsLeaderTask         pgtype.Bool   `json:"is_leader_task"`
-	HandoffNote          pgtype.Text   `json:"handoff_note"`
-	SquadID              pgtype.UUID   `json:"squad_id"`
-	HeadSha              pgtype.Text   `json:"head_sha"`
-	OriginatorUserID     pgtype.UUID   `json:"originator_user_id"`
-	AccountableUserID    pgtype.UUID   `json:"accountable_user_id"`
-	RuntimeMcpOverlay    []byte        `json:"runtime_mcp_overlay"`
-	RuntimeConnectedApps []byte        `json:"runtime_connected_apps"`
-	OriginatorSource     pgtype.Text   `json:"originator_source"`
-	DelegatedFromTaskID  pgtype.UUID   `json:"delegated_from_task_id"`
-	RuleVersionID        pgtype.UUID   `json:"rule_version_id"`
-	RerunOfTaskID        pgtype.UUID   `json:"rerun_of_task_id"`
-	TriggerEvidenceKind  pgtype.Text   `json:"trigger_evidence_kind"`
-	TriggerEvidenceRefID pgtype.UUID   `json:"trigger_evidence_ref_id"`
-	ID                   pgtype.UUID   `json:"id"`
+	AgentID              pgtype.UUID        `json:"agent_id"`
+	RuntimeID            pgtype.UUID        `json:"runtime_id"`
+	IssueID              pgtype.UUID        `json:"issue_id"`
+	Priority             int32              `json:"priority"`
+	FireAt               pgtype.Timestamptz `json:"fire_at"`
+	TriggerCommentID     pgtype.UUID        `json:"trigger_comment_id"`
+	CoalescedCommentIds  []pgtype.UUID      `json:"coalesced_comment_ids"`
+	TriggerSummary       pgtype.Text        `json:"trigger_summary"`
+	ForceFreshSession    pgtype.Bool        `json:"force_fresh_session"`
+	IsLeaderTask         pgtype.Bool        `json:"is_leader_task"`
+	HandoffNote          pgtype.Text        `json:"handoff_note"`
+	SquadID              pgtype.UUID        `json:"squad_id"`
+	HeadSha              pgtype.Text        `json:"head_sha"`
+	ChildDoneDebounce    pgtype.Bool        `json:"child_done_debounce"`
+	OriginatorUserID     pgtype.UUID        `json:"originator_user_id"`
+	AccountableUserID    pgtype.UUID        `json:"accountable_user_id"`
+	RuntimeMcpOverlay    []byte             `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps []byte             `json:"runtime_connected_apps"`
+	OriginatorSource     pgtype.Text        `json:"originator_source"`
+	DelegatedFromTaskID  pgtype.UUID        `json:"delegated_from_task_id"`
+	RuleVersionID        pgtype.UUID        `json:"rule_version_id"`
+	RerunOfTaskID        pgtype.UUID        `json:"rerun_of_task_id"`
+	TriggerEvidenceKind  pgtype.Text        `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID pgtype.UUID        `json:"trigger_evidence_ref_id"`
+	ID                   pgtype.UUID        `json:"id"`
 }
 
 // Fenced against workspace teardown: lock_task_owner_rows (migration 284)
@@ -2434,6 +2547,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.RuntimeID,
 		arg.IssueID,
 		arg.Priority,
+		arg.FireAt,
 		arg.TriggerCommentID,
 		arg.CoalescedCommentIds,
 		arg.TriggerSummary,
@@ -2442,6 +2556,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.HandoffNote,
 		arg.SquadID,
 		arg.HeadSha,
+		arg.ChildDoneDebounce,
 		arg.OriginatorUserID,
 		arg.AccountableUserID,
 		arg.RuntimeMcpOverlay,

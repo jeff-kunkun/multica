@@ -464,10 +464,12 @@ INSERT INTO agent_task_queue (
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
-    id
+    fire_at, id
 )
 SELECT
-    $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
+    $1, $2, $3,
+    CASE WHEN sqlc.narg(fire_at)::timestamptz IS NULL THEN 'queued' ELSE 'deferred' END,
+    $4, sqlc.narg(trigger_comment_id),
     COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
@@ -476,7 +478,12 @@ SELECT
     sqlc.narg(squad_id),
     CASE
         WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
+             AND COALESCE(sqlc.narg('child_done_debounce')::boolean, FALSE)
+        THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text, 'child_done_debounce', TRUE)
+        WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
         THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text)
+        WHEN COALESCE(sqlc.narg('child_done_debounce')::boolean, FALSE)
+        THEN jsonb_build_object('child_done_debounce', TRUE)
         ELSE NULL
     END,
     sqlc.narg(originator_user_id),
@@ -489,8 +496,33 @@ SELECT
     sqlc.narg(rerun_of_task_id),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(fire_at),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
+RETURNING *;
+
+-- name: CoalesceDeferredChildDoneWake :one
+-- Child-done notifications are separate top-level comments, hence separate
+-- comment threads. Keep their parent wake in one short deferred window instead
+-- of letting each completion start a fresh run. The trigger update also moves
+-- the task to the newest system comment so the eventual prompt points at the
+-- latest progress snapshot.
+UPDATE agent_task_queue
+SET fire_at = @fire_at,
+    trigger_comment_id = @trigger_comment_id::uuid,
+    coalesced_comment_ids = array_append(coalesced_comment_ids, trigger_comment_id)
+WHERE id = (
+    SELECT t.id
+    FROM agent_task_queue t
+    WHERE t.issue_id = @issue_id
+      AND t.agent_id = @agent_id
+      AND t.status = 'deferred'
+      AND t.context->>'child_done_debounce' = 'true'
+      AND t.fire_at > now()
+    ORDER BY t.created_at DESC
+    LIMIT 1
+    FOR UPDATE
+)
 RETURNING *;
 
 -- name: CreateDeferredChannelIssueTask :one

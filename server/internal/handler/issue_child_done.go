@@ -7,9 +7,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -757,10 +759,10 @@ func sanitizeMentionLabel(name string) string {
 //     parent silently stalled in in_progress (MUL-3969). The squad path now
 //     mirrors the agent path (MUL-2808): always dispatch, bounded only by
 //     idempotency.
-//   - Idempotency: HasPendingTaskForIssueAndAgent dedupes rapid-fire enqueues
-//     for the same parent (e.g. two children finishing back-to-back). It also
-//     bounds any re-trigger, since a leader waking on the parent does not by
-//     itself push a child back into a terminal transition.
+//   - Idempotency: child-done wakes enter a short durable deferred window;
+//     later sibling completions refresh that one row. The thread-scoped
+//     pending check then matches idx_one_pending_task_per_issue_agent_thread
+//     for non-deferred races.
 //   - Readiness: archived agents / missing runtimes are silently skipped
 //     so a closed-out agent does not surface as a phantom assignee.
 func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.Issue, systemComment db.Comment) {
@@ -798,9 +800,19 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
-	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: parent.ID,
-		AgentID: parent.AssigneeID,
+	fireAt := time.Now().Add(service.ChildDoneWakeDebounce)
+	coalesced, err := h.TaskService.CoalesceDeferredChildDoneWake(ctx, parent.ID, parent.AssigneeID, triggerCommentID, fireAt)
+	if err != nil {
+		slog.Warn("child done: coalesce parent agent wake failed", "error", err, "parent_id", uuidToString(parent.ID), "agent_id", uuidToString(parent.AssigneeID))
+	}
+	if coalesced {
+		return
+	}
+
+	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgentInThread(ctx, db.HasPendingTaskForIssueAndAgentInThreadParams{
+		IssueID:         parent.ID,
+		AgentID:         parent.AssigneeID,
+		ThreadCommentID: triggerCommentID,
 		// Key dedup on the reviewed head (TEN-356).
 		HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, parent.ID),
 	})
@@ -808,7 +820,7 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForMention(ctx, parent, parent.AssigneeID, triggerCommentID); err != nil {
+	if _, err := h.TaskService.EnqueueDeferredTaskForMention(ctx, parent, parent.AssigneeID, triggerCommentID, fireAt); err != nil {
 		slog.Warn("child done: enqueue parent agent task failed",
 			"error", err,
 			"parent_id", uuidToString(parent.ID),
@@ -839,8 +851,9 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 //     child-done follow one path; if invocation permission is ever reintroduced
 //     it must be added to BOTH paths together.
 //
-// Re-triggering is bounded by the HasPendingTaskForIssueAndAgent idempotency
-// check below, exactly as the agent path relies on it.
+// Re-triggering is bounded by the deferred child-done coalescing window and
+// the thread-scoped pending check below, exactly as the agent path relies on
+// the pending unique index.
 func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          parent.AssigneeID,
@@ -855,9 +868,19 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
-	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: parent.ID,
-		AgentID: squad.LeaderID,
+	fireAt := time.Now().Add(service.ChildDoneWakeDebounce)
+	coalesced, err := h.TaskService.CoalesceDeferredChildDoneWake(ctx, parent.ID, squad.LeaderID, triggerCommentID, fireAt)
+	if err != nil {
+		slog.Warn("child done: coalesce parent squad wake failed", "error", err, "parent_id", uuidToString(parent.ID), "leader_id", uuidToString(squad.LeaderID))
+	}
+	if coalesced {
+		return
+	}
+
+	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgentInThread(ctx, db.HasPendingTaskForIssueAndAgentInThreadParams{
+		IssueID:         parent.ID,
+		AgentID:         squad.LeaderID,
+		ThreadCommentID: triggerCommentID,
 		// Key dedup on the reviewed head (TEN-356).
 		HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, parent.ID),
 	})
@@ -865,7 +888,7 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID); err != nil {
+	if _, err := h.TaskService.EnqueueDeferredTaskForSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID, fireAt); err != nil {
 		slog.Warn("child done: enqueue parent squad leader task failed",
 			"error", err,
 			"parent_id", uuidToString(parent.ID),
