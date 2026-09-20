@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/coderesolve"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -122,44 +123,38 @@ func TestLocalDirectoryPathsMustBeAbsolute(t *testing.T) {
 	}
 }
 
-// Invariant 15/18: what a daemon receives is a subset of what it declared it
-// can handle. A daemon that predates user-disk working copies would ignore
-// worktree_root and build the copy inside its env root — so the field is
-// stripped, and that daemon behaves exactly as it does today rather than
-// appearing to honour a setting it cannot implement.
-func TestWorktreeRootIsStrippedForDaemonsThatCannotHonourIt(t *testing.T) {
+// The capability-narrowing matrix is canonical in
+// internal/coderesolve/filter_test.go, where the rule lives. What is left here
+// is the handler's own contract: the conversion is faithful and the caller's
+// slice is not mutated, because the same response is built once and the claim
+// gates below read it.
+func TestFilterForDaemonCapabilitiesConvertsWithoutMutatingTheCaller(t *testing.T) {
 	resources := []ProjectResourceData{
-		{ResourceType: "local_directory", ResourceRef: localRef(t, map[string]any{
+		{ID: "r1", ResourceType: "local_directory", Label: "app", ResourceRef: localRef(t, map[string]any{
 			"local_path": "/Users/me/code/app", "daemon_id": "d1",
 			"execution_mode": "worktree", "worktree_root": "/Users/me/code/app.multica-worktrees",
-			"label": "app",
 		})},
-		{ResourceType: "github_repo", ResourceRef: localRef(t, map[string]any{"url": "https://github.com/o/r"})},
+		{ID: "r2", ResourceType: "github_repo", ResourceRef: localRef(t, map[string]any{"url": "https://github.com/o/r"})},
+		{ID: "r3", ResourceType: "local_directory", ResourceRef: localRef(t, map[string]any{
+			"local_path": "/Users/me/code/docs", "daemon_id": "d1",
+		})},
 	}
 
-	stripped := filterResourcesForDaemonCapabilities(resources, false)
-	var ref map[string]any
-	if err := json.Unmarshal(stripped[0].ResourceRef, &ref); err != nil {
-		t.Fatal(err)
+	narrowed := filterResourcesForDaemonCapabilities(resources, coderesolve.Daemon{ID: "d1"})
+
+	if len(narrowed) != 2 || narrowed[0].ID != "r1" || narrowed[1].ID != "r2" {
+		t.Fatalf("delivered %+v, want r1 and r2", narrowed)
 	}
-	if _, present := ref["worktree_root"]; present {
-		t.Fatal("worktree_root reached a daemon that cannot honour it")
+	if narrowed[0].Label != "app" || narrowed[0].ResourceType != "local_directory" {
+		t.Errorf("conversion lost fields: %+v", narrowed[0])
 	}
-	// Everything else the old daemon DOES implement must survive untouched,
-	// or stripping one field would silently change where the task runs.
-	for key, want := range map[string]any{
-		"local_path": "/Users/me/code/app", "daemon_id": "d1", "execution_mode": "worktree", "label": "app",
-	} {
-		if ref[key] != want {
-			t.Errorf("%s = %v after stripping, want %v", key, ref[key], want)
-		}
+	if strings.Contains(string(narrowed[0].ResourceRef), "worktree_root") {
+		t.Error("worktree_root reached a daemon that cannot honour it")
 	}
-	if string(stripped[1].ResourceRef) != string(resources[1].ResourceRef) {
+	if string(narrowed[1].ResourceRef) != string(resources[1].ResourceRef) {
 		t.Error("a github_repo resource was rewritten by the local_directory filter")
 	}
 
-	// The caller's slice is not mutated: the same response is built once and
-	// the gates below read it.
 	var original map[string]any
 	if err := json.Unmarshal(resources[0].ResourceRef, &original); err != nil {
 		t.Fatal(err)
@@ -168,82 +163,11 @@ func TestWorktreeRootIsStrippedForDaemonsThatCannotHonourIt(t *testing.T) {
 		t.Fatal("filtering mutated the caller's resource slice")
 	}
 
-	// A capable daemon gets the field.
-	kept := filterResourcesForDaemonCapabilities(resources, true)
-	if !strings.Contains(string(kept[0].ResourceRef), "worktree_root") {
-		t.Fatal("worktree_root was stripped for a daemon that advertises support for it")
-	}
-}
-
-// Invariant 15, the other half: a daemon that predates multiple local
-// directories fails the whole task when it sees a second one pinned to itself
-// ("multiple local_directory resources for this daemon"). Its correctness rule
-// then is a task-killing error now, so it never receives the second row.
-func TestOldDaemonsReceiveAtMostOneLocalDirectoryEach(t *testing.T) {
-	resources := []ProjectResourceData{
-		{ID: "r1", ResourceType: "local_directory", ResourceRef: localRef(t, map[string]any{
-			"local_path": "/Users/me/code/app", "daemon_id": "d1",
-		})},
-		{ID: "r2", ResourceType: "github_repo", ResourceRef: localRef(t, map[string]any{"url": "https://github.com/o/r"})},
-		{ID: "r3", ResourceType: "local_directory", ResourceRef: localRef(t, map[string]any{
-			"local_path": "/Users/me/code/docs", "daemon_id": "d1",
-		})},
-		{ID: "r4", ResourceType: "local_directory", ResourceRef: localRef(t, map[string]any{
-			"local_path": "/Users/me/code/notes", "daemon_id": "d1",
-		})},
-		// Another machine's directory is not this daemon's problem and must
-		// still be delivered: every daemon resolves its own row.
-		{ID: "r5", ResourceType: "local_directory", ResourceRef: localRef(t, map[string]any{
-			"local_path": "/Users/me/code/other", "daemon_id": "d2",
-		})},
-	}
-
-	narrowed := filterResourcesForDaemonCapabilities(resources, false)
-
-	perDaemon := map[string]int{}
-	var ids []string
-	for _, res := range narrowed {
-		ids = append(ids, res.ID)
-		if res.ResourceType != "local_directory" {
-			continue
-		}
-		var ref struct {
-			DaemonID string `json:"daemon_id"`
-		}
-		if err := json.Unmarshal(res.ResourceRef, &ref); err != nil {
-			t.Fatal(err)
-		}
-		perDaemon[ref.DaemonID]++
-	}
-	for daemonID, count := range perDaemon {
-		if count > 1 {
-			t.Errorf("daemon %s received %d local directories; its own parser fails the task on the second", daemonID, count)
-		}
-	}
-	// The one it keeps is the first in position order — the same directory a
-	// current daemon would write in, so the task runs where the project says.
-	if got := strings.Join(ids, ","); got != "r1,r2,r5" {
-		t.Errorf("delivered resources = %s, want the first local directory per daemon plus every other type (r1,r2,r5)", got)
-	}
-
-	// A daemon that declared the capability gets all of them.
-	if kept := filterResourcesForDaemonCapabilities(resources, true); len(kept) != len(resources) {
-		t.Errorf("a capable daemon received %d of %d resources", len(kept), len(resources))
-	}
-}
-
-// A ref this server cannot parse is passed through rather than swallowed: the
-// daemon's own parser reports it, and dropping it here would turn a visible
-// "resource_ref is broken" into a task that silently ran somewhere else.
-func TestUnparseableLocalDirectoryRefIsNotDroppedByTheFilter(t *testing.T) {
-	resources := []ProjectResourceData{
-		{ID: "r1", ResourceType: "local_directory", ResourceRef: json.RawMessage(`{"local_path":`)},
-		{ID: "r2", ResourceType: "local_directory", ResourceRef: localRef(t, map[string]any{
-			"local_path": "/Users/me/code/app", "daemon_id": "d1",
-		})},
-	}
-	if narrowed := filterResourcesForDaemonCapabilities(resources, false); len(narrowed) != 2 {
-		t.Fatalf("delivered %d resources, want both — the broken ref belongs to the daemon's parser", len(narrowed))
+	full := filterResourcesForDaemonCapabilities(resources, coderesolve.Daemon{
+		ID: "d1", MultiLocalDirectory: true, WorktreeUserRoot: true,
+	})
+	if len(full) != len(resources) {
+		t.Errorf("a capable daemon received %d of %d resources", len(full), len(resources))
 	}
 }
 
