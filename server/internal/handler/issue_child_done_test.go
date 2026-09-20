@@ -154,6 +154,65 @@ func TestChildDoneNotifiesParent(t *testing.T) {
 	}
 }
 
+// TestChildDoneUnstagedBurstWakesParentOnce exercises the default (unstaged)
+// barrier with three siblings. Every completion may write its own top-level
+// system comment under concurrent delivery, but the parent assignee must keep
+// one durable deferred wake inside the short coalescing window.
+func TestChildDoneUnstagedBurstWakesParentOnce(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent").Scan(&agentID); err != nil {
+		t.Fatalf("locate test agent: %v", err)
+	}
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+	setIssueAssigneeDirect(t, fx.child.ID, "agent", agentID)
+
+	children := []string{fx.child.ID}
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+			"title":           "burst child-done sibling " + time.Now().Format(time.RFC3339Nano),
+			"status":          "in_progress",
+			"parent_issue_id": fx.parent.ID,
+		})
+		testHandler.CreateIssue(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create sibling: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var sibling IssueResponse
+		if err := json.NewDecoder(w.Body).Decode(&sibling); err != nil {
+			t.Fatalf("decode sibling: %v", err)
+		}
+		children = append(children, sibling.ID)
+		setIssueAssigneeDirect(t, sibling.ID, "agent", agentID)
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, sibling.ID) })
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+	})
+
+	for _, childID := range children {
+		updateChildStatus(t, childID, "done")
+	}
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("expected one unstaged barrier comment, got %d", got)
+	}
+	var wakes int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent_task_queue
+		 WHERE issue_id = $1 AND agent_id = $2
+		   AND status IN ('queued', 'dispatched', 'deferred')`, fx.parent.ID, agentID).Scan(&wakes); err != nil {
+		t.Fatalf("count parent wakes: %v", err)
+	}
+	if wakes != 1 {
+		t.Fatalf("expected one deferred parent wake, got %d", wakes)
+	}
+}
+
 // TestChildDoneNotificationIsIdempotent — re-saving an already-done child
 // must NOT fire a second notification. UpdateIssue is called with the same
 // status='done' twice; only the first call is a transition and should
@@ -287,7 +346,7 @@ func countPendingTasksForAgent(t *testing.T, issueID, agentID string) int {
 	if err := testPool.QueryRow(context.Background(),
 		`SELECT count(*) FROM agent_task_queue
 		   WHERE issue_id = $1 AND agent_id = $2
-		     AND status IN ('queued', 'dispatched', 'running')`,
+			 AND status IN ('queued', 'dispatched', 'running', 'deferred')`,
 		issueID, agentID,
 	).Scan(&n); err != nil {
 		t.Fatalf("count pending tasks: %v", err)
@@ -608,7 +667,7 @@ func TestStageLeaderPrepareTimeoutRetryCanAdvanceNextStage(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		SELECT id::text, is_leader_task, squad_id::text, trigger_comment_id::text
 		FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'deferred')
 		ORDER BY created_at DESC
 		LIMIT 1
 	`, fx.parent.ID, sq.LeaderID).Scan(&originalID, &originalLeader, &originalSquadID, &originalTriggerID); err != nil {

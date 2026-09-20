@@ -612,6 +612,14 @@ var legacyUpstreamAuthFaultReasons = map[string]bool{
 // can be deleted once no daemon old enough to produce its wire shape is still
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
+	// Quota wording is authoritative across daemon versions. Older daemons may
+	// report a coarse or otherwise stale agent_error.* label, but the canonical
+	// classifier already gives usage/weekly limits precedence over capacity and
+	// rate-limit witnesses. Keep this boundary rule on Classify rather than
+	// duplicating string matching in the task service.
+	if isAgentSideReason(reason) && Classify(rawError) == ReasonAgentProviderQuotaLimit {
+		return ReasonAgentProviderQuotaLimit
+	}
 	if legacyConcurrentRequestLimitReasons[reason] &&
 		strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
 		return ReasonAgentProviderCapacityOrRateLimit

@@ -163,6 +163,13 @@ const maxSynthesizedFallbackCommentRunes = 8000
 
 const oversizedFallbackCommentNotice = "This task completed, but its output was too large to post safely. The raw output was not posted. Review the task in this issue's Execution log."
 
+func failureCommentBody(failureReason, errMsg string) string {
+	if failureReason == string(taskfailure.ReasonAgentProviderQuotaLimit) {
+		return "Provider quota exhausted; no automatic retry was created. Switch this agent to another available account or seat, then retry. Provider error: " + errMsg
+	}
+	return errMsg
+}
+
 // truncateFallbackCommentBody bounds a synthesized completion-fallback comment
 // body. Unlike truncateForSummary (which flattens newlines for a one-line row
 // snapshot), it preserves genuine final messages below the cap verbatim. Output
@@ -193,7 +200,16 @@ const (
 	// stretching this global crash-recovery window.
 	claimResponseRecoveryWindow = 90 * time.Second
 	prepareLeaseDuration        = 45 * time.Second
+	// childDoneWakeDebounce keeps a burst of sibling completions from starting
+	// one parent run per system comment. The deferred row is durable, so a
+	// process restart still leaves the wake for the normal fire_at promoter.
+	childDoneWakeDebounce = 5 * time.Second
 )
+
+// ChildDoneWakeDebounce is the short coalescing window used by the handler's
+// parent wake path. Keep the policy in the service package so both agent and
+// squad parent triggers use the same duration.
+const ChildDoneWakeDebounce = childDoneWakeDebounce
 
 func (s *TaskService) trackTaskForReclaim(task db.AgentTaskQueue, checkAfter time.Time) {
 	if !task.RuntimeID.Valid || !task.ID.Valid || task.Status != "dispatched" {
@@ -1472,6 +1488,32 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 
 func (s *TaskService) EnqueueTaskForMentionFresh(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, true, "", pgtype.UUID{}, pgtype.UUID{})
+
+// CoalesceDeferredChildDoneWake refreshes the durable child-done wake window
+// when another sibling finishes before the parent run becomes claimable.
+// pgx.ErrNoRows means there was no existing deferred wake and the caller may
+// create the first one.
+func (s *TaskService) CoalesceDeferredChildDoneWake(ctx context.Context, issueID, agentID, triggerCommentID pgtype.UUID, fireAt time.Time) (bool, error) {
+	_, err := s.Queries.CoalesceDeferredChildDoneWake(ctx, db.CoalesceDeferredChildDoneWakeParams{
+		IssueID:          issueID,
+		AgentID:          agentID,
+		TriggerCommentID: triggerCommentID,
+		FireAt:           pgtype.Timestamptz{Time: fireAt, Valid: true},
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// EnqueueDeferredTaskForMention creates a durable, short-lived child-done
+// wake. It remains inert until fireAt and is promoted by the normal deferred
+// task sweeper.
+func (s *TaskService) EnqueueDeferredTaskForMention(ctx context.Context, issue db.Issue, agentID, triggerCommentID pgtype.UUID, fireAt time.Time) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTaskWithOptions(ctx, issue, agentID, triggerCommentID, nil, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{Time: fireAt, Valid: true}, true)
 }
 
 // EnqueueTaskForThreadParent creates a queued task for the agent who authored
@@ -1501,6 +1543,11 @@ func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Is
 
 func (s *TaskService) EnqueueTaskForSquadLeaderFresh(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, true, "", pgtype.UUID{}, pgtype.UUID{})
+
+// EnqueueDeferredTaskForSquadLeader is the child-done debounce variant of the
+// squad-leader enqueue path.
+func (s *TaskService) EnqueueDeferredTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID, squadID, triggerCommentID pgtype.UUID, fireAt time.Time) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTaskWithOptions(ctx, issue, leaderID, triggerCommentID, nil, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{Time: fireAt, Valid: true}, true)
 }
 
 // EnqueueTaskForSquadLeaderByActor is the assign/promote variant of
@@ -1522,6 +1569,10 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 }
 
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTaskWithOptions(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, pgtype.Timestamptz{}, false)
+}
+
+func (s *TaskService) enqueueMentionTaskWithOptions(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, childDoneDebounce bool) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -1577,6 +1628,8 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		DelegatedFromTaskID:  attrDelegatedFrom,
 		TriggerEvidenceKind:  attrEvidenceKind,
 		TriggerEvidenceRefID: attrEvidenceRef,
+		FireAt:               fireAt,
+		ChildDoneDebounce:    pgtype.Bool{Bool: childDoneDebounce, Valid: childDoneDebounce},
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
@@ -1595,10 +1648,12 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
-	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
+	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader, "status", task.Status)
 	// See EnqueueTaskForIssue for ordering rationale.
-	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
-	s.NotifyTaskEnqueued(ctx, task)
+	if task.Status == "queued" {
+		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+		s.NotifyTaskEnqueued(ctx, task)
+	}
 	return task, nil
 }
 
@@ -5128,7 +5183,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// in addition to the coordinator recovery signal, preserving visibility on
 	// both sides of a cross-issue handoff.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(failureCommentBody(failureReason, errMsg)), "system", task.TriggerCommentID, task.ID)
 	}
 
 	// Quick-create tasks: push a failure inbox notification to the
