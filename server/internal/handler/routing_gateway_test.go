@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/routing"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // routingHealthReportForTest is a minimal healthy report: these tests are
@@ -202,4 +203,62 @@ func TestListRoutingModelsUsesWorkspaceTargetAndReturnsIDsOnly(t *testing.T) {
 
 func containsAny(s, sub string) bool {
 	return len(sub) > 0 && len(s) >= len(sub) && strings.Contains(s, sub)
+}
+
+// TestWorkspaceResponseNeverCarriesTheSealedKey pins the redaction to the
+// path a client actually reads from.
+//
+// The rule "the key never reaches a client" was covered only as a pure
+// transformation of a settings map, which passes just as happily with the
+// call removed from workspaceToResponse — the one place that makes the rule
+// true. Reading it back through GetWorkspace is what turns a helper somebody
+// could delete during a refactor into a guard that fails loudly.
+func TestWorkspaceResponseNeverCarriesTheSealedKey(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	previousSettings := []byte{}
+	if err := testPool.QueryRow(context.Background(), `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previousSettings); err != nil {
+		t.Fatalf("read workspace settings: %v", err)
+	}
+	previousSecrets := testHandler.RoutingSecrets
+	box, err := NewRoutingSecretBox("workspace-response-redaction-secret")
+	if err != nil {
+		t.Fatalf("NewRoutingSecretBox: %v", err)
+	}
+	testHandler.RoutingSecrets = box
+	sealed, ok := testHandler.sealRoutingKey("sk-live-must-not-leak")
+	if !ok {
+		t.Fatal("sealRoutingKey refused the test key")
+	}
+	settings, _ := json.Marshal(map[string]any{
+		"github_enabled": true,
+		"routing": map[string]any{
+			"enabled": true, "model": "gpt-5.6-luna",
+			"base_url": "https://gw.example/v1", "api_key_enc": sealed,
+		},
+	})
+	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET settings = $1 WHERE id = $2`, settings, testWorkspaceID); err != nil {
+		t.Fatalf("write workspace settings: %v", err)
+	}
+	t.Cleanup(func() {
+		restore := previousSettings
+		if len(restore) == 0 {
+			restore = []byte(`{}`)
+		}
+		_, _ = testPool.Exec(context.Background(), `UPDATE workspace SET settings = $1 WHERE id = $2`, restore, testWorkspaceID)
+		testHandler.RoutingSecrets = previousSecrets
+	})
+
+	req := withURLParam(newRequest("GET", "/api/workspaces/"+testWorkspaceID, nil), "id", testWorkspaceID)
+	body := testutil.Call(t, testHandler.GetWorkspace, req).Want(http.StatusOK).Text()
+	if strings.Contains(body, sealed) || strings.Contains(body, "api_key_enc") {
+		t.Fatalf("workspace response carried the sealed routing key: %s", body)
+	}
+	// The rest of the block has to survive, or every read renders a workspace
+	// that looks unconfigured and somebody retypes a key that was already set.
+	if !strings.Contains(body, "gpt-5.6-luna") || !strings.Contains(body, "gw.example") {
+		t.Fatalf("redaction dropped non-secret routing fields: %s", body)
+	}
 }
