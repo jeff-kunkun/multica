@@ -100,3 +100,22 @@ export function providerSeatModelDisplay(
   const name = model ? providerPresetModelLabel(model) : parsed.modelId;
   return `${parsed.providerId} · ${name}`;
 }
+
+/**
+ * Whether a catalog row is the one a user means when they type `text` exactly.
+ *
+ * A picker's search matches the decoded spelling, so `deepseek/deepseek-v4.1-flash`
+ * now finds the row stored as `command-code2/deepseek%2Fdeepseek-v4.1-flash`.
+ * The "use custom model" affordance must recognise that same spelling as an
+ * existing row: offering to save what the user typed would store the
+ * unescaped pair, which the seat splits at the first slash into provider
+ * `deepseek` — the DENE-680 400, re-invited by the very spelling DENE-684
+ * taught the picker to display.
+ */
+export function seatModelIsExactly(seatModel: string, text: string): boolean {
+  const needle = text.trim();
+  if (!needle) return false;
+  if (seatModel === needle) return true;
+  if (providerSeatModelDisplay(seatModel) === needle) return true;
+  return parseProviderSeatModelString(seatModel)?.modelId === needle;
+}

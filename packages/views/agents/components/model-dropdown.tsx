@@ -17,7 +17,10 @@ import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
 import { UnavailableModelsNote } from "./unavailable-models-note";
 import { ModelSearchHeader } from "./model-search-header";
-import { providerSeatModelDisplay } from "./provider-seat-model";
+import {
+  providerSeatModelDisplay,
+  seatModelIsExactly,
+} from "./provider-seat-model";
 
 // ModelDropdown renders a searchable, creatable model picker for an agent.
 // It fetches the supported-model catalog from the selected runtime — the
@@ -106,7 +109,7 @@ export function ModelDropdown({
 
   const trimmedSearch = search.trim();
   const exactMatch = models.some(
-    (m) => m.id === trimmedSearch || m.label === trimmedSearch,
+    (m) => seatModelIsExactly(m.id, trimmedSearch) || m.label === trimmedSearch,
   );
   const canCreate = trimmedSearch.length > 0 && !exactMatch;
 

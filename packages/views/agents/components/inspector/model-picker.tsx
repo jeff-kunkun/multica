@@ -16,7 +16,10 @@ import { CHIP_CLASS } from "./chip";
 import { useT } from "../../../i18n";
 import { UnavailableModelsNote } from "../unavailable-models-note";
 import { ModelSearchHeader } from "../model-search-header";
-import { providerSeatModelDisplay } from "../provider-seat-model";
+import {
+  providerSeatModelDisplay,
+  seatModelIsExactly,
+} from "../provider-seat-model";
 
 /**
  * Inline model picker for the agent inspector. Lighter cousin of
@@ -93,7 +96,7 @@ export function ModelPicker({
 
   const trimmedSearch = search.trim();
   const exactMatch = models.some(
-    (m) => m.id === trimmedSearch || m.label === trimmedSearch,
+    (m) => seatModelIsExactly(m.id, trimmedSearch) || m.label === trimmedSearch,
   );
   const canCreate = trimmedSearch.length > 0 && !exactMatch;
 

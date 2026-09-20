@@ -15,6 +15,7 @@ import {
   providerPresetModelLabel,
   providerSeatModelDisplay,
   providerSeatModelString,
+  seatModelIsExactly,
 } from "./provider-seat-model";
 
 function preset(overrides: Partial<RuntimeProviderPreset> = {}): RuntimeProviderPreset {
@@ -105,5 +106,28 @@ describe("providerPresetModelLabel", () => {
     expect(providerPresetModelLabel(catalog[0]!)).toBe("DeepSeek V4.1 Flash");
     expect(providerPresetModelLabel(catalog[1]!)).toBe("claude-sonnet-5");
     expect(providerPresetModelLabel(catalog[2]!)).toBe("gpt-5.6-sol");
+  });
+});
+
+describe("seatModelIsExactly", () => {
+  const encoded = "command-code2/deepseek%2Fdeepseek-v4.1-flash";
+
+  it("recognises the decoded model id a user types", () => {
+    expect(seatModelIsExactly(encoded, "deepseek/deepseek-v4.1-flash")).toBe(true);
+    expect(seatModelIsExactly(encoded, " deepseek/deepseek-v4.1-flash ")).toBe(true);
+  });
+
+  it("recognises the stored string and the displayed pair", () => {
+    expect(seatModelIsExactly(encoded, encoded)).toBe(true);
+    expect(
+      seatModelIsExactly(encoded, "command-code2 · deepseek/deepseek-v4.1-flash"),
+    ).toBe(true);
+  });
+
+  it("does not match a different model or an empty search", () => {
+    expect(seatModelIsExactly(encoded, "deepseek/deepseek-v4.1")).toBe(false);
+    expect(seatModelIsExactly(encoded, "  ")).toBe(false);
+    expect(seatModelIsExactly("claude-opus-5", "claude-opus-5")).toBe(true);
+    expect(seatModelIsExactly("claude-opus-5", "claude-opus")).toBe(false);
   });
 });

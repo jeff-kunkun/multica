@@ -266,6 +266,31 @@ describe("ModelDropdown", () => {
       expect(screen.getByText("DeepSeek V4.1 Flash")).toBeTruthy();
     });
 
+    // The search above teaches the user this spelling; the custom-model row
+    // must not then offer to save it verbatim. `deepseek/deepseek-v4.1-flash`
+    // stored raw splits at the first slash into provider `deepseek` — the
+    // DENE-680 400.
+    it("does not offer to save the decoded spelling as a custom model", async () => {
+      discovery = async () => DSH_CATALOG;
+      const { container } = renderDropdown();
+      openDropdown(container);
+      await screen.findByText("DeepSeek V4.1 Flash");
+
+      const input = screen.getByPlaceholderText(
+        enAgents.pickers.model_search_placeholder,
+      );
+      fireEvent.change(input, { target: { value: "deepseek/deepseek-v4.1-flash" } });
+
+      expect(
+        screen.queryByText(
+          enAgents.pickers.model_custom_use.replace(
+            "{{value}}",
+            "deepseek/deepseek-v4.1-flash",
+          ),
+        ),
+      ).toBeNull();
+    });
+
     it("shows the selected seat model decoded on the trigger", async () => {
       const { container } = renderDropdown({ value: DSH_SEAT });
 
