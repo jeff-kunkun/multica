@@ -603,3 +603,129 @@ type blindReadStore struct{ *fakeStore }
 func (b *blindReadStore) HasComment(context.Context, string, string, CommentKind) (bool, error) {
 	return false, nil
 }
+
+// --- DENE-706: the reported action is the write, not the attempt -----------
+
+func TestLowConfidenceReportsDeclinedWithAReadableReason(t *testing.T) {
+	store := newFakeStore()
+	judge := &fakeJudge{verdict: Verdict{
+		ExecutorTier: "strong", ExecutorConfidence: 0.67,
+		Reviewer: ReviewerSeat, ReviewerTier: "strongest", ReviewerConfidence: 0.38,
+	}}
+	router := newRouter(store, judge)
+
+	// Twice: the slots stay empty, so the second pass is judged again and has
+	// to tell the same truth rather than drifting back to "assigned".
+	for pass := 1; pass <= 2; pass++ {
+		out, err := router.Route(context.Background(), "ws", "issue-1")
+		if err != nil {
+			t.Fatalf("pass %d: unexpected error: %v", pass, err)
+		}
+		if out.Action != ActionDeclined {
+			t.Errorf("pass %d: action = %q, want %q — nothing was written", pass, out.Action, ActionDeclined)
+		}
+		if out.ExecutorWritten != nil || out.ReviewerWritten != "" {
+			t.Errorf("pass %d: outcome claims a write: %+v", pass, out)
+		}
+		for _, want := range []string{"executor not filled: confidence 67% < threshold 70%", "reviewer not filled: confidence 38% < threshold 70%"} {
+			if !strings.Contains(out.Reason, want) {
+				t.Errorf("pass %d: reason = %q, want it to contain %q", pass, out.Reason, want)
+			}
+		}
+	}
+	if store.wrote() {
+		t.Errorf("wrote a value below the threshold: %v %v", store.assigns, store.reviewer)
+	}
+}
+
+func TestPartialFillIsAssignedAndNamesTheSlotLeftEmpty(t *testing.T) {
+	store := newFakeStore()
+	v := confidentVerdict()
+	v.ReviewerConfidence = 0.38
+	out, err := newRouter(store, &fakeJudge{verdict: v}).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Action != ActionAssigned || out.ExecutorWritten == nil {
+		t.Errorf("outcome = %+v, want assigned with an executor", out)
+	}
+	if !strings.Contains(out.Reason, "reviewer not filled") || strings.Contains(out.Reason, "executor not filled") {
+		t.Errorf("reason = %q, want only the reviewer slot named", out.Reason)
+	}
+}
+
+func TestFullFillCarriesNoReason(t *testing.T) {
+	store := newFakeStore()
+	out, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Action != ActionAssigned || out.Reason != "" {
+		t.Errorf("outcome = %+v, want assigned with an empty reason", out)
+	}
+}
+
+func TestBrokenTierAnswerReportsDeclined(t *testing.T) {
+	store := newFakeStore()
+	store.hasProp = false
+	v := confidentVerdict()
+	v.ExecutorTier = "godlike"
+	out, err := newRouter(store, &fakeJudge{verdict: v}).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Action != ActionDeclined || !strings.Contains(out.Reason, `"godlike"`) {
+		t.Errorf("outcome = %+v, want declined naming the tier", out)
+	}
+}
+
+// --- DENE-706: the project table is workspace data --------------------------
+
+func TestWorkspaceProjectRowSendsWorkToTheDirectionSeat(t *testing.T) {
+	store := newFakeStore()
+	store.issue.ProjectName = "PG 适配"
+	store.settings.Projects = map[string]string{"pg 适配": "游戏"}
+
+	if _, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).Route(context.Background(), "ws", "issue-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(store.assigns) != 1 || store.assigns[0] != "孙悟空游戏" {
+		t.Errorf("assigns = %v, want the direction seat [孙悟空游戏]", store.assigns)
+	}
+	if body := store.comments[KindAssignment][0]; !strings.Contains(body, "游戏（来自 project「PG 适配」）") {
+		t.Errorf("comment does not name the direction source:\n%s", body)
+	}
+}
+
+func TestProjectMappedToGenericIsKnownNotUnknown(t *testing.T) {
+	store := newFakeStore()
+	store.issue.ProjectName = "Multica 魔改"
+	store.settings.Projects = map[string]string{"Multica 魔改": GenericDirection}
+
+	if _, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).Route(context.Background(), "ws", "issue-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(store.assigns) != 1 || store.assigns[0] != "孙悟空" {
+		t.Errorf("assigns = %v, want the generic seat", store.assigns)
+	}
+	body := store.comments[KindAssignment][0]
+	if strings.Contains(body, "未知") || !strings.Contains(body, "归为通用") {
+		t.Errorf("a classified-generic project must not read as unknown:\n%s", body)
+	}
+}
+
+func TestProjectRowNamingNoDirectionIsCalledOut(t *testing.T) {
+	store := newFakeStore()
+	store.issue.ProjectName = "tarot"
+	store.settings.Projects = map[string]string{"tarot": "出海海"}
+
+	if _, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).Route(context.Background(), "ws", "issue-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(store.assigns) != 1 || store.assigns[0] != "孙悟空" {
+		t.Errorf("assigns = %v, want the generic seat", store.assigns)
+	}
+	if body := store.comments[KindAssignment][0]; !strings.Contains(body, "出海海") {
+		t.Errorf("comment hides the bad table value:\n%s", body)
+	}
+}

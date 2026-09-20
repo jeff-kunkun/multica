@@ -19,8 +19,14 @@ const (
 	// ActionNoop — this status has no routing behaviour (in_progress, done,
 	// cancelled, backlog), or there was nothing left to fill.
 	ActionNoop Action = "noop"
-	// ActionAssigned — the todo row ran.
+	// ActionAssigned — the todo row wrote at least one slot. It reports a
+	// write, never an attempt: callers batch on this value, and an "assigned"
+	// that wrote nothing is a dispatch that failed silently.
 	ActionAssigned Action = "assigned"
+	// ActionDeclined — the todo row ran, the judge answered, and no slot was
+	// written. Reason says why, slot by slot. Distinct from ActionNoop, which
+	// means there was nothing to decide.
+	ActionDeclined Action = "declined"
 	// ActionHandedOff — the in-review row ran.
 	ActionHandedOff Action = "handed_off"
 	// ActionAdvised — the blocked row ran. Writes nothing.
@@ -34,7 +40,8 @@ const (
 type Outcome struct {
 	State  State
 	Action Action
-	// Reason is a short machine-readable note for logs, not user copy.
+	// Reason is a short note for logs, scripts, and agents, not user copy. It
+	// is never empty when Action reports that nothing was written.
 	Reason string
 	// ExecutorWritten is the seat this call put in the executor slot, if any.
 	ExecutorWritten *Seat
@@ -130,7 +137,9 @@ func (r *Router) Route(ctx context.Context, workspaceID, issueID string) (Outcom
 
 // routeTodo is the only row that fills slots.
 func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Settings, issue Issue) (Outcome, error) {
-	out := Outcome{State: StateEnabled, Action: ActionAssigned}
+	// Declined until a write proves otherwise: the action is derived from what
+	// was written, at the bottom of this function.
+	out := Outcome{State: StateEnabled, Action: ActionDeclined}
 
 	needExecutor := issue.AssigneeType == ""
 	prop, hasReviewerSlot, err := r.Store.Reviewer(ctx, workspaceID)
@@ -147,12 +156,14 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "no empty slot"}, nil
 	}
 
-	direction := r.Ladder.Direction(issue.ProjectName)
+	ladder := r.Ladder.WithProjects(settings.Projects)
+	match := ladder.ResolveDirection(issue.ProjectName)
+	direction := match.Direction
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
 	}
-	candidates := r.Ladder.Candidates(direction, roster)
+	candidates := ladder.Candidates(direction, roster)
 	if len(candidates) == 0 {
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "ladder has no seat in this workspace"}, nil
 	}
@@ -183,6 +194,10 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	// --- executor slot ---------------------------------------------------
 	var executor *Seat
 	executorConfident := executorFromLabel || verdict.ExecutorConfidence >= threshold
+	var unfilled []string
+	if needExecutor && !executorConfident {
+		unfilled = append(unfilled, "executor not filled: confidence "+pct(verdict.ExecutorConfidence)+" < threshold "+pct(threshold))
+	}
 	if needExecutor && executorConfident {
 		seat := labelSeat
 		if !executorFromLabel {
@@ -191,6 +206,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 				// The judge named a rung that is not on the ladder. That is a
 				// broken answer, not an unconfident one: treat it as unfilled.
 				executorConfident = false
+				unfilled = append(unfilled, "executor not filled: judge named tier \""+verdict.ExecutorTier+"\", which has no seat")
 			}
 			seat = s
 		}
@@ -202,6 +218,8 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 			if written {
 				executor = &seat
 				out.ExecutorWritten = &seat
+			} else {
+				unfilled = append(unfilled, "executor not filled: the slot was taken before this call wrote it")
 			}
 		}
 	}
@@ -209,6 +227,9 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	// --- reviewer slot ---------------------------------------------------
 	reviewerName := ""
 	reviewerConfident := verdict.ReviewerConfidence >= threshold
+	if needReviewer && !reviewerConfident {
+		unfilled = append(unfilled, "reviewer not filled: confidence "+pct(verdict.ReviewerConfidence)+" < threshold "+pct(threshold))
+	}
 	if needReviewer && reviewerConfident {
 		name, ok := r.reviewerOptionName(verdict, candidates, executor, issue)
 		if ok {
@@ -220,23 +241,34 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 				if written {
 					reviewerName = name
 					out.ReviewerWritten = name
+				} else {
+					unfilled = append(unfilled, "reviewer not filled: the slot was taken before this call wrote it")
 				}
 			} else {
 				r.log().Warn("routing: reviewer option missing from property",
 					"workspace_id", workspaceID, "issue_id", issue.ID, "option", name)
 				reviewerConfident = false
+				unfilled = append(unfilled, "reviewer not filled: option \""+name+"\" is missing from the reviewer property")
 			}
 		} else {
 			reviewerConfident = false
+			unfilled = append(unfilled, "reviewer not filled: judge named tier \""+verdict.ReviewerTier+"\", which has no seat")
 		}
 	}
+
+	// The action reports the writes, not the fact that this row ran. A partial
+	// fill is still "assigned", and Reason carries the slot that stayed empty.
+	if out.ExecutorWritten != nil || out.ReviewerWritten != "" {
+		out.Action = ActionAssigned
+	}
+	out.Reason = strings.Join(unfilled, "; ")
 
 	// --- notify ----------------------------------------------------------
 	// The one condition that earns an @: the ticket is in a state where
 	// nobody will move it. Here that means the executor slot is still empty,
 	// so the ticket sits in todo until a person notices.
 	stillUnassigned := needExecutor && executor == nil
-	body := r.assignmentComment(issue, direction, candidates, verdict, threshold,
+	body := r.assignmentComment(issue, match, candidates, verdict, threshold,
 		executor, reviewerName, needExecutor, needReviewer, hasReviewerSlot, stillUnassigned,
 		executorFromLabel)
 
@@ -350,12 +382,13 @@ func (r *Router) routeBlocked(ctx context.Context, workspaceID string, settings 
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "already advised"}, nil
 	}
 
-	direction := r.Ladder.Direction(issue.ProjectName)
+	ladder := r.Ladder.WithProjects(settings.Projects)
+	direction := ladder.Direction(issue.ProjectName)
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {
 		return out, err
 	}
-	candidates := r.Ladder.Candidates(direction, roster)
+	candidates := ladder.Candidates(direction, roster)
 	advice, err := r.Judge.Unblock(ctx, settings.Target(), r.judgeState(issue, direction, candidates))
 	if err != nil {
 		return r.reportUnavailable(ctx, workspaceID, issue, err)

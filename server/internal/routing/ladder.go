@@ -42,15 +42,88 @@ func mustLoadLadder() Ladder {
 	return l
 }
 
+// GenericDirection is the table value for "this project is known, and it has
+// no domain": the generic rung, on purpose. It is a value rather than an
+// absence so the decision comment can tell a project nobody classified from
+// one somebody classified as general-purpose.
+const GenericDirection = "通用"
+
+// DirectionMatch is how a project resolved against the project table.
+type DirectionMatch struct {
+	// Direction is the resolved direction, empty for the generic rung.
+	Direction string
+	// Known reports that the table has a usable row for this project. A known
+	// project with an empty Direction was deliberately mapped to generic.
+	Known bool
+	// Invalid carries a table value that names no declared direction. Such a
+	// row is ignored rather than followed: base+typo names no seat, and the
+	// silent fallback would hide the typo forever.
+	Invalid string
+}
+
+// WithProjects returns the ladder with a workspace's own project rows laid
+// over the shipped ones. The workspace rows win, which is what makes the table
+// editable without a release: ladder.json is only the default.
+func (l Ladder) WithProjects(overrides map[string]string) Ladder {
+	if len(overrides) == 0 {
+		return l
+	}
+	merged := make(map[string]string, len(l.Projects)+len(overrides))
+	for k, v := range l.Projects {
+		merged[normalizeProjectKey(k)] = v
+	}
+	for k, v := range overrides {
+		merged[normalizeProjectKey(k)] = v
+	}
+	l.Projects = merged
+	return l
+}
+
+func normalizeProjectKey(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
 // Direction resolves an issue's direction from its project name. An unknown or
 // empty project yields "", which means the generic rung — routing never guesses
 // a direction, because guessing one silently sends work to a seat carrying the
 // wrong domain pack.
 func (l Ladder) Direction(projectName string) string {
-	if projectName == "" {
-		return ""
+	return l.ResolveDirection(projectName).Direction
+}
+
+// ResolveDirection looks a project up in the table: an exact row first, then
+// the longest `prefix*` row, both case-insensitive. Rows are data typed by a
+// person, so a family of projects (game-*) is one row rather than one per
+// project that will ever exist.
+func (l Ladder) ResolveDirection(projectName string) DirectionMatch {
+	name := normalizeProjectKey(projectName)
+	if name == "" {
+		return DirectionMatch{}
 	}
-	return l.Projects[projectName]
+	value, found, bestLen := "", false, -1
+	for rawKey, v := range l.Projects {
+		key := normalizeProjectKey(rawKey)
+		if key == name {
+			value, found = v, true
+			break
+		}
+		if prefix, ok := strings.CutSuffix(key, "*"); ok && strings.HasPrefix(name, prefix) && len(prefix) > bestLen {
+			value, found, bestLen = v, true, len(prefix)
+		}
+	}
+	if !found {
+		return DirectionMatch{}
+	}
+	value = strings.TrimSpace(value)
+	if value == "" || value == GenericDirection {
+		return DirectionMatch{Known: true}
+	}
+	for _, d := range l.Directions {
+		if d == value {
+			return DirectionMatch{Direction: d, Known: true}
+		}
+	}
+	return DirectionMatch{Invalid: value}
 }
 
 // Seat is one routable agent.

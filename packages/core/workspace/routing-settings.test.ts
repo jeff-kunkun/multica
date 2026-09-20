@@ -146,6 +146,23 @@ describe("withRoutingSettings", () => {
     });
   });
 
+  // DENE-706: the project -> direction table lives in the same block and is
+  // written by the CLI. A save from this form must not erase it.
+  it("carries routing fields this form does not own through a save", () => {
+    const out = withRoutingSettings(
+      { routing: { enabled: false, model: "old", projects: { tarot: "出海" }, future: 1 } },
+      { enabled: true, model: "m", confidence_threshold: 0.7, base_url: "" },
+    );
+    expect(out.routing).toEqual({
+      enabled: true,
+      model: "m",
+      confidence_threshold: 0.7,
+      base_url: "",
+      projects: { tarot: "出海" },
+      future: 1,
+    });
+  });
+
   // The key is write-only and lives outside RoutingSettings: the three cases
   // are what keeps an unrelated settings save from deleting a stored key.
   it("omits the key field entirely when no key was typed", () => {
