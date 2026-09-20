@@ -40,14 +40,15 @@ export function sortIssues(
   issues: Issue[],
   field: SortField,
   direction: SortDirection,
-  pinnedIds?: ReadonlySet<string>
+  pinnedIds?: ReadonlySet<string>,
+  statusOrder?: readonly string[],
 ): Issue[] {
   if (pinnedIds && pinnedIds.size > 0) {
-    return sortByField(issues, field, direction).toSorted(
+    return sortByField(issues, field, direction, statusOrder).toSorted(
       (a, b) => pinnedRank(a, pinnedIds) - pinnedRank(b, pinnedIds)
     );
   }
-  return sortByField(issues, field, direction);
+  return sortByField(issues, field, direction, statusOrder);
 }
 
 function pinnedRank(issue: Issue, pinnedIds: ReadonlySet<string>): number {
@@ -57,7 +58,8 @@ function pinnedRank(issue: Issue, pinnedIds: ReadonlySet<string>): number {
 function sortByField(
   issues: Issue[],
   field: SortField,
-  direction: SortDirection
+  direction: SortDirection,
+  statusOrder?: readonly string[],
 ): Issue[] {
   // `property:<id>` sorts by the custom-property value. Number values sort
   // numerically; date values are date-only "YYYY-MM-DD" strings, which sort
@@ -89,6 +91,10 @@ function sortByField(
           (PRIORITY_RANK[b.priority] ?? 99)
         );
       case "status":
+        if (statusOrder) {
+          const rank = new Map(statusOrder.map((status, index) => [status, index]));
+          return dir * ((rank.get(a.status) ?? rank.size) - (rank.get(b.status) ?? rank.size));
+        }
         return dir * (
           (STATUS_RANK[issueColumnCategory(a)] ?? STATUS_ORDER.length) -
           (STATUS_RANK[issueColumnCategory(b)] ?? STATUS_ORDER.length)

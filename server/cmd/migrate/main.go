@@ -310,6 +310,11 @@ var concurrentIndexCleanups = map[string]string{
 	"482_stage_wakeup_failure_parent_index":                     "idx_stage_wakeup_failure_parent",
 	"486_issue_draft_origin_unique":                             "idx_issue_origin_issue_draft_unique",
 	"488_agent_parent_index":                                    "idx_agent_parent_agent_id",
+	"472_agent_task_queue_chat_session_index":                   "idx_agent_task_queue_chat_session",
+	"474_dingtalk_bot_identity_workspace_index":                 "idx_dingtalk_bot_identity_workspace",
+	"480_instance_telemetry_state_singleton_index":              "instance_telemetry_state_singleton_uidx",
+	"482_agent_task_queue_telemetry_started_index":              "idx_agent_task_queue_telemetry_started",
+	"484_issue_triage_state_index":                              "idx_issue_triage_state",
 	"498_project_resource_local_directory_identity":             "idx_project_resource_local_directory_identity",
 	"499_project_resource_local_directory_repo":                 "idx_project_resource_local_directory_repo",
 }

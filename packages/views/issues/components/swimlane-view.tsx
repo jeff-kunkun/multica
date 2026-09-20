@@ -644,7 +644,12 @@ function SwimLaneViewImpl({
   const swimlaneOrder = swimlaneOrders[swimlaneGrouping];
 
   const wsId = useWorkspaceId();
-  const { categoryOf } = useIssueStatuses(wsId);
+  const statusCatalog = useIssueStatuses(wsId);
+  const { categoryOf } = statusCatalog;
+  const statusOrder = useMemo(
+    () => statusCatalog.statuses.map((status) => status.key),
+    [statusCatalog.statuses],
+  );
 
   const activeFilters = useMemo(() => ({
     // Status is enforced by visible-column rendering, not by filterIssues
@@ -864,7 +869,7 @@ function SwimLaneViewImpl({
     // The server already ranked this window; swapping in the client's own
     // comparator would drop the pinned block, so the same leading key has to
     // be passed through. (DENE-500)
-    const sorted = sortIssues(issueSource, sortBy, sortDirection, pinnedIssueIds);
+    const sorted = sortIssues(issueSource, sortBy, sortDirection, pinnedIssueIds, statusOrder);
     for (const issue of sorted) {
       let placed = false;
       for (const lane of laneGroups) {
@@ -902,7 +907,7 @@ function SwimLaneViewImpl({
       }
     }
     return result;
-  }, [issues, mergedIssues, laneGroups, sortedStatuses, sortBy, sortDirection, headerIssueIds, swimlaneGrouping, pinnedIssueIds]);
+  }, [issues, mergedIssues, laneGroups, sortedStatuses, sortBy, sortDirection, headerIssueIds, swimlaneGrouping, pinnedIssueIds, statusOrder]);
 
   const laneByKey = useMemo(() => {
     const map = new Map<string, LaneGroup>();

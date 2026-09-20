@@ -102,28 +102,7 @@ vi.mock("../../navigation", () => ({
 }));
 
 // Mock issue config
-vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_CONFIG: {
-    backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
-    in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
-    done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
-    blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
-    cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-  },
-  PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
-  PRIORITY_DISPLAY_ORDER: ["none", "urgent", "high", "medium", "low"],
-  PRIORITY_CONFIG: {
-    urgent: { label: "Urgent", bars: 4, color: "text-destructive" },
-    high: { label: "High", bars: 3, color: "text-warning" },
-    medium: { label: "Medium", bars: 2, color: "text-warning" },
-    low: { label: "Low", bars: 1, color: "text-info" },
-    none: { label: "No priority", bars: 0, color: "text-muted-foreground" },
-  },
-}));
+// Use the real status configuration so category fixtures cannot drift.
 
 type SwimlaneGroupingMock = "parent" | "project" | "assignee";
 
@@ -420,7 +399,7 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    expect(screen.getByText("Backlog")).toBeInTheDocument();
+    expect(screen.getByText("Todo")).toBeInTheDocument();
     expect(screen.getByText("Todo")).toBeInTheDocument();
     expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
@@ -477,13 +456,14 @@ describe("SwimLaneView", () => {
     identifier: "PROJ-10",
     title: "Awaiting Reporter",
     status: "awaiting_response",
-    status_category: "in_review",
+    status_category: "started",
   };
 
-  it("renders a custom-status card in its category's column", () => {
+  it("renders a custom-status card in its own status column", () => {
     renderWithI18n(
       <SwimLaneView
         issues={[...mockIssues, customStatusOrphan]}
+        visibleStatuses={["todo", "in_progress", "awaiting_response"]}
         onMoveIssue={vi.fn()}
       />,
     );
@@ -496,12 +476,9 @@ describe("SwimLaneView", () => {
       <SwimLaneView
         issues={[...mockIssues, cancelledOrphan]}
         visibleStatuses={[
-          "backlog",
           "todo",
           "in_progress",
-          "in_review",
           "done",
-          "blocked",
         ]}
         onMoveIssue={vi.fn()}
       />,
@@ -627,7 +604,7 @@ describe("SwimLaneView", () => {
     // No parent + Parent Issue 1 each have one + per visible status column.
     // The Other parents lane must add zero.
     const realLaneCount = 2;
-    const visibleStatusCount = 7; // ALL_STATUSES default (cancelled included)
+    const visibleStatusCount = 7; // Four lifecycle categories (closed included)
     expect(
       screen.getAllByRole("button", { name: /add issue/i }).length,
     ).toBe(realLaneCount * visibleStatusCount);
@@ -668,7 +645,7 @@ describe("SwimLaneView", () => {
         issues={mockIssues.filter((i) => i.status === "todo")}
         unfilteredIssues={mockIssues}
         visibleStatuses={["todo"]}
-        hiddenStatuses={["backlog", "in_progress", "in_review", "done", "blocked"]}
+        hiddenStatuses={["in_progress", "done"]}
         onMoveIssue={vi.fn()}
       />,
     );
@@ -837,13 +814,13 @@ describe("SwimLaneView", () => {
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
-        visibleStatuses={["backlog", "todo", "in_progress", "in_review", "done"]}
-        hiddenStatuses={["blocked"]}
+        visibleStatuses={["todo", "in_progress", "cancelled"]}
+        hiddenStatuses={["done"]}
         onMoveIssue={vi.fn()}
       />,
     );
     expect(screen.getByText("Hidden columns")).toBeInTheDocument();
-    expect(screen.getByText("Blocked")).toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeInTheDocument();
   });
 
   it("calls onMoveIssue on drag-and-drop end", () => {
@@ -924,27 +901,28 @@ describe("SwimLaneView", () => {
       "orphan-1",
       expect.objectContaining({
         parent_issue_id: "parent-1",
-        status: "todo",
       }),
       expect.any(Function),
     );
+    // Moving lanes within Unstarted must preserve the concrete Backlog key.
+    expect(mockOnMoveIssue.mock.calls[0]![1]).toHaveProperty("status", "todo");
   });
 
   it("renders count for hidden statuses from in-memory statusTotals", () => {
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
-        visibleStatuses={["todo", "in_progress", "in_review", "done"]}
-        hiddenStatuses={["backlog", "blocked"]}
+        visibleStatuses={["in_progress", "done", "cancelled"]}
+        hiddenStatuses={["backlog"]}
         onMoveIssue={vi.fn()}
       />,
     );
 
     const panel = screen.getByText("Hidden columns").parentElement!.parentElement!;
     expect(panel).toHaveTextContent("Backlog");
-    expect(panel).toHaveTextContent("Blocked");
+    expect(panel).not.toHaveTextContent("In Progress");
+    // The parent represented by a lane header is not counted as a card.
     expect(panel).toHaveTextContent("1");
-    expect(panel).toHaveTextContent("0");
   });
 
   it("hidden-column totals come from unfilteredIssues when provided", () => {
@@ -964,17 +942,18 @@ describe("SwimLaneView", () => {
       <SwimLaneView
         issues={mockIssues}
         unfilteredIssues={unfiltered}
-        visibleStatuses={["todo", "in_progress", "in_review", "done"]}
-        hiddenStatuses={["backlog", "blocked"]}
+        visibleStatuses={["done", "cancelled"]}
+        hiddenStatuses={["backlog", "in_progress", "blocked"]}
         onMoveIssue={vi.fn()}
       />,
     );
 
     const panel = screen.getByText("Hidden columns").parentElement!.parentElement!;
     expect(panel).toHaveTextContent("Backlog");
-    expect(panel).toHaveTextContent("Blocked");
+    expect(panel).toHaveTextContent("In Progress");
     const counts = [...panel.querySelectorAll("span")].map((el) => el.textContent);
-    expect(counts.filter((c) => c === "1").length).toBeGreaterThanOrEqual(2);
+    expect(counts).toContain("1");
+    expect(counts.filter((count) => count === "1")).toHaveLength(3);
   });
 
   const multiParentIssues: Issue[] = [
@@ -1332,9 +1311,10 @@ describe("SwimLaneView", () => {
 
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "issue-c",
-      expect.objectContaining({ project_id: "proj-1", status: "todo" }),
+      expect.objectContaining({ project_id: "proj-1" }),
       expect.any(Function),
     );
+    expect(mockOnMoveIssue.mock.calls[0]?.[1]).not.toHaveProperty("status");
   });
 
   it("emits null project_id when a card is dropped into the 'No project' lane", () => {
@@ -1345,7 +1325,7 @@ describe("SwimLaneView", () => {
       <SwimLaneView issues={projectIssues} onMoveIssue={mockOnMoveIssue} />,
     );
 
-    const target = "swim:project:none:in_review";
+    const target = "swim:project:none:in_progress";
     act(() => {
       lastOnDragOver({ active: { id: "issue-a" }, over: { id: target } });
     });
@@ -1355,7 +1335,7 @@ describe("SwimLaneView", () => {
 
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "issue-a",
-      expect.objectContaining({ project_id: null, status: "in_review" }),
+      expect.objectContaining({ project_id: null, status: "in_progress" }),
       expect.any(Function),
     );
   });
@@ -1424,7 +1404,7 @@ describe("SwimLaneView", () => {
       <SwimLaneView issues={assigneeIssues} onMoveIssue={mockOnMoveIssue} />,
     );
 
-    const target = "swim:assignee:member:user-1:in_review";
+    const target = "swim:assignee:member:user-1:in_progress";
     act(() => {
       lastOnDragOver({ active: { id: "issue-z" }, over: { id: target } });
     });
@@ -1437,7 +1417,7 @@ describe("SwimLaneView", () => {
       expect.objectContaining({
         assignee_type: "member",
         assignee_id: "user-1",
-        status: "in_review",
+        status: "in_progress",
       }),
       expect.any(Function),
     );

@@ -65,10 +65,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Test CI selection and gates
+        run: node --test scripts/ci-scope.test.mjs scripts/check-image-budget.test.mjs
+
       - name: Filter paths
         id: filter
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         uses: dorny/paths-filter@v3
         with:
+          # Pushes compare before/head SHAs. PRs use the pull-request file API.
+          base: ${{ github.event_name == 'push' && github.event.before || github.base_ref }}
+          ref: ${{ github.sha }}
           # apps/docs is excluded from the frontend turbo run, but knip does
           # analyze it, so a docs-only change still needs this job.
           # apps/mobile has its own mobile-verify workflow. Everything else
