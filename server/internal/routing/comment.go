@@ -107,7 +107,7 @@ func (r *Router) assignmentComment(
 }
 
 // handoffComment is the in-review-row comment.
-func (r *Router) handoffComment(issue Issue, to string, toHuman bool, target Member) string {
+func (r *Router) handoffComment(issue Issue, to string, toHuman bool, target Member, decidedHere bool) string {
 	var b strings.Builder
 	b.WriteString("## 交接\n\n")
 	b.WriteString("这张票进入了待验收。\n\n")
@@ -116,6 +116,9 @@ func (r *Router) handoffComment(issue Issue, to string, toHuman bool, target Mem
 		from = "无人"
 	}
 	b.WriteString(fmt.Sprintf("- 已从 %s 改派给 **%s**\n", from, to))
+	if decidedHere {
+		b.WriteString("- 这张票之前没有验收席，路由在它进入待验收时现场定了一个并填上\n")
+	}
 	if toHuman {
 		b.WriteString("- 验收席填的是人，所以 @ 你，不会有 agent 被叫醒\n")
 	} else {

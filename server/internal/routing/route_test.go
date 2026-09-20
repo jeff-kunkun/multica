@@ -739,3 +739,78 @@ func TestProjectRowNamingNoDirectionIsCalledOut(t *testing.T) {
 		t.Errorf("comment hides the bad table value:\n%s", body)
 	}
 }
+
+// The in-review row used to give up when the reviewer slot was empty, which is
+// how a workspace accumulates tickets sitting in review that nobody was ever
+// told to check: every ticket dispatched by hand, and every ticket that
+// predates routing, has an empty slot. It now decides one at this row.
+func TestInReviewFillsAnEmptyReviewerSlotAndHandsOff(t *testing.T) {
+	store := newFakeStore()
+	store.issue.Status = "in_review"
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-goku-g"
+	store.issue.Reviewer = ""
+	judge := &fakeJudge{verdict: confidentVerdict()}
+
+	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Action != ActionHandedOff {
+		t.Fatalf("action = %q, want %q (reason %q)", out.Action, ActionHandedOff, out.Reason)
+	}
+	if out.ReviewerWritten != "布尔玛游戏" {
+		t.Errorf("reviewer written = %q, want 布尔玛游戏", out.ReviewerWritten)
+	}
+	if len(store.reviewer) != 1 || store.reviewer[0] != "o-bulma-g" {
+		t.Errorf("reviewer slot = %v, want [o-bulma-g]", store.reviewer)
+	}
+	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-bulma-g" {
+		t.Errorf("handoffs = %v, want [agent:a-bulma-g]", store.handoffs)
+	}
+	body := store.comments[KindHandoff][0]
+	if !strings.Contains(body, "现场定了一个") {
+		t.Errorf("handoff comment hides that the reviewer was decided at this row:\n%s", body)
+	}
+}
+
+// A seat may not accept its own output, including when the reviewer is decided
+// at the in-review row, where the executor is read off the issue rather than
+// from a write this call just made.
+func TestInReviewDecidedReviewerIsNeverTheExecutor(t *testing.T) {
+	store := newFakeStore()
+	store.issue.Status = "in_review"
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-bulma-g" // the seat the judge is about to name
+	store.issue.Reviewer = ""
+	judge := &fakeJudge{verdict: confidentVerdict()}
+
+	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.ReviewerWritten != OptionHuman {
+		t.Errorf("reviewer = %q, want %q — the top rung did the work, so the check falls to a person",
+			out.ReviewerWritten, OptionHuman)
+	}
+	if len(store.handoffs) != 1 || store.handoffs[0] != "member:user-1" {
+		t.Errorf("handoffs = %v, want [member:user-1]", store.handoffs)
+	}
+}
+
+// Routing still never writes status, whichever row filled the reviewer slot.
+func TestInReviewDecisionNeverTouchesStatus(t *testing.T) {
+	store := newFakeStore()
+	store.issue.Status = "in_review"
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-goku-g"
+	store.issue.Reviewer = ""
+
+	if _, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).
+		Route(context.Background(), "ws", "issue-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if store.issue.Status != "in_review" {
+		t.Errorf("status = %q — routing moved a ticket's status", store.issue.Status)
+	}
+}
