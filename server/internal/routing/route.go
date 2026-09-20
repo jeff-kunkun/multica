@@ -120,7 +120,7 @@ func (r *Router) Route(ctx context.Context, workspaceID, issueID string) (Outcom
 	case "todo":
 		return r.routeTodo(ctx, workspaceID, settings, issue)
 	case "in_review":
-		return r.routeInReview(ctx, workspaceID, issue)
+		return r.routeInReview(ctx, workspaceID, settings, issue)
 	case "blocked":
 		return r.routeBlocked(ctx, workspaceID, settings, issue)
 	case "in_progress", "done", "cancelled", "backlog":
@@ -369,16 +369,34 @@ func (r *Router) reviewerOptionName(v Verdict, candidates []Seat, executor *Seat
 // a slot, it moves the ticket, so it is not governed by the fill-only rule —
 // but it still runs at most once per issue, because the handoff comment is
 // posted at most once per issue.
-func (r *Router) routeInReview(ctx context.Context, workspaceID string, issue Issue) (Outcome, error) {
+func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings Settings, issue Issue) (Outcome, error) {
 	out := Outcome{State: StateEnabled, Action: ActionHandedOff}
+	decidedHere := false
+	if issue.Reviewer == "" {
+		// Nothing was ever decided for this slot: the ticket was dispatched by
+		// hand, or it predates routing. Giving up here is what leaves a queue
+		// of tickets sitting in review that nobody was ever told to check, so
+		// the reviewer is decided now, by the same judge and the same ladder
+		// fallback the todo row uses. This is still a fill, not an overwrite —
+		// the write is conditional on the slot being empty.
+		name, outcome, err := r.decideReviewerNow(ctx, workspaceID, settings, issue)
+		if err != nil || name == "" {
+			return outcome, err
+		}
+		issue.Reviewer = name
+		out.ReviewerWritten = name
+		decidedHere = true
+	}
 	switch issue.Reviewer {
 	case "":
-		// Nothing was ever decided for this slot — most likely the executor
-		// went out under the threshold and the ticket was picked up by hand.
-		// There is nobody to hand to, and the todo row already notified.
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "reviewer slot is empty"}, nil
 	case OptionNoReview:
-		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "issue needs no acceptance pass"}, nil
+		return Outcome{
+			State:           StateEnabled,
+			Action:          ActionNoop,
+			Reason:          "issue needs no acceptance pass",
+			ReviewerWritten: out.ReviewerWritten,
+		}, nil
 	}
 
 	done, err := r.Store.HasComment(ctx, workspaceID, issue.ID, KindHandoff)
@@ -402,7 +420,7 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, issue Is
 		if err := r.Store.Handoff(ctx, workspaceID, issue.ID, "member", target.UserID); err != nil {
 			return out, err
 		}
-		body := r.handoffComment(issue, target.Name, true, target)
+		body := r.handoffComment(issue, target.Name, true, target, decidedHere)
 		return r.deliver(ctx, workspaceID, issue, KindHandoff, body, true, out)
 	}
 
@@ -422,8 +440,75 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, issue Is
 	}
 	// No mention: assignment itself starts the seat's run, so an @ here would
 	// only be noise to somebody who is not needed.
-	body := r.handoffComment(issue, seatAgent.Name, false, Member{})
+	body := r.handoffComment(issue, seatAgent.Name, false, Member{}, decidedHere)
 	return r.deliver(ctx, workspaceID, issue, KindHandoff, body, false, out)
+}
+
+// decideReviewerNow fills an empty reviewer slot at the in-review row. It is
+// the todo row's reviewer half, reached from the other end: same judge, same
+// threshold, same ladder fallback, same conditional write. It returns the
+// option name that is now in the slot, or an empty name plus the Outcome to
+// return when there is nothing to decide.
+func (r *Router) decideReviewerNow(ctx context.Context, workspaceID string, settings Settings, issue Issue) (string, Outcome, error) {
+	noop := func(reason string) Outcome {
+		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: reason}
+	}
+	prop, hasSlot, err := r.Store.Reviewer(ctx, workspaceID)
+	if err != nil {
+		return "", Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "reviewer property unreadable"}, err
+	}
+	if !hasSlot {
+		return "", noop("workspace has no reviewer property"), nil
+	}
+
+	ladder := r.Ladder.WithProjects(settings.Projects)
+	direction := ladder.Direction(issue.ProjectName)
+	roster, err := r.Store.Roster(ctx, workspaceID)
+	if err != nil {
+		return "", Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
+	}
+	candidates := ladder.Candidates(direction, roster)
+	if len(candidates) == 0 {
+		return "", noop("ladder has no seat in this workspace"), nil
+	}
+
+	verdict, err := r.Judge.Assign(ctx, settings.Target(), r.judgeState(issue, direction, candidates))
+	if err != nil {
+		out, err := r.reportUnavailable(ctx, workspaceID, issue, err)
+		return "", out, err
+	}
+	r.Breaker.Succeed(workspaceID)
+
+	// executor is nil on purpose: at this row the ticket is already held by
+	// whoever did the work, and reviewerOptionName reads that holder off the
+	// issue to keep a seat from reviewing its own output.
+	name, ok := r.reviewerOptionName(verdict, candidates, nil, issue)
+	if !ok || verdict.ReviewerConfidence < settings.Threshold() {
+		name = r.fallbackReviewer(candidates, nil, issue)
+	}
+	optID, exists := prop.Options[name]
+	if !exists {
+		r.log().Warn("routing: reviewer option missing from property",
+			"workspace_id", workspaceID, "issue_id", issue.ID, "option", name)
+		return "", noop("reviewer option \"" + name + "\" is missing from the reviewer property"), nil
+	}
+	written, err := r.Store.SetReviewerIfUnset(ctx, workspaceID, issue.ID, prop.ID, optID)
+	if err != nil {
+		return "", Outcome{State: StateEnabled, Action: ActionHandedOff}, err
+	}
+	if !written {
+		// Another pass filled it between the read and the write. Whatever it
+		// wrote is the answer; re-read rather than hand off to a stale one.
+		fresh, err := r.Store.Issue(ctx, workspaceID, issue.ID)
+		if err != nil {
+			return "", Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "issue unreadable"}, err
+		}
+		if fresh.Reviewer == "" {
+			return "", noop("reviewer slot is empty"), nil
+		}
+		return fresh.Reviewer, Outcome{}, nil
+	}
+	return name, Outcome{}, nil
 }
 
 // routeBlocked writes nothing. A blocked ticket is stuck on something routing
