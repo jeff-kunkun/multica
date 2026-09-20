@@ -16,6 +16,10 @@ import (
 type assistantTurn struct {
 	text     string
 	toolUses int
+	// lastContextTokens is the input-side context size reported for this
+	// assistant step. It is provider-specific and remains nil for backends
+	// whose stream does not expose that measurement.
+	lastContextTokens *int64
 	// understood is false when the event's message body failed to parse, or
 	// carried a content block type the backend does not handle. In both cases
 	// the backend cannot tell whether the model delivered its answer inside

@@ -41,7 +41,7 @@ func TestBreakerTripsOnRealUpstreamStatus(t *testing.T) {
 			judge := newUpstream(t, code)
 			b := NewBreaker()
 
-			_, err := judge.Assign(context.Background(), "gpt-5.6-luna", JudgeState{Title: "t", Status: "todo"})
+			_, err := judge.Assign(context.Background(), Target{Model: "gpt-5.6-luna"}, JudgeState{Title: "t", Status: "todo"})
 			if err == nil {
 				t.Fatal("Assign succeeded against an error-only upstream")
 			}
@@ -66,7 +66,7 @@ func TestBreakerCountsOrdinaryUpstreamFailures(t *testing.T) {
 	judge := newUpstream(t, http.StatusInternalServerError)
 	b := NewBreaker()
 	for i := 1; i <= DefaultFailuresToTrip; i++ {
-		_, err := judge.Assign(context.Background(), "gpt-5.6-luna", JudgeState{Title: "t", Status: "todo"})
+		_, err := judge.Assign(context.Background(), Target{Model: "gpt-5.6-luna"}, JudgeState{Title: "t", Status: "todo"})
 		if err == nil {
 			t.Fatal("Assign succeeded against an error-only upstream")
 		}
@@ -83,7 +83,7 @@ func TestBreakerCountsOrdinaryUpstreamFailures(t *testing.T) {
 // it is a settings-level fact — Route keeps it off the ticket entirely.
 func TestUnconfiguredDeploymentTripsTheBreaker(t *testing.T) {
 	judge := LLMJudge{Gen: llm.New(llm.Config{})}
-	_, err := judge.Assign(context.Background(), "some-model", JudgeState{Title: "t", Status: "todo"})
+	_, err := judge.Assign(context.Background(), Target{Model: "some-model"}, JudgeState{Title: "t", Status: "todo"})
 	if err == nil {
 		t.Fatal("Assign succeeded with no LLM configured")
 	}

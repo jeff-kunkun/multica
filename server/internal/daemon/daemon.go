@@ -734,10 +734,12 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
 	repocache.SetGitTimeout(cfg.RepoCacheGitTimeout)
+	cache := repocache.New(cacheRoot, logger)
+	cache.SetFetchCooldown(cfg.RepoCacheFetchCooldown)
 	d := &Daemon{
 		cfg:                       cfg,
 		client:                    client,
-		repoCache:                 repocache.New(cacheRoot, logger),
+		repoCache:                 cache,
 		skillCache:                NewSkillBundleCache(skillCacheRoot),
 		logger:                    logger,
 		workspaces:                make(map[string]*workspaceState),
@@ -6056,6 +6058,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, lease *taskSlotLease
 	phaseRecorder := newTaskPhaseRecorder(taskLog.With("task_id", task.ID, "runtime_id", task.RuntimeID), time.Now)
 	ctx = withTaskPhaseRecorder(ctx, phaseRecorder)
 	phaseRecorder.Mark(taskPhaseClaimed)
+	if createdAt, err := time.Parse(time.RFC3339Nano, task.CreatedAt); err == nil {
+		value := time.Since(createdAt).Milliseconds()
+		task.QueueToClaimMS = &value
+	}
 	defer phaseRecorder.Mark(taskPhaseFinished)
 	agentName := "agent"
 	if task.Agent != nil {
@@ -8972,6 +8978,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.LocalWorktree != nil && len(env.LocalWorktree.ReplayConflicts) > 0 {
 		promptOptions = append(promptOptions, WithWorktreeReplayConflicts(env.LocalWorktree.ReplayConflicts))
 	}
+	if env.LocalWorktree != nil && env.LocalWorktree.StaleBaselineNotice != "" {
+		promptOptions = append(promptOptions, WithStaleLocalBaseline(env.LocalWorktree.StaleBaselineNotice))
+	}
+	if command := dependencyInstallCommand(env.WorkDir); command != "" {
+		promptOptions = append(promptOptions, WithDependencyInstallCommand(command))
+	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
@@ -9198,9 +9210,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	thinkingLevel := ""
 	serviceTier := ""
+	claudeAutoCompactTokens := 0
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel
 		serviceTier = task.Agent.ServiceTier
+		if provider == "claude" && len(task.Agent.RuntimeConfig) > 0 {
+			claudeAutoCompactTokens = decodeClaudeRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
+		}
 	}
 	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
 		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
@@ -9221,6 +9237,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
 		TurnInterruptTimeout:       d.cfg.CodexTurnInterruptTimeout,
 		ThreadHandshakeTimeout:     d.cfg.CodexThreadHandshakeTimeout,
+		ClaudeAutoCompactTokens:    claudeAutoCompactTokens,
 		ResumeSessionID:            task.PriorSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
 		// resume gates (a dropped resume is surfaced via the prompt instead). If it
@@ -9460,19 +9477,45 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	)
 
 	// Convert agent usage map to task usage entries.
+	phaseSamples := phaseRecorder.Snapshot()
+	var queueToClaimMS, prepareMS, spawnToFirstOutputMS, totalMS *int64
+	queueToClaimMS = task.QueueToClaimMS
+	if sample, ok := phaseSamples[taskPhaseEnvironmentReady]; ok {
+		value := sample.TotalElapsed.Milliseconds()
+		prepareMS = &value
+	}
+	if runtimeStarted, ok := phaseSamples[taskPhaseRuntimeStarted]; ok {
+		if firstOutput, ok := phaseSamples[taskPhaseFirstOutputReceived]; ok {
+			value := firstOutput.TotalElapsed.Milliseconds() - runtimeStarted.TotalElapsed.Milliseconds()
+			spawnToFirstOutputMS = &value
+		}
+	}
+	// phaseRecorder starts when the daemon begins handling the claimed task;
+	// include the queue wait explicitly so total_ms covers task creation to
+	// completion. The deferred taskPhaseFinished mark runs after this snapshot.
+	value := phaseRecorder.Elapsed().Milliseconds()
+	if queueToClaimMS != nil {
+		value += *queueToClaimMS
+	}
+	totalMS = &value
 	var usageEntries []TaskUsageEntry
 	for model, u := range result.Usage {
-		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
-			continue
-		}
 		usageEntries = append(usageEntries, TaskUsageEntry{
-			Provider:         provider,
-			Model:            model,
-			InputTokens:      u.InputTokens,
-			OutputTokens:     u.OutputTokens,
-			CacheReadTokens:  u.CacheReadTokens,
-			CacheWriteTokens: u.CacheWriteTokens,
-			CostUSDTicks:     u.CostUSDTicks,
+			Provider:             provider,
+			Model:                model,
+			InputTokens:          u.InputTokens,
+			OutputTokens:         u.OutputTokens,
+			CacheReadTokens:      u.CacheReadTokens,
+			CacheWriteTokens:     u.CacheWriteTokens,
+			CostUSDTicks:         u.CostUSDTicks,
+			NumTurns:             result.NumTurns,
+			Resumed:              task.PriorSessionID != "" && !result.ResumeRejected && !result.ResumeRejectedTransient,
+			SessionID:            result.SessionID,
+			LastContextTokens:    result.LastContextTokens,
+			QueueToClaimMS:       queueToClaimMS,
+			PrepareMS:            prepareMS,
+			SpawnToFirstOutputMS: spawnToFirstOutputMS,
+			TotalMS:              totalMS,
 		})
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -94,6 +95,24 @@ func TestBuildQuickCreatePromptSeparatesInstructionFromCapturedContext(t *testin
 	}
 	if strings.Index(out, "New sub-issue instruction:") > strings.Index(out, "Captured source context") {
 		t.Fatal("captured history appeared before the new instruction")
+	}
+}
+
+func TestBuildPromptIncludesStaleBaselineAndDeterministicInstallGuidance(t *testing.T) {
+	out := BuildPrompt(Task{IssueID: "issue-1"}, "claude",
+		WithStaleLocalBaseline("The local checkout may be stale: local edits prevented a fast-forward."),
+		WithDependencyInstallCommand("pnpm install --frozen-lockfile"),
+	)
+	for _, want := range []string{
+		"## Local baseline may be stale",
+		"local edits prevented a fast-forward",
+		"## Dependency setup",
+		"pnpm install --frozen-lockfile",
+		"warm shared package store",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("BuildPrompt output missing %q", want)
+		}
 	}
 }
 
@@ -2111,4 +2130,25 @@ func TestSharedWorkspaceBlock(t *testing.T) {
 			t.Fatalf("shared-mode task also received the lock-exempt notice:\n%s", out)
 		}
 	})
+}
+
+func TestBuildPromptIssueContextSnapshotAndBudget(t *testing.T) {
+	out := BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "Fix cache", IssueDescription: "details", IssueStatus: "in_progress", IssueAssigneeType: "agent", IssueAssigneeID: "agent-1", IssueContextGeneratedAt: "2026-09-20T00:00:00Z", IssueCommentSummaries: []IssueContextComment{{ID: "c1", ThreadID: "c1", Content: "root"}}, IssueTriggerThread: []IssueContextComment{{ID: "c2", Content: "trigger"}}}, "claude")
+	for _, want := range []string{"## Issue context (server snapshot)", "Title: Fix cache", "Comment thread summaries:", "Triggering thread"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("prompt missing %q: %s", want, out)
+		}
+	}
+	long := strings.Repeat("x", maxIssueContextBytes*2)
+	bounded := BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "Fix", IssueDescription: long, IssueContextGeneratedAt: "now"}, "claude")
+	if !strings.Contains(bounded, "[context truncated; use CLI]") || len(bounded) > maxIssueContextBytes+2000 {
+		t.Fatalf("issue context was not bounded: %d", len(bounded))
+	}
+	if !strings.Contains(BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "续接", PriorSessionID: "session-1", IssueContextGeneratedAt: "now"}, "claude"), "could not confirm the comment delta") {
+		t.Fatal("warm snapshot with unknown delta must require a CLI comment scan")
+	}
+	unicodePrompt := BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "中文", IssueDescription: strings.Repeat("中文评论", maxIssueContextBytes), IssueContextGeneratedAt: "now"}, "claude")
+	if !utf8.ValidString(unicodePrompt) {
+		t.Fatal("bounded issue context must remain valid UTF-8")
+	}
 }

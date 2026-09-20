@@ -26,7 +26,33 @@ export interface RoutingSettings {
   model: string;
   /** Confidence floor in (0, 1]. */
   confidence_threshold: number;
+  /**
+   * This workspace's own OpenAI-compatible endpoint. Empty means the
+   * deployment's, which is all this section could ever use before.
+   *
+   * Not a secret, and stored in the clear on purpose: somebody who cannot see
+   * which endpoint their tickets are described to cannot consent to it.
+   */
+  base_url: string;
 }
+
+/**
+ * The write-only key field.
+ *
+ * It is not part of `RoutingSettings` because it is never READ: the server
+ * strips the stored key from every response, so there is no value to hold in
+ * form state between saves. A save sends this field only when somebody typed
+ * into the key box:
+ *
+ * - a non-empty string — store this key
+ * - an empty string    — clear the stored key
+ * - omitted            — leave the stored key alone
+ *
+ * The third case is the important one. Every unrelated settings save omits
+ * it, and if omission meant "clear", the first such save would silently break
+ * routing.
+ */
+export const ROUTING_API_KEY_FIELD = "api_key";
 
 /**
  * What the section shows. Derived, never stored — a stored copy would drift
@@ -47,6 +73,7 @@ export const DEFAULT_ROUTING_SETTINGS: RoutingSettings = {
   enabled: false,
   model: "",
   confidence_threshold: DEFAULT_CONFIDENCE_THRESHOLD,
+  base_url: "",
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -69,6 +96,7 @@ export function parseRoutingSettings(
     enabled: block.enabled === true,
     model: typeof block.model === "string" ? block.model : "",
     confidence_threshold: normalizeThreshold(block.confidence_threshold),
+    base_url: typeof block.base_url === "string" ? block.base_url : "",
   };
 }
 
@@ -127,13 +155,38 @@ export function routingIsActive(state: RoutingState): boolean {
 export function withRoutingSettings(
   settings: Record<string, unknown> | null | undefined,
   next: RoutingSettings,
+  /**
+   * A newly typed key, or `""` to clear the stored one. Omit it — do not pass
+   * `""` — for every save that is not about the key, or the stored key is
+   * deleted.
+   */
+  apiKey?: string,
 ): Record<string, unknown> {
-  return {
-    ...(settings ?? {}),
-    [ROUTING_SETTINGS_KEY]: {
-      enabled: next.enabled,
-      model: next.model.trim(),
-      confidence_threshold: normalizeThreshold(next.confidence_threshold),
-    },
+  const block: Record<string, unknown> = {
+    enabled: next.enabled,
+    model: next.model.trim(),
+    confidence_threshold: normalizeThreshold(next.confidence_threshold),
+    base_url: next.base_url.trim(),
   };
+  if (apiKey !== undefined) {
+    block[ROUTING_API_KEY_FIELD] = apiKey.trim();
+  }
+  return { ...(settings ?? {}), [ROUTING_SETTINGS_KEY]: block };
+}
+
+/**
+ * Whether the pair of endpoint fields is complete enough to be used.
+ *
+ * Both halves are required, and a half-filled pair is NOT an error — it means
+ * the deployment gateway is used instead. The section says so, because
+ * silently ignoring a typed-in endpoint is how somebody spends an afternoon
+ * wondering why their own model is not being called.
+ */
+export function routingGatewayIsComplete(
+  baseUrl: string,
+  keyStored: boolean,
+  typedKey?: string,
+): boolean {
+  const hasKey = typedKey !== undefined ? typedKey.trim() !== "" : keyStored;
+  return baseUrl.trim() !== "" && hasKey;
 }

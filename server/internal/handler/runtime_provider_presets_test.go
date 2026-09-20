@@ -234,7 +234,7 @@ func TestApplyProviderPresetTimeout(t *testing.T) {
 }
 
 func TestValidProviderPresetAction(t *testing.T) {
-	for _, action := range []string{"list", "upsert", "delete", "activate"} {
+	for _, action := range []string{"list", "upsert", "refresh", "delete", "activate"} {
 		if !validProviderPresetAction(action) {
 			t.Errorf("%q should be accepted", action)
 		}
@@ -488,6 +488,7 @@ func TestInitiateProviderPresetAction_WritesAreOwnerOnly(t *testing.T) {
 	// testUserID is a workspace member but not the runtime's owner.
 	for _, action := range []string{
 		ProviderPresetActionUpsert,
+		ProviderPresetActionRefresh,
 		ProviderPresetActionDelete,
 		ProviderPresetActionActivate,
 	} {

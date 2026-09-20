@@ -42,7 +42,13 @@ func (s routingStore) Settings(ctx context.Context, workspaceID string) (routing
 	if err != nil {
 		return routing.Settings{}, err
 	}
-	return routing.ParseSettings(ws.Settings), nil
+	settings := routing.ParseSettings(ws.Settings)
+	// Opened here, at the edge, so nothing above this line ever holds the
+	// ciphertext and nothing below ever has to know there was one. An
+	// unopenable value yields the empty string, which means "no workspace
+	// key" and sends the call to the deployment gateway instead.
+	settings.APIKey = s.h.openRoutingKey(settings.APIKeyEnc)
+	return settings, nil
 }
 
 func (s routingStore) Issue(ctx context.Context, workspaceID, issueID string) (routing.Issue, error) {

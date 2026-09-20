@@ -89,6 +89,8 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'scripts/generate-reserved-slugs.mjs'
               - 'server/internal/handler/reserved_slugs.json'
+              - 'scripts/generate-account-slot-families.mjs'
+              - 'server/pkg/agent/account_slot_families.json'
               - 'scripts/check-ui-wildcard-exports.mjs'
               - 'scripts/check-ui-wildcard-exports.test.sh'
               - 'scripts/check-ui-radius-tokens.mjs'
@@ -337,6 +339,14 @@ jobs:
         run: |
           pnpm generate:reserved-slugs
           git diff --exit-code -- packages/core/paths/reserved-slugs.ts
+
+      - name: Verify account-slot-families.ts is up to date
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        # Same contract as reserved slugs: the Go daemon embeds the JSON, the
+        # frontend reads the generated file, and a drift fails here.
+        run: |
+          pnpm generate:account-slot-families
+          git diff --exit-code -- packages/core/agents/account-slot-families.ts
 
       - name: Build, type check, and lint
         if: ${{ needs.changes.outputs.frontend == 'true' }}

@@ -18,10 +18,11 @@
 //   `custom_env`, MUL-2600), which is the only way to tell a bound DSH_HOME
 //   from an unbound one.
 //
-// The drawer edits one more agent field: `runtime_config.agy_slots`, the
-// numbered AGY directories the backend may rotate to when a quota runs out.
-// That list used to live in the custom-args tab; it moved here so the agent's
-// accounts have a single editing surface.
+// The drawer edits one more agent field: the numbered slot lists under
+// `runtime_config`, one key per CLI family that owns a slot registry
+// (`@multica/core/agents/account-slot-families`). For agy that list is what
+// the backend rotates over when a quota runs out; for dsh and claude it only
+// registers a directory for this agent — nothing rotates there.
 //
 // Invariants from the design doc: no credential value is ever read, rendered
 // or logged (only `key_ref` names and `signed_in`); every control with a side
@@ -49,29 +50,34 @@ import {
   type AgentAccountCli,
   accountLeverLabel,
   accountsViewState,
-  agySlotAccountId,
+  boundDirectoryFor,
   canManageAccounts,
   cliForProvider,
   groupAccountsByCli,
+  nextSlotForGroup,
   parseAccountLever,
   parseAgentAccounts,
   planAccountSwitch,
   quotaSwitchCandidate,
+  removableSlots,
   resolveCurrentAccount,
-  withAgySlots,
+  slotAccountId,
+  withAccountSlots,
 } from "./agent-accounts-model";
 import { useQuotaResetTick } from "./use-quota-reset-tick";
 import {
-  MAX_AGY_ACCOUNT_NUMBER,
-  detectAgyAccountSlot,
-  getGeminiDir,
-  parseAccountNumber,
-  nextAccountNumber,
+  ACCOUNT_SLOT_FAMILIES,
+  accountSlotFamily,
+} from "@multica/core/agents/account-slot-families";
+import {
+  type AccountSlotLists,
   normalizeAccountNumbers,
-  parseAgySlotsConfig,
-  runtimeHomeDir,
-  writeAgySlotsConfig,
-} from "./agy-account-slots";
+  parseSlotsConfig,
+  sameSlotList,
+  slotNumberFromDirectory,
+  writeSlotsConfig,
+} from "./account-slots";
+import { runtimeHomeDir } from "./agy-account-slots";
 import { AgentProviderPresetsSection } from "./agent-provider-presets-section";
 import {
   AccountActivePill,
@@ -100,22 +106,15 @@ function agentEnvQueryKey(wsId: string | null, agentId: string) {
  * write path consults this table — `planAccountSwitch` decides a switch from
  * the lever the daemon reported on the account itself.
  */
-const CLI_LEVER: Record<AgentAccountCli, string> = {
-  dsh: "env:DSH_HOME",
-  agy: "custom_args:--gemini_dir",
-  claude: "env:CLAUDE_CONFIG_DIR",
-  codex: "",
-  cursor: "",
-};
+function cliLever(cli: AgentAccountCli): string {
+  return accountSlotFamily(cli)?.lever ?? "";
+}
 
 /** Directory a new account of this CLI conventionally lives in (daemon glob). */
-const CLI_NEW_ACCOUNT_HOME: Record<AgentAccountCli, string> = {
-  dsh: "~/.dsh-account2",
-  agy: "~/.gemini-account2",
-  claude: "~/.claude-account2",
-  codex: "~/.codex",
-  cursor: "~/.cursor",
-};
+function cliNewAccountHome(cli: AgentAccountCli): string {
+  const family = accountSlotFamily(cli);
+  return family ? `~/${family.accountDirPrefix}2` : `~/.${cli}`;
+}
 
 type EmptyChoice = "dsh" | "agy" | "manual";
 
@@ -123,10 +122,10 @@ function emptyEntryAccount(cli: AgentAccountCli): AgentAccount {
   return {
     cli,
     account: "account2",
-    home: CLI_NEW_ACCOUNT_HOME[cli],
+    home: cliNewAccountHome(cli),
     base_url: "",
     key_ref: "",
-    lever: CLI_LEVER[cli],
+    lever: cliLever(cli),
     signed_in: false,
     quota_reset_at: 0,
   };
@@ -157,61 +156,6 @@ export function AgentAccountsTab({
   );
   const runtimeHome = runtimeHomeDir(runtimeDevice);
 
-  // The AGY group is the agent's own numbered-slot list rather than the
-  // machine's directory listing: `runtime_config.agy_slots` is what the
-  // backend rotates over, so the drawer has to edit that list. Every other CLI
-  // (and any agy directory outside the numbered convention) stays as reported.
-  const originalSlots = useMemo(() => {
-    const geminiDir = getGeminiDir([...(agent.custom_args ?? [])]);
-    const persisted = parseAgySlotsConfig(agent.runtime_config, geminiDir);
-    // The directory this agent actually launches with belongs to its own list
-    // whatever the stored list says. A stored list that omits it is a state
-    // older surfaces could save (the retired custom-path field wrote
-    // `--gemini_dir` without touching the list), and dropping the row would
-    // leave the account in effect with no row to select, no row to see, and
-    // every slot edit refused as "no target". Folding it in also repairs the
-    // pair on the next write, instead of leaving the agent bound to a
-    // directory the backend may not rotate to.
-    const bound = parseAccountNumber(detectAgyAccountSlot(geminiDir));
-    return bound === null
-      ? persisted
-      : normalizeAccountNumbers([...persisted, bound]);
-  }, [agent.custom_args, agent.runtime_config]);
-  const [slots, setSlots] = useState<number[]>(originalSlots);
-  const slotsDirty = JSON.stringify(slots) !== JSON.stringify(originalSlots);
-
-  const drawerAccounts = useMemo(
-    () => withAgySlots(parsed.accounts, slots, runtimeHome),
-    [parsed.accounts, slots, runtimeHome],
-  );
-  // The same list the drawer renders, but built from the SAVED slots rather
-  // than the pending edits: this is what "which account is in effect" must be
-  // answered against. A numbered slot whose directory does not exist yet is
-  // absent from the daemon's report and only exists as a synthesised row, so
-  // resolving the current account against the raw report alone would call a
-  // freshly bound slot "no matching account" while listing that very account
-  // one line below — and an unsaved slot edit must not move the summary bar.
-  const persistedAccounts = useMemo(
-    () => withAgySlots(parsed.accounts, originalSlots, runtimeHome),
-    [parsed.accounts, originalSlots, runtimeHome],
-  );
-  const groups = useMemo(
-    () => groupAccountsByCli(drawerAccounts),
-    [drawerAccounts],
-  );
-  // Slot 1 is always in the list, so "no next slot" means either this agent has
-  // no AGY account at all (nothing to attach a slot to) or the cap is reached.
-  const nextSlotNumber = nextAccountNumber(slots);
-  const agyGroup = groups.find((group) => group.cli === "agy");
-  const nextSlot =
-    agyGroup?.switchable === true && nextSlotNumber <= MAX_AGY_ACCOUNT_NUMBER
-      ? nextSlotNumber
-      : null;
-  const allAccounts = useMemo(
-    () => groups.flatMap((group) => group.accounts),
-    [groups],
-  );
-
   // An env lever is only readable through the env endpoint. Waiting for it
   // before rendering the summary keeps a bound DSH_HOME from being described
   // as the CLI default for one frame; an account set with no env lever (agy,
@@ -239,6 +183,77 @@ export function AgentAccountsTab({
       provider: runtimeDevice?.provider,
     }),
     [agent.custom_args, envQuery.data, runtimeDevice],
+  );
+
+  // A family's group is the agent's own numbered-slot list rather than only the
+  // machine's directory listing, so the drawer has to edit that list. CLIs with
+  // no family (and any directory outside the numbered convention) stay exactly
+  // as reported.
+  const originalSlots = useMemo<AccountSlotLists>(() => {
+    const lists: Record<string, number[]> = {};
+    for (const family of ACCOUNT_SLOT_FAMILIES) {
+      const boundDir = boundDirectoryFor(binding, family);
+      const persisted = parseSlotsConfig(family, agent.runtime_config, boundDir);
+      // The directory this agent actually launches with belongs to its own list
+      // whatever the stored list says. A stored list that omits it is a state
+      // older surfaces could save (the retired custom-path field wrote
+      // `--gemini_dir` without touching the list), and dropping the row would
+      // leave the account in effect with no row to select, no row to see, and
+      // every slot edit refused as "no target". Folding it in also repairs the
+      // pair on the next write, instead of leaving the agent bound to a
+      // directory the backend may not rotate to.
+      const bound = slotNumberFromDirectory(family, boundDir);
+      lists[family.cli] =
+        bound === null
+          ? persisted
+          : normalizeAccountNumbers([...persisted, bound]);
+    }
+    return lists;
+  }, [agent.runtime_config, binding]);
+  const [slots, setSlots] = useState<AccountSlotLists>(originalSlots);
+  const dirtyFamilies = ACCOUNT_SLOT_FAMILIES.filter(
+    (family) =>
+      !sameSlotList(slots[family.cli] ?? [], originalSlots[family.cli] ?? []),
+  );
+  const slotsDirty = dirtyFamilies.length > 0;
+
+  const drawerAccounts = useMemo(
+    () => withAccountSlots(parsed.accounts, slots, runtimeHome),
+    [parsed.accounts, slots, runtimeHome],
+  );
+  // The same list the drawer renders, but built from the SAVED slots rather
+  // than the pending edits: this is what "which account is in effect" must be
+  // answered against. A numbered slot whose directory does not exist yet is
+  // absent from the daemon's report and only exists as a synthesised row, so
+  // resolving the current account against the raw report alone would call a
+  // freshly bound slot "no matching account" while listing that very account
+  // one line below — and an unsaved slot edit must not move the summary bar.
+  const persistedAccounts = useMemo(
+    () => withAccountSlots(parsed.accounts, originalSlots, runtimeHome),
+    [parsed.accounts, originalSlots, runtimeHome],
+  );
+  const groups = useMemo(
+    () => groupAccountsByCli(drawerAccounts),
+    [drawerAccounts],
+  );
+  // "Add account" is a property of the family, not of one CLI id: every group
+  // whose family owns a slot registry, whose lever is writable and whose cap is
+  // not reached gets one.
+  const nextSlots = useMemo(() => {
+    const next: Record<string, number> = {};
+    for (const group of groups) {
+      const slot = nextSlotForGroup(group, slots);
+      if (slot !== null) next[group.cli] = slot;
+    }
+    return next;
+  }, [groups, slots]);
+  const droppableSlots = useMemo(
+    () => removableSlots(parsed.accounts, slots),
+    [parsed.accounts, slots],
+  );
+  const allAccounts = useMemo(
+    () => groups.flatMap((group) => group.accounts),
+    [groups],
   );
 
   // A failed env read is not a missing override: the lever value is unknown,
@@ -305,6 +320,9 @@ export function AgentAccountsTab({
 
   const openDrawer = () => {
     setSelectedKey(currentKey);
+    // The saved lists can have moved since mount (the env binding arrives
+    // late), and the drawer must start from what the agent actually has.
+    setSlots(originalSlots);
     setDrawerOpen(true);
   };
 
@@ -318,24 +336,31 @@ export function AgentAccountsTab({
     }
   };
 
-  const slotKey = (slot: number) =>
-    accountKey({ cli: "agy", account: agySlotAccountId(slot) });
+  const slotKey = (cli: AgentAccountCli, slot: number) =>
+    accountKey({ cli, account: slotAccountId(slot) });
 
-  const handleAddSlot = () => {
-    if (nextSlot === null) return;
-    setSlots((current) => normalizeAccountNumbers([...current, nextSlot]));
+  const handleAddSlot = (cli: AgentAccountCli) => {
+    const next = nextSlots[cli];
+    if (next === undefined) return;
+    setSlots((current) => ({
+      ...current,
+      [cli]: normalizeAccountNumbers([...(current[cli] ?? []), next]),
+    }));
   };
 
-  const handleRemoveSlot = (slot: number) => {
+  const handleRemoveSlot = (cli: AgentAccountCli, slot: number) => {
     // Slot 1 is the CLI's own directory and is always part of the list, so it
     // has no removal — the same rule the slot grid had before this moved here.
     if (slot <= 1) return;
-    setSlots((current) =>
-      normalizeAccountNumbers(current.filter((n) => n !== slot)),
-    );
+    setSlots((current) => ({
+      ...current,
+      [cli]: normalizeAccountNumbers(
+        (current[cli] ?? []).filter((n) => n !== slot),
+      ),
+    }));
     // Removing the slot the drawer has selected drops the selection back to
     // slot 1, which is what the agent would fall back to anyway.
-    if (selectedKey === slotKey(slot)) setSelectedKey(slotKey(1));
+    if (selectedKey === slotKey(cli, slot)) setSelectedKey(slotKey(cli, 1));
   };
 
   /**
@@ -381,16 +406,19 @@ export function AgentAccountsTab({
         queryClient.setQueryData(agentEnvQueryKey(wsId, agent.id), saved);
       }
 
-      // The agy binding and the slot list are both agent fields, so they leave
-      // in ONE request: the backend rotates over `runtime_config.agy_slots` and
-      // launches with `custom_args`, and committing only half of that pair
-      // would leave the agent bound to a directory it may not rotate to.
+      // The agy binding and the slot lists are both agent fields, so they
+      // leave in ONE request: the backend rotates over `runtime_config.agy_slots`
+      // and launches with `custom_args`, and committing only half of that pair
+      // would leave the agent bound to a directory it may not rotate to. Only
+      // the families that were edited are written, so an agent that never
+      // touched a family keeps no key for it.
       const updates: Partial<Agent> = {};
       if (plan.kind === "custom_args") updates.custom_args = plan.custom_args;
       if (commitSlots) {
-        updates.runtime_config = writeAgySlotsConfig(
-          agent.runtime_config,
-          slots,
+        updates.runtime_config = dirtyFamilies.reduce(
+          (config, family) =>
+            writeSlotsConfig(family, config, slots[family.cli] ?? []),
+          { ...(agent.runtime_config ?? {}) } as Record<string, unknown>,
         );
       }
       if (Object.keys(updates).length > 0) await onSave(updates);
@@ -586,7 +614,8 @@ export function AgentAccountsTab({
             saving={saving}
             onSave={() => void handleSaveAndSwitch()}
             nowMs={nowMs}
-            nextSlot={nextSlot}
+            nextSlots={nextSlots}
+            removableSlots={droppableSlots}
             onAddSlot={handleAddSlot}
             onRemoveSlot={handleRemoveSlot}
           />
@@ -642,7 +671,7 @@ function AccountsEmpty({ provider }: { provider: string }) {
     cli === "agy" ? "agy" : cli === "dsh" ? "dsh" : "manual";
   const choice = picked ?? defaultChoice;
 
-  const lever = cli ? CLI_LEVER[cli] : "";
+  const lever = cli ? cliLever(cli) : "";
   const leverLabel = accountLeverLabel(lever);
 
   const choices: { id: EmptyChoice; label: string }[] = [

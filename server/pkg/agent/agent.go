@@ -36,9 +36,11 @@ type ExecOptions struct {
 	//
 	// A backend must therefore NOT assume this is populated, and adding a new
 	// backend that only reads SystemPrompt will silently receive nothing.
-	SystemPrompt              string
-	ThreadName                string
-	MaxTurns                  int
+	SystemPrompt string
+	ThreadName   string
+	MaxTurns     int
+	// ClaudeAutoCompactTokens configures Claude Code conversation compaction.
+	ClaudeAutoCompactTokens   int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
 	// FirstTurnNoProgressTimeout optionally overrides the Codex first-turn
@@ -235,12 +237,14 @@ const CostUSDTicksPerUSD = 10_000_000_000
 
 // Result is the final outcome after an agent session completes.
 type Result struct {
-	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
-	Output     string // final user-facing output selected by the backend
-	Error      string // error message if failed
-	DurationMs int64
-	SessionID  string
-	Usage      map[string]TokenUsage // keyed by model name
+	Status            string // "completed", "failed", "aborted", "timeout", "cancelled"
+	Output            string // final user-facing output selected by the backend
+	Error             string // error message if failed
+	DurationMs        int64
+	SessionID         string
+	Usage             map[string]TokenUsage // keyed by model name
+	NumTurns          int
+	LastContextTokens *int64
 	// PlanLimits is the latest credential-free subscription-window snapshot
 	// observed while this run was active. Most providers leave it nil because
 	// their CLI does not expose plan headroom to non-interactive callers.
