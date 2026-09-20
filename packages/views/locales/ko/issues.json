@@ -678,7 +678,8 @@
       "source_backfill": "백필된 귀속",
       "source_unattributed": "책임 멤버를 확인할 수 없음"
     },
-    "usage_total_tooltip": "이 태스크의 토큰 사용량 — 클릭하면 실행별 내역"
+    "usage_total_tooltip": "이 태스크의 토큰 사용량 — 클릭하면 실행별 내역",
+    "usage_label": "토큰 비용"
   },
   "usage_detail": {
     "title": "사용량 내역",
@@ -704,7 +705,38 @@
     "total": "합계",
     "note_unpriced_other": "실행 {{count}}회는 사용량 기록이 없어 합계에 포함되지 않습니다.",
     "note_unmapped": "{{models}}의 가격 정보가 없어 토큰은 집계되지만 비용은 포함되지 않습니다.",
-    "note_estimate": "비용은 공개된 모델 요금 기준 추정치이며, 제공자가 자체 비용을 보고한 경우는 그 값을 사용합니다."
+    "note_estimate": "비용은 공개된 모델 요금 기준 추정치이며, 제공자가 자체 비용을 보고한 경우는 그 값을 사용합니다.",
+    "empty_hint": "사용량은 실행이 끝날 때 데몬이 기록합니다. 사용량 보고 이전의 실행이나 보고하지 않는 데몬에서의 실행에는 수치가 없습니다. 최신 데몬에서 다시 실행하면 수집이 시작됩니다.",
+    "loading": "실행 기록을 불러오는 중…",
+    "load_failed": "이 이슈의 실행 기록을 불러오지 못했습니다.",
+    "retry": "다시 시도"
+  },
+  "run_cost": {
+    "section": "이번 실행의 토큰 비용",
+    "segment": {
+      "input": "신규 입력",
+      "cacheWrite": "캐시 쓰기",
+      "cacheRead": "캐시 읽기",
+      "output": "출력"
+    },
+    "figure_cost": "이번 실행",
+    "figure_cost_hint": "이 이슈의 {{pct}}%",
+    "figure_cost_hint_unknown": "이슈 내 비중을 계산할 수 없음",
+    "figure_cache": "캐시 적중률",
+    "figure_cache_hint": "읽기 {{reads}} · 쓰기 {{writes}}",
+    "figure_largest": "가장 큰 구성",
+    "figure_largest_hint": "{{pct}}% · {{tokens}} 토큰",
+    "fact_turns": "턴 수",
+    "fact_start": "세션",
+    "fact_start_resumed": "이어받기",
+    "fact_start_cold": "콜드 스타트",
+    "fact_last_context": "마지막 단계 컨텍스트",
+    "fact_queue": "대기",
+    "fact_prepare": "준비",
+    "fact_first_output": "첫 출력까지",
+    "fact_trigger": "트리거 출처",
+    "facts_unavailable": "이 실행은 턴 수와 구간 소요 시간을 보고하지 않았습니다. 실행 메타데이터 보고 이전의 데몬에서 실행되었습니다.",
+    "note_no_prompt_split": "공급자는 이 네 가지로 과금하고 그 네 가지만 보고합니다. 토큰은 런타임 브리프·도구 스키마·히스토리·도구 결과에 귀속되지 않으므로 이 화면은 그렇게 나누지 않습니다."
   },
   "terminate_dialog": {
     "title": "이 실행을 중지할까요?",

@@ -453,3 +453,22 @@ describe("IssueUsageTotal pricing", () => {
     expect(screen.getByText("$7.00")).toBeInTheDocument();
   });
 });
+
+describe("IssueUsageTotal with nothing metered", () => {
+  it("still offers the Token cost entry so the empty state is reachable", () => {
+    // Regression for DENE-670: this used to render null when no run reported
+    // usage, which removed the only door to the breakdown at exactly the
+    // moment the reader needs to know WHY there is no figure — metering off,
+    // or no run yet. The door stays; the numbers do not appear.
+    const onOpen = vi.fn();
+    renderWithI18n(
+      <IssueUsageTotal tasks={[makeTask({ status: "completed" })]} alone onOpen={onOpen} />,
+    );
+
+    const entry = screen.getByRole("button", { name: "Token cost" });
+    expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
+
+    fireEvent.click(entry);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+});
