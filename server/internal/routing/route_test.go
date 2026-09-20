@@ -814,3 +814,54 @@ func TestInReviewDecisionNeverTouchesStatus(t *testing.T) {
 		t.Errorf("status = %q — routing moved a ticket's status", store.issue.Status)
 	}
 }
+
+// Plenty of work is done by agents that carry no tier label at all. "The
+// ladder has no rung above this seat" is then a fact about the ladder, not
+// about the ticket, and answering it with a person is how every mechanical
+// check ends up queued on somebody's desk. The top rung takes those.
+func TestOffLadderExecutorFallsBackToTheTopRungNotAPerson(t *testing.T) {
+	store := newFakeStore()
+	store.issue.Status = "in_review"
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-trunks" // not on the ladder: no tier label
+	store.issue.Reviewer = ""
+	// An unusable verdict, so the ladder fallback is what answers.
+	judge := &fakeJudge{verdict: Verdict{
+		ExecutorTier: "strong", ExecutorConfidence: 0.9,
+		Reviewer: ReviewerSeat, ReviewerTier: "strongest", ReviewerConfidence: 0.1,
+	}}
+
+	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.ReviewerWritten != "布尔玛游戏" {
+		t.Errorf("reviewer = %q, want 布尔玛游戏 — an unlabelled executor must not force a human check",
+			out.ReviewerWritten)
+	}
+	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-bulma-g" {
+		t.Errorf("handoffs = %v, want [agent:a-bulma-g]", store.handoffs)
+	}
+}
+
+// The opposite case still holds: when the top rung did the work, there is
+// genuinely nothing above it, and the check falls to a person.
+func TestTopRungExecutorStillFallsBackToAPerson(t *testing.T) {
+	store := newFakeStore()
+	store.issue.Status = "in_review"
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-bulma-g"
+	store.issue.Reviewer = ""
+	judge := &fakeJudge{verdict: Verdict{
+		ExecutorTier: "strong", ExecutorConfidence: 0.9,
+		Reviewer: ReviewerSeat, ReviewerTier: "strongest", ReviewerConfidence: 0.1,
+	}}
+
+	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.ReviewerWritten != OptionHuman {
+		t.Errorf("reviewer = %q, want %q", out.ReviewerWritten, OptionHuman)
+	}
+}

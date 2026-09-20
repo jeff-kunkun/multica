@@ -329,6 +329,17 @@ func (r *Router) fallbackReviewer(candidates []Seat, executor *Seat, issue Issue
 	if stronger, ok := StrongerThan(candidates, holder); ok {
 		return stronger.Name
 	}
+	if _, onLadder := SeatIndex(candidates, holder); !onLadder {
+		// The work was done by a seat that carries no tier label — an
+		// off-ladder agent, or one whose label was never set. "No rung above"
+		// is then a statement about the ladder's ignorance, not about the
+		// ticket, and sending it to a person on that basis is how a queue of
+		// mechanical checks ends up on somebody's desk. The top rung is a
+		// valid reviewer for any of them, and it is by construction not the
+		// seat that did the work.
+		return candidates[0].Name
+	}
+	// The holder IS the top rung. Nothing here can check it, so a person does.
 	return OptionHuman
 }
 

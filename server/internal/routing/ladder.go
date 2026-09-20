@@ -288,6 +288,19 @@ func SeatByTier(seats []Seat, tierKey string) (Seat, bool) {
 // StrongerThan returns the candidate one rung above the given seat, if the
 // ladder has one. Used to keep a reviewer from being the seat that did the
 // work: reviewing your own output is not review.
+// SeatIndex reports where a seat sits in the candidate list, and whether it is
+// there at all. "Not on the ladder" and "on the top rung" both make
+// StrongerThan return false, and the two call for opposite fallbacks, so the
+// difference has to be askable.
+func SeatIndex(seats []Seat, seat Seat) (int, bool) {
+	for i, s := range seats {
+		if s.ID == seat.ID {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 func StrongerThan(seats []Seat, seat Seat) (Seat, bool) {
 	for i, s := range seats {
 		if s.ID == seat.ID {
