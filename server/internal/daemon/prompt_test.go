@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -2142,5 +2143,12 @@ func TestBuildPromptIssueContextSnapshotAndBudget(t *testing.T) {
 	bounded := BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "Fix", IssueDescription: long, IssueContextGeneratedAt: "now"}, "claude")
 	if !strings.Contains(bounded, "[context truncated; use CLI]") || len(bounded) > maxIssueContextBytes+2000 {
 		t.Fatalf("issue context was not bounded: %d", len(bounded))
+	}
+	if !strings.Contains(BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "续接", PriorSessionID: "session-1", IssueContextGeneratedAt: "now"}, "claude"), "could not confirm the comment delta") {
+		t.Fatal("warm snapshot with unknown delta must require a CLI comment scan")
+	}
+	unicodePrompt := BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "中文", IssueDescription: strings.Repeat("中文评论", maxIssueContextBytes), IssueContextGeneratedAt: "now"}, "claude")
+	if !utf8.ValidString(unicodePrompt) {
+		t.Fatal("bounded issue context must remain valid UTF-8")
 	}
 }

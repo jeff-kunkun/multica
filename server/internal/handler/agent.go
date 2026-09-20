@@ -1071,11 +1071,13 @@ type CoalescedCommentData struct {
 
 // IssueContextComment is a bounded comment snapshot included in a daemon claim.
 type IssueContextComment struct {
-	ID         string `json:"id"`
-	ThreadID   string `json:"thread_id,omitempty"`
-	AuthorType string `json:"author_type,omitempty"`
-	Content    string `json:"content"`
-	CreatedAt  string `json:"created_at,omitempty"`
+	ID             string `json:"id"`
+	ThreadID       string `json:"thread_id,omitempty"`
+	AuthorType     string `json:"author_type,omitempty"`
+	Content        string `json:"content"`
+	CreatedAt      string `json:"created_at,omitempty"`
+	ReplyCount     int    `json:"reply_count,omitempty"`
+	LastActivityAt string `json:"last_activity_at,omitempty"`
 }
 
 // TaskUsageData is one (provider, model) slice of a single run's token usage.

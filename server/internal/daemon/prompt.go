@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
@@ -223,7 +224,9 @@ func buildIssueContextBlock(task Task) string {
 	}
 	warm := task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable
 	if warm {
-		if task.NewCommentsDeltaKnown && task.NewCommentCount == 0 {
+		if !task.NewCommentsDeltaKnown {
+			b.WriteString("The server could not confirm the comment delta for this resumed run; scan the issue comments with the CLI before acting.\n")
+		} else if task.NewCommentCount == 0 {
 			b.WriteString("The server checked the issue: no new comments arrived since the previous run.\n")
 		}
 		if len(task.IssueNewComments) > 0 {
@@ -236,7 +239,7 @@ func buildIssueContextBlock(task Task) string {
 		if len(task.IssueCommentSummaries) > 0 {
 			b.WriteString("Comment thread summaries:\n")
 			for _, c := range task.IssueCommentSummaries {
-				fmt.Fprintf(&b, "- thread %s (%s): %s\n", c.ThreadID, c.CreatedAt, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
+				fmt.Fprintf(&b, "- thread %s (%s, author=%s, replies=%d, last_activity=%s): %s\n", c.ThreadID, c.CreatedAt, c.AuthorType, c.ReplyCount, c.LastActivityAt, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
 			}
 		}
 		if len(task.IssueTriggerThread) > 0 {
@@ -254,7 +257,14 @@ func buildIssueContextBlock(task Task) string {
 	if len(out) <= maxIssueContextBytes {
 		return out
 	}
-	return out[:maxIssueContextBytes-len("\n[context truncated; use CLI]\n\n")] + "\n[context truncated; use CLI]\n\n"
+	marker := "\n[context truncated; use CLI]\n\n"
+	budget := maxIssueContextBytes - len(marker)
+	cut := out[:budget]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		_, size := utf8.DecodeLastRuneInString(cut)
+		cut = cut[:len(cut)-size]
+	}
+	return cut + marker
 }
 
 // buildWorktreeReplayConflictBlock tells the turn that its own working tree

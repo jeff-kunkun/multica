@@ -230,11 +230,13 @@ type CoalescedCommentData struct {
 }
 
 type IssueContextComment struct {
-	ID         string `json:"id"`
-	ThreadID   string `json:"thread_id,omitempty"`
-	AuthorType string `json:"author_type,omitempty"`
-	Content    string `json:"content"`
-	CreatedAt  string `json:"created_at,omitempty"`
+	ID             string `json:"id"`
+	ThreadID       string `json:"thread_id,omitempty"`
+	AuthorType     string `json:"author_type,omitempty"`
+	Content        string `json:"content"`
+	CreatedAt      string `json:"created_at,omitempty"`
+	ReplyCount     int    `json:"reply_count,omitempty"`
+	LastActivityAt string `json:"last_activity_at,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

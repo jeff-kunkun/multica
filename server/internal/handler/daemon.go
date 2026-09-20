@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -44,6 +45,18 @@ import (
 // current request, so this is a defense-in-depth floor rather than the steady
 // state poll interval.
 const claimPollHintMinDelay = time.Second
+
+func truncateUTF8(s string, maxBytes int) (string, bool) {
+	if len(s) <= maxBytes {
+		return s, false
+	}
+	cut := s[:maxBytes]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		_, size := utf8.DecodeLastRuneInString(cut)
+		cut = cut[:len(cut)-size]
+	}
+	return cut, true
+}
 
 // ---------------------------------------------------------------------------
 // Daemon workspace ownership helpers
@@ -2875,12 +2888,16 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.IssueContextGeneratedAt = time.Now().UTC().Format(time.RFC3339)
 		if roots, err := h.Queries.ListRootCommentsForIssue(r.Context(), db.ListRootCommentsForIssueParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, RowLimit: 200}); err == nil {
 			for _, root := range roots {
-				content := root.Content
-				if len(content) > 240 {
-					content = content[:240] + "…"
+				content, truncated := truncateUTF8(root.Content, 240-len("…"))
+				if truncated {
+					content += "…"
 					resp.IssueContextTruncated = true
 				}
-				resp.IssueCommentSummaries = append(resp.IssueCommentSummaries, IssueContextComment{ID: uuidToString(root.ID), ThreadID: uuidToString(root.ID), AuthorType: root.AuthorType, Content: content, CreatedAt: root.CreatedAt.Time.UTC().Format(time.RFC3339)})
+				resp.IssueCommentSummaries = append(resp.IssueCommentSummaries, IssueContextComment{
+					ID: uuidToString(root.ID), ThreadID: uuidToString(root.ID), AuthorType: root.AuthorType,
+					Content: content, CreatedAt: root.CreatedAt.Time.UTC().Format(time.RFC3339), ReplyCount: int(root.ReplyCount),
+					LastActivityAt: root.LastActivityAt.Time.UTC().Format(time.RFC3339),
+				})
 			}
 		}
 		if task.TriggerCommentID.Valid {
