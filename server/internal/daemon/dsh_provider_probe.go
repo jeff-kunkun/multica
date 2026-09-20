@@ -25,7 +25,8 @@ import (
 //	GET  {baseURL}/models        the catalog, and the cheapest proof that the
 //	                             key authenticates at all
 //	POST {baseURL}/chat/completions
-//	     {baseURL}/messages      a minimal round trip, the only step that
+//	     {baseURL}/messages
+//	     {baseURL}/responses      a minimal round trip, the only step that
 //	                             exposes "the key is valid but this plan
 //	                             cannot use this model"
 //
@@ -69,18 +70,29 @@ const (
 	providerProbeKindModelsUnavailable = "models_unavailable"
 	// providerProbeKindEmptyModelList — /models answered with nothing.
 	providerProbeKindEmptyModelList = "empty_model_list"
+	// providerProbeKindUnsupportedProtocol — the caller declared a wire
+	// protocol this build cannot serve.
+	providerProbeKindUnsupportedProtocol = "unsupported_protocol"
 	// providerProbeKindProviderError — anything else the gateway answered.
 	providerProbeKindProviderError = "provider_error"
 )
 
-// The two wire protocols a DSH route can speak, and the path each one appends
-// to the route's baseURL. These are the values written to `api` in
+// The wire protocols a DSH route can speak — the same three, in the same
+// order, that DSH's own `supportedProtocols()` lists — and the path each one
+// appends to the route's baseURL. These are the values written to `api` in
 // settings.yaml and the values `supported_endpoints` reports.
+//
+// The set is closed on purpose. A protocol outside it cannot be probed, so a
+// save could not prove it works; honouring one verbatim would write a route
+// nothing here has ever tested, and quietly recording a different one would
+// store something other than what the user chose. Both are refused instead.
 const (
 	providerAPIOpenAICompletions = "openai-completions"
+	providerAPIOpenAIResponses   = "openai-responses"
 	providerAPIAnthropicMessages = "anthropic-messages"
 
 	providerEndpointChatCompletions = "/chat/completions"
+	providerEndpointResponses       = "/responses"
 	providerEndpointMessages        = "/messages"
 
 	// providerThinkingFormatDeepSeek is the compat switch a DeepSeek-family
@@ -104,6 +116,12 @@ const (
 
 	// providerProbeMaxTokens is the smallest completion a gateway accepts.
 	providerProbeMaxTokens = 1
+
+	// providerProbeResponsesMinTokens is the smallest `max_output_tokens` the
+	// Responses endpoint accepts — it refuses anything below 16 outright, so
+	// reusing providerProbeMaxTokens there would fail a healthy route with a
+	// 400 about the request rather than an answer about the credential.
+	providerProbeResponsesMinTokens = 16
 
 	// providerProbeBodyLimit bounds a successful body. It has to be a real
 	// limit rather than a display one: a model catalog runs past a kilobyte
@@ -201,10 +219,12 @@ func dshVerifyProviderRoute(ctx context.Context, request dshVerifyRequest) (*dsh
 		if !ok {
 			return nil, unknownProviderModel(id)
 		}
-		if len(model.SupportedEndpoints) == 0 {
+		protocol, ok := providerProtocolForEndpoints(model.SupportedEndpoints)
+		if !ok {
+			// The model names no endpoint, so it cannot disagree with the
+			// others; the protocol below comes from the caller's declaration.
 			continue
 		}
-		protocol := providerProtocolForModel(model, "")
 		if _, seen := answered[protocol]; !seen {
 			answered[protocol] = id
 			answeredOrder = append(answeredOrder, protocol)
@@ -227,7 +247,10 @@ func dshVerifyProviderRoute(ctx context.Context, request dshVerifyRequest) (*dsh
 	if !ok {
 		return nil, unknownProviderModel(request.ModelID)
 	}
-	api := providerProtocolForModel(model, request.API)
+	api, err := providerProtocolForModel(model, request.API)
+	if err != nil {
+		return nil, err
+	}
 	if len(answeredOrder) == 1 {
 		api = answeredOrder[0]
 	}
@@ -261,7 +284,10 @@ func verifyProviderRouteWithoutCatalog(ctx context.Context, request dshVerifyReq
 			"This endpoint publishes no model list, so a model id has to be given.",
 			nil)
 	}
-	api := providerDeclaredAPI(request.API)
+	api, err := providerDeclaredAPI(request.API)
+	if err != nil {
+		return nil, err
+	}
 	if err := probeProviderChat(ctx, request.BaseURL, request.APIKey, api, modelID); err != nil {
 		return nil, err
 	}
@@ -272,14 +298,27 @@ func verifyProviderRouteWithoutCatalog(ctx context.Context, request dshVerifyReq
 	}, nil
 }
 
-// providerDeclaredAPI normalizes the protocol a caller claims when the gateway
-// does not describe it. Only the two protocols a route can speak are accepted:
-// anything else would be written into settings.yaml as a route nothing reads.
-func providerDeclaredAPI(declared string) string {
-	if strings.TrimSpace(declared) == providerAPIAnthropicMessages {
-		return providerAPIAnthropicMessages
+// providerDeclaredAPI reports the protocol a caller declares, for a gateway
+// that does not describe its endpoints. It is the only place a declared value
+// becomes a protocol, so the two paths below cannot disagree about one.
+//
+// A blank declaration is the caller naming no preference, and that is the
+// most widely reachable protocol. A value outside the set DSH can serve is
+// refused: see the protocol constants for why neither honouring nor
+// normalizing it is acceptable.
+func providerDeclaredAPI(declared string) (string, error) {
+	switch trimmed := strings.TrimSpace(declared); trimmed {
+	case "", providerAPIOpenAICompletions:
+		return providerAPIOpenAICompletions, nil
+	case providerAPIOpenAIResponses:
+		return providerAPIOpenAIResponses, nil
+	case providerAPIAnthropicMessages:
+		return providerAPIAnthropicMessages, nil
 	}
-	return providerAPIOpenAICompletions
+	return "", providerFailure(providerProbeKindUnsupportedProtocol,
+		fmt.Sprintf("%q is not a protocol this build can route. Use %s, %s or %s.",
+			strings.TrimSpace(declared), providerAPIOpenAICompletions, providerAPIOpenAIResponses, providerAPIAnthropicMessages),
+		map[string]string{providerParamAPI: strings.TrimSpace(declared)})
 }
 
 func unknownProviderModel(id string) *providerConfigFailure {
@@ -308,19 +347,36 @@ func findProviderModel(models []providerDiscoveredModel, id string) (providerDis
 // providerProtocolForModel decides which wire protocol the model is requested
 // with. `supported_endpoints` is the gateway answering the question itself;
 // model-family guessing is only the fallback for a gateway that stays silent.
-func providerProtocolForModel(model providerDiscoveredModel, declared string) string {
-	for _, endpoint := range model.SupportedEndpoints {
-		if strings.TrimSpace(endpoint) == providerEndpointMessages {
-			return providerAPIAnthropicMessages
-		}
+func providerProtocolForModel(model providerDiscoveredModel, declared string) (string, error) {
+	if protocol, ok := providerProtocolForEndpoints(model.SupportedEndpoints); ok {
+		return protocol, nil
 	}
-	if len(model.SupportedEndpoints) > 0 {
-		return providerAPIOpenAICompletions
+	return providerDeclaredAPI(declared)
+}
+
+// providerProtocolForEndpoints reads the protocol off the endpoints a gateway
+// advertises. A model listing several is asked on the widest one, in a fixed
+// order, so the same model described the same way always resolves to the same
+// route. Ok is false only for a model that names no endpoint at all — an
+// endpoint list this build has no name for is still served over
+// openai-completions, which is what a route without a protocol line means.
+func providerProtocolForEndpoints(endpoints []string) (string, bool) {
+	if len(endpoints) == 0 {
+		return "", false
 	}
-	if strings.TrimSpace(declared) != "" {
-		return strings.TrimSpace(declared)
+	advertised := make(map[string]bool, len(endpoints))
+	for _, endpoint := range endpoints {
+		advertised[strings.TrimSpace(endpoint)] = true
 	}
-	return providerAPIOpenAICompletions
+	switch {
+	case advertised[providerEndpointMessages]:
+		return providerAPIAnthropicMessages, true
+	case advertised[providerEndpointChatCompletions]:
+		return providerAPIOpenAICompletions, true
+	case advertised[providerEndpointResponses]:
+		return providerAPIOpenAIResponses, true
+	}
+	return providerAPIOpenAICompletions, true
 }
 
 // providerThinkingFormatForModel returns the compat switch a model family
@@ -386,26 +442,40 @@ func applyProviderAuth(request *http.Request, api, apiKey string) {
 // only step that separates "the key authenticates" from "the key can actually
 // run this model", and a health check that stops at step one reports the
 // cancelled-billing-cycle key as healthy.
+//
+// Each protocol gets the request its own endpoint accepts: the two chat-shaped
+// ones take `messages`/`max_tokens`, the Responses endpoint takes `input` and
+// refuses a `max_output_tokens` below 16. Sending one shape to all three would
+// make a healthy route fail on the request rather than on the credential.
 func probeProviderChat(ctx context.Context, baseURL, apiKey, api, modelID string) error {
 	path := providerEndpointChatCompletions
-	if api == providerAPIAnthropicMessages {
+	body := map[string]any{
+		"model":      modelID,
+		"max_tokens": providerProbeMaxTokens,
+		"messages":   []map[string]string{{"role": "user", "content": providerProbePrompt}},
+	}
+	switch api {
+	case providerAPIAnthropicMessages:
 		path = providerEndpointMessages
+	case providerAPIOpenAIResponses:
+		path = providerEndpointResponses
+		body = map[string]any{
+			"model":             modelID,
+			"input":             providerProbePrompt,
+			"max_output_tokens": providerProbeResponsesMinTokens,
+		}
 	}
 	endpoint, err := providerEndpointURL(baseURL, path)
 	if err != nil {
 		return err
 	}
 
-	body, err := json.Marshal(map[string]any{
-		"model":      modelID,
-		"max_tokens": providerProbeMaxTokens,
-		"messages":   []map[string]string{{"role": "user", "content": providerProbePrompt}},
-	})
+	encoded, err := json.Marshal(body)
 	if err != nil {
 		return providerFailure(providerProbeKindProviderError,
 			fmt.Sprintf("Could not build the probe request: %v", err), nil)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
 	if err != nil {
 		return providerFailure(providerProbeKindUnreachable,
 			fmt.Sprintf("Could not build a request for %s: %v", baseURL, err), nil)

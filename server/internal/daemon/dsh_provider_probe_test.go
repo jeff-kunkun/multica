@@ -98,6 +98,22 @@ func (g *dshFakeGateway) serveMessagesModel(id string) {
 	})
 }
 
+// serveResponsesModel adds a model the catalog reports as speaking the OpenAI
+// Responses protocol instead.
+func (g *dshFakeGateway) serveResponsesModel(id string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.hasModel(id) {
+		return
+	}
+	g.catalog = append(g.catalog, map[string]any{
+		"id":                  id,
+		"name":                id,
+		"context_length":      200000,
+		"supported_endpoints": []string{providerEndpointResponses},
+	})
+}
+
 // failChat makes step two answer with a gateway rejection while step one keeps
 // succeeding — the "the key authenticates but cannot be used" case.
 func (g *dshFakeGateway) failChat(status int, body string) {
@@ -162,7 +178,8 @@ func (g *dshFakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": g.catalog})
 	case r.Method == http.MethodPost &&
 		(strings.HasSuffix(r.URL.Path, providerEndpointChatCompletions) ||
-			strings.HasSuffix(r.URL.Path, providerEndpointMessages)):
+			strings.HasSuffix(r.URL.Path, providerEndpointMessages) ||
+			strings.HasSuffix(r.URL.Path, providerEndpointResponses)):
 		g.chatCalls++
 		g.lastChatAuth = r.Header.Get("Authorization")
 		g.lastChatKey = r.Header.Get("x-api-key")
@@ -917,15 +934,17 @@ func TestDshProviderUpsertRefusesAPresetWhoseModelsNeedTwoProtocols(t *testing.T
 	}
 }
 
-// TestDshProviderProtocolForModel pins the two-way rule directly: the endpoint
-// answers when it can, and a declared protocol survives an endpoint that says
-// nothing.
+// TestDshProviderProtocolForModel pins the three-way rule directly: the
+// endpoint answers when it can, a declared protocol survives an endpoint that
+// says nothing, and a declared protocol this build cannot serve is refused
+// rather than recorded as a different one.
 func TestDshProviderProtocolForModel(t *testing.T) {
 	cases := []struct {
 		name     string
 		model    providerDiscoveredModel
 		declared string
 		want     string
+		wantErr  bool
 	}{
 		{
 			name:  "chat completions route",
@@ -938,23 +957,156 @@ func TestDshProviderProtocolForModel(t *testing.T) {
 			want:  providerAPIAnthropicMessages,
 		},
 		{
-			name:     "silent endpoint keeps the declared protocol",
+			name:  "responses route",
+			model: providerDiscoveredModel{SupportedEndpoints: []string{providerEndpointResponses}},
+			want:  providerAPIOpenAIResponses,
+		},
+		{
+			name:  "completions route wins over responses when a model lists both",
+			model: providerDiscoveredModel{SupportedEndpoints: []string{providerEndpointResponses, providerEndpointChatCompletions}},
+			want:  providerAPIOpenAICompletions,
+		},
+		{
+			name:  "messages route wins over both",
+			model: providerDiscoveredModel{SupportedEndpoints: []string{providerEndpointChatCompletions, providerEndpointMessages}},
+			want:  providerAPIAnthropicMessages,
+		},
+		{
+			name:     "silent endpoint keeps the declared anthropic protocol",
 			model:    providerDiscoveredModel{},
 			declared: providerAPIAnthropicMessages,
 			want:     providerAPIAnthropicMessages,
+		},
+		{
+			name:     "silent endpoint keeps the declared responses protocol",
+			model:    providerDiscoveredModel{},
+			declared: providerAPIOpenAIResponses,
+			want:     providerAPIOpenAIResponses,
+		},
+		{
+			name:     "silent endpoint keeps the declared completions protocol",
+			model:    providerDiscoveredModel{},
+			declared: providerAPIOpenAICompletions,
+			want:     providerAPIOpenAICompletions,
 		},
 		{
 			name:  "silent endpoint with nothing declared",
 			model: providerDiscoveredModel{},
 			want:  providerAPIOpenAICompletions,
 		},
+		{
+			name:     "a protocol this build cannot serve is refused",
+			model:    providerDiscoveredModel{},
+			declared: "openai-embeddings",
+			wantErr:  true,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if got := providerProtocolForModel(testCase.model, testCase.declared); got != testCase.want {
+			got, err := providerProtocolForModel(testCase.model, testCase.declared)
+			if testCase.wantErr {
+				failure := dshFailure(t, err)
+				if failure.Kind != providerProbeKindUnsupportedProtocol {
+					t.Errorf("kind = %q, want %q", failure.Kind, providerProbeKindUnsupportedProtocol)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("protocol: %v", err)
+			}
+			if got != testCase.want {
 				t.Errorf("protocol = %q, want %q", got, testCase.want)
 			}
 		})
+	}
+}
+
+// TestDshProviderUpsertHonoursTheDeclaredResponsesProtocol pins that the third
+// protocol the form offers survives the save. It used to be normalized to
+// openai-completions: the save reported success, settings.yaml recorded a
+// protocol the user never chose, and nothing anywhere said so.
+func TestDshProviderUpsertHonoursTheDeclaredResponsesProtocol(t *testing.T) {
+	home := dshTestHome(t)
+	gateway := dshInstalledGateway
+	// A gateway with no model list is the case where the declaration is the
+	// only source for the protocol, and therefore where it was ignored.
+	gateway.failModels(http.StatusNotFound)
+
+	dshApplyOK(t, providerActionUpsert, map[string]any{
+		"id":       "responses-route",
+		"api":      providerAPIOpenAIResponses,
+		"base_url": "https://api.example.invalid/provider/v1",
+		"models":   []map[string]any{{"id": "gpt-5.1"}},
+		"api_key":  "sk-test-xxxx",
+	})
+
+	// The completion is what proved the route, and it has to run against the
+	// endpoint the recorded protocol names — a probe that certified
+	// /chat/completions while settings.yaml says openai-responses would
+	// vouch for a request DSH will never make.
+	if got := gateway.lastChatPath; got != "/provider/v1"+providerEndpointResponses {
+		t.Errorf("probe path = %q, want the responses endpoint", got)
+	}
+	if got := gateway.lastChatBody["input"]; got != providerProbePrompt {
+		t.Errorf("responses probe body input = %#v, want the probe prompt", got)
+	}
+	if got := gateway.lastChatBody["max_output_tokens"]; got != float64(providerProbeResponsesMinTokens) {
+		t.Errorf("responses probe max_output_tokens = %#v, want %d", got, providerProbeResponsesMinTokens)
+	}
+	settings := dshSettingsAfter(t, home)
+	if got := dshMapPath(t, settings, dshProviderRootKey, dshProvidersKey, "responses-route", "api"); got != providerAPIOpenAIResponses {
+		t.Fatalf("api = %#v, want the declared %q", got, providerAPIOpenAIResponses)
+	}
+}
+
+// TestDshProviderUpsertRoutesByAdvertisedResponsesEndpoint pins the other half
+// of the same rule: when the gateway does describe its endpoints, the one it
+// names decides the protocol — and it is the one the probe runs against.
+func TestDshProviderUpsertRoutesByAdvertisedResponsesEndpoint(t *testing.T) {
+	home := dshTestHome(t)
+	gateway := dshInstalledGateway
+	gateway.serveResponsesModel("gpt-5.1")
+
+	dshApplyOK(t, providerActionUpsert, map[string]any{
+		"id":       "responses-route",
+		"base_url": "https://api.example.invalid/provider/v1",
+		"models":   []map[string]any{{"id": "gpt-5.1"}},
+		"api_key":  "sk-test-xxxx",
+	})
+
+	if got := gateway.lastChatPath; got != "/provider/v1"+providerEndpointResponses {
+		t.Errorf("probe path = %q, want the responses endpoint", got)
+	}
+	settings := dshSettingsAfter(t, home)
+	if got := dshMapPath(t, settings, dshProviderRootKey, dshProvidersKey, "responses-route", "api"); got != providerAPIOpenAIResponses {
+		t.Fatalf("api = %#v, want %q", got, providerAPIOpenAIResponses)
+	}
+}
+
+// TestDshProviderUpsertRefusesAProtocolItCannotRoute pins the other side of
+// the same defect: a declaration this build cannot serve is refused outright,
+// never quietly recorded as something else.
+func TestDshProviderUpsertRefusesAProtocolItCannotRoute(t *testing.T) {
+	home := dshTestHome(t)
+	gateway := dshInstalledGateway
+	gateway.failModels(http.StatusNotFound)
+
+	err := dshUpsertVerify(t, map[string]any{
+		"id":       "unsupported-route",
+		"api":      "openai-embeddings",
+		"base_url": "https://api.example.invalid/provider/v1",
+		"models":   []map[string]any{{"id": "m1"}},
+		"api_key":  "sk-test-xxxx",
+	})
+	failure := dshFailure(t, err)
+	if failure.Kind != providerProbeKindUnsupportedProtocol {
+		t.Fatalf("kind = %q, want %q (message: %s)", failure.Kind, providerProbeKindUnsupportedProtocol, failure.Message)
+	}
+	if _, chats := gateway.calls(); chats != 0 {
+		t.Errorf("chat probes = %d, want none for a protocol that cannot be probed", chats)
+	}
+	if settings := dshSettingsAfter(t, home); len(settings) != 0 {
+		t.Errorf("a refused save wrote settings.yaml: %#v", settings)
 	}
 }
 
