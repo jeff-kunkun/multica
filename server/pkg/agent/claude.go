@@ -41,6 +41,11 @@ type claudeBackend struct {
 	cfg Config
 }
 
+var claudeAutoCompactProbeCache = struct {
+	sync.Mutex
+	supported map[string]bool
+}{supported: make(map[string]bool)}
+
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -54,6 +59,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildClaudeArgs(opts, b.cfg.Logger)
+	if !b.supportsAutoCompact(ctx, execPath) {
+		args = stripClaudeAutoCompactArgs(args)
+	}
 
 	// If the caller provided an MCP config, write it to a temp file and pass
 	// --mcp-config <path> so the agent uses a controlled set of MCP servers
@@ -377,6 +385,52 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// supportsAutoCompact probes the installed CLI once. Claude Code exits on an
+// unknown option, so sending --autocompact without this capability check would
+// turn every task into an immediate failure on older installations.
+func (b *claudeBackend) supportsAutoCompact(ctx context.Context, execPath string) bool {
+	claudeAutoCompactProbeCache.Lock()
+	if supported, ok := claudeAutoCompactProbeCache.supported[execPath]; ok {
+		claudeAutoCompactProbeCache.Unlock()
+		return supported
+	}
+	claudeAutoCompactProbeCache.Unlock()
+
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := outputOwned(b.cfg.commandAt(execPath).exec(probeCtx, "--help"), b.cfg.Logger)
+	if err != nil {
+		// A cancelled or otherwise failed probe is transient. Do not cache it:
+		// the next task gets another chance to establish the capability.
+		if b.cfg.Logger != nil {
+			b.cfg.Logger.Warn("Claude Code capability probe failed; omitting --autocompact for this task", "error", err)
+		}
+		return false
+	}
+	supported := strings.Contains(string(out), "--autocompact")
+	claudeAutoCompactProbeCache.Lock()
+	claudeAutoCompactProbeCache.supported[execPath] = supported
+	claudeAutoCompactProbeCache.Unlock()
+	if !supported && b.cfg.Logger != nil {
+		b.cfg.Logger.Warn("Claude Code does not advertise --autocompact; omitting the flag")
+	}
+	return supported
+}
+
+func stripClaudeAutoCompactArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--autocompact" {
+			if i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
 
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage) assistantTurn {
@@ -809,7 +863,16 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--effort": blockedWithValue,
 }
 
+const (
+	DefaultClaudeAutoCompactTokens = 200000
+	MinClaudeAutoCompactTokens     = 100000
+	MaxClaudeAutoCompactTokens     = 1000000
+)
+
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
+	const defaultAutoCompactTokens = DefaultClaudeAutoCompactTokens
+	const minAutoCompactTokens = MinClaudeAutoCompactTokens
+	const maxAutoCompactTokens = MaxClaudeAutoCompactTokens
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
@@ -843,6 +906,20 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
 	}
+	// Claude Code supports --autocompact from 100k through 1M tokens. Put the
+	// daemon default before custom args so an explicit per-agent custom_args
+	// value wins naturally under the CLI's last-value-wins parsing.
+	autoCompactTokens := opts.ClaudeAutoCompactTokens
+	if autoCompactTokens <= 0 {
+		autoCompactTokens = defaultAutoCompactTokens
+	} else if autoCompactTokens < minAutoCompactTokens || autoCompactTokens > maxAutoCompactTokens {
+		if logger != nil {
+			logger.Warn("Claude autocompact token window outside supported range; using default",
+				"value", autoCompactTokens, "min", minAutoCompactTokens, "max", maxAutoCompactTokens)
+		}
+		autoCompactTokens = defaultAutoCompactTokens
+	}
+	args = append(args, "--autocompact", fmt.Sprintf("%d", autoCompactTokens))
 	// SystemPrompt is intentionally not forwarded as --append-system-prompt:
 	// Claude Code loads the per-task CLAUDE.md the daemon writes into the
 	// workdir, so inlining the same runtime brief would duplicate it on every
