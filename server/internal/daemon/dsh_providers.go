@@ -60,6 +60,10 @@ const (
 	providerActionUpsert   = "upsert"
 	providerActionDelete   = "delete"
 	providerActionActivate = "activate"
+	// providerActionReplay rewrites the presets Multica already saved back into
+	// a DSH installation whose configuration was reset or upgraded away. See
+	// dsh_provider_ledger.go for why the record it replays from exists.
+	providerActionReplay = "replay"
 )
 
 // providerPresetModel is one entry of a preset's model list, as reported to the
@@ -195,6 +199,10 @@ func (dshProviderDriver) Apply(ctx context.Context, action string, payload json.
 		return dshDeleteProvider(dshHome, payload)
 	case providerActionActivate:
 		return dshActivateProvider(dshHome, payload)
+	case providerActionReplay:
+		// The only action with no body: it names nothing, because what it
+		// restores is whatever was recorded for this DSH home.
+		return dshReplayProviders(dshHome)
 	default:
 		return nil, fmt.Errorf("unsupported action %q", action)
 	}
@@ -616,6 +624,13 @@ func dshUpsertProvider(ctx context.Context, dshHome string, payload json.RawMess
 		}
 	}
 
+	// Recorded from the entry rather than from the request, and recorded before
+	// settings.yaml is replaced for the same reason the credentials file is
+	// written first: a failure here leaves DSH's files untouched.
+	if err := recordDshLedgerPreset(dshHome, id, dshLedgerPresetFromEntry(entry)); err != nil {
+		return nil, err
+	}
+
 	if err := writeDshYAMLFile(settings.path, settings, dshExistingFileMode(settings.path, 0o600)); err != nil {
 		return nil, err
 	}
@@ -691,6 +706,12 @@ func dshDeleteProvider(dshHome string, payload json.RawMessage) (*providerConfig
 		}
 	}
 
+	// A deleted preset has to leave the replay record too, or the next replay
+	// would put back the preset the user just removed.
+	if err := forgetDshLedgerPreset(dshHome, id); err != nil {
+		return nil, err
+	}
+
 	if err := writeDshYAMLFile(settings.path, settings, dshExistingFileMode(settings.path, 0o600)); err != nil {
 		return nil, err
 	}
@@ -734,6 +755,10 @@ func dshActivateProvider(dshHome string, payload json.RawMessage) (*providerConf
 	active := yamlMapMapping(settings.root, dshActiveModelKey)
 	yamlMapSet(active, "provider", yamlScalarNode(id))
 	yamlMapSet(active, "model", yamlScalarNode(model))
+
+	if err := recordDshLedgerActive(dshHome, id, model); err != nil {
+		return nil, err
+	}
 
 	if err := writeDshYAMLFile(settings.path, settings, dshExistingFileMode(settings.path, 0o600)); err != nil {
 		return nil, err

@@ -184,6 +184,43 @@ describe("view states", () => {
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
   });
 
+  // The restore control is the recovery path for a CLI that was reinstalled or
+  // reset under a configuration Multica already wrote (DENE-683). Its rules —
+  // what the daemon puts back and what it refuses to overwrite — are covered in
+  // server/internal/daemon/dsh_provider_ledger_test.go; this checks the wiring.
+  it("sends a replay and never a credential when restore is pressed", async () => {
+    runProviderPresetAction.mockResolvedValue(result([preset()]));
+    renderSection(runtime());
+
+    fireEvent.click(await screen.findByRole("button", { name: /Restore from Multica/ }));
+
+    await waitFor(() => expect(runProviderPresetAction).toHaveBeenCalledTimes(1));
+    expect(runProviderPresetAction).toHaveBeenCalledWith("rt-1", { action: "replay" });
+  });
+
+  it("offers restore on an empty list, which is what a reset CLI looks like", async () => {
+    resolveRuntimeProviderPresets.mockResolvedValue(result([]));
+    renderSection(runtime());
+
+    expect(await screen.findByText("No providers configured")).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: /Restore from Multica/ }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("offers no restore when the list could not be read", async () => {
+    resolveRuntimeProviderPresets.mockRejectedValue(new Error("daemon did not respond"));
+    renderSection(runtime());
+
+    expect(
+      await screen.findByText("Can't read provider configuration"),
+    ).toBeInTheDocument();
+    // A section that could not read the machine must not offer to write it.
+    expect(
+      screen.queryByRole("button", { name: /Restore from Multica/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("offers add on an empty but trustworthy list", async () => {
     resolveRuntimeProviderPresets.mockResolvedValue(result([]));
     renderSection(runtime());
