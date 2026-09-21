@@ -11,11 +11,14 @@ export type {
   ApiClientOptions,
   ClientRuntimeSnapshot,
   ClientUsageRequest,
+  LogExportParams,
+  LogExportScope,
 } from "./client";
 export { parseWithFallback, setSchemaLogger } from "./schema";
 export type { ParseOptions } from "./schema";
 export { DuplicateIssueErrorBodySchema } from "./schemas";
 export type { DuplicateIssueErrorBody } from "./schemas";
+export type { LogExportConfig, LogExportPreview, LogExportReport } from "./schemas";
 export {
   CONFIG_BUNDLE_FORMAT,
   CONFIG_BUNDLE_SCHEMA_VERSION,

@@ -1642,5 +1642,22 @@
         "detail": "モデルが拒否・到達不可・削除済み、または連続失敗後のクールダウン中です。オフと同じ動作で、課題には何も表示されません。"
       }
     }
+  },
+  "log_repository": {
+    "title": "ログリポジトリ",
+    "description": "報告されたログバンドルはこのリポジトリの logs/ ディレクトリにコミットされ、タスクのコメントにはリンクだけが残ります。",
+    "url_label": "ログリポジトリの URL",
+    "url_placeholder": "https://github.com/owner/repo",
+    "branch_label": "ブランチ",
+    "branch_placeholder": "デフォルトブランチ",
+    "token_label": "アクセストークン",
+    "token_placeholder": "このリポジトリに書き込み権限のある GitHub トークン",
+    "token_placeholder_stored": "トークンは保存済みです — 置き換える場合は新しいものを入力",
+    "hint": "GitHub リポジトリのみ対応。トークンはサーバー上で暗号化され、再表示されません。プッシュに失敗した場合、バンドルはコメントに添付されます。",
+    "token_not_storable": "このデプロイには暗号化用のシークレットキーがないため、トークンを保存できません。",
+    "save": "保存",
+    "clear_token": "トークンを削除",
+    "saved": "ログリポジトリを保存しました",
+    "save_failed": "ログリポジトリの保存に失敗しました"
   }
 }

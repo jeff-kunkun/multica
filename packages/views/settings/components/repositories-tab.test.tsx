@@ -112,6 +112,11 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
+// The log repository form has its own suite (log-repository-section.test.tsx).
+vi.mock("./log-repository-section", () => ({
+  LogRepositorySection: () => null,
+}));
+
 vi.mock("sonner", () => ({
   toast: { success: mockToastSuccess, error: vi.fn() },
 }));

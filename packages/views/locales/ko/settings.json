@@ -1642,5 +1642,22 @@
         "detail": "모델이 거부되었거나 연결할 수 없거나 삭제되었거나, 연속 실패 후 쿨다운 중입니다. 꺼짐과 같게 동작하며 이슈에는 아무것도 표시되지 않습니다."
       }
     }
+  },
+  "log_repository": {
+    "title": "로그 저장소",
+    "description": "보고된 로그 번들은 이 저장소의 logs/ 디렉터리에 커밋되고, 태스크 댓글에는 링크만 남습니다.",
+    "url_label": "로그 저장소 URL",
+    "url_placeholder": "https://github.com/owner/repo",
+    "branch_label": "브랜치",
+    "branch_placeholder": "기본 브랜치",
+    "token_label": "액세스 토큰",
+    "token_placeholder": "이 저장소에 쓰기 권한이 있는 GitHub 토큰",
+    "token_placeholder_stored": "토큰이 저장되어 있습니다 — 바꾸려면 새 토큰을 입력하세요",
+    "hint": "GitHub 저장소만 지원합니다. 토큰은 서버에서 암호화되며 다시 표시되지 않습니다. 푸시에 실패하면 번들은 댓글에 첨부됩니다.",
+    "token_not_storable": "이 배포에는 암호화에 사용할 비밀 키가 없어 토큰을 저장할 수 없습니다.",
+    "save": "저장",
+    "clear_token": "토큰 제거",
+    "saved": "로그 저장소가 저장되었습니다",
+    "save_failed": "로그 저장소를 저장하지 못했습니다"
   }
 }

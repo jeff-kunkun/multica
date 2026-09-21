@@ -16,6 +16,12 @@ import {
   AgentSchema,
   AgentTaskListSchema,
   TaskMessageListSchema,
+  LogExportPreviewSchema,
+  LogExportReportSchema,
+  LogExportConfigSchema,
+  EMPTY_LOG_EXPORT_PREVIEW,
+  EMPTY_LOG_EXPORT_REPORT,
+  EMPTY_LOG_EXPORT_CONFIG,
   AutopilotQuotaUsageSchema,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
@@ -3017,5 +3023,56 @@ describe("alignment capabilities on the wire", () => {
       capabilities: { keys: [], version: "1" },
     });
     expect(parsed.capabilities).toEqual({ keys: [], version: "1" });
+  });
+});
+
+describe("log export schemas", () => {
+  it("reads a bundle preview and tolerates null lists", () => {
+    const parsed = LogExportPreviewSchema.parse({
+      empty: false,
+      filename: "multica-logs-dene-599.zip",
+      size_bytes: 2048,
+      summary: "# summary",
+      meta: { scope: "task", run_count: 2, entry_count: 40, warnings: null, runs: null },
+      log_repo_configured: true,
+    });
+    expect(parsed.meta.entry_count).toBe(40);
+    expect(parsed.meta.warnings).toEqual([]);
+    expect(parsed.meta.runs).toEqual([]);
+    expect(parsed.meta.partial).toBe(false);
+  });
+
+  // A preview the client cannot read must not render as a downloadable
+  // bundle: the fallback is the empty state, which offers a wider scope.
+  it("falls back to the empty state on a malformed preview", () => {
+    const parsed = parseWithFallback(
+      { empty: "no", meta: "broken" },
+      LogExportPreviewSchema,
+      EMPTY_LOG_EXPORT_PREVIEW,
+      { endpoint: "GET /api/tasks/:id/log-export" },
+    );
+    expect(parsed.empty).toBe(true);
+    expect(parsed.filename).toBe("");
+  });
+
+  it("degrades an unknown delivery to attachment, the mode that needs no link", () => {
+    const parsed = LogExportReportSchema.parse({ comment_id: "c-1", delivery: "s3" });
+    expect(parsed.delivery).toBe("attachment");
+    expect(parsed.link).toBe("");
+  });
+
+  it("falls back on a malformed report", () => {
+    const parsed = parseWithFallback([1, 2], LogExportReportSchema, EMPTY_LOG_EXPORT_REPORT, {
+      endpoint: "POST /api/tasks/:id/log-export/report",
+    });
+    expect(parsed).toEqual(EMPTY_LOG_EXPORT_REPORT);
+  });
+
+  it("never claims a stored token the server did not report", () => {
+    expect(LogExportConfigSchema.parse({ repo_url: "https://github.com/a/b" }).has_token).toBe(false);
+    const parsed = parseWithFallback("nope", LogExportConfigSchema, EMPTY_LOG_EXPORT_CONFIG, {
+      endpoint: "GET /api/workspaces/:id/log-export-config",
+    });
+    expect(parsed).toEqual(EMPTY_LOG_EXPORT_CONFIG);
   });
 });

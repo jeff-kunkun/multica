@@ -1642,5 +1642,22 @@
         "detail": "模型被拒、连不通、已删除，或正在失败后的冷却期。完全走原版，票上不会出现任何提示。"
       }
     }
+  },
+  "log_repository": {
+    "title": "日志仓库",
+    "description": "上报的日志包会提交到这个仓库的 logs/ 目录，任务评论里只留链接，不再挂大附件。",
+    "url_label": "日志仓库地址",
+    "url_placeholder": "https://github.com/owner/repo",
+    "branch_label": "分支",
+    "branch_placeholder": "默认分支",
+    "token_label": "访问令牌",
+    "token_placeholder": "对该仓库有写权限的 GitHub 令牌",
+    "token_placeholder_stored": "已保存令牌 — 输入新的即可替换",
+    "hint": "目前只支持 GitHub 仓库。令牌在服务器上加密保存，之后不会再显示。推送失败时，日志包会改为挂在评论附件里。",
+    "token_not_storable": "这个部署没有可用于加密的密钥，无法保存令牌。",
+    "save": "保存",
+    "clear_token": "移除令牌",
+    "saved": "日志仓库已保存",
+    "save_failed": "保存日志仓库失败"
   }
 }

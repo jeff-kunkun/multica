@@ -2186,6 +2186,105 @@ export const TaskMessagePayloadSchema = z.object({
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);
 
+// Task log export (`GET /api/tasks/:id/log-export`, `POST .../report`). The
+// dialog decides between "nothing to export", "here is the bundle" and "where
+// did the report land" from these, so every field it branches on has a default
+// and the delivery enum degrades to "attachment" — the mode that needs no link.
+const LogExportRunSchema = z.object({
+  task_id: z.string().default(""),
+  agent_name: z.string().default(""),
+  status: z.string().default(""),
+  exit_code: z.number().nullable().optional().catch(undefined),
+  entry_count: z.number().default(0),
+}).loose();
+
+const LogExportMetaSchema = z.object({
+  scope: z.string().default(""),
+  hours: z.number().optional().catch(undefined),
+  run_count: z.number().default(0),
+  entry_count: z.number().default(0),
+  dropped_entries: z.number().default(0),
+  partial: z.boolean().default(false),
+  warnings: z.array(z.string()).nullish().transform((v) => v ?? []),
+  runs: z.array(LogExportRunSchema).nullish().transform((v) => v ?? []),
+}).loose();
+
+export const EMPTY_LOG_EXPORT_META = {
+  scope: "",
+  run_count: 0,
+  entry_count: 0,
+  dropped_entries: 0,
+  partial: false,
+  warnings: [] as string[],
+  runs: [] as z.infer<typeof LogExportRunSchema>[],
+};
+
+export const LogExportPreviewSchema = z.object({
+  empty: z.boolean().default(false),
+  filename: z.string().default(""),
+  size_bytes: z.number().default(0),
+  summary: z.string().default(""),
+  meta: LogExportMetaSchema.default(EMPTY_LOG_EXPORT_META),
+  log_repo_configured: z.boolean().default(false),
+}).loose();
+
+export type LogExportPreview = z.infer<typeof LogExportPreviewSchema>;
+
+// A malformed preview is treated as "nothing to export": the dialog then
+// offers a wider scope instead of a bundle card it cannot describe.
+export const EMPTY_LOG_EXPORT_PREVIEW: LogExportPreview = {
+  empty: true,
+  filename: "",
+  size_bytes: 0,
+  summary: "",
+  meta: EMPTY_LOG_EXPORT_META,
+  log_repo_configured: false,
+};
+
+export const LogExportReportSchema = z.object({
+  comment_id: z.string().default(""),
+  issue_id: z.string().default(""),
+  issue_identifier: z.string().default(""),
+  delivery: z.enum(["git", "attachment"]).catch("attachment"),
+  link: z.string().default(""),
+  fallback_reason: z.string().default(""),
+  filename: z.string().default(""),
+  size_bytes: z.number().default(0),
+  mentioned: z.string().default(""),
+}).loose();
+
+export type LogExportReport = z.infer<typeof LogExportReportSchema>;
+
+export const EMPTY_LOG_EXPORT_REPORT: LogExportReport = {
+  comment_id: "",
+  issue_id: "",
+  issue_identifier: "",
+  delivery: "attachment",
+  link: "",
+  fallback_reason: "",
+  filename: "",
+  size_bytes: 0,
+  mentioned: "",
+};
+
+// Workspace log repository (`/api/workspaces/:id/log-export-config`). The token
+// is write-only, so the response only ever says whether one is stored.
+export const LogExportConfigSchema = z.object({
+  repo_url: z.string().default(""),
+  branch: z.string().default(""),
+  has_token: z.boolean().default(false),
+  token_storable: z.boolean().default(true),
+}).loose();
+
+export type LogExportConfig = z.infer<typeof LogExportConfigSchema>;
+
+export const EMPTY_LOG_EXPORT_CONFIG: LogExportConfig = {
+  repo_url: "",
+  branch: "",
+  has_token: false,
+  token_storable: true,
+};
+
 // Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
 // chat recovery. Its optional message payload must be well-formed before the
 // UI deletes a message from cache or restores text into the input.

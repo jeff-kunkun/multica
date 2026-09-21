@@ -17,6 +17,7 @@ import {
   Check,
   ChevronRight,
   Filter,
+  FileArchive,
   FilePen,
   FileText,
   Search,
@@ -57,6 +58,7 @@ import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { runtimeDisplayName, providerDisplayName } from "@multica/core/runtimes";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { redactSecrets } from "./redact";
+import { LogExportDialog } from "./log-export-dialog";
 import {
   createLiveEndFollow,
   FOLLOW_EDGE_THRESHOLD,
@@ -327,6 +329,7 @@ export function AgentTranscriptDialog({
   const wsId = useWorkspaceId();
   const formatText = useTraceIssueLabels(wsId, task.issue_id, items, open);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
+  const [logExportOpen, setLogExportOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
   const [query, setQuery] = useState("");
   const [elapsed, setElapsed] = useState("");
@@ -946,6 +949,18 @@ export function AgentTranscriptDialog({
             )}
 
             <div className="flex shrink-0 items-center gap-0.5">
+              {task.id && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setLogExportOpen(true)}
+                  title={t(($) => $.log_export.open)}
+                  className="text-muted-foreground"
+                >
+                  <FileArchive className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">{t(($) => $.log_export.open)}</span>
+                </Button>
+              )}
               {hasRunDetails && (
                 <Popover>
                   <PopoverTrigger
@@ -1309,6 +1324,14 @@ export function AgentTranscriptDialog({
             />
           )}
         </div>
+        {/* Nested inside this dialog's tree so the two stack: closing the
+            export dialog returns to the transcript instead of dismissing it. */}
+        <LogExportDialog
+          open={logExportOpen}
+          onOpenChange={setLogExportOpen}
+          taskId={task.id}
+          canReport={Boolean(task.issue_id)}
+        />
       </DialogContent>
     </Dialog>
   );

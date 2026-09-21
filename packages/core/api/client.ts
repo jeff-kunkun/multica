@@ -371,6 +371,15 @@ import {
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TaskMessageListSchema,
+  LogExportPreviewSchema,
+  LogExportReportSchema,
+  LogExportConfigSchema,
+  EMPTY_LOG_EXPORT_PREVIEW,
+  EMPTY_LOG_EXPORT_REPORT,
+  EMPTY_LOG_EXPORT_CONFIG,
+  type LogExportPreview,
+  type LogExportReport,
+  type LogExportConfig,
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
@@ -544,6 +553,16 @@ export interface ClientUsageRequest {
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+export type LogExportScope = "run" | "hours" | "task";
+
+export interface LogExportParams {
+  scope: LogExportScope;
+  /** Window size, only read for `scope: "hours"`. */
+  hours?: number;
+  /** Export what could be collected when some runs cannot be read. */
+  allowPartial?: boolean;
 }
 
 export class ApiError extends Error {
@@ -2790,6 +2809,70 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`);
     return parseWithFallback<TaskMessagePayload[]>(raw, TaskMessageListSchema, [], {
       endpoint: "GET /api/tasks/:id/messages",
+    });
+  }
+
+  // Task log export. The preview and the zip are the same server-side bundle
+  // (`format=json` describes it, `format=zip` is it), so the dialog, the
+  // report action and `multica logs export` cannot drift apart.
+  private logExportQuery(params: LogExportParams, format?: "zip"): string {
+    const query = new URLSearchParams({ scope: params.scope });
+    if (params.scope === "hours" && params.hours !== undefined) {
+      query.set("hours", String(params.hours));
+    }
+    if (params.allowPartial === true) query.set("allow_partial", "true");
+    if (format) query.set("format", format);
+    return query.toString();
+  }
+
+  async previewTaskLogExport(taskId: string, params: LogExportParams): Promise<LogExportPreview> {
+    const raw = await this.fetch<unknown>(
+      `/api/tasks/${taskId}/log-export?${this.logExportQuery(params)}`,
+    );
+    return parseWithFallback<LogExportPreview>(raw, LogExportPreviewSchema, EMPTY_LOG_EXPORT_PREVIEW, {
+      endpoint: "GET /api/tasks/:id/log-export",
+    });
+  }
+
+  async downloadTaskLogExport(taskId: string, params: LogExportParams): Promise<Blob> {
+    const res = await this.fetchRaw(
+      `/api/tasks/${taskId}/log-export?${this.logExportQuery(params, "zip")}`,
+    );
+    return res.blob();
+  }
+
+  async reportTaskLogExport(taskId: string, params: LogExportParams): Promise<LogExportReport> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/log-export/report`, {
+      method: "POST",
+      body: JSON.stringify({
+        scope: params.scope,
+        hours: params.hours,
+        allow_partial: params.allowPartial === true,
+      }),
+    });
+    return parseWithFallback<LogExportReport>(raw, LogExportReportSchema, EMPTY_LOG_EXPORT_REPORT, {
+      endpoint: "POST /api/tasks/:id/log-export/report",
+    });
+  }
+
+  async getLogExportConfig(workspaceId: string): Promise<LogExportConfig> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/log-export-config`);
+    return parseWithFallback<LogExportConfig>(raw, LogExportConfigSchema, EMPTY_LOG_EXPORT_CONFIG, {
+      endpoint: "GET /api/workspaces/:id/log-export-config",
+    });
+  }
+
+  // `token` is write-only: omit it to keep the stored one, send "" to clear it.
+  async updateLogExportConfig(
+    workspaceId: string,
+    data: { repo_url: string; branch: string; token?: string },
+  ): Promise<LogExportConfig> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/log-export-config`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback<LogExportConfig>(raw, LogExportConfigSchema, EMPTY_LOG_EXPORT_CONFIG, {
+      endpoint: "PUT /api/workspaces/:id/log-export-config",
     });
   }
 

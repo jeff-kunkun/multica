@@ -1649,5 +1649,22 @@
         "detail": "The model was rejected, is unreachable, was deleted, or is cooling down after repeated failures. Behaves like off; nothing appears on any issue."
       }
     }
+  },
+  "log_repository": {
+    "title": "Log repository",
+    "description": "Reported log bundles are committed to this repository's logs/ directory, so the issue comment carries a link instead of a large attachment.",
+    "url_label": "Log repository URL",
+    "url_placeholder": "https://github.com/owner/repo",
+    "branch_label": "Branch",
+    "branch_placeholder": "Default branch",
+    "token_label": "Access token",
+    "token_placeholder": "GitHub token with write access to the repository",
+    "token_placeholder_stored": "A token is stored — type a new one to replace it",
+    "hint": "GitHub repositories only. The token is encrypted on the server and never shown again. If a push fails, the bundle is attached to the comment instead.",
+    "token_not_storable": "This deployment has no secret key to encrypt a token with, so one cannot be stored.",
+    "save": "Save",
+    "clear_token": "Remove token",
+    "saved": "Log repository saved",
+    "save_failed": "Failed to save the log repository"
   }
 }

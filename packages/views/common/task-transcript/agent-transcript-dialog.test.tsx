@@ -75,6 +75,13 @@ vi.mock("@multica/ui/components/ui/dialog", () => ({
   DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
 }));
 
+// The export flow has its own suite (log-export-dialog.test.tsx); here only
+// the header entry and what it is handed matter.
+vi.mock("./log-export-dialog", () => ({
+  LogExportDialog: ({ open, taskId, canReport }: { open: boolean; taskId: string; canReport: boolean }) =>
+    open ? <div data-testid="log-export" data-task={taskId} data-can-report={String(canReport)} /> : null,
+}));
+
 vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
   const React = await import("react");
   const RadioContext = React.createContext<{
@@ -263,6 +270,17 @@ afterEach(() => {
 });
 
 describe("AgentTranscriptDialog", () => {
+  it("opens the log export for this run from the header action area", () => {
+    renderDialog();
+    expect(screen.queryByTestId("log-export")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Export logs" }));
+
+    const exportDialog = screen.getByTestId("log-export");
+    expect(exportDialog).toHaveAttribute("data-task", baseTask.id);
+    expect(exportDialog).toHaveAttribute("data-can-report", String(Boolean(baseTask.issue_id)));
+  });
+
   it("explains unavailable live events for an empty Antigravity transcript", async () => {
     vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("antigravity")]);
 

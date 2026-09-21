@@ -53,6 +53,7 @@ import type {
 } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { LogRepositorySection } from "./log-repository-section";
 import {
   SettingsCard,
   SettingsSaveState,
@@ -474,6 +475,8 @@ export function RepositoriesTab() {
           )}
         </SettingsCard>
       </SettingsSection>
+
+      <LogRepositorySection wsId={wsId} canManage={canManageWorkspace} />
 
       <Dialog
         open={githubPickerOpen}
