@@ -1018,7 +1018,9 @@ function FailureBubble({
     // with the check the member can run (`agy -p ping`) and branches on the
     // result, which also happens to be the right advice when the same notice
     // arrives alongside an expired token.
-    antigravity_not_logged_in: t(($) => $.message_list.failure.antigravity_not_logged_in),
+    antigravity_not_logged_in: t(
+      ($) => $.message_list.failure.antigravity_not_logged_in,
+    ),
     "agent_error.provider_quota_limit": t(($) => $.message_list.failure.provider_quota_limit),
     "agent_error.provider_capacity_or_rate_limit": t(
       ($) => $.message_list.failure.provider_capacity_or_rate_limit,
