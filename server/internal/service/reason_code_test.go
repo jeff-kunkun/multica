@@ -51,6 +51,13 @@ func TestAgentReadinessVerdict(t *testing.T) {
 	if got, _ := AgentReadiness(t.Context(), RuntimeLookup{}, db.Agent{ArchivedAt: archivedAt, RuntimeID: validRuntime}); got.Reason != dispatch.ReasonTargetUnavailable || !got.Blocked() {
 		t.Errorf("archived agent: got %+v, want blocked/target_unavailable", got)
 	}
+	disabled, _ := AgentReadiness(t.Context(), RuntimeLookup{}, db.Agent{RuntimeID: validRuntime, WorkEnabled: false})
+	if disabled.Reason != dispatch.ReasonTargetUnavailable || !disabled.Blocked() {
+		t.Errorf("disabled agent: got %+v, want blocked/target_unavailable", disabled)
+	}
+	if disabled.Detail != "agent is not accepting work" {
+		t.Errorf("disabled agent detail = %q, want not-accepting-work", disabled.Detail)
+	}
 
 	// The runtime half.
 	if got := runtimeVerdict(db.AgentRuntime{Status: "online"}); !got.Ready() {

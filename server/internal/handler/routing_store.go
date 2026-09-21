@@ -156,6 +156,11 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 	}
 	out := make(map[string]routing.Agent, len(agents))
 	for _, a := range agents {
+		// Disabled seats stay on the agents list but are not routing
+		// candidates (DENE-714). Archive is already excluded by ListAgents.
+		if !a.WorkEnabled {
+			continue
+		}
 		out[a.Name] = routing.Agent{
 			ID:   util.UUIDToString(a.ID),
 			Name: a.Name,

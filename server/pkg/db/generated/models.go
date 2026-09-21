@@ -58,6 +58,7 @@ type Agent struct {
 	ParentAgentID         pgtype.UUID `json:"parent_agent_id"`
 	RuntimeInherited      bool        `json:"runtime_inherited"`
 	RoutingTier           pgtype.Text `json:"routing_tier"`
+	WorkEnabled           bool        `json:"work_enabled"`
 }
 
 type AgentBuilderDraft struct {

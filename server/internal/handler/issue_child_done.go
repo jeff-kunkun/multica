@@ -794,7 +794,7 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
 	})
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid || !agent.WorkEnabled {
 		return
 	}
 
@@ -851,7 +851,7 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 	}
 
 	agent, err := h.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid || !agent.WorkEnabled {
 		return
 	}
 

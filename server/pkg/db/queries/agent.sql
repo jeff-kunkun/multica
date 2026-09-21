@@ -215,6 +215,10 @@ UPDATE agent SET
     -- "turned off" the same way thinking_level's two-query pattern does for
     -- nullable text. A bool column cannot be cleared to NULL.
     auto_retry_enabled = COALESCE(sqlc.narg('auto_retry_enabled'), auto_retry_enabled),
+    -- Reversible seat gate (DENE-714). Same omitted-preserves / present-sets
+    -- contract as auto_retry_enabled. FALSE means the seat stays in the list
+    -- but does not take new work.
+    work_enabled = COALESCE(sqlc.narg('work_enabled'), work_enabled),
     -- Same tri-state for runtime inheritance (DENE-505): NULL leaves the flag
     -- alone, FALSE switches a specialisation to its own runtime configuration,
     -- TRUE makes it follow its base role again. Setting it back to "not
@@ -931,6 +935,10 @@ WHERE id = (
           WHERE a.id = atq.agent_id
             -- A task's persisted runtime is not authority after an agent rebind.
             AND a.runtime_id = atq.runtime_id
+            -- Reversible seat gate (DENE-714). Queued work stays queued until
+            -- the seat is turned back on. Already-dispatched reclaim queries
+            -- do NOT check this: disable must not interrupt an in-flight claim.
+            AND a.work_enabled
             -- Private runtimes only execute their owner's agents. Ownerless
             -- runtime/agent rows remain claimable only so the handler can
             -- settle them explicitly before daemon delivery; filtering them
@@ -2407,6 +2415,7 @@ WHERE atq.runtime_id = $1
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
         AND a.runtime_id = atq.runtime_id
+        AND a.work_enabled
         AND (
             r.visibility = 'public'
             OR (
@@ -2534,6 +2543,7 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
         AND a.runtime_id = atq.runtime_id
+        AND a.work_enabled
         AND (
             r.visibility = 'public'
             OR (

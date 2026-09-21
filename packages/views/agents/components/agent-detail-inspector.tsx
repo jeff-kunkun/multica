@@ -13,6 +13,7 @@ import {
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
   isAgentAutoRetryEnabled,
+  isAgentWorkEnabled,
   normaliseSwitchableModelsDraft,
   selectAgentSwitchableModels,
   switchableModelsEqual,
@@ -474,6 +475,19 @@ export function AgentDetailInspector({
               value={agent.max_concurrent_tasks}
               canEdit={canEdit}
               onSave={(next) => update({ max_concurrent_tasks: next })}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_work_enabled)}
+            description={t(($) => $.inspector.prop_work_enabled_hint)}
+          >
+            <Switch
+              checked={isAgentWorkEnabled(agent)}
+              disabled={!canEdit}
+              onCheckedChange={(checked) => {
+                void update({ work_enabled: checked });
+              }}
+              aria-label={t(($) => $.inspector.prop_work_enabled)}
             />
           </SettingsRow>
           <SettingsRow
