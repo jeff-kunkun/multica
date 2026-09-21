@@ -1,10 +1,13 @@
 name: CI
 
+# `kun` is this fork's mainline and its default branch; `main` is the upstream
+# mirror. Both are listed so a PR opened against either one is gated, and so a
+# push to either publishes the build caches the next run restores from.
 on:
   push:
-    branches: [main]
+    branches: [main, kun]
   pull_request:
-    branches: [main]
+    branches: [main, kun]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -183,7 +186,7 @@ jobs:
 
       - name: Decide
         id: decide
-        # Always run everything on push to main (full validation); on
+        # Always run everything on a branch push (full validation); on
         # pull_request, run only the areas whose paths changed.
         # The gated jobs themselves always run and report success — their
         # steps are gated on these outputs rather than the job being skipped
@@ -548,7 +551,7 @@ jobs:
   # Two entries now. The module cache is keyed by go.sum: immutable, saved on
   # a miss, never grows. The build cache is keyed by commit SHA with a prefix
   # fallback, so each run starts from the newest entry and recompiles only
-  # what its change touched. Only pushes to main publish a build-cache entry;
+  # what its change touched. Only branch pushes publish a build-cache entry;
   # PR runs restore and leave, which keeps storage churn at one entry per
   # merge, the same shape as the turbo caches above. The key carries the
   # resolved Go version because `check-latest` floats across patch releases,
@@ -1016,7 +1019,7 @@ jobs:
   image-budget:
     # Soft gate against the 21.7MB of raw PNG/JPG that MUL-6352 cleared out:
     # a bitmap added or grown past 300KB fails until the PR description says
-    # why. Pull requests only — a push to main has no description to read,
+    # why. Pull requests only — a branch push has no description to read,
     # and the branch it came from was already checked.
     needs: changes
     if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.images == 'true' }}
