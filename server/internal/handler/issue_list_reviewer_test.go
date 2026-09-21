@@ -69,6 +69,15 @@ func issueRowsByID(rows []IssueResponse) map[string]IssueResponse {
 	return out
 }
 
+// reviewerPtrString renders a nullable reviewer field for comparison, so a nil
+// and an empty string stay distinguishable from a set value.
+func reviewerPtrString(value *string) string {
+	if value == nil {
+		return "<nil>"
+	}
+	return *value
+}
+
 func reviewerRow(t *testing.T, rows map[string]IssueResponse, id, label string) IssueResponse {
 	t.Helper()
 	row, ok := rows[id]
@@ -121,6 +130,25 @@ func TestListIssuesIncludesReviewer(t *testing.T) {
 	}
 	wantAgentReviewer(t, "baseline agent row", reviewerRow(t, baseline, fx.agentIssue, "baseline"), fx.agentID)
 	wantNoReviewer(t, "baseline none row", reviewerRow(t, baseline, fx.noneIssue, "baseline"))
+
+	// The reported symptom was the list payload disagreeing with the detail
+	// endpoint for the same issue, so pin the two against each other rather
+	// than only against the fixture's expected value.
+	for _, id := range []string{fx.agentIssue, fx.noneIssue} {
+		var detail IssueResponse
+		testutil.Call(t, testHandler.GetIssue,
+			withURLParam(newRequest(http.MethodGet, "/api/issues/"+id, nil), "id", id)).
+			Want(http.StatusOK).
+			JSON(&detail)
+
+		listed := reviewerRow(t, baseline, id, "list-vs-detail")
+		if reviewerPtrString(listed.ReviewerType) != reviewerPtrString(detail.ReviewerType) ||
+			reviewerPtrString(listed.ReviewerID) != reviewerPtrString(detail.ReviewerID) {
+			t.Errorf("list/detail reviewer disagree for %s: list=(%v,%v) detail=(%v,%v)",
+				id, reviewerPtrString(listed.ReviewerType), reviewerPtrString(listed.ReviewerID),
+				reviewerPtrString(detail.ReviewerType), reviewerPtrString(detail.ReviewerID))
+		}
+	}
 
 	// ?status= takes a different filter arm; the projection must not drift with it.
 	todo := list("&status=todo&limit=500")
