@@ -131,8 +131,11 @@ daemon — and it stays on disk on purpose. Automatic cleanup of those is a
 machine-level setting, OFF by default (Desktop → daemon settings). When on, a
 copy is removed only if ALL of: Multica created it, no task is in it, its last
 run is older than the configured window (default 14 days), `git status
---porcelain` is empty, and its branch is already merged into trunk. Any one
-failing keeps it, and the settings screen shows which. Removal always goes
+--porcelain` is empty, and its work is already in trunk — the branch is
+contained in trunk, or its changes were squashed into it (compared by content,
+since a squashed branch is never an ancestor of trunk). A deleted remote branch
+and a merged pull request are deliberately not accepted as evidence. Any one
+condition failing keeps the copy, and the settings screen shows which. Removal always goes
 through `git worktree remove`.
 
 Parallel mode is never preselected when a directory is added: a new

@@ -154,7 +154,7 @@ Never copy the visual shape of an existing hand-written `components/ui/` compone
 ## Build & release
 
 - **Main CI** (`.github/workflows/ci.yml`) excludes mobile via `--filter='!@multica/mobile'`. Mobile failures do NOT block web/desktop PRs.
-- **Mobile verify** (`.github/workflows/mobile-verify.yml`): triggered on `apps/mobile/**` or `packages/core/types/**` changes — runs typecheck/lint/test only, no IPA build.
+- **Mobile verify** (`.github/workflows/mobile-verify.yml`): **manual only** (`workflow_dispatch`) — mobile is not a CI gate on this fork, so no push or PR triggers it. Run it by hand (`gh workflow run mobile-verify.yml`) before a mobile release; it runs typecheck/lint/test only, no IPA build.
 - **Mobile release** (`.github/workflows/mobile-release.yml`): triggered by `mobile-v*.*.*` tag → `eas build` + `eas submit`.
 - **OTA** — EAS Update for JS-only fixes that don't change the runtime version. Manual / on-demand push to preview/production channels.
 

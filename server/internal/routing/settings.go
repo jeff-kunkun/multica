@@ -34,9 +34,12 @@ import (
 const SettingsKey = "routing"
 
 // DefaultConfidenceThreshold is the threshold applied when settings carry no
-// explicit one. Below it, the corresponding slot is left empty rather than
-// filled with a guess.
-const DefaultConfidenceThreshold = 0.70
+// explicit one. It no longer decides whether a slot gets filled — routing
+// always dispatches — only whether the judge's own pick is used or the
+// ladder's fallback rung is. Measured verdicts on real tickets cluster in the
+// 0.5-0.7 band, so a floor above that band sent every ticket to the fallback
+// and threw the judge's answer away.
+const DefaultConfidenceThreshold = 0.60
 
 // Settings is the whole routing configuration: an on/off switch, the model the
 // judge runs on, the confidence threshold, and — optionally — the endpoint and
@@ -86,6 +89,12 @@ type Settings struct {
 	// after decryption and is never serialised — `json:"-"` is load-bearing,
 	// because this struct is marshalled back into the settings column.
 	APIKey string `json:"-"`
+	// Projects is this workspace's project -> direction table: project name
+	// (exact, or `prefix*`) to one of the ladder's directions, or "通用" for a
+	// project that is deliberately general-purpose. Rows here are laid over
+	// the shipped defaults in ladder.json and win, so classifying a project is
+	// a settings write and never a release.
+	Projects map[string]string `json:"projects,omitempty"`
 }
 
 // Target is where one judge call is sent: which model, on whose endpoint,

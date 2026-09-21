@@ -2961,3 +2961,17 @@ RETURNING *;
 
 -- name: GetCommentThreadRootID :one
 SELECT comment_thread_root_id(@comment_id::uuid)::uuid AS id;
+
+-- name: SetAgentTaskCodeDecision :exec
+-- Records where this run's code lives, as decided at claim time by
+-- internal/coderesolve (DENE-619). The daemon already has the answer on its
+-- claim response; this is the copy every later read serves, so the UI can say
+-- where a run went without re-deriving the rule — or guessing, once the
+-- project's resources have moved on.
+--
+-- Written once, by the claim that computed it: a redelivery re-runs the
+-- resolution against the runtime actually claiming, which is the decision that
+-- is true for the attempt now running, so a plain assignment is correct.
+UPDATE agent_task_queue
+SET code_decision = sqlc.arg('code_decision')
+WHERE id = sqlc.arg('id');

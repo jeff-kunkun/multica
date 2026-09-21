@@ -24,6 +24,10 @@ type Ladder struct {
 	Tiers      []Tier            `json:"tiers"`
 	Directions []string          `json:"directions"`
 	Projects   map[string]string `json:"projects"`
+	// Fallback names the rung an unconfident verdict lands on. Routing always
+	// dispatches, so "the judge was not sure" has to resolve to a seat; this
+	// is that seat, chosen once as data rather than per call.
+	Fallback string `json:"fallback_tier"`
 }
 
 // DefaultLadder is the shipped ladder. Parsed once at init; a malformed
@@ -39,7 +43,53 @@ func mustLoadLadder() Ladder {
 	if len(l.Tiers) == 0 {
 		panic("routing: ladder.json declares no tiers")
 	}
+	if l.Fallback != "" {
+		if _, ok := l.TierByKey(l.Fallback); !ok {
+			panic("routing: ladder.json names fallback_tier " + l.Fallback + ", which is not a declared tier")
+		}
+	}
 	return l
+}
+
+// GenericDirection is the table value for "this project is known, and it has
+// no domain": the generic rung, on purpose. It is a value rather than an
+// absence so the decision comment can tell a project nobody classified from
+// one somebody classified as general-purpose.
+const GenericDirection = "通用"
+
+// DirectionMatch is how a project resolved against the project table.
+type DirectionMatch struct {
+	// Direction is the resolved direction, empty for the generic rung.
+	Direction string
+	// Known reports that the table has a usable row for this project. A known
+	// project with an empty Direction was deliberately mapped to generic.
+	Known bool
+	// Invalid carries a table value that names no declared direction. Such a
+	// row is ignored rather than followed: base+typo names no seat, and the
+	// silent fallback would hide the typo forever.
+	Invalid string
+}
+
+// WithProjects returns the ladder with a workspace's own project rows laid
+// over the shipped ones. The workspace rows win, which is what makes the table
+// editable without a release: ladder.json is only the default.
+func (l Ladder) WithProjects(overrides map[string]string) Ladder {
+	if len(overrides) == 0 {
+		return l
+	}
+	merged := make(map[string]string, len(l.Projects)+len(overrides))
+	for k, v := range l.Projects {
+		merged[normalizeProjectKey(k)] = v
+	}
+	for k, v := range overrides {
+		merged[normalizeProjectKey(k)] = v
+	}
+	l.Projects = merged
+	return l
+}
+
+func normalizeProjectKey(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 // Direction resolves an issue's direction from its project name. An unknown or
@@ -47,10 +97,42 @@ func mustLoadLadder() Ladder {
 // a direction, because guessing one silently sends work to a seat carrying the
 // wrong domain pack.
 func (l Ladder) Direction(projectName string) string {
-	if projectName == "" {
-		return ""
+	return l.ResolveDirection(projectName).Direction
+}
+
+// ResolveDirection looks a project up in the table: an exact row first, then
+// the longest `prefix*` row, both case-insensitive. Rows are data typed by a
+// person, so a family of projects (game-*) is one row rather than one per
+// project that will ever exist.
+func (l Ladder) ResolveDirection(projectName string) DirectionMatch {
+	name := normalizeProjectKey(projectName)
+	if name == "" {
+		return DirectionMatch{}
 	}
-	return l.Projects[projectName]
+	value, found, bestLen := "", false, -1
+	for rawKey, v := range l.Projects {
+		key := normalizeProjectKey(rawKey)
+		if key == name {
+			value, found = v, true
+			break
+		}
+		if prefix, ok := strings.CutSuffix(key, "*"); ok && strings.HasPrefix(name, prefix) && len(prefix) > bestLen {
+			value, found, bestLen = v, true, len(prefix)
+		}
+	}
+	if !found {
+		return DirectionMatch{}
+	}
+	value = strings.TrimSpace(value)
+	if value == "" || value == GenericDirection {
+		return DirectionMatch{Known: true}
+	}
+	for _, d := range l.Directions {
+		if d == value {
+			return DirectionMatch{Direction: d, Known: true}
+		}
+	}
+	return DirectionMatch{Invalid: value}
 }
 
 // Seat is one routable agent.
@@ -206,6 +288,19 @@ func SeatByTier(seats []Seat, tierKey string) (Seat, bool) {
 // StrongerThan returns the candidate one rung above the given seat, if the
 // ladder has one. Used to keep a reviewer from being the seat that did the
 // work: reviewing your own output is not review.
+// SeatIndex reports where a seat sits in the candidate list, and whether it is
+// there at all. "Not on the ladder" and "on the top rung" both make
+// StrongerThan return false, and the two call for opposite fallbacks, so the
+// difference has to be askable.
+func SeatIndex(seats []Seat, seat Seat) (int, bool) {
+	for i, s := range seats {
+		if s.ID == seat.ID {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 func StrongerThan(seats []Seat, seat Seat) (Seat, bool) {
 	for i, s := range seats {
 		if s.ID == seat.ID {
@@ -213,6 +308,23 @@ func StrongerThan(seats []Seat, seat Seat) (Seat, bool) {
 				return Seat{}, false
 			}
 			return seats[i-1], true
+		}
+	}
+	return Seat{}, false
+}
+
+// WeakerThan returns the candidate one rung below the given seat, if the
+// ladder has one. It is the reviewer of last resort for work done by the top
+// rung: a reviewer checks, merges and closes — it does not redo the work — so
+// a rung below is a real check, and it is the only remaining way to keep
+// acceptance on a seat now that the slot may never name a person.
+func WeakerThan(seats []Seat, seat Seat) (Seat, bool) {
+	for i, s := range seats {
+		if s.ID == seat.ID {
+			if i == len(seats)-1 {
+				return Seat{}, false
+			}
+			return seats[i+1], true
 		}
 	}
 	return Seat{}, false
@@ -290,4 +402,21 @@ func (l Ladder) RequestedTier(labels []string) (string, bool) {
 		found = key
 	}
 	return found, found != ""
+}
+
+// FallbackSeat is the seat routing dispatches to when the judge's answer is
+// unusable — under the threshold, or naming a rung this workspace has no seat
+// on. It prefers the ladder's declared fallback rung and otherwise takes the
+// strongest candidate present, because a ticket parked in todo costs more than
+// a seat a person has to change.
+func (l Ladder) FallbackSeat(candidates []Seat) (Seat, bool) {
+	if len(candidates) == 0 {
+		return Seat{}, false
+	}
+	if l.Fallback != "" {
+		if seat, ok := SeatByTier(candidates, l.Fallback); ok {
+			return seat, true
+		}
+	}
+	return candidates[0], true
 }

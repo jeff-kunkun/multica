@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Use for Multica platform actions the runtime brief does not fully cover: issue and PR contracts, close protocol, mentions, agents and base-role specialisations, squads, autopilots, projects, runtimes, skill import, workspace transfer. Not for the product code you are working on."
+description: "Use for Multica platform actions the runtime brief does not fully cover: issue and PR contracts, automatic routing, close protocol, mentions, agents and base-role specialisations, squads, autopilots, projects, runtimes, skill import, workspace transfer. Not for the product code you are working on."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -20,6 +20,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | Open | When the task is about |
 |---|---|
 | `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, sub-issues and stages, who else is running |
+| `references/routing.md` | Automatic routing: which slots it fills at which status, the 验收席 field, what an `issue route` result means, why dispatch stopped |
 | `references/close-protocol.md` | Closing an issue: the eight `close.*` keys, conclusion / status / next owner / wake decision tables, blocked-close fields, dispatcher stage promotion |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config, skill binding |

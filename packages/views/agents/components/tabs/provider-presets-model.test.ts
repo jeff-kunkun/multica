@@ -14,13 +14,11 @@ import {
   emptyProviderPresetForm,
   filterProviderPresetModels,
   isKnownProviderPresetFailure,
-  parseProviderSeatModelString,
   providerConsoleUrl,
   providerPresetContextWindow,
   providerPresetFailureFrom,
   providerPresetFormFrom,
   providerPresetKeyState,
-  providerPresetModelLabel,
   providerPresetModels,
   providerPresetNeedsKeyRegeneration,
   providerPresetPeerState,
@@ -30,8 +28,6 @@ import {
   providerPresetSyncTargets,
   providerPresetUpsertInput,
   providerPresetsViewState,
-  providerSeatModelDisplay,
-  providerSeatModelString,
   reduceProviderPresetSave,
   supportsProviderPresets,
   validateProviderPresetForm,
@@ -308,11 +304,6 @@ describe("the fetched catalog", () => {
     expect(providerPresetContextWindow({ id: "m", context_window: 0 })).toBeNull();
   });
 
-  it("labels a row by name and falls back to the id", () => {
-    expect(providerPresetModelLabel(catalog[0]!)).toBe("DeepSeek V4.1 Flash");
-    expect(providerPresetModelLabel(catalog[1]!)).toBe("claude-sonnet-5");
-  });
-
   it("offers the fetch only with an endpoint and a usable credential", () => {
     const base = {
       ...emptyProviderPresetForm(),
@@ -331,60 +322,6 @@ describe("the fetched catalog", () => {
     ).toBe(true);
     expect(canFetchProviderPresetModels({ ...base, apiKey: " " })).toBe(false);
     expect(canFetchProviderPresetModels({ ...base, baseUrl: "" })).toBe(false);
-  });
-});
-
-describe("seat model strings", () => {
-  const rawId = "deepseek/deepseek-v4.1-flash";
-  const presetId = "command-code2";
-  const encoded = "command-code2/deepseek%2Fdeepseek-v4.1-flash";
-
-  it("generates, parses and regenerates the same string for a slash-bearing id", () => {
-    const generated = providerSeatModelString(presetId, rawId);
-    expect(generated).toBe(encoded);
-
-    const parsed = parseProviderSeatModelString(generated);
-    expect(parsed).toEqual({ providerId: presetId, modelId: rawId });
-
-    // 回填: writing the parsed pair back out reproduces the same seat string, so
-    // what the user selected and what the seat runs are the same thing.
-    expect(providerSeatModelString(parsed!.providerId, parsed!.modelId)).toBe(
-      generated,
-    );
-  });
-
-  it("leaves an id without a slash readable, and encodes only what it must", () => {
-    expect(providerSeatModelString("command-code2", "claude-sonnet-5")).toBe(
-      "command-code2/claude-sonnet-5",
-    );
-    expect(providerSeatModelString("command-code2", "a b/c")).toBe(
-      "command-code2/a%20b%2Fc",
-    );
-    expect(providerSeatModelString("", rawId)).toBe("");
-    expect(providerSeatModelString(presetId, "  ")).toBe("");
-  });
-
-  it("refuses a value that cannot be a seat pair", () => {
-    for (const bad of ["", "no-slash", "/model", "provider/", "   "]) {
-      expect(parseProviderSeatModelString(bad)).toBeNull();
-    }
-  });
-
-  it("shows provider and model name, never the escape", () => {
-    const display = providerSeatModelDisplay(encoded, [
-      preset({ id: presetId, models: [{ id: rawId, name: "DeepSeek V4.1 Flash" }] }),
-    ]);
-    expect(display).toBe("command-code2 · DeepSeek V4.1 Flash");
-    // The regression this rule exists for: rendering `%2F` invites a hand-edit
-    // that drops the prefix.
-    expect(display).not.toContain("%2F");
-  });
-
-  it("falls back to the parsed pieces when the preset is not in hand", () => {
-    expect(providerSeatModelDisplay(encoded, [])).toBe(
-      `command-code2 · ${rawId}`,
-    );
-    expect(providerSeatModelDisplay("plain-model", [])).toBe("plain-model");
   });
 });
 

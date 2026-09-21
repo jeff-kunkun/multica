@@ -1294,11 +1294,11 @@
       "daemon_offline": "Start the local daemon to see the working copies on this machine.",
       "load_failed": "Could not read the working copies on this machine.",
       "enable_title": "Clear out merged copies automatically",
-      "enable_description": "Off by default. When on, a copy is removed only if it is Multica's, idle, clean, already merged, and older than the window below — any one of those failing keeps it.",
+      "enable_description": "Off by default. When on, a copy is removed only if it is Multica's, idle, clean, older than the window below, and its changes are already in the trunk branch — either merged there or squashed into it. Any one of those failing keeps it.",
       "min_age_title": "Keep for at least",
       "min_age_description": "Days after a copy's last run before it can be cleared. Days, not hours: a run you meant to come back to on Monday should still be there after a holiday.",
       "trunk_title": "Merge into",
-      "trunk_description": "The branch a copy's work must already be in. Leave empty to use each repository's own default branch.",
+      "trunk_description": "The branch a copy's work must already be in, whether it was merged or squashed into it. Leave empty to use each repository's own default branch.",
       "trunk_placeholder": "main",
       "summary": "{{count}} working copies · {{total}} on disk · {{reclaimable}} would be cleared",
       "advisory": "Automatic cleanup is off, so nothing below will be removed. This is what it would do if you switched it on.",
@@ -1307,6 +1307,7 @@
       "remove_now": "Clear now",
       "removed": "Working copy cleared",
       "reason_removable": "Merged, clean and idle — this one would be cleared.",
+      "reason_removable_squash": "Squashed into trunk, clean and idle — its changes are in the trunk branch even though its commits are not, so this one would be cleared.",
       "reason_uncommitted": "Kept: it still has uncommitted changes. Multica never removes a copy holding work that is nowhere else.",
       "reason_unmerged": "Kept: its branch is not in the trunk branch yet.",
       "reason_too_recent": "Kept: its last run is too recent.",
@@ -1364,6 +1365,10 @@
       "member": {
         "label": "Member",
         "description": "Create and work on issues"
+      },
+      "guest": {
+        "label": "Guest",
+        "description": "Read-only, sees only what is shared with them"
       }
     },
     "share_links_title": "Share links",
@@ -1385,7 +1390,31 @@
     "expiry_24h": "24 hours",
     "expiry_7d": "7 days",
     "expiry_30d": "30 days",
-    "expiry_never": "Never"
+    "expiry_never": "Never",
+    "role_blocked": {
+      "owner_requires_owner": "Only an owner can hand out the owner tier"
+    },
+    "role_select_label": "Tier for {{name}}",
+    "unknown_role": "Unknown tier",
+    "unknown_role_title": "This member holds a tier this app version does not know. Update the app to change it.",
+    "role_impact_title": "{{name}} is now {{role}}",
+    "role_impact_gained": "Gains: {{items}}",
+    "role_impact_lost": "Loses: {{items}}",
+    "role_impact_none": "Nothing else changes.",
+    "members_loading": "Loading members…",
+    "empty_title": "No members yet",
+    "empty_description": "Invite a teammate to share this workspace.",
+    "empty_action": "Invite a member",
+    "capabilities": {
+      "view_shared": "see what is shared with them",
+      "see_workspace_scope": "see workspace-wide resources",
+      "create_resources": "create issues, projects and repos",
+      "comment_and_edit": "comment, edit and change status",
+      "be_assigned": "be assigned and trigger agent runs",
+      "manage_members": "invite members and change tiers",
+      "workspace_settings": "workspace settings, integrations and keys",
+      "billing_and_transfer": "billing, transfer and deletion"
+    }
   },
   "integrations": {
     "description": "Connect your tools and manage each integration in one place.",
@@ -1572,7 +1601,7 @@
     "model_discover_loaded": "{{count}} models loaded from this endpoint.",
     "model_placeholder": "e.g. gpt-5.6-luna",
     "threshold_label": "Confidence threshold",
-    "threshold_description": "Below this, the slot is left empty and you are mentioned once with the reason instead. Defaults to 0.70.",
+    "threshold_description": "Below this the ticket is still dispatched, to the fallback rung (the generic strong seat), and the routing comment says so. Defaults to 0.60.",
     "gateway_endpoint_workspace": "The model id is sent to this workspace’s own endpoint: {{host}}.",
     "gateway_endpoint_deployment": "The model id is sent to the deployment’s shared LLM endpoint: {{host}}.",
     "gateway_protocol_systemone": "This endpoint is TypeSafe System One (Jev): routing asks it for a typed judgment with the probabilities behind it, so the confidence it gates on is measured rather than self-reported.",

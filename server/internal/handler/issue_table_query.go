@@ -483,6 +483,18 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		return "$" + strconv.Itoa(len(args))
 	}
 
+	// Sharing scope (DENE-698). Every table surface — rows, groups, facet
+	// counts — compiles through here, so one predicate keeps them consistent:
+	// a facet cannot count an issue the rows below it will not show.
+	tableViewer, viewerErr := h.visibilityViewerFor(r, workspaceUUID)
+	if viewerErr != nil {
+		// Unestablished sharing facts mean "sees nothing", never an
+		// unfiltered scan. FALSE keeps the surface shaped correctly (empty
+		// rows, zeroed facets) instead of erroring the whole table.
+		tableViewer = visibilityViewer{}
+	}
+	where = append(where, tableViewer.issueVisibilitySQL("i", addArg))
+
 	// Any non-empty status KEY, not just the 7 built-ins. A status filter names
 	// the exact statuses the user picked, and since MUL-6243 those can be custom
 	// — rejecting them here 400'd the entire request, so filtering a board by a

@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 
+	"github.com/multica-ai/multica/server/internal/coderesolve"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
@@ -49,6 +50,11 @@ type ProjectResourceData struct {
 	ResourceType string          `json:"resource_type"`
 	ResourceRef  json.RawMessage `json:"resource_ref"`
 	Label        string          `json:"label,omitempty"`
+	// Access is "read-write" for the one directory this run writes in and
+	// "read-only" for the project's other local directories (DENE-619). Empty
+	// from a server that predates the field, and for resource types with no
+	// access dimension. Mirror field: internal/handler/agent.go, same JSON name.
+	Access string `json:"access,omitempty"`
 }
 
 // ProjectContextData mirrors handler.TaskProjectContextData — one project of
@@ -114,6 +120,12 @@ type Task struct {
 	ProjectTitle         string                `json:"project_title,omitempty"`       // human-readable project title for context injection
 	ProjectDescription   string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
 	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // project-scoped resources to expose to the agent
+	// CodeDecision is the server's answer to "which code does this run use",
+	// computed once by internal/coderesolve and shipped with the task
+	// (DENE-619). Nil from a server that predates it; the daemon still
+	// resolves the directory itself today, and DENE-621 makes this the source
+	// of truth instead. Mirror field: internal/handler/agent.go, same JSON name.
+	CodeDecision *coderesolve.Decision `json:"code_decision,omitempty"`
 	// Projects is the task's project set in priority order (DENE-523) — every
 	// project a chat attached, one for the other surfaces. The singular
 	// Project* fields above mirror its first entry, so a server predating this

@@ -135,7 +135,20 @@
     "waiting_on": "Waiting on {{id}}",
     "last_activity_missing": "No activity time"
   },
-  "blocker_summary": { "title": "Blocked · {{count}} root cause(s)", "needs_you": "{{count}} need you", "root": "Root blocker", "propagated": "Blocked by a sub-issue", "kind_decision": "Needs your decision", "kind_permission": "Needs your permission", "kind_external": "Waiting on an external dependency", "kind_capacity": "Waiting on capacity", "kind_action": "{{kind}}: {{action}}", "kind_review_overdue": "Review overdue · {{ago}}", "kind_wake_missed": "{{id}} finished without a wake-up", "kind_cycle": "Waiting in a cycle" },
+  "blocker_summary": {
+    "title": "Blocked · {{count}} root cause(s)",
+    "needs_you": "{{count}} need you",
+    "root": "Root blocker",
+    "propagated": "Blocked by a sub-issue",
+    "kind_decision": "Needs your decision",
+    "kind_permission": "Needs your permission",
+    "kind_external": "Waiting on an external dependency",
+    "kind_capacity": "Waiting on capacity",
+    "kind_action": "{{kind}}: {{action}}",
+    "kind_review_overdue": "Review overdue · {{ago}}",
+    "kind_wake_missed": "{{id}} finished without a wake-up",
+    "kind_cycle": "Waiting in a cycle"
+  },
   "scope": {
     "all_label": "All",
     "all_description": "All issues in this workspace",
@@ -426,6 +439,7 @@
     "prop_priority": "Priority",
     "prop_stage": "Stage",
     "prop_assignee": "Assignee",
+    "prop_reviewer": "Reviewer",
     "prop_start_date": "Start date",
     "prop_due_date": "Due date",
     "prop_project": "Project",
@@ -702,7 +716,8 @@
       "source_backfill": "Backfilled attribution",
       "source_unattributed": "No responsible member resolved"
     },
-    "usage_total_tooltip": "Token usage for this issue — click for the per-run breakdown"
+    "usage_total_tooltip": "Token usage for this issue — click for the per-run breakdown",
+    "usage_label": "Token cost"
   },
   "usage_detail": {
     "title": "Usage breakdown",
@@ -731,7 +746,38 @@
     "note_unpriced_one": "{{count}} run has no recorded usage and is not counted in the total.",
     "note_unpriced_other": "{{count}} runs have no recorded usage and are not counted in the total.",
     "note_unmapped": "No price on file for {{models}}; their tokens are counted but their cost is not.",
-    "note_estimate": "Cost is estimated from published model rates, except where the provider reported its own figure."
+    "note_estimate": "Cost is estimated from published model rates, except where the provider reported its own figure.",
+    "empty_hint": "Usage is recorded by the daemon when a run finishes. Runs that predate usage reporting, and runs on a daemon that is not reporting, have no figure — rerun the issue on an up-to-date daemon to start collecting one.",
+    "loading": "Loading runs…",
+    "load_failed": "Could not load this issue's runs.",
+    "retry": "Try again"
+  },
+  "run_cost": {
+    "section": "Run token cost",
+    "segment": {
+      "input": "Fresh input",
+      "cacheWrite": "Cache write",
+      "cacheRead": "Cache read",
+      "output": "Output"
+    },
+    "figure_cost": "This run",
+    "figure_cost_hint": "{{pct}}% of this issue",
+    "figure_cost_hint_unknown": "Share of issue unavailable",
+    "figure_cache": "Cache hit rate",
+    "figure_cache_hint": "{{reads}} read · {{writes}} written",
+    "figure_largest": "Biggest block",
+    "figure_largest_hint": "{{pct}}% · {{tokens}} tokens",
+    "fact_turns": "Turns",
+    "fact_start": "Session",
+    "fact_start_resumed": "Resumed",
+    "fact_start_cold": "Cold start",
+    "fact_last_context": "Context at last step",
+    "fact_queue": "Queued",
+    "fact_prepare": "Prepare",
+    "fact_first_output": "To first output",
+    "fact_trigger": "Triggered by",
+    "facts_unavailable": "This run reported no turn count or timing — it ran on a daemon older than run metadata reporting.",
+    "note_no_prompt_split": "Providers bill these four buckets and report only these four. Tokens are not attributed to the runtime brief, tool schemas, history or tool results, so this view does not split them that way."
   },
   "terminate_dialog": {
     "title": "Stop this run?",
@@ -823,6 +869,14 @@
       "squads_group": "Squads",
       "agent_runtime_required": "Bind a runtime before assigning work to this agent",
       "squad_runtime_required": "Bind a runtime to this squad's leader before assigning work"
+    },
+    "reviewer": {
+      "trigger_undecided": "Undecided",
+      "trigger_no_review": "No review needed",
+      "search_placeholder": "Review by...",
+      "no_review": "No review needed",
+      "members_group": "Members",
+      "agents_group": "Agents"
     },
     "start_date": {
       "trigger_label": "Start date",

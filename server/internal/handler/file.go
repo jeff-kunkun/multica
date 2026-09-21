@@ -767,6 +767,34 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// requireAttachmentIssueVisible gates an attachment by the sharing scope of
+// the issue it hangs off (DENE-698).
+//
+// Attachment access is the one path that takes a cached "is a member" as the
+// whole answer, which is why it needs this explicitly: the membership cache
+// stores membership only, never a tier or a scope. An attachment with no
+// issue (chat, task, avatar) is governed by its own surface and passes.
+func (h *Handler) requireAttachmentIssueVisible(w http.ResponseWriter, r *http.Request, att db.Attachment) bool {
+	if !att.IssueID.Valid {
+		return true
+	}
+	issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		ID:          att.IssueID,
+		WorkspaceID: att.WorkspaceID,
+	})
+	if err != nil {
+		// The issue is gone; the attachment row outlived it. Nothing to
+		// widen, so leave the existing behaviour alone.
+		return true
+	}
+	viewer, viewerErr := h.visibilityViewerFor(r, att.WorkspaceID)
+	if viewerErr != nil || !viewer.canSeeIssue(issue) {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return false
+	}
+	return true
+}
+
 func (h *Handler) loadAttachmentForRequest(w http.ResponseWriter, r *http.Request) (db.Attachment, bool) {
 	attachmentID := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
@@ -790,6 +818,9 @@ func (h *Handler) loadAttachmentForRequest(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
+		return db.Attachment{}, false
+	}
+	if !h.requireAttachmentIssueVisible(w, r, att) {
 		return db.Attachment{}, false
 	}
 
@@ -840,13 +871,16 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 		return db.Attachment{}, false
 	}
 	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
-		return att, true
+		return att, h.requireAttachmentIssueVisible(w, r, att)
 	}
 	if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
 	h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	if !h.requireAttachmentIssueVisible(w, r, att) {
+		return db.Attachment{}, false
+	}
 	return att, true
 }
 

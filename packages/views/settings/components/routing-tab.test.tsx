@@ -221,7 +221,7 @@ describe("RoutingTab", () => {
     expect(body.settings.routing).toEqual({
       enabled: false,
       model: "gpt-5.6-luna",
-      confidence_threshold: 0.7,
+      confidence_threshold: 0.6,
       base_url: "",
     });
   });

@@ -31,6 +31,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  RotateCcw,
   Share2,
   Trash2,
 } from "lucide-react";
@@ -112,7 +113,6 @@ import {
   providerPresetFailureFrom,
   providerPresetFormFrom,
   providerPresetKeyState,
-  providerPresetModelLabel,
   providerPresetModels,
   providerPresetNeedsKeyRegeneration,
   providerPresetPeerState,
@@ -122,12 +122,15 @@ import {
   providerPresetSyncTargets,
   providerPresetUpsertInput,
   providerPresetsViewState,
-  providerSeatModelDisplay,
-  providerSeatModelString,
   reduceProviderPresetSave,
   supportsProviderPresets,
   validateProviderPresetForm,
 } from "./provider-presets-model";
+import {
+  providerPresetModelLabel,
+  providerSeatModelDisplay,
+  providerSeatModelString,
+} from "../provider-seat-model";
 
 export interface AgentProviderPresetsSectionProps {
   runtimeDevice?: RuntimeDevice;
@@ -172,6 +175,7 @@ function ProviderPresets({
   // Which row's activate is in flight, so only that button shows a spinner
   // instead of every row going busy at once.
   const [activatingId, setActivatingId] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
 
   // The other machines that could hold a copy of this preset. A workspace with
   // one DSH runtime has none, and then the row shows no sync affordance at all
@@ -261,6 +265,45 @@ function ProviderPresets({
     );
   };
 
+  // Restore is the repair for a CLI that was reinstalled, upgraded or reset
+  // under a configuration Multica already wrote. The daemon replays from its
+  // own record, fills only what is missing and runs no health check — so this
+  // is safe to press on a machine that lost nothing, and it is the one button
+  // that makes a reset recoverable without retyping every endpoint.
+  //
+  // The key is not part of it. A restored provider whose credential went with
+  // the reset comes back with `has_key: false`, which the row already renders
+  // as "No key", and the user re-enters exactly that one field.
+  const handleRestore = async () => {
+    setRestoring(true);
+    try {
+      await mutation.mutateAsync({ action: "replay" });
+      toast.success(t(($) => $.tab_body.providers.restored_toast));
+    } catch (err) {
+      toast.error(errorText(err, t(($) => $.tab_body.providers.restore_failed_toast)));
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const restoreButton = (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      className="shrink-0"
+      disabled={restoring || mutation.isPending}
+      onClick={() => void handleRestore()}
+    >
+      {restoring ? (
+        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+      ) : (
+        <RotateCcw className="size-3.5" aria-hidden="true" />
+      )}
+      {t(($) => $.tab_body.providers.restore_action)}
+    </Button>
+  );
+
   const handleRetry = () => {
     void queryClient.invalidateQueries({
       queryKey: runtimeProviderPresetsKeys.forRuntime(runtimeId),
@@ -279,16 +322,18 @@ function ProviderPresets({
           </p>
         </div>
         {manageable ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="shrink-0"
-            onClick={() => setEditing(emptyProviderPresetForm())}
-          >
-            <Plus className="size-3.5" aria-hidden="true" />
-            {t(($) => $.tab_body.providers.add_action)}
-          </Button>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {restoreButton}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setEditing(emptyProviderPresetForm())}
+            >
+              <Plus className="size-3.5" aria-hidden="true" />
+              {t(($) => $.tab_body.providers.add_action)}
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -328,6 +373,17 @@ function ProviderPresets({
           <p className="mx-auto mt-1 max-w-lg text-pretty text-caption leading-5 text-muted-foreground">
             {t(($) => $.tab_body.providers.empty_description)}
           </p>
+          {/* An empty list is also what a reinstalled CLI looks like, and that
+              user has not lost their configuration — Multica still holds it.
+              Offering the repair here is what keeps them from retyping it. */}
+          {manageable ? (
+            <>
+              <p className="mx-auto mt-3 max-w-lg text-pretty text-caption leading-5 text-muted-foreground">
+                {t(($) => $.tab_body.providers.restore_hint)}
+              </p>
+              <div className="mt-4 flex justify-center">{restoreButton}</div>
+            </>
+          ) : null}
         </div>
       ) : null}
 
@@ -1228,10 +1284,14 @@ function ProviderPresetSyncDialog({
       targets[index]!.online && selected[targets[index]!.runtimeId] === true,
   );
   const needsKey = providerPresetSyncNeedsKey(chosenStates, apiKey);
+  // A machine that has not answered yet could be missing the preset or its
+  // key; writing before the read lands would skip both the drift report and
+  // the key check.
+  const reading = chosenStates.some((state) => state.status === "loading");
   const busy = mutation.isPending;
 
   const handleSync = async () => {
-    if (chosenIds.length === 0) return;
+    if (chosenIds.length === 0 || reading) return;
     if (needsKey) {
       setShowKeyError(true);
       return;
@@ -1327,7 +1387,7 @@ function ProviderPresetSyncDialog({
           <Button
             type="button"
             onClick={() => void handleSync()}
-            disabled={busy || chosenIds.length === 0}
+            disabled={busy || reading || chosenIds.length === 0}
           >
             {busy ? (
               <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />

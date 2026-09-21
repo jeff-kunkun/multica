@@ -73,7 +73,7 @@ import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { errorCode } from "@multica/core/api";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, ReviewerPicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
@@ -1007,6 +1007,13 @@ interface IssueDetailProps {
    * the surface the reader arrived from, so only the host can spell that trip.
    */
   leadingAction?: ReactNode;
+  /**
+   * Let the execution log mirror its usage dialog into `?usage=1` and open it
+   * from the URL. Only the standalone issue route sets this: the inbox renders
+   * this detail in a side panel whose URL it must not rewrite. See
+   * ../../common/issue-usage-link.
+   */
+  deepLinkUsage?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1128,7 +1135,7 @@ export function IssueDetailSkeleton({ leading }: { leading?: ReactNode } = {}) {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, deepLinkUsage = false }: IssueDetailProps) {
   const { t } = useT("issues");
   const locale = useLocale();
   const timeAgo = useTimeAgo();
@@ -2328,6 +2335,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
+          <PropRow label={t(($) => $.detail.prop_reviewer)}>
+            <ReviewerPicker reviewerType={issue.reviewer_type} reviewerId={issue.reviewer_id} onUpdate={handleUpdateField} align="start" />
+          </PropRow>
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker
               projectId={issue.project_id}
@@ -2573,7 +2583,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           own token spend, with the issue total on the section header.
           Self-contained; owns its own collapse state and WS subscriptions.
           Hides itself when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} workspaceId={issue.workspace_id} identifier={issue.identifier} halted={issue.metadata?.agent_halted === true} />
+      <ExecutionLogSection issueId={id} workspaceId={issue.workspace_id} identifier={issue.identifier} halted={issue.metadata?.agent_halted === true} deepLinkUsage={deepLinkUsage} />
 
       {/* Details — creator and timestamps. Sits below the execution log
           because it is the least-read block in the sidebar: the values

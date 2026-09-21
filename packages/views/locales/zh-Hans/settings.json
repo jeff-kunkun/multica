@@ -1287,11 +1287,11 @@
       "daemon_offline": "启动本机守护进程后才能看到这台机器上的工作副本。",
       "load_failed": "读取这台机器上的工作副本失败。",
       "enable_title": "自动清理已合并的副本",
-      "enable_description": "默认关闭。打开后，只有同时满足「Multica 建的、没在跑、没有未提交改动、已合入主干、超过下面的天数」才会删；少一条就留着。",
+      "enable_description": "默认关闭。打开后，只有同时满足「Multica 建的、没在跑、没有未提交改动、超过下面的天数、改动已经在主干分支里（合入或 squash 合入都算）」才会删；少一条就留着。",
       "min_age_title": "至少保留",
       "min_age_description": "副本最后一次运行结束后要过多少天才可能被清理。按天不按小时：你打算周一回来看的现场，放个假回来也该还在。",
       "trunk_title": "合入到",
-      "trunk_description": "副本上的工作必须已经进入的分支。留空则用各仓库自己的默认分支。",
+      "trunk_description": "副本上的改动必须已经进入的分支，合入或 squash 合入都算。留空则用各仓库自己的默认分支。",
       "trunk_placeholder": "main",
       "summary": "{{count}} 份工作副本 · 占用 {{total}} · 可清理 {{reclaimable}}",
       "advisory": "自动清理当前是关闭的，下面这些都不会被删。这是打开后会发生的事。",
@@ -1300,6 +1300,7 @@
       "remove_now": "立即清理",
       "removed": "工作副本已清理",
       "reason_removable": "已合并、干净、没在跑——这一份会被清理。",
+      "reason_removable_squash": "已 squash 合入主干、干净、没在跑——它的 commit 不在主干里，但改动已经在了，所以这一份会被清理。",
       "reason_uncommitted": "保留：还有未提交的改动。只存在于这里的工作，Multica 绝不会删。",
       "reason_unmerged": "保留：它的分支还没进主干分支。",
       "reason_too_recent": "保留：最近才跑过。",
@@ -1357,6 +1358,10 @@
       "member": {
         "label": "成员",
         "description": "创建并处理任务"
+      },
+      "guest": {
+        "label": "访客",
+        "description": "只读，只看得到共享给 TA 的内容"
       }
     },
     "share_links_title": "分享链接",
@@ -1378,7 +1383,31 @@
     "expiry_24h": "24 小时",
     "expiry_7d": "7 天",
     "expiry_30d": "30 天",
-    "expiry_never": "永久有效"
+    "expiry_never": "永久有效",
+    "role_blocked": {
+      "owner_requires_owner": "只有 owner 能授予 owner 档位"
+    },
+    "role_select_label": "{{name}} 的档位",
+    "unknown_role": "未知档位",
+    "unknown_role_title": "这位成员的档位当前版本不认识，升级后才能修改。",
+    "role_impact_title": "{{name}} 已改为 {{role}}",
+    "role_impact_gained": "获得：{{items}}",
+    "role_impact_lost": "失去：{{items}}",
+    "role_impact_none": "其余不受影响。",
+    "members_loading": "正在加载成员…",
+    "empty_title": "还没有成员",
+    "empty_description": "邀请同事一起使用这个工作区。",
+    "empty_action": "邀请成员",
+    "capabilities": {
+      "view_shared": "查看共享给 TA 的内容",
+      "see_workspace_scope": "查看全工作区范围的内容",
+      "create_resources": "新建任务、项目与仓库",
+      "comment_and_edit": "评论、编辑与改状态",
+      "be_assigned": "被指派、被 @ 触发运行",
+      "manage_members": "邀请成员与修改档位",
+      "workspace_settings": "工作区设置、集成与密钥",
+      "billing_and_transfer": "计费、转让与删除工作区"
+    }
   },
   "integrations": {
     "description": "连接常用工具，分别管理每项集成。",
@@ -1565,7 +1594,7 @@
     "model_discover_loaded": "已从这个端点读取 {{count}} 个模型。",
     "model_placeholder": "例如 gpt-5.6-luna",
     "threshold_label": "置信度阈值",
-    "threshold_description": "低于这个值就不填那一格，改成 @ 你一次并说明原因。默认 0.70。",
+    "threshold_description": "低于这个值仍然派，只是改用兜底档（通用强档）并在路由评论里标出来。默认 0.60。",
     "gateway_endpoint_workspace": "模型 id 发往本工作区自己的端点：{{host}}。",
     "gateway_endpoint_deployment": "模型 id 发往部署共用的 LLM 端点：{{host}}。",
     "gateway_protocol_systemone": "这个端点是 TypeSafe System One（Jev）：路由问它的是一个带概率分布的判断，用来卡阈值的置信度是算出来的，不是模型自己写的。",

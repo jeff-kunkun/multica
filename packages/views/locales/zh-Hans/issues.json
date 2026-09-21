@@ -133,7 +133,20 @@
     "waiting_on": "等待 {{id}}",
     "last_activity_missing": "无活动时间"
   },
-  "blocker_summary": { "title": "已阻塞 · {{count}} 个根因", "needs_you": "其中 {{count}} 个需要你", "root": "根因阻塞", "propagated": "受子任务阻塞", "kind_decision": "需要你决定", "kind_permission": "需要你授权", "kind_external": "等待外部依赖", "kind_capacity": "等待额度恢复", "kind_action": "{{kind}}：{{action}}", "kind_review_overdue": "审核逾期 · {{ago}}", "kind_wake_missed": "{{id}} 已完成，未唤醒", "kind_cycle": "循环等待" },
+  "blocker_summary": {
+    "title": "已阻塞 · {{count}} 个根因",
+    "needs_you": "其中 {{count}} 个需要你",
+    "root": "根因阻塞",
+    "propagated": "受子任务阻塞",
+    "kind_decision": "需要你决定",
+    "kind_permission": "需要你授权",
+    "kind_external": "等待外部依赖",
+    "kind_capacity": "等待额度恢复",
+    "kind_action": "{{kind}}：{{action}}",
+    "kind_review_overdue": "审核逾期 · {{ago}}",
+    "kind_wake_missed": "{{id}} 已完成，未唤醒",
+    "kind_cycle": "循环等待"
+  },
   "scope": {
     "all_label": "全部",
     "all_description": "工作区内的全部任务",
@@ -421,6 +434,7 @@
     "prop_priority": "优先级",
     "prop_stage": "阶段",
     "prop_assignee": "负责人",
+    "prop_reviewer": "验收席",
     "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
     "prop_project": "项目",
@@ -678,7 +692,8 @@
       "source_backfill": "回填的归因",
       "source_unattributed": "未解析到责任成员"
     },
-    "usage_total_tooltip": "这个任务的 token 用量——点击查看每次运行的明细"
+    "usage_total_tooltip": "这个任务的 token 用量——点击查看每次运行的明细",
+    "usage_label": "Token 成本"
   },
   "usage_detail": {
     "title": "用量明细",
@@ -704,7 +719,38 @@
     "total": "合计",
     "note_unpriced_other": "有 {{count}} 次运行没有用量记录，不计入合计。",
     "note_unmapped": "{{models}} 没有维护价格，token 已计入，费用未计入。",
-    "note_estimate": "费用按各模型公开价目估算；供应商回报实际费用时以回报值为准。"
+    "note_estimate": "费用按各模型公开价目估算；供应商回报实际费用时以回报值为准。",
+    "empty_hint": "用量由守护进程在运行结束时记录。早于用量上报的运行，以及运行在未上报守护进程上的运行，都没有数字——在已升级的守护进程上重跑本任务即可开始采集。",
+    "loading": "正在加载运行记录……",
+    "load_failed": "无法加载本任务的运行记录。",
+    "retry": "重试"
+  },
+  "run_cost": {
+    "section": "本次运行的 Token 成本",
+    "segment": {
+      "input": "新输入",
+      "cacheWrite": "缓存写入",
+      "cacheRead": "缓存读取",
+      "output": "输出"
+    },
+    "figure_cost": "本次运行",
+    "figure_cost_hint": "占本任务 {{pct}}%",
+    "figure_cost_hint_unknown": "无法计算占比",
+    "figure_cache": "缓存命中率",
+    "figure_cache_hint": "读取 {{reads}} · 写入 {{writes}}",
+    "figure_largest": "最大构成",
+    "figure_largest_hint": "{{pct}}% · {{tokens}} token",
+    "fact_turns": "步数",
+    "fact_start": "会话",
+    "fact_start_resumed": "续接",
+    "fact_start_cold": "冷启",
+    "fact_last_context": "末步上下文",
+    "fact_queue": "排队",
+    "fact_prepare": "准备目录",
+    "fact_first_output": "到首字",
+    "fact_trigger": "触发来源",
+    "facts_unavailable": "本次运行没有上报步数与分段耗时——它跑在早于运行元数据上报的守护进程上。",
+    "note_no_prompt_split": "供应商只按这四类计费、也只回报这四类。token 不会被归到 runtime brief、工具 schema、历史或工具结果上，因此本视图不按那四类拆分。"
   },
   "terminate_dialog": {
     "title": "确定停止本次运行？",
@@ -792,6 +838,14 @@
       "squads_group": "小队",
       "agent_runtime_required": "请先为该智能体绑定运行时，再分配工作",
       "squad_runtime_required": "请先为该小队的负责人绑定运行时，再分配工作"
+    },
+    "reviewer": {
+      "trigger_undecided": "未指定",
+      "trigger_no_review": "不需要验收",
+      "search_placeholder": "交给谁验收...",
+      "no_review": "不需要验收",
+      "members_group": "成员",
+      "agents_group": "智能体"
     },
     "start_date": {
       "trigger_label": "开始日期",

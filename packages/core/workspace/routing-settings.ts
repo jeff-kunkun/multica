@@ -15,7 +15,7 @@ export const ROUTING_SETTINGS_KEY = "routing";
  * DefaultConfidenceThreshold on the server; a client that guessed a different
  * default would show a threshold the server does not apply.
  */
-export const DEFAULT_CONFIDENCE_THRESHOLD = 0.7;
+export const DEFAULT_CONFIDENCE_THRESHOLD = 0.6;
 
 export interface RoutingSettings {
   enabled: boolean;
@@ -162,7 +162,13 @@ export function withRoutingSettings(
    */
   apiKey?: string,
 ): Record<string, unknown> {
+  // Fields this form does not own — the project -> direction table the CLI
+  // writes (`projects`), and anything a newer server adds — are carried
+  // through. Rebuilding the block from the four form fields alone would erase
+  // them on every unrelated save.
+  const stored = settings?.[ROUTING_SETTINGS_KEY];
   const block: Record<string, unknown> = {
+    ...(isRecord(stored) ? stored : {}),
     enabled: next.enabled,
     model: next.model.trim(),
     confidence_threshold: normalizeThreshold(next.confidence_threshold),

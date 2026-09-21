@@ -7,6 +7,7 @@ import { SourceBackfillModal } from "../onboarding";
 import { AppSidebar } from "./app-sidebar";
 import { DashboardGuard } from "./dashboard-guard";
 import { NavigationProgress } from "./navigation-progress";
+import { ProviderStatusBar } from "./provider-status-bar";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
 
@@ -39,8 +40,11 @@ export function DashboardLayout({
         <WorkspacePresencePrefetch />
         <AppSidebar searchSlot={searchSlot} />
         <SidebarInset className="relative overflow-hidden">
-          <NavigationProgress />
-          {children}
+          <div className="flex min-h-0 flex-1 flex-col">
+            <NavigationProgress />
+            {children}
+          </div>
+          <ProviderStatusBar />
           <ModalRegistry />
           <SourceBackfillModal />
           {extra}

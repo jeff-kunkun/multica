@@ -58,9 +58,14 @@ func TestIssueAgentChainBudgetBlocksAtTheThresholdAndResetsOnHumanComment(t *tes
 	}
 	agentA := createHandlerTestAgent(t, "Guard Budget Agent A", []byte("[]"))
 	agentB := createHandlerTestAgent(t, "Guard Budget Agent B", []byte("[]"))
+	// Agent-created issues are shared workspace-wide (DENE-698): 'private'
+	// means "only its creator", and an agent is not somebody a list is shown
+	// to. The service stamps this on create; a fixture that writes the row
+	// directly has to say it.
 	issueID := dbfx.Issue(t, "agent chain budget", testutil.Cols{
 		"creator_type": "agent",
 		"creator_id":   agentA,
+		"visibility":   "workspace",
 	})
 
 	var sourceTaskID string
@@ -124,6 +129,7 @@ func TestHaltIssueCancelsActiveRunsAndPreservesHumanTriggers(t *testing.T) {
 		"creator_id":    agentID,
 		"assignee_type": "agent",
 		"assignee_id":   agentID,
+		"visibility":    "workspace",
 	})
 	active := []string{"queued", "dispatched", "running", "waiting_local_directory", "deferred"}
 	taskIDs := make(map[string]string, len(active))
@@ -168,6 +174,7 @@ func TestResumeDoesNotResetBudgetOrDuplicateNotice(t *testing.T) {
 	issueID := dbfx.Issue(t, "resume budget", testutil.Cols{
 		"creator_type": "agent",
 		"creator_id":   agentID,
+		"visibility":   "workspace",
 	})
 	var sourceTaskID string
 	for i := 0; i < 6; i++ {

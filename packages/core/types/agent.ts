@@ -337,6 +337,34 @@ export interface TaskCancellationActor {
   name?: string;
 }
 
+/**
+ * Server-side answer to "which code does this run use". Shipped with the task
+ * and stored on it, so a later read reports where the run actually went rather
+ * than where a run starting now would go.
+ */
+export interface CodeDecision {
+  kind: string;
+  /** Absolute directory the agent works in. Empty for remote_cache. */
+  path?: string;
+  /** For local_worktree: the repository the parallel copy is made from. */
+  repo_path?: string;
+  /** For local_worktree: where parallel copies are placed. */
+  worktree_root?: string;
+  execution_mode?: string;
+  /** Label to show instead of the absolute path, which leaks the account name. */
+  display_name?: string;
+  resource_id?: string;
+  project_id?: string;
+  /** For remote_cache: the repository URL that will be checked out. */
+  url?: string;
+  /** For shared_scratch: the session whose scratch directory is reused. */
+  session_id?: string;
+  /** For unresolvable: the machine-readable failure code. */
+  code?: string;
+  /** For unresolvable: a sentence naming what could not be resolved. */
+  reason?: string;
+}
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -471,6 +499,17 @@ export interface AgentTask {
    */
   branch_name?: string;
   /**
+   * Where this run's code lives, decided on the server so the daemon, the
+   * desktop app and the web app all show one answer (DENE-619).
+   *
+   * `kind` is a closed set server-side — local_in_place / local_shared /
+   * local_worktree / remote_cache / shared_scratch / unresolvable — but switch
+   * on it with a default branch: a newer backend may add one. `unresolvable`
+   * is a value, not a missing field; `code` and `reason` say why. Older
+   * backends omit the whole object — render conditionally.
+   */
+  code_decision?: CodeDecision;
+  /**
    * Resolved accountable-human provenance of this run (MUL-4302 §9): who it ran
    * "on behalf of", how that was resolved, and the evidence/lineage. Present on
    * user-facing task surfaces; older backends omit it — render conditionally.
@@ -511,6 +550,25 @@ export interface TaskUsage {
   cache_read_tokens: number;
   cache_write_tokens: number;
   cost_usd_ticks?: number;
+  // Run-level metadata the daemon reports alongside the token counters
+  // (DENE-666). It describes the RUN, not the (provider, model) slice, so the
+  // same values repeat on every slice of a run that spilled across models —
+  // read it with `runMetadata`, which takes the first slice that carries each
+  // field rather than summing.
+  //
+  // `TaskUsageSchema` has parsed these since they landed; this interface had
+  // not caught up, so the fields arrived on the wire and were invisible to
+  // TypeScript. Every one stays optional: a pre-DENE-666 server sends none.
+  num_turns?: number;
+  resumed?: boolean;
+  session_id?: string;
+  last_context_tokens?: number;
+  queue_to_claim_ms?: number;
+  prepare_ms?: number;
+  spawn_to_first_output_ms?: number;
+  total_ms?: number;
+  attribution_source?: string;
+  trigger_evidence_kind?: string;
 }
 
 /**
@@ -1227,6 +1285,29 @@ export interface DashboardUsageByAgent {
   task_count: number;
 }
 
+// Per-(issue, model) token totals for the workspace dashboard's per-issue
+// cost list — the entry point into one issue's Token cost view.
+//
+// `identifier` and `title` ride along so the row can be rendered and linked
+// without an extra request per issue; the identifier is what the issue route
+// canonicalizes to, so a copied link reads as "DENE-42", not a UUID.
+export interface DashboardUsageByIssue {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  provider: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
+}
+
 // Per-agent total terminal-task run-time + counts. Powers the workspace
 // dashboard's "time by agent" list. failed_count is a subset of
 // task_count (failed tasks still contribute to total_seconds because
@@ -1542,7 +1623,8 @@ export type RuntimeProviderPresetAction =
   | "models"
   | "upsert"
   | "delete"
-  | "activate";
+  | "activate"
+  | "replay";
 
 export type RuntimeProviderPresetStatus =
   | "pending"

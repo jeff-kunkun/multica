@@ -198,6 +198,11 @@ function providerPresetPayload(
     }
     case "delete":
       return { id: input.id };
+    // Replay names nothing: what it restores is whatever this machine already
+    // recorded for its own DSH home. It carries no key — the credential is the
+    // one thing a replay cannot put back.
+    case "replay":
+      return {};
     case "activate":
       // An empty model asks the daemon for the preset's first model, which is
       // what "use this provider" means when the user did not pick one.
@@ -233,6 +238,7 @@ export type ProviderPresetActionInput =
   | { action: "upsert"; preset: RuntimeProviderPresetUpsertInput }
   | { action: "delete"; id: string }
   | { action: "activate"; id: string; model?: string }
+  | { action: "replay" }
   | ({ action: "models" } & ProviderPresetModelsQuery);
 
 /**

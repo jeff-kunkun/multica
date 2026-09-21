@@ -23,11 +23,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/coderesolve"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/permission"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -88,11 +90,32 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	_, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
-	if ok && userID != "" {
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
+	if !ok {
+		return false
+	}
+	if !daemonAccessAllowedForTier(member.Role) {
+		writeError(w, http.StatusNotFound, "not found")
+		return false
+	}
+	if userID != "" {
 		h.MembershipCache.Set(r.Context(), userID, workspaceID)
 	}
-	return ok
+	return true
+}
+
+// daemonAccessAllowedForTier keeps guests off the daemon API entirely.
+// Registering a machine, claiming a task or reporting a run is workspace
+// infrastructure, not content, so there is no read half of it worth granting;
+// the tier that may not write has no business on these routes at all.
+//
+// This is also why the membership cache above is only written for tiers that
+// pass: MembershipCache stores "is a member" and nothing else, so a cached
+// entry must never stand for a guest. UpdateMember already invalidates on a
+// tier change, so a demoted member loses the cached entry at demotion time
+// rather than at TTL.
+func daemonAccessAllowedForTier(role string) bool {
+	return permission.Role(role).CanWrite()
 }
 
 // requireDaemonRuntimeAccess looks up a runtime and verifies the caller owns its workspace.
@@ -193,8 +216,11 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
 		return true
 	}
-	_, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
 	if err != nil {
+		return false
+	}
+	if !daemonAccessAllowedForTier(member.Role) {
 		return false
 	}
 	h.MembershipCache.Set(r.Context(), userID, workspaceID)
@@ -3813,10 +3839,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// ignores it and behaves as it always has, so that one is narrowed out of
 	// the payload rather than refused. Done BEFORE the gates read the resource
 	// set, so the gates and the daemon reason about one payload.
-	supportsUserWorktreeRoot := requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeUserRootV1)
-	resp.ProjectResources = filterResourcesForDaemonCapabilities(resp.ProjectResources, supportsUserWorktreeRoot)
+	claimingDaemon := daemonForRequest(r, runtime.DaemonID.String)
+	resp.ProjectResources = filterResourcesForDaemonCapabilities(resp.ProjectResources, claimingDaemon)
 	for i := range resp.Projects {
-		resp.Projects[i].Resources = filterResourcesForDaemonCapabilities(resp.Projects[i].Resources, supportsUserWorktreeRoot)
+		resp.Projects[i].Resources = filterResourcesForDaemonCapabilities(resp.Projects[i].Resources, claimingDaemon)
+	}
+
+	// Which code this run uses, decided once on the narrowed set and shipped
+	// as a field on the task (DENE-619). See applyCodeDecision.
+	applyCodeDecision(&resp, claimingDaemon)
+	if resp.CodeDecision != nil {
+		h.persistCodeDecision(r.Context(), task.ID, *resp.CodeDecision)
 	}
 
 	reason := worktreeClaimBlockReason(
@@ -3917,93 +3950,33 @@ func sharedClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRun
 }
 
 // filterResourcesForDaemonCapabilities narrows a claim's resource set to what
-// the claiming daemon can actually act on (DENE-617 invariant 15).
+// the claiming daemon declared it can act on (DENE-617 invariant 15), so an
+// old daemon receives exactly the payload shape it receives today and needs no
+// change to keep working (invariant 18).
 //
-// Two things need it, and the capability bit covers both because they shipped
-// together: a daemon declaring local-worktree-user-root-v1 is a daemon built
-// after this change, and one that does not is the daemon this function exists
-// to protect.
-//
-// One is the worktree_root field. A daemon that predates the move of parallel
-// working copies onto the user's disk json-skips the field and builds the copy
-// inside its own env root — where the workspace GC reclaims it. The user who
-// chose a location would then see their setting ignored, silently and
-// permanently, with the copy vanishing on a schedule they never agreed to.
-//
-// The other is the COUNT. Before this change a project held at most one
-// local_directory per daemon, and an old daemon's findLocalDirectoryAssignment
-// enforces that by failing the task outright when it sees a second one for
-// itself — correct then, because a second row could only mean corruption; a
-// task-killing error now, because a second row is a feature. It receives the
-// first row in position order, which is the same row the new daemon would
-// choose as its working directory, and the read-only extras — the part it
-// cannot implement — simply never reach it.
-//
-// Narrowing at the dispatch point means such a daemon behaves EXACTLY as it
-// does today — no new failure, no partially-honoured setting — and the rule
-// stays where it can be stated once: what a daemon receives is a subset of
-// what it declared it can handle. Old daemons need no change to keep working
-// (invariant 18).
-//
-// What survives is otherwise untouched: the directory, the daemon binding and
-// the execution mode are still what the project configured, because those an
-// old daemon does implement.
-func filterResourcesForDaemonCapabilities(resources []ProjectResourceData, supportsUserWorktreeRoot bool) []ProjectResourceData {
-	if supportsUserWorktreeRoot || len(resources) == 0 {
+// The rule itself lives in internal/coderesolve, next to the decision that
+// must be taken on its result: the server may only promise a directory it
+// actually sent. This function is the wire-struct conversion around it.
+func filterResourcesForDaemonCapabilities(resources []ProjectResourceData, daemon coderesolve.Daemon) []ProjectResourceData {
+	if len(resources) == 0 {
 		return resources
 	}
-	// Position order is the caller's: every query feeding this payload orders
-	// by position, and position is what decides which directory a run writes.
-	// Keeping the first occurrence per daemon_id is therefore the same choice
-	// a current daemon makes, not an arbitrary one.
-	seenDaemon := map[string]bool{}
-	out := make([]ProjectResourceData, 0, len(resources))
-	for _, res := range resources {
-		if res.ResourceType != "local_directory" {
-			out = append(out, res)
-			continue
-		}
-		var ref struct {
-			DaemonID string `json:"daemon_id"`
-		}
-		// An unparseable ref is left in place rather than dropped: this
-		// function narrows what a daemon receives, and a row it cannot read is
-		// not a row it can prove is a duplicate. The daemon's own parser
-		// reports the malformed ref, which is where that error belongs.
-		if err := json.Unmarshal(res.ResourceRef, &ref); err == nil {
-			key := strings.TrimSpace(ref.DaemonID)
-			if key != "" {
-				if seenDaemon[key] {
-					continue
-				}
-				seenDaemon[key] = true
+	filtered := coderesolve.FilterForCapabilities(resourcesToResolve(resources), daemon)
+	if len(filtered) == len(resources) {
+		// Nothing was dropped, but a ref may have been stripped; rebuilding is
+		// how that edit reaches the payload.
+		unchanged := true
+		for i := range filtered {
+			if string(filtered[i].Ref) != string(resources[i].ResourceRef) {
+				unchanged = false
+				break
 			}
 		}
-		if stripped, changed := stripRefField(res.ResourceRef, "worktree_root"); changed {
-			res.ResourceRef = stripped
+		if unchanged {
+			return resources
 		}
-		out = append(out, res)
 	}
-	return out
-}
-
-// stripRefField removes one key from a resource ref, leaving every other key —
-// including keys written by a newer server this binary cannot interpret —
-// byte-for-byte intact in value. Reports whether the key was there.
-func stripRefField(ref json.RawMessage, key string) (json.RawMessage, bool) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(ref, &fields); err != nil {
-		return ref, false
-	}
-	if _, ok := fields[key]; !ok {
-		return ref, false
-	}
-	delete(fields, key)
-	out, err := json.Marshal(fields)
-	if err != nil {
-		return ref, false
-	}
-	return out, true
+	return resourcesFromResolve(filtered)
 }
 
 // localDirectoryModeClaimBlockReason is the shared body of the per-mode claim

@@ -22,7 +22,7 @@ SET assignee_type = $1::text,
 WHERE id = $3::uuid
   AND workspace_id = $4::uuid
   AND assignee_id IS NULL
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id, visibility
 `
 
 type AssignIssueIfUnassignedParams struct {
@@ -80,8 +80,39 @@ func (q *Queries) AssignIssueIfUnassigned(ctx context.Context, arg AssignIssueIf
 		&i.Properties,
 		&i.Revision,
 		&i.LastActivityAt,
+		&i.ReviewerType,
+		&i.ReviewerID,
+		&i.Visibility,
 	)
 	return i, err
+}
+
+const clearIssueReviewer = `-- name: ClearIssueReviewer :execrows
+UPDATE issue
+SET reviewer_type = NULL,
+    reviewer_id = NULL,
+    updated_at = now()
+WHERE workspace_id = $1::uuid
+  AND reviewer_type = $2::text
+  AND reviewer_id = $3::uuid
+`
+
+type ClearIssueReviewerParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	ReviewerType string      `json:"reviewer_type"`
+	ReviewerID   pgtype.UUID `json:"reviewer_id"`
+}
+
+// Drops a reviewer reference that no longer points at anybody. The reviewer
+// pair is a reference, not a copy of a name, so the one thing it needs from
+// the rest of the server is to be released when its target is archived — the
+// same cleanup the no-foreign-keys rule requires for every other reference.
+func (q *Queries) ClearIssueReviewer(ctx context.Context, arg ClearIssueReviewerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, clearIssueReviewer, arg.WorkspaceID, arg.ReviewerType, arg.ReviewerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const createRoutingComment = `-- name: CreateRoutingComment :one
@@ -173,7 +204,7 @@ SET assignee_type = $1::text,
     updated_at = now()
 WHERE id = $3::uuid
   AND workspace_id = $4::uuid
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id, visibility
 `
 
 type ReassignIssueParams struct {
@@ -224,6 +255,9 @@ func (q *Queries) ReassignIssue(ctx context.Context, arg ReassignIssueParams) (I
 		&i.Properties,
 		&i.Revision,
 		&i.LastActivityAt,
+		&i.ReviewerType,
+		&i.ReviewerID,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -237,7 +271,7 @@ SET properties = jsonb_set(properties, ARRAY[$1::text], $2::jsonb, true),
 WHERE id = $3::uuid
   AND workspace_id = $4::uuid
   AND NOT (properties ? $1::text)
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id, visibility
 `
 
 type SetIssuePropertyValueIfUnsetParams struct {
@@ -287,6 +321,77 @@ func (q *Queries) SetIssuePropertyValueIfUnset(ctx context.Context, arg SetIssue
 		&i.Properties,
 		&i.Revision,
 		&i.LastActivityAt,
+		&i.ReviewerType,
+		&i.ReviewerID,
+		&i.Visibility,
+	)
+	return i, err
+}
+
+const setIssueReviewerIfUnset = `-- name: SetIssueReviewerIfUnset :one
+UPDATE issue
+SET reviewer_type = $1::text,
+    reviewer_id = $2::uuid,
+    revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
+    updated_at = now()
+WHERE id = $3::uuid
+  AND workspace_id = $4::uuid
+  AND reviewer_type IS NULL
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id, visibility
+`
+
+type SetIssueReviewerIfUnsetParams struct {
+	ReviewerType string      `json:"reviewer_type"`
+	ReviewerID   pgtype.UUID `json:"reviewer_id"`
+	ID           pgtype.UUID `json:"id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+}
+
+// Fills the reviewer slot only while it is still empty. reviewer_type IS NULL
+// is the empty slot; 'none' ("needs no acceptance pass") is a written value
+// and blocks this write exactly like a named reviewer does. Returns no row
+// when the slot already held an answer.
+func (q *Queries) SetIssueReviewerIfUnset(ctx context.Context, arg SetIssueReviewerIfUnsetParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, setIssueReviewerIfUnset,
+		arg.ReviewerType,
+		arg.ReviewerID,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+		&i.Revision,
+		&i.LastActivityAt,
+		&i.ReviewerType,
+		&i.ReviewerID,
+		&i.Visibility,
 	)
 	return i, err
 }
