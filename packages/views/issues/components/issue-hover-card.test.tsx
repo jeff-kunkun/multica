@@ -118,7 +118,7 @@ const BASE_ISSUE: Issue = {
   priority: "none",
 };
 
-const NOT_FOUND_TEXT = "This issue does not exist or has been deleted in this workspace.";
+const NOT_FOUND_TEXT = "Page not found";
 
 /** The three query states the card body branches on, as react-query reports them. */
 type DetailState =

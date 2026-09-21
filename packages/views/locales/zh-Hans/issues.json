@@ -377,7 +377,7 @@
     "manual_reorder_hint": "切换到“手动”排序后，才能调整同一列内的顺序。"
   },
   "detail": {
-    "not_found": "这个任务不存在或已在该工作区被删除。",
+    "not_found": "找不到这个页面",
     "breadcrumb_project_unknown": "未知项目",
     "back": "返回",
     "title_placeholder": "任务标题",

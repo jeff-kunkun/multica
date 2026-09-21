@@ -14,8 +14,9 @@ import {
 } from "@multica/core/issues/stores/sub-issue-display-store";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
+import enLayout from "../../locales/en/layout.json";
 
-const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
+const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues, layout: enLayout } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 
@@ -1553,10 +1554,12 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail("nonexistent-id");
 
     await waitFor(() => {
-      expect(
-        screen.getByText("This issue does not exist or has been deleted in this workspace."),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("resource-not-found")).toBeInTheDocument();
     });
+    expect(screen.getByText("Page not found")).toBeInTheDocument();
+    expect(
+      screen.getByText("It may have been deleted, or it hasn't been shared with you."),
+    ).toBeInTheDocument();
   });
 
   it("shows 'Back' button when issue is not found and no onDelete prop", async () => {
