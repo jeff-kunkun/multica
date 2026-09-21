@@ -203,7 +203,7 @@ type ListProjectRepoURLsParams struct {
 }
 
 // The repository URLs a project holds. A workspace repo has no row of its own
-// (it is an entry in workspace.repos, see migration 505), so this join table
+// (it is an entry in workspace.repos, see migration 511), so this join table
 // is what "this repo belongs to that project" means.
 func (q *Queries) ListProjectRepoURLs(ctx context.Context, arg ListProjectRepoURLsParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, listProjectRepoURLs, arg.WorkspaceID, arg.ProjectID)

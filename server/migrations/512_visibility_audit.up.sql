@@ -4,7 +4,7 @@
 -- audience_size is a count taken at write time, not a live view: it answers
 -- "how many people did this change expose the resource to" months later, when
 -- the project's membership has moved on. resource_id is TEXT because a repo is
--- identified by its URL, not a UUID (see migration 505).
+-- identified by its URL, not a UUID (see migration 511).
 --
 -- No foreign keys and no cascades, per repository policy: an audit row must
 -- outlive the resource it describes.

@@ -1,6 +1,6 @@
 -- Safe rollback: narrow every entry to private before the key is dropped, for
 -- the same reason as 503 and 504 — a rolled-back server has no visibility
--- filter at all, and the audit trail (migration 506) is what replays the
+-- filter at all, and the audit trail (migration 512) is what replays the
 -- narrowing after a roll forward.
 UPDATE workspace
 SET repos = COALESCE((

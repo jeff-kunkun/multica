@@ -726,7 +726,7 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 	// issue.project_id is ON DELETE SET NULL (migration 034), and a
 	// 'project'-scoped issue with no project violates the pairing CHECK added
-	// in migration 504. Demote before the delete so the cascade cannot leave
+	// in migration 510. Demote before the delete so the cascade cannot leave
 	// rows the constraint rejects — and because an issue whose project is gone
 	// has no audience left to be shared with (DENE-698).
 	if _, err := qtx.DemoteProjectScopedIssues(r.Context(), db.DemoteProjectScopedIssuesParams{

@@ -15,8 +15,6 @@ type fakeStore struct {
 	settings Settings
 	issue    Issue
 	roster   map[string]Agent
-	prop     ReviewerProperty
-	hasProp  bool
 	target   Member
 
 	// slot occupancy, as the database would enforce it
@@ -53,12 +51,6 @@ func newFakeStore() *fakeStore {
 			"贝吉塔游戏": {ID: "a-vegeta-g", Name: "贝吉塔游戏"},
 			"比克游戏":  {ID: "a-piccolo-g", Name: "比克游戏"},
 		},
-		prop: ReviewerProperty{ID: "prop-1", Options: map[string]string{
-			"布尔玛游戏": "o-bulma-g", "孙悟空游戏": "o-goku-g",
-			"贝吉塔游戏": "o-vegeta-g", "比克游戏": "o-piccolo-g",
-			OptionNoReview: "o-none", OptionHuman: "o-human",
-		}},
-		hasProp:  true,
 		target:   Member{UserID: "user-1", Name: "Kun"},
 		comments: map[CommentKind][]string{},
 		errOn:    map[string]error{},
@@ -76,10 +68,6 @@ func (f *fakeStore) Issue(context.Context, string, string) (Issue, error) {
 func (f *fakeStore) Roster(context.Context, string) (map[string]Agent, error) {
 	return f.roster, f.fail("roster")
 }
-func (f *fakeStore) Reviewer(context.Context, string) (ReviewerProperty, bool, error) {
-	return f.prop, f.hasProp, f.fail("reviewer")
-}
-
 func (f *fakeStore) AssignAgentIfUnassigned(_ context.Context, _, _ string, seat Seat) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -94,17 +82,19 @@ func (f *fakeStore) AssignAgentIfUnassigned(_ context.Context, _, _ string, seat
 	return true, nil
 }
 
-func (f *fakeStore) SetReviewerIfUnset(_ context.Context, _, _, _, optionID string) (bool, error) {
+func (f *fakeStore) SetReviewerIfUnset(_ context.Context, _, _ string, ref ReviewerRef) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("set_reviewer"); err != nil {
 		return false, err
 	}
-	if f.reviewerTaken || f.issue.Reviewer != "" {
+	if f.reviewerTaken || !f.issue.Reviewer.Empty() {
 		return false, nil
 	}
 	f.reviewerTaken = true
-	f.reviewer = append(f.reviewer, optionID)
+	// Records the LABEL, not the id: every assertion in this package is about
+	// who was chosen, and an id would make each one restate the fixture.
+	f.reviewer = append(f.reviewer, ref.Label())
 	return true, nil
 }
 

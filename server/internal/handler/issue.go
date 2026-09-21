@@ -62,10 +62,18 @@ type IssueResponse struct {
 	// field at all: with omitempty a built-in fixture hides it from BOTH
 	// renderings, and the drift guard goes green on a payload that has drifted.
 	// (MUL-6749)
-	StatusName    string  `json:"status_name"`
-	Priority      string  `json:"priority"`
-	AssigneeType  *string `json:"assignee_type"`
-	AssigneeID    *string `json:"assignee_id"`
+	StatusName   string  `json:"status_name"`
+	Priority     string  `json:"priority"`
+	AssigneeType *string `json:"assignee_type"`
+	AssigneeID   *string `json:"assignee_id"`
+	// ReviewerType / ReviewerID are the acceptance slot, shaped exactly like
+	// the assignee pair: a REFERENCE to an agent or a member, not a copy of a
+	// name, so renaming or archiving the target cannot leave stale text behind.
+	// ReviewerType also carries the value 'none' ("this issue needs no
+	// acceptance pass"), which is a written answer and not an empty slot —
+	// with ReviewerID nil. Both nil means nobody has decided yet. (DENE-633)
+	ReviewerType  *string `json:"reviewer_type"`
+	ReviewerID    *string `json:"reviewer_id"`
 	CreatorType   string  `json:"creator_type"`
 	CreatorID     string  `json:"creator_id"`
 	ParentIssueID *string `json:"parent_issue_id"`
@@ -355,6 +363,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		Priority:       i.Priority,
 		AssigneeType:   textToPtr(i.AssigneeType),
 		AssigneeID:     uuidToPtr(i.AssigneeID),
+		ReviewerType:   textToPtr(i.ReviewerType),
+		ReviewerID:     uuidToPtr(i.ReviewerID),
 		CreatorType:    i.CreatorType,
 		CreatorID:      uuidToString(i.CreatorID),
 		ParentIssueID:  uuidToPtr(i.ParentIssueID),
@@ -395,6 +405,8 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		Priority:       i.Priority,
 		AssigneeType:   textToPtr(i.AssigneeType),
 		AssigneeID:     uuidToPtr(i.AssigneeID),
+		ReviewerType:   textToPtr(i.ReviewerType),
+		ReviewerID:     uuidToPtr(i.ReviewerID),
 		CreatorType:    i.CreatorType,
 		CreatorID:      uuidToString(i.CreatorID),
 		ParentIssueID:  uuidToPtr(i.ParentIssueID),
@@ -465,6 +477,8 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		Priority:       i.Priority,
 		AssigneeType:   textToPtr(i.AssigneeType),
 		AssigneeID:     uuidToPtr(i.AssigneeID),
+		ReviewerType:   textToPtr(i.ReviewerType),
+		ReviewerID:     uuidToPtr(i.ReviewerID),
 		CreatorType:    i.CreatorType,
 		CreatorID:      uuidToString(i.CreatorID),
 		ParentIssueID:  uuidToPtr(i.ParentIssueID),
@@ -3319,17 +3333,23 @@ type UpdateIssueRequest struct {
 	// that landed asynchronously after that base without making media already
 	// present in the base impossible for the user to delete. Older clients omit
 	// it and receive conservative channel-media preservation.
-	DescriptionBase *string  `json:"description_base,omitempty"`
-	Status          *string  `json:"status"`
-	Priority        *string  `json:"priority"`
-	AssigneeType    *string  `json:"assignee_type"`
-	AssigneeID      *string  `json:"assignee_id"`
-	Position        *float64 `json:"position"`
-	StartDate       *string  `json:"start_date"`
-	DueDate         *string  `json:"due_date"`
-	ParentIssueID   *string  `json:"parent_issue_id"`
-	ProjectID       *string  `json:"project_id"`
-	Stage           *int32   `json:"stage"`
+	DescriptionBase *string `json:"description_base,omitempty"`
+	Status          *string `json:"status"`
+	Priority        *string `json:"priority"`
+	AssigneeType    *string `json:"assignee_type"`
+	AssigneeID      *string `json:"assignee_id"`
+	// ReviewerType / ReviewerID set the acceptance slot. Sending the pair as
+	// explicit nulls clears it back to "undecided"; sending reviewer_type
+	// "none" with a null id records "this issue needs no acceptance pass",
+	// which is an answer and not an empty slot. (DENE-633)
+	ReviewerType  *string  `json:"reviewer_type"`
+	ReviewerID    *string  `json:"reviewer_id"`
+	Position      *float64 `json:"position"`
+	StartDate     *string  `json:"start_date"`
+	DueDate       *string  `json:"due_date"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
+	Stage         *int32   `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -3406,6 +3426,15 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 	if !assigneeTypeTouched && !assigneeIDTouched {
 		params.AssigneeType = current.AssigneeType
 		params.AssigneeID = current.AssigneeID
+	}
+	// Same pairing rule as the assignee above: reviewer_type and reviewer_id
+	// are one validated value, so an untouched pair is restored whole from the
+	// locked row and a touched one is left exactly as validation left it.
+	_, reviewerTypeTouched := rawFields["reviewer_type"]
+	_, reviewerIDTouched := rawFields["reviewer_id"]
+	if !reviewerTypeTouched && !reviewerIDTouched {
+		params.ReviewerType = current.ReviewerType
+		params.ReviewerID = current.ReviewerID
 	}
 	if _, touched := rawFields["start_date"]; !touched {
 		params.StartDate = current.StartDate
@@ -3562,6 +3591,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ID:            prevIssue.ID,
 		AssigneeType:  prevIssue.AssigneeType,
 		AssigneeID:    prevIssue.AssigneeID,
+		ReviewerType:  prevIssue.ReviewerType,
+		ReviewerID:    prevIssue.ReviewerID,
 		StartDate:     prevIssue.StartDate,
 		DueDate:       prevIssue.DueDate,
 		ParentIssueID: prevIssue.ParentIssueID,
@@ -3625,6 +3656,24 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.AssigneeID = id
 		} else {
 			params.AssigneeID = pgtype.UUID{Valid: false} // explicit null = unassign
+		}
+	}
+	if _, ok := rawFields["reviewer_type"]; ok {
+		if req.ReviewerType != nil {
+			params.ReviewerType = pgtype.Text{String: *req.ReviewerType, Valid: true}
+		} else {
+			params.ReviewerType = pgtype.Text{Valid: false} // explicit null = undecided again
+		}
+	}
+	if _, ok := rawFields["reviewer_id"]; ok {
+		if req.ReviewerID != nil {
+			id, ok := parseUUIDOrBadRequest(w, *req.ReviewerID, "reviewer_id")
+			if !ok {
+				return
+			}
+			params.ReviewerID = id
+		} else {
+			params.ReviewerID = pgtype.UUID{Valid: false}
 		}
 	}
 	if _, ok := rawFields["start_date"]; ok {
@@ -3751,6 +3800,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	_, touchedID := rawFields["assignee_id"]
 	if touchedType || touchedID {
 		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
+			writeError(w, status, msg)
+			return
+		}
+	}
+
+	_, touchedReviewerType := rawFields["reviewer_type"]
+	_, touchedReviewerID := rawFields["reviewer_id"]
+	if touchedReviewerType || touchedReviewerID {
+		if status, msg := h.validateReviewerPair(r.Context(), workspaceID, params.ReviewerType, params.ReviewerID); status != 0 {
 			writeError(w, status, msg)
 			return
 		}
@@ -3916,6 +3974,66 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 // Returns (statusCode, errorMessage). statusCode == 0 means the pair is valid;
 // callers should treat any non-zero status as a rejection and surface it back
 // to the client.
+// validateReviewerPair checks the acceptance slot the same way
+// validateAssigneePair checks the executor slot: the pair is a reference, so
+// it must point at something that exists in THIS workspace.
+//
+// It deliberately does not run the invoke-permission check the assignee
+// branch runs. Naming a reviewer does not dispatch work — the routing layer
+// hands the ticket over only when it reaches in_review, and that handoff goes
+// through the same assignment path, with the same permission check, then.
+//
+// 'none' is the one type that carries no id: it means "this issue needs no
+// acceptance pass", which is a decision worth recording precisely because an
+// empty slot would otherwise be re-judged forever. (DENE-633)
+func (h *Handler) validateReviewerPair(ctx context.Context, workspaceID string, reviewerType pgtype.Text, reviewerID pgtype.UUID) (int, string) {
+	if !reviewerType.Valid {
+		if reviewerID.Valid {
+			return http.StatusBadRequest, "reviewer_id requires reviewer_type"
+		}
+		return 0, ""
+	}
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return http.StatusBadRequest, "invalid workspace_id"
+	}
+	switch reviewerType.String {
+	case "none":
+		if reviewerID.Valid {
+			return http.StatusBadRequest, "reviewer_type 'none' takes no reviewer_id"
+		}
+		return 0, ""
+	case "member":
+		if !reviewerID.Valid {
+			return http.StatusBadRequest, "reviewer_type 'member' requires reviewer_id"
+		}
+		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID:      reviewerID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			return http.StatusBadRequest, "reviewer_id does not refer to a member of this workspace"
+		}
+		return 0, ""
+	case "agent":
+		if !reviewerID.Valid {
+			return http.StatusBadRequest, "reviewer_type 'agent' requires reviewer_id"
+		}
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          reviewerID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			return http.StatusBadRequest, "reviewer_id does not refer to an agent of this workspace"
+		}
+		if agent.ArchivedAt.Valid {
+			return http.StatusBadRequest, "cannot set an archived agent as reviewer"
+		}
+		return 0, ""
+	default:
+		return http.StatusBadRequest, "reviewer_type must be 'member', 'agent', or 'none'"
+	}
+}
+
 func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, workspaceID string, assigneeType pgtype.Text, assigneeID pgtype.UUID) (int, string) {
 	// Both unset → unassigned issue, valid.
 	if !assigneeType.Valid && !assigneeID.Valid {
@@ -3931,11 +4049,20 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 	}
 	switch assigneeType.String {
 	case "member":
-		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		target, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 			UserID:      assigneeID,
 			WorkspaceID: wsUUID,
-		}); err != nil {
+		})
+		if err != nil {
 			return http.StatusBadRequest, "assignee_id does not refer to a member of this workspace"
+		}
+		// Owning an issue is work, and a guest cannot do work: they can
+		// neither change its status nor comment on it, so an issue parked
+		// on a guest is an issue nobody is carrying. This is the assignment
+		// half of DENE-695's "guests cannot be assigned or @-triggered";
+		// the write half is middleware.GuestReadOnly.
+		if !permission.AllowedInWorkspace(permission.Role(target.Role), permission.WorkspaceBeAssigned) {
+			return http.StatusBadRequest, "guests cannot be assigned work"
 		}
 		return 0, ""
 	case "agent":
@@ -4380,6 +4507,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			ID:            prevIssue.ID,
 			AssigneeType:  prevIssue.AssigneeType,
 			AssigneeID:    prevIssue.AssigneeID,
+			ReviewerType:  prevIssue.ReviewerType,
+			ReviewerID:    prevIssue.ReviewerID,
 			StartDate:     prevIssue.StartDate,
 			DueDate:       prevIssue.DueDate,
 			ParentIssueID: prevIssue.ParentIssueID,

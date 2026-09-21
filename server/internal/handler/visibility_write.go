@@ -548,7 +548,7 @@ type repoVisibilityRequest struct {
 }
 
 // SetRepoVisibility changes one workspace repository's scope. A repo lives in
-// workspace.repos as a JSONB entry keyed by URL (migration 505), so this
+// workspace.repos as a JSONB entry keyed by URL (migration 511), so this
 // rewrites that entry rather than a row.
 func (h *Handler) SetRepoVisibility(w http.ResponseWriter, r *http.Request) {
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
@@ -640,7 +640,7 @@ func (h *Handler) SetRepoVisibility(w http.ResponseWriter, r *http.Request) {
 
 // repoProjectIDs is which projects list this repository as a resource. It is
 // the repo's answer to "does it belong to a project", the pairing rule's
-// input (migration 505).
+// input (migration 511).
 func (h *Handler) repoProjectIDs(ctx context.Context, wsUUID pgtype.UUID, url string) []pgtype.UUID {
 	ids, err := h.Queries.ListProjectIDsForRepoURL(ctx, db.ListProjectIDsForRepoURLParams{
 		WorkspaceID: wsUUID,

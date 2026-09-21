@@ -312,6 +312,12 @@ var concurrentIndexCleanups = map[string]string{
 	"488_agent_parent_index":                                    "idx_agent_parent_agent_id",
 	"498_project_resource_local_directory_identity":             "idx_project_resource_local_directory_identity",
 	"499_project_resource_local_directory_repo":                 "idx_project_resource_local_directory_repo",
+	"494_chat_session_project_unique":                           "idx_chat_session_project_session_project",
+	"495_chat_session_project_project_index":                    "idx_chat_session_project_project",
+	"504_comment_routing_kind_unique":                           "comment_routing_kind_uniq",
+	"513_visibility_audit_workspace_index":                      "idx_visibility_audit_workspace_created",
+	"514_visibility_audit_resource_index":                       "idx_visibility_audit_resource",
+	"515_issue_visibility_index":                                "idx_issue_workspace_visibility",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

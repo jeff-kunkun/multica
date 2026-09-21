@@ -133,7 +133,20 @@
     "waiting_on": "{{id}} 대기",
     "last_activity_missing": "활동 시각 없음"
   },
-  "blocker_summary": { "title": "차단됨 · 근본 원인 {{count}}개", "needs_you": "{{count}}개는 조치가 필요합니다", "root": "근본 차단", "propagated": "하위 태스크로 인해 차단됨", "kind_decision": "결정이 필요합니다", "kind_permission": "권한이 필요합니다", "kind_external": "외부 의존성 대기 중", "kind_capacity": "용량 회복 대기 중", "kind_action": "{{kind}}: {{action}}", "kind_review_overdue": "검토 지연 · {{ago}}", "kind_wake_missed": "{{id}} 완료 후 깨우지 않음", "kind_cycle": "순환 대기" },
+  "blocker_summary": {
+    "title": "차단됨 · 근본 원인 {{count}}개",
+    "needs_you": "{{count}}개는 조치가 필요합니다",
+    "root": "근본 차단",
+    "propagated": "하위 태스크로 인해 차단됨",
+    "kind_decision": "결정이 필요합니다",
+    "kind_permission": "권한이 필요합니다",
+    "kind_external": "외부 의존성 대기 중",
+    "kind_capacity": "용량 회복 대기 중",
+    "kind_action": "{{kind}}: {{action}}",
+    "kind_review_overdue": "검토 지연 · {{ago}}",
+    "kind_wake_missed": "{{id}} 완료 후 깨우지 않음",
+    "kind_cycle": "순환 대기"
+  },
   "scope": {
     "all_label": "전체",
     "all_description": "이 워크스페이스의 모든 태스크",
@@ -421,6 +434,7 @@
     "prop_priority": "우선순위",
     "prop_stage": "단계",
     "prop_assignee": "담당자",
+    "prop_reviewer": "검수자",
     "prop_start_date": "시작일",
     "prop_due_date": "마감일",
     "prop_project": "프로젝트",
@@ -824,6 +838,14 @@
       "squads_group": "스쿼드",
       "agent_runtime_required": "작업을 할당하기 전에 이 에이전트에 런타임을 연결하세요",
       "squad_runtime_required": "작업을 할당하기 전에 이 스쿼드의 리더에 런타임을 연결하세요"
+    },
+    "reviewer": {
+      "trigger_undecided": "미지정",
+      "trigger_no_review": "검수 불필요",
+      "search_placeholder": "검수자 지정...",
+      "no_review": "검수 불필요",
+      "members_group": "멤버",
+      "agents_group": "에이전트"
     },
     "start_date": {
       "trigger_label": "시작일",

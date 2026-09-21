@@ -63,6 +63,42 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 	}
 }
 
+// worktreeCleanupStartupDelay is how long the cleanup loop waits before its
+// first pass.
+var worktreeCleanupStartupDelay = 30 * time.Second
+
+// worktreeCleanupLoop runs the parallel-copy cleanup pass on its own schedule.
+//
+// Deliberately NOT a step inside runGC (DENE-648). Those working copies are the
+// one thing the cycle touches that does not live under WorkspacesRoot, and the
+// consent for removing them is the cleanup switch on the storage screen — not
+// the daemon's workspace GC. Riding on gcLoop meant a user who had turned
+// daemon GC off flipped that switch and nothing ever happened, with no hint
+// anywhere on screen. Its own loop keeps the switch the only thing that decides.
+//
+// The cadence is the GC interval because it answers the same question — how
+// often is it worth walking the disk — not because the two passes are related.
+func (d *Daemon) worktreeCleanupLoop(ctx context.Context) {
+	// Same startup delay as gcLoop: let the daemon finish initializing before
+	// anything starts sizing directories. A variable so a test can watch the
+	// loop actually fire instead of waiting half a minute for it.
+	if err := sleepWithContext(ctx, worktreeCleanupStartupDelay); err != nil {
+		return
+	}
+	d.runWorktreeCleanup()
+
+	ticker := time.NewTicker(d.cfg.GCInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.runWorktreeCleanup()
+		}
+	}
+}
+
 // gcStats accumulates byte counts and per-pattern hit counts for one GC cycle.
 type gcStats struct {
 	cleaned         int // whole task dirs removed by a parent-lifecycle or completed-task policy
@@ -86,18 +122,6 @@ type gcStats struct {
 
 // runGC performs a single GC scan across all workspace directories.
 func (d *Daemon) runGC(ctx context.Context) {
-	// Parallel-mode working copies first, because they are the only thing this
-	// cycle touches that does NOT live under WorkspacesRoot (DENE-617). They
-	// sit beside the user's repository, so the walk below can never reach
-	// them, and the early return on a missing workspaces root must not skip
-	// them either — hence before it rather than alongside the other pruners.
-	//
-	// The consent for this pass is the machine's own cleanup policy, which is
-	// off until the user switches it on; GCEnabled gating it as well only ever
-	// means less deleting, which is the safe direction for a directory on
-	// somebody else's disk.
-	d.runWorktreeCleanup()
-
 	root := d.cfg.WorkspacesRoot
 	entries, err := os.ReadDir(root)
 	if err != nil {

@@ -344,7 +344,7 @@ type UpdateWorkspaceRequest struct {
 }
 
 // workspaceRepoRef is one entry of workspace.repos. A repository has no table
-// of its own, so its sharing scope rides on the entry (migration 505):
+// of its own, so its sharing scope rides on the entry (migration 511):
 // visibility is the scope, created_by is who added it — 'private' means "only
 // the creator", which needs somebody to point at.
 type workspaceRepoRef struct {
@@ -633,7 +633,11 @@ func normalizeMemberRole(role string) (string, bool) {
 
 	role = strings.TrimSpace(role)
 	switch role {
-	case "owner", "admin", "member":
+	case "owner", "admin", "member", "guest":
+		// "guest" became selectable here together with DENE-697's
+		// read-only interceptor. Before that layer existed a guest held
+		// every Member write permission under a read-only name, so
+		// migration 502 deliberately left this list alone.
 		return role, true
 	default:
 		return "", false

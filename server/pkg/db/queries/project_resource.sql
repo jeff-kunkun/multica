@@ -63,7 +63,7 @@ GROUP BY project_id;
 
 -- name: ListProjectRepoURLs :many
 -- The repository URLs a project holds. A workspace repo has no row of its own
--- (it is an entry in workspace.repos, see migration 505), so this join table
+-- (it is an entry in workspace.repos, see migration 511), so this join table
 -- is what "this repo belongs to that project" means.
 SELECT DISTINCT (resource_ref->>'url')::text AS url
 FROM project_resource

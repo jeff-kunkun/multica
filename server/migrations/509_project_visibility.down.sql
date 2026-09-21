@@ -6,7 +6,7 @@
 -- back to its pre-DENE-698 behaviour where every project is visible to every
 -- member. That is the rollback target, not a leak this migration introduces —
 -- but every scope change made while the feature was live is recorded in
--- visibility_audit (migration 506), so the narrowing can be replayed after a
+-- visibility_audit (migration 512), so the narrowing can be replayed after a
 -- roll forward.
 UPDATE project SET visibility = 'private' WHERE visibility <> 'private';
 

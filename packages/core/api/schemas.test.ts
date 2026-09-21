@@ -25,6 +25,7 @@ import {
   DashboardFailureByAgentListSchema,
   DashboardFailureDailyListSchema,
   DashboardUsageByAgentListSchema,
+  DashboardUsageByIssueListSchema,
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
   ChatPendingTaskSchema,
@@ -96,6 +97,8 @@ const baseIssue = {
   priority: "medium",
   assignee_type: null,
   assignee_id: null,
+  reviewer_type: null,
+  reviewer_id: null,
   creator_type: "member",
   creator_id: "user-1",
   parent_issue_id: null,
@@ -231,6 +234,41 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     const parsed = ListIssuesResponseSchema.parse({ issues: [withoutName], total: 1 });
     expect(parsed.issues[0]?.id).toBe(baseIssue.id);
     expect(parsed.issues[0]?.status_name).toBeUndefined();
+  });
+  // 验收席 is a reference pair, and an installed client can be pointed at a
+  // backend that predates it (DENE-633). A missing pair must read as
+  // "undecided", and a malformed one must not cost the whole issue.
+  it("reads a missing reviewer pair as undecided", () => {
+    const { reviewer_type: _t, reviewer_id: _i, ...older } = { ...baseIssue, reviewer_type: "agent", reviewer_id: "a-1" };
+    const parsed = ListIssuesResponseSchema.parse({ issues: [older], total: 1 });
+    expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+    expect(parsed.issues[0]?.reviewer_type).toBeNull();
+    expect(parsed.issues[0]?.reviewer_id).toBeNull();
+  });
+  it("carries a named reviewer and the 'none' answer through unchanged", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [
+        { ...baseIssue, id: "issue-a", reviewer_type: "agent", reviewer_id: "agent-1" },
+        { ...baseIssue, id: "issue-b", reviewer_type: "none", reviewer_id: null },
+      ],
+      total: 2,
+    });
+    expect(parsed.issues[0]?.reviewer_type).toBe("agent");
+    expect(parsed.issues[0]?.reviewer_id).toBe("agent-1");
+    expect(parsed.issues[1]?.reviewer_type).toBe("none");
+    expect(parsed.issues[1]?.reviewer_id).toBeNull();
+  });
+  it("drops only a malformed reviewer pair, keeping the issue and the list", () => {
+    for (const bad of [42, { id: "x" }, ["x"], true]) {
+      const parsed = ListIssuesResponseSchema.parse({
+        issues: [{ ...baseIssue, reviewer_type: bad, reviewer_id: bad }],
+        total: 1,
+      });
+      expect(parsed.issues).toHaveLength(1);
+      expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+      expect(parsed.issues[0]?.reviewer_type).toBeNull();
+      expect(parsed.issues[0]?.reviewer_id).toBeNull();
+    }
   });
   it("keeps the issue while independently dropping a malformed source context", () => {
     const parsed = ListIssuesResponseSchema.parse({
@@ -1320,6 +1358,26 @@ describe("dashboard + runtime usage schema drift", () => {
       { model: "claude-opus-4-7", input_tokens: 7 },
     ]);
     expect(parsed[0]?.agent_id).toBe("");
+  });
+
+  it("keeps a usage-by-issue row whose identifier/title an older backend omits", () => {
+    // issue_id is what the row links with, so it is the one field a version
+    // drift must not cost the whole list; identifier/title default to "" and
+    // the client falls back to the UUID for the label.
+    const parsed = DashboardUsageByIssueListSchema.parse([
+      { issue_id: "issue-1", model: "claude-opus-4-7", input_tokens: 7 },
+    ]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.identifier).toBe("");
+    expect(parsed[0]?.title).toBe("");
+    expect(parsed[0]?.input_tokens).toBe(7);
+  });
+
+  it("rejects a non-array usage-by-issue body so parseWithFallback can fall back", () => {
+    expect(DashboardUsageByIssueListSchema.safeParse(null).success).toBe(false);
+    expect(DashboardUsageByIssueListSchema.safeParse({ rows: [] }).success).toBe(
+      false,
+    );
   });
 
   it("coerces missing fields on every runtime usage schema", () => {

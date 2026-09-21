@@ -178,7 +178,7 @@ func (v visibilityViewer) canSeeProject(p db.Project) bool {
 }
 
 // canSeeRepo takes the repo's projects as a set because a workspace repo can
-// sit in several (migration 505): being in any one of them is enough.
+// sit in several (migration 511): being in any one of them is enough.
 func (v visibilityViewer) canSeeRepo(entry workspaceRepoRef, repoProjectIDs []pgtype.UUID) bool {
 	rel := permission.Relation{
 		IsCreator: entry.CreatedBy != "" && entry.CreatedBy == uuidToString(v.userID),

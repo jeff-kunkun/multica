@@ -1270,6 +1270,11 @@ export const IssueSchema = z.object({
   priority: z.string(),
   assignee_type: z.string().nullable(),
   assignee_id: z.string().nullable(),
+  // 验收席. Nullish-with-default rather than plain nullable: an installed
+  // client can talk to a backend that predates DENE-633, and a missing pair
+  // must parse to "undecided" instead of failing the whole issue.
+  reviewer_type: z.string().nullish().catch(null).default(null),
+  reviewer_id: z.string().nullish().catch(null).default(null),
   creator_type: z.string(),
   creator_id: z.string(),
   parent_issue_id: z.string().nullable(),
@@ -1850,6 +1855,25 @@ const DashboardUsageByAgentSchema = z.object({
 }).loose();
 
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
+
+// Per-(issue, model) rows for the dashboard's per-issue cost list. `identifier`
+// / `title` default to "" so a backend that predates the issue fields degrades
+// to an unnamed row rather than dropping the whole list to the `[]` fallback —
+// the row's link is derived from `issue_id`, which every version sends.
+const DashboardUsageByIssueSchema = z.object({
+  issue_id: z.string().default(""),
+  identifier: z.string().default(""),
+  title: z.string().default(""),
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  ...CostSplitShape,
+}).loose();
+
+export const DashboardUsageByIssueListSchema = z.array(DashboardUsageByIssueSchema);
 
 // `cancelled_count` defaults to 0 so an installed client pointed at a
 // backend that predates it still renders: those rows simply carry no
@@ -4058,6 +4082,22 @@ export const MemberWithUserSchema = z.object({
   email: z.string().optional().default(""),
   avatar_url: z.string().nullable().optional().default(null),
 }).loose();
+
+export const MemberWithUserListSchema = z.array(MemberWithUserSchema);
+
+/** Fallback for a single-member write whose response drifted. `role` is the
+ *  least privileged known tier so a garbled reply never paints someone as an
+ *  owner; the row re-reads the truth on the next list invalidation. */
+export const EMPTY_MEMBER_WITH_USER: MemberWithUser = {
+  id: "",
+  workspace_id: "",
+  user_id: "",
+  role: "guest",
+  created_at: "",
+  name: "",
+  email: "",
+  avatar_url: null,
+};
 
 export {
   ConfigBundleSchema,

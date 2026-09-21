@@ -16,6 +16,13 @@ const (
 	ReviewerSeat ReviewerKind = "seat"
 	// ReviewerHuman — this acceptance needs a person, because it needs a
 	// conversation rather than a check.
+	//
+	// It never becomes the reviewer slot's VALUE. A slot naming a person
+	// hands the ticket to that person at 待验收, and from then on routing
+	// skips it — an issue a person holds is that person's issue — so the
+	// ticket freezes with nobody able to move it on. The answer is kept as a
+	// note instead: a seat takes the slot and is told to @ the person for the
+	// call it cannot make.
 	ReviewerHuman ReviewerKind = "human"
 	// ReviewerNone — this issue does not need a separate acceptance pass.
 	//
