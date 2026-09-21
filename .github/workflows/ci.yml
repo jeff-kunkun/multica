@@ -74,7 +74,7 @@ jobs:
         with:
           # apps/docs is excluded from the frontend turbo run, but knip does
           # analyze it, so a docs-only change still needs this job.
-          # apps/mobile has its own mobile-verify workflow. Everything else
+          # apps/mobile is not gated by CI at all. Everything else
           # the frontend job touches is listed here; bias toward
           # over-matching since a missed path silently skips validation.
           filters: |
@@ -353,11 +353,10 @@ jobs:
 
       - name: Build, type check, and lint
         if: ${{ needs.changes.outputs.frontend == 'true' }}
-        # Mobile lives in a parallel mobile-verify workflow (path-filtered
-        # to apps/mobile/** + packages/core/**) so it doesn't add
-        # ~50s of expo-lint + tsc to every web/desktop PR. Keep this
-        # filter in sync with the root package.json scripts, which also
-        # exclude @multica/mobile.
+        # Mobile is not a CI gate on this fork: mobile-verify.yml is
+        # manual-only (workflow_dispatch), so nothing about apps/mobile
+        # blocks a PR here. Keep this filter in sync with the root
+        # package.json scripts, which also exclude @multica/mobile.
         run: pnpm exec turbo build typecheck lint --filter='!@multica/docs' --filter='!@multica/mobile'
 
       # Blocking from the start: it reports nothing today, and it covers the
