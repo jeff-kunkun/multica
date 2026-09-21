@@ -3961,6 +3961,7 @@ export class ApiClient {
     // Not routed through `this.fetch` for the same reason uploadFile is not:
     // the artifact is a document to hand to the caller untouched, and the
     // generic JSON helper would decode and drop the exact bytes.
+    const credentialUsed = this.getToken();
     const res = await fetch(`${this.baseUrl}${path}`, {
       headers: this.authHeaders(),
       credentials: "include",
@@ -3968,7 +3969,7 @@ export class ApiClient {
     });
 
     if (!res.ok) {
-      if (res.status === 401) this.handleUnauthorized();
+      if (res.status === 401) this.handleUnauthorized(credentialUsed);
       const message = await this.parseErrorMessage(res, `Export failed: ${res.status}`);
       this.logger.error(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new Error(message);
