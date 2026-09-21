@@ -107,7 +107,11 @@ func TestRefreshLocalBaselineFastForwardsCleanTrackingBranch(t *testing.T) {
 	if err := os.MkdirAll(remote, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, remote, "init", "--bare")
+	// `-b main` explicitly: a bare repo initialised without it keeps the
+	// runner's `init.defaultBranch` (master on GitHub runners), so the later
+	// `git clone` checks out an unborn `master` and every `push origin main`
+	// from the clone fails with "src refspec main does not match any".
+	gitRun(t, remote, "init", "--bare", "-b", "main")
 	gitRun(t, repo, "remote", "add", "origin", remote)
 	gitRun(t, repo, "push", "-u", "origin", "main")
 
@@ -134,7 +138,7 @@ func TestRefreshLocalBaselineLeavesDirtyCheckoutAndExplainsIt(t *testing.T) {
 	if err := os.MkdirAll(remote, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, remote, "init", "--bare")
+	gitRun(t, remote, "init", "--bare", "-b", "main")
 	gitRun(t, repo, "remote", "add", "origin", remote)
 	gitRun(t, repo, "push", "-u", "origin", "main")
 	other := filepath.Join(t.TempDir(), "other")
@@ -163,7 +167,7 @@ func TestRefreshLocalBaselineLeavesDivergedCheckoutUntouched(t *testing.T) {
 	if err := os.MkdirAll(remote, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, remote, "init", "--bare")
+	gitRun(t, remote, "init", "--bare", "-b", "main")
 	gitRun(t, repo, "remote", "add", "origin", remote)
 	gitRun(t, repo, "push", "-u", "origin", "main")
 
@@ -197,7 +201,7 @@ func TestRefreshLocalBaselineFetchFailureLeavesHeadUntouched(t *testing.T) {
 	if err := os.MkdirAll(remote, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, remote, "init", "--bare")
+	gitRun(t, remote, "init", "--bare", "-b", "main")
 	gitRun(t, repo, "remote", "add", "origin", remote)
 	gitRun(t, repo, "push", "-u", "origin", "main")
 	headBefore := gitRun(t, repo, "rev-parse", "HEAD")

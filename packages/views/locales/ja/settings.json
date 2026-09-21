@@ -1287,11 +1287,11 @@
       "daemon_offline": "ローカルデーモンを起動すると、このマシンの作業コピーを表示できます。",
       "load_failed": "このマシンの作業コピーを読み取れませんでした。",
       "enable_title": "マージ済みのコピーを自動で片付ける",
-      "enable_description": "既定はオフ。オンにしても、Multica が作成し、実行中でなく、未コミットの変更がなく、すでにマージ済みで、下の日数を超えたコピーだけが削除されます。ひとつでも満たさなければ残します。",
+      "enable_description": "既定はオフ。オンにしても、Multica が作成し、実行中でなく、未コミットの変更がなく、下の日数を超え、変更がすでにトランクブランチに入っている（マージでも squash でも可）コピーだけが削除されます。ひとつでも満たさなければ残します。",
       "min_age_title": "最低保持期間",
       "min_age_description": "最後の実行から何日経てば片付けの対象になるか。時間ではなく日単位です。月曜に見るつもりだった実行が、休暇明けにも残っているように。",
       "trunk_title": "マージ先",
-      "trunk_description": "コピーの作業がすでに入っている必要のあるブランチ。空にすると各リポジトリの既定ブランチを使います。",
+      "trunk_description": "コピーの変更がすでに入っている必要のあるブランチ。マージでも squash でも構いません。空にすると各リポジトリの既定ブランチを使います。",
       "trunk_placeholder": "main",
       "summary": "作業コピー {{count}} 件 · ディスク使用 {{total}} · 片付け可能 {{reclaimable}}",
       "advisory": "自動クリーンアップはオフなので、以下は削除されません。オンにした場合に起きることです。",
@@ -1300,6 +1300,7 @@
       "remove_now": "今すぐ片付ける",
       "removed": "作業コピーを片付けました",
       "reason_removable": "マージ済み・クリーン・実行中でないため、これは片付けられます。",
+      "reason_removable_squash": "トランクへ squash 済み・クリーン・実行中でない — コミットは入っていませんが変更は入っているため、これは片付けられます。",
       "reason_uncommitted": "保持：未コミットの変更が残っています。ほかのどこにもない作業を Multica が削除することはありません。",
       "reason_unmerged": "保持：ブランチがまだトランクに入っていません。",
       "reason_too_recent": "保持：最後の実行が最近すぎます。",
@@ -1357,6 +1358,10 @@
       "member": {
         "label": "メンバー",
         "description": "タスクの作成と作業"
+      },
+      "guest": {
+        "label": "ゲスト",
+        "description": "読み取り専用。共有されたものだけが見えます"
       }
     },
     "share_links_title": "共有リンク",
@@ -1378,7 +1383,32 @@
     "expiry_24h": "24時間",
     "expiry_7d": "7日",
     "expiry_30d": "30日",
-    "expiry_never": "無期限"
+    "expiry_never": "無期限",
+    "role_blocked": {
+      "guest_unreleased": "ゲストはまだ利用できません — 読み取り専用の制御を準備中です",
+      "owner_requires_owner": "owner を付与できるのは owner だけです"
+    },
+    "role_select_label": "{{name}} の権限",
+    "unknown_role": "不明な権限",
+    "unknown_role_title": "このメンバーの権限はこのバージョンでは扱えません。アプリを更新してください。",
+    "role_impact_title": "{{name}} を {{role}} に変更しました",
+    "role_impact_gained": "追加：{{items}}",
+    "role_impact_lost": "削除：{{items}}",
+    "role_impact_none": "ほかに変わるものはありません。",
+    "members_loading": "メンバーを読み込み中…",
+    "empty_title": "メンバーがいません",
+    "empty_description": "このワークスペースに同僚を招待しましょう。",
+    "empty_action": "メンバーを招待",
+    "capabilities": {
+      "view_shared": "共有されたものを見る",
+      "see_workspace_scope": "ワークスペース全体の内容を見る",
+      "create_resources": "issue・プロジェクト・リポジトリの作成",
+      "comment_and_edit": "コメント・編集・ステータス変更",
+      "be_assigned": "担当割り当てとエージェント起動",
+      "manage_members": "メンバー招待と権限変更",
+      "workspace_settings": "ワークスペース設定・連携・キー",
+      "billing_and_transfer": "請求・譲渡・削除"
+    }
   },
   "integrations": {
     "description": "ツールを接続して、各連携を管理します。",
@@ -1565,7 +1595,7 @@
     "model_discover_loaded": "このエンドポイントから {{count}} 件のモデルを取得しました。",
     "model_placeholder": "例: gpt-5.6-luna",
     "threshold_label": "確信度のしきい値",
-    "threshold_description": "これを下回る場合はその欄を埋めず、理由を添えて一度だけメンションします。既定は 0.70。",
+    "threshold_description": "これを下回っても割り当ては行い、フォールバック段（汎用の強）を使ってルーティングコメントに明記します。既定は 0.60。",
     "gateway_endpoint_workspace": "モデル id はこのワークスペース独自のエンドポイントに送信されます：{{host}}。",
     "gateway_endpoint_deployment": "モデル id はデプロイ共通の LLM エンドポイントに送信されます：{{host}}。",
     "gateway_protocol_systemone": "このエンドポイントは TypeSafe System One（Jev）です。ルーティングは確率分布付きの型付き判断を求めるため、しきい値に使う確信度はモデルの自己申告ではなく実測値になります。",
