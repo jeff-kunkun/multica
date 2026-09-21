@@ -68,6 +68,7 @@ func init() {
 	loginCmd.GroupID = groupAdditional
 	setupCmd.GroupID = groupAdditional
 	attachmentCmd.GroupID = groupAdditional
+	logsCmd.GroupID = groupAdditional
 	configCmd.GroupID = groupAdditional
 	updateCmd.GroupID = groupAdditional
 	versionCmd.GroupID = groupAdditional
@@ -91,6 +92,7 @@ func init() {
 	rootCmd.AddCommand(loginCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(attachmentCmd)
+	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(versionCmd)

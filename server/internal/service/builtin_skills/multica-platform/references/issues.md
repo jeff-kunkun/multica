@@ -342,6 +342,32 @@ The family read returns a compact row — task, issue, agent, status, started �
 not the full execution-log record. If you need a run's detail, follow the task
 id with `multica issue run-messages`.
 
+## Export a run's logs as one redacted bundle
+
+When a run has to be handed to someone else to diagnose, do not paste raw
+messages: export the bundle. It is built by the server — the same artifact the
+Web and Desktop "Export logs" dialog downloads — and holds `logs.jsonl`,
+`meta.json` (task id, agent, time window, exit code) and `summary.md`, a brief
+meant to be pasted into an AI conversation. Tokens, passwords and environment
+variable values are removed before anything leaves the server.
+
+```bash
+multica logs export <task-id>                                  # this run, zip into the cwd
+multica logs export <task-id> --scope hours --hours 12 -o ./out # every run on the issue, last 12h
+multica logs export <task-id> --scope task --summary            # print only the AI summary
+multica logs export <task-id> --scope task --report             # post it on the issue
+```
+
+`--report` posts one comment on the run's issue and **mentions the assignee**
+(skipped when the assignee is the caller), so it is a side-effecting action
+like any other mention. With a workspace log repository configured
+(Settings → Repositories) the bundle is committed under `logs/` and the
+comment carries only the link; when that push fails, or no repository is
+configured, the bundle is attached to the comment instead, trimmed to the
+newest entries if it would exceed the attachment size cap. An empty scope is
+an error that names the wider scopes; `--allow-partial` exports what could be
+collected when some runs cannot be read.
+
 ## Stop every run on one issue
 
 Use the issue-level guard when an agent chain must stop immediately:
