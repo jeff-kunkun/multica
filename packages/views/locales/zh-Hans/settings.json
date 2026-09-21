@@ -1357,6 +1357,10 @@
       "member": {
         "label": "成员",
         "description": "创建并处理任务"
+      },
+      "guest": {
+        "label": "访客",
+        "description": "只读，只看得到共享给 TA 的内容"
       }
     },
     "share_links_title": "分享链接",
@@ -1378,7 +1382,32 @@
     "expiry_24h": "24 小时",
     "expiry_7d": "7 天",
     "expiry_30d": "30 天",
-    "expiry_never": "永久有效"
+    "expiry_never": "永久有效",
+    "role_blocked": {
+      "guest_unreleased": "访客档位尚未开放——只读拦截还在上线中",
+      "owner_requires_owner": "只有 owner 能授予 owner 档位"
+    },
+    "role_select_label": "{{name}} 的档位",
+    "unknown_role": "未知档位",
+    "unknown_role_title": "这位成员的档位当前版本不认识，升级后才能修改。",
+    "role_impact_title": "{{name}} 已改为 {{role}}",
+    "role_impact_gained": "获得：{{items}}",
+    "role_impact_lost": "失去：{{items}}",
+    "role_impact_none": "其余不受影响。",
+    "members_loading": "正在加载成员…",
+    "empty_title": "还没有成员",
+    "empty_description": "邀请同事一起使用这个工作区。",
+    "empty_action": "邀请成员",
+    "capabilities": {
+      "view_shared": "查看共享给 TA 的内容",
+      "see_workspace_scope": "查看全工作区范围的内容",
+      "create_resources": "新建任务、项目与仓库",
+      "comment_and_edit": "评论、编辑与改状态",
+      "be_assigned": "被指派、被 @ 触发运行",
+      "manage_members": "邀请成员与修改档位",
+      "workspace_settings": "工作区设置、集成与密钥",
+      "billing_and_transfer": "计费、转让与删除工作区"
+    }
   },
   "integrations": {
     "description": "连接常用工具，分别管理每项集成。",

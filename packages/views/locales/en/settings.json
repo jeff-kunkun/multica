@@ -1364,6 +1364,10 @@
       "member": {
         "label": "Member",
         "description": "Create and work on issues"
+      },
+      "guest": {
+        "label": "Guest",
+        "description": "Read-only, sees only what is shared with them"
       }
     },
     "share_links_title": "Share links",
@@ -1385,7 +1389,32 @@
     "expiry_24h": "24 hours",
     "expiry_7d": "7 days",
     "expiry_30d": "30 days",
-    "expiry_never": "Never"
+    "expiry_never": "Never",
+    "role_blocked": {
+      "guest_unreleased": "Guest is not available yet — the read-only enforcement is still shipping",
+      "owner_requires_owner": "Only an owner can hand out the owner tier"
+    },
+    "role_select_label": "Tier for {{name}}",
+    "unknown_role": "Unknown tier",
+    "unknown_role_title": "This member holds a tier this app version does not know. Update the app to change it.",
+    "role_impact_title": "{{name}} is now {{role}}",
+    "role_impact_gained": "Gains: {{items}}",
+    "role_impact_lost": "Loses: {{items}}",
+    "role_impact_none": "Nothing else changes.",
+    "members_loading": "Loading members…",
+    "empty_title": "No members yet",
+    "empty_description": "Invite a teammate to share this workspace.",
+    "empty_action": "Invite a member",
+    "capabilities": {
+      "view_shared": "see what is shared with them",
+      "see_workspace_scope": "see workspace-wide resources",
+      "create_resources": "create issues, projects and repos",
+      "comment_and_edit": "comment, edit and change status",
+      "be_assigned": "be assigned and trigger agent runs",
+      "manage_members": "invite members and change tiers",
+      "workspace_settings": "workspace settings, integrations and keys",
+      "billing_and_transfer": "billing, transfer and deletion"
+    }
   },
   "integrations": {
     "description": "Connect your tools and manage each integration in one place.",
