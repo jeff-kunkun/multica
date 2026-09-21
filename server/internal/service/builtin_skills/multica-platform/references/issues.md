@@ -354,11 +354,17 @@ multica issue resume <issue-id>  # clear the halt guard; a human comment is stil
 The guard is issue-scoped. A human comment clears it and resets the
 delegation-chain budget; `resume` only clears an explicit halt and does not
 reset an already-exceeded budget. Direct human-triggered runs are never
-consumed by that budget. Workspace settings may override the default chain
-limit of 30 runs with the `agent_chain_budget` setting; currently this is
-configured by writing the workspace `settings` JSON directly (there is no CLI
-command for it yet). Hitting the limit posts a system comment in the triggering
-thread instead of stopping silently.
+consumed by that budget. The default chain limit is thirty runs; a workspace
+admin changes it under Settings → General → Agent run limits (stored as
+`agent_chain_budget` in the workspace `settings` JSON, `0` = unlimited). Hitting
+the limit posts a system comment in the triggering thread instead of stopping
+silently.
+
+The same settings section holds a run time limit
+(`agent_task_timeout_minutes`, `0`/absent = none). A run that outlives it is
+failed with reason `task_time_limit`, is not auto-retried, and the platform
+posts a system comment with the measured runtime on the issue and, for a
+sub-issue, on its parent.
 
 Rows come back running-first, newest-first within a status, and the family read
 is capped at 20. When the cap truncates the answer the CLI prints a warning on

@@ -165,6 +165,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 		sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace)
 		sweepExpiredRuntimeReconnectRetries(ctx, queries, taskSvc, reconnectGrace)
 		sweepStaleTasks(ctx, queries, taskSvc, bus, reconnectGrace)
+		sweepTaskTimeLimits(ctx, taskSvc)
 		sweepExpiredQueuedTasks(ctx, queries, taskSvc, reconnectGrace)
 		sweepDeferredChatFinalizations(ctx, queries, taskSvc)
 	})
@@ -615,6 +616,27 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 	taskSvc.CaptureLeaseExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
 	return
+}
+
+// sweepTaskTimeLimits stops running issue tasks that outlived their
+// workspace's configured wall-clock limit and tells the responsible people.
+// It is a spend guard, so unlike sweepStaleTasks it fires on healthy runs; the
+// daemon notices the terminal status on its next status poll and interrupts
+// the agent.
+func sweepTaskTimeLimits(ctx context.Context, taskSvc *service.TaskService) {
+	stopped, err := taskSvc.FailTasksOverWorkspaceTimeLimit(ctx)
+	if err != nil {
+		slog.Warn("task sweeper: failed to enforce workspace task time limit", "error", err)
+		return
+	}
+	if len(stopped) == 0 {
+		return
+	}
+	slog.Info("task sweeper: stopped tasks over workspace time limit", "count", len(stopped))
+	// Notify first: HandleFailedTasks resets a stranded in_progress issue to
+	// todo, and the notice reports the status the run was stopped in.
+	taskSvc.NotifyTaskTimeLimit(ctx, stopped)
+	taskSvc.HandleFailedTasks(ctx, stopped)
 }
 
 // sweepExpiredQueuedTasks fails queued tasks whose runtime has stopped proving

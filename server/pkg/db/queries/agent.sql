@@ -1539,6 +1539,31 @@ WHERE (
   )
 RETURNING *;
 
+-- name: FailTasksOverWorkspaceTimeLimit :many
+-- Stops running issue tasks that outlived the workspace's own wall-clock
+-- limit (`settings.agent_task_timeout_minutes`). Unlike FailStaleTasks this
+-- fires while the daemon is healthy: the limit is a spend guard, not a
+-- liveness check. Absent, zero or malformed settings mean "no workspace
+-- limit" and leave the row to the liveness sweepers. The CASE keeps the cast
+-- behind the digit check; a bare AND does not guarantee evaluation order.
+UPDATE agent_task_queue t
+SET status = 'failed', completed_at = now(),
+    error = 'task time limit reached',
+    failure_reason = 'task_time_limit',
+    prepare_lease_expires_at = NULL
+FROM issue i, workspace w
+WHERE i.id = t.issue_id
+  AND w.id = i.workspace_id
+  AND t.status = 'running'
+  AND t.started_at IS NOT NULL
+  -- Absent, malformed and zero all collapse to NULL, which makes the
+  -- comparison NULL and the row ineligible.
+  AND t.started_at < now() - make_interval(mins => NULLIF(CASE
+        WHEN w.settings->>'agent_task_timeout_minutes' ~ '^[0-9]{1,6}$'
+          THEN (w.settings->>'agent_task_timeout_minutes')::int
+      END, 0))
+RETURNING t.*;
+
 -- name: ExpireStaleQueuedTasks :many
 -- Fails queued tasks whose runtime can no longer prove it is alive.
 --

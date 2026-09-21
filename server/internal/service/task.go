@@ -773,8 +773,14 @@ func (s *TaskService) admitAgentChain(ctx context.Context, issue db.Issue, trigg
 	}
 
 	budget, err := s.Queries.GetWorkspaceAgentChainBudget(ctx, issue.WorkspaceID)
-	if err != nil || budget <= 0 {
+	if err != nil {
 		budget = DefaultAgentChainBudget
+	}
+	// Zero is the explicit "unlimited" setting. Keep the server-side guard
+	// disabled for this issue while retaining the default for absent/invalid
+	// settings.
+	if budget == 0 {
+		return nil
 	}
 	count, err := s.Queries.CountDelegatedTasksSinceHumanComment(ctx, issue.ID)
 	if err != nil || count < int64(budget) {
@@ -822,7 +828,7 @@ func (s *TaskService) createAgentChainBudgetNotice(ctx context.Context, issue db
 	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		ID: dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
 		AuthorType: "system", AuthorID: pgtype.UUID{Valid: true},
-		Content: fmt.Sprintf("%sAgent delegation chain reached the limit of %d runs. Add a human comment to reset the budget and continue.", mention, budget),
+		Content: fmt.Sprintf("%sAgent delegation chain reached the limit of %d runs. Add a human comment to reset the budget and continue, or raise the limit in workspace settings.", mention, budget),
 		Type:    "system", ParentID: parentID,
 	})
 	if err != nil {
@@ -5980,6 +5986,160 @@ func (s *TaskService) FailStaleTasks(ctx context.Context, arg db.FailStaleTasksP
 	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
 		return qtx.FailStaleTasks(ctx, arg)
 	})
+}
+
+// FailTasksOverWorkspaceTimeLimit stops running issue tasks that outlived
+// their workspace's configured wall-clock limit.
+func (s *TaskService) FailTasksOverWorkspaceTimeLimit(ctx context.Context) ([]db.AgentTaskQueue, error) {
+	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		return qtx.FailTasksOverWorkspaceTimeLimit(ctx)
+	})
+}
+
+// NotifyTaskTimeLimit tells the people who can decide what happens next that
+// a run was stopped by the workspace time limit: how long it ran, which agent,
+// and how to continue. The notice lands on the task's issue and, for a
+// sub-issue, on its parent too, because the parent is where a supervising
+// human or agent is watching the children.
+func (s *TaskService) NotifyTaskTimeLimit(ctx context.Context, tasks []db.AgentTaskQueue) {
+	for _, t := range tasks {
+		if !t.IssueID.Valid {
+			continue
+		}
+		issue, err := s.Queries.GetIssue(ctx, t.IssueID)
+		if err != nil {
+			slog.Warn("task time limit notice: load issue failed", "task_id", util.UUIDToString(t.ID), "error", err)
+			continue
+		}
+		ran := "an unknown duration"
+		if t.StartedAt.Valid {
+			end := time.Now()
+			if t.CompletedAt.Valid {
+				end = t.CompletedAt.Time
+			}
+			if d := end.Sub(t.StartedAt.Time); d > 0 {
+				ran = d.Round(time.Minute).String()
+			}
+		}
+		agentName := "An agent"
+		if agent, err := s.Queries.GetAgent(ctx, t.AgentID); err == nil && agent.Name != "" {
+			agentName = agent.Name
+		}
+		ownerID, mention := s.taskTimeLimitMention(ctx, issue)
+		summary := fmt.Sprintf("%s was stopped after running for %s: it reached this workspace's task time limit. The run was not retried. Issue status at stop: %s.", agentName, ran, issue.Status)
+		s.createSystemNotice(ctx, issue, mention+summary+" Comment here to start a new run, or raise the limit in workspace settings.")
+		s.notifyTaskTimeLimitOwner(ctx, issue, t, ownerID, summary)
+
+		if !issue.ParentIssueID.Valid {
+			continue
+		}
+		parent, err := s.Queries.GetIssue(ctx, issue.ParentIssueID)
+		if err != nil || parent.WorkspaceID != issue.WorkspaceID {
+			continue
+		}
+		s.createSystemNotice(ctx, parent, fmt.Sprintf(
+			"%sSub-issue [%s](mention://issue/%s) was stopped: %s ran for %s and reached this workspace's task time limit. The run was not retried.",
+			mention, issue.Title, util.UUIDToString(issue.ID), agentName, ran))
+	}
+}
+
+// taskTimeLimitMention picks who to wake for a time-limit stop: the project
+// lead when the issue belongs to a project led by a member, else the issue's
+// own creator, else the workspace owner. Returns "" when none resolves; the
+// notice is still posted for followers.
+func (s *TaskService) taskTimeLimitMention(ctx context.Context, issue db.Issue) (pgtype.UUID, string) {
+	var userID pgtype.UUID
+	if issue.ProjectID.Valid {
+		if project, err := s.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+			ID: issue.ProjectID, WorkspaceID: issue.WorkspaceID,
+		}); err == nil && project.LeadType.String == "member" && project.LeadID.Valid {
+			userID = project.LeadID
+		}
+	}
+	if !userID.Valid && issue.CreatorType == "member" && issue.CreatorID.Valid {
+		userID = issue.CreatorID
+	}
+	if !userID.Valid {
+		if members, err := s.Queries.ListMembers(ctx, issue.WorkspaceID); err == nil {
+			for _, m := range members {
+				if m.Role == "owner" {
+					userID = m.UserID
+					break
+				}
+			}
+		}
+	}
+	if !userID.Valid {
+		return pgtype.UUID{}, ""
+	}
+	user, err := s.Queries.GetUser(ctx, userID)
+	if err != nil {
+		return pgtype.UUID{}, ""
+	}
+	name := strings.NewReplacer("[", "", "]", "").Replace(user.Name)
+	return userID, fmt.Sprintf("[@%s](mention://member/%s) ", name, util.UUIDToString(userID))
+}
+
+// notifyTaskTimeLimitOwner puts the stop in the responsible member's inbox.
+// System comments never reach the inbox through their mentions (the comment
+// listener skips platform-authored bodies), and issue subscribers already get
+// the generic task_failed item, so this only covers a responsible member who
+// is not subscribed — typically a project lead or the workspace owner.
+func (s *TaskService) notifyTaskTimeLimitOwner(ctx context.Context, issue db.Issue, task db.AgentTaskQueue, userID pgtype.UUID, summary string) {
+	if !userID.Valid {
+		return
+	}
+	if subscribed, err := s.Queries.IsIssueSubscriber(ctx, db.IsIssueSubscriberParams{
+		IssueID: issue.ID, UserType: "member", UserID: userID,
+	}); err == nil && subscribed {
+		return
+	}
+	details, _ := json.Marshal(map[string]any{
+		"task_id":        util.UUIDToString(task.ID),
+		"agent_id":       util.UUIDToString(task.AgentID),
+		"failure_reason": string(taskfailure.ReasonTaskTimeLimit),
+	})
+	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		ID:            dbid.NewV7(),
+		WorkspaceID:   issue.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   userID,
+		Type:          "task_failed",
+		Severity:      "action_required",
+		IssueID:       issue.ID,
+		Title:         issue.Title,
+		Body:          pgtype.Text{String: summary, Valid: true},
+		ActorType:     pgtype.Text{String: "agent", Valid: true},
+		ActorID:       task.AgentID,
+		Details:       details,
+	})
+	if err != nil {
+		slog.Warn("task time limit notice: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	if s.Bus != nil {
+		s.publishQuickCreateInbox(item, util.UUIDToString(issue.WorkspaceID), util.UUIDToString(task.AgentID), issue.Status)
+	}
+}
+
+// createSystemNotice posts a top-level system comment and broadcasts it.
+func (s *TaskService) createSystemNotice(ctx context.Context, issue db.Issue, content string) {
+	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID: dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		AuthorType: "system", AuthorID: pgtype.UUID{Valid: true},
+		Content: content, Type: "system", ParentID: pgtype.UUID{},
+	})
+	if err != nil {
+		slog.Warn("system notice: create comment failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		return
+	}
+	if s.Bus != nil {
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventCommentCreated,
+			WorkspaceID: util.UUIDToString(issue.WorkspaceID), ActorType: "system",
+			Payload: map[string]any{"comment": created.Comment(), "issue_title": issue.Title, "issue_revision": created.IssueRevision},
+		})
+	}
 }
 
 // ExpireStaleQueuedTasks fails queued work whose runtime never came back.
