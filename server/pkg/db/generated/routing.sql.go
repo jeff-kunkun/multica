@@ -254,34 +254,74 @@ func (q *Queries) HasRoutingComment(ctx context.Context, arg HasRoutingCommentPa
 	return column_1, err
 }
 
+const lastEnteredReviewAt = `-- name: LastEnteredReviewAt :one
+SELECT created_at FROM activity_log
+WHERE issue_id = $1::uuid
+  AND workspace_id = $2::uuid
+  AND action = 'status_changed'
+  AND details->>'to' = ANY($3::text[])
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type LastEnteredReviewAtParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Statuses    []string    `json:"statuses"`
+}
+
+// When this ticket last ENTERED the awaiting-acceptance category.
+//
+// It bounds the completion gate to the current review round. A ticket can go
+// through review more than once — reviewer passes it, a person sends it back,
+// the executor redoes the work, it returns to in_review — and the pass verdict
+// from the first round is still sitting on the thread. Without this boundary
+// the stale sweep would read that stale verdict as acceptance of work nobody
+// has looked at, which is exactly the thing this package must never do: align
+// to a fact, not to an expired one.
+//
+// No row means the entry moment is unknown (the activity row is written by a
+// best-effort bus listener, and tickets that entered review before that
+// listener existed have none). Callers read that as "no verdict in this
+// round", which routes to the wake — the safe direction.
+func (q *Queries) LastEnteredReviewAt(ctx context.Context, arg LastEnteredReviewAtParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, lastEnteredReviewAt, arg.IssueID, arg.WorkspaceID, arg.Statuses)
+	var created_at pgtype.Timestamptz
+	err := row.Scan(&created_at)
+	return created_at, err
+}
+
 const listReviewerCommentsForIssue = `-- name: ListReviewerCommentsForIssue :many
 SELECT content FROM comment
 WHERE issue_id = $1::uuid
   AND workspace_id = $2::uuid
   AND author_type = $3::text
   AND author_id = $4::uuid
+  AND created_at >= $5::timestamptz
   AND deleted_at IS NULL
 ORDER BY created_at ASC
 `
 
 type ListReviewerCommentsForIssueParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	AuthorType  string      `json:"author_type"`
-	AuthorID    pgtype.UUID `json:"author_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	Since       pgtype.Timestamptz `json:"since"`
 }
 
-// What the reviewer themselves said on this ticket, oldest first. It is the
-// deterministic half of the completion gate: no remark from this author means
-// there is no acceptance for a status to be aligned to, whatever a model
-// answers. Deleted comments are excluded — a retracted verdict is not a
-// verdict.
+// What the reviewer themselves said on this ticket IN THE CURRENT REVIEW
+// ROUND, oldest first. It is the deterministic half of the completion gate: no
+// remark from this author since the ticket last entered review means there is
+// no acceptance for a status to be aligned to, whatever a model answers.
+// Deleted comments are excluded — a retracted verdict is not a verdict.
 func (q *Queries) ListReviewerCommentsForIssue(ctx context.Context, arg ListReviewerCommentsForIssueParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, listReviewerCommentsForIssue,
 		arg.IssueID,
 		arg.WorkspaceID,
 		arg.AuthorType,
 		arg.AuthorID,
+		arg.Since,
 	)
 	if err != nil {
 		return nil, err

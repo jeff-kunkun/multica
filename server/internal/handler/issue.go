@@ -3868,8 +3868,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
 		h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
 		// Routing hook (DENE-633): the status is now what it is, so ask who
-		// should be holding this ticket. Routing never writes a status of its
-		// own, so this cannot loop back here.
+		// should be holding this ticket. The one status routing can write is
+		// in_review -> done, from the stale sweep (DENE-712), and that write
+		// does not come through here — it calls the same two notifications
+		// above for itself. So this cannot loop back.
 		h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
 	}
 

@@ -198,10 +198,18 @@ type Store interface {
 	// Quiet is the thing this row is about.
 	StaleReviews(ctx context.Context, workspaceID string, before time.Time, limit int) ([]string, error)
 
-	// ReviewRemarks returns what the ticket's reviewer has said on it, oldest
-	// first. An empty result is the deterministic half of the completion
-	// gate: with nothing from the reviewer on the ticket there is no
-	// acceptance to align to, whatever the judge answers.
+	// ReviewRemarks returns what the ticket's reviewer has said on it IN THE
+	// CURRENT review round — since the ticket last entered the in_review
+	// category — oldest first. An empty result is the deterministic half of
+	// the completion gate: with nothing from the reviewer in this round there
+	// is no acceptance to align to, whatever the judge answers.
+	//
+	// The round boundary is part of the contract, not an implementation
+	// detail. A pass verdict from an earlier round, before the ticket was
+	// sent back and redone, is an expired fact, and aligning a status to an
+	// expired fact is the one thing this row must never do. A store that
+	// cannot establish where the round began returns nothing, which routes
+	// to the wake.
 	ReviewRemarks(ctx context.Context, workspaceID, issueID string, reviewer ReviewerRef) ([]string, error)
 
 	// CompleteFromReview is the ONLY status write this package has, and it is

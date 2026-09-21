@@ -533,7 +533,21 @@ func (s routingStore) StaleReviews(ctx context.Context, workspaceID string, befo
 	return out, nil
 }
 
-// ReviewRemarks returns what the reviewer themselves wrote on this ticket.
+// ReviewRemarks returns what the reviewer themselves wrote on this ticket in
+// the CURRENT review round — since the last time the ticket entered the
+// awaiting-acceptance category.
+//
+// The round boundary is the point of this method, not a refinement of it. A
+// ticket can be reviewed more than once: the reviewer passes it, a person
+// sends it back, the executor redoes the work, and it returns to in_review
+// with the first round's "looks good" still sitting on the thread. Reading
+// that remark as acceptance of the second round's work would align the status
+// to an expired fact — the one failure the completion gate exists to prevent.
+//
+// A ticket whose entry moment cannot be established yields nothing rather than
+// its whole history. That is the same safe direction the rest of this gate
+// takes: no remark means no acceptance, which means the sweep wakes the
+// reviewer instead of closing the ticket.
 //
 // "none" and an empty slot have no author, so they return nothing and can
 // never unlock a completion — which is the correct reading of both: a ticket
@@ -554,11 +568,33 @@ func (s routingStore) ReviewRemarks(ctx context.Context, workspaceID, issueID st
 	if err != nil {
 		return nil, err
 	}
+	keys, err := s.inReviewKeys(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	since, err := s.h.Queries.LastEnteredReviewAt(ctx, db.LastEnteredReviewAtParams{
+		IssueID:     id,
+		WorkspaceID: wsID,
+		Statuses:    keys,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !since.Valid {
+		return nil, nil
+	}
 	rows, err := s.h.Queries.ListReviewerCommentsForIssue(ctx, db.ListReviewerCommentsForIssueParams{
 		IssueID:     id,
 		WorkspaceID: wsID,
 		AuthorType:  string(reviewer.Kind),
 		AuthorID:    authorID,
+		Since:       since,
 	})
 	if err != nil {
 		return nil, err
@@ -599,6 +635,20 @@ func (s routingStore) CompleteFromReview(ctx context.Context, workspaceID, issue
 		return false, err
 	}
 	s.publishIssueUpdated(prev, issue)
+	// A status write is not finished when the row is written. Everything that
+	// depends on a ticket reaching a terminal status — the parent's child-done
+	// comment, the stage barrier that wakes the next stage, the cross-family
+	// waiters — hangs off these two helpers, which the request path calls on
+	// every status change (see UpdateIssue). Leaving them out here would trade
+	// one stall for a quieter one: an agent cannot set done itself, so "the
+	// reviewer passed it and the status never moved" is the commonest way a
+	// SUB-issue stalls, and closing it without telling the parent would stop
+	// the next stage from ever waking.
+	//
+	// Both are best-effort and guard on the transition themselves; the status
+	// write has already committed, so neither can undo it.
+	s.h.notifyParentOfChildDone(ctx, prev, issue)
+	s.h.notifyWaitersOfIssueDone(ctx, prev, issue)
 	return true, nil
 }
 

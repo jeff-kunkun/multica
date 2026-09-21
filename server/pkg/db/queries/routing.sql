@@ -137,17 +137,41 @@ WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
 ORDER BY COALESCE(i.last_activity_at, i.updated_at) ASC
 LIMIT sqlc.arg('lim')::int;
 
+-- name: LastEnteredReviewAt :one
+-- When this ticket last ENTERED the awaiting-acceptance category.
+--
+-- It bounds the completion gate to the current review round. A ticket can go
+-- through review more than once — reviewer passes it, a person sends it back,
+-- the executor redoes the work, it returns to in_review — and the pass verdict
+-- from the first round is still sitting on the thread. Without this boundary
+-- the stale sweep would read that stale verdict as acceptance of work nobody
+-- has looked at, which is exactly the thing this package must never do: align
+-- to a fact, not to an expired one.
+--
+-- No row means the entry moment is unknown (the activity row is written by a
+-- best-effort bus listener, and tickets that entered review before that
+-- listener existed have none). Callers read that as "no verdict in this
+-- round", which routes to the wake — the safe direction.
+SELECT created_at FROM activity_log
+WHERE issue_id = sqlc.arg('issue_id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND action = 'status_changed'
+  AND details->>'to' = ANY(sqlc.arg('statuses')::text[])
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: ListReviewerCommentsForIssue :many
--- What the reviewer themselves said on this ticket, oldest first. It is the
--- deterministic half of the completion gate: no remark from this author means
--- there is no acceptance for a status to be aligned to, whatever a model
--- answers. Deleted comments are excluded — a retracted verdict is not a
--- verdict.
+-- What the reviewer themselves said on this ticket IN THE CURRENT REVIEW
+-- ROUND, oldest first. It is the deterministic half of the completion gate: no
+-- remark from this author since the ticket last entered review means there is
+-- no acceptance for a status to be aligned to, whatever a model answers.
+-- Deleted comments are excluded — a retracted verdict is not a verdict.
 SELECT content FROM comment
 WHERE issue_id = sqlc.arg('issue_id')::uuid
   AND workspace_id = sqlc.arg('workspace_id')::uuid
   AND author_type = sqlc.arg('author_type')::text
   AND author_id = sqlc.arg('author_id')::uuid
+  AND created_at >= sqlc.arg('since')::timestamptz
   AND deleted_at IS NULL
 ORDER BY created_at ASC;
 
