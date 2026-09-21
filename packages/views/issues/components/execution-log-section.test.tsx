@@ -487,13 +487,17 @@ describe("Token cost deep link", () => {
     replace.mockClear();
   });
 
-  function renderSection(initialSearch: string, tasks: AgentTask[] = [
-    makeTask({
-      status: "completed",
-      completed_at: "2026-06-08T08:04:00Z",
-      usage: [usageSlice()],
-    }),
-  ]) {
+  function renderSection(
+    initialSearch: string,
+    tasks: AgentTask[] = [
+      makeTask({
+        status: "completed",
+        completed_at: "2026-06-08T08:04:00Z",
+        usage: [usageSlice()],
+      }),
+    ],
+    hash = "",
+  ) {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -509,15 +513,16 @@ describe("Token cost deep link", () => {
           // browser does.
           replace: (path: string) => {
             replace(path);
-            setSearch(path.split("?")[1] ?? "");
+            const query = path.split("#")[0]?.split("?")[1] ?? "";
+            setSearch(query);
           },
           back: vi.fn(),
           pathname: "/acme/issues/MUL-1",
           searchParams: new URLSearchParams(search),
-          hash: "",
+          hash,
           getShareableUrl: (path: string) => path,
         }),
-        [search],
+        [search, hash],
       );
       return (
         <NavigationProvider value={adapter}>
@@ -564,5 +569,17 @@ describe("Token cost deep link", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     expect(replace).toHaveBeenCalledWith("/acme/issues/MUL-1");
+  });
+
+  // The reader can arrive on a `#comment-…` link and then open the cost view.
+  // Composing pathname + search by hand would strip the fragment, which both
+  // un-highlights the comment they came for and downgrades the URL they copy
+  // next. `NavigationAdapter.hash` exists for exactly this.
+  it("keeps the comment fragment when the dialog writes the param", () => {
+    renderSection("", [makeTask({ status: "completed" })], "#comment-7");
+
+    fireEvent.click(screen.getByRole("button", { name: "Token cost" }));
+
+    expect(replace).toHaveBeenCalledWith("/acme/issues/MUL-1?usage=1#comment-7");
   });
 });

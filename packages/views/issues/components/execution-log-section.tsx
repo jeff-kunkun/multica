@@ -31,7 +31,7 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { IssueUsageDialog } from "./issue-usage-dialog";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
-import { useOptionalNavigation } from "../../navigation";
+import { currentPath, useOptionalNavigation } from "../../navigation";
 import {
   hasIssueUsageDeepLink,
   ISSUE_USAGE_QUERY_PARAM,
@@ -122,8 +122,11 @@ export function ExecutionLogSection({ issueId, workspaceId, identifier, halted =
     const params = new URLSearchParams(navigation.searchParams);
     if (next) params.set(ISSUE_USAGE_QUERY_PARAM, "1");
     else params.delete(ISSUE_USAGE_QUERY_PARAM);
-    const query = params.toString();
-    navigation.replace(`${navigation.pathname}${query ? `?${query}` : ""}`);
+    // Through `currentPath` with the rewritten params: composing
+    // pathname + search by hand drops the fragment, which would downgrade a
+    // `#comment-…` deep link to the whole issue the moment the reader opens
+    // the Token cost view. See navigation/current-path.ts.
+    navigation.replace(currentPath({ ...navigation, searchParams: params }));
   };
 
   // Cache key registered in `issueKeys.tasks` (packages/core/issues/queries.ts)
