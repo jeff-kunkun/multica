@@ -1717,6 +1717,14 @@ type WorkspaceMcpServer struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type WorkspaceModuleVisibility struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Module      string             `json:"module"`
+	Visibility  string             `json:"visibility"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type WorkspaceShareLink struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

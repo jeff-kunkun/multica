@@ -36,6 +36,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/permission"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1938,8 +1939,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
+			// Module-level sharing (DENE-699). These endpoints are themselves
+			// not behind RequireModule: the caller needs them to learn which
+			// areas they may enter, and only owner/admin can write.
+			r.Get("/api/modules", h.ListModuleVisibility)
+			r.Put("/api/modules/{module}/visibility", h.SetModuleVisibility)
+
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
+				r.Use(h.RequireModule(permission.ModuleIssues))
 				r.Get("/limit-usage", h.GetIssueLimitUsage)
 				r.Post("/table/groups", h.ListIssueTableGroups)
 				r.Post("/table/rows", h.ListIssueTableRows)
@@ -2048,6 +2056,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// every client needs the catalog to render a status. Writes are
 			// gated to workspace owner/admin inside the handlers.
 			r.Route("/api/issue-statuses", func(r chi.Router) {
+				r.Use(h.RequireModule(permission.ModuleIssues))
 				r.Get("/", h.ListIssueStatuses)
 				r.Post("/", h.CreateIssueStatus)
 				r.Patch("/reorder", h.ReorderIssueStatuses)
@@ -2060,9 +2069,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Projects
 			// Repositories are JSONB entries in workspace.repos, not rows, so
 			// their scope is keyed by URL in the body rather than by path id.
-			r.Put("/api/repos/visibility", h.SetRepoVisibility)
+			r.With(h.RequireModule(permission.ModuleRepos)).Put("/api/repos/visibility", h.SetRepoVisibility)
 
 			r.Route("/api/projects", func(r chi.Router) {
+				r.Use(h.RequireModule(permission.ModuleProjects))
 				r.Get("/search", h.SearchProjects)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
@@ -2101,7 +2111,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 
 			// Squad leader evaluation (writes to activity_log)
-			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
+			r.With(h.RequireModule(permission.ModuleIssues)).Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
 
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
@@ -2140,9 +2150,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 
 			// Saved issue views (MUL-4796).
-			r.Get("/api/issue-view-preferences", h.GetIssueViewPreference)
-			r.Put("/api/issue-view-preferences", h.PutIssueViewPreference)
+			r.With(h.RequireModule(permission.ModuleIssues)).Get("/api/issue-view-preferences", h.GetIssueViewPreference)
+			r.With(h.RequireModule(permission.ModuleIssues)).Put("/api/issue-view-preferences", h.PutIssueViewPreference)
 			r.Route("/api/issue-views", func(r chi.Router) {
+				r.Use(h.RequireModule(permission.ModuleIssues))
 				r.Get("/", h.ListIssueViews)
 				r.Post("/", h.CreateIssueView)
 				r.Route("/{id}", func(r chi.Router) {
@@ -2164,6 +2175,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
+				r.Use(h.RequireModule(permission.ModuleIssues))
 				r.With(handler.RequireHumanActor).Get("/sub-issue-preview", h.PreviewCommentSubIssue)
 				r.With(handler.RequireHumanActor).Post("/sub-issues", h.CreateCommentSubIssue)
 				r.Put("/", h.UpdateComment)
@@ -2248,6 +2260,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// writes only the draft, and POST /finalize is the single
 			// transition that produces an issue.
 			r.Route("/api/issue-drafts", func(r chi.Router) {
+				r.Use(h.RequireModule(permission.ModuleIssues))
 				// Alignment conversations are invisible to every chat list
 				// (their carrier is kind='system'), so this is the only route
 				// back to one. `?status=all` widens it from "the ones I can
@@ -2310,6 +2323,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
+				r.Use(h.RequireModule(permission.ModuleRuntimes))
 				r.Get("/", h.ListAgentRuntimes)
 				r.Route("/{runtimeId}", func(r chi.Router) {
 					r.Patch("/", h.UpdateAgentRuntime)
@@ -2346,6 +2360,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Cloud Runtime fleet proxy. The remote service URL is configured
 			// on SaaS API nodes only; self-hosted deployments return 503.
 			r.Route("/api/cloud-runtime", func(r chi.Router) {
+				r.Use(h.RequireModule(permission.ModuleRuntimes))
 				r.Get("/", h.GetCloudRuntimeService)
 				r.Get("/healthz", h.GetCloudRuntimeHealth)
 				r.Get("/readyz", h.GetCloudRuntimeReady)

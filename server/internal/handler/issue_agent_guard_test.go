@@ -239,7 +239,7 @@ func TestIssueAgentChainBudgetDefaultAndUnlimited(t *testing.T) {
 				"source_task_id": sourceTaskID,
 			})
 			_, err := testHandler.TaskService.EnqueueTaskForMention(
-				context.Background(), issueForGuardTest(t, issueID), util.MustParseUUID(agentA), util.MustParseUUID(triggerCommentID),
+				context.Background(), issueForGuardTest(t, issueID), util.MustParseUUID(agentA), util.MustParseUUID(triggerCommentID), service.OriginNamed,
 			)
 			if blocked := errors.Is(err, service.ErrAgentChainBudgetExceeded); blocked != tc.wantBlock {
 				t.Fatalf("after %d delegated runs: err = %v, want blocked = %v", tc.seeded, err, tc.wantBlock)
@@ -361,7 +361,7 @@ func TestIssueAgentChainBudgetDefaultAllowsMoreThanSix(t *testing.T) {
 	})
 	issue := issueForGuardTest(t, issueID)
 	if _, err := testHandler.TaskService.EnqueueTaskForMention(
-		context.Background(), issue, util.MustParseUUID(agentID), util.MustParseUUID(triggerCommentID),
+		context.Background(), issue, util.MustParseUUID(agentID), util.MustParseUUID(triggerCommentID), service.OriginNamed,
 	); err != nil {
 		t.Fatalf("7th delegated enqueue with default budget: %v", err)
 	}

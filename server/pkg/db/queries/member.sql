@@ -43,3 +43,15 @@ ORDER BY m.created_at ASC;
 -- counted.
 SELECT count(*)::bigint FROM member
 WHERE workspace_id = $1 AND role <> 'guest';
+
+-- name: CountWorkspaceMembers :one
+-- How many people a workspace-scoped *module* reaches. Modules include
+-- guests (resource visibility still filters what they see inside).
+SELECT count(*)::bigint FROM member
+WHERE workspace_id = $1;
+
+-- name: CountWorkspaceManagers :one
+-- How many people a private module reaches: owner and admin, who always
+-- enter every module so they can administer a restriction.
+SELECT count(*)::bigint FROM member
+WHERE workspace_id = $1 AND role IN ('owner', 'admin');

@@ -59,6 +59,7 @@ import type {
   InboxWorkspaceUnread,
   Label,
   MemberWithUser,
+  ModuleVisibilityList,
   IssueProperty,
   ListPropertiesResponse,
   QuickAction,
@@ -4214,6 +4215,29 @@ export const EMPTY_MEMBER_WITH_USER: MemberWithUser = {
   name: "",
   email: "",
   avatar_url: null,
+};
+
+/** Lenient: an unknown module key still parses so a newer server cannot blank the nav. */
+export const ModuleVisibilitySchema = z.object({
+  key: z.string(),
+  visibility: z.string(),
+  project_id: z.string().nullable().optional().default(null),
+  allowed: z.boolean(),
+}).loose();
+
+export const ModuleVisibilityListSchema = z.object({
+  modules: z.array(ModuleVisibilitySchema),
+}).loose();
+
+/** Fallback keeps every known module open. Hiding the product on a malformed
+ *  payload would look like a permission change the operator never made. */
+export const EMPTY_MODULE_VISIBILITY_LIST: ModuleVisibilityList = {
+  modules: [
+    { key: "issues", visibility: "workspace", project_id: null, allowed: true },
+    { key: "projects", visibility: "workspace", project_id: null, allowed: true },
+    { key: "repos", visibility: "workspace", project_id: null, allowed: true },
+    { key: "runtimes", visibility: "workspace", project_id: null, allowed: true },
+  ],
 };
 
 export {
