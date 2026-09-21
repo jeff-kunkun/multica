@@ -175,6 +175,18 @@ describe("failureReasonLabel", () => {
     );
   });
 
+  it("names the two Antigravity reasons apart", () => {
+    // DENE-724 review: one shared reason made one label wrong for whoever read
+    // it. The labels must stay distinguishable so the execution log says which
+    // of the two happened without opening the raw error.
+    expect(failureReasonLabel("antigravity_session_token_expired", enT)).toBe(
+      "Antigravity session token expired",
+    );
+    expect(failureReasonLabel("antigravity_not_logged_in", enT)).toBe(
+      "Antigravity not signed in",
+    );
+  });
+
   it("localizes the legacy user cancellation value retained by the service", () => {
     expect(failureReasonLabel("user_cancelled", enT)).toBe(
       "Cancelled by user",

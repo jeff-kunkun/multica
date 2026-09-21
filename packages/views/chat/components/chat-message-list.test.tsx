@@ -769,6 +769,50 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });
 
+  // DENE-724 review: the two Antigravity reasons must not share one sentence.
+  // The token-expiry line is allowed to say the login is fine — it is, the CLI
+  // reloads it on the next start. The CLI's own logged-out notice must not,
+  // because that is the one symptom that can mean the account really is gone;
+  // it leads with the check the member can run instead.
+  it("renders the token-expiry line for an expired in-process token", async () => {
+    renderFailure("antigravity_session_token_expired");
+    expect(
+      await screen.findByText(
+        enChat.message_list.failure.antigravity_session_token_expired,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(enChat.message_list.failure.antigravity_not_logged_in),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders its own line for the CLI's logged-out notice, not the login-is-fine one", async () => {
+    renderFailure("antigravity_not_logged_in");
+    expect(
+      await screen.findByText(
+        enChat.message_list.failure.antigravity_not_logged_in,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        enChat.message_list.failure.antigravity_session_token_expired,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("gives the two Antigravity reasons different copy with different next steps", () => {
+    // The blocking half of the DENE-724 review was that one sentence told both
+    // audiences the login was fine. Separate reasons are only worth the split
+    // if the strings actually differ, and the logged-out one has to carry the
+    // step that distinguishes a stale process from a real sign-out.
+    const tokenExpired =
+      enChat.message_list.failure.antigravity_session_token_expired;
+    const notLoggedIn =
+      enChat.message_list.failure.antigravity_not_logged_in;
+    expect(notLoggedIn).not.toBe(tokenExpired);
+    expect(notLoggedIn).toContain("agy -p ping");
+  });
+
   it("degrades a reason newer than this build to its agent_error family", async () => {
     renderFailure("agent_error.some_future_bucket");
     expect(

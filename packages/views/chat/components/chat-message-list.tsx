@@ -1004,6 +1004,23 @@ function FailureBubble({
     environment_prepare_failed: t(($) => $.message_list.failure.environment_prepare_failed),
     "agent_error.provider_network": t(($) => $.message_list.failure.provider_network),
     "agent_error.provider_auth_or_access": t(($) => $.message_list.failure.provider_auth_or_access),
+    // DENE-724: Antigravity's in-process OAuth token expiring partway through
+    // a long run. It arrives as a 401, but the neighbouring
+    // provider_auth_or_access line ("sign in again") is the wrong next step —
+    // the CLI reloads a still-valid login the next time it starts, so the
+    // member only needs to send the message again. Worth its own line for that.
+    antigravity_session_token_expired: t(
+      ($) => $.message_list.failure.antigravity_session_token_expired,
+    ),
+    // DENE-724's other half, and deliberately NOT the line above: the CLI's own
+    // "You are not logged into Antigravity" notice can mean the account really
+    // is signed out, so this copy must not claim the login is fine. It leads
+    // with the check the member can run (`agy -p ping`) and branches on the
+    // result, which also happens to be the right advice when the same notice
+    // arrives alongside an expired token.
+    antigravity_not_logged_in: t(
+      ($) => $.message_list.failure.antigravity_not_logged_in,
+    ),
     "agent_error.provider_quota_limit": t(($) => $.message_list.failure.provider_quota_limit),
     "agent_error.provider_capacity_or_rate_limit": t(
       ($) => $.message_list.failure.provider_capacity_or_rate_limit,

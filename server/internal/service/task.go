@@ -5479,7 +5479,16 @@ func resumeUnsafeFailureReason(reason string) bool {
 	// codex_resume_oversized is the strongest member of this set: a codex
 	// rollout only ever grows, so a thread whose resume response already
 	// overflowed the reader will overflow on every future attempt too.
-	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity", "agent_error.context_overflow", "codex_resume_oversized":
+	// antigravity_session_token_expired / antigravity_not_logged_in
+	// (DENE-724) are session-scoped rather than transcript-scoped, but the
+	// consequence is the same: the resumed conversation's last turn is the
+	// rejection, and the only cure is a fresh agy process that reloads the
+	// OAuth token from the login store. Leaving them resume-safe is what
+	// chained two 30+ minute failures on one session, so they belong in this
+	// list on the resume-safety test alone. They are two reasons only because
+	// their copy differs — the 401 says the login is fine, the CLI's own
+	// logged-out notice must not — not because the resume decision differs.
+	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity", "agent_error.context_overflow", "codex_resume_oversized", "antigravity_session_token_expired", "antigravity_not_logged_in":
 		return true
 	default:
 		return false
@@ -5526,7 +5535,18 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 	// a daemon too old to carry classifyPoisonedError's new branch reports
 	// agent_error.unknown, and without this the manual-retry path would
 	// happily resume the transcript the provider just refused (GH #6066).
-	return taskfailure.UnresumableHistory(errorText)
+	if taskfailure.UnresumableHistory(errorText) {
+		return true
+	}
+	// DENE-724: Antigravity's in-process OAuth token expiry and the CLI's own
+	// logged-out notice. A daemon that predates those reasons writes the
+	// ordinary agent_error.provider_auth_or_access for them — a reason this
+	// function and the resume queries both treat as resume-safe — so the phrase
+	// guard is the only thing that keeps the chat pointer (and a manual retry
+	// of that row) off a conversation whose credential cannot outlive another
+	// long run. Shared with the daemon classifier and the two resume queries;
+	// all three read the same phrase lists.
+	return taskfailure.AntigravityResumeUnsafe(errorText)
 }
 
 // retryEligible reports whether a failed task qualifies for an automatic retry
