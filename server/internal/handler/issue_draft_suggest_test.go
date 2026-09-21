@@ -23,6 +23,10 @@ func (j tierJudge) Unblock(context.Context, routing.Target, routing.JudgeState) 
 	return routing.Advice{}, nil
 }
 
+func (j tierJudge) Stale(context.Context, routing.Target, routing.StaleState) (routing.StaleDecision, error) {
+	return routing.StaleDecision{}, nil
+}
+
 // enableDraftSuggestRouting turns routing on for the test workspace and swaps
 // the judge, restoring both afterwards. The store stays the real one, so the
 // roster the suggestion reads is the workspace's actual tagged agents.
