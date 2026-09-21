@@ -4,7 +4,9 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
 import type { IssueStatusEntry } from "@multica/core/types";
+import { fireEvent, screen } from "@testing-library/react";
 import { renderWithI18n } from "../../../test/i18n";
+import { GuestReadOnlyScope } from "../../../layout/guest-readonly";
 import { StatusPicker } from "./status-picker";
 
 // The catalog is server state; this suite is about what the picker PAINTS with
@@ -71,6 +73,20 @@ function optionRow(label: string): HTMLElement {
 afterEach(() => {
   cleanup();
   catalogEntries = undefined;
+});
+
+describe("StatusPicker guest read-only", () => {
+  it("stays in place and does not open for a guest", () => {
+    catalogEntries = [IN_REVIEW, QA];
+    renderWithI18n(
+      <GuestReadOnlyScope isGuest>
+        <StatusPicker status="in_review" onUpdate={() => {}} />
+      </GuestReadOnlyScope>,
+    );
+
+    fireEvent.click(screen.getByRole("button"));
+    expect(document.querySelector("button[data-picker-item]")).toBeNull();
+  });
 });
 
 describe("StatusPicker trigger color", () => {

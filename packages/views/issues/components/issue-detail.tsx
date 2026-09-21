@@ -39,12 +39,13 @@ import {
   Users,
 } from "lucide-react";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
+import { ResourceNotFound, WriteAction, useGuestReadOnly } from "../../layout/guest-readonly";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, ImageSequenceProvider } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, ImageSequenceProvider } from "../../editor";
 import { collectImageSequence, type ImageSequenceBlock } from "@multica/core/attachments/image-sequence";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
@@ -1048,15 +1049,16 @@ export function IssueNotFound({
       {leading && (
         <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>{leading}</div>
       )}
-      <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-body text-muted-foreground">
-        <p>{t(($) => $.detail.not_found)}</p>
-        {showBackLink && (
-          <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
-            <ChevronLeft className="mr-1 h-3.5 w-3.5" />
-            {t(($) => $.detail.back)}
-          </Button>
-        )}
-      </div>
+      <ResourceNotFound
+        actions={
+          showBackLink ? (
+            <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
+              <ChevronLeft className="mr-1 h-3.5 w-3.5" />
+              {t(($) => $.detail.back)}
+            </Button>
+          ) : undefined
+        }
+      />
     </div>
   );
 }
@@ -1137,6 +1139,7 @@ export function IssueDetailSkeleton({ leading }: { leading?: ReactNode } = {}) {
 
 export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, deepLinkUsage = false }: IssueDetailProps) {
   const { t } = useT("issues");
+  const { isGuest } = useGuestReadOnly();
   const locale = useLocale();
   const timeAgo = useTimeAgo();
   const id = issueId;
@@ -2943,7 +2946,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             `useStickyComposer`), so it lands here — right where the launcher
             floats — once the reader scrolls to the bottom. */}
         <div className="mx-auto w-full max-w-4xl px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8">
-          {titleLazy.active && (
+          {titleLazy.active && !isGuest && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor
                 key={`title-${id}-${titleResetToken}`}
@@ -2974,7 +2977,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
             </div>
           )}
-          {!titleLazy.ready && (
+          {(!titleLazy.ready || isGuest) && (
+            isGuest ? (
+              <WriteAction className="w-full">
+                <div className="w-full text-display-sm font-bold leading-snug tracking-tight">
+                  {issue.title}
+                </div>
+              </WriteAction>
+            ) : (
             <div
               role="button"
               tabIndex={0}
@@ -2996,6 +3006,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             >
               {issue.title}
             </div>
+            )
           )}
           {titleConflictDraft !== null ? (
             <RevisionConflictCompare
@@ -3132,6 +3143,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           >
             {descriptionAnnotations.popup}
             <div data-comment-content={descriptionSourceId}>
+              {isGuest ? (
+                <WriteAction className="block w-full">
+                  <ReadonlyContent
+                    content={issue.description ?? ""}
+                    attachments={descEditorAttachments}
+                  />
+                </WriteAction>
+              ) : (
               <ContentEditor
                 ref={descEditorRef}
                 key={id}
@@ -3174,6 +3193,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 selectionAction={descriptionSelectionAction}
                 attachments={descEditorAttachments}
               />
+              )}
             </div>
 
             <div className="flex items-center gap-1 mt-3">
@@ -3183,11 +3203,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 onToggle={handleToggleIssueReaction}
                 getActorName={getActorName}
               />
-              <FileUploadButton
-                size="sm"
-                multiple
-                onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-              />
+              <WriteAction>
+                <FileUploadButton
+                  size="sm"
+                  multiple
+                  onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                />
+              </WriteAction>
             </div>
             {descDragOver && <FileDropOverlay />}
           </div>
@@ -3195,14 +3217,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (
             <div className="mt-6">
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() => actions.openCreateSubIssue()}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>{t(($) => $.detail.add_sub_issues)}</span>
-              </button>
+              <WriteAction>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => actions.openCreateSubIssue()}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>{t(($) => $.detail.add_sub_issues)}</span>
+                </button>
+              </WriteAction>
             </div>
           )}
           {childIssues.length > 0 && (() => {
