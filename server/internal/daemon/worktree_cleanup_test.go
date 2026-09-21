@@ -206,10 +206,13 @@ func TestAutomaticCleanupDoesNothingWhileDisabled(t *testing.T) {
 // matter — the point of the test below is that it is never asked.
 type countingProbe struct{ calls int }
 
-func (p *countingProbe) Dirty(string) (bool, error)              { p.calls++; return true, nil }
-func (p *countingProbe) MergedInto(_, _, _ string) (bool, error) { p.calls++; return false, nil }
-func (p *countingProbe) CurrentBranch(string) (string, error)    { p.calls++; return "main", nil }
-func (p *countingProbe) DefaultBranch(string) (string, error)    { p.calls++; return "main", nil }
+func (p *countingProbe) Dirty(string) (bool, error) { p.calls++; return true, nil }
+func (p *countingProbe) MergeEvidenceOf(_, _, _ string) (execenv.WorktreeMergeEvidence, error) {
+	p.calls++
+	return execenv.MergeEvidenceNone, nil
+}
+func (p *countingProbe) CurrentBranch(string) (string, error) { p.calls++; return "main", nil }
+func (p *countingProbe) DefaultBranch(string) (string, error) { p.calls++; return "main", nil }
 
 // With the policy off, the scheduled pass does not even LOOK (DENE-648). The
 // scan sizes every working copy and probes git in each; on a machine where
