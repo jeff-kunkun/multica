@@ -343,6 +343,58 @@ func TestSummarizeReportsNoExitCodeAsUnknown(t *testing.T) {
 	}
 }
 
+// TestBuildMarksIncompleteRedaction is the artifact side of F3. When the
+// exported runs' environment could not be read, the value deny-list never ran,
+// and the bundle must say so rather than shipping the reassuring
+// "已自动脱敏" line; the scenario is a deleted agent and a password with no
+// recognizable token shape.
+func TestBuildMarksIncompleteRedaction(t *testing.T) {
+	complete, err := Build(baseInput())
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !complete.Redaction.Complete || !complete.Redaction.EnvDenyList || !complete.Redaction.PatternRules {
+		t.Fatalf("complete bundle redaction = %+v", complete.Redaction)
+	}
+	if !strings.Contains(complete.SummaryMarkdown, "已自动脱敏") {
+		t.Fatalf("complete summary does not reassure the reader:\n%s", complete.SummaryMarkdown)
+	}
+
+	in := baseInput()
+	in.EnvLookupGap = "agent 记录不存在"
+	in.Messages = append(in.Messages, Message{
+		TaskID:  in.Target.TaskID,
+		Seq:     3,
+		At:      in.Messages[0].At.Add(6 * time.Second),
+		Type:    "text",
+		Content: "DATABASE_PASSWORD=hunter2-correct-horse",
+	})
+	degraded, err := Build(in)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if degraded.Redaction.Complete || degraded.Redaction.EnvDenyList {
+		t.Fatalf("degraded bundle still claims a complete redaction: %+v", degraded.Redaction)
+	}
+	if degraded.Redaction.Note != "agent 记录不存在" {
+		t.Fatalf("degraded note = %q", degraded.Redaction.Note)
+	}
+	if strings.Contains(degraded.SummaryMarkdown, "已自动脱敏") {
+		t.Fatalf("degraded summary still reassures the reader:\n%s", degraded.SummaryMarkdown)
+	}
+	if !strings.Contains(degraded.SummaryMarkdown, "脱敏不完整") {
+		t.Fatalf("degraded summary does not warn the reader:\n%s", degraded.SummaryMarkdown)
+	}
+
+	body, err := Marshal(degraded)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(body), `"complete": false`) {
+		t.Fatalf("artifact does not carry the redaction marker:\n%s", body)
+	}
+}
+
 func TestMarshalIsStableAndParseable(t *testing.T) {
 	in := baseInput()
 	first, err := Build(in)

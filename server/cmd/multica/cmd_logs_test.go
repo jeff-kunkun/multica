@@ -31,6 +31,10 @@ const logsExportTestTask = "01a0b577-06b6-786e-8df6-3ebf70edf6d2"
 // to read the metadata it reports, and byte-compared on the way out.
 const logsExportArtifact = "{\n  \"format\": \"multica.log-export\",\n  \"version\": 1,\n  \"task\": {\"id\": \"" + logsExportTestTask + "\", \"issue_id\": \"issue-9\", \"issue_identifier\": \"DENE-599\", \"scope\": {\"kind\": \"run\"}},\n  \"run_count\": 1,\n  \"entry_count\": 3,\n  \"truncated\": false,\n  \"summary_markdown\": \"## AI 摘要\\n\\nDENE-599 的运行 abc\"\n}\n"
 
+// logsExportUnredactedArtifact is the same bundle shape with the server having
+// recorded that the environment deny-list could not run.
+const logsExportUnredactedArtifact = "{\n  \"format\": \"multica.log-export\",\n  \"version\": 1,\n  \"task\": {\"id\": \"" + logsExportTestTask + "\", \"issue_id\": \"issue-9\", \"issue_identifier\": \"DENE-599\", \"scope\": {\"kind\": \"run\"}},\n  \"redaction\": {\"pattern_rules\": true, \"env_deny_list\": false, \"complete\": false, \"note\": \"部分 agent 记录不存在，环境变量 deny-list 未完整生效\"},\n  \"run_count\": 1,\n  \"entry_count\": 1,\n  \"truncated\": false,\n  \"summary_markdown\": \"## AI 摘要\\n\\n脱敏不完整\"\n}\n"
+
 func TestValidateLogsExportScope(t *testing.T) {
 	tests := []struct {
 		scope   string
@@ -240,6 +244,174 @@ func TestRunLogsExportReportMentionOverride(t *testing.T) {
 	content, _ := commentBody["content"].(string)
 	if !strings.Contains(content, "mention://agent/agent-3") {
 		t.Fatalf("comment missing the explicit mention: %q", content)
+	}
+}
+
+// TestRunLogsExportReportDoesNotWakeAgentAssignee is the F1 regression: a
+// `--report` on an issue assigned to an agent must not emit
+// `mention://agent/...`, because that mention queues another paid run — of the
+// very agent whose failed run the operator is exporting. The human who filed
+// the issue is notified instead.
+func TestRunLogsExportReportDoesNotWakeAgentAssignee(t *testing.T) {
+	var commentBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/logs/export"):
+			_, _ = io.WriteString(w, logsExportArtifact)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "attachment-7"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/issue-9":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"assignee_type": "agent", "assignee_id": "agent-3",
+				"creator_type": "member", "creator_id": "user-9",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-9/comments":
+			_ = json.NewDecoder(r.Body).Decode(&commentBody)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-11"})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newLogsExportTestCmd()
+	_ = cmd.Flags().Set("output-dir", t.TempDir())
+	_ = cmd.Flags().Set("report", "true")
+
+	if _, err := captureStdout(t, func() error { return runLogsExport(cmd, []string{logsExportTestTask}) }); err != nil {
+		t.Fatalf("runLogsExport: %v", err)
+	}
+
+	content, _ := commentBody["content"].(string)
+	if strings.Contains(content, "mention://agent/") || strings.Contains(content, "mention://squad/") {
+		t.Fatalf("default report would queue a run for the assignee: %q", content)
+	}
+	if !strings.Contains(content, "mention://member/user-9") {
+		t.Fatalf("comment missing the human creator fallback: %q", content)
+	}
+}
+
+// TestRunLogsExportReportSkipsMentionWhenNobodyHuman is the other half of F1:
+// when neither the assignee nor the creator is a member, the report posts
+// without a mention rather than guessing an agent to wake.
+func TestRunLogsExportReportSkipsMentionWhenNobodyHuman(t *testing.T) {
+	var commentBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/logs/export"):
+			_, _ = io.WriteString(w, logsExportArtifact)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "attachment-7"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/issue-9":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"assignee_type": "squad", "assignee_id": "squad-2",
+				"creator_type": "agent", "creator_id": "agent-3",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-9/comments":
+			_ = json.NewDecoder(r.Body).Decode(&commentBody)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-11"})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newLogsExportTestCmd()
+	_ = cmd.Flags().Set("output-dir", t.TempDir())
+	_ = cmd.Flags().Set("report", "true")
+
+	if _, err := captureStdout(t, func() error { return runLogsExport(cmd, []string{logsExportTestTask}) }); err != nil {
+		t.Fatalf("runLogsExport: %v", err)
+	}
+
+	content, _ := commentBody["content"].(string)
+	if strings.Contains(content, "mention://") {
+		t.Fatalf("report mentioned a non-human owner: %q", content)
+	}
+	if !strings.Contains(content, "AI 摘要") {
+		t.Fatalf("comment lost the summary: %q", content)
+	}
+}
+
+// TestRunLogsExportStdoutIsOnlyTheBundle is the F2 regression: stdout is the
+// artifact's channel, so `multica logs export <id> --stdout > bundle.json`
+// must yield exactly one JSON document. The metadata JSON moves to stderr
+// instead of being appended after the bundle.
+func TestRunLogsExportStdoutIsOnlyTheBundle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="log-export-DENE-599.json"`)
+		_, _ = io.WriteString(w, logsExportArtifact)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newLogsExportTestCmd()
+	_ = cmd.Flags().Set("stdout", "true")
+
+	errCap := captureStderr(t)
+	out, err := captureStdout(t, func() error { return runLogsExport(cmd, []string{logsExportTestTask}) })
+	errOut := errCap.read()
+	if err != nil {
+		t.Fatalf("runLogsExport: %v", err)
+	}
+
+	if out != logsExportArtifact {
+		t.Fatalf("stdout is not exactly the bundle:\n%s", out)
+	}
+	var bundle map[string]any
+	if err := json.Unmarshal([]byte(out), &bundle); err != nil {
+		t.Fatalf("stdout is not one JSON document: %v\n%s", err, out)
+	}
+	if bundle["format"] != "multica.log-export" {
+		t.Fatalf("stdout is not the bundle: %v", bundle)
+	}
+	if _, isMetadata := bundle["task_id"]; isMetadata {
+		t.Fatalf("stdout carried the metadata document as well: %v", bundle)
+	}
+
+	// The metadata still has to be reachable, and stderr is where it lives now.
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(errOut), &meta); err != nil {
+		t.Fatalf("stderr metadata is not JSON: %v\n%s", err, errOut)
+	}
+	if meta["task_id"] != logsExportTestTask {
+		t.Fatalf("stderr metadata = %v", meta)
+	}
+}
+
+// TestRunLogsExportSurfacesIncompleteRedaction pins the CLI half of F3: a
+// bundle whose environment deny-list did not run reports that in its machine
+// readable result, not only in the summary prose.
+func TestRunLogsExportSurfacesIncompleteRedaction(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, logsExportUnredactedArtifact)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newLogsExportTestCmd()
+	_ = cmd.Flags().Set("output-dir", t.TempDir())
+
+	out, err := captureStdout(t, func() error { return runLogsExport(cmd, []string{logsExportTestTask}) })
+	if err != nil {
+		t.Fatalf("runLogsExport: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode stdout: %v", err)
+	}
+	if complete, ok := result["redaction_complete"]; !ok || complete != false {
+		t.Fatalf("redaction_complete = %v (present=%v), want false", complete, ok)
+	}
+	if note, _ := result["redaction_note"].(string); note == "" {
+		t.Fatalf("missing redaction_note: %v", result)
 	}
 }
 

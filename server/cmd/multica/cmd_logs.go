@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -39,12 +40,17 @@ Ranges:
 
 To report the bundle on the issue instead of keeping it local, pass --report:
 the file is uploaded through the ordinary issue-comment attachment path and the
-issue's owner is mentioned in the comment.`,
+comment mentions the human who owns the issue. An agent- or squad-assigned
+issue mentions its human creator instead, so reporting can never queue another
+agent run; name one explicitly with --mention to override that.`,
 	Example: `  # Export the run's log bundle into the current directory
   $ multica logs export 01a0b577-06b6-786e-8df6-3ebf70edf6d2
 
   # The last 6 hours of the issue's runs, written to ./exports
   $ multica logs export 01a0b577-06b6-786e-8df6-3ebf70edf6d2 --scope hours --hours 6 -o ./exports
+
+  # Write the bundle to stdout (metadata goes to stderr), then report it
+  $ multica logs export 01a0b577-06b6-786e-8df6-3ebf70edf6d2 --stdout > bundle.json
 
   # Export and report it on the issue in one action
   $ multica logs export 01a0b577-06b6-786e-8df6-3ebf70edf6d2 --report`,
@@ -59,8 +65,8 @@ func init() {
 	logsExportCmd.Flags().StringP("output-dir", "o", ".", "Directory to write the bundle into")
 	logsExportCmd.Flags().String("output-file", "", "Exact path to write the bundle to (overrides --output-dir)")
 	logsExportCmd.Flags().Bool("stdout", false, "Write the bundle JSON to stdout instead of a file")
-	logsExportCmd.Flags().Bool("report", false, "Also post the bundle as a comment attachment on the task's issue and mention its owner")
-	logsExportCmd.Flags().String("mention", "", "Override the --report mention as <type>:<id> (type is member, agent, or squad)")
+	logsExportCmd.Flags().Bool("report", false, "Also post the bundle as a comment attachment on the task's issue and mention its human owner")
+	logsExportCmd.Flags().String("mention", "", "Override the --report mention as <type>:<id> (member, agent, or squad; an agent/squad mention queues a run)")
 }
 
 // exportedBundle is the subset of the artifact this command reads back. The
@@ -76,9 +82,19 @@ type exportedBundle struct {
 			Hours int    `json:"hours"`
 		} `json:"scope"`
 	} `json:"task"`
-	RunCount        int    `json:"run_count"`
-	EntryCount      int    `json:"entry_count"`
-	Truncated       bool   `json:"truncated"`
+	RunCount   int  `json:"run_count"`
+	EntryCount int  `json:"entry_count"`
+	Truncated  bool `json:"truncated"`
+	// Redaction is the artifact's own statement about its masking. A bundle
+	// built from a run whose environment could not be read is only
+	// pattern-redacted, and the CLI surfaces that rather than letting the
+	// summary's "已自动脱敏" line stand unqualified. It is a pointer so an
+	// artifact from a server that predates the marker reads as "unknown"
+	// instead of falsely reading as "incomplete".
+	Redaction *struct {
+		Complete bool   `json:"complete"`
+		Note     string `json:"note,omitempty"`
+	} `json:"redaction"`
 	SummaryMarkdown string `json:"summary_markdown"`
 }
 
@@ -132,12 +148,22 @@ func runLogsExport(cmd *cobra.Command, args []string) error {
 		"truncated":        bundle.Truncated,
 		"summary_markdown": bundle.SummaryMarkdown,
 	}
+	if bundle.Redaction != nil && !bundle.Redaction.Complete {
+		result["redaction_complete"] = false
+		result["redaction_note"] = bundle.Redaction.Note
+	}
 
+	// stdout is the artifact's channel. `multica logs export <id> --stdout >
+	// bundle.json` must produce a file that parses as exactly one JSON
+	// document, so in that mode the metadata JSON moves to stderr rather than
+	// being appended to the bundle on stdout.
+	metaOut := io.Writer(os.Stdout)
 	toStdout, _ := cmd.Flags().GetBool("stdout")
 	if toStdout {
 		if _, err := os.Stdout.Write(body); err != nil {
 			return fmt.Errorf("write bundle to stdout: %w", err)
 		}
+		metaOut = os.Stderr
 	} else {
 		dest, err := writeLogBundle(cmd, filename, body)
 		if err != nil {
@@ -157,7 +183,7 @@ func runLogsExport(cmd *cobra.Command, args []string) error {
 		result["report"] = reported
 	}
 
-	return cli.PrintJSON(os.Stdout, result)
+	return cli.PrintJSON(metaOut, result)
 }
 
 func validateLogsExportScope(scope string, hours int) error {
@@ -258,8 +284,15 @@ func reportLogBundle(ctx context.Context, cmd *cobra.Command, client *cli.APICli
 }
 
 // exportMention resolves the mention link for --report. An explicit --mention
-// wins; otherwise the issue's assignee is used. No assignee means no mention
-// rather than a guessed one.
+// wins; otherwise the default only ever names a human member.
+//
+// A default mention must never name an agent or a squad: `mention://agent/<id>`
+// enqueues a paid run, and the common report is an operator exporting the logs
+// of a run that just died — which is usually the run of the very agent the
+// issue is assigned to. Waking that agent back up is the opposite of what a
+// post-mortem report should do. So when the assignee is not a member, the
+// issue's human creator is notified instead; if nobody human is on the issue,
+// nothing is mentioned rather than a guessed target.
 func exportMention(ctx context.Context, cmd *cobra.Command, client *cli.APIClient, issueID string) (string, error) {
 	if override, _ := cmd.Flags().GetString("mention"); override != "" {
 		kind, id, ok := strings.Cut(override, ":")
@@ -271,20 +304,42 @@ func exportMention(ctx context.Context, cmd *cobra.Command, client *cli.APIClien
 		default:
 			return "", fmt.Errorf("--mention type %q is not member, agent, or squad", kind)
 		}
-		return fmt.Sprintf("[@负责人](mention://%s/%s)", kind, id), nil
+		// An explicit agent/squad mention is the caller taking responsibility
+		// for the run it may start, so it is passed through unchanged.
+		return mentionLink(kind, id, "负责人"), nil
 	}
 
 	var issue struct {
 		AssigneeType *string `json:"assignee_type"`
 		AssigneeID   *string `json:"assignee_id"`
+		CreatorType  *string `json:"creator_type"`
+		CreatorID    *string `json:"creator_id"`
 	}
 	if err := client.GetJSON(ctx, "/api/issues/"+issueID, &issue); err != nil {
 		return "", fmt.Errorf("load issue owner: %w", err)
 	}
-	if issue.AssigneeType == nil || issue.AssigneeID == nil || *issue.AssigneeType == "" || *issue.AssigneeID == "" {
+
+	// No assignee keeps the old "guess nobody" behavior; a human assignee is
+	// the natural owner; an agent/squad assignee falls back to the human who
+	// filed the issue.
+	if issue.AssigneeType == nil || *issue.AssigneeType == "" {
 		return "", nil
 	}
-	return fmt.Sprintf("[@负责人](mention://%s/%s)", *issue.AssigneeType, *issue.AssigneeID), nil
+	switch *issue.AssigneeType {
+	case "member":
+		if issue.AssigneeID != nil && *issue.AssigneeID != "" {
+			return mentionLink("member", *issue.AssigneeID, "负责人"), nil
+		}
+	case "agent", "squad":
+		if issue.CreatorType != nil && *issue.CreatorType == "member" && issue.CreatorID != nil && *issue.CreatorID != "" {
+			return mentionLink("member", *issue.CreatorID, "创建人"), nil
+		}
+	}
+	return "", nil
+}
+
+func mentionLink(kind, id, label string) string {
+	return fmt.Sprintf("[@%s](mention://%s/%s)", label, kind, id)
 }
 
 // filenameFromHeaders reads the server-suggested artifact name. The server owns

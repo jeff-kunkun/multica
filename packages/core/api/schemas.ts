@@ -4168,6 +4168,13 @@ const TaskLogExportEntrySchema = z.object({
   output_truncated: z.boolean().optional().default(false),
 }).loose();
 
+const TaskLogExportRedactionSchema = z.object({
+  pattern_rules: z.boolean().optional().default(true),
+  env_deny_list: z.boolean().optional().default(true),
+  complete: z.boolean().optional().default(true),
+  note: z.string().optional().default(""),
+}).loose();
+
 export const TaskLogExportBundleSchema = z.object({
   format: z.string().optional().default(""),
   version: z.number().optional().default(0),
@@ -4190,6 +4197,9 @@ export const TaskLogExportBundleSchema = z.object({
       to: z.string().optional().default(""),
     }).loose(),
   }).loose(),
+  // Optional so a bundle from a server older than the marker still parses;
+  // absent means "unknown", not "safe".
+  redaction: TaskLogExportRedactionSchema.optional(),
   run_count: z.number().optional().default(0),
   entry_count: z.number().optional().default(0),
   truncated: z.boolean().optional().default(false),

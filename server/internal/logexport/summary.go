@@ -55,7 +55,18 @@ func Summarize(b Bundle) string {
 		}
 	}
 
-	sb.WriteString("\n本产物已自动脱敏：不含 token、密码或环境变量值。可直接作为上下文喂给 AI。\n")
+	if b.Redaction.Complete {
+		sb.WriteString("\n本产物已自动脱敏：不含 token、密码或环境变量值。可直接作为上下文喂给 AI。\n")
+	} else {
+		// Never write the reassuring sentence on a bundle that only got the
+		// pattern pass: its whole value is that a reader can trust it, and an
+		// untrue "已自动脱敏" is how a credential travels to an AI chat.
+		note := b.Redaction.Note
+		if note == "" {
+			note = "运行环境不可读"
+		}
+		fmt.Fprintf(&sb, "\n注意：本产物脱敏不完整（%s），仅应用了 token/密码形态匹配，仍可能含环境变量值，请勿直接外发。\n", note)
+	}
 	return sb.String()
 }
 

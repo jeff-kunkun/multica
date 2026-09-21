@@ -58,11 +58,28 @@ export interface TaskLogExportTaskView {
   };
 }
 
+/** The artifact's statement about its own masking. */
+export interface TaskLogExportRedaction {
+  /** The shared token/password patterns ran; true in every built bundle. */
+  pattern_rules: boolean;
+  /** False when the runs' environment was unreadable, leaving known secret
+   *  variable values unmasked. */
+  env_deny_list: boolean;
+  /**
+   * Gate any "safe to forward" affordance on this. When false the bundle may
+   * still contain a credential, and the summary says so in prose too.
+   */
+  complete: boolean;
+  note?: string;
+}
+
 export interface TaskLogExportBundle {
   format: string;
   version: number;
   generated_at: string;
   task: TaskLogExportTaskView;
+  /** Absent on a server older than the marker; treat that as "unknown". */
+  redaction?: TaskLogExportRedaction;
   run_count: number;
   entry_count: number;
   /** The transcript hit the server's entry cap; this is a head, not the whole. */

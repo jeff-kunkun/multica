@@ -3319,6 +3319,35 @@ describe("ApiClient exportTaskLogs", () => {
     expect(exported.filename).toBe("log-export-DENE-599.json");
   });
 
+  it("exposes the redaction completeness marker", async () => {
+    const body = JSON.stringify({
+      ...bundleBody,
+      redaction: {
+        pattern_rules: true,
+        env_deny_list: false,
+        complete: false,
+        note: "部分 agent 记录不存在",
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(exportResponse(body)));
+
+    const client = new ApiClient("https://api.example.test");
+    const exported = await client.exportTaskLogs("task-1");
+
+    expect(exported.bundle.redaction?.complete).toBe(false);
+    expect(exported.bundle.redaction?.env_deny_list).toBe(false);
+    expect(exported.bundle.redaction?.note).toBe("部分 agent 记录不存在");
+  });
+
+  it("leaves the redaction marker unknown for a server that predates it", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(exportResponse(JSON.stringify(bundleBody))));
+
+    const client = new ApiClient("https://api.example.test");
+    const exported = await client.exportTaskLogs("task-1");
+
+    expect(exported.bundle.redaction).toBeUndefined();
+  });
+
   it("sends the scope and window as query parameters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(exportResponse(JSON.stringify(bundleBody)));
     vi.stubGlobal("fetch", fetchMock);

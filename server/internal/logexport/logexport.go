@@ -155,7 +155,14 @@ type Input struct {
 	Runs        []Run
 	Messages    []Message
 	Env         map[string]string
-	MaxEntries  int
+	// EnvLookupGap is non-empty when the runs' environment could not be read
+	// completely, so the value deny-list could not run in full. The artifact
+	// carries this forward instead of claiming a redaction that never
+	// happened: pattern matching alone does not cover a password with no
+	// token shape, and a bundle whose summary says "已自动脱敏" must not be
+	// lying about it.
+	EnvLookupGap string
+	MaxEntries   int
 }
 
 // Entry is the artifact's per-log-line shape.
@@ -204,19 +211,37 @@ type TaskView struct {
 	Window          Window `json:"window"`
 }
 
+// RedactionView is the artifact's statement about its own masking. It exists so
+// a reader — or a tool that decides whether a bundle is safe to hand to an AI —
+// can tell a fully redacted bundle from one that only got pattern matching,
+// rather than trusting the summary's word for it.
+type RedactionView struct {
+	// PatternRules is true whenever the shared token/password patterns ran.
+	// They run unconditionally, so it is always true in a built bundle.
+	PatternRules bool `json:"pattern_rules"`
+	// EnvDenyList is false when the exported runs' environment was not
+	// available, which leaves known secret variable values unmasked.
+	EnvDenyList bool `json:"env_deny_list"`
+	// Complete is the field to gate on: false means the bundle may still
+	// contain a credential and must not be forwarded blindly.
+	Complete bool   `json:"complete"`
+	Note     string `json:"note,omitempty"`
+}
+
 // Bundle is the exported artifact. It is what the endpoint returns, what the
 // CLI writes to disk, and what the git push commits.
 type Bundle struct {
-	Format          string    `json:"format"`
-	Version         int       `json:"version"`
-	GeneratedAt     string    `json:"generated_at"`
-	Task            TaskView  `json:"task"`
-	RunCount        int       `json:"run_count"`
-	EntryCount      int       `json:"entry_count"`
-	Truncated       bool      `json:"truncated"`
-	Runs            []RunView `json:"runs"`
-	Entries         []Entry   `json:"entries"`
-	SummaryMarkdown string    `json:"summary_markdown"`
+	Format          string        `json:"format"`
+	Version         int           `json:"version"`
+	GeneratedAt     string        `json:"generated_at"`
+	Task            TaskView      `json:"task"`
+	Redaction       RedactionView `json:"redaction"`
+	RunCount        int           `json:"run_count"`
+	EntryCount      int           `json:"entry_count"`
+	Truncated       bool          `json:"truncated"`
+	Runs            []RunView     `json:"runs"`
+	Entries         []Entry       `json:"entries"`
+	SummaryMarkdown string        `json:"summary_markdown"`
 }
 
 // ErrUnknownScope is returned by Build when the input carries a scope this
@@ -417,6 +442,12 @@ func Build(in Input) (Bundle, error) {
 		Truncated:  truncated,
 		Runs:       runs,
 		Entries:    entries,
+	}
+	bundle.Redaction = RedactionView{
+		PatternRules: true,
+		EnvDenyList:  in.EnvLookupGap == "",
+		Complete:     in.EnvLookupGap == "",
+		Note:         in.EnvLookupGap,
 	}
 	bundle.SummaryMarkdown = Summarize(bundle)
 	return bundle, nil

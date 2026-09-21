@@ -175,6 +175,42 @@ func TestExportTaskLogsHoursScope(t *testing.T) {
 	}
 }
 
+// TestExportTaskLogsMarksRedactionIncompleteWhenEnvUnreadable is F3 at the
+// handler boundary. When an agent's stored environment cannot be decoded the
+// value deny-list has no input, so the export degrades explicitly: it still
+// succeeds, but the bundle records that the deny-list did not run instead of
+// carrying the summary's "已自动脱敏" claim for a redaction it never did.
+func TestExportTaskLogsMarksRedactionIncompleteWhenEnvUnreadable(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	// A non-string value cannot decode into map[string]string — the shape the
+	// deny-list needs — which is the reachable "environment unreadable" case.
+	agentID := dbfx.Agent(t, "log-export-bad-env", handlerTestRuntimeID(t), testutil.Cols{
+		"custom_env": testutil.Raw(`'{"DATABASE_PASSWORD": 123}'::jsonb`),
+	})
+	issueID := dbfx.Issue(t, "log export bad env fixture")
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id":   issueID,
+		"status":     "failed",
+		"runtime_id": handlerTestRuntimeID(t),
+	})
+	insertExportMessage(t, taskID, 1, "text", "DATABASE_PASSWORD=hunter2-correct-horse", "")
+
+	var bundle logexport.Bundle
+	exportLogsRequest(t, taskID, "").Want(http.StatusOK).JSON(&bundle)
+
+	if bundle.Redaction.Complete || bundle.Redaction.EnvDenyList {
+		t.Fatalf("bundle claims a complete redaction from an unreadable env: %+v", bundle.Redaction)
+	}
+	if bundle.Redaction.Note == "" {
+		t.Fatalf("bundle does not say why redaction was incomplete")
+	}
+	if !strings.Contains(bundle.SummaryMarkdown, "脱敏不完整") {
+		t.Fatalf("summary does not warn about the incomplete redaction:\n%s", bundle.SummaryMarkdown)
+	}
+}
+
 func TestExportTaskLogsRejectsBadInput(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

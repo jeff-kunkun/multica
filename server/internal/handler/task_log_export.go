@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logexport"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -77,19 +78,20 @@ func (h *Handler) ExportTaskLogs(w http.ResponseWriter, r *http.Request) {
 		target.IssueTitle = issue.Title
 	}
 
-	var env map[string]string
-	if agent, agentErr := h.Queries.GetAgent(r.Context(), task.AgentID); agentErr == nil {
-		target.AgentName = agent.Name
-		env = unmarshalCustomEnv(agent)
+	env, agentNames, envGap, envOK := h.collectExportEnv(w, r, task.AgentID, runs)
+	if !envOK {
+		return
 	}
+	target.AgentName = agentNames[uuidToString(task.AgentID)]
 
 	bundle, err := logexport.Build(logexport.Input{
-		GeneratedAt: now,
-		Scope:       scope,
-		Target:      target,
-		Runs:        runs,
-		Messages:    messages,
-		Env:         env,
+		GeneratedAt:  now,
+		Scope:        scope,
+		Target:       target,
+		Runs:         runs,
+		Messages:     messages,
+		Env:          env,
+		EnvLookupGap: envGap,
 	})
 	if err != nil {
 		slog.Error("build log export failed", append(logger.RequestAttrs(r), "task_id", taskID, "error", err)...)
@@ -109,6 +111,65 @@ func (h *Handler) ExportTaskLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="`+logexport.FileName(bundle)+`"`)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
+}
+
+// collectExportEnv reads the environment of every agent whose runs the bundle
+// carries, so the value deny-list covers all exported runs and not only the
+// requested one. The environment IS the deny-list input: without it, a secret
+// whose value has no recognizable token shape travels in the artifact.
+//
+// Two failures are kept apart, because they have different honest answers:
+//
+//   - The agent row cannot be read at all (a database error): the request is
+//     retryable, so it fails with a 5xx. Shipping a bundle that silently ran
+//     without the deny-list is exactly the bug this guards against.
+//   - The row is readable but its stored environment cannot be decoded: the
+//     export proceeds and reports the gap through the artifact, so the reader
+//     sees "redaction incomplete" instead of the summary's old, false
+//     "已自动脱敏".
+func (h *Handler) collectExportEnv(w http.ResponseWriter, r *http.Request, targetAgentID pgtype.UUID, runs []logexport.Run) (env, names map[string]string, gap string, ok bool) {
+	env = map[string]string{}
+	names = map[string]string{}
+	seen := map[string]struct{}{}
+
+	ids := make([]pgtype.UUID, 0, len(runs)+1)
+	if targetAgentID.Valid {
+		ids = append(ids, targetAgentID)
+	}
+	for _, run := range runs {
+		id, err := util.ParseUUID(run.AgentID)
+		if err != nil {
+			continue
+		}
+		ids = append(ids, id)
+	}
+
+	for _, id := range ids {
+		key := uuidToString(id)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		agent, err := h.Queries.GetAgent(r.Context(), id)
+		if err != nil {
+			slog.Warn("get agent for log export failed", append(logger.RequestAttrs(r), "agent_id", key, "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to load agent environment")
+			return nil, nil, "", false
+		}
+		names[key] = agent.Name
+
+		values, decodeErr := unmarshalCustomEnvChecked(agent)
+		if decodeErr != nil {
+			slog.Warn("decode agent env for log export failed", append(logger.RequestAttrs(r), "agent_id", key, "error", decodeErr)...)
+			gap = "部分 agent 的环境变量无法解析，deny-list 未完整生效"
+			continue
+		}
+		for name, value := range values {
+			env[name] = value
+		}
+	}
+	return env, names, gap, true
 }
 
 // parseExportScope validates the scope/hours pair, writing the 400 itself so
