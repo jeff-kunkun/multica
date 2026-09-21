@@ -83,6 +83,7 @@ vi.mock("../../platform/local-directory", () => ({
   isDesktopShell: () => true,
   pickDirectory: vi.fn(),
   validateLocalDirectory: vi.fn(),
+  validateWritablePath: async () => true,
 }));
 vi.mock("../../platform/use-local-daemon-status", () => ({
   useLocalDaemonStatus: () => ({

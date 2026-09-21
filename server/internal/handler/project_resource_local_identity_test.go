@@ -88,20 +88,24 @@ func TestWorktreeModeIsRefusedOnAProvenNonGitFolder(t *testing.T) {
 	if err == nil {
 		t.Fatal("parallel mode was accepted on a folder proven not to be a repository")
 	}
-	if !strings.Contains(err.Error(), "not a git repository") {
-		t.Fatalf("error = %v, want it to say the folder is not a git repository", err)
+	if !strings.Contains(err.Error(), "cannot use parallel") {
+		t.Fatalf("error = %v, want it to refuse parallel mode", err)
 	}
 
-	// Proven-a-repo is fine, and so is absent: nobody checked is not proof,
-	// and the daemon re-checks authoritatively at task time. Guessing "not a
-	// repo" here would block a perfectly valid setup on an older client.
-	for name, fields := range map[string]map[string]any{
-		"proven a repo": {"local_path": "/Users/me/code/app", "daemon_id": "d1", "execution_mode": "worktree", "is_git_repo": true},
-		"nobody looked": {"local_path": "/Users/me/code/app", "daemon_id": "d1", "execution_mode": "worktree"},
-	} {
-		if _, err := validateAndNormalizeResourceRef("local_directory", localRef(t, fields)); err != nil {
-			t.Errorf("%s: parallel mode was refused: %v", name, err)
-		}
+	// Proven-a-repo is fine. Absent is not: a client that cannot look at the
+	// disk (the web UI) used to save worktree on a plain folder because the
+	// field was missing. Parallel mode now requires an explicit true.
+	if _, err := validateAndNormalizeResourceRef("local_directory", localRef(t, map[string]any{
+		"local_path": "/Users/me/code/app", "daemon_id": "d1",
+		"execution_mode": "worktree", "is_git_repo": true,
+	})); err != nil {
+		t.Errorf("a proven repo was refused parallel mode: %v", err)
+	}
+	if _, err := validateAndNormalizeResourceRef("local_directory", localRef(t, map[string]any{
+		"local_path": "/Users/me/code/app", "daemon_id": "d1",
+		"execution_mode": "worktree",
+	})); err == nil {
+		t.Fatal("parallel mode was accepted without is_git_repo; web and an un-enriched CLI would save a mode every task would fail")
 	}
 
 	// A plain folder stays perfectly legal in every other mode (form C).
@@ -109,6 +113,56 @@ func TestWorktreeModeIsRefusedOnAProvenNonGitFolder(t *testing.T) {
 		"local_path": "/Users/me/notes", "daemon_id": "d1", "is_git_repo": false,
 	})); err != nil {
 		t.Errorf("a plain folder was refused in the default mode: %v", err)
+	}
+}
+
+func TestWorktreeRootRefusedInsideTheBoundDirectory(t *testing.T) {
+	_, err := validateAndNormalizeResourceRef("local_directory", localRef(t, map[string]any{
+		"local_path": "/Users/me/code/app", "daemon_id": "d1",
+		"real_path":     "/Users/me/code/app",
+		"worktree_root": "/Users/me/code/app/.worktrees",
+	}))
+	if err == nil {
+		t.Fatal("worktree_root inside the bound directory was accepted")
+	}
+	if !strings.Contains(err.Error(), "inside") {
+		t.Fatalf("error = %v, want it to say the root sits inside the repository", err)
+	}
+
+	// Sibling is the default shape and must stay legal.
+	if _, err := validateAndNormalizeResourceRef("local_directory", localRef(t, map[string]any{
+		"local_path": "/Users/me/code/app", "daemon_id": "d1",
+		"worktree_root": "/Users/me/code/app.multica-worktrees",
+	})); err != nil {
+		t.Errorf("a sibling worktree_root was refused: %v", err)
+	}
+}
+
+func TestPathContainsIsSegmentWise(t *testing.T) {
+	if !pathContains("/Users/me/repo", "/Users/me/repo/.worktrees") {
+		t.Error("a child should be inside its parent")
+	}
+	if pathContains("/Users/me/repo", "/Users/me/repo-backup") {
+		t.Error("/repo-backup is not inside /repo")
+	}
+	if !pathContains("/Users/me/repo", "/Users/me/repo") {
+		t.Error("a directory contains itself")
+	}
+}
+
+func TestGithubRepoStoresNormalizedRepoKey(t *testing.T) {
+	out, err := validateAndNormalizeResourceRef("github_repo", localRef(t, map[string]any{
+		"url": "git@github.com:Owner/Repo.git",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ref githubRepoRef
+	if err := json.Unmarshal(out, &ref); err != nil {
+		t.Fatal(err)
+	}
+	if ref.RepoKey != "github.com/owner/repo" {
+		t.Fatalf("repo_key = %q, want github.com/owner/repo (host and path lowercased: DNS and GitHub are case-insensitive, so mixed case would let the same repository bind twice)", ref.RepoKey)
 	}
 }
 

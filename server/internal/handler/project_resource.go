@@ -90,6 +90,11 @@ type githubRepoRef struct {
 	URL               string `json:"url"`
 	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
 	Ref               string `json:"ref,omitempty"`
+	// RepoKey is the same normalized identity local_directory uses, computed
+	// from URL on every save so a client cannot send a mismatched key.
+	// Duplicate detection between a github_repo and a local checkout compares
+	// these, not folder-name vs repo-name (DENE-618).
+	RepoKey string `json:"repo_key,omitempty"`
 }
 
 func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
@@ -106,6 +111,9 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 	}
 	payload.DefaultBranchHint = strings.TrimSpace(payload.DefaultBranchHint)
 	payload.Ref = strings.TrimSpace(payload.Ref)
+	// Always recompute from the URL. A client-supplied key would drift the
+	// moment the URL changed and the key did not.
+	payload.RepoKey = string(repoident.NormalizeURL(payload.URL))
 	out, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -205,9 +213,9 @@ type localDirectoryRef struct {
 	// this is the only way it can refuse parallel mode on a folder that has
 	// no repository to branch from — a resource whose every task would fail.
 	//
-	// A pointer because the three states differ: true (a repo), false (proven
-	// not a repo — reject parallel), and absent (nobody checked — allow, and
-	// let the daemon refuse authoritatively at task time).
+	// true means a git working tree with at least one commit. false and
+	// absent both refuse parallel mode: a client that cannot measure the
+	// disk (the web UI) must not save a mode every task would fail.
 	IsGitRepo *bool `json:"is_git_repo,omitempty"`
 }
 
@@ -394,16 +402,30 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 	if payload.WorktreeRoot != "" && !isAbsoluteLocalPath(payload.WorktreeRoot) {
 		return nil, errors.New("local_directory: worktree_root must be an absolute path")
 	}
-	// Parallel mode branches from a repository. A directory the machine
-	// holding it proved has none cannot run a single task in that mode, so it
-	// is refused here rather than at the first run (DENE-617 invariant 12).
-	// Absent is not proof and stays allowed: the daemon re-checks at task time.
+	if payload.WorktreeRoot != "" {
+		// The bound directory is the best git-root the server has. A client
+		// that can see the disk may send a subdirectory; refusing a root
+		// inside that path is still correct, and the daemon re-checks against
+		// the real git top-level at task time.
+		bound := localDirectoryIdentity(payload)
+		if bound != "" && pathContains(bound, payload.WorktreeRoot) {
+			return nil, fmt.Errorf(
+				"local_directory: worktree_root %q sits inside %q — working copies there would appear in the repository's own git status; put them beside the repository instead",
+				payload.WorktreeRoot, payload.LocalPath)
+		}
+	}
+	// Parallel mode branches from a repository with at least one commit.
+	// The server cannot see the user's disk, so it requires the client that
+	// can to say so. Absent used to be treated as "nobody looked, allow" —
+	// which let the web UI and an un-enriched CLI save worktree on a plain
+	// folder. Web cannot measure a filesystem, so missing is now a refusal
+	// (DENE-618).
 	if payload.ExecutionMode == localDirectoryModeWorktree &&
-		payload.IsGitRepo != nil && !*payload.IsGitRepo {
+		(payload.IsGitRepo == nil || !*payload.IsGitRepo) {
 		return nil, fmt.Errorf(
-			"local_directory: %q is not a git repository, so it cannot use parallel (worktree) mode — "+
-				"parallel mode delivers work as a branch and needs a repository to branch from. "+
-				"Keep it on in_place, or create a git repository in that folder first",
+			"local_directory: %q cannot use parallel (worktree) mode — "+
+				"parallel mode delivers work as a branch and needs a git repository with at least one commit. "+
+				"Keep it on in_place, or bind it from the desktop app / CLI on the machine that holds the folder",
 			payload.LocalPath)
 	}
 	out, err := json.Marshal(payload)
@@ -663,7 +685,7 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "this resource is already attached to the project")
+			h.writeProjectResourceUniqueConflict(w, r.Context(), project.ID, req.ResourceType, normalizedRef, pgtype.UUID{})
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create project resource")
@@ -849,7 +871,7 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "this resource is already attached to the project")
+			h.writeProjectResourceUniqueConflict(w, r.Context(), project.ID, existing.ResourceType, nextRef, existing.ID)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update project resource")
@@ -938,8 +960,56 @@ func (h *Handler) findLocalDirectoryConflictReason(ctx context.Context, projectI
 				"this repository is already added on this machine as %q — a second checkout of it would be a second copy of the same code",
 				existing.LocalPath), nil
 		}
+		if incoming.WorktreeRoot != "" {
+			existingID := localDirectoryIdentity(existing)
+			if existingID != "" && (pathContains(existingID, incoming.WorktreeRoot) || pathContains(incoming.WorktreeRoot, existingID)) {
+				return true, fmt.Sprintf(
+					"worktree_root %q conflicts with the directory already bound as %q",
+					incoming.WorktreeRoot, existing.LocalPath), nil
+			}
+		}
 	}
 	return false, "", nil
+}
+
+// pathContains reports whether candidate is parent or lives under it, compared
+// segment-wise. `/repo-backup` is not inside `/repo`. Separators are folded so
+// a Windows path and a POSIX path can be compared as the strings the client
+// sent — the server has no filesystem to canonicalise them against.
+func pathContains(parent, candidate string) bool {
+	p := normalizePathForCompare(parent)
+	c := normalizePathForCompare(candidate)
+	if p == "" || c == "" {
+		return false
+	}
+	if p == c {
+		return true
+	}
+	return strings.HasPrefix(c, p+"/")
+}
+
+func normalizePathForCompare(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "\\", "/")
+	s = strings.TrimRight(s, "/")
+	return s
+}
+
+func (h *Handler) writeProjectResourceUniqueConflict(w http.ResponseWriter, ctx context.Context, projectID pgtype.UUID, resourceType string, ref json.RawMessage, excludeID pgtype.UUID) {
+	if conflict, reason, err := h.findLocalDirectoryConflictReason(ctx, projectID, resourceType, ref, excludeID); err == nil && conflict {
+		writeError(w, http.StatusConflict, reason)
+		return
+	}
+	if resourceType == "local_directory" {
+		var incoming localDirectoryRef
+		if json.Unmarshal(ref, &incoming) == nil {
+			if p := strings.TrimSpace(incoming.LocalPath); p != "" {
+				writeError(w, http.StatusConflict, fmt.Sprintf("%q is already added to this project", p))
+				return
+			}
+		}
+	}
+	writeError(w, http.StatusConflict, "this resource is already attached to the project")
 }
 
 // DeleteProjectResource removes a resource from a project.

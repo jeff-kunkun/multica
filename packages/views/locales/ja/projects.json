@@ -156,7 +156,9 @@
     "local_directory_move_down_tooltip": "下に移動",
     "mode_worktree_root_label": "作業コピーの作成先",
     "mode_worktree_root_not_absolute": "絶対パスを指定してください。相対パスでは、そのときデーモンがいるディレクトリに作られてしまいます。",
-    "mode_worktree_root_inside_repo": "リポジトリの内部です。そこに作るとあなた自身の git status に現れ、.gitignore への追加も必要になります。リポジトリの隣のフォルダを選んでください。"
+    "mode_worktree_root_inside_repo": "リポジトリの内部です。そこに作るとあなた自身の git status に現れ、.gitignore への追加も必要になります。リポジトリの隣のフォルダを選んでください。",
+    "mode_worktree_root_not_writable": "このフォルダには書き込めません。このマシンでファイルを作成できる場所を選んでください。",
+    "mode_worktree_root_conflicts": "プロジェクトに既に紐づいているディレクトリと重なっています。別のフォルダを選んでください。"
   },
   "members": {
     "section_header": "メンバー",
