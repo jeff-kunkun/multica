@@ -85,9 +85,16 @@ Guest 一整列除了「查看」全是否，没有任何关系能翻过来：�
 - **不新建任何名单表。**「项目成员」= `project_member` 的行 + 项目 lead，由 `listAccessibleProjectIDs` 合并；共享界面里不逐个勾人，也不给某个人单独选读写。
 - 回滚只收紧不放宽。502 的 down 不能把访客改写成 Member（那是给只读的人发写权限），所以访客在回滚时直接失去成员资格，连同他们的 `project_member` 行一起删掉；重新上线后再邀请。
 
-### 现在还不能在界面或接口里选「访客」
+### 「访客」已经可以在接口里选了（DENE-697 起）
 
-502 只是让数据库**放得下** `guest`。`normalizeMemberRole` 和邀请表（`workspace_invitation`、`workspace_share_link` 的 role CHECK 仍是 `admin / member`）这次故意没动：今天绝大多数写接口只检查「是不是成员」，不看档位，此刻放出一个访客，他实际上拥有 Member 的全部写权限，却顶着「只读」的名字。接口放行 `guest` 必须和 DENE-697 的拦截层同一次上线。
+502 只让数据库**放得下** `guest`，当时故意没放开接口：那时绝大多数写接口只检查「是不是成员」，不看档位，放出一个访客等于发给他 Member 的全部写权限，却顶着「只读」的名字。那条约束是「接口放行 `guest` 必须和拦截层同一次上线」，DENE-697 已经兑现：
+
+- 全局只读拦截层 `middleware.GuestReadOnly` 挂在整个已认证 `/api` 路由组的最前面，按 HTTP 方法判定，而不是靠每个 handler 自己记得检查。
+- `normalizeMemberRole` 放行 `guest`；邀请表的 role CHECK 扩成 `admin / member / guest`（migration 503）。`workspace_share_link` 不走 `normalizeMemberRole`，仍是 `admin / member`，不在本次范围内。
+
+拦截层只对写方法（非 GET/HEAD/OPTIONS）生效，并留了一份**只涉及本人账号状态**的白名单：`/api/me`、`/api/cli-token`、`/api/feedback`、`/api/client-usage`、`/api/inbox`、`/api/notification-preferences`，加上「新建自己的工作区」和「退出工作区」。前缀匹配按路径段边界比较，`/api/me` 不会误命中 `/api/members`。访客改不了任何工作区内容，但能改自己的名字、标记通知已读、退出工作区。
+
+拦截层还顺手把它读到的 `member` 行按「用户 + 工作区」配对塞进 context，`RequireWorkspaceMember` 直接复用，所以写请求的成员查询次数不变，仍是一次。
 
 ## 缓存失效
 
@@ -103,11 +110,11 @@ Guest 一整列除了「查看」全是否，没有任何关系能翻过来：�
 由此定下四条规则：
 
 1. **档位与共享范围永远不进这两级缓存。** 可见性判定每次读库（`visibility` 列 + `listAccessibleProjectIDs`）。要提速就在单次请求内复用结果，不跨请求缓存——跨请求缓存一旦出现，「即时生效」就变成了又一处要记得失效的地方。
-2. **档位变更、移除成员 → 失效该用户的 `MembershipCache`。** 现状已经做到（`UpdateMember` / `DeleteMember` / 退出 / 删工作区都调了 `Invalidate`），DENE-697 只需补一条测试把它钉住。
+2. **档位变更、移除成员 → 失效该用户的 `MembershipCache`。** 现状已经做到（`UpdateMember` / `DeleteMember` / 退出 / 删工作区都调了 `Invalidate`）。
 3. **`PATCache` 不需要因为档位或共享变更而失效。** 它只回答「token 属于谁」，这个答案不随档位变。它唯一需要失效的时机是吊销 token，现状已做。把它列进「每次共享变更都要清」只会制造无意义的缓存击穿。
 4. **信 `MembershipCache` 的三处，缓存命中之后仍要补判定。** 这是本次排查发现的真正漏洞：
    - 附件下载：命中缓存就直接放行，完全不看附件所属 issue 的可见性。DENE-698 必须在这里加 `CanSee`，否则任何成员拿到附件 id 就能下载别人 `private` issue 里的文件。
-   - daemon 两处：访客不应能注册或操作 runtime。DENE-697 在缓存命中后补读一次档位，或者干脆不给访客写缓存。
+   - daemon 两处：访客不应能注册或操作 runtime。DENE-697 选了「干脆不给访客写缓存」这条：`requireDaemonWorkspaceAccess` / `verifyDaemonWorkspaceAccess` 读到成员行后先过 `daemonAccessAllowedForTier`，访客按「找不到」拒绝，也不写 `MembershipCache`——缓存里存的是「是成员」这一个事实，一条代表访客的缓存项会让后面所有命中都放行。
 
 共享变更（改范围、项目加人减人）因为第 1 条，**没有任何缓存需要清**：下一次请求读库就是新答案。前端侧由 WebSocket 事件让相关 Query 失效即可，和现有 `member:updated` 同一个模式。
 

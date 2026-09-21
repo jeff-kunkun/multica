@@ -1544,6 +1544,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
+		// Guests are the read-only tier (DENE-695). One interceptor in
+		// front of every authenticated route, rather than a check
+		// repeated in each of the ~250 write handlers below — the rule
+		// then holds for routes nobody has written yet. See
+		// internal/middleware/guest.go for what a guest still may write.
+		r.Use(middleware.GuestReadOnly(queries))
 
 		// Plugin Action API. Called by the HOST PAGE on the signed-in user's
 		// session after a surface asks for something over the postMessage

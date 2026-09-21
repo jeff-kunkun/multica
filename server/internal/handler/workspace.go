@@ -574,7 +574,11 @@ func normalizeMemberRole(role string) (string, bool) {
 
 	role = strings.TrimSpace(role)
 	switch role {
-	case "owner", "admin", "member":
+	case "owner", "admin", "member", "guest":
+		// "guest" became selectable here together with DENE-697's
+		// read-only interceptor. Before that layer existed a guest held
+		// every Member write permission under a read-only name, so
+		// migration 502 deliberately left this list alone.
 		return role, true
 	default:
 		return "", false
