@@ -237,7 +237,7 @@ func TestReviewerIsNeverTheSeatThatDidTheWork(t *testing.T) {
 	}
 }
 
-func TestReviewerCollisionOnTopRungFallsBackToAHuman(t *testing.T) {
+func TestReviewerCollisionOnTopRungFallsToTheRungBelow(t *testing.T) {
 	store := newFakeStore()
 	v := confidentVerdict()
 	v.ExecutorTier = "strongest"
@@ -247,12 +247,41 @@ func TestReviewerCollisionOnTopRungFallsBackToAHuman(t *testing.T) {
 	if _, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// The slot names the PERSON, not the 「交给人」 placeholder the old select
-	// property could only offer. That is the second thing DENE-633 buys: the
-	// in-review handoff hands the ticket to whoever the slot names instead of
-	// re-deriving a target at handoff time.
-	if len(store.reviewer) != 1 || store.reviewer[0] != "Kun" {
-		t.Errorf("reviewer = %v, want [Kun] — the named notify target", store.reviewer)
+	// Nothing above the top rung can check it, and the slot may never name a
+	// person: a person in this slot is handed the ticket at 待验收 and routing
+	// never touches it again. The rung below checks, merges and closes.
+	if len(store.reviewer) != 1 || store.reviewer[0] != "孙悟空游戏" {
+		t.Errorf("reviewer = %v, want [孙悟空游戏] — the rung below the top rung", store.reviewer)
+	}
+}
+
+// The judge answering "this acceptance needs a person" must not put a person
+// in the slot. This is the regression DENE-633 was reopened for: a reviewer
+// slot naming a member freezes the ticket, because a ticket a person holds is
+// one routing never touches again.
+func TestJudgeAskingForAPersonStillWritesASeat(t *testing.T) {
+	store := newFakeStore()
+	v := confidentVerdict()
+	v.Reviewer = ReviewerHuman
+	judge := &fakeJudge{verdict: v}
+
+	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.ReviewerWritten.Kind != ReviewerAgent {
+		t.Fatalf("reviewer kind = %q, want %q — the slot may never name a person",
+			out.ReviewerWritten.Kind, ReviewerAgent)
+	}
+	if len(store.reviewer) != 1 || store.reviewer[0] != "布尔玛游戏" {
+		t.Errorf("reviewer = %v, want [布尔玛游戏] — the rung above the executor", store.reviewer)
+	}
+	body := store.comments[KindAssignment][0]
+	if !strings.Contains(body, "需要人拍板") {
+		t.Errorf("comment hides that the judge asked for a person:\n%s", body)
+	}
+	if !strings.Contains(body, "@ 对应的人") {
+		t.Errorf("comment does not tell the seat to ping the person:\n%s", body)
 	}
 }
 
@@ -306,7 +335,11 @@ func TestInReviewHandsOffToAgentWithoutMentioning(t *testing.T) {
 	}
 }
 
-func TestInReviewHandsOffToAPersonWithAMention(t *testing.T) {
+// A person can still be put in the slot by hand, and old tickets already hold
+// one. That person gets pinged — and keeps their hands free: reassigning the
+// ticket to them is what made the status unmovable, because every later
+// routing row skips an issue a person holds.
+func TestInReviewWithAPersonInTheSlotNotifiesWithoutReassigning(t *testing.T) {
 	store := newFakeStore()
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
@@ -318,18 +351,21 @@ func TestInReviewHandsOffToAPersonWithAMention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(store.handoffs) != 1 || store.handoffs[0] != "member:user-1" {
-		t.Errorf("handoffs = %v, want [member:user-1]", store.handoffs)
+	if len(store.handoffs) != 0 {
+		t.Errorf("handoffs = %v, want none — the ticket must not be reassigned to a person", store.handoffs)
+	}
+	if out.Action != ActionAdvised {
+		t.Errorf("action = %q, want %q", out.Action, ActionAdvised)
 	}
 	if !out.Mentioned {
-		t.Error("handed a person the issue without notifying them")
+		t.Error("the person named in the slot was not notified")
 	}
 	if len(store.subs) != 1 {
 		t.Errorf("subs = %v — a mention without a subscription does not notify", store.subs)
 	}
 	body := store.comments[KindHandoff][0]
-	if !strings.Contains(body, "不会有 agent 被叫醒") {
-		t.Errorf("handoff comment does not explain why a person was pinged:\n%s", body)
+	if !strings.Contains(body, "票没有被改派") {
+		t.Errorf("handoff comment does not say the ticket stayed put:\n%s", body)
 	}
 }
 
@@ -802,12 +838,12 @@ func TestInReviewDecidedReviewerIsNeverTheExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ReviewerWritten.Kind != ReviewerMember {
-		t.Errorf("reviewer = %q, want %q — the top rung did the work, so the check falls to a person",
-			out.ReviewerWritten.Label(), LabelHuman)
+	if out.ReviewerWritten.Label() != "孙悟空游戏" {
+		t.Errorf("reviewer = %q, want 孙悟空游戏 — the top rung did the work, so the rung below checks it",
+			out.ReviewerWritten.Label())
 	}
-	if len(store.handoffs) != 1 || store.handoffs[0] != "member:user-1" {
-		t.Errorf("handoffs = %v, want [member:user-1]", store.handoffs)
+	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-goku-g" {
+		t.Errorf("handoffs = %v, want [agent:a-goku-g]", store.handoffs)
 	}
 }
 
@@ -857,9 +893,11 @@ func TestOffLadderExecutorFallsBackToTheTopRungNotAPerson(t *testing.T) {
 	}
 }
 
-// The opposite case still holds: when the top rung did the work, there is
-// genuinely nothing above it, and the check falls to a person.
-func TestTopRungExecutorStillFallsBackToAPerson(t *testing.T) {
+// When the top rung did the work there is genuinely nothing above it. The
+// check goes one rung DOWN rather than to a person: a reviewer checks, merges
+// and closes, and a person in the slot takes the ticket out of routing's reach
+// for good.
+func TestTopRungExecutorFallsBackToTheRungBelow(t *testing.T) {
 	store := newFakeStore()
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
@@ -874,7 +912,11 @@ func TestTopRungExecutorStillFallsBackToAPerson(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ReviewerWritten.Kind != ReviewerMember {
-		t.Errorf("reviewer = %q, want %q", out.ReviewerWritten.Label(), LabelHuman)
+	if out.ReviewerWritten.Kind != ReviewerAgent {
+		t.Fatalf("reviewer kind = %q, want %q — the slot may never name a person",
+			out.ReviewerWritten.Kind, ReviewerAgent)
+	}
+	if out.ReviewerWritten.Label() != "孙悟空游戏" {
+		t.Errorf("reviewer = %q, want 孙悟空游戏", out.ReviewerWritten.Label())
 	}
 }

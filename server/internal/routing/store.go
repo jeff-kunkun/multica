@@ -46,6 +46,12 @@ const (
 	// ReviewerAgent — a seat accepts the ticket. ID is the agent id.
 	ReviewerAgent ReviewerTarget = "agent"
 	// ReviewerMember — a person accepts the ticket. ID is the user id.
+	//
+	// Routing never WRITES this value; only a person filling the slot by hand
+	// does, and tickets routed by earlier versions still carry it. At 待验收
+	// it means "ping this person", not "hand them the ticket": handing it over
+	// puts the ticket beyond routing's reach for good, which is what left
+	// people unable to move its status.
 	ReviewerMember ReviewerTarget = "member"
 	// ReviewerNoReview — this ticket needs no acceptance pass. It is a
 	// WRITTEN value and carries no id: an empty slot would be re-judged on
@@ -140,7 +146,9 @@ type Store interface {
 	SetReviewerIfUnset(ctx context.Context, workspaceID, issueID string, ref ReviewerRef) (written bool, err error)
 	// Handoff reassigns an issue that already has an assignee. Unlike the two
 	// above this is not a fill: the in-review row hands the ticket from the
-	// seat that did the work to the seat or person that accepts it.
+	// seat that did the work to the seat that accepts it. It is only ever
+	// called with assigneeType "agent" — routing does not hand tickets to
+	// people, it notifies them.
 	Handoff(ctx context.Context, workspaceID, issueID, assigneeType, assigneeID string) error
 
 	HasComment(ctx context.Context, workspaceID, issueID string, kind CommentKind) (bool, error)

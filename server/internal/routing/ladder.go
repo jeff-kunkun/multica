@@ -313,6 +313,23 @@ func StrongerThan(seats []Seat, seat Seat) (Seat, bool) {
 	return Seat{}, false
 }
 
+// WeakerThan returns the candidate one rung below the given seat, if the
+// ladder has one. It is the reviewer of last resort for work done by the top
+// rung: a reviewer checks, merges and closes — it does not redo the work — so
+// a rung below is a real check, and it is the only remaining way to keep
+// acceptance on a seat now that the slot may never name a person.
+func WeakerThan(seats []Seat, seat Seat) (Seat, bool) {
+	for i, s := range seats {
+		if s.ID == seat.ID {
+			if i == len(seats)-1 {
+				return Seat{}, false
+			}
+			return seats[i+1], true
+		}
+	}
+	return Seat{}, false
+}
+
 // TierKeys lists the rung keys in ladder order — the exact value range the
 // judge is allowed to answer with.
 func (l Ladder) TierKeys() []string {

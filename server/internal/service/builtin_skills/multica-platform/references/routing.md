@@ -9,10 +9,15 @@ write at all, so nothing below can move an issue for you.
 What it may do, and only when the slot is still **empty**:
 
 - **`todo`** — fill the assignee with a seat from the tier ladder, and fill the
-  issue's 验收席 with a seat, a named person, or 「不需要验收」.
-- **`in_review`** — hand the issue to whatever 验收席 holds: reassign to that
-  seat (which starts its run), or reassign to the named person and @ them.
-  「不需要验收」 is left alone.
+  issue's 验收席 with a seat or 「不需要验收」. **Routing never writes a person
+  into 验收席**: an issue a person holds is one routing never touches again, so
+  a person in that slot freezes the issue there. When the judge decides the
+  acceptance needs a human call, the slot still gets a seat and the decision
+  comment tells that seat to @ the person instead.
+- **`in_review`** — hand the issue to the seat in 验收席 (which starts its run).
+  「不需要验收」 is left alone. A 验收席 a person filled with a **person** is
+  notified with an @ and a subscription, and the issue is **not** reassigned —
+  whoever is holding it keeps it, so its status can still be moved.
 - **`blocked`** — post one advice comment and @ somebody. **No value is
   changed.**
 - **`in_progress` / `done` / `cancelled` / `backlog`** — nothing at all.
@@ -49,7 +54,8 @@ Consequences for how you work:
 - **Low confidence dispatches anyway**, to the ladder's fallback rung (the
   generic strong seat) — `reason` reads `executor fell back to 孙悟空:
   confidence 47% < threshold 60%`. The reviewer slot falls back to one rung
-  above the executor, or a person at the top rung.
+  above the executor, one rung below when the executor is already the top
+  rung, and 「不需要验收」 when the workspace has only one seat.
 - The project -> direction table decides which direction SEAT on a rung gets
   the work; it never changes the rung or the confidence. It is workspace data:
   `multica workspace routing-projects list | set <project> <direction> | unset
