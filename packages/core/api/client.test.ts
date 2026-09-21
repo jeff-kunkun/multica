@@ -3274,3 +3274,111 @@ describe("ApiClient agent specialisation reads (DENE-304)", () => {
     expect(agent?.id).toBe("agent-child");
   });
 });
+
+describe("ApiClient exportTaskLogs", () => {
+  const bundleBody = {
+    format: "multica.log-export",
+    version: 1,
+    generated_at: "2026-09-21T12:00:00Z",
+    task: {
+      id: "task-1",
+      issue_id: "issue-9",
+      issue_identifier: "DENE-599",
+      agent_name: "孙悟饭",
+      status: "failed",
+      exit_code: 1,
+      scope: { kind: "run" },
+      window: { from: "2026-09-21T11:59:00Z", to: "2026-09-21T12:00:00Z" },
+    },
+    run_count: 1,
+    entry_count: 2,
+    truncated: false,
+    runs: [],
+    entries: [],
+    summary_markdown: "## AI 摘要",
+  };
+
+  const exportResponse = (body: string, filename: string | null = "log-export-DENE-599.json") => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (filename !== null) headers["Content-Disposition"] = `attachment; filename="${filename}"`;
+    return new Response(body, { status: 200, headers });
+  };
+
+  it("returns the artifact verbatim and parses the bundle", async () => {
+    // Pretty-printed with a trailing newline: the CLI writes these exact bytes,
+    // so the client must not normalise them away.
+    const artifact = `${JSON.stringify(bundleBody, null, 2)}\n`;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(exportResponse(artifact)));
+
+    const client = new ApiClient("https://api.example.test");
+    const exported = await client.exportTaskLogs("task-1");
+
+    expect(exported.artifact).toBe(artifact);
+    expect(exported.bundle.task.issue_identifier).toBe("DENE-599");
+    expect(exported.bundle.entry_count).toBe(2);
+    expect(exported.filename).toBe("log-export-DENE-599.json");
+  });
+
+  it("sends the scope and window as query parameters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(exportResponse(JSON.stringify(bundleBody)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.exportTaskLogs("task-1", { scope: "hours", hours: 6 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/tasks/task-1/logs/export?scope=hours&hours=6",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("degrades to an empty bundle when the body is not JSON, keeping the artifact", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(exportResponse("not json at all")));
+
+    const client = new ApiClient("https://api.example.test");
+    const exported = await client.exportTaskLogs("task-1");
+
+    expect(exported.artifact).toBe("not json at all");
+    expect(exported.bundle.entry_count).toBe(0);
+    expect(exported.bundle.task.scope.kind).toBe("run");
+  });
+
+  it("reduces the server filename to its basename", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(exportResponse(JSON.stringify(bundleBody), "../../etc/passwd")),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const exported = await client.exportTaskLogs("task-1");
+
+    expect(exported.filename).toBe("passwd");
+  });
+
+  it("falls back to a stable filename when the header is missing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(exportResponse(JSON.stringify(bundleBody), null)),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const exported = await client.exportTaskLogs("task-1");
+
+    expect(exported.filename).toBe("log-export.json");
+  });
+
+  it("surfaces the server error message on failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "task not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.exportTaskLogs("task-1")).rejects.toThrow(/task not found/);
+  });
+});

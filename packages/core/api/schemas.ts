@@ -93,6 +93,7 @@ import type {
   Skill,
   SkillImportResult,
   Squad,
+  TaskLogExportBundle,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -4133,4 +4134,90 @@ export const EMPTY_JOIN_SHARE_LINK_RESPONSE: {
   },
   workspace_id: "",
   workspace_slug: "",
+};
+
+// ---------------------------------------------------------------------------
+// Task log export (DENE-599)
+// ---------------------------------------------------------------------------
+
+// The bundle is a document the server owns end to end. Every field is parsed
+// leniently with a safe default so a newer server that adds a field, or an
+// older one that omits it, still renders a usable export card instead of
+// blanking the dialog.
+const TaskLogExportRunSchema = z.object({
+  task_id: z.string().optional().default(""),
+  agent_id: z.string().optional().default(""),
+  agent_name: z.string().optional().default(""),
+  status: z.string().optional().default(""),
+  started_at: z.string().optional().default(""),
+  completed_at: z.string().optional().default(""),
+  exit_code: z.number().nullable().optional().default(null),
+  failure_reason: z.string().optional().default(""),
+  error: z.string().optional().default(""),
+}).loose();
+
+const TaskLogExportEntrySchema = z.object({
+  seq: z.number().optional().default(0),
+  task_id: z.string().optional().default(""),
+  at: z.string().optional().default(""),
+  type: z.string().optional().default(""),
+  tool: z.string().optional().default(""),
+  content: z.string().optional().default(""),
+  input: z.unknown().optional(),
+  output: z.string().optional().default(""),
+  output_truncated: z.boolean().optional().default(false),
+}).loose();
+
+export const TaskLogExportBundleSchema = z.object({
+  format: z.string().optional().default(""),
+  version: z.number().optional().default(0),
+  generated_at: z.string().optional().default(""),
+  task: z.object({
+    id: z.string().optional().default(""),
+    issue_id: z.string().optional().default(""),
+    issue_identifier: z.string().optional().default(""),
+    issue_title: z.string().optional().default(""),
+    agent_id: z.string().optional().default(""),
+    agent_name: z.string().optional().default(""),
+    status: z.string().optional().default(""),
+    exit_code: z.number().nullable().optional().default(null),
+    scope: z.object({
+      kind: z.string().optional().default("run"),
+      hours: z.number().optional(),
+    }).loose(),
+    window: z.object({
+      from: z.string().optional().default(""),
+      to: z.string().optional().default(""),
+    }).loose(),
+  }).loose(),
+  run_count: z.number().optional().default(0),
+  entry_count: z.number().optional().default(0),
+  truncated: z.boolean().optional().default(false),
+  runs: z.array(TaskLogExportRunSchema).optional().default([]),
+  entries: z.array(TaskLogExportEntrySchema).optional().default([]),
+  summary_markdown: z.string().optional().default(""),
+}).loose();
+
+export const EMPTY_TASK_LOG_EXPORT_BUNDLE: TaskLogExportBundle = {
+  format: "",
+  version: 0,
+  generated_at: "",
+  task: {
+    id: "",
+    issue_id: "",
+    issue_identifier: "",
+    issue_title: "",
+    agent_id: "",
+    agent_name: "",
+    status: "",
+    exit_code: null,
+    scope: { kind: "run" },
+    window: { from: "", to: "" },
+  },
+  run_count: 0,
+  entry_count: 0,
+  truncated: false,
+  runs: [],
+  entries: [],
+  summary_markdown: "",
 };
