@@ -1600,7 +1600,8 @@ export type RuntimeProviderPresetAction =
   | "models"
   | "upsert"
   | "delete"
-  | "activate";
+  | "activate"
+  | "replay";
 
 export type RuntimeProviderPresetStatus =
   | "pending"

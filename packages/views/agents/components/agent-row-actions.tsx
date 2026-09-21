@@ -307,7 +307,7 @@ export function AgentRowActions({
           // The active rows hanging off this base role, as the list knows
           // them. Solidify is per child, so the dialog needs the ids — the
           // server's refusal only carries names.
-          children={childAgents.filter((child) => !child.archived_at)}
+          childAgents={childAgents.filter((child) => !child.archived_at)}
           serverChildNames={refusedChildNames}
           onClose={() => setBlockedByChildren(false)}
           onArchived={invalidateAgents}

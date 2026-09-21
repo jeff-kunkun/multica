@@ -427,6 +427,9 @@ import {
   NotificationPreferenceResponseSchema,
   EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
   LabelSchema,
+  MemberWithUserSchema,
+  MemberWithUserListSchema,
+  EMPTY_MEMBER_WITH_USER,
   ListLabelsResponseSchema,
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
@@ -3384,7 +3387,10 @@ export class ApiClient {
 
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/members`);
+    return parseWithFallback(raw, MemberWithUserListSchema, [] as MemberWithUser[], {
+      endpoint: "GET /api/workspaces/{id}/members",
+    });
   }
 
   async createMember(workspaceId: string, data: CreateMemberRequest): Promise<Invitation> {
@@ -3395,9 +3401,12 @@ export class ApiClient {
   }
 
   async updateMember(workspaceId: string, memberId: string, data: UpdateMemberRequest): Promise<MemberWithUser> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/members/${memberId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, MemberWithUserSchema, EMPTY_MEMBER_WITH_USER, {
+      endpoint: "PATCH /api/workspaces/{id}/members/{memberId}",
     });
   }
 

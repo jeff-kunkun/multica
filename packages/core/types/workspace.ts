@@ -1,4 +1,10 @@
-export type MemberRole = "owner" | "admin" | "member";
+/**
+ * Workspace tier. `guest` is read-only: it exists in the DB (migration 502)
+ * and in the permission matrix, but member writes still reject it until the
+ * interception layer ships — see `GUEST_ROLE_RELEASED` in
+ * `workspace/member-roles.ts`.
+ */
+export type MemberRole = "owner" | "admin" | "member" | "guest";
 
 export interface WorkspaceRepo {
   url: string;

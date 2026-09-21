@@ -722,6 +722,65 @@ describe("ApiClient label response schemas", () => {
   });
 });
 
+describe("ApiClient member response schemas", () => {
+  const jsonResponse = (body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  it("falls back to an empty roster when the member list is not an array", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ members: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.listMembers("ws-1")).resolves.toEqual([]);
+  });
+
+  it("drops the whole roster rather than render a member with no id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse([{ workspace_id: "ws-1", user_id: "u-1", role: "admin" }]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.listMembers("ws-1")).resolves.toEqual([]);
+  });
+
+  it("keeps a tier string this build does not know instead of discarding the row", async () => {
+    // The role enum is deliberately lenient: a backend that grows a fifth
+    // tier must still render its roster. The members table is what refuses
+    // to edit the unknown row — see asMemberRole.
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse([
+        {
+          id: "m-1",
+          workspace_id: "ws-1",
+          user_id: "u-1",
+          role: "superadmin",
+        },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const members = await client.listMembers("ws-1");
+    expect(members).toHaveLength(1);
+    expect(members[0]).toMatchObject({ id: "m-1", role: "superadmin", name: "", email: "" });
+  });
+
+  it("falls back to the least privileged tier when a role write reply is malformed", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    // A garbled write reply must never paint the row as an owner.
+    await expect(
+      client.updateMember("ws-1", "m-1", { role: "admin" }),
+    ).resolves.toMatchObject({ id: "", role: "guest" });
+  });
+});
+
 describe("ApiClient agent builder runtime switch", () => {
   it("PATCHes the session runtime endpoint and returns the runtime the server bound", async () => {
     const fetchMock = vi.fn().mockResolvedValue(

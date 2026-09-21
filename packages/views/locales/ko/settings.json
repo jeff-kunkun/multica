@@ -1025,11 +1025,11 @@
       "daemon_offline": "로컬 데몬을 시작하면 이 컴퓨터의 작업 사본을 볼 수 있습니다.",
       "load_failed": "이 컴퓨터의 작업 사본을 읽지 못했습니다.",
       "enable_title": "병합된 사본 자동 정리",
-      "enable_description": "기본값은 꺼짐입니다. 켜더라도 Multica가 만들었고, 실행 중이 아니고, 커밋하지 않은 변경이 없고, 이미 병합되었고, 아래 기간을 넘긴 사본만 삭제합니다. 하나라도 어긋나면 남겨 둡니다.",
+      "enable_description": "기본값은 꺼짐입니다. 켜더라도 Multica가 만들었고, 실행 중이 아니고, 커밋하지 않은 변경이 없고, 아래 기간을 넘겼고, 변경이 이미 트렁크 브랜치에 들어가 있는(병합이든 squash든) 사본만 삭제합니다. 하나라도 어긋나면 남겨 둡니다.",
       "min_age_title": "최소 보관 기간",
       "min_age_description": "마지막 실행 이후 며칠이 지나야 정리 대상이 되는지. 시간이 아니라 일 단위입니다. 월요일에 다시 보려던 실행은 휴가 후에도 남아 있어야 하니까요.",
       "trunk_title": "병합 대상",
-      "trunk_description": "사본의 작업이 이미 들어가 있어야 하는 브랜치. 비워 두면 각 저장소의 기본 브랜치를 사용합니다.",
+      "trunk_description": "사본의 변경이 이미 들어가 있어야 하는 브랜치. 병합이든 squash든 상관없습니다. 비워 두면 각 저장소의 기본 브랜치를 사용합니다.",
       "trunk_placeholder": "main",
       "summary": "작업 사본 {{count}}개 · 디스크 {{total}} · 정리 가능 {{reclaimable}}",
       "advisory": "자동 정리가 꺼져 있어 아래 항목은 삭제되지 않습니다. 켰을 때 일어날 일입니다.",
@@ -1038,6 +1038,7 @@
       "remove_now": "지금 정리",
       "removed": "작업 사본을 정리했습니다",
       "reason_removable": "병합됨·깨끗함·실행 중 아님 — 이 사본은 정리됩니다.",
+      "reason_removable_squash": "트렁크에 squash로 들어감·깨끗함·실행 중 아님 — 커밋은 없지만 변경은 트렁크에 있으므로 이 사본은 정리됩니다.",
       "reason_uncommitted": "보관: 커밋하지 않은 변경이 남아 있습니다. 다른 곳에 없는 작업을 Multica가 삭제하는 일은 없습니다.",
       "reason_unmerged": "보관: 브랜치가 아직 트렁크에 들어가지 않았습니다.",
       "reason_too_recent": "보관: 마지막 실행이 너무 최근입니다.",
@@ -1095,6 +1096,10 @@
       "member": {
         "label": "멤버",
         "description": "태스크 생성 및 작업"
+      },
+      "guest": {
+        "label": "게스트",
+        "description": "읽기 전용, 공유된 항목만 볼 수 있음"
       }
     },
     "share_links_title": "공유 링크",
@@ -1116,7 +1121,32 @@
     "expiry_24h": "24시간",
     "expiry_7d": "7일",
     "expiry_30d": "30일",
-    "expiry_never": "무기한"
+    "expiry_never": "무기한",
+    "role_blocked": {
+      "guest_unreleased": "게스트는 아직 사용할 수 없습니다 — 읽기 전용 차단이 배포 중입니다",
+      "owner_requires_owner": "owner 등급은 owner만 부여할 수 있습니다"
+    },
+    "role_select_label": "{{name}}의 등급",
+    "unknown_role": "알 수 없는 등급",
+    "unknown_role_title": "이 버전이 알지 못하는 등급입니다. 앱을 업데이트한 뒤 변경하세요.",
+    "role_impact_title": "{{name}}을(를) {{role}}(으)로 변경했습니다",
+    "role_impact_gained": "추가: {{items}}",
+    "role_impact_lost": "제거: {{items}}",
+    "role_impact_none": "그 밖에 변경되는 것은 없습니다.",
+    "members_loading": "멤버를 불러오는 중…",
+    "empty_title": "아직 멤버가 없습니다",
+    "empty_description": "동료를 이 워크스페이스에 초대하세요.",
+    "empty_action": "멤버 초대",
+    "capabilities": {
+      "view_shared": "공유된 항목 보기",
+      "see_workspace_scope": "워크스페이스 전체 항목 보기",
+      "create_resources": "이슈·프로젝트·저장소 생성",
+      "comment_and_edit": "댓글·편집·상태 변경",
+      "be_assigned": "담당 지정 및 에이전트 실행",
+      "manage_members": "멤버 초대 및 등급 변경",
+      "workspace_settings": "워크스페이스 설정·연동·키",
+      "billing_and_transfer": "결제·이전·삭제"
+    }
   },
   "lark": {
     "section_title": "Lark",
