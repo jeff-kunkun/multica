@@ -47,7 +47,8 @@
       "cancel": "キャンセル",
       "save": "保存",
       "saving": "保存中…",
-      "save_failed": "ステータスを保存できませんでした。"
+      "save_failed": "ステータスを保存できませんでした。",
+      "behavior_hint": "このステータスは「{{category}}」とまったく同じ挙動になります。"
     },
     "archive_dialog": {
       "retry": "アーカイブを再試行",
@@ -71,7 +72,13 @@
       "unstarted": "バックログや計画済みを含む、まだ始まっていない作業。",
       "started": "進行中、レビュー中、またはブロック中の作業。",
       "done": "完了した作業。",
-      "closed": "完了しないことになった作業。"
+      "closed": "完了しないことになった作業。",
+      "backlog": "保留。ここに移動してもエージェントは起動しません。",
+      "todo": "待機中。ここに移動すると担当エージェントが起動します。",
+      "in_progress": "作業中。",
+      "in_review": "納品済み、レビュー待ち。オートパイロットの実行を完了します。",
+      "blocked": "外部依存でブロック中。",
+      "cancelled": "見送り。"
     },
     "built_in_descriptions": {
       "backlog": "保留。ここに移動してもエージェントは起動しません。",
@@ -81,7 +88,8 @@
       "blocked": "外部依存でブロック中。",
       "done": "完了。",
       "cancelled": "見送り。"
-    }
+    },
+    "description": "タスクが辿るワークフローを定義します。各ステータスの挙動は所属するカテゴリが決めます。"
   },
   "quick_actions": {
     "title": "クイックアクション",
@@ -160,12 +168,14 @@
       "sync_failed": "タイムゾーン設定を保存できませんでした。"
     },
     "sticky_comment_bar": {
-      "title": "コメント欄を下部に固定"
+      "title": "コメント欄を下部に固定",
+      "hint": "タスクのページをスクロールしても、コメントバーを常に下部に固定します。"
     },
     "issue_title": "タスク作成",
     "comments_title": "コメント",
     "device_hint": "このデバイスに保存されます。",
-    "issue_scope": "この設定は、このデバイスの現在のワークスペースに適用され、タスク作成時に表示するフィールドのみを変更します。"
+    "issue_scope": "この設定は、このデバイスの現在のワークスペースに適用され、タスク作成時に表示するフィールドのみを変更します。",
+    "description": "Multica の使い方をカスタマイズします。"
   },
   "shortcuts": {
     "title": "キーボードショートカット",
@@ -316,7 +326,9 @@
       "project": "プロジェクト",
       "due_date": "期限",
       "start_date": "開始日"
-    }
+    },
+    "quick_create_description": "クイック作成ツールバーに表示するフィールド。",
+    "manual_create_description": "手動作成ツールバーに表示するフィールド。"
   },
   "mcp": {
     "title": "MCP",
@@ -347,7 +359,8 @@
     "removed_toast": "共有 MCP サーバーを削除しました",
     "save_failed_toast": "共有 MCP サーバーを保存できませんでした",
     "rename_failed_toast": "共有 MCP サーバーの名前を変更できませんでした",
-    "remove_failed_toast": "共有 MCP サーバーを削除できませんでした"
+    "remove_failed_toast": "共有 MCP サーバーを削除できませんでした",
+    "empty_description": "まずここにサーバーを追加し、使用するエージェントの MCP タブから割り当ててください。"
   },
   "page": {
     "title": "設定",
@@ -476,8 +489,10 @@
       "deleted": "公開したプラグインを削除しました",
       "installed_version": "使用中",
       "review_install": "確認してインストール",
-      "review_upgrade": "確認してアップグレード"
-    }
+      "review_upgrade": "確認してアップグレード",
+      "description": "プラグインパッケージをアップロードします。Multica が保存と配信を行うため、作者自身のサーバーは不要です。"
+    },
+    "description": "このワークスペースにプラグインを公開し、特定のバージョンをインストールして、何にアクセスできるかを確認します。"
   },
   "properties": {
     "title": "プロパティ",
@@ -641,7 +656,8 @@
     "system": {
       "title": "システム通知",
       "description": "Multica がバックグラウンドにあるときにシステム通知を表示します。",
-      "label": "システム通知を表示"
+      "label": "システム通知を表示",
+      "hint": "アプリにフォーカスがないときに、新しいインボックス項目について OS のバナーを表示します。"
     },
     "browser": {
       "label": "ブラウザ通知",
@@ -790,7 +806,9 @@
     "section_repositories": "リポジトリ",
     "repositories_shortcut_label": "リポジトリ URL はリポジトリタブにあります",
     "repositories_shortcut_link": "リポジトリを管理 →",
-    "toast_failed": "GitHub 設定を更新できませんでした"
+    "toast_failed": "GitHub 設定を更新できませんでした",
+    "page_description": "GitHub App を接続し、Pull request が Multica 内でどう表示されるかを制御し、エージェントがコミット履歴に残す情報を設定します。",
+    "feature_auto_link_description": "PR のタイトルとブランチ名、および本文で closing keyword の直後にある番号をタスク識別子と照合し、自動でリンクを作成します。"
   },
   "vcs": {
     "section_title": "Git providers (self-hosted)",
@@ -904,7 +922,9 @@
     "install_error_installer_bind": "ボットは設置されましたが、Lark の身元情報を連携できませんでした。もう一度お試しいただくか、サポートにお問い合わせください。",
     "install_error_session_lost": "設置セッションが期限切れまたは失われました。もう一度スキャンしてやり直してください。",
     "install_error_forbidden": "このワークスペースに Lark ボットを設置する権限がなくなりました。ワークスペース管理者にお問い合わせください。",
-    "install_error_generic": "設置に失敗しました。もう一度お試しください。"
+    "install_error_generic": "設置に失敗しました。もう一度お試しください。",
+    "install_scan_hint_feishu": "Feishu → スキャン → 新しい PersonalAgent を承認してください。",
+    "install_scan_hint_lark": "Lark → スキャン → 新しい PersonalAgent を承認してください。"
   },
   "composio": {
     "section_title": "Composio",
@@ -1040,7 +1060,8 @@
     "byo_submitting": "接続中…",
     "byo_cancel": "キャンセル",
     "byo_success_toast": "DingTalk ボットを接続しました",
-    "byo_failed_toast": "DingTalk ボットを接続できませんでした"
+    "byo_failed_toast": "DingTalk ボットを接続できませんでした",
+    "groups_overview_description": "各接続に、エージェント、DingTalk ロボット、最近やり取りしたグループを表示します。"
   },
   "wecom": {
     "section_title": "WeCom",
@@ -1227,7 +1248,8 @@
       "up_to_date": "最新バージョンを使用しています。",
       "downloading": "v{{version}} をバックグラウンドでダウンロード中です。インストールの準備が整うとお知らせします。",
       "check_now": "今すぐ確認",
-      "checking": "確認中…"
+      "checking": "確認中…",
+      "description": "バックグラウンドでの自動アップデートを設定するか、新しいバージョンを手動で確認します。"
     },
     "daemon": {
       "title": "デーモン",
@@ -1298,7 +1320,10 @@
       "waiting_logs": "ログを待機中…",
       "reconnect_failed": "デーモンに再接続できませんでした",
       "try_again_moment": "しばらくしてからもう一度お試しください。",
-      "try_again": "もう一度お試しください。"
+      "try_again": "もう一度お試しください。",
+      "description": "ローカルエージェントのデーモンとデスクトップアプリの連携方法を設定します。",
+      "diagnostics_description": "識別情報と接続の詳細です。バグ報告やランタイムが表示されない問題の調査に役立ちます。",
+      "waiting_logs_description": "新しいログがリアルタイムで表示されます。"
     },
     "worktree_cleanup": {
       "title": "このマシン上の作業コピー",
@@ -1307,11 +1332,11 @@
       "daemon_offline": "ローカルデーモンを起動すると、このマシンの作業コピーを表示できます。",
       "load_failed": "このマシンの作業コピーを読み取れませんでした。",
       "enable_title": "マージ済みのコピーを自動で片付ける",
-      "enable_description": "既定はオフ。オンにしても、Multica が作成し、実行中でなく、未コミットの変更がなく、すでにマージ済みで、下の日数を超えたコピーだけが削除されます。ひとつでも満たさなければ残します。",
+      "enable_description": "既定はオフ。オンにしても、Multica が作成し、実行中でなく、未コミットの変更がなく、下の日数を超え、変更がすでにトランクブランチに入っている（マージでも squash でも可）コピーだけが削除されます。ひとつでも満たさなければ残します。",
       "min_age_title": "最低保持期間",
       "min_age_description": "最後の実行から何日経てば片付けの対象になるか。時間ではなく日単位です。月曜に見るつもりだった実行が、休暇明けにも残っているように。",
       "trunk_title": "マージ先",
-      "trunk_description": "コピーの作業がすでに入っている必要のあるブランチ。空にすると各リポジトリの既定ブランチを使います。",
+      "trunk_description": "コピーの変更がすでに入っている必要のあるブランチ。マージでも squash でも構いません。空にすると各リポジトリの既定ブランチを使います。",
       "trunk_placeholder": "main",
       "summary": "作業コピー {{count}} 件 · ディスク使用 {{total}} · 片付け可能 {{reclaimable}}",
       "advisory": "自動クリーンアップはオフなので、以下は削除されません。オンにした場合に起きることです。",
@@ -1320,6 +1345,7 @@
       "remove_now": "今すぐ片付ける",
       "removed": "作業コピーを片付けました",
       "reason_removable": "マージ済み・クリーン・実行中でないため、これは片付けられます。",
+      "reason_removable_squash": "トランクへ squash 済み・クリーン・実行中でない — コミットは入っていませんが変更は入っているため、これは片付けられます。",
       "reason_uncommitted": "保持：未コミットの変更が残っています。ほかのどこにもない作業を Multica が削除することはありません。",
       "reason_unmerged": "保持：ブランチがまだトランクに入っていません。",
       "reason_too_recent": "保持：最後の実行が最近すぎます。",
@@ -1377,6 +1403,10 @@
       "member": {
         "label": "メンバー",
         "description": "タスクの作成と作業"
+      },
+      "guest": {
+        "label": "ゲスト",
+        "description": "読み取り専用。共有されたものだけが見えます"
       }
     },
     "share_links_title": "共有リンク",
@@ -1398,7 +1428,31 @@
     "expiry_24h": "24時間",
     "expiry_7d": "7日",
     "expiry_30d": "30日",
-    "expiry_never": "無期限"
+    "expiry_never": "無期限",
+    "role_blocked": {
+      "owner_requires_owner": "owner を付与できるのは owner だけです"
+    },
+    "role_select_label": "{{name}} の権限",
+    "unknown_role": "不明な権限",
+    "unknown_role_title": "このメンバーの権限はこのバージョンでは扱えません。アプリを更新してください。",
+    "role_impact_title": "{{name}} を {{role}} に変更しました",
+    "role_impact_gained": "追加：{{items}}",
+    "role_impact_lost": "削除：{{items}}",
+    "role_impact_none": "ほかに変わるものはありません。",
+    "members_loading": "メンバーを読み込み中…",
+    "empty_title": "メンバーがいません",
+    "empty_description": "このワークスペースに同僚を招待しましょう。",
+    "empty_action": "メンバーを招待",
+    "capabilities": {
+      "view_shared": "共有されたものを見る",
+      "see_workspace_scope": "ワークスペース全体の内容を見る",
+      "create_resources": "issue・プロジェクト・リポジトリの作成",
+      "comment_and_edit": "コメント・編集・ステータス変更",
+      "be_assigned": "担当割り当てとエージェント起動",
+      "manage_members": "メンバー招待と権限変更",
+      "workspace_settings": "ワークスペース設定・連携・キー",
+      "billing_and_transfer": "請求・譲渡・削除"
+    }
   },
   "integrations": {
     "code_title": "コードとリポジトリ",
@@ -1413,7 +1467,8 @@
     "status_not_connected": "未接続",
     "status_loading": "確認中...",
     "status_unknown": "状態を取得できません",
-    "channel_hint": "{{channel}} でエージェントと会話し、タスクを作成します。"
+    "channel_hint": "{{channel}} でエージェントと会話し、タスクを作成します。",
+    "description": "ツールを接続して、各連携を管理します。"
   },
   "config_transfer": {
     "title": "設定の書き出し/読み込み",
@@ -1577,11 +1632,33 @@
     "enabled_label": "自動アサインを有効にする",
     "enabled_description": "オフの場合は従来どおりに動作し、課題にルーティングの痕跡もメンションも残りません。すでに書き込まれた値は保持されます。",
     "model_label": "ルーティングモデル",
-    "model_description": "判断を行うモデル。未設定ならスイッチがオンでも何も行いません。",
+    "model_description": "判断を行うモデル。エンドポイントとキーを保存すると利用可能なモデルを自動取得します。モデル ID の手入力もできます。",
+    "model_discovering": "エンドポイントからモデルを取得中…",
+    "model_discover_failed": "モデルを取得できませんでした。モデル ID を手入力してください。",
+    "model_discover_empty": "エンドポイントからモデルが返されませんでした。モデル ID を手入力してください。",
+    "model_discover_loaded": "このエンドポイントから {{count}} 件のモデルを取得しました。",
     "model_placeholder": "例: gpt-5.6-luna",
     "threshold_label": "確信度のしきい値",
-    "threshold_description": "これを下回る場合はその欄を埋めず、理由を添えて一度だけメンションします。既定は 0.70。",
-    "no_credentials_note": "ここに認証情報は保存されません。デプロイのモデル設定で管理します。",
+    "threshold_description": "これを下回っても割り当ては行い、フォールバック段（汎用の強）を使ってルーティングコメントに明記します。既定は 0.60。",
+    "stale_hours_label": "停滞チェックのしきい値（時間）",
+    "stale_hours_description": "レビュー待ちのままで実行中の run もない状態がこの時間を超えると、巡回の対象になります。既定の動作はレビュー担当に差し戻すだけでステータスは変えません。チケット上にレビュー担当の合格判定が既にある場合に限り、完了へ揃えます。既定は 24 時間。",
+    "gateway_endpoint_workspace": "モデル id はこのワークスペース独自のエンドポイントに送信されます：{{host}}。",
+    "gateway_endpoint_deployment": "モデル id はデプロイ共通の LLM エンドポイントに送信されます：{{host}}。",
+    "gateway_protocol_systemone": "このエンドポイントは TypeSafe System One（Jev）です。ルーティングは確率分布付きの型付き判断を求めるため、しきい値に使う確信度はモデルの自己申告ではなく実測値になります。",
+    "gateway_unset": "送信先のエンドポイントがありません。このワークスペースは未設定で、デプロイにも内部 LLM（MULTICA_LLM_BASE_URL / MULTICA_LLM_API_KEY）がありません。下でエンドポイントとキーを設定するか、サーバー管理者に依頼してください。",
+    "gateway_title": "このワークスペース独自のエンドポイント",
+    "gateway_url_label": "エンドポイント URL",
+    "gateway_url_description": "OpenAI 互換の base URL、または TypeSafe System One（Jev）なら https://api.typesafe.ai。両方空のままにすると、現在と同じくデプロイ共通のエンドポイントを使います。",
+    "gateway_url_placeholder": "https://api.example.com/v1 または https://api.typesafe.ai",
+    "gateway_key_label": "API キー",
+    "gateway_key_description": "暗号化して保存され、以後は表示されません（マスク表示もしません）。保存で置き換え、クリアでデプロイのエンドポイントに戻ります。",
+    "gateway_key_unstorable": "このデプロイはワークスペースのキーを保存できません（MULTICA_ROUTING_SECRET_KEY も JWT_SECRET も未設定）。サーバー管理者のみが対応できます。",
+    "gateway_key_placeholder": "sk-…",
+    "gateway_key_stored": "キーを保存済み",
+    "gateway_key_save": "キーを保存",
+    "gateway_key_clear": "クリア",
+    "gateway_pair_incomplete": "エンドポイントは両方の入力が必要です。片方だけの場合はデプロイ共通のエンドポイントを使います。",
+    "gateway_default_model": "そのデプロイ自体の既定モデルは {{model}} です。",
     "filters_title": "候補フィルター",
     "filters_placeholder": "今後対応予定。今回は未実装です。",
     "health_checking": "確認中…",

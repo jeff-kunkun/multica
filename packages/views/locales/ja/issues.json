@@ -100,7 +100,8 @@
     "breadcrumb_title": "タスク",
     "breadcrumb_workspace_fallback": "ワークスペース",
     "empty_title": "まだタスクがありません",
-    "move_failed": "タスクを移動できませんでした"
+    "move_failed": "タスクを移動できませんでした",
+    "empty_hint": "タスクを作成して始めましょう。"
   },
   "status": {
     "backlog": "バックログ",
@@ -129,6 +130,28 @@
     "value": "ステージ {{n}}",
     "blocking": "進行を阻止",
     "queued": "待機中"
+  },
+  "close_protocol": {
+    "missing": "プロトコル未クローズ",
+    "status_drift": "close.status ≠ {{issueStatus}}",
+    "next_owner": "次: {{name}}",
+    "next_owner_none": "次: なし",
+    "waiting_on": "{{id}} を待機",
+    "last_activity_missing": "活動時刻なし"
+  },
+  "blocker_summary": {
+    "title": "ブロック中 · 根因 {{count}} 件",
+    "needs_you": "{{count}} 件はあなたの対応が必要",
+    "root": "根本ブロッカー",
+    "propagated": "サブタスクによるブロック",
+    "kind_decision": "あなたの判断が必要",
+    "kind_permission": "あなたの許可が必要",
+    "kind_external": "外部依存を待機中",
+    "kind_capacity": "枠の回復を待機中",
+    "kind_action": "{{kind}}：{{action}}",
+    "kind_review_overdue": "レビュー期限超過 · {{ago}}",
+    "kind_wake_missed": "{{id}} は完了済みですが未起床",
+    "kind_cycle": "循環待ち"
   },
   "scope": {
     "all_label": "すべて",
@@ -326,10 +349,12 @@
     },
     "empty": {
       "assigned": {
-        "title": "割り当てられたタスクはありません"
+        "title": "割り当てられたタスクはありません",
+        "description": "ここに割り当てられたタスクがこの表示に表示されます。"
       },
       "created": {
-        "title": "作成したタスクはありません"
+        "title": "作成したタスクはありません",
+        "description": "ここで作成したタスクがこの表示に表示されます。"
       }
     },
     "search_placeholder": "タスクを検索...",
@@ -415,6 +440,7 @@
     "prop_priority": "優先度",
     "prop_stage": "ステージ",
     "prop_assignee": "担当者",
+    "prop_reviewer": "検収担当",
     "prop_start_date": "開始日",
     "prop_due_date": "期限",
     "prop_project": "プロジェクト",
@@ -469,7 +495,8 @@
     "alignment_continue_failed": "このすり合わせを再開できませんでした。すでに存在しない可能性があります。",
     "alignment_origin": "この課題を作ったすり合わせを見る",
     "alignment_start": "この課題からすり合わせる",
-    "alignment_started_by_another": "この作業にはすでにすり合わせがあります。"
+    "alignment_started_by_another": "この作業にはすでにすり合わせがあります。",
+    "pull_requests_empty": "まだリンクされた Pull request がありません。このタスクの識別子を PR のブランチ名かタイトルに入れるか、本文で Closes の直後に書くと、自動的にリンクされます。"
   },
   "timeline": {
     "loading": "読み込み中..."
@@ -617,7 +644,8 @@
   },
   "filtered_empty": {
     "title": "フィルター条件に一致するタスクがありません",
-    "clear_button": "フィルターを解除"
+    "clear_button": "フィルターを解除",
+    "hint": "フィルターを変更または解除すると、このビューのタスクが表示されます。"
   },
   "agent_live": {
     "is_working": "{{name}} が作業中",
@@ -675,7 +703,8 @@
       "source_unattributed": "責任メンバーを解決できません"
     },
     "usage_total_tooltip": "このタスクのトークン使用量 — クリックで実行ごとの内訳",
-    "status_deferred": "再試行中"
+    "status_deferred": "再試行中",
+    "usage_label": "トークン費用"
   },
   "usage_detail": {
     "title": "使用量の内訳",
@@ -701,7 +730,38 @@
     "total": "合計",
     "note_unpriced_other": "{{count}} 回の実行は使用量が記録されておらず、合計に含まれません。",
     "note_unmapped": "{{models}} は価格が未登録です。トークンは集計されますが費用は含まれません。",
-    "note_estimate": "費用は公開モデル料金からの概算です（プロバイダーが独自の費用を返した分を除く）。"
+    "note_estimate": "費用は公開モデル料金からの概算です（プロバイダーが独自の費用を返した分を除く）。",
+    "empty_hint": "使用量は実行終了時にデーモンが記録します。使用量レポート導入前の実行や、レポートしないデーモン上の実行には数値がありません。更新済みのデーモンで再実行すると収集が始まります。",
+    "loading": "実行履歴を読み込み中…",
+    "load_failed": "この課題の実行履歴を読み込めませんでした。",
+    "retry": "再試行"
+  },
+  "run_cost": {
+    "section": "この実行のトークン費用",
+    "segment": {
+      "input": "新規入力",
+      "cacheWrite": "キャッシュ書き込み",
+      "cacheRead": "キャッシュ読み取り",
+      "output": "出力"
+    },
+    "figure_cost": "この実行",
+    "figure_cost_hint": "この課題の {{pct}}%",
+    "figure_cost_hint_unknown": "課題内の比率は算出できません",
+    "figure_cache": "キャッシュヒット率",
+    "figure_cache_hint": "読み取り {{reads}} · 書き込み {{writes}}",
+    "figure_largest": "最大の構成要素",
+    "figure_largest_hint": "{{pct}}% · {{tokens}} トークン",
+    "fact_turns": "ターン数",
+    "fact_start": "セッション",
+    "fact_start_resumed": "再開",
+    "fact_start_cold": "コールドスタート",
+    "fact_last_context": "最終ステップの文脈量",
+    "fact_queue": "待機",
+    "fact_prepare": "準備",
+    "fact_first_output": "初回出力まで",
+    "fact_trigger": "トリガー元",
+    "facts_unavailable": "この実行はターン数と区間所要時間を報告していません。実行メタデータ報告より古いデーモンで動作しました。",
+    "note_no_prompt_split": "プロバイダーはこの 4 区分で課金し、報告もこの 4 区分だけです。トークンはランタイムブリーフ・ツールスキーマ・履歴・ツール結果には割り当てられないため、本ビューではその分割を行いません。"
   },
   "terminate_dialog": {
     "title": "この実行を停止しますか？",
@@ -757,7 +817,9 @@
     "remove_parent_issue": "親タスクを解除",
     "remove_parent_issue_success": "親タスクを解除しました",
     "add_sub_issue": "サブタスクを追加...",
-    "delete_issue": "タスクを削除"
+    "delete_issue": "タスクを削除",
+    "pin_to_sidebar": "サイドバーにピン留め",
+    "unpin_from_sidebar": "サイドバーのピン留めを解除"
   },
   "pickers": {
     "custom_property": {
@@ -789,6 +851,14 @@
       "squads_group": "スクワッド",
       "agent_runtime_required": "作業を割り当てる前に、このエージェントにランタイムをバインドしてください",
       "squad_runtime_required": "作業を割り当てる前に、このスクワッドのリーダーにランタイムをバインドしてください"
+    },
+    "reviewer": {
+      "trigger_undecided": "未指定",
+      "trigger_no_review": "検収不要",
+      "search_placeholder": "検収担当を指定...",
+      "no_review": "検収不要",
+      "members_group": "メンバー",
+      "agents_group": "エージェント"
     },
     "start_date": {
       "trigger_label": "開始日",
@@ -925,28 +995,6 @@
     "surface_loading": "{{name}} を読み込んでいます…",
     "surface_unavailable": "{{name}} のインターフェースを読み込めません。インストール済みのバージョンに含まれていない可能性があります。",
     "surface_navigated": "{{name}} がパネルを外部から読み込んだページに置き換えようとしました。停止して接続を切りました。ワークスペース管理者に知らせてください。"
-  },
-  "close_protocol": {
-    "missing": "プロトコル未クローズ",
-    "status_drift": "close.status ≠ {{issueStatus}}",
-    "next_owner": "次: {{name}}",
-    "next_owner_none": "次: なし",
-    "waiting_on": "{{id}} を待機",
-    "last_activity_missing": "活動時刻なし"
-  },
-  "blocker_summary": {
-    "title": "ブロック中 · 根因 {{count}} 件",
-    "needs_you": "{{count}} 件はあなたの対応が必要",
-    "root": "根本ブロッカー",
-    "propagated": "サブタスクによるブロック",
-    "kind_decision": "あなたの判断が必要",
-    "kind_permission": "あなたの許可が必要",
-    "kind_external": "外部依存を待機中",
-    "kind_capacity": "枠の回復を待機中",
-    "kind_action": "{{kind}}：{{action}}",
-    "kind_review_overdue": "レビュー期限超過 · {{ago}}",
-    "kind_wake_missed": "{{id}} は完了済みですが未起床",
-    "kind_cycle": "循環待ち"
   },
   "manage_views": {
     "visibility_label": "{{name}} の公開範囲",

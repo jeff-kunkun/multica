@@ -102,7 +102,8 @@
     "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "Workspace",
     "empty_title": "No issues yet",
-    "move_failed": "Failed to move issue"
+    "move_failed": "Failed to move issue",
+    "empty_hint": "Create an issue to get started."
   },
   "status": {
     "backlog": "Backlog",
@@ -131,6 +132,28 @@
     "value": "Stage {{n}}",
     "blocking": "Blocking",
     "queued": "Queued"
+  },
+  "close_protocol": {
+    "missing": "Not closed under protocol",
+    "status_drift": "close.status ≠ {{issueStatus}}",
+    "next_owner": "Next: {{name}}",
+    "next_owner_none": "Next: none",
+    "waiting_on": "Waiting on {{id}}",
+    "last_activity_missing": "No activity time"
+  },
+  "blocker_summary": {
+    "title": "Blocked · {{count}} root cause(s)",
+    "needs_you": "{{count}} need you",
+    "root": "Root blocker",
+    "propagated": "Blocked by a sub-issue",
+    "kind_decision": "Needs your decision",
+    "kind_permission": "Needs your permission",
+    "kind_external": "Waiting on an external dependency",
+    "kind_capacity": "Waiting on capacity",
+    "kind_action": "{{kind}}: {{action}}",
+    "kind_review_overdue": "Review overdue · {{ago}}",
+    "kind_wake_missed": "{{id}} finished without a wake-up",
+    "kind_cycle": "Waiting in a cycle"
   },
   "scope": {
     "all_label": "All",
@@ -330,10 +353,12 @@
     },
     "empty": {
       "assigned": {
-        "title": "No assigned issues"
+        "title": "No assigned issues",
+        "description": "Issues assigned here will appear in this view."
       },
       "created": {
-        "title": "No created issues"
+        "title": "No created issues",
+        "description": "Issues created here will appear in this view."
       }
     },
     "search_placeholder": "Search issues...",
@@ -420,6 +445,7 @@
     "prop_priority": "Priority",
     "prop_stage": "Stage",
     "prop_assignee": "Assignee",
+    "prop_reviewer": "Reviewer",
     "prop_start_date": "Start date",
     "prop_due_date": "Due date",
     "prop_project": "Project",
@@ -474,7 +500,8 @@
     "alignment_continue_failed": "Could not reopen this alignment. It may no longer be available.",
     "alignment_origin": "View the alignment that created this",
     "alignment_start": "Align on this issue",
-    "alignment_started_by_another": "An alignment is already running for this work."
+    "alignment_started_by_another": "An alignment is already running for this work.",
+    "pull_requests_empty": "No linked pull requests yet. Put this issue's identifier in a PR's branch name or title, or write it after Closes in the PR body, to auto-link it."
   },
   "timeline": {
     "loading": "Loading..."
@@ -639,7 +666,8 @@
   },
   "filtered_empty": {
     "title": "No issues match these filters",
-    "clear_button": "Clear filters"
+    "clear_button": "Clear filters",
+    "hint": "Adjust or clear the filters to see the issues in this view."
   },
   "agent_live": {
     "is_working": "{{name}} is working",
@@ -699,7 +727,8 @@
       "source_unattributed": "No responsible member resolved"
     },
     "usage_total_tooltip": "Token usage for this issue — click for the per-run breakdown",
-    "status_deferred": "Retrying"
+    "status_deferred": "Retrying",
+    "usage_label": "Token cost"
   },
   "usage_detail": {
     "title": "Usage breakdown",
@@ -728,7 +757,38 @@
     "note_unpriced_one": "{{count}} run has no recorded usage and is not counted in the total.",
     "note_unpriced_other": "{{count}} runs have no recorded usage and are not counted in the total.",
     "note_unmapped": "No price on file for {{models}}; their tokens are counted but their cost is not.",
-    "note_estimate": "Cost is estimated from published model rates, except where the provider reported its own figure."
+    "note_estimate": "Cost is estimated from published model rates, except where the provider reported its own figure.",
+    "empty_hint": "Usage is recorded by the daemon when a run finishes. Runs that predate usage reporting, and runs on a daemon that is not reporting, have no figure — rerun the issue on an up-to-date daemon to start collecting one.",
+    "loading": "Loading runs…",
+    "load_failed": "Could not load this issue's runs.",
+    "retry": "Try again"
+  },
+  "run_cost": {
+    "section": "Run token cost",
+    "segment": {
+      "input": "Fresh input",
+      "cacheWrite": "Cache write",
+      "cacheRead": "Cache read",
+      "output": "Output"
+    },
+    "figure_cost": "This run",
+    "figure_cost_hint": "{{pct}}% of this issue",
+    "figure_cost_hint_unknown": "Share of issue unavailable",
+    "figure_cache": "Cache hit rate",
+    "figure_cache_hint": "{{reads}} read · {{writes}} written",
+    "figure_largest": "Biggest block",
+    "figure_largest_hint": "{{pct}}% · {{tokens}} tokens",
+    "fact_turns": "Turns",
+    "fact_start": "Session",
+    "fact_start_resumed": "Resumed",
+    "fact_start_cold": "Cold start",
+    "fact_last_context": "Context at last step",
+    "fact_queue": "Queued",
+    "fact_prepare": "Prepare",
+    "fact_first_output": "To first output",
+    "fact_trigger": "Triggered by",
+    "facts_unavailable": "This run reported no turn count or timing — it ran on a daemon older than run metadata reporting.",
+    "note_no_prompt_split": "Providers bill these four buckets and report only these four. Tokens are not attributed to the runtime brief, tool schemas, history or tool results, so this view does not split them that way."
   },
   "terminate_dialog": {
     "title": "Stop this run?",
@@ -788,7 +848,9 @@
     "remove_parent_issue": "Remove parent issue",
     "remove_parent_issue_success": "Removed parent issue",
     "add_sub_issue": "Add sub-issue...",
-    "delete_issue": "Delete issue"
+    "delete_issue": "Delete issue",
+    "pin_to_sidebar": "Pin to sidebar",
+    "unpin_from_sidebar": "Unpin from sidebar"
   },
   "pickers": {
     "custom_property": {
@@ -820,6 +882,14 @@
       "squads_group": "Squads",
       "agent_runtime_required": "Bind a runtime before assigning work to this agent",
       "squad_runtime_required": "Bind a runtime to this squad's leader before assigning work"
+    },
+    "reviewer": {
+      "trigger_undecided": "Undecided",
+      "trigger_no_review": "No review needed",
+      "search_placeholder": "Review by...",
+      "no_review": "No review needed",
+      "members_group": "Members",
+      "agents_group": "Agents"
     },
     "start_date": {
       "trigger_label": "Start date",
@@ -956,28 +1026,6 @@
     "surface_loading": "Loading {{name}}…",
     "surface_unavailable": "{{name}} could not load its interface. The installed version may not include it.",
     "surface_navigated": "{{name}} tried to replace its panel with a page loaded from elsewhere. It has been stopped and disconnected — tell your workspace admin."
-  },
-  "close_protocol": {
-    "missing": "Not closed under protocol",
-    "status_drift": "close.status ≠ {{issueStatus}}",
-    "next_owner": "Next: {{name}}",
-    "next_owner_none": "Next: none",
-    "waiting_on": "Waiting on {{id}}",
-    "last_activity_missing": "No activity time"
-  },
-  "blocker_summary": {
-    "title": "Blocked · {{count}} root cause(s)",
-    "needs_you": "{{count}} need you",
-    "root": "Root blocker",
-    "propagated": "Blocked by a sub-issue",
-    "kind_decision": "Needs your decision",
-    "kind_permission": "Needs your permission",
-    "kind_external": "Waiting on an external dependency",
-    "kind_capacity": "Waiting on capacity",
-    "kind_action": "{{kind}}: {{action}}",
-    "kind_review_overdue": "Review overdue · {{ago}}",
-    "kind_wake_missed": "{{id}} finished without a wake-up",
-    "kind_cycle": "Waiting in a cycle"
   },
   "manage_views": {
     "visibility_label": "Sharing for {{name}}",

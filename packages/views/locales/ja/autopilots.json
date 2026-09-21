@@ -340,7 +340,8 @@
         "label": "実行のみ",
         "description": "タスクを作成せず、静かに実行します"
       }
-    }
+    },
+    "schedule_disabled_reason": "このオートパイロットには複数のスケジュールがあります。詳細ページで編集してください。"
   },
   "schedule_editor": {
     "time_label": "時刻",

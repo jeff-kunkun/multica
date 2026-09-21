@@ -96,7 +96,8 @@
     "cancel": "キャンセル",
     "add_confirm": "追加（{{num}}）",
     "adding": "追加中...",
-    "added_multi_toast_other": "{{count}} 件のエージェントに追加しました"
+    "added_multi_toast_other": "{{count}} 件のエージェントに追加しました",
+    "add_dialog_description": "選択したスキルを追加するエージェントを選んでください。"
   },
   "toolbar": {
     "result_count_title": "該当スキル / 全スキル",
@@ -353,7 +354,9 @@
     "conflict_footer": "{{count}} 件の競合判断が残っています。",
     "conflict_apply_button": "決定を適用",
     "conflict_missing_resolution": "この競合の処理方法を選択してください。",
-    "conflict_name_still_exists": "その名前はすでに存在します。別の名前を選択するか、スキップしてください。"
+    "conflict_name_still_exists": "その名前はすでに存在します。別の名前を選択するか、スキップしてください。",
+    "no_skills_hint": "このランタイムには、まだ検出可能なローカルスキルがありません。",
+    "no_search_results_title": "一致するローカルスキルはありません"
   },
   "file_tree": {
     "no_files": "ファイルなし",

@@ -3,13 +3,16 @@
     "wordmark": "Multica",
     "label": "オンボーディングの手順",
     "about_you": {
-      "label": "あなたについて"
+      "label": "あなたについて",
+      "description": "役割と、実現したいこと。"
     },
     "workspace": {
-      "label": "ワークスペース"
+      "label": "ワークスペース",
+      "description": "名前と URL を決める。"
     },
     "runtime": {
-      "label": "Mika を知る"
+      "label": "Mika を知る",
+      "description": "最初のエージェント仲間と、その実行環境。"
     }
   },
   "welcome": {
@@ -42,7 +45,9 @@
       "card5_body_suffix": " さんが指摘した点も対応済みです。プレビューリンクは PR にあります。",
       "card5_mention_you": "@あなた",
       "card5_timestamp": "たった今"
-    }
+    },
+    "lede_desktop": "完了するころには、実際のエージェントがあなたの最初のタスクに返信しています。",
+    "illustration_caption": "すべてのタスク、すべてのスレッド、すべての判断を、チームとエージェントで共有。"
   },
   "common": {
     "back": "戻る",
@@ -56,7 +61,8 @@
     "eyebrow": "ちょっと質問",
     "lede": "Multica を知ったきっかけを教えてください。",
     "submit": "送信",
-    "save_failed_toast": "保存できませんでした"
+    "save_failed_toast": "保存できませんでした",
+    "hint_ready": "OK です。準備ができたら送信を押してください。"
   },
   "questions": {
     "about_you": {
@@ -111,7 +117,8 @@
     "other_aria": "別の内容を入力"
   },
   "step_question": {
-    "hint_pick": "スキップできます。"
+    "hint_pick": "スキップできます。",
+    "hint_continue": "いい感じです。準備ができたら「続ける」を押してください。"
   },
   "cli_install": {
     "copy_aria": "コピー",
@@ -189,7 +196,8 @@
     "creation_disabled_logout": "ログアウト",
     "creation_disabled_eyebrow_resume": "あなたのワークスペース",
     "creation_disabled_headline_resume": "{{name}} で続けましょう。",
-    "creation_disabled_lede_resume": "このインスタンスではワークスペースの作成が無効になっているため、既存のワークスペースへ続けて移動します。"
+    "creation_disabled_lede_resume": "このインスタンスではワークスペースの作成が無効になっているため、既存のワークスペースへ続けて移動します。",
+    "create_new_subtitle": "新しく始めましょう — 別の業務領域のための独立した場所です。"
   },
   "step_runtime": {
     "scanning_headline": "このコンピュータを接続中…",
@@ -217,7 +225,9 @@
     "hint_selected": "選択中: {{name}}",
     "hint_pick": "Mika と始めるには、上でエージェントランタイムを選んでください。",
     "hint_waiting": "最初の結果を待っています…",
-    "continue": "Mika と始める"
+    "continue": "Mika と始める",
+    "found_lede": "このコンピュータで見つかったエージェントランタイムです。あとで切り替えたり追加したりできます。",
+    "hint_skip_or_refresh": "インストール後に更新するか、スキップしてワークスペースに入ってください。"
   },
   "step_platform": {
     "eyebrow": "コンピュータを接続",
@@ -246,7 +256,8 @@
     "stage_slow_suffix": " を実行したターミナルにエラーがないか確認してください。",
     "stage_stalled_prefix": "まだ何も届いていません。ターミナルに不慣れな場合は、",
     "stage_stalled_term": "デスクトップ",
-    "stage_stalled_suffix": "のほうがスムーズです — ワンクリックでこのコンピュータが接続されます。このダイアログを閉じてデスクトップを選ぶか、スキップを押して続けてください。"
+    "stage_stalled_suffix": "のほうがスムーズです — ワンクリックでこのコンピュータが接続されます。このダイアログを閉じてデスクトップを選ぶか、スキップを押して続けてください。",
+    "cli_dialog_description": "デスクトップと同じ接続を、ターミナルからセットアップします。サーバー、リモート開発環境、ヘッドレスなコンピュータに使ってください。"
   },
   "errors": {
     "skip_failed": "オンボーディングを完了できませんでした",

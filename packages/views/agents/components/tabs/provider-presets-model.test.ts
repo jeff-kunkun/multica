@@ -5,20 +5,34 @@
 // wiring and does not re-run this matrix through a DOM mount.
 
 import { describe, expect, it } from "vitest";
-import type { RuntimeProviderPreset } from "@multica/core/types";
+import type { RuntimeDevice, RuntimeProviderPreset } from "@multica/core/types";
 import {
+  IDLE_PROVIDER_PRESET_SAVE,
+  canFetchProviderPresetModels,
   canManageProviderPresets,
   deletingActivePreset,
   emptyProviderPresetForm,
+  filterProviderPresetModels,
+  isKnownProviderPresetFailure,
+  providerConsoleUrl,
+  providerPresetContextWindow,
+  providerPresetFailureFrom,
   providerPresetFormFrom,
   providerPresetKeyState,
   providerPresetModels,
+  providerPresetNeedsKeyRegeneration,
+  providerPresetPeerState,
   providerPresetSummaryLine,
+  providerPresetSyncInput,
+  providerPresetSyncNeedsKey,
+  providerPresetSyncTargets,
   providerPresetUpsertInput,
   providerPresetsViewState,
+  reduceProviderPresetSave,
   supportsProviderPresets,
   validateProviderPresetForm,
 } from "./provider-presets-model";
+import type { ProviderPresetSyncTarget } from "./provider-presets-model";
 
 function preset(overrides: Partial<RuntimeProviderPreset> = {}): RuntimeProviderPreset {
   return {
@@ -163,10 +177,16 @@ describe("validateProviderPresetForm", () => {
     );
   });
 
-  it("allows an empty model list so the daemon can discover models from the endpoint", () => {
+  it("requires at least one model, because saving verifies one against the endpoint", () => {
     expect(
       validateProviderPresetForm({ ...valid(), models: [{ id: "  ", name: "x" }] }),
-    ).toEqual([]);
+    ).toContain("models_required");
+    expect(validateProviderPresetForm({ ...valid(), models: [] })).toContain(
+      "models_required",
+    );
+    expect(
+      validateProviderPresetForm({ ...valid(), models: [{ id: "m1", name: "" }] }),
+    ).not.toContain("models_required");
   });
 });
 
@@ -255,5 +275,356 @@ describe("presentation helpers", () => {
   it("flags a delete that would leave the machine with no default model", () => {
     expect(deletingActivePreset(preset({ active: true }))).toBe(true);
     expect(deletingActivePreset(preset())).toBe(false);
+  });
+});
+
+describe("the fetched catalog", () => {
+  const catalog = [
+    { id: "deepseek/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", context_window: 1_000_000 },
+    { id: "claude-sonnet-5", context_length: 200_000 },
+    { id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
+  ];
+
+  it("filters on both the real id and the display name", () => {
+    // 70+ rows is the normal case, so both fields have to be searchable.
+    expect(filterProviderPresetModels(catalog, "deepseek").map((m) => m.id)).toEqual([
+      "deepseek/deepseek-v4.1-flash",
+    ]);
+    expect(filterProviderPresetModels(catalog, "SONNET").map((m) => m.id)).toEqual([
+      "claude-sonnet-5",
+    ]);
+    expect(filterProviderPresetModels(catalog, "  ")).toHaveLength(3);
+    expect(filterProviderPresetModels(catalog, "nothing")).toEqual([]);
+  });
+
+  it("reads either spelling of the context window, and rejects a non-size", () => {
+    expect(providerPresetContextWindow(catalog[0]!)).toBe(1_000_000);
+    expect(providerPresetContextWindow(catalog[1]!)).toBe(200_000);
+    expect(providerPresetContextWindow(catalog[2]!)).toBeNull();
+    expect(providerPresetContextWindow({ id: "m", context_window: 0 })).toBeNull();
+  });
+
+  it("offers the fetch only with an endpoint and a usable credential", () => {
+    const base = {
+      ...emptyProviderPresetForm(),
+      baseUrl: "https://api.example.test/v1",
+    };
+    expect(canFetchProviderPresetModels(base)).toBe(false);
+    expect(canFetchProviderPresetModels({ ...base, apiKey: "sk-1" })).toBe(true);
+    // Editing reuses the stored key: making the user retype it would be a second
+    // dead end on top of the one the selector removes.
+    expect(
+      canFetchProviderPresetModels({
+        ...base,
+        editingId: "command-code",
+        hasKey: true,
+      }),
+    ).toBe(true);
+    expect(canFetchProviderPresetModels({ ...base, apiKey: " " })).toBe(false);
+    expect(canFetchProviderPresetModels({ ...base, baseUrl: "" })).toBe(false);
+  });
+});
+
+describe("failure translation", () => {
+  it("carries the daemon's kind and parameters onto the failure", () => {
+    const error = Object.assign(new Error("quota"), {
+      kind: "rate_limited",
+      params: { status: "429", action: "regenerate_key" },
+    });
+    const failure = providerPresetFailureFrom(error, "fallback");
+    expect(failure.kind).toBe("rate_limited");
+    expect(failure.params.action).toBe("regenerate_key");
+    expect(providerPresetNeedsKeyRegeneration(failure)).toBe(true);
+  });
+
+  it("uses the caller's fallback when the error carries no classification", () => {
+    expect(providerPresetFailureFrom(new Error(""), "Could not save.")).toEqual({
+      kind: "",
+      params: {},
+      message: "Could not save.",
+    });
+    expect(providerPresetFailureFrom(undefined, "Could not save.").message).toBe(
+      "Could not save.",
+    );
+    // A kind that is not a string (or params with a non-string value) must not
+    // reach the copy switch as if it were one.
+    const weird = Object.assign(new Error("boom"), {
+      kind: 7,
+      params: { reset_at_local: 3 },
+    });
+    expect(providerPresetFailureFrom(weird, "fallback")).toEqual({
+      kind: "",
+      params: {},
+      message: "boom",
+    });
+  });
+
+  it("knows the kinds this build has copy for", () => {
+    expect(isKnownProviderPresetFailure("rate_limited")).toBe(true);
+    expect(isKnownProviderPresetFailure("something_newer")).toBe(false);
+    expect(isKnownProviderPresetFailure("")).toBe(false);
+  });
+
+  it("derives a clickable dashboard target from the endpoint", () => {
+    expect(providerConsoleUrl("https://api.commandcode.ai/provider/v1")).toBe(
+      "https://api.commandcode.ai/",
+    );
+    for (const bad of ["", "not a url", "file:///etc/passwd"]) {
+      expect(providerConsoleUrl(bad)).toBeNull();
+    }
+  });
+});
+
+describe("the save state machine", () => {
+  const failure = { kind: "rate_limited", params: {}, message: "quota" };
+
+  it("moves idle → verifying → saved on success", () => {
+    const verifying = reduceProviderPresetSave(IDLE_PROVIDER_PRESET_SAVE, {
+      type: "begin",
+    });
+    expect(verifying.phase).toBe("verifying");
+    expect(reduceProviderPresetSave(verifying, { type: "succeeded" })).toEqual({
+      phase: "saved",
+      failure: null,
+    });
+  });
+
+  it("never reports saved when verification failed", () => {
+    const verifying = reduceProviderPresetSave(IDLE_PROVIDER_PRESET_SAVE, {
+      type: "begin",
+    });
+    const failed = reduceProviderPresetSave(verifying, {
+      type: "failed",
+      failure,
+    });
+    expect(failed.phase).toBe("failed");
+    expect(failed.failure).toEqual(failure);
+    expect(failed.phase).not.toBe("saved");
+
+    // A late success must not paper over a failure that is still on screen.
+    expect(reduceProviderPresetSave(failed, { type: "succeeded" })).toBe(failed);
+  });
+
+  it("ignores a result for a run that was never started", () => {
+    expect(
+      reduceProviderPresetSave(IDLE_PROVIDER_PRESET_SAVE, { type: "succeeded" }),
+    ).toBe(IDLE_PROVIDER_PRESET_SAVE);
+    expect(
+      reduceProviderPresetSave(IDLE_PROVIDER_PRESET_SAVE, {
+        type: "failed",
+        failure,
+      }),
+    ).toBe(IDLE_PROVIDER_PRESET_SAVE);
+  });
+
+  it("clears the previous failure when a new attempt starts", () => {
+    const failed = reduceProviderPresetSave(
+      reduceProviderPresetSave(IDLE_PROVIDER_PRESET_SAVE, { type: "begin" }),
+      { type: "failed", failure },
+    );
+    expect(
+      reduceProviderPresetSave(failed, { type: "begin" }).failure,
+    ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-machine sync (DENE-335)
+// ---------------------------------------------------------------------------
+
+function runtime(
+  overrides: Partial<
+    Pick<RuntimeDevice, "id" | "name" | "custom_name" | "provider" | "status">
+  > = {},
+): Pick<RuntimeDevice, "id" | "name" | "custom_name" | "provider" | "status"> {
+  return {
+    id: "rt-1",
+    name: "MacBook-Pro (dsh)",
+    custom_name: null,
+    provider: "dsh",
+    status: "online",
+    ...overrides,
+  };
+}
+
+function target(
+  overrides: Partial<ProviderPresetSyncTarget> = {},
+): ProviderPresetSyncTarget {
+  return { runtimeId: "rt-2", label: "MacBook-Air-5", online: true, ...overrides };
+}
+
+describe("providerPresetSyncTargets", () => {
+  it("drops the machine being edited and every CLI without a preset driver", () => {
+    const targets = providerPresetSyncTargets(
+      [
+        runtime({ id: "rt-1" }),
+        runtime({ id: "rt-2", name: "Air" }),
+        runtime({ id: "rt-3", name: "Codex box", provider: "codex" }),
+      ],
+      "rt-1",
+    );
+
+    expect(targets.map((entry) => entry.runtimeId)).toEqual(["rt-2"]);
+  });
+
+  // Offline machines are the drift that matters most — they are still running
+  // the old endpoint and nobody is looking at them. Hiding the row would read
+  // as "everything is in sync".
+  it("keeps offline machines, listed after the online ones", () => {
+    const targets = providerPresetSyncTargets(
+      [
+        runtime({ id: "rt-2", name: "Zulu", status: "offline" }),
+        runtime({ id: "rt-3", name: "Yankee" }),
+        runtime({ id: "rt-4", name: "Alpha" }),
+      ],
+      "rt-1",
+    );
+
+    expect(targets.map((entry) => [entry.label, entry.online])).toEqual([
+      ["Alpha", true],
+      ["Yankee", true],
+      ["Zulu", false],
+    ]);
+  });
+
+  it("prefers a user alias over the daemon's name", () => {
+    const targets = providerPresetSyncTargets(
+      [runtime({ id: "rt-2", custom_name: "Studio" })],
+      "rt-1",
+    );
+
+    expect(targets[0]?.label).toBe("Studio");
+  });
+});
+
+describe("providerPresetPeerState", () => {
+  const source = preset();
+
+  it("settles an offline machine without waiting on a read", () => {
+    const state = providerPresetPeerState({
+      target: target({ online: false }),
+      presets: undefined,
+      loading: true,
+      error: "",
+      source,
+    });
+
+    expect(state.status).toBe("offline");
+  });
+
+  // An unreadable machine is not a matching machine. Rendering it as "in sync"
+  // would be the exact false assurance this dialog exists to remove.
+  it("keeps an unreadable machine apart from a matching one", () => {
+    const state = providerPresetPeerState({
+      target: target(),
+      presets: undefined,
+      loading: false,
+      error: "daemon did not answer",
+      source,
+    });
+
+    expect(state.status).toBe("unreadable");
+    expect(state.message).toBe("daemon did not answer");
+  });
+
+  it("reports a machine that has no copy of the preset", () => {
+    const state = providerPresetPeerState({
+      target: target(),
+      presets: [preset({ id: "other" })],
+      loading: false,
+      error: "",
+      source,
+    });
+
+    expect(state.status).toBe("missing");
+  });
+
+  it("matches on endpoint and protocol together, and reports the peer's own row", () => {
+    const same = providerPresetPeerState({
+      target: target(),
+      presets: [preset({ key_mask: "sk-…9999" })],
+      loading: false,
+      error: "",
+      source,
+    });
+    expect(same.status).toBe("match");
+    expect(same.preset?.key_mask).toBe("sk-…9999");
+
+    // Same URL, other protocol — a different request, so not a match.
+    const protocol = providerPresetPeerState({
+      target: target(),
+      presets: [preset({ api: "anthropic-messages" })],
+      loading: false,
+      error: "",
+      source,
+    });
+    expect(protocol.status).toBe("drift");
+
+    const endpoint = providerPresetPeerState({
+      target: target(),
+      presets: [preset({ base_url: "https://zen.example.test/v1" })],
+      loading: false,
+      error: "",
+      source,
+    });
+    expect(endpoint.status).toBe("drift");
+    expect(endpoint.preset?.base_url).toBe("https://zen.example.test/v1");
+  });
+});
+
+describe("providerPresetSyncNeedsKey", () => {
+  const stateFor = (peer: RuntimeProviderPreset | null, status: "match" | "missing") => ({
+    status,
+    preset: peer,
+    message: "",
+  });
+
+  it("requires a typed key when a selected machine has none to keep", () => {
+    expect(
+      providerPresetSyncNeedsKey([stateFor(null, "missing")], ""),
+    ).toBe(true);
+    expect(
+      providerPresetSyncNeedsKey([stateFor(preset({ has_key: false }), "match")], ""),
+    ).toBe(true);
+  });
+
+  it("asks for nothing when every selected machine already stores one", () => {
+    expect(providerPresetSyncNeedsKey([stateFor(preset(), "match")], "")).toBe(false);
+  });
+
+  it("is satisfied by a typed key whatever the machines hold", () => {
+    expect(providerPresetSyncNeedsKey([stateFor(null, "missing")], " sk-live ")).toBe(
+      false,
+    );
+  });
+});
+
+describe("providerPresetSyncInput", () => {
+  it("carries the source route and omits the key unless one was typed", () => {
+    expect(providerPresetSyncInput(preset(), "  ")).toEqual({
+      id: "command-code",
+      api: "openai-completions",
+      base_url: "https://api.example.test/v1",
+      api_key_env: "COMMAND_CODE_API_KEY",
+      models: [{ id: "m1", name: "Model One" }],
+    });
+
+    expect(providerPresetSyncInput(preset(), " sk-live ")).toMatchObject({
+      api_key: "sk-live",
+    });
+  });
+
+  // The mask is a display string, never a credential. Nothing on this path may
+  // turn `sk-…0000` into the key a machine then authenticates with.
+  it("never derives a key from the source's mask", () => {
+    expect(providerPresetSyncInput(preset({ key_mask: "sk-…0000" }), "")).not.toHaveProperty(
+      "api_key",
+    );
+  });
+
+  it("falls back to the default protocol when the source reports an unknown one", () => {
+    expect(providerPresetSyncInput(preset({ api: "grpc-whatever" }), "").api).toBe(
+      "openai-completions",
+    );
   });
 });

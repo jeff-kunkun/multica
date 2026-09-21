@@ -340,7 +340,8 @@
         "label": "Run only",
         "description": "Silent run, no issue created"
       }
-    }
+    },
+    "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page."
   },
   "schedule_editor": {
     "time_label": "Time",

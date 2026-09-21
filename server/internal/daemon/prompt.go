@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
@@ -206,6 +207,66 @@ func dependencyInstallCommand(workDir string) string {
 // not be able to spend that turn on filenames.
 const maxConflictListBytes = 4 << 10
 
+const maxIssueContextBytes = 12 << 10
+
+func buildIssueContextBlock(task Task) string {
+	if task.IssueTitle == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Issue context (server snapshot)\n\n")
+	fmt.Fprintf(&b, "Title: %s\nStatus: %s\n", task.IssueTitle, task.IssueStatus)
+	if task.IssueAssigneeType != "" || task.IssueAssigneeID != "" {
+		fmt.Fprintf(&b, "Assignee: %s %s\n", task.IssueAssigneeType, task.IssueAssigneeID)
+	}
+	if task.IssueDescription != "" {
+		fmt.Fprintf(&b, "Description:\n%s\n", task.IssueDescription)
+	}
+	warm := task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable
+	if warm {
+		if !task.NewCommentsDeltaKnown {
+			b.WriteString("The server could not confirm the comment delta for this resumed run; scan the issue comments with the CLI before acting.\n")
+		} else if task.NewCommentCount == 0 {
+			b.WriteString("The server checked the issue: no new comments arrived since the previous run.\n")
+		}
+		if len(task.IssueNewComments) > 0 {
+			b.WriteString("New comments since the previous run:\n")
+			for _, c := range task.IssueNewComments {
+				fmt.Fprintf(&b, "- [%s] %s\n", c.ID, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
+			}
+		}
+	} else {
+		if len(task.IssueCommentSummaries) > 0 {
+			b.WriteString("Comment thread summaries:\n")
+			for _, c := range task.IssueCommentSummaries {
+				fmt.Fprintf(&b, "- thread %s (%s, author=%s, replies=%d, last_activity=%s): %s\n", c.ThreadID, c.CreatedAt, c.AuthorType, c.ReplyCount, c.LastActivityAt, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
+			}
+		}
+		if len(task.IssueTriggerThread) > 0 {
+			b.WriteString("Triggering thread (root plus recent replies):\n")
+			for _, c := range task.IssueTriggerThread {
+				fmt.Fprintf(&b, "- [%s] %s\n", c.ID, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
+			}
+		}
+	}
+	if task.IssueContextTruncated {
+		b.WriteString("Some snapshot text was truncated; use the CLI reads in the brief to fill gaps.\n")
+	}
+	b.WriteString("Snapshot generated at " + task.IssueContextGeneratedAt + ". Changes after this time require a CLI read.\n\n")
+	out := b.String()
+	if len(out) <= maxIssueContextBytes {
+		return out
+	}
+	marker := "\n[context truncated; use CLI]\n\n"
+	budget := maxIssueContextBytes - len(marker)
+	cut := out[:budget]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		_, size := utf8.DecodeLastRuneInString(cut)
+		cut = cut[:len(cut)-size]
+	}
+	return cut + marker
+}
+
 // buildWorktreeReplayConflictBlock tells the turn that its own working tree
 // starts out mid-merge, and that finishing that merge comes before the task.
 //
@@ -262,6 +323,12 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 		apply(&opts)
 	}
 	body := buildPromptBody(task, provider)
+	if block := buildIssueContextBlock(task); block != "" {
+		if !strings.HasSuffix(body, "\n\n") {
+			body += "\n"
+		}
+		body += block
+	}
 	// Run-scoped context is appended, never prepended: everything ahead of it
 	// is stable across runs of a resumed session, and appending keeps it after
 	// the cached prefix (MUL-5377).

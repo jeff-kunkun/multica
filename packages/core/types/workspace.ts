@@ -1,4 +1,8 @@
-export type MemberRole = "owner" | "admin" | "member";
+/**
+ * Workspace tier. `guest` is read-only: the server rejects every guest write
+ * in one interception layer (DENE-697), so the tier is safe to hand out.
+ */
+export type MemberRole = "owner" | "admin" | "member" | "guest";
 
 export interface WorkspaceRepo {
   url: string;

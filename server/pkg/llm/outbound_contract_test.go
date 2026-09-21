@@ -77,6 +77,10 @@ func TestUnconfiguredClientMakesZeroUpstreamRequests(t *testing.T) {
 				_, err := c.GenerateJSON(ctx, "", "system JSON", "private chat content", 0.3, 2048)
 				return err
 			}},
+			{"ListModels", func() error {
+				_, err := c.ListModels(ctx)
+				return err
+			}},
 		}
 		for _, call := range calls {
 			if err := call.run(); !errors.Is(err, ErrNotConfigured) {

@@ -51,6 +51,13 @@ func TestAgentReadinessVerdict(t *testing.T) {
 	if got, _ := AgentReadiness(t.Context(), RuntimeLookup{}, db.Agent{ArchivedAt: archivedAt, RuntimeID: validRuntime}); got.Reason != dispatch.ReasonTargetUnavailable || !got.Blocked() {
 		t.Errorf("archived agent: got %+v, want blocked/target_unavailable", got)
 	}
+	disabled, _ := AgentReadiness(t.Context(), RuntimeLookup{}, db.Agent{RuntimeID: validRuntime, WorkEnabled: false})
+	if disabled.Reason != dispatch.ReasonTargetUnavailable || !disabled.Blocked() {
+		t.Errorf("disabled agent: got %+v, want blocked/target_unavailable", disabled)
+	}
+	if disabled.Detail != "agent is not accepting work" {
+		t.Errorf("disabled agent detail = %q, want not-accepting-work", disabled.Detail)
+	}
 
 	// The runtime half. A private runtime with an owner admits only an agent
 	// owned by that same member; ownerless agents are blocked for new work.
@@ -168,7 +175,7 @@ func TestAgentReadinessVerdict(t *testing.T) {
 	if fresh.Reason != dispatch.ReasonRuntimeOffline {
 		t.Errorf("install in flight: reason = %q, want %q", fresh.Reason, dispatch.ReasonRuntimeOffline)
 	}
-	stale := runtimeVerdict(installingRow(time.Now().Add(-runtimeInstallClaimWindow - time.Minute)), db.Agent{OwnerID: ownerA})
+	stale := runtimeVerdict(installingRow(time.Now().Add(-runtimeInstallClaimWindow-time.Minute)), db.Agent{OwnerID: ownerA})
 	if !stale.Blocked() || stale.Reason != dispatch.ReasonRuntimeProfileMissing {
 		t.Fatalf("stale install claim: got %+v, want blocked/runtime_profile_missing", stale)
 	}

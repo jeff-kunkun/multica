@@ -144,6 +144,17 @@ func AgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent) (
 			Detail:       "agent has no runtime bound",
 		}, nil
 	}
+	// Reversible seat gate (DENE-714). Distinct from archive: the row stays
+	// on the roster, but it must not take new work until turned back on.
+	// Checked after runtime_id so an unbound seat still reports
+	// agent_runtime_required — that repair is more specific.
+	if !agent.WorkEnabled {
+		return AgentVerdict{
+			Availability: AgentBlocked,
+			Reason:       dispatch.ReasonTargetUnavailable,
+			Detail:       "agent is not accepting work",
+		}, nil
+	}
 	rt, err := lookup.Get(ctx, agent.RuntimeID)
 	if err != nil {
 		return AgentVerdict{}, err

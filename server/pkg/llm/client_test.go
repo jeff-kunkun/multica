@@ -70,6 +70,31 @@ func TestConfiguredDefaultModel(t *testing.T) {
 	}
 }
 
+func TestListModels(t *testing.T) {
+	var gotPath, gotAuthorization string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuthorization = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":" model-a ","object":"model","created":0,"owned_by":"test"},{"id":"model-b","object":"model","created":0,"owned_by":"test"},{"id":"","object":"model","created":0,"owned_by":"test"}]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	models, err := New(Config{APIKey: "test-key", BaseURL: srv.URL, MaxRetries: retries(0)}).ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+	if gotPath != "/models" {
+		t.Fatalf("ListModels path = %q, want /models", gotPath)
+	}
+	if gotAuthorization != "Bearer test-key" {
+		t.Fatalf("ListModels authorization = %q, want bearer token", gotAuthorization)
+	}
+	if got, want := strings.Join(models, ","), "model-a,model-b"; got != want {
+		t.Fatalf("ListModels = %q, want %q", got, want)
+	}
+}
+
 func TestChatAppliesDefaultModel(t *testing.T) {
 	var gotModel string
 	srv := stubUpstream(t, func(w http.ResponseWriter, body map[string]any) {

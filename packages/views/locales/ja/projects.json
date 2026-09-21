@@ -156,7 +156,9 @@
     "local_directory_move_down_tooltip": "下に移動",
     "mode_worktree_root_label": "作業コピーの作成先",
     "mode_worktree_root_not_absolute": "絶対パスを指定してください。相対パスでは、そのときデーモンがいるディレクトリに作られてしまいます。",
-    "mode_worktree_root_inside_repo": "リポジトリの内部です。そこに作るとあなた自身の git status に現れ、.gitignore への追加も必要になります。リポジトリの隣のフォルダを選んでください。"
+    "mode_worktree_root_inside_repo": "リポジトリの内部です。そこに作るとあなた自身の git status に現れ、.gitignore への追加も必要になります。リポジトリの隣のフォルダを選んでください。",
+    "local_daemon_already_attached_hint": "このマシンにはすでにローカルディレクトリが添付されています。新しく追加するには、先に既存のものを削除してください。",
+    "toast_local_daemon_already_attached": "このマシンにはすでにこのプロジェクトのローカルディレクトリが添付されています。新しく追加するには、先に既存のものを削除してください。"
   },
   "members": {
     "section_header": "メンバー",

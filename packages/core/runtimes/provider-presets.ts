@@ -3,6 +3,7 @@ import { api } from "../api";
 import type {
   RuntimeProviderPreset,
   RuntimeProviderPresetAction,
+  RuntimeProviderPresetModel,
   RuntimeProviderPresetRequest,
   RuntimeProviderPresetStatus,
   RuntimeProviderPresetTicket,
@@ -89,6 +90,36 @@ function knownPresetStatus(status: string): RuntimeProviderPresetStatus {
   }
 }
 
+/**
+ * A terminal provider-preset failure, carrying the daemon's machine-readable
+ * classification next to its English sentence.
+ *
+ * The kind is why this is a class rather than a plain `Error`: "the quota is
+ * exhausted" and "this key is bound to a cancelled billing cycle" are the same
+ * HTTP status and lead the user in opposite directions, and only the kind plus
+ * its parameters tells a localized surface which copy to render.
+ */
+export class ProviderPresetActionError extends Error {
+  readonly kind: string;
+  readonly params: Record<string, string>;
+
+  constructor(
+    message: string,
+    kind = "",
+    params: Record<string, string> = {},
+  ) {
+    super(message);
+    this.name = "ProviderPresetActionError";
+    this.kind = kind;
+    this.params = params;
+  }
+}
+
+/** The failure kind on a preset error, or "" when the error carries none. */
+export function providerPresetErrorKind(error: unknown): string {
+  return error instanceof ProviderPresetActionError ? error.kind : "";
+}
+
 // presetsFrom renders one reply as the cache entry. `cleared_active` is read
 // with `=== true` rather than truthiness: a backend that predates the field
 // omits it, and "absent" must not read as "the active model was just cleared".
@@ -135,8 +166,10 @@ async function awaitProviderPreset(
   }
 
   if (current.status !== "completed") {
-    throw new Error(
+    throw new ProviderPresetActionError(
       current.error || `provider preset ${action} failed (status: ${current.status})`,
+      current.error_kind ?? "",
+      current.error_params ?? {},
     );
   }
   return current;
@@ -165,20 +198,66 @@ function providerPresetPayload(
     }
     case "delete":
       return { id: input.id };
-    case "refresh":
-      return { id: input.id };
+    // Replay names nothing: what it restores is whatever this machine already
+    // recorded for its own DSH home. It carries no key — the credential is the
+    // one thing a replay cannot put back.
+    case "replay":
+      return {};
     case "activate":
       // An empty model asks the daemon for the preset's first model, which is
       // what "use this provider" means when the user did not pick one.
       return input.model ? { id: input.id, model: input.model } : { id: input.id };
+    case "models": {
+      // Only what the caller actually has. A blank field falls back on the
+      // daemon side to whatever the named preset already stores — endpoint,
+      // credential and protocol — which is what makes "fetch with the key I
+      // already saved" work without ever sending the key back to the browser.
+      const payload: Record<string, unknown> = {
+        base_url: input.baseUrl.trim(),
+        api: input.api.trim(),
+      };
+      if (input.id?.trim()) payload.id = input.id.trim();
+      // Same write-only channel as an upsert: present only when typed.
+      if (input.apiKey?.trim()) payload.api_key = input.apiKey.trim();
+      return payload;
+    }
   }
+}
+
+/** What a catalog fetch needs from the form. */
+export interface ProviderPresetModelsQuery {
+  /** Existing preset whose stored endpoint, key and protocol fill blank fields. */
+  id?: string;
+  baseUrl: string;
+  api: string;
+  /** Write-only, exactly like an upsert's key. */
+  apiKey?: string;
 }
 
 export type ProviderPresetActionInput =
   | { action: "upsert"; preset: RuntimeProviderPresetUpsertInput }
-  | { action: "refresh"; id: string }
   | { action: "delete"; id: string }
-  | { action: "activate"; id: string; model?: string };
+  | { action: "activate"; id: string; model?: string }
+  | { action: "replay" }
+  | ({ action: "models" } & ProviderPresetModelsQuery);
+
+/**
+ * Park one preset action and poll it to a terminal record. Kept separate from
+ * `runProviderPresetAction` so a caller that needs a field other than the
+ * preset list — `models` answers with a catalog — can read the record itself.
+ */
+async function runProviderPresetActionRequest(
+  runtimeId: string,
+  input: ProviderPresetActionInput,
+): Promise<RuntimeProviderPresetRequest> {
+  const ticket = await api.initiateProviderPresetAction(
+    runtimeId,
+    PROVIDER_PRESET_PROVIDER,
+    input.action,
+    providerPresetPayload(input),
+  );
+  return awaitProviderPreset(runtimeId, input.action, ticket);
+}
 
 /**
  * Run one preset action to completion and return the refreshed configuration.
@@ -193,13 +272,70 @@ export async function runProviderPresetAction(
   runtimeId: string,
   input: ProviderPresetActionInput,
 ): Promise<RuntimeProviderPresetsResult> {
-  const ticket = await api.initiateProviderPresetAction(
-    runtimeId,
-    PROVIDER_PRESET_PROVIDER,
-    input.action,
-    providerPresetPayload(input),
-  );
-  return presetsFrom(await awaitProviderPreset(runtimeId, input.action, ticket));
+  return presetsFrom(await runProviderPresetActionRequest(runtimeId, input));
+}
+
+/** The endpoint's own catalog, plus the protocol whose auth convention worked. */
+export interface ProviderPresetModelsResult {
+  /** Ids verbatim, exactly as the gateway spelled them — never escaped. */
+  models: RuntimeProviderPresetModel[];
+  /**
+   * The protocol under which the endpoint accepted the credential. Equal to the
+   * declared one unless the wrong auth convention was tried first and the other
+   * was retried (see `fetchProviderPresetModels`).
+   */
+  api: string;
+}
+
+// The two auth conventions a route can want. Anthropic-shaped gateways read the
+// key from `x-api-key`, everything else from `Authorization: Bearer`, and a
+// preset created before its protocol was set defaults to the OpenAI shape.
+// Picking the wrong one reads as a rejected key, which is indistinguishable
+// from a genuinely bad one until the other convention is tried.
+function otherAuthConvention(api: string): string {
+  return api.startsWith("anthropic")
+    ? PROVIDER_PRESET_DEFAULT_API
+    : "anthropic-messages";
+}
+
+/**
+ * Fetch a preset's model catalog without writing anything.
+ *
+ * The declared protocol is tried first; on a rejected credential the one other
+ * auth convention is tried exactly once. That is what removes the
+ * chicken-and-egg for a new anthropic gateway: its catalog can be fetched
+ * without first switching the form's protocol by hand, and the protocol that
+ * answered is returned so the form can reflect it.
+ *
+ * Deliberately not optimistic and deliberately not cached: the catalog is the
+ * endpoint's live answer, and a stale one would offer a model the route no
+ * longer serves.
+ */
+export async function fetchProviderPresetModels(
+  runtimeId: string,
+  query: ProviderPresetModelsQuery,
+): Promise<ProviderPresetModelsResult> {
+  const declared = query.api.trim() || PROVIDER_PRESET_DEFAULT_API;
+  try {
+    const request = await runProviderPresetActionRequest(runtimeId, {
+      action: "models",
+      ...query,
+      api: declared,
+    });
+    return { models: request.models ?? [], api: declared };
+  } catch (error) {
+    // Only a rejected credential is worth a second convention. An unreachable
+    // endpoint, a gateway with no catalog and a rate-limited account answer the
+    // same way to both, so a retry would only double the wait.
+    if (providerPresetErrorKind(error) !== "invalid_credential") throw error;
+    const fallback = otherAuthConvention(declared);
+    const request = await runProviderPresetActionRequest(runtimeId, {
+      action: "models",
+      ...query,
+      api: fallback,
+    });
+    return { models: request.models ?? [], api: fallback };
+  }
 }
 
 /** Read the machine's presets and which one is in effect. */
@@ -259,4 +395,122 @@ export function activeProviderPreset(
   presets: readonly RuntimeProviderPreset[],
 ): RuntimeProviderPreset | null {
   return presets.find((preset) => preset.active === true) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-machine sync (DENE-335)
+// ---------------------------------------------------------------------------
+//
+// A preset lives in the files of ONE machine, and a seat's model string names
+// the preset by id — so the same agent running on a second runtime resolves
+// that id against that machine's own files. Two runtimes therefore drift
+// silently: editing the endpoint on the laptop leaves the desktop calling the
+// old gateway, and nothing on either screen says so.
+//
+// The fix is a fan-out, not a server-side copy of the configuration. The
+// per-runtime request store is deliberately transient and never persists a
+// credential (see the note in `runtime_provider_presets.go`), and a
+// workspace-level provider record would have to hold the key to be able to
+// replay it onto a machine that joins later. Sending the same upsert to each
+// selected runtime keeps the key on exactly the path it already travels.
+//
+// Consequences the callers must respect:
+//
+//   - one machine per outcome. A fan-out that rejected on the first failure
+//     would hide which machines DID take the write, which is the one fact the
+//     user needs to know what is still drifting.
+//   - the key is per-machine. Each runtime holds its own credentials file, so
+//     an upsert with no `api_key` leaves the target's stored key alone — and
+//     creates a keyless preset on a target that had none. The caller decides
+//     whether a key is required; this layer only carries what it is given.
+
+/** What one machine did with a synced preset. */
+export interface ProviderPresetSyncOutcome {
+  runtimeId: string;
+  status: "synced" | "failed";
+  /** The daemon's sentence, empty on success. */
+  error: string;
+  /** Machine-readable classification of `error`, for localized copy. */
+  errorKind: string;
+}
+
+export interface ProviderPresetSyncResult {
+  /** One entry per requested runtime, in the order they were requested. */
+  outcomes: ProviderPresetSyncOutcome[];
+  /** The refreshed configuration of each runtime that accepted the write. */
+  configs: Record<string, RuntimeProviderPresetsResult>;
+}
+
+export interface ProviderPresetSyncInput {
+  runtimeIds: readonly string[];
+  preset: RuntimeProviderPresetUpsertInput;
+}
+
+/** How many machines took the write and how many did not. */
+export function providerPresetSyncSummary(
+  outcomes: readonly ProviderPresetSyncOutcome[],
+): { synced: number; failed: number } {
+  let synced = 0;
+  for (const outcome of outcomes) if (outcome.status === "synced") synced += 1;
+  return { synced, failed: outcomes.length - synced };
+}
+
+/**
+ * Write one preset to several machines at once.
+ *
+ * Runs in parallel — each target is an independent park-then-poll round trip
+ * against a different daemon, and doing them in sequence would multiply a
+ * 90-second worst case by the number of machines.
+ *
+ * Never rejects: a target that failed is a reported outcome, not an exception,
+ * so a partial sync stays legible. Only an empty target list short-circuits.
+ */
+export async function syncProviderPresetToRuntimes(
+  input: ProviderPresetSyncInput,
+): Promise<ProviderPresetSyncResult> {
+  const configs: Record<string, RuntimeProviderPresetsResult> = {};
+  const outcomes = await Promise.all(
+    input.runtimeIds.map(async (runtimeId): Promise<ProviderPresetSyncOutcome> => {
+      try {
+        configs[runtimeId] = await runProviderPresetAction(runtimeId, {
+          action: "upsert",
+          preset: input.preset,
+        });
+        return { runtimeId, status: "synced", error: "", errorKind: "" };
+      } catch (error) {
+        return {
+          runtimeId,
+          status: "failed",
+          error:
+            error instanceof Error && error.message
+              ? error.message
+              : "provider preset sync failed",
+          errorKind: providerPresetErrorKind(error),
+        };
+      }
+    }),
+  );
+  return { outcomes, configs };
+}
+
+/**
+ * The sync mutation. Each machine that answered refreshes its own cache entry
+ * straight from its reply — the same "the receipt IS the refresh" rule as the
+ * single-runtime mutation, applied per target so a half-successful sync leaves
+ * every list showing what its own machine really holds.
+ */
+export function useProviderPresetSyncMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ProviderPresetSyncInput) =>
+      syncProviderPresetToRuntimes(input),
+    onSuccess: (result) => {
+      for (const [runtimeId, config] of Object.entries(result.configs)) {
+        queryClient.setQueryData(
+          runtimeProviderPresetsKeys.forRuntime(runtimeId),
+          config,
+        );
+      }
+    },
+  });
 }

@@ -186,7 +186,7 @@ func BuildColdCommentsHint(issueID, triggerCommentID, triggerThreadID string) st
 	// a second full command: the duplicate restated the issue UUID for no
 	// routing value (MUL-5721 OPT-1).
 	return fmt.Sprintf(
-		"Triggering thread: "+
+		"The opening issue-context block is the server snapshot for this run. If it is marked truncated, fill the gap. Triggering thread: "+
 			"`multica issue comment list %s --thread %s --tail 30 --compact --output json` "+
 			"(that thread's root + its 30 newest replies). "+
 			"The scan workflow step 2 requires is the same command with `--roots-only --summary` in place of `--thread ... --tail 30`.\n\n",

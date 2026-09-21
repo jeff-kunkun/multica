@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/permission"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -340,12 +341,29 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 			projectID = parent.ProjectID
 		}
 	}
+	// A new issue is private unless it lands in a project, in which case it
+	// takes that project's current scope as its initial value and is then
+	// independent of it (DENE-698). Joining a shared project is how work
+	// becomes visible without anyone having to re-share each issue.
+	visibility := pgtype.Text{String: string(permission.DefaultVisibility), Valid: true}
+	if p.CreatorType == "agent" {
+		// 'private' means "only its creator", and an agent is not somebody who
+		// can be shown a list. An agent-created issue left private would be
+		// visible to nobody at all — not even the person whose work produced
+		// it — so an agent's issue outside any project starts workspace-wide.
+		// Inside a project it still takes the project's scope, below.
+		visibility = pgtype.Text{String: string(permission.VisibilityWorkspace), Valid: true}
+	}
 	if projectID.Valid {
-		if _, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+		project, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
 			ID:          projectID,
 			WorkspaceID: p.WorkspaceID,
-		}); err != nil {
+		})
+		if err != nil {
 			return issueCreateTxOutcome{}, ErrProjectNotFound
+		}
+		if permission.Visibility(project.Visibility).Valid() {
+			visibility = pgtype.Text{String: project.Visibility, Valid: true}
 		}
 	}
 
@@ -409,6 +427,7 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 			OriginType:    p.OriginType,
 			OriginID:      p.OriginID,
 			Stage:         p.Stage,
+			Visibility:    visibility,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
@@ -429,6 +448,7 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 			Number:        issueNumber,
 			ProjectID:     projectID,
 			Stage:         p.Stage,
+			Visibility:    visibility,
 		})
 	}
 	if err != nil {

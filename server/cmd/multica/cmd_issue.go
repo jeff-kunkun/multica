@@ -454,7 +454,8 @@ var validIssueSortColumns = []string{
 var validIssueFields = []string{
 	"id", "workspace_id", "number", "identifier", "title", "description",
 	"status", "status_category", "status_name", "priority", "assignee_type",
-	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
+	"assignee_id", "reviewer_type", "reviewer_id", "creator_type",
+	"creator_id", "parent_issue_id",
 	"project_id", "position", "stage", "start_date", "due_date", "created_at",
 	"updated_at", "revision", "last_activity_at", "metadata", "properties",
 	"labels",
@@ -600,6 +601,7 @@ func init() {
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
 	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
+	issueUpdateCmd.Flags().String("reviewer", "", "验收席 — who accepts this issue: a member or agent name, \"none\" for no acceptance pass, or \"\" to clear the slot")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
@@ -1069,13 +1071,14 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		if dueDate != "" && len(dueDate) >= 10 {
 			dueDate = dueDate[:10]
 		}
-		headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "START DATE", "DUE DATE", "DESCRIPTION"}
+		headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "REVIEWER", "START DATE", "DUE DATE", "DESCRIPTION"}
 		rows := [][]string{{
 			issueDisplayKey(issue),
 			strVal(issue, "title"),
 			strVal(issue, "status"),
 			strVal(issue, "priority"),
 			assignee,
+			formatReviewer(issue, actors),
 			startDate,
 			dueDate,
 			strVal(issue, "description"),
@@ -1580,6 +1583,26 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if hasAssignee {
 			body["assignee_type"] = aType
 			body["assignee_id"] = aID
+		}
+	}
+	if cmd.Flags().Changed("reviewer") {
+		v, _ := cmd.Flags().GetString("reviewer")
+		switch strings.TrimSpace(v) {
+		case "":
+			// Empty clears the slot back to undecided, so routing may fill it
+			// again. "none" is the opposite: it closes the question.
+			body["reviewer_type"] = nil
+			body["reviewer_id"] = nil
+		case "none":
+			body["reviewer_type"] = "none"
+			body["reviewer_id"] = nil
+		default:
+			rType, rID, err := resolveAssignee(ctx, client, v, memberOrAgentKinds)
+			if err != nil {
+				return fmt.Errorf("resolve reviewer: %w", err)
+			}
+			body["reviewer_type"] = rType
+			body["reviewer_id"] = rID
 		}
 	}
 	if cmd.Flags().Changed("parent") {
@@ -3312,6 +3335,26 @@ func formatAssignee(issue map[string]any, actors actorDisplayLookup) string {
 		return ""
 	}
 	return actors.actor(aType, aID)
+}
+
+// formatReviewer renders the acceptance slot. It is the same reference pair as
+// the assignee, plus one value the assignee has no equivalent of: reviewer_type
+// "none" carries no id and means "this issue needs no acceptance pass" — a
+// recorded decision, not an empty slot, so it must read differently from "".
+// (DENE-633)
+func formatReviewer(issue map[string]any, actors actorDisplayLookup) string {
+	rType := strVal(issue, "reviewer_type")
+	switch rType {
+	case "":
+		return ""
+	case "none":
+		return "不需要验收"
+	}
+	rID := strVal(issue, "reviewer_id")
+	if rID == "" {
+		return ""
+	}
+	return actors.actor(rType, rID)
 }
 
 // filterIssueFields keeps only the requested top-level keys on each issue,

@@ -96,7 +96,8 @@
     "cancel": "취소",
     "add_confirm": "추가 ({{num}})",
     "adding": "추가 중...",
-    "added_multi_toast_other": "에이전트 {{count}}개에 추가했습니다"
+    "added_multi_toast_other": "에이전트 {{count}}개에 추가했습니다",
+    "add_dialog_description": "선택한 스킬을 추가할 에이전트를 선택하세요."
   },
   "toolbar": {
     "result_count_title": "일치하는 스킬 / 전체 스킬",
@@ -353,7 +354,9 @@
     "conflict_footer": "{{count}}개의 충돌 결정이 남아 있습니다.",
     "conflict_apply_button": "결정 적용",
     "conflict_missing_resolution": "이 충돌을 처리할 방법을 선택하세요.",
-    "conflict_name_still_exists": "해당 이름이 이미 있습니다. 다른 이름을 선택하거나 건너뛰세요."
+    "conflict_name_still_exists": "해당 이름이 이미 있습니다. 다른 이름을 선택하거나 건너뛰세요.",
+    "no_skills_hint": "이 런타임에는 아직 검색 가능한 로컬 스킬이 없습니다.",
+    "no_search_results_title": "일치하는 로컬 스킬이 없습니다"
   },
   "file_tree": {
     "no_files": "파일 없음",

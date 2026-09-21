@@ -47,7 +47,8 @@
       "cancel": "Cancel",
       "save": "Save",
       "saving": "Saving…",
-      "save_failed": "Could not save the status."
+      "save_failed": "Could not save the status.",
+      "behavior_hint": "This status behaves exactly like {{category}}."
     },
     "archive_dialog": {
       "retry": "Retry archive",
@@ -71,7 +72,13 @@
       "unstarted": "Work that has not started, whether planned or in the backlog.",
       "started": "Work that is active, under review, or blocked.",
       "done": "Work that has been finished.",
-      "closed": "Work that will not be completed."
+      "closed": "Work that will not be completed.",
+      "backlog": "Parked. Assigning an issue here never starts an agent run.",
+      "todo": "Queued. Moving an issue here starts the assigned agent.",
+      "in_progress": "Actively being worked on.",
+      "in_review": "Delivered, waiting on human review. Finalizes the autopilot run.",
+      "blocked": "Stalled on an external dependency.",
+      "cancelled": "Decided not to do."
     },
     "built_in_descriptions": {
       "backlog": "Parked. Assigning an issue here never starts an agent run.",
@@ -81,7 +88,8 @@
       "blocked": "Stalled on an external dependency.",
       "done": "Completed.",
       "cancelled": "Decided not to do."
-    }
+    },
+    "description": "Define the workflow your issues move through. Each status inherits its behavior from its category."
   },
   "quick_actions": {
     "title": "Quick Actions",
@@ -160,12 +168,14 @@
       "sync_failed": "Failed to save your timezone preference."
     },
     "sticky_comment_bar": {
-      "title": "Pin comment bar to bottom"
+      "title": "Pin comment bar to bottom",
+      "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
     },
     "issue_title": "Issue creation",
     "comments_title": "Comments",
     "device_hint": "Saved on this device.",
-    "issue_scope": "These preferences apply to this workspace on this device. They only change which fields you see when creating an issue."
+    "issue_scope": "These preferences apply to this workspace on this device. They only change which fields you see when creating an issue.",
+    "description": "Customize how you work in Multica."
   },
   "shortcuts": {
     "title": "Keyboard Shortcuts",
@@ -316,7 +326,9 @@
       "project": "Project",
       "due_date": "Due date",
       "start_date": "Start date"
-    }
+    },
+    "quick_create_description": "Fields shown in the quick create toolbar.",
+    "manual_create_description": "Fields shown in the manual create toolbar."
   },
   "mcp": {
     "title": "MCP",
@@ -347,7 +359,8 @@
     "removed_toast": "Shared MCP server removed",
     "save_failed_toast": "Could not save the shared MCP server",
     "rename_failed_toast": "Could not rename the shared MCP server",
-    "remove_failed_toast": "Could not remove the shared MCP server"
+    "remove_failed_toast": "Could not remove the shared MCP server",
+    "empty_description": "Add a server here, then assign it to the agents that should use it from their own MCP tab."
   },
   "page": {
     "title": "Settings",
@@ -477,8 +490,10 @@
       "deleted": "Published Plugin deleted",
       "installed_version": "In use",
       "review_install": "Review and install",
-      "review_upgrade": "Review and upgrade"
-    }
+      "review_upgrade": "Review and upgrade",
+      "description": "Upload a plugin package. Multica stores and serves it, so a plugin author needs no server of their own."
+    },
+    "description": "Publish plugins into this workspace, then install a specific version and review exactly what it is allowed to reach."
   },
   "properties": {
     "title": "Properties",
@@ -643,7 +658,8 @@
     "system": {
       "title": "System Notifications",
       "description": "Show system notifications when Multica is in the background.",
-      "label": "Show system notifications"
+      "label": "Show system notifications",
+      "hint": "Show a banner from your operating system for new inbox items when the app isn't focused."
     },
     "browser": {
       "label": "Browser notifications",
@@ -792,7 +808,9 @@
     "section_repositories": "Repositories",
     "repositories_shortcut_label": "Repository URLs live in the Repositories tab",
     "repositories_shortcut_link": "Manage repositories →",
-    "toast_failed": "Failed to update GitHub settings"
+    "toast_failed": "Failed to update GitHub settings",
+    "page_description": "Connect a GitHub App, control how Pull Requests show up inside Multica, and decide what your agents leave behind in commit history.",
+    "feature_auto_link_description": "Match PR titles and branch names against issue identifiers, along with identifiers after a closing keyword in the body, and create the link automatically."
   },
   "vcs": {
     "section_title": "Git providers (self-hosted)",
@@ -906,7 +924,9 @@
     "install_error_installer_bind": "Installed the bot, but could not bind your Lark identity. Try again or contact support.",
     "install_error_session_lost": "Install session expired or was lost. Scan again to start over.",
     "install_error_forbidden": "You no longer have permission to install Lark Bots in this workspace. Ask a workspace admin to continue.",
-    "install_error_generic": "Install failed. Try again."
+    "install_error_generic": "Install failed. Try again.",
+    "install_scan_hint_feishu": "Feishu → Scan → authorize the new PersonalAgent.",
+    "install_scan_hint_lark": "Lark → Scan → authorize the new PersonalAgent."
   },
   "composio": {
     "section_title": "Composio",
@@ -1043,7 +1063,8 @@
     "byo_submitting": "Connecting…",
     "byo_cancel": "Cancel",
     "byo_success_toast": "DingTalk bot connected",
-    "byo_failed_toast": "Could not connect the DingTalk bot"
+    "byo_failed_toast": "Could not connect the DingTalk bot",
+    "groups_overview_description": "Each connection shows its Agent, DingTalk bot, and recently observed groups."
   },
   "wecom": {
     "section_title": "WeCom",
@@ -1230,7 +1251,8 @@
       "up_to_date": "You're on the latest version.",
       "downloading": "v{{version}} is downloading in the background — you'll be notified when it's ready to install.",
       "check_now": "Check now",
-      "checking": "Checking…"
+      "checking": "Checking…",
+      "description": "Control automatic background updates or check for a new version manually."
     },
     "daemon": {
       "title": "Daemon",
@@ -1305,7 +1327,10 @@
       "waiting_logs": "Waiting for logs…",
       "reconnect_failed": "Couldn't reconnect the daemon",
       "try_again_moment": "Please try again in a moment.",
-      "try_again": "Please try again."
+      "try_again": "Please try again.",
+      "description": "Configure how the local agent daemon behaves with the desktop app.",
+      "diagnostics_description": "Identification and connection details. Useful when filing a bug report or investigating why a runtime isn't showing up.",
+      "waiting_logs_description": "New entries will appear in real time."
     },
     "worktree_cleanup": {
       "title": "Working copies on this machine",
@@ -1314,11 +1339,11 @@
       "daemon_offline": "Start the local daemon to see the working copies on this machine.",
       "load_failed": "Could not read the working copies on this machine.",
       "enable_title": "Clear out merged copies automatically",
-      "enable_description": "Off by default. When on, a copy is removed only if it is Multica's, idle, clean, already merged, and older than the window below — any one of those failing keeps it.",
+      "enable_description": "Off by default. When on, a copy is removed only if it is Multica's, idle, clean, older than the window below, and its changes are already in the trunk branch — either merged there or squashed into it. Any one of those failing keeps it.",
       "min_age_title": "Keep for at least",
       "min_age_description": "Days after a copy's last run before it can be cleared. Days, not hours: a run you meant to come back to on Monday should still be there after a holiday.",
       "trunk_title": "Merge into",
-      "trunk_description": "The branch a copy's work must already be in. Leave empty to use each repository's own default branch.",
+      "trunk_description": "The branch a copy's work must already be in, whether it was merged or squashed into it. Leave empty to use each repository's own default branch.",
       "trunk_placeholder": "main",
       "summary": "{{count}} working copies · {{total}} on disk · {{reclaimable}} would be cleared",
       "advisory": "Automatic cleanup is off, so nothing below will be removed. This is what it would do if you switched it on.",
@@ -1327,6 +1352,7 @@
       "remove_now": "Clear now",
       "removed": "Working copy cleared",
       "reason_removable": "Merged, clean and idle — this one would be cleared.",
+      "reason_removable_squash": "Squashed into trunk, clean and idle — its changes are in the trunk branch even though its commits are not, so this one would be cleared.",
       "reason_uncommitted": "Kept: it still has uncommitted changes. Multica never removes a copy holding work that is nowhere else.",
       "reason_unmerged": "Kept: its branch is not in the trunk branch yet.",
       "reason_too_recent": "Kept: its last run is too recent.",
@@ -1384,6 +1410,10 @@
       "member": {
         "label": "Member",
         "description": "Create and work on issues"
+      },
+      "guest": {
+        "label": "Guest",
+        "description": "Read-only, sees only what is shared with them"
       }
     },
     "share_links_title": "Share links",
@@ -1405,7 +1435,31 @@
     "expiry_24h": "24 hours",
     "expiry_7d": "7 days",
     "expiry_30d": "30 days",
-    "expiry_never": "Never"
+    "expiry_never": "Never",
+    "role_blocked": {
+      "owner_requires_owner": "Only an owner can hand out the owner tier"
+    },
+    "role_select_label": "Tier for {{name}}",
+    "unknown_role": "Unknown tier",
+    "unknown_role_title": "This member holds a tier this app version does not know. Update the app to change it.",
+    "role_impact_title": "{{name}} is now {{role}}",
+    "role_impact_gained": "Gains: {{items}}",
+    "role_impact_lost": "Loses: {{items}}",
+    "role_impact_none": "Nothing else changes.",
+    "members_loading": "Loading members…",
+    "empty_title": "No members yet",
+    "empty_description": "Invite a teammate to share this workspace.",
+    "empty_action": "Invite a member",
+    "capabilities": {
+      "view_shared": "see what is shared with them",
+      "see_workspace_scope": "see workspace-wide resources",
+      "create_resources": "create issues, projects and repos",
+      "comment_and_edit": "comment, edit and change status",
+      "be_assigned": "be assigned and trigger agent runs",
+      "manage_members": "invite members and change tiers",
+      "workspace_settings": "workspace settings, integrations and keys",
+      "billing_and_transfer": "billing, transfer and deletion"
+    }
   },
   "integrations": {
     "code_title": "Code & repositories",
@@ -1420,7 +1474,8 @@
     "status_not_connected": "Not connected",
     "status_loading": "Checking...",
     "status_unknown": "Status unavailable",
-    "channel_hint": "Chat with agents and create issues from {{channel}}."
+    "channel_hint": "Chat with agents and create issues from {{channel}}.",
+    "description": "Connect your tools and manage each integration in one place."
   },
   "config_transfer": {
     "title": "Export & import",
@@ -1584,11 +1639,33 @@
     "enabled_label": "Enable automatic dispatch",
     "enabled_description": "Switched off, the product behaves exactly as it did before: no routing comments, no mentions. Values already written to issues are kept.",
     "model_label": "Routing model",
-    "model_description": "The model that makes the call. Left empty, routing is unconfigured and does nothing even with the switch on.",
+    "model_description": "The model that makes the call. After you save an endpoint and key, available models are loaded automatically; you can still type an id manually.",
+    "model_discovering": "Loading models from the endpoint…",
+    "model_discover_failed": "Could not load models. Enter a model id manually.",
+    "model_discover_empty": "The endpoint returned no models. Enter a model id manually.",
+    "model_discover_loaded": "{{count}} models loaded from this endpoint.",
     "model_placeholder": "e.g. gpt-5.6-luna",
     "threshold_label": "Confidence threshold",
-    "threshold_description": "Below this, the slot is left empty and you are mentioned once with the reason instead. Defaults to 0.70.",
-    "no_credentials_note": "No credentials are stored here — they belong to the deployment's model configuration.",
+    "threshold_description": "Below this the ticket is still dispatched, to the fallback rung (the generic strong seat), and the routing comment says so. Defaults to 0.60.",
+    "stale_hours_label": "Stale review threshold (hours)",
+    "stale_hours_description": "How long a ticket may sit awaiting acceptance with no run working on it before the sweep looks at it. The default action is to put it back in front of the reviewer and change no status; only a pass verdict the reviewer already left on the ticket lets the status be aligned to done. Defaults to 24 hours.",
+    "gateway_endpoint_workspace": "The model id is sent to this workspace’s own endpoint: {{host}}.",
+    "gateway_endpoint_deployment": "The model id is sent to the deployment’s shared LLM endpoint: {{host}}.",
+    "gateway_protocol_systemone": "This endpoint is TypeSafe System One (Jev): routing asks it for a typed judgment with the probabilities behind it, so the confidence it gates on is measured rather than self-reported.",
+    "gateway_unset": "There is no endpoint to send the model id to — this workspace has not set one, and the deployment has no internal LLM configured (MULTICA_LLM_BASE_URL / MULTICA_LLM_API_KEY). Set an endpoint and key below, or ask whoever runs the server.",
+    "gateway_title": "This workspace’s own endpoint",
+    "gateway_url_label": "Endpoint URL",
+    "gateway_url_description": "An OpenAI-compatible base URL, or https://api.typesafe.ai for TypeSafe System One (Jev). Leave both fields empty to use the deployment’s shared endpoint, which is what happens today.",
+    "gateway_url_placeholder": "https://api.example.com/v1 or https://api.typesafe.ai",
+    "gateway_key_label": "API key",
+    "gateway_key_description": "Stored encrypted and never shown again — not even masked. Save to replace it; clear to go back to the deployment endpoint.",
+    "gateway_key_unstorable": "This deployment cannot store a workspace key (neither MULTICA_ROUTING_SECRET_KEY nor JWT_SECRET is set). Only whoever runs the server can fix this.",
+    "gateway_key_placeholder": "sk-…",
+    "gateway_key_stored": "A key is saved",
+    "gateway_key_save": "Save key",
+    "gateway_key_clear": "Clear",
+    "gateway_pair_incomplete": "An endpoint needs both halves. With only one filled in, the deployment’s shared endpoint is used instead.",
+    "gateway_default_model": "That deployment’s own default model is {{model}}.",
     "filters_title": "Candidate filters",
     "filters_placeholder": "Supported later; not implemented in this version. Today candidates are narrowed by direction and gated by confidence.",
     "health_checking": "Checking…",

@@ -123,6 +123,13 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 		if label != "" {
 			out += " — " + label
 		}
+		// One run writes one directory. Saying so on the bullet is what keeps
+		// an agent from treating a project's other directories as places to
+		// edit; without it the brief lists several paths and says nothing
+		// about which one this run owns (DENE-619).
+		if r.Access == "read-only" {
+			out += " (read-only)"
+		}
 		return out
 	}
 }

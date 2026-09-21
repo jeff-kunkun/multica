@@ -141,6 +141,8 @@ function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
     priority: "none",
     assignee_type: "member",
     assignee_id: "me",
+    reviewer_type: null,
+    reviewer_id: null,
     creator_type: "member",
     creator_id: "me",
     parent_issue_id: null,

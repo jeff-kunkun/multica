@@ -3,13 +3,16 @@
     "wordmark": "Multica",
     "label": "Onboarding steps",
     "about_you": {
-      "label": "About you"
+      "label": "About you",
+      "description": "Your role, and what you want done."
     },
     "workspace": {
-      "label": "Workspace"
+      "label": "Workspace",
+      "description": "Name it and pick its URL."
     },
     "runtime": {
-      "label": "Meet Mika"
+      "label": "Meet Mika",
+      "description": "Your first agent teammate, and where it runs."
     }
   },
   "welcome": {
@@ -42,7 +45,9 @@
       "card5_body_suffix": " flagged. Preview link in the PR.",
       "card5_mention_you": "@you",
       "card5_timestamp": "just now"
-    }
+    },
+    "lede_desktop": "By the end, a real agent will be replying to your first issue.",
+    "illustration_caption": "Every issue, every thread, every decision — shared by your team and agents."
   },
   "common": {
     "back": "Back",
@@ -56,7 +61,8 @@
     "eyebrow": "Quick question",
     "lede": "Help us understand how you found Multica.",
     "submit": "Submit",
-    "save_failed_toast": "Failed to save"
+    "save_failed_toast": "Failed to save",
+    "hint_ready": "Looks good. Hit Submit when you're ready."
   },
   "questions": {
     "about_you": {
@@ -111,7 +117,8 @@
     "other_aria": "Describe something else"
   },
   "step_question": {
-    "hint_pick": "You can skip this."
+    "hint_pick": "You can skip this.",
+    "hint_continue": "Looks good. Hit Continue when you're ready."
   },
   "cli_install": {
     "copy_aria": "Copy",
@@ -189,7 +196,8 @@
     "creation_disabled_logout": "Log out",
     "creation_disabled_eyebrow_resume": "Your workspace",
     "creation_disabled_headline_resume": "Continue with {{name}}.",
-    "creation_disabled_lede_resume": "Workspace creation is disabled on this instance, so you'll continue into your existing workspace."
+    "creation_disabled_lede_resume": "Workspace creation is disabled on this instance, so you'll continue into your existing workspace.",
+    "create_new_subtitle": "Start fresh — a separate space for a different side of your work."
   },
   "step_runtime": {
     "scanning_headline": "Connecting this computer…",
@@ -218,7 +226,9 @@
     "hint_selected": "Selected: {{name}}",
     "hint_pick": "Pick an agent runtime above to start with Mika.",
     "hint_waiting": "Waiting for the first result…",
-    "continue": "Start with Mika"
+    "continue": "Start with Mika",
+    "found_lede": "These are the agent runtimes we found on this computer. You can switch it or add more later.",
+    "hint_skip_or_refresh": "Refresh after installing one, or skip to enter your workspace."
   },
   "step_platform": {
     "eyebrow": "Connect a computer",
@@ -248,7 +258,8 @@
     "stage_slow_suffix": " for errors.",
     "stage_stalled_prefix": "Nothing coming through yet. If you're not comfortable with the terminal, ",
     "stage_stalled_term": "Desktop",
-    "stage_stalled_suffix": " is the smoother path — one click and this computer is connected. Close this dialog and pick Desktop, or hit Skip to continue."
+    "stage_stalled_suffix": " is the smoother path — one click and this computer is connected. Close this dialog and pick Desktop, or hit Skip to continue.",
+    "cli_dialog_description": "Same connection as Desktop, set up from the terminal. Use it for servers, remote dev boxes, or any headless computer."
   },
   "errors": {
     "skip_failed": "Failed to finish onboarding",

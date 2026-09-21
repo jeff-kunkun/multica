@@ -17,7 +17,8 @@
     "confirm": "削除",
     "deleting": "削除中...",
     "toast_deleted": "タスクを削除しました",
-    "toast_delete_failed": "タスクを削除できませんでした"
+    "toast_delete_failed": "タスクを削除できませんでした",
+    "hint": "ワークスペースのメンバーであれば誰でもタスクを削除できます。"
   },
   "feedback": {
     "title": "フィードバック",

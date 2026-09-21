@@ -65,6 +65,8 @@ export const issues: Issue[] = titles.map((title, index) => ({
   priority: index % 2 ? "medium" : "high",
   assignee_type: "member",
   assignee_id: user.id,
+  reviewer_type: null,
+  reviewer_id: null,
   creator_type: "member",
   creator_id: user.id,
   parent_issue_id: null,
@@ -204,6 +206,7 @@ export function createFixtureApi(getLocale: () => LabLocale = () => "en") {
         rows: branch.map((issue) => ({
           issue: localizeIssue(issue),
           direct_child_count: 0,
+          is_pinned: false,
         })),
         next_cursor: null,
       };

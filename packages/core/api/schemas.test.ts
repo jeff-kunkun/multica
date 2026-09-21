@@ -25,6 +25,7 @@ import {
   DashboardFailureByAgentListSchema,
   DashboardFailureDailyListSchema,
   DashboardUsageByAgentListSchema,
+  DashboardUsageByIssueListSchema,
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
   ChatPendingTaskSchema,
@@ -49,6 +50,8 @@ import {
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
   RuntimeModelListRequestSchema,
+  MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
+  RuntimeProviderPresetRequestSchema,
   SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -94,6 +97,8 @@ const baseIssue = {
   priority: "medium",
   assignee_type: null,
   assignee_id: null,
+  reviewer_type: null,
+  reviewer_id: null,
   creator_type: "member",
   creator_id: "user-1",
   parent_issue_id: null,
@@ -229,6 +234,41 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     const parsed = ListIssuesResponseSchema.parse({ issues: [withoutName], total: 1 });
     expect(parsed.issues[0]?.id).toBe(baseIssue.id);
     expect(parsed.issues[0]?.status_name).toBeUndefined();
+  });
+  // 验收席 is a reference pair, and an installed client can be pointed at a
+  // backend that predates it (DENE-633). A missing pair must read as
+  // "undecided", and a malformed one must not cost the whole issue.
+  it("reads a missing reviewer pair as undecided", () => {
+    const { reviewer_type: _t, reviewer_id: _i, ...older } = { ...baseIssue, reviewer_type: "agent", reviewer_id: "a-1" };
+    const parsed = ListIssuesResponseSchema.parse({ issues: [older], total: 1 });
+    expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+    expect(parsed.issues[0]?.reviewer_type).toBeNull();
+    expect(parsed.issues[0]?.reviewer_id).toBeNull();
+  });
+  it("carries a named reviewer and the 'none' answer through unchanged", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [
+        { ...baseIssue, id: "issue-a", reviewer_type: "agent", reviewer_id: "agent-1" },
+        { ...baseIssue, id: "issue-b", reviewer_type: "none", reviewer_id: null },
+      ],
+      total: 2,
+    });
+    expect(parsed.issues[0]?.reviewer_type).toBe("agent");
+    expect(parsed.issues[0]?.reviewer_id).toBe("agent-1");
+    expect(parsed.issues[1]?.reviewer_type).toBe("none");
+    expect(parsed.issues[1]?.reviewer_id).toBeNull();
+  });
+  it("drops only a malformed reviewer pair, keeping the issue and the list", () => {
+    for (const bad of [42, { id: "x" }, ["x"], true]) {
+      const parsed = ListIssuesResponseSchema.parse({
+        issues: [{ ...baseIssue, reviewer_type: bad, reviewer_id: bad }],
+        total: 1,
+      });
+      expect(parsed.issues).toHaveLength(1);
+      expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+      expect(parsed.issues[0]?.reviewer_type).toBeNull();
+      expect(parsed.issues[0]?.reviewer_id).toBeNull();
+    }
   });
   it("keeps the issue while independently dropping a malformed source context", () => {
     const parsed = ListIssuesResponseSchema.parse({
@@ -679,6 +719,39 @@ describe("AgentTaskListSchema", () => {
     created_at: "2026-07-10T00:00:00Z",
     trigger_comment_id: "comment-3",
   };
+
+  it("carries the server's code decision, and degrades a malformed one alone", () => {
+    const parsed = AgentTaskListSchema.parse([
+      {
+        ...task,
+        code_decision: {
+          kind: "local_worktree",
+          path: "/Users/me/code/app.multica-worktrees/dene-619-142f15c86d34",
+          repo_path: "/Users/me/code/app",
+          display_name: "app",
+          execution_mode: "worktree",
+        },
+      },
+      // Failure is a value, not a missing field: the run has no code source
+      // and the UI must be able to say why.
+      { ...task, id: "task-2", code_decision: { kind: "unresolvable", code: "malformed_resource", reason: "resource_ref is not readable" } },
+      // A kind this client predates still parses; the UI's default branch
+      // renders it rather than losing the whole row.
+      { ...task, id: "task-3", code_decision: { kind: "something_newer", path: "/x" } },
+      { ...task, id: "task-4" },
+      { ...task, id: "task-5", code_decision: "local_in_place" },
+    ]);
+
+    expect(parsed[0]?.code_decision?.kind).toBe("local_worktree");
+    expect(parsed[0]?.code_decision?.display_name).toBe("app");
+    expect(parsed[1]?.code_decision?.code).toBe("malformed_resource");
+    expect(parsed[2]?.code_decision?.kind).toBe("something_newer");
+    expect(parsed[3]?.code_decision).toBeUndefined();
+    // A malformed decision costs the row its decision, not its execution log.
+    expect(parsed[4]?.code_decision).toBeUndefined();
+    expect(parsed[4]?.id).toBe("task-5");
+    expect(parsed[4]?.status).toBe("queued");
+  });
 
   it("preserves planned and delivered comment IDs for a task run", () => {
     const parsed = AgentTaskListSchema.parse([
@@ -1285,6 +1358,26 @@ describe("dashboard + runtime usage schema drift", () => {
       { model: "claude-opus-4-7", input_tokens: 7 },
     ]);
     expect(parsed[0]?.agent_id).toBe("");
+  });
+
+  it("keeps a usage-by-issue row whose identifier/title an older backend omits", () => {
+    // issue_id is what the row links with, so it is the one field a version
+    // drift must not cost the whole list; identifier/title default to "" and
+    // the client falls back to the UUID for the label.
+    const parsed = DashboardUsageByIssueListSchema.parse([
+      { issue_id: "issue-1", model: "claude-opus-4-7", input_tokens: 7 },
+    ]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.identifier).toBe("");
+    expect(parsed[0]?.title).toBe("");
+    expect(parsed[0]?.input_tokens).toBe(7);
+  });
+
+  it("rejects a non-array usage-by-issue body so parseWithFallback can fall back", () => {
+    expect(DashboardUsageByIssueListSchema.safeParse(null).success).toBe(false);
+    expect(DashboardUsageByIssueListSchema.safeParse({ rows: [] }).success).toBe(
+      false,
+    );
   });
 
   it("coerces missing fields on every runtime usage schema", () => {
@@ -2012,6 +2105,127 @@ describe("RuntimeModelListRequestSchema", () => {
   });
 });
 
+describe("RuntimeProviderPresetRequestSchema", () => {
+  const completed = {
+    id: "req-1",
+    runtime_id: "rt-1",
+    provider: "dsh",
+    action: "models",
+    status: "completed",
+    created_at: "2026-09-20T00:00:00Z",
+    updated_at: "2026-09-20T00:00:01Z",
+  };
+
+  // The `models` action's catalog and the failure classification are additive
+  // fields on an existing record (DENE-681). `.loose()` would have passed both
+  // through without typing them, which is exactly how the selector ended up
+  // unable to read the list it exists to render.
+  it("parses the catalog the models action answers with", () => {
+    const parsed = parseWithFallback(
+      {
+        ...completed,
+        models: [
+          {
+            id: "deepseek/deepseek-v4.1-flash",
+            name: "DeepSeek V4.1 Flash",
+            context_window: 1000000,
+          },
+          // The other spelling a gateway may answer with. The daemon normally
+          // normalises it; accepting both keeps a catalog usable either way.
+          { id: "claude-sonnet-5", context_length: 200000 },
+        ],
+      },
+      RuntimeProviderPresetRequestSchema,
+      MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.models?.map((model) => model.id)).toEqual([
+      "deepseek/deepseek-v4.1-flash",
+      "claude-sonnet-5",
+    ]);
+    expect(parsed.models?.[0]?.context_window).toBe(1000000);
+    expect(parsed.models?.[1]?.context_length).toBe(200000);
+  });
+
+  it("parses the failure kind and its parameters", () => {
+    const parsed = parseWithFallback(
+      {
+        ...completed,
+        action: "upsert",
+        status: "failed",
+        error: "The provider quota is used up",
+        error_kind: "rate_limited",
+        error_params: {
+          status: "429",
+          reset_at_local: "2026-09-21 08:00",
+          action: "regenerate_key",
+        },
+      },
+      RuntimeProviderPresetRequestSchema,
+      MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.error_kind).toBe("rate_limited");
+    expect(parsed.error_params).toEqual({
+      status: "429",
+      reset_at_local: "2026-09-21 08:00",
+      action: "regenerate_key",
+    });
+  });
+
+  it("drops a non-string parameter instead of failing the whole record", () => {
+    // Losing one parameter degrades a localized sentence. Rejecting the record
+    // would hide the failure the user needs to read.
+    const parsed = parseWithFallback(
+      {
+        ...completed,
+        status: "failed",
+        error_kind: "provider_error",
+        error_params: { status: 500, detail: "boom" },
+      },
+      RuntimeProviderPresetRequestSchema,
+      MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.status).toBe("failed");
+    expect(parsed.error_params).toEqual({ detail: "boom" });
+  });
+
+  it("falls back on a malformed response rather than inventing an empty preset list", () => {
+    for (const malformed of [
+      null,
+      "nope",
+      [],
+      { ...completed, status: 7 },
+      { ...completed, models: "nope" },
+      { ...completed, models: [{ name: "no id" }] },
+      { ...completed, error_kind: { nested: true } },
+    ]) {
+      const parsed = parseWithFallback(
+        malformed,
+        RuntimeProviderPresetRequestSchema,
+        MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
+        { endpoint: "test" },
+      );
+      expect(parsed.status).toBe("failed");
+      expect(parsed.error).toBe("invalid provider preset response");
+      expect(parsed.providers).toBeUndefined();
+    }
+  });
+
+  it("keeps unknown server fields instead of stripping them", () => {
+    const parsed = parseWithFallback(
+      { ...completed, future_field: "keep me" },
+      RuntimeProviderPresetRequestSchema,
+      MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
+      { endpoint: "test" },
+    );
+    expect((parsed as unknown as { future_field?: string }).future_field).toBe(
+      "keep me",
+    );
+  });
+});
+
 describe("IssueViewSchema", () => {
   const valid = {
     id: "v1",
@@ -2524,6 +2738,99 @@ describe("AgentSchema auto_retry_enabled", () => {
     });
     expect(parsed.id).toBe("agent-1");
     expect(parsed.auto_retry_enabled).toBeUndefined();
+  });
+});
+
+describe("AgentSchema work_enabled", () => {
+  const baseAgent = {
+    id: "agent-1",
+    workspace_id: "ws-1",
+    runtime_id: "rt-1",
+    name: "Lambda",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    runtime_mode: "local",
+    runtime_config: {},
+    custom_args: [],
+    visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
+    status: "idle",
+    max_concurrent_tasks: 1,
+    model: "",
+    owner_id: null,
+    skills: [],
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    archived_at: null,
+    archived_by: null,
+  };
+
+  it("parses when work_enabled is omitted and leaves it undefined", () => {
+    const parsed = AgentSchema.parse(baseAgent);
+    expect(parsed.id).toBe("agent-1");
+    expect(parsed.work_enabled).toBeUndefined();
+  });
+
+  it("keeps an explicit false so the UI can treat only that as off", () => {
+    const parsed = AgentSchema.parse({ ...baseAgent, work_enabled: false });
+    expect(parsed.work_enabled).toBe(false);
+  });
+
+  it("degrades a malformed work_enabled without dropping the agent", () => {
+    const parsed = AgentSchema.parse({
+      ...baseAgent,
+      work_enabled: "no",
+    });
+    expect(parsed.id).toBe("agent-1");
+    expect(parsed.work_enabled).toBeUndefined();
+  });
+});
+
+describe("AgentSchema routing_tier", () => {
+  const baseAgent = {
+    id: "agent-1",
+    workspace_id: "ws-1",
+    runtime_id: "rt-1",
+    name: "Lambda",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    runtime_mode: "local",
+    runtime_config: {},
+    custom_args: [],
+    visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
+    status: "idle",
+    max_concurrent_tasks: 1,
+    model: "",
+    owner_id: null,
+    skills: [],
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    archived_at: null,
+    archived_by: null,
+  };
+
+  it("parses an agent from a backend that predates the field", () => {
+    const parsed = AgentSchema.parse(baseAgent);
+    expect(parsed.id).toBe("agent-1");
+    expect(parsed.routing_tier).toBeUndefined();
+  });
+
+  it("keeps the rung a newer backend sent", () => {
+    const parsed = AgentSchema.parse({ ...baseAgent, routing_tier: "strong" });
+    expect(parsed.routing_tier).toBe("strong");
+  });
+
+  // A malformed rung must cost the rung, not the agent: dropping the row
+  // would empty the agent list over one bad column.
+  it("degrades a malformed routing_tier without dropping the agent", () => {
+    const parsed = AgentSchema.parse({ ...baseAgent, routing_tier: 3 });
+    expect(parsed.id).toBe("agent-1");
+    expect(parsed.routing_tier).toBeUndefined();
   });
 });
 

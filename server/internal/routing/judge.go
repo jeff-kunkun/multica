@@ -16,6 +16,13 @@ const (
 	ReviewerSeat ReviewerKind = "seat"
 	// ReviewerHuman — this acceptance needs a person, because it needs a
 	// conversation rather than a check.
+	//
+	// It never becomes the reviewer slot's VALUE. A slot naming a person
+	// hands the ticket to that person at 待验收, and from then on routing
+	// skips it — an issue a person holds is that person's issue — so the
+	// ticket freezes with nobody able to move it on. The answer is kept as a
+	// note instead: a seat takes the slot and is told to @ the person for the
+	// call it cannot make.
 	ReviewerHuman ReviewerKind = "human"
 	// ReviewerNone — this issue does not need a separate acceptance pass.
 	//
@@ -80,8 +87,13 @@ type JudgeState struct {
 // Judge answers the two questions Route cannot answer deterministically.
 // Implementations must not write anything anywhere.
 type Judge interface {
-	Assign(ctx context.Context, model string, st JudgeState) (Verdict, error)
-	Unblock(ctx context.Context, model string, st JudgeState) (Advice, error)
+	Assign(ctx context.Context, target Target, st JudgeState) (Verdict, error)
+	Unblock(ctx context.Context, target Target, st JudgeState) (Advice, error)
+	// Stale answers the stale-review row: wake the reviewer, or align a
+	// status to an acceptance the ticket already carries. It is the only
+	// question whose answer can reach a status write, which is why its
+	// branch set is two values and why the caller gates it a second time.
+	Stale(ctx context.Context, target Target, st StaleState) (StaleDecision, error)
 }
 
 // TextGenerator is the slice of the server-internal LLM layer this package
@@ -97,7 +109,28 @@ type TextGenerator interface {
 // is reused is the discipline — a bounded branch set, one threshold living in
 // one place, and no write when the answer is not clear — not the program.
 type LLMJudge struct {
+	// Gen is the deployment's own generator (MULTICA_LLM_*). It serves every
+	// workspace that did not bring its own gateway, which is all of them until
+	// somebody fills the endpoint pair in.
 	Gen TextGenerator
+	// Dial builds a generator for a workspace-owned gateway. Nil means this
+	// build cannot honour a workspace endpoint at all, and such a target falls
+	// back to Gen rather than failing — an unwired factory is a deployment
+	// fact, not a reason to stop routing.
+	//
+	// It is a factory rather than a cache on purpose: one call per routing
+	// pass is cheap next to the model round-trip it is about to make, while a
+	// cache keyed by credential would keep a rotated-away key alive in memory
+	// for as long as the process runs.
+	Dial func(baseURL, apiKey string) TextGenerator
+}
+
+// generator picks the endpoint one call goes to.
+func (j LLMJudge) generator(t Target) TextGenerator {
+	if t.Override() && j.Dial != nil {
+		return j.Dial(t.BaseURL, t.APIKey)
+	}
+	return j.Gen
 }
 
 // Availability is the optional half of Judge: an implementation that can say,
@@ -107,7 +140,7 @@ type LLMJudge struct {
 // is reported the moment somebody opens the settings section, instead of only
 // after the first ticket has failed against it.
 type Availability interface {
-	Available() bool
+	Available(target Target) bool
 }
 
 // Available reports whether the generator behind this judge has anywhere to
@@ -117,7 +150,14 @@ type Availability interface {
 // only honest reading of "unknown" is to let the real call decide, and
 // claiming a fault on a guess is exactly the mistake this whole surface is
 // supposed to avoid.
-func (j LLMJudge) Available() bool {
+func (j LLMJudge) Available(t Target) bool {
+	// A workspace that supplied both halves has somewhere to send a request by
+	// construction, whatever the deployment did or did not configure. Reading
+	// the deployment client here is what used to report "this deployment has
+	// no internal LLM" at a workspace that had just typed in its own.
+	if t.Override() && j.Dial != nil {
+		return true
+	}
 	type enabler interface{ Enabled() bool }
 	if e, ok := j.Gen.(enabler); ok {
 		return e.Enabled()
@@ -125,9 +165,10 @@ func (j LLMJudge) Available() bool {
 	return true
 }
 
-// NotConfiguredReason is the wording shown for a deployment with no internal
-// LLM. Named once so Health and the breaker cannot drift apart on it.
-const NotConfiguredReason = "this deployment has no internal LLM configured"
+// NotConfiguredReason is the wording shown when neither the workspace nor the
+// deployment has an endpoint to call. Named once so Health and the breaker
+// cannot drift apart on it.
+const NotConfiguredReason = "no routing endpoint is configured — set one for this workspace, or configure the deployment's internal LLM"
 
 // ErrJudgeUnavailable reports that no answer could be obtained. Route turns it
 // into the else branch; it never becomes a partial write.
@@ -155,8 +196,8 @@ You are not changing anything on the ticket. Respond with a JSON object with key
 // Assign asks the todo-row question. Any transport, decoding, or contract
 // failure returns an error wrapping ErrJudgeUnavailable; the caller must not
 // be able to mistake a broken call for a low-confidence answer.
-func (j LLMJudge) Assign(ctx context.Context, model string, st JudgeState) (Verdict, error) {
-	raw, err := j.ask(ctx, model, assignSystemPrompt, st)
+func (j LLMJudge) Assign(ctx context.Context, target Target, st JudgeState) (Verdict, error) {
+	raw, err := j.ask(ctx, target, assignSystemPrompt, st)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -177,8 +218,8 @@ func (j LLMJudge) Assign(ctx context.Context, model string, st JudgeState) (Verd
 }
 
 // Unblock asks the blocked-row question.
-func (j LLMJudge) Unblock(ctx context.Context, model string, st JudgeState) (Advice, error) {
-	raw, err := j.ask(ctx, model, unblockSystemPrompt, st)
+func (j LLMJudge) Unblock(ctx context.Context, target Target, st JudgeState) (Advice, error) {
+	raw, err := j.ask(ctx, target, unblockSystemPrompt, st)
 	if err != nil {
 		return Advice{}, err
 	}
@@ -189,15 +230,19 @@ func (j LLMJudge) Unblock(ctx context.Context, model string, st JudgeState) (Adv
 	return a, nil
 }
 
-func (j LLMJudge) ask(ctx context.Context, model, system string, st JudgeState) (string, error) {
-	if j.Gen == nil {
+// ask sends one question and returns the raw JSON body. st is the question's
+// own state struct: every row embeds JudgeState and adds its own fields, which
+// is why this takes any rather than the base type.
+func (j LLMJudge) ask(ctx context.Context, target Target, system string, st any) (string, error) {
+	gen := j.generator(target)
+	if gen == nil {
 		return "", ErrJudgeUnavailable
 	}
 	payload, err := json.Marshal(st)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrJudgeUnavailable, err)
 	}
-	raw, err := j.Gen.GenerateJSON(ctx, model, system, string(payload), 0, 400)
+	raw, err := gen.GenerateJSON(ctx, target.Model, system, string(payload), 0, 400)
 	if err != nil {
 		// Both errors are wrapped, not formatted in: the breaker classifies
 		// 401/402/403/429 out of the upstream error with errors.As, and a %v
@@ -205,4 +250,79 @@ func (j LLMJudge) ask(ctx context.Context, model, system string, st JudgeState) 
 		return "", fmt.Errorf("%w: %w", ErrJudgeUnavailable, err)
 	}
 	return raw, nil
+}
+
+// StaleAction is the judge's whole answer for the stale-review row. It is a
+// closed two-value set, and that is the point: the model is asked "wake, or
+// align the status to a verdict that already exists", never "is this work
+// done".
+type StaleAction string
+
+const (
+	// StaleWake — nobody is going to move this ticket; put it back in front of
+	// the reviewer. Writes no status.
+	StaleWake StaleAction = "wake"
+	// StaleComplete — the reviewer already passed this on the ticket and the
+	// status simply never followed. Only ever honoured when the deterministic
+	// gate in routeStale agrees that the reviewer actually spoke.
+	StaleComplete StaleAction = "complete"
+)
+
+// StaleDecision is one answer plus its confidence. No prose the product
+// depends on, no action, no free-form status.
+type StaleDecision struct {
+	Action     StaleAction `json:"action"`
+	Confidence float64     `json:"confidence"`
+	Reason     string      `json:"reason"`
+}
+
+// StaleState is the trimmed view the stale-review question is asked against.
+// It carries the reviewer's own remarks because the whole question is whether
+// THOSE remarks already contain an acceptance — not whether the work looks
+// finished.
+type StaleState struct {
+	JudgeState
+	// QuietHours is how long the ticket has been sitting in the in-review
+	// category with nothing happening on it.
+	QuietHours int `json:"quiet_hours"`
+	// Reviewer is the display name of the seat or person holding the
+	// acceptance.
+	Reviewer string `json:"reviewer"`
+	// ReviewRemarks are what the reviewer said on this ticket, oldest first
+	// and clipped. Empty means the reviewer never spoke, and an empty list can
+	// never produce a completion — routeStale refuses it before the answer is
+	// read.
+	ReviewRemarks []string `json:"review_remarks"`
+}
+
+const staleSystemPrompt = `A work ticket has been sitting in "in review" with nothing happening on it, and no run is active. Decide one thing.
+
+action: "complete" ONLY IF review_remarks already contain an explicit acceptance from the reviewer — they checked the work and passed it. "wake" for everything else, including an empty review_remarks, remarks that ask for changes, remarks that are questions, and remarks you are unsure about.
+
+You are NOT judging whether the work is finished. You are judging whether the reviewer has ALREADY said it is. If nobody has said so on the ticket, the answer is "wake".
+
+confidence: calibrated in [0,1]. A below-threshold answer is discarded and treated as "wake", so do not inflate it.
+
+Respond with a JSON object with keys: action, confidence, reason. reason is one short sentence for a human reader.`
+
+// Stale asks the stale-review question.
+func (j LLMJudge) Stale(ctx context.Context, target Target, st StaleState) (StaleDecision, error) {
+	raw, err := j.ask(ctx, target, staleSystemPrompt, st)
+	if err != nil {
+		return StaleDecision{}, err
+	}
+	var d StaleDecision
+	if err := json.Unmarshal([]byte(raw), &d); err != nil {
+		return StaleDecision{}, fmt.Errorf("%w: stale decision was not JSON: %v", ErrJudgeUnavailable, err)
+	}
+	d.Action = StaleAction(strings.ToLower(strings.TrimSpace(string(d.Action))))
+	switch d.Action {
+	case StaleWake, StaleComplete:
+	default:
+		// An unrecognised branch is a broken contract, not a weak answer. The
+		// caller would otherwise read the zero value, and the zero value of a
+		// string is not "wake".
+		return StaleDecision{}, fmt.Errorf("%w: unknown stale action %q", ErrJudgeUnavailable, d.Action)
+	}
+	return d, nil
 }

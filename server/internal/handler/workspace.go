@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/permission"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -121,6 +122,10 @@ func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	if settings == nil {
 		settings = map[string]any{}
 	}
+	// The routing gateway key lives in this column and must never leave the
+	// server. Stripped here, in the one function every workspace response goes
+	// through, rather than at each of its call sites.
+	settings = redactRoutingSettings(settings)
 	var repos any
 	if w.Repos != nil {
 		json.Unmarshal(w.Repos, &repos)
@@ -177,6 +182,7 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	resp := make([]WorkspaceResponse, len(workspaces))
 	for i, ws := range workspaces {
 		resp[i] = h.workspaceToResponse(ws)
+		resp[i].Repos = h.visibleWorkspaceRepos(r, ws)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -194,7 +200,9 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.workspaceToResponse(ws))
+	resp := h.workspaceToResponse(ws)
+	resp.Repos = h.visibleWorkspaceRepos(r, ws)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type CreateWorkspaceRequest struct {
@@ -335,12 +343,27 @@ type UpdateWorkspaceRequest struct {
 	AvatarURL   *string `json:"avatar_url"`
 }
 
+// workspaceRepoRef is one entry of workspace.repos. A repository has no table
+// of its own, so its sharing scope rides on the entry (migration 511):
+// visibility is the scope, created_by is who added it — 'private' means "only
+// the creator", which needs somebody to point at.
 type workspaceRepoRef struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
+	Visibility  string `json:"visibility,omitempty"`
+	CreatedBy   string `json:"created_by,omitempty"`
 }
 
-func validateAndNormalizeWorkspaceRepos(value any) ([]byte, error) {
+// validateAndNormalizeWorkspaceRepos validates the caller's repo list and
+// carries each entry's sharing scope across the write.
+//
+// The client sends the whole list on every save and has no reason to know
+// about visibility or created_by, so those two are never taken from the
+// request: an entry that already exists (matched by URL) keeps the stored
+// values, and a new one is stamped private — zero trust — and credited to the
+// caller. Without the carry-forward, saving an unrelated workspace setting
+// would silently re-share every repo.
+func validateAndNormalizeWorkspaceRepos(value any, stored []byte, actorUserID string) ([]byte, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
@@ -350,6 +373,8 @@ func validateAndNormalizeWorkspaceRepos(value any) ([]byte, error) {
 	if err := json.Unmarshal(raw, &repos); err != nil {
 		return nil, fmt.Errorf("repos must be an array of repository objects: %w", err)
 	}
+
+	existing := workspaceReposByURL(stored)
 
 	normalized := make([]workspaceRepoRef, 0, len(repos))
 	seen := make(map[string]struct{}, len(repos))
@@ -366,6 +391,16 @@ func validateAndNormalizeWorkspaceRepos(value any) ([]byte, error) {
 			continue
 		}
 		seen[repo.URL] = struct{}{}
+		if prior, ok := existing[repo.URL]; ok {
+			repo.Visibility = prior.Visibility
+			repo.CreatedBy = prior.CreatedBy
+		} else {
+			repo.Visibility = string(permission.DefaultVisibility)
+			repo.CreatedBy = actorUserID
+		}
+		if !permission.Visibility(repo.Visibility).Valid() {
+			repo.Visibility = string(permission.DefaultVisibility)
+		}
 		normalized = append(normalized, repo)
 	}
 
@@ -374,6 +409,30 @@ func validateAndNormalizeWorkspaceRepos(value any) ([]byte, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// decodeWorkspaceRepos reads a stored workspace.repos blob. A malformed or
+// absent blob yields an empty list rather than an error: repos are a settings
+// convenience, and a workspace whose list will not parse must still load.
+func decodeWorkspaceRepos(stored []byte) []workspaceRepoRef {
+	if len(stored) == 0 {
+		return nil
+	}
+	var repos []workspaceRepoRef
+	if err := json.Unmarshal(stored, &repos); err != nil {
+		return nil
+	}
+	return repos
+}
+
+func workspaceReposByURL(stored []byte) map[string]workspaceRepoRef {
+	out := map[string]workspaceRepoRef{}
+	for _, repo := range decodeWorkspaceRepos(stored) {
+		if repo.URL != "" {
+			out[repo.URL] = repo
+		}
+	}
+	return out
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -407,11 +466,28 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
 	if req.Settings != nil {
-		s, _ := json.Marshal(req.Settings)
+		// The client cannot echo back the routing key it was never sent, so
+		// the stored one is carried forward unless this write explicitly sets
+		// or clears it. Without this, any unrelated settings save wipes it.
+		var stored []byte
+		if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
+			stored = existing.Settings
+		}
+		merged, ok := h.applyRoutingSecret(req.Settings, stored)
+		if !ok {
+			writeError(w, http.StatusServiceUnavailable,
+				"this deployment cannot store a routing key (no MULTICA_ROUTING_SECRET_KEY or JWT_SECRET)")
+			return
+		}
+		s, _ := json.Marshal(merged)
 		params.Settings = s
 	}
 	if req.Repos != nil {
-		reposJSON, err := validateAndNormalizeWorkspaceRepos(req.Repos)
+		var storedRepos []byte
+		if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
+			storedRepos = existing.Repos
+		}
+		reposJSON, err := validateAndNormalizeWorkspaceRepos(req.Repos, storedRepos, requestUserID(r))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -557,7 +633,11 @@ func normalizeMemberRole(role string) (string, bool) {
 
 	role = strings.TrimSpace(role)
 	switch role {
-	case "owner", "admin", "member":
+	case "owner", "admin", "member", "guest":
+		// "guest" became selectable here together with DENE-697's
+		// read-only interceptor. Before that layer existed a guest held
+		// every Member write permission under a read-only name, so
+		// migration 502 deliberately left this list alone.
 		return role, true
 	default:
 		return "", false

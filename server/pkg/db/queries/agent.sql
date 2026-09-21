@@ -75,14 +75,15 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
-    service_tier, conversation_starters,
+    service_tier, routing_tier, conversation_starters,
     composio_toolkit_allowlist, permission_mode, parent_agent_id,
     runtime_inherited
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
-    $17, COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
+    $17, sqlc.narg('routing_tier'),
+    COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
     sqlc.narg('composio_toolkit_allowlist')::text[],
     COALESCE(sqlc.narg('permission_mode'), 'private'),
     sqlc.narg('parent_agent_id')::uuid,
@@ -206,6 +207,7 @@ UPDATE agent SET
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
+    routing_tier = COALESCE(sqlc.narg('routing_tier'), routing_tier),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     switchable_models = COALESCE(sqlc.narg('switchable_models'), switchable_models),
@@ -213,6 +215,10 @@ UPDATE agent SET
     -- "turned off" the same way thinking_level's two-query pattern does for
     -- nullable text. A bool column cannot be cleared to NULL.
     auto_retry_enabled = COALESCE(sqlc.narg('auto_retry_enabled'), auto_retry_enabled),
+    -- Reversible seat gate (DENE-714). Same omitted-preserves / present-sets
+    -- contract as auto_retry_enabled. FALSE means the seat stays in the list
+    -- but does not take new work.
+    work_enabled = COALESCE(sqlc.narg('work_enabled'), work_enabled),
     -- Same tri-state for runtime inheritance (DENE-505): NULL leaves the flag
     -- alone, FALSE switches a specialisation to its own runtime configuration,
     -- TRUE makes it follow its base role again. Setting it back to "not
@@ -333,6 +339,13 @@ RETURNING *;
 -- Explicit NULL-clear for service_tier. COALESCE-based UpdateAgent cannot
 -- set the column back to NULL, so the API routes "Runtime default" here.
 UPDATE agent SET service_tier = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentRoutingTier :one
+-- Explicit NULL-clear for routing_tier. COALESCE-based UpdateAgent cannot set
+-- the column back to NULL, so "this seat is not on the ladder" routes here.
+UPDATE agent SET routing_tier = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -947,6 +960,15 @@ WHERE id = (
             -- settle an owner mismatch through the existing FailTask path
             -- before daemon delivery. Public runtimes remain shareable across
             -- agent owners; dispatched reclaim keeps its owner fence below.
+            -- Reversible seat gate (DENE-714). Queued work stays queued until
+            -- the seat is turned back on. Already-dispatched reclaim queries
+            -- do NOT check this: disable must not interrupt an in-flight claim.
+            AND a.work_enabled
+            -- Private runtimes only execute their owner's agents. Ownerless
+            -- runtime/agent rows remain claimable only so the handler can
+            -- settle them explicitly before daemon delivery; filtering them
+            -- here would leave every task silently queued until the TTL.
+            -- Public runtimes remain shareable across agent owners.
             AND (
                 r.visibility = 'public'
                 OR r.visibility = 'private'
@@ -2462,6 +2484,7 @@ WHERE atq.runtime_id = $1
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
         AND a.runtime_id = atq.runtime_id
+        AND a.work_enabled
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'
@@ -2582,6 +2605,7 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
         AND a.runtime_id = atq.runtime_id
+        AND a.work_enabled
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'
@@ -3006,3 +3030,17 @@ RETURNING *;
 
 -- name: GetCommentThreadRootID :one
 SELECT comment_thread_root_id(@comment_id::uuid)::uuid AS id;
+
+-- name: SetAgentTaskCodeDecision :exec
+-- Records where this run's code lives, as decided at claim time by
+-- internal/coderesolve (DENE-619). The daemon already has the answer on its
+-- claim response; this is the copy every later read serves, so the UI can say
+-- where a run went without re-deriving the rule — or guessing, once the
+-- project's resources have moved on.
+--
+-- Written once, by the claim that computed it: a redelivery re-runs the
+-- resolution against the runtime actually claiming, which is the decision that
+-- is true for the attempt now running, so a plain assignment is correct.
+UPDATE agent_task_queue
+SET code_decision = sqlc.arg('code_decision')
+WHERE id = sqlc.arg('id');

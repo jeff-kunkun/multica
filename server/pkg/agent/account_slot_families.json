@@ -1,0 +1,32 @@
+{
+  "max_account_number": 32,
+  "families": [
+    {
+      "cli": "agy",
+      "base_dir": ".gemini",
+      "account_dir_prefix": ".gemini-account",
+      "lever": "custom_args:--gemini_dir",
+      "runtime_config_key": "agy_slots",
+      "default_accounts": [1, 2, 3],
+      "rotates_on_quota": true
+    },
+    {
+      "cli": "dsh",
+      "base_dir": ".dsh",
+      "account_dir_prefix": ".dsh-account",
+      "lever": "env:DSH_HOME",
+      "runtime_config_key": "dsh_slots",
+      "default_accounts": [1],
+      "rotates_on_quota": false
+    },
+    {
+      "cli": "claude",
+      "base_dir": ".claude",
+      "account_dir_prefix": ".claude-account",
+      "lever": "env:CLAUDE_CONFIG_DIR",
+      "runtime_config_key": "claude_slots",
+      "default_accounts": [1],
+      "rotates_on_quota": false
+    }
+  ]
+}

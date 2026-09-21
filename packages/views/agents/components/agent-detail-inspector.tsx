@@ -13,6 +13,7 @@ import {
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
   isAgentAutoRetryEnabled,
+  isAgentWorkEnabled,
   normaliseSwitchableModelsDraft,
   selectAgentSwitchableModels,
   switchableModelsEqual,
@@ -43,6 +44,7 @@ import {
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
+import { RoutingTierSettingField } from "./inspector/routing-tier-setting-field";
 import { SwitchableModelsEditor } from "./switchable-models-editor";
 import {
   canEditRuntimeProfile,
@@ -423,6 +425,13 @@ export function AgentDetailInspector({
             canEdit={canEditRuntime}
             onChange={(serviceTier) => update({ service_tier: serviceTier })}
           />
+          <RoutingTierSettingField
+            label={t(($) => $.inspector.prop_routing_tier)}
+            description={t(($) => $.inspector.prop_routing_tier_hint)}
+            value={agent.routing_tier ?? ""}
+            canEdit={canEdit}
+            onChange={(routingTier) => update({ routing_tier: routingTier })}
+          />
           <SettingsRow
             label={t(($) => $.inspector.prop_switchable_models)}
             description={
@@ -463,6 +472,19 @@ export function AgentDetailInspector({
               value={agent.max_concurrent_tasks}
               canEdit={canEdit}
               onSave={(next) => update({ max_concurrent_tasks: next })}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_work_enabled)}
+            description={t(($) => $.inspector.prop_work_enabled_hint)}
+          >
+            <Switch
+              checked={isAgentWorkEnabled(agent)}
+              disabled={!canEdit}
+              onCheckedChange={(checked) => {
+                void update({ work_enabled: checked });
+              }}
+              aria-label={t(($) => $.inspector.prop_work_enabled)}
             />
           </SettingsRow>
           <SettingsRow

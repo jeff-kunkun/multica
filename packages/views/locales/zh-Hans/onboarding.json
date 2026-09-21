@@ -3,13 +3,16 @@
     "wordmark": "Multica",
     "label": "引导步骤",
     "about_you": {
-      "label": "关于你"
+      "label": "关于你",
+      "description": "你的角色，和你想完成的事。"
     },
     "workspace": {
-      "label": "工作区"
+      "label": "工作区",
+      "description": "起个名字，定个网址。"
     },
     "runtime": {
-      "label": "认识 Mika"
+      "label": "认识 Mika",
+      "description": "你的第一个智能体队友，以及它在哪运行。"
     }
   },
   "welcome": {
@@ -42,7 +45,9 @@
       "card5_body_suffix": " 标记的导出功能，PR 里附了预览链接。",
       "card5_mention_you": "@你",
       "card5_timestamp": "刚刚"
-    }
+    },
+    "lede_desktop": "走完这几步，就会有真实的智能体来回复你的第一个任务。",
+    "illustration_caption": "每个任务、每条对话、每个决策——团队和智能体共享同一份上下文。"
   },
   "common": {
     "back": "返回",
@@ -56,7 +61,8 @@
     "eyebrow": "顺便问一句",
     "lede": "帮助我们了解你从哪里知道 Multica。",
     "submit": "提交",
-    "save_failed_toast": "保存失败"
+    "save_failed_toast": "保存失败",
+    "hint_ready": "看起来不错，准备好就点提交。"
   },
   "questions": {
     "about_you": {
@@ -111,7 +117,8 @@
     "other_aria": "描述其他选项"
   },
   "step_question": {
-    "hint_pick": "可跳过。"
+    "hint_pick": "可跳过。",
+    "hint_continue": "可以了。准备好就点继续。"
   },
   "cli_install": {
     "copy_aria": "复制",
@@ -189,7 +196,8 @@
     "creation_disabled_logout": "退出登录",
     "creation_disabled_eyebrow_resume": "你的工作区",
     "creation_disabled_headline_resume": "继续使用 {{name}}。",
-    "creation_disabled_lede_resume": "该实例已禁用创建工作区，继续进入你已有的工作区即可。"
+    "creation_disabled_lede_resume": "该实例已禁用创建工作区，继续进入你已有的工作区即可。",
+    "create_new_subtitle": "另起一个——把另一类工作放进单独的空间。"
   },
   "step_runtime": {
     "scanning_headline": "正在连接这台电脑...",
@@ -217,7 +225,9 @@
     "hint_selected": "已选择：{{name}}",
     "hint_pick": "在上方选择一个智能体运行时，就可以开始使用 Mika。",
     "hint_waiting": "等待第一个结果...",
-    "continue": "开始使用 Mika"
+    "continue": "开始使用 Mika",
+    "found_lede": "以下是在这台电脑上找到的智能体运行时。之后可以随时切换，或添加更多。",
+    "hint_skip_or_refresh": "装好后点刷新，或跳过进入工作区。"
   },
   "step_platform": {
     "eyebrow": "连接一台电脑",
@@ -246,7 +256,8 @@
     "stage_slow_suffix": " 的终端是否有错误。",
     "stage_stalled_prefix": "目前还没有收到连接。如果你不太习惯终端，",
     "stage_stalled_term": "桌面端",
-    "stage_stalled_suffix": " 更顺手——一键搞定，这台电脑就连接好了。关闭这个对话框选择桌面端，或点跳过继续。"
+    "stage_stalled_suffix": " 更顺手——一键搞定，这台电脑就连接好了。关闭这个对话框选择桌面端，或点跳过继续。",
+    "cli_dialog_description": "和桌面端相同的连接，通过终端配置。适用于服务器、远程开发机或任意无头电脑。"
   },
   "errors": {
     "skip_failed": "完成上手引导失败",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -16,8 +16,10 @@ import {
 } from "@multica/core/workspace/queries";
 import type { RoutingHealth } from "@multica/core/workspace/routing-health";
 import {
+  normalizeStaleReviewHours,
   normalizeThreshold,
   parseRoutingSettings,
+  routingGatewayIsComplete,
   routingState,
   withRoutingSettings,
   type RoutingSettings,
@@ -41,13 +43,28 @@ import { useAutoSave } from "./use-auto-save";
  * Hiding the slot while routing is off is done by archiving the property
  * definition, which the property panel already honours.
  *
- * The model field is a free-text identifier rather than a picker. The routing
- * judge runs on the deployment's server-internal LLM gateway (the same layer
- * that backs chat titling), not on the per-workspace runtime model catalog the
- * agent seats use — so there is no workspace-scoped list to pick from, and
- * offering one would let a workspace choose a model the server cannot reach.
- * Credentials for that gateway are deployment configuration and are
- * deliberately not editable here: this section stores no secret of any kind.
+ * The model field accepts manual ids but also gets a catalog from the selected
+ * gateway. The server keeps the credential on its side, returns ids only, and
+ * the first id fills an empty field; manual entry stays available for gateways
+ * that do not implement `/models`.
+ *
+ * Two protocols can be on the other end. An OpenAI-compatible gateway is
+ * asked for JSON; a TypeSafe System One endpoint (Jev) is asked for a typed
+ * judgment with its probability distribution. The section names which one is
+ * in use, because the confidence the threshold gates on means different things
+ * on the two: measured on one, self-reported on the other.
+ *
+ * Which gateway is now a workspace decision. It did not used to be: the judge
+ * borrowed the deployment's MULTICA_LLM_* configuration, which is fine for one
+ * operator on their own box and stops being fine the moment the instance is
+ * shared with a team — "ask whoever runs the server to edit an env var and
+ * restart" is not a setting, and it is the same answer for every workspace on
+ * the machine. Both fields stay optional: leave them empty and the deployment
+ * gateway is used exactly as before.
+ *
+ * The key is the one field here that is write-only. It is sealed server-side
+ * and stripped from every response, so there is nothing to render back — the
+ * box shows whether a key is stored, never which.
  */
 export function RoutingTab() {
   const { t } = useT("settings");
@@ -66,6 +83,16 @@ export function RoutingTab() {
   const [enabled, setEnabled] = useState(saved.enabled);
   const [model, setModel] = useState(saved.model);
   const [threshold, setThreshold] = useState(String(saved.confidence_threshold));
+  const [staleHours, setStaleHours] = useState(String(saved.stale_review_hours));
+  const [baseUrl, setBaseUrl] = useState(saved.base_url);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const autoDiscoverKey = useRef("");
+  const autoFilledModel = useRef("");
+  // Held apart from the auto-saved draft on purpose. Auto-save fires while
+  // somebody is still typing, and a half-typed credential saved to the server
+  // is both useless and a real key sitting in a row nobody will think to
+  // clear. The key is committed by an explicit button instead.
+  const [keyInput, setKeyInput] = useState("");
 
   // Reset only when the workspace changes, not on every cached-object
   // replacement — an unrelated mutation must not wipe an unsaved edit.
@@ -74,6 +101,12 @@ export function RoutingTab() {
     setEnabled(next.enabled);
     setModel(next.model);
     setThreshold(String(next.confidence_threshold));
+    setStaleHours(String(next.stale_review_hours));
+    setBaseUrl(next.base_url);
+    setKeyInput("");
+    setAvailableModels([]);
+    autoDiscoverKey.current = "";
+    autoFilledModel.current = "";
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace?.id]);
 
@@ -82,9 +115,34 @@ export function RoutingTab() {
       enabled,
       model,
       confidence_threshold: normalizeThreshold(Number(threshold)),
+      stale_review_hours: normalizeStaleReviewHours(Number(staleHours)),
+      base_url: baseUrl,
     }),
-    [enabled, model, threshold],
+    [enabled, model, threshold, staleHours, baseUrl],
   );
+
+  const discoverModels = useMutation({
+    mutationFn: async () => {
+      if (!workspace) throw new Error("workspace is not selected");
+      return api.listRoutingModels(workspace.id);
+    },
+    onSuccess: (result) => {
+      setAvailableModels(result.models);
+      // Discovery is an aid, not an override: keep a model somebody already
+      // chose, and only fill the empty state the user asked us to complete.
+      if (result.models.length > 0) {
+        const first = result.models[0];
+        if (first) {
+          setModel((current) => {
+            if (current.trim() !== "") return current;
+            autoFilledModel.current = first;
+            return first;
+          });
+        }
+      }
+    },
+    onError: () => setAvailableModels([]),
+  });
 
   useAutoSave({
     value: draft,
@@ -111,7 +169,9 @@ export function RoutingTab() {
     isEqual: (a, b) =>
       a.enabled === b.enabled &&
       a.model.trim() === b.model.trim() &&
-      a.confidence_threshold === b.confidence_threshold,
+      a.confidence_threshold === b.confidence_threshold &&
+      a.stale_review_hours === b.stale_review_hours &&
+      a.base_url.trim() === b.base_url.trim(),
   });
 
   // Live health from the server. Without it the fourth state is unreachable:
@@ -124,11 +184,76 @@ export function RoutingTab() {
     enabled: !!workspace?.id,
   });
 
+  // A workspace that already has URL + key saved should not need to touch the
+  // form again after an app restart. Discover once for the current target;
+  // manual re-entry remains available after a provider that has no /models.
+  useEffect(() => {
+    const healthData = health.data;
+    if (
+      !workspace ||
+      !canManage ||
+      !enabled ||
+      !healthData?.gateway_configured ||
+      (saved.base_url.trim() !== "" && !healthData.gateway_key_set) ||
+      discoverModels.isPending
+    ) {
+      return;
+    }
+    const key = [
+      workspace.id,
+      healthData.gateway_scope,
+      healthData.gateway_host,
+      healthData.gateway_key_set,
+      saved.base_url,
+    ].join("|");
+    if (autoDiscoverKey.current === key) return;
+    autoDiscoverKey.current = key;
+    // A half-filled custom pair falls back to the deployment gateway. Do not
+    // fill from that fallback, because the next key save would silently leave
+    // a deployment-only model selected for the new workspace gateway.
+    if (model.trim() !== "" && autoFilledModel.current !== model.trim()) return;
+    if (autoFilledModel.current === model.trim()) setModel("");
+    discoverModels.mutate();
+  }, [
+    canManage,
+    discoverModels,
+    enabled,
+    health.data,
+    model,
+    saved.base_url,
+    workspace,
+  ]);
+
   const recheck = useMutation({
     mutationFn: () => api.checkRoutingHealth(workspace?.id ?? ""),
     onSuccess: (next) => {
       qc.setQueryData(workspaceKeys.routingHealth(workspace?.id ?? ""), next);
     },
+  });
+
+  // The key write. Explicit rather than auto-saved (see keyInput), and it
+  // sends the rest of the draft along because the server replaces the whole
+  // settings column — sending the key alone would revert an unsaved model or
+  // endpoint edit made in the same sitting.
+  const saveKey = useMutation({
+    mutationFn: async (nextKey: string) => {
+      if (!workspace) return;
+      const updated = await api.updateWorkspace(workspace.id, {
+        settings: withRoutingSettings(workspace.settings, draft, nextKey),
+      });
+      qc.setQueryData(
+        workspaceListOptions().queryKey,
+        (old: Workspace[] | undefined) =>
+          old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      await qc.invalidateQueries({
+        queryKey: workspaceKeys.routingHealth(workspace.id),
+      });
+    },
+    // Cleared whichever way it went: on success the key is stored and there
+    // is nothing to show, and on failure leaving a credential in a text box
+    // behind a red message is not something to do to somebody.
+    onSettled: () => setKeyInput(""),
   });
 
   // The draft wins over the server report while an edit is in flight: a person
@@ -174,12 +299,33 @@ export function RoutingTab() {
             size="text"
           >
             <Input
+              list="routing-model-options"
               value={model}
               disabled={!canManage}
               placeholder={t(($) => $.routing.model_placeholder)}
               onChange={(e) => setModel(e.target.value)}
               aria-label={t(($) => $.routing.model_label)}
             />
+            {availableModels.length > 0 ? (
+              <datalist id="routing-model-options">
+                {availableModels.map((availableModel) => (
+                  <option key={availableModel} value={availableModel} />
+                ))}
+              </datalist>
+            ) : null}
+            <p className="text-micro text-muted-foreground">
+              {discoverModels.isPending
+                ? t(($) => $.routing.model_discovering)
+                : discoverModels.isError
+                  ? t(($) => $.routing.model_discover_failed)
+                  : discoverModels.isSuccess && availableModels.length === 0
+                    ? t(($) => $.routing.model_discover_empty)
+                    : availableModels.length > 0
+                      ? t(($) => $.routing.model_discover_loaded, {
+                          count: availableModels.length,
+                        })
+                      : null}
+            </p>
           </SettingsRow>
 
           <SettingsRow
@@ -200,10 +346,105 @@ export function RoutingTab() {
               aria-label={t(($) => $.routing.threshold_label)}
             />
           </SettingsRow>
+
+          <SettingsRow
+            label={t(($) => $.routing.stale_hours_label)}
+            description={t(($) => $.routing.stale_hours_description)}
+            size="code"
+          >
+            <Input
+              type="number"
+              min={1}
+              max={720}
+              step={1}
+              value={staleHours}
+              // Same gate as the threshold: this row runs only while routing
+              // is on, and it is deliberately not a switch of its own.
+              disabled={!canManage || !enabled}
+              onChange={(e) => setStaleHours(e.target.value)}
+              aria-label={t(($) => $.routing.stale_hours_label)}
+            />
+          </SettingsRow>
         </SettingsCard>
-        <p className="px-0.5 text-caption text-muted-foreground">
-          {t(($) => $.routing.no_credentials_note)}
-        </p>
+        <GatewayNote health={health.data} />
+      </SettingsSection>
+
+      <SettingsSection title={t(($) => $.routing.gateway_title)}>
+        <SettingsCard>
+          <SettingsRow
+            label={t(($) => $.routing.gateway_url_label)}
+            description={t(($) => $.routing.gateway_url_description)}
+            size="text"
+          >
+            <Input
+              value={baseUrl}
+              disabled={!canManage}
+              placeholder={t(($) => $.routing.gateway_url_placeholder)}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              aria-label={t(($) => $.routing.gateway_url_label)}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t(($) => $.routing.gateway_key_label)}
+            description={
+              health.data?.workspace_key_storable === false
+                ? t(($) => $.routing.gateway_key_unstorable)
+                : t(($) => $.routing.gateway_key_description)
+            }
+            size="text"
+          >
+            <div className="flex w-full items-center gap-2">
+              <Input
+                type="password"
+                value={keyInput}
+                autoComplete="off"
+                disabled={
+                  !canManage ||
+                  health.data?.workspace_key_storable === false ||
+                  saveKey.isPending
+                }
+                // The placeholder is the whole readback: the stored key never
+                // leaves the server, so "a key is saved" is the most this box
+                // can honestly say.
+                placeholder={
+                  health.data?.gateway_key_set
+                    ? t(($) => $.routing.gateway_key_stored)
+                    : t(($) => $.routing.gateway_key_placeholder)
+                }
+                onChange={(e) => setKeyInput(e.target.value)}
+                aria-label={t(($) => $.routing.gateway_key_label)}
+              />
+              <Button
+                type="button"
+                size="sm"
+                disabled={
+                  !canManage || keyInput.trim() === "" || saveKey.isPending
+                }
+                onClick={() => saveKey.mutate(keyInput)}
+                className="shrink-0"
+              >
+                {t(($) => $.routing.gateway_key_save)}
+              </Button>
+              {health.data?.gateway_key_set && canManage ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={saveKey.isPending}
+                  onClick={() => saveKey.mutate("")}
+                  className="shrink-0"
+                >
+                  {t(($) => $.routing.gateway_key_clear)}
+                </Button>
+              ) : null}
+            </div>
+          </SettingsRow>
+        </SettingsCard>
+        <GatewayPairNote
+          baseUrl={baseUrl}
+          keyStored={health.data?.gateway_key_set === true}
+        />
       </SettingsSection>
 
       {/* Placeholder for the candidate filter chain. Kept visible and clearly
@@ -215,6 +456,87 @@ export function RoutingTab() {
         </div>
       </SettingsSection>
     </SettingsTab>
+  );
+}
+
+/**
+ * Where the model id above is sent.
+ *
+ * The box is a bare model identifier, which left the obvious question — "which
+ * model is this, and on whose endpoint?" — answerable nowhere in the product.
+ * Naming the host lets a reader tell at a glance whether the model they are
+ * about to type exists on it.
+ *
+ * It also has to say WHOSE host it is. The same hostname means two different
+ * things depending on scope: one the workspace can edit in the card below, one
+ * only whoever runs the server can change. The unconfigured case is the
+ * important one — it is the most common reason routing silently does nothing —
+ * and it now has a fix on this very screen, so it points at it.
+ */
+function GatewayNote({ health }: { health?: RoutingHealth }) {
+  const { t } = useT("settings");
+  if (health && health.gateway_configured === false) {
+    return (
+      <p className="px-0.5 text-caption leading-5 text-destructive">
+        {t(($) => $.routing.gateway_unset)}
+      </p>
+    );
+  }
+  const scoped =
+    health?.gateway_scope === "workspace"
+      ? t(($) => $.routing.gateway_endpoint_workspace, {
+          host: health?.gateway_host ?? "",
+        })
+      : t(($) => $.routing.gateway_endpoint_deployment, {
+          host: health?.gateway_host ?? "",
+        });
+  return (
+    <div className="flex flex-col gap-1 px-0.5">
+      {health?.gateway_host ? (
+        <p className="text-caption leading-5 text-muted-foreground">{scoped}</p>
+      ) : null}
+      {health?.gateway_protocol === "systemone" ? (
+        <p className="text-caption leading-5 text-muted-foreground">
+          {t(($) => $.routing.gateway_protocol_systemone)}
+        </p>
+      ) : null}
+      {health?.gateway_default_model ? (
+        <p className="text-caption leading-5 text-muted-foreground">
+          {t(($) => $.routing.gateway_default_model, {
+            model: health.gateway_default_model,
+          })}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The half-filled pair.
+ *
+ * An endpoint with no key, or a key with no endpoint, is not an error — it
+ * falls back whole to the deployment gateway, because sending the deployment
+ * key to a host the operator never chose, or a workspace key to the
+ * deployment's host, are both worse than doing nothing. But a silent fallback
+ * is how somebody spends an afternoon wondering why their own model is never
+ * called, so it is stated.
+ */
+function GatewayPairNote({
+  baseUrl,
+  keyStored,
+}: {
+  baseUrl: string;
+  keyStored: boolean;
+}) {
+  const { t } = useT("settings");
+  const typedSomething = baseUrl.trim() !== "" || keyStored;
+  if (!typedSomething || routingGatewayIsComplete(baseUrl, keyStored)) {
+    return null;
+  }
+  return (
+    <p className="px-0.5 text-caption leading-5 text-warning-foreground">
+      {t(($) => $.routing.gateway_pair_incomplete)}
+    </p>
   );
 }
 

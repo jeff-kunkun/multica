@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // agentAccountFixtures builds a fake host home whose CLI directories are the
@@ -477,5 +479,57 @@ func TestHealthHandlerReportsAgentAccounts(t *testing.T) {
 	}
 	if _, present := raw["agent_accounts_error"]; present {
 		t.Fatalf("clean probe must omit agent_accounts_error: %#v", raw["agent_accounts_error"])
+	}
+}
+
+// A slot registered in the UI is only real if the bound directory reaches the
+// CLI. For an env-lever family that means the key must pass the custom_env
+// blocklist and land in the task's child environment unchanged — otherwise the
+// account surface would offer an "add account" that silently does nothing,
+// which is exactly why codex and cursor own no slot registry.
+func TestAccountSlotFamilyEnvLeversReachTheTaskEnv(t *testing.T) {
+	envFamilies := 0
+	for _, family := range agent.AccountSlotFamilies() {
+		key := family.EnvLeverKey()
+		if key == "" {
+			continue
+		}
+		envFamilies++
+		if isBlockedEnvKey(key) {
+			t.Errorf("%s lever %s is blocklisted: its slots could never take effect", family.CLI, key)
+		}
+		dir := filepath.Join("/Users/someone", family.AccountDirPrefix+"2")
+		childEnv := map[string]string{}
+		layerCustomEnvAndHermesHome(childEnv, map[string]string{key: dir}, "", nil)
+		if got := childEnv[key]; got != dir {
+			t.Errorf("%s: task env %s = %q, want %q", family.CLI, key, got, dir)
+		}
+	}
+	if envFamilies == 0 {
+		t.Fatal("no env-lever slot family found; dsh and claude are expected")
+	}
+}
+
+// Every slot family must be probed with the layout the shared table declares,
+// so a directory the UI registers is the directory the daemon reports back.
+func TestAgentCLIProbesFollowTheSlotFamilyTable(t *testing.T) {
+	probes := map[string]agentCLIProbe{}
+	for _, probe := range agentCLIProbes {
+		probes[probe.CLI] = probe
+	}
+	for _, family := range agent.AccountSlotFamilies() {
+		probe, ok := probes[family.CLI]
+		if !ok {
+			t.Errorf("%s owns a slot registry but is not probed", family.CLI)
+			continue
+		}
+		if probe.BaseDir != family.BaseDir || probe.AccountGlob != family.AccountGlob() || probe.Lever != family.Lever {
+			t.Errorf("%s probe = %+v, table = %+v", family.CLI, probe, family)
+		}
+	}
+	for _, cli := range []string{"codex", "cursor"} {
+		if probes[cli].Lever != agentLeverNone {
+			t.Errorf("%s must stay read-only, got lever %q", cli, probes[cli].Lever)
+		}
 	}
 }

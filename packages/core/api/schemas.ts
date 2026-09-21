@@ -1309,6 +1309,11 @@ export const IssueSchema = z.object({
   priority: z.string(),
   assignee_type: z.string().nullable(),
   assignee_id: z.string().nullable(),
+  // 验收席. Nullish-with-default rather than plain nullable: an installed
+  // client can talk to a backend that predates DENE-633, and a missing pair
+  // must parse to "undecided" instead of failing the whole issue.
+  reviewer_type: z.string().nullish().catch(null).default(null),
+  reviewer_id: z.string().nullish().catch(null).default(null),
   creator_type: z.string(),
   creator_id: z.string(),
   parent_issue_id: z.string().nullable(),
@@ -1791,6 +1796,9 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   model: z.string().default(""),
   thinking_level: z.string().optional(),
   service_tier: z.string().optional(),
+  // Seat strength for automatic dispatch (DENE-633). Optional because a
+  // desktop build can talk to a backend that predates the column.
+  routing_tier: z.string().optional().catch(undefined),
   switchable_models: z.array(z.unknown()).optional(),
   owner_id: z.string().nullable().default(null),
   skills: z.array(z.unknown()).default([]),
@@ -1802,6 +1810,9 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   // Older backends omit this field. Missing or malformed must not fail the
   // whole agent parse; UI treats undefined as enabled (`!== false`).
   auto_retry_enabled: z.boolean().optional().catch(undefined),
+  // Reversible seat gate (DENE-714). Same omit/malformed contract as
+  // auto_retry_enabled: only an explicit false is off.
+  work_enabled: z.boolean().optional().catch(undefined),
 }).loose() as z.ZodType<Agent>;
 
 // Malformed ROWS are dropped individually, the same way a blocked mention is
@@ -1888,6 +1899,25 @@ const DashboardUsageByAgentSchema = z.object({
 }).loose();
 
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
+
+// Per-(issue, model) rows for the dashboard's per-issue cost list. `identifier`
+// / `title` default to "" so a backend that predates the issue fields degrades
+// to an unnamed row rather than dropping the whole list to the `[]` fallback —
+// the row's link is derived from `issue_id`, which every version sends.
+const DashboardUsageByIssueSchema = z.object({
+  issue_id: z.string().default(""),
+  identifier: z.string().default(""),
+  title: z.string().default(""),
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  ...CostSplitShape,
+}).loose();
+
+export const DashboardUsageByIssueListSchema = z.array(DashboardUsageByIssueSchema);
 
 // `cancelled_count` defaults to 0 so an installed client pointed at a
 // backend that predates it still renders: those rows simply carry no
@@ -2065,6 +2095,29 @@ const TaskUsageSchema = z.object({
   trigger_evidence_kind: z.string().optional(),
 }).loose();
 
+// Where this run's code lives, decided once on the server (DENE-619). A closed
+// set of kinds, but parsed as a plain string with a `.catch`: the UI switches
+// on it with a default branch, so a kind added by a newer backend renders as
+// "somewhere this client does not know about" rather than erasing the task.
+//
+// kind === "unresolvable" is a real value, not an error: the run has no code
+// source and `code` says why. Absent entirely from a task claimed before the
+// server recorded decisions.
+export const CodeDecisionSchema = z.object({
+  kind: z.string().default("unresolvable"),
+  path: z.string().optional().catch(undefined),
+  repo_path: z.string().optional().catch(undefined),
+  worktree_root: z.string().optional().catch(undefined),
+  execution_mode: z.string().optional().catch(undefined),
+  display_name: z.string().optional().catch(undefined),
+  resource_id: z.string().optional().catch(undefined),
+  project_id: z.string().optional().catch(undefined),
+  url: z.string().optional().catch(undefined),
+  session_id: z.string().optional().catch(undefined),
+  code: z.string().optional().catch(undefined),
+  reason: z.string().optional().catch(undefined),
+}).loose();
+
 export const AgentTaskSchema = z.object({
   cancelled_by_comment_change: z.boolean().optional().catch(undefined),
   cancelled_by: TaskCancellationActorSchema.optional().catch(undefined),
@@ -2098,6 +2151,9 @@ export const AgentTaskSchema = z.object({
   durable_work_dir: z.string().optional().catch(undefined),
   relative_durable_work_dir: z.string().optional().catch(undefined),
   branch_name: z.string().optional().catch(undefined),
+  // Additive display metadata, degraded independently: a malformed decision
+  // must cost the row its "where did this run" line, not the execution log.
+  code_decision: CodeDecisionSchema.optional().catch(undefined),
   attribution: TaskAttributionSchema.optional(),
   // Per-run token usage. Same independent-degradation rule as the coverage
   // arrays above: usage is additive display metadata, so one malformed entry
@@ -3660,11 +3716,16 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
 // A model entry with no `id` cannot be keyed or activated, so `id` is required
 // and an entry without one drops the whole response to the fallback rather than
 // rendering a row that would write an empty model id.
+//
+// `context_length` is the spelling some gateways use on the wire; the daemon
+// normalises it onto `context_window` before reporting, and both are accepted
+// so a catalog stays usable when only the older spelling arrives.
 const RuntimeProviderPresetModelSchema = z
   .object({
     id: z.string(),
     name: z.string().optional(),
     context_window: z.number().optional(),
+    context_length: z.number().optional(),
   })
   .loose();
 
@@ -3692,6 +3753,21 @@ const RuntimeProviderPresetActiveSchema = z
   })
   .loose();
 
+// Failure parameters are the daemon's own facts and are typed as a string map,
+// but a newer daemon could add a numeric one (a status code, a retry delay).
+// Non-string values are dropped rather than failing the whole record: losing a
+// parameter degrades one localized sentence, while rejecting the response would
+// hide the failure the user needs to see.
+const RuntimeProviderPresetErrorParamsSchema = z
+  .record(z.string(), z.unknown())
+  .transform((params) => {
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(params)) {
+      if (typeof value === "string") out[key] = value;
+    }
+    return out;
+  });
+
 export const RuntimeProviderPresetRequestSchema = z
   .object({
     id: z.string().default(""),
@@ -3705,7 +3781,12 @@ export const RuntimeProviderPresetRequestSchema = z
     providers: z.array(RuntimeProviderPresetSchema).optional(),
     active: RuntimeProviderPresetActiveSchema.optional(),
     cleared_active: z.boolean().optional(),
+    // The endpoint's own catalog, filled only by the `models` action. Absent on
+    // a response to any other action, and on a daemon older than the field.
+    models: z.array(RuntimeProviderPresetModelSchema).optional(),
     error: z.string().optional(),
+    error_kind: z.string().optional(),
+    error_params: RuntimeProviderPresetErrorParamsSchema.optional(),
     created_at: z.string().default(""),
     updated_at: z.string().default(""),
   })
@@ -4097,6 +4178,22 @@ export const MemberWithUserSchema = z.object({
   email: z.string().optional().default(""),
   avatar_url: z.string().nullable().optional().default(null),
 }).loose();
+
+export const MemberWithUserListSchema = z.array(MemberWithUserSchema);
+
+/** Fallback for a single-member write whose response drifted. `role` is the
+ *  least privileged known tier so a garbled reply never paints someone as an
+ *  owner; the row re-reads the truth on the next list invalidation. */
+export const EMPTY_MEMBER_WITH_USER: MemberWithUser = {
+  id: "",
+  workspace_id: "",
+  user_id: "",
+  role: "guest",
+  created_at: "",
+  name: "",
+  email: "",
+  avatar_url: null,
+};
 
 export {
   ConfigBundleSchema,

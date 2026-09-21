@@ -130,6 +130,10 @@ let searchParams = new URLSearchParams();
 
 vi.mock("../../navigation", () => ({
   useNavigation: () => ({ searchParams, replace }),
+  // The inbox renders IssueDetail in a side panel and never passes
+  // `deepLinkUsage`, so the usage dialog's URL mirroring is off here; a null
+  // adapter is that same "no deep link" state, not a stand-in for navigation.
+  useOptionalNavigation: () => null,
   // Real hook: reports the detail-pane swap to the shell's progress bar.
   // Nothing here renders that bar, and the page reads nothing back from it.
   useReportNavigating: () => {},

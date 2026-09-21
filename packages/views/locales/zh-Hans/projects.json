@@ -156,7 +156,9 @@
     "local_directory_move_down_tooltip": "下移",
     "mode_worktree_root_label": "工作副本建在",
     "mode_worktree_root_not_absolute": "请填绝对路径 —— 相对路径会落在守护进程当时所在的目录里。",
-    "mode_worktree_root_inside_repo": "这个位置在仓库内部。副本放在那里会出现在你自己的 git status 里，还得改 .gitignore —— 换一个仓库旁边的目录。"
+    "mode_worktree_root_inside_repo": "这个位置在仓库内部。副本放在那里会出现在你自己的 git status 里，还得改 .gitignore —— 换一个仓库旁边的目录。",
+    "local_daemon_already_attached_hint": "本机已经关联了一个本地目录到该项目，先移除现有目录再添加新目录。",
+    "toast_local_daemon_already_attached": "本机已经关联了一个本地目录到该项目，先移除现有目录再添加新目录。"
   },
   "members": {
     "section_header": "成员",

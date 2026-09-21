@@ -47,7 +47,8 @@
       "cancel": "取消",
       "save": "保存",
       "saving": "保存中…",
-      "save_failed": "状态保存失败。"
+      "save_failed": "状态保存失败。",
+      "behavior_hint": "该状态的行为与「{{category}}」完全一致。"
     },
     "archive_dialog": {
       "retry": "重试归档",
@@ -71,7 +72,13 @@
       "unstarted": "尚未开始的工作，包括待规划和已规划的任务。",
       "started": "正在进行、审核中或已阻塞的工作。",
       "done": "已经完成的工作。",
-      "closed": "不再继续的工作。"
+      "closed": "不再继续的工作。",
+      "backlog": "搁置。把任务移到这里不会启动智能体。",
+      "todo": "排队中。把任务移到这里会启动指派的智能体。",
+      "in_progress": "正在进行。",
+      "in_review": "已交付，等待人工审核。会结束自动化运行。",
+      "blocked": "被外部依赖阻塞。",
+      "cancelled": "决定不做。"
     },
     "built_in_descriptions": {
       "backlog": "搁置。把任务移到这里不会启动智能体。",
@@ -81,7 +88,8 @@
       "blocked": "被外部依赖阻塞。",
       "done": "已完成。",
       "cancelled": "决定不做。"
-    }
+    },
+    "description": "定义任务流转的工作流。每个状态的行为由它所属的分类决定。"
   },
   "quick_actions": {
     "title": "快捷操作",
@@ -160,12 +168,14 @@
       "sync_failed": "保存时区偏好失败。"
     },
     "sticky_comment_bar": {
-      "title": "固定底部评论栏"
+      "title": "固定底部评论栏",
+      "hint": "滚动任务页面时，评论栏始终固定在底部。"
     },
     "issue_title": "任务创建",
     "comments_title": "评论",
     "device_hint": "保存在当前设备上。",
-    "issue_scope": "这些偏好仅对当前设备上的当前工作区生效，只影响创建任务时显示的字段。"
+    "issue_scope": "这些偏好仅对当前设备上的当前工作区生效，只影响创建任务时显示的字段。",
+    "description": "调整你在 Multica 中的使用偏好。"
   },
   "shortcuts": {
     "title": "快捷键",
@@ -316,7 +326,9 @@
       "project": "项目",
       "due_date": "截止日期",
       "start_date": "开始日期"
-    }
+    },
+    "quick_create_description": "快速创建工具栏中显示的字段。",
+    "manual_create_description": "手动创建工具栏中显示的字段。"
   },
   "mcp": {
     "title": "MCP",
@@ -347,7 +359,8 @@
     "removed_toast": "已移除共享 MCP Server",
     "save_failed_toast": "无法保存共享 MCP Server",
     "rename_failed_toast": "无法重命名共享 MCP Server",
-    "remove_failed_toast": "无法移除共享 MCP Server"
+    "remove_failed_toast": "无法移除共享 MCP Server",
+    "empty_description": "先在这里添加 MCP Server，再前往对应智能体的 MCP 页面完成分配。"
   },
   "page": {
     "title": "设置",
@@ -476,8 +489,10 @@
       "deleted": "已删除发布的插件",
       "installed_version": "使用中",
       "review_install": "查看并安装",
-      "review_upgrade": "查看并升级"
-    }
+      "review_upgrade": "查看并升级",
+      "description": "上传插件产物包。Multica 负责存储和分发，作者不需要自己的服务器。"
+    },
+    "description": "在这个工作区里发布插件，然后安装某个具体版本，并逐条确认它能访问什么。"
   },
   "properties": {
     "title": "属性",
@@ -641,7 +656,8 @@
     "system": {
       "title": "系统通知",
       "description": "Multica 在后台时显示系统通知。",
-      "label": "显示系统通知"
+      "label": "显示系统通知",
+      "hint": "App 未获得焦点时，新的收件箱条目通过操作系统弹出通知横幅。"
     },
     "browser": {
       "label": "浏览器通知",
@@ -790,7 +806,9 @@
     "section_repositories": "代码仓库",
     "repositories_shortcut_label": "仓库 URL 仍在\"代码仓库\"标签页中管理",
     "repositories_shortcut_link": "前往管理 →",
-    "toast_failed": "更新 GitHub 设置失败"
+    "toast_failed": "更新 GitHub 设置失败",
+    "page_description": "连接 GitHub App、控制 Pull Request 如何出现在 Multica 中，并决定智能体在 commit 记录里留下哪些痕迹。",
+    "feature_auto_link_description": "根据 PR 标题和分支名匹配任务编号，正文中只匹配关闭关键字后面的编号，并自动建立链接。"
   },
   "vcs": {
     "section_title": "Git 代码托管（自托管）",
@@ -904,7 +922,9 @@
     "install_error_installer_bind": "已安装 Bot，但未能绑定你的飞书身份。请重试或联系管理员。",
     "install_error_session_lost": "安装会话已失效或丢失，请重新扫码。",
     "install_error_forbidden": "你已没有在此工作区安装飞书 Bot 的权限，请联系工作区管理员。",
-    "install_error_generic": "安装失败，请重试。"
+    "install_error_generic": "安装失败，请重试。",
+    "install_scan_hint_feishu": "飞书 → 扫一扫 → 授权新 PersonalAgent。",
+    "install_scan_hint_lark": "Lark → 扫一扫 → 授权新 PersonalAgent。"
   },
   "composio": {
     "section_title": "Composio",
@@ -1040,7 +1060,8 @@
     "byo_submitting": "连接中…",
     "byo_cancel": "取消",
     "byo_success_toast": "钉钉机器人已连接",
-    "byo_failed_toast": "无法连接钉钉机器人"
+    "byo_failed_toast": "无法连接钉钉机器人",
+    "groups_overview_description": "每条连接显示智能体、钉钉机器人和近期有交互的群。"
   },
   "wecom": {
     "section_title": "企业微信",
@@ -1227,7 +1248,8 @@
       "up_to_date": "已是最新版本。",
       "downloading": "v{{version}} 正在后台下载——准备好安装时会通知你。",
       "check_now": "立即检查",
-      "checking": "检查中..."
+      "checking": "检查中...",
+      "description": "控制后台自动更新，或手动检查新版本。"
     },
     "daemon": {
       "title": "守护进程",
@@ -1298,7 +1320,10 @@
       "waiting_logs": "正在等待日志...",
       "reconnect_failed": "无法重新连接守护进程",
       "try_again_moment": "请稍后重试。",
-      "try_again": "请重试。"
+      "try_again": "请重试。",
+      "description": "配置本地智能体守护进程与桌面应用协同工作的方式。",
+      "diagnostics_description": "设备标识与连接详情，可用于提交错误报告或排查运行时未显示的问题。",
+      "waiting_logs_description": "新日志会实时显示在这里。"
     },
     "worktree_cleanup": {
       "title": "这台机器上的工作副本",
@@ -1307,11 +1332,11 @@
       "daemon_offline": "启动本机守护进程后才能看到这台机器上的工作副本。",
       "load_failed": "读取这台机器上的工作副本失败。",
       "enable_title": "自动清理已合并的副本",
-      "enable_description": "默认关闭。打开后，只有同时满足「Multica 建的、没在跑、没有未提交改动、已合入主干、超过下面的天数」才会删；少一条就留着。",
+      "enable_description": "默认关闭。打开后，只有同时满足「Multica 建的、没在跑、没有未提交改动、超过下面的天数、改动已经在主干分支里（合入或 squash 合入都算）」才会删；少一条就留着。",
       "min_age_title": "至少保留",
       "min_age_description": "副本最后一次运行结束后要过多少天才可能被清理。按天不按小时：你打算周一回来看的现场，放个假回来也该还在。",
       "trunk_title": "合入到",
-      "trunk_description": "副本上的工作必须已经进入的分支。留空则用各仓库自己的默认分支。",
+      "trunk_description": "副本上的改动必须已经进入的分支，合入或 squash 合入都算。留空则用各仓库自己的默认分支。",
       "trunk_placeholder": "main",
       "summary": "{{count}} 份工作副本 · 占用 {{total}} · 可清理 {{reclaimable}}",
       "advisory": "自动清理当前是关闭的，下面这些都不会被删。这是打开后会发生的事。",
@@ -1320,6 +1345,7 @@
       "remove_now": "立即清理",
       "removed": "工作副本已清理",
       "reason_removable": "已合并、干净、没在跑——这一份会被清理。",
+      "reason_removable_squash": "已 squash 合入主干、干净、没在跑——它的 commit 不在主干里，但改动已经在了，所以这一份会被清理。",
       "reason_uncommitted": "保留：还有未提交的改动。只存在于这里的工作，Multica 绝不会删。",
       "reason_unmerged": "保留：它的分支还没进主干分支。",
       "reason_too_recent": "保留：最近才跑过。",
@@ -1377,6 +1403,10 @@
       "member": {
         "label": "成员",
         "description": "创建并处理任务"
+      },
+      "guest": {
+        "label": "访客",
+        "description": "只读，只看得到共享给 TA 的内容"
       }
     },
     "share_links_title": "分享链接",
@@ -1398,7 +1428,31 @@
     "expiry_24h": "24 小时",
     "expiry_7d": "7 天",
     "expiry_30d": "30 天",
-    "expiry_never": "永久有效"
+    "expiry_never": "永久有效",
+    "role_blocked": {
+      "owner_requires_owner": "只有 owner 能授予 owner 档位"
+    },
+    "role_select_label": "{{name}} 的档位",
+    "unknown_role": "未知档位",
+    "unknown_role_title": "这位成员的档位当前版本不认识，升级后才能修改。",
+    "role_impact_title": "{{name}} 已改为 {{role}}",
+    "role_impact_gained": "获得：{{items}}",
+    "role_impact_lost": "失去：{{items}}",
+    "role_impact_none": "其余不受影响。",
+    "members_loading": "正在加载成员…",
+    "empty_title": "还没有成员",
+    "empty_description": "邀请同事一起使用这个工作区。",
+    "empty_action": "邀请成员",
+    "capabilities": {
+      "view_shared": "查看共享给 TA 的内容",
+      "see_workspace_scope": "查看全工作区范围的内容",
+      "create_resources": "新建任务、项目与仓库",
+      "comment_and_edit": "评论、编辑与改状态",
+      "be_assigned": "被指派、被 @ 触发运行",
+      "manage_members": "邀请成员与修改档位",
+      "workspace_settings": "工作区设置、集成与密钥",
+      "billing_and_transfer": "计费、转让与删除工作区"
+    }
   },
   "integrations": {
     "code_title": "代码与仓库",
@@ -1413,7 +1467,8 @@
     "status_not_connected": "未连接",
     "status_loading": "正在检查...",
     "status_unknown": "状态暂不可用",
-    "channel_hint": "在 {{channel}} 中与智能体对话、创建任务。"
+    "channel_hint": "在 {{channel}} 中与智能体对话、创建任务。",
+    "description": "连接常用工具，分别管理每项集成。"
   },
   "config_transfer": {
     "title": "配置导出/导入",
@@ -1577,11 +1632,33 @@
     "enabled_label": "启用自动选派",
     "enabled_description": "关掉之后系统按原有逻辑工作：票上不会出现任何路由痕迹，也不会 @ 任何人。已经写进票里的值保留。",
     "model_label": "路由模型",
-    "model_description": "判断交给哪个模型。留空等于没配好——开关开着也不会工作。",
+    "model_description": "判断交给哪个模型。保存端点和 Key 后会自动读取可用模型；也可以手动填写模型 ID。",
+    "model_discovering": "正在从端点读取模型…",
+    "model_discover_failed": "模型读取失败，请手动填写模型 ID。",
+    "model_discover_empty": "端点没有返回模型，请手动填写模型 ID。",
+    "model_discover_loaded": "已从这个端点读取 {{count}} 个模型。",
     "model_placeholder": "例如 gpt-5.6-luna",
     "threshold_label": "置信度阈值",
-    "threshold_description": "低于这个值就不填那一格，改成 @ 你一次并说明原因。默认 0.70。",
-    "no_credentials_note": "这里不存任何密钥，凭据归部署的模型配置管。",
+    "threshold_description": "低于这个值仍然派，只是改用兜底档（通用强档）并在路由评论里标出来。默认 0.60。",
+    "stale_hours_label": "停滞巡检阈值（小时）",
+    "stale_hours_description": "票停在待验收、且期间没有任何 run 在跑，超过这个时长就会被巡检看到：默认只把它重新推到验收席面前，不改状态；只有票上已经有验收席给出的通过结论，才会把状态对齐到完成。默认 24 小时。",
+    "gateway_endpoint_workspace": "模型 id 发往本工作区自己的端点：{{host}}。",
+    "gateway_endpoint_deployment": "模型 id 发往部署共用的 LLM 端点：{{host}}。",
+    "gateway_protocol_systemone": "这个端点是 TypeSafe System One（Jev）：路由问它的是一个带概率分布的判断，用来卡阈值的置信度是算出来的，不是模型自己写的。",
+    "gateway_unset": "没有可发送的端点——本工作区没配，部署也没有内部 LLM（MULTICA_LLM_BASE_URL / MULTICA_LLM_API_KEY）。在下面填一个端点和 Key，或者找运维配部署级的。",
+    "gateway_title": "本工作区自己的端点",
+    "gateway_url_label": "端点 URL",
+    "gateway_url_description": "OpenAI 兼容的 base URL；填 https://api.typesafe.ai 就是 TypeSafe System One（Jev）。两个都留空就用部署共用的端点，也就是今天的行为。",
+    "gateway_url_placeholder": "https://api.example.com/v1 或 https://api.typesafe.ai",
+    "gateway_key_label": "API Key",
+    "gateway_key_description": "加密保存，之后不再回显——连打码都不回显。重填即替换，清除即回到部署端点。",
+    "gateway_key_unstorable": "这个部署存不了工作区级的 Key（MULTICA_ROUTING_SECRET_KEY 和 JWT_SECRET 都没设）。只有运维能改。",
+    "gateway_key_placeholder": "sk-…",
+    "gateway_key_stored": "已保存一个 Key",
+    "gateway_key_save": "保存 Key",
+    "gateway_key_clear": "清除",
+    "gateway_pair_incomplete": "端点要两半都填。只填一半时走的仍是部署共用端点。",
+    "gateway_default_model": "该部署自己的默认模型是 {{model}}。",
     "filters_title": "候选筛选层",
     "filters_placeholder": "以后支持，本版不实现。今天的候选只按方向预筛加置信度过闸。",
     "health_checking": "自检中…",

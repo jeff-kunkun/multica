@@ -17,7 +17,8 @@
     "confirm": "삭제",
     "deleting": "삭제하는 중...",
     "toast_deleted": "태스크를 삭제했습니다",
-    "toast_delete_failed": "태스크를 삭제하지 못했습니다"
+    "toast_delete_failed": "태스크를 삭제하지 못했습니다",
+    "hint": "워크스페이스 멤버라면 누구나 태스크를 삭제할 수 있습니다."
   },
   "feedback": {
     "title": "피드백",

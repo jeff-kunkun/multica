@@ -30,6 +30,50 @@ export interface RoutingHealth {
   last_failure_at: number;
   model: string;
   threshold: number;
+  /**
+   * Host of the endpoint in use, host only — the workspace's own when it
+   * supplied one, otherwise the deployment's (`MULTICA_LLM_BASE_URL`). Empty
+   * when neither is configured, or when the configured value did not parse as
+   * a URL.
+   *
+   * Host only, never the raw URL: a value pasted from a provider dashboard
+   * routinely carries a token in its userinfo.
+   */
+  gateway_host: string;
+  /** `MULTICA_LLM_DEFAULT_MODEL`, the deployment's own default. */
+  gateway_default_model: string;
+  /** False when there is no endpoint at all — neither workspace nor deployment. */
+  gateway_configured: boolean;
+  /**
+   * Whose endpoint `gateway_host` is. The host alone does not say, and the two
+   * answers lead to different next actions: edit the field in this section, or
+   * go and talk to whoever runs the server.
+   */
+  gateway_scope: "workspace" | "deployment";
+  /**
+   * Which wire format the endpoint speaks. `systemone` is a TypeSafe System
+   * One endpoint (Jev), which answers with typed judgments and the
+   * probabilities behind them; `openai` is a chat-completions gateway.
+   *
+   * It matters to a reader, not just to the server: the confidence the
+   * threshold gates on is a measured quantity on one protocol and a number the
+   * model wrote about itself on the other.
+   */
+  gateway_protocol: "openai" | "systemone";
+  /**
+   * A workspace key is stored AND openable. Never the key itself.
+   *
+   * False for a key sealed under a deployment secret this server no longer
+   * has (restored dump, rotated secret) — which has to read as "type it
+   * again", not as a configured workspace.
+   */
+  gateway_key_set: boolean;
+  /**
+   * This deployment can store a workspace key at all. False disables the key
+   * field rather than letting somebody type a credential into a form that
+   * will refuse it.
+   */
+  workspace_key_storable: boolean;
 }
 
 /**
@@ -47,6 +91,13 @@ export const RoutingHealthSchema = z.object({
   last_failure_at: z.number().optional(),
   model: z.string().optional(),
   threshold: z.number().optional(),
+  gateway_host: z.string().optional(),
+  gateway_default_model: z.string().optional(),
+  gateway_configured: z.boolean().optional(),
+  gateway_scope: z.string().optional(),
+  gateway_protocol: z.string().optional(),
+  gateway_key_set: z.boolean().optional(),
+  workspace_key_storable: z.boolean().optional(),
 });
 
 /**
@@ -65,6 +116,13 @@ export const UNKNOWN_ROUTING_HEALTH: RoutingHealth = {
   last_failure_at: 0,
   model: "",
   threshold: 0,
+  gateway_host: "",
+  gateway_default_model: "",
+  gateway_configured: false,
+  gateway_scope: "deployment",
+  gateway_protocol: "openai",
+  gateway_key_set: false,
+  workspace_key_storable: false,
 };
 
 const KNOWN_STATES: readonly RoutingState[] = [
@@ -100,6 +158,27 @@ export function parseRoutingHealth(raw: unknown): RoutingHealth {
     last_failure_at: toCount(parsed.last_failure_at),
     model: typeof parsed.model === "string" ? parsed.model : "",
     threshold: typeof parsed.threshold === "number" ? parsed.threshold : 0,
+    gateway_host:
+      typeof parsed.gateway_host === "string" ? parsed.gateway_host : "",
+    gateway_default_model:
+      typeof parsed.gateway_default_model === "string"
+        ? parsed.gateway_default_model
+        : "",
+    // A backend that predates the field omits it; "absent" must not read as
+    // "this deployment has no LLM", which would put a scary line under a
+    // section that is working fine.
+    gateway_configured: parsed.gateway_configured !== false,
+    // Anything other than the one known override value reads as the
+    // deployment gateway. A backend that predates the field omits it, and
+    // "deployment" is what it meant.
+    gateway_scope: parsed.gateway_scope === "workspace" ? "workspace" : "deployment",
+    // A backend that predates the field omits it, and every endpoint before
+    // this field existed was OpenAI-compatible. Anything unrecognised reads
+    // the same way rather than claiming a protocol this client cannot check.
+    gateway_protocol:
+      parsed.gateway_protocol === "systemone" ? "systemone" : "openai",
+    gateway_key_set: parsed.gateway_key_set === true,
+    workspace_key_storable: parsed.workspace_key_storable === true,
   };
 }
 

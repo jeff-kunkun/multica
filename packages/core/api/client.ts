@@ -79,6 +79,7 @@ import type {
   RuntimeUsageByHour,
   DashboardUsageDaily,
   DashboardUsageByAgent,
+  DashboardUsageByIssue,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
   DashboardFailureDaily,
@@ -255,6 +256,10 @@ import {
   type RoutingHealth,
 } from "../workspace/routing-health";
 import {
+  parseRoutingModels,
+  type RoutingModels,
+} from "../workspace/routing-models";
+import {
   parseConfigBundle,
   parseConfigImportReport,
   reportFromImportError,
@@ -310,6 +315,7 @@ import {
   DashboardFailureDailyListSchema,
   DashboardFailureByAgentListSchema,
   DashboardUsageByAgentListSchema,
+  DashboardUsageByIssueListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
@@ -433,6 +439,9 @@ import {
   NotificationPreferenceResponseSchema,
   EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
   LabelSchema,
+  MemberWithUserSchema,
+  MemberWithUserListSchema,
+  EMPTY_MEMBER_WITH_USER,
   ListLabelsResponseSchema,
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
@@ -2667,6 +2676,22 @@ export class ApiClient {
     );
   }
 
+  async getDashboardUsageByIssue(
+    params: { days?: number; project_id?: string | null; tz?: string },
+  ): Promise<DashboardUsageByIssue[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-issue?${search}`);
+    return parseWithFallback<DashboardUsageByIssue[]>(
+      raw,
+      DashboardUsageByIssueListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/usage/by-issue" },
+    );
+  }
+
   async getDashboardAgentRunTime(
     params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardAgentRunTime[]> {
@@ -3204,6 +3229,18 @@ export class ApiClient {
     return parseRoutingHealth(raw);
   }
 
+  /**
+   * Discover model ids from the routing target. The server resolves the
+   * workspace/deployment endpoint and keeps the API key entirely server-side.
+   */
+  async listRoutingModels(workspaceId: string): Promise<RoutingModels> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/routing/models`,
+      { method: "POST" },
+    );
+    return parseRoutingModels(raw);
+  }
+
   async exportWorkspaceConfig(workspaceId: string): Promise<ConfigBundle> {
     const raw = await this.fetch<unknown>(
       `/api/workspaces/${workspaceId}/config/export`,
@@ -3581,7 +3618,10 @@ export class ApiClient {
 
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/members`);
+    return parseWithFallback(raw, MemberWithUserListSchema, [] as MemberWithUser[], {
+      endpoint: "GET /api/workspaces/{id}/members",
+    });
   }
 
   async createMember(workspaceId: string, data: CreateMemberRequest): Promise<Invitation> {
@@ -3592,9 +3632,12 @@ export class ApiClient {
   }
 
   async updateMember(workspaceId: string, memberId: string, data: UpdateMemberRequest): Promise<MemberWithUser> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/members/${memberId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, MemberWithUserSchema, EMPTY_MEMBER_WITH_USER, {
+      endpoint: "PATCH /api/workspaces/{id}/members/{memberId}",
     });
   }
 

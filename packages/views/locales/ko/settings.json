@@ -47,7 +47,8 @@
       "cancel": "취소",
       "save": "저장",
       "saving": "저장 중…",
-      "save_failed": "상태를 저장하지 못했습니다."
+      "save_failed": "상태를 저장하지 못했습니다.",
+      "behavior_hint": "이 상태는 \"{{category}}\"와 정확히 같게 동작합니다."
     },
     "archive_dialog": {
       "retry": "보관 다시 시도",
@@ -71,7 +72,13 @@
       "unstarted": "백로그와 계획된 작업을 포함하여 아직 시작하지 않은 작업입니다.",
       "started": "진행 중이거나 리뷰 또는 차단 상태인 작업입니다.",
       "done": "완료된 작업입니다.",
-      "closed": "완료하지 않기로 한 작업입니다."
+      "closed": "완료하지 않기로 한 작업입니다.",
+      "backlog": "보류. 여기로 옮겨도 에이전트가 시작되지 않습니다.",
+      "todo": "대기 중. 여기로 옮기면 담당 에이전트가 시작됩니다.",
+      "in_progress": "진행 중.",
+      "in_review": "전달 완료, 리뷰 대기. 오토파일럿 실행을 마무리합니다.",
+      "blocked": "외부 의존성으로 중단됨.",
+      "cancelled": "진행하지 않기로 함."
     },
     "built_in_descriptions": {
       "backlog": "보류. 여기로 옮겨도 에이전트가 시작되지 않습니다.",
@@ -81,7 +88,8 @@
       "blocked": "외부 의존성으로 중단됨.",
       "done": "완료.",
       "cancelled": "진행하지 않기로 함."
-    }
+    },
+    "description": "태스크가 거치는 워크플로를 정의합니다. 각 상태의 동작은 속한 카테고리가 결정합니다."
   },
   "quick_actions": {
     "title": "퀵 액션",
@@ -160,12 +168,14 @@
       "sync_failed": "시간대 설정을 저장하지 못했습니다."
     },
     "sticky_comment_bar": {
-      "title": "댓글 입력란을 하단에 고정"
+      "title": "댓글 입력란을 하단에 고정",
+      "hint": "태스크 페이지를 스크롤할 때 댓글 입력창을 항상 하단에 고정합니다."
     },
     "issue_title": "태스크 생성",
     "comments_title": "댓글",
     "device_hint": "현재 기기에 저장됩니다.",
-    "issue_scope": "이 설정은 현재 기기의 현재 워크스페이스에 적용되며 태스크 생성 시 표시되는 필드만 변경합니다."
+    "issue_scope": "이 설정은 현재 기기의 현재 워크스페이스에 적용되며 태스크 생성 시 표시되는 필드만 변경합니다.",
+    "description": "Multica 사용 환경을 맞춤 설정합니다."
   },
   "shortcuts": {
     "title": "키보드 단축키",
@@ -316,7 +326,9 @@
       "project": "프로젝트",
       "due_date": "마감일",
       "start_date": "시작일"
-    }
+    },
+    "quick_create_description": "빠른 생성 툴바에 표시할 필드입니다.",
+    "manual_create_description": "직접 만들기 툴바에 표시할 필드입니다."
   },
   "mcp": {
     "title": "MCP",
@@ -347,7 +359,8 @@
     "removed_toast": "공유 MCP 서버를 제거했습니다",
     "save_failed_toast": "공유 MCP 서버를 저장하지 못했습니다",
     "rename_failed_toast": "공유 MCP 서버 이름을 변경하지 못했습니다",
-    "remove_failed_toast": "공유 MCP 서버를 제거하지 못했습니다"
+    "remove_failed_toast": "공유 MCP 서버를 제거하지 못했습니다",
+    "empty_description": "여기에 서버를 추가한 뒤, 사용할 에이전트의 MCP 탭에서 할당하세요."
   },
   "page": {
     "title": "설정",
@@ -476,8 +489,10 @@
       "deleted": "게시된 플러그인을 삭제했습니다",
       "installed_version": "사용 중",
       "review_install": "확인 후 설치",
-      "review_upgrade": "확인 후 업그레이드"
-    }
+      "review_upgrade": "확인 후 업그레이드",
+      "description": "플러그인 패키지를 업로드하세요. Multica가 저장하고 제공하므로 작성자에게 별도의 서버가 필요하지 않습니다."
+    },
+    "description": "이 워크스페이스에 플러그인을 게시하고 특정 버전을 설치하며, 무엇에 접근할 수 있는지 확인합니다."
   },
   "properties": {
     "title": "속성",
@@ -641,7 +656,8 @@
     "system": {
       "title": "시스템 알림",
       "description": "Multica가 백그라운드에 있을 때 시스템 알림을 표시합니다.",
-      "label": "시스템 알림 표시"
+      "label": "시스템 알림 표시",
+      "hint": "앱에 포커스가 없을 때 새 인박스 항목에 대해 운영체제 배너를 표시합니다."
     },
     "browser": {
       "label": "브라우저 알림",
@@ -790,7 +806,9 @@
     "section_repositories": "저장소",
     "repositories_shortcut_label": "저장소 URL은 저장소 탭에 있습니다",
     "repositories_shortcut_link": "저장소 관리 →",
-    "toast_failed": "GitHub 설정을 업데이트하지 못했습니다"
+    "toast_failed": "GitHub 설정을 업데이트하지 못했습니다",
+    "page_description": "GitHub App을 연결하고, Pull request가 Multica 안에서 표시되는 방식을 제어하며, 에이전트가 커밋 기록에 남기는 정보를 설정합니다.",
+    "feature_auto_link_description": "PR 제목과 브랜치 이름, 그리고 본문에서 종료 키워드 바로 뒤에 있는 번호를 태스크 식별자와 대조해 자동으로 연결합니다."
   },
   "vcs": {
     "section_title": "Git providers (self-hosted)",
@@ -968,7 +986,8 @@
       "up_to_date": "최신 버전입니다.",
       "downloading": "v{{version}}을(를) 백그라운드에서 다운로드 중입니다. 설치 준비가 끝나면 알림을 드립니다.",
       "check_now": "지금 확인",
-      "checking": "확인 중..."
+      "checking": "확인 중...",
+      "description": "자동 백그라운드 업데이트를 설정하거나 새 버전을 직접 확인합니다."
     },
     "daemon": {
       "title": "데몬",
@@ -1039,7 +1058,10 @@
       "waiting_logs": "로그를 기다리는 중...",
       "reconnect_failed": "데몬에 다시 연결하지 못했습니다",
       "try_again_moment": "잠시 후 다시 시도하세요.",
-      "try_again": "다시 시도하세요."
+      "try_again": "다시 시도하세요.",
+      "description": "로컬 에이전트 데몬이 데스크톱 앱과 동작하는 방식을 설정합니다.",
+      "diagnostics_description": "식별 및 연결 세부 정보입니다. 버그를 신고하거나 런타임이 표시되지 않는 문제를 조사할 때 유용합니다.",
+      "waiting_logs_description": "새 로그가 실시간으로 표시됩니다."
     },
     "worktree_cleanup": {
       "title": "이 컴퓨터의 작업 사본",
@@ -1048,11 +1070,11 @@
       "daemon_offline": "로컬 데몬을 시작하면 이 컴퓨터의 작업 사본을 볼 수 있습니다.",
       "load_failed": "이 컴퓨터의 작업 사본을 읽지 못했습니다.",
       "enable_title": "병합된 사본 자동 정리",
-      "enable_description": "기본값은 꺼짐입니다. 켜더라도 Multica가 만들었고, 실행 중이 아니고, 커밋하지 않은 변경이 없고, 이미 병합되었고, 아래 기간을 넘긴 사본만 삭제합니다. 하나라도 어긋나면 남겨 둡니다.",
+      "enable_description": "기본값은 꺼짐입니다. 켜더라도 Multica가 만들었고, 실행 중이 아니고, 커밋하지 않은 변경이 없고, 아래 기간을 넘겼고, 변경이 이미 트렁크 브랜치에 들어가 있는(병합이든 squash든) 사본만 삭제합니다. 하나라도 어긋나면 남겨 둡니다.",
       "min_age_title": "최소 보관 기간",
       "min_age_description": "마지막 실행 이후 며칠이 지나야 정리 대상이 되는지. 시간이 아니라 일 단위입니다. 월요일에 다시 보려던 실행은 휴가 후에도 남아 있어야 하니까요.",
       "trunk_title": "병합 대상",
-      "trunk_description": "사본의 작업이 이미 들어가 있어야 하는 브랜치. 비워 두면 각 저장소의 기본 브랜치를 사용합니다.",
+      "trunk_description": "사본의 변경이 이미 들어가 있어야 하는 브랜치. 병합이든 squash든 상관없습니다. 비워 두면 각 저장소의 기본 브랜치를 사용합니다.",
       "trunk_placeholder": "main",
       "summary": "작업 사본 {{count}}개 · 디스크 {{total}} · 정리 가능 {{reclaimable}}",
       "advisory": "자동 정리가 꺼져 있어 아래 항목은 삭제되지 않습니다. 켰을 때 일어날 일입니다.",
@@ -1061,6 +1083,7 @@
       "remove_now": "지금 정리",
       "removed": "작업 사본을 정리했습니다",
       "reason_removable": "병합됨·깨끗함·실행 중 아님 — 이 사본은 정리됩니다.",
+      "reason_removable_squash": "트렁크에 squash로 들어감·깨끗함·실행 중 아님 — 커밋은 없지만 변경은 트렁크에 있으므로 이 사본은 정리됩니다.",
       "reason_uncommitted": "보관: 커밋하지 않은 변경이 남아 있습니다. 다른 곳에 없는 작업을 Multica가 삭제하는 일은 없습니다.",
       "reason_unmerged": "보관: 브랜치가 아직 트렁크에 들어가지 않았습니다.",
       "reason_too_recent": "보관: 마지막 실행이 너무 최근입니다.",
@@ -1118,6 +1141,10 @@
       "member": {
         "label": "멤버",
         "description": "태스크 생성 및 작업"
+      },
+      "guest": {
+        "label": "게스트",
+        "description": "읽기 전용, 공유된 항목만 볼 수 있음"
       }
     },
     "share_links_title": "공유 링크",
@@ -1139,7 +1166,31 @@
     "expiry_24h": "24시간",
     "expiry_7d": "7일",
     "expiry_30d": "30일",
-    "expiry_never": "무기한"
+    "expiry_never": "무기한",
+    "role_blocked": {
+      "owner_requires_owner": "owner 등급은 owner만 부여할 수 있습니다"
+    },
+    "role_select_label": "{{name}}의 등급",
+    "unknown_role": "알 수 없는 등급",
+    "unknown_role_title": "이 버전이 알지 못하는 등급입니다. 앱을 업데이트한 뒤 변경하세요.",
+    "role_impact_title": "{{name}}을(를) {{role}}(으)로 변경했습니다",
+    "role_impact_gained": "추가: {{items}}",
+    "role_impact_lost": "제거: {{items}}",
+    "role_impact_none": "그 밖에 변경되는 것은 없습니다.",
+    "members_loading": "멤버를 불러오는 중…",
+    "empty_title": "아직 멤버가 없습니다",
+    "empty_description": "동료를 이 워크스페이스에 초대하세요.",
+    "empty_action": "멤버 초대",
+    "capabilities": {
+      "view_shared": "공유된 항목 보기",
+      "see_workspace_scope": "워크스페이스 전체 항목 보기",
+      "create_resources": "이슈·프로젝트·저장소 생성",
+      "comment_and_edit": "댓글·편집·상태 변경",
+      "be_assigned": "담당 지정 및 에이전트 실행",
+      "manage_members": "멤버 초대 및 등급 변경",
+      "workspace_settings": "워크스페이스 설정·연동·키",
+      "billing_and_transfer": "결제·이전·삭제"
+    }
   },
   "lark": {
     "section_title": "Lark",
@@ -1212,7 +1263,9 @@
     "install_error_installer_bind": "봇은 설치되었지만 Lark 신원을 연결하지 못했어요. 다시 시도하거나 지원팀에 문의하세요.",
     "install_error_session_lost": "설치 세션이 만료되었거나 유실되었어요. 다시 스캔해 처음부터 진행하세요.",
     "install_error_forbidden": "이 워크스페이스에 Lark 봇을 설치할 권한이 더 이상 없어요. 워크스페이스 관리자에게 문의하세요.",
-    "install_error_generic": "설치에 실패했어요. 다시 시도하세요."
+    "install_error_generic": "설치에 실패했어요. 다시 시도하세요.",
+    "install_scan_hint_feishu": "Feishu → 스캔 → 새 PersonalAgent를 승인하세요.",
+    "install_scan_hint_lark": "Lark → 스캔 → 새 PersonalAgent를 승인하세요."
   },
   "composio": {
     "section_title": "Composio",
@@ -1348,7 +1401,8 @@
     "byo_submitting": "연결 중…",
     "byo_cancel": "취소",
     "byo_success_toast": "DingTalk 봇을 연결했어요",
-    "byo_failed_toast": "DingTalk 봇을 연결하지 못했어요"
+    "byo_failed_toast": "DingTalk 봇을 연결하지 못했어요",
+    "groups_overview_description": "각 연결에 에이전트, DingTalk 로봇, 최근에 상호작용한 그룹을 표시합니다."
   },
   "wecom": {
     "section_title": "WeCom",
@@ -1413,7 +1467,8 @@
     "status_not_connected": "연결되지 않음",
     "status_loading": "확인 중...",
     "status_unknown": "상태를 확인할 수 없음",
-    "channel_hint": "{{channel}}에서 에이전트와 대화하고 태스크를 생성합니다."
+    "channel_hint": "{{channel}}에서 에이전트와 대화하고 태스크를 생성합니다.",
+    "description": "도구를 연결하고 각 연동을 관리하세요."
   },
   "config_transfer": {
     "title": "구성 내보내기/가져오기",
@@ -1577,11 +1632,33 @@
     "enabled_label": "자동 배정 사용",
     "enabled_description": "끄면 이전과 똑같이 동작합니다. 이슈에 라우팅 흔적도, 멘션도 남지 않습니다. 이미 기록된 값은 유지됩니다.",
     "model_label": "라우팅 모델",
-    "model_description": "판단을 맡길 모델. 비워 두면 스위치를 켜도 아무 일도 하지 않습니다.",
+    "model_description": "판단을 맡길 모델입니다. 엔드포인트와 키를 저장하면 사용 가능한 모델을 자동으로 불러옵니다. 모델 ID를 직접 입력할 수도 있습니다.",
+    "model_discovering": "엔드포인트에서 모델을 불러오는 중…",
+    "model_discover_failed": "모델을 불러오지 못했습니다. 모델 ID를 직접 입력하세요.",
+    "model_discover_empty": "엔드포인트가 모델을 반환하지 않았습니다. 모델 ID를 직접 입력하세요.",
+    "model_discover_loaded": "이 엔드포인트에서 모델 {{count}}개를 불러왔습니다.",
     "model_placeholder": "예: gpt-5.6-luna",
     "threshold_label": "신뢰도 임계값",
-    "threshold_description": "이보다 낮으면 해당 칸을 비워 두고 이유와 함께 한 번만 멘션합니다. 기본값 0.70.",
-    "no_credentials_note": "여기에는 어떤 비밀 값도 저장되지 않습니다. 자격 증명은 배포의 모델 설정이 관리합니다.",
+    "threshold_description": "이보다 낮아도 배정은 하되 폴백 등급(범용 강)을 사용하고 라우팅 코멘트에 표시합니다. 기본값 0.60.",
+    "stale_hours_label": "정체 점검 임계값(시간)",
+    "stale_hours_description": "티켓이 검수 대기 상태로 머물고 실행 중인 run도 없는 시간이 이 값을 넘으면 점검 대상이 됩니다. 기본 동작은 검수자에게 다시 알리는 것뿐이고 상태는 바꾸지 않습니다. 티켓에 검수자의 통과 결론이 이미 있을 때만 완료로 정렬합니다. 기본값 24시간.",
+    "gateway_endpoint_workspace": "모델 id는 이 워크스페이스 전용 엔드포인트로 전송됩니다: {{host}}.",
+    "gateway_endpoint_deployment": "모델 id는 배포 공용 LLM 엔드포인트로 전송됩니다: {{host}}.",
+    "gateway_protocol_systemone": "이 엔드포인트는 TypeSafe System One(Jev)입니다. 라우팅이 확률 분포가 딸린 타입 판단을 요청하므로, 임계값에 쓰이는 신뢰도는 모델의 자기 신고가 아니라 측정값입니다.",
+    "gateway_unset": "보낼 엔드포인트가 없습니다 — 이 워크스페이스도 설정하지 않았고, 배포에도 내부 LLM(MULTICA_LLM_BASE_URL / MULTICA_LLM_API_KEY)이 없습니다. 아래에서 엔드포인트와 키를 설정하거나 서버 운영자에게 요청하세요.",
+    "gateway_title": "이 워크스페이스 전용 엔드포인트",
+    "gateway_url_label": "엔드포인트 URL",
+    "gateway_url_description": "OpenAI 호환 base URL, 또는 TypeSafe System One(Jev)이라면 https://api.typesafe.ai. 둘 다 비워 두면 지금처럼 배포 공용 엔드포인트를 사용합니다.",
+    "gateway_url_placeholder": "https://api.example.com/v1 또는 https://api.typesafe.ai",
+    "gateway_key_label": "API 키",
+    "gateway_key_description": "암호화되어 저장되며 다시 표시되지 않습니다 — 마스킹된 형태로도 표시하지 않습니다. 저장하면 교체되고, 지우면 배포 엔드포인트로 돌아갑니다.",
+    "gateway_key_unstorable": "이 배포는 워크스페이스 키를 저장할 수 없습니다(MULTICA_ROUTING_SECRET_KEY, JWT_SECRET 모두 미설정). 서버 운영자만 해결할 수 있습니다.",
+    "gateway_key_placeholder": "sk-…",
+    "gateway_key_stored": "키가 저장되어 있음",
+    "gateway_key_save": "키 저장",
+    "gateway_key_clear": "지우기",
+    "gateway_pair_incomplete": "엔드포인트는 두 항목이 모두 필요합니다. 하나만 채우면 배포 공용 엔드포인트를 사용합니다.",
+    "gateway_default_model": "해당 배포의 기본 모델은 {{model}} 입니다.",
     "filters_title": "후보 필터",
     "filters_placeholder": "이후 지원 예정이며 이번 버전에는 없습니다.",
     "health_checking": "확인 중…",

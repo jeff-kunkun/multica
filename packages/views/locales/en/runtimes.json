@@ -33,7 +33,8 @@
     "action": "Start with Mika",
     "failed": "Couldn't start Mika",
     "dialog_title": "Where should Mika run?",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "dialog_description": "Pick the runtime Mika will use. You can change it later in settings."
   },
   "machine": {
     "search_placeholder": "Search machines…",
@@ -217,7 +218,8 @@
     "success_title": "Computer connected",
     "success_description": "Computer connected. You can now create an agent.",
     "view_runtime": "View runtime",
-    "create_agent": "Create an agent"
+    "create_agent": "Create an agent",
+    "live_listening_hint": "We'll detect it as soon as the daemon starts — usually under a minute."
   },
   "cloud_runtime": {
     "action": "Cloud Runtime",
@@ -256,7 +258,8 @@
     "validation": {
       "instance_type_required": "Instance type is required",
       "disk_size_invalid": "Disk size must be a positive integer"
-    }
+    },
+    "create_hint": "Choose a name, instance type, and disk size. Fleet applies the rest."
   },
   "update": {
     "cli_version_label": "CLI Version:",

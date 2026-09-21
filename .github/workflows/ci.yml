@@ -1,10 +1,13 @@
 name: CI
 
+# `kun` is this fork's mainline and its default branch; `main` is the upstream
+# mirror. Both are listed so a PR opened against either one is gated, and so a
+# push to either publishes the build caches the next run restores from.
 on:
   push:
-    branches: [main]
+    branches: [main, kun]
   pull_request:
-    branches: [main]
+    branches: [main, kun]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -83,7 +86,7 @@ jobs:
           ref: ${{ github.sha }}
           # apps/docs is excluded from the frontend turbo run, but knip does
           # analyze it, so a docs-only change still needs this job.
-          # apps/mobile has its own mobile-verify workflow. Everything else
+          # apps/mobile is not gated by CI at all. Everything else
           # the frontend job touches is listed here; bias toward
           # over-matching since a missed path silently skips validation.
           filters: |
@@ -101,6 +104,8 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'scripts/generate-reserved-slugs.mjs'
               - 'server/internal/handler/reserved_slugs.json'
+              - 'scripts/generate-account-slot-families.mjs'
+              - 'server/pkg/agent/account_slot_families.json'
               - 'scripts/check-ui-wildcard-exports.mjs'
               - 'scripts/check-ui-wildcard-exports.test.sh'
               - 'scripts/check-ui-radius-tokens.mjs'
@@ -193,7 +198,7 @@ jobs:
 
       - name: Decide
         id: decide
-        # Always run everything on push to main (full validation); on
+        # Always run everything on a branch push (full validation); on
         # pull_request, run only the areas whose paths changed.
         # The gated jobs themselves always run and report success — their
         # steps are gated on these outputs rather than the job being skipped
@@ -350,13 +355,20 @@ jobs:
           pnpm generate:reserved-slugs
           git diff --exit-code -- packages/core/paths/reserved-slugs.ts
 
+      - name: Verify account-slot-families.ts is up to date
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        # Same contract as reserved slugs: the Go daemon embeds the JSON, the
+        # frontend reads the generated file, and a drift fails here.
+        run: |
+          pnpm generate:account-slot-families
+          git diff --exit-code -- packages/core/agents/account-slot-families.ts
+
       - name: Build, type check, and lint
         if: ${{ needs.changes.outputs.frontend == 'true' }}
-        # Mobile lives in a parallel mobile-verify workflow (path-filtered
-        # to apps/mobile/** + packages/core/**) so it doesn't add
-        # ~50s of expo-lint + tsc to every web/desktop PR. Keep this
-        # filter in sync with the root package.json scripts, which also
-        # exclude @multica/mobile.
+        # Mobile is not a CI gate on this fork: mobile-verify.yml is
+        # manual-only (workflow_dispatch), so nothing about apps/mobile
+        # blocks a PR here. Keep this filter in sync with the root
+        # package.json scripts, which also exclude @multica/mobile.
         run: pnpm exec turbo build typecheck lint --filter='!@multica/docs' --filter='!@multica/mobile'
 
       # Blocking from the start: it reports nothing today, and it covers the
@@ -550,7 +562,7 @@ jobs:
   # Two entries now. The module cache is keyed by go.sum: immutable, saved on
   # a miss, never grows. The build cache is keyed by commit SHA with a prefix
   # fallback, so each run starts from the newest entry and recompiles only
-  # what its change touched. Only pushes to main publish a build-cache entry;
+  # what its change touched. Only branch pushes publish a build-cache entry;
   # PR runs restore and leave, which keeps storage churn at one entry per
   # merge, the same shape as the turbo caches above. The key carries the
   # resolved Go version because `check-latest` floats across patch releases,
@@ -1018,7 +1030,7 @@ jobs:
   image-budget:
     # Soft gate against the 21.7MB of raw PNG/JPG that MUL-6352 cleared out:
     # a bitmap added or grown past 300KB fails until the PR description says
-    # why. Pull requests only — a push to main has no description to read,
+    # why. Pull requests only — a branch push has no description to read,
     # and the branch it came from was already checked.
     needs: changes
     if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.images == 'true' }}

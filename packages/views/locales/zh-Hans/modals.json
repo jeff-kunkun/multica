@@ -17,7 +17,8 @@
     "confirm": "删除",
     "deleting": "删除中...",
     "toast_deleted": "已删除任务",
-    "toast_delete_failed": "删除任务失败"
+    "toast_delete_failed": "删除任务失败",
+    "hint": "工作区任何成员都可以删除任务。"
   },
   "feedback": {
     "title": "反馈",

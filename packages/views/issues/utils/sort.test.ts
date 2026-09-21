@@ -116,6 +116,7 @@ describe("sortIssues property sorts", () => {
       ],
       "status",
       "asc",
+      undefined,
       // Catalog order: the gate sits between in_progress and done, which no
       // ordering of the seven built-ins alone could produce.
       ["backlog", "todo", "in_progress", "waiting_on_vendor", "in_review", "blocked", "done", "cancelled"],

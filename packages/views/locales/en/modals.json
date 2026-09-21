@@ -17,7 +17,8 @@
     "confirm": "Delete",
     "deleting": "Deleting...",
     "toast_deleted": "Issue deleted",
-    "toast_delete_failed": "Failed to delete issue"
+    "toast_delete_failed": "Failed to delete issue",
+    "hint": "Any workspace member can delete issues."
   },
   "feedback": {
     "title": "Feedback",

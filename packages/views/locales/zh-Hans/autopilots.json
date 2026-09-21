@@ -340,7 +340,8 @@
         "label": "仅运行",
         "description": "静默运行，不创建任务"
       }
-    }
+    },
+    "schedule_disabled_reason": "该自动化有多个时间表——请到详情页编辑。"
   },
   "schedule_editor": {
     "time_label": "时间",

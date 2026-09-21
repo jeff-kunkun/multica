@@ -805,6 +805,15 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {
 		slog.Warn("scheduler: failed to register plugin_hook_schedule_dispatch job", "error", err)
 	}
+	// DENE-712: the routing stale-review sweep. Every other routing row is
+	// triggered by an event the product delivers; a ticket going quiet in
+	// review is the absence of one, so this row needs a clock and it shares
+	// the same lease + audit machinery as the jobs above.
+	if h.Routing != nil {
+		if err := schedulerMgr.Register(scheduler.RoutingStaleReviewJob(h.Routing)); err != nil {
+			slog.Warn("scheduler: failed to register routing_stale_review job", "error", err)
+		}
+	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)
 	}()
