@@ -75,6 +75,61 @@ func AuthMethodUnresolved(errText string) bool {
 // with %v rather than replacing it.
 const authMethodUnresolvedPhrase = "could not resolve authentication method"
 
+// AntigravitySessionTokenExpired reports whether an agent error is the
+// Antigravity CLI (agy) being refused by Google because the OAuth access token
+// its RUNNING process holds is no longer valid (DENE-724).
+//
+// The defect this names is not a credential the user has to renew. `agy -p`
+// reads its access token ONCE at process start and never refreshes it
+// mid-turn, so a run that outlives that token's remaining lifetime dies with
+// Google's UNAUTHENTICATED 401 no matter how much work it had already done —
+// while every short invocation re-reads the login store and succeeds. That is
+// why "the CLI works fine on my machine" and a failing Multica run are the
+// same account, and why telling the member to sign in again sends them
+// nowhere.
+//
+// What the failure DOES prove is that this session is finished: the turn's
+// transcript ends in a rejected call, and the remedy is a NEW agy process
+// (which reloads the login) rather than another resume of the same
+// conversation. The daemon classifies it as
+// antigravity_session_token_expired and retires the session; the resume
+// queries in pkg/db/queries apply the same phrase guard, which is the only
+// protection for rows an older daemon wrote under
+// agent_error.provider_auth_or_access. Keep the three in sync.
+//
+// Matching is phrase-based rather than provider-based on purpose: the SQL
+// guard cannot see which backend produced the row, and both phrases below are
+// Google/Antigravity's own wording, so no other provider can trip them. A bare
+// "401" is deliberately not a marker — every provider emits one, and on most
+// of them it really does mean a credential the user must renew.
+func AntigravitySessionTokenExpired(errText string) bool {
+	if errText == "" {
+		return false
+	}
+	lowered := strings.ToLower(errText)
+	for _, phrase := range antigravitySessionTokenExpiredPhrases {
+		if strings.Contains(lowered, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// antigravitySessionTokenExpiredPhrases are the wordings the Antigravity CLI
+// surfaces when Google rejects its in-process access token:
+//
+//	UNAUTHENTICATED (code 401): Request had invalid authentication credentials.
+//	  Expected OAuth 2 access token, login cookie or other valid authentication
+//	  credential. ...
+//	You are not logged into Antigravity
+//
+// The first is the Google OAuth library's 401 detail, the second the CLI's own
+// logged-out notice. Both are the CLI's wording, not a generic status line.
+var antigravitySessionTokenExpiredPhrases = []string{
+	"request had invalid authentication credentials",
+	"not logged into antigravity",
+}
+
 // emptyContentRe matches the provider's complaint that a content field is
 // empty, in the wordings observed across providers.
 var emptyContentRe = regexp.MustCompile(`(?i)must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty`)

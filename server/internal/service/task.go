@@ -5479,7 +5479,13 @@ func resumeUnsafeFailureReason(reason string) bool {
 	// codex_resume_oversized is the strongest member of this set: a codex
 	// rollout only ever grows, so a thread whose resume response already
 	// overflowed the reader will overflow on every future attempt too.
-	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity", "agent_error.context_overflow", "codex_resume_oversized":
+	// antigravity_session_token_expired (DENE-724) is session-scoped rather
+	// than transcript-scoped, but the consequence is the same: the resumed
+	// conversation's last turn is the token-expiry rejection, and the only cure
+	// is a fresh agy process that reloads the OAuth token from the login store.
+	// Leaving it resume-safe is what chained two 30+ minute failures on one
+	// session, so it belongs in this list on the resume-safety test alone.
+	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity", "agent_error.context_overflow", "codex_resume_oversized", "antigravity_session_token_expired":
 		return true
 	default:
 		return false
@@ -5526,7 +5532,18 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 	// a daemon too old to carry classifyPoisonedError's new branch reports
 	// agent_error.unknown, and without this the manual-retry path would
 	// happily resume the transcript the provider just refused (GH #6066).
-	return taskfailure.UnresumableHistory(errorText)
+	if taskfailure.UnresumableHistory(errorText) {
+		return true
+	}
+	// DENE-724: Antigravity's in-process OAuth token expiry. A daemon that
+	// predates FailureReasonAntigravitySessionTokenExpired writes the ordinary
+	// agent_error.provider_auth_or_access for it — a reason this function and
+	// the resume queries both treat as resume-safe — so the phrase guard is the
+	// only thing that keeps the chat pointer (and a manual retry of that row)
+	// off a conversation whose token cannot outlive another long run. Shared
+	// with the daemon classifier and the two resume queries; all three read the
+	// same phrase list.
+	return taskfailure.AntigravitySessionTokenExpired(errorText)
 }
 
 // retryEligible reports whether a failed task qualifies for an automatic retry

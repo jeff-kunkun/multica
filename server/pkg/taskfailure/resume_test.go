@@ -234,3 +234,122 @@ func TestAuthMethodUnresolvedMatchesResumeQueryGuard(t *testing.T) {
 		t.Fatalf("predicate does not match the SQL guard phrase %q — pkg/db/queries and pkg/taskfailure have drifted", sqlGuardPhrase)
 	}
 }
+
+// dene724AntigravityError is DENE-724's failure verbatim, as the daemon logged
+// it for task 01a0c372-0d6d-7d56-9c8f-9c725671e987 after a 29m37s Antigravity
+// run — and again for the follow-up 01a0c3a3-d346-7105-8126-47e33a56f862,
+// which resumed the same conversation and spent another 35m58s to reach the
+// identical 401. agy loads its OAuth access token once at process start and
+// never refreshes it, so the run dies when that token's lifetime runs out,
+// however much work it had already done.
+const dene724AntigravityError = `UNAUTHENTICATED (code 401): Request had invalid authentication credentials. ` +
+	`Expected OAuth 2 access token, login cookie or other valid authentication credential. ` +
+	`See https://developers.google.com/identity/sign-in/web/devconsole-project.; ` +
+	`agy stderr: error: UNAUTHENTICATED (code 401): Request had invalid authentication credentials. ` +
+	`Expected OAuth 2 access token, login cookie or other valid authentication credential. ` +
+	`See https://developers.google.com/identity/sign-in/web/devconsole-project.` + "\n" +
+	`AGY_ERROR: {"short_error":"UNAUTHENTICATED (code 401): Request had invalid authentication credentials.",` +
+	`"status":"UNAUTHENTICATED","error_code":401,"code_kind":"http","retryable":false,` +
+	`"error_id":"a869a7c3-252f-4028-a01c-fcceb364f369-102"}`
+
+// TestAntigravitySessionTokenExpired pins the predicate against the real
+// Antigravity wording. The positives decide whether a dead session is retired;
+// the negatives decide whether a credential the member genuinely has to renew
+// keeps its conversation. Both directions matter, and the negatives are the
+// dangerous side: a false positive silently drops conversation context.
+func TestAntigravitySessionTokenExpired(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		errMsg string
+		want   bool
+	}{
+		{
+			name:   "dene724 daemon error verbatim",
+			errMsg: dene724AntigravityError,
+			want:   true,
+		},
+		{
+			// The CLI's own logged-out notice, the second wording DENE-724
+			// lists. It carries no status code at all, which is why the
+			// predicate cannot key on "401".
+			name:   "agy not-logged-in notice",
+			errMsg: "error: You are not logged into Antigravity",
+			want:   true,
+		},
+		{
+			name:   "wrapped by the daemon's stderr tail",
+			errMsg: "agy provider error: Request had invalid authentication credentials.",
+			want:   true,
+		},
+
+		// --- Negatives: auth failures a new session cannot cure. ---
+		{
+			name:   "anthropic bare 401",
+			errMsg: "API Error: 401 Unauthorized",
+			want:   false,
+		},
+		{
+			name:   "claude not-logged-in copy",
+			errMsg: "Not logged in · Please run /login",
+			want:   false,
+		},
+		{
+			name:   "revoked access token",
+			errMsg: "API Error: 403 access token has been revoked",
+			want:   false,
+		},
+		{
+			// The tail sentence of Google's own message, without its opening
+			// clause. Matching on a fragment of it ("access token") would catch
+			// every provider that names the credential it rejected.
+			name:   "google sentence tail alone is not enough",
+			errMsg: "Expected OAuth 2 access token, login cookie or other valid authentication credential.",
+			want:   false,
+		},
+		{
+			// Another provider's UNAUTHENTICATED status must not be read as
+			// Antigravity's — only the two phrases above are agy wording.
+			name:   "grpc unauthenticated from another backend",
+			errMsg: `{"code":16,"status":"UNAUTHENTICATED","message":"token expired"}`,
+			want:   false,
+		},
+		{
+			name:   "empty error",
+			errMsg: "",
+			want:   false,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := AntigravitySessionTokenExpired(tt.errMsg); got != tt.want {
+				t.Errorf("AntigravitySessionTokenExpired(%q) = %v, want %v", tt.errMsg, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAntigravitySessionTokenExpiredMatchesResumeQueryGuards asserts the Go
+// predicate and the SQL guards in GetLastTaskSession / GetLastChatTaskSession
+// agree on every phrase. They are two independent implementations of one rule:
+// the daemon classifier reads this one, and rows written by a daemon too old to
+// carry it are caught by the ILIKE guards — so a phrase added on one side only
+// would leave that layer resuming a session the other considers dead.
+func TestAntigravitySessionTokenExpiredMatchesResumeQueryGuards(t *testing.T) {
+	t.Parallel()
+
+	// The ILIKE patterns the queries apply, minus the wildcards.
+	sqlGuardPhrases := []string{
+		"request had invalid authentication credentials",
+		"not logged into antigravity",
+	}
+
+	for _, phrase := range sqlGuardPhrases {
+		if !AntigravitySessionTokenExpired("prefix " + phrase + " suffix") {
+			t.Errorf("predicate does not match the SQL guard phrase %q — pkg/db/queries and pkg/taskfailure have drifted", phrase)
+		}
+	}
+}

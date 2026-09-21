@@ -1237,6 +1237,7 @@
       "agent_error_unknown": "智能体执行出错",
       "agent_fallback_message": "智能体返回了兜底消息",
       "codex_resume_oversized": "会话过大，无法恢复",
+      "antigravity_session_token_expired": "Antigravity 长会话登录凭据过期",
       "idle_watchdog": "智能体长时间无活动，运行已停止",
       "local_directory_error": "本地目录出错",
       "cancelled": "系统已取消",

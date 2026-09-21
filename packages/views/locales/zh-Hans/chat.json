@@ -67,6 +67,7 @@
       "environment_prepare_failed": "运行智能体的那台机器没能把这次运行准备好，任务没有启动。下方的原始错误会说明是哪一步失败——常见的是磁盘空间、权限、目录仍被占用，或本地配置读不出来。与智能体和模型厂商无关。",
       "provider_network": "与模型服务的连接中断，回复没能完成。检查网络后重试。",
       "provider_auth_or_access": "智能体的模型账号登录已失效。重新登录后再试。",
+      "antigravity_session_token_expired": "这次 Antigravity 运行超过了 CLI 登录凭据的有效期，模型随后拒绝了请求。登录本身没问题：下一次运行会自动开新会话并重新读取登录态，直接再发一次即可。",
       "provider_quota_limit": "智能体的模型账号额度已用尽。充值或更换账号后再试。",
       "provider_capacity_or_rate_limit": "模型服务繁忙或触发了限流。稍后再试。",
       "provider_server_error": "模型服务在自己那一侧出了错——可能是它的接口，也可能是它的鉴权服务——智能体的账号本身是正常的。重新登录没有用，请稍后再试。",

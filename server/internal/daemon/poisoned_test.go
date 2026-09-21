@@ -389,3 +389,104 @@ func TestClassifyResumeUnsafeTimeout(t *testing.T) {
 		})
 	}
 }
+
+// dene724AntigravityError is DENE-724's failure as the daemon logged it for
+// task 01a0c372-0d6d-7d56-9c8f-9c725671e987 (resume_session=false, 29m37s)
+// and again for the follow-up 01a0c3a3-d346-7105-8126-47e33a56f862, which
+// resumed the same conversation and spent another 35m58s reaching the same
+// 401. The access token agy loaded at process start expired mid-run and was
+// never refreshed; every short invocation reloads it, which is why the same
+// account passed `agy -p ping` while these two runs failed.
+const dene724AntigravityError = `UNAUTHENTICATED (code 401): Request had invalid authentication credentials. ` +
+	`Expected OAuth 2 access token, login cookie or other valid authentication credential. ` +
+	`See https://developers.google.com/identity/sign-in/web/devconsole-project.; ` +
+	`agy stderr: error: UNAUTHENTICATED (code 401): Request had invalid authentication credentials. ` +
+	`Expected OAuth 2 access token, login cookie or other valid authentication credential. ` +
+	`See https://developers.google.com/identity/sign-in/web/devconsole-project.` + "\n" +
+	`AGY_ERROR: {"short_error":"UNAUTHENTICATED (code 401): Request had invalid authentication credentials.",` +
+	`"status":"UNAUTHENTICATED","error_code":401,"code_kind":"http","retryable":false,` +
+	`"error_id":"a869a7c3-252f-4028-a01c-fcceb364f369-102"}`
+
+func TestClassifyResumeUnsafeAuthExpiry(t *testing.T) {
+	cases := []struct {
+		name       string
+		errMsg     string
+		wantOK     bool
+		wantReason string
+	}{
+		{
+			name:       "dene724 antigravity token expiry",
+			errMsg:     dene724AntigravityError,
+			wantOK:     true,
+			wantReason: FailureReasonAntigravitySessionTokenExpired,
+		},
+		{
+			name:       "agy not-logged-in notice",
+			errMsg:     "error: You are not logged into Antigravity",
+			wantOK:     true,
+			wantReason: FailureReasonAntigravitySessionTokenExpired,
+		},
+		{
+			// An ordinary 401 from any backend stays resume-safe: a new session
+			// replays it verbatim, so retiring the conversation would cost the
+			// member their context for nothing.
+			name:   "ordinary unauthorized stays resumable",
+			errMsg: "API Error: 401 Unauthorized",
+			wantOK: false,
+		},
+		{
+			name:   "revoked oauth token stays resumable",
+			errMsg: "OAuth access token has been revoked",
+			wantOK: false,
+		},
+		{
+			name:   "empty error",
+			errMsg: "",
+			wantOK: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, ok := classifyResumeUnsafeAuthExpiry(tc.errMsg)
+			if ok != tc.wantOK {
+				t.Fatalf("classifyResumeUnsafeAuthExpiry(%q) ok=%v, want %v", tc.errMsg, ok, tc.wantOK)
+			}
+			if ok && reason != tc.wantReason {
+				t.Fatalf("classifyResumeUnsafeAuthExpiry(%q) reason=%q, want %q", tc.errMsg, reason, tc.wantReason)
+			}
+		})
+	}
+}
+
+// TestAntigravitySessionTokenExpiredIsResumeUnsafe pins the cross-package
+// contract that makes the classifier above worth anything: classifying the
+// failure only helps if the resume lookup actually treats the reason as unsafe.
+// The service-side list and the two SQL blacklists are edited by hand in three
+// places, so this asserts the Go half rather than trusting that all three
+// stayed in sync.
+//
+// The text half matters just as much and is asserted for the same reason: the
+// rows DENE-724 was filed from were written by a daemon that only knew
+// agent_error.provider_auth_or_access, and it is the phrase guard — not the
+// reason — that keeps those exact rows from being resumed a fourth time.
+func TestAntigravitySessionTokenExpiredIsResumeUnsafe(t *testing.T) {
+	t.Run("reason alone", func(t *testing.T) {
+		if !service.ResumeUnsafeFailure(FailureReasonAntigravitySessionTokenExpired, "") {
+			t.Fatalf("ResumeUnsafeFailure(%q, \"\") = false, want true — the reason is classified but the session would still be resumed",
+				FailureReasonAntigravitySessionTokenExpired)
+		}
+	})
+
+	t.Run("legacy row classified as provider auth", func(t *testing.T) {
+		if !service.ResumeUnsafeFailure(string(taskfailure.ReasonAgentProviderAuthOrAccess), dene724AntigravityError) {
+			t.Fatal("a legacy agent_error.provider_auth_or_access row carrying the Antigravity 401 text must not be resumed — the text guard is the only protection for rows an older daemon wrote")
+		}
+	})
+
+	t.Run("an ordinary 401 keeps its conversation", func(t *testing.T) {
+		if service.ResumeUnsafeFailure(string(taskfailure.ReasonAgentProviderAuthOrAccess), "API Error: 401 Unauthorized") {
+			t.Fatal("a plain 401 must stay resume-safe: a fresh session replays it identically, so retiring the session only loses context")
+		}
+	})
+}

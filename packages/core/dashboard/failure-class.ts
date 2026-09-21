@@ -83,6 +83,14 @@ const REASON_CLASS: Record<string, FailureClass> = {
   // "agent" rather than "runtime": the daemon is healthy and the provider is
   // fine — it is this backend's own resume path that could not complete.
   codex_resume_oversized: "agent",
+  // DENE-724: the Antigravity CLI's in-process OAuth token expired mid-run.
+  // Read as a 401, but deliberately NOT the "auth" class: that class's operator
+  // response is "go re-auth", and nothing here is wrong with the account — the
+  // CLI simply never refreshes the token it loaded at startup, so every run
+  // longer than the token's remaining lifetime ends this way no matter how
+  // healthy the credentials are. The response is to let the next run start a
+  // fresh session, which is what the backend already does.
+  antigravity_session_token_expired: "agent",
   "agent_error.empty_or_unparseable_output": "agent",
   "agent_error.context_overflow": "agent",
   iteration_limit: "agent",
