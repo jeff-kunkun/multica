@@ -3,8 +3,10 @@
 Automatic dispatch is off unless the workspace turned it on in Settings →
 Routing. Once it is on, the server asks one question on issue creation and on
 every status change: given this status, who should be holding this issue. It
-answers by filling slots, never by changing status — routing has no status
-write at all, so nothing below can move an issue for you.
+answers by filling slots. It has exactly one status write, described under
+「停滞巡检」 below, and that write can only ever align a status to an acceptance
+the reviewer already gave on the ticket — routing never decides for itself that
+work is finished.
 
 What it may do, and only when the slot is still **empty**:
 
@@ -16,6 +18,21 @@ What it may do, and only when the slot is still **empty**:
 - **`blocked`** — post one advice comment and @ somebody. **No value is
   changed.**
 - **`in_progress` / `done` / `cancelled` / `backlog`** — nothing at all.
+
+There is a fourth trigger that is not a status change. A ticket sitting in
+`in_review` with nothing happening on it and no run working on it is **stalled**,
+and a periodic sweep looks at it once the quiet passes the workspace's stall
+threshold (Settings → Routing, default 24 hours):
+
+- The default is to **wake the 验收席 and change no status** — reassign the seat,
+  which starts its run, or tell a named person once and @ them.
+- The status is moved to done **only** when the 验收席 already left a pass verdict
+  on the ticket, and the comment recording it says which remark it read. With
+  nothing from the reviewer on the ticket this branch cannot be taken at all.
+- A ticket that reached `in_review` before its 验收席 was ever decided gets the
+  slot filled now and is handed on — this is the same row as `in_review` above,
+  and it runs even when the assignee is a person.
+- With routing switched off, the sweep does not run.
 
 验收席 is a native issue field, not a workspace property: `reviewer_type` +
 `reviewer_id` on the issue, shaped exactly like `assignee_type` +
@@ -36,7 +53,10 @@ Consequences for how you work:
 - A value you set yourself is never overwritten. Assigning an issue, or
   filling 验收席 by hand, permanently opts that slot out.
 - An issue whose assignee is a **person** is not touched in any way — no
-  slot, no comment, no mention.
+  slot, no comment, no mention. The one exception is an issue in `in_review`
+  whose 验收席 has never been decided: that slot is still filled and the issue
+  still handed on, because「这个人在干活」and「这个人在验收」are different
+  situations. The status is untouched either way.
 - Routing comments are capped at one of each kind per issue, so flipping a
   status back and forth does not re-dispatch or re-notify.
 - Every slot routing writes shows up in `multica issue timeline`, so a routed

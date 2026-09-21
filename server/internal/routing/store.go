@@ -1,6 +1,9 @@
 package routing
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Issue is the slice of an issue routing reads. Everything here is either fed
 // to the judge in trimmed form or used by the state table; nothing else about
@@ -33,6 +36,12 @@ type Issue struct {
 	// Reviewer is the ticket's reviewer slot. A zero Kind means the slot is
 	// empty — the only condition under which routing may write it.
 	Reviewer ReviewerRef
+
+	// LastActivityAt is when anything last happened on this ticket. The
+	// stale-review row measures quiet from here; every other row ignores it.
+	// Zero means the store could not tell, which that row reads as "not
+	// stale" rather than as "stale forever".
+	LastActivityAt time.Time
 }
 
 // ReviewerTarget is what the reviewer slot holds. The values are the strings
@@ -117,6 +126,20 @@ const (
 	// KindUnavailable — the model could not be reached on a workspace that is
 	// configured. Posted once, then the breaker keeps the issue quiet.
 	KindUnavailable CommentKind = "unavailable"
+	// KindStalled — the stale-review row could not wake anybody by writing a
+	// value, because the acceptance belongs to a PERSON. Posted once per
+	// issue and paired with an @, which is the only thing that reaches them.
+	//
+	// The agent half of the same row needs no comment: reassigning a seat
+	// starts its run, and that reassignment is already in the timeline. A
+	// comment per sweep is impossible anyway — one comment of each kind per
+	// issue is the de-duplication key — and it is the right impossibility:
+	// the wake may repeat, the noise may not.
+	KindStalled CommentKind = "stalled"
+	// KindCompleted — the stale-review row aligned the status to an
+	// acceptance the ticket already carried. At most once per issue by
+	// nature: there is only one such transition.
+	KindCompleted CommentKind = "completed"
 )
 
 // Store is everything Route needs from the rest of the server. Every write on
@@ -156,4 +179,34 @@ type Store interface {
 	// NotifyTarget resolves who to @ for this issue: the creator, or the
 	// workspace owner when the creator is an agent. One rule, no setting.
 	NotifyTarget(ctx context.Context, workspaceID string, issue Issue) (Member, error)
+
+	// --- the stale-review row -------------------------------------------
+	//
+	// These four exist for one row of the table and are used nowhere else.
+
+	// EnabledWorkspaces lists the workspaces whose routing switch is on. The
+	// sweep has no request to hang off, so it has to find its own work; every
+	// workspace it returns is re-checked against Settings anyway, because the
+	// switch can flip between this call and the pass.
+	EnabledWorkspaces(ctx context.Context) ([]string, error)
+
+	// StaleReviews lists issues in this workspace that sit in the in_review
+	// CATEGORY, carry no active run, and have had no activity since `before`.
+	//
+	// "No activity" rather than "entered review at": a ticket somebody
+	// commented on an hour ago is not stalled, whenever it entered review.
+	// Quiet is the thing this row is about.
+	StaleReviews(ctx context.Context, workspaceID string, before time.Time, limit int) ([]string, error)
+
+	// ReviewRemarks returns what the ticket's reviewer has said on it, oldest
+	// first. An empty result is the deterministic half of the completion
+	// gate: with nothing from the reviewer on the ticket there is no
+	// acceptance to align to, whatever the judge answers.
+	ReviewRemarks(ctx context.Context, workspaceID, issueID string, reviewer ReviewerRef) ([]string, error)
+
+	// CompleteFromReview is the ONLY status write this package has, and it is
+	// conditional: it moves the ticket to done only while it is still in the
+	// in_review category, and reports whether THIS call wrote it. A ticket
+	// that moved between the decision and the write is left alone.
+	CompleteFromReview(ctx context.Context, workspaceID, issueID string) (written bool, err error)
 }

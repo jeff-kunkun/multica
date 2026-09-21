@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -74,6 +75,14 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 		AssigneeType: row.AssigneeType.String,
 		CreatorType:  row.CreatorType,
 		CreatorID:    util.UUIDToString(row.CreatorID),
+	}
+	// Falls back to updated_at exactly as ListStaleReviewIssues does, so the
+	// single-issue re-check cannot disagree with the query that selected it.
+	switch {
+	case row.LastActivityAt.Valid:
+		out.LastActivityAt = row.LastActivityAt.Time
+	case row.UpdatedAt.Valid:
+		out.LastActivityAt = row.UpdatedAt.Time
 	}
 	if !row.AssigneeType.Valid {
 		out.AssigneeType = ""
@@ -464,11 +473,133 @@ func RoutingIssueUpdatedPayload(prev, issue db.Issue) map[string]any {
 	return map[string]any{
 		"issue":              issueToResponse(issue, ""),
 		"assignee_changed":   assigneeChanged,
+		"status_changed":     prev.Status != issue.Status,
+		"prev_status":        prev.Status,
 		"prev_assignee_type": textToPtr(prev.AssigneeType),
 		"prev_assignee_id":   uuidToPtr(prev.AssigneeID),
 		"creator_type":       issue.CreatorType,
 		"creator_id":         uuidToString(issue.CreatorID),
 	}
+}
+
+// inReviewCategory is the one category the stale-review sweep looks at,
+// expanded to this workspace's concrete status keys so a workspace that
+// renamed or added an awaiting-acceptance status sweeps identically to one
+// that did not.
+func (s routingStore) inReviewKeys(ctx context.Context, wsID pgtype.UUID) ([]string, error) {
+	return issuestatus.ExpandCategories(ctx, s.h.Queries, wsID, []string{"in_review"})
+}
+
+// EnabledWorkspaces lists the workspaces the sweep should visit at all.
+func (s routingStore) EnabledWorkspaces(ctx context.Context) ([]string, error) {
+	ids, err := s.h.Queries.ListRoutingEnabledWorkspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, util.UUIDToString(id))
+	}
+	return out, nil
+}
+
+// StaleReviews lists tickets awaiting acceptance that have been quiet since
+// before the given instant and have no run working on them.
+func (s routingStore) StaleReviews(ctx context.Context, workspaceID string, before time.Time, limit int) ([]string, error) {
+	wsID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	keys, err := s.inReviewKeys(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	rows, err := s.h.Queries.ListStaleReviewIssues(ctx, db.ListStaleReviewIssuesParams{
+		WorkspaceID: wsID,
+		Statuses:    keys,
+		Before:      pgtype.Timestamptz{Time: before, Valid: true},
+		Lim:         int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, id := range rows {
+		out = append(out, util.UUIDToString(id))
+	}
+	return out, nil
+}
+
+// ReviewRemarks returns what the reviewer themselves wrote on this ticket.
+//
+// "none" and an empty slot have no author, so they return nothing and can
+// never unlock a completion — which is the correct reading of both: a ticket
+// nobody was asked to accept carries no acceptance.
+func (s routingStore) ReviewRemarks(ctx context.Context, workspaceID, issueID string, reviewer routing.ReviewerRef) ([]string, error) {
+	if reviewer.Kind != routing.ReviewerAgent && reviewer.Kind != routing.ReviewerMember {
+		return nil, nil
+	}
+	wsID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	id, err := util.ParseUUID(issueID)
+	if err != nil {
+		return nil, err
+	}
+	authorID, err := util.ParseUUID(reviewer.ID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.h.Queries.ListReviewerCommentsForIssue(ctx, db.ListReviewerCommentsForIssueParams{
+		IssueID:     id,
+		WorkspaceID: wsID,
+		AuthorType:  string(reviewer.Kind),
+		AuthorID:    authorID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// CompleteFromReview moves a ticket out of the awaiting-acceptance category.
+// It is conditional on the ticket still being there, so a ticket somebody else
+// moved in the meantime reports written=false and the caller says nothing.
+func (s routingStore) CompleteFromReview(ctx context.Context, workspaceID, issueID string) (bool, error) {
+	wsID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return false, err
+	}
+	id, err := util.ParseUUID(issueID)
+	if err != nil {
+		return false, err
+	}
+	keys, err := s.inReviewKeys(ctx, wsID)
+	if err != nil {
+		return false, err
+	}
+	if len(keys) == 0 {
+		return false, nil
+	}
+	prev, err := s.h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: wsID})
+	if err != nil {
+		return false, err
+	}
+	issue, err := s.h.Queries.CompleteIssueFromReview(ctx, db.CompleteIssueFromReviewParams{
+		ID: id, WorkspaceID: wsID, Statuses: keys,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	s.publishIssueUpdated(prev, issue)
+	return true, nil
 }
 
 func clipRunes(s string, limit int) string {

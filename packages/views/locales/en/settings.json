@@ -1603,6 +1603,8 @@
     "model_placeholder": "e.g. gpt-5.6-luna",
     "threshold_label": "Confidence threshold",
     "threshold_description": "Below this the ticket is still dispatched, to the fallback rung (the generic strong seat), and the routing comment says so. Defaults to 0.60.",
+    "stale_hours_label": "Stale review threshold (hours)",
+    "stale_hours_description": "How long a ticket may sit awaiting acceptance with no run working on it before the sweep looks at it. The default action is to put it back in front of the reviewer and change no status; only a pass verdict the reviewer already left on the ticket lets the status be aligned to done. Defaults to 24 hours.",
     "gateway_endpoint_workspace": "The model id is sent to this workspace’s own endpoint: {{host}}.",
     "gateway_endpoint_deployment": "The model id is sent to the deployment’s shared LLM endpoint: {{host}}.",
     "gateway_protocol_systemone": "This endpoint is TypeSafe System One (Jev): routing asks it for a typed judgment with the probabilities behind it, so the confidence it gates on is measured rather than self-reported.",

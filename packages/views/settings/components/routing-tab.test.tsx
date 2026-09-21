@@ -222,6 +222,7 @@ describe("RoutingTab", () => {
       enabled: false,
       model: "gpt-5.6-luna",
       confidence_threshold: 0.6,
+      stale_review_hours: 24,
       base_url: "",
     });
   });
