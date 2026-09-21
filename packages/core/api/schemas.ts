@@ -2669,6 +2669,26 @@ export const issueDraftRuntimeSwitchFallback = (
   requestedRuntimeID: string,
 ): IssueDraftRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
 
+const IssueDraftAssigneeSuggestionSchema = z.object({
+  assignee_type: z.literal("agent"),
+  assignee_id: z.string().min(1),
+  name: z.string().catch(""),
+  tier: z.string().catch(""),
+}).loose();
+
+/**
+ * Index-aligned with the rows that were asked about. Each entry falls back to
+ * null on its own — "no suggestion" is a first-class answer the panel already
+ * renders as unassigned, so one malformed row must not discard the others.
+ */
+export const IssueDraftAssigneeSuggestionsSchema = z.object({
+  suggestions: z.array(IssueDraftAssigneeSuggestionSchema.nullable().catch(null)).catch([]),
+}).loose();
+
+export const EMPTY_ISSUE_DRAFT_ASSIGNEE_SUGGESTIONS: {
+  suggestions: (z.infer<typeof IssueDraftAssigneeSuggestionSchema> | null)[];
+} = { suggestions: [] };
+
 // Squad list responses carry lightweight membership previews used by hover
 // cards. member_count / member_preview are additive and default cleanly.
 // `members` must stay optional: official cloud omits it, and defaulting to []

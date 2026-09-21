@@ -2964,6 +2964,35 @@ describe("ApiClient issue drafts", () => {
     ).rejects.toThrow();
   });
 
+  it("reads assignee suggestions row by row and survives a malformed body", async () => {
+    const seat = { assignee_type: "agent", assignee_id: "agent-1", name: "孙悟空", tier: "strong" };
+    const fetchMock = vi
+      .fn()
+      // A row the client cannot use (a member, a missing id) is "no
+      // suggestion" for that row only; its neighbours keep their seats.
+      .mockResolvedValueOnce(
+        jsonResponse({ suggestions: [seat, null, { assignee_type: "member", assignee_id: "u" }, { name: "x" }] }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ suggestions: "not a list" }))
+      .mockResolvedValueOnce(jsonResponse(null));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const request = { project_id: null, rows: [{ title: "a", description: "", has_children: false }] };
+    await expect(client.suggestIssueDraftAssignees("session-1", request)).resolves.toEqual([
+      seat,
+      null,
+      null,
+      null,
+    ]);
+    await expect(client.suggestIssueDraftAssignees("session-1", request)).resolves.toEqual([]);
+    await expect(client.suggestIssueDraftAssignees("session-1", request)).resolves.toEqual([]);
+
+    const call = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(call[0]).toContain("/api/issue-drafts/session-1/assignee-suggestions");
+    expect(JSON.parse(String(call[1].body))).toEqual(request);
+  });
+
   it("degrades a malformed draft body to an empty draft instead of throwing", async () => {
     const fetchMock = vi
       .fn()
