@@ -447,8 +447,10 @@ func localDirectoryRefLabel(ref json.RawMessage) string {
 	return strings.TrimSpace(payload.Label)
 }
 
-// localDirectoryRefDiffersOnlyByLabel reports whether two refs are identical
-// once their labels are set aside.
+// localDirectoryRefDiffersOnlyByLabel reports whether two refs have the same
+// execution semantics once their display label and identity metadata are set
+// aside. Identity fields are deliberately ignored because newer clients may
+// enrich an old ref while an older client is only renaming the resource.
 //
 // This is what separates "a ≤ v0.4.28 client renamed the folder" from "a client
 // sent a ref it had been holding since before someone else renamed it". Both
@@ -468,6 +470,9 @@ func localDirectoryRefDiffersOnlyByLabel(a, b json.RawMessage) bool {
 			return nil, false
 		}
 		delete(fields, "label")
+		for _, key := range []string{"real_path", "repo_key", "is_git_repo", "worktree_root"} {
+			delete(fields, key)
+		}
 		return fields, true
 	}
 	left, ok := strip(a)
