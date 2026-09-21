@@ -327,7 +327,8 @@
     "window_flash_lite": "Flash Lite",
     "window_credits": "クレジット",
     "window_balance_cny": "CNY残高",
-    "window_balance_usd": "USD残高"
+    "window_balance_usd": "USD残高",
+    "switch_source": "{{provider}}の上限を切り替え"
   },
   "profiles": {
     "cta": "ランタイムを追加",

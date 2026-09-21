@@ -355,9 +355,10 @@ The guard is issue-scoped. A human comment clears it and resets the
 delegation-chain budget; `resume` only clears an explicit halt and does not
 reset an already-exceeded budget. Direct human-triggered runs are never
 consumed by that budget. Workspace settings may override the default chain
-limit of six runs with the `agent_chain_budget` setting; currently this is
+limit of 30 runs with the `agent_chain_budget` setting; currently this is
 configured by writing the workspace `settings` JSON directly (there is no CLI
-command for it yet).
+command for it yet). Hitting the limit posts a system comment in the triggering
+thread instead of stopping silently.
 
 Rows come back running-first, newest-first within a status, and the family read
 is capped at 20. When the cap truncates the answer the CLI prints a warning on
