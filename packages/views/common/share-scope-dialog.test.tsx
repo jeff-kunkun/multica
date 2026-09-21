@@ -80,4 +80,64 @@ describe("ShareScopeDialog", () => {
     await waitFor(() => expect(mutateProject).toHaveBeenCalledWith({ projectId: "project-1", visibility: "project" }));
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
+
+  it("asks for confirmation before applying the entire workspace scope", async () => {
+    const onOpenChange = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <I18nProvider locale="en" resources={resources}>
+          <ShareScopeDialog
+            open
+            onOpenChange={onOpenChange}
+            target={{ kind: "project", resourceId: "project-1", currentScope: "private" }}
+          />
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: /Entire workspace/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save as Entire workspace/ }));
+    expect(await screen.findByText(/Apply to all project resources/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Apply sharing/ }));
+    await waitFor(() => expect(mutateProject).toHaveBeenCalledWith({ projectId: "project-1", visibility: "workspace" }));
+  });
+
+  it("allows a repository in a project to use project-member sharing", async () => {
+    const onOpenChange = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <I18nProvider locale="en" resources={resources}>
+          <ShareScopeDialog
+            open
+            onOpenChange={onOpenChange}
+            target={{ kind: "repo", resourceId: "https://github.com/acme/app.git", projectId: "project-1", currentScope: "private" }}
+          />
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    const projectRadio = screen.getByRole("radio", { name: /Project members/ });
+    expect(projectRadio).not.toBeDisabled();
+    fireEvent.click(projectRadio);
+    fireEvent.click(screen.getByRole("button", { name: /Save as Project members/ }));
+    await waitFor(() => expect(mutateRepo).toHaveBeenCalledWith({ url: "https://github.com/acme/app.git", visibility: "project" }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  it("wires the project-member management entry", async () => {
+    const onManageMembers = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <I18nProvider locale="en" resources={resources}>
+          <ShareScopeDialog
+            open
+            onOpenChange={vi.fn()}
+            target={{ kind: "project", resourceId: "project-1", currentScope: "private" }}
+            onManageMembers={onManageMembers}
+          />
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: /Project members/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Manage project members/ }));
+    expect(onManageMembers).toHaveBeenCalledTimes(1);
+  });
 });

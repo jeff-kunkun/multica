@@ -25,6 +25,8 @@ export interface WorkspaceRepo {
   /** Resource sharing scope. Older servers omit this field. */
   visibility?: "private" | "project" | "workspace";
   created_by?: string;
+  /** First project that contains this repository, when applicable. */
+  project_id?: string;
 }
 
 export interface Workspace {

@@ -352,6 +352,10 @@ type workspaceRepoRef struct {
 	Description string `json:"description,omitempty"`
 	Visibility  string `json:"visibility,omitempty"`
 	CreatedBy   string `json:"created_by,omitempty"`
+	// ProjectID is response-only metadata used by the sharing dialog. It is
+	// cleared before workspace.repos is persisted because project membership
+	// lives in project_resource, not in the workspace JSON blob.
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // validateAndNormalizeWorkspaceRepos validates the caller's repo list and
@@ -381,6 +385,7 @@ func validateAndNormalizeWorkspaceRepos(value any, stored []byte, actorUserID st
 	for i, repo := range repos {
 		repo.URL = strings.TrimSpace(repo.URL)
 		repo.Description = strings.TrimSpace(repo.Description)
+		repo.ProjectID = ""
 		if repo.URL == "" {
 			return nil, fmt.Errorf("repos[%d]: url is required", i)
 		}

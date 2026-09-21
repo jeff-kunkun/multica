@@ -34,6 +34,7 @@ export type ShareScopeTarget =
       kind: "issue";
       resourceId: string;
       currentScope?: VisibilityScope;
+      audienceSize?: number;
       projectId?: string | null;
       resourceLabel?: string;
     }
@@ -41,6 +42,7 @@ export type ShareScopeTarget =
       kind: "repo";
       resourceId: string;
       currentScope?: VisibilityScope;
+      audienceSize?: number;
       projectId?: string | null;
       resourceLabel?: string;
     }
@@ -48,6 +50,7 @@ export type ShareScopeTarget =
       kind: "project";
       resourceId: string;
       currentScope?: VisibilityScope;
+      audienceSize?: number;
       resourceLabel?: string;
     };
 
@@ -82,18 +85,18 @@ export function ShareScopeDialog({
 
   const projectId = target.kind === "project" ? target.resourceId : target.projectId ?? null;
   const isProjectTarget = target.kind === "project";
-  const projectScopeDisabled = !isProjectTarget && !target.projectId;
+  const projectScopeDisabled = !isProjectTarget && !projectId;
   const { data: projectMembers = [], isLoading: projectMembersLoading } = useQuery({
     ...projectMembersOptions(wsId, projectId ?? ""),
-    enabled: open && !!projectId && scope === "project",
+    enabled: open && !!projectId,
   });
   const { data: workspaceMembers = [] } = useQuery({
     ...memberListOptions(wsId),
-    enabled: open && scope === "project",
+    enabled: open,
   });
   const preview = useProjectVisibilityPreview(
     target.kind === "project" ? target.resourceId : "",
-    open && target.kind === "project" && scope === "project",
+    open && target.kind === "project",
   );
   const issueMutation = useSetIssueVisibility(wsId);
   const repoMutation = useSetRepoVisibility(wsId);
@@ -138,8 +141,16 @@ export function ShareScopeDialog({
 
   const scopeLabel = (value: VisibilityScope) => t(($) => $.share_scope[SCOPE_META[value].labelKey]);
   const currentLabel = scopeLabel(scope);
-  const previewReady = target.kind !== "project" || scope !== "project" || !!preview.data;
-  const showConfirm = confirming && target.kind === "project" && scope === "project";
+  const previewReady = target.kind !== "project" || !!preview.data;
+  const audienceSizeByScope: Record<VisibilityScope, number | undefined> = {
+    private: 1,
+    project: projectId ? projectMembers.length : undefined,
+    workspace: workspaceMembers.filter((member) => member.role !== "guest").length,
+  };
+  if (target.audienceSize !== undefined) {
+    audienceSizeByScope[scope] = target.audienceSize;
+  }
+  const showConfirm = confirming && target.kind === "project";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -219,6 +230,11 @@ export function ShareScopeDialog({
                           ? t(($) => $.share_scope.project_requires_project)
                           : t(($) => $.share_scope[meta.descriptionKey])}
                       </span>
+                      {!disabled && audienceSizeByScope[value] !== undefined && (
+                        <span className="mt-1 block text-caption font-medium text-foreground/70">
+                          {t(($) => $.share_scope.audience_count, { count: audienceSizeByScope[value] ?? 0 })}
+                        </span>
+                      )}
                     </span>
                   </label>
                 );
@@ -276,10 +292,10 @@ export function ShareScopeDialog({
               <Button
                 size="sm"
                 onClick={() => {
-                  if (target.kind === "project" && scope === "project") setConfirming(true);
+                  if (target.kind === "project") setConfirming(true);
                   else void save();
                 }}
-                disabled={saving || projectScopeDisabled || (target.kind === "project" && scope === "project" && preview.isLoading)}
+                disabled={saving || projectScopeDisabled || (target.kind === "project" && preview.isLoading)}
               >
                 {saving && <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
                 {t(($) => $.share_scope.save_as, { scope: currentLabel })}
@@ -294,9 +310,11 @@ export function ShareScopeDialog({
 
 export function ShareScopeTrigger({
   scope,
+  audienceSize,
   onClick,
 }: {
   scope?: VisibilityScope;
+  audienceSize?: number;
   onClick: () => void;
 }) {
   const { t } = useT("common");
@@ -305,6 +323,11 @@ export function ShareScopeTrigger({
     <Button variant="outline" size="sm" onClick={onClick} className="gap-1.5">
       {value === "private" ? <LockKeyhole className="size-3.5" /> : value === "project" ? <Users className="size-3.5" /> : <Globe2 className="size-3.5" />}
       {t(($) => $.share_scope[SCOPE_META[value].labelKey])}
+      {audienceSize !== undefined && (
+        <span className="text-caption text-muted-foreground">
+          · {t(($) => $.share_scope.audience_count, { count: audienceSize })}
+        </span>
+      )}
     </Button>
   );
 }

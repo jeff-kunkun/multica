@@ -155,6 +155,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
   const [shareScopeOpen, setShareScopeOpen] = useState(false);
+  const [shareAudienceSize, setShareAudienceSize] = useState<number | undefined>();
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -491,13 +492,15 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       {/* Resources */}
       <ProjectResourcesSection projectId={projectId} />
 
-      <ProjectMembersSection
-        projectId={projectId}
-        canManage={
-          isWorkspaceAdmin ||
-          (project.lead_type === "member" && project.lead_id === userId)
-        }
-      />
+      <div id="project-members-section">
+        <ProjectMembersSection
+          projectId={projectId}
+          canManage={
+            isWorkspaceAdmin ||
+            (project.lead_type === "member" && project.lead_id === userId)
+          }
+        />
+      </div>
     </div>
   );
 
@@ -526,10 +529,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               >
                 {isPinned ? <PinOff /> : <Pin />}
               </Button>
-              <ShareScopeTrigger
-                scope={project.visibility}
-                onClick={() => setShareScopeOpen(true)}
-              />
+              <WriteAction>
+                <ShareScopeTrigger
+                  scope={project.visibility}
+                  audienceSize={shareAudienceSize}
+                  onClick={() => setShareScopeOpen(true)}
+                />
+              </WriteAction>
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
@@ -621,7 +627,18 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           kind: "project",
           resourceId: project.id,
           currentScope: project.visibility,
+          audienceSize: shareAudienceSize,
           resourceLabel: project.title,
+        }}
+        onSaved={(result) => {
+          setShareAudienceSize(result.audience_size);
+        }}
+        onManageMembers={() => {
+          setShareScopeOpen(false);
+          document.getElementById("project-members-section")?.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
         }}
       />
 
