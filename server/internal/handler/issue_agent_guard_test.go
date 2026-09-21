@@ -48,14 +48,32 @@ func countBudgetNotices(t *testing.T, issueID string) int {
 	return count
 }
 
+// setAgentChainBudget writes the workspace's chain budget as raw JSON and
+// restores the previous settings afterwards.
+func setAgentChainBudget(t *testing.T, rawValue string) {
+	t.Helper()
+	var previous []byte
+	dbfx.QueryRow(t, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previous)
+	t.Cleanup(func() {
+		dbfx.Exec(t, `UPDATE workspace SET settings = $2 WHERE id = $1`, testWorkspaceID, previous)
+	})
+	dbfx.Exec(t, `
+		UPDATE workspace
+		SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{agent_chain_budget}', $2::jsonb)
+		WHERE id = $1
+	`, testWorkspaceID, rawValue)
+}
+
 // TestIssueAgentChainBudgetBlocksAtTheThresholdAndResetsOnHumanComment covers
-// the complete A↔B guard contract: six delegated runs consume the budget, the
+// the complete A↔B guard contract under a configured budget of six: six
+// delegated runs consume the budget, the
 // seventh is refused, the notice is one-shot, and a human comment resets the
 // window so a later delegated trigger can enqueue again.
 func TestIssueAgentChainBudgetBlocksAtTheThresholdAndResetsOnHumanComment(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
+	setAgentChainBudget(t, "6")
 	agentA := createHandlerTestAgent(t, "Guard Budget Agent A", []byte("[]"))
 	agentB := createHandlerTestAgent(t, "Guard Budget Agent B", []byte("[]"))
 	// Agent-created issues are shared workspace-wide (DENE-698): 'private'
@@ -113,6 +131,60 @@ func TestIssueAgentChainBudgetBlocksAtTheThresholdAndResetsOnHumanComment(t *tes
 		context.Background(), issue, util.MustParseUUID(agentA), util.MustParseUUID(triggerCommentID),
 	); err != nil {
 		t.Fatalf("delegated trigger after human comment: %v", err)
+	}
+}
+
+// TestIssueAgentChainBudgetDefaultAndUnlimited pins the two values a workspace
+// that never opened the setting relies on: the unconfigured default admits a
+// relay well past the old limit of six (DENE-691), and zero removes the cap.
+func TestIssueAgentChainBudgetDefaultAndUnlimited(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	for name, tc := range map[string]struct {
+		budget    string // raw JSON; "" leaves the setting absent
+		seeded    int
+		wantBlock bool
+	}{
+		"default admits the 7th run":    {budget: "", seeded: 6},
+		"default blocks at 30":          {budget: "", seeded: 30, wantBlock: true},
+		"zero is unlimited":             {budget: "0", seeded: 40},
+		"malformed falls back to 30":    {budget: `"lots"`, seeded: 30, wantBlock: true},
+		"configured value is respected": {budget: "8", seeded: 8, wantBlock: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tc.budget != "" {
+				setAgentChainBudget(t, tc.budget)
+			}
+			agentA := createHandlerTestAgent(t, "Guard Default Agent A", []byte("[]"))
+			agentB := createHandlerTestAgent(t, "Guard Default Agent B", []byte("[]"))
+			issueID := dbfx.Issue(t, "agent chain default budget", testutil.Cols{
+				"creator_type": "agent",
+				"creator_id":   agentA,
+			})
+			var sourceTaskID string
+			for i := 0; i < tc.seeded; i++ {
+				agentID := agentA
+				if i%2 == 1 {
+					agentID = agentB
+				}
+				taskID := seedDelegatedTask(t, agentID, issueID)
+				if i == 0 {
+					sourceTaskID = taskID
+				}
+			}
+			triggerCommentID := dbfx.Comment(t, issueID, "@agent please continue", testutil.Cols{
+				"author_type":    "agent",
+				"author_id":      agentB,
+				"source_task_id": sourceTaskID,
+			})
+			_, err := testHandler.TaskService.EnqueueTaskForMention(
+				context.Background(), issueForGuardTest(t, issueID), util.MustParseUUID(agentA), util.MustParseUUID(triggerCommentID),
+			)
+			if blocked := errors.Is(err, service.ErrAgentChainBudgetExceeded); blocked != tc.wantBlock {
+				t.Fatalf("after %d delegated runs: err = %v, want blocked = %v", tc.seeded, err, tc.wantBlock)
+			}
+		})
 	}
 }
 

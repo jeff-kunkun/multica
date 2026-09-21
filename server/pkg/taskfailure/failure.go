@@ -89,6 +89,12 @@ const (
 	// agent timeout path.
 	ReasonTimeout Reason = "timeout"
 
+	// ReasonTaskTimeLimit: the workspace-configured wall-clock limit
+	// (`agent_task_timeout_minutes`) stopped a healthy running task.
+	// Written by FailTasksOverWorkspaceTimeLimit. Deliberately terminal:
+	// retrying would spend the same budget the limit exists to protect.
+	ReasonTaskTimeLimit Reason = "task_time_limit"
+
 	// ReasonIterationLimit: the agent reached its per-run iteration
 	// cap and emitted a fallback "I reached the iteration limit"
 	// message. Treated as platform-side because it is a Multica-imposed
@@ -277,6 +283,7 @@ var allReasons = []Reason{
 	ReasonRuntimeReconnectTimeout,
 	ReasonRuntimeRecovery,
 	ReasonTimeout,
+	ReasonTaskTimeLimit,
 	ReasonIterationLimit,
 	ReasonAgentBlocked,
 	ReasonAPIInvalidRequest,
