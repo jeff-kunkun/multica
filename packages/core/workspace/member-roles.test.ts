@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
-  GUEST_ROLE_RELEASED,
   MEMBER_ROLES,
   asMemberRole,
   isMemberRole,
@@ -117,7 +116,7 @@ describe("roleOptions", () => {
       owner: null,
       admin: null,
       member: null,
-      guest: GUEST_ROLE_RELEASED ? null : "guest_unreleased",
+      guest: null,
     });
   });
 
@@ -154,13 +153,12 @@ describe("roleOptions", () => {
     expect(opts.map((o) => o.role)).toEqual([...MEMBER_ROLES]);
   });
 
-  it("does not offer guest while the backend still rejects it", () => {
-    // Guard against flipping GUEST_ROLE_RELEASED without DENE-697's
-    // interception layer: a released guest with Member write power is worse
-    // than no guest tier at all. See docs/kun/permission-model.md.
-    const guest = roleOptions({ current: "member", actorIsOwner: true, isLastOwner: false }).find(
+  it("lets an admin hand out guest", () => {
+    // The server enforces guest read-only on every write (DENE-697), so the
+    // tier is released. See docs/kun/permission-model.md.
+    const guest = roleOptions({ current: "member", actorIsOwner: false, isLastOwner: false }).find(
       (o) => o.role === "guest",
     );
-    expect(guest?.disabled).toBe(!GUEST_ROLE_RELEASED);
+    expect(guest).toEqual({ role: "guest", disabled: false });
   });
 });

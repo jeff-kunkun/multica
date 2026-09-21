@@ -1123,7 +1123,6 @@
     "expiry_30d": "30일",
     "expiry_never": "무기한",
     "role_blocked": {
-      "guest_unreleased": "게스트는 아직 사용할 수 없습니다 — 읽기 전용 차단이 배포 중입니다",
       "owner_requires_owner": "owner 등급은 owner만 부여할 수 있습니다"
     },
     "role_select_label": "{{name}}의 등급",

@@ -7,22 +7,6 @@ import type { MemberRole } from "../types";
  */
 export const MEMBER_ROLES = ["owner", "admin", "member", "guest"] as const;
 
-/**
- * Whether the backend accepts `guest` on member writes yet.
- *
- * Migration 502 only widened the DB CHECK constraint. `normalizeMemberRole`
- * in `server/internal/handler/workspace.go` still answers owner/admin/member,
- * on purpose: today most write endpoints only check "is a member", so a guest
- * released before the global read-only interception layer (DENE-697) would
- * carry full Member write power under a read-only name. See
- * `docs/kun/permission-model.md`.
- *
- * Until that layer ships the tier is visible but unselectable, with the
- * reason shown — a picker that silently 400s looks like a broken save.
- * Flip this in the same change that widens `normalizeMemberRole`.
- */
-export const GUEST_ROLE_RELEASED = false;
-
 export function isMemberRole(value: unknown): value is MemberRole {
   return (
     typeof value === "string" &&
@@ -123,8 +107,7 @@ export function roleChangeImpact(
 /** Why a tier cannot be picked for this member right now. */
 export type RoleOptionBlock =
   | "last_owner"
-  | "owner_requires_owner"
-  | "guest_unreleased";
+  | "owner_requires_owner";
 
 export interface RoleOption {
   role: MemberRole;
@@ -159,9 +142,6 @@ export function roleOptions({
     }
     if (isLastOwner) {
       return { role, disabled: true, block: "last_owner" as const };
-    }
-    if (role === "guest" && !GUEST_ROLE_RELEASED) {
-      return { role, disabled: true, block: "guest_unreleased" as const };
     }
     return { role, disabled: false };
   });

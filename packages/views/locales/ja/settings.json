@@ -1385,7 +1385,6 @@
     "expiry_30d": "30日",
     "expiry_never": "無期限",
     "role_blocked": {
-      "guest_unreleased": "ゲストはまだ利用できません — 読み取り専用の制御を準備中です",
       "owner_requires_owner": "owner を付与できるのは owner だけです"
     },
     "role_select_label": "{{name}} の権限",
