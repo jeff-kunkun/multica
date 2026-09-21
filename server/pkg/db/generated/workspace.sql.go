@@ -257,7 +257,7 @@ SELECT CASE
     WHEN settings->>'agent_chain_budget' ~ '^[0-9]+$'
          AND (settings->>'agent_chain_budget')::int > 0
       THEN (settings->>'agent_chain_budget')::int
-    ELSE 6
+    ELSE 30
   END::int AS budget
 FROM workspace
 WHERE id = $1
