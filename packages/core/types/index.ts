@@ -157,6 +157,14 @@ export type {
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";
+export type {
+  TaskLogExport,
+  TaskLogExportBundle,
+  TaskLogExportEntry,
+  TaskLogExportRun,
+  TaskLogExportScope,
+  TaskLogExportTaskView,
+} from "./log-export";
 export type { Attachment } from "./attachment";
 export {
   attachmentDownloadPath,
