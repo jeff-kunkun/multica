@@ -18,6 +18,7 @@ import { isImeComposing } from "@multica/core/utils";
 import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility";
 import { useNavigation } from "../navigation";
 import { useSearchStore } from "../search/search-store";
+import { useDenyGuestWrite } from "./guest-readonly";
 
 const GLOBAL_ACTIONS: readonly ShortcutActionId[] = [
   "openSearch",
@@ -49,6 +50,7 @@ export function GlobalShortcuts() {
   const { toggleSidebar } = useSidebar();
   const navigation = useNavigation();
   const workspacePaths = useWorkspacePaths();
+  const denyGuestWrite = useDenyGuestWrite();
 
   // Subscribe so changing a binding in Settings immediately refreshes the
   // listener closure; getShortcut remains useful to non-React call sites.
@@ -120,6 +122,7 @@ export function GlobalShortcuts() {
         return;
       }
       if (actionId === "createIssue") {
+        if (denyGuestWrite()) return;
         if (useModalStore.getState().modal) return;
         const projectMatch = navigation.pathname.match(
           /^\/[^/]+\/projects\/([^/]+)$/,
@@ -139,7 +142,7 @@ export function GlobalShortcuts() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [navigation, overrides, toggleSidebar, workspacePaths]);
+  }, [denyGuestWrite, navigation, overrides, toggleSidebar, workspacePaths]);
 
   return null;
 }

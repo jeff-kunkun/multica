@@ -7,6 +7,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
 import { HelpLauncher } from "./help-launcher";
+import { WriteAction } from "./guest-readonly";
 import { JoinDiscordCard } from "./join-discord-card";
 import {
   DndContext,
@@ -748,6 +749,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               </SidebarMenuItem>
             )}
             <SidebarMenuItem>
+              <WriteAction className="flex w-full">
               <SidebarMenuButton
                 className="text-muted-foreground"
                 onClick={() => openCreateIssueWithPreference()}
@@ -758,6 +760,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <ShortcutKeycaps shortcut={createIssueShortcut} decorative className="pointer-events-none ml-auto" />
                 ) : null}
               </SidebarMenuButton>
+              </WriteAction>
             </SidebarMenuItem>
             <SidebarMenuItem>
               {/* The way into requirement alignment. It sits beside "New
@@ -765,6 +768,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   deliberate choice, not something a user has to undo. It opens
                   the create-issue dialog on its alignment face — the same
                   shell, so the shared draft and uploads come with it. */}
+              <WriteAction className="flex w-full">
               <SidebarMenuButton
                 className="text-muted-foreground"
                 title={t(($) => $.sidebar.align_issue_hint)}
@@ -773,6 +777,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <Sparkles />
                 <span>{t(($) => $.sidebar.align_issue)}</span>
               </SidebarMenuButton>
+              </WriteAction>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarHeader>
