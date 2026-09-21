@@ -115,6 +115,10 @@ vi.mock("sonner", () => ({
 vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
     agent.runtime_bound !== false && agent.runtime_id.length > 0,
+  // Mirror `packages/core/agents/work-enabled.ts`: only an explicit `false`
+  // disables a seat, because older servers omit the field.
+  isAgentWorkEnabled: (agent: { work_enabled?: boolean }) =>
+    agent.work_enabled !== false,
   agentRunCounts30dOptions: () => ({ queryKey: ["agent-run-counts"] }),
   useWorkspaceActivityMap: () => mocks.activity,
   useWorkspacePresenceMap: () => mocks.presence,

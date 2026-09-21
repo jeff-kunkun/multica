@@ -124,7 +124,7 @@ SET status = 'done',
 WHERE id = $1::uuid
   AND workspace_id = $2::uuid
   AND status = ANY($3::text[])
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id, visibility
 `
 
 type CompleteIssueFromReviewParams struct {
@@ -171,6 +171,7 @@ func (q *Queries) CompleteIssueFromReview(ctx context.Context, arg CompleteIssue
 		&i.LastActivityAt,
 		&i.ReviewerType,
 		&i.ReviewerID,
+		&i.Visibility,
 	)
 	return i, err
 }
