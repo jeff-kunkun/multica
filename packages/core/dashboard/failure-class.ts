@@ -91,6 +91,14 @@ const REASON_CLASS: Record<string, FailureClass> = {
   // healthy the credentials are. The response is to let the next run start a
   // fresh session, which is what the backend already does.
   antigravity_session_token_expired: "agent",
+  // DENE-724's other half: the Antigravity CLI's own "You are not logged into
+  // Antigravity" notice. This one DOES belong in "auth" — unlike the token
+  // expiry above it can mean the account is genuinely signed out on that
+  // machine, and the operator's first move (check the login there) is exactly
+  // what the auth class says. Same session retirement either way; only the
+  // reason and the copy differ, so the two buckets do not hide the account
+  // problem behind the session-lifetime one.
+  antigravity_not_logged_in: "auth",
   "agent_error.empty_or_unparseable_output": "agent",
   "agent_error.context_overflow": "agent",
   iteration_limit: "agent",

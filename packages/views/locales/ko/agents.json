@@ -1139,6 +1139,7 @@
       "agent_fallback_message": "에이전트가 대체 메시지를 반환함",
       "codex_resume_oversized": "세션이 너무 커서 재개할 수 없음",
       "antigravity_session_token_expired": "Antigravity 장시간 세션 토큰 만료",
+      "antigravity_not_logged_in": "Antigravity 로그인 안 됨",
       "idle_watchdog": "에이전트가 장시간 응답하지 않아 중지됨",
       "local_directory_error": "로컬 디렉터리 오류",
       "cancelled": "시스템에서 취소함",

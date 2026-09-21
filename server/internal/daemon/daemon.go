@@ -9804,18 +9804,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 		if failureReason == "" {
-			// DENE-724: Antigravity's long-session credential expiry. agy -p
-			// reads its OAuth access token once at startup and never refreshes
-			// it, so a run that outlives the token dies on Google's
-			// UNAUTHENTICATED 401 after however much work it had done. Without
-			// this the failure lands in agent_error.provider_auth_or_access,
-			// which is resume-safe: the next trigger re-enters the same
-			// conversation and burns another full token lifetime to fail
-			// identically. Naming the session explicitly is what makes the
-			// exclusion independent of this row's own session_id — the 401
-			// arrives on the error path, where session extraction from stream
-			// output is least reliable, and an older completed row for the same
-			// session would otherwise still look resumable.
+			// DENE-724: Antigravity's long-session credential expiry, plus the
+			// CLI's own logged-out notice. agy -p reads its OAuth access token
+			// once at startup and never refreshes it, so a run that outlives
+			// the token dies on Google's UNAUTHENTICATED 401 after however much
+			// work it had done. Without this the failure lands in
+			// agent_error.provider_auth_or_access, which is resume-safe: the
+			// next trigger re-enters the same conversation and burns another
+			// full token lifetime to fail identically. Naming the session
+			// explicitly is what makes the exclusion independent of this row's
+			// own session_id — the 401 arrives on the error path, where session
+			// extraction from stream output is least reliable, and an older
+			// completed row for the same session would otherwise still look
+			// resumable.
 			failureReason, _ = classifyResumeUnsafeAuthExpiry(errMsg)
 			if failureReason != "" && retiredSessionID == "" && task.PriorSessionID != "" {
 				retiredSessionID = task.PriorSessionID

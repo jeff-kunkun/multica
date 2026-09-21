@@ -1131,6 +1131,7 @@
       "agent_fallback_message": "エージェントがフォールバックメッセージを返しました",
       "codex_resume_oversized": "セッションが大きすぎて再開できません",
       "antigravity_session_token_expired": "Antigravity の長時間セッションでトークンが失効",
+      "antigravity_not_logged_in": "Antigravity にサインインしていない",
       "idle_watchdog": "エージェントが長時間応答しなかったため停止しました",
       "local_directory_error": "ローカルディレクトリエラー",
       "cancelled": "システムによってキャンセルされました",

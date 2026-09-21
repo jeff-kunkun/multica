@@ -1006,7 +1006,7 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
     status IN ('completed', 'cancelled')
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized', 'antigravity_session_token_expired')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized', 'antigravity_session_token_expired', 'antigravity_not_logged_in')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
       -- Mirrors the GetLastTaskSession auth-resolution guard: a provider that
       -- cannot resolve its auth method fails deterministically on resume, and
@@ -1023,8 +1023,11 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
       -- DENE-724, mirroring GetLastTaskSession: an Antigravity run whose
       -- in-process OAuth token expired is the CLI's own 401 wording, and an
       -- older daemon records it as agent_error.provider_auth_or_access — a
-      -- reason this filter keeps resuming. Keep in sync with
-      -- taskfailure.AntigravitySessionTokenExpired and the issue-side twin.
+      -- reason this filter keeps resuming. The CLI's separate "not logged into
+      -- Antigravity" notice gets the same treatment: it retires the session
+      -- too, and only its copy differs. Keep in sync with
+      -- taskfailure.AntigravitySessionTokenExpired / AntigravityNotLoggedIn and
+      -- the issue-side twin.
       AND NOT (COALESCE(error, '') ILIKE '%request had invalid authentication credentials%')
       AND NOT (COALESCE(error, '') ILIKE '%not logged into antigravity%')
     )

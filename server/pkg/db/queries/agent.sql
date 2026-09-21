@@ -1320,18 +1320,23 @@ RETURNING *;
 --
 -- DENE-724 is the newest text guard, and the reason it needs one at all is
 -- that the row it must catch is written by daemons that predate
--- 'antigravity_session_token_expired': an expired in-process OAuth token in
--- the Antigravity CLI surfaces as an ordinary 401, so those rows carry
--- agent_error.provider_auth_or_access — resume-safe by every rule above.
--- Antigravity loads that token once per process and never refreshes it, so the
--- resumed conversation burns a whole new token lifetime before failing
--- identically. The two phrases are Google/Antigravity's own wording
--- ("Request had invalid authentication credentials", "You are not logged into
--- Antigravity"), which is what keeps this narrow without a provider column to
--- filter on. The message is exactly the one in
--- taskfailure.AntigravitySessionTokenExpired; the three guards
+-- 'antigravity_session_token_expired' / 'antigravity_not_logged_in': an
+-- expired in-process OAuth token in the Antigravity CLI surfaces as an
+-- ordinary 401, so those rows carry agent_error.provider_auth_or_access —
+-- resume-safe by every rule above. Antigravity loads that token once per
+-- process and never refreshes it, so the resumed conversation burns a whole new
+-- token lifetime before failing identically. The two phrases are
+-- Google/Antigravity's own wording ("Request had invalid authentication
+-- credentials", "You are not logged into Antigravity"), which is what keeps
+-- this narrow without a provider column to filter on. They are exactly the
+-- ones in taskfailure.AntigravitySessionTokenExpired / AntigravityNotLoggedIn
+-- (both covered by taskfailure.AntigravityResumeUnsafe); the three guards
 -- (daemon classifier, service.ResumeUnsafeFailure, this query) read the same
 -- list.
+--
+-- The two Antigravity reasons are separate wire values only because their copy
+-- differs (see the daemon classifier). Here both are excluded, because the
+-- session is equally unusable either way.
 --
 -- retired_sessions is the explicit half of the same rule (GH #6066). The
 -- per-session latest state above can only judge sessions that some row still
@@ -1386,7 +1391,7 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
     status IN ('completed', 'cancelled')
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized', 'antigravity_session_token_expired')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized', 'antigravity_session_token_expired', 'antigravity_not_logged_in')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
       AND NOT (COALESCE(error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(error, '') ILIKE '%image.source.base64.data%')
       -- A provider credential-resolution failure ("Could not resolve
@@ -1403,11 +1408,12 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
       AND NOT (COALESCE(error, '') ILIKE '%could not resolve authentication method%')
       AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
                AND COALESCE(error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
-      -- DENE-724: Antigravity's in-process OAuth token expiry. Mirrors the
-      -- phrase list in taskfailure.AntigravitySessionTokenExpired, which the
-      -- daemon classifier and service.ResumeUnsafeFailure also read — see the
-      -- comment above for why a 401 from this CLI is session-scoped rather
-      -- than a credential the member can renew.
+      -- DENE-724: Antigravity's in-process OAuth token expiry, and the CLI's
+      -- own logged-out notice. Mirrors the phrase lists in
+      -- taskfailure.AntigravitySessionTokenExpired / AntigravityNotLoggedIn,
+      -- which the daemon classifier and service.ResumeUnsafeFailure also read —
+      -- see the comment above for why this CLI's credential failure is
+      -- session-scoped rather than a credential the member can renew.
       AND NOT (COALESCE(error, '') ILIKE '%request had invalid authentication credentials%')
       AND NOT (COALESCE(error, '') ILIKE '%not logged into antigravity%')
     )

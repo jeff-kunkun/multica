@@ -252,11 +252,22 @@ const dene724AntigravityError = `UNAUTHENTICATED (code 401): Request had invalid
 	`"status":"UNAUTHENTICATED","error_code":401,"code_kind":"http","retryable":false,` +
 	`"error_id":"a869a7c3-252f-4028-a01c-fcceb364f369-102"}`
 
-// TestAntigravitySessionTokenExpired pins the predicate against the real
-// Antigravity wording. The positives decide whether a dead session is retired;
-// the negatives decide whether a credential the member genuinely has to renew
-// keeps its conversation. Both directions matter, and the negatives are the
-// dangerous side: a false positive silently drops conversation context.
+// dene724NotLoggedInError is the Antigravity CLI's own logged-out notice, the
+// second wording DENE-724 lists. It is a different sentence from the 401 above
+// and gets a different reason: it can mean the account really is signed out, so
+// its copy must not tell the member their login is fine. It carries no status
+// code at all, which is why the predicates cannot key on "401".
+const dene724NotLoggedInError = "error: You are not logged into Antigravity"
+
+// TestAntigravitySessionTokenExpired pins the Google-side predicate against the
+// real Antigravity 401 wording. The positives decide whether a dead session is
+// retired; the negatives decide whether a credential the member genuinely has to
+// renew keeps its conversation. Both directions matter, and the negatives are
+// the dangerous side: a false positive silently drops conversation context.
+//
+// The CLI's own logged-out notice is deliberately NOT a positive here — it has
+// its own predicate and reason (see TestAntigravityNotLoggedIn), because one
+// sentence cannot be right for both audiences.
 func TestAntigravitySessionTokenExpired(t *testing.T) {
 	t.Parallel()
 
@@ -271,17 +282,17 @@ func TestAntigravitySessionTokenExpired(t *testing.T) {
 			want:   true,
 		},
 		{
-			// The CLI's own logged-out notice, the second wording DENE-724
-			// lists. It carries no status code at all, which is why the
-			// predicate cannot key on "401".
-			name:   "agy not-logged-in notice",
-			errMsg: "error: You are not logged into Antigravity",
-			want:   true,
-		},
-		{
 			name:   "wrapped by the daemon's stderr tail",
 			errMsg: "agy provider error: Request had invalid authentication credentials.",
 			want:   true,
+		},
+		{
+			// Ownership split: the CLI's notice belongs to the other
+			// predicate. Matching both here is what let one reason's copy
+			// claim "your login is still fine" to a member who is signed out.
+			name:   "agy not-logged-in notice is not this predicate",
+			errMsg: dene724NotLoggedInError,
+			want:   false,
 		},
 
 		// --- Negatives: auth failures a new session cannot cure. ---
@@ -310,7 +321,7 @@ func TestAntigravitySessionTokenExpired(t *testing.T) {
 		},
 		{
 			// Another provider's UNAUTHENTICATED status must not be read as
-			// Antigravity's — only the two phrases above are agy wording.
+			// Antigravity's — only the phrases above are agy wording.
 			name:   "grpc unauthenticated from another backend",
 			errMsg: `{"code":16,"status":"UNAUTHENTICATED","message":"token expired"}`,
 			want:   false,
@@ -332,24 +343,103 @@ func TestAntigravitySessionTokenExpired(t *testing.T) {
 	}
 }
 
-// TestAntigravitySessionTokenExpiredMatchesResumeQueryGuards asserts the Go
-// predicate and the SQL guards in GetLastTaskSession / GetLastChatTaskSession
-// agree on every phrase. They are two independent implementations of one rule:
-// the daemon classifier reads this one, and rows written by a daemon too old to
-// carry it are caught by the ILIKE guards — so a phrase added on one side only
-// would leave that layer resuming a session the other considers dead.
-func TestAntigravitySessionTokenExpiredMatchesResumeQueryGuards(t *testing.T) {
+// TestAntigravityNotLoggedIn pins the CLI-side predicate. This is the half the
+// first review of DENE-724 blocked on: it must be recognisable on its own, and
+// it must not be reachable through the 401 predicate, so the two can carry
+// different copy.
+func TestAntigravityNotLoggedIn(t *testing.T) {
 	t.Parallel()
 
-	// The ILIKE patterns the queries apply, minus the wildcards.
-	sqlGuardPhrases := []string{
-		"request had invalid authentication credentials",
-		"not logged into antigravity",
+	cases := []struct {
+		name   string
+		errMsg string
+		want   bool
+	}{
+		{
+			name:   "agy notice verbatim",
+			errMsg: dene724NotLoggedInError,
+			want:   true,
+		},
+		{
+			name:   "wrapped by the daemon's stderr tail",
+			errMsg: "agy exited with: You are not logged into Antigravity. Run agy to sign in.",
+			want:   true,
+		},
+		{
+			// A blob carrying BOTH wordings is the overlap the classifier
+			// resolves toward this predicate: the not-logged-in copy stays
+			// correct when the run's token also expired, while the 401 copy
+			// ("your login is still fine") would not.
+			name:   "both wordings in one blob",
+			errMsg: dene724AntigravityError + "\n" + dene724NotLoggedInError,
+			want:   true,
+		},
+
+		// --- Negatives: other tools' logged-out copy must not match. ---
+		{
+			name:   "dene724 google 401 alone is not this predicate",
+			errMsg: dene724AntigravityError,
+			want:   false,
+		},
+		{
+			name:   "claude not-logged-in copy",
+			errMsg: "Not logged in · Please run /login",
+			want:   false,
+		},
+		{
+			// "not logged in" without the product name is not enough: every
+			// CLI says something like it, and retiring another provider's
+			// healthy conversation would cost the member their context.
+			name:   "bare not-logged-in phrase",
+			errMsg: "error: not logged in",
+			want:   false,
+		},
+		{
+			name:   "empty error",
+			errMsg: "",
+			want:   false,
+		},
 	}
 
-	for _, phrase := range sqlGuardPhrases {
-		if !AntigravitySessionTokenExpired("prefix " + phrase + " suffix") {
-			t.Errorf("predicate does not match the SQL guard phrase %q — pkg/db/queries and pkg/taskfailure have drifted", phrase)
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := AntigravityNotLoggedIn(tt.errMsg); got != tt.want {
+				t.Errorf("AntigravityNotLoggedIn(%q) = %v, want %v", tt.errMsg, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAntigravityPhraseGuardsMatchResumeQueryGuards asserts the Go predicates
+// and the SQL guards in GetLastTaskSession / GetLastChatTaskSession agree on
+// every phrase. They are two independent implementations of one rule: the
+// daemon classifier reads the predicates, and rows written by a daemon too old
+// to carry it are caught by the ILIKE guards — so a phrase added on one side
+// only would leave that layer resuming a session the other considers dead.
+//
+// Each phrase is also asserted against AntigravityResumeUnsafe, the single
+// predicate service.ResumeUnsafeFailure and the query comments point at: the
+// SQL guards do not know which of the two reasons a row was classified with, so
+// the combined predicate is what has to cover both.
+func TestAntigravityPhraseGuardsMatchResumeQueryGuards(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		phrase  string
+		matches func(string) bool
+	}{
+		{"request had invalid authentication credentials", AntigravitySessionTokenExpired},
+		{"not logged into antigravity", AntigravityNotLoggedIn},
+	}
+
+	for _, tc := range cases {
+		probe := "prefix " + tc.phrase + " suffix"
+		if !tc.matches(probe) {
+			t.Errorf("predicate does not match the SQL guard phrase %q — pkg/db/queries and pkg/taskfailure have drifted", tc.phrase)
+		}
+		if !AntigravityResumeUnsafe(probe) {
+			t.Errorf("AntigravityResumeUnsafe does not cover SQL guard phrase %q — the SQL guards and service.ResumeUnsafeFailure would disagree", tc.phrase)
 		}
 	}
 }

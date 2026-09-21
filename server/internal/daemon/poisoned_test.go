@@ -407,6 +407,12 @@ const dene724AntigravityError = `UNAUTHENTICATED (code 401): Request had invalid
 	`"status":"UNAUTHENTICATED","error_code":401,"code_kind":"http","retryable":false,` +
 	`"error_id":"a869a7c3-252f-4028-a01c-fcceb364f369-102"}`
 
+// dene724NotLoggedInError is the Antigravity CLI's own logged-out notice. It
+// retires the session exactly like the 401 above, but as its own reason: unlike
+// the expired in-process token, this notice can mean the account really is
+// signed out, so its copy must not tell the member their login is fine.
+const dene724NotLoggedInError = "error: You are not logged into Antigravity"
+
 func TestClassifyResumeUnsafeAuthExpiry(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -422,9 +428,20 @@ func TestClassifyResumeUnsafeAuthExpiry(t *testing.T) {
 		},
 		{
 			name:       "agy not-logged-in notice",
-			errMsg:     "error: You are not logged into Antigravity",
+			errMsg:     dene724NotLoggedInError,
 			wantOK:     true,
-			wantReason: FailureReasonAntigravitySessionTokenExpired,
+			wantReason: FailureReasonAntigravityNotLoggedIn,
+		},
+		{
+			// Both wordings can arrive in one stderr tail: Google rejects the
+			// mid-run token, then the CLI appends its own logged-out notice.
+			// The not-logged-in reason is the one that is still correct in
+			// that overlap — its copy never claims the login is fine, and its
+			// ping-then-retry step is what a long-run expiry needs too.
+			name:       "both wordings in one blob",
+			errMsg:     dene724AntigravityError + "\n" + dene724NotLoggedInError,
+			wantOK:     true,
+			wantReason: FailureReasonAntigravityNotLoggedIn,
 		},
 		{
 			// An ordinary 401 from any backend stays resume-safe: a new session
@@ -432,6 +449,11 @@ func TestClassifyResumeUnsafeAuthExpiry(t *testing.T) {
 			// member their context for nothing.
 			name:   "ordinary unauthorized stays resumable",
 			errMsg: "API Error: 401 Unauthorized",
+			wantOK: false,
+		},
+		{
+			name:   "another CLI's logged-out copy stays resumable",
+			errMsg: "Not logged in · Please run /login",
 			wantOK: false,
 		},
 		{
@@ -459,28 +481,37 @@ func TestClassifyResumeUnsafeAuthExpiry(t *testing.T) {
 	}
 }
 
-// TestAntigravitySessionTokenExpiredIsResumeUnsafe pins the cross-package
-// contract that makes the classifier above worth anything: classifying the
-// failure only helps if the resume lookup actually treats the reason as unsafe.
-// The service-side list and the two SQL blacklists are edited by hand in three
-// places, so this asserts the Go half rather than trusting that all three
-// stayed in sync.
+// TestAntigravityReasonsAreResumeUnsafe pins the cross-package contract that
+// makes the classifier above worth anything: classifying the failure only helps
+// if the resume lookup actually treats the reason as unsafe. The service-side
+// list and the two SQL blacklists are edited by hand in three places, so this
+// asserts the Go half rather than trusting that all three stayed in sync.
+//
+// Both DENE-724 reasons are asserted, because they are separate wire values:
+// splitting them for copy must not quietly make one of them resume-safe.
 //
 // The text half matters just as much and is asserted for the same reason: the
 // rows DENE-724 was filed from were written by a daemon that only knew
 // agent_error.provider_auth_or_access, and it is the phrase guard — not the
 // reason — that keeps those exact rows from being resumed a fourth time.
-func TestAntigravitySessionTokenExpiredIsResumeUnsafe(t *testing.T) {
-	t.Run("reason alone", func(t *testing.T) {
-		if !service.ResumeUnsafeFailure(FailureReasonAntigravitySessionTokenExpired, "") {
-			t.Fatalf("ResumeUnsafeFailure(%q, \"\") = false, want true — the reason is classified but the session would still be resumed",
-				FailureReasonAntigravitySessionTokenExpired)
-		}
-	})
+func TestAntigravityReasonsAreResumeUnsafe(t *testing.T) {
+	for _, reason := range []string{
+		FailureReasonAntigravitySessionTokenExpired,
+		FailureReasonAntigravityNotLoggedIn,
+	} {
+		t.Run("reason alone: "+reason, func(t *testing.T) {
+			if !service.ResumeUnsafeFailure(reason, "") {
+				t.Fatalf("ResumeUnsafeFailure(%q, \"\") = false, want true — the reason is classified but the session would still be resumed", reason)
+			}
+		})
+	}
 
 	t.Run("legacy row classified as provider auth", func(t *testing.T) {
 		if !service.ResumeUnsafeFailure(string(taskfailure.ReasonAgentProviderAuthOrAccess), dene724AntigravityError) {
 			t.Fatal("a legacy agent_error.provider_auth_or_access row carrying the Antigravity 401 text must not be resumed — the text guard is the only protection for rows an older daemon wrote")
+		}
+		if !service.ResumeUnsafeFailure(string(taskfailure.ReasonAgentProviderAuthOrAccess), dene724NotLoggedInError) {
+			t.Fatal("a legacy agent_error.provider_auth_or_access row carrying the CLI's logged-out notice must not be resumed either — the reason predicate cannot see it")
 		}
 	})
 

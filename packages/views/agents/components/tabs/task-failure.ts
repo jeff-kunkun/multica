@@ -51,6 +51,7 @@ export const FAILURE_REASON_I18N_KEYS = {
   codex_semantic_inactivity: "codex_semantic_inactivity",
   codex_resume_oversized: "codex_resume_oversized",
   antigravity_session_token_expired: "antigravity_session_token_expired",
+  antigravity_not_logged_in: "antigravity_not_logged_in",
   idle_watchdog: "idle_watchdog",
   local_directory_error: "local_directory_error",
   cancelled: "cancelled",

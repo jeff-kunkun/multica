@@ -35,7 +35,10 @@ import (
 //     UNAUTHENTICATED 401. The session is not a bad conversation, but its
 //     transcript now ends in that rejection and every long resume re-expires
 //     the same way; the next turn must start a fresh agy process, which
-//     reloads the login. Detected via classifyResumeUnsafeAuthExpiry.
+//     reloads the login. The same CLI also reports its own logged-out notice,
+//     which retires the session the same way but keeps a different reason so
+//     its copy does not claim the login is fine. Detected via
+//     classifyResumeUnsafeAuthExpiry.
 //
 // MUL-2946: ReasonIterationLimit and ReasonAPIInvalidRequest are aliased
 // to the canonical taskfailure values so the daemon and the in-flight
@@ -60,6 +63,17 @@ const (
 	// operational reasons above: it is a Multica/backend lifecycle fact about
 	// the session, not a classification of the provider's error string.
 	FailureReasonAntigravitySessionTokenExpired = "antigravity_session_token_expired"
+	// FailureReasonAntigravityNotLoggedIn is the second half of DENE-724: the
+	// CLI's own "You are not logged into Antigravity" notice. Same session
+	// retirement as the reason above, deliberately a different wire value
+	// because the two need different words — the 401 above proves the saved
+	// login is fine (a short invocation reloads it and succeeds), so its copy
+	// must not send the member to sign in; this notice is the one symptom that
+	// can mean the account really is signed out, so its copy must not claim
+	// "your login is fine". One shared reason forced one sentence to be wrong
+	// for the other audience, which was the blocking finding on the first
+	// review of this fix.
+	FailureReasonAntigravityNotLoggedIn = "antigravity_not_logged_in"
 )
 
 // poisonedOutputMaxLen caps how long an output can be and still be
@@ -234,8 +248,8 @@ func classifyResumeUnsafeTimeout(provider, errMsg string) (string, bool) {
 }
 
 // classifyResumeUnsafeAuthExpiry reports whether an agent error is the
-// Antigravity CLI (agy) being refused by Google because the OAuth access token
-// inside the RUNNING process has expired (DENE-724).
+// Antigravity CLI (agy) unable to authenticate, and which of the two DENE-724
+// conditions it is (DENE-724).
 //
 // Why this is resume-unsafe rather than an ordinary auth failure: `agy -p`
 // loads its access token once at startup and never refreshes it mid-turn, so
@@ -246,6 +260,22 @@ func classifyResumeUnsafeTimeout(provider, errMsg string) (string, bool) {
 // must therefore start a NEW agy process (which reloads the token) instead of
 // resuming the conversation whose transcript now ends in the rejection.
 //
+// The two conditions share that remedy but not their copy, so they get
+// separate reasons:
+//
+//   - Google's 401 wording means the token the RUNNING process held expired.
+//     The saved login is fine (a short invocation just used it), so the copy
+//     says so and sends the member straight back to their message.
+//   - The CLI's own "You are not logged into Antigravity" notice may mean the
+//     account really is signed out. Its copy must never claim the login is
+//     fine; it leads with `agy -p ping` and branches on the result.
+//
+// The notice is checked first because both wordings can land in one error
+// blob: when Google rejects the mid-run token, the CLI may append its own
+// logged-out notice to the same stderr tail. The not-logged-in copy is the one
+// that is still correct in that overlap — it never asserts the login is fine,
+// and its ping-then-retry step is exactly what a long-run expiry needs too.
+//
 // Deliberately NOT wired into shouldRetryWithFreshSession, unlike the Codex
 // cases above. That in-turn retry is gated on tools == 0, and the failure only
 // happens after a long run has already done real work — the gate is satisfied
@@ -253,11 +283,14 @@ func classifyResumeUnsafeTimeout(provider, errMsg string) (string, bool) {
 // safe basis for replaying half an hour of side effects. Retiring the session
 // keeps the NEXT round off the dead conversation without re-running this one.
 //
-// The phrases live in taskfailure.AntigravitySessionTokenExpired, shared with
-// the resume queries' SQL guard (pkg/db/queries) and with
-// service.ResumeUnsafeFailure, so a row written by a daemon too old to carry
-// this classifier is still excluded from resume.
+// The phrases live in taskfailure.AntigravitySessionTokenExpired /
+// AntigravityNotLoggedIn, shared with the resume queries' SQL guard
+// (pkg/db/queries) and with service.ResumeUnsafeFailure, so a row written by a
+// daemon too old to carry this classifier is still excluded from resume.
 func classifyResumeUnsafeAuthExpiry(errMsg string) (string, bool) {
+	if taskfailure.AntigravityNotLoggedIn(errMsg) {
+		return FailureReasonAntigravityNotLoggedIn, true
+	}
 	if taskfailure.AntigravitySessionTokenExpired(errMsg) {
 		return FailureReasonAntigravitySessionTokenExpired, true
 	}

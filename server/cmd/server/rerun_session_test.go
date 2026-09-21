@@ -353,6 +353,64 @@ func TestGetLastTaskSessionExcludesAntigravityTokenExpiredReason(t *testing.T) {
 	requireSessionExcluded(t, prior.SessionID, err)
 }
 
+// TestGetLastTaskSessionExcludesAntigravityNotLoggedIn is the second half of
+// DENE-724's session retirement: the CLI's own logged-out notice. It retires
+// the session for the same reason the 401 does (the next run must start a fresh
+// agy process), but it is a separate reason on the wire so its copy can tell the
+// member something different. Two cases, because either half could rot alone:
+// the reason the CURRENT daemon writes, and the legacy row an older daemon wrote
+// for the same text.
+func TestGetLastTaskSessionExcludesAntigravityNotLoggedIn(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	const notLoggedInError = "error: You are not logged into Antigravity"
+
+	cases := []struct {
+		name          string
+		sessionID     string
+		failureReason string
+		errText       any
+	}{
+		{
+			name:          "reason written by the current daemon",
+			sessionID:     "AGY-NOT-LOGGED-IN",
+			failureReason: "antigravity_not_logged_in",
+			errText:       nil,
+		},
+		{
+			name:          "legacy row classified as provider auth",
+			sessionID:     "AGY-NOT-LOGGED-IN-LEGACY",
+			failureReason: "agent_error.provider_auth_or_access",
+			errText:       notLoggedInError,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issueID, agentID, runtimeID := setupRerunTestFixture(t)
+			t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+			ctx := context.Background()
+
+			if _, err := testPool.Exec(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+				VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', $4, '/tmp/agy', $5, $6)
+			`, agentID, runtimeID, issueID, tc.sessionID, tc.failureReason, tc.errText); err != nil {
+				t.Fatalf("insert antigravity not-logged-in task: %v", err)
+			}
+
+			queries := db.New(testPool)
+			prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+				AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+				IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+			})
+			requireSessionExcluded(t, prior.SessionID, err)
+		})
+	}
+}
+
 // TestGetLastTaskSessionKeepsSessionOnOrdinaryUnauthorized is the narrowness
 // half of DENE-724: the guard must match Antigravity's own wording, not any
 // 401. A plain unauthorized failure replays identically on a fresh session, so

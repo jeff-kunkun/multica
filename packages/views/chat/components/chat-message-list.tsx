@@ -1012,6 +1012,13 @@ function FailureBubble({
     antigravity_session_token_expired: t(
       ($) => $.message_list.failure.antigravity_session_token_expired,
     ),
+    // DENE-724's other half, and deliberately NOT the line above: the CLI's own
+    // "You are not logged into Antigravity" notice can mean the account really
+    // is signed out, so this copy must not claim the login is fine. It leads
+    // with the check the member can run (`agy -p ping`) and branches on the
+    // result, which also happens to be the right advice when the same notice
+    // arrives alongside an expired token.
+    antigravity_not_logged_in: t(($) => $.message_list.failure.antigravity_not_logged_in),
     "agent_error.provider_quota_limit": t(($) => $.message_list.failure.provider_quota_limit),
     "agent_error.provider_capacity_or_rate_limit": t(
       ($) => $.message_list.failure.provider_capacity_or_rate_limit,

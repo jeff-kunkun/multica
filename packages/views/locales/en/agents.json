@@ -1268,6 +1268,7 @@
       "agent_fallback_message": "Agent returned a fallback message",
       "codex_resume_oversized": "Session too large to resume",
       "antigravity_session_token_expired": "Antigravity session token expired",
+      "antigravity_not_logged_in": "Antigravity not signed in",
       "idle_watchdog": "Agent stopped after inactivity",
       "local_directory_error": "Local directory error",
       "cancelled": "Cancelled by the system",
