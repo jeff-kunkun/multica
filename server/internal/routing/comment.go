@@ -44,6 +44,8 @@ func (r *Router) assignmentComment(
 	executorSource string,
 	reviewer ReviewerRef,
 	reviewerFallback bool,
+	fallbackWhy string,
+	humanSignoff bool,
 	needExecutor, needReviewer bool,
 	stillUnassigned bool,
 ) string {
@@ -71,17 +73,14 @@ func (r *Router) assignmentComment(
 	switch {
 	case !needReviewer:
 		b.WriteString(fmt.Sprintf("- **验收席**：已有值「%s」，未改动\n", issue.Reviewer.Label()))
-	case reviewerFallback && reviewer.Kind == ReviewerMember:
-		b.WriteString(fmt.Sprintf("- **验收席**：%s（**兜底**——裁决置信度 %s 低于阈值 %s，执行席已在最强档，没有更高一档可验）\n",
-			reviewer.Label(), pct(v.ReviewerConfidence), pct(threshold)))
+	case reviewerFallback && humanSignoff && !reviewer.Empty():
+		b.WriteString(fmt.Sprintf("- **验收席**：%s（模型判为这次验收需要人拍板，置信度 %s。验收席不填人——填了人这张票后面就没人能推动了；%s）\n",
+			reviewer.Label(), pct(v.ReviewerConfidence), fallbackWhy))
 	case reviewerFallback && !reviewer.Empty():
-		b.WriteString(fmt.Sprintf("- **验收席**：%s（**兜底**——裁决置信度 %s 低于阈值 %s，按「比执行席高一档」选的）\n",
-			reviewer.Label(), pct(v.ReviewerConfidence), pct(threshold)))
+		b.WriteString(fmt.Sprintf("- **验收席**：%s（**兜底**——裁决置信度 %s 低于阈值 %s，%s）\n",
+			reviewer.Label(), pct(v.ReviewerConfidence), pct(threshold), fallbackWhy))
 	case reviewer.Kind == ReviewerNoReview:
 		b.WriteString(fmt.Sprintf("- **验收席**：本票不需要验收（置信度 %s）。要人复核就自己填一个\n", pct(v.ReviewerConfidence)))
-	case reviewer.Kind == ReviewerMember:
-		b.WriteString(fmt.Sprintf("- **验收席**：%s（置信度 %s）——判为这次验收需要沟通，交给人\n",
-			reviewer.Label(), pct(v.ReviewerConfidence)))
 	case !reviewer.Empty():
 		b.WriteString(fmt.Sprintf("- **验收席**：%s（置信度 %s ≥ 阈值 %s）\n",
 			reviewer.Label(), pct(v.ReviewerConfidence), pct(threshold)))
@@ -97,6 +96,11 @@ func (r *Router) assignmentComment(
 	}
 	b.WriteString("\n")
 
+	if humanSignoff && reviewer.Kind == ReviewerAgent {
+		b.WriteString(fmt.Sprintf("这次验收里有需要人拍板的部分：**%s** 先做检查、合并、关票，遇到只有人能定的事，由它在票下 @ 对应的人。票不会被改派给人。\n\n",
+			reviewer.Label()))
+	}
+
 	if stillUnassigned {
 		b.WriteString("⚠️ 执行席没派出去，这张票会一直躺在待办，所以 @ 你一次。\n\n")
 	}
@@ -105,8 +109,9 @@ func (r *Router) assignmentComment(
 	return b.String()
 }
 
-// handoffComment is the in-review-row comment.
-func (r *Router) handoffComment(issue Issue, to string, toHuman bool, target Member, decidedHere bool) string {
+// handoffComment is the in-review-row comment. Every handoff it describes is
+// to a seat: the reviewer slot never names a person.
+func (r *Router) handoffComment(issue Issue, to string, decidedHere bool) string {
 	var b strings.Builder
 	b.WriteString("## 交接\n\n")
 	b.WriteString("这张票进入了待验收。\n\n")
@@ -118,13 +123,32 @@ func (r *Router) handoffComment(issue Issue, to string, toHuman bool, target Mem
 	if decidedHere {
 		b.WriteString("- 这张票之前没有验收席，路由在它进入待验收时现场定了一个并填上\n")
 	}
-	if toHuman {
-		b.WriteString("- 验收席填的是人，所以 @ 你，不会有 agent 被叫醒\n")
-	} else {
-		b.WriteString("- 指派本身就是叫醒，这个席位的 run 已启动\n")
-	}
-	b.WriteString("\n验收席只做检查、合并、关票，不重做这张票的活；认为要返工就把票改回执行席并说明原因。\n")
+	b.WriteString("- 指派本身就是叫醒，这个席位的 run 已启动\n")
+	b.WriteString("\n验收席只做检查、合并、关票，不重做这张票的活；认为要返工就把票改回执行席并说明原因。遇到只有人能定的事，在票下 @ 对应的人，不要把票改派给人。\n")
 	b.WriteString("\n**路由没有改过状态。**")
+	return b.String()
+}
+
+// reviewerIsPersonComment is the in-review-row comment for a ticket whose
+// reviewer slot names a person — filled by hand, or by a routing version that
+// still wrote people into it. Nothing is reassigned: a ticket a person holds
+// is a ticket routing never touches again, so handing it over is what freezes
+// it. The person is notified and the ticket stays where it is.
+func (r *Router) reviewerIsPersonComment(issue Issue, target Member, decidedHere bool) string {
+	var b strings.Builder
+	name := strings.TrimSpace(target.Name)
+	if name == "" {
+		name = "这个人"
+	}
+	b.WriteString("## 待验收\n\n")
+	b.WriteString(fmt.Sprintf("这张票进入了待验收，验收席填的是人（%s），所以 @ 一次。\n\n", name))
+	if decidedHere {
+		b.WriteString("- 这张票之前没有验收席，路由在它进入待验收时现场定了一个并填上\n")
+	}
+	b.WriteString("- **票没有被改派**：改派给人之后路由就再也不碰这张票，状态也就没人能往下推了\n")
+	b.WriteString("- 验收完把票改成完成，或者写清楚要返工的地方并改回执行席\n")
+	b.WriteString("- 不想再被 @，把验收席改成一个席位或「不需要验收」即可\n")
+	b.WriteString("\n**路由没有改过状态，也没有改过负责人。**")
 	return b.String()
 }
 
