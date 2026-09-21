@@ -13,6 +13,7 @@ import {
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
   isAgentAutoRetryEnabled,
+  isAgentWorkEnabled,
   normaliseSwitchableModelsDraft,
   selectAgentSwitchableModels,
   switchableModelsEqual,
@@ -261,7 +262,6 @@ export function AgentDetailInspector({
     <div className="space-y-8">
       <SettingsSection
         title={t(($) => $.inspector.section_profile)}
-        description={t(($) => $.inspector.section_profile_hint)}
         action={
           <SettingsSaveState
             status={profileAutoSave.status}
@@ -274,7 +274,6 @@ export function AgentDetailInspector({
         <SettingsCard>
           <SettingsRow
             label={t(($) => $.inspector.avatar_label)}
-            description={t(($) => $.inspector.avatar_hint)}
             size="none"
           >
             <div className="flex justify-start sm:justify-end">
@@ -344,7 +343,6 @@ export function AgentDetailInspector({
 
       <SettingsSection
         title={t(($) => $.inspector.section_execution)}
-        description={t(($) => $.inspector.section_execution_hint)}
       >
         <SettingsCard>
           {runtimeInheritance !== "unknown" && (
@@ -474,6 +472,19 @@ export function AgentDetailInspector({
               value={agent.max_concurrent_tasks}
               canEdit={canEdit}
               onSave={(next) => update({ max_concurrent_tasks: next })}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_work_enabled)}
+            description={t(($) => $.inspector.prop_work_enabled_hint)}
+          >
+            <Switch
+              checked={isAgentWorkEnabled(agent)}
+              disabled={!canEdit}
+              onCheckedChange={(checked) => {
+                void update({ work_enabled: checked });
+              }}
+              aria-label={t(($) => $.inspector.prop_work_enabled)}
             />
           </SettingsRow>
           <SettingsRow

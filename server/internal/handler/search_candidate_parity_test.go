@@ -292,10 +292,12 @@ func runSearchForParity(t *testing.T, label, query string, args []any) []searchP
 	var result []searchParityRow
 	for rows.Next() {
 		var sr searchResult
-		// The candidate query hydrates i.visibility between revision and
-		// match_source (DENE-698); the legacy copy below is the parent
-		// commit's query verbatim and has no such column, so the two
-		// destination lists differ by exactly that one field.
+		// The candidate query hydrates i.reviewer_type / i.reviewer_id
+		// between assignee_id and creator_type (DENE-720) and i.visibility
+		// between revision and match_source (DENE-698); the legacy copy
+		// below is the parent commit's query verbatim and has none of those
+		// columns, so the two destination lists differ by exactly those
+		// three fields.
 		dest := []any{
 			&sr.issue.ID,
 			&sr.issue.WorkspaceID,
@@ -305,6 +307,11 @@ func runSearchForParity(t *testing.T, label, query string, args []any) []searchP
 			&sr.issue.Priority,
 			&sr.issue.AssigneeType,
 			&sr.issue.AssigneeID,
+		}
+		if label == "candidate" {
+			dest = append(dest, &sr.issue.ReviewerType, &sr.issue.ReviewerID)
+		}
+		dest = append(dest,
 			&sr.issue.CreatorType,
 			&sr.issue.CreatorID,
 			&sr.issue.ParentIssueID,
@@ -319,7 +326,7 @@ func runSearchForParity(t *testing.T, label, query string, args []any) []searchP
 			&sr.issue.Number,
 			&sr.issue.ProjectID,
 			&sr.issue.Revision,
-		}
+		)
 		if label == "candidate" {
 			dest = append(dest, &sr.issue.Visibility)
 		}

@@ -27,6 +27,7 @@
     "online": "オンライン",
     "unstable": "不安定",
     "offline": "オフライン",
+    "disabled": "停止中",
     "archived": "アーカイブ済み"
   },
   "workload": {
@@ -98,6 +99,10 @@
     "set_access_skipped": "{{count}} 件スキップ(あなた所有ではありません)。",
     "set_access_dialog_confirm": "適用",
     "set_access_bulk_partial": "{{succeeded}} 件適用、{{failed}} 件失敗(現在の状態を維持)。",
+    "work_enabled_aria": "新しい作業を受け付ける",
+    "agent_enabled_toast": "席を有効にしました",
+    "agent_disabled_toast": "席を停止しました。新しい作業は受け付けません",
+    "work_toggle_failed_toast": "席の状態を更新できませんでした",
     "agent_archived_toast": "エージェントをアーカイブしました",
     "archive_failed_toast": "エージェントをアーカイブできませんでした",
     "agent_restored_toast": "エージェントを復元しました",
@@ -226,6 +231,8 @@
     "prop_speed": "速度",
     "prop_visibility": "公開範囲",
     "prop_concurrency": "同時実行数",
+    "prop_work_enabled": "作業を受け付ける",
+    "prop_work_enabled_hint": "オフにすると、この席は一覧に残りますが、自動選派の対象にならず、割り当てでも起動せず、新しい実行も受け取りません。実行中の作業は止まりません。",
     "prop_auto_retry": "自動リトライ",
     "prop_auto_retry_hint": "オフにすると、容量不足やネットワーク切断などの失敗は自動リトライせず、そのまま表示されます。手動での再実行はできます。",
     "prop_switchable_models": "切り替え可能なモデル",
@@ -439,7 +446,7 @@
       "unsaved_changes": "保存していない変更"
     },
     "instructions": {
-      "intro": "すべての実行で使用する System Prompt を設定します。Markdown に対応しています。",
+      "intro": "すべての実行で使用する System Prompt を設定します。これはエージェントの動作を導くもので、権限やセキュリティの境界を強制するものではありません。Markdown に対応しています。",
       "system_prompt_label": "System Prompt",
       "placeholder": "このエージェントの役割、専門分野、作業スタイルを定義してください。\n\n# 例\nあなたは React と TypeScript を専門とするフロントエンドエンジニアです。\n\n## 作業スタイル\n- 小さく焦点を絞った PR を作成する — 論理的な変更ごとに1コミット\n- 継承よりコンポジションを優先する\n- 新しいコンポーネントには必ずユニットテストを追加する\n\n## 制約\n- 明示的な承認なしに shared/ の型を変更しない\n- features/ の既存のコンポーネントパターンに従う",
       "system_layer_label": "Multica が管理",
@@ -447,7 +454,7 @@
       "system_layer_show": "表示",
       "system_layer_hide": "隠す",
       "workspace_notes_label": "ワークスペースの補足",
-      "workspace_notes_intro": "チームのコンテキストや好みを下に追加してください。Multica がこのエージェント向けに管理している指示の上に適用されます。Markdown が使えます。",
+      "workspace_notes_intro": "チームのコンテキストや好みを下に追加してください。Multica がこのエージェント向けに管理している指示に加えて動作を導きますが、権限やセキュリティの境界を強制するものではありません。Markdown が使えます。",
       "workspace_notes_placeholder": "このエージェントが常に知っておくべきことを書きます。\n\n# 例\nメインリポジトリは github.com/acme/platform です。\nチャットが日本語でも、タスクは英語で書いてください。\n金曜日はデプロイしません。"
     },
     "accounts": {
@@ -762,7 +769,8 @@
       "invalid_json": "無効な JSON: {{error}}",
       "save_failed_toast": "MCP config を保存できませんでした",
       "redacted_title": "設定済み — あなたには非表示",
-      "redacted_hint": "この config を読み取れるのは、エージェントのオーナーまたはワークスペースの admin のみです。"
+      "redacted_hint": "この config を読み取れるのは、エージェントのオーナーまたはワークスペースの admin のみです。",
+      "dialog_json_help": "サーバー設定全体を JSON で編集します。"
     },
     "composio_mcp": {
       "subtitle": "ツールキットにチェックを入れると、あなた（この agent の作成者）が直接または下位 agent のチェーン経由でこの agent をトリガーしたときに限り、MCP サーバーとしてマウントされます。",
@@ -899,7 +907,10 @@
       "cancel_failed_toast": "実行をキャンセルできませんでした",
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
-      "queued_prefix": "{{when}} に待機開始"
+      "queued_prefix": "{{when}} に待機開始",
+      "success_hint": "完了した実行数を、完了と失敗の実行数の合計で割った割合です。キャンセルした実行は含みません。",
+      "success_unavailable": "この期間に完了または失敗した実行がないため、成功率を計算できません。",
+      "cancelled_count": "{{count}} 件キャンセル"
     }
   },
   "char_counter": {
@@ -1095,12 +1106,14 @@
       "runtime_reconnect_timeout": "デーモンが時間内に再接続しませんでした",
       "runtime_recovery": "デーモンが再起動しました",
       "timeout": "実行がタイムアウトしました",
+      "task_time_limit": "ワークスペースの実行時間の上限に達したため停止しました",
       "iteration_limit": "反復回数の上限に達しました",
       "agent_blocked": "人による入力を待機中",
       "api_invalid_request": "モデル API に拒否されました",
       "skill_bundle_unavailable": "エージェントのスキルをダウンロードできませんでした",
       "runtime_cli_timeout": "ローカルランタイム CLI がタイムアウトしました",
       "environment_prepare_failed": "実行環境を準備できませんでした",
+      "runtime_access_denied": "このエージェントはプライベートランタイムで実行できないため、返信できませんでした。ランタイムを公開にするか、所有者が利用できるランタイムへエージェントを再設定/コピーしてください。",
       "invalid_task_identity": "実行のエージェント情報が一致しません",
       "agent_error_provider_auth_or_access": "プロバイダーの認証に失敗しました",
       "agent_error_provider_quota_limit": "プロバイダーのクォータを使い切りました",
@@ -1118,6 +1131,8 @@
       "agent_error_unknown": "エージェント実行エラー",
       "agent_fallback_message": "エージェントがフォールバックメッセージを返しました",
       "codex_resume_oversized": "セッションが大きすぎて再開できません",
+      "antigravity_session_token_expired": "Antigravity の長時間セッションでトークンが失効",
+      "antigravity_not_logged_in": "Antigravity にサインインしていない",
       "idle_watchdog": "エージェントが長時間応答しなかったため停止しました",
       "local_directory_error": "ローカルディレクトリエラー",
       "cancelled": "システムによってキャンセルされました",

@@ -686,6 +686,7 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   updated_at: z.string().default(""),
   archived_at: z.string().nullable().default(null),
   archived_by: z.string().nullable().default(null),
+  work_enabled: z.boolean().optional().catch(undefined),
 }).loose();
 
 export const AgentListSchema = z.array(AgentSchema).default([]);

@@ -27,6 +27,7 @@
     "online": "在线",
     "unstable": "不稳定",
     "offline": "离线",
+    "disabled": "已停用",
     "archived": "已归档"
   },
   "workload": {
@@ -106,6 +107,10 @@
     "set_access_skipped": "{{count}} 个已跳过(不是你所有)。",
     "set_access_dialog_confirm": "应用",
     "set_access_bulk_partial": "已应用 {{succeeded}} 个;{{failed}} 个失败(保持当前状态)。",
+    "work_enabled_aria": "承接新工作",
+    "agent_enabled_toast": "已启用该席位",
+    "agent_disabled_toast": "已停用该席位，不再承接新工作",
+    "work_toggle_failed_toast": "无法更新席位状态",
     "agent_archived_toast": "已归档智能体",
     "archive_failed_toast": "归档智能体失败",
     "agent_restored_toast": "已恢复智能体",
@@ -234,6 +239,8 @@
     "prop_speed": "速度",
     "prop_visibility": "可见性",
     "prop_concurrency": "并发",
+    "prop_work_enabled": "承接工作",
+    "prop_work_enabled_hint": "关闭后，这个席位仍在列表里，但不会被自动选派、指派也不会唤醒，也不会领取新的运行。已经在跑的运行不会中断。",
     "prop_auto_retry": "自动重试",
     "prop_auto_retry_hint": "关闭后，容量不足、网络抖动等失败会直接报出来，不再由平台自动重试。仍可手动重试运行。",
     "prop_switchable_models": "可换档",
@@ -546,7 +553,7 @@
       "unsaved_changes": "未保存的修改"
     },
     "instructions": {
-      "intro": "设置每次运行都会使用的 System Prompt，支持 Markdown。",
+      "intro": "设置每次运行都会使用的 System Prompt。它会引导智能体的行为，但不构成权限或安全边界。支持 Markdown。",
       "system_prompt_label": "System Prompt",
       "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR——每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式",
       "system_layer_label": "由 Multica 维护",
@@ -554,7 +561,7 @@
       "system_layer_show": "查看",
       "system_layer_hide": "收起",
       "workspace_notes_label": "工作区补充",
-      "workspace_notes_intro": "在下面补充你们团队的上下文和偏好，它们会叠加在 Multica 为这个智能体维护的指令之上。支持 Markdown。",
+      "workspace_notes_intro": "在下面补充你们团队的上下文和偏好。它们会在 Multica 为这个智能体维护的指令之上引导其行为，但不构成权限或安全边界。支持 Markdown。",
       "workspace_notes_placeholder": "写下这个智能体应该始终知道的上下文。\n\n# 示例\n我们的主仓库是 github.com/acme/platform。\n即使聊天用中文，任务也一律用英文写。\n周五不部署。"
     },
     "accounts": {
@@ -869,7 +876,8 @@
       "invalid_json": "JSON 无效：{{error}}",
       "save_failed_toast": "无法保存 MCP 配置",
       "redacted_title": "已配置，但当前不可见",
-      "redacted_hint": "只有智能体 owner 或工作区 admin 可以查看此配置。"
+      "redacted_hint": "只有智能体 owner 或工作区 admin 可以查看此配置。",
+      "dialog_json_help": "以 JSON 编辑完整的服务器配置。"
     },
     "composio_mcp": {
       "subtitle": "勾选 toolkit，只在你自己（这个智能体的创建者）直接或通过下级智能体链路触发这个智能体时，才把它挂载为 MCP server。",
@@ -1006,7 +1014,10 @@
       "cancel_failed_toast": "取消运行失败",
       "started_prefix": "{{when}}启动",
       "dispatched_prefix": "{{when}}派发",
-      "queued_prefix": "{{when}}排队"
+      "queued_prefix": "{{when}}排队",
+      "success_hint": "成功率按已完成和失败的运行计算，不包含已取消的运行。",
+      "success_unavailable": "本期间没有已完成或失败的运行，无法计算成功率。",
+      "cancelled_count": "{{count}} 次已取消"
     }
   },
   "char_counter": {
@@ -1202,12 +1213,14 @@
       "runtime_reconnect_timeout": "守护进程未及时重新连接",
       "runtime_recovery": "守护进程已重启",
       "timeout": "运行超时",
+      "task_time_limit": "达到工作区运行时长上限，已停止",
       "iteration_limit": "达到迭代次数上限",
       "agent_blocked": "等待人工输入",
       "api_invalid_request": "模型 API 拒绝了请求",
       "skill_bundle_unavailable": "无法下载智能体的 skill",
       "runtime_cli_timeout": "本地运行时 CLI 超时",
       "environment_prepare_failed": "无法准备执行环境",
+      "runtime_access_denied": "该智能体无法在其私有运行时上运行，暂时无法回复。请将该运行时设为公开，或将智能体重新绑定/复制到其所有者可用的运行时。",
       "invalid_task_identity": "运行身份不匹配",
       "agent_error_provider_auth_or_access": "提供商认证失败",
       "agent_error_provider_quota_limit": "提供商配额已用尽",
@@ -1225,6 +1238,8 @@
       "agent_error_unknown": "智能体执行出错",
       "agent_fallback_message": "智能体返回了兜底消息",
       "codex_resume_oversized": "会话过大，无法恢复",
+      "antigravity_session_token_expired": "Antigravity 长会话登录凭据过期",
+      "antigravity_not_logged_in": "Antigravity 未登录",
       "idle_watchdog": "智能体长时间无活动，运行已停止",
       "local_directory_error": "本地目录出错",
       "cancelled": "系统已取消",

@@ -165,8 +165,14 @@ type AgentResponse struct {
 	// (DENE-217). Default true. When false, FailTask and
 	// MaybeRetryFailedTask skip retryableReasons; manual rerun is
 	// unaffected.
-	AutoRetryEnabled bool   `json:"auto_retry_enabled"`
-	Model            string `json:"model"`
+	AutoRetryEnabled bool `json:"auto_retry_enabled"`
+	// WorkEnabled is the reversible seat gate (DENE-714). Default true.
+	// When false the seat stays in the list, keeps its routing tag and
+	// specialisations, and does not cancel running tasks — it is simply
+	// not selected for automatic dispatch, not woken by assignment, and
+	// does not claim new runs.
+	WorkEnabled bool   `json:"work_enabled"`
+	Model       string `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
@@ -302,6 +308,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Status:                   a.Status,
 		MaxConcurrentTasks:       a.MaxConcurrentTasks,
 		AutoRetryEnabled:         a.AutoRetryEnabled,
+		WorkEnabled:              a.WorkEnabled,
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
@@ -748,6 +755,11 @@ type AgentTaskResponse struct {
 	// the cap, so the brief can say the list is incomplete instead of
 	// presenting a truncated catalog as the whole one.
 	IssueStatusesOmitted int                   `json:"issue_statuses_omitted,omitempty"`
+	IssueStateDeltaKnown bool                  `json:"issue_state_delta_known,omitempty"`
+	IssueChangedFields   []string              `json:"issue_changed_fields,omitempty"`
+	IssueStatus          string                `json:"issue_status,omitempty"`
+	IssueAssigneeType    string                `json:"issue_assignee_type,omitempty"`
+	IssueAssigneeID      string                `json:"issue_assignee_id,omitempty"`
 	ThreadName           string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Status               string                `json:"status"`
 	Priority             int32                 `json:"priority"`
@@ -841,9 +853,6 @@ type AgentTaskResponse struct {
 	NewCommentsDeltaKnown    bool                  `json:"new_comments_delta_known,omitempty"`
 	IssueTitle               string                `json:"issue_title,omitempty"`
 	IssueDescription         string                `json:"issue_description,omitempty"`
-	IssueStatus              string                `json:"issue_status,omitempty"`
-	IssueAssigneeType        string                `json:"issue_assignee_type,omitempty"`
-	IssueAssigneeID          string                `json:"issue_assignee_id,omitempty"`
 	IssueCommentSummaries    []IssueContextComment `json:"issue_comment_summaries,omitempty"`
 	IssueTriggerThread       []IssueContextComment `json:"issue_trigger_thread,omitempty"`
 	IssueNewComments         []IssueContextComment `json:"issue_new_comments,omitempty"`
@@ -1986,7 +1995,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		// its picker says "Extra high" is the same lie as an agent whose saved
 		// level was silently dropped, and two copies of these three steps is
 		// how the two answers drift apart.
-		if !h.thinkingLevelAcceptedForRuntime(w, r, runtime, req.ThinkingLevel) {
+		if !h.thinkingLevelAcceptedForRuntime(w, r, runtime, req.ThinkingLevel, req.Model) {
 			return
 		}
 		if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
@@ -2278,6 +2287,9 @@ type UpdateAgentRequest struct {
 	// is not NULL, so COALESCE in UpdateAgent can distinguish "not sent"
 	// from "turned off".
 	AutoRetryEnabled *bool `json:"auto_retry_enabled"`
+	// WorkEnabled is omitted-preserves / present-sets, same contract as
+	// AutoRetryEnabled (DENE-714).
+	WorkEnabled *bool `json:"work_enabled"`
 	// ParentAgentID re-parents this agent (DENE-301): a non-empty value attaches
 	// it to a base role, and an explicitly empty string detaches it. The field
 	// is a tri-state like thinking_level — omitted preserves, `""` clears, a
@@ -2627,6 +2639,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.AutoRetryEnabled != nil {
 		params.AutoRetryEnabled = pgtype.Bool{Bool: *req.AutoRetryEnabled, Valid: true}
 	}
+	if req.WorkEnabled != nil {
+		params.WorkEnabled = pgtype.Bool{Bool: *req.WorkEnabled, Valid: true}
+	}
 	if req.AvatarURL != nil {
 		avatarURL, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, existing.AvatarUrl.String)
 		if !ok {
@@ -2822,6 +2837,28 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		case acpEffortUnknown:
 			writeError(w, http.StatusBadRequest, existingThinkingCapabilityUnknownRejection(provider, existing.ThinkingLevel.String))
+			return
+		}
+	}
+
+	// Same combination check as CreateAgent, but against the state the request
+	// actually lands on: a cleared model with a carried-over effort, or a new
+	// effort on an agent that never had a model, are both the invalid pair. The
+	// caller can always recover by pinning a model or clearing the level, so
+	// this cannot lock an agent out of editing (MUL-7412).
+	if effectiveThinking := effectiveThinkingLevel(params, existing, shouldClearThinkingLevel); effectiveThinking != "" &&
+		strings.TrimSpace(effectiveModelValue(params, existing)) == "" {
+		provider := targetProvider
+		if provider == "" {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
+				return
+			}
+		}
+		if agent.ThinkingLevelRejectedWithoutModel(provider) {
+			writeError(w, http.StatusBadRequest, thinkingNeedsExplicitModelRejection(provider))
 			return
 		}
 	}
@@ -3133,6 +3170,41 @@ func (h *Handler) resolveAgentProvider(r *http.Request, workspaceID pgtype.UUID,
 		return "", false
 	}
 	return rt.Provider, true
+}
+
+// thinkingNeedsExplicitModelRejection is the copy for a level that is valid for
+// the runtime but has no model to run it on.
+func thinkingNeedsExplicitModelRejection(provider string) string {
+	return fmt.Sprintf(
+		"runtime %q resolves its own default model, so a reasoning effort needs an explicit model; set model or pass thinking_level=\"\" to clear",
+		provider,
+	)
+}
+
+// effectiveModelValue is the model the update lands on: the requested value
+// when this request sets one (including an explicit clear), otherwise what the
+// agent already holds.
+func effectiveModelValue(params db.UpdateAgentParams, existing db.Agent) string {
+	if params.Model.Valid {
+		return params.Model.String
+	}
+	return existing.Model.String
+}
+
+// effectiveThinkingLevel is the effort the update lands on. An explicit clear
+// wins over everything; otherwise a value set by this request wins over the
+// stored one, which is carried when the field was omitted.
+func effectiveThinkingLevel(params db.UpdateAgentParams, existing db.Agent, cleared bool) string {
+	if cleared {
+		return ""
+	}
+	if params.ThinkingLevel.Valid {
+		return params.ThinkingLevel.String
+	}
+	if existing.ThinkingLevel.Valid {
+		return existing.ThinkingLevel.String
+	}
+	return ""
 }
 
 // thinkingLevelRejection explains why the target runtime will not take this
