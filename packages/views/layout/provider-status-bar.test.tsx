@@ -115,6 +115,23 @@ describe("quotaSourceLabel", () => {
       }),
     ).toBe("studio");
   });
+
+  it("never renders the raw daemon name", () => {
+    expect(
+      quotaSourceLabel({
+        name: "Grok",
+        custom_name: null,
+        device_info: "",
+      }),
+    ).toBe("—");
+    expect(
+      quotaSourceLabel({
+        name: "Grok (box.local)",
+        custom_name: null,
+        device_info: "",
+      }),
+    ).not.toBe("Grok (box.local)");
+  });
 });
 
 describe("resolveSelectedRuntime", () => {

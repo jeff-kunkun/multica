@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import {
   providerDisplayName,
+  runtimeDisplayName,
   useProviderQuotaSourceStore,
 } from "@multica/core/runtimes";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
@@ -31,6 +32,7 @@ import {
   formatPlanLimitRemaining,
   planLimitWindowShortLabel,
 } from "../runtimes/components/plan-limits";
+import { runtimeDeviceName } from "../runtimes/components/runtime-machines";
 import { formatDeviceInfo } from "../runtimes/utils";
 import { useLocale, useT } from "../i18n";
 
@@ -51,13 +53,8 @@ export interface ProviderQuotaSummary {
 export function quotaSourceLabel(
   runtime: Pick<AgentRuntime, "name" | "custom_name" | "device_info">,
 ): string {
-  const custom = runtime.custom_name?.trim();
-  if (custom) return custom;
-  const host = runtime.name.match(/^(.+?)\s+\(([^)]+)\)$/)?.[2]?.trim();
-  if (host) return host;
-  const device = runtime.device_info?.trim().split(" · ")[0]?.trim();
-  if (device) return device;
-  return runtime.name.trim() || "—";
+  if (runtime.custom_name?.trim()) return runtimeDisplayName(runtime);
+  return runtimeDeviceName(runtime) ?? "—";
 }
 
 export function resolveSelectedRuntime<T extends { runtimeId: string }>(
