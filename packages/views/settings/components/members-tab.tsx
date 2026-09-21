@@ -174,7 +174,6 @@ function useRoleBlockLabels(): Record<
   return {
     last_owner: t(($) => $.members.cannot_demote_last_owner),
     owner_requires_owner: t(($) => $.members.role_blocked.owner_requires_owner),
-    guest_unreleased: t(($) => $.members.role_blocked.guest_unreleased),
   };
 }
 

@@ -3,7 +3,7 @@
 // what each change costs or grants — is the canonical business of
 // packages/core/workspace/member-roles.test.ts and is NOT re-run here.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithI18n } from "../../test/i18n";
@@ -244,18 +244,17 @@ describe("MembersTab tier changes", () => {
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 
-  it("keeps guest visible but unselectable while the backend still rejects it", async () => {
-    // Regression guard for docs/kun/permission-model.md: releasing guest
-    // before the read-only interception layer hands a "read-only" person
-    // full Member write power.
+  it("lets a member be moved down to guest", async () => {
+    // Guest is released: the server rejects every guest write in one layer
+    // (DENE-697), so the picker no longer holds the tier back.
     renderTab();
     await screen.findByText("Bo Member");
 
     await userEvent.click(tierPicker("Bo Member"));
-    const guest = await screen.findByRole("option", { name: /Guest/ });
-    expect(within(guest).getByText(/not available yet/i)).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("option", { name: /Guest/ }));
 
-    await userEvent.click(guest);
-    expect(updateMember).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(updateMember).toHaveBeenCalledWith("ws-1", "m-teammate", { role: "guest" }),
+    );
   });
 });

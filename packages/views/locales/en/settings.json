@@ -1392,7 +1392,6 @@
     "expiry_30d": "30 days",
     "expiry_never": "Never",
     "role_blocked": {
-      "guest_unreleased": "Guest is not available yet — the read-only enforcement is still shipping",
       "owner_requires_owner": "Only an owner can hand out the owner tier"
     },
     "role_select_label": "Tier for {{name}}",

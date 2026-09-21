@@ -1385,7 +1385,6 @@
     "expiry_30d": "30 天",
     "expiry_never": "永久有效",
     "role_blocked": {
-      "guest_unreleased": "访客档位尚未开放——只读拦截还在上线中",
       "owner_requires_owner": "只有 owner 能授予 owner 档位"
     },
     "role_select_label": "{{name}} 的档位",

@@ -1,8 +1,6 @@
 /**
- * Workspace tier. `guest` is read-only: it exists in the DB (migration 502)
- * and in the permission matrix, but member writes still reject it until the
- * interception layer ships — see `GUEST_ROLE_RELEASED` in
- * `workspace/member-roles.ts`.
+ * Workspace tier. `guest` is read-only: the server rejects every guest write
+ * in one interception layer (DENE-697), so the tier is safe to hand out.
  */
 export type MemberRole = "owner" | "admin" | "member" | "guest";
 
