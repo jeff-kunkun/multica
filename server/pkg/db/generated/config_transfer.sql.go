@@ -1684,7 +1684,7 @@ UPDATE issue_status SET
     updated_at = now()
 WHERE id = $5::uuid
   AND workspace_id = $6::uuid
-RETURNING id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at
+RETURNING id, workspace_id, key, name, description, category, color, is_system, position, archived_at, created_at, updated_at, icon
 `
 
 type UpdateIssueStatusEntryForImportParams struct {
@@ -1721,6 +1721,7 @@ func (q *Queries) UpdateIssueStatusEntryForImport(ctx context.Context, arg Updat
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Icon,
 	)
 	return i, err
 }

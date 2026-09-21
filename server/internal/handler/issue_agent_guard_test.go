@@ -148,7 +148,7 @@ func TestIssueAgentChainBudgetBlocksAtTheThresholdAndResetsOnHumanComment(t *tes
 	issue := issueForGuardTest(t, issueID)
 	for attempt := 0; attempt < 2; attempt++ {
 		_, err := testHandler.TaskService.EnqueueTaskForMention(
-			context.Background(), issue, util.MustParseUUID(agentA), util.MustParseUUID(triggerCommentID),
+			context.Background(), issue, util.MustParseUUID(agentA), util.MustParseUUID(triggerCommentID), service.OriginNamed,
 		)
 		if !errors.Is(err, service.ErrAgentChainBudgetExceeded) {
 			t.Fatalf("delegated attempt %d error = %v, want ErrAgentChainBudgetExceeded", attempt+1, err)
@@ -173,7 +173,7 @@ func TestIssueAgentChainBudgetBlocksAtTheThresholdAndResetsOnHumanComment(t *tes
 
 	issue = issueForGuardTest(t, issueID)
 	if _, err := testHandler.TaskService.EnqueueTaskForMention(
-		context.Background(), issue, util.MustParseUUID(agentA), util.MustParseUUID(triggerCommentID),
+		context.Background(), issue, util.MustParseUUID(agentA), util.MustParseUUID(triggerCommentID), service.OriginNamed,
 	); err != nil {
 		t.Fatalf("delegated trigger after human comment: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestResumeDoesNotResetBudgetOrDuplicateNotice(t *testing.T) {
 		"source_task_id": sourceTaskID,
 	})
 	issue := issueForGuardTest(t, issueID)
-	_, err := testHandler.TaskService.EnqueueTaskForMention(context.Background(), issue, util.MustParseUUID(agentID), util.MustParseUUID(triggerCommentID))
+	_, err := testHandler.TaskService.EnqueueTaskForMention(context.Background(), issue, util.MustParseUUID(agentID), util.MustParseUUID(triggerCommentID), service.OriginNamed)
 	if !errors.Is(err, service.ErrAgentChainBudgetExceeded) {
 		t.Fatalf("initial delegated attempt error = %v, want budget exceeded", err)
 	}
@@ -261,7 +261,7 @@ func TestResumeDoesNotResetBudgetOrDuplicateNotice(t *testing.T) {
 	}
 
 	issue = issueForGuardTest(t, issueID)
-	_, err = testHandler.TaskService.EnqueueTaskForMention(context.Background(), issue, util.MustParseUUID(agentID), util.MustParseUUID(triggerCommentID))
+	_, err = testHandler.TaskService.EnqueueTaskForMention(context.Background(), issue, util.MustParseUUID(agentID), util.MustParseUUID(triggerCommentID), service.OriginNamed)
 	if !errors.Is(err, service.ErrAgentChainBudgetExceeded) {
 		t.Fatalf("delegated attempt after resume error = %v, want budget exceeded", err)
 	}

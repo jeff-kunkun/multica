@@ -107,5 +107,6 @@ func TestAgentRoutingTier(t *testing.T) {
 		_, code, tier := create(t, "tier-test-child", map[string]any{"parent_agent_id": baseID})
 		if code != http.StatusCreated || tier != "weak" {
 			t.Fatalf("code=%d routing_tier=%q, want 201 and the base role's weak rung", code, tier)
-		}	})
+		}
+	})
 }
