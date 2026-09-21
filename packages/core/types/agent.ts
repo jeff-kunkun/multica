@@ -1285,6 +1285,29 @@ export interface DashboardUsageByAgent {
   task_count: number;
 }
 
+// Per-(issue, model) token totals for the workspace dashboard's per-issue
+// cost list — the entry point into one issue's Token cost view.
+//
+// `identifier` and `title` ride along so the row can be rendered and linked
+// without an extra request per issue; the identifier is what the issue route
+// canonicalizes to, so a copied link reads as "DENE-42", not a UUID.
+export interface DashboardUsageByIssue {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  provider: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
+}
+
 // Per-agent total terminal-task run-time + counts. Powers the workspace
 // dashboard's "time by agent" list. failed_count is a subset of
 // task_count (failed tasks still contribute to total_seconds because

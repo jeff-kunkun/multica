@@ -25,6 +25,7 @@ import {
   DashboardFailureByAgentListSchema,
   DashboardFailureDailyListSchema,
   DashboardUsageByAgentListSchema,
+  DashboardUsageByIssueListSchema,
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
   ChatPendingTaskSchema,
@@ -1357,6 +1358,26 @@ describe("dashboard + runtime usage schema drift", () => {
       { model: "claude-opus-4-7", input_tokens: 7 },
     ]);
     expect(parsed[0]?.agent_id).toBe("");
+  });
+
+  it("keeps a usage-by-issue row whose identifier/title an older backend omits", () => {
+    // issue_id is what the row links with, so it is the one field a version
+    // drift must not cost the whole list; identifier/title default to "" and
+    // the client falls back to the UUID for the label.
+    const parsed = DashboardUsageByIssueListSchema.parse([
+      { issue_id: "issue-1", model: "claude-opus-4-7", input_tokens: 7 },
+    ]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.identifier).toBe("");
+    expect(parsed[0]?.title).toBe("");
+    expect(parsed[0]?.input_tokens).toBe(7);
+  });
+
+  it("rejects a non-array usage-by-issue body so parseWithFallback can fall back", () => {
+    expect(DashboardUsageByIssueListSchema.safeParse(null).success).toBe(false);
+    expect(DashboardUsageByIssueListSchema.safeParse({ rows: [] }).success).toBe(
+      false,
+    );
   });
 
   it("coerces missing fields on every runtime usage schema", () => {

@@ -123,6 +123,10 @@ vi.mock("../../navigation", () => ({
     pathname: "/issues/issue-1",
     getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   }),
+  // This mock replaces the whole module, so there is no provider to read —
+  // the same "no deep link available" case ExecutionLogSection handles for a
+  // leaf view rendered on its own.
+  useOptionalNavigation: () => null,
   useBackOrReplace: () => vi.fn(),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));

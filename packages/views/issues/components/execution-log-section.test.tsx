@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { useMemo, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
+import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 
 const mockState = vi.hoisted(() => ({
   taskMessagesOptions: vi.fn(),
@@ -470,5 +472,97 @@ describe("IssueUsageTotal with nothing metered", () => {
 
     fireEvent.click(entry);
     expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+});
+
+// DENE-709: the workspace usage page deep-links here with `?usage=1`, so the
+// route — and only the route — makes the URL the source of truth for the
+// Token cost dialog. The inbox's side-panel copy passes no `deepLinkUsage` and
+// keeps the dialog purely local (asserted by every other test in this file,
+// which renders without a NavigationProvider at all).
+describe("Token cost deep link", () => {
+  const replace = vi.fn();
+
+  beforeEach(() => {
+    replace.mockClear();
+  });
+
+  function renderSection(initialSearch: string, tasks: AgentTask[] = [
+    makeTask({
+      status: "completed",
+      completed_at: "2026-06-08T08:04:00Z",
+      usage: [usageSlice()],
+    }),
+  ]) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), tasks);
+
+    function Harness() {
+      const [search, setSearch] = useState(initialSearch);
+      const adapter = useMemo<NavigationAdapter>(
+        () => ({
+          push: vi.fn(),
+          // Holds the query string the way the real adapter does, so closing
+          // the dialog and re-reading the URL exercises the same chain the
+          // browser does.
+          replace: (path: string) => {
+            replace(path);
+            setSearch(path.split("?")[1] ?? "");
+          },
+          back: vi.fn(),
+          pathname: "/acme/issues/MUL-1",
+          searchParams: new URLSearchParams(search),
+          hash: "",
+          getShareableUrl: (path: string) => path,
+        }),
+        [search],
+      );
+      return (
+        <NavigationProvider value={adapter}>
+          <ExecutionLogSection issueId="issue-1" identifier="MUL-1" deepLinkUsage />
+        </NavigationProvider>
+      );
+    }
+
+    return renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("opens the dialog on arrival when the URL asks for it", () => {
+    renderSection("usage=1");
+
+    // No click: the link alone decides the landing view, which is what makes
+    // the copied URL and a refresh land on the same screen.
+    expect(screen.getByText("Usage breakdown")).toBeInTheDocument();
+  });
+
+  it("leaves the dialog closed for a plain issue URL", () => {
+    renderSection("");
+
+    expect(screen.queryByText("Usage breakdown")).toBeNull();
+  });
+
+  it("writes the param when the dialog is opened by hand, so the view is linkable", () => {
+    // No run reported usage here, so the header entry reads "Token cost"
+    // instead of the figures — the same door DENE-670 kept open.
+    renderSection("", [makeTask({ status: "completed" })]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Token cost" }));
+
+    expect(screen.getByText("Usage breakdown")).toBeInTheDocument();
+    expect(replace).toHaveBeenCalledWith("/acme/issues/MUL-1?usage=1");
+  });
+
+  it("drops the param when the dialog closes, so Back and refresh do not reopen it", () => {
+    renderSection("usage=1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(replace).toHaveBeenCalledWith("/acme/issues/MUL-1");
   });
 });
