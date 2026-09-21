@@ -21,7 +21,7 @@
 // canonical tests.
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Check,
@@ -32,6 +32,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Share2,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -39,14 +40,18 @@ import {
   runtimeProviderPresetsKeys,
   runtimeProviderPresetsOptions,
   useProviderPresetMutation,
+  useProviderPresetSyncMutation,
+  providerPresetSyncSummary,
   fetchProviderPresetModels,
   PROVIDER_PRESET_APIS,
 } from "@multica/core/runtimes";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import type {
   RuntimeDevice,
   RuntimeProviderPreset,
   RuntimeProviderPresetModel,
 } from "@multica/core/types";
+import type { ProviderPresetSyncOutcome } from "@multica/core/runtimes";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -58,6 +63,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -95,6 +101,8 @@ import {
   type ProviderPresetFailure,
   type ProviderPresetFieldError,
   type ProviderPresetForm,
+  type ProviderPresetPeerState,
+  type ProviderPresetSyncTarget,
   canFetchProviderPresetModels,
   canManageProviderPresets,
   emptyProviderPresetForm,
@@ -107,7 +115,11 @@ import {
   providerPresetKeyState,
   providerPresetModels,
   providerPresetNeedsKeyRegeneration,
+  providerPresetPeerState,
   providerPresetSummaryLine,
+  providerPresetSyncInput,
+  providerPresetSyncNeedsKey,
+  providerPresetSyncTargets,
   providerPresetUpsertInput,
   providerPresetsViewState,
   reduceProviderPresetSave,
@@ -134,10 +146,21 @@ export function AgentProviderPresetsSection({
   if (!runtimeDevice || !supportsProviderPresets(runtimeDevice.provider)) {
     return null;
   }
-  return <ProviderPresets runtimeId={runtimeDevice.id} />;
+  return (
+    <ProviderPresets
+      runtimeId={runtimeDevice.id}
+      workspaceId={runtimeDevice.workspace_id}
+    />
+  );
 }
 
-function ProviderPresets({ runtimeId }: { runtimeId: string }) {
+function ProviderPresets({
+  runtimeId,
+  workspaceId,
+}: {
+  runtimeId: string;
+  workspaceId: string;
+}) {
   const { t } = useT("agents");
   const queryClient = useQueryClient();
   const query = useQuery(runtimeProviderPresetsOptions(runtimeId));
@@ -147,10 +170,27 @@ function ProviderPresets({ runtimeId }: { runtimeId: string }) {
   const [pendingDelete, setPendingDelete] = useState<RuntimeProviderPreset | null>(
     null,
   );
+  // The preset whose "push this route to the other machines" dialog is open.
+  const [syncing, setSyncing] = useState<RuntimeProviderPreset | null>(null);
   // Which row's activate is in flight, so only that button shows a spinner
   // instead of every row going busy at once.
   const [activatingId, setActivatingId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
+
+  // The other machines that could hold a copy of this preset. A workspace with
+  // one DSH runtime has none, and then the row shows no sync affordance at all
+  // — there is nothing to drift from (DENE-335).
+  // The workspace comes off the runtime this section is already rendering, not
+  // off the route: the tab is mounted in several shells and a route-derived id
+  // would make the sync affordance depend on which one.
+  const { data: runtimes = [] } = useQuery({
+    ...runtimeListOptions(workspaceId),
+    enabled: Boolean(workspaceId),
+  });
+  const syncTargets = useMemo(
+    () => providerPresetSyncTargets(runtimes, runtimeId),
+    [runtimes, runtimeId],
+  );
 
   const state = useMemo(
     () =>
@@ -358,6 +398,9 @@ function ProviderPresets({ runtimeId }: { runtimeId: string }) {
               onActivate={() => void handleActivate(preset)}
               onEdit={() => setEditing(providerPresetFormFrom(preset))}
               onDelete={() => setPendingDelete(preset)}
+              onSync={
+                syncTargets.length > 0 ? () => setSyncing(preset) : undefined
+              }
             />
           ))}
         </ul>
@@ -389,6 +432,14 @@ function ProviderPresets({ runtimeId }: { runtimeId: string }) {
         />
       ) : null}
 
+      {syncing ? (
+        <ProviderPresetSyncDialog
+          preset={syncing}
+          targets={syncTargets}
+          onClose={() => setSyncing(null)}
+        />
+      ) : null}
+
       {pendingDelete ? (
         <DeletePresetDialog
           preset={pendingDelete}
@@ -407,6 +458,7 @@ function ProviderPresetRow({
   onActivate,
   onEdit,
   onDelete,
+  onSync,
 }: {
   preset: RuntimeProviderPreset;
   busy: boolean;
@@ -414,6 +466,8 @@ function ProviderPresetRow({
   onActivate: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  /** Absent when this workspace has no other machine to sync to. */
+  onSync?: () => void;
 }) {
   const { t } = useT("agents");
   const active = preset.active === true;
@@ -479,6 +533,18 @@ function ProviderPresetRow({
         >
           {t(($) => $.tab_body.providers.edit_action)}
         </Button>
+        {onSync ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={onSync}
+            aria-label={t(($) => $.tab_body.providers.sync_aria, { name: preset.id })}
+          >
+            <Share2 className="size-3.5" aria-hidden="true" />
+          </Button>
+        ) : null}
         <Button
           type="button"
           size="sm"
@@ -1144,6 +1210,275 @@ function providerPresetFailureMessage(
   if (!isKnownProviderPresetFailure(failure.kind)) return failure.message;
   const key = PROVIDER_PRESET_FAILURE_I18N_KEYS[failure.kind];
   return t(($) => $.tab_body.providers[key], { ...failure.params });
+}
+
+/**
+ * Push one preset's route onto the workspace's other DSH machines (DENE-335).
+ *
+ * The problem this closes is not "editing is hard" — the section above already
+ * edits any machine's route without logging into it. It is that a seat's model
+ * string names a preset ID, and each machine resolves that ID against its own
+ * files: the same agent can run on two runtimes that spell the same ID with
+ * two different endpoints, and until now nothing said so. So this dialog reads
+ * every other machine's copy before it offers to write, and the list IS the
+ * drift report — a user who opens it to sync and sees "in sync" everywhere got
+ * the answer they came for without writing anything.
+ *
+ * Offline machines are listed and NOT selectable. The daemon has to claim the
+ * request off a heartbeat, so a machine that is not polling cannot take the
+ * write at all; queueing it would be a promise this transport cannot keep.
+ *
+ * The key stays write-only. It is never read back from the source machine, so
+ * a target that holds no credential of its own can only be filled by the user
+ * typing one — which is why an empty box blocks the sync in exactly that case
+ * and nowhere else.
+ */
+function ProviderPresetSyncDialog({
+  preset,
+  targets,
+  onClose,
+}: {
+  preset: RuntimeProviderPreset;
+  targets: ProviderPresetSyncTarget[];
+  onClose: () => void;
+}) {
+  const { t } = useT("agents");
+  const mutation = useProviderPresetSyncMutation();
+  const [apiKey, setApiKey] = useState("");
+  const [showKeyError, setShowKeyError] = useState(false);
+  const [selected, setSelected] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(targets.map((target) => [target.runtimeId, target.online])),
+  );
+  // Per-machine receipts of the last attempt. A partial sync keeps the dialog
+  // open on purpose: "three of four machines took it" is only useful next to
+  // which one did not.
+  const [outcomes, setOutcomes] = useState<Record<string, ProviderPresetSyncOutcome>>(
+    {},
+  );
+
+  const peerQueries = useQueries({
+    queries: targets.map((target) => ({
+      ...runtimeProviderPresetsOptions(target.runtimeId),
+      enabled: target.online,
+    })),
+  });
+
+  const states: ProviderPresetPeerState[] = targets.map((target, index) => {
+    const peer = peerQueries[index];
+    return providerPresetPeerState({
+      target,
+      presets: peer?.data?.presets,
+      loading: peer?.isPending ?? true,
+      error: peer?.isError
+        ? errorText(peer.error, t(($) => $.tab_body.providers.error_description))
+        : "",
+      source: preset,
+    });
+  });
+
+  const chosenIds = targets
+    .filter((target) => target.online && selected[target.runtimeId])
+    .map((target) => target.runtimeId);
+  const chosenStates = states.filter(
+    (_, index) =>
+      targets[index]!.online && selected[targets[index]!.runtimeId] === true,
+  );
+  const needsKey = providerPresetSyncNeedsKey(chosenStates, apiKey);
+  // A machine that has not answered yet could be missing the preset or its
+  // key; writing before the read lands would skip both the drift report and
+  // the key check.
+  const reading = chosenStates.some((state) => state.status === "loading");
+  const busy = mutation.isPending;
+
+  const handleSync = async () => {
+    if (chosenIds.length === 0 || reading) return;
+    if (needsKey) {
+      setShowKeyError(true);
+      return;
+    }
+    try {
+      const result = await mutation.mutateAsync({
+        runtimeIds: chosenIds,
+        preset: providerPresetSyncInput(preset, apiKey),
+      });
+      setOutcomes(
+        Object.fromEntries(
+          result.outcomes.map((outcome) => [outcome.runtimeId, outcome]),
+        ),
+      );
+      const { synced, failed } = providerPresetSyncSummary(result.outcomes);
+      if (failed === 0) {
+        toast.success(t(($) => $.tab_body.providers.sync_done_toast, { count: synced }));
+        onClose();
+        return;
+      }
+      toast.error(
+        t(($) => $.tab_body.providers.sync_partial_toast, { synced, failed }),
+      );
+    } catch (error) {
+      toast.error(
+        errorText(error, t(($) => $.tab_body.providers.sync_failed_toast)),
+      );
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
+            {t(($) => $.tab_body.providers.sync_title, { name: preset.id })}
+          </DialogTitle>
+          <DialogDescription>
+            {t(($) => $.tab_body.providers.sync_description)}
+          </DialogDescription>
+        </DialogHeader>
+
+        <p className="truncate font-mono text-micro text-muted-foreground" translate="no">
+          {providerPresetSummaryLine(preset)}
+        </p>
+
+        <ul
+          className="divide-y divide-border overflow-hidden rounded-lg border border-border"
+          data-testid="provider-preset-sync-targets"
+        >
+          {targets.map((target, index) => (
+            <ProviderPresetSyncRow
+              key={target.runtimeId}
+              target={target}
+              state={states[index]!}
+              outcome={outcomes[target.runtimeId]}
+              checked={target.online && selected[target.runtimeId] === true}
+              disabled={busy || !target.online}
+              onCheckedChange={(next) =>
+                setSelected((current) => ({ ...current, [target.runtimeId]: next }))
+              }
+            />
+          ))}
+        </ul>
+
+        <Field>
+          <FieldLabel htmlFor="preset-sync-key">
+            {t(($) => $.tab_body.providers.sync_key_label)}
+          </FieldLabel>
+          <Input
+            id="preset-sync-key"
+            type="password"
+            autoComplete="off"
+            value={apiKey}
+            onChange={(event) => {
+              setApiKey(event.target.value);
+              setShowKeyError(false);
+            }}
+            aria-invalid={showKeyError && needsKey}
+          />
+          <FieldDescription>
+            {t(($) => $.tab_body.providers.sync_key_hint)}
+          </FieldDescription>
+          {showKeyError && needsKey ? (
+            <FieldError>{t(($) => $.tab_body.providers.sync_key_required)}</FieldError>
+          ) : null}
+        </Field>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+            {t(($) => $.tab_body.providers.cancel_action)}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => void handleSync()}
+            disabled={busy || reading || chosenIds.length === 0}
+          >
+            {busy ? (
+              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            ) : null}
+            {t(($) => $.tab_body.providers.sync_confirm_action, {
+              count: chosenIds.length,
+            })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProviderPresetSyncRow({
+  target,
+  state,
+  outcome,
+  checked,
+  disabled,
+  onCheckedChange,
+}: {
+  target: ProviderPresetSyncTarget;
+  state: ProviderPresetPeerState;
+  outcome: ProviderPresetSyncOutcome | undefined;
+  checked: boolean;
+  disabled: boolean;
+  onCheckedChange: (next: boolean) => void;
+}) {
+  const { t } = useT("agents");
+  const failed = outcome?.status === "failed";
+
+  return (
+    <li className="min-w-0 p-3">
+      {/* The whole row is the label, so the checkbox and the machine's name
+          are one target — a row whose state line is its only wide element is
+          otherwise mostly dead space. */}
+      <label className="flex min-w-0 cursor-pointer items-start gap-3">
+        <Checkbox
+          className="mt-0.5 shrink-0"
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={(next) => onCheckedChange(next === true)}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-caption font-medium" translate="no">
+            {target.label}
+          </span>
+          {/* The receipt outranks the read: once a machine has answered a write,
+              what it just did is more current than the list we read before it. */}
+          <span
+            className={cn(
+              "mt-0.5 block truncate text-micro",
+              failed ? "text-destructive" : "text-muted-foreground",
+            )}
+            data-testid={`provider-preset-sync-state-${target.runtimeId}`}
+          >
+            {outcome
+              ? failed
+                ? t(($) => $.tab_body.providers.sync_peer_failed, {
+                    reason: outcome.error,
+                  })
+                : t(($) => $.tab_body.providers.sync_peer_synced)
+              : peerStateText(state, t)}
+          </span>
+        </span>
+      </label>
+    </li>
+  );
+}
+
+/** One machine's current relationship to the preset being synced. */
+function peerStateText(state: ProviderPresetPeerState, t: AgentsTranslator): string {
+  switch (state.status) {
+    case "loading":
+      return t(($) => $.tab_body.providers.sync_peer_loading);
+    case "offline":
+      return t(($) => $.tab_body.providers.sync_peer_offline);
+    case "unreadable":
+      return t(($) => $.tab_body.providers.sync_peer_unreadable, {
+        reason: state.message,
+      });
+    case "missing":
+      return t(($) => $.tab_body.providers.sync_peer_missing);
+    case "match":
+      return t(($) => $.tab_body.providers.sync_peer_match);
+    case "drift":
+      return t(($) => $.tab_body.providers.sync_peer_drift, {
+        base_url: state.preset?.base_url ?? "",
+      });
+  }
 }
 
 function DeletePresetDialog({
