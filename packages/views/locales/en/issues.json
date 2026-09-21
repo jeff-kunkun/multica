@@ -135,7 +135,20 @@
     "waiting_on": "Waiting on {{id}}",
     "last_activity_missing": "No activity time"
   },
-  "blocker_summary": { "title": "Blocked · {{count}} root cause(s)", "needs_you": "{{count}} need you", "root": "Root blocker", "propagated": "Blocked by a sub-issue", "kind_decision": "Needs your decision", "kind_permission": "Needs your permission", "kind_external": "Waiting on an external dependency", "kind_capacity": "Waiting on capacity", "kind_action": "{{kind}}: {{action}}", "kind_review_overdue": "Review overdue · {{ago}}", "kind_wake_missed": "{{id}} finished without a wake-up", "kind_cycle": "Waiting in a cycle" },
+  "blocker_summary": {
+    "title": "Blocked · {{count}} root cause(s)",
+    "needs_you": "{{count}} need you",
+    "root": "Root blocker",
+    "propagated": "Blocked by a sub-issue",
+    "kind_decision": "Needs your decision",
+    "kind_permission": "Needs your permission",
+    "kind_external": "Waiting on an external dependency",
+    "kind_capacity": "Waiting on capacity",
+    "kind_action": "{{kind}}: {{action}}",
+    "kind_review_overdue": "Review overdue · {{ago}}",
+    "kind_wake_missed": "{{id}} finished without a wake-up",
+    "kind_cycle": "Waiting in a cycle"
+  },
   "scope": {
     "all_label": "All",
     "all_description": "All issues in this workspace",
@@ -426,6 +439,7 @@
     "prop_priority": "Priority",
     "prop_stage": "Stage",
     "prop_assignee": "Assignee",
+    "prop_reviewer": "Reviewer",
     "prop_start_date": "Start date",
     "prop_due_date": "Due date",
     "prop_project": "Project",
@@ -855,6 +869,14 @@
       "squads_group": "Squads",
       "agent_runtime_required": "Bind a runtime before assigning work to this agent",
       "squad_runtime_required": "Bind a runtime to this squad's leader before assigning work"
+    },
+    "reviewer": {
+      "trigger_undecided": "Undecided",
+      "trigger_no_review": "No review needed",
+      "search_placeholder": "Review by...",
+      "no_review": "No review needed",
+      "members_group": "Members",
+      "agents_group": "Agents"
     },
     "start_date": {
       "trigger_label": "Start date",

@@ -6,7 +6,8 @@
 -- because that is already the meaning of the `assignee_id` filter (tab 1
 -- "Assigned to me"), and the two filters must produce disjoint result sets.
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
-       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.assignee_type, i.assignee_id, i.reviewer_type, i.reviewer_id,
+       i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
        i.revision
 FROM issue i
@@ -180,10 +181,11 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    stage, last_activity_at, id
+    stage, reviewer_type, reviewer_id, last_activity_at, id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    sqlc.narg('stage'), sqlc.narg('reviewer_type')::text, sqlc.narg('reviewer_id')::uuid,
+    now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -200,6 +202,10 @@ WITH candidate AS (
         COALESCE(sqlc.narg('priority')::text, i.priority) AS next_priority,
         sqlc.narg('assignee_type')::text AS next_assignee_type,
         sqlc.narg('assignee_id')::uuid AS next_assignee_id,
+        -- Same tri-state convention as the assignee pair: the caller passes the
+        -- current value to leave it alone, and NULL to clear the slot.
+        sqlc.narg('reviewer_type')::text AS next_reviewer_type,
+        sqlc.narg('reviewer_id')::uuid AS next_reviewer_id,
         CASE
             -- An explicit position wins. Cross-column drag-and-drop sends
             -- status and position together and means the slot it dropped on.
@@ -241,18 +247,24 @@ WITH candidate AS (
         candidate.*,
         ROW(
             title, description, status, priority, assignee_type, assignee_id,
+            reviewer_type, reviewer_id,
             position, start_date, due_date, parent_issue_id, project_id, stage
         ) IS DISTINCT FROM ROW(
             next_title, next_description, next_status, next_priority,
-            next_assignee_type, next_assignee_id, next_position, next_start_date,
+            next_assignee_type, next_assignee_id,
+            next_reviewer_type, next_reviewer_id,
+            next_position, next_start_date,
             next_due_date, next_parent_issue_id, next_project_id, next_stage
         ) AS did_change,
         ROW(
             title, description, status, priority, assignee_type, assignee_id,
+            reviewer_type, reviewer_id,
             start_date, due_date, parent_issue_id, project_id, stage
         ) IS DISTINCT FROM ROW(
             next_title, next_description, next_status, next_priority,
-            next_assignee_type, next_assignee_id, next_start_date, next_due_date,
+            next_assignee_type, next_assignee_id,
+            next_reviewer_type, next_reviewer_id,
+            next_start_date, next_due_date,
             next_parent_issue_id, next_project_id, next_stage
         ) AS did_activity
     FROM candidate
@@ -264,6 +276,8 @@ UPDATE issue AS i SET
     priority = changed.next_priority,
     assignee_type = changed.next_assignee_type,
     assignee_id = changed.next_assignee_id,
+    reviewer_type = changed.next_reviewer_type,
+    reviewer_id = changed.next_reviewer_id,
     position = changed.next_position,
     start_date = changed.next_start_date,
     due_date = changed.next_due_date,
@@ -382,7 +396,8 @@ DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 -- See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
 -- filter; member-direct assignment is intentionally excluded).
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
-       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.assignee_type, i.assignee_id, i.reviewer_type, i.reviewer_id,
+       i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
        i.revision
 FROM issue i

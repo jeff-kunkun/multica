@@ -3329,6 +3329,20 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Release every acceptance slot pointing at this agent. The reviewer pair
+	// is a reference with no foreign key behind it, so nothing else would drop
+	// it — and a ticket whose reviewer can no longer be dispatched would sit in
+	// in_review forever. Clearing it puts the slot back to "undecided", which
+	// is what lets routing pick a live seat the next time the ticket moves.
+	// (DENE-633)
+	if _, err := h.Queries.ClearIssueReviewer(r.Context(), db.ClearIssueReviewerParams{
+		WorkspaceID:  archived.WorkspaceID,
+		ReviewerType: "agent",
+		ReviewerID:   archived.ID,
+	}); err != nil {
+		slog.Warn("clear issue reviewer on agent archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+	}
+
 	// Cancel all pending/active tasks for this agent. The cancel and its
 	// delegated-failure settlement commit together — a settlement issued after
 	// the cancel committed could never be repaired. Chat tasks publish

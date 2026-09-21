@@ -34,6 +34,16 @@ export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent" | "squad";
 
+/**
+ * 验收席 — who accepts the issue once it reaches in_review.
+ *
+ * The same reference shape as the assignee (a type plus an id), minus squads,
+ * plus `"none"`: "this issue needs no acceptance pass". `"none"` is an ANSWER,
+ * not an absence — an empty slot is re-judged by routing on every status
+ * change, so opting out has to be something the issue can say. (DENE-633)
+ */
+export type IssueReviewerType = "member" | "agent" | "none";
+
 export interface IssueReaction {
   id: string;
   issue_id: string;
@@ -192,6 +202,10 @@ export interface Issue {
   priority: IssuePriority;
   assignee_type: IssueAssigneeType | null;
   assignee_id: string | null;
+  // 验收席. Both null = nobody has decided yet. reviewer_type "none" carries a
+  // null reviewer_id and means the issue needs no acceptance pass.
+  reviewer_type: IssueReviewerType | null;
+  reviewer_id: string | null;
   creator_type: IssueAssigneeType;
   creator_id: string;
   parent_issue_id: string | null;

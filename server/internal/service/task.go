@@ -7640,10 +7640,15 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		// — clients localize those from the key — and a CUSTOM one is filled in
 		// by IssueToMapResolved, which has the catalog. Emitted unconditionally
 		// so this rendering cannot lose a key the HTTP one carries. (MUL-6749)
-		"status_name":      "",
-		"priority":         issue.Priority,
-		"assignee_type":    util.TextToPtr(issue.AssigneeType),
-		"assignee_id":      util.UUIDToPtr(issue.AssigneeID),
+		"status_name":   "",
+		"priority":      issue.Priority,
+		"assignee_type": util.TextToPtr(issue.AssigneeType),
+		"assignee_id":   util.UUIDToPtr(issue.AssigneeID),
+		// Mirrors handler.IssueResponse.ReviewerType/ReviewerID. Always
+		// emitted, like the assignee pair: an unset slot is null, not a
+		// missing key. (DENE-633)
+		"reviewer_type":    util.TextToPtr(issue.ReviewerType),
+		"reviewer_id":      util.UUIDToPtr(issue.ReviewerID),
 		"creator_type":     issue.CreatorType,
 		"creator_id":       util.UUIDToString(issue.CreatorID),
 		"parent_issue_id":  util.UUIDToPtr(issue.ParentIssueID),

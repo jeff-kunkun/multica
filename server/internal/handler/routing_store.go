@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
@@ -16,14 +15,6 @@ import (
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
-
-// ReviewerPropertyName is the workspace property the routing layer fills.
-//
-// It is a `select`, not an `actor`. Actor values are members only today (see
-// actorPropertyKinds), so an actor slot cannot name a seat at all — and it
-// could not hold "needs no review" either, which has to be a written value
-// rather than an empty slot for the fill-only-empty-slots rule to ever close.
-const ReviewerPropertyName = "验收席"
 
 // routingStore binds the routing module to this server. Everything the module
 // is allowed to touch passes through here, which is also why the module cannot
@@ -113,42 +104,45 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 			}
 		}
 	}
-	prop, ok, err := s.Reviewer(ctx, util.UUIDToString(row.WorkspaceID))
-	if err != nil {
-		return out, err
-	}
-	if ok {
-		out.Reviewer = reviewerOptionName(prop, row.Properties)
-	}
+	out.Reviewer = s.reviewerRef(ctx, row)
 	return out, nil
 }
 
-// reviewerOptionName resolves the stored option id back to its name. The
-// routing module addresses options by name, so option ids never leave here.
-// An unknown id reads as an empty slot on purpose: a value this server cannot
-// interpret is not something the module should hand off to.
-func reviewerOptionName(prop routing.ReviewerProperty, properties []byte) string {
-	if len(properties) == 0 {
-		return ""
+// reviewerRef reads the reviewer pair off the issue and resolves the display
+// name from the roster. The name is resolved on every read and stored nowhere,
+// which is what a reference buys over the old select option: renaming a seat
+// renames it on every ticket, and archiving one is visible instead of leaving
+// a ticket holding a word that no longer means anybody.
+func (s routingStore) reviewerRef(ctx context.Context, row db.Issue) routing.ReviewerRef {
+	if !row.ReviewerType.Valid || row.ReviewerType.String == "" {
+		return routing.ReviewerRef{}
 	}
-	var values map[string]json.RawMessage
-	if err := json.Unmarshal(properties, &values); err != nil {
-		return ""
+	ref := routing.ReviewerRef{Kind: routing.ReviewerTarget(row.ReviewerType.String)}
+	if ref.Kind == routing.ReviewerNoReview {
+		return ref
 	}
-	raw, ok := values[prop.ID]
-	if !ok {
-		return ""
+	if !row.ReviewerID.Valid {
+		// A pair with a type but no id is not a reviewer. Reporting it as an
+		// empty slot lets routing decide again rather than hand off to
+		// nobody.
+		return routing.ReviewerRef{}
 	}
-	var optionID string
-	if err := json.Unmarshal(raw, &optionID); err != nil {
-		return ""
-	}
-	for name, id := range prop.Options {
-		if id == optionID {
-			return name
+	ref.ID = util.UUIDToString(row.ReviewerID)
+	switch ref.Kind {
+	case routing.ReviewerAgent:
+		if agent, err := s.h.Queries.GetAgent(ctx, row.ReviewerID); err == nil {
+			ref.Name = agent.Name
 		}
+	case routing.ReviewerMember:
+		if u, err := s.h.Queries.GetUser(ctx, row.ReviewerID); err == nil {
+			ref.Name = u.Name
+		}
+	default:
+		// An unknown reviewer_type is not something this server can hand off
+		// to. Fail closed: read it as empty.
+		return routing.ReviewerRef{}
 	}
-	return ""
+	return ref
 }
 
 func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[string]routing.Agent, error) {
@@ -169,40 +163,6 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 		}
 	}
 	return out, nil
-}
-
-// Reviewer returns the workspace's reviewer slot, provisioning it when it is
-// missing. The slot is a product fixture rather than a field each workspace
-// invents, so routing does not degrade to executor-only just because nobody
-// clicked through the settings page. See routing_reviewer_property.go.
-func (s routingStore) Reviewer(ctx context.Context, workspaceID string) (routing.ReviewerProperty, bool, error) {
-	wsID, err := util.ParseUUID(workspaceID)
-	if err != nil {
-		return routing.ReviewerProperty{}, false, err
-	}
-	return s.ensureReviewerProperty(ctx, wsID)
-}
-
-// findReviewerProperty reads the slot without creating it.
-func (s routingStore) findReviewerProperty(ctx context.Context, wsID pgtype.UUID) (routing.ReviewerProperty, bool, error) {
-	props, err := s.h.Queries.ListIssueProperties(ctx, db.ListIssuePropertiesParams{
-		WorkspaceID: wsID,
-		// Archived definitions are excluded, which is also how the switch
-		// hides the slot: archiving the property takes it out of the picker
-		// and out of routing's reach while keeping every value already
-		// written. No frontend change, no data loss.
-		IncludeArchived: false,
-	})
-	if err != nil {
-		return routing.ReviewerProperty{}, false, err
-	}
-	for _, p := range props {
-		if p.Name != ReviewerPropertyName || p.Type != "select" {
-			continue
-		}
-		return reviewerPropertyView(p.ID, parsePropertyConfig(p.Config)), true, nil
-	}
-	return routing.ReviewerProperty{}, false, nil
 }
 
 func (s routingStore) AssignAgentIfUnassigned(ctx context.Context, workspaceID, issueID string, seat routing.Seat) (bool, error) {
@@ -242,7 +202,7 @@ func (s routingStore) AssignAgentIfUnassigned(ctx context.Context, workspaceID, 
 	return true, nil
 }
 
-func (s routingStore) SetReviewerIfUnset(ctx context.Context, workspaceID, issueID, propertyID, optionID string) (bool, error) {
+func (s routingStore) SetReviewerIfUnset(ctx context.Context, workspaceID, issueID string, ref routing.ReviewerRef) (bool, error) {
 	wsID, err := util.ParseUUID(workspaceID)
 	if err != nil {
 		return false, err
@@ -251,20 +211,29 @@ func (s routingStore) SetReviewerIfUnset(ctx context.Context, workspaceID, issue
 	if err != nil {
 		return false, err
 	}
-	value, err := json.Marshal(optionID)
-	if err != nil {
-		return false, err
+	if ref.Empty() {
+		// Routing never writes an empty slot: an empty slot is what it writes
+		// INTO. A caller that reaches here has nothing to say.
+		return false, nil
 	}
-	issue, err := s.h.Queries.SetIssuePropertyValueIfUnset(ctx, db.SetIssuePropertyValueIfUnsetParams{
-		ID: id, WorkspaceID: wsID, Key: propertyID, Value: value,
-	})
+	params := db.SetIssueReviewerIfUnsetParams{
+		ID: id, WorkspaceID: wsID, ReviewerType: string(ref.Kind),
+	}
+	if ref.Kind != routing.ReviewerNoReview {
+		refID, err := util.ParseUUID(ref.ID)
+		if err != nil {
+			return false, err
+		}
+		params.ReviewerID = refID
+	}
+	issue, err := s.h.Queries.SetIssueReviewerIfUnset(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	// A property write, not an assignment: prev == next on the assignee pair,
+	// A reviewer write, not an assignment: prev == next on the assignee pair,
 	// so assignee_changed comes out false and no spurious owner-change lands
 	// in the timeline.
 	s.publishIssueUpdated(issue, issue)

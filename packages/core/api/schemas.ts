@@ -1270,6 +1270,11 @@ export const IssueSchema = z.object({
   priority: z.string(),
   assignee_type: z.string().nullable(),
   assignee_id: z.string().nullable(),
+  // 验收席. Nullish-with-default rather than plain nullable: an installed
+  // client can talk to a backend that predates DENE-633, and a missing pair
+  // must parse to "undecided" instead of failing the whole issue.
+  reviewer_type: z.string().nullish().catch(null).default(null),
+  reviewer_id: z.string().nullish().catch(null).default(null),
   creator_type: z.string(),
   creator_id: z.string(),
   parent_issue_id: z.string().nullable(),

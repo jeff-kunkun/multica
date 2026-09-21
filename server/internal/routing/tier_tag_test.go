@@ -138,7 +138,9 @@ func TestTaggedSeatOverridesTheNameConvention(t *testing.T) {
 
 func TestLabelledTicketIsAssignedWithoutAskingTheJudge(t *testing.T) {
 	store := newFakeStore()
-	store.hasProp = false // reviewer slot absent: nothing left to judge
+	// The reviewer slot already holds an answer, so only the executor
+	// question is left for the judge.
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerNoReview}
 	store.issue.Labels = []string{"弱"}
 	judge := &fakeJudge{verdict: confidentVerdict()}
 
@@ -182,7 +184,7 @@ func TestLabelBeatsTheJudgeWhenBothSpeak(t *testing.T) {
 
 func TestAnUnknownLabelIsNotATier(t *testing.T) {
 	store := newFakeStore()
-	store.hasProp = false
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerNoReview}
 	store.issue.Labels = []string{"紧急", "前端"}
 	judge := &fakeJudge{verdict: confidentVerdict()}
 
