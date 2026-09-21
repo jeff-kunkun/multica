@@ -340,7 +340,8 @@
     "window_flash_lite": "Flash Lite",
     "window_credits": "Credits",
     "window_balance_cny": "CNY balance",
-    "window_balance_usd": "USD balance"
+    "window_balance_usd": "USD balance",
+    "switch_source": "Switch {{provider}} quota"
   },
   "profiles": {
     "cta": "Add runtime",

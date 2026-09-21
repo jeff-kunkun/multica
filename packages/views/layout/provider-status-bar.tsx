@@ -1,14 +1,25 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { ChevronDown } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { providerDisplayName } from "@multica/core/runtimes";
+import {
+  providerDisplayName,
+  useProviderQuotaSourceStore,
+} from "@multica/core/runtimes";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import type {
   AgentRuntime,
   PlanLimitWindow,
   PlanLimitsSnapshot,
 } from "@multica/core/types";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import {
   Tooltip,
   TooltipContent,
@@ -20,40 +31,88 @@ import {
   formatPlanLimitRemaining,
   planLimitWindowShortLabel,
 } from "../runtimes/components/plan-limits";
+import { formatDeviceInfo } from "../runtimes/utils";
 import { useLocale, useT } from "../i18n";
 
-export interface ProviderQuotaSummary {
-  provider: string;
+export interface ProviderQuotaRuntime {
+  runtimeId: string;
+  sourceLabel: string;
+  deviceLabel: string | null;
   snapshot: PlanLimitsSnapshot;
   windows: PlanLimitWindow[];
 }
 
-/** Collapse runtimes onto the newest real snapshot for each provider. */
+export interface ProviderQuotaSummary {
+  provider: string;
+  runtimes: ProviderQuotaRuntime[];
+}
+
+/** Compact identity for a quota snapshot: alias, then hostname, then device. */
+export function quotaSourceLabel(
+  runtime: Pick<AgentRuntime, "name" | "custom_name" | "device_info">,
+): string {
+  const custom = runtime.custom_name?.trim();
+  if (custom) return custom;
+  const host = runtime.name.match(/^(.+?)\s+\(([^)]+)\)$/)?.[2]?.trim();
+  if (host) return host;
+  const device = runtime.device_info?.trim().split(" · ")[0]?.trim();
+  if (device) return device;
+  return runtime.name.trim() || "—";
+}
+
+export function resolveSelectedRuntime<T extends { runtimeId: string }>(
+  runtimes: readonly T[],
+  selectedId: string | undefined,
+): T | undefined {
+  if (runtimes.length === 0) return undefined;
+  if (selectedId) {
+    const match = runtimes.find((runtime) => runtime.runtimeId === selectedId);
+    if (match) return match;
+  }
+  return runtimes[0];
+}
+
+/** Group runtimes by provider, keeping every current snapshot. Newest first. */
 export function collectProviderQuotas(
   runtimes: readonly AgentRuntime[],
   nowMs = Date.now(),
 ): ProviderQuotaSummary[] {
-  const summaries = new Map<string, ProviderQuotaSummary>();
+  const byProvider = new Map<string, ProviderQuotaRuntime[]>();
 
   for (const runtime of runtimes) {
     const display = displayPlanLimits(runtime.plan_limits, nowMs);
     if (!display) continue;
 
     const provider = runtime.provider.trim().toLowerCase();
-    const previous = summaries.get(provider);
-    if (previous && previous.snapshot.observed_at >= display.snapshot.observed_at) {
-      continue;
-    }
-    summaries.set(provider, {
-      provider,
+    const list = byProvider.get(provider) ?? [];
+    const sourceLabel = quotaSourceLabel(runtime);
+    const deviceLabel = formatDeviceInfo(runtime.device_info ?? null);
+    list.push({
+      runtimeId: runtime.id,
+      sourceLabel,
+      deviceLabel:
+        deviceLabel && deviceLabel !== sourceLabel ? deviceLabel : null,
       snapshot: display.snapshot,
       windows: display.windows,
     });
+    byProvider.set(provider, list);
   }
 
-  return [...summaries.values()].sort((a, b) =>
-    providerDisplayName(a.provider).localeCompare(providerDisplayName(b.provider)),
-  );
+  return [...byProvider.entries()]
+    .map(([provider, items]) => ({
+      provider,
+      runtimes: items.sort((a, b) => {
+        if (b.snapshot.observed_at !== a.snapshot.observed_at) {
+          return b.snapshot.observed_at - a.snapshot.observed_at;
+        }
+        return a.sourceLabel.localeCompare(b.sourceLabel);
+      }),
+    }))
+    .sort((a, b) =>
+      providerDisplayName(a.provider).localeCompare(
+        providerDisplayName(b.provider),
+      ),
+    );
 }
 
 export function ProviderStatusBar() {
@@ -62,14 +121,30 @@ export function ProviderStatusBar() {
     ...runtimeListOptions(workspace?.id ?? ""),
     enabled: Boolean(workspace),
   });
+  const selectedByProvider = useProviderQuotaSourceStore(
+    (state) => state.selectedByProvider,
+  );
+  const setSelectedRuntime = useProviderQuotaSourceStore(
+    (state) => state.setSelectedRuntime,
+  );
 
-  return <ProviderStatusBarView providers={collectProviderQuotas(runtimes)} />;
+  return (
+    <ProviderStatusBarView
+      providers={collectProviderQuotas(runtimes)}
+      selectedByProvider={selectedByProvider}
+      onSelectRuntime={setSelectedRuntime}
+    />
+  );
 }
 
 export function ProviderStatusBarView({
   providers,
+  selectedByProvider = {},
+  onSelectRuntime,
 }: {
   providers: ProviderQuotaSummary[];
+  selectedByProvider?: Record<string, string>;
+  onSelectRuntime?: (provider: string, runtimeId: string) => void;
 }) {
   const { t } = useT("runtimes");
   if (providers.length === 0) return null;
@@ -80,7 +155,12 @@ export function ProviderStatusBarView({
       className="flex h-10 shrink-0 items-center gap-4 overflow-x-auto border-t px-3 pe-chat-launcher"
     >
       {providers.map((provider) => (
-        <ProviderStatusEntry key={provider.provider} provider={provider} />
+        <ProviderStatusEntry
+          key={provider.provider}
+          provider={provider}
+          selectedId={selectedByProvider[provider.provider]}
+          onSelectRuntime={onSelectRuntime}
+        />
       ))}
     </footer>
   );
@@ -88,45 +168,151 @@ export function ProviderStatusBarView({
 
 function ProviderStatusEntry({
   provider,
+  selectedId,
+  onSelectRuntime,
 }: {
   provider: ProviderQuotaSummary;
+  selectedId: string | undefined;
+  onSelectRuntime?: (provider: string, runtimeId: string) => void;
 }) {
   const { t } = useT("runtimes");
   const locale = useLocale();
+  const selected = resolveSelectedRuntime(provider.runtimes, selectedId);
+  if (!selected) return null;
+
   const name = providerDisplayName(provider.provider);
+  const hasMultiple = provider.runtimes.length > 1;
+  const switchLabel = t(($) => $.plan_limits.switch_source, { provider: name });
+
+  const summary = (
+    <ProviderStatusSummary
+      provider={provider.provider}
+      name={name}
+      selected={selected}
+      hasMultiple={hasMultiple}
+    />
+  );
+
+  if (!hasMultiple) {
+    return (
+      <Tooltip>
+        <TooltipTrigger render={<div className="flex shrink-0 items-center gap-2 text-caption">{summary}</div>} />
+        <TooltipContent side="top">
+          <QuotaDetails
+            name={name}
+            selected={selected}
+            locale={locale}
+          />
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
 
   return (
-    <Tooltip>
-      <TooltipTrigger
+    <DropdownMenu>
+      <DropdownMenuTrigger
         render={
-          <div className="flex shrink-0 items-center gap-2 text-caption">
-            <ProviderLogo provider={provider.provider} className="h-3.5 w-3.5" />
-            <span className="font-medium">{name}</span>
-            {provider.windows.length === 0 ? (
-              <span className="font-medium text-destructive">
-                {t(($) => $.plan_limits.limit_reached)}
-              </span>
-            ) : (
-              provider.windows.map((window) => (
-                <WindowSummary key={window.name} window={window} locale={locale} />
-              ))
-            )}
-          </div>
+          <button
+            type="button"
+            aria-label={switchLabel}
+            className="flex h-8 shrink-0 items-center gap-2 rounded-md px-1.5 text-caption hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
+          >
+            {summary}
+          </button>
         }
       />
-      <TooltipContent side="top">
-        <div className="space-y-1">
-          <div className="font-medium">{name}</div>
-          {provider.windows.length === 0 ? (
-            <div>{t(($) => $.plan_limits.limit_reached)}</div>
-          ) : (
-            provider.windows.map((window) => (
-              <WindowDetail key={window.name} window={window} locale={locale} />
-            ))
-          )}
-        </div>
-      </TooltipContent>
-    </Tooltip>
+      <DropdownMenuContent align="start" side="top" className="min-w-48">
+        <DropdownMenuRadioGroup
+          value={selected.runtimeId}
+          onValueChange={(runtimeId) =>
+            onSelectRuntime?.(provider.provider, runtimeId)
+          }
+        >
+          {provider.runtimes.map((runtime) => (
+            <DropdownMenuRadioItem
+              key={runtime.runtimeId}
+              value={runtime.runtimeId}
+              className="items-start py-1.5"
+            >
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate font-medium">{runtime.sourceLabel}</span>
+                {runtime.deviceLabel ? (
+                  <span className="truncate text-caption text-muted-foreground">
+                    {runtime.deviceLabel}
+                  </span>
+                ) : null}
+              </span>
+              <span className="ps-3 text-caption tabular-nums text-muted-foreground">
+                {compactRemaining(runtime.windows, t)}
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ProviderStatusSummary({
+  provider,
+  name,
+  selected,
+  hasMultiple,
+}: {
+  provider: string;
+  name: string;
+  selected: ProviderQuotaRuntime;
+  hasMultiple: boolean;
+}) {
+  const { t } = useT("runtimes");
+  const locale = useLocale();
+
+  return (
+    <>
+      <ProviderLogo provider={provider} className="h-3.5 w-3.5" />
+      <span className="font-medium">{name}</span>
+      {selected.windows.length === 0 ? (
+        <span className="font-medium text-destructive">
+          {t(($) => $.plan_limits.limit_reached)}
+        </span>
+      ) : (
+        selected.windows.map((window) => (
+          <WindowSummary key={window.name} window={window} locale={locale} />
+        ))
+      )}
+      <span className="max-w-28 truncate text-muted-foreground">
+        {selected.sourceLabel}
+      </span>
+      {hasMultiple ? (
+        <ChevronDown className="size-3 text-muted-foreground" />
+      ) : null}
+    </>
+  );
+}
+
+function QuotaDetails({
+  name,
+  selected,
+  locale,
+}: {
+  name: string;
+  selected: ProviderQuotaRuntime;
+  locale: string;
+}) {
+  const { t } = useT("runtimes");
+
+  return (
+    <div className="space-y-1">
+      <div className="font-medium">{name}</div>
+      <div className="text-muted-foreground">{selected.sourceLabel}</div>
+      {selected.windows.length === 0 ? (
+        <div>{t(($) => $.plan_limits.limit_reached)}</div>
+      ) : (
+        selected.windows.map((window) => (
+          <WindowDetail key={window.name} window={window} locale={locale} />
+        ))
+      )}
+    </div>
   );
 }
 
@@ -165,6 +351,16 @@ function WindowDetail({
       {reset ? ` · ${t(($) => $.plan_limits.resets, { when: reset })}` : ""}
     </div>
   );
+}
+
+function compactRemaining(
+  windows: PlanLimitWindow[],
+  t: ReturnType<typeof useT<"runtimes">>["t"],
+): string {
+  if (windows.length === 0) return t(($) => $.plan_limits.limit_reached);
+  return windows
+    .map((window) => remainingLabel(window) ?? "—")
+    .join(" · ");
 }
 
 function remainingLabel(window: PlanLimitWindow): string | null {
