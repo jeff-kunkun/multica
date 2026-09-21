@@ -2237,6 +2237,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// carrier's prompt and records which policy version is
 					// running; the draft's content is untouched.
 					r.Patch("/policy", h.SwitchIssueDraftPolicy)
+					// Read-only: which seat routing would put on each issue
+					// of the draft, shown in the confirm panel before create.
+					r.Post("/assignee-suggestions", h.SuggestIssueDraftAssignees)
 					r.Post("/finalize", h.FinalizeIssueDraft)
 					// Starts another round on an alignment that already
 					// produced its group: same session, same draft row, and
