@@ -265,6 +265,7 @@ WHERE id = $1
 
 // Workspace-level chain budget. Invalid or absent settings fail safe to the
 // product default instead of making enqueue paths fail on a cast error.
+// Keep ELSE in sync with service.DefaultAgentChainBudget.
 func (q *Queries) GetWorkspaceAgentChainBudget(ctx context.Context, id pgtype.UUID) (int32, error) {
 	row := q.db.QueryRow(ctx, getWorkspaceAgentChainBudget, id)
 	var budget int32
