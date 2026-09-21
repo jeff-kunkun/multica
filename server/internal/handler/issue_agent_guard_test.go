@@ -3,9 +3,11 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -37,6 +39,48 @@ func seedDelegatedTask(t *testing.T, agentID, issueID string) string {
 	})
 }
 
+func seedDelegatedTasks(t *testing.T, agentID, issueID string, n int) string {
+	t.Helper()
+	var first string
+	for i := 0; i < n; i++ {
+		id := seedDelegatedTask(t, agentID, issueID)
+		if i == 0 {
+			first = id
+		}
+	}
+	return first
+}
+
+func snapshotHandlerTestWorkspaceSettings(t *testing.T) []byte {
+	t.Helper()
+	var previous []byte
+	dbfx.QueryRow(t, `SELECT COALESCE(settings, '{}'::jsonb) FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previous)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `UPDATE workspace SET settings = $1 WHERE id = $2`, previous, testWorkspaceID)
+	})
+	return previous
+}
+
+func setHandlerTestAgentChainBudget(t *testing.T, budget int) {
+	t.Helper()
+	snapshotHandlerTestWorkspaceSettings(t)
+	dbfx.Exec(t, `
+		UPDATE workspace
+		SET settings = COALESCE(settings, '{}'::jsonb) || jsonb_build_object('agent_chain_budget', $1::int)
+		WHERE id = $2
+	`, budget, testWorkspaceID)
+}
+
+func clearHandlerTestAgentChainBudget(t *testing.T) {
+	t.Helper()
+	snapshotHandlerTestWorkspaceSettings(t)
+	dbfx.Exec(t, `
+		UPDATE workspace
+		SET settings = COALESCE(settings, '{}'::jsonb) - 'agent_chain_budget'
+		WHERE id = $1
+	`, testWorkspaceID)
+}
+
 func countBudgetNotices(t *testing.T, issueID string) int {
 	t.Helper()
 	var count int
@@ -48,14 +92,30 @@ func countBudgetNotices(t *testing.T, issueID string) int {
 	return count
 }
 
+func budgetNoticeParentID(t *testing.T, issueID string) string {
+	t.Helper()
+	var parentID string
+	dbfx.QueryRow(t, `
+		SELECT COALESCE(parent_id::text, '')
+		FROM comment
+		WHERE issue_id = $1 AND author_type = 'system'
+		  AND content LIKE 'Agent delegation chain reached the limit%'
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, issueID).Scan(&parentID)
+	return parentID
+}
+
 // TestIssueAgentChainBudgetBlocksAtTheThresholdAndResetsOnHumanComment covers
-// the complete A↔B guard contract: six delegated runs consume the budget, the
-// seventh is refused, the notice is one-shot, and a human comment resets the
-// window so a later delegated trigger can enqueue again.
+// the complete A↔B guard contract: a configured budget of six delegated runs
+// is consumed, the seventh is refused, the notice is one-shot and parented to
+// the triggering comment, and a human comment resets the window so a later
+// delegated trigger can enqueue again.
 func TestIssueAgentChainBudgetBlocksAtTheThresholdAndResetsOnHumanComment(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
+	setHandlerTestAgentChainBudget(t, 6)
 	agentA := createHandlerTestAgent(t, "Guard Budget Agent A", []byte("[]"))
 	agentB := createHandlerTestAgent(t, "Guard Budget Agent B", []byte("[]"))
 	// Agent-created issues are shared workspace-wide (DENE-698): 'private'
@@ -96,6 +156,9 @@ func TestIssueAgentChainBudgetBlocksAtTheThresholdAndResetsOnHumanComment(t *tes
 	}
 	if got := countBudgetNotices(t, issueID); got != 1 {
 		t.Fatalf("budget notices = %d, want exactly one", got)
+	}
+	if got := budgetNoticeParentID(t, issueID); got != triggerCommentID {
+		t.Fatalf("budget notice parent_id = %q, want triggering comment %s", got, triggerCommentID)
 	}
 
 	// Route an actual member comment through the handler so the same code that
@@ -170,19 +233,14 @@ func TestResumeDoesNotResetBudgetOrDuplicateNotice(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
+	setHandlerTestAgentChainBudget(t, 6)
 	agentID := createHandlerTestAgent(t, "Guard Resume Agent", []byte("[]"))
 	issueID := dbfx.Issue(t, "resume budget", testutil.Cols{
 		"creator_type": "agent",
 		"creator_id":   agentID,
 		"visibility":   "workspace",
 	})
-	var sourceTaskID string
-	for i := 0; i < 6; i++ {
-		taskID := seedDelegatedTask(t, agentID, issueID)
-		if i == 0 {
-			sourceTaskID = taskID
-		}
-	}
+	sourceTaskID := seedDelegatedTasks(t, agentID, issueID, 6)
 	triggerCommentID := dbfx.Comment(t, issueID, "resume trigger", testutil.Cols{
 		"author_type":    "agent",
 		"author_id":      agentID,
@@ -209,5 +267,69 @@ func TestResumeDoesNotResetBudgetOrDuplicateNotice(t *testing.T) {
 	}
 	if got := countBudgetNotices(t, issueID); got != 1 {
 		t.Fatalf("budget notices after resume = %d, want exactly one", got)
+	}
+}
+
+// TestIssueAgentChainBudgetDefaultAllowsMoreThanSix is the DENE-693 acceptance
+// case: the product default is 30, so a 7th agent-originated @-relay must still
+// enqueue instead of stopping at the old hardcoded 6.
+func TestIssueAgentChainBudgetDefaultAllowsMoreThanSix(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	clearHandlerTestAgentChainBudget(t)
+	agentID := createHandlerTestAgent(t, "Guard Default Budget Agent", []byte("[]"))
+	issueID := dbfx.Issue(t, "default chain budget", testutil.Cols{
+		"creator_type": "agent",
+		"creator_id":   agentID,
+		"visibility":   "workspace",
+	})
+	sourceTaskID := seedDelegatedTasks(t, agentID, issueID, 6)
+	triggerCommentID := dbfx.Comment(t, issueID, "continue past six", testutil.Cols{
+		"author_type":    "agent",
+		"author_id":      agentID,
+		"source_task_id": sourceTaskID,
+	})
+	issue := issueForGuardTest(t, issueID)
+	if _, err := testHandler.TaskService.EnqueueTaskForMention(
+		context.Background(), issue, util.MustParseUUID(agentID), util.MustParseUUID(triggerCommentID),
+	); err != nil {
+		t.Fatalf("7th delegated enqueue with default budget: %v", err)
+	}
+	if got := countBudgetNotices(t, issueID); got != 0 {
+		t.Fatalf("budget notices = %d, want none under the default cap", got)
+	}
+}
+
+func TestGetWorkspaceAgentChainBudgetDefaultAndOverride(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	slug := fmt.Sprintf("cb-%d", time.Now().UnixNano())
+	var wsID string
+	dbfx.QueryRow(t, `
+		INSERT INTO workspace (name, slug)
+		VALUES ('chain budget default', $1)
+		RETURNING id
+	`, slug).Scan(&wsID)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+
+	got, err := testHandler.Queries.GetWorkspaceAgentChainBudget(context.Background(), util.MustParseUUID(wsID))
+	if err != nil {
+		t.Fatalf("default budget lookup: %v", err)
+	}
+	if got != service.DefaultAgentChainBudget {
+		t.Fatalf("default budget = %d, want %d", got, service.DefaultAgentChainBudget)
+	}
+
+	dbfx.Exec(t, `UPDATE workspace SET settings = '{"agent_chain_budget": 2}'::jsonb WHERE id = $1`, wsID)
+	got, err = testHandler.Queries.GetWorkspaceAgentChainBudget(context.Background(), util.MustParseUUID(wsID))
+	if err != nil {
+		t.Fatalf("override budget lookup: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("override budget = %d, want 2", got)
 	}
 }
