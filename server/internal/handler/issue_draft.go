@@ -857,6 +857,19 @@ type FinalizeIssueDraftResponse struct {
 	// "the group is the one issue named by issue_id", which is exactly what a
 	// group with no children is. See issueDraftCreatedIssues.
 	Issues []IssueDraftCreatedIssue `json:"issues"`
+	// AssignmentWarnings names nodes that were created unassigned because the
+	// assignee on the draft could not be applied. Omitted when every
+	// assignment landed. A client that predates the field simply does not
+	// show the prompt; the issues still exist.
+	AssignmentWarnings []IssueDraftAssignmentWarning `json:"assignment_warnings,omitempty"`
+}
+
+// IssueDraftAssignmentWarning is one node whose assignee was dropped at
+// confirm. Key is empty for the parent. The issue itself was still created.
+type IssueDraftAssignmentWarning struct {
+	Key    string `json:"key"`
+	Title  string `json:"title"`
+	Reason string `json:"reason"`
 }
 
 // FinalizeIssueDraft is the single point where an alignment conversation
@@ -929,7 +942,7 @@ func (h *Handler) FinalizeIssueDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	group, ok := h.issueGroupParamsFromDraft(w, r, workspaceID, session, ready, state)
+	group, warnings, ok := h.issueGroupParamsFromDraft(w, r, workspaceID, session, ready, state)
 	if !ok {
 		return
 	}
@@ -946,6 +959,7 @@ func (h *Handler) FinalizeIssueDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	completed.AssignmentWarnings = warnings
 	writeJSON(w, http.StatusOK, *completed)
 }
 

@@ -73,6 +73,8 @@ vi.mock("@multica/core/api", async () => {
       getPendingChatTask: mocks.getPendingChatTask,
       listRuntimes: mocks.listRuntimes,
       listMembers: mocks.listMembers,
+      listAgents: vi.fn().mockResolvedValue([]),
+      listSquads: vi.fn().mockResolvedValue([]),
       updateIssueDraft: mocks.updateIssueDraft,
       finalizeIssueDraft: mocks.finalizeIssueDraft,
       abandonIssueDraft: mocks.abandonIssueDraft,

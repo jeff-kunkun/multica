@@ -123,9 +123,10 @@ export function parseIssueDraftBlock(content: string): IssueDraftPatch | null {
  *     row would be a line in the preview that can never be created.
  *
  * An assignee the carrier names is ignored. It has no roster, its instructions
- * forbid it, and a wrong id here fails the whole confirm
- * (`validateAssigneePair` refuses rather than ignores) — the preview panel is
- * the only thing that may choose a real assignee.
+ * forbid it, and a guessed id used to fail the whole confirm. The preview
+ * panel is the only thing that may choose a real assignee; a pair that still
+ * cannot be applied at confirm leaves that issue unassigned rather than
+ * refusing the group.
  */
 function parseIssueDraftChildren(raw: unknown): IssueDraftChild[] | undefined {
   if (!Array.isArray(raw)) return undefined;

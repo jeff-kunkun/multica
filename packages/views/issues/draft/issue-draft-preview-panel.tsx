@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, FileText, Loader2, Trash2 } from "lucide-react";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
+  applyIssueDraftAssigneeSuggestions,
   maxIssueDraftChildStage,
   normalizeIssueDraftPayloadGroup,
   planIssueDraftGroup,
@@ -13,6 +14,7 @@ import type {
   Attachment,
   Issue,
   IssueAssigneeType,
+  IssueDraftAssignmentWarning,
   IssueDraftChild,
   IssueDraftCreatedIssue,
   IssueDraftPayload,
@@ -43,6 +45,7 @@ import { PriorityPicker } from "../components/pickers/priority-picker";
 import { StagePicker } from "../components/pickers/stage-picker";
 import { StatusPicker } from "../components/pickers/status-picker";
 import { useT } from "../../i18n";
+import { useDraftAssigneeSuggestions } from "./use-draft-assignee-suggestions";
 
 /**
  * The right-hand column: exactly what pressing "confirm and create" will write.
@@ -82,6 +85,7 @@ export function IssueDraftPreviewPanel({
   readOnly: readOnlyProp,
   producedIssueId,
   createdIssues,
+  assignmentWarnings,
   round,
   continuation,
   builtChildren,
@@ -131,6 +135,12 @@ export function IssueDraftPreviewPanel({
    * which is what `[issue_id]` means (DENE-411).
    */
   createdIssues?: IssueDraftCreatedIssue[] | null;
+  /**
+   * Nodes that were created unassigned because the assignee shown here could
+   * not be applied. Only present after a confirm; the created footer is what
+   * names them.
+   */
+  assignmentWarnings?: IssueDraftAssignmentWarning[];
   /**
    * Which round this alignment is on: 1 for a first pass, one more per reopen.
    * Only shown past the first, because "round 1" on a brand-new alignment is a
@@ -252,6 +262,50 @@ export function IssueDraftPreviewPanel({
   // path has held this line since DENE-279 (`planIssueDraftFold` never
   // downgrades `ready`).
   const saveStatus = stage === "ready" ? "ready" : "draft";
+
+  const { suggestions, loading: suggesting } = useDraftAssigneeSuggestions(
+    value,
+    { enabled: !record && stage !== "created" },
+  );
+  // Keys we have already filled from the roster, so clearing a picker does
+  // not immediately re-fill it, and a built node is never rewritten.
+  const appliedSuggestionKeys = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (record || locked || suggesting) return;
+    const skip = new Set(appliedSuggestionKeys.current);
+    for (const key of adopted) skip.add(key);
+    const next = applyIssueDraftAssigneeSuggestions(value, suggestions, {
+      skipKeys: skip,
+    });
+    if (next === value) return;
+    if (!value.assignee_id && next.assignee_id) {
+      appliedSuggestionKeys.current.add("");
+    }
+    for (const child of next.children ?? []) {
+      const previous = value.children?.find((row) => row.key === child.key);
+      if (!previous?.assignee_id && child.assignee_id) {
+        appliedSuggestionKeys.current.add(child.key);
+      }
+    }
+    const wasDirty = dirty;
+    setEditing(next);
+    if (wasDirty || next.title.trim().length === 0) return;
+    const normalized = normalizeIssueDraftPayloadGroup(next);
+    void onSave(normalized, saveStatus).then((savedNow) => {
+      if (savedNow) setBaseline(normalized);
+    });
+  }, [
+    adopted,
+    dirty,
+    locked,
+    onSave,
+    record,
+    saveStatus,
+    suggesting,
+    suggestions,
+    value,
+  ]);
 
   const handleGenerate = () => {
     void onGenerate(value).then((persisted) => {
@@ -454,6 +508,11 @@ export function IssueDraftPreviewPanel({
                     })
                   }
                 />
+                {suggesting && !value.assignee_id ? (
+                  <span className="text-caption text-muted-foreground">
+                    {t(($) => $.alignment.assignee_suggesting)}
+                  </span>
+                ) : null}
               </div>
             </div>
 
@@ -672,6 +731,11 @@ export function IssueDraftPreviewPanel({
                             })
                           }
                         />
+                        {suggesting && !child.assignee_id ? (
+                          <span className="text-caption text-muted-foreground">
+                            {t(($) => $.alignment.assignee_suggesting)}
+                          </span>
+                        ) : null}
                       </div>
                       {child.assignee_hint ? (
                         <p className="text-caption text-muted-foreground">
@@ -696,6 +760,7 @@ export function IssueDraftPreviewPanel({
           <CreatedGroupFooter
             issues={createdIssues ?? null}
             fallbackIssueId={producedIssueId ?? null}
+            assignmentWarnings={assignmentWarnings ?? []}
           />
         ) : (
           <>
@@ -906,9 +971,11 @@ function AlignmentRecordFooter({
 function CreatedGroupFooter({
   issues,
   fallbackIssueId,
+  assignmentWarnings,
 }: {
   issues: IssueDraftCreatedIssue[] | null;
   fallbackIssueId: string | null;
+  assignmentWarnings: IssueDraftAssignmentWarning[];
 }) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
@@ -937,6 +1004,17 @@ function CreatedGroupFooter({
       {rows.length > 1 ? (
         <p className="text-caption text-muted-foreground">
           {t(($) => $.alignment.created_group_title, { count: rows.length })}
+        </p>
+      ) : null}
+      {assignmentWarnings.length > 0 ? (
+        <p className="text-caption text-foreground">
+          {assignmentWarnings.length === 1
+            ? t(($) => $.alignment.assignee_dropped, {
+                title: assignmentWarnings[0]?.title || "—",
+              })
+            : t(($) => $.alignment.assignee_dropped_several, {
+                count: assignmentWarnings.length,
+              })}
         </p>
       ) : null}
       <ul className="space-y-1">

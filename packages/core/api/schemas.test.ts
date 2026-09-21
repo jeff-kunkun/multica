@@ -2911,6 +2911,23 @@ describe("alignment group drift", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("reads assignment warnings and degrades a missing list to empty", () => {
+    const parsed = IssueDraftFinalizeSchema.parse({
+      draft,
+      issue_id: "issue-1",
+      assignment_warnings: [
+        { key: "c1", title: "Backend", reason: "cannot invoke agent" },
+      ],
+    });
+    expect(parsed.assignment_warnings).toEqual([
+      { key: "c1", title: "Backend", reason: "cannot invoke agent" },
+    ]);
+    expect(
+      IssueDraftFinalizeSchema.parse({ draft, issue_id: "issue-1" })
+        .assignment_warnings,
+    ).toEqual([]);
+  });
 });
 
 describe("alignment rounds on the wire", () => {

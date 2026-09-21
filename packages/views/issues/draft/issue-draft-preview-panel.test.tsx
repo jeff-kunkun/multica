@@ -29,6 +29,14 @@ const mocks = vi.hoisted(() => ({
   // whenever it is asked to show no runtime. The alignment page's selection is
   // server state, so that is the whole window after a confirm.
   seedRuntimeId: "rt-2" as string,
+  suggestions: {
+    parent: null as { assigneeType: "agent"; assigneeId: string } | null,
+    children: {} as Record<
+      string,
+      { assigneeType: "agent"; assigneeId: string } | null
+    >,
+  },
+  suggesting: false,
 }));
 
 vi.mock("../../agents/components/runtime-picker", () => ({
@@ -107,6 +115,13 @@ vi.mock("../components/pickers/stage-picker", () => ({
       stage-picker:{String(stage)}
     </button>
   ),
+}));
+
+vi.mock("./use-draft-assignee-suggestions", () => ({
+  useDraftAssigneeSuggestions: () => ({
+    suggestions: mocks.suggestions,
+    loading: mocks.suggesting,
+  }),
 }));
 
 vi.mock("../components/pickers/assignee-picker", () => ({
@@ -257,6 +272,8 @@ function descriptionInput(): HTMLTextAreaElement {
 
 beforeEach(() => {
   mocks.seedRuntimeId = "rt-2";
+  mocks.suggestions = { parent: null, children: {} };
+  mocks.suggesting = false;
 });
 afterEach(() => cleanup());
 
@@ -734,6 +751,105 @@ describe("IssueDraftPreviewPanel parent assignee", () => {
     rerenderWith({ draft: MERGED });
     expect(screen.getByRole("button", { name: "assignee-picker:ag-9" })).toBeTruthy();
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+  });
+});
+
+/**
+ * DENE-694: suggested assignees from the workspace roster. Empty slots are
+ * filled once the roster is known; the confirm stays available while that
+ * lookup is in flight, treating those slots as unassigned.
+ */
+describe("IssueDraftPreviewPanel assignee suggestions", () => {
+  it("keeps confirm available while a suggestion is still loading", () => {
+    mocks.suggesting = true;
+    renderPanel({
+      draft: { ...GROUP, assignee_id: null, assignee_type: null },
+      stage: "ready",
+      canConfirm: true,
+    });
+    expect(screen.getAllByText("Finding a suggested assignee…").length).toBeGreaterThan(
+      0,
+    );
+    expect(
+      screen.getByRole("button", { name: "Confirm and create" }),
+    ).not.toBeDisabled();
+  });
+
+  it("fills empty slots from the roster and saves them", async () => {
+    mocks.suggestions = {
+      parent: { assigneeType: "agent", assigneeId: "ag-goku" },
+      children: {
+        c1: { assigneeType: "agent", assigneeId: "ag-vegeta" },
+        c2: { assigneeType: "agent", assigneeId: "ag-piccolo" },
+      },
+    };
+    const onSave = vi.fn().mockResolvedValue(true);
+    renderPanel({
+      draft: {
+        ...GROUP,
+        children: GROUP.children!.map((child) => ({
+          ...child,
+          assignee_type: null,
+          assignee_id: null,
+        })),
+      },
+      stage: "ready",
+      onSave,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "assignee-picker:ag-goku" })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "assignee-picker:ag-vegeta" }),
+      ).toBeTruthy();
+    });
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const sent = savedPayload(onSave);
+    expect(sent.assignee_id).toBe("ag-goku");
+    expect(sent.children?.[0]?.assignee_id).toBe("ag-vegeta");
+    expect(sent.children?.[1]?.assignee_id).toBe("ag-piccolo");
+  });
+
+  it("does not overwrite an assignee the user already picked", async () => {
+    mocks.suggestions = {
+      parent: { assigneeType: "agent", assigneeId: "ag-goku" },
+      children: {
+        c1: { assigneeType: "agent", assigneeId: "ag-vegeta" },
+        c2: { assigneeType: "agent", assigneeId: "ag-piccolo" },
+      },
+    };
+    renderPanel({ draft: GROUP, stage: "ready" });
+    // GROUP already has ag-1 / ag-2 on the children; those must stick even
+    // after the parent empty slot is filled.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "assignee-picker:ag-goku" })).toBeTruthy();
+    });
+    expect(screen.getByRole("button", { name: "assignee-picker:ag-1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "assignee-picker:ag-2" })).toBeTruthy();
+  });
+
+  it("names issues that were created unassigned after a failed assign", () => {
+    renderPanel({
+      draft: GROUP,
+      stage: "created",
+      createdIssues: [
+        {
+          id: "issue-1",
+          identifier: "DENE-1",
+          title: "Parent",
+          status: "todo",
+        },
+      ],
+      producedIssueId: "issue-1",
+      assignmentWarnings: [
+        { key: "c1", title: "后端接口", reason: "cannot invoke agent" },
+      ],
+    });
+    expect(
+      screen.getByText(
+        "Could not assign 后端接口. The issue was still created, unassigned.",
+      ),
+    ).toBeTruthy();
   });
 });
 

@@ -1,4 +1,12 @@
 export {
+  applyIssueDraftAssigneeSuggestions,
+  buildIssueDraftAssigneeRoster,
+  suggestIssueDraftAssignees,
+  type IssueDraftAssigneeRosterEntry,
+  type IssueDraftAssigneeSuggestions,
+  type IssueDraftSuggestedAssignee,
+} from "./assignee-suggestion";
+export {
   decodeIssueDraftInput,
   encodeIssueDraftInput,
   issueDraftIsCreatable,

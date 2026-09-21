@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -131,11 +132,16 @@ type issueDraftNode struct {
 // field applies here too — the draft is client-supplied, and an alignment
 // conversation must not become a way to assign work to an agent the caller
 // cannot invoke, or to name a parent in another workspace.
-func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, workspaceID string, session db.ChatSession, node issueDraftNode) (service.IssueCreateParams, bool) {
+//
+// Assignee is the one exception: a pair that cannot be applied (malformed id,
+// missing target, no invoke permission) is dropped and returned as a warning
+// rather than refusing the group. The issue is still created, unassigned
+// (DENE-694). Title, status, project and parent stay hard gates.
+func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, workspaceID string, session db.ChatSession, node issueDraftNode) (service.IssueCreateParams, string, bool) {
 	title := strings.TrimSpace(node.Title)
 	if title == "" {
 		writeError(w, http.StatusBadRequest, "draft title is required")
-		return service.IssueCreateParams{}, false
+		return service.IssueCreateParams{}, "", false
 	}
 
 	status := node.Status
@@ -144,38 +150,23 @@ func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, w
 	}
 	status, ok := h.resolveIssueStatusKey(w, r, session.WorkspaceID, status)
 	if !ok {
-		return service.IssueCreateParams{}, false
+		return service.IssueCreateParams{}, "", false
 	}
 	priority := node.Priority
 	if priority == "" {
 		priority = "none"
 	}
 	if !validateIssueEnum(w, "priority", priority, validIssuePriorities) {
-		return service.IssueCreateParams{}, false
+		return service.IssueCreateParams{}, "", false
 	}
 
-	var assigneeType pgtype.Text
-	var assigneeID pgtype.UUID
-	if node.AssigneeType != nil {
-		assigneeType = pgtype.Text{String: *node.AssigneeType, Valid: true}
-	}
-	if node.AssigneeID != nil {
-		id, ok := parseUUIDOrBadRequest(w, *node.AssigneeID, "assignee_id")
-		if !ok {
-			return service.IssueCreateParams{}, false
-		}
-		assigneeID = id
-	}
-	if code, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); code != 0 {
-		writeError(w, code, msg)
-		return service.IssueCreateParams{}, false
-	}
+	assigneeType, assigneeID, assigneeWarning := h.draftAssigneeFromNode(r, workspaceID, node)
 
 	var projectID pgtype.UUID
 	if node.ProjectID != nil && *node.ProjectID != "" {
 		id, ok := parseUUIDOrBadRequest(w, *node.ProjectID, "project_id")
 		if !ok {
-			return service.IssueCreateParams{}, false
+			return service.IssueCreateParams{}, "", false
 		}
 		projectID = id
 	}
@@ -183,7 +174,7 @@ func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, w
 	if node.ParentIssueID != nil && *node.ParentIssueID != "" {
 		id, ok := parseUUIDOrBadRequest(w, *node.ParentIssueID, "parent_issue_id")
 		if !ok {
-			return service.IssueCreateParams{}, false
+			return service.IssueCreateParams{}, "", false
 		}
 		// Project membership and the parent's workspace boundary are re-checked
 		// inside the create transaction atomically with the create; this read only
@@ -194,7 +185,7 @@ func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, w
 		})
 		if err != nil || !parent.ID.Valid {
 			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
-			return service.IssueCreateParams{}, false
+			return service.IssueCreateParams{}, "", false
 		}
 		parentIssueID = id
 	}
@@ -223,7 +214,36 @@ func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, w
 		// read it. The duplicate guard's "did you mean this existing issue"
 		// prompt belongs to the quick-create path, not here.
 		AllowDuplicate: true,
-	}, true
+	}, assigneeWarning, true
+}
+
+// draftAssigneeFromNode resolves the assignee on one alignment node. A pair
+// that cannot be applied is dropped rather than refusing the confirm: the
+// issue is created unassigned and the caller reports why.
+func (h *Handler) draftAssigneeFromNode(r *http.Request, workspaceID string, node issueDraftNode) (pgtype.Text, pgtype.UUID, string) {
+	typeRaw := ""
+	if node.AssigneeType != nil {
+		typeRaw = strings.TrimSpace(*node.AssigneeType)
+	}
+	idRaw := ""
+	if node.AssigneeID != nil {
+		idRaw = strings.TrimSpace(*node.AssigneeID)
+	}
+	if typeRaw == "" && idRaw == "" {
+		return pgtype.Text{}, pgtype.UUID{}, ""
+	}
+	if typeRaw == "" || idRaw == "" {
+		return pgtype.Text{}, pgtype.UUID{}, "assignee_type and assignee_id must be provided together"
+	}
+	id, err := util.ParseUUID(idRaw)
+	if err != nil {
+		return pgtype.Text{}, pgtype.UUID{}, "invalid assignee_id"
+	}
+	assigneeType := pgtype.Text{String: typeRaw, Valid: true}
+	if code, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, id); code != 0 {
+		return pgtype.Text{}, pgtype.UUID{}, msg
+	}
+	return assigneeType, id, ""
 }
 
 // issueDraftGroupState is what this alignment has already produced, read once
@@ -315,15 +335,15 @@ func (h *Handler) issueDraftOwnedNodes(w http.ResponseWriter, r *http.Request, s
 // must not be refused over a node it is not touching. Its fields are never
 // rewritten either — the group is real work by then, edited by people and
 // agents, and a follow-up round is not grounds for overwriting that.
-func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Request, workspaceID string, session db.ChatSession, draft db.IssueDraft, state issueDraftGroupState) (service.IssueGroupParams, bool) {
+func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Request, workspaceID string, session db.ChatSession, draft db.IssueDraft, state issueDraftGroupState) (service.IssueGroupParams, []IssueDraftAssignmentWarning, bool) {
 	var payload issueDraftPayload
 	if err := json.Unmarshal(draft.Draft, &payload); err != nil {
 		writeError(w, http.StatusBadRequest, "draft is not a valid issue draft")
-		return service.IssueGroupParams{}, false
+		return service.IssueGroupParams{}, nil, false
 	}
 	children, ok := issueDraftChildrenFromPayload(w, payload)
 	if !ok {
-		return service.IssueGroupParams{}, false
+		return service.IssueGroupParams{}, nil, false
 	}
 
 	nodes := make([]issueDraftNode, 0, len(children)+1)
@@ -354,6 +374,22 @@ func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Reque
 	}
 
 	group := service.IssueGroupParams{Nodes: make([]service.IssueGroupNode, 0, len(nodes))}
+	var warnings []IssueDraftAssignmentWarning
+	appendNode := func(node issueDraftNode) bool {
+		params, warning, ok := h.issueParamsFromDraft(w, r, workspaceID, session, node)
+		if !ok {
+			return false
+		}
+		if warning != "" {
+			warnings = append(warnings, IssueDraftAssignmentWarning{
+				Key:    node.Key,
+				Title:  node.Title,
+				Reason: warning,
+			})
+		}
+		group.Nodes = append(group.Nodes, service.IssueGroupNode{Params: params})
+		return true
+	}
 	if !state.HasRoot || draft.FinalizeRound == 0 {
 		// Not a continuation round. Either nothing exists yet and the whole
 		// payload is built, or the group is already committed and the caller
@@ -363,13 +399,11 @@ func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Reque
 		// children too". Reopening is the only thing that makes new keys an
 		// increment, and the only thing that moves the round counter.
 		for _, node := range nodes {
-			params, ok := h.issueParamsFromDraft(w, r, workspaceID, session, node)
-			if !ok {
-				return service.IssueGroupParams{}, false
+			if !appendNode(node) {
+				return service.IssueGroupParams{}, nil, false
 			}
-			group.Nodes = append(group.Nodes, service.IssueGroupNode{Params: params})
 		}
-		return group, true
+		return group, warnings, true
 	}
 
 	group.RootIssueID = state.Root.ID
@@ -379,7 +413,7 @@ func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Reque
 	}
 	owned, ok := h.issueDraftOwnedNodes(w, r, session, origins)
 	if !ok {
-		return service.IssueGroupParams{}, false
+		return service.IssueGroupParams{}, nil, false
 	}
 	for i, node := range nodes {
 		if _, exists := owned[uuidToString(origins[i])]; exists {
@@ -388,13 +422,11 @@ func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Reque
 			// and a follow-up round is not grounds for overwriting that.
 			continue
 		}
-		params, ok := h.issueParamsFromDraft(w, r, workspaceID, session, node)
-		if !ok {
-			return service.IssueGroupParams{}, false
+		if !appendNode(node) {
+			return service.IssueGroupParams{}, nil, false
 		}
-		group.Nodes = append(group.Nodes, service.IssueGroupNode{Params: params})
 	}
-	return group, true
+	return group, warnings, true
 }
 
 // lookupIssueGroupRoot finds the group this alignment already produced, by the

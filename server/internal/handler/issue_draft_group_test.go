@@ -607,10 +607,10 @@ func TestFinalizeIssueDraftGroupRejectsMalformedChildren(t *testing.T) {
 	}
 }
 
-// A group must fail whole when one node's assignee is not invocable by the
-// caller. The check runs before the transaction, so nothing is created — this
-// is the same door the ordinary create path closes.
-func TestFinalizeIssueDraftGroupRejectsUnauthorizedChildAssignee(t *testing.T) {
+// A node whose assignee cannot be invoked is still created, unassigned. The
+// rest of the group keeps the assignees that did apply, and the response
+// names the dropped one (DENE-694).
+func TestFinalizeIssueDraftGroupDropsUnauthorizedChildAssignee(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -625,12 +625,37 @@ func TestFinalizeIssueDraftGroupRejectsUnauthorizedChildAssignee(t *testing.T) {
 		assignTo(draftChild("c2", "child the caller cannot dispatch", "todo"), privateAgentID),
 	))
 
+	var finalized FinalizeIssueDraftResponse
 	testutil.Call(t, testHandler.FinalizeIssueDraft, finalizeRequest(t, session.SessionID, saved.Revision)).
-		Want(http.StatusForbidden)
+		Want(http.StatusOK).JSON(&finalized)
 
-	if got := issueDraftGroupIssueCount(t); got != 0 {
-		t.Fatalf("a forbidden assignee on the last child still created %d issues; the group "+
-			"transaction must never start", got)
+	if got := issueDraftGroupIssueCount(t); got != 3 {
+		t.Fatalf("the group has %d issues, want the root plus 2 children", got)
+	}
+	if len(finalized.AssignmentWarnings) != 1 {
+		t.Fatalf("assignment warnings = %+v, want the one child that could not be dispatched", finalized.AssignmentWarnings)
+	}
+	if finalized.AssignmentWarnings[0].Key != "c2" {
+		t.Fatalf("warning key = %q, want c2", finalized.AssignmentWarnings[0].Key)
+	}
+
+	var assigned, unassigned int
+	for _, issue := range finalized.Issues {
+		if issue.Title == "allowed child" {
+			if issue.AssigneeID == nil || *issue.AssigneeID != agentID {
+				t.Fatalf("allowed child assignee = %v, want %s", issue.AssigneeID, agentID)
+			}
+			assigned++
+		}
+		if issue.Title == "child the caller cannot dispatch" {
+			if issue.AssigneeID != nil || issue.AssigneeType != nil {
+				t.Fatalf("forbidden child still assigned: %v/%v", issue.AssigneeType, issue.AssigneeID)
+			}
+			unassigned++
+		}
+	}
+	if assigned != 1 || unassigned != 1 {
+		t.Fatalf("assigned=%d unassigned=%d, want one of each", assigned, unassigned)
 	}
 }
 

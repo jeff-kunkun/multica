@@ -190,10 +190,24 @@ export interface IssueDraftCreatedIssue {
  * predates groups; callers that need the group degrade to `[issue_id]`, which
  * is exactly what a group with no sub-issues is.
  */
+/** One node whose assignee could not be applied at confirm. The issue was
+ *  still created, unassigned. `key` is empty for the parent. */
+export interface IssueDraftAssignmentWarning {
+  key: string;
+  title: string;
+  reason: string;
+}
+
 export interface IssueDraftFinalizeResult {
   draft: IssueDraft;
   issue_id: string;
   issues?: IssueDraftCreatedIssue[];
+  /**
+   * Nodes that were created unassigned because the displayed assignee could
+   * not be applied. Absent on a backend that predates the field, and empty
+   * when every assignment landed.
+   */
+  assignment_warnings?: IssueDraftAssignmentWarning[];
 }
 
 /** Result of rebinding a live alignment conversation to another runtime. */

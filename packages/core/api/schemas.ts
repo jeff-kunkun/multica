@@ -2652,10 +2652,20 @@ export const IssueDraftCreatedIssueSchema = z.object({
  * unrenderable" and "we cannot tell how many" should both show the user the
  * same thing (the parent alone, which is `[issue_id]`).
  */
+export const IssueDraftAssignmentWarningSchema = z.object({
+  key: z.string().catch(""),
+  title: z.string().catch(""),
+  reason: z.string().catch(""),
+}).loose();
+
 export const IssueDraftFinalizeSchema = z.object({
   draft: IssueDraftSchema,
   issue_id: z.string().min(1),
   issues: z.array(IssueDraftCreatedIssueSchema).catch([]),
+  // Additive: a backend that predates the field, or a malformed row, must
+  // not turn a successful confirm into a failed parse. Missing means "every
+  // assignment landed" — the same answer as an empty list.
+  assignment_warnings: z.array(IssueDraftAssignmentWarningSchema).catch([]),
 }).loose();
 
 export const IssueDraftRuntimeSwitchSchema = z.object({

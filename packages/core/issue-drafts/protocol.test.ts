@@ -184,8 +184,9 @@ describe("parseIssueDraftBlock", () => {
   });
 
   it("ignores an assignee the carrier named", () => {
-    // It has no roster and its instructions forbid this; a wrong id makes the
-    // whole confirm fail, so the panel is the only thing that may choose one.
+    // It has no roster and its instructions forbid this; a guessed id used
+    // to fail the whole confirm, so the panel is the only thing that may
+    // choose one.
     const parsed = parseIssueDraftBlock(
       `<issue_draft>{"title":"T","children":[{"key":"c1","title":"Child","assignee_type":"agent","assignee_id":"made-up"}]}</issue_draft>`,
     );
