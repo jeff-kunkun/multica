@@ -22,6 +22,9 @@ export interface ModuleVisibilityList {
 export interface WorkspaceRepo {
   url: string;
   description?: string;
+  /** Resource sharing scope. Older servers omit this field. */
+  visibility?: "private" | "project" | "workspace";
+  created_by?: string;
 }
 
 export interface Workspace {

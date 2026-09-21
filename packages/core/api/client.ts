@@ -1477,6 +1477,13 @@ export class ApiClient {
     });
   }
 
+  async setIssueVisibility(id: string, visibility: "private" | "project" | "workspace") {
+    return this.fetch<{ id: string; visibility: "private" | "project" | "workspace"; audience_size?: number }>(
+      `/api/issues/${id}/visibility`,
+      { method: "PUT", body: JSON.stringify({ visibility }) },
+    );
+  }
+
   async moveIssue(id: string, data: MoveIssueRequest): Promise<Issue> {
     return this.fetch(`/api/issues/${id}/move`, {
       method: "POST",
@@ -3286,6 +3293,35 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  }
+
+  async setRepoVisibility(url: string, visibility: "private" | "project" | "workspace") {
+    return this.fetch<{ url: string; visibility: "private" | "project" | "workspace"; audience_size?: number }>(
+      "/api/repos/visibility",
+      { method: "PUT", body: JSON.stringify({ url, visibility }) },
+    );
+  }
+
+  async previewProjectVisibility(projectId: string) {
+    return this.fetch<{
+      project_id: string;
+      visibility: "private" | "project" | "workspace";
+      affected_count: number;
+      previously_private_count: number;
+    }>(`/api/projects/${projectId}/visibility/preview`);
+  }
+
+  async setProjectVisibility(projectId: string, visibility: "private" | "project" | "workspace") {
+    return this.fetch<{
+      project_id: string;
+      visibility: "private" | "project" | "workspace";
+      affected_count: number;
+      previously_private_count: number;
+      audience_size?: number;
+    }>(`/api/projects/${projectId}/visibility`, {
+      method: "PUT",
+      body: JSON.stringify({ visibility }),
     });
   }
 

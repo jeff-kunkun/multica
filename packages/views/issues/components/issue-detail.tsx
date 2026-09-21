@@ -153,6 +153,7 @@ import {
 } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
+import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
 
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -1214,6 +1215,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
+  const [shareScopeOpen, setShareScopeOpen] = useState(false);
   const githubSettings = useGitHubSettings();
 
   // Per-issue, per-session set of optional properties currently visible in
@@ -2920,6 +2922,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
               <TooltipContent side="bottom">{actions.isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}</TooltipContent>
             </Tooltip>
+            <ShareScopeTrigger
+              scope={issue.visibility}
+              onClick={() => setShareScopeOpen(true)}
+            />
             <IssueActionsDropdown
               issue={issue}
               align="end"
@@ -3619,6 +3625,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             className="absolute bottom-0 right-3 top-12"
           />
         )}
+        <ShareScopeDialog
+          open={shareScopeOpen}
+          onOpenChange={setShareScopeOpen}
+          target={{
+            kind: "issue",
+            resourceId: issue.id,
+            currentScope: issue.visibility,
+            projectId: issue.project_id,
+            resourceLabel: issue.identifier,
+          }}
+        />
       </div>
     </ImageSequenceProvider>
     </CurrentIssueRenderContextProvider>

@@ -61,6 +61,7 @@ import {
 } from "./settings-layout";
 import { useAutoSave } from "./use-auto-save";
 import { GitHubMark } from "./github-mark";
+import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
 
 const EMPTY_REPOSITORIES: WorkspaceRepo[] = [];
 
@@ -122,6 +123,7 @@ export function RepositoriesTab() {
     Map<number, GitHubRepository>
   >(new Map());
   const [repositorySearch, setRepositorySearch] = useState("");
+  const [shareScopeIndex, setShareScopeIndex] = useState<number | null>(null);
 
   const currentMember = members.find((member) => member.user_id === user?.id) ?? null;
   const canManageWorkspace =
@@ -416,15 +418,21 @@ export function RepositoriesTab() {
                 placeholder={t(($) => $.repositories.description_placeholder)}
               />
               {canManageWorkspace ? (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t(($) => $.repositories.delete_aria)}
-                  className="justify-self-end text-muted-foreground hover:text-destructive"
-                  onClick={() => setPendingRemovalIndex(index)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
+                <div className="flex items-center justify-self-end gap-1">
+                  <ShareScopeTrigger
+                    scope={repository.visibility}
+                    onClick={() => setShareScopeIndex(index)}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t(($) => $.repositories.delete_aria)}
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => setPendingRemovalIndex(index)}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
               ) : null}
             </div>
           ))}
@@ -474,6 +482,26 @@ export function RepositoriesTab() {
           )}
         </SettingsCard>
       </SettingsSection>
+
+      {shareScopeIndex !== null && repositories[shareScopeIndex] && (
+        <ShareScopeDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setShareScopeIndex(null);
+          }}
+          target={{
+            kind: "repo",
+            resourceId: repositories[shareScopeIndex].url,
+            currentScope: repositories[shareScopeIndex].visibility,
+            resourceLabel: repositories[shareScopeIndex].url,
+          }}
+          onSaved={(result) => {
+            setRepositories((current) => current.map((repo, index) =>
+              index === shareScopeIndex ? { ...repo, visibility: result.visibility } : repo,
+            ));
+          }}
+        />
+      )}
 
       <Dialog
         open={githubPickerOpen}

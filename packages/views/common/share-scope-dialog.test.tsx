@@ -1,0 +1,83 @@
+// @vitest-environment jsdom
+
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../locales/en/common.json";
+import { ShareScopeDialog } from "./share-scope-dialog";
+
+const mutateIssue = vi.fn();
+const mutateRepo = vi.fn();
+const mutateProject = vi.fn();
+const previewData = { project_id: "project-1", visibility: "private", affected_count: 8, previously_private_count: 3 };
+
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
+vi.mock("@multica/core/auth", () => ({ useAuthStore: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "me" } }) }));
+vi.mock("@multica/core/projects", () => ({
+  projectMembersOptions: (_wsId: string, projectId: string) => ({ queryKey: ["project-members", projectId], queryFn: () => [] }),
+}));
+vi.mock("@multica/core/workspace/queries", () => ({
+  memberListOptions: () => ({ queryKey: ["workspace-members"], queryFn: () => [{ user_id: "guest-1", role: "guest", name: "Guest", email: "guest@example.com" }] }),
+}));
+vi.mock("@multica/core/visibility", () => ({
+  useSetIssueVisibility: () => ({ isPending: false, mutateAsync: mutateIssue }),
+  useSetRepoVisibility: () => ({ isPending: false, mutateAsync: mutateRepo }),
+  useSetProjectVisibility: () => ({ isPending: false, mutateAsync: mutateProject }),
+  useProjectVisibilityPreview: (_projectId: string, enabled: boolean) => ({
+    isLoading: false,
+    data: enabled ? previewData : undefined,
+  }),
+}));
+vi.mock("./actor-avatar", () => ({ ActorAvatar: () => <span data-testid="avatar" /> }));
+
+const resources = { en: { common: enCommon } };
+
+function renderDialog(target: Parameters<typeof ShareScopeDialog>[0]["target"]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <I18nProvider locale="en" resources={resources}>
+        <ShareScopeDialog open onOpenChange={vi.fn()} target={target} />
+      </I18nProvider>
+    </QueryClientProvider>,
+  );
+}
+
+describe("ShareScopeDialog", () => {
+  beforeEach(() => {
+    mutateIssue.mockReset().mockResolvedValue({ visibility: "workspace", audience_size: 4 });
+    mutateRepo.mockReset().mockResolvedValue({ visibility: "workspace", audience_size: 4 });
+    mutateProject.mockReset().mockResolvedValue({ visibility: "project", audience_size: 2 });
+  });
+
+  it("disables project members when the resource is not in a project", () => {
+    renderDialog({ kind: "issue", resourceId: "issue-1", currentScope: "private" });
+    const projectRadio = screen.getByRole("radio", { name: /Project members/ });
+    expect(projectRadio).toBeDisabled();
+    expect(screen.getByText(/Add this resource to a project first/)).toBeInTheDocument();
+  });
+
+  it("asks for confirmation before applying a project-wide scope", async () => {
+    const onOpenChange = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <I18nProvider locale="en" resources={resources}>
+          <ShareScopeDialog
+            open
+            onOpenChange={onOpenChange}
+            target={{ kind: "project", resourceId: "project-1", currentScope: "private" }}
+          />
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: /Project members/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save as Project members/ }));
+    expect(await screen.findByText(/Apply to all project resources/)).toBeInTheDocument();
+    expect(screen.getByText(/8 resources, including 3/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Apply sharing/ }));
+    await waitFor(() => expect(mutateProject).toHaveBeenCalledWith({ projectId: "project-1", visibility: "project" }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+});

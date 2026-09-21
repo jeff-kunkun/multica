@@ -75,6 +75,7 @@ import {
 import { useT } from "../../i18n";
 import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
 
 // ---------------------------------------------------------------------------
 // Property row — sidebar property display
@@ -153,6 +154,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
+  const [shareScopeOpen, setShareScopeOpen] = useState(false);
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -524,6 +526,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               >
                 {isPinned ? <PinOff /> : <Pin />}
               </Button>
+              <ShareScopeTrigger
+                scope={project.visibility}
+                onClick={() => setShareScopeOpen(true)}
+              />
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
@@ -607,6 +613,17 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </Sheet>
         )}
       </ResizablePanelGroup>
+
+      <ShareScopeDialog
+        open={shareScopeOpen}
+        onOpenChange={setShareScopeOpen}
+        target={{
+          kind: "project",
+          resourceId: project.id,
+          currentScope: project.visibility,
+          resourceLabel: project.title,
+        }}
+      />
 
       {/* Delete confirmation */}
       {isWorkspaceAdmin && (
