@@ -2302,7 +2302,7 @@ func (q *Queries) ListChatSessionProjectIDsForSessions(ctx context.Context, chat
 }
 
 const listChatSessionProjectsInWorkspace = `-- name: ListChatSessionProjectsInWorkspace :many
-SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.start_date, p.due_date FROM chat_session_project AS csp
+SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.start_date, p.due_date, p.visibility, p.created_by FROM chat_session_project AS csp
 JOIN project AS p ON p.id = csp.project_id AND p.workspace_id = csp.workspace_id
 WHERE csp.chat_session_id = $1 AND csp.workspace_id = $2
 ORDER BY csp.position ASC, csp.created_at ASC, csp.id ASC
@@ -2341,6 +2341,8 @@ func (q *Queries) ListChatSessionProjectsInWorkspace(ctx context.Context, arg Li
 			&i.Priority,
 			&i.StartDate,
 			&i.DueDate,
+			&i.Visibility,
+			&i.CreatedBy,
 		); err != nil {
 			return nil, err
 		}

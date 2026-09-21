@@ -9,7 +9,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.reviewer_type, i.reviewer_id,
        i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision
+       i.revision, i.visibility
 FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -181,11 +181,14 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    stage, reviewer_type, reviewer_id, last_activity_at, id
+    stage, reviewer_type, reviewer_id, last_activity_at, id, visibility
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('stage'), sqlc.narg('reviewer_type')::text, sqlc.narg('reviewer_id')::uuid,
-    now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
+    -- Zero trust by default. A create that lands in a project passes the
+    -- project's current scope here instead (DENE-698).
+    COALESCE(sqlc.narg('visibility')::text, 'private')
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -238,7 +241,21 @@ WITH candidate AS (
         sqlc.narg('due_date')::date AS next_due_date,
         sqlc.narg('parent_issue_id')::uuid AS next_parent_issue_id,
         sqlc.narg('project_id')::uuid AS next_project_id,
-        sqlc.narg('stage')::integer AS next_stage
+        sqlc.narg('stage')::integer AS next_stage,
+        -- Sharing scope rides along with the project move (DENE-698).
+        -- An explicit value wins: that is an issue joining a project and
+        -- taking its current scope. Otherwise the only change made here is
+        -- the pairing rule's, which the CHECK constraint would enforce as a
+        -- 500 rather than a demotion: an issue leaving every project cannot
+        -- stay 'project'-scoped, so it falls back to 'private'. Widening is
+        -- never automatic.
+        CASE
+            WHEN sqlc.narg('visibility')::text IS NOT NULL
+                THEN sqlc.narg('visibility')::text
+            WHEN sqlc.narg('project_id')::uuid IS NULL AND i.visibility = 'project'
+                THEN 'private'
+            ELSE i.visibility
+        END AS next_visibility
     FROM issue AS i
     WHERE i.id = $1
       AND (sqlc.narg('expected_revision')::bigint IS NULL OR i.revision = sqlc.narg('expected_revision')::bigint)
@@ -284,6 +301,7 @@ UPDATE issue AS i SET
     parent_issue_id = changed.next_parent_issue_id,
     project_id = changed.next_project_id,
     stage = changed.next_stage,
+    visibility = changed.next_visibility,
     revision = i.revision + changed.did_change::integer,
     last_activity_at = CASE WHEN changed.did_activity
         THEN GREATEST(COALESCE(i.last_activity_at, i.updated_at), now())
@@ -327,10 +345,11 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, stage, last_activity_at, id
+    origin_type, origin_id, stage, last_activity_at, id, visibility
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
+    COALESCE(sqlc.narg('visibility')::text, 'private')
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec
@@ -399,7 +418,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.reviewer_type, i.reviewer_id,
        i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision
+       i.revision, i.visibility
 FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains visible.
@@ -675,3 +694,52 @@ FROM (
     WHERE workspace_id = $1
     LIMIT sqlc.arg('limit')::bigint
 ) bounded_issues;
+
+-- name: SetIssueVisibility :one
+-- The one writer of issue.visibility for a single issue (DENE-698). It is
+-- deliberately not folded into UpdateIssue: changing a scope is its own action
+-- with its own tier rule and its own audit row, and threading it through
+-- UpdateIssue's revision/activity bookkeeping would make an ordinary edit and
+-- a sharing change indistinguishable in the timeline.
+UPDATE issue SET
+    visibility = $3,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
+-- name: ApplyProjectVisibilityToIssues :many
+-- A project's scope change swept over the issues it currently holds. The
+-- snapshot is taken FOR UPDATE so what this reports is what was written, even
+-- against a concurrent single-issue change.
+--
+-- It returns a row per issue, carrying the scope that was overwritten, because
+-- the audit trail has to say what each issue moved from — a count cannot. The
+-- caller derives affected_count and previously_private_count from these rows.
+WITH snapshot AS (
+    SELECT i.id, i.visibility FROM issue AS i
+    WHERE i.workspace_id = $1 AND i.project_id = $2
+    FOR UPDATE
+), updated AS (
+    UPDATE issue AS u SET visibility = $3, updated_at = now()
+    WHERE u.id IN (SELECT snapshot.id FROM snapshot)
+    RETURNING u.id
+)
+SELECT snapshot.id, snapshot.visibility AS previous_visibility
+FROM snapshot
+WHERE snapshot.id IN (SELECT updated.id FROM updated);
+
+-- name: CountProjectIssueVisibility :one
+-- Dry run of ApplyProjectVisibilityToIssues, for the confirm dialog.
+SELECT
+    count(*)::bigint AS affected_count,
+    count(*) FILTER (WHERE visibility = 'private')::bigint AS previously_private_count
+FROM issue
+WHERE workspace_id = $1 AND project_id = $2;
+
+-- name: DemoteProjectScopedIssues :execrows
+-- issue.project_id is ON DELETE SET NULL, so deleting a project would leave
+-- its project-scoped issues violating issue_project_visibility_pairing. The
+-- delete path runs this first: losing the project means losing the audience,
+-- and tightening to private is the only answer that shows nobody more.
+UPDATE issue SET visibility = 'private', updated_at = now()
+WHERE workspace_id = $1 AND project_id = $2 AND visibility = 'project';

@@ -1939,6 +1939,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
+					// Sharing scope is its own action, not a field on the
+					// ordinary edit: it has its own tier rule and its own
+					// audit row (DENE-698).
+					r.Put("/visibility", h.SetIssueVisibility)
 					r.Post("/move", h.MoveIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
@@ -2029,6 +2033,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 
 			// Projects
+			// Repositories are JSONB entries in workspace.repos, not rows, so
+			// their scope is keyed by URL in the body rather than by path id.
+			r.Put("/api/repos/visibility", h.SetRepoVisibility)
+
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
 				r.Get("/", h.ListProjects)
@@ -2037,6 +2045,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					// A project's scope change sweeps every resource it
+					// holds, so the frontend asks what it would sweep first.
+					r.Get("/visibility/preview", h.PreviewProjectVisibility)
+					r.Put("/visibility", h.SetProjectVisibility)
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)

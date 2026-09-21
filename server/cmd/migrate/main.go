@@ -315,6 +315,9 @@ var concurrentIndexCleanups = map[string]string{
 	"494_chat_session_project_unique":                           "idx_chat_session_project_session_project",
 	"495_chat_session_project_project_index":                    "idx_chat_session_project_project",
 	"504_comment_routing_kind_unique":                           "comment_routing_kind_uniq",
+	"513_visibility_audit_workspace_index":                      "idx_visibility_audit_workspace_created",
+	"514_visibility_audit_resource_index":                       "idx_visibility_audit_resource",
+	"515_issue_visibility_index":                                "idx_issue_workspace_visibility",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

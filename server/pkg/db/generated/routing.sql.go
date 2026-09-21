@@ -22,7 +22,7 @@ SET assignee_type = $1::text,
 WHERE id = $3::uuid
   AND workspace_id = $4::uuid
   AND assignee_id IS NULL
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id, visibility
 `
 
 type AssignIssueIfUnassignedParams struct {
@@ -82,6 +82,7 @@ func (q *Queries) AssignIssueIfUnassigned(ctx context.Context, arg AssignIssueIf
 		&i.LastActivityAt,
 		&i.ReviewerType,
 		&i.ReviewerID,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -203,7 +204,7 @@ SET assignee_type = $1::text,
     updated_at = now()
 WHERE id = $3::uuid
   AND workspace_id = $4::uuid
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id, visibility
 `
 
 type ReassignIssueParams struct {
@@ -256,6 +257,7 @@ func (q *Queries) ReassignIssue(ctx context.Context, arg ReassignIssueParams) (I
 		&i.LastActivityAt,
 		&i.ReviewerType,
 		&i.ReviewerID,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -269,7 +271,7 @@ SET properties = jsonb_set(properties, ARRAY[$1::text], $2::jsonb, true),
 WHERE id = $3::uuid
   AND workspace_id = $4::uuid
   AND NOT (properties ? $1::text)
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id, visibility
 `
 
 type SetIssuePropertyValueIfUnsetParams struct {
@@ -321,6 +323,7 @@ func (q *Queries) SetIssuePropertyValueIfUnset(ctx context.Context, arg SetIssue
 		&i.LastActivityAt,
 		&i.ReviewerType,
 		&i.ReviewerID,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -335,7 +338,7 @@ SET reviewer_type = $1::text,
 WHERE id = $3::uuid
   AND workspace_id = $4::uuid
   AND reviewer_type IS NULL
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, reviewer_type, reviewer_id, visibility
 `
 
 type SetIssueReviewerIfUnsetParams struct {
@@ -388,6 +391,7 @@ func (q *Queries) SetIssueReviewerIfUnset(ctx context.Context, arg SetIssueRevie
 		&i.LastActivityAt,
 		&i.ReviewerType,
 		&i.ReviewerID,
+		&i.Visibility,
 	)
 	return i, err
 }

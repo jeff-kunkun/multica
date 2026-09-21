@@ -90,7 +90,7 @@ Guest 一整列除了「查看」全是否，没有任何关系能翻过来：�
 502 只让数据库**放得下** `guest`，当时故意没放开接口：那时绝大多数写接口只检查「是不是成员」，不看档位，放出一个访客等于发给他 Member 的全部写权限，却顶着「只读」的名字。那条约束是「接口放行 `guest` 必须和拦截层同一次上线」，DENE-697 已经兑现：
 
 - 全局只读拦截层 `middleware.GuestReadOnly` 挂在整个已认证 `/api` 路由组的最前面，按 HTTP 方法判定，而不是靠每个 handler 自己记得检查。
-- `normalizeMemberRole` 放行 `guest`；邀请表的 role CHECK 扩成 `admin / member / guest`（migration 503）。`workspace_share_link` 不走 `normalizeMemberRole`，仍是 `admin / member`，不在本次范围内。
+- `normalizeMemberRole` 放行 `guest`；邀请表的 role CHECK 扩成 `admin / member / guest`（migration 508）。`workspace_share_link` 不走 `normalizeMemberRole`，仍是 `admin / member`，不在本次范围内。
 
 拦截层只对写方法（非 GET/HEAD/OPTIONS）生效，并留了一份**只涉及本人账号状态**的白名单：`/api/me`、`/api/cli-token`、`/api/feedback`、`/api/client-usage`、`/api/inbox`、`/api/notification-preferences`，加上「新建自己的工作区」和「退出工作区」。前缀匹配按路径段边界比较，`/api/me` 不会误命中 `/api/members`。访客改不了任何工作区内容，但能改自己的名字、标记通知已读、退出工作区。
 
@@ -113,7 +113,7 @@ Guest 一整列除了「查看」全是否，没有任何关系能翻过来：�
 2. **档位变更、移除成员 → 失效该用户的 `MembershipCache`。** 现状已经做到（`UpdateMember` / `DeleteMember` / 退出 / 删工作区都调了 `Invalidate`）。
 3. **`PATCache` 不需要因为档位或共享变更而失效。** 它只回答「token 属于谁」，这个答案不随档位变。它唯一需要失效的时机是吊销 token，现状已做。把它列进「每次共享变更都要清」只会制造无意义的缓存击穿。
 4. **信 `MembershipCache` 的三处，缓存命中之后仍要补判定。** 这是本次排查发现的真正漏洞：
-   - 附件下载：命中缓存就直接放行，完全不看附件所属 issue 的可见性。DENE-698 必须在这里加 `CanSee`，否则任何成员拿到附件 id 就能下载别人 `private` issue 里的文件。
+   - 附件下载：原本命中缓存就直接放行，完全不看附件所属 issue 的可见性。DENE-698 已在 `loadAttachmentForRequest` / `loadAttachmentForDownload` 两条路径补上 `requireAttachmentIssueVisible`：附件挂在 issue 上时按母 issue 的范围判定，拒绝时回 404「attachment not found」，与不存在完全同形。不挂 issue 的附件（聊天、头像）由各自的接口管辖，不在这一层拦。
    - daemon 两处：访客不应能注册或操作 runtime。DENE-697 选了「干脆不给访客写缓存」这条：`requireDaemonWorkspaceAccess` / `verifyDaemonWorkspaceAccess` 读到成员行后先过 `daemonAccessAllowedForTier`，访客按「找不到」拒绝，也不写 `MembershipCache`——缓存里存的是「是成员」这一个事实，一条代表访客的缓存项会让后面所有命中都放行。
 
 共享变更（改范围、项目加人减人）因为第 1 条，**没有任何缓存需要清**：下一次请求读库就是新答案。前端侧由 WebSocket 事件让相关 Query 失效即可，和现有 `member:updated` 同一个模式。
@@ -123,3 +123,45 @@ Guest 一整列除了「查看」全是否，没有任何关系能翻过来：�
 - **lead 看不见自己带的 `private` 项目。** 如果 A 建了一个 `private` 项目并把 B 设成 lead，按矩阵 B 看不见它（`private` 只认创建者）。矩阵答案是唯一的，但体验上会怪；DENE-698 做「设 lead」时应提示把项目范围改成 `project`。
 - **创建者离开工作区后，他的 `private` 资源对所有人不可见**（包括 Owner）。需要产品决定：移除成员时转交给操作人，还是保留为孤儿。不决定也不会出错，只是那些资源谁也找不回来。
 - 模块级可见性（DENE-699）是叠在这两层之上的第三道「与」门，不改变这张矩阵的任何一格。
+
+## 三档共享范围落地（DENE-698）
+
+### 数据模型
+
+| 迁移 | 做了什么 |
+| --- | --- |
+| 509 | `project.visibility`（CHECK 三档，默认 `private`）+ `project.created_by`；存量项目回填 `workspace` |
+| 510 | `issue.visibility` + 配对约束 `visibility <> 'project' OR project_id IS NOT NULL`；存量 issue 回填 `workspace` |
+| 511 | 仓库不是表，是 `workspace.repos` 里的 JSONB 条目，范围盖在条目上；存量回填 `workspace` |
+| 512 | `visibility_audit`：谁、何时、改了哪个资源、从哪档到哪档、这一档覆盖多少人、是直接改还是被项目扫中 |
+| 513–515 | 上述三张表/列各自的并发索引，一个文件一条语句 |
+
+**down 只收紧不放宽**：回滚时先把 `project` / `workspace` 的行统一改成 `private` 再删列，所以回滚之后没有任何人能看到比回滚前更多的东西——代价是回滚后一切都要重新分享，这是刻意选的方向。
+
+### 被指派人永远看得见
+
+档位之上还有两条「名字写在资源上」的关系：创建者与**被指派人**。把活指派给谁，本身就是一次分享——指派了却打不开是产品不该能到达的状态——所以被指派人在任何档位下都看得见那张 issue，和创建者同级。指派不改档位，只多认一个人；project / repo 没有指派人，这条只对 issue 成立。SQL 与 Go 两侧都带这一项，parity 测试把「指派给我 / 指派给别人 / 指派给智能体 / 未指派」也叉进矩阵。
+
+### 读侧：一个判定，两种写法
+
+`visibilityViewer`（`handler/visibility.go`）是这一层的唯一入口。它的项目集合直接复用 `listAccessibleProjectIDs`，不新增查询。
+
+- **分页的列表**（issue 搜索、`ListIssues`、issue 表格、分组、项目搜索）把范围拼进 SQL：`issueVisibilitySQL` / `projectVisibilitySQL`。必须在 SQL 里，否则翻页和 total 描述的是调用者看不到的行。
+- **不分页的读**（`open_only`、子 issue 列表、项目列表、收件箱）在 Go 里过滤：`canSeeIssueFields` / `canSeeProject` / `canSeeRepo`。
+- 两种写法是同一个矩阵的两种语言，`TestIssueVisibilitySQLAgreesWithCanSeeIssue` 把它们钉在一起：任何一边先改都会红。
+- 拒绝一律是「不存在」。`hiddenIssueNotFound` 与真正的 404 逐字节相同。
+
+绕过这一层的只有两种调用者，都用命名常量记着原因：`bypassAgent`（智能体的读由 `agent.permission_mode` 与 `agent_invocation_target` 管辖，跑人类的范围会让它看不见刚派给自己的 issue）与 `bypassInternal`（daemon 管道、webhook 扇出，根本没有人类调用者）。
+
+### 写侧：项目是批量开关
+
+- `PUT /api/issues/{id}/visibility`、`PUT /api/projects/{id}/visibility`、`PUT /api/repos/visibility`。
+- `GET /api/projects/{id}/visibility/preview` 先回答「会扫到多少」：`affected_count` 与 `previously_private_count`，供确认弹窗用；正式写入返回同样两个数字加 `audience_size`。
+- 改项目范围 = 覆盖它当前持有的全部资源。之后进入项目的资源取项目当时的范围，随后各自独立，不再被项目带着走。
+- 新建资源默认 `private`，只有一个例外：**智能体创建的 issue 若不属于任何项目，落地就是 `workspace`**。`private` 的含义是「只有创建者看得见」，而智能体不是一个能被展示列表的人——这样的 issue 留在 `private` 会对所有人（包括让它干活的那个人）不可见。在项目里的仍然取项目当时的范围。规则写在 `service.CreateIssue`。
+- `project` 档没有项目就不成立：接口先回 400（话说人话），数据库的配对约束兜底。issue 被移出全部项目时，`UpdateIssue` 的 SQL 把它降回 `private`——收紧是自动的，放宽永远不是。
+- 每一次变更都写 `visibility_audit`：直接改写一行 `source='direct'`，被项目扫中的资源逐个写 `source='project_bulk'`（一条语句批量写入，避免扫一千个 issue 就来一千个往返）。
+
+### 已知欠账
+
+`workspaceToResponse` 同时用来构造 `workspace:updated` 广播，一份负载发给所有人，装不下「对这个调用者而言可见的仓库」。所以仓库过滤只加在 GET 路径（`ListWorkspaces` / `GetWorkspace` 调 `visibleWorkspaceRepos`），广播里的 `repos` 仍是全量。要彻底解决得让广播按订阅者分发，或者把仓库列表从工作区负载里拆出去——不在本票范围内。

@@ -78,7 +78,9 @@ type IssueResponse struct {
 	CreatorID     string  `json:"creator_id"`
 	ParentIssueID *string `json:"parent_issue_id"`
 	ProjectID     *string `json:"project_id"`
-	Position      float64 `json:"position"`
+	// Visibility is the issue's sharing scope (DENE-698).
+	Visibility string  `json:"visibility,omitempty"`
+	Position   float64 `json:"position"`
 	// OriginType / OriginID are the issue's provenance for platform-internal
 	// flows — autopilot runs, quick-create tasks, and requirement alignment
 	// (`origin_type='issue_draft'`, `origin_id` = the alignment's
@@ -367,6 +369,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatorID:      uuidToString(i.CreatorID),
 		ParentIssueID:  uuidToPtr(i.ParentIssueID),
 		ProjectID:      uuidToPtr(i.ProjectID),
+		Visibility:     i.Visibility,
 		Position:       i.Position,
 		OriginType:     textToPtr(i.OriginType),
 		OriginID:       uuidToPtr(i.OriginID),
@@ -408,6 +411,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		CreatorID:      uuidToString(i.CreatorID),
 		ParentIssueID:  uuidToPtr(i.ParentIssueID),
 		ProjectID:      uuidToPtr(i.ProjectID),
+		Visibility:     i.Visibility,
 		Position:       i.Position,
 		Stage:          int4ToPtr(i.Stage),
 		StartDate:      dateToPtr(i.StartDate),
@@ -479,6 +483,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		CreatorID:      uuidToString(i.CreatorID),
 		ParentIssueID:  uuidToPtr(i.ParentIssueID),
 		ProjectID:      uuidToPtr(i.ProjectID),
+		Visibility:     i.Visibility,
 		Position:       i.Position,
 		Stage:          int4ToPtr(i.Stage),
 		StartDate:      dateToPtr(i.StartDate),
@@ -677,7 +682,7 @@ type searchResult struct {
 // case-insensitive LIKE semantics as the legacy query. The pipeline deliberately
 // trades the title, description, and comment content GIN fast paths for one
 // predictable pass over each relation within the selected workspace.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string, viewer visibilityViewer) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, term := range terms {
@@ -714,6 +719,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		// searchable instead of disappearing from the default result set.
 		terminalStatusesParam = nextArg(terminalStatusKeys)
 	}
+
+	// Sharing scope narrows the candidate stage, not the result page: search
+	// paginates, so a hidden row dropped afterwards would shrink pages and
+	// eventually leak through the total. Stage two is driven by issue_matches,
+	// so filtering there covers comment matches too. Bound before limit/offset
+	// because the caller fills those by position from the end.
+	visibilityPredicate := viewer.issueVisibilitySQL("i", nextArg)
 
 	limitParam := nextArg(nil)
 	offsetParam := nextArg(nil)
@@ -756,7 +768,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		)
 	}
 
-	issueWhere := "i.workspace_id = " + wsParam
+	issueWhere := "i.workspace_id = " + wsParam + " AND " + visibilityPredicate
 	if terminalStatusesParam != "" {
 		issueWhere += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
 	}
@@ -971,7 +983,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id,
-		i.revision,
+		i.revision, i.visibility,
 		pc.match_source,
 		COALESCE(c.content, '') AS matched_comment_content
 	FROM page_candidates pc
@@ -1034,14 +1046,21 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		terminalStatusKeys = resolvedKeys
 	}
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys)
+	searchViewer, err := h.visibilityViewerFor(r, wsUUID)
+	if err != nil {
+		// The caller's sharing facts could not be established. Search sees
+		// nothing rather than falling back to an unfiltered scan.
+		writeJSON(w, http.StatusOK, map[string]any{"issues": []SearchIssueResponse{}})
+		return
+	}
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys, searchViewer)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset
 
 	var results []searchResult
-	err := runSearchQuery(ctx, h.TxStarter, sqlQuery, args, func(rows pgx.Rows) error {
+	err = runSearchQuery(ctx, h.TxStarter, sqlQuery, args, func(rows pgx.Rows) error {
 		for rows.Next() {
 			var sr searchResult
 			if err := rows.Scan(
@@ -1067,6 +1086,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 				&sr.issue.Number,
 				&sr.issue.ProjectID,
 				&sr.issue.Revision,
+				&sr.issue.Visibility,
 				&sr.matchSource,
 				&sr.matchedCommentContent,
 			); err != nil {
@@ -1245,6 +1265,11 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
 			return
 		}
+		openViewer, viewerErr := h.visibilityViewerFor(r, wsUUID)
+		if viewerErr != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"issues": []IssueResponse{}, "total": 0})
+			return
+		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:        wsUUID,
 			TerminalStatusKeys: terminalStatusKeys,
@@ -1260,6 +1285,20 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
 			return
+		}
+
+		// open_only returns the whole set rather than a page, so filtering
+		// here cannot shrink a page or skew a total.
+		if !openViewer.bypasses() {
+			visible := issues[:0]
+			for _, issue := range issues {
+				if openViewer.canSeeIssueFields(
+					issue.Visibility, issue.CreatorType, issue.CreatorID, issue.ProjectID,
+					issue.AssigneeType.String, issue.AssigneeID) {
+					visible = append(visible, issue)
+				}
+			}
+			issues = visible
 		}
 
 		prefix := h.getIssuePrefix(ctx, wsUUID)
@@ -1411,6 +1450,15 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
+	// Sharing scope belongs in the window, next to the facets and for the same
+	// reason: a row removed after LIMIT/OFFSET would shrink the page and leave
+	// `total` counting issues the caller cannot see.
+	listViewer, err := h.visibilityViewerFor(r, wsUUID)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"issues": []IssueResponse{}, "total": 0})
+		return
+	}
+	where = append(where, listViewer.issueVisibilitySQL("i", addArg))
 	if sortByStatus {
 		var err error
 		sortCol, err = h.issueStatusSortExpression(r.Context(), wsUUID, addArg)
@@ -1612,7 +1660,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-	   i.revision
+	   i.revision, i.visibility
 FROM issue i
 WHERE %s
 ORDER BY %s
@@ -1653,6 +1701,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Stage,
 			&row.Properties,
 			&row.Revision,
+			&row.Visibility,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1899,6 +1948,15 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
+
+	// Sharing scope, inside the grouped window for the same reason as the
+	// table's: a group header counting issues the caller cannot open is worse
+	// than no group at all.
+	groupViewer, viewerErr := h.visibilityViewerFor(r, wsUUID)
+	if viewerErr != nil {
+		groupViewer = visibilityViewer{}
+	}
+	where = append(where, groupViewer.issueVisibilitySQL("i", addArg))
 
 	statuses := splitCommaParam(r.URL.Query().Get("statuses"))
 	if len(statuses) == 0 {
@@ -2389,6 +2447,14 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
+	// A parent the caller can see does not vouch for its children: each child
+	// carries its own scope. The list is unpaginated, so filtering here is the
+	// whole answer.
+	if viewer, viewerErr := h.visibilityViewerFor(r, issue.WorkspaceID); viewerErr == nil {
+		children = viewer.filterIssues(children)
+	} else {
+		children = nil
+	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	ids := make([]pgtype.UUID, len(children))
 	for i, child := range children {
@@ -2474,6 +2540,11 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
+	}
+	if viewer, viewerErr := h.visibilityViewerFor(r, wsUUID); viewerErr == nil {
+		children = viewer.filterIssues(children)
+	} else {
+		children = nil
 	}
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
 	ids := make([]pgtype.UUID, len(children))
@@ -3692,6 +3763,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ProjectID = pgtype.UUID{Valid: false}
 		}
 	}
+	// An issue moved into a different project takes that project's current
+	// scope, then stays independent of it (DENE-698). Re-reading the project
+	// here rather than trusting the request keeps the inherited value the one
+	// the project actually has.
+	if params.ProjectID.Valid && uuidToString(params.ProjectID) != uuidToString(prevIssue.ProjectID) {
+		if target, projectErr := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          params.ProjectID,
+			WorkspaceID: prevIssue.WorkspaceID,
+		}); projectErr == nil && permission.Visibility(target.Visibility).Valid() {
+			params.Visibility = pgtype.Text{String: target.Visibility, Valid: true}
+		}
+	}
 	if _, ok := rawFields["stage"]; ok {
 		if req.Stage != nil {
 			if *req.Stage < 1 {
@@ -4368,6 +4451,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// per issue, and rejected instead of skipped like the per-item guards in
 	// the loop: a foreign project invalidates the whole request.
 	batchProjectID := pgtype.UUID{Valid: false}
+	batchProjectVisibility := pgtype.Text{}
 	if _, ok := rawUpdates["project_id"]; ok && req.Updates.ProjectID != nil {
 		projectUUID, ok := parseUUIDOrBadRequest(w, *req.Updates.ProjectID, "project_id")
 		if !ok {
@@ -4387,6 +4471,14 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		batchProjectID = projectUUID
+		if project, projectErr := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          projectUUID,
+			WorkspaceID: wsUUID,
+		}); projectErr == nil && permission.Visibility(project.Visibility).Valid() {
+			// Same inheritance as the single-issue move: everything landing in
+			// this project takes its current scope (DENE-698).
+			batchProjectVisibility = pgtype.Text{String: project.Visibility, Valid: true}
+		}
 	}
 
 	updated := 0
@@ -4522,6 +4614,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if _, ok := rawUpdates["project_id"]; ok {
 			// Resolved before the loop; an explicit null stays invalid and clears.
 			params.ProjectID = batchProjectID
+			if batchProjectID.Valid && uuidToString(batchProjectID) != uuidToString(prevIssue.ProjectID) {
+				params.Visibility = batchProjectVisibility
+			}
 		}
 		if _, ok := rawUpdates["stage"]; ok {
 			if req.Updates.Stage != nil {

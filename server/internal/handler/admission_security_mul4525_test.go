@@ -184,10 +184,14 @@ func TestRerunIssue_PrivateHistoricalAgent(t *testing.T) {
 	ctx := context.Background()
 	agentID, ownerID, _ := privateAgentTestFixture(t) // private agent owned by ownerID
 
+	// Shared workspace-wide on purpose: this test is about the invocation
+	// gate, and the sharing layer (DENE-698) would otherwise answer first —
+	// a private issue somebody else created is 404 to everyone but its
+	// creator, which would hide the 403 this test exists to see.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority)
-		VALUES ($1, 'rerun private agent', 'member', $2, 'agent', $3, 'medium')
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority, visibility)
+		VALUES ($1, 'rerun private agent', 'member', $2, 'agent', $3, 'medium', 'workspace')
 		RETURNING id`, testWorkspaceID, ownerID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("seed issue: %v", err)
 	}

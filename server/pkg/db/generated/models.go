@@ -811,6 +811,7 @@ type Issue struct {
 	LastActivityAt     pgtype.Timestamptz `json:"last_activity_at"`
 	ReviewerType       pgtype.Text        `json:"reviewer_type"`
 	ReviewerID         pgtype.UUID        `json:"reviewer_id"`
+	Visibility         string             `json:"visibility"`
 }
 
 type IssueDependency struct {
@@ -1209,6 +1210,8 @@ type Project struct {
 	Priority    string             `json:"priority"`
 	StartDate   pgtype.Date        `json:"start_date"`
 	DueDate     pgtype.Date        `json:"due_date"`
+	Visibility  string             `json:"visibility"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
 }
 
 type ProjectMember struct {
@@ -1588,6 +1591,20 @@ type VerificationCode struct {
 	Used      bool               `json:"used"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	Attempts  int32              `json:"attempts"`
+}
+
+type VisibilityAudit struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ActorType          string             `json:"actor_type"`
+	ActorID            pgtype.UUID        `json:"actor_id"`
+	ResourceType       string             `json:"resource_type"`
+	ResourceID         string             `json:"resource_id"`
+	PreviousVisibility pgtype.Text        `json:"previous_visibility"`
+	NewVisibility      string             `json:"new_visibility"`
+	AudienceSize       int32              `json:"audience_size"`
+	Source             string             `json:"source"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 type WebhookDelivery struct {
