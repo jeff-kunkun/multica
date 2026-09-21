@@ -1184,6 +1184,7 @@
       "runtime_reconnect_timeout": "守护进程未及时重新连接",
       "runtime_recovery": "守护进程已重启",
       "timeout": "运行超时",
+      "task_time_limit": "达到工作区运行时长上限，已停止",
       "iteration_limit": "达到迭代次数上限",
       "agent_blocked": "等待人工输入",
       "api_invalid_request": "模型 API 拒绝了请求",

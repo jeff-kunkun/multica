@@ -44,6 +44,7 @@ const REASON_CLASS: Record<string, FailureClass> = {
   // Ran too long. Platform-side sweeper timeout and the agent's own hard
   // timeout land together — from the dashboard both read as "this run hung".
   timeout: "timeout",
+  task_time_limit: "timeout",
   "agent_error.agent_timeout": "timeout",
   codex_semantic_inactivity: "timeout",
 
