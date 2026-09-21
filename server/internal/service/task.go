@@ -734,6 +734,10 @@ var ErrDuplicatePendingTask = errors.New("a pending task for this issue and agen
 const (
 	agentHaltedMetadataKey      = "agent_halted"
 	agentChainBudgetNotifiedKey = "agent_chain_budget_notified"
+	// DefaultAgentChainBudget is the per-issue agent-to-agent @-relay cap when
+	// workspace.settings.agent_chain_budget is absent or invalid. Keep in
+	// sync with GetWorkspaceAgentChainBudget's SQL ELSE branch.
+	DefaultAgentChainBudget int32 = 30
 )
 
 // admitAgentChain is the single admission gate shared by issue-assignee,
@@ -770,7 +774,7 @@ func (s *TaskService) admitAgentChain(ctx context.Context, issue db.Issue, trigg
 
 	budget, err := s.Queries.GetWorkspaceAgentChainBudget(ctx, issue.WorkspaceID)
 	if err != nil || budget <= 0 {
-		budget = 6
+		budget = DefaultAgentChainBudget
 	}
 	count, err := s.Queries.CountDelegatedTasksSinceHumanComment(ctx, issue.ID)
 	if err != nil || count < int64(budget) {
@@ -784,12 +788,12 @@ func (s *TaskService) admitAgentChain(ctx context.Context, issue db.Issue, trigg
 		Key: agentChainBudgetNotifiedKey, Value: []byte("true"),
 	})
 	if markErr == nil {
-		s.createAgentChainBudgetNotice(ctx, issue, budget)
+		s.createAgentChainBudgetNotice(ctx, issue, budget, triggerCommentID)
 	}
 	return ErrAgentChainBudgetExceeded
 }
 
-func (s *TaskService) createAgentChainBudgetNotice(ctx context.Context, issue db.Issue, budget int32) {
+func (s *TaskService) createAgentChainBudgetNotice(ctx context.Context, issue db.Issue, budget int32, triggerCommentID pgtype.UUID) {
 	creator := "the issue creator"
 	mention := ""
 	if issue.CreatorType == "member" && issue.CreatorID.Valid {
@@ -799,11 +803,27 @@ func (s *TaskService) createAgentChainBudgetNotice(ctx context.Context, issue db
 			mention = fmt.Sprintf("[@%s](mention://member/%s) ", creator, util.UUIDToString(issue.CreatorID))
 		}
 	}
+	parentID := pgtype.UUID{}
+	var rootComment *db.Comment
+	if triggerCommentID.Valid {
+		if comment, err := s.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+			ID: triggerCommentID, WorkspaceID: issue.WorkspaceID,
+		}); err == nil && comment.IssueID == issue.ID {
+			parentID = triggerCommentID
+			if root, rootErr := s.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
+				CommentID: triggerCommentID, WorkspaceID: issue.WorkspaceID,
+			}); rootErr == nil {
+				rootComment = &root
+			} else {
+				rootComment = &comment
+			}
+		}
+	}
 	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		ID: dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
 		AuthorType: "system", AuthorID: pgtype.UUID{Valid: true},
 		Content: fmt.Sprintf("%sAgent delegation chain reached the limit of %d runs. Add a human comment to reset the budget and continue.", mention, budget),
-		Type:    "system", ParentID: pgtype.UUID{},
+		Type:    "system", ParentID: parentID,
 	})
 	if err != nil {
 		slog.Warn("agent chain budget notice: create system comment failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -816,6 +836,7 @@ func (s *TaskService) createAgentChainBudgetNotice(ctx context.Context, issue db
 			Payload: map[string]any{"comment": created.Comment(), "issue_title": issue.Title, "issue_revision": created.IssueRevision},
 		})
 	}
+	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "system", "")
 }
 
 // isDuplicatePendingTaskErr reports whether err is the pending-task unique-index

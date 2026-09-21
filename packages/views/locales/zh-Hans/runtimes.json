@@ -327,7 +327,8 @@
     "window_flash_lite": "Flash Lite",
     "window_credits": "积分",
     "window_balance_cny": "人民币余额",
-    "window_balance_usd": "美元余额"
+    "window_balance_usd": "美元余额",
+    "switch_source": "切换{{provider}}额度"
   },
   "profiles": {
     "cta": "添加运行时",
