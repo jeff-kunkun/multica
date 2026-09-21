@@ -1641,6 +1641,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// that routing is on, so everyone should be able to see
 					// that it is currently broken. Only admins can change it.
 					r.Get("/routing/health", h.GetRoutingHealth)
+					r.Get("/log-export-config", h.GetLogExportConfig)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -1650,6 +1651,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// The re-check button. It makes an outbound request, so it
 					// sits with the other admin actions rather than with the
 					// read above.
+					r.Put("/log-export-config", h.UpdateLogExportConfig)
 					r.Post("/routing/health/check", h.CheckRoutingHealth)
 					// Model discovery also makes an outbound request with the
 					// workspace/deployment credential, so keep it admin-only.
@@ -1981,6 +1983,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+			r.Get("/api/tasks/{taskId}/log-export", h.ExportTaskLogs)
+			r.Post("/api/tasks/{taskId}/log-export/report", h.ReportTaskLogs)
 			r.With(handler.RequireHumanActor).Post("/api/tasks/{taskId}/retry-source-context", h.RetrySourceContextQuickCreate)
 
 			// Issue quick actions (definitions; running one lives under

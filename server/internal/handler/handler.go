@@ -408,6 +408,11 @@ type Handler struct {
 	// rather than dropping it; routing then uses the deployment gateway, which
 	// is what it did before workspaces could bring their own.
 	RoutingSecrets *secretbox.Box
+
+	// LogExportGitHubAPIBase overrides the GitHub REST endpoint the log
+	// repository push talks to. Empty means api.github.com; tests point it at
+	// a fake.
+	LogExportGitHubAPIBase string
 	// PRRefresh drives the GitHub API snapshot pipeline for PR cards (MUL-5265):
 	// webhook / page-visit / TTL triggers → authenticated GraphQL fetch →
 	// head-SHA-guarded atomic snapshot write. Always non-nil, but inert (every

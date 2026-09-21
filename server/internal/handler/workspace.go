@@ -125,6 +125,8 @@ func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	// server. Stripped here, in the one function every workspace response goes
 	// through, rather than at each of its call sites.
 	settings = redactRoutingSettings(settings)
+	// Same for the log repository token (log_export_config.go).
+	settings = redactLogExportSettings(settings)
 	var repos any
 	if w.Repos != nil {
 		json.Unmarshal(w.Repos, &repos)
@@ -424,6 +426,9 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 				"this deployment cannot store a routing key (no MULTICA_ROUTING_SECRET_KEY or JWT_SECRET)")
 			return
 		}
+		// The log repository block has its own endpoint; a generic write keeps
+		// whatever is stored rather than the redacted copy the client holds.
+		merged = carryLogExportSettings(merged, stored)
 		s, _ := json.Marshal(merged)
 		params.Settings = s
 	}

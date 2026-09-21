@@ -206,6 +206,23 @@ func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const deleteWorkspaceSettingsKey = `-- name: DeleteWorkspaceSettingsKey :exec
+UPDATE workspace SET
+    settings = COALESCE(settings, '{}'::jsonb) - $2::text,
+    updated_at = now()
+WHERE id = $1
+`
+
+type DeleteWorkspaceSettingsKeyParams struct {
+	ID  pgtype.UUID `json:"id"`
+	Key string      `json:"key"`
+}
+
+func (q *Queries) DeleteWorkspaceSettingsKey(ctx context.Context, arg DeleteWorkspaceSettingsKeyParams) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceSettingsKey, arg.ID, arg.Key)
+	return err
+}
+
 const getDaemonWorkspace = `-- name: GetDaemonWorkspace :one
 SELECT id, name
 FROM workspace
@@ -448,6 +465,27 @@ func (q *Queries) LockWorkspaceForDelete(ctx context.Context, id pgtype.UUID) (p
 	var id_2 pgtype.UUID
 	err := row.Scan(&id_2)
 	return id_2, err
+}
+
+const setWorkspaceSettingsKey = `-- name: SetWorkspaceSettingsKey :exec
+UPDATE workspace SET
+    settings = jsonb_set(COALESCE(settings, '{}'::jsonb), ARRAY[$2::text], $3::jsonb, true),
+    updated_at = now()
+WHERE id = $1
+`
+
+type SetWorkspaceSettingsKeyParams struct {
+	ID    pgtype.UUID `json:"id"`
+	Key   string      `json:"key"`
+	Value []byte      `json:"value"`
+}
+
+// Writes ONE top-level key of the settings column. A subsystem that owns a
+// single block (log_export) uses this instead of UpdateWorkspace, which
+// replaces the whole column and would race every other settings writer.
+func (q *Queries) SetWorkspaceSettingsKey(ctx context.Context, arg SetWorkspaceSettingsKeyParams) error {
+	_, err := q.db.Exec(ctx, setWorkspaceSettingsKey, arg.ID, arg.Key, arg.Value)
+	return err
 }
 
 const updateWorkspace = `-- name: UpdateWorkspace :one

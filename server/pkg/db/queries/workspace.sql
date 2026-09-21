@@ -69,6 +69,21 @@ UPDATE workspace SET
 WHERE id = $1
 RETURNING *;
 
+-- name: SetWorkspaceSettingsKey :exec
+-- Writes ONE top-level key of the settings column. A subsystem that owns a
+-- single block (log_export) uses this instead of UpdateWorkspace, which
+-- replaces the whole column and would race every other settings writer.
+UPDATE workspace SET
+    settings = jsonb_set(COALESCE(settings, '{}'::jsonb), ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb, true),
+    updated_at = now()
+WHERE id = $1;
+
+-- name: DeleteWorkspaceSettingsKey :exec
+UPDATE workspace SET
+    settings = COALESCE(settings, '{}'::jsonb) - sqlc.arg('key')::text,
+    updated_at = now()
+WHERE id = $1;
+
 -- name: IncrementIssueCounter :one
 UPDATE workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
