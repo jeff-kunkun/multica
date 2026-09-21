@@ -242,6 +242,7 @@ func TestResumeDoesNotResetBudgetOrDuplicateNotice(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
+	setAgentChainBudget(t, "6")
 	agentID := createHandlerTestAgent(t, "Guard Resume Agent", []byte("[]"))
 	issueID := dbfx.Issue(t, "resume budget", testutil.Cols{
 		"creator_type": "agent",
