@@ -444,6 +444,28 @@ UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: DisableAgent :one
+-- Parks a seat: it takes no NEW work until it is enabled again (DENE-714).
+-- Deliberately narrower than ArchiveAgent — no children check, no reviewer
+-- release, no task cancellation — because nothing is released. The seat keeps
+-- its routing tier, its specialisations and its place in every list, and the
+-- three admission gates (routing roster, AgentReadiness, ClaimAgentTask) read
+-- disabled_at to skip it.
+--
+-- The IS NULL guard makes the write idempotent-safe rather than idempotent:
+-- re-disabling an already disabled seat returns no row, so the handler answers
+-- 409 instead of silently resetting the timestamp a human may be reading as
+-- "parked since".
+UPDATE agent SET disabled_at = now(), updated_at = now()
+WHERE id = $1 AND disabled_at IS NULL
+RETURNING *;
+
+-- name: EnableAgent :one
+-- Un-parks a seat. Same IS NOT NULL guard, same reason as DisableAgent.
+UPDATE agent SET disabled_at = NULL, updated_at = now()
+WHERE id = $1 AND disabled_at IS NOT NULL
+RETURNING *;
+
 -- name: ListAgentTasks :many
 SELECT * FROM agent_task_queue
 WHERE agent_id = $1
@@ -931,6 +953,13 @@ WHERE id = (
           WHERE a.id = atq.agent_id
             -- A task's persisted runtime is not authority after an agent rebind.
             AND a.runtime_id = atq.runtime_id
+            -- A parked seat claims nothing new (DENE-714). Enforced here, not
+            -- only at enqueue time, because a seat is usually disabled while
+            -- work is already queued behind it — that is the whole point of the
+            -- switch. Tasks already dispatched or running are untouched: the
+            -- gate is on the claim, so stopping live runs stays the explicit
+            -- "cancel all tasks" action.
+            AND a.disabled_at IS NULL
             -- Private runtimes only execute their owner's agents. Ownerless
             -- runtime/agent rows remain claimable only so the handler can
             -- settle them explicitly before daemon delivery; filtering them

@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -200,6 +201,12 @@ type AgentResponse struct {
 	UpdatedAt                        string                 `json:"updated_at"`
 	ArchivedAt                       *string                `json:"archived_at"`
 	ArchivedBy                       *string                `json:"archived_by"`
+	// DisabledAt is when this seat was parked (DENE-714), null while it is
+	// taking work. Distinct from ArchivedAt in every way that matters: the seat
+	// stays in every list, keeps its routing tier and its specialisations, and
+	// one click puts it back. It is a gate on NEW work only — runs already
+	// executing when the switch was flipped keep going.
+	DisabledAt *string `json:"disabled_at"`
 }
 
 // runtimeConfigGatewayTokenMask is the placeholder the API substitutes for
@@ -314,6 +321,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		UpdatedAt:                timestampToString(a.UpdatedAt),
 		ArchivedAt:               timestampToPtr(a.ArchivedAt),
 		ArchivedBy:               uuidToPtr(a.ArchivedBy),
+		DisabledAt:               timestampToPtr(a.DisabledAt),
 	}
 }
 
@@ -3410,6 +3418,103 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
+	redactAgentResponseForActor(&resp, actorType)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DisableAgent parks a seat: it stops taking NEW work but stays exactly where
+// it is (DENE-714).
+//
+// Deliberately much smaller than ArchiveAgent, and the difference IS the
+// feature. Archiving releases things — it clears acceptance slots, cancels
+// queued and running tasks, refuses base roles that still have
+// specialisations, and drops the seat out of every list. Disabling releases
+// nothing: no slot is cleared, no run is interrupted, a base role with children
+// is fine, and the row keeps its place. The only thing that changes is that
+// three admission gates now skip it — the routing roster, AgentReadiness, and
+// the task claim.
+//
+// Runs already executing are untouched on purpose: the switch answers "stop
+// giving this seat work", and "stop what it is doing right now" is a different
+// question with an existing answer (POST /cancel-tasks). Folding the two
+// together would make an operator parking a seat during a provider outage also
+// throw away whatever happened to be mid-flight.
+//
+// System agents are allowed here, unlike archive. Parking the workspace's
+// built-in Chief of Staff is recoverable with one more click and strands
+// nothing — the row and its system_key stay in place, so the bootstrap lookup
+// still finds it.
+func (h *Handler) DisableAgent(w http.ResponseWriter, r *http.Request) {
+	h.setAgentDisabled(w, r, true)
+}
+
+// EnableAgent un-parks a seat. It rejoins the routing ladder on its own tier
+// and its queued work becomes claimable again; nothing is re-created, because
+// nothing was released.
+func (h *Handler) EnableAgent(w http.ResponseWriter, r *http.Request) {
+	h.setAgentDisabled(w, r, false)
+}
+
+// setAgentDisabled is the shared body of the two switch endpoints. The two
+// differ only in which guarded UPDATE they run and which conflict they report,
+// and a copy of the load / permission / broadcast sequence per direction is a
+// copy that drifts.
+func (h *Handler) setAgentDisabled(w http.ResponseWriter, r *http.Request, disable bool) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+	// An archived seat has no intake to gate. Answering 409 rather than
+	// silently writing the column keeps "disabled" meaning one thing on the
+	// list: a seat you can see, parked on purpose.
+	if agent.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "agent is archived; restore it before changing its availability")
+		return
+	}
+
+	var updated db.Agent
+	var err error
+	if disable {
+		updated, err = h.Queries.DisableAgent(r.Context(), agent.ID)
+	} else {
+		updated, err = h.Queries.EnableAgent(r.Context(), agent.ID)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The guarded UPDATE matched nothing, which means the row is already in
+		// the state this call asks for. Reported rather than swallowed so a
+		// re-disable cannot quietly reset the "parked since" timestamp.
+		if disable {
+			writeError(w, http.StatusConflict, "agent is already disabled")
+		} else {
+			writeError(w, http.StatusConflict, "agent is not disabled")
+		}
+		return
+	}
+	if err != nil {
+		slog.Warn("set agent disabled failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id, "disable", disable)...)
+		writeError(w, http.StatusInternalServerError, "failed to change agent availability")
+		return
+	}
+
+	wsID := uuidToString(updated.WorkspaceID)
+	slog.Info("agent availability changed", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID, "disabled", disable)...)
+	resp := h.agentToResponse(updated)
+	if err := h.attachAgentSkills(r.Context(), &resp, updated.ID); err != nil {
+		slog.Warn("load agent skills after availability change failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, wsID)
+	// agent:status, the same event UpdateAgent publishes: this is a field on
+	// the agent row changing, not a lifecycle transition like archive/restore.
+	// Every client already invalidates its agent list on it, so a row parked
+	// from one window greys out in the others without a new event kind.
+	h.publish(protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusOK, resp)
 }

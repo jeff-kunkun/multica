@@ -29,6 +29,12 @@ import type { useT } from "../i18n";
 // profile (DSH's `multica` profile, which supplies the protocol Multica
 // drives). "Reinstall the CLI" copy sends the user to re-run an install that
 // was never broken; the fix is installing the profile.
+//
+// `agent_disabled` (DENE-714) is kept out of `target_unavailable` on the same
+// rule: the seat is not gone and its machine may be perfectly healthy —
+// somebody turned it off from the agents list. "Unavailable" copy sends the
+// user hunting for a machine or an archive when the repair is one click on a
+// row they are already looking at.
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
 // Full sentence — for tooltips and other surfaces with room to explain.
@@ -46,6 +52,8 @@ export function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
       return t(($) => $.comment.trigger_blocked_runtime_profile_missing);
     case "agent_runtime_required":
       return t(($) => $.comment.trigger_blocked_agent_runtime_required);
+    case "agent_disabled":
+      return t(($) => $.comment.trigger_blocked_agent_disabled);
     default:
       return t(($) => $.comment.trigger_blocked_generic);
   }
@@ -67,6 +75,8 @@ export function blockedShortReasonLabel(reasonCode: string, t: IssuesT): string 
       return t(($) => $.comment.trigger_blocked_short_runtime_profile_missing);
     case "agent_runtime_required":
       return t(($) => $.comment.trigger_blocked_short_agent_runtime_required);
+    case "agent_disabled":
+      return t(($) => $.comment.trigger_blocked_short_agent_disabled);
     default:
       return t(($) => $.comment.trigger_blocked_short_generic);
   }

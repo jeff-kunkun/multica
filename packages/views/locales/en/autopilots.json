@@ -81,6 +81,7 @@
     "run_blocked_runtime_offline": "Not triggered — the agent's runtime is offline",
     "run_blocked_agent_runtime_required": "Not triggered — the agent has no runtime; bind one to run it",
     "run_blocked_target_unavailable": "Not triggered — the agent is unavailable",
+    "run_blocked_agent_disabled": "Not triggered — the agent is disabled; enable it from the agents list",
     "run_blocked_attribution": "Not triggered — the run couldn't be attributed to a responsible member",
     "run_blocked_already_active": "Not triggered — a recent run already covers this",
     "run_blocked_quota_exceeded": "Not triggered — the run limit for this period has been reached",

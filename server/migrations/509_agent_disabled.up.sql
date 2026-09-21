@@ -1,0 +1,21 @@
+-- Per-agent intake switch (DENE-714): a reversible "this seat takes no new
+-- work" gate that is NOT archival.
+--
+-- Timestamp rather than a boolean, per the repo's column convention and to
+-- mirror archived_at: "when was this seat parked" is the question an operator
+-- asks after a provider outage or an expired plan, and a bare boolean cannot
+-- answer it.
+--
+-- Semantics, all enforced server-side:
+--   * a disabled seat stays in every list and keeps its routing tier, skills
+--     and specialisation children — nothing is released;
+--   * it is skipped by automatic dispatch (routing roster), refused by the
+--     assignment/mention admission gate, and cannot claim a queued task;
+--   * runs already executing are NOT interrupted — cancelling those stays the
+--     existing "stop all tasks" action.
+--
+-- No index: the column is read with the agent row by primary key on every gate
+-- except the roster, which already scans one workspace's agents, so the repo's
+-- CREATE INDEX CONCURRENTLY rule does not apply.
+-- Single-statement ALTER; no transaction split needed.
+ALTER TABLE agent ADD COLUMN disabled_at TIMESTAMPTZ;

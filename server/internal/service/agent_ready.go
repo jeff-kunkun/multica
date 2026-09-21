@@ -136,6 +136,18 @@ func AgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent) (
 			Detail:       "agent is archived",
 		}, nil
 	}
+	// A parked seat is blocked, not waitable (DENE-714). Waiting is only a plan
+	// when something resolves itself; this one resolves when a person flips the
+	// switch back, so queueing work behind it would recreate exactly the
+	// silent-pile-up the switch exists to prevent. Checked before the runtime
+	// read: the seat's machine is irrelevant once its owner has parked it.
+	if agent.DisabledAt.Valid {
+		return AgentVerdict{
+			Availability: AgentBlocked,
+			Reason:       dispatch.ReasonAgentDisabled,
+			Detail:       "agent is disabled",
+		}, nil
+	}
 	if !agent.RuntimeID.Valid {
 		return AgentVerdict{
 			Availability: AgentBlocked,

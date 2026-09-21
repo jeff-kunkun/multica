@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Lock,
   Plus,
+  PowerOff,
   Users,
 } from "lucide-react";
 import { useQueries, useQuery } from "@tanstack/react-query";
@@ -633,6 +634,21 @@ function StatusCell({ row }: { row: AgentListRow }) {
       <ListGridCell>
         <span className="text-caption text-muted-foreground">
           {t(($) => $.row.archived)}
+        </span>
+      </ListGridCell>
+    );
+  }
+  // A seat parked from this list (DENE-714) says so on the row, ahead of any
+  // runtime state: once the owner has turned it off, whether its machine is
+  // online is not the fact the row needs to carry. This is a real gate, not a
+  // grey-out — the server drops the seat from the routing roster, refuses
+  // assignment and mention wake, and refuses the claim.
+  if (agent.disabled_at) {
+    return (
+      <ListGridCell className="gap-1.5">
+        <PowerOff className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate text-caption text-muted-foreground">
+          {t(($) => $.row.disabled)}
         </span>
       </ListGridCell>
     );

@@ -566,6 +566,8 @@
     "trigger_blocked_short_runtime_unusable": "CLI can't run",
     "trigger_blocked_short_runtime_profile_missing": "Runtime profile missing",
     "trigger_blocked_short_agent_runtime_required": "Needs a runtime",
+    "trigger_blocked_agent_disabled": "This agent is disabled — enable it from the agents list to run it",
+    "trigger_blocked_short_agent_disabled": "Disabled",
     "trigger_blocked_short_generic": "Won't start",
     "send_reply_failed": "Failed to send reply",
     "delete_failed": "Failed to delete comment",

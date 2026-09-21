@@ -6,6 +6,8 @@ import {
   Copy,
   ExternalLink,
   MoreHorizontal,
+  Power,
+  PowerOff,
   RotateCcw,
   Square,
   Trash2,
@@ -99,6 +101,11 @@ export function AgentRowActions({
   );
 
   const isArchived = !!agent.archived_at;
+  // The seat availability switch (DENE-714). `disabled_at` is optional-and-
+  // caught in the schema, so a backend that predates the switch — or one that
+  // sent a malformed timestamp — reads as "taking work", which is the state
+  // those backends are actually in.
+  const isDisabled = !!agent.disabled_at;
   const runningCount = presence?.runningCount ?? 0;
   const queuedCount = presence?.queuedCount ?? 0;
   const hasActiveWork = runningCount + queuedCount > 0;
@@ -114,6 +121,11 @@ export function AgentRowActions({
   const isSystemAgent = !!agent.system_key;
   const showArchive = canManage && !isArchived && !isSystemAgent;
   const showRestore = canManage && isArchived;
+  // Unlike archive, a system agent MAY be parked: nothing is released and one
+  // click puts it back, so there is no way to strand the workspace's entry
+  // point. Archived rows are excluded because the seat is already out of
+  // every dispatch path — restoring is the only move that means anything.
+  const showAvailabilityToggle = canManage && !isArchived;
 
   const invalidateAgents = () => {
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
@@ -144,6 +156,31 @@ export function AgentRowActions({
       toast.success(t(($) => $.row_actions.agent_restored_toast));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.row_actions.restore_failed_toast));
+    }
+  };
+
+  // One click, no detail page, no confirm dialog: the whole point of the
+  // switch is that parking a seat during a provider outage or an expired plan
+  // costs nothing, and un-parking it costs nothing either. A confirm step
+  // would price a reversible action like the irreversible one next to it.
+  const handleToggleAvailability = async () => {
+    try {
+      if (isDisabled) {
+        await api.enableAgent(agent.id);
+      } else {
+        await api.disableAgent(agent.id);
+      }
+      invalidateAgents();
+      toast.success(
+        isDisabled
+          ? t(($) => $.row_actions.agent_enabled_toast)
+          : t(($) => $.row_actions.agent_disabled_toast),
+      );
+    } catch (e) {
+      const fallback = isDisabled
+        ? t(($) => $.row_actions.enable_failed_toast)
+        : t(($) => $.row_actions.disable_failed_toast);
+      toast.error(e instanceof Error ? e.message : fallback);
     }
   };
 
@@ -199,6 +236,18 @@ export function AgentRowActions({
             >
               <Square className="h-3.5 w-3.5" />
               {t(($) => $.row_actions.cancel_all_tasks)}
+            </DropdownMenuItem>
+          )}
+          {showAvailabilityToggle && (
+            <DropdownMenuItem onClick={handleToggleAvailability}>
+              {isDisabled ? (
+                <Power className="h-3.5 w-3.5" />
+              ) : (
+                <PowerOff className="h-3.5 w-3.5" />
+              )}
+              {isDisabled
+                ? t(($) => $.row_actions.enable)
+                : t(($) => $.row_actions.disable)}
             </DropdownMenuItem>
           )}
           {showDuplicate && (

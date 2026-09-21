@@ -556,6 +556,8 @@
     "trigger_blocked_short_runtime_unusable": "CLI 无法运行",
     "trigger_blocked_short_runtime_profile_missing": "缺少运行时 profile",
     "trigger_blocked_short_agent_runtime_required": "需绑定运行时",
+    "trigger_blocked_agent_disabled": "该智能体已停用——在智能体列表里启用后才能运行",
+    "trigger_blocked_short_agent_disabled": "已停用",
     "trigger_blocked_short_generic": "不会触发",
     "send_reply_failed": "发送回复失败",
     "delete_failed": "删除评论失败",

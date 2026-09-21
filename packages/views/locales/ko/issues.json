@@ -556,6 +556,8 @@
     "trigger_blocked_short_runtime_unusable": "CLI 실행 불가",
     "trigger_blocked_short_runtime_profile_missing": "런타임 프로필 없음",
     "trigger_blocked_short_agent_runtime_required": "런타임 필요",
+    "trigger_blocked_agent_disabled": "이 에이전트는 비활성화되어 있습니다 — 에이전트 목록에서 활성화하면 실행됩니다",
+    "trigger_blocked_short_agent_disabled": "비활성화됨",
     "trigger_blocked_short_generic": "트리거 안 됨",
     "send_reply_failed": "답글을 보내지 못했습니다",
     "delete_failed": "댓글을 삭제하지 못했습니다",

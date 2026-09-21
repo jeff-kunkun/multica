@@ -81,6 +81,7 @@
     "run_blocked_runtime_offline": "実行されませんでした — エージェントのランタイムがオフラインです",
     "run_blocked_agent_runtime_required": "実行されませんでした — エージェントにランタイムがありません。実行するにはバインドしてください",
     "run_blocked_target_unavailable": "実行されませんでした — エージェントを利用できません",
+    "run_blocked_agent_disabled": "実行されませんでした — エージェントが無効です。エージェント一覧で有効にしてください",
     "run_blocked_attribution": "実行されませんでした — 実行の責任者を特定できませんでした",
     "run_blocked_already_active": "実行されませんでした — 直近の実行が本件をカバーしています",
     "run_blocked_quota_exceeded": "実行されませんでした — この期間の実行上限に達しました",

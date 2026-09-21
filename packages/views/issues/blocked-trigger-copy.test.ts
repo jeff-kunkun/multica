@@ -72,6 +72,21 @@ describe("blocked trigger copy", () => {
     );
   });
 
+  // DENE-714: a parked seat is neither gone nor broken. "Unavailable" copy
+  // sends the user hunting for a machine or an archive when the repair is one
+  // click on the row in front of them.
+  it("distinguishes a disabled seat from an unavailable target", () => {
+    const disabled = blockedReasonLabel("agent_disabled", t);
+
+    expect(disabled).toBe(en.comment.trigger_blocked_agent_disabled);
+    expect(disabled).not.toBe(blockedReasonLabel("target_unavailable", t));
+    expect(disabled).not.toBe(en.comment.trigger_blocked_generic);
+    expect(disabled.toLowerCase()).not.toContain("unavailable");
+    expect(blockedShortReasonLabel("agent_disabled", t)).toBe(
+      en.comment.trigger_blocked_short_agent_disabled,
+    );
+  });
+
   it("degrades an unknown code to the generic label", () => {
     expect(blockedReasonLabel("some_future_code", t)).toBe(en.comment.trigger_blocked_generic);
     expect(blockedShortReasonLabel("some_future_code", t)).toBe(

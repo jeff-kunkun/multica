@@ -1939,6 +1939,36 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Parks a seat from the agents list (DENE-714): it is dropped from the
+   * routing roster, refused by the assignment/mention admission gate and
+   * cannot claim a queued task, but it keeps its tier, its specialisations and
+   * its place in every list. Runs already executing are NOT interrupted —
+   * that stays `cancelAgentTasks`. Re-disabling an already parked seat is a
+   * 409, so a double click cannot reset its "parked since" timestamp.
+   *
+   * Degrades to `null` rather than a blank-named agent, like `getAgent`: the
+   * write succeeded regardless, and the caller refetches the list.
+   */
+  async disableAgent(id: string): Promise<Agent | null> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/disable`, {
+      method: "POST",
+    });
+    return parseWithFallback<Agent | null>(raw, AgentSchema, null, {
+      endpoint: "POST /api/agents/:id/disable",
+    });
+  }
+
+  /** Un-parks a seat disabled by {@link disableAgent}. */
+  async enableAgent(id: string): Promise<Agent | null> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/enable`, {
+      method: "POST",
+    });
+    return parseWithFallback<Agent | null>(raw, AgentSchema, null, {
+      endpoint: "POST /api/agents/:id/enable",
+    });
+  }
+
   async restoreAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/restore`, { method: "POST" });
   }

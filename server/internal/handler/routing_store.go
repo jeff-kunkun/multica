@@ -156,6 +156,16 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 	}
 	out := make(map[string]routing.Agent, len(agents))
 	for _, a := range agents {
+		// A parked seat is off the ladder for as long as it is parked
+		// (DENE-714). Dropping it from the roster rather than filtering later
+		// is what makes the rung fall through to the next candidate: routing
+		// picks by tier, so a disabled seat left in the map would be chosen and
+		// then refused at dispatch, stranding the ticket on a seat nobody is
+		// going to wake. Archived seats are already absent — ListAgents skips
+		// them — and this is the same kind of exclusion for a reversible state.
+		if a.DisabledAt.Valid {
+			continue
+		}
 		out[a.Name] = routing.Agent{
 			ID:   util.UUIDToString(a.ID),
 			Name: a.Name,

@@ -556,6 +556,8 @@
     "trigger_blocked_short_runtime_unusable": "CLI を実行できません",
     "trigger_blocked_short_runtime_profile_missing": "ランタイム プロファイル未導入",
     "trigger_blocked_short_agent_runtime_required": "ランタイム未設定",
+    "trigger_blocked_agent_disabled": "このエージェントは無効です — エージェント一覧で有効にすると実行できます",
+    "trigger_blocked_short_agent_disabled": "無効",
     "trigger_blocked_short_generic": "トリガーされません",
     "send_reply_failed": "返信を送信できませんでした",
     "delete_failed": "コメントを削除できませんでした",

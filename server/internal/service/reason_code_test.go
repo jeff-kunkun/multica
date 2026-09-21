@@ -42,6 +42,7 @@ func TestDispatchFailReasonCode(t *testing.T) {
 func TestAgentReadinessVerdict(t *testing.T) {
 	validRuntime := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 	archivedAt := pgtype.Timestamptz{Valid: true}
+	disabledAt := pgtype.Timestamptz{Valid: true}
 
 	// The agent-only half needs no runtime row, so AgentReadiness answers before
 	// it queries one.
@@ -50,6 +51,14 @@ func TestAgentReadinessVerdict(t *testing.T) {
 	}
 	if got, _ := AgentReadiness(t.Context(), RuntimeLookup{}, db.Agent{ArchivedAt: archivedAt, RuntimeID: validRuntime}); got.Reason != dispatch.ReasonTargetUnavailable || !got.Blocked() {
 		t.Errorf("archived agent: got %+v, want blocked/target_unavailable", got)
+	}
+	// A seat parked from the agents list (DENE-714). Blocked, not waitable:
+	// nothing resolves it but a person flipping the switch back, so queueing
+	// work behind it rebuilds the silent pile-up the switch exists to stop.
+	// Its own code, not target_unavailable — an archived seat has to be
+	// restored, a parked one is sitting in the list behind a switch.
+	if got, _ := AgentReadiness(t.Context(), RuntimeLookup{}, db.Agent{DisabledAt: disabledAt, RuntimeID: validRuntime}); got.Reason != dispatch.ReasonAgentDisabled || !got.Blocked() {
+		t.Errorf("disabled agent: got %+v, want blocked/agent_disabled", got)
 	}
 
 	// The runtime half.

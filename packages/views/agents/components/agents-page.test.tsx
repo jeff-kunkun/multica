@@ -775,3 +775,25 @@ describe("AgentsPage runtime inheritance tag", () => {
     );
   });
 });
+
+// A parked seat (DENE-714) has to SAY so on its own row. The ticket's explicit
+// boundary is that disabling is not archiving and not a grey-out: the row stays
+// in the list, and what changes is the status it reports. The server-side half
+// — roster, admission gate, claim — is pinned in the Go suites.
+describe("AgentsPage seat availability", () => {
+  it("labels a parked seat on the row and keeps it in the list", () => {
+    mocks.agents = [makeAgent({ ...ALPHA, disabled_at: "2026-06-02T00:00:00Z" })];
+    renderPage();
+    expect(screen.getByText("Alpha Agent")).toBeTruthy();
+    expect(screen.getByText("Disabled")).toBeTruthy();
+    // Not archived: the two states are different lifecycles and must not
+    // collapse into one label.
+    expect(screen.queryByText("Archived")).toBeNull();
+  });
+
+  it("says nothing about the switch on a seat that is taking work", () => {
+    mocks.agents = [ALPHA];
+    renderPage();
+    expect(screen.queryByText("Disabled")).toBeNull();
+  });
+});

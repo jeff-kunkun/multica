@@ -13,6 +13,7 @@ import {
   EMPTY_TELEGRAM_INSTALLATION,
   EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
+  AgentListSchema,
   AgentSchema,
   AgentTaskListSchema,
   TaskMessageListSchema,
@@ -2761,6 +2762,67 @@ describe("AgentSchema routing_tier", () => {
     const parsed = AgentSchema.parse({ ...baseAgent, routing_tier: 3 });
     expect(parsed.id).toBe("agent-1");
     expect(parsed.routing_tier).toBeUndefined();
+  });
+});
+
+describe("AgentSchema disabled_at", () => {
+  const baseAgent = {
+    id: "agent-1",
+    workspace_id: "ws-1",
+    runtime_id: "rt-1",
+    name: "Lambda",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    runtime_mode: "local",
+    runtime_config: {},
+    custom_args: [],
+    visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
+    status: "idle",
+    max_concurrent_tasks: 1,
+    model: "",
+    owner_id: null,
+    skills: [],
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    archived_at: null,
+    archived_by: null,
+  };
+
+  it("parses an agent from a backend that predates the switch", () => {
+    const parsed = AgentSchema.parse(baseAgent);
+    expect(parsed.id).toBe("agent-1");
+    expect(parsed.disabled_at ?? null).toBeNull();
+  });
+
+  it("keeps the parked-since timestamp a newer backend sent", () => {
+    const parsed = AgentSchema.parse({
+      ...baseAgent,
+      disabled_at: "2026-02-03T04:05:06Z",
+    });
+    expect(parsed.disabled_at).toBe("2026-02-03T04:05:06Z");
+  });
+
+  // A malformed timestamp must cost the switch state, not the agent — and it
+  // has to degrade to "taking work", because the list row is how a seat is
+  // un-parked: a row dropped or stuck showing "disabled" is a seat the owner
+  // can no longer turn back on.
+  it("degrades a malformed disabled_at without dropping the agent", () => {
+    const parsed = AgentSchema.parse({ ...baseAgent, disabled_at: 17 });
+    expect(parsed.id).toBe("agent-1");
+    expect(parsed.disabled_at).toBeUndefined();
+  });
+
+  // The list drops rows it cannot parse at all; a parked seat is not one of
+  // them, or disabling a seat would make it disappear like an archive.
+  it("keeps a parked seat in the list", () => {
+    const rows = AgentListSchema.parse([
+      { ...baseAgent, disabled_at: "2026-02-03T04:05:06Z" },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.disabled_at).toBe("2026-02-03T04:05:06Z");
   });
 });
 

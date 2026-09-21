@@ -57,6 +57,15 @@ const (
 	// collapse the two send the user looking for an offline computer that does
 	// not exist.
 	ReasonAgentRuntimeRequired ReasonCode = "agent_runtime_required"
+	// ReasonAgentDisabled: the target agent is parked by its owner — the seat
+	// exists, is bound, and its machine may be perfectly healthy, but somebody
+	// turned it off from the agents list (DENE-714). Kept APART from
+	// target_unavailable on the same rule as the runtime family above: an
+	// archived agent is gone and has to be restored, while a disabled one is
+	// sitting right there in the list behind a switch. Copy that says
+	// "unavailable" sends the user hunting for a machine or an archive when the
+	// repair is one click on a row they are already looking at.
+	ReasonAgentDisabled ReasonCode = "agent_disabled"
 	// ReasonAttributionBlocked: a fail-closed workspace could not resolve a
 	// responsible human for the run, so it was refused.
 	ReasonAttributionBlocked ReasonCode = "attribution_blocked"

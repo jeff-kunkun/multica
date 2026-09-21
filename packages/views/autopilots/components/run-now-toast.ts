@@ -34,6 +34,7 @@ export type RunNowBlockedKey =
   | "run_blocked_runtime_offline"
   | "run_blocked_agent_runtime_required"
   | "run_blocked_target_unavailable"
+  | "run_blocked_agent_disabled"
   | "run_blocked_attribution"
   | "run_blocked_already_active"
   | "run_blocked_quota_exceeded"
@@ -52,6 +53,10 @@ export function runNowBlockedKey(reasonCode: string | undefined): RunNowBlockedK
       return "run_blocked_agent_runtime_required";
     case "target_unavailable":
       return "run_blocked_target_unavailable";
+    // Parked from the agents list, not archived and not broken (DENE-714):
+    // the run waits on a person flipping the switch back, nothing else.
+    case "agent_disabled":
+      return "run_blocked_agent_disabled";
     case "attribution_blocked":
       return "run_blocked_attribution";
     case "already_active":

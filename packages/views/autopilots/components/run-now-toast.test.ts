@@ -32,6 +32,7 @@ describe("runNowBlockedKey", () => {
     expect(runNowBlockedKey("invocation_not_allowed")).toBe("run_blocked_invocation_not_allowed");
     expect(runNowBlockedKey("runtime_offline")).toBe("run_blocked_runtime_offline");
     expect(runNowBlockedKey("target_unavailable")).toBe("run_blocked_target_unavailable");
+    expect(runNowBlockedKey("agent_disabled")).toBe("run_blocked_agent_disabled");
     expect(runNowBlockedKey("attribution_blocked")).toBe("run_blocked_attribution");
     expect(runNowBlockedKey("already_active")).toBe("run_blocked_already_active");
     expect(runNowBlockedKey("quota_exceeded")).toBe("run_blocked_quota_exceeded");

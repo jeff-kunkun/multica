@@ -2157,6 +2157,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateAgent)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
+					// The seat availability switch (DENE-714), reachable from
+					// the agents list without opening the seat. Separate verbs
+					// rather than a field on PUT /api/agents/{id}: the list row
+					// must be able to flip it without sending — and therefore
+					// without being able to clobber — the rest of the seat's
+					// configuration.
+					r.Post("/disable", h.DisableAgent)
+					r.Post("/enable", h.EnableAgent)
 					// Bakes the base role's prompt into this specialisation and
 					// detaches it, which is what makes the base role archivable
 					// again (DENE-301). Not a route older servers know, so a

@@ -1766,6 +1766,11 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   updated_at: z.string().default(""),
   archived_at: z.string().nullable().default(null),
   archived_by: z.string().nullable().default(null),
+  // The seat availability switch (DENE-714). Optional-and-caught on the same
+  // rule as the fields above: a backend that predates the column omits it, and
+  // a malformed value must degrade THIS field — reading as "taking work", the
+  // pre-feature behaviour — rather than drop the agent out of the list.
+  disabled_at: z.string().nullable().optional().catch(undefined),
   // Older backends omit this field. Missing or malformed must not fail the
   // whole agent parse; UI treats undefined as enabled (`!== false`).
   auto_retry_enabled: z.boolean().optional().catch(undefined),

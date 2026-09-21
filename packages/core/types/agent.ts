@@ -770,6 +770,14 @@ export interface Agent {
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
+  /**
+   * When this seat was parked from the agents list (DENE-714); null while it
+   * is taking work. Not archival: the seat stays in every list, keeps its
+   * routing tier and its specialisations, and one click puts it back. Older
+   * backends omit the field, so `undefined` reads the same as `null` — the
+   * seat is taking work.
+   */
+  disabled_at?: string | null;
 }
 
 export interface AgentConversationStarter {
