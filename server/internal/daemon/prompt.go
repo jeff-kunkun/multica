@@ -323,11 +323,17 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 		apply(&opts)
 	}
 	body := buildPromptBody(task, provider)
-	if block := buildIssueContextBlock(task); block != "" {
-		if !strings.HasSuffix(body, "\n\n") {
-			body += "\n"
+	// An interrupted auto-retry already has the original task in the
+	// resumed session. Re-attaching the issue snapshot would re-pay that
+	// context (DENE-727). New comments still reach the continue prompt
+	// itself when the delta is known.
+	if !shouldContinueInterruptedSession(task) {
+		if block := buildIssueContextBlock(task); block != "" {
+			if !strings.HasSuffix(body, "\n\n") {
+				body += "\n"
+			}
+			body += block
 		}
-		body += block
 	}
 	// Run-scoped context is appended, never prepended: everything ahead of it
 	// is stable across runs of a resumed session, and appending keeps it after
@@ -341,7 +347,14 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 	return body
 }
 
+func shouldContinueInterruptedSession(task Task) bool {
+	return task.ContinueInterruptedSession && task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable
+}
+
 func buildPromptBody(task Task, provider string) string {
+	if shouldContinueInterruptedSession(task) {
+		return buildInterruptedRetryPrompt(task, provider)
+	}
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
@@ -369,6 +382,38 @@ func buildPromptBody(task Task, provider string) string {
 	// treat the read as mandatory)", which read as if comment-triggered turns
 	// did not (MUL-6984).
 	fmt.Fprintf(&b, "For comment history, workflow step 2 applies. Scan the threads first with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. For `--since` incremental polling, pagination, and folding, see `multica issue comment list --help`.\n", task.IssueID)
+	return b.String()
+}
+
+// buildInterruptedRetryPrompt is the per-turn user message for an automatic
+// retry that resumes a session that already ran partway (DENE-727). The
+// original task, triggering comment, and chat input are already in that
+// session; re-injecting them would spend the previous turn's context twice
+// and make the agent restart. A short continue instruction plus the usual
+// reply routing is enough. Poisoned / missing sessions never reach here —
+// shouldContinueInterruptedSession requires a live PriorSessionID.
+func buildInterruptedRetryPrompt(task Task, provider string) string {
+	var b strings.Builder
+	b.WriteString("Your previous turn was interrupted by a transient error before it finished. Continue from where you left off in this same session. Do not restart the task, and do not re-read or re-send the original request unless you no longer have that context.\n\n")
+	if task.ChatSessionID != "" {
+		return b.String()
+	}
+	if task.IssueID == "" {
+		return b.String()
+	}
+	if task.NewCommentsDeltaKnown && task.NewCommentCount > 0 {
+		fmt.Fprintf(&b, "%d new comment(s) arrived after the interrupted turn started — read and address them too, not just the work already in this session.\n\n", task.NewCommentCount)
+		if hint := execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount); hint != "" {
+			b.WriteString(hint)
+		}
+	}
+	if task.TriggerCommentID != "" {
+		if targets := commentReplyThreads(task); len(targets) >= 2 {
+			b.WriteString(execenv.BuildMultiThreadCommentReplyInstructions(task.IssueID, targets, taskIsSquadLeader(task)))
+		} else {
+			b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID, taskIsSquadLeader(task)))
+		}
+	}
 	return b.String()
 }
 
