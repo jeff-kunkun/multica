@@ -1106,6 +1106,7 @@
       "runtime_reconnect_timeout": "デーモンが時間内に再接続しませんでした",
       "runtime_recovery": "デーモンが再起動しました",
       "timeout": "実行がタイムアウトしました",
+      "task_time_limit": "ワークスペースの実行時間の上限に達したため停止しました",
       "iteration_limit": "反復回数の上限に達しました",
       "agent_blocked": "人による入力を待機中",
       "api_invalid_request": "モデル API に拒否されました",

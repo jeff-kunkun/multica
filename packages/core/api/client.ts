@@ -250,6 +250,10 @@ import type {
   CreateCloudRuntimeNodeRequest,
   ListCloudRuntimeNodesParams,
 } from "../runtimes/cloud-runtime";
+import type {
+  DraftAssigneeSuggestion,
+  DraftAssigneeSuggestionRequest,
+} from "../issue-drafts/assignee-suggestions";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -303,6 +307,8 @@ import {
   IssueDraftListSchema,
   IssueDraftFinalizeSchema,
   IssueDraftRuntimeSwitchSchema,
+  IssueDraftAssigneeSuggestionsSchema,
+  EMPTY_ISSUE_DRAFT_ASSIGNEE_SUGGESTIONS,
   EMPTY_ISSUE_DRAFT,
   EMPTY_ISSUE_DRAFT_SESSION,
   EMPTY_ISSUE_DRAFT_LIST,
@@ -1982,6 +1988,27 @@ export class ApiClient {
     return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
       endpoint: "PATCH /api/issue-drafts/{id}",
     });
+  }
+
+  /**
+   * Which seat routing would put on each issue of a draft, root first. Reads
+   * only: nothing is created or assigned. Advisory, so an unparseable body is
+   * "no suggestions" rather than an error on the confirm panel.
+   */
+  async suggestIssueDraftAssignees(
+    sessionId: string,
+    data: DraftAssigneeSuggestionRequest,
+  ): Promise<(DraftAssigneeSuggestion | null)[]> {
+    const raw = await this.fetch<unknown>(
+      `/api/issue-drafts/${sessionId}/assignee-suggestions`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(
+      raw,
+      IssueDraftAssigneeSuggestionsSchema,
+      EMPTY_ISSUE_DRAFT_ASSIGNEE_SUGGESTIONS,
+      { endpoint: "POST /api/issue-drafts/{id}/assignee-suggestions" },
+    ).suggestions;
   }
 
   /** Discards a draft. The conversation itself is left alone. */

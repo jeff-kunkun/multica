@@ -1243,6 +1243,7 @@
       "runtime_reconnect_timeout": "Daemon did not reconnect in time",
       "runtime_recovery": "Daemon restarted",
       "timeout": "Run timed out",
+      "task_time_limit": "Stopped at the workspace run time limit",
       "iteration_limit": "Hit the iteration limit",
       "agent_blocked": "Waiting on human input",
       "api_invalid_request": "Rejected by the model API",
