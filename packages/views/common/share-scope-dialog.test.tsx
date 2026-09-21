@@ -5,7 +5,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
-import { ShareScopeDialog } from "./share-scope-dialog";
+import enLayout from "../locales/en/layout.json";
+import { ShareScopeDialog, ShareScopeTrigger } from "./share-scope-dialog";
+import { GuestReadOnlyScope, WriteAction } from "../layout/guest-readonly";
 
 const mutateIssue = vi.fn();
 const mutateRepo = vi.fn();
@@ -31,7 +33,7 @@ vi.mock("@multica/core/visibility", () => ({
 }));
 vi.mock("./actor-avatar", () => ({ ActorAvatar: () => <span data-testid="avatar" /> }));
 
-const resources = { en: { common: enCommon } };
+const resources = { en: { common: enCommon, layout: enLayout } };
 
 function renderDialog(target: Parameters<typeof ShareScopeDialog>[0]["target"]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -139,5 +141,21 @@ describe("ShareScopeDialog", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Project members/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Manage project members/ }));
     expect(onManageMembers).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the sharing entry inert for guests", () => {
+    const onClick = vi.fn();
+    render(
+      <I18nProvider locale="en" resources={resources}>
+        <GuestReadOnlyScope isGuest>
+          <WriteAction>
+            <ShareScopeTrigger scope="private" onClick={onClick} />
+          </WriteAction>
+        </GuestReadOnlyScope>
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByTestId("write-action"));
+    expect(onClick).not.toHaveBeenCalled();
+    expect(screen.getByTestId("write-action")).toHaveAttribute("aria-disabled", "true");
   });
 });
