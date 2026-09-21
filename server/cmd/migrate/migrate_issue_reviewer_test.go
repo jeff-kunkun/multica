@@ -40,13 +40,13 @@ func TestIssueReviewerMigrationBackfillsEveryOptionMeaning(t *testing.T) {
 
 	options := runOptions{
 		Direction:             "up",
-		Files:                 realMigrationFiles(t, []string{"503_issue_reviewer"}, "up"),
+		Files:                 realMigrationFiles(t, []string{"507_issue_reviewer"}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       int64(rand.Uint64()&0x7fffffffffffffff) | 1,
 		Hooks:                 hooksForDirection("up"),
 	}
 	if err := runMigrations(ctx, pool, options); err != nil {
-		t.Fatalf("apply 503_issue_reviewer up: %v", err)
+		t.Fatalf("apply 507_issue_reviewer up: %v", err)
 	}
 
 	cases := []struct {
@@ -93,13 +93,13 @@ func TestIssueReviewerMigrationBackfillsEveryOptionMeaning(t *testing.T) {
 
 	down := runOptions{
 		Direction:             "down",
-		Files:                 realMigrationFiles(t, []string{"503_issue_reviewer"}, "down"),
+		Files:                 realMigrationFiles(t, []string{"507_issue_reviewer"}, "down"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       options.AdvisoryLockKey,
 		Hooks:                 hooksForDirection("down"),
 	}
 	if err := runMigrations(ctx, pool, down); err != nil {
-		t.Fatalf("apply 503_issue_reviewer down: %v", err)
+		t.Fatalf("apply 507_issue_reviewer down: %v", err)
 	}
 
 	var columns int
