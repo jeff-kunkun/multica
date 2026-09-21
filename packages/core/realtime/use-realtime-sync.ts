@@ -975,6 +975,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
+      "modules:updated",
       "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
@@ -1273,6 +1274,13 @@ export function useRealtimeSync(
 
     const unsubWsUpdated = ws.on("workspace:updated", (p) => {
       applyWorkspaceUpdatedToCache(qc, p as WorkspaceUpdatedPayload);
+    });
+
+    const unsubModulesUpdated = ws.on("modules:updated", () => {
+      const currentWsId = getCurrentWsId();
+      if (currentWsId) {
+        qc.invalidateQueries({ queryKey: workspaceKeys.modules(currentWsId) });
+      }
     });
 
     const unsubWsDeleted = ws.on("workspace:deleted", (p) => {
@@ -1750,6 +1758,7 @@ export function useRealtimeSync(
       unsubSubscriberAdded();
       unsubSubscriberRemoved();
       unsubWsUpdated();
+      unsubModulesUpdated();
       unsubWsDeleted();
       unsubMemberRemoved();
       unsubMemberAdded();

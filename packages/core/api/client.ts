@@ -58,6 +58,8 @@ import type {
   IssueAgentGuardResponse,
   Workspace,
   WorkspaceRepo,
+  ModuleKey,
+  ModuleVisibility,
   WorkspaceMcpServer,
   MemberWithUser,
   User,
@@ -432,6 +434,9 @@ import {
   MemberWithUserSchema,
   MemberWithUserListSchema,
   EMPTY_MEMBER_WITH_USER,
+  ModuleVisibilityListSchema,
+  ModuleVisibilitySchema,
+  EMPTY_MODULE_VISIBILITY_LIST,
   ListLabelsResponseSchema,
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
@@ -2976,6 +2981,38 @@ export class ApiClient {
 
   async getWorkspace(id: string): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`);
+  }
+
+  async listModuleVisibility(): Promise<ModuleVisibility[]> {
+    const raw = await this.fetch<unknown>("/api/modules");
+    const parsed = parseWithFallback(
+      raw,
+      ModuleVisibilityListSchema,
+      EMPTY_MODULE_VISIBILITY_LIST,
+      { endpoint: "GET /api/modules" },
+    );
+    return parsed.modules as ModuleVisibility[];
+  }
+
+  async setModuleVisibility(
+    module: ModuleKey,
+    data: { visibility: string; project_id?: string | null },
+  ): Promise<ModuleVisibility> {
+    const raw = await this.fetch<unknown>(
+      `/api/modules/${encodeURIComponent(module)}/visibility`,
+      { method: "PUT", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(
+      raw,
+      ModuleVisibilitySchema,
+      {
+        key: module,
+        visibility: data.visibility,
+        project_id: data.project_id ?? null,
+        allowed: true,
+      },
+      { endpoint: "PUT /api/modules/{module}/visibility" },
+    ) as ModuleVisibility;
   }
 
   async createWorkspace(data: { name: string; slug: string; description?: string; context?: string; issue_prefix?: string }): Promise<Workspace> {

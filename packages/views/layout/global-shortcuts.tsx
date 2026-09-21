@@ -16,6 +16,10 @@ import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { isImeComposing } from "@multica/core/utils";
 import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import { moduleVisibilityOptions } from "@multica/core/workspace/queries";
+import { canAccessModule, navItemModule } from "@multica/core/workspace";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import { useSearchStore } from "../search/search-store";
 
@@ -49,6 +53,11 @@ export function GlobalShortcuts() {
   const { toggleSidebar } = useSidebar();
   const navigation = useNavigation();
   const workspacePaths = useWorkspacePaths();
+  const workspace = useCurrentWorkspace();
+  const { data: moduleAccess } = useQuery({
+    ...moduleVisibilityOptions(workspace?.id ?? ""),
+    enabled: !!workspace?.id,
+  });
 
   // Subscribe so changing a binding in Settings immediately refreshes the
   // listener closure; getShortcut remains useful to non-React call sites.
@@ -120,6 +129,7 @@ export function GlobalShortcuts() {
         return;
       }
       if (actionId === "createIssue") {
+        if (!canAccessModule(moduleAccess, "issues")) return;
         if (useModalStore.getState().modal) return;
         const projectMatch = navigation.pathname.match(
           /^\/[^/]+\/projects\/([^/]+)$/,
@@ -132,6 +142,8 @@ export function GlobalShortcuts() {
       }
 
       const destination = destinations[actionId];
+      const gated = navItemModule(actionId);
+      if (gated && !canAccessModule(moduleAccess, gated)) return;
       if (destination && destination !== navigation.pathname) {
         navigation.push(destination);
       }
@@ -139,7 +151,7 @@ export function GlobalShortcuts() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [navigation, overrides, toggleSidebar, workspacePaths]);
+  }, [moduleAccess, navigation, overrides, toggleSidebar, workspacePaths]);
 
   return null;
 }

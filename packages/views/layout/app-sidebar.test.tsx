@@ -4,7 +4,7 @@ import { ApiError } from "@multica/core/api";
 import { renderWithI18n } from "../test/i18n";
 import { AppSidebar } from "./app-sidebar";
 
-const { appForeground, chatSessions, chatStore, detail, deletePin, navigation, pins, sidebarState, summary, workspaces } = vi.hoisted(() => ({
+const { appForeground, chatSessions, chatStore, detail, deletePin, modules, navigation, pins, sidebarState, summary, workspaces } = vi.hoisted(() => ({
   appForeground: { current: true },
   sidebarState: { setOpenMobile: vi.fn() },
   chatSessions: { current: [] as { id?: string; unread_count?: number }[] },
@@ -28,6 +28,11 @@ const { appForeground, chatSessions, chatStore, detail, deletePin, navigation, p
         created_at: "2026-05-06T00:00:00Z",
       },
     ],
+  },
+  modules: {
+    current: undefined as
+      | { key: string; visibility: string; project_id: string | null; allowed: boolean }[]
+      | undefined,
   },
 }));
 
@@ -176,6 +181,7 @@ vi.mock("@multica/core/workspace/queries", () => ({
   myInvitationListOptions: () => ({ queryKey: ["invitations"] }),
   workspaceKeys: { myInvitations: () => ["invitations"] },
   workspaceListOptions: () => ({ queryKey: ["workspaces"] }),
+  moduleVisibilityOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "modules"] }),
 }));
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
@@ -184,6 +190,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
     if (queryKey[0] === "pins") return { data: pins.current };
     if (queryKey[0] === "issue") return detail.current;
     if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
+    if (queryKey[0] === "workspaces" && queryKey[2] === "modules") return { data: modules.current };
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
     if (queryKey[0] === "chat" && queryKey[2] === "sessions") return { data: chatSessions.current };
     return { data: [] };
@@ -198,6 +205,7 @@ describe("PinRow", () => {
     detail.current = { isPending: false, isError: false, data: null, error: null };
     summary.current = [];
     workspaces.current = [];
+    modules.current = undefined;
   });
 
   it("unpins missing details", async () => {
@@ -301,6 +309,30 @@ describe("mobile sheet dismissal", () => {
     rerender(<AppSidebar />);
 
     expect(sidebarState.setOpenMobile).not.toHaveBeenCalled();
+  });
+});
+
+describe("module-level nav visibility", () => {
+  beforeEach(() => {
+    modules.current = [
+      { key: "issues", visibility: "private", project_id: null, allowed: false },
+      { key: "projects", visibility: "workspace", project_id: null, allowed: true },
+      { key: "repos", visibility: "workspace", project_id: null, allowed: true },
+      { key: "runtimes", visibility: "private", project_id: null, allowed: false },
+    ];
+  });
+  afterEach(() => {
+    modules.current = undefined;
+  });
+
+  it("hides Issues and Runtimes but keeps Agents and Squads", () => {
+    const { container } = renderWithI18n(<AppSidebar />);
+    expect(container.querySelector('button[data-href="/acme/issues"]')).not.toBeInTheDocument();
+    expect(container.querySelector('button[data-href="/acme/my-issues"]')).not.toBeInTheDocument();
+    expect(container.querySelector('button[data-href="/acme/runtimes"]')).not.toBeInTheDocument();
+    expect(container.querySelector('button[data-href="/acme/agents"]')).toBeInTheDocument();
+    expect(container.querySelector('button[data-href="/acme/squads"]')).toBeInTheDocument();
+    expect(container.querySelector('button[data-href="/acme/projects"]')).toBeInTheDocument();
   });
 });
 

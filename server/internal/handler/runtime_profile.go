@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/permission"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -135,6 +136,9 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireModuleAccess(w, r, permission.ModuleRuntimes) {
+		return
+	}
 
 	var req createRuntimeProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -213,6 +217,9 @@ func (h *Handler) ListRuntimeProfiles(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireModuleAccess(w, r, permission.ModuleRuntimes) {
+		return
+	}
 
 	profiles, err := h.Queries.ListRuntimeProfiles(r.Context(), wsUUID)
 	if err != nil {
@@ -234,6 +241,9 @@ func (h *Handler) GetRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, wsID, "workspace id")
 	if !ok {
+		return
+	}
+	if !h.requireModuleAccess(w, r, permission.ModuleRuntimes) {
 		return
 	}
 	profileUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "profileId"), "profile id")
@@ -271,6 +281,9 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, wsID, "workspace id")
 	if !ok {
+		return
+	}
+	if !h.requireModuleAccess(w, r, permission.ModuleRuntimes) {
 		return
 	}
 	profileUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "profileId"), "profile id")
@@ -353,6 +366,9 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, wsID, "workspace id")
 	if !ok {
+		return
+	}
+	if !h.requireModuleAccess(w, r, permission.ModuleRuntimes) {
 		return
 	}
 	profileUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "profileId"), "profile id")

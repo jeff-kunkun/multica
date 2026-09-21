@@ -4,6 +4,21 @@
  */
 export type MemberRole = "owner" | "admin" | "member" | "guest";
 
+/** Product areas that can be shared independently of any one resource (DENE-699). */
+export const MODULE_KEYS = ["issues", "projects", "repos", "runtimes"] as const;
+export type ModuleKey = (typeof MODULE_KEYS)[number];
+
+export interface ModuleVisibility {
+  key: ModuleKey;
+  visibility: "private" | "project" | "workspace";
+  project_id: string | null;
+  allowed: boolean;
+}
+
+export interface ModuleVisibilityList {
+  modules: ModuleVisibility[];
+}
+
 export interface WorkspaceRepo {
   url: string;
   description?: string;
