@@ -233,6 +233,9 @@ import type {
   CreateCommentSubIssueManualRequest,
   CreateCommentSubIssueAgentRequest,
   CreateCommentSubIssueRequest,
+  TaskLogExport,
+  TaskLogExportBundle,
+  TaskLogExportScope,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -314,6 +317,8 @@ import {
   DashboardUsageDailyListSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
+  EMPTY_TASK_LOG_EXPORT_BUNDLE,
+  TaskLogExportBundleSchema,
   EMPTY_CHAT_MESSAGE_LIST,
   EMPTY_CHAT_PENDING_TASK,
   EMPTY_CHAT_SESSION,
@@ -706,6 +711,22 @@ function workspaceHeader(
   slug?: string,
 ): Record<string, string> | undefined {
   return slug ? { "X-Workspace-Slug": slug } : undefined;
+}
+
+/**
+ * Read the artifact name the server put in Content-Disposition.
+ *
+ * The server owns the file name so every client writes the same one. Only the
+ * basename survives: the value crosses a trust boundary and must never steer a
+ * write outside the caller's chosen directory. Falls back to a stable default
+ * when the header is missing or not in `filename="…"` form.
+ */
+function exportFilenameFromDisposition(disposition: string | null): string {
+  if (!disposition) return "log-export.json";
+  const match = /filename="([^"]*)"/.exec(disposition);
+  const name = match?.[1] ?? "";
+  const basename = name.split(/[\\/]/).pop() ?? "";
+  return basename.trim() === "" ? "log-export.json" : basename;
 }
 
 function dingTalkGroupSearch(params: ListDingTalkGroupsParams): string {
@@ -3693,6 +3714,71 @@ export class ApiClient {
     return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
       endpoint: "POST /api/upload-file",
     });
+  }
+
+  // Task log export (DENE-599)
+
+  /**
+   * Fetch the server-rendered log export bundle for a task run.
+   *
+   * Returns the verbatim artifact alongside its parsed view. Callers that
+   * report the export must upload `artifact` (or use
+   * `useReportTaskLogExport`), never a re-encoded `bundle`: the server owns
+   * the artifact's bytes so `multica logs export` and the dialogs hand the
+   * user the identical file.
+   */
+  async exportTaskLogs(
+    taskId: string,
+    opts?: { scope?: TaskLogExportScope; hours?: number; signal?: AbortSignal },
+  ): Promise<TaskLogExport> {
+    const params = new URLSearchParams();
+    if (opts?.scope) params.set("scope", opts.scope);
+    if (typeof opts?.hours === "number") params.set("hours", String(opts.hours));
+    const query = params.toString();
+    const path = `/api/tasks/${taskId}/logs/export${query ? `?${query}` : ""}`;
+
+    const rid = createRequestId();
+    const start = Date.now();
+    this.logger.info(`→ GET ${path}`, { rid });
+
+    // Not routed through `this.fetch` for the same reason uploadFile is not:
+    // the artifact is a document to hand to the caller untouched, and the
+    // generic JSON helper would decode and drop the exact bytes.
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      headers: this.authHeaders(),
+      credentials: "include",
+      signal: opts?.signal,
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) this.handleUnauthorized();
+      const message = await this.parseErrorMessage(res, `Export failed: ${res.status}`);
+      this.logger.error(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
+      throw new Error(message);
+    }
+
+    const artifact = await res.text();
+    this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
+
+    let raw: unknown = null;
+    try {
+      raw = JSON.parse(artifact);
+    } catch {
+      // Fall through to the fallback bundle: a malformed body must degrade to
+      // an empty card, not throw past the caller's error handling.
+      raw = null;
+    }
+    const bundle = parseWithFallback<TaskLogExportBundle>(
+      raw,
+      TaskLogExportBundleSchema,
+      EMPTY_TASK_LOG_EXPORT_BUNDLE,
+      { endpoint: "GET /api/tasks/:id/logs/export" },
+    );
+    return {
+      bundle,
+      artifact,
+      filename: exportFilenameFromDisposition(res.headers.get("content-disposition")),
+    };
   }
 
   // Chat Sessions
