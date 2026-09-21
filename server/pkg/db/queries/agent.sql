@@ -956,10 +956,6 @@ WHERE id = (
           WHERE a.id = atq.agent_id
             -- A task's persisted runtime is not authority after an agent rebind.
             AND a.runtime_id = atq.runtime_id
-            -- Queued private-runtime rows are claimable so the handler can
-            -- settle an owner mismatch through the existing FailTask path
-            -- before daemon delivery. Public runtimes remain shareable across
-            -- agent owners; dispatched reclaim keeps its owner fence below.
             -- Reversible seat gate (DENE-714). Queued work stays queued until
             -- the seat is turned back on. Already-dispatched reclaim queries
             -- do NOT check this: disable must not interrupt an in-flight claim.
