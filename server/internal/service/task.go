@@ -1365,6 +1365,10 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Debug("task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agent.ID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
+	if !agent.WorkEnabled {
+		slog.Debug("task enqueue skipped: agent is not accepting work", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agent.ID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is not accepting work")
+	}
 	if !agent.RuntimeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
@@ -1538,6 +1542,10 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		slog.Debug("mention task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
+	if !agent.WorkEnabled {
+		slog.Debug("mention task enqueue skipped: agent is not accepting work", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is not accepting work")
+	}
 	if !agent.RuntimeID.Valid {
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
@@ -1687,6 +1695,9 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 	if agent.ArchivedAt.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.WorkEnabled {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is not accepting work")
 	}
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
@@ -1845,7 +1856,7 @@ func (s *TaskService) RetrySourceContextQuickCreate(ctx context.Context, workspa
 		return nil, ErrSourceContextRetryUnavailable
 	}
 	agent, err := s.Queries.GetAgent(ctx, parent.AgentID)
-	if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+	if err != nil || agent.ArchivedAt.Valid || !agent.WorkEnabled || !agent.RuntimeID.Valid {
 		return nil, ErrSourceContextRetryUnavailable
 	}
 	if canInvoke != nil && !canInvoke(agent) {
@@ -1896,6 +1907,12 @@ func (s *TaskService) RetrySourceContextQuickCreate(ctx context.Context, workspa
 // is a productizable state — surface it to the user as "this agent
 // has been archived" rather than retrying.
 var ErrChatTaskAgentArchived = errors.New("chat task: agent archived")
+
+// ErrChatTaskAgentDisabled signals that EnqueueChatTask refused to
+// queue work because the destination seat is turned off (DENE-714).
+// Distinct from archived: the agent is still on the list and can be
+// turned back on.
+var ErrChatTaskAgentDisabled = errors.New("chat task: agent is not accepting work")
 
 // ErrChatTaskAgentNoRuntime signals that EnqueueChatTask refused to
 // queue work because the agent has never been associated with a
@@ -1960,6 +1977,9 @@ func (s *TaskService) PrepareChatTaskEnqueue(
 	}
 	if agent.ArchivedAt.Valid {
 		return PreparedChatTaskEnqueue{}, ErrChatTaskAgentArchived
+	}
+	if !agent.WorkEnabled {
+		return PreparedChatTaskEnqueue{}, ErrChatTaskAgentDisabled
 	}
 	if !agent.RuntimeID.Valid {
 		return PreparedChatTaskEnqueue{}, ErrChatTaskAgentNoRuntime
@@ -2101,6 +2121,9 @@ func (s *TaskService) enqueueChatTaskTx(
 	}
 	if agent.ArchivedAt.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentArchived
+	}
+	if !agent.WorkEnabled {
+		return db.AgentTaskQueue{}, ErrChatTaskAgentDisabled
 	}
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
@@ -2448,6 +2471,9 @@ func (s *TaskService) SendDirectChatMessage(
 		}
 		if carrier.ArchivedAt.Valid {
 			return ErrChatTaskAgentArchived
+		}
+		if !carrier.WorkEnabled {
+			return ErrChatTaskAgentDisabled
 		}
 		if !carrier.RuntimeID.Valid {
 			return ErrChatTaskAgentNoRuntime
@@ -6241,7 +6267,7 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 		}
 		return nil, fmt.Errorf("load source agent: %w", err)
 	}
-	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid || agent.WorkspaceID != issue.WorkspaceID {
+	if agent.ArchivedAt.Valid || !agent.WorkEnabled || !agent.RuntimeID.Valid || agent.WorkspaceID != issue.WorkspaceID {
 		return nil, nil
 	}
 	return &delegatedFailureRecoveryTarget{failed: failed, source: source, issue: issue, agent: agent}, nil

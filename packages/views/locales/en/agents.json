@@ -27,6 +27,7 @@
     "online": "Online",
     "unstable": "Unstable",
     "offline": "Offline",
+    "disabled": "Disabled",
     "archived": "Archived"
   },
   "workload": {
@@ -111,6 +112,10 @@
     "set_access_skipped": "{{count}} skipped (not owned by you).",
     "set_access_dialog_confirm": "Apply",
     "set_access_bulk_partial": "Applied to {{succeeded}}; {{failed}} failed (kept in current state).",
+    "work_enabled_aria": "Accept new work",
+    "agent_enabled_toast": "Seat enabled",
+    "agent_disabled_toast": "Seat disabled — it will not take new work",
+    "work_toggle_failed_toast": "Couldn't update the seat",
     "agent_archived_toast": "Agent archived",
     "archive_failed_toast": "Failed to archive agent",
     "agent_restored_toast": "Agent restored",
@@ -250,6 +255,8 @@
     "prop_speed": "Speed",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
+    "prop_work_enabled": "Accept work",
+    "prop_work_enabled_hint": "When off, this seat stays in the list but is not selected for automatic dispatch, is not woken by assignment, and does not claim new runs. Running work is not stopped.",
     "prop_auto_retry": "Auto retry",
     "prop_auto_retry_hint": "When off, failures such as capacity limits or network cuts surface immediately instead of retrying. You can still retry a run yourself.",
     "prop_switchable_models": "Model lineup",

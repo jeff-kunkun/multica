@@ -27,6 +27,7 @@
     "online": "온라인",
     "unstable": "불안정",
     "offline": "오프라인",
+    "disabled": "사용 중지",
     "archived": "보관됨"
   },
   "workload": {
@@ -106,6 +107,10 @@
     "set_access_skipped": "{{count}}개 건너뜀(본인 소유 아님).",
     "set_access_dialog_confirm": "적용",
     "set_access_bulk_partial": "{{succeeded}}개 적용, {{failed}}개 실패(현재 상태 유지).",
+    "work_enabled_aria": "새 작업 수락",
+    "agent_enabled_toast": "좌석을 사용하도록 설정했습니다",
+    "agent_disabled_toast": "좌석을 사용 중지했습니다. 새 작업을 받지 않습니다",
+    "work_toggle_failed_toast": "좌석 상태를 업데이트하지 못했습니다",
     "agent_archived_toast": "에이전트를 보관했습니다",
     "archive_failed_toast": "에이전트를 보관하지 못했습니다",
     "agent_restored_toast": "에이전트를 복원했습니다",
@@ -234,6 +239,8 @@
     "prop_speed": "속도",
     "prop_visibility": "공개 범위",
     "prop_concurrency": "동시 실행",
+    "prop_work_enabled": "작업 수락",
+    "prop_work_enabled_hint": "끄면 이 좌석은 목록에 남지만 자동 배정 대상이 되지 않고, 할당해도 깨어나지 않으며, 새 실행도 받지 않습니다. 이미 실행 중인 작업은 멈추지 않습니다.",
     "prop_auto_retry": "자동 재시도",
     "prop_auto_retry_hint": "끄면 용량 부족·네트워크 오류 같은 실패가 자동 재시도되지 않고 바로 표시됩니다. 수동으로 다시 실행할 수는 있습니다.",
     "prop_switchable_models": "전환 가능한 모델",

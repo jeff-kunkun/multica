@@ -27,6 +27,7 @@
     "online": "在线",
     "unstable": "不稳定",
     "offline": "离线",
+    "disabled": "已停用",
     "archived": "已归档"
   },
   "workload": {
@@ -106,6 +107,10 @@
     "set_access_skipped": "{{count}} 个已跳过(不是你所有)。",
     "set_access_dialog_confirm": "应用",
     "set_access_bulk_partial": "已应用 {{succeeded}} 个;{{failed}} 个失败(保持当前状态)。",
+    "work_enabled_aria": "承接新工作",
+    "agent_enabled_toast": "已启用该席位",
+    "agent_disabled_toast": "已停用该席位，不再承接新工作",
+    "work_toggle_failed_toast": "无法更新席位状态",
     "agent_archived_toast": "已归档智能体",
     "archive_failed_toast": "归档智能体失败",
     "agent_restored_toast": "已恢复智能体",
@@ -234,6 +239,8 @@
     "prop_speed": "速度",
     "prop_visibility": "可见性",
     "prop_concurrency": "并发",
+    "prop_work_enabled": "承接工作",
+    "prop_work_enabled_hint": "关闭后，这个席位仍在列表里，但不会被自动选派、指派也不会唤醒，也不会领取新的运行。已经在跑的运行不会中断。",
     "prop_auto_retry": "自动重试",
     "prop_auto_retry_hint": "关闭后，容量不足、网络抖动等失败会直接报出来，不再由平台自动重试。仍可手动重试运行。",
     "prop_switchable_models": "可换档",

@@ -165,8 +165,14 @@ type AgentResponse struct {
 	// (DENE-217). Default true. When false, FailTask and
 	// MaybeRetryFailedTask skip retryableReasons; manual rerun is
 	// unaffected.
-	AutoRetryEnabled bool   `json:"auto_retry_enabled"`
-	Model            string `json:"model"`
+	AutoRetryEnabled bool `json:"auto_retry_enabled"`
+	// WorkEnabled is the reversible seat gate (DENE-714). Default true.
+	// When false the seat stays in the list, keeps its routing tag and
+	// specialisations, and does not cancel running tasks — it is simply
+	// not selected for automatic dispatch, not woken by assignment, and
+	// does not claim new runs.
+	WorkEnabled bool   `json:"work_enabled"`
+	Model       string `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
@@ -302,6 +308,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Status:                   a.Status,
 		MaxConcurrentTasks:       a.MaxConcurrentTasks,
 		AutoRetryEnabled:         a.AutoRetryEnabled,
+		WorkEnabled:              a.WorkEnabled,
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
@@ -2278,6 +2285,9 @@ type UpdateAgentRequest struct {
 	// is not NULL, so COALESCE in UpdateAgent can distinguish "not sent"
 	// from "turned off".
 	AutoRetryEnabled *bool `json:"auto_retry_enabled"`
+	// WorkEnabled is omitted-preserves / present-sets, same contract as
+	// AutoRetryEnabled (DENE-714).
+	WorkEnabled *bool `json:"work_enabled"`
 	// ParentAgentID re-parents this agent (DENE-301): a non-empty value attaches
 	// it to a base role, and an explicitly empty string detaches it. The field
 	// is a tri-state like thinking_level — omitted preserves, `""` clears, a
@@ -2626,6 +2636,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AutoRetryEnabled != nil {
 		params.AutoRetryEnabled = pgtype.Bool{Bool: *req.AutoRetryEnabled, Valid: true}
+	}
+	if req.WorkEnabled != nil {
+		params.WorkEnabled = pgtype.Bool{Bool: *req.WorkEnabled, Valid: true}
 	}
 	if req.AvatarURL != nil {
 		avatarURL, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, existing.AvatarUrl.String)

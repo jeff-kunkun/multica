@@ -757,6 +757,14 @@ export interface Agent {
    */
   auto_retry_enabled?: boolean;
   /**
+   * Reversible seat gate (DENE-714). When `false` the seat stays in the
+   * list but does not take new work: routing will not pick it, assignment
+   * will not wake it, and the daemon will not claim a new run. Running
+   * tasks are not cancelled. Older backends omit the field; treat
+   * `undefined` as enabled. Only `=== false` is off.
+   */
+  work_enabled?: boolean;
+  /**
    * Display-only model lineup (kun fork, DENE-200): the default model, the
    * ordered fallback chain and models borrowable for batch work. Never used
    * for routing. Older servers omit it; treat undefined as [].
@@ -1005,6 +1013,11 @@ export interface UpdateAgentRequest {
    * turns platform auto-retry off without affecting manual rerun.
    */
   auto_retry_enabled?: boolean;
+  /**
+   * Reversible seat gate. Omitted preserves the saved value; `false`
+   * stops the seat taking new work without archiving it.
+   */
+  work_enabled?: boolean;
   /**
    * Re-parents this agent (DENE-301). Tri-state semantics:
    *   - field omitted → no change
