@@ -3348,6 +3348,26 @@ describe("ApiClient exportTaskLogs", () => {
     expect(exported.bundle.redaction).toBeUndefined();
   });
 
+  it("never fills a half-stated redaction marker with true", async () => {
+    const client = new ApiClient("https://api.example.test");
+
+    // An empty object and a note-only object both parse, but neither states
+    // whether masking completed. That is "unknown", and unknown must fail
+    // closed: it can never read as safe to forward.
+    for (const redaction of [{}, { note: "只有说明，没有布尔字段" }]) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(exportResponse(JSON.stringify({ ...bundleBody, redaction }))),
+      );
+
+      const exported = await client.exportTaskLogs("task-1");
+
+      expect(exported.bundle.redaction?.complete).toBe(false);
+      expect(exported.bundle.redaction?.env_deny_list).toBe(false);
+      expect(exported.bundle.redaction?.pattern_rules).toBe(false);
+    }
+  });
+
   it("sends the scope and window as query parameters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(exportResponse(JSON.stringify(bundleBody)));
     vi.stubGlobal("fetch", fetchMock);

@@ -4168,10 +4168,15 @@ const TaskLogExportEntrySchema = z.object({
   output_truncated: z.boolean().optional().default(false),
 }).loose();
 
+// Unlike the rest of the bundle, these flags default to `false`, never `true`.
+// A server that omits or half-fills `redaction` is saying "unknown", and a
+// consumer gating "safe to forward" on `complete` must read that as "not
+// proven complete" rather than "clean". Fail-open here would let a bundle that
+// never stated its masking status out the door as if it had.
 const TaskLogExportRedactionSchema = z.object({
-  pattern_rules: z.boolean().optional().default(true),
-  env_deny_list: z.boolean().optional().default(true),
-  complete: z.boolean().optional().default(true),
+  pattern_rules: z.boolean().optional().default(false),
+  env_deny_list: z.boolean().optional().default(false),
+  complete: z.boolean().optional().default(false),
   note: z.string().optional().default(""),
 }).loose();
 
