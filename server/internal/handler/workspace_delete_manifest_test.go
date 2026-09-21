@@ -139,6 +139,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"webhook_delivery":                   workspaceDelete,
 	"workspace":                          workspaceDelete,
 	"workspace_invitation":               workspaceDelete,
+	"workspace_module_visibility":        workspaceDelete,
 	"workspace_share_link":               workspaceDelete,
 }
 

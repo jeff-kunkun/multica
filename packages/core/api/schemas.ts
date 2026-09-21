@@ -58,7 +58,6 @@ import type {
   InboxWorkspaceUnread,
   Label,
   MemberWithUser,
-  ModuleVisibility,
   ModuleVisibilityList,
   IssueProperty,
   ListPropertiesResponse,
