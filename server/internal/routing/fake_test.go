@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 )
 
 // fakeStore records every write so a test can assert not just the result but
@@ -20,6 +21,13 @@ type fakeStore struct {
 	// slot occupancy, as the database would enforce it
 	assigneeTaken bool
 	reviewerTaken bool
+
+	// stale-review row
+	workspaces    []string
+	staleIDs      []string
+	remarks       []string
+	statusWritten []string
+	completeLost  bool
 
 	comments map[CommentKind][]string
 	subs     []string
@@ -139,6 +147,33 @@ func (f *fakeStore) Subscribe(_ context.Context, _, _, userID string) error {
 	return nil
 }
 
+func (f *fakeStore) EnabledWorkspaces(context.Context) ([]string, error) {
+	return f.workspaces, f.fail("enabled_workspaces")
+}
+
+func (f *fakeStore) StaleReviews(_ context.Context, _ string, _ time.Time, _ int) ([]string, error) {
+	return f.staleIDs, f.fail("stale_reviews")
+}
+
+func (f *fakeStore) ReviewRemarks(_ context.Context, _, _ string, _ ReviewerRef) ([]string, error) {
+	return f.remarks, f.fail("review_remarks")
+}
+
+func (f *fakeStore) CompleteFromReview(_ context.Context, _, issueID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("complete"); err != nil {
+		return false, err
+	}
+	// The conditional write losing its race: the ticket left in_review between
+	// the decision and the write.
+	if f.completeLost {
+		return false, nil
+	}
+	f.statusWritten = append(f.statusWritten, issueID)
+	return true, nil
+}
+
 func (f *fakeStore) NotifyTarget(context.Context, string, Issue) (Member, error) {
 	return f.target, f.fail("notify_target")
 }
@@ -148,7 +183,8 @@ func (f *fakeStore) NotifyTarget(context.Context, string, Issue) (Member, error)
 func (f *fakeStore) wrote() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return len(f.assigns) > 0 || len(f.reviewer) > 0 || len(f.handoffs) > 0
+	return len(f.assigns) > 0 || len(f.reviewer) > 0 || len(f.handoffs) > 0 ||
+		len(f.statusWritten) > 0
 }
 
 func (f *fakeStore) commentCount() int {
@@ -167,6 +203,7 @@ type fakeJudge struct {
 	mu      sync.Mutex
 	verdict Verdict
 	advice  Advice
+	stale   StaleDecision
 	err     error
 	calls   int
 }
@@ -183,6 +220,13 @@ func (j *fakeJudge) Unblock(context.Context, Target, JudgeState) (Advice, error)
 	defer j.mu.Unlock()
 	j.calls++
 	return j.advice, j.err
+}
+
+func (j *fakeJudge) Stale(context.Context, Target, StaleState) (StaleDecision, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.calls++
+	return j.stale, j.err
 }
 
 func (j *fakeJudge) callCount() int {

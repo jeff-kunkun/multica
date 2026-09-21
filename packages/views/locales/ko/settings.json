@@ -1595,6 +1595,8 @@
     "model_placeholder": "예: gpt-5.6-luna",
     "threshold_label": "신뢰도 임계값",
     "threshold_description": "이보다 낮아도 배정은 하되 폴백 등급(범용 강)을 사용하고 라우팅 코멘트에 표시합니다. 기본값 0.60.",
+    "stale_hours_label": "정체 점검 임계값(시간)",
+    "stale_hours_description": "티켓이 검수 대기 상태로 머물고 실행 중인 run도 없는 시간이 이 값을 넘으면 점검 대상이 됩니다. 기본 동작은 검수자에게 다시 알리는 것뿐이고 상태는 바꾸지 않습니다. 티켓에 검수자의 통과 결론이 이미 있을 때만 완료로 정렬합니다. 기본값 24시간.",
     "gateway_endpoint_workspace": "모델 id는 이 워크스페이스 전용 엔드포인트로 전송됩니다: {{host}}.",
     "gateway_endpoint_deployment": "모델 id는 배포 공용 LLM 엔드포인트로 전송됩니다: {{host}}.",
     "gateway_protocol_systemone": "이 엔드포인트는 TypeSafe System One(Jev)입니다. 라우팅이 확률 분포가 딸린 타입 판단을 요청하므로, 임계값에 쓰이는 신뢰도는 모델의 자기 신고가 아니라 측정값입니다.",

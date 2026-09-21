@@ -1595,6 +1595,8 @@
     "model_placeholder": "例: gpt-5.6-luna",
     "threshold_label": "確信度のしきい値",
     "threshold_description": "これを下回っても割り当ては行い、フォールバック段（汎用の強）を使ってルーティングコメントに明記します。既定は 0.60。",
+    "stale_hours_label": "停滞チェックのしきい値（時間）",
+    "stale_hours_description": "レビュー待ちのままで実行中の run もない状態がこの時間を超えると、巡回の対象になります。既定の動作はレビュー担当に差し戻すだけでステータスは変えません。チケット上にレビュー担当の合格判定が既にある場合に限り、完了へ揃えます。既定は 24 時間。",
     "gateway_endpoint_workspace": "モデル id はこのワークスペース独自のエンドポイントに送信されます：{{host}}。",
     "gateway_endpoint_deployment": "モデル id はデプロイ共通の LLM エンドポイントに送信されます：{{host}}。",
     "gateway_protocol_systemone": "このエンドポイントは TypeSafe System One（Jev）です。ルーティングは確率分布付きの型付き判断を求めるため、しきい値に使う確信度はモデルの自己申告ではなく実測値になります。",

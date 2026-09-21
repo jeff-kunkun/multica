@@ -33,6 +33,13 @@ const (
 	ActionAdvised Action = "advised"
 	// ActionUnavailable — the model could not be reached.
 	ActionUnavailable Action = "unavailable"
+	// ActionWoken — the stale-review row put a stalled ticket back in front
+	// of whoever accepts it. Writes no status.
+	ActionWoken Action = "woken"
+	// ActionCompleted — the stale-review row moved a ticket to done because
+	// the reviewer had already passed it on the ticket. The only action in
+	// this package that changes a status.
+	ActionCompleted Action = "completed"
 )
 
 // Outcome reports what happened, so the CLI entry point and the hook entry
@@ -111,7 +118,7 @@ func (r *Router) Route(ctx context.Context, workspaceID, issueID string) (Outcom
 		return Outcome{State: state, Action: ActionSkipped, Reason: "issue unreadable"}, err
 	}
 
-	if issue.AssignedToHuman() {
+	if issue.AssignedToHuman() && !humanHeldIsRoutable(issue) {
 		// A person's ticket is a person's ticket. Nothing is filled, nothing
 		// is said, nobody is pinged.
 		return Outcome{State: state, Action: ActionSkipped, Reason: "assignee is a person"}, nil
@@ -134,6 +141,29 @@ func (r *Router) Route(ctx context.Context, workspaceID, issueID string) (Outcom
 		// licence to guess who should hold the ticket.
 		return Outcome{State: state, Action: ActionNoop, Reason: "unknown status category " + issue.Status}, nil
 	}
+}
+
+// humanHeldIsRoutable carves ONE case out of "a person holds it, do not
+// touch it": the ticket is awaiting acceptance and its reviewer slot has
+// never been decided.
+//
+// The blanket rule was written for "a person is DOING this work". It stopped
+// meaning that the moment the in-review row started handing tickets to
+// people: the handoff makes the assignee a person, and from then on every
+// later pass took the early return above — so a ticket that reached review
+// before its reviewer slot was ever filled could never have it filled, could
+// never be handed to anybody, and could never be swept. Eighteen tickets in
+// one workspace were in exactly that state, all answering `skipped / assignee
+// is a person` (DENE-712 B1).
+//
+// The carve-out is as narrow as the bug: in_review only, empty reviewer slot
+// only. A person holding a ticket in any other status is untouched, and a
+// person holding a ticket whose reviewer slot already holds a value is
+// untouched too — there is nothing left to fill, so the fill-only rule has
+// already closed and the only thing left to do would be to take the ticket
+// away from them.
+func humanHeldIsRoutable(issue Issue) bool {
+	return issue.Status == "in_review" && issue.Reviewer.Empty()
 }
 
 // routeTodo is the only row that fills slots.
