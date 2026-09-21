@@ -980,7 +980,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	%s,
 	%s
 	SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
-		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+		i.assignee_type, i.assignee_id, i.reviewer_type, i.reviewer_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id,
 		i.revision, i.visibility,
@@ -1072,6 +1072,8 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 				&sr.issue.Priority,
 				&sr.issue.AssigneeType,
 				&sr.issue.AssigneeID,
+				&sr.issue.ReviewerType,
+				&sr.issue.ReviewerID,
 				&sr.issue.CreatorType,
 				&sr.issue.CreatorID,
 				&sr.issue.ParentIssueID,
@@ -1658,7 +1660,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	limitRef := addArg(int64(limit))
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
-       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.assignee_type, i.assignee_id, i.reviewer_type, i.reviewer_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
 	   i.revision, i.visibility
 FROM issue i
@@ -1686,6 +1688,8 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Priority,
 			&row.AssigneeType,
 			&row.AssigneeID,
+			&row.ReviewerType,
+			&row.ReviewerID,
 			&row.CreatorType,
 			&row.CreatorID,
 			&row.ParentIssueID,
@@ -2267,7 +2271,7 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 WITH ranked AS (
 	SELECT
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
-		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+		i.assignee_type, i.assignee_id, i.reviewer_type, i.reviewer_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at,
 		i.number, i.project_id, i.metadata, i.stage, i.properties, i.revision,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
@@ -2280,7 +2284,7 @@ WITH ranked AS (
 )
 SELECT
 	id, workspace_id, title, description, status, priority,
-	assignee_type, assignee_id, creator_type, creator_id,
+	assignee_type, assignee_id, reviewer_type, reviewer_id, creator_type, creator_id,
 	parent_issue_id, position, start_date, due_date, created_at, updated_at, last_activity_at,
 	number, project_id, metadata, stage, properties, revision, group_total
 FROM ranked
@@ -2316,6 +2320,8 @@ ORDER BY
 			&row.Priority,
 			&row.AssigneeType,
 			&row.AssigneeID,
+			&row.ReviewerType,
+			&row.ReviewerID,
 			&row.CreatorType,
 			&row.CreatorID,
 			&row.ParentIssueID,
