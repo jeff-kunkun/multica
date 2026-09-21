@@ -2006,6 +2006,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+			// Log export bundle. One generator for the web dialog, the
+			// desktop dialog, and `multica logs export`, so all three hand
+			// the user the same artifact.
+			r.Get("/api/tasks/{taskId}/logs/export", h.ExportTaskLogs)
 			r.With(handler.RequireHumanActor).Post("/api/tasks/{taskId}/retry-source-context", h.RetrySourceContextQuickCreate)
 
 			// Issue quick actions (definitions; running one lives under
