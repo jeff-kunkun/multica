@@ -388,7 +388,7 @@
     "manual_reorder_hint": "Switch to Manual ordering to rearrange issues within a column."
   },
   "detail": {
-    "not_found": "This issue does not exist or has been deleted in this workspace.",
+    "not_found": "Page not found",
     "breadcrumb_project_unknown": "Unknown project",
     "back": "Back",
     "title_placeholder": "Issue title",

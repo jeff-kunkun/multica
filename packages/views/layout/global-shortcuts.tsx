@@ -22,6 +22,7 @@ import { canAccessModule, navItemModule } from "@multica/core/workspace";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import { useSearchStore } from "../search/search-store";
+import { useDenyGuestWrite } from "./guest-readonly";
 
 const GLOBAL_ACTIONS: readonly ShortcutActionId[] = [
   "openSearch",
@@ -58,6 +59,7 @@ export function GlobalShortcuts() {
     ...moduleVisibilityOptions(workspace?.id ?? ""),
     enabled: !!workspace?.id,
   });
+  const denyGuestWrite = useDenyGuestWrite();
 
   // Subscribe so changing a binding in Settings immediately refreshes the
   // listener closure; getShortcut remains useful to non-React call sites.
@@ -130,6 +132,7 @@ export function GlobalShortcuts() {
       }
       if (actionId === "createIssue") {
         if (!canAccessModule(moduleAccess, "issues")) return;
+        if (denyGuestWrite()) return;
         if (useModalStore.getState().modal) return;
         const projectMatch = navigation.pathname.match(
           /^\/[^/]+\/projects\/([^/]+)$/,
@@ -151,7 +154,14 @@ export function GlobalShortcuts() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [moduleAccess, navigation, overrides, toggleSidebar, workspacePaths]);
+  }, [
+    denyGuestWrite,
+    moduleAccess,
+    navigation,
+    overrides,
+    toggleSidebar,
+    workspacePaths,
+  ]);
 
   return null;
 }

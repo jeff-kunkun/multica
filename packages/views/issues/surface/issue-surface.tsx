@@ -36,6 +36,7 @@ import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
 import { TableView } from "../components/table-view";
 import { useT } from "../../i18n";
+import { NothingSharedEmpty, WriteAction, useGuestReadOnly } from "../../layout/guest-readonly";
 import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
@@ -197,6 +198,7 @@ function IssueSurfaceContent({
   contentClassName,
 }: Omit<IssueSurfaceComponentProps, "surfaceKey">) {
   const { t } = useT("projects");
+  const { isGuest } = useGuestReadOnly();
   const controller = useIssueSurfaceController({
     scope,
     modes,
@@ -310,22 +312,28 @@ function IssueSurfaceContent({
           // copy describes the unfiltered case.
           controller.hasActiveFilters ? (
             <FilteredEmptyState />
-          ) : renderEmpty ? (
+          ) : isGuest && scope.type === "workspace" ? (
+            <NothingSharedEmpty />
+          ) : renderEmpty && !isGuest ? (
             renderEmpty(renderContext)
           ) : (
             <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
               <ListTodo className="h-10 w-10 text-faint-foreground" />
               <p className="text-body">{t(($) => $.detail.empty_issues_title)}</p>
-              <p className="text-caption">{t(($) => $.detail.empty_issues_hint)}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-1"
-                onClick={() => controller.openCreateIssue()}
-              >
-                <Plus className="size-3.5 mr-1.5" />
-                {t(($) => $.detail.empty_issues_new_button)}
-              </Button>
+              {!isGuest && (
+                <p className="text-caption">{t(($) => $.detail.empty_issues_hint)}</p>
+              )}
+              <WriteAction>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-1"
+                  onClick={() => controller.openCreateIssue()}
+                >
+                  <Plus className="size-3.5 mr-1.5" />
+                  {t(($) => $.detail.empty_issues_new_button)}
+                </Button>
+              </WriteAction>
             </div>
           )
         ) : (

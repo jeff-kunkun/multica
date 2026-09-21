@@ -12,6 +12,16 @@ export {
 export type { TabPresentationResult } from "./tab-presentation";
 export { DashboardGuard } from "./dashboard-guard";
 export { DashboardLayout } from "./dashboard-layout";
+export {
+  GuestBanner,
+  GuestReadOnlyProvider,
+  GuestReadOnlyScope,
+  NothingSharedEmpty,
+  ResourceNotFound,
+  WriteAction,
+  useDenyGuestWrite,
+  useGuestReadOnly,
+} from "./guest-readonly";
 export { useDashboardGuard } from "./use-dashboard-guard";
 export { WorkspaceLoader } from "./workspace-loader";
 export { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";

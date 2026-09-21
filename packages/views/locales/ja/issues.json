@@ -384,7 +384,7 @@
     "manual_reorder_hint": "列内の順序を変更するには、並び順を「手動」に切り替えてください。"
   },
   "detail": {
-    "not_found": "このタスクはこのワークスペースに存在しないか、削除されています。",
+    "not_found": "このページは見つかりません",
     "breadcrumb_project_unknown": "不明なプロジェクト",
     "back": "戻る",
     "title_placeholder": "タスクのタイトル",
