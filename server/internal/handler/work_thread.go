@@ -19,6 +19,9 @@ type WorkThreadSnapshot struct {
 	ChatSessionID  string            `json:"chat_session_id,omitempty"`
 	Continuous     bool              `json:"continuous"`
 	CurrentTurn    *WorkThreadTurn   `json:"current_turn,omitempty"`
+	LastTurn       *WorkThreadTurn   `json:"last_turn,omitempty"`
+	State          string            `json:"state"`
+	CanResume      bool              `json:"can_resume"`
 	SessionID      string            `json:"session_id,omitempty"`
 	QueuedInputs   []WorkThreadInput `json:"queued_inputs"`
 	QueueTruncated bool              `json:"queue_truncated"`
@@ -59,13 +62,17 @@ type workThreadRow struct {
 	CurrentID, CurrentSessionID               pgtype.UUID
 	CurrentStatus                             pgtype.Text
 	CurrentStartedAt                          pgtype.Timestamptz
+	LastID, LastTaskSessionID                 pgtype.UUID
+	LastStatus                                pgtype.Text
+	LastCompletedAt                           pgtype.Timestamptz
 }
 
 const workThreadByIssueSQL = `
 SELECT wt.id, wt.agent_id, wt.issue_id, wt.chat_session_id,
        wt.context_generation, wt.context_message_limit, wt.context_token_budget,
        wt.last_session_id, wt.last_turn_id, wt.continuity_break_reason, wt.updated_at,
-       active.id, active.session_id, active.status, active.started_at
+       active.id, active.session_id, active.status, active.started_at,
+       latest.id, latest.session_id, latest.status, latest.completed_at
 FROM work_thread wt
 LEFT JOIN LATERAL (
   SELECT id, session_id, status, started_at
@@ -75,6 +82,13 @@ LEFT JOIN LATERAL (
   ORDER BY created_at DESC, id DESC
   LIMIT 1
 ) active ON true
+LEFT JOIN LATERAL (
+  SELECT id, session_id, status, completed_at
+  FROM agent_task_queue
+  WHERE work_thread_id = wt.id
+  ORDER BY created_at DESC, id DESC
+  LIMIT 1
+) latest ON true
 WHERE wt.issue_id = $1
 ORDER BY wt.updated_at DESC, wt.id DESC
 LIMIT 1`
@@ -83,7 +97,8 @@ const workThreadByChatSQL = `
 SELECT wt.id, wt.agent_id, wt.issue_id, wt.chat_session_id,
        wt.context_generation, wt.context_message_limit, wt.context_token_budget,
        wt.last_session_id, wt.last_turn_id, wt.continuity_break_reason, wt.updated_at,
-       active.id, active.session_id, active.status, active.started_at
+       active.id, active.session_id, active.status, active.started_at,
+       latest.id, latest.session_id, latest.status, latest.completed_at
 FROM work_thread wt
 LEFT JOIN LATERAL (
   SELECT id, session_id, status, started_at
@@ -93,6 +108,13 @@ LEFT JOIN LATERAL (
   ORDER BY created_at DESC, id DESC
   LIMIT 1
 ) active ON true
+LEFT JOIN LATERAL (
+  SELECT id, session_id, status, completed_at
+  FROM agent_task_queue
+  WHERE work_thread_id = wt.id
+  ORDER BY created_at DESC, id DESC
+  LIMIT 1
+) latest ON true
 WHERE wt.chat_session_id = $1
 ORDER BY wt.updated_at DESC, wt.id DESC
 LIMIT 1`
@@ -115,6 +137,7 @@ func (h *Handler) GetIssueWorkThread(w http.ResponseWriter, r *http.Request) {
 		&row.Generation, &row.MessageLimit, &row.TokenBudget, &row.LastSessionID,
 		&row.LastTurnID, &row.BreakReason, &row.UpdatedAt, &row.CurrentID,
 		&row.CurrentSessionID, &row.CurrentStatus, &row.CurrentStartedAt,
+		&row.LastID, &row.LastTaskSessionID, &row.LastStatus, &row.LastCompletedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -142,6 +165,7 @@ func (h *Handler) GetChatWorkThread(w http.ResponseWriter, r *http.Request) {
 		&row.Generation, &row.MessageLimit, &row.TokenBudget, &row.LastSessionID,
 		&row.LastTurnID, &row.BreakReason, &row.UpdatedAt, &row.CurrentID,
 		&row.CurrentSessionID, &row.CurrentStatus, &row.CurrentStartedAt,
+		&row.LastID, &row.LastTaskSessionID, &row.LastStatus, &row.LastCompletedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -163,13 +187,32 @@ func (h *Handler) writeWorkThreadSnapshot(w http.ResponseWriter, r *http.Request
 		Context: WorkThreadContext{Generation: row.Generation, MessageLimit: row.MessageLimit, TokenBudget: row.TokenBudget,
 			SummaryAvailable: false, BreakReason: row.BreakReason.String},
 		UpdatedAt: row.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		State:     "idle",
 	}
 	if !snapshot.CurrentTurnExists() && row.LastTurnID.Valid {
 		snapshot.SessionID = uuidToString(row.LastSessionID)
 	}
 	if row.CurrentID.Valid {
+		snapshot.State = "active"
 		snapshot.CurrentTurn = &WorkThreadTurn{ID: uuidToString(row.CurrentID), Status: row.CurrentStatus.String,
 			SessionID: uuidToString(row.CurrentSessionID), StartedAt: timestampToString(row.CurrentStartedAt)}
+	}
+	if row.LastID.Valid {
+		snapshot.LastTurn = &WorkThreadTurn{ID: uuidToString(row.LastID), Status: row.LastStatus.String,
+			SessionID: uuidToString(row.LastTaskSessionID), StartedAt: timestampToString(row.LastCompletedAt)}
+		if snapshot.State == "idle" {
+			switch row.LastStatus.String {
+			case "cancelled", "failed":
+				if row.LastTaskSessionID.Valid && !row.BreakReason.Valid {
+					snapshot.State = "resumable"
+					snapshot.CanResume = true
+				} else if row.BreakReason.Valid {
+					snapshot.State = "rebuild_required"
+				}
+			case "completed":
+				snapshot.State = "completed"
+			}
+		}
 	}
 	rows, err := h.DB.Query(r.Context(), workThreadInputsSQL, row.ThreadID, workThreadQueueLimit+1)
 	if err != nil {
@@ -196,6 +239,9 @@ func (h *Handler) writeWorkThreadSnapshot(w http.ResponseWriter, r *http.Request
 	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load queued work thread inputs")
 		return
+	}
+	if snapshot.State == "idle" && len(snapshot.QueuedInputs) > 0 {
+		snapshot.State = "queued"
 	}
 	writeJSON(w, http.StatusOK, snapshot)
 }

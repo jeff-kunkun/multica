@@ -19,6 +19,9 @@ export interface WorkThreadSnapshot {
   chat_session_id?: string;
   continuous: boolean;
   current_turn?: WorkThreadTurn;
+  last_turn?: WorkThreadTurn;
+  state: "idle" | "queued" | "active" | "completed" | "resumable" | "rebuild_required" | string;
+  can_resume: boolean;
   session_id?: string;
   queued_inputs: WorkThreadInput[];
   queue_truncated: boolean;
