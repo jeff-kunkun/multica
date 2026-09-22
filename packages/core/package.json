@@ -33,6 +33,7 @@
     "./workspace/avatar-url": "./workspace/avatar-url.ts",
     "./workspace/routing-settings": "./workspace/routing-settings.ts",
     "./workspace/routing-health": "./workspace/routing-health.ts",
+    "./workspace/routing-policy-prompt": "./workspace/routing-policy-prompt.ts",
     "./issue-statuses": "./issue-statuses/index.ts",
     "./issue-statuses/queries": "./issue-statuses/queries.ts",
     "./issue-statuses/hooks": "./issue-statuses/hooks.ts",
