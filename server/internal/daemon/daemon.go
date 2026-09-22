@@ -6154,6 +6154,24 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, lease *taskSlotLease
 		defer localRelease()
 	}
 
+	// A shared-scratch run has no per-task env root to publish. Resolving one
+	// here would write a task-root index record for a directory this run is
+	// not going to create, and the next claim would treat that record as the
+	// task's private checkout.
+	scratchDir, scratchErr := sharedScratchDirForTask(d.cfg.WorkspacesRoot, task)
+	if scratchErr != nil {
+		taskLog.Error("shared scratch: path refused", "error", scratchErr)
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  scratchErr.Error(),
+			failureReason: placementCode(scratchErr),
+		}); failErr != nil {
+			taskLog.Error("fail task after shared scratch path refusal", "error", failErr)
+		}
+		return
+	}
+
 	// Hold a process-wide active-root guard for the rest of this task so
 	// the GC loop never sees a window where the env root has neither the
 	// in-process guard nor .gc_meta.json (issue #3999 race B). runTask
@@ -6163,18 +6181,35 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, lease *taskSlotLease
 	// reportTaskResult and execenv.WriteGCMeta below. markActiveEnvRoot
 	// is reference-counted, so the duplicate marks runTask installs are
 	// correctly nested within these.
-	resolvedEnvRoot, resolveRootErr := execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
-	if resolveRootErr != nil {
-		taskLog.Error("resolve stable task env root", "error", resolveRootErr)
-	}
-	if resolvedEnvRoot != "" {
-		d.markActiveEnvRoot(resolvedEnvRoot)
-		defer d.unmarkActiveEnvRoot(resolvedEnvRoot)
-	}
-	if task.PriorWorkDir != "" {
-		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != resolvedEnvRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
+	if scratchDir != "" {
+		if err := os.MkdirAll(scratchDir, 0o755); err != nil {
+			taskLog.Error("shared scratch: create session folder", "error", err)
+			if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+				kind:          terminalTaskReportFail,
+				taskID:        task.ID,
+				errorMessage:  err.Error(),
+				failureReason: "scratch_path_invalid",
+			}); failErr != nil {
+				taskLog.Error("fail task after shared scratch create", "error", failErr)
+			}
+			return
+		}
+		d.markActiveEnvRoot(scratchDir)
+		defer d.unmarkActiveEnvRoot(scratchDir)
+	} else {
+		resolvedEnvRoot, resolveRootErr := execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
+		if resolveRootErr != nil {
+			taskLog.Error("resolve stable task env root", "error", resolveRootErr)
+		}
+		if resolvedEnvRoot != "" {
+			d.markActiveEnvRoot(resolvedEnvRoot)
+			defer d.unmarkActiveEnvRoot(resolvedEnvRoot)
+		}
+		if task.PriorWorkDir != "" {
+			if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != resolvedEnvRoot {
+				d.markActiveEnvRoot(priorRoot)
+				defer d.unmarkActiveEnvRoot(priorRoot)
+			}
 		}
 	}
 
@@ -6423,7 +6458,10 @@ func taskRunFailureReason(err error) string {
 // a queue on one directory does not consume the daemon's whole capacity. nil
 // is accepted (focused tests) and simply keeps the slot.
 func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger, lease *taskSlotLease) (release func(), abort bool) {
-	if !task.hasProjectResources() || d.cfg.DaemonID == "" {
+	// A decision names the directory, or says there isn't one. There is
+	// nothing to scan, and a task with no project resources can still be
+	// unresolvable — that has to fail here, before a fresh checkout is built.
+	if task.CodeDecision == nil && (!task.hasProjectResources() || d.cfg.DaemonID == "") {
 		return nil, false
 	}
 	assignment, err := d.resolveLocalDirectoryAssignment(task)
@@ -6433,7 +6471,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
 			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			failureReason: placementCode(err),
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory resolve error", "error", failErr)
 		}
@@ -6452,7 +6490,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
 			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			failureReason: placementCode(err),
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory mode check", "error", failErr)
 		}
@@ -6464,7 +6502,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
 			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			failureReason: placementCode(err),
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
@@ -7086,6 +7124,33 @@ func sharedModeSkillsDir(provider, sidecarRoot, codexHome string) string {
 		return filepath.Join(codexHome, "skills")
 	}
 	return execenv.SkillsDirPath(sidecarRoot, provider)
+}
+
+// isolateUserDirectorySidecars reports whether this run must keep the
+// daemon's files — and in particular .multica/ — out of the user's directory.
+//
+// Shared mode always isolates: several tasks share the cwd, so a file at a
+// fixed path there is a race. In-place isolates whenever the runtime can
+// receive its brief from outside the cwd. A directory that is not a git
+// work tree isolates even when the runtime cannot, and then the run fails
+// rather than writing .multica/ into a folder nothing will put back.
+func isolateUserDirectorySidecars(a *localDirectoryAssignment, provider string, gitWorkTree bool) (bool, error) {
+	if a == nil || !a.RunsInUserDirectory() {
+		return false, nil
+	}
+	must := a.IsShared() || !gitWorkTree || sharedModeBriefDelivery(provider) != sharedBriefUnsupported
+	if !must {
+		return false, nil
+	}
+	if err := sharedModeProviderSupported(provider); err != nil {
+		if !a.IsShared() && !gitWorkTree {
+			return false, fmt.Errorf(
+				"local_directory: %q is not a git work tree, so .multica/ cannot be written into it, and the %q runtime cannot take those files from outside the directory",
+				a.AbsPath, provider)
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // sharedModeProviderSupported returns a user-facing error when provider has no
@@ -8341,7 +8406,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Resolved BEFORE the brief is built, not after: the brief has to state
 	// which repositories this machine already holds, and it cannot do that
 	// without knowing whether a directory is pinned here at all (DENE-595).
-	localAssignment, readOnlyLocalDirs, _ := d.resolveLocalDirectoryPlan(task)
+	// The error is not optional. Dropping it used to mean "no directory
+	// matched, check the repos out", which is a silent change of plan when
+	// the decision had already named a directory that failed its check.
+	localAssignment, readOnlyLocalDirs, planErr := d.resolveLocalDirectoryPlan(task)
+	if planErr != nil {
+		return TaskResult{}, planErr
+	}
+	scratchDir, scratchErr := sharedScratchDirForTask(d.cfg.WorkspacesRoot, task)
+	if scratchErr != nil {
+		return TaskResult{}, scratchErr
+	}
+	if scratchDir != "" && localAssignment != nil {
+		return TaskResult{}, &codePlacementError{
+			Code: "decision_mismatch",
+			Err:  errors.New("shared scratch decision also resolved a local directory"),
+		}
+	}
 
 	// Prepare isolated execution environment.
 	// Repos the local directory does not already hold are passed as metadata
@@ -8397,34 +8478,49 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// can't reclaim artifacts inside them mid-execution. We mark both the
 	// stable root for a fresh Prepare and the prior root for Reuse — they
 	// usually differ (Reuse keeps the original task's directory).
-	resolvedRoot, err := execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
-	if err != nil {
-		return TaskResult{}, fmt.Errorf("resolve stable task env root: %w", err)
-	}
-	d.markActiveEnvRoot(resolvedRoot)
-	defer d.unmarkActiveEnvRoot(resolvedRoot)
-	if task.PriorWorkDir != "" {
-		priorRoot := filepath.Dir(task.PriorWorkDir)
-		if priorRoot != resolvedRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
-		}
-	}
-
-	// Claim the env root HERE, in the daemon parent, and hold it for the whole
-	// task run — the same lifetime as unmarkActiveEnvRoot above.
 	//
-	// It cannot be claimed inside preparation: production preparation runs in a
-	// short-lived helper process (prepareExecutionEnvironment ->
-	// PrepareIsolated), so a lock taken there dies with the helper and the
-	// *os.File cannot cross its JSON response back to us. Claiming there would
-	// leave the agent running with no protection at all — which is exactly the
-	// re-dispatch window this guards.
-	envClaim, err := execenv.ClaimEnvRoot(taskRootDirParams(d.cfg.WorkspacesRoot, task))
-	if err != nil {
-		return TaskResult{}, fmt.Errorf("claim execution environment: %w", err)
+	// Shared scratch has no task root. Claiming one would create the
+	// per-task directory this mode is not allowed to create, and resetting
+	// it would wipe the conversation's folder.
+	var envClaim *execenv.EnvRootClaim
+	var resolvedRoot string
+	if scratchDir == "" {
+		var err error
+		resolvedRoot, err = execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("resolve stable task env root: %w", err)
+		}
+		d.markActiveEnvRoot(resolvedRoot)
+		defer d.unmarkActiveEnvRoot(resolvedRoot)
+		if task.PriorWorkDir != "" {
+			priorRoot := filepath.Dir(task.PriorWorkDir)
+			if priorRoot != resolvedRoot {
+				d.markActiveEnvRoot(priorRoot)
+				defer d.unmarkActiveEnvRoot(priorRoot)
+			}
+		}
+
+		// Claim the env root HERE, in the daemon parent, and hold it for the whole
+		// task run — the same lifetime as unmarkActiveEnvRoot above.
+		//
+		// It cannot be claimed inside preparation: production preparation runs in a
+		// short-lived helper process (prepareExecutionEnvironment ->
+		// PrepareIsolated), so a lock taken there dies with the helper and the
+		// *os.File cannot cross its JSON response back to us. Claiming there would
+		// leave the agent running with no protection at all — which is exactly the
+		// re-dispatch window this guards.
+		envClaim, err = execenv.ClaimEnvRoot(taskRootDirParams(d.cfg.WorkspacesRoot, task))
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("claim execution environment: %w", err)
+		}
+		defer envClaim.Release()
+	} else {
+		if err := os.MkdirAll(scratchDir, 0o755); err != nil {
+			return TaskResult{}, fmt.Errorf("create shared scratch: %w", err)
+		}
+		d.markActiveEnvRoot(scratchDir)
+		defer d.unmarkActiveEnvRoot(scratchDir)
 	}
-	defer envClaim.Release()
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
@@ -8642,67 +8738,74 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	envReused := false
-	priorClaim, priorWorkDir, lockedPriorInfo, reusable, reuseErr := d.lockReusablePriorEnvRoot(ctx, task, localAssignment, envClaim.RootDir())
-	if reuseErr != nil {
-		// Cancelled while waiting for the previous run to let go of its
-		// directory. Ending here IS the behaviour: falling through would
-		// prepare a whole environment — repo checkout included — for a task
-		// nobody is waiting for any more.
-		return TaskResult{}, reuseErr
-	}
-	if reusable {
-		defer priorClaim.Release()
-		// Deterministic seam for the last-window regression: tests swap the
-		// directory here, after the claim is settled and before Reuse resolves
-		// the path by name.
-		if reuseBeforeUseTestHook != nil {
-			reuseBeforeUseTestHook()
+	var priorClaim *execenv.EnvRootClaim
+	var priorWorkDir string
+	var lockedPriorInfo os.FileInfo
+	var reusable bool
+	if envClaim != nil {
+		var reuseErr error
+		priorClaim, priorWorkDir, lockedPriorInfo, reusable, reuseErr = d.lockReusablePriorEnvRoot(ctx, task, localAssignment, envClaim.RootDir())
+		if reuseErr != nil {
+			// Cancelled while waiting for the previous run to let go of its
+			// directory. Ending here IS the behaviour: falling through would
+			// prepare a whole environment — repo checkout included — for a task
+			// nobody is waiting for any more.
+			return TaskResult{}, reuseErr
 		}
-		var err error
-		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			Profile:        d.cfg.Profile,
-			// The canonical path the lock was taken on. Handing Reuse the raw
-			// PriorWorkDir instead would re-resolve it, so the directory we
-			// locked and the directory we use could differ.
-			WorkDir:               priorWorkDir,
-			Provider:              provider,
-			CodexVersion:          codexVersion,
-			ResumeSessionID:       task.PriorSessionID,
-			OpenclawBin:           openclawBin,
-			McpConfig:             effectiveMcpConfig,
-			CursorMcpAuthSource:   cursorMcpAuthSource,
-			OpenclawGateway:       openclawGateway,
-			HermesSourceHome:      hermesSourceHome,
-			HermesSourceMustExist: hermesSourceMustExist,
-			HermesEnv:             hermesEnv,
-			HermesMemoryStore:     hermesMemoryStore,
-			HermesSessionStore:    hermesSessionStore,
-			ReasonixEnv:           reasonixEnv,
-			CodexCustomArgs:       codexSandboxArgs,
-			Task:                  taskCtx,
-		})
-		if err != nil {
-			return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("reuse execution environment: %w", err))
-		}
-		// Reuse resolves priorWorkDir by name, so confirm what it actually
-		// opened is still the directory we hold the lock on. An fd cannot cross
-		// into the preparation helper process, so the name is the only thing
-		// that can be handed over; this turns "silently ran somewhere else"
-		// into "declined and started clean". See lockReusablePriorEnvRoot for
-		// what remains uncovered.
-		if env != nil && lockedPriorInfo != nil {
-			usedInfo, statErr := os.Stat(filepath.Dir(env.WorkDir))
-			if statErr != nil || !os.SameFile(lockedPriorInfo, usedInfo) {
-				// No "task" field here: taskLog already carries the full id.
-				taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment")
-				env = nil
+		if reusable {
+			defer priorClaim.Release()
+			// Deterministic seam for the last-window regression: tests swap the
+			// directory here, after the claim is settled and before Reuse resolves
+			// the path by name.
+			if reuseBeforeUseTestHook != nil {
+				reuseBeforeUseTestHook()
 			}
+			var err error
+			env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
+				WorkspacesRoot: d.cfg.WorkspacesRoot,
+				Profile:        d.cfg.Profile,
+				// The canonical path the lock was taken on. Handing Reuse the raw
+				// PriorWorkDir instead would re-resolve it, so the directory we
+				// locked and the directory we use could differ.
+				WorkDir:               priorWorkDir,
+				Provider:              provider,
+				CodexVersion:          codexVersion,
+				ResumeSessionID:       task.PriorSessionID,
+				OpenclawBin:           openclawBin,
+				McpConfig:             effectiveMcpConfig,
+				CursorMcpAuthSource:   cursorMcpAuthSource,
+				OpenclawGateway:       openclawGateway,
+				HermesSourceHome:      hermesSourceHome,
+				HermesSourceMustExist: hermesSourceMustExist,
+				HermesEnv:             hermesEnv,
+				HermesMemoryStore:     hermesMemoryStore,
+				HermesSessionStore:    hermesSessionStore,
+				ReasonixEnv:           reasonixEnv,
+				CodexCustomArgs:       codexSandboxArgs,
+				Task:                  taskCtx,
+			})
+			if err != nil {
+				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("reuse execution environment: %w", err))
+			}
+			// Reuse resolves priorWorkDir by name, so confirm what it actually
+			// opened is still the directory we hold the lock on. An fd cannot cross
+			// into the preparation helper process, so the name is the only thing
+			// that can be handed over; this turns "silently ran somewhere else"
+			// into "declined and started clean". See lockReusablePriorEnvRoot for
+			// what remains uncovered.
+			if env != nil && lockedPriorInfo != nil {
+				usedInfo, statErr := os.Stat(filepath.Dir(env.WorkDir))
+				if statErr != nil || !os.SameFile(lockedPriorInfo, usedInfo) {
+					// No "task" field here: taskLog already carries the full id.
+					taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment")
+					env = nil
+				}
+			}
+			// Reuse can decline (nil) and fall through to a fresh Prepare below.
+			// Whether it did decides whether an env-root-scoped session store — the
+			// Hermes overlay's task-local state.db — carried over from the prior task.
+			envReused = env != nil
 		}
-		// Reuse can decline (nil) and fall through to a fresh Prepare below.
-		// Whether it did decides whether an env-root-scoped session store — the
-		// Hermes overlay's task-local state.db — carried over from the prior task.
-		envReused = env != nil
 	}
 	if env == nil {
 		var err error
@@ -8732,7 +8835,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}
-		if localAssignment.UsesWorktree() {
+		if scratchDir != "" {
+			// The session folder is the cwd. Prepare must not claim or reset
+			// a per-task env root; there isn't one.
+			prepParams.SharedScratchDir = scratchDir
+			prepParams.EnvRootPreclaimed = false
+			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
+			if err != nil {
+				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
+			}
+		} else if localAssignment.UsesWorktree() {
 			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{
 				LocalPath: localAssignment.AbsPath,
 				// Empty when the resource names no location; execenv then
@@ -8811,15 +8923,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		} else {
 			if localAssignment != nil {
 				prepParams.LocalWorkDir = localAssignment.AbsPath
-				if localAssignment.IsShared() {
-					// Fail before anything is written: a provider without a
-					// sidecar-free brief route would start with no runtime brief
-					// and no skills, and silently do the wrong work.
-					if err := sharedModeProviderSupported(provider); err != nil {
-						return TaskResult{}, err
-					}
-					prepParams.IsolateSidecars = true
+				// .multica/ is the daemon's own bookkeeping. In the user's
+				// directory it is either isolated up front or, for a git
+				// checkout whose runtime cannot take a brief from outside the
+				// cwd, cleaned up on the way out. A directory that is not a
+				// git work tree has neither a commit nor an ignore rule to
+				// fall back on, so isolation is not optional there.
+				isolate, isoErr := isolateUserDirectorySidecars(localAssignment, provider, isGitWorkTree(prepareCtx, localAssignment.AbsPath))
+				if isoErr != nil {
+					return TaskResult{}, isoErr
 				}
+				prepParams.IsolateSidecars = isolate
 			}
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 			if err != nil {

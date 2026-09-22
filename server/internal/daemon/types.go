@@ -122,9 +122,11 @@ type Task struct {
 	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // project-scoped resources to expose to the agent
 	// CodeDecision is the server's answer to "which code does this run use",
 	// computed once by internal/coderesolve and shipped with the task
-	// (DENE-619). Nil from a server that predates it; the daemon still
-	// resolves the directory itself today, and DENE-621 makes this the source
-	// of truth instead. Mirror field: internal/handler/agent.go, same JSON name.
+	// (DENE-619). When it is set, it is the only answer the daemon acts on:
+	// the named directory is checked, not re-chosen, and a check that fails
+	// fails the task. Nil from a server that predates it, in which case the
+	// daemon still resolves the directory from the resource list. Mirror
+	// field: internal/handler/agent.go, same JSON name.
 	CodeDecision *coderesolve.Decision `json:"code_decision,omitempty"`
 	// Projects is the task's project set in priority order (DENE-523) — every
 	// project a chat attached, one for the other surfaces. The singular
