@@ -9,6 +9,50 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
+func TestCancelAgentTasksAlsoCancelsDirectSpecialisations(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	parentID, childID := specializationFixture(t, "cancel-cascade")
+	for _, agentID := range []string{parentID, childID} {
+		dbfx.Exec(t, `INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority) VALUES ($1, $2, 'queued', 0)`, agentID, testRuntimeID)
+	}
+
+	req := testutil.WithURLParams(
+		specRequest(http.MethodPost, "/api/agents/"+parentID+"/cancel-tasks", nil),
+		"id", parentID,
+	)
+	resp := testutil.Call(t, testHandler.CancelAgentTasks, req).Want(http.StatusOK)
+	var body struct {
+		Cancelled int `json:"cancelled"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode cancel response: %v", err)
+	}
+	if body.Cancelled != 2 {
+		t.Fatalf("cancelled count = %d, want 2", body.Cancelled)
+	}
+
+	rows, err := testPool.Query(t.Context(), `SELECT status FROM agent_task_queue WHERE agent_id IN ($1, $2) ORDER BY agent_id`, parentID, childID)
+	if err != nil {
+		t.Fatalf("query cancelled tasks: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var status string
+		if err := rows.Scan(&status); err != nil {
+			t.Fatalf("scan task status: %v", err)
+		}
+		if status != "cancelled" {
+			t.Errorf("task status = %q, want cancelled", status)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate task statuses: %v", err)
+	}
+}
+
 // The two-level specialisation contract (DENE-301). One file, because the rules
 // only make sense together: depth, self-reference, the child-count direction of
 // the same rule, the archive guard, and the solidify escape hatch that is what

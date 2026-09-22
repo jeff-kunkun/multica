@@ -852,7 +852,9 @@ WHERE issue_id = $1 AND agent_id = $2
 RETURNING *;
 
 -- name: CancelAgentTasksByAgent :many
--- Bulk-cancel every active (queued/dispatched/running) task for an agent.
+-- Bulk-cancel every active (queued/dispatched/running) task for an agent and
+-- its direct specialisations. Stopping a base role must also stop the work
+-- scheduled for the specialised roles that extend it.
 -- Returns the affected rows so callers can broadcast task:cancelled events.
 -- Mirrors the shape of CancelAgentTasksByIssue / CancelPendingTasksByIssueAndAgent
 -- (also :many + RETURNING + completed_at) so the three sibling cancel paths
@@ -860,7 +862,9 @@ RETURNING *;
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
     cancelled_by_type = 'system', cancelled_by_id = NULL, cancelled_by_name = NULL
-WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+WHERE (agent_id = $1
+    OR agent_id IN (SELECT id FROM agent WHERE parent_agent_id = $1))
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CancelAgentTasksByTriggerComment :many
