@@ -252,6 +252,14 @@ const desktopAPI = {
     ipcRenderer.invoke("worktree-cleanup:save-settings", settings),
   removeWorktreeCopy: (path: string) =>
     ipcRenderer.invoke("worktree-cleanup:remove", path),
+  /** This machine's shared session folder: where questions with no code land. */
+  sharedScratchReport: () => ipcRenderer.invoke("shared-scratch:report"),
+  saveSharedScratchSettings: (settings: unknown) =>
+    ipcRenderer.invoke("shared-scratch:save-settings", settings),
+  removeSharedSession: (path: string) =>
+    ipcRenderer.invoke("shared-scratch:remove", path),
+  cleanExpiredSharedSessions: () =>
+    ipcRenderer.invoke("shared-scratch:clean-expired"),
   listLocalDirectorySharedOverrides: () =>
     ipcRenderer.invoke("local-directory:list-shared-overrides"),
   setLocalDirectorySharedOverride: (input: {

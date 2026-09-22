@@ -398,6 +398,10 @@ type Daemon struct {
 	// has used, which copies are busy, and the policy (off by default) that
 	// decides whether a finished one may be removed (DENE-617).
 	worktreeCleanup *worktreeCleanupState
+	// sharedScratch owns the one session folder per workspace: which
+	// conversations a task is in, and how long an idle one stays (DENE-622).
+	// Nil on a Daemon built field-by-field in a test.
+	sharedScratch *sharedScratchState
 
 	// terminalReports is the durable outbox for complete/fail callbacks. The
 	// sender hook is production-wired through Client and overridable in focused
@@ -814,6 +818,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		d.localSharedOverrides = newLocalSharedOverrideStore("")
 	}
 	d.worktreeCleanup = newWorktreeCleanupState(cfg.Profile)
+	d.sharedScratch = newSharedScratchState(cfg.Profile)
 	return d
 }
 
@@ -6154,24 +6159,6 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, lease *taskSlotLease
 		defer localRelease()
 	}
 
-	// A shared-scratch run has no per-task env root to publish. Resolving one
-	// here would write a task-root index record for a directory this run is
-	// not going to create, and the next claim would treat that record as the
-	// task's private checkout.
-	scratchDir, scratchErr := sharedScratchDirForTask(d.cfg.WorkspacesRoot, task)
-	if scratchErr != nil {
-		taskLog.Error("shared scratch: path refused", "error", scratchErr)
-		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:          terminalTaskReportFail,
-			taskID:        task.ID,
-			errorMessage:  scratchErr.Error(),
-			failureReason: placementCode(scratchErr),
-		}); failErr != nil {
-			taskLog.Error("fail task after shared scratch path refusal", "error", failErr)
-		}
-		return
-	}
-
 	// Hold a process-wide active-root guard for the rest of this task so
 	// the GC loop never sees a window where the env root has neither the
 	// in-process guard nor .gc_meta.json (issue #3999 race B). runTask
@@ -6181,35 +6168,18 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, lease *taskSlotLease
 	// reportTaskResult and execenv.WriteGCMeta below. markActiveEnvRoot
 	// is reference-counted, so the duplicate marks runTask installs are
 	// correctly nested within these.
-	if scratchDir != "" {
-		if err := os.MkdirAll(scratchDir, 0o755); err != nil {
-			taskLog.Error("shared scratch: create session folder", "error", err)
-			if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-				kind:          terminalTaskReportFail,
-				taskID:        task.ID,
-				errorMessage:  err.Error(),
-				failureReason: "scratch_path_invalid",
-			}); failErr != nil {
-				taskLog.Error("fail task after shared scratch create", "error", failErr)
-			}
-			return
-		}
-		d.markActiveEnvRoot(scratchDir)
-		defer d.unmarkActiveEnvRoot(scratchDir)
-	} else {
-		resolvedEnvRoot, resolveRootErr := execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
-		if resolveRootErr != nil {
-			taskLog.Error("resolve stable task env root", "error", resolveRootErr)
-		}
-		if resolvedEnvRoot != "" {
-			d.markActiveEnvRoot(resolvedEnvRoot)
-			defer d.unmarkActiveEnvRoot(resolvedEnvRoot)
-		}
-		if task.PriorWorkDir != "" {
-			if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != resolvedEnvRoot {
-				d.markActiveEnvRoot(priorRoot)
-				defer d.unmarkActiveEnvRoot(priorRoot)
-			}
+	resolvedEnvRoot, resolveRootErr := execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
+	if resolveRootErr != nil {
+		taskLog.Error("resolve stable task env root", "error", resolveRootErr)
+	}
+	if resolvedEnvRoot != "" {
+		d.markActiveEnvRoot(resolvedEnvRoot)
+		defer d.unmarkActiveEnvRoot(resolvedEnvRoot)
+	}
+	if task.PriorWorkDir != "" {
+		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != resolvedEnvRoot {
+			d.markActiveEnvRoot(priorRoot)
+			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
 	}
 
@@ -8413,16 +8383,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if planErr != nil {
 		return TaskResult{}, planErr
 	}
-	scratchDir, scratchErr := sharedScratchDirForTask(d.cfg.WorkspacesRoot, task)
-	if scratchErr != nil {
-		return TaskResult{}, scratchErr
-	}
-	if scratchDir != "" && localAssignment != nil {
-		return TaskResult{}, &codePlacementError{
-			Code: "decision_mismatch",
-			Err:  errors.New("shared scratch decision also resolved a local directory"),
-		}
-	}
 
 	// Prepare isolated execution environment.
 	// Repos the local directory does not already hold are passed as metadata
@@ -8474,17 +8434,54 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ConnectedApps:                    task.ConnectedApps,
 	}
 
+	// A run the server placed in the shared session folder does not get a
+	// per-task env root. The folder is the workspace's one scratch directory,
+	// and this turn uses the session's child of it (DENE-622). Every other
+	// decision, including a task whose server sent no decision, keeps the
+	// per-task directory below.
+	scratchDir, scratchRel, useScratch, scratchErr := d.taskSharedScratch(task)
+	if scratchErr != nil {
+		return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("shared scratch: %w", scratchErr))
+	}
+	if useScratch && localAssignment != nil {
+		return TaskResult{}, &codePlacementError{
+			Code: "decision_mismatch",
+			Err:  errors.New("shared scratch decision also resolved a local directory"),
+		}
+	}
+	if useScratch {
+		if _, err := execenv.OpenSharedSession(d.cfg.WorkspacesRoot, task.WorkspaceID, scratchRel, time.Now()); err != nil {
+			return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("open shared session: %w", err))
+		}
+		d.sharedScratch.MarkActive(scratchDir)
+		defer func() {
+			_ = execenv.TouchSharedSession(scratchDir, time.Now())
+			d.sharedScratch.ReleaseActive(scratchDir)
+		}()
+	}
+
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the
 	// stable root for a fresh Prepare and the prior root for Reuse — they
 	// usually differ (Reuse keeps the original task's directory).
 	//
-	// Shared scratch has no task root. Claiming one would create the
-	// per-task directory this mode is not allowed to create, and resetting
-	// it would wipe the conversation's folder.
-	var envClaim *execenv.EnvRootClaim
+	// A shared-scratch run marks the session folder instead. Marking the
+	// per-task path as well would protect a directory this run is refusing
+	// to create, and would keep the pile of old task directories pinned for
+	// the length of a conversation that no longer uses them.
 	var resolvedRoot string
-	if scratchDir == "" {
+	var envClaim *execenv.EnvRootClaim
+	if useScratch {
+		resolvedRoot = scratchDir
+		d.markActiveEnvRoot(resolvedRoot)
+		defer d.unmarkActiveEnvRoot(resolvedRoot)
+		var claimErr error
+		envClaim, claimErr = execenv.ClaimSharedSession(scratchDir)
+		if claimErr != nil {
+			return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("claim shared session: %w", claimErr))
+		}
+		defer envClaim.Release()
+	} else {
 		var err error
 		resolvedRoot, err = execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
 		if err != nil {
@@ -8514,12 +8511,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			return TaskResult{}, fmt.Errorf("claim execution environment: %w", err)
 		}
 		defer envClaim.Release()
-	} else {
-		if err := os.MkdirAll(scratchDir, 0o755); err != nil {
-			return TaskResult{}, fmt.Errorf("create shared scratch: %w", err)
-		}
-		d.markActiveEnvRoot(scratchDir)
-		defer d.unmarkActiveEnvRoot(scratchDir)
 	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
@@ -8738,13 +8729,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	envReused := false
-	var priorClaim *execenv.EnvRootClaim
-	var priorWorkDir string
-	var lockedPriorInfo os.FileInfo
-	var reusable bool
-	if envClaim != nil {
-		var reuseErr error
-		priorClaim, priorWorkDir, lockedPriorInfo, reusable, reuseErr = d.lockReusablePriorEnvRoot(ctx, task, localAssignment, envClaim.RootDir())
+	// The session folder is the continuity. Reusing PriorWorkDir here would
+	// treat its parent — the directory that holds every session — as an env
+	// root, or fall through and mint a per-task directory beside it.
+	if !useScratch {
+		priorClaim, priorWorkDir, lockedPriorInfo, reusable, reuseErr := d.lockReusablePriorEnvRoot(ctx, task, localAssignment, envClaim.RootDir())
 		if reuseErr != nil {
 			// Cancelled while waiting for the previous run to let go of its
 			// directory. Ending here IS the behaviour: falling through would
@@ -8835,11 +8824,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}
-		if scratchDir != "" {
-			// The session folder is the cwd. Prepare must not claim or reset
-			// a per-task env root; there isn't one.
+		if useScratch {
+			// Already claimed, and not reset: the session folder keeps the
+			// files the previous turn left. No local directory and no
+			// worktree — the server said this run has neither.
 			prepParams.SharedScratchDir = scratchDir
-			prepParams.EnvRootPreclaimed = false
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 			if err != nil {
 				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))

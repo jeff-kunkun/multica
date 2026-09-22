@@ -13,7 +13,6 @@ import (
 	"sync"
 
 	"github.com/multica-ai/multica/server/internal/coderesolve"
-	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 // localDirectoryResourceType is the project_resource discriminator the daemon
@@ -977,23 +976,4 @@ func classifyPathFailure(err error) string {
 	default:
 		return "path_invalid"
 	}
-}
-
-// sharedScratchDirForTask is the absolute session folder a SharedScratch
-// decision names. An empty string with a nil error means this task is not a
-// scratch run. A non-nil error is a refusal: the path is not inside the
-// scratch root, and the run does not fall back to a fresh task directory.
-func sharedScratchDirForTask(workspacesRoot string, task Task) (string, error) {
-	if task.CodeDecision == nil {
-		return "", nil
-	}
-	scratch, ok := task.CodeDecision.Scratch()
-	if !ok {
-		return "", nil
-	}
-	dir, err := execenv.SharedScratchDir(workspacesRoot, task.WorkspaceID, scratch.Path)
-	if err != nil {
-		return "", &codePlacementError{Code: "scratch_path_invalid", Err: err}
-	}
-	return dir, nil
 }

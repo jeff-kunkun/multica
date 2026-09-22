@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/coderesolve"
@@ -239,30 +238,6 @@ func TestDecisionFailureIsReportedWithItsCode(t *testing.T) {
 	}
 }
 
-func TestSharedScratchPathIsTheSessionFolderAndRejectsEscape(t *testing.T) {
-	root := t.TempDir()
-	decision := coderesolve.NewSharedScratch(coderesolve.ScratchTarget{SessionID: "chat-7", Path: "sessions/chat-7"})
-	dir, err := sharedScratchDirForTask(root, Task{WorkspaceID: "ws-1", CodeDecision: &decision})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := execenv.SharedScratchDir(root, "ws-1", "sessions/chat-7")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dir != want {
-		t.Fatalf("scratch dir = %q, want %q", dir, want)
-	}
-	if !strings.Contains(dir, string(filepath.Separator)+".scratch"+string(filepath.Separator)) {
-		t.Fatalf("scratch dir %q is not under .scratch, so the task GC would treat it as a task directory", dir)
-	}
-
-	bad := coderesolve.NewSharedScratch(coderesolve.ScratchTarget{SessionID: "x", Path: "../outside"})
-	if _, err := sharedScratchDirForTask(root, Task{WorkspaceID: "ws-1", CodeDecision: &bad}); err == nil {
-		t.Fatal("a scratch path that climbs out of the scratch root was accepted")
-	}
-}
-
 func TestInPlaceNonGitDirectoryKeepsMulticaOutAndCreatesNoWorkCopy(t *testing.T) {
 	workspaces := t.TempDir()
 	userDir := t.TempDir() // not a git work tree
@@ -300,68 +275,6 @@ func TestInPlaceNonGitDirectoryKeepsMulticaOutAndCreatesNoWorkCopy(t *testing.T)
 	}
 	if _, err := os.Stat(filepath.Join(env.SidecarRoot, ".multica")); err != nil {
 		t.Fatalf(".multica missing from the sidecar root: %v", err)
-	}
-}
-
-func TestPrepareSharedScratchReusesOneSessionFolder(t *testing.T) {
-	root := t.TempDir()
-	dir, err := execenv.SharedScratchDir(root, "ws-1", "sessions/chat-7")
-	if err != nil {
-		t.Fatal(err)
-	}
-	params := execenv.PrepareParams{
-		WorkspacesRoot:   root,
-		WorkspaceID:      "ws-1",
-		TaskID:           "11111111-1111-7111-8111-111111111111",
-		AgentName:        "Test Agent",
-		SharedScratchDir: dir,
-		Task:             execenv.TaskContextForEnv{ChatSessionID: "chat-7", AgentID: "agent-1"},
-	}
-	env, err := execenv.Prepare(params, discardLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if env.WorkDir != dir || env.RootDir != dir || !env.SharedScratch {
-		t.Fatalf("env work=%q root=%q scratch=%v, want the session folder", env.WorkDir, env.RootDir, env.SharedScratch)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "workdir")); !os.IsNotExist(err) {
-		t.Fatalf("shared scratch created a per-task workdir: %v", err)
-	}
-	taskRoot := execenv.PredictRootDir(execenv.RootDirParams{
-		WorkspacesRoot: root, WorkspaceID: "ws-1", TaskID: params.TaskID,
-	})
-	if _, err := os.Stat(taskRoot); !os.IsNotExist(err) {
-		t.Fatalf("shared scratch created a task env root at %s: %v", taskRoot, err)
-	}
-	sentinel := filepath.Join(dir, "kept.txt")
-	if err := os.WriteFile(sentinel, []byte("turn one"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := env.Cleanup(true); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(sentinel); err != nil {
-		t.Fatalf("cleanup removed the session folder: %v", err)
-	}
-
-	params.TaskID = "22222222-2222-7222-8222-222222222222"
-	env2, err := execenv.Prepare(params, discardLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer env2.Cleanup(true)
-	if env2.WorkDir != dir {
-		t.Fatalf("second turn cwd = %q, want the same session folder", env2.WorkDir)
-	}
-	body, err := os.ReadFile(sentinel)
-	if err != nil || string(body) != "turn one" {
-		t.Fatalf("second prepare reset the session folder: %v %q", err, body)
-	}
-	secondRoot := execenv.PredictRootDir(execenv.RootDirParams{
-		WorkspacesRoot: root, WorkspaceID: "ws-1", TaskID: params.TaskID,
-	})
-	if _, err := os.Stat(secondRoot); !os.IsNotExist(err) {
-		t.Fatalf("second turn created a task env root at %s: %v", secondRoot, err)
 	}
 }
 

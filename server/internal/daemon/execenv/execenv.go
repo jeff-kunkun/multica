@@ -159,10 +159,11 @@ type PrepareParams struct {
 	// Mutually exclusive with LocalWorkDir — the daemon picks one based on the
 	// resource's execution_mode.
 	LocalWorktree *LocalWorktreeParams
-	// SharedScratchDir, when set, is the session folder this run works in.
-	// There is no per-task env root and no workdir checkout: the folder is
-	// the cwd, created if missing, and never wiped. Twenty turns of one
-	// conversation stay in this one directory. Mutually exclusive with
+	// SharedScratchDir, when set, is the session folder this run works in
+	// (DENE-622). There is no per-task env root: RootDir and the workdir's
+	// parent are this directory, it is not emptied, and a later turn of the
+	// same session finds the previous turn's files. The caller must already
+	// hold the claim (EnvRootPreclaimed). Mutually exclusive with
 	// LocalWorkDir and LocalWorktree.
 	SharedScratchDir string
 	// HermesSourceHome is the shared Hermes home the per-task overlay is seeded
@@ -402,6 +403,11 @@ type Environment struct {
 	// scratch that the GC should reclaim on the normal schedule, and the
 	// sidecar rollback that protects a user's directory is unnecessary.
 	LocalDirectory bool
+	// SharedScratch is true when RootDir is the machine's shared session
+	// folder rather than a per-task env root. Cleanup must not delete it;
+	// the shared-scratch GC is the only thing that reclaims it, and only
+	// under that GC's own rules.
+	SharedScratch bool
 	// SidecarRoot is the per-task directory holding the files Prepare kept
 	// out of a shared-mode workdir (PrepareParams.IsolateSidecars): the task
 	// marker, project resources, provider skills and, once the daemon injects
@@ -418,10 +424,6 @@ type Environment struct {
 	// agent exits to commit leftovers, drop the worktree, and learn the
 	// branch name to report as the task's result.
 	LocalWorktree *LocalWorktree
-	// SharedScratch is set when WorkDir is the machine's shared session
-	// folder rather than a per-task env root. Cleanup must not delete it:
-	// the next turn of the same conversation is still using it.
-	SharedScratch bool
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
 	// ClaudeSettingsPath is a task-local --settings JSON file that applies
@@ -550,33 +552,23 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if params.TaskID == "" {
 		return nil, fmt.Errorf("execenv: task ID is required")
 	}
-	if params.SharedScratchDir != "" && (params.LocalWorkDir != "" || params.LocalWorktree != nil) {
-		return nil, fmt.Errorf("execenv: shared scratch cannot be combined with a local directory or worktree")
-	}
 
-	// Self-heal the root-level daemon marker on every task start so a marker
-	// removed while the daemon runs is restored before the agent spawns. The
-	// per-workdir marker written below only covers cwds inside the workdir;
-	// the root marker keeps the CLI fail-closed guard active for subprocesses
-	// that lose all MULTICA_* env vars AND escape above the workdir. Non-fatal:
-	// without it the workdir marker still protects the common case.
-	if err := EnsureWorkspacesRootMarker(params.WorkspacesRoot); err != nil && logger != nil {
-		logger.Warn("execenv: workspaces root marker not written; fail-closed guard limited to the task workdir", "error", err)
-	}
-
-	// A shared-scratch run has no per-task env root. The session folder is the
-	// cwd, it already belongs to this conversation, and claiming it the way a
-	// task root is claimed would wipe the previous turn. Nothing below may
-	// publish a task-root index record for it either: that record is what a
-	// later claim would treat as this task's private directory.
 	var envRoot string
-	var lockFile *os.File
-	lockClaimed := false
 	if params.SharedScratchDir != "" {
-		envRoot = params.SharedScratchDir
-		if err := os.MkdirAll(envRoot, 0o755); err != nil {
-			return nil, fmt.Errorf("execenv: create shared scratch %s: %w", envRoot, err)
+		if params.LocalWorkDir != "" || params.LocalWorktree != nil {
+			return nil, fmt.Errorf("execenv: shared scratch cannot be combined with a local directory")
 		}
+		if !params.EnvRootPreclaimed {
+			return nil, fmt.Errorf("execenv: shared scratch directory must already be claimed by the caller")
+		}
+		info, statErr := os.Lstat(params.SharedScratchDir)
+		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("execenv: shared scratch directory %s is not a real directory", params.SharedScratchDir)
+		}
+		// The session folder already exists and already holds this
+		// conversation. Do not resolve a per-task env root and do not empty
+		// this one: both are how a question used to mint a new directory.
+		envRoot = params.SharedScratchDir
 	} else {
 		var err error
 		envRoot, err = ResolveRootDir(RootDirParams{
@@ -589,49 +581,61 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
 
-		// Take exclusive ownership of the env root before touching anything in it.
-		// What follows wipes the directory, and while the segment was a UUIDv7
-		// prefix that routinely wiped a live sibling task's workdir, worktree and
-		// task-scoped config (#7326). taskKey now reads the id's random tail, which
-		// makes a shared path improbable rather than impossible — so prove
-		// ownership instead of assuming it. A task that refuses to start is
-		// recoverable; one that deletes a running sibling's uncommitted work is not.
-		//
-		// claimEnvRoot is the only thing standing between two same-key tasks, so it
-		// has to be atomic end to end: a read-then-delete would let both pass the
-		// check and one still delete the other. Once claimed, the claim is held for
-		// the rest of Prepare — the reset below clears the directory's CONTENTS and
-		// leaves the marker in place, so there is never a moment where the env root
-		// looks unowned to a racing task.
-		if params.EnvRootPreclaimed {
-			// The caller holds the claim and already reset the root; just make sure
-			// the directory is there before populating it.
-			if err := os.MkdirAll(envRoot, 0o755); err != nil {
-				return nil, fmt.Errorf("execenv: create env root %s: %w", envRoot, err)
+	// Self-heal the root-level daemon marker on every task start so a marker
+	// removed while the daemon runs is restored before the agent spawns. The
+	// per-workdir marker written below only covers cwds inside the workdir;
+	// the root marker keeps the CLI fail-closed guard active for subprocesses
+	// that lose all MULTICA_* env vars AND escape above the workdir. Non-fatal:
+	// without it the workdir marker still protects the common case.
+	if err := EnsureWorkspacesRootMarker(params.WorkspacesRoot); err != nil && logger != nil {
+		logger.Warn("execenv: workspaces root marker not written; fail-closed guard limited to the task workdir", "error", err)
+	}
+
+	// Take exclusive ownership of the env root before touching anything in it.
+	// What follows wipes the directory, and while the segment was a UUIDv7
+	// prefix that routinely wiped a live sibling task's workdir, worktree and
+	// task-scoped config (#7326). taskKey now reads the id's random tail, which
+	// makes a shared path improbable rather than impossible — so prove
+	// ownership instead of assuming it. A task that refuses to start is
+	// recoverable; one that deletes a running sibling's uncommitted work is not.
+	//
+	// claimEnvRoot is the only thing standing between two same-key tasks, so it
+	// has to be atomic end to end: a read-then-delete would let both pass the
+	// check and one still delete the other. Once claimed, the claim is held for
+	// the rest of Prepare — the reset below clears the directory's CONTENTS and
+	// leaves the marker in place, so there is never a moment where the env root
+	// looks unowned to a racing task.
+	var lockFile *os.File
+	lockClaimed := false
+	if params.EnvRootPreclaimed {
+		// The caller holds the claim and already reset the root; just make sure
+		// the directory is there before populating it.
+		if err := os.MkdirAll(envRoot, 0o755); err != nil {
+			return nil, fmt.Errorf("execenv: create env root %s: %w", envRoot, err)
+		}
+	} else {
+		lock, reset, err := claimEnvRoot(envRoot, params.WorkspaceID, params.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("execenv: %w", err)
+		}
+		lockFile = lock
+		// Release the lock on every failure path below. The successful path
+		// hands it to the Environment.
+		lockClaimed = true
+		defer func() {
+			if lockClaimed {
+				releaseLockFile(lockFile)
 			}
-		} else {
-			lock, reset, err := claimEnvRoot(envRoot, params.WorkspaceID, params.TaskID)
-			if err != nil {
-				return nil, fmt.Errorf("execenv: %w", err)
-			}
-			lockFile = lock
-			// Release the lock on every failure path below. The successful path
-			// hands it to the Environment.
-			lockClaimed = true
-			defer func() {
-				if lockClaimed {
-					releaseLockFile(lockFile)
-				}
-			}()
-			// reset means this task already owned the directory and the execution
-			// that left it there is gone — a rerun, which is meant to start from a
-			// clean tree. Reuse of a PRIOR task's directory never reaches here;
-			// that is Reuse, which takes an explicit WorkDir and deletes nothing.
-			if reset {
-				if err := resetEnvRootContents(envRoot); err != nil {
-					return nil, fmt.Errorf("execenv: reset existing env: %w", err)
-				}
+		}()
+		// reset means this task already owned the directory and the execution
+		// that left it there is gone — a rerun, which is meant to start from a
+		// clean tree. Reuse of a PRIOR task's directory never reaches here;
+		// that is Reuse, which takes an explicit WorkDir and deletes nothing.
+		if reset {
+			if err := resetEnvRootContents(envRoot); err != nil {
+				return nil, fmt.Errorf("execenv: reset existing env: %w", err)
 			}
 		}
 	}
@@ -639,14 +643,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// Create directory tree. For the standard flow the agent's workdir is
 	// envRoot/workdir; for local_directory tasks the user's path takes its
 	// place and we only need to create the scratch directories under
-	// envRoot. Shared scratch uses the session folder itself as the cwd —
-	// a workdir child would be a second directory per task, which is the
-	// thing this mode exists to stop creating.
+	// envRoot.
 	workDir := filepath.Join(envRoot, "workdir")
 	scratchDirs := []string{filepath.Join(envRoot, "output"), filepath.Join(envRoot, "logs")}
-	if params.SharedScratchDir != "" {
-		workDir = envRoot
-	} else if params.LocalWorkDir == "" && params.LocalWorktree == nil {
+	if params.LocalWorkDir == "" && params.LocalWorktree == nil {
 		scratchDirs = append(scratchDirs, workDir)
 	} else if params.LocalWorkDir != "" {
 		workDir = params.LocalWorkDir
@@ -801,7 +801,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// exactly the set with a durable conversation scope. Non-fatal: a write failure
 	// only costs the next follow-up its session reuse (it falls back to a fresh
 	// session), which must never block dispatching this task.
-	if params.SharedScratchDir == "" && params.LocalWorkDir == "" && (params.Task.IssueID != "" || params.Task.ChatSessionID != "") {
+	if params.LocalWorkDir == "" && (params.Task.IssueID != "" || params.Task.ChatSessionID != "") {
 		if err := WriteManagedEnvProvenance(envRoot, ManagedEnvProvenance{
 			WorkspaceID:   params.WorkspaceID,
 			IssueID:       params.Task.IssueID,
@@ -1418,9 +1418,9 @@ func (env *Environment) Cleanup(removeAll bool) error {
 	// both paths are idempotent.
 	env.ReleaseLock()
 
-	// The session folder outlives this task. Deleting it here would take the
-	// conversation's artifacts with it, which is the opposite of sharing one
-	// folder across turns.
+	// The session folder outlives the turn. Removing it here would delete the
+	// conversation the next turn is supposed to come back to, and it would
+	// do so on a path Cleanup's caller thinks of as an env root.
 	if env.SharedScratch {
 		return nil
 	}
