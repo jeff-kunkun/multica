@@ -4157,6 +4157,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
+	// DENE-727: an automatic retry that inherited the parent's session already
+	// ran partway. Tell the daemon to continue that session instead of
+	// re-injecting the original task. The child's session_id is copied from
+	// the parent at CreateRetryTask, so it being set is the "already ran"
+	// signal — a retry of a startup failure has no session and keeps the
+	// full prompt. force_fresh_session (poisoned conversation) also stays
+	// on the full-prompt path.
+	if task.RetryOfTaskID.Valid && !task.ForceFreshSession && task.SessionID.Valid {
+		resp.ContinueInterruptedSession = true
+	}
+
 	return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, nil
 }
 

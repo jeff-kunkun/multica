@@ -805,8 +805,14 @@ type AgentTaskResponse struct {
 	// when an automatic retry continues in its parent's workdir under a fresh
 	// session (MUL-7034). omitempty keeps it off the wire for the common
 	// (no-gap) case and for old daemons.
-	PriorSessionResumeUnavailable bool   `json:"prior_session_resume_unavailable,omitempty"`
-	WorkDir                       string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
+	PriorSessionResumeUnavailable bool `json:"prior_session_resume_unavailable,omitempty"`
+	// ContinueInterruptedSession is set on an automatic retry that inherited
+	// a resume-safe parent session (DENE-727). The daemon resumes that session
+	// and sends a short continue prompt instead of re-injecting the original
+	// task. omitempty keeps it off the wire for every other claim and for old
+	// daemons.
+	ContinueInterruptedSession bool   `json:"continue_interrupted_session,omitempty"`
+	WorkDir                    string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
 	// the UI. For standard tasks it strips the daemon's workspaces root while
 	// preserving either the legacy or readable workspace/task segments; for local_directory
