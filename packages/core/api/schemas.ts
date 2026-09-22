@@ -97,6 +97,7 @@ import type {
   SkillSummary,
   Squad,
   TaskLogExportBundle,
+  TaskLogExportPush,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -4398,4 +4399,39 @@ export const EMPTY_TASK_LOG_EXPORT_BUNDLE: TaskLogExportBundle = {
   runs: [],
   entries: [],
   summary_markdown: "",
+};
+
+// The push acknowledgement (c4). Lenient like the bundle: a response missing
+// a count still lets the dialog say "已上报" instead of blanking on a field
+// it only displays. `redaction_complete` stays nullable on purpose — `null`
+// means the push did not state it, which reads as "not proven clean".
+export const TaskLogExportPushSchema = z.object({
+  pushed: z.boolean().optional().default(false),
+  filename: z.string().optional().default(""),
+  path: z.string().optional().default(""),
+  url: z.string().optional().default(""),
+  branch: z.string().optional().default(""),
+  repo: z.string().optional().default(""),
+  summary_markdown: z.string().optional().default(""),
+  entry_count: z.number().optional().default(0),
+  run_count: z.number().optional().default(0),
+  size_bytes: z.number().optional().default(0),
+  redaction_complete: z.boolean().nullable().optional().default(null),
+  redaction_note: z.string().optional().default(""),
+  truncated: z.boolean().optional().default(false),
+}).loose();
+
+export const EMPTY_TASK_LOG_EXPORT_PUSH: TaskLogExportPush = {
+  pushed: false,
+  filename: "",
+  path: "",
+  url: "",
+  branch: "",
+  repo: "",
+  summary_markdown: "",
+  entry_count: 0,
+  run_count: 0,
+  size_bytes: 0,
+  redaction_complete: null,
+  truncated: false,
 };
