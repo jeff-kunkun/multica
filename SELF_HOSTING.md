@@ -501,6 +501,7 @@ Each tick:
 3. On drift: tags the current images `:prev`, `git reset --hard origin/<branch>`, rebuilds with `COMMIT`/`VERSION`/`DATE` set to the target SHA, and recreates the backend and frontend.
 4. Waits for `/readyz` **and** checks that `/health` now reports the target SHA — a build that did not take effect is treated as a failure, not a success.
 5. On any failure: restores the `:prev` images, resets the checkout to the previous SHA, recreates, and exits non-zero.
+6. After a verified update, or after a verified rollback, runs `docker image prune -f`. That removes only untagged images left by the retag and the build. `:dev` and the one `:prev` tag stay, and volumes are not images so they stay too. A prune failure is logged and does not roll back a version that already became ready. A no-op tick does not touch Docker.
 
 The last run is always machine-readable:
 

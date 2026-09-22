@@ -19,6 +19,11 @@
 #     leaves the containers on whatever image they were started from.
 #   - Every exit path writes the status file, including the EXIT trap. A timer
 #     whose state file goes stale is a timer nobody can debug.
+#   - After a verified update or a verified rollback, dangling images are
+#     pruned. Retagging :prev and rebuilding leaves the previous anchor and
+#     the intermediate layers with no tag, and on a 40GB disk that is what
+#     fills the box. :dev and the one :prev tag stay. A prune failure is a
+#     warning: it must not roll back a version that already became ready.
 #
 # Usage: scripts/selfhost-autoupdate.sh
 # Runbook: docs/kun/selfhost-autoupdate.md
@@ -241,6 +246,19 @@ restore_prev() {
   fi
 }
 
+# Untagged images are what filled the disk: retagging :prev drops the previous
+# anchor, and compose build leaves intermediate layers. :dev is serving and
+# :prev is the one rollback tag; both stay because they are tagged.
+# `docker image prune` without --all removes only dangling images, so volumes
+# and tagged images are out of scope. Failure is a warning. Rolling back a
+# version that already passed /readyz because the broom failed would throw
+# away a good deploy.
+prune_dangling_images() {
+  if ! run_step "docker image prune" docker image prune -f; then
+    log "warning: dangling image prune failed; $(step_error_text)"
+  fi
+}
+
 # Restore what was running before this run: images, source, containers, then
 # proof that the previous version answers again. A rollback that cannot be
 # verified is reported as failed, not as rolled_back.
@@ -264,6 +282,10 @@ rollback() {
   if ! run_step "waiting for /readyz after rollback" wait_ready; then
     finish failed "rollback: the previous version did not become ready; $REASON; $(step_error_text)"
   fi
+
+  # The previous version is serving again. The failed build is dangling now
+  # that :dev points back at :prev, so it can go.
+  prune_dangling_images
 
   DEPLOYED_COMMIT="$(health_commit || true)"
   if [ -z "$DEPLOYED_COMMIT" ]; then DEPLOYED_COMMIT="$HEAD_BEFORE"; fi
@@ -344,6 +366,9 @@ main() {
   if [ "$DEPLOYED_COMMIT" != "$TARGET_COMMIT" ]; then
     rollback "/health reports '${DEPLOYED_COMMIT:-unknown}' but $TARGET_COMMIT was built (the build did not take effect)"
   fi
+
+  # /health already agrees with the build. Prune cannot see :dev or :prev.
+  prune_dangling_images
 
   log "updated to $TARGET_COMMIT"
   finish updated ""

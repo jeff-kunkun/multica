@@ -127,6 +127,15 @@ case " $args " in
   ;;
 esac
 case " $args " in
+*" image prune "*)
+  if [ "${STUB_PRUNE_FAILS:-0}" = "1" ]; then
+    echo "stub docker: prune failed" >&2
+    exit 1
+  fi
+  exit 0
+  ;;
+esac
+case " $args " in
 *" up "*)
   if [ "${STUB_UP_FAILS:-0}" = "1" ]; then
     echo "stub docker: up failed" >&2
@@ -238,6 +247,13 @@ require_contains "$state_file" "\"target_commit\": \"$sha_b\"" "the target SHA m
 require_contains "$state_file" "\"deployed_commit\": \"$sha_b\"" "the deployed SHA must be the target"
 require_contains "$docker_log" "build VERSION=$sha_b COMMIT=$sha_b" "the image must be built with the target commit"
 require_contains "$docker_log" "recreate-update" "the new image must be recreated into a container"
+require_contains "$docker_log" "docker image prune -f" "a successful update must prune dangling images"
+awk '
+  /recreate-update/ { up=1 }
+  /docker image prune -f/ { if (up) pruned=1 }
+  END { exit pruned ? 0 : 1 }
+' "$docker_log" || fail "dangling images must be pruned after the new containers are up"
+require_not_contains "$docker_log" "docker image prune -a" "the prune must not drop tagged images"
 require_eq "$(git -C "$checkout" rev-parse HEAD)" "$sha_b" "the checkout must end on the target commit"
 echo "ok: drift builds with the target commit and reports updated"
 
@@ -256,6 +272,12 @@ require_contains "$state_file" '"result": "rolled_back"' "a failed readiness che
 require_contains "$docker_log" "docker tag multica-backend:prev multica-backend:dev" "the backend image must be restored from :prev"
 require_contains "$docker_log" "docker tag multica-web:prev multica-web:dev" "the web image must be restored from :prev"
 require_contains "$docker_log" "recreate-rollback" "the rollback must recreate the containers"
+require_contains "$docker_log" "docker image prune -f" "a verified rollback must prune the failed build"
+awk '
+  /recreate-rollback/ { back=1 }
+  /docker image prune -f/ { if (back) pruned=1 }
+  END { exit pruned ? 0 : 1 }
+' "$docker_log" || fail "dangling images must be pruned after the rollback is serving"
 require_eq "$(git -C "$checkout" rev-parse HEAD)" "$sha_a" "the rollback must restore the old commit"
 require_contains "$state_file" "\"deployed_commit\": \"$sha_a\"" "the rollback must record what is running again"
 require_contains "$state_file" '"error"' "the failure must be recorded"
@@ -316,7 +338,25 @@ fi
 echo "ok: the installer is idempotent and rejects a bad checkout"
 
 # ---------------------------------------------------------------------------
-# 6. A fetch that cannot reach the origin fails the run without mutating
+# 6. A prune failure must not undo an upgrade that already became ready.
+# ---------------------------------------------------------------------------
+reset_run 1 "$sha_a"
+export STUB_OLD_COMMIT="$sha_a"
+export STUB_READY_ON_UPDATE=1
+export STUB_UPDATE_COMMIT_VALUE=""
+export STUB_PRUNE_FAILS=1
+git -C "$checkout" reset -q --hard "$sha_a"
+run_script
+require_eq "$run_status" 0 "a prune failure must not fail an upgrade that became ready"
+require_contains "$state_file" '"result": "updated"' "a prune failure must still report updated"
+require_contains "$state_file" "\"deployed_commit\": \"$sha_b\"" "the deployed SHA must still be the target"
+require_contains "$docker_log" "docker image prune -f" "the prune must have been attempted"
+require_contains "$work/run.out" "warning: dangling image prune failed" "a prune failure must be a warning"
+unset STUB_PRUNE_FAILS
+echo "ok: a failed prune does not roll back a ready upgrade"
+
+# ---------------------------------------------------------------------------
+# 7. A fetch that cannot reach the origin fails the run without mutating
 #    anything. Last, because it breaks the origin on purpose.
 # ---------------------------------------------------------------------------
 rm -rf "$origin"
@@ -325,6 +365,7 @@ run_script
 require_eq "$run_status" 1 "an unreachable origin must exit non-zero"
 require_contains "$state_file" '"result": "failed"' "an unreachable origin must be recorded as failed"
 require_not_contains "$docker_log" "docker compose" "a failed fetch must not build anything"
+require_not_contains "$docker_log" "docker image prune" "a failed fetch must not prune"
 echo "ok: an unreachable origin fails without touching the stack"
 
 echo ""

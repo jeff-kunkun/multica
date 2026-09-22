@@ -80,6 +80,16 @@ sudo systemctl start multica-autoupdate.service
 
 一个必须知道的判据：**「构建了但 `/health` 没变成目标 SHA」也算失败**，会照常回滚。这条是防「构建产物没真正生效」，也是这个脚本存在的理由——不查这一条，机器和工作区可能各说各话。
 
+## 打扫
+
+升级确认成功，或者回滚确认旧版本又在服务之后，脚本跑一次 `docker image prune -f`。
+
+这条只删**没有标签**的镜像。正在服务的 `:dev` 和用来回滚的那一份 `:prev` 都有标签，会留下。Postgres 卷和上传卷不是镜像，不在这条命令的范围里。
+
+没变化的那一轮（`noop`）不碰 Docker。打扫自己失败只在日志里记一条 warning，不会把已经通过 `/readyz` 的升级打回去。盘可以下一轮再清。
+
+`docker image prune -a` 会把有标签但没在跑的镜像一起删掉，包括 `:prev`。`docker builder prune -a` 会拆掉下次构建还要用的缓存。这次要清的是没标签的旧镜像。
+
 ## 停
 
 ```bash
