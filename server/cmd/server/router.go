@@ -1998,6 +1998,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
+					r.Get("/work-thread", h.GetIssueWorkThread)
 					r.Put("/", h.UpdateIssue)
 					// Sharing scope is its own action, not a field on the
 					// ordinary edit: it has its own tier rule and its own
@@ -2444,6 +2445,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListChatSessions)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
+					r.Get("/work-thread", h.GetChatWorkThread)
 					r.Patch("/", h.UpdateChatSession)
 					r.Patch("/pin", h.SetChatSessionPinned)
 					r.Patch("/archive", h.SetChatSessionArchived)

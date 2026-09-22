@@ -1,5 +1,6 @@
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
+import type { WorkThreadSnapshot } from "../types/work_thread";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -3095,6 +3096,10 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/active-task`);
   }
 
+  async getIssueWorkThread(issueId: string): Promise<WorkThreadSnapshot | null> {
+    return this.fetch(`/api/issues/${issueId}/work-thread`);
+  }
+
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
     const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`);
     return parseWithFallback<TaskMessagePayload[]>(raw, TaskMessageListSchema, [], {
@@ -4486,6 +4491,10 @@ export class ApiClient {
     return parseWithFallback(raw, ChatPendingTaskSchema, EMPTY_CHAT_PENDING_TASK, {
       endpoint: "GET /api/chat/sessions/:id/pending-task",
     });
+  }
+
+  async getChatWorkThread(sessionId: string): Promise<WorkThreadSnapshot | null> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/work-thread`);
   }
 
   async prioritizeQueuedChatTask(

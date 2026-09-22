@@ -182,3 +182,14 @@ turn
 ## 本阶段交付边界
 
 本阶段完成了线程主键与上下文预算的服务端落盘，并把 Issue、Chat 入队/重试/claim 接到各自稳定线程键；现有取消后恢复链路继续复用 provider session。聊天与消息线仍需把同一 `work_thread_id` 投影到统一 snapshot，并补齐 queue/interrupt/preempt 的专用输入实体。
+
+## 统一快照读取切片
+
+现在 Issue 和 Chat 都有只读的线程快照接口：
+
+- `GET /api/issues/{id}/work-thread`
+- `GET /api/chat/sessions/{sessionId}/work-thread`
+
+两条入口返回同一套投影：线程连续性、当前活动 Turn 和 session 指针、最多 50 条排队输入，以及线程的上下文代次、消息上限、token 预算和 continuity break 原因。Issue 入口复用 issue 可见性边界；Chat 入口复用会话所有权、公开会话和 Agent 访问边界。响应不会返回完整任务 context 或 provider session 内容。
+
+当前持久模型还没有可安全复用的摘要正文列，因此 `context.summary_available` 明确为 `false`；预算和受限回读边界已经可验证，摘要正文留给后续上下文压缩切片接入。
