@@ -41,6 +41,44 @@ const (
 	maxIssueDraftChildStage    = 20
 )
 
+// issueDraftCoordinatorStatus is the status a group's ROOT is created with when
+// the payload has sub-issues. It mirrors ISSUE_DRAFT_COORDINATOR_STATUS in
+// packages/core/issue-drafts/group.ts, and it is applied here — at the final
+// write boundary — because the panel's save is not the only way a payload
+// reaches a confirm.
+//
+// A root with sub-issues coordinates: the stage barrier wakes it when a stage
+// closes so that it can promote the next one. `notifyParentOfChildDone` skips a
+// parent whose status is done, cancelled or backlog, so a backlog coordinator
+// would never be woken and every stage after the first would sit parked with
+// nobody told to move it. The root therefore stays ACTIVE, and the create path
+// keeps it out of the queue instead (service.IssueCreateOpts.SuppressAssigneeRun
+// below) — a rule about this confirm rather than a state the issue is left in.
+const issueDraftCoordinatorStatus = "in_progress"
+
+// issueDraftChildStatusForCreate mirrors the shared preview plan
+// (issueDraftChildStatus in packages/core/issue-drafts/group.ts) at the final
+// write boundary: a sub-issue's status is derived from its stage, never
+// authored, because stage is the field the alignment actually decides.
+//
+// This is what makes "stage 1 runs, stage 2 waits" a server guarantee rather
+// than a promise the client keeps. The payload is model- and user-authored, and
+// the confirm sends only a revision — so a payload saved by an older client, or
+// written straight into the draft, must not be able to put a stage-2 sub-issue
+// in the queue ahead of its predecessor.
+//
+// The assignee deliberately does NOT take part. An unassigned stage-1
+// sub-issue is created `todo` and starts nothing: `maybeEnqueueOnAssign` has no
+// assignee to enqueue for, and an issue the board shows as unassigned is how a
+// person finds the gap and fills it in. Parking it in Backlog instead would
+// hide the very gap the confirm panel warned about.
+func issueDraftChildStatusForCreate(stage *int32) string {
+	if stage == nil || *stage <= 1 {
+		return "todo"
+	}
+	return "backlog"
+}
+
 // issueDraftNodeNamespace is the fixed namespace node ids are derived under.
 // Never change it: it is half the input of every node id already minted, so
 // changing it would strip every existing group of its identity and make the
@@ -360,6 +398,15 @@ func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Reque
 		return service.IssueGroupParams{}, nil, false
 	}
 
+	// A payload with sub-issues describes a group, and a group's root is its
+	// coordinator whatever status the payload carries (see
+	// issueDraftCoordinatorStatus). A payload with no sub-issues is an ordinary
+	// single issue and keeps the status it was written with.
+	rootStatus := payload.Status
+	if len(children) > 0 {
+		rootStatus = issueDraftCoordinatorStatus
+	}
+
 	nodes := make([]issueDraftNode, 0, len(children)+1)
 	nodes = append(nodes, issueDraftNode{
 		// The root's key is empty by definition. issueDraftNodeID maps that to
@@ -367,7 +414,7 @@ func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Reque
 		// produced before groups existed.
 		Title:         payload.Title,
 		Description:   payload.Description,
-		Status:        payload.Status,
+		Status:        rootStatus,
 		Priority:      payload.Priority,
 		AssigneeType:  payload.AssigneeType,
 		AssigneeID:    payload.AssigneeID,
@@ -379,7 +426,7 @@ func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Reque
 			Key:          child.Key,
 			Title:        child.Title,
 			Description:  child.Description,
-			Status:       child.Status,
+			Status:       issueDraftChildStatusForCreate(child.Stage),
 			Priority:     child.Priority,
 			AssigneeType: child.AssigneeType,
 			AssigneeID:   child.AssigneeID,
@@ -419,6 +466,23 @@ func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Reque
 			if !appendNode(node) {
 				return service.IssueGroupParams{}, nil, false
 			}
+		}
+		// The root coordinates, so this confirm does not also hand it an
+		// implementation task: it keeps the assignee the payload gave it — that
+		// is the seat the stage barrier wakes — but its run is suppressed. The
+		// suppression is a property of THIS insert, which is why it is decided
+		// here (node 0 is the root only when this create inserts one; a
+		// continuation round passes RootIssueID and no root node at all) and
+		// only for a payload that actually has sub-issues. A single-issue
+		// confirm is untouched, and every later write to the root enqueues
+		// normally.
+		//
+		// A root whose assignee was dropped by the DENE-694 warning path is
+		// suppressed too: there is nothing to enqueue for it either way, and
+		// keeping the rule shaped as "the root of a group never runs on create"
+		// means the two rules cannot drift apart.
+		if len(children) > 0 {
+			group.Nodes[0].Opts.SuppressAssigneeRun = true
 		}
 		return group, warnings, true
 	}
@@ -621,6 +685,12 @@ func (h *Handler) carryIssueDraftAttachments(r *http.Request, session db.ChatSes
 // which agent the analytics event belongs to, the platform, and the
 // issue:created payload this transport broadcasts.
 //
+// It fills the TRANSPORT half of the options and leaves whatever the params
+// pass already decided (the group root's suppressed run) in place: the two are
+// decided by different questions — one by the payload's shape, one by the
+// request — and a caller reading either should not have to know about the
+// other.
+//
 // Both commit paths go through it, because an appended node is created exactly
 // like a first-round one — a follow-up round that skipped this would create
 // real work that no board ever heard about.
@@ -637,18 +707,18 @@ func (h *Handler) prepareIssueGroupOpts(r *http.Request, session db.ChatSession,
 		if params.AssigneeType.Valid && params.AssigneeType.String == "agent" {
 			analyticsAgentID = uuidToString(params.AssigneeID)
 		}
-		group.Nodes[i].Opts = service.IssueCreateOpts{
-			ActorID:          actorID,
-			AnalyticsAgentID: analyticsAgentID,
-			Platform:         platform,
-			BroadcastPayload: func(issue db.Issue, _ []db.Attachment, labels []db.IssueLabel) map[string]any {
-				payload := issueToResponse(issue, prefix)
-				fillCreated(&payload)
-				labelResponses := labelsToResponse(labels)
-				payload.Labels = &labelResponses
-				return map[string]any{"issue": payload}
-			},
+		opts := group.Nodes[i].Opts
+		opts.ActorID = actorID
+		opts.AnalyticsAgentID = analyticsAgentID
+		opts.Platform = platform
+		opts.BroadcastPayload = func(issue db.Issue, _ []db.Attachment, labels []db.IssueLabel) map[string]any {
+			payload := issueToResponse(issue, prefix)
+			fillCreated(&payload)
+			labelResponses := labelsToResponse(labels)
+			payload.Labels = &labelResponses
+			return map[string]any{"issue": payload}
 		}
+		group.Nodes[i].Opts = opts
 	}
 }
 
