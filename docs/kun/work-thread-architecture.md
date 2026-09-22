@@ -5,7 +5,7 @@
 当前系统已经具备“单入口连续执行”的关键能力，但还没有统一的 Work Thread：
 
 - Issue 入口现在由 `agent_task_queue.work_thread_id` 作为持久线程键（历史数据按 Issue + Agent 回填）；session 恢复仍从 `GetLastTaskSession` 读取最近可恢复的终态任务。
-- Chat 入口以 `chat_session.id` 为隐式线程键，发送、claim、完成、取消都在 chat session 锁下串行化，恢复优先读取 `chat_session.session_id`，缺失时回退到 `GetLastChatTaskSession`。
+- Chat 入口现在把 `chat_session.id` 写入每个 `agent_task_queue.work_thread_id`，发送、claim、完成、取消仍在 chat session 锁下串行化；恢复优先读取 `chat_session.session_id`，缺失时回退到 `GetLastChatTaskSession`。
 - 评论线程目前只影响任务去重和 `comment_thread_id`，没有成为跨聊天、Issue、消息线的统一输入队列。
 - `agent_task_queue` 既是执行历史，又承担排队、租约、重试、取消、session 指针和实时状态，导致“任务行”和“连续线程”被混用。
 
@@ -69,11 +69,11 @@ Issue 指派 / @mention / 评论回复
 
 ## 已落地的线程连续性基线
 
-任务表已持久化 `work_thread_id`、`context_generation`、`context_message_limit`、`context_token_budget` 和 `continuity_break_reason`。Issue 入队会复用该 Issue + Agent 最近线程，重试复制父任务线程；claim 同时按线程键和兼容的 Issue + Agent 条件串行化。队列允许当前 Turn 运行时继续接收输入，后续输入等待同一线程的下一 Turn。
+任务表已持久化 `work_thread_id`、`context_generation`、`context_message_limit`、`context_token_budget` 和 `continuity_break_reason`。Issue 入队会复用该 Issue + Agent 最近线程，Chat 入队复用 chat session 线程键，重试复制父任务线程；claim 同时按线程键和兼容的 Issue + Agent / Chat session 条件串行化。队列允许当前 Turn 运行时继续接收输入，后续输入等待同一线程的下一 Turn。
 
 ## 当前缺口
 
-1. **还没有跨入口 Work Thread 主键**：Issue 任务已经有 `work_thread_id`，但 Chat 仍以 `chat_session.id` 为线程事实源，尚未表达同一任务从聊天转入 Issue，或 Issue 评论回到聊天的连续关系。
+1. **还没有跨入口 Work Thread 主键**：Issue 与 Chat 任务现在各自持久化 `work_thread_id`，但尚未表达同一任务从聊天转入 Issue，或 Issue 评论回到聊天的连续关系。
 2. **输入与执行耦合**：评论、@、CLI 文本最终都被压进 task row 的 trigger/comment 字段，没有独立的 queue/interrupt/preempt 语义，也不能可靠记录“输入已收到但尚未被某一 Turn 消费”。
 3. **线程级配置缺失**：agent、model、runtime、permission、workdir、上下文预算散落在 agent/task/chat_session；无法用一个稳定指纹判断“沿用线程”还是“新建线程”。
 4. **状态投影分裂**：Chat 使用 `pendingTask` 与 Chat realtime，Issue 使用 task timeline/activity；二者没有统一的 current turn、queued inputs、continuity break reason。
@@ -181,4 +181,4 @@ turn
 
 ## 本阶段交付边界
 
-本阶段完成了线程主键与上下文预算的服务端落盘，并把 Issue 入队/重试/claim 接到该主键；现有取消后恢复链路继续复用 provider session。聊天与消息线仍需把同一 `work_thread_id` 投影到统一 snapshot，并补齐 queue/interrupt/preempt 的专用输入实体。
+本阶段完成了线程主键与上下文预算的服务端落盘，并把 Issue、Chat 入队/重试/claim 接到各自稳定线程键；现有取消后恢复链路继续复用 provider session。聊天与消息线仍需把同一 `work_thread_id` 投影到统一 snapshot，并补齐 queue/interrupt/preempt 的专用输入实体。
