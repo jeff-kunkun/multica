@@ -131,7 +131,7 @@ type issueDraftNode struct {
 // field applies here too — the draft is client-supplied, and an alignment
 // conversation must not become a way to assign work to an agent the caller
 // cannot invoke, or to name a parent in another workspace.
-func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, workspaceID string, session db.ChatSession, node issueDraftNode) (service.IssueCreateParams, bool) {
+func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, workspaceID string, session db.ChatSession, node issueDraftNode, projectPinned bool) (service.IssueCreateParams, bool) {
 	title := strings.TrimSpace(node.Title)
 	if title == "" {
 		writeError(w, http.StatusBadRequest, "draft title is required")
@@ -177,6 +177,9 @@ func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, w
 		if !ok {
 			return service.IssueCreateParams{}, false
 		}
+		if _, ok := h.visibleProjectInWorkspace(w, r, session.WorkspaceID, id); !ok {
+			return service.IssueCreateParams{}, false
+		}
 		projectID = id
 	}
 	var parentIssueID pgtype.UUID
@@ -211,6 +214,7 @@ func (h *Handler) issueParamsFromDraft(w http.ResponseWriter, r *http.Request, w
 		CreatorID:     session.CreatorID,
 		ParentIssueID: parentIssueID,
 		ProjectID:     projectID,
+		ProjectPinned: projectPinned,
 		Stage:         node.Stage,
 		// The draft's conversation IS the issue's provenance: it is how the
 		// created issue points back at what was agreed, and how a crashed
@@ -362,8 +366,13 @@ func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Reque
 		// and appending there would turn "confirm again" into "create those
 		// children too". Reopening is the only thing that makes new keys an
 		// increment, and the only thing that moves the round counter.
+		rootProjectPinned := draftJSONFieldPresent(draft.Draft, "project_id")
 		for _, node := range nodes {
-			params, ok := h.issueParamsFromDraft(w, r, workspaceID, session, node)
+			// Only the root carries a project choice. Children leave the
+			// field out so they take the root's project, including an
+			// explicit empty one.
+			pinned := node.Key == "" && rootProjectPinned
+			params, ok := h.issueParamsFromDraft(w, r, workspaceID, session, node, pinned)
 			if !ok {
 				return service.IssueGroupParams{}, false
 			}
@@ -388,13 +397,22 @@ func (h *Handler) issueGroupParamsFromDraft(w http.ResponseWriter, r *http.Reque
 			// and a follow-up round is not grounds for overwriting that.
 			continue
 		}
-		params, ok := h.issueParamsFromDraft(w, r, workspaceID, session, node)
+		params, ok := h.issueParamsFromDraft(w, r, workspaceID, session, node, false)
 		if !ok {
 			return service.IssueGroupParams{}, false
 		}
 		group.Nodes = append(group.Nodes, service.IssueGroupNode{Params: params})
 	}
 	return group, true
+}
+
+func draftJSONFieldPresent(raw []byte, field string) bool {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return false
+	}
+	_, ok := payload[field]
+	return ok
 }
 
 // lookupIssueGroupRoot finds the group this alignment already produced, by the
