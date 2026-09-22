@@ -25,6 +25,7 @@
     "partial": "Export what was collected",
     "widen": "Widen to the whole task",
     "report": "Report as a comment attachment and @ the owner",
+    "retry_comment": "Resend the comment",
     "copy_summary": "Copy the AI summary",
     "copied": "Copied",
     "download": "Download the bundle"
@@ -59,6 +60,7 @@
     "success_git": "Reported on {{issue}} — the bundle was pushed to {{repo}}.",
     "success_attachment": "Reported on {{issue}} — the bundle is a comment attachment.",
     "fallback": "Fell back to a comment attachment: {{reason}}",
+    "push_landed": "Pushed to the log repository, but the comment did not send: {{reason}}",
     "failed": "Report failed: {{reason}}",
     "link": "Open the bundle"
   },

@@ -25,6 +25,7 @@
     "partial": "수집된 부분만 내보내기",
     "widen": "작업 전체로 넓히기",
     "report": "댓글 첨부로 보고하고 담당자에게 @ 하기",
+    "retry_comment": "댓글만 다시 보내기",
     "copy_summary": "AI 요약 복사",
     "copied": "복사됨",
     "download": "로그 패키지 내려받기"
@@ -59,6 +60,7 @@
     "success_git": "{{issue}}에 보고했습니다 — 로그 패키지는 {{repo}}에 푸시되었습니다.",
     "success_attachment": "{{issue}}에 보고했습니다 — 로그 패키지가 댓글 첨부로 올라갔습니다.",
     "fallback": "댓글 첨부로 전환했습니다: {{reason}}",
+    "push_landed": "로그 저장소로 푸시했지만 댓글이 전송되지 않았습니다: {{reason}}",
     "failed": "보고 실패: {{reason}}",
     "link": "로그 패키지 열기"
   },

@@ -265,6 +265,59 @@ describe("LogExportDialog", () => {
     );
   });
 
+  it("drops the bundle when the lookback hours change", async () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /Last 6h/ }));
+    fireEvent.click(exportButton());
+    await screen.findByText("log-export-DENE-599.json");
+
+    // The card answers the 6h window. Changing the number to 24 without
+    // re-exporting must not leave a 6h card that a report would send as 24h.
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "24" } });
+
+    expect(screen.queryByText("log-export-DENE-599.json")).not.toBeInTheDocument();
+    expect(screen.getByText("Nothing exported yet")).toBeInTheDocument();
+
+    fireEvent.click(exportButton());
+    await waitFor(() =>
+      expect(api.exportTaskLogs).toHaveBeenLastCalledWith(
+        "task-1",
+        expect.objectContaining({ scope: "hours", hours: 24 }),
+      ),
+    );
+  });
+
+  it("keeps the pushed link and retries only the comment when the comment fails", async () => {
+    api.pushTaskLogExport.mockResolvedValue(PUSH);
+    api.createComment.mockRejectedValueOnce(new Error("评论请求超时"));
+    renderDialog();
+
+    fireEvent.click(exportButton());
+    await screen.findByText("log-export-DENE-599.json");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Report as a comment attachment and @ the owner",
+      }),
+    );
+
+    // The bundle is committed already: nothing is uploaded, and the link the
+    // reader would otherwise lose is on screen with the reason.
+    await screen.findByText(/评论请求超时/);
+    expect(api.uploadFile).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "Open the bundle" })).toHaveAttribute(
+      "href",
+      PUSH.url,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Resend the comment" }));
+    await screen.findByText(/Reported on DENE-599/);
+    // The retry sends the comment only — the repository is not contacted again
+    // and the artifact never crosses the upload path.
+    expect(api.pushTaskLogExport).toHaveBeenCalledTimes(1);
+    expect(api.uploadFile).not.toHaveBeenCalled();
+  });
+
   it("falls back to a comment attachment without losing the report", async () => {
     // The shape the server actually returns: a git stderr transcript whose
     // first line is the temp directory and whose last useful line is the

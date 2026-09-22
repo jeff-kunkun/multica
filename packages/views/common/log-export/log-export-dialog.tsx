@@ -27,6 +27,7 @@ import {
 import { copyText } from "@multica/ui/lib/clipboard";
 import type { TaskLogExportProgress } from "@multica/core/api/client";
 import {
+  LogExportCommentError,
   useExportTaskLogs,
   useReportTaskLogExport,
 } from "@multica/core/logs";
@@ -84,6 +85,7 @@ export function LogExportDialog({
   const [failure, setFailure] = useState<string | null>(null);
   const [restored, setRestored] = useState(false);
   const [report, setReport] = useState<TaskLogExportReport | null>(null);
+  const [pendingComment, setPendingComment] = useState<LogExportCommentError | null>(null);
   const [copied, setCopied] = useState(false);
 
   const exportMutation = useExportTaskLogs();
@@ -97,6 +99,7 @@ export function LogExportDialog({
     setFailure(null);
     setRestored(false);
     setReport(null);
+    setPendingComment(null);
     setCopied(false);
     setScope("run");
     setHours(DEFAULT_HOURS);
@@ -113,6 +116,7 @@ export function LogExportDialog({
     setFailure(null);
     setRestored(false);
     setReport(null);
+    setPendingComment(null);
     setCopied(false);
     setProgress(null);
     exportMutation.mutate(
@@ -130,14 +134,33 @@ export function LogExportDialog({
     );
   };
 
-  const changeScope = (next: TaskLogExportScope) => {
-    setScope(next);
-    // A range the current bundle no longer answers: drop back to the prompt
-    // rather than leave a card on screen that describes a different export.
+  // A bundle answers exactly one range, so anything that changes the range
+  // drops it rather than leaving a card that describes a different export than
+  // a report would send. The scope toggle and the hours number are both range
+  // inputs and share this.
+  const discardExported = () => {
     setExported(null);
     setFailure(null);
     setRestored(false);
     setReport(null);
+    setPendingComment(null);
+    setCopied(false);
+  };
+
+  const changeScope = (next: TaskLogExportScope) => {
+    setScope(next);
+    discardExported();
+  };
+
+  const changeHours = (raw: string) => {
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return;
+    const next = clampHours(parsed);
+    // The input fires only on a real edit; clamping can round back to the
+    // current number, and an unchanged range keeps its bundle.
+    if (next === hours) return;
+    setHours(next);
+    discardExported();
   };
 
   const runReport = () => {
@@ -149,15 +172,29 @@ export function LogExportDialog({
         taskId,
         scope,
         hours: scope === "hours" ? hours : undefined,
+        // A push that already landed is not repeated: the retry sends only
+        // the comment that links it.
+        pushed: pendingComment?.push,
       },
       {
-        onSuccess: (result) => setReport(result),
-        onError: (error) =>
+        onSuccess: (result) => {
+          setPendingComment(null);
+          setReport(result);
+        },
+        onError: (error) => {
+          if (error instanceof LogExportCommentError) {
+            // The bundle is committed, so nothing is uploaded here: the link
+            // and the reason stay on screen and the action becomes a
+            // comment-only retry.
+            setPendingComment(error);
+            return;
+          }
           toast.error(
             error instanceof Error
               ? error.message
               : t(($) => $.error.report_failed),
-          ),
+          );
+        },
       },
     );
   };
@@ -235,11 +272,7 @@ export function LogExportDialog({
                 min={MIN_HOURS}
                 max={MAX_HOURS}
                 value={hours}
-                onChange={(event) => {
-                  const parsed = Number(event.target.value);
-                  if (!Number.isFinite(parsed)) return;
-                  setHours(clampHours(parsed));
-                }}
+                onChange={(event) => changeHours(event.target.value)}
                 className="h-7 w-20 rounded-md border border-input bg-transparent px-2 text-caption tabular-nums outline-none focus-visible:border-ring"
               />
             </label>
@@ -333,7 +366,11 @@ export function LogExportDialog({
                 ) : (
                   <FileJson />
                 )}
-                <span className="truncate">{t(($) => $.action.report)}</span>
+                <span className="truncate">
+                  {pendingComment
+                    ? t(($) => $.action.retry_comment)
+                    : t(($) => $.action.report)}
+                </span>
               </Button>
             ) : (
               <p className="text-caption text-muted-foreground">
@@ -350,6 +387,11 @@ export function LogExportDialog({
             {report && (
               <p className="basis-full text-caption text-muted-foreground">
                 <ReportSummary report={report} identifier={identifier} />
+              </p>
+            )}
+            {pendingComment && (
+              <p className="basis-full break-words text-caption text-warning">
+                <PushLandedNote error={pendingComment} identifier={identifier} />
               </p>
             )}
           </div>
@@ -648,6 +690,43 @@ function ReportSummary({
             {t(($) => $.report.fallback, { reason: compactReason(report.fallbackReason) })}
           </span>
         </>
+      )}
+    </>
+  );
+}
+
+/**
+ * The push landed but the comment did not.
+ *
+ * The artifact is already in the repository, so the reader gets the link and
+ * the reason and the action above becomes a comment-only retry. Nothing here
+ * offers the attachment fallback: re-POSTing the bundle is the request this
+ * channel exists to avoid, and the repository copy would still need a link.
+ */
+function PushLandedNote({
+  error,
+  identifier,
+}: {
+  error: LogExportCommentError;
+  identifier: string;
+}) {
+  const { t } = useT("logExport");
+  const issue = identifier || error.issueId;
+  return (
+    <>
+      {t(($) => $.report.push_landed, {
+        issue,
+        reason: compactReason(error.reason),
+      })}{" "}
+      {error.push.url && (
+        <a
+          href={error.push.url}
+          target="_blank"
+          rel="noreferrer"
+          className="underline underline-offset-2"
+        >
+          {t(($) => $.report.link)}
+        </a>
       )}
     </>
   );

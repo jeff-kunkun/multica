@@ -210,11 +210,16 @@ func (p *GitCLIPusher) Push(ctx context.Context, repo GitRepo, token string, req
 	defer cancel()
 
 	// Mirror Settings.Repo()'s normalization so a caller that built a GitRepo
-	// by hand still lands in logs/ rather than at the repository root.
-	repo.Dir = strings.Trim(strings.TrimSpace(repo.Dir), "/")
-	if repo.Dir == "" {
-		repo.Dir = DefaultDir
+	// by hand still lands in logs/ rather than at the repository root — and so
+	// a hand-built Dir cannot reach the filesystem without the same escaping
+	// check the settings path applies. The write below happens inside a
+	// temporary clone, and `..` would put the bundle outside it, where the
+	// trailing RemoveAll does not reach.
+	dir, ok := normalizeRepoDir(repo.Dir)
+	if !ok {
+		return PushResult{}, fmt.Errorf("invalid log export repository directory %q", repo.Dir)
 	}
+	repo.Dir = dir
 	repo.Branch = strings.TrimSpace(repo.Branch)
 
 	plainURL := strings.TrimSpace(repo.URL)
@@ -258,6 +263,13 @@ func (p *GitCLIPusher) Push(ctx context.Context, repo GitRepo, token string, req
 	// path is the OS's business, so FromSlash is what keeps this correct on a
 	// Windows server without changing what gets committed.
 	localPath := filepath.Join(workdir, filepath.FromSlash(relPath))
+	// Belt and braces: normalizeRepoDir already refused every `..`, but the
+	// destination must be proven inside the clone before anything is written,
+	// read, or staged. A path that fails this is a configuration the pusher
+	// must refuse rather than a file to publish.
+	if !insideDir(workdir, localPath) {
+		return PushResult{}, fmt.Errorf("invalid log export repository directory %q", repo.Dir)
+	}
 
 	// Identical bytes already tracked: there is nothing to commit, and a
 	// second push would otherwise add a no-op commit to the history. Report
@@ -306,6 +318,18 @@ func (p *GitCLIPusher) Push(ctx context.Context, repo GitRepo, token string, req
 		URL:    fileWebURL(plainURL, branch, relPath),
 		Branch: branch,
 	}, nil
+}
+
+// insideDir reports whether target is root itself or a path beneath it. It is
+// the last line of defence around the one write the pusher performs: the
+// artifact and its directory must land in the temporary clone, or nothing is
+// committed at all.
+func insideDir(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!filepath.IsAbs(rel) && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 // WebURL is the repository's browsable root: the configured URL with any

@@ -25,6 +25,7 @@
     "partial": "Exporter ce qui a été collecté",
     "widen": "Élargir à toute la tâche",
     "report": "Signaler en pièce jointe et @ le responsable",
+    "retry_comment": "Renvoyer le commentaire",
     "copy_summary": "Copier le résumé pour l'IA",
     "copied": "Copié",
     "download": "Télécharger le paquet"
@@ -59,6 +60,7 @@
     "success_git": "Signalé sur {{issue}} — le paquet a été poussé vers {{repo}}.",
     "success_attachment": "Signalé sur {{issue}} — le paquet est une pièce jointe du commentaire.",
     "fallback": "Repli sur une pièce jointe : {{reason}}",
+    "push_landed": "Poussé vers le dépôt de logs, mais le commentaire n'a pas été envoyé : {{reason}}",
     "failed": "Échec du signalement : {{reason}}",
     "link": "Ouvrir le paquet"
   },

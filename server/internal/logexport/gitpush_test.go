@@ -181,6 +181,38 @@ func TestGitRedactorStripsCredentials(t *testing.T) {
 	}
 }
 
+// TestGitCLIPusherRefusesEscapingDir is the regression for the configured
+// directory escape: with Dir "../<name>" the joined path wrote the bundle
+// beside the temporary clone — outside it, where the RemoveAll that only
+// covers the clone cannot reach. The pusher must refuse before it touches the
+// filesystem or the remote.
+func TestGitCLIPusherRefusesEscapingDir(t *testing.T) {
+	requireGit(t)
+	origin := initBareOrigin(t)
+	escapedName := "dene599-escape-" + strings.ReplaceAll(t.Name(), "/", "-")
+	escapedPath := filepath.Join(os.TempDir(), escapedName, "log-export-x.json")
+
+	pusher := &GitCLIPusher{}
+	repo := GitRepo{Enabled: true, URL: "file://" + origin, Branch: "main", Dir: "../" + escapedName}
+	_, err := pusher.Push(context.Background(), repo, "", PushRequest{
+		Filename: "log-export-x.json",
+		Content:  []byte("{}"),
+		Message:  "export",
+	})
+	if err == nil {
+		t.Fatal("Push accepted a directory that escapes the clone")
+	}
+	if !strings.Contains(err.Error(), "invalid log export repository directory") {
+		t.Fatalf("error = %v, want it to name the directory", err)
+	}
+	if _, statErr := os.Stat(escapedPath); statErr == nil {
+		t.Fatalf("bundle escaped the clone to %s", escapedPath)
+	}
+	if count := runGitTest(t, "", "--git-dir", origin, "rev-list", "--count", "main"); count != "1" {
+		t.Fatalf("origin history changed to %s commits", count)
+	}
+}
+
 func TestAuthenticatedURLOnlyTouchesHTTP(t *testing.T) {
 	if got := authenticatedURL("git@github.com:org/repo.git", "tok"); got != "git@github.com:org/repo.git" {
 		t.Fatalf("ssh URL was rewritten: %q", got)

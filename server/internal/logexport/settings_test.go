@@ -93,3 +93,62 @@ func TestGitRepoPathUsesForwardSlashes(t *testing.T) {
 		t.Fatalf("Path = %q", got)
 	}
 }
+
+// TestNormalizeRepoDirRejectsEscapes is the security boundary: the directory is
+// the prefix of a path joined under a temporary clone, so a `..` segment writes
+// the bundle outside that clone and past the RemoveAll that only covers it.
+// These values are refused rather than repaired.
+func TestNormalizeRepoDirRejectsEscapes(t *testing.T) {
+	for _, dir := range []string{
+		"..",
+		"../escaped",
+		"foo/../../tmp/escaped",
+		"logs/../../etc",
+		"/../escaped",
+		"logs/..",
+		`..\..\escaped`,
+		`logs\..\escaped`,
+	} {
+		if got, ok := normalizeRepoDir(dir); ok {
+			t.Fatalf("normalizeRepoDir(%q) = %q, want refusal", dir, got)
+		}
+	}
+}
+
+func TestNormalizeRepoDirKeepsOrdinaryPaths(t *testing.T) {
+	cases := map[string]string{
+		"":               DefaultDir,
+		"   ":            DefaultDir,
+		"/":              DefaultDir,
+		"logs":           "logs",
+		" /logs/ ":       "logs",
+		"artifacts/logs": "artifacts/logs",
+		"foo//bar":       "foo/bar",
+		"foo/./bar":      "foo/bar",
+	}
+	for raw, want := range cases {
+		got, ok := normalizeRepoDir(raw)
+		if !ok {
+			t.Fatalf("normalizeRepoDir(%q) refused an ordinary path", raw)
+		}
+		if got != want {
+			t.Fatalf("normalizeRepoDir(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+// TestRepoRejectsEscapingDir pins the handler-facing outcome: a row whose
+// directory would escape the clone resolves to no repo, so the push endpoint
+// answers "not configured" and never reaches the filesystem.
+func TestRepoRejectsEscapingDir(t *testing.T) {
+	for _, dir := range []string{"../escaped", "foo/../../tmp/escaped", `logs\..\escaped`} {
+		settings := Settings{GitRepo: &GitRepo{
+			Enabled: true,
+			URL:     "https://github.com/o/r.git",
+			Dir:     dir,
+		}}
+		if _, ok := settings.Repo(); ok {
+			t.Fatalf("Repo() accepted an escaping dir %q", dir)
+		}
+	}
+}

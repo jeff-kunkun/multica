@@ -59,6 +59,41 @@ func ParseSettings(raw []byte) Settings {
 	return *envelope.LogExport
 }
 
+// normalizeRepoDir validates and normalizes a configured repository directory.
+//
+// The directory becomes the prefix of a path that is joined under a temporary
+// clone, so a `..` segment is not a naming choice: `foo/../../tmp/escaped`
+// resolves outside the clone and the bundle is written there, before `git add`
+// ever runs and past the RemoveAll that only covers the clone. A backslash is
+// an ordinary character on Linux but a separator on Windows, which means the
+// same row would escape on one platform and not the other; it is rejected
+// rather than reinterpreted. Both are refused outright instead of repaired —
+// a repository directory the operator did not mean should stop the push, not
+// be silently rewritten into a different one.
+//
+// A blank value (or one that only names the root, e.g. `/`) means DefaultDir.
+// Surrounding slashes are trimmed as before, so `/logs/` stays `logs` and the
+// resulting path never starts with a separator.
+func normalizeRepoDir(raw string) (string, bool) {
+	dir := strings.Trim(strings.TrimSpace(raw), "/")
+	if dir == "" {
+		return DefaultDir, true
+	}
+	if strings.Contains(dir, `\`) {
+		return "", false
+	}
+	for _, segment := range strings.Split(dir, "/") {
+		if segment == ".." {
+			return "", false
+		}
+	}
+	cleaned := path.Clean(dir)
+	if cleaned == "." || cleaned == "/" {
+		return DefaultDir, true
+	}
+	return cleaned, true
+}
+
 // Repo resolves the configured repository, reporting false when it is not
 // usable. Both halves are required: the switch must be on, and the URL must be
 // non-empty. Nothing else — a half-filled row is a workspace that has not
@@ -67,7 +102,8 @@ func ParseSettings(raw []byte) Settings {
 //
 // The returned value is a normalized copy: Dir falls back to DefaultDir and
 // the string fields are trimmed. Branch is deliberately allowed to stay empty,
-// meaning "the remote's default branch".
+// meaning "the remote's default branch". A Dir that would escape the clone
+// makes the whole row unusable, exactly like an unfinished URL.
 func (s Settings) Repo() (GitRepo, bool) {
 	if s.GitRepo == nil || !s.GitRepo.Enabled {
 		return GitRepo{}, false
@@ -78,10 +114,11 @@ func (s Settings) Repo() (GitRepo, bool) {
 		return GitRepo{}, false
 	}
 	repo.Branch = strings.TrimSpace(repo.Branch)
-	repo.Dir = strings.Trim(strings.TrimSpace(repo.Dir), "/")
-	if repo.Dir == "" {
-		repo.Dir = DefaultDir
+	dir, ok := normalizeRepoDir(repo.Dir)
+	if !ok {
+		return GitRepo{}, false
 	}
+	repo.Dir = dir
 	return repo, true
 }
 

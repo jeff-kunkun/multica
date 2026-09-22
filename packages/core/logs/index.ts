@@ -6,6 +6,7 @@ export {
   type LogExportMentionSubject,
 } from "./report";
 export {
+  LogExportCommentError,
   useExportTaskLogs,
   useReportTaskLogExport,
   type ExportTaskLogsVars,

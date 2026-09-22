@@ -58,6 +58,37 @@ export interface ReportTaskLogExportVars {
    * attachment.
    */
   channel?: "auto" | "attachment";
+  /**
+   * A push that already landed, supplied to retry only the comment. When set,
+   * the repository is not contacted again and the artifact is never uploaded:
+   * the bundle is committed, so the only step left is the link comment.
+   */
+  pushed?: TaskLogExportPush;
+}
+
+/**
+ * The push landed but the comment that would link it did not.
+ *
+ * Kept distinct from every other report failure because the recovery differs:
+ * the artifact is already committed, so the useful next step is to send the
+ * comment again — never to upload the bundle as an attachment, which is the
+ * multi-megabyte request the repository channel exists to avoid. It carries
+ * the link so the dialog can hand the reader the committed file even when the
+ * comment keeps failing.
+ */
+export class LogExportCommentError extends Error {
+  readonly push: TaskLogExportPush;
+  readonly issueId: string;
+  readonly reason: string;
+
+  constructor(push: TaskLogExportPush, issueId: string, cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    super(reason);
+    this.name = "LogExportCommentError";
+    this.push = push;
+    this.issueId = issueId;
+    this.reason = reason;
+  }
 }
 
 /**
@@ -77,6 +108,11 @@ export interface ReportTaskLogExportVars {
  * Falling back is not an error path: a workspace with no repository configured
  * reports exactly the way it did before the repository existed. The reason is
  * returned so the dialog can say which way it went.
+ *
+ * The fallback only covers a push that FAILED. A push that succeeded and a
+ * comment that then failed is a `LogExportCommentError` carrying the link, not
+ * a reason to upload the artifact: the bytes are already committed, and the
+ * caller retries the comment (or shows the link and the reason).
  */
 export function useReportTaskLogExport() {
   const queryClient = useQueryClient();
@@ -88,24 +124,43 @@ export function useReportTaskLogExport() {
       // dialog (a run row, a transcript) do not all have the issue in hand.
       const mention = vars.mention ?? (await resolveMention(vars.issueId));
       const report = { ...vars, mention };
-      let fallbackReason: string | undefined;
+
+      // A comment-only retry: the push already landed, so the repository is
+      // not contacted again and the artifact is not re-uploaded.
+      if (vars.pushed) {
+        return reportViaRepository(report, vars.pushed);
+      }
 
       if (vars.channel !== "attachment") {
+        // The push and the comment are separated on purpose. Once the push
+        // succeeds the bundle is in the repository; a comment failure from
+        // here must not drop into the attachment fallback, because that would
+        // POST the whole multi-megabyte artifact over the very upload path
+        // this channel exists to avoid — and if that upload also failed, the
+        // committed file would be left unlinked.
+        let push: TaskLogExportPush;
         try {
-          const push = await api.pushTaskLogExport(
+          push = await api.pushTaskLogExport(
             vars.taskId || vars.exported.bundle.task.id,
             {
               scope: vars.scope ?? "run",
               hours: vars.hours,
             },
           );
+        } catch (error) {
+          const fallbackReason =
+            error instanceof Error ? error.message : String(error);
+          return reportViaAttachment(report, fallbackReason);
+        }
+
+        try {
           return await reportViaRepository(report, push);
         } catch (error) {
-          fallbackReason = error instanceof Error ? error.message : String(error);
+          throw new LogExportCommentError(push, vars.issueId, error);
         }
       }
 
-      return reportViaAttachment(report, fallbackReason);
+      return reportViaAttachment(report);
     },
     onSuccess: (_report, vars) => {
       // The comment lands in the issue timeline; refresh it so the reported

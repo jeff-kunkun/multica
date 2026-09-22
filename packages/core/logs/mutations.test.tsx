@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { TaskLogExport, TaskLogExportReport } from "../types";
-import { useReportTaskLogExport } from "./mutations";
+import { LogExportCommentError, useReportTaskLogExport } from "./mutations";
 
 function createWrapper(qc: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -17,6 +17,21 @@ function createWrapper(qc: QueryClient) {
 }
 
 const ARTIFACT = '{\n  "format": "multica.log-export"\n}\n';
+
+const PUSHED = {
+  pushed: true,
+  filename: "log-export-DENE-599.json",
+  path: "logs/log-export-DENE-599.json",
+  url: "https://github.com/o/r/blob/kun/logs/log-export-DENE-599.json",
+  branch: "kun",
+  repo: "https://github.com/o/r",
+  summary_markdown: "## AI 摘要\n\n推送后的产物摘要。",
+  entry_count: 3,
+  run_count: 1,
+  size_bytes: 10,
+  redaction_complete: true,
+  truncated: false,
+};
 
 function exported(): TaskLogExport {
   return {
@@ -174,6 +189,51 @@ describe("useReportTaskLogExport", () => {
     expect(content).toContain("推送后的产物摘要");
     expect(content).toContain("https://github.com/o/r/blob/kun/logs/log-export-DENE-599.json");
     expect(content).toContain("mention://member/user-9");
+  });
+
+  // The push landed, so the bytes are already in the repository. A comment
+  // failure must not fall into the attachment path: that would POST the whole
+  // multi-megabyte artifact over the very upload route the git channel exists
+  // to avoid, and a failed upload would leave the committed file unlinked.
+  it("hands back the pushed link when the comment fails, without uploading the artifact", async () => {
+    pushTaskLogExport.mockResolvedValue(PUSHED);
+    createComment.mockRejectedValue(new Error("comment request timed out"));
+    const { result } = renderHook(() => useReportTaskLogExport(), {
+      wrapper: createWrapper(qc),
+    });
+
+    let caught: unknown;
+    await act(async () => {
+      caught = await result.current
+        .mutateAsync({ exported: exported(), issueId: "issue-9", scope: "run" })
+        .catch((error: unknown) => error);
+    });
+
+    expect(caught).toBeInstanceOf(LogExportCommentError);
+    const failure = caught as LogExportCommentError;
+    expect(failure.push.url).toBe(PUSHED.url);
+    expect(failure.reason).toContain("timed out");
+    expect(uploadFile).not.toHaveBeenCalled();
+
+    // The retry carries the landed push, so only the comment is attempted.
+    createComment.mockResolvedValue({ id: "comment-12" });
+    let report: TaskLogExportReport | undefined;
+    await act(async () => {
+      report = await result.current.mutateAsync({
+        exported: exported(),
+        issueId: "issue-9",
+        scope: "run",
+        pushed: PUSHED,
+      });
+    });
+
+    expect(report).toMatchObject({
+      channel: "git",
+      commentId: "comment-12",
+      url: PUSHED.url,
+    });
+    expect(pushTaskLogExport).toHaveBeenCalledTimes(1);
+    expect(uploadFile).not.toHaveBeenCalled();
   });
 
   it("falls back to the comment attachment when the push fails, keeping the report", async () => {

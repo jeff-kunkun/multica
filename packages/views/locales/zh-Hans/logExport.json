@@ -25,6 +25,7 @@
     "partial": "只导出已收集部分",
     "widen": "扩大到整个任务",
     "report": "作为评论附件上报并 @负责人",
+    "retry_comment": "重新发送评论",
     "copy_summary": "复制给 AI 的摘要",
     "copied": "已复制",
     "download": "下载日志包"
@@ -59,6 +60,7 @@
     "success_git": "已上报到 {{issue}}，日志包已推送到 {{repo}}。",
     "success_attachment": "已上报到 {{issue}}，日志包已作为评论附件。",
     "fallback": "已回退为评论附件：{{reason}}",
+    "push_landed": "日志包已推送到仓库，但评论没有发出：{{reason}}",
     "failed": "上报失败：{{reason}}",
     "link": "打开日志包"
   },
