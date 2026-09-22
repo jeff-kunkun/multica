@@ -1369,6 +1369,29 @@
       "reason_in_use": "Conservée : une tâche s'y exécute en ce moment.",
       "reason_not_ours": "Conservée : Multica n'a pas créé celle-ci, elle ne lui appartient donc pas.",
       "reason_unknown": "Conservée : son état n'a pas pu être lu, et l'incertitude n'autorise pas à supprimer."
+    },
+    "shared_scratch": {
+      "title": "Dossier de session partagé",
+      "description": "Les questions sans dossier local et sans dépôt laissent leurs fichiers ici, un sous-dossier par conversation, au lieu d'un nouveau dossier de tâche à chaque fois. Seul ce dossier est nettoyé — jamais un répertoire à vous, ni une copie de travail à côté d'un dépôt.",
+      "scanning": "Lecture du dossier de session partagé…",
+      "daemon_offline": "Démarrez le démon local pour voir le dossier de session partagé de cette machine.",
+      "load_failed": "Impossible de lire le dossier de session partagé.",
+      "location_title": "Emplacement",
+      "location_description": "Un seul dossier sur cette machine. Les conversations de chaque espace de travail sont rangées dessous, par conversation.",
+      "size_title": "Occupation",
+      "summary": "{{count}} conversations · {{total}} sur le disque · {{reclaimable}} inactives assez longtemps pour être effacées",
+      "enable_title": "Effacer automatiquement les conversations inactives",
+      "enable_description": "Activé par défaut. Un dossier de conversation n'est retiré que s'il a été créé par Multica, que rien ne s'y exécute, et que rien n'y a été utilisé depuis le nombre de jours ci-dessous. Cela suit le nettoyage déjà prévu du démon.",
+      "retention_title": "Garder au moins",
+      "retention_description": "Jours après la dernière utilisation d'une conversation avant que son dossier puisse être effacé.",
+      "empty": "Aucune conversation partagée sur cette machine pour l'instant.",
+      "last_used": "dernière utilisation il y a {{days}} j",
+      "in_use": "en cours d'utilisation, laissé en place",
+      "not_ours": "pas créé par Multica, laissé en place",
+      "remove": "Effacer",
+      "removed": "Dossier de conversation effacé",
+      "clean_expired": "Effacer les expirés",
+      "cleaned": "Dossiers de conversation expirés effacés"
     }
   },
   "members": {

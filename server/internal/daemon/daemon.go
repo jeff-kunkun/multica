@@ -398,6 +398,10 @@ type Daemon struct {
 	// has used, which copies are busy, and the policy (off by default) that
 	// decides whether a finished one may be removed (DENE-617).
 	worktreeCleanup *worktreeCleanupState
+	// sharedScratch owns the one session folder per workspace: which
+	// conversations a task is in, and how long an idle one stays (DENE-622).
+	// Nil on a Daemon built field-by-field in a test.
+	sharedScratch *sharedScratchState
 
 	// terminalReports is the durable outbox for complete/fail callbacks. The
 	// sender hook is production-wired through Client and overridable in focused
@@ -814,6 +818,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		d.localSharedOverrides = newLocalSharedOverrideStore("")
 	}
 	d.worktreeCleanup = newWorktreeCleanupState(cfg.Profile)
+	d.sharedScratch = newSharedScratchState(cfg.Profile)
 	return d
 }
 
@@ -8393,38 +8398,78 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ConnectedApps:                    task.ConnectedApps,
 	}
 
+	// A run the server placed in the shared session folder does not get a
+	// per-task env root. The folder is the workspace's one scratch directory,
+	// and this turn uses the session's child of it (DENE-622). Every other
+	// decision, including a task whose server sent no decision, keeps the
+	// per-task directory below.
+	scratchDir, scratchRel, useScratch, scratchErr := d.taskSharedScratch(task)
+	if scratchErr != nil {
+		return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("shared scratch: %w", scratchErr))
+	}
+	if useScratch {
+		if _, err := execenv.OpenSharedSession(d.cfg.WorkspacesRoot, task.WorkspaceID, scratchRel, time.Now()); err != nil {
+			return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("open shared session: %w", err))
+		}
+		d.sharedScratch.MarkActive(scratchDir)
+		defer func() {
+			_ = execenv.TouchSharedSession(scratchDir, time.Now())
+			d.sharedScratch.ReleaseActive(scratchDir)
+		}()
+	}
+
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the
 	// stable root for a fresh Prepare and the prior root for Reuse — they
 	// usually differ (Reuse keeps the original task's directory).
-	resolvedRoot, err := execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
-	if err != nil {
-		return TaskResult{}, fmt.Errorf("resolve stable task env root: %w", err)
-	}
-	d.markActiveEnvRoot(resolvedRoot)
-	defer d.unmarkActiveEnvRoot(resolvedRoot)
-	if task.PriorWorkDir != "" {
-		priorRoot := filepath.Dir(task.PriorWorkDir)
-		if priorRoot != resolvedRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
-		}
-	}
-
-	// Claim the env root HERE, in the daemon parent, and hold it for the whole
-	// task run — the same lifetime as unmarkActiveEnvRoot above.
 	//
-	// It cannot be claimed inside preparation: production preparation runs in a
-	// short-lived helper process (prepareExecutionEnvironment ->
-	// PrepareIsolated), so a lock taken there dies with the helper and the
-	// *os.File cannot cross its JSON response back to us. Claiming there would
-	// leave the agent running with no protection at all — which is exactly the
-	// re-dispatch window this guards.
-	envClaim, err := execenv.ClaimEnvRoot(taskRootDirParams(d.cfg.WorkspacesRoot, task))
-	if err != nil {
-		return TaskResult{}, fmt.Errorf("claim execution environment: %w", err)
+	// A shared-scratch run marks the session folder instead. Marking the
+	// per-task path as well would protect a directory this run is refusing
+	// to create, and would keep the pile of old task directories pinned for
+	// the length of a conversation that no longer uses them.
+	var resolvedRoot string
+	var envClaim *execenv.EnvRootClaim
+	if useScratch {
+		resolvedRoot = scratchDir
+		d.markActiveEnvRoot(resolvedRoot)
+		defer d.unmarkActiveEnvRoot(resolvedRoot)
+		var claimErr error
+		envClaim, claimErr = execenv.ClaimSharedSession(scratchDir)
+		if claimErr != nil {
+			return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("claim shared session: %w", claimErr))
+		}
+		defer envClaim.Release()
+	} else {
+		var err error
+		resolvedRoot, err = execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("resolve stable task env root: %w", err)
+		}
+		d.markActiveEnvRoot(resolvedRoot)
+		defer d.unmarkActiveEnvRoot(resolvedRoot)
+		if task.PriorWorkDir != "" {
+			priorRoot := filepath.Dir(task.PriorWorkDir)
+			if priorRoot != resolvedRoot {
+				d.markActiveEnvRoot(priorRoot)
+				defer d.unmarkActiveEnvRoot(priorRoot)
+			}
+		}
+
+		// Claim the env root HERE, in the daemon parent, and hold it for the whole
+		// task run — the same lifetime as unmarkActiveEnvRoot above.
+		//
+		// It cannot be claimed inside preparation: production preparation runs in a
+		// short-lived helper process (prepareExecutionEnvironment ->
+		// PrepareIsolated), so a lock taken there dies with the helper and the
+		// *os.File cannot cross its JSON response back to us. Claiming there would
+		// leave the agent running with no protection at all — which is exactly the
+		// re-dispatch window this guards.
+		envClaim, err = execenv.ClaimEnvRoot(taskRootDirParams(d.cfg.WorkspacesRoot, task))
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("claim execution environment: %w", err)
+		}
+		defer envClaim.Release()
 	}
-	defer envClaim.Release()
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
@@ -8642,67 +8687,72 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	envReused := false
-	priorClaim, priorWorkDir, lockedPriorInfo, reusable, reuseErr := d.lockReusablePriorEnvRoot(ctx, task, localAssignment, envClaim.RootDir())
-	if reuseErr != nil {
-		// Cancelled while waiting for the previous run to let go of its
-		// directory. Ending here IS the behaviour: falling through would
-		// prepare a whole environment — repo checkout included — for a task
-		// nobody is waiting for any more.
-		return TaskResult{}, reuseErr
-	}
-	if reusable {
-		defer priorClaim.Release()
-		// Deterministic seam for the last-window regression: tests swap the
-		// directory here, after the claim is settled and before Reuse resolves
-		// the path by name.
-		if reuseBeforeUseTestHook != nil {
-			reuseBeforeUseTestHook()
+	// The session folder is the continuity. Reusing PriorWorkDir here would
+	// treat its parent — the directory that holds every session — as an env
+	// root, or fall through and mint a per-task directory beside it.
+	if !useScratch {
+		priorClaim, priorWorkDir, lockedPriorInfo, reusable, reuseErr := d.lockReusablePriorEnvRoot(ctx, task, localAssignment, envClaim.RootDir())
+		if reuseErr != nil {
+			// Cancelled while waiting for the previous run to let go of its
+			// directory. Ending here IS the behaviour: falling through would
+			// prepare a whole environment — repo checkout included — for a task
+			// nobody is waiting for any more.
+			return TaskResult{}, reuseErr
 		}
-		var err error
-		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			Profile:        d.cfg.Profile,
-			// The canonical path the lock was taken on. Handing Reuse the raw
-			// PriorWorkDir instead would re-resolve it, so the directory we
-			// locked and the directory we use could differ.
-			WorkDir:               priorWorkDir,
-			Provider:              provider,
-			CodexVersion:          codexVersion,
-			ResumeSessionID:       task.PriorSessionID,
-			OpenclawBin:           openclawBin,
-			McpConfig:             effectiveMcpConfig,
-			CursorMcpAuthSource:   cursorMcpAuthSource,
-			OpenclawGateway:       openclawGateway,
-			HermesSourceHome:      hermesSourceHome,
-			HermesSourceMustExist: hermesSourceMustExist,
-			HermesEnv:             hermesEnv,
-			HermesMemoryStore:     hermesMemoryStore,
-			HermesSessionStore:    hermesSessionStore,
-			ReasonixEnv:           reasonixEnv,
-			CodexCustomArgs:       codexSandboxArgs,
-			Task:                  taskCtx,
-		})
-		if err != nil {
-			return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("reuse execution environment: %w", err))
-		}
-		// Reuse resolves priorWorkDir by name, so confirm what it actually
-		// opened is still the directory we hold the lock on. An fd cannot cross
-		// into the preparation helper process, so the name is the only thing
-		// that can be handed over; this turns "silently ran somewhere else"
-		// into "declined and started clean". See lockReusablePriorEnvRoot for
-		// what remains uncovered.
-		if env != nil && lockedPriorInfo != nil {
-			usedInfo, statErr := os.Stat(filepath.Dir(env.WorkDir))
-			if statErr != nil || !os.SameFile(lockedPriorInfo, usedInfo) {
-				// No "task" field here: taskLog already carries the full id.
-				taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment")
-				env = nil
+		if reusable {
+			defer priorClaim.Release()
+			// Deterministic seam for the last-window regression: tests swap the
+			// directory here, after the claim is settled and before Reuse resolves
+			// the path by name.
+			if reuseBeforeUseTestHook != nil {
+				reuseBeforeUseTestHook()
 			}
+			var err error
+			env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
+				WorkspacesRoot: d.cfg.WorkspacesRoot,
+				Profile:        d.cfg.Profile,
+				// The canonical path the lock was taken on. Handing Reuse the raw
+				// PriorWorkDir instead would re-resolve it, so the directory we
+				// locked and the directory we use could differ.
+				WorkDir:               priorWorkDir,
+				Provider:              provider,
+				CodexVersion:          codexVersion,
+				ResumeSessionID:       task.PriorSessionID,
+				OpenclawBin:           openclawBin,
+				McpConfig:             effectiveMcpConfig,
+				CursorMcpAuthSource:   cursorMcpAuthSource,
+				OpenclawGateway:       openclawGateway,
+				HermesSourceHome:      hermesSourceHome,
+				HermesSourceMustExist: hermesSourceMustExist,
+				HermesEnv:             hermesEnv,
+				HermesMemoryStore:     hermesMemoryStore,
+				HermesSessionStore:    hermesSessionStore,
+				ReasonixEnv:           reasonixEnv,
+				CodexCustomArgs:       codexSandboxArgs,
+				Task:                  taskCtx,
+			})
+			if err != nil {
+				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("reuse execution environment: %w", err))
+			}
+			// Reuse resolves priorWorkDir by name, so confirm what it actually
+			// opened is still the directory we hold the lock on. An fd cannot cross
+			// into the preparation helper process, so the name is the only thing
+			// that can be handed over; this turns "silently ran somewhere else"
+			// into "declined and started clean". See lockReusablePriorEnvRoot for
+			// what remains uncovered.
+			if env != nil && lockedPriorInfo != nil {
+				usedInfo, statErr := os.Stat(filepath.Dir(env.WorkDir))
+				if statErr != nil || !os.SameFile(lockedPriorInfo, usedInfo) {
+					// No "task" field here: taskLog already carries the full id.
+					taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment")
+					env = nil
+				}
+			}
+			// Reuse can decline (nil) and fall through to a fresh Prepare below.
+			// Whether it did decides whether an env-root-scoped session store — the
+			// Hermes overlay's task-local state.db — carried over from the prior task.
+			envReused = env != nil
 		}
-		// Reuse can decline (nil) and fall through to a fresh Prepare below.
-		// Whether it did decides whether an env-root-scoped session store — the
-		// Hermes overlay's task-local state.db — carried over from the prior task.
-		envReused = env != nil
 	}
 	if env == nil {
 		var err error
@@ -8732,7 +8782,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}
-		if localAssignment.UsesWorktree() {
+		if useScratch {
+			// Already claimed, and not reset: the session folder keeps the
+			// files the previous turn left. No local directory and no
+			// worktree — the server said this run has neither.
+			prepParams.SharedScratchDir = scratchDir
+			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
+			if err != nil {
+				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
+			}
+		} else if localAssignment.UsesWorktree() {
 			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{
 				LocalPath: localAssignment.AbsPath,
 				// Empty when the resource names no location; execenv then
