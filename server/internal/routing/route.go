@@ -531,20 +531,26 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 		target := Member{UserID: issue.Reviewer.ID, Name: issue.Reviewer.Name}
 		out.Action = ActionAdvised
 		out.Reason = "reviewer slot names a person: notified, ticket not reassigned"
+		// The inbox row is the notice, and NotifyMember is its only writer.
+		// deliverTo would insert another one on a different connection from
+		// the stay check, so a status-change hook and the completion callback
+		// could each leave a routing_needs_you. The comment is still once per
+		// issue; a later stay finds it already posted and only refreshes the
+		// notice.
 		body := r.reviewerIsPersonComment(issue, target, decidedHere)
-		delivered, err := r.deliverTo(ctx, workspaceID, issue, KindHandoff, body, target, out)
+		if target.UserID != "" {
+			body += "\n\n" + mentionLink(target)
+		}
+		written, err := r.Store.PostComment(ctx, workspaceID, issue.ID, KindHandoff, body)
 		if err != nil {
-			return delivered, err
+			return out, err
 		}
-		if delivered.Mentioned {
-			return delivered, nil
+		if written {
+			out.Commented = true
 		}
-		// The handoff comment is one per issue, so a later stay finds it
-		// already posted and deliverTo stays silent. The notice for THIS stay
-		// is the inbox row, which is what actually reaches the person.
 		wrote, err := r.Store.NotifyMember(ctx, workspaceID, issue.ID, target)
 		if err != nil {
-			return delivered, err
+			return out, err
 		}
 		if !wrote {
 			return Outcome{
@@ -552,10 +558,11 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 				Action:          ActionNoop,
 				Reason:          "already notified this round",
 				ReviewerWritten: out.ReviewerWritten,
+				Commented:       out.Commented,
 			}, nil
 		}
-		delivered.Mentioned = true
-		return delivered, nil
+		out.Mentioned = true
+		return out, nil
 	}
 
 	if state.AgentEngaged {

@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -408,5 +410,146 @@ func TestAcceptanceFollowsTheCurrentReviewStay(t *testing.T) {
 	}
 	if !state.MemberNotified {
 		t.Fatal("this stay's notice was not seen")
+	}
+}
+
+// Two callbacks for the same stay — the status change and the run finishing —
+// both used to read "not yet notified" and each insert a routing_needs_you.
+// The person is not reassigned. A later stay still gets its own notice.
+func TestNotifyMemberOncePerStayUnderConcurrency(t *testing.T) {
+	ctx := context.Background()
+	fx := testutil.New(testPool, testWorkspaceID, testUserID)
+	store := testHandler.RoutingStore()
+
+	runtimeID := fx.Runtime(t, "notice-race-runtime")
+	executor := fx.Agent(t, "notice-race-executor", runtimeID)
+	issueID := fx.Issue(t, "person accepts, two callbacks at once", testutil.Cols{
+		"status":        "in_review",
+		"assignee_type": "agent",
+		"assignee_id":   executor,
+		"reviewer_type": "member",
+		"reviewer_id":   testUserID,
+	})
+	fx.Insert(t, "activity_log", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"issue_id":     issueID,
+		"actor_type":   "member",
+		"actor_id":     testUserID,
+		"action":       "status_changed",
+		"details":      testutil.Raw(`'{"from": "in_progress", "to": "in_review"}'::jsonb`),
+		"created_at":   testutil.Raw("now() - interval '2 hours'"),
+	})
+
+	const callers = 8
+	var wrote atomic.Int32
+	var failed atomic.Int32
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			ok, err := store.NotifyMember(ctx, testWorkspaceID, issueID, routing.Member{UserID: testUserID, Name: "Kun"})
+			if err != nil {
+				failed.Add(1)
+				t.Errorf("notify: %v", err)
+				return
+			}
+			if ok {
+				wrote.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if failed.Load() != 0 {
+		t.Fatalf("%d notify calls failed", failed.Load())
+	}
+	if got := wrote.Load(); got != 1 {
+		t.Fatalf("writers = %d, want 1", got)
+	}
+	if got := fx.Count(t, `SELECT COUNT(*) FROM inbox_item WHERE issue_id = $1 AND type = 'routing_needs_you'`, issueID); got != 1 {
+		t.Fatalf("notices = %d, want 1", got)
+	}
+	assertAssignee(t, issueID, "agent", executor)
+
+	fx.Insert(t, "activity_log", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"issue_id":     issueID,
+		"actor_type":   "member",
+		"actor_id":     testUserID,
+		"action":       "status_changed",
+		"details":      testutil.Raw(`'{"from": "in_progress", "to": "in_review"}'::jsonb`),
+		"created_at":   testutil.Raw("now() + interval '2 minutes'"),
+	})
+	again, err := store.NotifyMember(ctx, testWorkspaceID, issueID, routing.Member{UserID: testUserID, Name: "Kun"})
+	if err != nil {
+		t.Fatalf("next stay: %v", err)
+	}
+	if !again {
+		t.Fatal("the next stay was treated as already notified")
+	}
+	if got := fx.Count(t, `SELECT COUNT(*) FROM inbox_item WHERE issue_id = $1 AND type = 'routing_needs_you'`, issueID); got != 2 {
+		t.Fatalf("notices after the next stay = %d, want 2", got)
+	}
+	assertAssignee(t, issueID, "agent", executor)
+}
+
+// Concurrent handoffs of one stay must enqueue one reviewer run. The pending
+// task unique index is what collapses the second insert; this is the regression
+// that it still does.
+func TestConcurrentHandoffStartsOneReviewerRun(t *testing.T) {
+	ctx := context.Background()
+	fx := testutil.New(testPool, testWorkspaceID, testUserID)
+	store := testHandler.RoutingStore()
+
+	runtimeID := fx.Runtime(t, "handoff-race-runtime")
+	executor := fx.Agent(t, "handoff-race-executor", runtimeID)
+	reviewer := fx.Agent(t, "handoff-race-reviewer", runtimeID)
+	issueID := fx.Issue(t, "two callbacks hand the ticket to the reviewer", testutil.Cols{
+		"status":        "in_review",
+		"assignee_type": "agent",
+		"assignee_id":   executor,
+		"reviewer_type": "agent",
+		"reviewer_id":   reviewer,
+	})
+
+	const callers = 8
+	var failed atomic.Int32
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if err := store.Handoff(ctx, testWorkspaceID, issueID, "agent", reviewer); err != nil {
+				failed.Add(1)
+				t.Errorf("handoff: %v", err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if failed.Load() != 0 {
+		t.Fatalf("%d handoffs failed", failed.Load())
+	}
+	if got := fx.Count(t, `SELECT COUNT(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status <> 'cancelled'`, issueID, reviewer); got != 1 {
+		t.Fatalf("reviewer runs = %d, want 1", got)
+	}
+	assertAssignee(t, issueID, "agent", reviewer)
+}
+
+func assertAssignee(t *testing.T, issueID, wantType, wantID string) {
+	t.Helper()
+	var gotType, gotID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT assignee_type, assignee_id::text FROM issue WHERE id = $1`, issueID,
+	).Scan(&gotType, &gotID); err != nil {
+		t.Fatalf("assignee: %v", err)
+	}
+	if gotType != wantType || gotID != wantID {
+		t.Fatalf("assignee = %s/%s, want %s/%s", gotType, gotID, wantType, wantID)
 	}
 }
