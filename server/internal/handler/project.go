@@ -480,6 +480,10 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			if isUniqueViolation(err) {
+				if conflict, reason, cErr := h.findLocalDirectoryConflictReason(r.Context(), project.ID, res.ResourceType, normalizedRefs[i], pgtype.UUID{}); cErr == nil && conflict {
+					writeError(w, http.StatusConflict, "resources["+strconv.Itoa(i)+"]: "+reason)
+					return
+				}
 				writeError(w, http.StatusConflict, "resources["+strconv.Itoa(i)+"]: this resource is already attached")
 				return
 			}

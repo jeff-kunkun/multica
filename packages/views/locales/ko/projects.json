@@ -157,6 +157,8 @@
     "mode_worktree_root_label": "작업 사본을 만들 위치",
     "mode_worktree_root_not_absolute": "절대 경로를 입력하세요. 상대 경로는 그때 데몬이 있는 디렉터리에 만들어집니다.",
     "mode_worktree_root_inside_repo": "저장소 안쪽입니다. 거기에 만들면 사용자의 git status에 나타나고 .gitignore 항목도 필요합니다. 저장소 옆 폴더를 고르세요.",
+    "mode_worktree_root_not_writable": "이 폴더에는 쓸 수 없습니다. 이 기기에서 파일을 만들 수 있는 위치를 고르세요.",
+    "mode_worktree_root_conflicts": "이미 프로젝트에 묶인 디렉터리와 겹칩니다. 다른 폴더를 고르세요.",
     "local_daemon_already_attached_hint": "이 기기에는 이미 로컬 디렉터리가 연결되어 있습니다. 새로 추가하려면 먼저 기존 항목을 제거하세요.",
     "toast_local_daemon_already_attached": "이 기기에는 이미 이 프로젝트의 로컬 디렉터리가 연결되어 있습니다. 새로 추가하려면 먼저 기존 항목을 제거하세요."
   },

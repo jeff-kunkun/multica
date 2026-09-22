@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -49,6 +49,7 @@ import {
   useLocalDaemonStatus,
   useLocalDirectorySharedOverrides,
   validateLocalDirectory,
+  validateWritablePath,
   type ValidateLocalDirectoryResult,
 } from "../../platform";
 // The source rule is pure and imported from its own module rather than the
@@ -193,6 +194,48 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // Which of them a run writes is no longer ambiguous either: resources are
   // ordered, and the first local directory on this machine is the working
   // directory. The rest reach the agent read-only.
+  const boundIdentitiesForDialog = useMemo(() => {
+    return resources
+      .filter(isLocalDirectoryRef)
+      .filter((r) => r.resource_ref.daemon_id === localDaemonId)
+      .filter((r) => r.id !== modeDialog?.resource?.id)
+      .map((r) => r.resource_ref.real_path || r.resource_ref.local_path);
+  }, [resources, localDaemonId, modeDialog?.resource?.id]);
+
+  const identityBackfilled = useRef(new Set<string>());
+  useEffect(() => {
+    if (!desktopMode || !localDaemonId) return;
+    for (const r of resources) {
+      if (!isLocalDirectoryRef(r)) continue;
+      if (r.resource_ref.daemon_id !== localDaemonId) continue;
+      if (r.resource_ref.real_path) continue;
+      if (identityBackfilled.current.has(r.id)) continue;
+      identityBackfilled.current.add(r.id);
+      void (async () => {
+        try {
+          const measured = await validateLocalDirectory(r.resource_ref.local_path);
+          if (!measured?.ok || !measured.real_path) return;
+          await updateResource.mutateAsync({
+            resourceId: r.id,
+            data: {
+              resource_ref: {
+                ...r.resource_ref,
+                real_path: measured.real_path,
+                ...(measured.repo_key ? { repo_key: measured.repo_key } : {}),
+                ...(measured.is_git_repo === undefined
+                  ? {}
+                  : { is_git_repo: measured.is_git_repo }),
+              },
+            },
+          });
+        } catch {
+          // Unique conflict or a path we cannot see: leave the first row
+          // and do not fail the page.
+        }
+      })();
+    }
+  }, [resources, desktopMode, localDaemonId, updateResource]);
+
   const attachedRealPaths = new Set(
     resources
       .filter(isLocalDirectoryRef)
@@ -362,9 +405,20 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     // would arrive as a failed task, long after the dialog is gone.
     if (
       mode === "worktree" &&
-      worktreeRootProblem(worktreeRootShown ?? "", modeDialog.gitRoot) !== undefined
+      worktreeRootProblem(
+        worktreeRootShown ?? "",
+        modeDialog.gitRoot,
+        boundIdentitiesForDialog,
+      ) !== undefined
     ) {
       return;
+    }
+    if (mode === "worktree" && worktreeRootShown) {
+      const writable = await validateWritablePath(worktreeRootShown);
+      if (!writable) {
+        setModeError(t(($) => $.resources.mode_worktree_root_not_writable));
+        return;
+      }
     }
     setModeSaving(true);
     setModeError(null);
@@ -773,6 +827,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           sharedUsesLocalOverride={sharedUsesLocalOverride}
           worktreeRootPreview={worktreeRootShown}
           gitRoot={modeDialog.gitRoot}
+          boundIdentities={boundIdentitiesForDialog}
           onWorktreeRootChange={(next) =>
             setModeDialog((current) =>
               current ? { ...current, worktreeRoot: next } : current,

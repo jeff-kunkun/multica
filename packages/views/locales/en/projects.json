@@ -158,6 +158,8 @@
     "mode_worktree_root_label": "Working copies go in",
     "mode_worktree_root_not_absolute": "Use an absolute path — a relative one would land wherever the daemon happens to be running.",
     "mode_worktree_root_inside_repo": "This is inside the repository. Copies there would show up in your own git status and need a .gitignore entry — pick a folder beside it instead.",
+    "mode_worktree_root_not_writable": "This folder is not writable. Pick a location this machine can create files in.",
+    "mode_worktree_root_conflicts": "This overlaps a directory already bound to the project. Pick a different folder.",
     "local_daemon_already_attached_hint": "This machine already has a local directory attached. Remove it before adding another.",
     "toast_local_daemon_already_attached": "This machine already has a local directory attached to this project. Remove it before adding another."
   },

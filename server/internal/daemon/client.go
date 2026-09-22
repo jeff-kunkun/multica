@@ -607,6 +607,23 @@ func (c *Client) failTaskWithRetrySchedule(ctx context.Context, taskID, errMsg, 
 
 // PinTaskSession persists the agent's session_id and work_dir on the task
 // row mid-flight so a daemon crash doesn't lose the resume pointer.
+// LocalDirectoryIdentityBackfill is the daemon's report of identity fields
+// it measured for a local_directory it owns. Conflict is true when the
+// unique index refused the write — the daemon must treat that as success
+// (the first row keeps the identity) and only log.
+type LocalDirectoryIdentityBackfill struct {
+	Applied  bool `json:"applied"`
+	Conflict bool `json:"conflict"`
+}
+
+func (c *Client) BackfillLocalDirectoryIdentity(ctx context.Context, resourceID string, body map[string]any) (*LocalDirectoryIdentityBackfill, error) {
+	var resp LocalDirectoryIdentityBackfill
+	if err := c.postJSON(ctx, "/api/daemon/project-resources/"+resourceID+"/identity", body, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir string) error {
 	if sessionID == "" && workDir == "" {
 		return nil
