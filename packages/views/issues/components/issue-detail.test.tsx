@@ -809,41 +809,6 @@ describe("IssueDetail (shared)", () => {
     );
   });
 
-  it("does not offer an acceptance slot on a sub-issue", async () => {
-    // Acceptance is parent-scoped: a reviewer on a sub-issue is a seat
-    // routing never hands the ticket to, so an empty slot there must not
-    // invite one. The row is absent; the rest of the panel is not, which is
-    // what makes the absence meaningful rather than a blank sidebar.
-    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, parent_issue_id: "parent-1" });
-    renderIssueDetail();
-
-    await screen.findByText("Implement authentication");
-    expect(screen.queryByText("Reviewer")).not.toBeInTheDocument();
-    expect(screen.getByText("Assignee")).toBeInTheDocument();
-  });
-
-  it("keeps a sub-issue's hand-recorded acceptance slot visible", async () => {
-    // A value somebody wrote by hand predates the rule, and a hidden slot
-    // would hide the decision with it — including the means to clear it.
-    mockApiObj.getIssue.mockResolvedValue({
-      ...mockIssue,
-      parent_issue_id: "parent-1",
-      reviewer_type: "agent",
-      reviewer_id: "agent-1",
-    });
-    renderIssueDetail();
-
-    await screen.findByText("Implement authentication");
-    expect(screen.getByText("Reviewer")).toBeInTheDocument();
-  });
-
-  it("offers the acceptance slot on a top-level issue", async () => {
-    renderIssueDetail();
-
-    await screen.findByText("Implement authentication");
-    expect(screen.getByText("Reviewer")).toBeInTheDocument();
-  });
-
   it("wires the description selection toolbar to annotation collection", async () => {
     renderIssueDetail();
     await screen.findByDisplayValue("Add JWT auth to the backend");

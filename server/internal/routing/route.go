@@ -124,15 +124,6 @@ func (r *Router) Route(ctx context.Context, workspaceID, issueID string) (Outcom
 		return Outcome{State: state, Action: ActionSkipped, Reason: "assignee is a person"}, nil
 	}
 
-	// A child issue is execution-only. It may still receive an executor at
-	// `todo`, but acceptance is a single parent-level handoff. Keep this guard
-	// before the status switch so a manually assigned reviewer, a stale child
-	// row, or a direct `issue route` call cannot start an independent review
-	// chain.
-	if issue.ParentIssueID != "" && issue.Status == "in_review" {
-		return Outcome{State: state, Action: ActionNoop, Reason: "sub-issue has no acceptance route"}, nil
-	}
-
 	switch issue.Status {
 	case "todo":
 		return r.routeTodo(ctx, workspaceID, settings, issue)
@@ -182,7 +173,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	out := Outcome{State: StateEnabled, Action: ActionDeclined}
 
 	needExecutor := issue.AssigneeType == ""
-	needReviewer := issue.ParentIssueID == "" && issue.Reviewer.Empty()
+	needReviewer := issue.Reviewer.Empty()
 
 	if !needExecutor && !needReviewer {
 		// Both slots already hold a value, whoever wrote them. Repeated status
@@ -471,9 +462,6 @@ func (r *Router) decideReviewer(v Verdict, candidates []Seat, executor *Seat, is
 // but it still runs at most once per issue, because the handoff comment is
 // posted at most once per issue.
 func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings Settings, issue Issue) (Outcome, error) {
-	if issue.ParentIssueID != "" {
-		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "sub-issue has no acceptance route"}, nil
-	}
 	out := Outcome{State: StateEnabled, Action: ActionHandedOff}
 	decidedHere := false
 	if issue.Reviewer.Empty() {

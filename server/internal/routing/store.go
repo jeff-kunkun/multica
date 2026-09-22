@@ -29,10 +29,6 @@ type Issue struct {
 	ProjectName string
 	Repository  string
 	Labels      []string
-	// ParentIssueID is empty for a top-level issue. Child issues still use
-	// routing for executor dispatch, but acceptance belongs to their parent
-	// and must never be routed independently.
-	ParentIssueID string
 
 	ParentExecutor string
 	HasChildren    bool

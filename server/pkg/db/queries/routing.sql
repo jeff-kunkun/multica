@@ -128,7 +128,6 @@ ORDER BY id;
 SELECT i.id FROM issue i
 WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
   AND i.status = ANY(sqlc.arg('statuses')::text[])
-  AND i.parent_issue_id IS NULL
   AND COALESCE(i.last_activity_at, i.updated_at) < sqlc.arg('before')::timestamptz
   AND NOT EXISTS (
       SELECT 1 FROM agent_task_queue q

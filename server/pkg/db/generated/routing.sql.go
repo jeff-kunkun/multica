@@ -423,7 +423,6 @@ const listStaleReviewIssues = `-- name: ListStaleReviewIssues :many
 SELECT i.id FROM issue i
 WHERE i.workspace_id = $1::uuid
   AND i.status = ANY($2::text[])
-  AND i.parent_issue_id IS NULL
   AND COALESCE(i.last_activity_at, i.updated_at) < $3::timestamptz
   AND NOT EXISTS (
       SELECT 1 FROM agent_task_queue q

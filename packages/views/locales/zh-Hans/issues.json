@@ -1070,8 +1070,6 @@
     "group_summary_parent": "父任务不指派负责人，自己不会开跑。",
     "created_title": "任务已创建",
     "created_group_title": "已创建 {{count}} 个任务",
-    "assignee_dropped": "「{{title}}」的负责人没能指派上，任务已创建，目前未分配。",
-    "assignee_dropped_several": "有 {{count}} 个任务的负责人没能指派上，它们已创建，目前未分配。",
     "retired_title": "这次对齐已结束",
     "retired_description": "它已不在你的未完成草稿里。",
     "load_failed": "无法加载这次对齐。",
