@@ -288,6 +288,67 @@ describe("LogExportDialog", () => {
     );
   });
 
+  it("refuses a late result when the range changed while the export was in flight", async () => {
+    let landExport: (value: TaskLogExport) => void = () => {};
+    api.exportTaskLogs.mockReturnValueOnce(
+      new Promise<TaskLogExport>((resolve) => {
+        landExport = resolve;
+      }),
+    );
+    renderDialog();
+
+    // Ask for the 6h window, then edit the number while the request is still
+    // on the wire. The response describes 6h; installing it under a 24h input
+    // would leave a card the reader can copy and download while a report
+    // rebuilds 24h on the server — the comment would carry a document nobody
+    // reviewed.
+    fireEvent.click(screen.getByRole("button", { name: /Last 6h/ }));
+    fireEvent.click(exportButton());
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "24" } });
+
+    landExport(exported());
+
+    await screen.findByText("Nothing exported yet");
+    expect(screen.queryByText("log-export-DENE-599.json")).not.toBeInTheDocument();
+    // No card means no report: the action only exists over a bundle the
+    // reader can see.
+    expect(
+      screen.queryByRole("button", {
+        name: "Report as a comment attachment and @ the owner",
+      }),
+    ).not.toBeInTheDocument();
+
+    // Only a fresh export, which carries the number now on screen, may fill
+    // the card back in.
+    fireEvent.click(exportButton());
+    await waitFor(() =>
+      expect(api.exportTaskLogs).toHaveBeenLastCalledWith(
+        "task-1",
+        expect.objectContaining({ scope: "hours", hours: 24 }),
+      ),
+    );
+  });
+
+  it("keeps a bundle whose hours were clamped back to the same window", async () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /Last 6h/ }));
+    fireEvent.click(exportButton());
+    await screen.findByText("log-export-DENE-599.json");
+
+    // 5.6 rounds back to the current 6, so the range is unchanged and the
+    // keystroke must not throw the card away. (The input fires on every edit,
+    // so a reader can land here by typing.)
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "5.6" } });
+
+    expect(screen.getByText("log-export-DENE-599.json")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Report as a comment attachment and @ the owner",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("keeps the pushed link and retries only the comment when the comment fails", async () => {
     api.pushTaskLogExport.mockResolvedValue(PUSH);
     api.createComment.mockRejectedValueOnce(new Error("评论请求超时"));

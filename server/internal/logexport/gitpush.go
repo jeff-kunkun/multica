@@ -270,6 +270,16 @@ func (p *GitCLIPusher) Push(ctx context.Context, repo GitRepo, token string, req
 	if !insideDir(workdir, localPath) {
 		return PushResult{}, fmt.Errorf("invalid log export repository directory %q", repo.Dir)
 	}
+	// insideDir compares path strings; the filesystem follows symbolic links.
+	// A clone is a working copy of a repository somebody else controls, and git
+	// records a link verbatim, so a tracked `logs` that points elsewhere makes
+	// the joined path leave the clone the moment it is used. WriteFile follows
+	// it and runs before `git add`; the trailing RemoveAll only covers the
+	// clone, so the escaped file would outlive the push. Prove the destination
+	// stays inside before the first read, mkdir, write, or git invocation.
+	if err := refuseLinkEscape(workdir, relPath, localPath); err != nil {
+		return PushResult{}, err
+	}
 
 	// Identical bytes already tracked: there is nothing to commit, and a
 	// second push would otherwise add a no-op commit to the history. Report
@@ -330,6 +340,55 @@ func insideDir(root, target string) bool {
 		return false
 	}
 	return rel == "." || (!filepath.IsAbs(rel) && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// refuseLinkEscape refuses a destination that only looks like it is inside the
+// clone. insideDir answers a question about strings; this one answers it about
+// the filesystem the strings will be handed to.
+//
+// Every segment of relPath that already exists is inspected with Lstat, so a
+// symbolic link — an ancestor, or the artifact path itself — is refused rather
+// than followed. A log repository has no legitimate reason to route its own
+// artifacts through a link, and resolving one to decide would leave a window
+// between the check and the write in which the link could change. Whatever
+// part of the chain does exist must also resolve into the clone, which catches
+// a link that appeared between the walk and this call.
+func refuseLinkEscape(workdir, relPath, localPath string) error {
+	escaped := func() error {
+		return fmt.Errorf("refusing to write %s: the path resolves outside the cloned repository", relPath)
+	}
+
+	realWorkdir, err := filepath.EvalSymlinks(workdir)
+	if err != nil {
+		return fmt.Errorf("resolve the cloned repository failed: %w", err)
+	}
+
+	current := workdir
+	for _, segment := range strings.Split(filepath.FromSlash(relPath), string(filepath.Separator)) {
+		if segment == "" || segment == "." {
+			continue
+		}
+		current = filepath.Join(current, segment)
+		info, statErr := os.Lstat(current)
+		if statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) {
+				// Nothing below this point exists, so nothing below it can be
+				// a link; MkdirAll will create real directories.
+				break
+			}
+			return fmt.Errorf("inspect %s failed: %w", relPath, statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return escaped()
+		}
+	}
+
+	if resolved, resErr := filepath.EvalSymlinks(filepath.Dir(localPath)); resErr == nil {
+		if !insideDir(realWorkdir, resolved) {
+			return escaped()
+		}
+	}
+	return nil
 }
 
 // WebURL is the repository's browsable root: the configured URL with any

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -207,6 +208,70 @@ func TestGitCLIPusherRefusesEscapingDir(t *testing.T) {
 	}
 	if _, statErr := os.Stat(escapedPath); statErr == nil {
 		t.Fatalf("bundle escaped the clone to %s", escapedPath)
+	}
+	if count := runGitTest(t, "", "--git-dir", origin, "rev-list", "--count", "main"); count != "1" {
+		t.Fatalf("origin history changed to %s commits", count)
+	}
+}
+
+// TestGitCLIPusherRefusesSymlinkedDirectoryEscape is the second half of the
+// directory-escape regression: the configured Dir is inside the clone on
+// paper, but the repository tracks `logs` as a symbolic link pointing out of
+// it. insideDir cannot see that, WriteFile follows the link, the write lands
+// before `git add` fails, and the temporary directory the pusher removes is
+// not where the file went. The push must be refused before anything is
+// written, and the remote must not move.
+func TestGitCLIPusherRefusesSymlinkedDirectoryEscape(t *testing.T) {
+	requireGit(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symbolic links needs privileges on Windows")
+	}
+
+	root := t.TempDir()
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("create the outside directory: %v", err)
+	}
+
+	origin := filepath.Join(root, "origin.git")
+	runGitTest(t, "", "init", "--bare", "--initial-branch=main", origin)
+
+	seed := filepath.Join(root, "seed")
+	runGitTest(t, "", "init", "--initial-branch=main", seed)
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+	// Git records a link verbatim, so the clone really does contain `logs`
+	// pointing at a directory no clone owns.
+	if err := os.Symlink(outside, filepath.Join(seed, "logs")); err != nil {
+		t.Fatalf("create the seed symlink: %v", err)
+	}
+	runGitTest(t, seed, "add", "-A")
+	runGitTest(t, seed, "commit", "-m", "initial")
+	runGitTest(t, seed, "remote", "add", "origin", origin)
+	runGitTest(t, seed, "push", "origin", "main")
+
+	pusher := &GitCLIPusher{}
+	repo := GitRepo{Enabled: true, URL: "file://" + origin, Branch: "main", Dir: "logs"}
+	_, err := pusher.Push(context.Background(), repo, "", PushRequest{
+		Filename: "log-export-x.json",
+		Content:  []byte("{}"),
+		Message:  "export",
+	})
+	if err == nil {
+		t.Fatal("Push wrote through a symlinked directory")
+	}
+	// The escape, not the error string, is the property under test: assert the
+	// filesystem first so a regression reports what actually went wrong.
+	entries, readErr := os.ReadDir(outside)
+	if readErr != nil {
+		t.Fatalf("read the outside directory: %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("bundle escaped the clone into %s: %v", outside, entries)
+	}
+	if !strings.Contains(err.Error(), "resolves outside the cloned repository") {
+		t.Fatalf("error = %v, want it to name the escape", err)
 	}
 	if count := runGitTest(t, "", "--git-dir", origin, "rev-list", "--count", "main"); count != "1" {
 		t.Fatalf("origin history changed to %s commits", count)

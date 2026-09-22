@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -91,9 +91,22 @@ export function LogExportDialog({
   const exportMutation = useExportTaskLogs();
   const reportMutation = useReportTaskLogExport();
 
+  // Which range the dialog is currently asking for. Every edit to the range —
+  // the scope toggle, the hours number, closing the dialog — bumps this, and a
+  // response may only land on screen if the range it was requested for is
+  // still the current one. Without it, an export started for "the last 6h"
+  // still resolves after the reader has typed 24, and the card, summary and
+  // download would describe 6h while a report sends the new range: the server
+  // rebuilds from the range, so the comment would carry a document the reader
+  // never saw.
+  const rangeVersionRef = useRef(0);
+
   // A dialog reopened on another run must not show the previous run's bundle.
   useEffect(() => {
     if (open) return;
+    // Closing also abandons anything still in flight: it belongs to a range
+    // nobody is looking at any more.
+    rangeVersionRef.current += 1;
     setProgress(null);
     setExported(null);
     setFailure(null);
@@ -113,6 +126,10 @@ export function LogExportDialog({
   const collecting = exportMutation.isPending;
 
   const runExport = (nextScope: TaskLogExportScope) => {
+    // The range this request answers, frozen at the moment it is sent. A
+    // request carries `hours` by value, so a later edit must not let its
+    // result be treated as the current range's bundle.
+    const requestedRange = rangeVersionRef.current;
     setFailure(null);
     setRestored(false);
     setReport(null);
@@ -127,9 +144,16 @@ export function LogExportDialog({
         onProgress: setProgress,
       },
       {
-        onSuccess: (result) => setExported(result),
-        onError: (error) =>
-          setFailure(error instanceof Error ? error.message : String(error)),
+        onSuccess: (result) => {
+          if (requestedRange !== rangeVersionRef.current) return;
+          setExported(result);
+        },
+        onError: (error) => {
+          // A failure for a range the reader has already left is noise, not a
+          // state to show.
+          if (requestedRange !== rangeVersionRef.current) return;
+          setFailure(error instanceof Error ? error.message : String(error));
+        },
       },
     );
   };
@@ -137,8 +161,12 @@ export function LogExportDialog({
   // A bundle answers exactly one range, so anything that changes the range
   // drops it rather than leaving a card that describes a different export than
   // a report would send. The scope toggle and the hours number are both range
-  // inputs and share this.
+  // inputs and share this. Editing the range also invalidates whatever is
+  // still in flight: a response that arrives afterwards describes the range
+  // the reader just left, so it must not be installed as if it answered the
+  // current one.
   const discardExported = () => {
+    rangeVersionRef.current += 1;
     setExported(null);
     setFailure(null);
     setRestored(false);
