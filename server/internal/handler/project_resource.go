@@ -336,19 +336,8 @@ func daemonAdvertisesWorktree(runtimes []db.AgentRuntime, daemonID string) bool 
 // A row missing the capability is never skipped: being the newest is what makes
 // it authoritative, not whether its answer is convenient.
 func daemonAdvertisesCapability(runtimes []db.AgentRuntime, daemonID, capability string) bool {
-	newest := newestRuntimeForDaemon(runtimes, daemonID)
-	if newest == nil {
-		return false
-	}
-	return runtimeHasCapability(newest.Metadata, capability)
-}
-
-// newestRuntimeForDaemon is the machine's current binary: the runtime row that
-// checked in last. A downgraded daemon leaves its old capable row beside the
-// new one, and "any row said yes" would keep saying yes forever.
-func newestRuntimeForDaemon(runtimes []db.AgentRuntime, daemonID string) *db.AgentRuntime {
 	if strings.TrimSpace(daemonID) == "" {
-		return nil
+		return false
 	}
 	var newest *db.AgentRuntime
 	for i := range runtimes {
@@ -360,7 +349,10 @@ func newestRuntimeForDaemon(runtimes []db.AgentRuntime, daemonID string) *db.Age
 			newest = rt
 		}
 	}
-	return newest
+	if newest == nil {
+		return false
+	}
+	return runtimeHasCapability(newest.Metadata, capability)
 }
 
 // runtimeSeenAfter orders two rows of the same daemon by last_seen_at. A row

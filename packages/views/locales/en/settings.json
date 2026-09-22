@@ -1700,7 +1700,7 @@
     "gateway_pair_incomplete": "An endpoint needs both halves. With only one filled in, the deployment’s shared endpoint is used instead.",
     "gateway_default_model": "That deployment’s own default model is {{model}}.",
     "filters_title": "Candidate filters",
-    "filters_placeholder": "A seat that is cancelled, archived, switched off, unreachable, dead, or out of quota is left out before the next assignment. Provider quota is only a hint: a missing reading does not remove every seat on that provider.",
+    "filters_placeholder": "Supported later; not implemented in this version. Today candidates are narrowed by direction and gated by confidence.",
     "health_checking": "Checking…",
     "health_recheck": "Re-check",
     "health_connected": "Connected · self-checked {{when}}",
@@ -1727,22 +1727,6 @@
         "chip": "Not in effect",
         "detail": "The model was rejected, is unreachable, was deleted, or is cooling down after repeated failures. Behaves like off; nothing appears on any issue."
       }
-    },
-    "context_title": "Assignment context",
-    "policy_label": "Routing prompt",
-    "policy_description": "This text decides which tier gets the work. Ordinary work stays on medium or strong; simple, explicit, low-risk work can use weak; only complex or high-risk work steps up. It cannot change status or take an action.",
-    "policy_restore": "Restore the default prompt",
-    "policy_save_error": "Could not save. Your edit is still in the box.",
-    "policy_saving": "Saving…",
-    "policy_saved": "Saved",
-    "quota_title": "Provider quota",
-    "quota_description": "Claude, Codex, and Grok, as last reported. Missing or stale numbers stay unknown. Quota does not decide whether a seat is alive.",
-    "quota_unknown": "unknown",
-    "quota_exhausted": "used up",
-    "quota_available": "{{percent}}% used",
-    "quota_resets": "resets {{when}}",
-    "quota_updated": "updated {{when}}",
-    "seats_title": "Candidate seats",
-    "seats_empty": "No candidate seats yet."
+    }
   }
 }

@@ -7,7 +7,6 @@ export {
   pickDirectory,
   validateLocalDirectory,
   validateWritablePath,
-  initLocalGit,
   canSetLocalDirectorySharedOverride,
   listLocalDirectorySharedOverrides,
   setLocalDirectorySharedOverride,
@@ -15,7 +14,6 @@ export {
   normalizeLocalDirectoryOverridePath,
   type PickDirectoryResult,
   type ValidateLocalDirectoryResult,
-  type InitLocalGitResult,
   type LocalDirectorySharedOverride,
   type SetLocalDirectorySharedOverrideResult,
 } from "./local-directory";

@@ -15,7 +15,6 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { useT } from "../../i18n/use-t";
 import type { WorktreeUnavailableReason } from "./local-directory-mode";
-import { PlainFolderGitOffer } from "./plain-folder-git-offer";
 import { worktreeRootProblem } from "./worktree-root";
 
 export type { WorktreeUnavailableReason } from "./local-directory-mode";
@@ -62,12 +61,6 @@ interface LocalDirectoryModeDialogProps {
   /** Confirm label differs between adding a resource and editing one. */
   confirmLabel: string;
   onConfirm: (mode: LocalDirectoryExecutionMode) => void;
-  /** Set for a folder the machine measured as having no Git. The offer can
-   *  be skipped: confirming still adds the folder. */
-  plainFolder?: boolean;
-  onInitGit?: () => void;
-  initGitPending?: boolean;
-  initGitError?: string;
 }
 
 /**
@@ -96,10 +89,6 @@ export function LocalDirectoryModeDialog({
   saving = false,
   confirmLabel,
   onConfirm,
-  plainFolder = false,
-  onInitGit,
-  initGitPending = false,
-  initGitError,
 }: LocalDirectoryModeDialogProps) {
   const { t } = useT("projects");
   const [selected, setSelected] = useState<LocalDirectoryExecutionMode>(value);
@@ -123,14 +112,6 @@ export function LocalDirectoryModeDialog({
         <div className="rounded-md bg-muted px-2.5 py-1.5 font-mono text-micro text-muted-foreground break-all">
           {path}
         </div>
-
-        {plainFolder && onInitGit && (
-          <PlainFolderGitOffer
-            onInit={onInitGit}
-            pending={initGitPending}
-            error={initGitError}
-          />
-        )}
 
         <LocalDirectoryModeOptions
           value={selected}

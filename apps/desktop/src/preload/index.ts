@@ -243,9 +243,6 @@ const desktopAPI = {
   /** Validate that a path is an existing readable+writable directory. */
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
-  /** Create a local Git repository in a plain folder. Nothing is uploaded. */
-  initLocalGit: (path: string) =>
-    ipcRenderer.invoke("local-directory:init-git", path),
   validateWritablePath: (path: string) =>
     ipcRenderer.invoke("local-directory:writable", path),
   /** This machine's parallel-copy cleanup: report, policy, one-off removal.

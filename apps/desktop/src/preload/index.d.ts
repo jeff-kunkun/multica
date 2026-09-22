@@ -141,12 +141,6 @@ interface DesktopAPI {
     /** The repository root containing the directory, when there is one. */
     git_root?: string;
   }>;
-  /** Create a local Git repository in a plain folder. Nothing is uploaded. */
-  initLocalGit: (path: string) => Promise<{
-    ok: boolean;
-    reason?: "not_absolute" | "not_a_directory" | "inside_repo" | "error";
-    error?: string;
-  }>;
   /** Whether `path` (or its nearest existing ancestor) is writable. Used for
    *  worktree_root, which the first task often creates. */
   validateWritablePath: (path: string) => Promise<{ ok: boolean }>;

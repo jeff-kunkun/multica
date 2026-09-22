@@ -16,13 +16,7 @@ type fakeStore struct {
 	settings Settings
 	issue    Issue
 	roster   map[string]Agent
-	facts    RoutingFacts
-	// factsAfter, when set, is what the second RoutingFacts read returns.
-	// The first read is the one the judge sees; the second is the recheck
-	// immediately before a write.
-	factsAfter *RoutingFacts
-	factReads  int
-	target     Member
+	target   Member
 
 	// slot occupancy, as the database would enforce it
 	assigneeTaken bool
@@ -81,18 +75,6 @@ func (f *fakeStore) Issue(context.Context, string, string) (Issue, error) {
 }
 func (f *fakeStore) Roster(context.Context, string) (map[string]Agent, error) {
 	return f.roster, f.fail("roster")
-}
-func (f *fakeStore) RoutingFacts(context.Context, string, []string, []string) (RoutingFacts, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.factReads++
-	if err := f.fail("facts"); err != nil {
-		return RoutingFacts{}, err
-	}
-	if f.factReads > 1 && f.factsAfter != nil {
-		return *f.factsAfter, nil
-	}
-	return f.facts, nil
 }
 func (f *fakeStore) AssignAgentIfUnassigned(_ context.Context, _, _ string, seat Seat) (bool, error) {
 	f.mu.Lock()
@@ -218,20 +200,18 @@ func (f *fakeStore) commentCount() int {
 // fakeJudge answers whatever the test tells it to, and counts calls so tests
 // can prove no request was made.
 type fakeJudge struct {
-	mu         sync.Mutex
-	verdict    Verdict
-	advice     Advice
-	stale      StaleDecision
-	err        error
-	calls      int
-	lastAssign JudgeState
+	mu      sync.Mutex
+	verdict Verdict
+	advice  Advice
+	stale   StaleDecision
+	err     error
+	calls   int
 }
 
-func (j *fakeJudge) Assign(_ context.Context, _ Target, st JudgeState) (Verdict, error) {
+func (j *fakeJudge) Assign(context.Context, Target, JudgeState) (Verdict, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.calls++
-	j.lastAssign = st
 	return j.verdict, j.err
 }
 
@@ -253,12 +233,6 @@ func (j *fakeJudge) callCount() int {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return j.calls
-}
-
-func (j *fakeJudge) assignedState() JudgeState {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	return j.lastAssign
 }
 
 func confidentVerdict() Verdict {
