@@ -110,7 +110,7 @@ export interface IssueDraftPayload {
 三条硬规则要写进 prompt：
 
 - `key` 一旦发出就不许改。模型每一轮都要把上一轮给过的 key 原样带回来。这是「保留已有字段」规则的延伸，现有 prompt 已经有这条精神（`Preserve good existing draft fields supplied in the user's message`）。
-- 模型**不许**写 `assignee_id`。它给 `assignee_hint`（自然语言，比如「后端实现」「前端页面」），由前端 preview 面板映射到真实的 agent id 再存进 draft。理由：模型没有工作区的 agent 名册，让它猜 UUID 是在给 `validateAssigneePair` 送垃圾；而 `issueParamsFromDraft:805` 的权限校验是拒绝而不是忽略，一个瞎猜的 id 会让整次 confirm 失败。
+- 模型**不许**写 `assignee_id`。它给 `assignee_hint`（自然语言，比如「后端实现」「前端页面」），由真实名册解析成 agent id 之后再存进 draft（DENE-691 起这一步在服务端路由里做，见 `server/internal/routing/suggest.go`）。理由：模型没有工作区的 agent 名册，让它猜 UUID 是在给 `validateAssigneePair` 送垃圾。DENE-694 起，这个 id 即使最终没通过校验，代价也只是那张单未分配——`draftAssigneeFromNode` 把失败降级成 `assignment_warnings`，不再让整次 confirm 失败。
 - 拆单数量上限写进 prompt（推荐 8，硬上限 20，见 §2.4）。
 
 `packages/core/issue-drafts/protocol.ts` 的 `parseIssueDraftBlock` 增加 `children` 解析，规则和现有字段一致：**解析失败 = 这一轮没有 children 更新**，不是清空。`mergeIssueDraftPayload` 对 `children` 用整体替换而不是逐项合并——子单集合是一个整体判断（模型可能删掉一张单），逐项合并会让删除永远不生效；被替换掉的 key 如果在新数组里还在，key 本身就保住了身份。
@@ -603,7 +603,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_issue_draft_reopened
 | 同一 payload 确认两次 | 第二次不新建，返回同一组；`issue` 表里 `origin_type='issue_draft'` 的行数不变 |
 | admit 之后、建组之前，draft 被保存成另一套 children key，再确认一次 | 只有一组（第一次那组），第二次认领它而不是建第二组（§3.3 时序 B）。这是本设计唯一一个 revision 挡不住、只有根节点 id 挡得住的用例，**不能漏** |
 | 并发两次确认 | 只有一组；两次响应的 `issue_id` 相同 |
-| 组里第 3 张的 assignee 无权调用 | 403，且**一张单都没建**（事务回滚的证据） |
+| 组里第 3 张的 assignee 无权调用 | 4 张单都建出来，第 3 张**未分配**，响应里的 `assignment_warnings` 指名它（DENE-694：校验照旧拒绝写这个 assignee，但降级成警告，不再拿整组陪葬） |
 | 配额只剩 2 张，payload 要 4 张 | `IssueLimitReachedError`，一张都没建 |
 | 重复 key | 400 `duplicate sub-issue key`，不到数据库 |
 | children 长度 21 | 400 |
@@ -617,7 +617,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_issue_draft_reopened
 | --- | --- |
 | `issue-drafts/protocol.test.ts` | `children` 块解析；坏 JSON = 不更新而不是清空；key 原样保留；`mergeIssueDraftPayload` 对 children 整体替换 |
 | `issue-drafts/group.test.ts`（新） | stage 归一化（全空 → 不分阶段；部分空 → 补 1；跳号 → 压实）；派单策略从 stage 推 status |
-| `api/schemas.test.ts` | `IssueDraftFinalizeSchema`：缺 `issues` → `[]`；`issues` 里有坏行 → 整个数组退化成 `[]`；`issue_id` 为空 → 硬失败 |
+| `api/schemas.test.ts` | `IssueDraftFinalizeSchema`：缺 `issues` → `[]`；`issues` 里有坏行 → 整个数组退化成 `[]`；`issue_id` 为空 → 硬失败；缺 `assignment_warnings` → `[]`，坏行仍可读（DENE-694） |
 | `api/client.test.ts` | finalize 的 malformed-response 用例（仓库 API 兼容规矩的硬要求） |
 
 **`packages/views/`（`.test.tsx`）** —— 只留确认页的 happy path、接线和无障碍，矩阵不重跑，注释指回上面的 `.test.ts`。

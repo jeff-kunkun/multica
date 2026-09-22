@@ -1102,6 +1102,8 @@
     "group_summary_parent": "La tâche parente est créée sans assigné : elle ne démarre donc rien toute seule.",
     "created_title": "Tâche créée",
     "created_group_title": "{{count}} tâches créées",
+    "assignee_dropped": "« {{title}} » n’a pas pu être assignée et a été créée sans assignation.",
+    "assignee_dropped_several": "{{count}} tâches n’ont pas pu être assignées et ont été créées sans assignation.",
     "retired_title": "Cet alignement est terminé",
     "retired_description": "Il ne fait plus partie de vos brouillons inachevés.",
     "load_failed": "Impossible de charger cet alignement.",
