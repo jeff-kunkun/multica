@@ -135,7 +135,7 @@ const issueLabels: IssueLabelsResponse = {
 function makeListCache(...issues: Issue[]): ListIssuesCache {
   return {
     byStatus: {
-      todo: { issues, total: issues.length },
+      unstarted: { issues, total: issues.length },
     },
   };
 }
@@ -194,7 +194,7 @@ function setup(
 }
 
 function ids(cache: ListIssuesCache | undefined) {
-  return cache?.byStatus.todo?.issues.map((issue) => issue.id);
+  return cache?.byStatus.unstarted?.issues.map((issue) => issue.id);
 }
 
 function expectInvalidated(qc: QueryClient, queryKey: readonly unknown[]) {

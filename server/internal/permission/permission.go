@@ -213,3 +213,65 @@ func CanSetVisibility(vis Visibility, hasProject bool) bool {
 	}
 	return vis != VisibilityProject || hasProject
 }
+
+// Module is a product area that can be shared independently of any one
+// resource. Agents and squads are not modules: their access stays with
+// agent.permission_mode. Workspace settings, members and billing are not
+// modules either — those follow tier alone.
+type Module string
+
+const (
+	ModuleIssues   Module = "issues"
+	ModuleProjects Module = "projects"
+	ModuleRepos    Module = "repos"
+	ModuleRuntimes Module = "runtimes"
+)
+
+// Modules is the closed list a workspace can restrict. Keep in sync with the
+// workspace_module_visibility.module CHECK constraint.
+var Modules = []Module{ModuleIssues, ModuleProjects, ModuleRepos, ModuleRuntimes}
+
+// DefaultModuleVisibility is what a module with no row is treated as: every
+// member, including guests, may enter. Modules are not created the way an
+// issue is, so defaulting them to private would lock the product on upgrade.
+const DefaultModuleVisibility = VisibilityWorkspace
+
+// Valid reports whether m is a known module.
+func (m Module) Valid() bool {
+	switch m {
+	case ModuleIssues, ModuleProjects, ModuleRepos, ModuleRuntimes:
+		return true
+	}
+	return false
+}
+
+// CanSeeModule is the third AND gate on top of CanSee: may this caller enter
+// this product area at all. It does not change the resource matrix. A caller
+// who can see an issue but not the Issues module must not find Issues in the
+// nav and must be refused at the Issues APIs.
+//
+// Owner and admin always enter every module so they can administer a
+// restriction they just set. For everyone else:
+//
+//   - workspace: every member, including guests (resource visibility still
+//     filters what they see inside)
+//   - project: only people in the module's designated project
+//   - private: nobody but owner/admin
+//
+// Unknown roles and unknown scopes fail closed.
+func CanSeeModule(role Role, vis Visibility, inProject bool) bool {
+	if !role.Valid() {
+		return false
+	}
+	if role.isManager() {
+		return true
+	}
+	switch vis {
+	case VisibilityWorkspace:
+		return true
+	case VisibilityProject:
+		return inProject
+	default:
+		return false
+	}
+}

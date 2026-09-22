@@ -27,6 +27,7 @@
     "online": "Online",
     "unstable": "Unstable",
     "offline": "Offline",
+    "disabled": "Disabled",
     "archived": "Archived"
   },
   "workload": {
@@ -111,6 +112,10 @@
     "set_access_skipped": "{{count}} skipped (not owned by you).",
     "set_access_dialog_confirm": "Apply",
     "set_access_bulk_partial": "Applied to {{succeeded}}; {{failed}} failed (kept in current state).",
+    "work_enabled_aria": "Accept new work",
+    "agent_enabled_toast": "Seat enabled",
+    "agent_disabled_toast": "Seat disabled — it will not take new work",
+    "work_toggle_failed_toast": "Couldn't update the seat",
     "agent_archived_toast": "Agent archived",
     "archive_failed_toast": "Failed to archive agent",
     "agent_restored_toast": "Agent restored",
@@ -250,6 +255,8 @@
     "prop_speed": "Speed",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
+    "prop_work_enabled": "Accept work",
+    "prop_work_enabled_hint": "When off, this seat stays in the list but is not selected for automatic dispatch, is not woken by assignment, and does not claim new runs. Running work is not stopped.",
     "prop_auto_retry": "Auto retry",
     "prop_auto_retry_hint": "When off, failures such as capacity limits or network cuts surface immediately instead of retrying. You can still retry a run yourself.",
     "prop_switchable_models": "Model lineup",
@@ -564,7 +571,7 @@
       "unsaved_changes": "Unsaved changes"
     },
     "instructions": {
-      "intro": "Set the system prompt used for every run. Markdown is supported.",
+      "intro": "Set the system prompt used for every run. It guides behavior but does not enforce permissions or security boundaries. Markdown is supported.",
       "system_prompt_label": "System prompt",
       "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/",
       "system_layer_label": "Maintained by Multica",
@@ -572,7 +579,7 @@
       "system_layer_show": "Show",
       "system_layer_hide": "Hide",
       "workspace_notes_label": "Workspace notes",
-      "workspace_notes_intro": "Add your team's context and preferences below. They apply on top of the instructions Multica maintains for this agent. Markdown is supported.",
+      "workspace_notes_intro": "Add your team's context and preferences below. They guide behavior on top of the instructions Multica maintains for this agent, but do not enforce permissions or security boundaries. Markdown is supported.",
       "workspace_notes_placeholder": "Add context this agent should always have.\n\n# Example\nOur main repository is github.com/acme/platform.\nWrite issues in English even when we chat in Chinese.\nWe do not deploy on Fridays."
     },
     "accounts": {
@@ -892,7 +899,8 @@
       "invalid_json": "Invalid JSON: {{error}}",
       "save_failed_toast": "Failed to save MCP config",
       "redacted_title": "Configured — hidden from your view",
-      "redacted_hint": "Only the agent owner or a workspace admin can read this config."
+      "redacted_hint": "Only the agent owner or a workspace admin can read this config.",
+      "dialog_json_help": "Edit the full server configuration as JSON."
     },
     "composio_mcp": {
       "subtitle": "Check a toolkit to let this agent mount it as an MCP server — but only when you (its creator) are the one who triggered the run, directly or down a sub-agent chain.",
@@ -1032,7 +1040,10 @@
       "cancel_failed_toast": "Failed to cancel run",
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
-      "queued_prefix": "Queued {{when}}"
+      "queued_prefix": "Queued {{when}}",
+      "success_hint": "Completed runs divided by completed and failed runs. Cancelled runs are excluded.",
+      "success_unavailable": "No completed or failed runs in this period, so there is no success rate to show.",
+      "cancelled_count": "{{count}} cancelled"
     }
   },
   "char_counter": {
@@ -1232,12 +1243,14 @@
       "runtime_reconnect_timeout": "Daemon did not reconnect in time",
       "runtime_recovery": "Daemon restarted",
       "timeout": "Run timed out",
+      "task_time_limit": "Stopped at the workspace run time limit",
       "iteration_limit": "Hit the iteration limit",
       "agent_blocked": "Waiting on human input",
       "api_invalid_request": "Rejected by the model API",
       "skill_bundle_unavailable": "Couldn't download the agent's skills",
       "runtime_cli_timeout": "Local runtime CLI timed out",
       "environment_prepare_failed": "Couldn't prepare the execution environment",
+      "runtime_access_denied": "This agent can't run on its private runtime, so it couldn't reply. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.",
       "invalid_task_identity": "Run identity mismatch",
       "agent_error_provider_auth_or_access": "Provider auth failed",
       "agent_error_provider_quota_limit": "Provider quota exhausted",
@@ -1255,6 +1268,8 @@
       "agent_error_unknown": "Agent execution error",
       "agent_fallback_message": "Agent returned a fallback message",
       "codex_resume_oversized": "Session too large to resume",
+      "antigravity_session_token_expired": "Antigravity session token expired",
+      "antigravity_not_logged_in": "Antigravity not signed in",
       "idle_watchdog": "Agent stopped after inactivity",
       "local_directory_error": "Local directory error",
       "cancelled": "Cancelled by the system",

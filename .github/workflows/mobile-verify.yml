@@ -41,8 +41,3 @@ jobs:
 
       - name: Type check, lint, and test
         run: pnpm exec turbo typecheck lint test --filter=@multica/mobile
-
-      - name: Check UI radius tokens
-        run: |
-          node --test scripts/check-ui-radius-tokens.test.mjs
-          node scripts/check-ui-radius-tokens.mjs

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The routing comment IS the decision log. There is no second log file: a
@@ -176,6 +177,51 @@ func (r *Router) adviceComment(issue Issue, a Advice, candidates []Seat) string 
 	}
 	b.WriteString("\n**没有改动任何值** —— 执行席、验收席、状态都保持原样。这条只是建议，@ 你一次是因为票卡住了就没人会动它。")
 	return b.String()
+}
+
+// stalledComment is the stale-review row's comment, and it is only ever posted
+// when the reviewer is a person: a seat is woken by being assigned, a person is
+// woken by being told. It says once what has been quiet and for how long, and
+// it says plainly that nothing was changed — the whole reason this comment can
+// exist at all is that the row took no action beyond speaking.
+func (r *Router) stalledComment(issue Issue, d StaleDecision, quiet time.Duration) string {
+	var b strings.Builder
+	b.WriteString("## 停在待验收\n\n")
+	b.WriteString(fmt.Sprintf("这张票在待验收里静了 **%s**，期间没有任何 run 在跑，验收席是 **%s**（你）。\n\n",
+		quietLabel(quiet), issue.Reviewer.Label()))
+	if strings.TrimSpace(d.Reason) != "" {
+		b.WriteString("- **判断**：" + strings.TrimSpace(d.Reason) + "\n")
+	}
+	b.WriteString("- 票上没有找到你给出的通过结论，所以路由不会替你宣布验收完成\n")
+	b.WriteString("\n验收完就把状态改成完成；要返工就改回执行席并说明原因。\n")
+	b.WriteString("\n**没有改动任何值** —— 负责人、验收席、状态都保持原样。这条只提醒一次，之后不会再刷。")
+	return b.String()
+}
+
+// completedComment records the only status write this package performs, and it
+// has to show its work: which remark it read as the acceptance verdict, how
+// confident that read was, and the fact that the verdict was somebody else's.
+func (r *Router) completedComment(issue Issue, d StaleDecision, threshold float64) string {
+	var b strings.Builder
+	b.WriteString("## 状态对齐到已有结论\n\n")
+	b.WriteString(fmt.Sprintf("验收席 **%s** 已经在这张票上给出通过结论，但状态一直停在待验收，所以路由把状态改成了**完成**。\n\n",
+		issue.Reviewer.Label()))
+	if strings.TrimSpace(d.Reason) != "" {
+		b.WriteString("- **依据**：" + strings.TrimSpace(d.Reason) + "\n")
+	}
+	b.WriteString(fmt.Sprintf("- **置信度**：%s ≥ 阈值 %s\n", pct(d.Confidence), pct(threshold)))
+	b.WriteString("- **改动**：只改了状态。负责人、执行席、验收席一律没碰\n")
+	b.WriteString("\n路由不会自己判断活有没有干完 —— 它只在票面上已经有验收结论时，把状态对齐到这个事实。判断错了直接把状态改回去，改完路由不会再碰这张票。")
+	return b.String()
+}
+
+// quietLabel renders a stall duration the way a person would say it.
+func quietLabel(d time.Duration) string {
+	h := int(d.Hours())
+	if h < 48 {
+		return strconv.Itoa(h) + " 小时"
+	}
+	return strconv.Itoa(h/24) + " 天"
 }
 
 // unavailableComment is posted once when a configured model cannot be reached.

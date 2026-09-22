@@ -148,11 +148,13 @@ type Task struct {
 	NewCommentCount               int                    `json:"new_comment_count,omitempty"`                // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
 	NewCommentsSince              string                 `json:"new_comments_since,omitempty"`               // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	NewCommentsDeltaKnown         bool                   `json:"new_comments_delta_known,omitempty"`         // the server actually computed the issue-wide delta this claim (both reads succeeded). A zero NewCommentCount means "nothing was said" only when this is true; otherwise the zero is a failed read, a cold start, or an old server, and the prompt must not present it as the comment scan's answer (MUL-6984)
+	IssueStateDeltaKnown          bool                   `json:"issue_state_delta_known,omitempty"`          // MUL-7344: the server compared the issue's title/description against the snapshot taken at this agent's previous run on this issue. Same contract as NewCommentsDeltaKnown — absent means NOT compared (cold start, no prior snapshot, read error, old server), and the prompt must then keep telling the agent to read the issue
+	IssueChangedFields            []string               `json:"issue_changed_fields,omitempty"`             // subset of title,description in that order; empty alongside IssueStateDeltaKnown means unchanged. Fields outside that set (status, assignee, priority, labels, parent, due, stage, project, metadata) are not compared and must never be reported as checked; status and assignee ship their current values instead
+	IssueStatus                   string                 `json:"issue_status,omitempty"`                     // the issue's status key at claim time; sent whether or not the delta is known
+	IssueAssigneeType             string                 `json:"issue_assignee_type,omitempty"`              // "agent", "member" or "squad" at claim time; empty when unassigned
+	IssueAssigneeID               string                 `json:"issue_assignee_id,omitempty"`                // assignee UUID at claim time; empty when unassigned
 	IssueTitle                    string                 `json:"issue_title,omitempty"`
 	IssueDescription              string                 `json:"issue_description,omitempty"`
-	IssueStatus                   string                 `json:"issue_status,omitempty"`
-	IssueAssigneeType             string                 `json:"issue_assignee_type,omitempty"`
-	IssueAssigneeID               string                 `json:"issue_assignee_id,omitempty"`
 	IssueCommentSummaries         []IssueContextComment  `json:"issue_comment_summaries,omitempty"`
 	IssueTriggerThread            []IssueContextComment  `json:"issue_trigger_thread,omitempty"`
 	IssueNewComments              []IssueContextComment  `json:"issue_new_comments,omitempty"`
