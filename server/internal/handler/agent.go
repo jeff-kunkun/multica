@@ -856,9 +856,13 @@ type AgentTaskResponse struct {
 	// the same zero. Only the first of those answers "has anything else been
 	// said on this issue", so only the first may waive the workflow's comment
 	// scan. Absent on old servers, which is the safe reading (MUL-6984).
-	NewCommentsDeltaKnown    bool                  `json:"new_comments_delta_known,omitempty"`
-	IssueTitle               string                `json:"issue_title,omitempty"`
-	IssueDescription         string                `json:"issue_description,omitempty"`
+	NewCommentsDeltaKnown bool   `json:"new_comments_delta_known,omitempty"`
+	IssueTitle            string `json:"issue_title,omitempty"`
+	IssueDescription      string `json:"issue_description,omitempty"`
+	// CheckoutPaths is the issue's checkout_paths metadata: repo-relative
+	// directories this task wants on disk. Empty (and absent on old servers)
+	// checks out the whole repository.
+	CheckoutPaths            string                `json:"checkout_paths,omitempty"`
 	IssueCommentSummaries    []IssueContextComment `json:"issue_comment_summaries,omitempty"`
 	IssueTriggerThread       []IssueContextComment `json:"issue_trigger_thread,omitempty"`
 	IssueNewComments         []IssueContextComment `json:"issue_new_comments,omitempty"`
