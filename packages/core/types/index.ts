@@ -206,6 +206,7 @@ export type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  ProjectVisibilityPreview,
   ProjectMember,
   ProjectResource,
   ProjectResourceType,
