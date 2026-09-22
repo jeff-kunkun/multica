@@ -262,6 +262,87 @@ func TestIsolatedCloneChecksOutOnlyTheCone(t *testing.T) {
 	}
 }
 
+func TestReconcileRestoresAFullTreeAndWidensACone(t *testing.T) {
+	top := newRepo(t)
+	writeTree(t, top, map[string]string{
+		"package.json":        "{}\n",
+		"apps/web/index.ts":   "web\n",
+		"apps/other/index.ts": "other\n",
+		"server/main.go":      "package main\n",
+	})
+	runGit(t, top, "add", "-A")
+	runGit(t, top, "commit", "-m", "init")
+	wt := filepath.Join(t.TempDir(), "wt")
+	runGit(t, top, "worktree", "add", "--no-checkout", "-b", "agent/t", wt, "HEAD")
+	ctx := context.Background()
+	scope, err := Parse("apps/web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Enable(ctx, wt, scope); err != nil || CheckoutCurrent(ctx, wt) != nil || Finish(ctx, wt) != nil {
+		t.Fatal(err)
+	}
+
+	// Kept checkout, empty declaration: the rest of the tree comes back.
+	action, err := Reconcile(ctx, wt, Scope{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != SkippedRestored {
+		t.Fatalf("restore action = %q", action)
+	}
+	if _, err := os.Stat(filepath.Join(wt, "server", "main.go")); err != nil {
+		t.Fatalf("restore left server/main.go off disk: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, "apps", "other", "index.ts")); err != nil {
+		t.Fatalf("restore left apps/other off disk: %v", err)
+	}
+	if isSparse(ctx, wt) {
+		t.Fatal("empty declaration left the checkout sparse")
+	}
+
+	// Put the cone back, then widen it without being allowed to narrow.
+	web, err := Parse("apps/web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(ctx, wt, web); err != nil {
+		t.Fatal(err)
+	}
+	wider, err := Parse("apps/web,server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, err = Reconcile(ctx, wt, wider, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != SkippedWidened {
+		t.Fatalf("widen action = %q", action)
+	}
+	if _, err := os.Stat(filepath.Join(wt, "server", "main.go")); err != nil {
+		t.Fatalf("widen left server/main.go off disk: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, "apps", "other", "index.ts")); !os.IsNotExist(err) {
+		t.Fatalf("widen checked out a directory outside the declaration: %v", err)
+	}
+	if !isSparse(ctx, wt) {
+		t.Fatal("wider declaration turned sparse checkout off")
+	}
+
+	// A narrower declaration on a kept checkout must not delete files.
+	action, err = Reconcile(ctx, wt, web, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != SkippedKept {
+		t.Fatalf("narrow action = %q", action)
+	}
+	if _, err := os.Stat(filepath.Join(wt, "server", "main.go")); err != nil {
+		t.Fatalf("narrowing a kept checkout removed server/main.go: %v", err)
+	}
+}
+
 func newRepo(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

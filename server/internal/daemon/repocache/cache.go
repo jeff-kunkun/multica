@@ -1449,11 +1449,17 @@ type WorktreeResult struct {
 	Stale       bool   `json:"stale,omitempty"`
 	StaleReason string `json:"stale_reason,omitempty"`
 	// SparsePaths is the declaration this checkout was asked to honor. Empty
-	// when the checkout is the whole tree. SparseSkipped is "kept" when an
-	// existing checkout was left untouched, so the declaration did not remove
-	// files that checkout already had.
+	// when the checkout is the whole tree. SparseSkipped is "kept" when a
+	// declaration would have removed files from a checkout that was left in
+	// place, "restored" when an empty declaration found a sparse checkout and
+	// brought the rest of the repository back, and "widened" when a broader
+	// declaration was applied without moving the branch.
 	SparsePaths   string `json:"sparse_paths,omitempty"`
 	SparseSkipped string `json:"sparse_skipped,omitempty"`
+	// sparseReconciled is set once an existing checkout has been compared
+	// with the declaration. noteSparse then records that outcome instead of
+	// assuming a kept checkout ignored the declaration.
+	sparseReconciled bool
 }
 
 // Reasons CreateWorktree keeps an existing checkout, reported in
@@ -1625,10 +1631,8 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		if err != nil {
 			return nil, fmt.Errorf("update existing worktree: %w", err)
 		}
-		if scope.Active() && result.Kept == "" {
-			if err := sparsecheckout.Apply(ctx, worktreePath, scope); err != nil {
-				return nil, fmt.Errorf("sparse checkout: %w", err)
-			}
+		if err := reconcileSparse(ctx, worktreePath, scope, result); err != nil {
+			return nil, err
 		}
 
 		for _, pattern := range agentGitExcludePatterns {
@@ -1691,17 +1695,52 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	return noteSparse(result, params.SparsePaths).withFetchFailure(fetchErr), nil
 }
 
-// noteSparse records the declaration on the result. A kept checkout did not
-// have files removed, and the caller has to be able to tell those apart.
+// noteSparse records the declaration on the result. A checkout reconcile
+// already ran keeps that outcome: restoring the whole tree, widening the
+// cone, or refusing to narrow a checkout that was left in place. A kept
+// checkout that never went through reconcile still must not claim a cone
+// was applied.
 func noteSparse(result *WorktreeResult, declared string) *WorktreeResult {
-	if result == nil || strings.TrimSpace(declared) == "" {
+	if result == nil {
+		return result
+	}
+	declared = strings.TrimSpace(declared)
+	if result.sparseReconciled {
+		if result.SparseSkipped == sparsecheckout.SkippedRestored {
+			result.SparsePaths = ""
+			return result
+		}
+		if declared != "" {
+			result.SparsePaths = declared
+		}
+		return result
+	}
+	if declared == "" {
 		return result
 	}
 	result.SparsePaths = declared
 	if result.Kept != "" {
-		result.SparseSkipped = "kept"
+		result.SparseSkipped = sparsecheckout.SkippedKept
 	}
 	return result
+}
+
+// reconcileSparse makes an existing checkout match scope. Adding files is
+// done even when the branch is kept. Removing files is not: that waits for
+// a checkout that is allowed to start over.
+func reconcileSparse(ctx context.Context, path string, scope sparsecheckout.Scope, result *WorktreeResult) error {
+	if result == nil {
+		return nil
+	}
+	action, err := sparsecheckout.Reconcile(ctx, path, scope, result.Kept == "")
+	if err != nil {
+		return fmt.Errorf("sparse checkout: %w", err)
+	}
+	result.sparseReconciled = true
+	if action != "" {
+		result.SparseSkipped = action
+	}
+	return nil
 }
 
 // withFetchFailure marks the result stale when the pre-checkout fetch failed.
@@ -1778,13 +1817,14 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 			return nil, err
 		}
 		result, err := updateExistingCheckoutContext(ctx, checkoutPath, branchName, baseCommit, fresh)
-		if err != nil || result.Kept != "" {
+		if err != nil {
 			return result, err
 		}
-		if scope.Active() {
-			if err := sparsecheckout.Apply(ctx, checkoutPath, scope); err != nil {
-				return nil, fmt.Errorf("sparse checkout: %w", err)
-			}
+		if err := reconcileSparse(ctx, checkoutPath, scope, result); err != nil {
+			return nil, err
+		}
+		if result.Kept != "" {
+			return result, nil
 		}
 		// Drop earlier tasks' agent/* heads so a reused workdir doesn't grow a
 		// new local branch on every checkout. Non-fatal: leftover branches are
@@ -1810,6 +1850,9 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 		}
 		if !fresh {
 			if state.Kept = keepReason(state, branchName); state.Kept != "" {
+				if err := reconcileSparse(ctx, checkoutPath, scope, state); err != nil {
+					return nil, err
+				}
 				return state, nil
 			}
 		}

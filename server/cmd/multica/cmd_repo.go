@@ -574,22 +574,38 @@ func repoCheckoutSummary(repoURL string, result repoCheckoutResult) string {
 	if result.Kept == "task_branch" {
 		branch += ", this task's branch"
 	}
+	keptAction := "nothing was reset, cleaned, or switched; only remote refs were fetched."
+	switch result.SparseSkipped {
+	case sparsecheckout.SkippedRestored:
+		keptAction = "the branch was left as it was, and sparse checkout was turned off so the whole repository is on disk again."
+	case sparsecheckout.SkippedWidened:
+		keptAction = "the branch was left as it was, and the sparse checkout was widened so the newly declared directories are on disk."
+	}
 	return fmt.Sprintf("Kept the existing checkout of %s at %s (branch: %s; %d uncommitted file%s, %d unpushed commit%s): "+
-		"nothing was reset, cleaned, or switched; only remote refs were fetched.\n"+
+		"%s\n"+
 		"To discard its uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref), "+
 		"re-run with --fresh; commits stay on the old branch, but push any you still need first.%s",
 		repoURL, result.Path, branch,
 		result.UncommittedFiles, pluralS(result.UncommittedFiles),
 		result.UnpushedCommits, pluralS(result.UnpushedCommits),
+		keptAction,
 		sparseCheckoutNote(result))
 }
 
 func sparseCheckoutNote(result repoCheckoutResult) string {
+	switch result.SparseSkipped {
+	case sparsecheckout.SkippedRestored:
+		return "\nThe previous checkout was sparse. Nothing was declared this time, so every file in the repository is on disk now."
+	case sparsecheckout.SkippedWidened:
+		return "\nSparse checkout now includes " + result.SparsePaths + " plus root project files. Directories left out before are on disk."
+	case sparsecheckout.SkippedKept:
+		if strings.TrimSpace(result.SparsePaths) == "" {
+			return ""
+		}
+		return "\nThis task declared a sparse checkout (" + result.SparsePaths + ") but the existing checkout was kept, so its files were not removed. Re-run with --fresh to apply it; that discards uncommitted changes."
+	}
 	if strings.TrimSpace(result.SparsePaths) == "" {
 		return ""
-	}
-	if result.SparseSkipped == "kept" {
-		return "\nThis task declared a sparse checkout (" + result.SparsePaths + ") but the existing checkout was kept, so its files were not removed. Re-run with --fresh to apply it; that discards uncommitted changes."
 	}
 	return "\nSparse checkout: only " + result.SparsePaths + " plus root project files are on disk. A missing file may still be in the repository; run `multica repo sparse-add <path>` before concluding it does not exist."
 }

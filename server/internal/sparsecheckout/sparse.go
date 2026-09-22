@@ -40,6 +40,16 @@ const (
 	MarkerName = "MULTICA_SPARSE_EXCLUDED.txt"
 
 	excludeFileName = "multica-sparse-exclude"
+
+	// SkippedKept means a declaration would have removed files from a checkout
+	// that was left in place, so the cone was not narrowed.
+	SkippedKept = "kept"
+	// SkippedRestored means an empty declaration found a sparse checkout and
+	// brought the rest of the repository back onto disk.
+	SkippedRestored = "restored"
+	// SkippedWidened means a broader declaration was applied without moving
+	// the branch or discarding the checkout's own work.
+	SkippedWidened = "widened"
 )
 
 // Scope is a parsed declaration. The zero value checks out the whole tree.
@@ -212,6 +222,131 @@ func Apply(ctx context.Context, repo string, scope Scope) error {
 		return err
 	}
 	return Finish(ctx, repo)
+}
+
+// Reconcile makes an existing checkout match scope.
+//
+// allowNarrow is false when the checkout is being kept: its branch and
+// uncommitted work stay. Adding files is still done. An empty scope turns
+// sparse checkout off, and a scope that already covers the current cone
+// widens it. A scope that would drop directories returns SkippedKept and
+// changes nothing — removing files waits for a checkout that is allowed to
+// start over.
+//
+// allowNarrow is true when the checkout was just reset onto a new branch.
+// The cone is then set exactly, including a narrower one, and an empty scope
+// restores the whole tree.
+//
+// The returned value is "", SkippedKept, SkippedRestored, or SkippedWidened.
+// "" means the checkout already matches scope: a full tree, or the same cone.
+func Reconcile(ctx context.Context, repo string, scope Scope, allowNarrow bool) (string, error) {
+	sparse := isSparse(ctx, repo)
+	if !scope.Active() {
+		if !sparse {
+			return "", nil
+		}
+		if err := restoreFull(ctx, repo); err != nil {
+			return "", err
+		}
+		return SkippedRestored, nil
+	}
+	if !allowNarrow {
+		if !sparse {
+			return SkippedKept, nil
+		}
+		current, err := includedDirs(ctx, repo)
+		if err != nil {
+			return "", err
+		}
+		requested, err := coneDirs(ctx, repo, scope)
+		if err != nil {
+			return "", err
+		}
+		if !coneCovers(current, requested) {
+			return SkippedKept, nil
+		}
+		if coneCovers(requested, current) {
+			return "", nil
+		}
+		if err := Apply(ctx, repo, scope); err != nil {
+			return "", err
+		}
+		return SkippedWidened, nil
+	}
+	if err := Apply(ctx, repo, scope); err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
+// restoreFull turns sparse checkout off and materializes every file. The
+// marker files and the worktree exclude that hid them go with it, so a
+// restored checkout does not keep overriding the user's global excludes.
+func restoreFull(ctx context.Context, repo string) error {
+	if err := git(ctx, repo, "sparse-checkout", "disable"); err != nil {
+		return err
+	}
+	top, err := gitStdout(ctx, repo, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return err
+	}
+	top = strings.TrimSpace(top)
+	if err := removeMarkers(top); err != nil {
+		return err
+	}
+	return clearOwnExclude(ctx, repo)
+}
+
+func clearOwnExclude(ctx context.Context, repo string) error {
+	out, err := gitStdout(ctx, repo, "config", "--worktree", "--get", "core.excludesFile")
+	if err != nil {
+		return nil
+	}
+	path := strings.TrimSpace(out)
+	if filepath.Base(path) != excludeFileName {
+		return nil
+	}
+	if err := git(ctx, repo, "config", "--worktree", "--unset", "core.excludesFile"); err != nil {
+		return err
+	}
+	if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+		return rmErr
+	}
+	return nil
+}
+
+// coneDirs is the set of directories Enable would pass to sparse-checkout.
+// A declaration of only root files is an empty set: cone mode already keeps
+// every root file.
+func coneDirs(ctx context.Context, repo string, scope Scope) ([]string, error) {
+	dirs, rootOnly, err := classify(ctx, repo, scope.Paths)
+	if err != nil {
+		return nil, err
+	}
+	if rootOnly {
+		return nil, nil
+	}
+	return dirs, nil
+}
+
+// coneCovers reports whether every directory in have sits inside want.
+// An empty want is the root-only cone, which covers nothing below the root.
+func coneCovers(have, want []string) bool {
+	for _, dir := range have {
+		if !dirCovered(dir, want) {
+			return false
+		}
+	}
+	return true
+}
+
+func dirCovered(dir string, cones []string) bool {
+	for _, cone := range cones {
+		if cone == dir || strings.HasPrefix(dir, cone+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // Materialize checks out one path the cone left behind.
