@@ -240,6 +240,7 @@ import type {
   TaskLogExport,
   TaskLogExportBundle,
   TaskLogExportScope,
+  CodeDecision,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -317,6 +318,7 @@ import {
   issueDraftRuntimeSwitchFallback,
   AgentSchema,
   AgentListSchema,
+  CodeDecisionSchema,
   EMPTY_AGENT_LIST,
   AgentBuilderSessionListSchema,
   EMPTY_AGENT_BUILDER_SESSION_LIST,
@@ -4499,6 +4501,25 @@ export class ApiClient {
     projectId: string,
   ): Promise<ListProjectResourcesResponse> {
     return this.fetch(`/api/projects/${projectId}/resources`);
+  }
+
+  /** Where a new task on this project would run if `daemonId`'s machine claimed
+   *  it. The server computes it; callers render the result. */
+  async previewProjectCodeDecision(
+    projectId: string,
+    daemonId: string,
+  ): Promise<CodeDecision> {
+    const params = new URLSearchParams({ daemon_id: daemonId });
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/code-decision?${params}`,
+    );
+    const parsed = CodeDecisionSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error(
+        "GET /api/projects/:id/code-decision failed schema validation",
+      );
+    }
+    return parsed.data;
   }
 
   async createProjectResource(

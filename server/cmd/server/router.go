@@ -2086,6 +2086,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/visibility/preview", h.PreviewProjectVisibility)
 					r.Put("/visibility", h.SetProjectVisibility)
 					r.Get("/resources", h.ListProjectResources)
+					// Where a new task on this machine would run, computed by
+					// the same function the claim path uses. The project page
+					// displays it; it does not derive a directory of its own.
+					r.Get("/code-decision", h.PreviewProjectCodeDecision)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
