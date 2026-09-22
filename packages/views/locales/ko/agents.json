@@ -454,7 +454,7 @@
       "unsaved_changes": "저장하지 않은 변경사항"
     },
     "instructions": {
-      "intro": "모든 실행에 사용할 System Prompt를 설정하세요. Markdown을 지원합니다.",
+      "intro": "모든 실행에 사용할 System Prompt를 설정하세요. 에이전트의 동작을 유도하지만 권한이나 보안 경계를 강제하지는 않습니다. Markdown을 지원합니다.",
       "system_prompt_label": "System Prompt",
       "placeholder": "이 에이전트의 역할, 전문성, 작업 방식을 정의하세요.\n\n# 예시\n당신은 React와 TypeScript에 특화된 프런트엔드 엔지니어입니다.\n\n## 작업 방식\n- 작고 집중된 PR을 작성합니다. 논리적 변경 단위마다 커밋 하나를 사용합니다\n- 상속보다 조합을 선호합니다\n- 새 컴포넌트에는 항상 단위 테스트를 추가합니다\n\n## 제약\n- 명시적인 승인 없이 shared/ 타입을 수정하지 않습니다\n- features/의 기존 컴포넌트 패턴을 따릅니다",
       "system_layer_label": "Multica가 관리",
@@ -462,7 +462,7 @@
       "system_layer_show": "보기",
       "system_layer_hide": "접기",
       "workspace_notes_label": "워크스페이스 메모",
-      "workspace_notes_intro": "팀의 컨텍스트와 선호를 아래에 추가하세요. Multica가 이 에이전트를 위해 관리하는 지침 위에 적용됩니다. Markdown을 지원합니다.",
+      "workspace_notes_intro": "팀의 컨텍스트와 선호를 아래에 추가하세요. Multica가 이 에이전트를 위해 관리하는 지침에 더해 동작을 유도하지만 권한이나 보안 경계를 강제하지는 않습니다. Markdown을 지원합니다.",
       "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다."
     },
     "accounts": {
@@ -777,7 +777,8 @@
       "invalid_json": "잘못된 JSON: {{error}}",
       "save_failed_toast": "MCP config를 저장하지 못했습니다",
       "redacted_title": "설정됨 — 보기에서 숨김",
-      "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다."
+      "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다.",
+      "dialog_json_help": "전체 서버 설정을 JSON으로 편집합니다."
     },
     "composio_mcp": {
       "subtitle": "툴킷을 선택하면, 본인(이 에이전트의 생성자)이 직접 또는 하위 에이전트 체인을 통해 이 에이전트를 트리거할 때만 MCP 서버로 마운트됩니다.",
@@ -914,7 +915,10 @@
       "cancel_failed_toast": "실행을 취소하지 못했습니다",
       "started_prefix": "{{when}} 시작됨",
       "dispatched_prefix": "{{when}} 디스패치됨",
-      "queued_prefix": "{{when}} 대기 시작"
+      "queued_prefix": "{{when}} 대기 시작",
+      "success_hint": "완료 및 실패한 실행 수 중 완료한 실행의 비율입니다. 취소한 실행은 제외됩니다.",
+      "success_unavailable": "이 기간에 완료하거나 실패한 실행이 없어 성공률을 계산할 수 없습니다.",
+      "cancelled_count": "{{count}}개 취소됨"
     }
   },
   "char_counter": {
@@ -1110,12 +1114,14 @@
       "runtime_reconnect_timeout": "데몬이 제시간에 다시 연결되지 않음",
       "runtime_recovery": "데몬 재시작됨",
       "timeout": "실행 시간 초과",
+      "task_time_limit": "워크스페이스 실행 시간 한도에 도달해 중지됨",
       "iteration_limit": "반복 횟수 제한에 도달함",
       "agent_blocked": "사용자 입력 대기 중",
       "api_invalid_request": "모델 API에서 요청을 거부함",
       "skill_bundle_unavailable": "에이전트 스킬을 다운로드할 수 없음",
       "runtime_cli_timeout": "로컬 런타임 CLI 시간 초과",
       "environment_prepare_failed": "실행 환경을 준비하지 못함",
+      "runtime_access_denied": "이 에이전트는 비공개 런타임에서 실행할 수 없어 답변할 수 없습니다. 런타임을 공개로 변경하거나, 소유자가 사용할 수 있는 런타임으로 에이전트를 다시 연결/복사하세요.",
       "invalid_task_identity": "실행 ID 정보가 일치하지 않음",
       "agent_error_provider_auth_or_access": "공급자 인증 실패",
       "agent_error_provider_quota_limit": "공급자 할당량 소진",
@@ -1133,6 +1139,8 @@
       "agent_error_unknown": "에이전트 실행 오류",
       "agent_fallback_message": "에이전트가 대체 메시지를 반환함",
       "codex_resume_oversized": "세션이 너무 커서 재개할 수 없음",
+      "antigravity_session_token_expired": "Antigravity 장시간 세션 토큰 만료",
+      "antigravity_not_logged_in": "Antigravity 로그인 안 됨",
       "idle_watchdog": "에이전트가 장시간 응답하지 않아 중지됨",
       "local_directory_error": "로컬 디렉터리 오류",
       "cancelled": "시스템에서 취소함",

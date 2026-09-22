@@ -314,8 +314,10 @@ func Classify(rawError string) Reason {
 	//    "TRANSPORT: Connection error." after their own retry budget is
 	//    exhausted. The TRANSPORT: code token is the witness — a local
 	//    "connection error" without it stays on the Pi exact-match path.
-	case isPiProviderNetworkError(lower),
-		isAdapterTransportError(lower),
+	//    Cursor can exit before its first stream event with a Node connect
+	//    ETIMEDOUT error. Keep that failed resume network-safe instead of
+	//    letting the exit-status wrapper trigger a fresh-session retry.
+	case isPiProviderNetworkError(lower), isAdapterTransportError(lower), isCursorProviderNetworkError(lower),
 		containsAny(lower,
 			"stream disconnected",
 			opencodeStreamEndedPrefix,
@@ -534,6 +536,20 @@ var legacyOpenclawCLITimeoutReasons = map[string]bool{
 var legacyEnvironmentPrepareWitnesses = []string{
 	"prepare execution environment:",
 	"reuse execution environment:",
+}
+
+// isCursorProviderNetworkError recognizes the captured Cursor provider error,
+// bare or in the adapter's process-failure wrapper. Do not match ETIMEDOUT
+// globally: a local tool or MCP connection timeout is not provider evidence.
+func isCursorProviderNetworkError(lower string) bool {
+	if strings.HasPrefix(lower, "cursor-agent exited with error: ") {
+		_, stderr, ok := strings.Cut(lower, "; cursor stderr: ")
+		if !ok {
+			return false
+		}
+		lower = strings.TrimSpace(stderr)
+	}
+	return strings.HasPrefix(lower, "error: [unavailable] connect etimedout ")
 }
 
 func isPiProviderNetworkError(lower string) bool {

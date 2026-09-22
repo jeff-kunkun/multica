@@ -10,6 +10,7 @@ import { NavigationProgress } from "./navigation-progress";
 import { ProviderStatusBar } from "./provider-status-bar";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
+import { GuestBanner, GuestReadOnlyProvider } from "./guest-readonly";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -36,12 +37,14 @@ export function DashboardLayout({
       }
     >
       <SidebarProvider className="h-svh bg-app-shell">
+        <GuestReadOnlyProvider>
         <GlobalShortcuts />
         <WorkspacePresencePrefetch />
         <AppSidebar searchSlot={searchSlot} />
         <SidebarInset className="relative overflow-hidden">
           <div className="flex min-h-0 flex-1 flex-col">
             <NavigationProgress />
+            <GuestBanner />
             {children}
           </div>
           <ProviderStatusBar />
@@ -49,6 +52,7 @@ export function DashboardLayout({
           <SourceBackfillModal />
           {extra}
         </SidebarInset>
+        </GuestReadOnlyProvider>
       </SidebarProvider>
     </DashboardGuard>
   );

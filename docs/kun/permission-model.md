@@ -122,7 +122,7 @@ Guest 一整列除了「查看」全是否，没有任何关系能翻过来：�
 
 - **lead 看不见自己带的 `private` 项目。** 如果 A 建了一个 `private` 项目并把 B 设成 lead，按矩阵 B 看不见它（`private` 只认创建者）。矩阵答案是唯一的，但体验上会怪；DENE-698 做「设 lead」时应提示把项目范围改成 `project`。
 - **创建者离开工作区后，他的 `private` 资源对所有人不可见**（包括 Owner）。需要产品决定：移除成员时转交给操作人，还是保留为孤儿。不决定也不会出错，只是那些资源谁也找不回来。
-- 模块级可见性（DENE-699）是叠在这两层之上的第三道「与」门，不改变这张矩阵的任何一格。
+- 模块级可见性（DENE-699）是叠在这两层之上的第三道「与」门，不改变这张矩阵的任何一格。见下方「模块级可见性」。
 
 ## 三档共享范围落地（DENE-698）
 
@@ -161,6 +161,22 @@ Guest 一整列除了「查看」全是否，没有任何关系能翻过来：�
 - 新建资源默认 `private`，只有一个例外：**智能体创建的 issue 若不属于任何项目，落地就是 `workspace`**。`private` 的含义是「只有创建者看得见」，而智能体不是一个能被展示列表的人——这样的 issue 留在 `private` 会对所有人（包括让它干活的那个人）不可见。在项目里的仍然取项目当时的范围。规则写在 `service.CreateIssue`。
 - `project` 档没有项目就不成立：接口先回 400（话说人话），数据库的配对约束兜底。issue 被移出全部项目时，`UpdateIssue` 的 SQL 把它降回 `private`——收紧是自动的，放宽永远不是。
 - 每一次变更都写 `visibility_audit`：直接改写一行 `source='direct'`，被项目扫中的资源逐个写 `source='project_bulk'`（一条语句批量写入，避免扫一千个 issue 就来一千个往返）。
+
+## 模块级可见性（DENE-699）
+
+第三道「与」门：资源看得见，还要进得了这个产品区域。清单只有 Issues、Projects、Repos、Runtimes。Agents 与 Squads 不在清单里（归 Parent B）；工作区设置 / 成员 / 计费只跟档位走。
+
+可执行版本是 `permission.CanSeeModule`。Owner / Admin 永远进得了每个模块，否则他们刚设的限制自己也改不回来。其余档位：
+
+| 模块范围 | Member | Guest |
+| --- | --- | --- |
+| `workspace`（缺省、缺行） | 可进 | 可进（里面的条目仍按资源范围过滤；`workspace` 资源对访客仍然不可见） |
+| `project` | 只在指定项目里的人 | 同上 |
+| `private` | 不可进 | 不可进 |
+
+缺行按 `workspace` 处理：模块不像 issue 那样被「新建」，升级时如果默认 `private` 会把整个产品锁死。
+
+写接口：`GET /api/modules` 返回四个模块各自的范围和对当前调用者的 `allowed`；`PUT /api/modules/{module}/visibility` 只有 Owner / Admin 能改，每次变更写 `visibility_audit`（`resource_type='module'`）。路由组上的 `RequireModule` 拦直接打接口：看不见就 404，和资源层同一套「找不到」语义。Agent 调用走 `bypassAgent`，不被这道门拦住。
 
 ### 已知欠账
 

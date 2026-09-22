@@ -223,6 +223,58 @@ func TestFailsClosed(t *testing.T) {
 	}
 }
 
+func TestCanSeeModuleMatrix(t *testing.T) {
+	type row struct {
+		role            Role
+		vis             Visibility
+		inProject, want bool
+	}
+	rows := []row{
+		{RoleOwner, VisibilityPrivate, false, true},
+		{RoleOwner, VisibilityPrivate, true, true},
+		{RoleOwner, VisibilityProject, false, true},
+		{RoleOwner, VisibilityWorkspace, false, true},
+		{RoleAdmin, VisibilityPrivate, false, true},
+		{RoleAdmin, VisibilityProject, false, true},
+		{RoleAdmin, VisibilityWorkspace, false, true},
+		{RoleMember, VisibilityPrivate, false, false},
+		{RoleMember, VisibilityPrivate, true, false},
+		{RoleMember, VisibilityProject, false, false},
+		{RoleMember, VisibilityProject, true, true},
+		{RoleMember, VisibilityWorkspace, false, true},
+		{RoleGuest, VisibilityPrivate, false, false},
+		{RoleGuest, VisibilityProject, false, false},
+		{RoleGuest, VisibilityProject, true, true},
+		{RoleGuest, VisibilityWorkspace, false, true},
+	}
+	for _, r := range rows {
+		if got := CanSeeModule(r.role, r.vis, r.inProject); got != r.want {
+			t.Errorf("CanSeeModule(%s, %s, inProject=%v) = %v, want %v",
+				r.role, r.vis, r.inProject, got, r.want)
+		}
+	}
+	if DefaultModuleVisibility != VisibilityWorkspace {
+		t.Fatalf("DefaultModuleVisibility = %s, want workspace — upgrading must not hide every module", DefaultModuleVisibility)
+	}
+	if CanSeeModule("superuser", VisibilityWorkspace, true) {
+		t.Error("unknown role must not enter a module")
+	}
+	if CanSeeModule(RoleMember, "public", true) {
+		t.Error("unknown scope must not open a module to a member")
+	}
+	if !CanSeeModule(RoleOwner, "public", false) {
+		t.Error("owner must still enter a module with a broken scope so they can fix it")
+	}
+	if got, want := len(Modules), 4; got != want {
+		t.Fatalf("Modules has %d entries, want the closed list of %d", got, want)
+	}
+	for _, m := range []Module{"agents", "squads", "settings", "members", "billing", ""} {
+		if m.Valid() {
+			t.Errorf("%q must not be a module: agents/squads belong to Parent B, settings follow tier", m)
+		}
+	}
+}
+
 func TestProjectScopeNeedsAProject(t *testing.T) {
 	for _, vis := range Visibilities {
 		if !CanSetVisibility(vis, true) {
@@ -250,6 +302,9 @@ func TestNoAgentOrSquad(t *testing.T) {
 	}
 	for _, a := range WorkspaceActions {
 		names = append(names, string(a))
+	}
+	for _, m := range Modules {
+		names = append(names, string(m))
 	}
 	for _, n := range names {
 		if strings.Contains(n, "agent") || strings.Contains(n, "squad") {

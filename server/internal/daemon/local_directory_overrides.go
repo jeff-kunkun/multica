@@ -159,11 +159,19 @@ func (d *Daemon) resolveLocalDirectoryAssignment(task Task) (*localDirectoryAssi
 // but not write (DENE-617 invariant 1). The shared-mode override applies only
 // to the writable one: it decides whether THIS run takes the path mutex, and
 // a directory nothing runs in has no mutex to skip.
+//
+// Resolving is a pure read: the identity backfill is NOT fired from here. This
+// runs during the lock pre-flight, where a task that ends up cancelled while
+// queued for a contended path would still have POSTed its identity for a
+// directory it never uses (DENE-730). runTask fires the backfill once the task
+// is actually committed to the directory.
 func (d *Daemon) resolveLocalDirectoryPlan(task Task) (*localDirectoryAssignment, []*localDirectoryAssignment, error) {
 	assignment, readOnly, err := localDirectoryPlanForTask(task, d.cfg.DaemonID)
-	if err != nil || assignment == nil {
+	if err != nil {
 		return assignment, readOnly, err
 	}
-	d.applyLocalSharedOverride(assignment)
+	if assignment != nil {
+		d.applyLocalSharedOverride(assignment)
+	}
 	return assignment, readOnly, nil
 }

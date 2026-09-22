@@ -101,6 +101,35 @@ func (h *Handler) audienceSize(ctx context.Context, wsUUID pgtype.UUID, vis perm
 	}
 }
 
+func (h *Handler) visibilityAudienceSize(ctx context.Context, wsUUID pgtype.UUID, change visibilityChange) int32 {
+	if change.resourceType == "module" {
+		return h.moduleAudienceSize(ctx, wsUUID, change.next, change.projectID)
+	}
+	return h.audienceSize(ctx, wsUUID, change.next, change.projectID)
+}
+
+// moduleAudienceSize is the snapshot written with a module audit row.
+// Workspace-scoped modules include guests (they may enter the area; resource
+// visibility still filters items). Private modules reach owner/admin only.
+func (h *Handler) moduleAudienceSize(ctx context.Context, wsUUID pgtype.UUID, vis permission.Visibility, projectID pgtype.UUID) int32 {
+	switch vis {
+	case permission.VisibilityWorkspace:
+		n, err := h.Queries.CountWorkspaceMembers(ctx, wsUUID)
+		if err != nil {
+			return 0
+		}
+		return int32(n)
+	case permission.VisibilityProject:
+		return h.audienceSize(ctx, wsUUID, vis, projectID)
+	default:
+		n, err := h.Queries.CountWorkspaceManagers(ctx, wsUUID)
+		if err != nil {
+			return 0
+		}
+		return int32(n)
+	}
+}
+
 // visibilityChange is one audit row's worth of facts.
 type visibilityChange struct {
 	resourceType string
@@ -138,7 +167,7 @@ func (h *Handler) recordVisibilityChange(r *http.Request, wsUUID pgtype.UUID, ch
 		ResourceID:         change.resourceID,
 		PreviousVisibility: previous,
 		NewVisibility:      string(change.next),
-		AudienceSize:       h.audienceSize(r.Context(), wsUUID, change.next, change.projectID),
+		AudienceSize:       h.visibilityAudienceSize(r.Context(), wsUUID, change),
 		Source:             change.source,
 	})
 	if err != nil {
