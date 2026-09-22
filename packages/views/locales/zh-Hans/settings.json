@@ -1693,7 +1693,7 @@
     "gateway_pair_incomplete": "端点要两半都填。只填一半时走的仍是部署共用端点。",
     "gateway_default_model": "该部署自己的默认模型是 {{model}}。",
     "filters_title": "候选筛选层",
-    "filters_placeholder": "以后支持，本版不实现。今天的候选只按方向预筛加置信度过闸。",
+    "filters_placeholder": "取消、归档、停用、运行时不可达、已死亡或额度用尽的席位，会在下一次分配前被排除。供应商额度只是提示：某一家没有新鲜数据，不会把这家的席位全部判死。",
     "health_checking": "自检中…",
     "health_recheck": "重新自检",
     "health_connected": "已连通 · {{when}}自检",
@@ -1720,6 +1720,22 @@
         "chip": "未生效",
         "detail": "模型被拒、连不通、已删除，或正在失败后的冷却期。完全走原版，票上不会出现任何提示。"
       }
-    }
+    },
+    "context_title": "分配上下文",
+    "policy_label": "路由提示词",
+    "policy_description": "这段文字决定档位怎么选。普通工作落在中或强；简单、明确、低风险的工作可以用弱；只有复杂或高风险才上探强或最强。它不能改状态，也不能执行动作。",
+    "policy_restore": "恢复系统默认提示词",
+    "policy_save_error": "保存失败，编辑内容还在。",
+    "policy_saving": "保存中…",
+    "policy_saved": "已保存",
+    "quota_title": "供应商额度",
+    "quota_description": "Claude、Codex、Grok 最近一次上报。没有或过期的数字显示未知。额度不能决定某个席位是否还活着。",
+    "quota_unknown": "未知",
+    "quota_exhausted": "已用尽",
+    "quota_available": "已用 {{percent}}%",
+    "quota_resets": "{{when}} 重置",
+    "quota_updated": "更新于 {{when}}",
+    "seats_title": "候选席位",
+    "seats_empty": "还没有候选席位。"
   }
 }

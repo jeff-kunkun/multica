@@ -1700,7 +1700,7 @@
     "gateway_pair_incomplete": "Un point d'accès a besoin de ses deux composants. Si un seul est renseigné, le point d'accès partagé du déploiement est utilisé à la place.",
     "gateway_default_model": "Le modèle par défaut de ce déploiement est {{model}}.",
     "filters_title": "Filtres de candidats",
-    "filters_placeholder": "Prévu pour une version ultérieure ; non implémenté dans celle-ci. Aujourd'hui, les candidats sont restreints par direction et filtrés par la confiance.",
+    "filters_placeholder": "Un siège annulé, archivé, désactivé, injoignable, mort ou à quota épuisé est écarté avant la prochaine attribution. Le quota d'un fournisseur n'est qu'un indice : une lecture manquante ne retire pas tous ses sièges.",
     "health_checking": "Vérification…",
     "health_recheck": "Revérifier",
     "health_connected": "Connecté · auto-vérifié {{when}}",
@@ -1727,6 +1727,22 @@
         "chip": "Sans effet",
         "detail": "Le modèle a été rejeté, est injoignable, a été supprimé ou est en pause après des échecs répétés. Se comporte comme un routage désactivé ; rien n'apparaît sur les tâches."
       }
-    }
+    },
+    "context_title": "Contexte d'attribution",
+    "policy_label": "Invite de routage",
+    "policy_description": "Ce texte choisit le palier. Le travail ordinaire reste au palier moyen ou fort ; le travail simple et peu risqué peut aller au palier faible ; seul le travail complexe ou à haut risque monte. Il ne change pas le statut.",
+    "policy_restore": "Rétablir l'invite par défaut",
+    "policy_save_error": "Enregistrement impossible. Votre texte est toujours dans la zone.",
+    "policy_saving": "Enregistrement…",
+    "policy_saved": "Enregistré",
+    "quota_title": "Quota des fournisseurs",
+    "quota_description": "Claude, Codex et Grok, selon le dernier relevé. Un chiffre manquant ou périmé reste inconnu. Le quota ne décide pas si un siège est vivant.",
+    "quota_unknown": "inconnu",
+    "quota_exhausted": "épuisé",
+    "quota_available": "{{percent}} % utilisé",
+    "quota_resets": "réinitialisation {{when}}",
+    "quota_updated": "mis à jour {{when}}",
+    "seats_title": "Sièges candidats",
+    "seats_empty": "Aucun siège candidat."
   }
 }
