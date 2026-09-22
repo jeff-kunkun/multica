@@ -21,6 +21,8 @@ export interface Project {
   issue_count: number;
   done_count: number;
   resource_count: number;
+  /** Resource sharing scope. Older servers omit this field. */
+  visibility?: "private" | "project" | "workspace";
 }
 
 export interface CreateProjectRequest {

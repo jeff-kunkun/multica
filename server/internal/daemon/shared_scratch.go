@@ -183,7 +183,7 @@ func (s *sharedScratchState) PruneNow(workspacesRoot string) (int, int64) {
 // Remove deletes one idle session folder. The rules are re-checked here;
 // the screen does not get to name an arbitrary path and have it deleted.
 func (s *sharedScratchState) Remove(workspacesRoot, path string) error {
-	return execenv.RemoveSharedSession(workspacesRoot, path, s.activeSnapshot())
+	return execenv.RemoveSharedSession(workspacesRoot, path, s.activeSnapshot(), s.now())
 }
 
 // taskSharedScratch resolves the session folder for a run the server placed

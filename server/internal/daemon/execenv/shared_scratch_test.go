@@ -226,7 +226,7 @@ func TestPruneSharedScratch_LeavesUserDirectoriesAndWorkCopiesAlone(t *testing.T
 	}
 
 	for _, banned := range []string{userRepo, workCopy, link, stranger} {
-		err := RemoveSharedSession(root, banned, nil)
+		err := RemoveSharedSession(root, banned, nil, now)
 		if !errors.Is(err, ErrSharedSessionKept) {
 			t.Fatalf("RemoveSharedSession(%s) = %v, want kept", banned, err)
 		}
@@ -237,6 +237,62 @@ func TestPruneSharedScratch_LeavesUserDirectoriesAndWorkCopiesAlone(t *testing.T
 	if _, err := os.Lstat(filepath.Join(workCopy, "keep.txt")); err != nil {
 		t.Fatalf("working copy was removed through the symlink: %v", err)
 	}
+}
+
+func TestPruneSharedScratch_ReopenAfterScanIsKept(t *testing.T) {
+	root := t.TempDir()
+	scannedAt := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	old := scannedAt.Add(-30 * 24 * time.Hour)
+
+	reopened, err := OpenSharedSession(root, "ws-1", "sessions/chat-back", old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reopened, "before.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stillIdle, err := OpenSharedSession(root, "ws-1", "sessions/chat-idle", old)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The scan walks every session before it deletes any. A turn can reopen
+	// one in that gap, and the in-use snapshot from before the scan does not
+	// contain it. Removal must notice the rewritten marker anyway.
+	sharedScratchBeforeRemove = func(path string) {
+		if path != reopened {
+			return
+		}
+		if _, openErr := OpenSharedSession(root, "ws-1", "sessions/chat-back", scannedAt.Add(time.Minute)); openErr != nil {
+			t.Errorf("reopen: %v", openErr)
+		}
+		if writeErr := os.WriteFile(filepath.Join(reopened, "during.txt"), []byte("new"), 0o644); writeErr != nil {
+			t.Errorf("write during reopen: %v", writeErr)
+		}
+	}
+	t.Cleanup(func() { sharedScratchBeforeRemove = nil })
+
+	removed, _ := PruneSharedScratch(root, scannedAt, 14*24*time.Hour, nil)
+	if removed != 1 {
+		t.Fatalf("removed %d, want only the session that stayed idle", removed)
+	}
+	if _, err := os.Lstat(stillIdle); !os.IsNotExist(err) {
+		t.Fatalf("idle session = %v, want removed", err)
+	}
+	for _, name := range []string{"before.txt", "during.txt"} {
+		body, err := os.ReadFile(filepath.Join(reopened, name))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(body) == 0 {
+			t.Fatalf("%s is empty", name)
+		}
+	}
+	claim, err := ClaimSharedSession(reopened)
+	if err != nil {
+		t.Fatalf("claim after prune kept the folder: %v", err)
+	}
+	claim.Release()
 }
 
 func TestClaimSharedSession_SecondTurnDoesNotReset(t *testing.T) {

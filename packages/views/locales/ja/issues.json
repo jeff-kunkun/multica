@@ -132,7 +132,7 @@
     "queued": "待機中"
   },
   "close_protocol": {
-    "missing": "プロトコル未クローズ",
+    "missing": "クローズ記録なし",
     "status_drift": "close.status ≠ {{issueStatus}}",
     "next_owner": "次: {{name}}",
     "next_owner_none": "次: なし",

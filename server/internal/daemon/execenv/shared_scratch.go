@@ -292,6 +292,12 @@ func ScanSharedScratch(workspacesRoot string, now time.Time, retention time.Dura
 	return report, nil
 }
 
+// sharedScratchBeforeRemove, when non-nil, runs after a session has been
+// judged expired and before it is removed. Production leaves it nil. Tests
+// set it to reopen the session in that gap, which is where a turn can
+// rewrite the marker while the scan is still walking other folders.
+var sharedScratchBeforeRemove func(path string)
+
 // PruneSharedScratch removes session folders this daemon created that have
 // been idle for at least retention. retention <= 0 removes nothing.
 //
@@ -299,6 +305,8 @@ func ScanSharedScratch(workspacesRoot string, now time.Time, retention time.Dura
 // (workspace/sessions/id), carrying our marker, not in use, and not a
 // symlink. A user directory, a working copy beside a repository, or a link
 // that points at either of those is not this shape and is not touched.
+// The marker is read again under the removal lock, and `now` is that
+// scan's clock: a session opened after the scan started is kept.
 func PruneSharedScratch(workspacesRoot string, now time.Time, retention time.Duration, inUse map[string]bool) (removed int, bytes int64) {
 	if retention <= 0 {
 		return 0, 0
@@ -311,8 +319,11 @@ func PruneSharedScratch(workspacesRoot string, now time.Time, retention time.Dur
 		if !session.Expired || !session.Ours || session.InUse {
 			continue
 		}
+		if sharedScratchBeforeRemove != nil {
+			sharedScratchBeforeRemove(session.Path)
+		}
 		size := session.SizeBytes
-		if err := RemoveSharedSession(workspacesRoot, session.Path, inUse); err != nil {
+		if err := RemoveSharedSession(workspacesRoot, session.Path, inUse, now); err != nil {
 			continue
 		}
 		removed++
@@ -323,7 +334,11 @@ func PruneSharedScratch(workspacesRoot string, now time.Time, retention time.Dur
 
 // RemoveSharedSession deletes one idle session folder. It refuses anything
 // that is not a marked session directory inside the shared root.
-func RemoveSharedSession(workspacesRoot, path string, inUse map[string]bool) error {
+//
+// scannedAt is when the caller decided the folder was idle. A marker
+// rewritten after that — a turn opened the session while the scan was
+// still walking other folders — is not idle anymore, and the folder stays.
+func RemoveSharedSession(workspacesRoot, path string, inUse map[string]bool, scannedAt time.Time) error {
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "" {
 		return fmt.Errorf("%w: path is empty", ErrSharedSessionKept)
@@ -350,10 +365,23 @@ func RemoveSharedSession(workspacesRoot, path string, inUse map[string]bool) err
 	}
 	defer claim.Release()
 	// Re-check after the lock. The scan's verdict is not the verdict that
-	// deletes: a turn can start between the two.
+	// deletes: a turn can open this folder after the marker was read and
+	// before this lock, rewriting LastUsed without holding the lock yet.
+	// A directory that is merely still here is not enough — that is also
+	// true of a folder just reopened.
 	info, err = os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("%w: %s changed before removal", ErrSharedSessionKept, path)
+	}
+	marker, markerErr := readSharedSessionMarker(path)
+	if markerErr != nil {
+		return fmt.Errorf("%w: %s changed before removal", ErrSharedSessionKept, path)
+	}
+	// Before, not After. The marker this scan already called expired was
+	// older than the retention window, so it cannot already sit on the
+	// scan clock. A stamp at that clock was written after the read.
+	if !marker.LastUsed.Before(scannedAt) {
+		return fmt.Errorf("%w: %s was opened again after the scan", ErrSharedSessionKept, path)
 	}
 	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("%w: %s", ErrSharedSessionKept, err)

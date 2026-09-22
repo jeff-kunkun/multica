@@ -134,7 +134,7 @@
     "queued": "Queued"
   },
   "close_protocol": {
-    "missing": "Not closed under protocol",
+    "missing": "No close record",
     "status_drift": "close.status ≠ {{issueStatus}}",
     "next_owner": "Next: {{name}}",
     "next_owner_none": "Next: none",

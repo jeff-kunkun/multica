@@ -805,8 +805,14 @@ type AgentTaskResponse struct {
 	// when an automatic retry continues in its parent's workdir under a fresh
 	// session (MUL-7034). omitempty keeps it off the wire for the common
 	// (no-gap) case and for old daemons.
-	PriorSessionResumeUnavailable bool   `json:"prior_session_resume_unavailable,omitempty"`
-	WorkDir                       string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
+	PriorSessionResumeUnavailable bool `json:"prior_session_resume_unavailable,omitempty"`
+	// ContinueInterruptedSession is set on an automatic retry that inherited
+	// a resume-safe parent session (DENE-727). The daemon resumes that session
+	// and sends a short continue prompt instead of re-injecting the original
+	// task. omitempty keeps it off the wire for every other claim and for old
+	// daemons.
+	ContinueInterruptedSession bool   `json:"continue_interrupted_session,omitempty"`
+	WorkDir                    string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
 	// the UI. For standard tasks it strips the daemon's workspaces root while
 	// preserving either the legacy or readable workspace/task segments; for local_directory
@@ -3726,10 +3732,12 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 // AgentActivityBucket is one day-bucketed throughput sample for the
 // Agents-list ACTIVITY sparkline. bucket_at is midnight UTC of the day.
 type AgentActivityBucket struct {
-	AgentID     string `json:"agent_id"`
-	BucketAt    string `json:"bucket_at"`
-	TaskCount   int32  `json:"task_count"`
-	FailedCount int32  `json:"failed_count"`
+	AgentID        string `json:"agent_id"`
+	BucketAt       string `json:"bucket_at"`
+	TaskCount      int32  `json:"task_count"`
+	FailedCount    int32  `json:"failed_count"`
+	CompletedCount int32  `json:"completed_count"`
+	CancelledCount int32  `json:"cancelled_count"`
 }
 
 // AgentRunCount is the trailing-30-day total task run count per agent,
@@ -3945,10 +3953,12 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 			continue
 		}
 		resp = append(resp, AgentActivityBucket{
-			AgentID:     agentID,
-			BucketAt:    timestampToString(row.Bucket),
-			TaskCount:   row.TaskCount,
-			FailedCount: row.FailedCount,
+			AgentID:        agentID,
+			BucketAt:       timestampToString(row.Bucket),
+			TaskCount:      row.TaskCount,
+			FailedCount:    row.FailedCount,
+			CompletedCount: row.CompletedCount,
+			CancelledCount: row.CancelledCount,
 		})
 	}
 
