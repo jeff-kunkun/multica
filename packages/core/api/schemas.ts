@@ -2695,6 +2695,22 @@ export const IssueDraftCreatedIssueSchema = z.object({
 }).loose();
 
 /**
+ * One node of a confirmed group whose assignee could not be applied. The issue
+ * was still created, unassigned. `key` is empty for the parent.
+ *
+ * Every field falls back rather than failing the parse: a warning row that
+ * cannot be read is still "that seat did not land", and refusing the whole
+ * confirm response over it would be the worse of the two failures.
+ */
+export const IssueDraftAssignmentWarningSchema = z
+  .object({
+    key: z.string().catch(""),
+    title: z.string().catch(""),
+    reason: z.string().catch(""),
+  })
+  .loose();
+
+/**
  * The result of confirming a draft.
  *
  * `issue_id` has no fallback on purpose. This endpoint returns 2xx only after
@@ -2711,11 +2727,16 @@ export const IssueDraftCreatedIssueSchema = z.object({
  * time: the group is a single judgement, and "5 issues, one of them
  * unrenderable" and "we cannot tell how many" should both show the user the
  * same thing (the parent alone, which is `[issue_id]`).
+ *
+ * `assignment_warnings` is additive, and a missing list reads as empty — the
+ * same answer as "every assignment landed", which is what a backend that
+ * predates the field is saying (DENE-694).
  */
 export const IssueDraftFinalizeSchema = z.object({
   draft: IssueDraftSchema,
   issue_id: z.string().min(1),
   issues: z.array(IssueDraftCreatedIssueSchema).catch([]),
+  assignment_warnings: z.array(IssueDraftAssignmentWarningSchema).catch([]),
 }).loose();
 
 export const IssueDraftRuntimeSwitchSchema = z.object({

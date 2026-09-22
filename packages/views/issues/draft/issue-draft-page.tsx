@@ -287,6 +287,7 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
               readOnly={record}
               producedIssueId={session.producedIssueId}
               createdIssues={session.createdIssues}
+              assignmentWarnings={session.assignmentWarnings}
               round={session.round}
               continuation={session.continuation}
               builtChildren={session.groupChildren}

@@ -41,6 +41,7 @@ import type {
   Attachment,
   ChatMessage,
   Issue,
+  IssueDraftAssignmentWarning,
   IssueDraftCreatedIssue,
   IssueDraftPayload,
   IssueDraftSummary,
@@ -155,6 +156,13 @@ export interface IssueDraftSession {
    * answered; `[the root]` for a backend that predates groups.
    */
   createdIssues: IssueDraftCreatedIssue[] | null;
+  /**
+   * Nodes the confirm created unassigned because the seat shown on the panel
+   * could not be applied. Empty until a confirm answers, and empty when every
+   * assignment landed — a backend that predates the field says the same thing
+   * by omitting it (DENE-694).
+   */
+  assignmentWarnings: IssueDraftAssignmentWarning[];
   send: (
     content: string,
     attachmentIds?: string[],
@@ -221,6 +229,13 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
   const [createdIssues, setCreatedIssues] = useState<
     IssueDraftCreatedIssue[] | null
   >(null);
+  // Kept beside `createdIssues` and for the same reason: the confirm's own
+  // answer is the only place a dropped seat is ever visible. The panel is on
+  // "created" for exactly this mount, and a refetch cannot answer it — the
+  // group is an ordinary unassigned issue by then.
+  const [assignmentWarnings, setAssignmentWarnings] = useState<
+    IssueDraftAssignmentWarning[]
+  >([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -596,6 +611,7 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
       // was created, and a repeat confirm has to read back the same list rather
       // than degrading to "one issue".
       setCreatedIssues(issueDraftCreatedGroup(result));
+      setAssignmentWarnings(result.assignment_warnings ?? []);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : t(($) => $.alignment.confirm_failed));
@@ -724,6 +740,7 @@ export function useIssueDraftSession(draftId: string): IssueDraftSession {
     abandoning: abandonMutation.isPending,
     createdIssueId,
     createdIssues,
+    assignmentWarnings,
     send,
     save,
     generatePreview,
