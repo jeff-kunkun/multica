@@ -2361,16 +2361,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-          {/* Core props — always rendered. */}
+          {/* Core props — always rendered, except the acceptance slot below. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label={t(($) => $.detail.prop_reviewer)}>
-            <ReviewerPicker reviewerType={issue.reviewer_type} reviewerId={issue.reviewer_id} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
+          {/* 验收席 is parent-scoped: acceptance belongs to the top-level
+              issue, and a sub-issue is execution-only. An empty slot on a
+              sub-issue is therefore not a requirement — offering one would
+              invite a reviewer that routing never hands the ticket to. A
+              value somebody recorded by hand still renders, so existing
+              tickets keep their decision and can clear it. */}
+          {(issue.parent_issue_id == null || issue.reviewer_type != null) && (
+            <PropRow label={t(($) => $.detail.prop_reviewer)}>
+              <ReviewerPicker reviewerType={issue.reviewer_type} reviewerId={issue.reviewer_id} onUpdate={handleUpdateField} align="start" />
+            </PropRow>
+          )}
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker
               projectId={issue.project_id}
