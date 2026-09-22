@@ -38,6 +38,11 @@ func TestStaleReviewStoreQueries(t *testing.T) {
 		"status":           "in_review",
 		"last_activity_at": long,
 	})
+	child := fx.Issue(t, "child review must stay with parent", testutil.Cols{
+		"status":           "in_review",
+		"last_activity_at": long,
+	})
+	fx.Exec(t, `UPDATE issue SET parent_issue_id = $1 WHERE id = $2`, stale, child)
 	runtimeID := fx.Runtime(t, "stale-sweep-runtime")
 	agentID := fx.Agent(t, "stale-sweep-agent", runtimeID)
 	fx.Task(t, agentID, testutil.Cols{
@@ -62,6 +67,7 @@ func TestStaleReviewStoreQueries(t *testing.T) {
 			"a ticket touched an hour ago": fresh,
 			"a ticket being worked on":     working,
 			"a ticket with an active run":  running,
+			"a child issue awaiting review": child,
 		} {
 			if seen[id] {
 				t.Errorf("%s was picked up by the sweep", label)

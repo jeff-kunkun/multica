@@ -119,6 +119,16 @@ func TestStageProgressSummary(t *testing.T) {
 	}
 }
 
+func TestNestedParentBarrierDoesNotAskForIndependentReview(t *testing.T) {
+	got := stageAdvanceInstruction(0, "nested-parent", 0, false, true)
+	if strings.Contains(got, "in_review") {
+		t.Fatalf("nested parent guidance must not start an independent review chain: %q", got)
+	}
+	if !strings.Contains(got, "top-level parent") {
+		t.Fatalf("nested parent guidance must point acceptance to the root parent: %q", got)
+	}
+}
+
 func TestStageProgressSummary_FinalStageNoNext(t *testing.T) {
 	children := []db.Issue{
 		child(1, "done"), child(1, "done"),
