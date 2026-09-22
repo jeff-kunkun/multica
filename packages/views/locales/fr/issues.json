@@ -19,7 +19,8 @@
     "full_log": "Ouvrir le journal complet",
     "message": "Message de l'agent",
     "error": "Erreur",
-    "waiting_result": "En attente du résultat de l'outil..."
+    "waiting_result": "En attente du résultat de l'outil...",
+    "retrying": "En attente d'une nouvelle tentative."
   },
   "status_catalog_error": {
     "title": "Impossible de charger la liste des états",
@@ -101,7 +102,8 @@
     "breadcrumb_title": "Tâches",
     "breadcrumb_workspace_fallback": "Espace de travail",
     "empty_title": "Aucune tâche pour l'instant",
-    "move_failed": "Échec du déplacement de la tâche"
+    "move_failed": "Échec du déplacement de la tâche",
+    "empty_hint": "Créez une tâche pour commencer."
   },
   "status": {
     "backlog": "À planifier",
@@ -127,7 +129,9 @@
   },
   "stage": {
     "none": "Aucune étape",
-    "value": "Étape {{n}}"
+    "value": "Étape {{n}}",
+    "blocking": "Bloquante",
+    "queued": "En attente"
   },
   "scope": {
     "all_label": "Toutes",
@@ -180,7 +184,9 @@
     "active_count_other": "{{count}} filtres",
     "in_view": "Déjà dans cette vue",
     "chip_edit": "Modifier",
-    "chip_save_as": "Enregistrer sous"
+    "chip_save_as": "Enregistrer sous",
+    "project_tooltip": "Filtrer par projet",
+    "project_clear": "Effacer le filtre de projet"
   },
   "display": {
     "tooltip": "Paramètres d'affichage",
@@ -220,7 +226,9 @@
     "card_project": "Projet",
     "card_labels": "Étiquettes",
     "card_child_progress": "Avancement des sous-tâches",
-    "show_sub_issues": "Afficher les sous-tâches"
+    "show_sub_issues": "Afficher les sous-tâches",
+    "hide_completed_parents": "Masquer le travail terminé",
+    "hide_completed_parents_description": "Masque les tâches dont le statut et toutes les sous-tâches sont terminés"
   },
   "view": {
     "tooltip_board": "Vue tableau",
@@ -323,10 +331,12 @@
     },
     "empty": {
       "assigned": {
-        "title": "Aucune tâche assignée"
+        "title": "Aucune tâche assignée",
+        "description": "Les tâches assignées ici apparaîtront dans cette vue."
       },
       "created": {
-        "title": "Aucune tâche créée"
+        "title": "Aucune tâche créée",
+        "description": "Les tâches créées ici apparaîtront dans cette vue."
       }
     },
     "search_placeholder": "Rechercher des tâches...",
@@ -459,7 +469,17 @@
     "project_directory_path_copied_with_branch": "Chemin du répertoire du projet copié — le travail se trouve sur {{branch}}",
     "workdir_path_copy_failed": "Échec de la copie du chemin du répertoire de travail",
     "workdir_path_unavailable": "Aucun répertoire de travail local — cette tâche n'a pas encore été traitée par un agent local",
-    "pull_requests_empty_title": "Aucune pull request associée."
+    "pull_requests_empty_title": "Aucune pull request associée.",
+    "prop_reviewer": "Relecteur",
+    "alignment_group_progress": "{{count}} tâche(s) · {{done}} terminée(s)",
+    "alignment_group_stage": "étape {{stage}}/{{total}}",
+    "alignment_continue": "Continuer l'alignement",
+    "alignment_continue_pending": "Réouverture…",
+    "alignment_continue_failed": "Impossible de rouvrir cet alignement. Il n'est peut-être plus disponible.",
+    "alignment_origin": "Voir l'alignement à l'origine de cette tâche",
+    "alignment_start": "Aligner cette tâche",
+    "alignment_started_by_another": "Un alignement est déjà en cours pour cette tâche.",
+    "pull_requests_empty": "Aucune pull request liée pour l'instant. Placez l'identifiant de cette tâche dans le nom de branche ou le titre d'une PR, ou écrivez-le après Closes dans le corps de la PR, pour la lier automatiquement."
   },
   "timeline": {
     "loading": "Chargement..."
@@ -577,7 +597,8 @@
       "bar_authors_more_other": "{{names}} et {{count}} autres",
       "resolve_failed": "Échec de la résolution du fil",
       "unresolve_failed": "Échec de la réouverture du fil"
-    }
+    },
+    "align_action": "Alignez d'abord cette tâche"
   },
   "reply": {
     "placeholder": "Laisser une réponse...",
@@ -623,7 +644,8 @@
   },
   "filtered_empty": {
     "title": "Aucune tâche ne correspond à ces filtres",
-    "clear_button": "Effacer les filtres"
+    "clear_button": "Effacer les filtres",
+    "hint": "Ajustez ou effacez les filtres pour voir les tâches de cette vue."
   },
   "agent_live": {
     "is_working": "{{name}} travaille",
@@ -678,7 +700,13 @@
       "source_backfill": "Attribution reconstituée",
       "source_unattributed": "Aucun membre responsable identifié"
     },
-    "usage_total_tooltip": "Consommation de tokens pour cette tâche — cliquez pour le détail par exécution"
+    "usage_total_tooltip": "Consommation de tokens pour cette tâche — cliquez pour le détail par exécution",
+    "halt_all": "Arrêter toutes les exécutions",
+    "resume_all": "Reprendre les exécutions",
+    "halt_failed": "Échec de l'arrêt des exécutions",
+    "resume_failed": "Échec de la reprise des exécutions",
+    "status_deferred": "Nouvelle tentative",
+    "usage_label": "Coût en tokens"
   },
   "usage_detail": {
     "title": "Détail de la consommation",
@@ -707,7 +735,11 @@
     "note_unpriced_one": "{{count}} exécution n'a aucune consommation enregistrée et n'est pas comptée dans le total.",
     "note_unpriced_other": "{{count}} exécutions n'ont aucune consommation enregistrée et ne sont pas comptées dans le total.",
     "note_unmapped": "Aucun tarif connu pour {{models}} ; leurs tokens sont comptés, mais pas leur coût.",
-    "note_estimate": "Le coût est estimé d'après les tarifs publiés des modèles, sauf lorsque le fournisseur a communiqué son propre chiffre."
+    "note_estimate": "Le coût est estimé d'après les tarifs publiés des modèles, sauf lorsque le fournisseur a communiqué son propre chiffre.",
+    "empty_hint": "La consommation est enregistrée par le daemon à la fin d'une exécution. Les exécutions antérieures à cette remontée, et celles lancées sur un daemon qui ne la transmet pas, n'ont aucun chiffre — relancez la tâche sur un daemon à jour pour commencer à en collecter un.",
+    "loading": "Chargement des exécutions…",
+    "load_failed": "Impossible de charger les exécutions de cette tâche.",
+    "retry": "Réessayer"
   },
   "terminate_dialog": {
     "title": "Arrêter cette exécution ?",
@@ -766,7 +798,10 @@
     "remove_parent_issue": "Retirer la tâche parente",
     "remove_parent_issue_success": "Tâche parente retirée",
     "add_sub_issue": "Ajouter une sous-tâche...",
-    "delete_issue": "Supprimer la tâche"
+    "delete_issue": "Supprimer la tâche",
+    "pin": "Épingler",
+    "unpin": "Détacher",
+    "pin_failed": "Impossible de mettre à jour l'épingle"
   },
   "pickers": {
     "custom_property": {
@@ -814,6 +849,14 @@
       "manage_dialog_title": "Gérer les étiquettes",
       "create_action": "Créer",
       "create_failed": "Échec de la création de l'étiquette"
+    },
+    "reviewer": {
+      "trigger_undecided": "Non décidé",
+      "trigger_no_review": "Aucune relecture nécessaire",
+      "search_placeholder": "Relecture par...",
+      "no_review": "Aucune relecture nécessaire",
+      "members_group": "Membres",
+      "agents_group": "Agents"
     }
   },
   "labels_panel": {
@@ -888,7 +931,9 @@
     "variant_my_any": "Toute relation",
     "variant_my_assigned": "Qui me sont assignés",
     "variant_my_created": "Que j'ai créés",
-    "variant_my_involved": "Impliqué"
+    "variant_my_involved": "Impliqué",
+    "visibility_project": "Membres du projet",
+    "visibility_project_hint": "Visible uniquement par les membres de ce projet, et seulement sur la page de ce projet"
   },
   "view_selector": {
     "trigger": "Vues",
@@ -918,7 +963,8 @@
     "manage_title": "Gérer les vues",
     "manage_hint": "L'ordre et la visibilité ne concernent que vous",
     "visible_toggle": "Afficher dans la barre de vues",
-    "more_label": "Plus de vues"
+    "more_label": "Plus de vues",
+    "project_shared_tag": "Partagée avec le projet"
   },
   "plugins": {
     "panels": "Plugins",
@@ -931,5 +977,230 @@
     "surface_loading": "Chargement de {{name}}…",
     "surface_unavailable": "{{name}} n'a pas pu charger son interface. La version installée ne la contient peut-être pas.",
     "surface_navigated": "{{name}} a tenté de remplacer son panneau par une page chargée depuis une autre source. Il a été arrêté et déconnecté : prévenez l'administrateur de votre espace de travail."
+  },
+  "close_protocol": {
+    "missing": "Non clôturée selon le protocole",
+    "status_drift": "close.status ≠ {{issueStatus}}",
+    "next_owner": "Suivant : {{name}}",
+    "next_owner_none": "Suivant : aucun",
+    "waiting_on": "En attente de {{id}}",
+    "last_activity_missing": "Aucune heure d'activité"
+  },
+  "blocker_summary": {
+    "title": "Bloqué · {{count}} cause(s) racine(s)",
+    "needs_you": "{{count}} en attente de votre action",
+    "root": "Blocage racine",
+    "propagated": "Bloquée par une sous-tâche",
+    "kind_decision": "Nécessite votre décision",
+    "kind_permission": "Nécessite votre autorisation",
+    "kind_external": "En attente d'une dépendance externe",
+    "kind_capacity": "En attente de capacité",
+    "kind_action": "{{kind}} : {{action}}",
+    "kind_review_overdue": "Relecture en retard · {{ago}}",
+    "kind_wake_missed": "{{id}} s'est terminée sans réveiller la suite",
+    "kind_cycle": "En attente dans un cycle"
+  },
+  "run_cost": {
+    "section": "Coût en tokens de l'exécution",
+    "segment": {
+      "input": "Entrée nouvelle",
+      "cacheWrite": "Écriture de cache",
+      "cacheRead": "Lecture de cache",
+      "output": "Sortie"
+    },
+    "figure_cost": "Cette exécution",
+    "figure_cost_hint": "{{pct}} % de cette tâche",
+    "figure_cost_hint_unknown": "Part de la tâche indisponible",
+    "figure_cache": "Taux de succès du cache",
+    "figure_cache_hint": "{{reads}} lecture · {{writes}} écriture",
+    "figure_largest": "Plus gros bloc",
+    "figure_largest_hint": "{{pct}}% · {{tokens}} tokens",
+    "fact_turns": "Tours",
+    "fact_start": "Session",
+    "fact_start_resumed": "Reprise",
+    "fact_start_cold": "Démarrage à froid",
+    "fact_last_context": "Contexte à la dernière étape",
+    "fact_queue": "En file d'attente",
+    "fact_prepare": "Préparation",
+    "fact_first_output": "Jusqu'à la première sortie",
+    "fact_trigger": "Déclenché par",
+    "facts_unavailable": "Cette exécution n'a signalé ni nombre de tours ni chronologie — elle a tourné sur un daemon antérieur à la remontée des métadonnées d'exécution.",
+    "note_no_prompt_split": "Les fournisseurs facturent ces quatre catégories et ne rapportent qu'elles. Les tokens ne sont pas attribués au brief de runtime, aux schémas d'outils, à l'historique ni aux résultats d'outils : cette vue ne les répartit donc pas ainsi."
+  },
+  "manage_views": {
+    "visibility_label": "Partage de {{name}}",
+    "visibility_project": "Membres du projet",
+    "visibility_project_hint": "Visible uniquement par les membres de ce projet, et seulement sur la page de ce projet"
+  },
+  "alignment": {
+    "title": "Aligner une nouvelle tâche",
+    "subtitle": "Rien n'est créé tant que vous n'avez pas confirmé.",
+    "back": "Retour aux tâches",
+    "stage_aligning": "Alignement",
+    "stage_ready": "Prêt",
+    "stage_creating": "Création",
+    "stage_created": "Créée",
+    "stage_hint_aligning": "Continuez de répondre jusqu'à ce que la demande soit sans ambiguïté.",
+    "stage_hint_ready": "Le brouillon est prêt. Relisez-le, puis confirmez.",
+    "stage_hint_creating": "Création de la tâche…",
+    "stage_hint_created": "La tâche existe.",
+    "conversation_title": "Alignement",
+    "conversation_hint": "Une question à la fois, jusqu'à ce que la demande soit claire.",
+    "runtime_online": "Runtime en ligne",
+    "runtime_offline": "Runtime hors ligne",
+    "preview_title": "Aperçu de la tâche",
+    "preview_hint": "Ce qui sera créé. Modifiez ce que vous voulez avant de confirmer.",
+    "preview_empty": "Le brouillon apparaît ici dès que vous décrivez ce que vous voulez.",
+    "field_title": "Titre",
+    "field_title_placeholder": "Une ligne qui nomme le résultat attendu",
+    "field_description": "Description",
+    "field_description_placeholder": "Problème, critères d'acceptation, contraintes connues",
+    "field_status": "Statut",
+    "field_priority": "Priorité",
+    "field_project": "Projet",
+    "field_assignee": "Assigné à",
+    "save": "Enregistrer le brouillon",
+    "saving": "Enregistrement…",
+    "saved": "Enregistré",
+    "generate": "Générer l'aperçu",
+    "confirm": "Confirmer et créer",
+    "confirming": "Création…",
+    "confirm_hint": "Créer la tâche met aussi en file d'attente le travail de l'assigné.",
+    "confirm_unsaved": "Enregistrez d'abord vos modifications — la confirmation crée le brouillon enregistré, pas ce qui est à l'écran.",
+    "parent_label": "Tâche parente",
+    "group_title": "Sous-tâches",
+    "group_hint": "Les champs ci-dessus forment la tâche parente. Chaque sous-tâche ci-dessous est créée en même temps qu'elle, dans l'ordre donné par son étape.",
+    "group_project_inherited": "Les sous-tâches sont classées dans le projet de la tâche parente.",
+    "child_label": "Sous-tâche {{n}}",
+    "child_title": "Titre de la sous-tâche {{n}}",
+    "child_starts_now": "Démarre immédiatement",
+    "child_parked": "Attend son étape",
+    "child_remove": "Retirer la sous-tâche {{n}}",
+    "child_hint": "Suggéré : {{hint}}",
+    "group_summary": "La confirmation crée {{count}} tâches.",
+    "group_summary_running": "Démarrage immédiat : {{count}}.",
+    "group_summary_parked": "Créées dans À planifier, en attente de leur étape : {{count}}.",
+    "round_subtitle": "Tour {{n}} de cet alignement. Rien d'existant n'est modifié.",
+    "round_label": "Tour {{n}}",
+    "round_hint": "{{count}} tâche(s) des tours précédents seront conservées telles quelles.",
+    "round_hint_empty": "Les tours précédents n'ont produit aucune sous-tâche.",
+    "built_title": "Déjà créées",
+    "built_hint": "La confirmation reprend ces tâches telles quelles : leur titre, leur étape et leur assigné ne sont pas réécrits. Ouvrez-en une pour la modifier.",
+    "attachments_title": "Fichiers de référence",
+    "attachments_hint_one": "Après confirmation, ce fichier appartient à la tâche parente. Les sous-tâches y renvoient par un lien au lieu d'en téléverser une copie.",
+    "attachments_hint_other": "Après confirmation, ces {{count}} fichiers appartiennent à la tâche parente. Les sous-tâches y renvoient par un lien au lieu d'en téléverser une copie.",
+    "built_stage": "Étape {{n}}",
+    "new_group_title": "Ajouté à ce tour",
+    "new_group_hint": "Seules celles-ci sont créées. Chaque sous-tâche rejoint la même tâche parente, dans l'ordre donné par son étape.",
+    "new_group_empty": "Rien de nouveau pour l'instant — continuez la discussion et le travail ajouté apparaîtra ici.",
+    "group_increment": "La confirmation crée {{count}} nouvelle(s) tâche(s).",
+    "group_increment_none": "La confirmation ne crée rien de nouveau : toutes les sous-tâches listées existent déjà.",
+    "group_summary_built": "Conservées telles quelles : {{count}}.",
+    "reopen_failed": "Impossible de rouvrir cet alignement.",
+    "parent_built": "La tâche parente existe déjà et n'est pas réécrite par ce tour.",
+    "parent_built_link": "Ouvrir la tâche parente",
+    "group_summary_parent": "La tâche parente est créée sans assigné : elle ne démarre donc rien toute seule.",
+    "created_title": "Tâche créée",
+    "created_group_title": "{{count}} tâches créées",
+    "retired_title": "Cet alignement est terminé",
+    "retired_description": "Il ne fait plus partie de vos brouillons inachevés.",
+    "load_failed": "Impossible de charger cet alignement.",
+    "retry": "Réessayer",
+    "send_failed": "Impossible d'envoyer ce message.",
+    "seed_lost": "Le premier tour n'a pas été envoyé. Renvoyez-le ci-dessous.",
+    "attachment_bind_failed": "Certaines pièces jointes n'ont pas été rattachées à ce message. Essayez de les envoyer à nouveau.",
+    "save_failed": "Impossible d'enregistrer le brouillon.",
+    "confirm_failed": "Impossible de créer la tâche.",
+    "abandon_failed": "Impossible d'abandonner le brouillon.",
+    "runtime_failed": "Impossible de changer de runtime.",
+    "abandon": "Abandonner le brouillon",
+    "abandoning": "Abandon…",
+    "abandon_title": "Abandonner cet alignement ?",
+    "abandon_description": "Le brouillon est abandonné. La conversation est conservée.",
+    "abandon_cancel": "Continuer l'alignement",
+    "confirm_abandon": "Abandonner",
+    "entry_title": "Aligner avant de créer",
+    "entry_description": "Décrivez ce que vous voulez. L'agent pose des questions sur ce qui reste flou, et rien n'est créé tant que vous n'avez pas confirmé.",
+    "entry_placeholder": "Que voulez-vous faire ?",
+    "entry_runtime": "Lieu d'exécution",
+    "entry_submit": "Lancer l'alignement",
+    "entry_submitting": "Démarrage…",
+    "entry_cancel": "Annuler",
+    "entry_no_runtime": "Aucun runtime en ligne n'est disponible : l'agent d'alignement ne peut pas s'exécuter.",
+    "entry_runtime_offline": "{{name}} est hors ligne : l'alignement ne peut pas démarrer.",
+    "entry_connect_runtime": "Connecter un runtime",
+    "entry_failed": "Impossible de démarrer la conversation d'alignement.",
+    "entry_failed_status": "Impossible de démarrer la conversation d'alignement. Erreur serveur (HTTP {{status}}).",
+    "entry_response_unrecognized": "La réponse du serveur n'a pas été reconnue. Le client ou le serveur doit peut-être être mis à jour.",
+    "more_actions": "Plus d'options d'alignement",
+    "drafts_banner": "Vous avez {{count}} alignement(s) inachevé(s)",
+    "drafts_title": "Alignements inachevés",
+    "drafts_hint": "Reprenez-en un, ou abandonnez ceux dont vous ne voulez plus.",
+    "drafts_untitled": "Alignement sans titre",
+    "drafts_discard_aria": "Abandonner « {{title}} »",
+    "drafts_discard_title": "Abandonner cet alignement inachevé ?",
+    "drafts_discard_description": "L'alignement est archivé comme abandonné — la conversation reste consultable dans les enregistrements d'alignement, et les tâches qu'il a déjà créées ne sont pas touchées.",
+    "drafts_discard_cancel": "Le garder",
+    "drafts_discard_confirm": "Abandonner",
+    "config_aria": "Configuration de l'alignement",
+    "config_runtime": "Machine",
+    "config_runtime_loading": "Chargement des machines…",
+    "config_runtime_hint": "{{count}} en ligne",
+    "config_runtime_offline": "Hors ligne — exécution impossible",
+    "config_model_short": "Modèle par défaut",
+    "config_model_default": "Utiliser la valeur par défaut de la machine",
+    "config_model_hint": "Depuis le catalogue de cette machine",
+    "config_model_managed": "Géré par le runtime",
+    "config_model_offline": "Machine hors ligne",
+    "config_thinking_hint": "Varie selon le modèle",
+    "config_thinking_unavailable": "Non disponible",
+    "config_thinking_none": "Ce modèle n'a pas de réglage d'effort de raisonnement.",
+    "config_capabilities_hint": "{{count}} sur 3 activées",
+    "config_capabilities_count": "{{count}} méthode(s)",
+    "config_pick_runtime": "Choisir une machine",
+    "capability_label": "Méthodes d'alignement",
+    "capability_wayfinder": "Carte de décision",
+    "capability_wayfinder_description": "Pour un travail trop gros pour une seule tâche : fixer la route (destination, frontière, ce qui reste encore informulable) avant la formulation.",
+    "capability_grill": "Entretien des besoins",
+    "capability_grill_description": "Fait converger le brouillon par questions — une à la fois, chacune avec une réponse recommandée. Désactivez-le pour un simple dialogue.",
+    "capability_frontend": "Voir l'écran d'abord",
+    "capability_frontend_description": "Fixez l'apparence de l'interface avec un prototype HTML ouvrable. Un tour sans rien à ouvrir n'est pas terminé.",
+    "policy_label": "Style d'alignement",
+    "policy_guided": "Questions guidées",
+    "policy_plain": "Conversation simple",
+    "policy_frontend": "Prototype front-end",
+    "policy_version": "Invite {{version}}",
+    "policy_version_hint": "La version d'invite utilisée par cette conversation. Enregistrée au démarrage de l'alignement, pour qu'un brouillon terminé reste auditable.",
+    "policy_failed": "Impossible de changer le style d'alignement.",
+    "question_recommended": "Recommandé",
+    "question_custom_hint": "Ou répondez avec vos propres mots ci-dessous.",
+    "records_title": "Alignements",
+    "records_status_open": "En cours",
+    "records_status_completed": "Créé",
+    "records_status_abandoned": "Abandonné",
+    "record_subtitle": "Cet alignement est terminé. Il est en lecture seule.",
+    "record_created_title": "Cet alignement a produit une tâche",
+    "record_issue_link": "Ouvrir la tâche",
+    "record_abandoned_title": "Cet alignement a été abandonné",
+    "record_abandoned_hint": "Aucune tâche n'a été créée."
+  },
+  "sub_issue_accordion": {
+    "count_one": "{{count}} sous-tâche",
+    "count_other": "{{count}} sous-tâches",
+    "blocked_one": "{{count}} bloquée",
+    "blocked_other": "{{count}} bloquées",
+    "active_one": "{{count}} en cours",
+    "active_other": "{{count}} en cours",
+    "stalled_one": "{{count}} non prise en charge",
+    "stalled_other": "{{count}} non prises en charge",
+    "stage": "Étape {{stage}}",
+    "empty": "Aucune sous-tâche",
+    "load_failed": "Impossible de charger les sous-tâches"
+  },
+  "parent_issue_badge": {
+    "open": "Ouvrir la tâche parente {{identifier}} : {{title}}"
+  },
+  "row": {
+    "pinned_label": "Épinglée"
   }
 }

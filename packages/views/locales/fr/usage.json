@@ -109,5 +109,15 @@
   },
   "duration": {
     "less_than_minute": "<1 min"
+  },
+  "issues": {
+    "title": "Tâches les plus coûteuses",
+    "caption": "Dépenses par tâche · ouvrez-en une pour la répartition de ses tokens",
+    "header_issue": "Tâche",
+    "header_tokens": "Tokens",
+    "header_cost": "Coût",
+    "show_all": "Tout afficher",
+    "show_less": "Afficher le top {{count}}",
+    "no_data": "Aucune dépense par tâche sur cette fenêtre."
   }
 }

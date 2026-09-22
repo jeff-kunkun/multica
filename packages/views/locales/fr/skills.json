@@ -103,7 +103,8 @@
     "add_confirm": "Ajouter ({{num}})",
     "adding": "Ajout...",
     "added_multi_toast_one": "Ajouté à {{count}} agent",
-    "added_multi_toast_other": "Ajouté à {{count}} agents"
+    "added_multi_toast_other": "Ajouté à {{count}} agents",
+    "add_dialog_description": "Sélectionnez les agents qui doivent recevoir les skills sélectionnés."
   },
   "toolbar": {
     "result_count_title": "Skills correspondants / tous les skills",
@@ -370,7 +371,9 @@
     "conflict_footer": "{{count}} décisions de conflit en attente.",
     "conflict_apply_button": "Appliquer les décisions",
     "conflict_missing_resolution": "Choisissez comment résoudre ce conflit.",
-    "conflict_name_still_exists": "Ce nom existe déjà. Choisissez-en un autre ou ignorez."
+    "conflict_name_still_exists": "Ce nom existe déjà. Choisissez-en un autre ou ignorez.",
+    "no_skills_hint": "Ce runtime n'a encore aucun skill local détectable.",
+    "no_search_results_title": "Aucun skill local correspondant"
   },
   "file_tree": {
     "no_files": "Aucun fichier",

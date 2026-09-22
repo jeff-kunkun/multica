@@ -25,7 +25,8 @@
     "runtime": "Runtime",
     "attachment": "Pièce jointe",
     "create_agent": "Créer un agent",
-    "unknown": "Page inconnue"
+    "unknown": "Page inconnue",
+    "create_issue": "Aligner une nouvelle tâche"
   },
   "help": {
     "trigger": "Aide",
@@ -60,6 +61,16 @@
     "discord_card": {
       "title": "Rejoignez notre Discord",
       "dismiss": "Ignorer"
-    }
+    },
+    "align_issue": "Aligner une demande",
+    "align_issue_hint": "Discuter et aligner avant toute création"
+  },
+  "guest": {
+    "badge": "Vous êtes invité — lecture seule",
+    "no_edit": "Les invités ne peuvent pas modifier",
+    "nothing_shared_title": "Rien n'a encore été partagé avec vous",
+    "nothing_shared_description": "Dès qu'une personne de cet espace de travail vous ajoute à un projet, ce que vous pouvez voir apparaîtra ici.",
+    "not_found_title": "Page introuvable",
+    "not_found_description": "Elle a peut-être été supprimée, ou elle n'a pas été partagée avec vous."
   }
 }

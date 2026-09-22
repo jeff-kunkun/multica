@@ -116,7 +116,7 @@ describe("agent outcome presentation", () => {
     expect(screen.queryByText("100%")).not.toBeInTheDocument();
     expect(screen.queryByText("100% success")).not.toBeInTheDocument();
     expect(container.querySelectorAll('rect[fill="var(--color-brand)"]')).toHaveLength(0);
-    expect(screen.getByText("success rate").parentElement).toHaveTextContent("—");
+    expect(screen.getByText("succeeded").parentElement).toHaveTextContent("—");
   });
 });
 

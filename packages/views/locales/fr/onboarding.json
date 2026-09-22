@@ -3,13 +3,16 @@
     "wordmark": "Multica",
     "label": "Étapes de prise en main",
     "about_you": {
-      "label": "À propos de vous"
+      "label": "À propos de vous",
+      "description": "Votre rôle, et ce que vous voulez voir accompli."
     },
     "workspace": {
-      "label": "Espace de travail"
+      "label": "Espace de travail",
+      "description": "Nommez-le et choisissez son URL."
     },
     "runtime": {
-      "label": "Rencontrez Mika"
+      "label": "Rencontrez Mika",
+      "description": "Votre premier coéquipier agent, et où il s'exécute."
     }
   },
   "welcome": {
@@ -42,7 +45,9 @@
       "card5_body_suffix": " avait signalée. Lien d'aperçu dans la PR.",
       "card5_mention_you": "@vous",
       "card5_timestamp": "à l'instant"
-    }
+    },
+    "lede_desktop": "À la fin, un véritable agent répondra à votre première tâche.",
+    "illustration_caption": "Chaque tâche, chaque fil, chaque décision — partagés par votre équipe et vos agents."
   },
   "common": {
     "back": "Retour",
@@ -56,7 +61,8 @@
     "eyebrow": "Une question rapide",
     "lede": "Aidez-nous à comprendre comment vous avez découvert Multica.",
     "submit": "Envoyer",
-    "save_failed_toast": "Échec de l'enregistrement"
+    "save_failed_toast": "Échec de l'enregistrement",
+    "hint_ready": "Tout est bon. Cliquez sur Envoyer quand vous êtes prêt."
   },
   "questions": {
     "about_you": {
@@ -111,7 +117,8 @@
     "other_aria": "Décrire autre chose"
   },
   "step_question": {
-    "hint_pick": "Vous pouvez passer cette étape."
+    "hint_pick": "Vous pouvez passer cette étape.",
+    "hint_continue": "Tout est bon. Cliquez sur Continuer quand vous êtes prêt."
   },
   "cli_install": {
     "copy_aria": "Copier",
@@ -189,7 +196,8 @@
     "creation_disabled_logout": "Se déconnecter",
     "creation_disabled_eyebrow_resume": "Votre espace de travail",
     "creation_disabled_headline_resume": "Continuez avec {{name}}.",
-    "creation_disabled_lede_resume": "La création d'espaces de travail est désactivée sur cette instance : vous continuerez donc dans votre espace existant."
+    "creation_disabled_lede_resume": "La création d'espaces de travail est désactivée sur cette instance : vous continuerez donc dans votre espace existant.",
+    "create_new_subtitle": "Repartez de zéro — un espace à part pour un autre volet de votre travail."
   },
   "step_runtime": {
     "scanning_headline": "Connexion de cet ordinateur…",
@@ -218,7 +226,9 @@
     "hint_selected": "Sélectionné : {{name}}",
     "hint_pick": "Choisissez un runtime d'agent ci-dessus pour commencer avec Mika.",
     "hint_waiting": "En attente du premier résultat…",
-    "continue": "Commencer avec Mika"
+    "continue": "Commencer avec Mika",
+    "found_lede": "Voici les runtimes d'agent que nous avons trouvés sur cet ordinateur. Vous pourrez en changer ou en ajouter d'autres plus tard.",
+    "hint_skip_or_refresh": "Actualisez après en avoir installé un, ou passez cette étape pour accéder à votre espace de travail."
   },
   "step_platform": {
     "eyebrow": "Connecter un ordinateur",
@@ -248,7 +258,8 @@
     "stage_slow_suffix": " pour d'éventuelles erreurs.",
     "stage_stalled_prefix": "Rien ne remonte pour l'instant. Si le terminal ne vous met pas à l'aise, ",
     "stage_stalled_term": "l'application de bureau",
-    "stage_stalled_suffix": " est la voie la plus simple — un clic et cet ordinateur est connecté. Fermez cette fenêtre et choisissez l'application de bureau, ou cliquez sur Ignorer pour continuer."
+    "stage_stalled_suffix": " est la voie la plus simple — un clic et cet ordinateur est connecté. Fermez cette fenêtre et choisissez l'application de bureau, ou cliquez sur Ignorer pour continuer.",
+    "cli_dialog_description": "La même connexion que l'application de bureau, configurée depuis le terminal. Utilisez-la pour les serveurs, les machines de développement distantes ou tout ordinateur sans interface graphique."
   },
   "errors": {
     "skip_failed": "Échec de la finalisation de la prise en main",
