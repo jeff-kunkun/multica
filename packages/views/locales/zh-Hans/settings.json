@@ -388,7 +388,8 @@
       "mcp": "MCP",
       "billing": "账单与套餐",
       "config_transfer": "配置导出/导入",
-      "routing": "路由"
+      "routing": "路由",
+      "project_sharing": "项目共享"
     },
     "groups": {
       "personal": "个人设置",
@@ -1737,5 +1738,30 @@
     "quota_updated": "更新于 {{when}}",
     "seats_title": "候选席位",
     "seats_empty": "还没有候选席位。"
+  },
+  "project_sharing": {
+    "title": "项目共享",
+    "description": "按项目管理工作区成员可以看到的内容。",
+    "section_title": "项目",
+    "section_description": "修改项目范围会同步更新该项目当前包含的所有任务和仓库。",
+    "loading": "正在加载项目…",
+    "empty": "还没有项目。",
+    "visibility_private": "仅自己",
+    "visibility_project": "项目成员",
+    "visibility_workspace": "全工作区",
+    "members": "{{count}} 名成员",
+    "guests": "{{count}} 名访客",
+    "resources": "{{count}} 项资源",
+    "no_members": "目前只有你，别人暂时看不到。",
+    "manage_members": "管理项目成员",
+    "read_only": "访客可以查看共享项目，但不能修改共享范围。",
+    "change_for": "修改 {{name}} 的共享范围",
+    "confirm_title": "更新 {{name}} 的共享范围？",
+    "confirm_description": "将把 {{count}} 项资源更新为“{{visibility}}”，其中 {{privateCount}} 项当前为私有。",
+    "cancel": "取消",
+    "confirm": "应用",
+    "saving": "应用中…",
+    "preview_loading": "正在加载预览…预览准备好之前不能确认。",
+    "preview_failed": "预览加载失败，请重试后再确认。"
   }
 }

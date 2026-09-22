@@ -1410,9 +1410,11 @@ const ProjectSchema = z.object({
   due_date: z.string().nullable().default(null),
   created_at: z.string(),
   updated_at: z.string(),
+  created_by: z.string().nullable().optional(),
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
+  visibility: z.enum(["private", "project", "workspace"]).default("private"),
 }).loose();
 
 const SearchProjectResultSchema = ProjectSchema.extend({
