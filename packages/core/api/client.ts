@@ -240,6 +240,7 @@ import type {
   TaskLogExport,
   TaskLogExportBundle,
   TaskLogExportScope,
+  CodeDecision,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -317,6 +318,7 @@ import {
   issueDraftRuntimeSwitchFallback,
   AgentSchema,
   AgentListSchema,
+  CodeDecisionSchema,
   EMPTY_AGENT_LIST,
   AgentBuilderSessionListSchema,
   EMPTY_AGENT_BUILDER_SESSION_LIST,
@@ -1475,6 +1477,13 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  async setIssueVisibility(id: string, visibility: "private" | "project" | "workspace") {
+    return this.fetch<{ id: string; visibility: "private" | "project" | "workspace"; audience_size?: number }>(
+      `/api/issues/${id}/visibility`,
+      { method: "PUT", body: JSON.stringify({ visibility }) },
+    );
   }
 
   async moveIssue(id: string, data: MoveIssueRequest): Promise<Issue> {
@@ -3289,6 +3298,35 @@ export class ApiClient {
     });
   }
 
+  async setRepoVisibility(url: string, visibility: "private" | "project" | "workspace") {
+    return this.fetch<{ url: string; visibility: "private" | "project" | "workspace"; audience_size?: number }>(
+      "/api/repos/visibility",
+      { method: "PUT", body: JSON.stringify({ url, visibility }) },
+    );
+  }
+
+  async previewProjectVisibility(projectId: string) {
+    return this.fetch<{
+      project_id: string;
+      visibility: "private" | "project" | "workspace";
+      affected_count: number;
+      previously_private_count: number;
+    }>(`/api/projects/${projectId}/visibility/preview`);
+  }
+
+  async setProjectVisibility(projectId: string, visibility: "private" | "project" | "workspace") {
+    return this.fetch<{
+      project_id: string;
+      visibility: "private" | "project" | "workspace";
+      affected_count: number;
+      previously_private_count: number;
+      audience_size?: number;
+    }>(`/api/projects/${projectId}/visibility`, {
+      method: "PUT",
+      body: JSON.stringify({ visibility }),
+    });
+  }
+
   /**
    * Read whether routing is actually working for this workspace.
    *
@@ -4463,6 +4501,25 @@ export class ApiClient {
     projectId: string,
   ): Promise<ListProjectResourcesResponse> {
     return this.fetch(`/api/projects/${projectId}/resources`);
+  }
+
+  /** Where a new task on this project would run if `daemonId`'s machine claimed
+   *  it. The server computes it; callers render the result. */
+  async previewProjectCodeDecision(
+    projectId: string,
+    daemonId: string,
+  ): Promise<CodeDecision> {
+    const params = new URLSearchParams({ daemon_id: daemonId });
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/code-decision?${params}`,
+    );
+    const parsed = CodeDecisionSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error(
+        "GET /api/projects/:id/code-decision failed schema validation",
+      );
+    }
+    return parsed.data;
   }
 
   async createProjectResource(
