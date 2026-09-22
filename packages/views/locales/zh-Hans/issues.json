@@ -1150,7 +1150,10 @@
     "record_created_title": "这次对齐已产出一张任务",
     "record_issue_link": "查看产出的任务",
     "record_abandoned_title": "这次对齐已放弃",
-    "record_abandoned_hint": "没有产出任务。"
+    "record_abandoned_hint": "没有产出任务。",
+    "assignee_suggestions_loading": "正在查找建议负责人…",
+    "assignee_suggestions_failed": "负责人建议暂时不可用。仍可确认，但未分配的任务需要手动选择。",
+    "assignee_unassigned": "未分配——仍可确认，之后再指派。"
   },
   "sub_issue_accordion": {
     "count_other": "{{count}} 个子任务",

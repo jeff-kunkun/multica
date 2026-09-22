@@ -957,4 +957,24 @@ describe("assignee suggestions", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(onSave).not.toHaveBeenCalled();
   });
+
+  it("keeps confirmation available and explains unavailable suggestions", () => {
+    renderPanel({
+      stage: "ready",
+      draft: READY,
+      canConfirm: true,
+      assigneeSuggestionsError: true,
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Suggestions are unavailable",
+    );
+    expect(screen.getAllByText(/Unassigned/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole("button", { name: "Confirm and create" })).toBeEnabled();
+  });
+
+  it("shows the loading state while suggestions are being resolved", () => {
+    renderPanel({ stage: "ready", draft: READY, assigneeSuggestionsLoading: true });
+    expect(screen.getByRole("status")).toHaveTextContent("Finding suggested assignees");
+  });
 });

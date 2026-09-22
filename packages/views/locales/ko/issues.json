@@ -1150,7 +1150,10 @@
     "record_created_title": "이 정렬에서 이슈 1건이 생성되었습니다",
     "record_issue_link": "생성된 이슈 열기",
     "record_abandoned_title": "이 정렬은 포기되었습니다",
-    "record_abandoned_hint": "생성된 이슈가 없습니다."
+    "record_abandoned_hint": "생성된 이슈가 없습니다.",
+    "assignee_suggestions_loading": "추천 담당자를 찾는 중…",
+    "assignee_suggestions_failed": "추천을 불러오지 못했습니다. 미할당 항목은 직접 선택할 수 있습니다.",
+    "assignee_unassigned": "미할당 — 확인한 뒤 할당할 수 있습니다."
   },
   "sub_issue_accordion": {
     "count_other": "하위 태스크 {{count}}개",

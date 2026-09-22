@@ -1150,7 +1150,10 @@
     "record_created_title": "このすり合わせから課題が1件作成されました",
     "record_issue_link": "作成された課題を開く",
     "record_abandoned_title": "このすり合わせは破棄されました",
-    "record_abandoned_hint": "課題は作成されていません。"
+    "record_abandoned_hint": "課題は作成されていません。",
+    "assignee_suggestions_loading": "担当者の候補を検索中…",
+    "assignee_suggestions_failed": "候補を取得できません。未割り当ての行は手動で選べます。",
+    "assignee_unassigned": "未割り当て — 確認後に割り当てできます。"
   },
   "sub_issue_accordion": {
     "count_other": "サブタスク {{count}} 件",

@@ -80,6 +80,8 @@ export function IssueDraftPreviewPanel({
   runtimesLoading,
   members,
   assigneeSuggestions,
+  assigneeSuggestionsLoading = false,
+  assigneeSuggestionsError = false,
   currentUserId,
   switchingRuntime,
   pending,
@@ -110,6 +112,8 @@ export function IssueDraftPreviewPanel({
   runtimesLoading: boolean;
   members: MemberWithUser[];
   assigneeSuggestions?: readonly (DraftAssigneeSuggestion | null)[];
+  assigneeSuggestionsLoading?: boolean;
+  assigneeSuggestionsError?: boolean;
   currentUserId: string | null;
   switchingRuntime: boolean;
   /** A turn is running: nothing may be written while the carrier is replying. */
@@ -483,6 +487,21 @@ export function IssueDraftPreviewPanel({
                 />
               </div>
             </div>
+            {assigneeSuggestionsLoading ? (
+              <p className="text-caption text-muted-foreground" role="status">
+                {t(($) => $.alignment.assignee_suggestions_loading)}
+              </p>
+            ) : null}
+            {assigneeSuggestionsError ? (
+              <p className="text-caption text-destructive" role="alert">
+                {t(($) => $.alignment.assignee_suggestions_failed)}
+              </p>
+            ) : null}
+            {!value.assignee_id ? (
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.alignment.assignee_unassigned)}
+              </p>
+            ) : null}
 
             <div className="space-y-2">
               <span className="text-caption text-muted-foreground">
@@ -700,6 +719,11 @@ export function IssueDraftPreviewPanel({
                           }
                         />
                       </div>
+                      {!child.assignee_id ? (
+                        <p className="text-caption text-muted-foreground">
+                          {t(($) => $.alignment.assignee_unassigned)}
+                        </p>
+                      ) : null}
                       {child.assignee_hint ? (
                         <p className="text-caption text-muted-foreground">
                           {t(($) => $.alignment.child_hint, {
