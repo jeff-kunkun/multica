@@ -6428,7 +6428,10 @@ func taskRunFailureReason(err error) string {
 // a queue on one directory does not consume the daemon's whole capacity. nil
 // is accepted (focused tests) and simply keeps the slot.
 func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger, lease *taskSlotLease) (release func(), abort bool) {
-	if !task.hasProjectResources() || d.cfg.DaemonID == "" {
+	// A decision names the directory, or says there isn't one. There is
+	// nothing to scan, and a task with no project resources can still be
+	// unresolvable — that has to fail here, before a fresh checkout is built.
+	if task.CodeDecision == nil && (!task.hasProjectResources() || d.cfg.DaemonID == "") {
 		return nil, false
 	}
 	assignment, err := d.resolveLocalDirectoryAssignment(task)
@@ -6438,7 +6441,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
 			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			failureReason: placementCode(err),
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory resolve error", "error", failErr)
 		}
@@ -6457,7 +6460,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
 			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			failureReason: placementCode(err),
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory mode check", "error", failErr)
 		}
@@ -6469,7 +6472,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
 			errorMessage:  err.Error(),
-			failureReason: "local_directory_error",
+			failureReason: placementCode(err),
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
@@ -7091,6 +7094,33 @@ func sharedModeSkillsDir(provider, sidecarRoot, codexHome string) string {
 		return filepath.Join(codexHome, "skills")
 	}
 	return execenv.SkillsDirPath(sidecarRoot, provider)
+}
+
+// isolateUserDirectorySidecars reports whether this run must keep the
+// daemon's files — and in particular .multica/ — out of the user's directory.
+//
+// Shared mode always isolates: several tasks share the cwd, so a file at a
+// fixed path there is a race. In-place isolates whenever the runtime can
+// receive its brief from outside the cwd. A directory that is not a git
+// work tree isolates even when the runtime cannot, and then the run fails
+// rather than writing .multica/ into a folder nothing will put back.
+func isolateUserDirectorySidecars(a *localDirectoryAssignment, provider string, gitWorkTree bool) (bool, error) {
+	if a == nil || !a.RunsInUserDirectory() {
+		return false, nil
+	}
+	must := a.IsShared() || !gitWorkTree || sharedModeBriefDelivery(provider) != sharedBriefUnsupported
+	if !must {
+		return false, nil
+	}
+	if err := sharedModeProviderSupported(provider); err != nil {
+		if !a.IsShared() && !gitWorkTree {
+			return false, fmt.Errorf(
+				"local_directory: %q is not a git work tree, so .multica/ cannot be written into it, and the %q runtime cannot take those files from outside the directory",
+				a.AbsPath, provider)
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // sharedModeProviderSupported returns a user-facing error when provider has no
@@ -8346,7 +8376,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Resolved BEFORE the brief is built, not after: the brief has to state
 	// which repositories this machine already holds, and it cannot do that
 	// without knowing whether a directory is pinned here at all (DENE-595).
-	localAssignment, readOnlyLocalDirs, _ := d.resolveLocalDirectoryPlan(task)
+	// The error is not optional. Dropping it used to mean "no directory
+	// matched, check the repos out", which is a silent change of plan when
+	// the decision had already named a directory that failed its check.
+	localAssignment, readOnlyLocalDirs, planErr := d.resolveLocalDirectoryPlan(task)
+	if planErr != nil {
+		return TaskResult{}, planErr
+	}
 	// The task is past the lock wait and committed to this directory, so this is
 	// the first moment the identity backfill is paid for by a run that will
 	// actually use the path — a waiter cancelled during the queue never gets
@@ -8411,6 +8447,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	scratchDir, scratchRel, useScratch, scratchErr := d.taskSharedScratch(task)
 	if scratchErr != nil {
 		return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("shared scratch: %w", scratchErr))
+	}
+	if useScratch && localAssignment != nil {
+		return TaskResult{}, &codePlacementError{
+			Code: "decision_mismatch",
+			Err:  errors.New("shared scratch decision also resolved a local directory"),
+		}
 	}
 	if useScratch {
 		if _, err := execenv.OpenSharedSession(d.cfg.WorkspacesRoot, task.WorkspaceID, scratchRel, time.Now()); err != nil {
@@ -8875,15 +8917,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		} else {
 			if localAssignment != nil {
 				prepParams.LocalWorkDir = localAssignment.AbsPath
-				if localAssignment.IsShared() {
-					// Fail before anything is written: a provider without a
-					// sidecar-free brief route would start with no runtime brief
-					// and no skills, and silently do the wrong work.
-					if err := sharedModeProviderSupported(provider); err != nil {
-						return TaskResult{}, err
-					}
-					prepParams.IsolateSidecars = true
+				// .multica/ is the daemon's own bookkeeping. In the user's
+				// directory it is either isolated up front or, for a git
+				// checkout whose runtime cannot take a brief from outside the
+				// cwd, cleaned up on the way out. A directory that is not a
+				// git work tree has neither a commit nor an ignore rule to
+				// fall back on, so isolation is not optional there.
+				isolate, isoErr := isolateUserDirectorySidecars(localAssignment, provider, isGitWorkTree(prepareCtx, localAssignment.AbsPath))
+				if isoErr != nil {
+					return TaskResult{}, isoErr
 				}
+				prepParams.IsolateSidecars = isolate
 			}
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 			if err != nil {
