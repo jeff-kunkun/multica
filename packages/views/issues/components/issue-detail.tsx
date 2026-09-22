@@ -689,6 +689,8 @@ function SubIssueRow({
   rowProps,
   customProperties,
   blockerState,
+  parentStatus,
+  hasStagedSibling,
 }: {
   child: Issue;
   /** The sub-issue's OWN children progress (it can itself be a parent). */
@@ -698,6 +700,8 @@ function SubIssueRow({
   /** Workspace custom properties the user opted into showing on rows. */
   customProperties: IssueProperty[];
   blockerState?: { state: "ROOT" | "PROPAGATED" | "CLEAR"; rootCause?: string };
+  parentStatus?: Issue["status"];
+  hasStagedSibling?: boolean;
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -898,7 +902,7 @@ function SubIssueRow({
           />
         )}
         </div>
-        <SubIssueCloseStrip issue={child} />
+        <SubIssueCloseStrip issue={child} parentStatus={parentStatus} hasStagedSibling={hasStagedSibling} />
       </div>
     </IssueActionsContextMenu>
   );
@@ -3350,6 +3354,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                               rowProps={subIssueRowProps}
                               customProperties={subIssueCustomProps}
                               blockerState={blockerBadgeState(blockerData.tree, child.id)}
+                              parentStatus={issue.status}
+                              hasStagedSibling={staged}
                             />
                           ))}
                         </Fragment>

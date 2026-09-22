@@ -2657,7 +2657,7 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetail();
 
       await screen.findByText("Stage 1 child");
-      expect(screen.getByText("Not closed under protocol")).toBeInTheDocument();
+      expect(screen.getByText("No close record")).toBeInTheDocument();
       expect(screen.getByText("delivered")).toBeInTheDocument();
       expect(screen.getByText("Next: none")).toBeInTheDocument();
       const strips = screen.getAllByTestId("sub-issue-close-strip");

@@ -979,7 +979,7 @@
     "surface_navigated": "{{name}} a tenté de remplacer son panneau par une page chargée depuis une autre source. Il a été arrêté et déconnecté : prévenez l'administrateur de votre espace de travail."
   },
   "close_protocol": {
-    "missing": "Non clôturée selon le protocole",
+    "missing": "Aucun enregistrement de clôture",
     "status_drift": "close.status ≠ {{issueStatus}}",
     "next_owner": "Suivant : {{name}}",
     "next_owner_none": "Suivant : aucun",
