@@ -2990,6 +2990,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A base role owns the availability of its direct specialisations when it
+	// is turned off. The child update is deliberately one-way: turning the base
+	// role back on leaves each specialisation's independent setting untouched.
+	var disabledSpecialisations []db.Agent
+	if req.WorkEnabled != nil && !*req.WorkEnabled {
+		disabledSpecialisations, err = h.Queries.DisableAgentSpecialisations(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("disable agent specialisations failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent specialisations")
+			return
+		}
+	}
+
 	// Nullable runtime overrides: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
 	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
@@ -3094,6 +3107,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if child.ID == updated.ID {
 			continue
 		}
+		h.publishAgentUpdate(r, child)
+	}
+	for _, child := range disabledSpecialisations {
 		h.publishAgentUpdate(r, child)
 	}
 
