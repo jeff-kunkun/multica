@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // WorkThreadSnapshot is the bounded read model shared by Issue and Chat.
@@ -52,6 +56,99 @@ type WorkThreadContext struct {
 }
 
 const workThreadQueueLimit = 50
+
+type WorkThreadActionRequest struct {
+	Action  string `json:"action"`
+	Summary string `json:"summary,omitempty"`
+}
+
+// WorkThreadAction mutates one Issue work thread while preserving its
+// continuity key. Continue clones the latest resumable turn inside the same
+// transaction; interrupt cancels active turns; queue appends a new input.
+// The database unique pending-task fence is the final concurrency guard.
+func (h *Handler) WorkThreadAction(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	var req WorkThreadActionRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "invalid work thread action")
+			return
+		}
+	}
+	switch req.Action {
+	case "interrupt":
+		if err := h.TaskService.CancelTasksForIssue(r.Context(), issue.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to interrupt work thread")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"action": req.Action, "state": "interrupted"})
+		return
+	case "queue":
+		task, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		if req.Summary != "" {
+			if _, err := h.DB.Exec(r.Context(), `UPDATE agent_task_queue SET trigger_summary = $2 WHERE id = $1`, task.ID, req.Summary); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to record queued input")
+				return
+			}
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"action": req.Action, "state": "queued", "task_id": uuidToString(task.ID), "thread_id": uuidToString(task.WorkThreadID)})
+		return
+	case "continue":
+		task, err := h.continueWorkThread(r, issue.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusConflict, "work thread has no resumable turn or already has a pending turn")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to continue work thread")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"action": req.Action, "state": "queued", "task_id": uuidToString(task.ID), "thread_id": uuidToString(task.WorkThreadID), "session_id": task.SessionID.String})
+		return
+	default:
+		writeError(w, http.StatusBadRequest, "action must be continue, interrupt, or queue")
+	}
+}
+
+func (h *Handler) continueWorkThread(r *http.Request, issueID pgtype.UUID) (db.AgentTaskQueue, error) {
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	defer tx.Rollback(r.Context())
+	var threadID, taskID pgtype.UUID
+	var status string
+	var sessionID pgtype.Text
+	err = tx.QueryRow(r.Context(), `
+		SELECT wt.id, latest.id, latest.status, latest.session_id
+		FROM work_thread wt
+		JOIN LATERAL (
+			SELECT id, status, session_id FROM agent_task_queue
+			WHERE work_thread_id = wt.id ORDER BY created_at DESC, id DESC LIMIT 1
+		) latest ON true
+		WHERE wt.issue_id = $1
+		  AND NOT EXISTS (SELECT 1 FROM agent_task_queue WHERE work_thread_id = wt.id AND status IN ('queued','dispatched','running','waiting_local_directory'))
+		FOR UPDATE OF wt`, issueID).Scan(&threadID, &taskID, &status, &sessionID)
+	if err != nil || (status != "cancelled" && status != "failed") || !sessionID.Valid || sessionID.String == "" {
+		return db.AgentTaskQueue{}, pgx.ErrNoRows
+	}
+	qtx := h.Queries.WithTx(tx)
+	task, err := qtx.CreateRetryTask(r.Context(), db.CreateRetryTaskParams{ID: taskID})
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	return task, nil
+}
 
 type workThreadRow struct {
 	ThreadID, AgentID, IssueID, ChatSessionID pgtype.UUID

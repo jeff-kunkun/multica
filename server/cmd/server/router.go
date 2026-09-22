@@ -1999,6 +1999,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
 					r.Get("/work-thread", h.GetIssueWorkThread)
+					r.Post("/work-thread/action", h.WorkThreadAction)
 					r.Put("/", h.UpdateIssue)
 					// Sharing scope is its own action, not a field on the
 					// ordinary edit: it has its own tier rule and its own
