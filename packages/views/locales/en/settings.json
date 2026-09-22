@@ -1369,6 +1369,29 @@
       "reason_in_use": "Kept: a task is running in it right now.",
       "reason_not_ours": "Kept: Multica did not create this one, so it is not Multica's to remove.",
       "reason_unknown": "Kept: its state could not be read, and unknown is not permission to delete."
+    },
+    "shared_scratch": {
+      "title": "Shared session folder",
+      "description": "Questions with no local folder and no repository leave their files here, one subdirectory per conversation, instead of a new task directory every time. Only this folder is cleaned — never a directory of yours, and never a working copy beside a repository.",
+      "scanning": "Looking at the shared session folder…",
+      "daemon_offline": "Start the local daemon to see the shared session folder on this machine.",
+      "load_failed": "Could not read the shared session folder.",
+      "location_title": "Where it is",
+      "location_description": "One folder on this machine. Each workspace's conversations sit underneath it, named by the conversation.",
+      "size_title": "Using",
+      "summary": "{{count}} conversations · {{total}} on disk · {{reclaimable}} idle long enough to clear",
+      "enable_title": "Clear idle conversations automatically",
+      "enable_description": "On by default. A conversation folder is removed only when Multica created it, nothing is running in it, and nothing in it has been used for the number of days below. This runs with the daemon's existing cleanup.",
+      "retention_title": "Keep for at least",
+      "retention_description": "Days after a conversation was last used before its folder can be cleared.",
+      "empty": "No shared conversations on this machine yet.",
+      "last_used": "last used {{days}}d ago",
+      "in_use": "in use, left alone",
+      "not_ours": "not created by Multica, left alone",
+      "remove": "Clear",
+      "removed": "Conversation folder cleared",
+      "clean_expired": "Clear expired",
+      "cleaned": "Expired conversation folders cleared"
     }
   },
   "members": {

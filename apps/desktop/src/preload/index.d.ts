@@ -19,6 +19,10 @@ import type {
   WorktreeCleanupSettings,
 } from "../main/worktree-cleanup";
 import type {
+  SharedScratchResult,
+  SharedScratchSettings,
+} from "../main/shared-scratch";
+import type {
   DaemonStatus,
   DaemonPrefs,
   LocalRuntimeProbe,
@@ -149,6 +153,15 @@ interface DesktopAPI {
   ) => Promise<WorktreeCleanupResult>;
   /** Remove one working copy now. The daemon still applies every keep rule. */
   removeWorktreeCopy: (path: string) => Promise<WorktreeCleanupResult>;
+  /** Where the shared session folder is, how big it is, and what is in it. */
+  sharedScratchReport: () => Promise<SharedScratchResult>;
+  saveSharedScratchSettings: (
+    settings: SharedScratchSettings,
+  ) => Promise<SharedScratchResult>;
+  /** Remove one idle session folder. The daemon still applies every keep rule. */
+  removeSharedSession: (path: string) => Promise<SharedScratchResult>;
+  /** Remove session folders the retention window already calls expired. */
+  cleanExpiredSharedSessions: () => Promise<SharedScratchResult>;
   /** Local skip-mutex overrides for folders stored as in_place on a server
    *  that does not accept execution_mode=shared. */
   listLocalDirectorySharedOverrides: () => Promise<
