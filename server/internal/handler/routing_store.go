@@ -274,17 +274,143 @@ func (s routingStore) Handoff(ctx context.Context, workspaceID, issueID, assigne
 	if err != nil {
 		return err
 	}
-	issue, err := s.h.Queries.ReassignIssue(ctx, db.ReassignIssueParams{
-		ID: id, WorkspaceID: wsID, AssigneeType: assigneeType, AssigneeID: target,
-	})
-	if err != nil {
-		return err
+	already := prev.AssigneeType.Valid && prev.AssigneeType.String == assigneeType &&
+		prev.AssigneeID.Valid && util.UUIDToString(prev.AssigneeID) == assigneeID
+	issue := prev
+	if !already {
+		issue, err = s.h.Queries.ReassignIssue(ctx, db.ReassignIssueParams{
+			ID: id, WorkspaceID: wsID, AssigneeType: assigneeType, AssigneeID: target,
+		})
+		if err != nil {
+			return err
+		}
+		s.publishIssueUpdated(prev, issue)
 	}
-	s.publishIssueUpdated(prev, issue)
 	if assigneeType == "agent" {
+		// Assignment is the wake. When this stay's reviewer already holds the
+		// ticket — the previous attempt reassigned and the enqueue failed, or
+		// the stale sweep is poking the same seat again — starting the run
+		// must not depend on a second reassignment.
 		s.h.IssueService.StartAssignedAgent(ctx, issue)
 	}
 	return nil
+}
+
+// Acceptance is the in-review row's read of "has this stay already been
+// handed on, and is a run still open". Both answers are per stay, not per
+// issue: a handoff comment or a run from an earlier visit to in_review does
+// not count, which is the break DENE-617 hit.
+func (s routingStore) Acceptance(ctx context.Context, workspaceID string, issue routing.Issue) (routing.AcceptanceState, error) {
+	var state routing.AcceptanceState
+	id, err := util.ParseUUID(issue.ID)
+	if err != nil {
+		return state, err
+	}
+	active, err := s.h.Queries.HasActiveTaskForIssue(ctx, id)
+	if err != nil {
+		return state, err
+	}
+	state.ActiveRun = active
+	since, known, err := s.reviewRoundSince(ctx, workspaceID, id)
+	if err != nil {
+		return state, err
+	}
+	if !known {
+		// The activity row is written by a bus listener and can lag the status
+		// write by a moment. With no boundary, "since now" still sees a run or
+		// a notice created in the last 30 seconds (the query's skew), which is
+		// enough to collapse a duplicate trigger, and it does not treat an
+		// older stay as this one.
+		since = time.Now()
+	}
+	switch issue.Reviewer.Kind {
+	case routing.ReviewerAgent:
+		if issue.AssigneeType == "agent" && issue.AssigneeID == issue.Reviewer.ID {
+			agentID, err := util.ParseUUID(issue.Reviewer.ID)
+			if err != nil {
+				return state, err
+			}
+			state.AgentEngaged, err = s.h.Queries.HasReviewerRunSince(ctx, db.HasReviewerRunSinceParams{
+				IssueID: id,
+				AgentID: agentID,
+				Since:   pgtype.Timestamptz{Time: since, Valid: true},
+			})
+			if err != nil {
+				return state, err
+			}
+		}
+	case routing.ReviewerMember:
+		wsID, err := util.ParseUUID(workspaceID)
+		if err != nil {
+			return state, err
+		}
+		userID, err := util.ParseUUID(issue.Reviewer.ID)
+		if err != nil {
+			return state, err
+		}
+		state.MemberNotified, err = s.h.Queries.HasAcceptanceNoticeSince(ctx, db.HasAcceptanceNoticeSinceParams{
+			IssueID:     id,
+			WorkspaceID: wsID,
+			RecipientID: userID,
+			Since:       pgtype.Timestamptz{Time: since, Valid: true},
+		})
+		if err != nil {
+			return state, err
+		}
+	}
+	return state, nil
+}
+
+// NotifyMember sends this stay's acceptance notice. The routing comment is
+// once per issue, so a later stay cannot post another one; the inbox row is
+// what actually reaches the person, and it is not unique per issue.
+func (s routingStore) NotifyMember(ctx context.Context, workspaceID, issueID string, member routing.Member) (bool, error) {
+	if member.UserID == "" {
+		return false, nil
+	}
+	issue := routing.Issue{ID: issueID, Reviewer: routing.ReviewerRef{Kind: routing.ReviewerMember, ID: member.UserID}}
+	state, err := s.Acceptance(ctx, workspaceID, issue)
+	if err != nil {
+		return false, err
+	}
+	if state.MemberNotified {
+		return false, nil
+	}
+	if err := s.Subscribe(ctx, workspaceID, issueID, member.UserID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// reviewRoundSince is when this ticket last entered in_review. ok is false
+// when the activity row has not been written yet.
+func (s routingStore) reviewRoundSince(ctx context.Context, workspaceID string, issueID pgtype.UUID) (time.Time, bool, error) {
+	wsID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	keys, err := s.inReviewKeys(ctx, wsID)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if len(keys) == 0 {
+		return time.Time{}, false, nil
+	}
+	since, err := s.h.Queries.LastEnteredReviewAt(ctx, db.LastEnteredReviewAtParams{
+		IssueID:     issueID,
+		WorkspaceID: wsID,
+		Statuses:    keys,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, false, nil
+		}
+		return time.Time{}, false, err
+	}
+	if !since.Valid {
+		return time.Time{}, false, nil
+	}
+	return since.Time, true, nil
 }
 
 func (s routingStore) HasComment(ctx context.Context, workspaceID, issueID string, kind routing.CommentKind) (bool, error) {

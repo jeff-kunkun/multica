@@ -249,3 +249,164 @@ func TestCompleteFromReviewNotifiesParent(t *testing.T) {
 			before, after)
 	}
 }
+
+// Acceptance is per stay in review, not per issue. DENE-617 had a handoff
+// comment and a reviewer task from an earlier stay; the executor held the
+// ticket again and nothing was running. That must read as "not yet handed
+// off", while a live run and a notice from THIS stay must read as already
+// covered.
+func TestAcceptanceFollowsTheCurrentReviewStay(t *testing.T) {
+	ctx := context.Background()
+	fx := testutil.New(testPool, testWorkspaceID, testUserID)
+	store := testHandler.RoutingStore()
+
+	runtimeID := fx.Runtime(t, "acceptance-stay-runtime")
+	executor := fx.Agent(t, "acceptance-stay-executor", runtimeID)
+	reviewer := fx.Agent(t, "acceptance-stay-reviewer", runtimeID)
+	entered := time.Now().Add(-2 * time.Hour)
+
+	waiting := fx.Issue(t, "executor finished, reviewer not started", testutil.Cols{
+		"status":        "in_review",
+		"assignee_type": "agent",
+		"assignee_id":   executor,
+		"reviewer_type": "agent",
+		"reviewer_id":   reviewer,
+	})
+	fx.Insert(t, "activity_log", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"issue_id":     waiting,
+		"actor_type":   "agent",
+		"actor_id":     executor,
+		"action":       "status_changed",
+		"details":      testutil.Raw(`'{"from": "in_progress", "to": "in_review"}'::jsonb`),
+		"created_at":   entered,
+	})
+	fx.Comment(t, waiting, "上一轮交接", testutil.Cols{
+		"author_type":  "system",
+		"type":         "system",
+		"routing_kind": "handoff",
+		"created_at":   entered.Add(-48 * time.Hour),
+	})
+	fx.Task(t, reviewer, testutil.Cols{
+		"issue_id":   waiting,
+		"status":     "completed",
+		"runtime_id": runtimeID,
+		"created_at": entered.Add(-48 * time.Hour),
+	})
+
+	open := routing.Issue{
+		ID: waiting, Status: "in_review",
+		AssigneeType: "agent", AssigneeID: executor,
+		Reviewer: routing.ReviewerRef{Kind: routing.ReviewerAgent, ID: reviewer},
+	}
+	state, err := store.Acceptance(ctx, testWorkspaceID, open)
+	if err != nil {
+		t.Fatalf("acceptance: %v", err)
+	}
+	if state.ActiveRun || state.AgentEngaged {
+		t.Fatalf("state = %+v, want neither an active run nor an engaged reviewer — an earlier stay must not count", state)
+	}
+
+	fx.Task(t, executor, testutil.Cols{
+		"issue_id":   waiting,
+		"status":     "running",
+		"runtime_id": runtimeID,
+	})
+	state, err = store.Acceptance(ctx, testWorkspaceID, open)
+	if err != nil {
+		t.Fatalf("acceptance with a live run: %v", err)
+	}
+	if !state.ActiveRun || state.AgentEngaged {
+		t.Fatalf("state = %+v, want an active run and the reviewer still not engaged", state)
+	}
+
+	held := fx.Issue(t, "reviewer already holds this stay", testutil.Cols{
+		"status":        "in_review",
+		"assignee_type": "agent",
+		"assignee_id":   reviewer,
+		"reviewer_type": "agent",
+		"reviewer_id":   reviewer,
+	})
+	fx.Insert(t, "activity_log", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"issue_id":     held,
+		"actor_type":   "agent",
+		"actor_id":     executor,
+		"action":       "status_changed",
+		"details":      testutil.Raw(`'{"from": "in_progress", "to": "in_review"}'::jsonb`),
+		"created_at":   entered,
+	})
+	fx.Task(t, reviewer, testutil.Cols{
+		"issue_id":   held,
+		"status":     "completed",
+		"runtime_id": runtimeID,
+		"created_at": entered.Add(time.Minute),
+	})
+	state, err = store.Acceptance(ctx, testWorkspaceID, routing.Issue{
+		ID: held, Status: "in_review",
+		AssigneeType: "agent", AssigneeID: reviewer,
+		Reviewer: routing.ReviewerRef{Kind: routing.ReviewerAgent, ID: reviewer},
+	})
+	if err != nil {
+		t.Fatalf("acceptance for a held stay: %v", err)
+	}
+	if state.ActiveRun || !state.AgentEngaged {
+		t.Fatalf("state = %+v, want the reviewer engaged for this stay and no live run", state)
+	}
+
+	person := fx.Issue(t, "a person accepts this", testutil.Cols{
+		"status":        "in_review",
+		"assignee_type": "agent",
+		"assignee_id":   executor,
+		"reviewer_type": "member",
+		"reviewer_id":   testUserID,
+	})
+	fx.Insert(t, "activity_log", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"issue_id":     person,
+		"actor_type":   "member",
+		"actor_id":     testUserID,
+		"action":       "status_changed",
+		"details":      testutil.Raw(`'{"from": "in_progress", "to": "in_review"}'::jsonb`),
+		"created_at":   entered,
+	})
+	fx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id":   testWorkspaceID,
+		"recipient_type": "member",
+		"recipient_id":   testUserID,
+		"type":           "routing_needs_you",
+		"severity":       "action_required",
+		"issue_id":       person,
+		"title":          "上一轮",
+		"created_at":     entered.Add(-48 * time.Hour),
+	})
+	member := routing.Issue{
+		ID: person, Status: "in_review",
+		AssigneeType: "agent", AssigneeID: executor,
+		Reviewer: routing.ReviewerRef{Kind: routing.ReviewerMember, ID: testUserID},
+	}
+	state, err = store.Acceptance(ctx, testWorkspaceID, member)
+	if err != nil {
+		t.Fatalf("acceptance for a person: %v", err)
+	}
+	if state.MemberNotified {
+		t.Fatal("an inbox row from the previous stay counted as this stay's notice")
+	}
+	fx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id":   testWorkspaceID,
+		"recipient_type": "member",
+		"recipient_id":   testUserID,
+		"type":           "routing_needs_you",
+		"severity":       "action_required",
+		"issue_id":       person,
+		"title":          "这一轮",
+		"created_at":     entered.Add(time.Minute),
+	})
+	state, err = store.Acceptance(ctx, testWorkspaceID, member)
+	if err != nil {
+		t.Fatalf("acceptance after this stay's notice: %v", err)
+	}
+	if !state.MemberNotified {
+		t.Fatal("this stay's notice was not seen")
+	}
+}

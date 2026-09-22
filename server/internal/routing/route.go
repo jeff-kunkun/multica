@@ -430,9 +430,18 @@ func (r *Router) decideReviewer(v Verdict, candidates []Seat, executor *Seat, is
 }
 
 // routeInReview hands the ticket to whoever accepts it. This row does not fill
-// a slot, it moves the ticket, so it is not governed by the fill-only rule —
-// but it still runs at most once per issue, because the handoff comment is
-// posted at most once per issue.
+// a slot, it moves the ticket, so it is not governed by the fill-only rule.
+//
+// It runs once per stay in review, not once per issue. A handoff comment from
+// an earlier stay used to be treated as "the reviewer has already been woken",
+// which is how a ticket could enter in_review again — reviewer already
+// decided, no run active — and sit there until a person typed an @ (DENE-617,
+// DENE-772). The comment is still posted at most once; the wake is not.
+//
+// A stay that still has a run in flight is left alone. The executor sets
+// in_review from inside the run that is about to finish, and starting the
+// reviewer in that window races the delivery. The completion callback calls
+// Route again once that run is gone.
 func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings Settings, issue Issue) (Outcome, error) {
 	out := Outcome{State: StateEnabled, Action: ActionHandedOff}
 	decidedHere := false
@@ -460,17 +469,31 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 		}, nil
 	}
 
-	done, err := r.Store.HasComment(ctx, workspaceID, issue.ID, KindHandoff)
+	state, err := r.Store.Acceptance(ctx, workspaceID, issue)
 	if err != nil {
 		return out, err
 	}
-	if done {
-		// Already handed off once. Flipping the status back and forth must not
-		// reassign again or say the same thing twice.
-		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "already handed off"}, nil
+	if state.ActiveRun {
+		// The run that is still open — almost always the executor finishing
+		// the status write — owns the ticket until it ends. Completion calls
+		// this row again.
+		return Outcome{
+			State:           StateEnabled,
+			Action:          ActionNoop,
+			Reason:          "active run in progress",
+			ReviewerWritten: out.ReviewerWritten,
+		}, nil
 	}
 
 	if issue.Reviewer.Kind == ReviewerMember {
+		if state.MemberNotified {
+			return Outcome{
+				State:           StateEnabled,
+				Action:          ActionNoop,
+				Reason:          "already notified this round",
+				ReviewerWritten: out.ReviewerWritten,
+			}, nil
+		}
 		// A person is named in the slot — by hand, or by a routing version
 		// that still wrote people there. The ticket is NOT handed over: an
 		// issue a person holds is one routing never touches again, so
@@ -481,7 +504,43 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 		out.Action = ActionAdvised
 		out.Reason = "reviewer slot names a person: notified, ticket not reassigned"
 		body := r.reviewerIsPersonComment(issue, target, decidedHere)
-		return r.deliverTo(ctx, workspaceID, issue, KindHandoff, body, target, out)
+		delivered, err := r.deliverTo(ctx, workspaceID, issue, KindHandoff, body, target, out)
+		if err != nil {
+			return delivered, err
+		}
+		if delivered.Mentioned {
+			return delivered, nil
+		}
+		// The handoff comment is one per issue, so a later stay finds it
+		// already posted and deliverTo stays silent. The notice for THIS stay
+		// is the inbox row, which is what actually reaches the person.
+		wrote, err := r.Store.NotifyMember(ctx, workspaceID, issue.ID, target)
+		if err != nil {
+			return delivered, err
+		}
+		if !wrote {
+			return Outcome{
+				State:           StateEnabled,
+				Action:          ActionNoop,
+				Reason:          "already notified this round",
+				ReviewerWritten: out.ReviewerWritten,
+			}, nil
+		}
+		delivered.Mentioned = true
+		return delivered, nil
+	}
+
+	if state.AgentEngaged {
+		// This stay already put the ticket on the reviewer and started a run.
+		// A second status flip, the completion callback, and a manual re-route
+		// all land here. The stale sweep is the one path that may wake them
+		// again, and it does not come through this check.
+		return Outcome{
+			State:           StateEnabled,
+			Action:          ActionNoop,
+			Reason:          "already handed off this round",
+			ReviewerWritten: out.ReviewerWritten,
+		}, nil
 	}
 
 	// An agent reviewer. The reference is resolved against the roster on the
@@ -493,16 +552,20 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 	}
 	seatAgent, ok := agentByID(roster, issue.Reviewer.ID)
 	if !ok {
-		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "reviewer seat not in roster"}, nil
-	}
-	if issue.AssigneeType == "agent" && issue.AssigneeID == seatAgent.ID {
-		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "reviewer already holds the issue"}, nil
+		return Outcome{
+			State:           StateEnabled,
+			Action:          ActionNoop,
+			Reason:          "reviewer seat not in roster",
+			ReviewerWritten: out.ReviewerWritten,
+		}, nil
 	}
 	if err := r.Store.Handoff(ctx, workspaceID, issue.ID, "agent", seatAgent.ID); err != nil {
 		return out, err
 	}
 	// No mention: assignment itself starts the seat's run, so an @ here would
-	// only be noise to somebody who is not needed.
+	// only be noise to somebody who is not needed. The comment is once per
+	// issue; a later stay still hands off above, it just does not repeat the
+	// explanation.
 	body := r.handoffComment(issue, seatAgent.Name, decidedHere)
 	return r.deliver(ctx, workspaceID, issue, KindHandoff, body, false, out)
 }
