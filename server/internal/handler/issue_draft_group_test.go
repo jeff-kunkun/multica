@@ -607,10 +607,13 @@ func TestFinalizeIssueDraftGroupRejectsMalformedChildren(t *testing.T) {
 	}
 }
 
-// A group must fail whole when one node's assignee is not invocable by the
-// caller. The check runs before the transaction, so nothing is created — this
-// is the same door the ordinary create path closes.
-func TestFinalizeIssueDraftGroupRejectsUnauthorizedChildAssignee(t *testing.T) {
+// A confirm is one human decision about a whole group, so a single node whose
+// seat cannot be applied must not cost the user the other rows (DENE-694). The
+// unauthorized pair is dropped — never written — the node is created unassigned,
+// and the response names it. The security property is unchanged: the caller
+// cannot dispatch an agent it cannot invoke, it just does not lose the ticket
+// over one.
+func TestFinalizeIssueDraftGroupDropsAChildAssigneeItCannotApply(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -620,17 +623,86 @@ func TestFinalizeIssueDraftGroupRejectsUnauthorizedChildAssignee(t *testing.T) {
 	privateAgentID, _, _ := privateAgentTestFixture(t)
 
 	session := startIssueDraftSession(t)
-	saved := saveIssueDraft(t, session.SessionID, 0, "ready", draftGroupPayload("unauthorized child",
+	saved := saveIssueDraft(t, session.SessionID, 0, "ready", draftGroupPayload("parent with one unappliable seat",
 		assignTo(draftChild("c1", "allowed child", "todo"), agentID),
 		assignTo(draftChild("c2", "child the caller cannot dispatch", "todo"), privateAgentID),
 	))
 
+	var finalized FinalizeIssueDraftResponse
 	testutil.Call(t, testHandler.FinalizeIssueDraft, finalizeRequest(t, session.SessionID, saved.Revision)).
-		Want(http.StatusForbidden)
+		Want(http.StatusOK).JSON(&finalized)
 
-	if got := issueDraftGroupIssueCount(t); got != 0 {
-		t.Fatalf("a forbidden assignee on the last child still created %d issues; the group "+
-			"transaction must never start", got)
+	if got := issueDraftGroupIssueCount(t); got != 3 {
+		t.Fatalf("a group with one unappliable assignee created %d issues, want the root plus both "+
+			"children — one bad seat must not cost the rest of the group", got)
+	}
+	if len(finalized.Issues) != 3 {
+		t.Fatalf("the response carries %d issues, want the whole group of 3", len(finalized.Issues))
+	}
+
+	allowed, blocked := finalized.Issues[1], finalized.Issues[2]
+	if allowed.Title != "allowed child" || blocked.Title != "child the caller cannot dispatch" {
+		t.Fatalf("the group came back in the wrong order: %q then %q", allowed.Title, blocked.Title)
+	}
+	if allowed.AssigneeID == nil || *allowed.AssigneeID != agentID {
+		t.Fatalf("the allowed child lost its assignee too (%v); only the unappliable node may be dropped",
+			allowed.AssigneeID)
+	}
+	if blocked.AssigneeID != nil || blocked.AssigneeType != nil {
+		t.Fatalf("the unappliable child was assigned anyway (%v/%v)", blocked.AssigneeType, blocked.AssigneeID)
+	}
+	var storedAssignee *string
+	dbfx.QueryRow(t, `SELECT assignee_id::text FROM issue WHERE id = $1`, blocked.ID).Scan(&storedAssignee)
+	if storedAssignee != nil {
+		t.Fatalf("the dropped assignee was written to the row anyway: %v", *storedAssignee)
+	}
+
+	if len(finalized.AssignmentWarnings) != 1 {
+		t.Fatalf("assignment warnings = %+v, want the one child that could not be dispatched",
+			finalized.AssignmentWarnings)
+	}
+	warning := finalized.AssignmentWarnings[0]
+	if warning.Key != "c2" {
+		t.Fatalf("warning key = %q, want c2 — the panel maps the warning back to the row by key", warning.Key)
+	}
+	if warning.Title != "child the caller cannot dispatch" {
+		t.Fatalf("warning title = %q, want the node's title, which is what a person is shown", warning.Title)
+	}
+	if warning.Reason == "" {
+		t.Fatal("the warning carries no reason; the user cannot tell why the seat was dropped")
+	}
+}
+
+// A payload that cannot even be parsed into an assignee — here a bogus id — is
+// the same case as a forbidden one: the node is created unassigned and named,
+// not refused. It is the ordinary create path's own refusal reused as a
+// warning, so the two surfaces cannot drift apart.
+func TestFinalizeIssueDraftGroupDropsAMalformedChildAssignee(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cleanupIssueDraftGroup(t)
+
+	broken := draftChild("c1", "child with a bogus seat", "todo")
+	broken["assignee_type"] = "agent"
+	broken["assignee_id"] = "not-a-uuid"
+
+	session := startIssueDraftSession(t)
+	saved := saveIssueDraft(t, session.SessionID, 0, "ready",
+		draftGroupPayload("parent with a malformed seat", broken))
+
+	var finalized FinalizeIssueDraftResponse
+	testutil.Call(t, testHandler.FinalizeIssueDraft, finalizeRequest(t, session.SessionID, saved.Revision)).
+		Want(http.StatusOK).JSON(&finalized)
+
+	if got := issueDraftGroupIssueCount(t); got != 2 {
+		t.Fatalf("a group with a malformed assignee created %d issues, want the root and its child", got)
+	}
+	if len(finalized.AssignmentWarnings) != 1 || finalized.AssignmentWarnings[0].Key != "c1" {
+		t.Fatalf("assignment warnings = %+v, want the one malformed child", finalized.AssignmentWarnings)
+	}
+	if len(finalized.Issues) != 2 || finalized.Issues[1].AssigneeID != nil {
+		t.Fatalf("the malformed child was not created unassigned: %+v", finalized.Issues)
 	}
 }
 
