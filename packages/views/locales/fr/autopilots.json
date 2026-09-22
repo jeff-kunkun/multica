@@ -340,7 +340,8 @@
         "label": "Exécution seule",
         "description": "Exécution silencieuse, aucune tâche créée"
       }
-    }
+    },
+    "schedule_disabled_reason": "Cette automatisation a plusieurs planifications — modifiez-les sur sa page de détail."
   },
   "schedule_editor": {
     "time_label": "Heure",

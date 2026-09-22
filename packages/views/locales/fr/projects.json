@@ -136,7 +136,30 @@
     "mode_badge_worktree_tooltip": "Les exécutions ont lieu simultanément dans leur propre worktree git et restituent une branche. Votre copie de travail reste intacte.",
     "toast_local_mode_updated": "Mode d'exécution mis à jour",
     "toast_local_mode_update_failed": "Impossible de mettre à jour le mode d'exécution",
-    "mode_badge_in_place": "Direct"
+    "mode_badge_in_place": "Direct",
+    "chat_hint_shared_prefix": "L'agent travaillera en parallèle dans l'espace de travail partagé",
+    "chat_hint_shared_note": "Isolez vous-même les branches via des worktrees par dépôt. Multica ne verrouillera pas ce répertoire.",
+    "mode_shared_title": "Partager cet espace de travail",
+    "mode_shared_description": "Les exécutions ont lieu simultanément dans ce dossier. Isolez chaque tâche avec vos propres worktrees par dépôt — Multica ne verrouillera pas le répertoire et n'y écrira pas ses fichiers.",
+    "mode_shared_needs_server_upgrade": "Votre serveur Multica est trop ancien pour prendre en charge le mode espace de travail partagé : il verrouillerait silencieusement ce dossier et n'exécuterait qu'une tâche à la fois. Mettez le serveur à jour, puis activez cette option.",
+    "mode_shared_uses_local_override": "Ce serveur n'enregistre pas le mode partagé. Multica enregistrera le dossier en mode direct et ignorera le verrouillage du répertoire sur cette machine, de sorte que les exécutions puissent tout de même démarrer ensemble.",
+    "toast_local_shared_via_daemon": "Le cloud officiel n'accepte pas le mode partagé. Ce dossier s'exécutera en parallèle sur cette machine, sans verrouillage du répertoire.",
+    "mode_shared_rejected_by_server": "Le cloud officiel n'accepte pas la valeur d'énumération du mode partagé. Basculement vers le mode parallèle local sans verrouillage.",
+    "mode_badge_shared": "Partagé",
+    "mode_badge_shared_tooltip": "Les exécutions ont lieu simultanément dans ce dossier. Les tâches s'isolent via des worktrees par dépôt ; Multica ne verrouille pas le répertoire.",
+    "duplicate_title": "« {{repo}} » est configuré deux fois",
+    "duplicate_body": "Un répertoire local et {{remotes}} entrée(s) de dépôt distant pointent vers le même dépôt. Les tâches de cette machine utilisent le répertoire local : les entrées distantes ne font donc que provoquer le téléchargement d'une seconde copie.",
+    "duplicate_merge": "Fusionner dans le répertoire local",
+    "duplicate_merging": "Fusion en cours...",
+    "duplicate_merged": "Entrées distantes redondantes supprimées",
+    "mode_worktree_cost": "Consomme de l'espace disque sur VOTRE disque : une copie de travail complète par tâche, créée sous {{path}}. Vous pouvez les ouvrir, et Multica ne supprime jamais une copie qui contient encore des modifications non validées.",
+    "mode_worktree_cost_unknown_path": "Consomme de l'espace disque sur VOTRE disque : une copie de travail complète par tâche, créée dans un dossier voisin de ce dépôt. Vous pouvez les ouvrir, et Multica ne supprime jamais une copie qui contient encore des modifications non validées.",
+    "local_directory_default_hint": "Les tâches de cette machine s'exécutent dans le premier répertoire de cette liste. Utilisez les flèches pour les réordonner ; les autres restent disponibles en lecture seule.",
+    "local_directory_move_up_tooltip": "Déplacer vers le haut",
+    "local_directory_move_down_tooltip": "Déplacer vers le bas",
+    "mode_worktree_root_label": "Emplacement des copies de travail",
+    "mode_worktree_root_not_absolute": "Utilisez un chemin absolu — un chemin relatif atterrirait là où le daemon se trouve en cours d'exécution.",
+    "mode_worktree_root_inside_repo": "Ce chemin se trouve à l'intérieur du dépôt. Les copies qui y seraient créées apparaîtraient dans votre propre git status et nécessiteraient une entrée .gitignore — choisissez plutôt un dossier à côté."
   },
   "delete_dialog": {
     "title": "Supprimer le projet",
@@ -168,5 +191,17 @@
     "direction_desc": "Décroissant",
     "section_columns": "Colonnes",
     "view": "Vue"
+  },
+  "members": {
+    "section_header": "Membres",
+    "empty": "Aucun membre pour l'instant.",
+    "add_button": "Ajouter un membre",
+    "add_placeholder": "Ajouter un membre de l'espace de travail...",
+    "no_results": "Aucun résultat",
+    "remove_tooltip": "Retirer",
+    "toast_added": "Membre ajouté",
+    "toast_add_failed": "Échec de l'ajout du membre",
+    "toast_removed": "Membre retiré",
+    "toast_remove_failed": "Échec du retrait du membre"
   }
 }

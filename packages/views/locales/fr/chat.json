@@ -32,7 +32,9 @@
     "change_project_context": "Changer le contexte de projet",
     "remove_project_context": "Retirer le contexte de projet",
     "no_projects": "Aucun projet pour l'instant",
-    "project_context_unsupported": "La description du projet ne s'appliquera pas — le daemon de cet agent doit être mis à jour"
+    "project_context_unsupported": "La description du projet ne s'appliquera pas — le daemon de cet agent doit être mis à jour",
+    "remove_all_project_context": "Retirer tout le contexte de projet",
+    "switch_project": "Passer à un autre projet…"
   },
   "queue": {
     "title_one": "{{count}} message en file d'attente",
@@ -72,7 +74,10 @@
       "context_overflow": "Cette conversation est devenue trop longue pour le modèle. Démarrez une nouvelle session, ou découpez votre demande en étapes plus courtes.",
       "runtime_missing_executable": "Le CLI de l'agent n'a pas pu être exécuté sur cette machine. Vérifiez qu'il est correctement installé et présent dans le PATH, puis réessayez.",
       "runtime_version_unsupported": "Le CLI de l'agent est trop ancien pour ce runtime. Mettez-le à jour, puis réessayez.",
-      "fallback": "Une erreur est survenue et l'agent n'a pas pu terminer sa réponse. Veuillez réessayer."
+      "fallback": "Une erreur est survenue et l'agent n'a pas pu terminer sa réponse. Veuillez réessayer.",
+      "antigravity_session_token_expired": "Cette exécution Antigravity a duré plus longtemps que le jeton de connexion du CLI, si bien que le modèle a cessé de l'accepter. Votre connexion est toujours valide — la prochaine exécution démarrera une nouvelle session et le rechargera, il vous suffit donc de renvoyer votre message.",
+      "antigravity_not_logged_in": "Le CLI Antigravity indique qu'il n'est pas connecté sur la machine qui exécute l'agent. Lancez `agy -p ping` sur cette machine : s'il répond, renvoyez simplement votre message — la prochaine exécution démarrera une nouvelle session ; s'il échoue immédiatement, reconnectez-vous à Antigravity.",
+      "provider_server_error": "Le fournisseur du modèle a renvoyé une erreur de son côté — son API ou son service d'authentification — alors même que le compte de l'agent est valide. Se reconnecter n'y changera rien. Veuillez réessayer dans un instant."
     },
     "tools_one": "{{count}} outil",
     "tools_other": "{{count}} outils",

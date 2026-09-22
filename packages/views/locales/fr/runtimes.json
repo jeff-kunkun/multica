@@ -33,7 +33,8 @@
     "action": "Commencer avec Mika",
     "failed": "Impossible de démarrer Mika",
     "dialog_title": "Où Mika doit-il s'exécuter ?",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "dialog_description": "Choisissez le runtime que Mika utilisera. Vous pourrez le modifier plus tard dans les paramètres."
   },
   "machine": {
     "search_placeholder": "Rechercher des machines…",
@@ -217,7 +218,8 @@
     "success_title": "Ordinateur connecté",
     "success_description": "Ordinateur connecté. Vous pouvez maintenant créer un agent.",
     "view_runtime": "Voir le runtime",
-    "create_agent": "Créer un agent"
+    "create_agent": "Créer un agent",
+    "live_listening_hint": "Nous le détecterons dès que le daemon démarrera — généralement en moins d'une minute."
   },
   "cloud_runtime": {
     "action": "Cloud Runtime",
@@ -256,7 +258,8 @@
     "validation": {
       "instance_type_required": "Le type d'instance est obligatoire",
       "disk_size_invalid": "La taille du disque doit être un entier positif"
-    }
+    },
+    "create_hint": "Choisissez un nom, un type d'instance et une taille de disque. Fleet s'occupe du reste."
   },
   "update": {
     "cli_version_label": "Version du CLI :",
@@ -316,7 +319,8 @@
     "pending_health_warning": "En attente de synchronisation du daemon",
     "pending_health_error": "Erreur d'enregistrement",
     "pending_health_disabled": "Désactivé",
-    "pending_cli_unknown": "en attente"
+    "pending_cli_unknown": "en attente",
+    "col_plan_limits": "Limites du forfait"
   },
   "profiles": {
     "cta": "Ajouter un runtime",
@@ -462,5 +466,26 @@
     "table_cache_r": "Cache L",
     "table_cache_w": "Cache É",
     "no_data": "Aucune donnée de consommation pour l'instant"
+  },
+  "plan_limits": {
+    "title": "Limites du forfait",
+    "observed": "Mis à jour {{when}}",
+    "unavailable": "Limites du forfait indisponibles",
+    "unavailable_hint": "Aucun instantané de quota n'a été transmis. Codex en transmet un après une session CLI ; les daemons plus anciens et les CLI non pris en charge restent indisponibles.",
+    "unavailable_hint_claude": "Claude Code ne transmet actuellement les limites du forfait qu'après avoir atteint une limite de session.",
+    "limit_reached": "Limite atteinte",
+    "used": "{{percent}} % utilisés",
+    "resets": "Réinitialisation {{when}}",
+    "window_5h": "Fenêtre de 5 heures",
+    "window_7d": "Fenêtre de 7 jours",
+    "window_primary": "Fenêtre actuelle",
+    "window_secondary": "Fenêtre secondaire",
+    "window_pro": "Pro",
+    "window_flash": "Flash",
+    "window_flash_lite": "Flash Lite",
+    "window_credits": "Crédits",
+    "window_balance_cny": "Solde CNY",
+    "window_balance_usd": "Solde USD",
+    "switch_source": "Basculer sur le quota {{provider}}"
   }
 }

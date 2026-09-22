@@ -47,7 +47,8 @@
       "cancel": "Annuler",
       "save": "Enregistrer",
       "saving": "Enregistrement…",
-      "save_failed": "L'état n'a pas pu être enregistré."
+      "save_failed": "L'état n'a pas pu être enregistré.",
+      "behavior_hint": "Cet état se comporte exactement comme {{category}}."
     },
     "archive_dialog": {
       "retry": "Réessayer l'archivage",
@@ -71,7 +72,13 @@
       "unstarted": "Travail non démarré, qu'il soit planifié ou dans le backlog.",
       "started": "Travail en cours, en relecture ou bloqué.",
       "done": "Travail terminé.",
-      "closed": "Travail qui ne sera pas terminé."
+      "closed": "Travail qui ne sera pas terminé.",
+      "backlog": "En attente. Affecter une tâche ici ne démarre jamais un agent.",
+      "todo": "En file. Déplacer une tâche ici démarre l'agent qui lui est affecté.",
+      "in_progress": "En cours de traitement.",
+      "in_review": "Livré, en attente d'une relecture humaine. Clôt l'exécution de l'autopilote.",
+      "blocked": "À l'arrêt, en attente d'une dépendance extérieure.",
+      "cancelled": "Abandonné."
     },
     "built_in_descriptions": {
       "backlog": "En attente. Affecter une tâche ici ne démarre jamais un agent.",
@@ -81,7 +88,8 @@
       "blocked": "À l'arrêt, en attente d'une dépendance extérieure.",
       "done": "Terminé.",
       "cancelled": "Abandonné."
-    }
+    },
+    "description": "Définissez le flux de travail que suivent vos tâches. Chaque état tient son comportement de sa catégorie."
   },
   "quick_actions": {
     "title": "Actions rapides",
@@ -160,12 +168,14 @@
       "sync_failed": "Échec de l'enregistrement de votre préférence de fuseau horaire."
     },
     "sticky_comment_bar": {
-      "title": "Épingler la barre de commentaire en bas"
+      "title": "Épingler la barre de commentaire en bas",
+      "hint": "Garder la barre de commentaire épinglée en bas pendant le défilement d'une page de tâche."
     },
     "issue_title": "Création de tâches",
     "comments_title": "Commentaires",
     "device_hint": "Enregistré sur cet appareil.",
-    "issue_scope": "Ces préférences s'appliquent à cet espace de travail sur cet appareil. Elles modifient uniquement les champs visibles lors de la création d'une tâche."
+    "issue_scope": "Ces préférences s'appliquent à cet espace de travail sur cet appareil. Elles modifient uniquement les champs visibles lors de la création d'une tâche.",
+    "description": "Personnalisez votre façon de travailler dans Multica."
   },
   "shortcuts": {
     "title": "Raccourcis clavier",
@@ -316,7 +326,9 @@
       "project": "Projet",
       "due_date": "Date d'échéance",
       "start_date": "Date de début"
-    }
+    },
+    "quick_create_description": "Champs affichés dans la barre de création avec un agent.",
+    "manual_create_description": "Champs affichés dans la barre de création manuelle."
   },
   "mcp": {
     "title": "MCP",
@@ -347,7 +359,8 @@
     "removed_toast": "Serveur MCP partagé retiré",
     "save_failed_toast": "Impossible d'enregistrer le serveur MCP partagé",
     "rename_failed_toast": "Impossible de renommer le serveur MCP partagé",
-    "remove_failed_toast": "Impossible de retirer le serveur MCP partagé"
+    "remove_failed_toast": "Impossible de retirer le serveur MCP partagé",
+    "empty_description": "Ajoutez un serveur ici, puis assignez-le aux agents qui doivent l'utiliser depuis leur propre onglet MCP."
   },
   "page": {
     "title": "Paramètres",
@@ -373,7 +386,9 @@
       "quick_actions": "Actions rapides",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "Facturation"
+      "billing": "Facturation",
+      "config_transfer": "Export et import",
+      "routing": "Routage"
     },
     "groups": {
       "personal": "Personnel",
@@ -475,8 +490,10 @@
       "deleted": "Plugin publié supprimé",
       "installed_version": "Utilisés",
       "review_install": "Vérifier et installer",
-      "review_upgrade": "Vérifier et mettre à niveau"
-    }
+      "review_upgrade": "Vérifier et mettre à niveau",
+      "description": "Envoyez un paquet de plugin. Multica le stocke et le diffuse, donc l'auteur d'un plugin n'a pas besoin de son propre serveur."
+    },
+    "description": "Publiez des plugins dans cet espace de travail, puis installez une version précise et vérifiez exactement ce à quoi elle a accès."
   },
   "properties": {
     "title": "Propriétés",
@@ -641,7 +658,8 @@
     "system": {
       "title": "Notifications système",
       "description": "Afficher les notifications système lorsque Multica est en arrière-plan.",
-      "label": "Afficher les notifications système"
+      "label": "Afficher les notifications système",
+      "hint": "Afficher une bannière du système d'exploitation pour les nouveaux éléments de la boîte de réception lorsque l'application n'a pas le focus."
     },
     "browser": {
       "label": "Notifications du navigateur",
@@ -735,7 +753,17 @@
     "deleting": "Suppression...",
     "toast_delete_failed": "Échec de la suppression de l'espace de travail",
     "confirm_cancel": "Annuler",
-    "confirm_action": "Confirmer"
+    "confirm_action": "Confirmer",
+    "automation_limits_title": "Limites d'exécution des agents",
+    "automation_limits_description": "Garde-fous qui empêchent les agents de dépenser des tokens sans fin. Lorsqu'une limite est atteinte, le travail s'arrête et les personnes responsables sont prévenues.",
+    "chain_budget_label": "Tours de relais",
+    "chain_budget_description": "Combien de fois les agents peuvent se passer le travail après une demande humaine. Un commentaire humain remet le compteur à zéro.",
+    "chain_budget_unit": "tours",
+    "chain_budget_unlimited": "Illimité",
+    "timeout_label": "Limite de durée d'exécution",
+    "timeout_description": "Arrêter une exécution qui dure plus longtemps que cette limite, puis prévenir le responsable du projet, le créateur de la tâche ou le propriétaire de l'espace de travail en indiquant sa durée. L'arrêt d'une sous-tâche est aussi signalé sur la tâche parente.",
+    "timeout_unit": "minutes",
+    "timeout_unlimited": "Illimité"
   },
   "delete_workspace_dialog": {
     "title": "Supprimer l'espace de travail",
@@ -790,7 +818,9 @@
     "section_repositories": "Dépôts",
     "repositories_shortcut_label": "Les URL de dépôts se trouvent dans l'onglet Dépôts",
     "repositories_shortcut_link": "Gérer les dépôts →",
-    "toast_failed": "Échec de la mise à jour des paramètres GitHub"
+    "toast_failed": "Échec de la mise à jour des paramètres GitHub",
+    "page_description": "Connectez une GitHub App, contrôlez la façon dont les pull requests apparaissent dans Multica et décidez ce que vos agents laissent dans l'historique des commits.",
+    "feature_auto_link_description": "Associer les titres de PR et les noms de branches aux identifiants de tâches, ainsi que les identifiants qui suivent un mot-clé de clôture dans le corps, et créer le lien automatiquement."
   },
   "vcs": {
     "section_title": "Fournisseurs git (auto-hébergés)",
@@ -904,7 +934,9 @@
     "install_error_installer_bind": "Le bot a été installé, mais votre identité Lark n'a pas pu être associée. Réessayez ou contactez le support.",
     "install_error_session_lost": "La session d'installation a expiré ou a été perdue. Scannez à nouveau pour recommencer.",
     "install_error_forbidden": "Vous n'avez plus la permission d'installer des bots Lark dans cet espace de travail. Demandez à un administrateur de l'espace de travail pour continuer.",
-    "install_error_generic": "Échec de l'installation. Réessayez."
+    "install_error_generic": "Échec de l'installation. Réessayez.",
+    "install_scan_hint_feishu": "Feishu → Scanner → autorisez le nouveau PersonalAgent.",
+    "install_scan_hint_lark": "Lark → Scanner → autorisez le nouveau PersonalAgent."
   },
   "composio": {
     "section_title": "Composio",
@@ -1041,7 +1073,8 @@
     "byo_submitting": "Connexion…",
     "byo_cancel": "Annuler",
     "byo_success_toast": "Bot DingTalk connecté",
-    "byo_failed_toast": "Impossible de connecter le bot DingTalk"
+    "byo_failed_toast": "Impossible de connecter le bot DingTalk",
+    "groups_overview_description": "Chaque connexion affiche son agent, son bot DingTalk et les groupes récemment observés."
   },
   "wecom": {
     "section_title": "WeCom",
@@ -1179,7 +1212,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "Mises à jour"
+      "updates": "Mises à jour",
+      "server": "Serveur"
     },
     "updates": {
       "title": "Mises à jour",
@@ -1192,7 +1226,8 @@
       "up_to_date": "Vous avez la dernière version.",
       "downloading": "La v{{version}} se télécharge en arrière-plan — vous serez averti quand elle sera prête à installer.",
       "check_now": "Vérifier maintenant",
-      "checking": "Vérification…"
+      "checking": "Vérification…",
+      "description": "Contrôlez les mises à jour automatiques en arrière-plan ou recherchez manuellement une nouvelle version."
     },
     "daemon": {
       "title": "Démon",
@@ -1267,7 +1302,73 @@
       "waiting_logs": "En attente de journaux…",
       "reconnect_failed": "Impossible de reconnecter le démon",
       "try_again_moment": "Veuillez réessayer dans un instant.",
-      "try_again": "Veuillez réessayer."
+      "try_again": "Veuillez réessayer.",
+      "description": "Configurez le comportement du daemon d'agent local avec l'application de bureau.",
+      "diagnostics_description": "Détails d'identification et de connexion. Utile pour signaler un bug ou comprendre pourquoi un runtime n'apparaît pas.",
+      "waiting_logs_description": "Les nouvelles entrées apparaîtront en temps réel."
+    },
+    "server": {
+      "title": "Serveur",
+      "description": "Voyez à quel serveur cette application est connectée et basculez entre le cloud officiel et une instance auto-hébergée.",
+      "current_title": "Serveur actuel",
+      "host": "Hôte",
+      "kind": "Type",
+      "kind_official": "Cloud officiel",
+      "kind_self_hosted": "Auto-hébergé",
+      "profile": "Profil",
+      "api_url": "URL de l'API",
+      "switch_title": "Changer de serveur",
+      "switch_description": "Le nouveau serveur n'est utilisé qu'après avoir complètement quitté et rouvert l'application. Les sessions de connexion sont conservées par serveur.",
+      "preset_official": "Cloud officiel",
+      "preset_official_description": "multica.ai",
+      "preset_self_hosted": "Auto-hébergé",
+      "preset_self_hosted_description": "ai.ferryway.cc",
+      "default_entry_badge": "Entrée par défaut",
+      "current_badge": "Actuel",
+      "custom_url": "URL personnalisée",
+      "custom_url_description": "http ou https uniquement. N'indiquez ni nom d'utilisateur ni mot de passe.",
+      "custom_url_placeholder": "https://",
+      "switch": "Changer",
+      "switch_to_official": "Passer au cloud officiel",
+      "confirm_title": "Changer de serveur ?",
+      "confirm_description": "Quittez complètement l'application avec {{shortcut}} et rouvrez-la pour que le nouveau serveur prenne effet. Fermer la fenêtre ne suffit pas.",
+      "confirm_autostop": "L'arrêt automatique à la fermeture est activé. Après avoir quitté, le daemon de cette machine sur le serveur actuel s'arrêtera et les agents qui s'y trouvent cesseront de s'exécuter.",
+      "confirm_switch_back": "Pour revenir au cloud officiel plus tard, choisissez Cloud officiel sur cette page.",
+      "confirm_export_first": "Les discussions du cloud officiel ne suivent pas lors du changement de serveur. Exportez d'abord depuis Paramètres → Espace de travail → Migrer entre environnements.",
+      "confirm_cancel": "Annuler",
+      "confirm_action": "Changer",
+      "restart_title": "Quitter complètement et rouvrir",
+      "restart_description": "Le changement de serveur est enregistré. Quittez avec {{shortcut}} et rouvrez Multica Desktop — fermer la fenêtre ne suffit pas.",
+      "invalid_url": "Saisissez une URL http ou https valide.",
+      "switch_failed": "Impossible de changer de serveur"
+    },
+    "worktree_cleanup": {
+      "title": "Copies de travail sur cette machine",
+      "description": "Le mode parallèle crée une copie de travail par tâche, à côté du dépôt, sur votre propre disque. Elles y restent pour que vous puissiez les ouvrir après une exécution — c'est ici que vous décidez quand Multica peut les supprimer.",
+      "scanning": "Recherche des copies de travail…",
+      "daemon_offline": "Démarrez le daemon local pour voir les copies de travail sur cette machine.",
+      "load_failed": "Impossible de lire les copies de travail sur cette machine.",
+      "enable_title": "Supprimer automatiquement les copies fusionnées",
+      "enable_description": "Désactivé par défaut. Une fois activé, une copie n'est supprimée que si elle appartient à Multica, qu'elle est inactive, propre, plus ancienne que le délai ci-dessous et que ses modifications sont déjà dans la branche principale — qu'elles y aient été fusionnées ou squashées. Si l'une de ces conditions n'est pas remplie, elle est conservée.",
+      "min_age_title": "Conserver pendant au moins",
+      "min_age_description": "Nombre de jours après la dernière exécution d'une copie avant qu'elle puisse être supprimée. Des jours, pas des heures : une exécution que vous comptiez reprendre le lundi doit encore être là après des vacances.",
+      "trunk_title": "Fusionner dans",
+      "trunk_description": "La branche dans laquelle le travail d'une copie doit déjà se trouver, qu'il y ait été fusionné ou squashé. Laissez vide pour utiliser la branche par défaut de chaque dépôt.",
+      "trunk_placeholder": "main",
+      "summary": "{{count}} copies de travail · {{total}} sur le disque · {{reclaimable}} seraient supprimées",
+      "advisory": "Le nettoyage automatique est désactivé, rien de ce qui suit ne sera donc supprimé. Voici ce qu'il ferait si vous l'activiez.",
+      "empty": "Aucune copie de travail sur cette machine pour l'instant. Le mode parallèle en crée une par tâche.",
+      "last_run": "dernière exécution il y a {{days}} j",
+      "remove_now": "Supprimer maintenant",
+      "removed": "Copie de travail supprimée",
+      "reason_removable": "Fusionnée, propre et inactive — celle-ci serait supprimée.",
+      "reason_removable_squash": "Squashée dans la branche principale, propre et inactive — ses modifications sont dans la branche principale même si ses commits n'y sont pas, donc celle-ci serait supprimée.",
+      "reason_uncommitted": "Conservée : elle contient encore des modifications non validées. Multica ne supprime jamais une copie qui détient du travail introuvable ailleurs.",
+      "reason_unmerged": "Conservée : sa branche n'est pas encore dans la branche principale.",
+      "reason_too_recent": "Conservée : sa dernière exécution est trop récente.",
+      "reason_in_use": "Conservée : une tâche s'y exécute en ce moment.",
+      "reason_not_ours": "Conservée : Multica n'a pas créé celle-ci, elle ne lui appartient donc pas.",
+      "reason_unknown": "Conservée : son état n'a pas pu être lu, et l'incertitude n'autorise pas à supprimer."
     }
   },
   "members": {
@@ -1319,6 +1420,10 @@
       "member": {
         "label": "Membre",
         "description": "Créer des tâches et y travailler"
+      },
+      "guest": {
+        "label": "Invité",
+        "description": "Lecture seule, ne voit que ce qui est partagé avec lui"
       }
     },
     "share_links_title": "Liens de partage",
@@ -1340,7 +1445,31 @@
     "expiry_24h": "24 heures",
     "expiry_7d": "7 jours",
     "expiry_30d": "30 jours",
-    "expiry_never": "Jamais"
+    "expiry_never": "Jamais",
+    "role_blocked": {
+      "owner_requires_owner": "Seul un propriétaire peut attribuer le rôle de propriétaire"
+    },
+    "role_select_label": "Rôle de {{name}}",
+    "unknown_role": "Rôle inconnu",
+    "unknown_role_title": "Ce membre détient un rôle que cette version de l'application ne connaît pas. Mettez l'application à jour pour le modifier.",
+    "role_impact_title": "{{name}} est désormais {{role}}",
+    "role_impact_gained": "Gagne : {{items}}",
+    "role_impact_lost": "Perd : {{items}}",
+    "role_impact_none": "Rien d'autre ne change.",
+    "members_loading": "Chargement des membres…",
+    "empty_title": "Aucun membre pour l'instant",
+    "empty_description": "Invitez un coéquipier à partager cet espace de travail.",
+    "empty_action": "Inviter un membre",
+    "capabilities": {
+      "view_shared": "voir ce qui est partagé avec lui",
+      "see_workspace_scope": "voir les ressources de tout l'espace de travail",
+      "create_resources": "créer des tâches, des projets et des dépôts",
+      "comment_and_edit": "commenter, modifier et changer le statut",
+      "be_assigned": "être assigné et déclencher des exécutions d'agent",
+      "manage_members": "inviter des membres et changer les rôles",
+      "workspace_settings": "paramètres de l'espace de travail, intégrations et clés",
+      "billing_and_transfer": "facturation, transfert et suppression"
+    }
   },
   "integrations": {
     "code_title": "Code et dépôts",
@@ -1355,6 +1484,226 @@
     "status_not_connected": "Non connecté",
     "status_loading": "Vérification...",
     "status_unknown": "État indisponible",
-    "channel_hint": "Discutez avec les agents et créez des tâches depuis {{channel}}."
+    "channel_hint": "Discutez avec les agents et créez des tâches depuis {{channel}}.",
+    "description": "Connectez vos outils et gérez chaque intégration au même endroit."
+  },
+  "config_transfer": {
+    "title": "Export et import",
+    "description": "Téléchargez la configuration de cet espace de travail au format JSON, puis importez-la dans un autre espace de travail pour recréer les agents, les squads, les automatisations, les projets et la configuration des tâches. Les secrets ne sont jamais écrits dans le fichier — renseignez-les à nouveau après l'import.",
+    "read_only": "Vous pouvez consulter cette page, mais vous ne pouvez ni exporter ni importer.",
+    "read_only_description": "Les propriétaires et administrateurs de l'espace de travail peuvent exporter et importer la configuration.",
+    "unsupported_title": "Ce serveur ne peut pas exporter ni importer la configuration",
+    "unsupported": "Ce serveur ne prend pas en charge l'export et l'import de configuration. Il vous faut une instance auto-hébergée kun.",
+    "unsupported_use_migration": "Pour migrer depuis le cloud officiel, utilisez « Migrer entre environnements (discussions incluses) » ci-dessus.",
+    "export": {
+      "title": "Export",
+      "description": "Télécharge un paquet JSON de la configuration de cet espace de travail.",
+      "hint": "Le nom du fichier inclut l'identifiant d'URL de l'espace de travail et la date du jour.",
+      "button": "Exporter la configuration",
+      "exporting": "Exportation…",
+      "success": "Configuration téléchargée.",
+      "failed": "Impossible d'exporter la configuration.",
+      "secrets_title": "Ces secrets sont omis du fichier. Après l'import, renseignez-les à la main :"
+    },
+    "import": {
+      "title": "Import",
+      "description": "Prévisualisez d'abord le fichier, puis appliquez-le à cet espace de travail.",
+      "choose_file": "Choisir un fichier JSON",
+      "choose_hint": "Le fichier est vérifié localement, puis prévisualisé par une simulation.",
+      "replace_file": "Choisir un autre fichier",
+      "previewing": "Prévisualisation…",
+      "applying": "Importation…",
+      "confirm": "Importer dans cet espace de travail",
+      "cancel": "Annuler",
+      "on_conflict": "Si un élément existe déjà",
+      "on_conflict_hint": "S'applique aux noms qui existent déjà dans cet espace de travail.",
+      "on_conflict_fail": "Arrêter",
+      "on_conflict_overwrite": "Écraser",
+      "on_conflict_rename": "Renommer l'élément entrant",
+      "on_conflict_skip": "Ignorer",
+      "stats_created": "Créés",
+      "stats_updated": "Mis à jour",
+      "stats_renamed": "Renommés",
+      "stats_skipped": "Ignorés",
+      "stats_failed": "En échec",
+      "conflicts_title": "Conflits et éléments ignorés",
+      "unmapped_title": "Références qui n'ont pas pu être associées",
+      "secrets_title": "Renseignez à nouveau ces secrets après l'import. La copie n'est pas complète tant que ce n'est pas fait.",
+      "warnings_title": "Remarques",
+      "warning_autopilots_paused": "{{count}} automatisations ont été importées en pause. Activez-les quand vous êtes prêt.",
+      "warning_issue_prefix_skipped": "Le préfixe des tâches n'a pas été appliqué car cet espace de travail contient déjà des tâches.",
+      "invalid_file": "Ce fichier n'est pas un paquet de configuration Multica.",
+      "unsupported_version": "Ce fichier de configuration utilise une version que cette application ne peut pas importer.",
+      "failed": "Impossible d'importer la configuration.",
+      "conflict_error": "L'import s'est arrêté à cause d'un conflit.",
+      "partial_failure": "L'import s'est arrêté en cours de route. Certains lots n'ont pas été appliqués.",
+      "success": "Configuration importée.",
+      "action_created": "créé",
+      "action_updated": "mis à jour",
+      "action_renamed": "renommé",
+      "action_skipped": "ignoré",
+      "action_failed": "en échec",
+      "reason_exists": "existe déjà",
+      "reason_assignee_unmapped": "impossible d'associer l'assigné",
+      "reason_leader_unmapped": "impossible d'associer le chef",
+      "reason_category_mismatch": "la catégorie ne correspond pas",
+      "reason_type_mismatch": "le type ne correspond pas",
+      "reason_daemon_not_in_target": "le runtime n'est pas dans cet espace de travail",
+      "reason_db_error": "erreur de base de données",
+      "confirm_title": "Importer cette configuration ?",
+      "confirm_description": "Cette action écrit la configuration dans l'espace de travail actuel. Elle ne peut pas être annulée depuis cette page."
+    },
+    "migration": {
+      "title": "Migrer entre environnements (discussions incluses)",
+      "description": "Regroupez la configuration de cet espace de travail et vos discussions dans un fichier zip.",
+      "export_button": "Exporter en zip",
+      "export_hint": "Choisissez où enregistrer le zip. Il contient l'historique de vos discussions — gardez-le privé.",
+      "export_source": "Exportera depuis {{workspace}} sur {{host}}.",
+      "export_order_hint": "Exportez d'abord ici, puis changez de serveur. Après le passage à une instance auto-hébergée, la source de l'export devient cette instance.",
+      "exporting": "Exportation…",
+      "export_success": "Export terminé.",
+      "import_button": "Importer depuis un zip",
+      "import_hint": "Choisissez un zip, prévisualisez la simulation, puis appliquez-le à cet espace de travail.",
+      "previewing": "Prévisualisation…",
+      "applying": "Importation…",
+      "confirm": "Importer dans cet espace de travail",
+      "confirm_title": "Importer ce zip ?",
+      "confirm_description": "Cette action écrit la configuration et les discussions dans l'espace de travail actuel. Elle ne peut pas être annulée depuis cette page.",
+      "cancel": "Annuler",
+      "success": "Import terminé.",
+      "failed": "Impossible de migrer.",
+      "target_unsupported": "L'instance cible doit être une version kun.",
+      "cli_too_old": "Le CLI de Desktop est trop ancien pour le transfert.",
+      "bundle_corrupt": "Ce zip n'est pas un paquet de transfert valide.",
+      "progress_sessions": "{{done}} / {{total}} sessions",
+      "progress_session_current": "Session en cours : {{title}}",
+      "progress_attachments": "{{count}} pièces jointes téléchargées",
+      "progress_attachments_total": "{{done}} / {{total}} pièces jointes",
+      "progress_attachments_bytes": "pièces jointes {{done}} / {{total}}",
+      "progress_issues": "{{done}} / {{total}} tâches",
+      "progress_stage_config": "Export de la configuration…",
+      "progress_stage_conversations": "Export des discussions…",
+      "progress_stage_issues": "Export des tâches…",
+      "progress_estimating": "Estimation de ce qu'il y a à exporter…",
+      "progress_finalizing": "Écriture du zip…",
+      "progress_keeps_running": "Quitter cette page ne l'interrompt pas ; en revenant, vous retrouvez la progression.",
+      "saved_as": "Enregistré sous {{name}} ({{size}})",
+      "runtimes_title": "Association des runtimes",
+      "gaps_title": "Lacunes de l'export source",
+      "option_activate_autopilots": "Activer les automatisations après l'import",
+      "option_activate_autopilots_hint": "Les automatisations importées se déclenchent dès la fin de l'import. Décochez pour les importer en pause.",
+      "option_apply_workspace_settings": "Appliquer les paramètres de l'espace de travail",
+      "option_apply_workspace_settings_hint": "Le contexte, les dépôts et les paramètres d'attribution voyagent dans le paquet et s'appliquent à cet espace de travail.",
+      "option_apply_issue_prefix": "Adopter le préfixe des tâches",
+      "option_apply_issue_prefix_hint": "Modifie le préfixe de toutes les futures tâches d'ici. Les références de style `DENE-123` présentes dans les corps importés continuent de pointer vers les bonnes tâches ; laissez donc cette option activée, sauf si vous voulez le préfixe propre à cet espace de travail. N'est appliqué que tant que cet espace de travail n'a encore aucune tâche.",
+      "autopilots_paused": "Automatisations : {{imported}} importées, dont {{paused}} en pause.",
+      "autopilots_active": "Automatisations : {{imported}} importées, qui se déclencheront dès la fin de l'import.",
+      "autopilots_activate_hint": "Cochez « Activer les automatisations après l'import » et appliquez pour les démarrer tout de suite.",
+      "runtimes_hint": "Chaque agent importé s'exécute sur une machine. Un seul runtime correspondant est associé automatiquement ; s'il y en a plusieurs, c'est à vous de choisir.",
+      "runtime_bound_to": "Associé à {{runtime}}.",
+      "runtime_will_bind_to": "Sera associé à {{runtime}} lors de l'import.",
+      "runtime_pick_label": "Choisir un runtime",
+      "runtime_apply": "Appliquer les associations",
+      "runtime_applying": "Association…",
+      "runtime_applied": "{{count}} agent(s) associé(s).",
+      "runtime_apply_partial": "{{bound}} associés, {{failed}} en échec.",
+      "runtime_needs_pick": "{{count}} agent(s) ont encore besoin d'un runtime.",
+      "runtime_reason_no_runtime": "Aucun runtime de l'instance cible n'a provider={{provider}}. Connectez le daemon de cette machine à l'instance cible (ou choisissez un runtime à la main), puis associez à nouveau.",
+      "runtime_reason_provider_unknown": "Ce paquet ne contient aucun runtime source pour l'agent. Exportez-le à nouveau depuis l'environnement source, puis réimportez-le.",
+      "runtime_reason_bind_failed": "Échec de l'association : {{reason}}",
+      "option_auto_bind_runtimes": "Associer les runtimes automatiquement",
+      "option_auto_bind_runtimes_hint": "Lorsqu'un seul runtime cible correspond au fournisseur, au mode et au profil sources, l'agent y est associé. S'il y a plusieurs candidats, le choix vous revient toujours.",
+      "option_include_issues": "Tâches et commentaires",
+      "option_include_issues_hint": "Exportez aussi les tâches, commentaires, étiquettes et réactions de cet espace de travail. Le zip grossit plusieurs fois, et l'espace de travail cible doit être vide.",
+      "include_issues_requires_empty_target": "Le groupe de tâches exige un espace de travail cible totalement dépourvu de tâches.",
+      "include_issues_empty_target_hint": "Créez un espace de travail vide et importez-y le paquet. Les numéros de tâches sont conservés tâche par tâche ; l'import dans un espace de travail qui contient déjà des tâches est donc refusé.",
+      "issues_target_not_empty": "Cet espace de travail contient déjà des tâches, le groupe de tâches a donc été refusé : les numéros de tâches sont conservés tâche par tâche. Créez un espace de travail vide et importez-y. En CLI, `--renumber` décale les numéros — chaque ancien numéro écrit dans une description ou un commentaire pointe alors vers la mauvaise tâche.",
+      "issues_title": "Tâches et commentaires",
+      "issues_created": "Tâches écrites",
+      "issues_skipped": "Tâches ignorées",
+      "comments_created": "Commentaires écrits",
+      "comments_skipped": "Commentaires ignorés",
+      "issues_labels": "{{count}} étiquettes",
+      "issues_reactions": "{{count}} réactions",
+      "issues_subscribers": "{{count}} abonnés reconstruits",
+      "issues_parents": "{{count}} liens de fil complétés",
+      "issues_degraded_title": "Lignes ayant perdu une référence",
+      "degrade_status": "Statut absent du catalogue de cet espace de travail",
+      "degrade_assignee": "Impossible d'associer l'assigné, réassigné à la personne qui importe",
+      "degrade_creator": "Impossible d'associer le créateur",
+      "degrade_project": "Impossible d'associer le projet",
+      "degrade_author": "Impossible d'associer l'auteur du commentaire",
+      "degrade_resolution": "Impossible d'associer la personne ayant résolu le fil",
+      "degrade_property": "Impossible d'associer la propriété",
+      "degrade_parent": "La tâche parente est en dehors du paquet",
+      "degrade_mention": "La mention n'a pas pu être réécrite",
+      "degrade_label": "Impossible d'associer l'étiquette",
+      "degrade_reaction": "Impossible d'associer l'auteur de la réaction",
+      "degrade_reparented": "Commentaire rattaché à un ancêtre plus haut dans le fil"
+    }
+  },
+  "routing": {
+    "title": "Routage",
+    "description": "Lorsqu'une tâche est créée, et à chaque changement de son statut, décidez à qui elle revient et attribuez les sièges d'exécutant et de relecteur. Le routage ne change jamais le statut — le statut est un fait que seul celui qui fait le travail connaît.",
+    "section_title": "Modèle de routage",
+    "enabled_label": "Activer la répartition automatique",
+    "enabled_description": "Désactivé, le produit se comporte exactement comme avant : aucun commentaire de routage, aucune mention. Les valeurs déjà écrites sur les tâches sont conservées.",
+    "model_label": "Modèle de routage",
+    "model_description": "Le modèle qui prend la décision. Après avoir enregistré un point d'accès et une clé, les modèles disponibles sont chargés automatiquement ; vous pouvez toujours saisir un identifiant à la main.",
+    "model_discovering": "Chargement des modèles depuis le point d'accès…",
+    "model_discover_failed": "Impossible de charger les modèles. Saisissez un identifiant de modèle à la main.",
+    "model_discover_empty": "Le point d'accès n'a renvoyé aucun modèle. Saisissez un identifiant de modèle à la main.",
+    "model_discover_loaded": "{{count}} modèles chargés depuis ce point d'accès.",
+    "model_placeholder": "ex. gpt-5.6-luna",
+    "threshold_label": "Seuil de confiance",
+    "threshold_description": "En dessous, la tâche est tout de même répartie vers l'échelon de repli (le siège générique fort), et le commentaire de routage le précise. Valeur par défaut : 0,60.",
+    "stale_hours_label": "Seuil de stagnation des relectures (heures)",
+    "stale_hours_description": "Combien de temps une tâche peut rester en attente d'acceptation sans qu'aucune exécution ne s'en occupe, avant que la passe de contrôle ne s'y intéresse. Par défaut, elle est simplement replacée devant le siège de relecture, sans changement de statut ; seul un verdict favorable déjà laissé par le relecteur sur la tâche permet d'aligner le statut sur terminé. Valeur par défaut : 24 heures.",
+    "gateway_endpoint_workspace": "L'identifiant du modèle est envoyé au point d'accès propre à cet espace de travail : {{host}}.",
+    "gateway_endpoint_deployment": "L'identifiant du modèle est envoyé au point d'accès LLM partagé du déploiement : {{host}}.",
+    "gateway_protocol_systemone": "Ce point d'accès est TypeSafe System One (Jev) : le routage lui demande un jugement typé accompagné des probabilités sous-jacentes ; la confiance sur laquelle il se base est donc mesurée plutôt qu'autodéclarée.",
+    "gateway_unset": "Aucun point d'accès auquel envoyer l'identifiant du modèle — cet espace de travail n'en a pas défini et le déploiement n'a aucun LLM interne configuré (MULTICA_LLM_BASE_URL / MULTICA_LLM_API_KEY). Définissez un point d'accès et une clé ci-dessous, ou demandez à la personne qui gère le serveur.",
+    "gateway_title": "Point d'accès propre à cet espace de travail",
+    "gateway_url_label": "URL du point d'accès",
+    "gateway_url_description": "Une URL de base compatible OpenAI, ou https://api.typesafe.ai pour TypeSafe System One (Jev). Laissez les deux champs vides pour utiliser le point d'accès partagé du déploiement, comme c'est le cas aujourd'hui.",
+    "gateway_url_placeholder": "https://api.example.com/v1 ou https://api.typesafe.ai",
+    "gateway_key_label": "Clé d'API",
+    "gateway_key_description": "Stockée chiffrée et jamais réaffichée — même pas masquée. Enregistrez pour la remplacer ; effacez pour revenir au point d'accès du déploiement.",
+    "gateway_key_unstorable": "Ce déploiement ne peut pas stocker de clé d'espace de travail (ni MULTICA_ROUTING_SECRET_KEY ni JWT_SECRET n'est défini). Seule la personne qui gère le serveur peut y remédier.",
+    "gateway_key_placeholder": "sk-…",
+    "gateway_key_stored": "Une clé est enregistrée",
+    "gateway_key_save": "Enregistrer la clé",
+    "gateway_key_clear": "Effacer",
+    "gateway_pair_incomplete": "Un point d'accès a besoin de ses deux composants. Si un seul est renseigné, le point d'accès partagé du déploiement est utilisé à la place.",
+    "gateway_default_model": "Le modèle par défaut de ce déploiement est {{model}}.",
+    "filters_title": "Filtres de candidats",
+    "filters_placeholder": "Prévu pour une version ultérieure ; non implémenté dans celle-ci. Aujourd'hui, les candidats sont restreints par direction et filtrés par la confiance.",
+    "health_checking": "Vérification…",
+    "health_recheck": "Revérifier",
+    "health_connected": "Connecté · auto-vérifié {{when}}",
+    "health_never_checked": "Aucun appel effectué depuis le démarrage du serveur",
+    "health_retry_in": "Nouvelle tentative dans environ {{minutes}} min",
+    "health_reason_label": "Raison",
+    "health_time_just_now": "à l'instant",
+    "health_time_minutes_ago": "il y a {{n}} min",
+    "health_time_hours_ago": "il y a {{n}} h",
+    "states": {
+      "off": {
+        "chip": "Désactivé",
+        "detail": "Lorsqu'il est désactivé, tout fonctionne exactement comme avant."
+      },
+      "incomplete": {
+        "chip": "Incomplet",
+        "detail": "L'interrupteur est activé mais aucun modèle n'est choisi — le comportement reste exactement celui d'un routage désactivé."
+      },
+      "enabled": {
+        "chip": "Activé",
+        "detail": "Les nouvelles tâches sont réparties automatiquement, et chaque décision est expliquée dans un commentaire sur la tâche."
+      },
+      "ineffective": {
+        "chip": "Sans effet",
+        "detail": "Le modèle a été rejeté, est injoignable, a été supprimé ou est en pause après des échecs répétés. Se comporte comme un routage désactivé ; rien n'apparaît sur les tâches."
+      }
+    }
   }
 }
