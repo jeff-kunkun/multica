@@ -16,7 +16,7 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { AppLink, useBackOrReplace } from "../../navigation";
+import { AppLink, useBackOrReplace, useNavigation } from "../../navigation";
 import {
   Archive,
   Calendar,
@@ -153,6 +153,7 @@ import {
 } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
+import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
 
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -1164,6 +1165,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const id = issueId;
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
+  const navigation = useNavigation();
   const openModal = useModalStore((state) => state.open);
 
   // Issue navigation — read from TQ list cache
@@ -1218,6 +1220,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
+  const [shareScopeOpen, setShareScopeOpen] = useState(false);
+  const [shareAudienceSize, setShareAudienceSize] = useState<number | undefined>();
   const githubSettings = useGitHubSettings();
 
   // Per-issue, per-session set of optional properties currently visible in
@@ -2924,6 +2928,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
               <TooltipContent side="bottom">{actions.isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}</TooltipContent>
             </Tooltip>
+            <WriteAction>
+              <ShareScopeTrigger
+                scope={issue.visibility}
+                audienceSize={shareAudienceSize}
+                onClick={() => setShareScopeOpen(true)}
+              />
+            </WriteAction>
             <IssueActionsDropdown
               issue={issue}
               align="end"
@@ -3625,6 +3636,27 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             className="absolute bottom-0 right-3 top-12"
           />
         )}
+        <ShareScopeDialog
+          open={shareScopeOpen}
+          onOpenChange={setShareScopeOpen}
+          target={{
+            kind: "issue",
+            resourceId: issue.id,
+            currentScope: issue.visibility,
+            audienceSize: shareAudienceSize,
+            projectId: issue.project_id,
+            resourceLabel: issue.identifier,
+          }}
+          onSaved={(result) => {
+            setShareAudienceSize(result.audience_size);
+          }}
+          onManageMembers={issue.project_id ? () => {
+            const projectId = issue.project_id;
+            if (!projectId) return;
+            setShareScopeOpen(false);
+            navigation.push(paths.projectDetail(projectId));
+          } : undefined}
+        />
       </div>
     </ImageSequenceProvider>
     </CurrentIssueRenderContextProvider>
