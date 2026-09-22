@@ -103,7 +103,7 @@ Which directory a run writes is decided on the server before a runtime claims it
 | `path_forbidden` | The path is one Multica refuses: a system root or drive root, a home directory or its parent, or a system directory such as `/etc`, `/var`, `/tmp`, `/usr`, `/opt` | Pick a directory inside your home folder that is not a system directory |
 | `path_not_writable` | The daemon cannot read or write the directory | Fix its permissions or ownership for the account the daemon runs as |
 | `path_invalid` | The path could not be resolved or used for some other reason; the raw error says which | Read the raw error in the run record |
-| `local_directory_error` | A placement failure reported by a runtime that predates these codes | Read the raw error; the cause is one of the rows above |
+| `local_directory_error` | A placement failure the runtime could not narrow to a finer code above, a wait for the directory lock that ended for a reason other than the user cancelling, a cancelled run whose working copy was kept, or the server cancelling a run whose runtime cannot run the directory's mode. The current version reports it too, not only runtimes that predate these codes | Read the raw error; it names the specific cause. This code on its own does not mean the runtime is out of date |
 | `unset` | No code source decision was computed for the run at all | Retry; if it repeats, check that the server and the client app are the same generation |
 
 The runtime never re-chooses: a directory that is missing, unwritable, or not a git work tree fails the run with the code above instead of sending the agent somewhere else.
