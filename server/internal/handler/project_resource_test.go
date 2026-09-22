@@ -1921,7 +1921,7 @@ func TestProjectResourceLegacyRenameSkipsWorktreeGate(t *testing.T) {
 	// correctly) be refused for a daemon with no capable runtime row.
 	if _, err := testHandler.Queries.UpdateProjectResource(context.Background(), db.UpdateProjectResourceParams{
 		ID:          parseUUID(created.ID),
-		ResourceRef: json.RawMessage(`{"local_path":"/Users/dev/work/game-client","daemon_id":"` + daemonID + `","label":"Game Client","execution_mode":"worktree"}`),
+		ResourceRef: json.RawMessage(`{"local_path":"/Users/dev/work/game-client","daemon_id":"` + daemonID + `","label":"Game Client","execution_mode":"worktree","is_git_repo":true}`),
 		Label:       pgtype.Text{String: "Game Client", Valid: true},
 		Position:    0,
 	}); err != nil {
@@ -1943,6 +1943,19 @@ func TestProjectResourceLegacyRenameSkipsWorktreeGate(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("a rename that changes no execution semantics must not hit the capability gate: %d %s",
 			w.Code, w.Body.String())
+	}
+	var renamed struct {
+		ResourceRef json.RawMessage `json:"resource_ref"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &renamed); err != nil {
+		t.Fatalf("decode renamed resource: %v", err)
+	}
+	var ref map[string]any
+	if err := json.Unmarshal(renamed.ResourceRef, &ref); err != nil {
+		t.Fatalf("decode renamed ref: %v", err)
+	}
+	if got, ok := ref["is_git_repo"].(bool); !ok || !got {
+		t.Fatalf("legacy rename must preserve stored is_git_repo identity: %#v", ref)
 	}
 
 	// And the gate still fires when the same client actually changes the mode.

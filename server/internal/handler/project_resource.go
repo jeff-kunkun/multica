@@ -86,6 +86,30 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 	}
 }
 
+// mergeOmittedLocalDirectoryIdentity keeps identity metadata written by newer
+// clients when an older client resends a partial ref during an edit. Older
+// clients only know the original four fields and would otherwise erase these
+// values before validation (and, for worktree rows, fail the git capability
+// check). Explicit values, including null, remain authoritative.
+func mergeOmittedLocalDirectoryIdentity(existing, incoming json.RawMessage) json.RawMessage {
+	var stored, next map[string]json.RawMessage
+	if json.Unmarshal(existing, &stored) != nil || json.Unmarshal(incoming, &next) != nil {
+		return incoming
+	}
+	for _, key := range []string{"is_git_repo", "real_path", "repo_key", "worktree_root"} {
+		if _, present := next[key]; !present {
+			if value, ok := stored[key]; ok {
+				next[key] = value
+			}
+		}
+	}
+	merged, err := json.Marshal(next)
+	if err != nil {
+		return incoming
+	}
+	return merged
+}
+
 type githubRepoRef struct {
 	URL               string `json:"url"`
 	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
@@ -752,6 +776,9 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	nextRef := json.RawMessage(existing.ResourceRef)
 	rawRef, refProvided := raw["resource_ref"]
 	if refProvided {
+		if existing.ResourceType == "local_directory" {
+			rawRef = mergeOmittedLocalDirectoryIdentity(existing.ResourceRef, rawRef)
+		}
 		normalized, err := validateAndNormalizeResourceRef(existing.ResourceType, rawRef)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
