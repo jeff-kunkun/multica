@@ -1935,7 +1935,6 @@ func TestProjectResourceLegacyRenameSkipsWorktreeGate(t *testing.T) {
 			"daemon_id":      daemonID,
 			"label":          "Renamed On Old Desktop",
 			"execution_mode": "worktree",
-			"is_git_repo":    true,
 		},
 	})
 	req = withURLParams(req, "id", project.ID, "resourceId", created.ID)

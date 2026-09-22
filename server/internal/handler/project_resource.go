@@ -73,6 +73,10 @@ type UpdateProjectResourceRequest struct {
 // at the API boundary so a typo can't slip through and produce a resource the
 // daemon/UI doesn't understand.
 func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (json.RawMessage, error) {
+	return validateAndNormalizeResourceRefWithOptions(resourceType, ref, false)
+}
+
+func validateAndNormalizeResourceRefWithOptions(resourceType string, ref json.RawMessage, allowLegacyWorktreeRename bool) (json.RawMessage, error) {
 	if len(ref) == 0 {
 		return nil, errors.New("resource_ref is required")
 	}
@@ -80,7 +84,7 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 	case "github_repo":
 		return validateGithubRepoRef(ref)
 	case "local_directory":
-		return validateLocalDirectoryRef(ref)
+		return validateLocalDirectoryRefWithOptions(ref, allowLegacyWorktreeRename)
 	default:
 		return nil, fmt.Errorf("unknown resource_type %q", resourceType)
 	}
@@ -389,6 +393,10 @@ func latestDaemonCLIVersion(runtimes []db.AgentRuntime, daemonID string) string 
 }
 
 func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
+	return validateLocalDirectoryRefWithOptions(ref, false)
+}
+
+func validateLocalDirectoryRefWithOptions(ref json.RawMessage, allowLegacyWorktreeRename bool) (json.RawMessage, error) {
 	var payload localDirectoryRef
 	if err := json.Unmarshal(ref, &payload); err != nil {
 		return nil, fmt.Errorf("invalid local_directory payload: %w", err)
@@ -446,11 +454,17 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 	// (DENE-618).
 	if payload.ExecutionMode == localDirectoryModeWorktree &&
 		(payload.IsGitRepo == nil || !*payload.IsGitRepo) {
-		return nil, fmt.Errorf(
-			"local_directory: %q cannot use parallel (worktree) mode — "+
-				"parallel mode delivers work as a branch and needs a git repository with at least one commit. "+
-				"Keep it on in_place, or bind it from the desktop app / CLI on the machine that holds the folder",
-			payload.LocalPath)
+		if allowLegacyWorktreeRename && payload.IsGitRepo == nil {
+			// A pre-identity client may resend an already-persisted worktree ref
+			// solely to rename it. Preserve that legacy edit without making the
+			// old row prove a capability it never stored.
+		} else {
+			return nil, fmt.Errorf(
+				"local_directory: %q cannot use parallel (worktree) mode — "+
+					"parallel mode delivers work as a branch and needs a git repository with at least one commit. "+
+					"Keep it on in_place, or bind it from the desktop app / CLI on the machine that holds the folder",
+				payload.LocalPath)
+		}
 	}
 	out, err := json.Marshal(payload)
 	if err != nil {
@@ -776,10 +790,12 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	nextRef := json.RawMessage(existing.ResourceRef)
 	rawRef, refProvided := raw["resource_ref"]
 	if refProvided {
+		allowLegacyWorktreeRename := false
 		if existing.ResourceType == "local_directory" {
 			rawRef = mergeOmittedLocalDirectoryIdentity(existing.ResourceRef, rawRef)
+			allowLegacyWorktreeRename = localDirectoryRefDiffersOnlyByLabel(rawRef, existing.ResourceRef)
 		}
-		normalized, err := validateAndNormalizeResourceRef(existing.ResourceType, rawRef)
+		normalized, err := validateAndNormalizeResourceRefWithOptions(existing.ResourceType, rawRef, allowLegacyWorktreeRename)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
