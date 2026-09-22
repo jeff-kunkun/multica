@@ -1362,6 +1362,29 @@
       "reason_in_use": "保留：现在有任务正在里面跑。",
       "reason_not_ours": "保留：不是 Multica 建的，轮不到 Multica 来删。",
       "reason_unknown": "保留：读不到它的状态，而「不确定」不等于可以删。"
+    },
+    "shared_scratch": {
+      "title": "公用会话文件夹",
+      "description": "没绑本地目录、也没有仓库的问答，文件都放在这一个文件夹里，按会话归档，不再每个任务新建一个目录。这里清的只是这个文件夹：不会动你自己的目录，也不会动仓库旁边的工作副本。",
+      "scanning": "正在查看公用会话文件夹…",
+      "daemon_offline": "启动本机守护进程后才能看到这台机器上的公用会话文件夹。",
+      "load_failed": "读取公用会话文件夹失败。",
+      "location_title": "位置",
+      "location_description": "这台机器上就这一个。每个工作区的会话都在它下面，按会话分开。",
+      "size_title": "当前占用",
+      "summary": "{{count}} 个会话 · 占用 {{total}} · 已闲置可清 {{reclaimable}}",
+      "enable_title": "自动清理闲置会话",
+      "enable_description": "默认打开。只删除 Multica 自己建的、当前没在用、而且超过下面的天数没再写过的会话目录。跟着守护进程原有的清理一起跑。",
+      "retention_title": "至少保留",
+      "retention_description": "一个会话最后一次使用之后，过多少天才可以清掉它的目录。",
+      "empty": "这台机器上还没有公用会话。",
+      "last_used": "{{days}} 天前用过",
+      "in_use": "正在用，不会清",
+      "not_ours": "不是 Multica 建的，不会清",
+      "remove": "清掉",
+      "removed": "会话目录已清掉",
+      "clean_expired": "清掉过期的",
+      "cleaned": "过期的会话目录已清掉"
     }
   },
   "members": {
