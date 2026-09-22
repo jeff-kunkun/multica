@@ -32,6 +32,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/selfexec"
+	"github.com/multica-ai/multica/server/internal/sparsecheckout"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -176,7 +177,7 @@ func taskScopedAuthToken(task Task) (string, error) {
 }
 
 func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesRoot, serverURL string, healthPort, slot int, tempDir string) map[string]string {
-	return map[string]string{
+	env := map[string]string{
 		"MULTICA_TOKEN":        token,
 		cli.TaskConfigRootEnv:  configRoot,
 		TaskWorkspacesRootEnv:  workspacesRoot,
@@ -191,6 +192,10 @@ func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesR
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
 	}
+	if paths := strings.TrimSpace(task.CheckoutPaths); paths != "" {
+		env[sparsecheckout.EnvVar] = paths
+	}
+	return env
 }
 
 // taskRunner executes a single agent task and returns the result.
@@ -8282,6 +8287,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.WorkspaceID == "" {
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
+	if _, err := sparsecheckout.Parse(task.CheckoutPaths); err != nil {
+		return TaskResult{}, fmt.Errorf("issue metadata checkout_paths: %w", err)
+	}
 
 	prepareTimeout := d.effectiveTaskPrepareTimeout()
 	prepareCtx, cancelPrepare := context.WithTimeoutCause(ctx, prepareTimeout, errTaskPrepareTimeout)
@@ -8840,7 +8848,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		} else if localAssignment.UsesWorktree() {
 			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{
-				LocalPath: localAssignment.AbsPath,
+				LocalPath:     localAssignment.AbsPath,
+				CheckoutPaths: task.CheckoutPaths,
 				// Empty when the resource names no location; execenv then
 				// uses the repository's sibling (DefaultWorktreeRoot). An
 				// older server that does not send the field, or a newer one
@@ -9554,6 +9563,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// The endpoint needs to know whether this project pinned a directory
 		// on this machine before it decides to clone anything (DENE-595).
 		LocalDirectory: localAssignment,
+		CheckoutPaths:  task.CheckoutPaths,
 	})
 	defer d.clearActiveRepoCheckoutTask(agentToken)
 
