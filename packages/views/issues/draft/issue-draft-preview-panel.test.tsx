@@ -478,7 +478,7 @@ describe("IssueDraftPreviewPanel group", () => {
     // And the parent, which is created but starts nothing.
     expect(
       screen.getByText(
-        "The parent is created unassigned, so it starts nothing on its own.",
+        "The parent coordinates this group, so it does not auto-start.",
       ),
     ).toBeTruthy();
   });
@@ -552,7 +552,7 @@ describe("IssueDraftPreviewPanel group", () => {
       },
       stage: "ready",
     });
-    expect(screen.getByText("Waits for its stage")).toBeTruthy();
+    expect(screen.getByText("Unassigned, won't auto-start")).toBeTruthy();
     expect(screen.queryByText(/Starting right away/)).toBeNull();
   });
 
@@ -1028,7 +1028,7 @@ describe("assignee suggestions", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Suggestions are unavailable",
     );
-    expect(screen.getAllByText(/Unassigned/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/Unassigned/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("button", { name: "Confirm and create" })).toBeEnabled();
   });
 

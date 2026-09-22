@@ -5,6 +5,8 @@ import { ExternalLink, FileText, Loader2, Trash2 } from "lucide-react";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   applyIssueDraftAssigneeSuggestions,
+  ISSUE_DRAFT_ROOT_ROW,
+  issueDraftGroupRowOutcome,
   type DraftAssigneeSuggestion,
 } from "@multica/core/issue-drafts";
 import {
@@ -319,6 +321,9 @@ export function IssueDraftPreviewPanel({
   };
 
   const updateChild = (index: number, patch: Partial<IssueDraftChild>) => {
+    if (patch.assignee_id !== undefined || patch.assignee_type !== undefined) {
+      offeredRows.current.add(children[index]?.key ?? "");
+    }
     setEditing({
       ...value,
       children: children.map((child, at) =>
@@ -487,11 +492,14 @@ export function IssueDraftPreviewPanel({
                   open={parentLocked ? false : undefined}
                   align="start"
                   onUpdate={(updates) =>
-                    setEditing({
-                      ...value,
-                      assignee_type: updates.assignee_type ?? null,
-                      assignee_id: updates.assignee_id ?? null,
-                    })
+                    (() => {
+                      offeredRows.current.add(ISSUE_DRAFT_ROOT_ROW);
+                      setEditing({
+                        ...value,
+                        assignee_type: updates.assignee_type ?? null,
+                        assignee_id: updates.assignee_id ?? null,
+                      });
+                    })()
                   }
                 />
               </div>
@@ -506,7 +514,7 @@ export function IssueDraftPreviewPanel({
                 {t(($) => $.alignment.assignee_suggestions_failed)}
               </p>
             ) : null}
-            {!value.assignee_id ? (
+            {!value.assignee_id && children.length === 0 ? (
               <p className="text-caption text-muted-foreground">
                 {t(($) => $.alignment.assignee_unassigned)}
               </p>
@@ -643,7 +651,9 @@ export function IssueDraftPreviewPanel({
                 ) : null}
                 {newChildren.map(({ child, index }) => {
                   const row = groupPlan.rows[index + 1];
-                  const startsNow = row?.startsOnCreate === true;
+                  const outcome = row
+                    ? issueDraftGroupRowOutcome(row, true)
+                    : "unassigned";
                   return (
                     <div
                       key={child.key}
@@ -656,14 +666,18 @@ export function IssueDraftPreviewPanel({
                         <span
                           className={cn(
                             "ml-auto text-caption",
-                            startsNow
+                            outcome === "starts"
                               ? "font-medium text-foreground"
                               : "text-muted-foreground",
                           )}
                         >
-                          {startsNow
+                          {outcome === "starts"
                             ? t(($) => $.alignment.child_starts_now)
-                            : t(($) => $.alignment.child_parked)}
+                            : outcome === "stage"
+                              ? t(($) => $.alignment.child_parked)
+                              : outcome === "person"
+                                ? t(($) => $.alignment.child_assigned_person)
+                                : t(($) => $.alignment.child_unassigned)}
                         </span>
                         <Button
                           variant="ghost"
@@ -728,11 +742,6 @@ export function IssueDraftPreviewPanel({
                           }
                         />
                       </div>
-                      {!child.assignee_id ? (
-                        <p className="text-caption text-muted-foreground">
-                          {t(($) => $.alignment.assignee_unassigned)}
-                        </p>
-                      ) : null}
                       {child.assignee_hint ? (
                         <p className="text-caption text-muted-foreground">
                           {t(($) => $.alignment.child_hint, {
@@ -802,7 +811,7 @@ export function IssueDraftPreviewPanel({
               ) : null}
               {!isContinuation &&
               groupPlan.total > 1 &&
-              groupPlan.rows[0]?.startsOnCreate !== true ? (
+              issueDraftGroupRowOutcome(groupPlan.rows[0]!, true) !== "starts" ? (
                 <p className="text-caption text-muted-foreground">
                   {t(($) => $.alignment.group_summary_parent)}
                 </p>

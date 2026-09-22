@@ -31,9 +31,11 @@ export {
   normalizeIssueDraftPayloadGroup,
   planIssueDraftGroup,
   planIssueDraftGroupProgress,
+  issueDraftGroupRowOutcome,
   sameIssueDraftChildren,
   type IssueDraftGroupPlan,
   type IssueDraftGroupRow,
+  type IssueDraftGroupRowOutcome,
   type IssueDraftGroupStageProgress,
 } from "./group";
 export {

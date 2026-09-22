@@ -13,6 +13,7 @@ import {
   normalizeIssueDraftPayloadGroup,
   planIssueDraftGroup,
   planIssueDraftGroupProgress,
+  issueDraftGroupRowOutcome,
   sameIssueDraftChildren,
 } from "./group";
 
@@ -359,6 +360,20 @@ describe("planIssueDraftGroup", () => {
       }),
     );
     expect(plan.starting).toBe(2);
+    expect(plan.parked).toBe(0);
+  });
+
+  it("treats a parent with children as coordination and an unassigned stage one row as unassigned", () => {
+    const plan = planIssueDraftGroup(
+      payload({
+        assignee_type: "agent",
+        assignee_id: "parent-agent",
+        children: [child({ key: "a", stage: 1 })],
+      }),
+    );
+    expect(issueDraftGroupRowOutcome(plan.rows[0]!, true)).toBe("coordination");
+    expect(issueDraftGroupRowOutcome(plan.rows[1]!, true)).toBe("unassigned");
+    expect(plan.starting).toBe(0);
     expect(plan.parked).toBe(0);
   });
 });

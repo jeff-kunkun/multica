@@ -240,6 +240,25 @@ export interface IssueDraftGroupRow {
   alreadyBuilt: boolean;
 }
 
+export type IssueDraftGroupRowOutcome =
+  | "coordination"
+  | "starts"
+  | "stage"
+  | "unassigned"
+  | "person";
+
+/** The single dispatch conclusion the preview should show for a row. */
+export function issueDraftGroupRowOutcome(
+  row: IssueDraftGroupRow,
+  hasChildren: boolean,
+): IssueDraftGroupRowOutcome {
+  if (row.isRoot && hasChildren) return "coordination";
+  if (!row.assigneeId) return "unassigned";
+  if (row.status === "backlog") return "stage";
+  if (row.assigneeType === "agent") return "starts";
+  return "person";
+}
+
 export interface IssueDraftGroupPlan {
   /** The root first, then the sub-issues in payload order. */
   rows: IssueDraftGroupRow[];
@@ -319,12 +338,15 @@ export function planIssueDraftGroup(
   // waits: the counts below answer "what does THIS confirm do", and the
   // adoption is stated separately as `built`.
   const incoming = rows.filter((row) => !row.alreadyBuilt);
+  const hasChildren = children.length > 0;
+  const outcome = (row: IssueDraftGroupRow) =>
+    issueDraftGroupRowOutcome(row, hasChildren);
   return {
     rows,
     total: rows.length,
     creating: incoming.length,
-    starting: incoming.filter((row) => row.startsOnCreate).length,
-    parked: incoming.filter((row) => row.status === "backlog").length,
+    starting: incoming.filter((row) => outcome(row) === "starts").length,
+    parked: incoming.filter((row) => outcome(row) === "stage").length,
     built: rows.length - incoming.length,
   };
 }
