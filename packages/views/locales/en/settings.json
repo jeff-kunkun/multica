@@ -388,7 +388,8 @@
       "mcp": "MCP",
       "billing": "Billing",
       "config_transfer": "Export & import",
-      "routing": "Routing"
+      "routing": "Routing",
+      "project_sharing": "Project sharing"
     },
     "groups": {
       "personal": "Personal",
@@ -1744,5 +1745,30 @@
     "quota_updated": "updated {{when}}",
     "seats_title": "Candidate seats",
     "seats_empty": "No candidate seats yet."
+  },
+  "project_sharing": {
+    "title": "Project sharing",
+    "description": "Manage which workspace members can see each project and its resources.",
+    "section_title": "Projects",
+    "section_description": "Changing a project scope updates all issues and repositories currently in that project.",
+    "loading": "Loading projects…",
+    "empty": "No projects yet.",
+    "visibility_private": "Only me",
+    "visibility_project": "Project members",
+    "visibility_workspace": "Entire workspace",
+    "members": "{{count}} members",
+    "guests": "{{count}} guests",
+    "resources": "{{count}} resources",
+    "no_members": "Only you can currently see this project. Others cannot see it yet.",
+    "manage_members": "Manage project members",
+    "read_only": "Guests can view shared projects but cannot change sharing.",
+    "change_for": "Change sharing for {{name}}",
+    "confirm_title": "Update sharing for {{name}}?",
+    "confirm_description": "This will update {{count}} resources, including {{privateCount}} that are currently private, to {{visibility}}.",
+    "cancel": "Cancel",
+    "confirm": "Apply",
+    "saving": "Applying…",
+    "preview_loading": "Loading the preview… You cannot apply changes until it is ready.",
+    "preview_failed": "The preview could not be loaded. Try again before applying changes."
   }
 }
