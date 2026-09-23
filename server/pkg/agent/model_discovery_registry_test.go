@@ -15,16 +15,17 @@ func TestEveryRuntimeDeclaresModelDiscovery(t *testing.T) {
 		t.Fatalf("runtimes with no discovery strategy: %v", missing)
 	}
 
+	decls := snapshotModelDiscovery()
 	for _, runtime := range BuiltinRuntimes {
-		decl, ok := modelDiscoveryByProvider[runtime.ID]
+		decl, ok := decls[runtime.ID]
 		if !ok {
 			t.Fatalf("%s missing from the discovery table", runtime.ID)
 		}
-		if runtime.ModelDiscovery == nil && decl.Kind == modelDiscoveryDedicated {
-			t.Errorf("%s claims a dedicated discoverer but BuiltinRuntime.ModelDiscovery is nil", runtime.ID)
+		if runtime.ModelDiscovery == nil && decl.Kind == modelDiscoveryDedicated && decl.Discover == nil {
+			t.Errorf("%s claims a dedicated discoverer but neither the declaration nor BuiltinRuntime.ModelDiscovery has one", runtime.ID)
 		}
 	}
-	for id, decl := range modelDiscoveryByProvider {
+	for id, decl := range decls {
 		switch decl.Kind {
 		case modelDiscoveryManual:
 			if strings.TrimSpace(decl.Reason) == "" {
@@ -34,11 +35,19 @@ func TestEveryRuntimeDeclaresModelDiscovery(t *testing.T) {
 				t.Errorf("%s is manual-only but the picker would still offer a model list", id)
 			}
 		case modelDiscoveryChain:
-			_, hasEndpoint := modelEndpointSources[id]
-			cmd, hasCommand := modelListCommands[id]
-			if !hasEndpoint && (!hasCommand || !listCommandRegistered(cmd)) {
+			if decl.Endpoint == nil && !listCommandRegistered(decl.ListCommand) {
 				t.Errorf("%s declares the fallback chain but registers neither an endpoint nor a readonly list command", id)
 			}
+		case modelDiscoveryDedicated:
+			if decl.Discover != nil {
+				continue
+			}
+			runtime, ok := BuiltinRuntimeByID(id)
+			if !ok || runtime.ModelDiscovery == nil {
+				t.Errorf("%s claims a dedicated discoverer but none is wired", id)
+			}
+		default:
+			t.Errorf("%s has an unknown discovery kind %d", id, decl.Kind)
 		}
 	}
 

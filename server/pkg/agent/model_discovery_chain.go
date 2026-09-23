@@ -17,67 +17,133 @@ const modelListCommandTimeout = 15 * time.Second
 type modelEndpointSource func(ctx context.Context) (baseURL, apiKey, defaultModel string, err error)
 
 // modelListCommand is a readonly catalog command a runtime has explicitly
-// registered. The chain never invents args or a parser: a runtime absent
-// from modelListCommands is not probed with `models` or `--list-models`.
+// registered. The chain never invents args or a parser: a declaration with
+// no args or no parser is not probed with `models` or `--list-models`.
 type modelListCommand struct {
 	Args  []string
 	Parse func([]byte) ([]Model, error)
 }
 
-// modelEndpointSources are the runtimes whose fallback step is
-// GET {base}/models against the endpoint their own config names.
-// Qwen Code is the first. A runtime that is not here has no endpoint step.
-var modelEndpointSources = map[string]modelEndpointSource{
-	"qwen": qwenModelEndpoint,
+// modelDiscoveryProbe overlays steps onto the declaration ListModels already
+// resolved. Production requests never set it. Tests use it to prove a real
+// runtime walks the later steps, without rewriting the process-wide table
+// while other tests are listing models for that same runtime.
+type modelDiscoveryProbe struct {
+	Discover    modelDiscoverer
+	Endpoint    modelEndpointSource
+	ListCommand *modelListCommand
 }
 
-// modelListCommands are the readonly list commands the chain is allowed to
-// run. Empty until a runtime registers one. Blindly trying `models` or
-// `--list-models` is how omp's discovery used to fail: the flag is not
-// universal, and a wrong command is worse than leaving the field manual.
-var modelListCommands = map[string]modelListCommand{}
+type modelDiscoveryProbeKey struct{}
 
-// walkModelDiscoveryChain tries the registered steps in order and stops at
-// the first one that obtains a list. A confirmed empty list is an answer and
-// stops the walk. A step that is not registered is skipped. A step that fails
-// is remembered and the next registered step is tried; when a later step
-// obtains a list, that list wins, and when none do, the first failure is
-// returned so the picker can say the list is temporarily unavailable.
+func withModelDiscoveryProbe(ctx context.Context, probe modelDiscoveryProbe) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, modelDiscoveryProbeKey{}, probe)
+}
+
+func applyModelDiscoveryProbe(ctx context.Context, decl modelDiscoveryDecl) modelDiscoveryDecl {
+	if ctx == nil {
+		return decl
+	}
+	probe, ok := ctx.Value(modelDiscoveryProbeKey{}).(modelDiscoveryProbe)
+	if !ok {
+		return decl
+	}
+	if probe.Discover != nil {
+		decl.Discover = probe.Discover
+	}
+	if probe.Endpoint != nil {
+		decl.Endpoint = probe.Endpoint
+	}
+	if probe.ListCommand != nil {
+		decl.ListCommand = *probe.ListCommand
+	}
+	return decl
+}
+
+// walkModelDiscoveryChain is the one model-list path. Every runtime uses it.
+// The first step that obtains a list stops the walk:
 //
-// Nothing here is cached. A tunnel that is down must not be remembered as an
-// empty catalog, and a successful read must not hide the next outage: the
-// endpoint probe is one HTTP GET, and the caller refreshes to see the tunnel
-// as it is now.
+//  1. Dedicated discoverer, when the declaration has one. A non-empty catalog
+//     that is not a static fallback is the answer. A failure, an empty
+//     catalog, or a fallback catalog continues.
+//  2. GET {base}/models on the endpoint the runtime's own config names, when
+//     the declaration registers a reader. A parsed list stops the walk,
+//     including a confirmed empty one. A transport or HTTP failure continues.
+//  3. The readonly list command on the declaration. A command that is not
+//     registered is not run.
+//  4. Manual entry, which stays in the picker. This step does not invent a
+//     model id. It returns the dedicated discoverer's stand-in when that is
+//     the only list anyone produced, otherwise the first failure, so a tunnel
+//     that is down is not reported as an empty catalog.
+//
+// Only a definitive dedicated list is cached, and only inside that step.
+// Endpoint and command results are not cached: the next refresh has to see
+// the tunnel as it is now. An empty dedicated result is not cached either,
+// so a later success is not hidden behind it.
 func walkModelDiscoveryChain(
 	ctx context.Context,
 	providerType string,
 	runtimeCmd Command,
-	sources map[string]modelEndpointSource,
-	commands map[string]modelListCommand,
+	decl modelDiscoveryDecl,
 ) (Catalog, error) {
 	var firstFail error
-	if source, ok := sources[providerType]; ok && source != nil {
-		baseURL, apiKey, defaultModel, err := source(ctx)
+	var dedicated Catalog
+	sawDedicated := false
+
+	if decl.Discover != nil {
+		sawDedicated = true
+		catalog, err := cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return decl.Discover(ctx, runtimeCmd)
+		})
+		if err == nil && len(catalog.Models) > 0 && !catalog.Fallback {
+			return catalog, nil
+		}
 		if err != nil {
 			firstFail = err
 		} else {
+			dedicated = catalog
+		}
+	}
+
+	if decl.Endpoint != nil {
+		baseURL, apiKey, defaultModel, err := decl.Endpoint(ctx)
+		if err != nil {
+			if firstFail == nil {
+				firstFail = err
+			}
+		} else {
 			models, err := discoverCompatibleEndpointModels(ctx, baseURL, apiKey, defaultModel)
 			if err != nil {
-				firstFail = err
+				if firstFail == nil {
+					firstFail = err
+				}
 			} else {
 				return Catalog{Models: models}, nil
 			}
 		}
 	}
-	if cmd, ok := commands[providerType]; ok && listCommandRegistered(cmd) {
-		models, err := runRegisteredModelListCommand(ctx, runtimeCmd, cmd)
+
+	if listCommandRegistered(decl.ListCommand) {
+		models, err := runRegisteredModelListCommand(ctx, runtimeCmd, decl.ListCommand)
 		if err != nil {
-			if firstFail != nil {
-				return Catalog{}, firstFail
+			if firstFail == nil {
+				firstFail = err
 			}
-			return Catalog{}, err
+		} else {
+			return Catalog{Models: models}, nil
 		}
-		return Catalog{Models: models}, nil
+	}
+
+	if sawDedicated && firstFail == nil {
+		return dedicated, nil
+	}
+	// A static stand-in still beats a later probe that also failed. Runtimes
+	// that already ship one keep it when they have no better answer.
+	if dedicated.Fallback && len(dedicated.Models) > 0 {
+		return dedicated, nil
 	}
 	if firstFail != nil {
 		return Catalog{}, firstFail
