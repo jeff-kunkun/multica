@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -40,6 +41,11 @@ func TestStaleReviewStoreQueries(t *testing.T) {
 		"status":           "in_review",
 		"last_activity_at": long,
 	})
+	child := fx.Issue(t, "child review must stay with parent", testutil.Cols{
+		"status":           "in_review",
+		"last_activity_at": long,
+	})
+	fx.Exec(t, `UPDATE issue SET parent_issue_id = $1 WHERE id = $2`, stale, child)
 	runtimeID := fx.Runtime(t, "stale-sweep-runtime")
 	agentID := fx.Agent(t, "stale-sweep-agent", runtimeID)
 	fx.Task(t, agentID, testutil.Cols{
@@ -61,9 +67,10 @@ func TestStaleReviewStoreQueries(t *testing.T) {
 			t.Errorf("the stalled ticket was not picked up")
 		}
 		for label, id := range map[string]string{
-			"a ticket touched an hour ago": fresh,
-			"a ticket being worked on":     working,
-			"a ticket with an active run":  running,
+			"a ticket touched an hour ago":  fresh,
+			"a ticket being worked on":      working,
+			"a ticket with an active run":   running,
+			"a child issue awaiting review": child,
 		} {
 			if seen[id] {
 				t.Errorf("%s was picked up by the sweep", label)
@@ -206,6 +213,62 @@ func TestStaleReviewStoreQueries(t *testing.T) {
 			t.Fatalf("an enabled workspace was not listed for the sweep")
 		}
 	})
+}
+
+// The sweep's budget must not be spent on child rows.
+//
+// Acceptance is parent-scoped, so a child is not a candidate at all. That
+// exclusion has to live in the candidate query, not only in the no-op the
+// decision layer returns after a row has been selected: the query orders
+// oldest-quiet-first and caps the round at `limit`, so children filtered only
+// after selection spend every slot before the sweep ever reaches the stalled
+// top-level parent. The parent then waits round after round — not a slow
+// sweep, a sweep that never visits the ticket it exists for.
+//
+// The children here are quieter than the parent on purpose, so they sort ahead
+// of it, and the limit is smaller than the child population.
+func TestStaleReviewSweepIsNotStarvedByChildIssues(t *testing.T) {
+	ctx := context.Background()
+	fx := testutil.New(testPool, testWorkspaceID, testUserID)
+	store := testHandler.RoutingStore()
+
+	// A workspace of its own: the claim is about which rows fill the round,
+	// and stale top-level rows another test left in the shared workspace
+	// would be exactly the noise this assertion must not have.
+	wsID := fx.Workspace(t, "child-starved stale sweep",
+		fmt.Sprintf("child-starved-sweep-%d", time.Now().UnixNano()))
+
+	parent := fx.Issue(t, "top-level ticket quietly awaiting acceptance", testutil.Cols{
+		"workspace_id":     wsID,
+		"status":           "in_review",
+		"last_activity_at": time.Now().Add(-48 * time.Hour),
+	})
+	const children = 30
+	for i := 0; i < children; i++ {
+		fx.Issue(t, "quiet child awaiting acceptance", testutil.Cols{
+			"workspace_id":     wsID,
+			"status":           "in_review",
+			"parent_issue_id":  parent,
+			"last_activity_at": time.Now().Add(-72 * time.Hour),
+		})
+	}
+
+	const limit = 5
+	ids, err := store.StaleReviews(ctx, wsID, time.Now().Add(-24*time.Hour), limit)
+	if err != nil {
+		t.Fatalf("stale reviews: %v", err)
+	}
+	if len(ids) == 0 {
+		t.Fatalf("the sweep returned nothing: the only candidate in this workspace is the " +
+			"top-level parent, and a sweep that never reaches it is the stall it exists to catch")
+	}
+	for _, id := range ids {
+		if id != parent {
+			t.Fatalf("sweep = %v, want only the top-level parent: %d child rows quieter than it "+
+				"sorted ahead of it, so a filter applied after selection spends the whole round "+
+				"on children and the parent is never reached", ids, children)
+		}
+	}
 }
 
 // A sub-issue completed by the sweep must reach its parent.
@@ -539,6 +602,145 @@ func TestConcurrentHandoffStartsOneReviewerRun(t *testing.T) {
 		t.Fatalf("reviewer runs = %d, want 1", got)
 	}
 	assertAssignee(t, issueID, "agent", reviewer)
+}
+
+// A finished stay leaves its handoff comment and its inbox row behind. The
+// next time the ticket enters in_review those rows are history: the reviewer
+// seat is started again, and a person in the slot is notified again. Eight
+// callbacks in the new stay still produce one notice, and the person is not
+// given the ticket.
+func TestNextReviewRoundWakesDespiteOldHandoffAndNotice(t *testing.T) {
+	ctx := context.Background()
+	fx := testutil.New(testPool, testWorkspaceID, testUserID)
+	store := testHandler.RoutingStore()
+
+	runtimeID := fx.Runtime(t, "next-round-runtime")
+	executor := fx.Agent(t, "next-round-executor", runtimeID)
+	reviewer := fx.Agent(t, "next-round-reviewer", runtimeID)
+	entered := time.Now().Add(-2 * time.Hour)
+	previous := entered.Add(-48 * time.Hour)
+
+	agentIssue := fx.Issue(t, "rework came back to review", testutil.Cols{
+		"status":        "in_review",
+		"assignee_type": "agent",
+		"assignee_id":   executor,
+		"reviewer_type": "agent",
+		"reviewer_id":   reviewer,
+	})
+	fx.Insert(t, "activity_log", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"issue_id":     agentIssue,
+		"actor_type":   "agent",
+		"actor_id":     executor,
+		"action":       "status_changed",
+		"details":      testutil.Raw(`'{"from": "in_progress", "to": "in_review"}'::jsonb`),
+		"created_at":   entered,
+	})
+	fx.Comment(t, agentIssue, "上一轮交接", testutil.Cols{
+		"author_type":  "system",
+		"type":         "system",
+		"routing_kind": "handoff",
+		"created_at":   previous,
+	})
+	fx.Task(t, reviewer, testutil.Cols{
+		"issue_id":   agentIssue,
+		"status":     "completed",
+		"runtime_id": runtimeID,
+		"created_at": previous,
+	})
+
+	state, err := store.Acceptance(ctx, testWorkspaceID, routing.Issue{
+		ID: agentIssue, Status: "in_review",
+		AssigneeType: "agent", AssigneeID: executor,
+		Reviewer: routing.ReviewerRef{Kind: routing.ReviewerAgent, ID: reviewer},
+	})
+	if err != nil {
+		t.Fatalf("acceptance before the next handoff: %v", err)
+	}
+	if state.ActiveRun || state.AgentEngaged {
+		t.Fatalf("state = %+v, the previous stay still counts as this one", state)
+	}
+	if err := store.Handoff(ctx, testWorkspaceID, agentIssue, "agent", reviewer); err != nil {
+		t.Fatalf("handoff: %v", err)
+	}
+	assertAssignee(t, agentIssue, "agent", reviewer)
+	pending := `SELECT COUNT(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched')`
+	if got := fx.Count(t, pending, agentIssue, reviewer); got != 1 {
+		t.Fatalf("new reviewer runs = %d, want 1 — the old completed run and the old handoff comment must not block this stay", got)
+	}
+	if err := store.Handoff(ctx, testWorkspaceID, agentIssue, "agent", reviewer); err != nil {
+		t.Fatalf("duplicate handoff: %v", err)
+	}
+	if got := fx.Count(t, pending, agentIssue, reviewer); got != 1 {
+		t.Fatalf("reviewer runs after the duplicate callback = %d, want 1", got)
+	}
+
+	personIssue := fx.Issue(t, "a person accepts the next round", testutil.Cols{
+		"status":        "in_review",
+		"assignee_type": "agent",
+		"assignee_id":   executor,
+		"reviewer_type": "member",
+		"reviewer_id":   testUserID,
+	})
+	fx.Insert(t, "activity_log", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"issue_id":     personIssue,
+		"actor_type":   "member",
+		"actor_id":     testUserID,
+		"action":       "status_changed",
+		"details":      testutil.Raw(`'{"from": "in_progress", "to": "in_review"}'::jsonb`),
+		"created_at":   entered,
+	})
+	fx.Comment(t, personIssue, "上一轮交接", testutil.Cols{
+		"author_type":  "system",
+		"type":         "system",
+		"routing_kind": "handoff",
+		"created_at":   previous,
+	})
+	fx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id":   testWorkspaceID,
+		"recipient_type": "member",
+		"recipient_id":   testUserID,
+		"type":           "routing_needs_you",
+		"severity":       "action_required",
+		"issue_id":       personIssue,
+		"title":          "上一轮",
+		"created_at":     previous,
+	})
+
+	const callers = 8
+	var wrote atomic.Int32
+	var failed atomic.Int32
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			ok, err := store.NotifyMember(ctx, testWorkspaceID, personIssue, routing.Member{UserID: testUserID, Name: "Kun"})
+			if err != nil {
+				failed.Add(1)
+				t.Errorf("notify: %v", err)
+				return
+			}
+			if ok {
+				wrote.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if failed.Load() != 0 {
+		t.Fatalf("%d notify calls failed", failed.Load())
+	}
+	if got := wrote.Load(); got != 1 {
+		t.Fatalf("writers = %d, want 1 for this stay", got)
+	}
+	if got := fx.Count(t, `SELECT COUNT(*) FROM inbox_item WHERE issue_id = $1 AND type = 'routing_needs_you' AND archived = false`, personIssue); got != 2 {
+		t.Fatalf("notices = %d, want the previous stay's notice plus this one", got)
+	}
+	assertAssignee(t, personIssue, "agent", executor)
 }
 
 func assertAssignee(t *testing.T, issueID, wantType, wantID string) {

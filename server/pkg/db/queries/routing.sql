@@ -67,9 +67,13 @@ RETURNING *;
 
 -- name: ReassignIssue :one
 -- The in-review handoff. Unlike the two above this is not a fill: it moves a
--- ticket that already has an assignee to whoever accepts it. It is still
--- guarded — by the one-comment-per-kind index on the handoff comment — so a
--- status flipped back and forth cannot reassign twice.
+-- ticket that already has an assignee to whoever accepts it.
+--
+-- The one-comment-per-kind index does NOT guard this write. That index only
+-- keeps the explanation comment to one per issue. A later stay — the work
+-- was sent back, redone, and the ticket entered in_review again — calls this
+-- again and starts another run. Two callbacks in the SAME stay collapse on
+-- the pending-task unique index, not on the comment.
 UPDATE issue
 SET assignee_type = sqlc.arg('assignee_type')::text,
     assignee_id = sqlc.arg('assignee_id')::uuid,
@@ -157,6 +161,7 @@ ORDER BY id;
 SELECT i.id FROM issue i
 WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
   AND i.status = ANY(sqlc.arg('statuses')::text[])
+  AND i.parent_issue_id IS NULL
   AND COALESCE(i.last_activity_at, i.updated_at) < sqlc.arg('before')::timestamptz
   AND NOT EXISTS (
       SELECT 1 FROM agent_task_queue q

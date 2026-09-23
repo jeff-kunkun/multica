@@ -134,6 +134,50 @@ func TestTodoFillsBothSlotsAndDoesNotMention(t *testing.T) {
 	}
 }
 
+func TestChildTodoDispatchesExecutorWithoutAcceptanceSeat(t *testing.T) {
+	store := newFakeStore()
+	store.issue.ParentIssueID = "parent-1"
+	judge := &fakeJudge{verdict: confidentVerdict()}
+
+	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Action != ActionAssigned {
+		t.Fatalf("action = %q, want %q", out.Action, ActionAssigned)
+	}
+	if len(store.assigns) != 1 {
+		t.Fatalf("executor writes = %v, want one child dispatch", store.assigns)
+	}
+	if len(store.reviewer) != 0 || !out.ReviewerWritten.Empty() {
+		t.Fatalf("child received an acceptance seat: writes=%v outcome=%+v", store.reviewer, out.ReviewerWritten)
+	}
+	if judge.callCount() != 1 {
+		t.Fatalf("judge calls = %d, want one executor-only decision", judge.callCount())
+	}
+}
+
+func TestChildInReviewDoesNotStartAcceptanceHandoff(t *testing.T) {
+	store := newFakeStore()
+	store.issue.ParentIssueID = "parent-1"
+	store.issue.Status = "in_review"
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-goku-g"
+	store.issue.Reviewer = ReviewerRef{}
+	judge := &fakeJudge{verdict: confidentVerdict()}
+
+	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Action != ActionNoop || out.Reason != "sub-issue has no acceptance route" {
+		t.Fatalf("child in_review route = %+v, want acceptance no-op", out)
+	}
+	if store.wrote() || store.commentCount() != 0 || judge.callCount() != 0 {
+		t.Fatalf("child in_review produced independent acceptance work: writes=%v comments=%d calls=%d", store.wrote(), store.commentCount(), judge.callCount())
+	}
+}
+
 func TestTodoDoesNotOverwriteSlotsSomebodyElseFilled(t *testing.T) {
 	store := newFakeStore()
 	store.issue.AssigneeType = "agent"
@@ -431,6 +475,44 @@ func TestInReviewHandsOffAgainAfterAPreviousRound(t *testing.T) {
 	}
 	if got := len(store.comments[KindHandoff]); got != 1 {
 		t.Errorf("posted %d handoff comments, want the original one left in place", got)
+	}
+}
+
+// Rework, then back to in_review. The first stay handed the ticket over and
+// posted the one explanation. The reviewer sent it back: the executor holds
+// it again, and that earlier run does not belong to this stay. Entering
+// in_review must hand off a second time. The explanation is not repeated.
+func TestInReviewHandsOffAgainAfterRework(t *testing.T) {
+	store := newFakeStore()
+	store.issue.Status = "in_review"
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-goku-g"
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerAgent, ID: "a-bulma-g", Name: "布尔玛游戏"}
+	r := newRouter(store, &fakeJudge{})
+
+	if _, err := r.Route(context.Background(), "ws", "issue-1"); err != nil {
+		t.Fatalf("first stay: %v", err)
+	}
+	if len(store.handoffs) != 1 {
+		t.Fatalf("first stay handoffs = %v, want 1", store.handoffs)
+	}
+
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-goku-g"
+	delete(store.reviewerRuns, "a-bulma-g")
+
+	out, err := r.Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("next stay: %v", err)
+	}
+	if out.Action != ActionHandedOff {
+		t.Fatalf("next stay = %q / %q, want handed off", out.Action, out.Reason)
+	}
+	if len(store.handoffs) != 2 || store.handoffs[1] != "agent:a-bulma-g" {
+		t.Fatalf("handoffs = %v, want a second handoff to the reviewer", store.handoffs)
+	}
+	if got := len(store.comments[KindHandoff]); got != 1 {
+		t.Errorf("posted %d handoff comments, want the one explanation kept", got)
 	}
 }
 

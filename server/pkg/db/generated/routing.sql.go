@@ -486,6 +486,7 @@ const listStaleReviewIssues = `-- name: ListStaleReviewIssues :many
 SELECT i.id FROM issue i
 WHERE i.workspace_id = $1::uuid
   AND i.status = ANY($2::text[])
+  AND i.parent_issue_id IS NULL
   AND COALESCE(i.last_activity_at, i.updated_at) < $3::timestamptz
   AND NOT EXISTS (
       SELECT 1 FROM agent_task_queue q
@@ -559,9 +560,13 @@ type ReassignIssueParams struct {
 }
 
 // The in-review handoff. Unlike the two above this is not a fill: it moves a
-// ticket that already has an assignee to whoever accepts it. It is still
-// guarded — by the one-comment-per-kind index on the handoff comment — so a
-// status flipped back and forth cannot reassign twice.
+// ticket that already has an assignee to whoever accepts it.
+//
+// The one-comment-per-kind index does NOT guard this write. That index only
+// keeps the explanation comment to one per issue. A later stay — the work
+// was sent back, redone, and the ticket entered in_review again — calls this
+// again and starts another run. Two callbacks in the SAME stay collapse on
+// the pending-task unique index, not on the comment.
 func (q *Queries) ReassignIssue(ctx context.Context, arg ReassignIssueParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, reassignIssue,
 		arg.AssigneeType,
