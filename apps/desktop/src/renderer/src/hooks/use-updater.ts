@@ -63,7 +63,7 @@ export interface UpdaterView {
   phase: UpdatePhase;
   lastCheck: UpdateCheckRecord | null;
   capabilities: UpdaterCapabilities | null;
-  /** False on an ad-hoc signed macOS build: only the release page can help. */
+  /** False on an ad-hoc or unsigned macOS build: only the release page can help. */
   autoUpdateSupported: boolean;
   check: () => Promise<void>;
   download: () => Promise<void>;

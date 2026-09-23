@@ -65,7 +65,7 @@ export function UpdateNotification() {
           icon={<ArrowDownToLine className="size-4 text-primary" />}
           tone="bg-primary/10"
           title="Manual download required"
-          body={`v${phase.version} is available, but this build isn't signed with a Developer ID, so macOS can't install it automatically.`}
+          body={`v${phase.version} is available, but this build is ad-hoc signed or unsigned, so macOS can't install it automatically.`}
         >
           <button type="button" onClick={() => void openReleasePage()} className={primaryButton}>
             Open release page

@@ -1236,7 +1236,7 @@
       "failed": "Échec de la mise à jour : {{error}}",
       "retry_download": "Réessayer le téléchargement",
       "manual_only_title": "Téléchargement manuel uniquement",
-      "manual_only_description": "Cette version n'est pas signée avec un Apple Developer ID ; macOS refuse donc d'installer automatiquement les mises à jour téléchargées. Les nouvelles versions sont annoncées ici ; installez-les depuis la page des versions.",
+      "manual_only_description": "Cette version est signée ad hoc ou n'est pas signée ; macOS ne peut donc pas faire correspondre la version suivante et n'installe pas la mise à jour automatiquement. Les nouvelles versions sont annoncées ici ; installez-les depuis la page des versions.",
       "open_release_page": "Ouvrir la page des versions",
       "last_check_label": "Dernière vérification",
       "last_check_never": "jamais",

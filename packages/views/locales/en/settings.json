@@ -1272,7 +1272,7 @@
       "failed": "Update failed: {{error}}",
       "retry_download": "Retry download",
       "manual_only_title": "Manual download only",
-      "manual_only_description": "This build isn't signed with an Apple Developer ID, so macOS refuses to install downloaded updates automatically. New versions are announced here; install them from the release page.",
+      "manual_only_description": "This build is ad-hoc signed or unsigned, so macOS cannot match the next version and will not install an update automatically. New versions are announced here; install them from the release page.",
       "open_release_page": "Open release page",
       "last_check_label": "Last check",
       "last_check_never": "not yet",

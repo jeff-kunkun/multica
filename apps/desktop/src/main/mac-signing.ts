@@ -3,23 +3,31 @@ import { execFile } from "node:child_process";
 /**
  * How the running macOS bundle is signed, as reported by `codesign -dv`.
  *
- * - `developer-id`: signed with a Developer ID Application certificate — the
- *   only case where Squirrel.Mac will accept a downloaded update.
- * - `adhoc`: `codesign -s -` (what CI produces without Apple credentials).
+ * - `identity`: a stable signing identity. Developer ID and the fork's
+ *   self-signed certificate both qualify. Squirrel.Mac pins the designated
+ *   requirement to that certificate, so a later build signed with the same
+ *   cert can install.
+ * - `adhoc`: `codesign -s -`. The requirement is the binary's cdhash, which
+ *   changes every build, so an update can never match.
  * - `unsigned`: no signature at all.
  * - `unknown`: codesign was unavailable or printed something unexpected.
+ *   Not a stable identity, so the updater stays on the manual path.
  */
-export type MacSigningStatus = "developer-id" | "adhoc" | "unsigned" | "unknown";
+export type MacSigningStatus = "identity" | "adhoc" | "unsigned" | "unknown";
 
 /**
  * Parse `codesign -dv --verbose=4` output. codesign writes its report to
  * stderr and exits non-zero for unsigned binaries, so callers pass whatever
  * text they got regardless of exit status.
+ *
+ * A self-signed certificate reports `TeamIdentifier=not set` just like an
+ * ad-hoc signature. The Authority line is what distinguishes them, so it is
+ * checked before that fallback.
  */
 export function parseCodesignOutput(output: string): MacSigningStatus {
-  if (/^Authority=Developer ID Application/m.test(output)) return "developer-id";
-  if (/^Signature=adhoc$/m.test(output)) return "adhoc";
   if (/code object is not signed at all/.test(output)) return "unsigned";
+  if (/^Signature=adhoc$/m.test(output)) return "adhoc";
+  if (/^Authority=.+/m.test(output)) return "identity";
   // A signed bundle without an Authority line only happens for ad-hoc
   // signatures on older codesign builds that omit the Signature= line.
   if (/^TeamIdentifier=not set$/m.test(output)) return "adhoc";

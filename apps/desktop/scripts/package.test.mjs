@@ -336,6 +336,7 @@ describe("builderArgsForTarget", () => {
       ),
     ).toEqual([
       "-c.extraMetadata.version=1.2.3",
+      "-c.mac.hardenedRuntime=true",
       "--mac",
       "dmg",
       "zip",
@@ -364,11 +365,44 @@ describe("builderArgsForTarget", () => {
       ),
     ).toEqual([
       "-c.extraMetadata.version=1.2.3",
+      "-c.mac.hardenedRuntime=true",
       "--mac",
       "--arm64",
       "--publish",
       "always",
       "-c.directories.output=dist/mac-arm64",
+    ]);
+  });
+
+  it("keeps a self-signed macOS build unnotarized and without the hardened runtime", () => {
+    expect(
+      builderArgsForTarget(
+        { platform: "mac", arch: "arm64" },
+        {
+          allPlatforms: false,
+          sharedArgs: ["--publish", "never"],
+          platformTargets: { mac: [], win: [], linux: [] },
+          requestedPlatforms: ["mac"],
+          requestedArchs: ["arm64"],
+        },
+        "1.2.3",
+        {
+          disableMacNotarize: true,
+          hostPlatform: "darwin",
+          useScopedOutputDir: false,
+          forceMacCodeSigning: true,
+        },
+      ),
+    ).toEqual([
+      "-c.extraMetadata.version=1.2.3",
+      "-c.mac.notarize=false",
+      "-c.forceCodeSigning=true",
+      "-c.mac.hardenedRuntime=false",
+      "-c.mac.gatekeeperAssess=false",
+      "--mac",
+      "--arm64",
+      "--publish",
+      "never",
     ]);
   });
 

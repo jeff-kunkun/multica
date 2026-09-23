@@ -97,10 +97,13 @@ function errorMessage(err: unknown): string {
 
 /**
  * Decide whether this build can install updates by itself. Only macOS has a
- * hard blocker: Squirrel.Mac validates that the downloaded bundle is signed
- * by the same Developer ID as the running app, so an ad-hoc or unsigned
- * build (what CI produces without Apple credentials) fails at install time
- * every time. We ask codesign rather than guessing from the version string.
+ * hard blocker: Squirrel.Mac checks the downloaded bundle against the running
+ * app's designated requirement. An ad-hoc signature pins that requirement to
+ * this binary's cdhash, and an unsigned bundle has nothing to match, so those
+ * two can never install a later build. Any stable identity (Developer ID or
+ * the fork's self-signed certificate) pins the requirement to the certificate
+ * instead, and a later build signed with the same cert matches. We ask
+ * codesign rather than guessing from the version string.
  */
 export async function resolveCapabilities(
   probe: {
@@ -131,7 +134,7 @@ export async function resolveCapabilities(
   }
 
   const signing = await detectSigning(executablePath);
-  if (signing === "developer-id") {
+  if (signing === "identity") {
     return { ...base, autoUpdateSupported: true, blocker: null };
   }
   return { ...base, autoUpdateSupported: false, blocker: "mac-unsigned" };
@@ -178,8 +181,8 @@ export function setupAutoUpdater(
     options.resolveCapabilities ??
     (() => resolveCapabilities({ logPath: updaterLogPath() }))
   )().then((capabilities) => {
-    // Don't pull a package we can never install: on an ad-hoc signed macOS
-    // build the user is sent to the release page instead.
+    // Don't pull a package we can never install: on an ad-hoc or unsigned
+    // macOS build the user is sent to the release page instead.
     autoUpdater.autoDownload = capabilities.autoUpdateSupported;
     if (!capabilities.autoUpdateSupported) {
       log.warn(

@@ -1268,7 +1268,7 @@
       "failed": "アップデートに失敗しました: {{error}}",
       "retry_download": "ダウンロードを再試行",
       "manual_only_title": "手動ダウンロードのみ",
-      "manual_only_description": "このビルドは Apple Developer ID で署名されていないため、macOS はダウンロードしたアップデートの自動インストールを拒否します。新しいバージョンはここで通知されるので、リリースページからインストールしてください。",
+      "manual_only_description": "このビルドはアドホック署名、または未署名です。次のバージョンと署名が一致しないため、macOS はアップデートを自動インストールしません。新しいバージョンはここで通知されるので、リリースページからインストールしてください。",
       "open_release_page": "リリースページを開く",
       "last_check_label": "最終確認",
       "last_check_never": "未確認",

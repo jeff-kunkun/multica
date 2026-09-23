@@ -39,9 +39,11 @@ export type AutoUpdateBlocker = "mac-unsigned";
 
 /**
  * Whether the running build can complete the download → install path by
- * itself. On macOS, Squirrel.Mac refuses to install a package whose signature
- * does not match the running app's Developer ID, so an ad-hoc signed build
- * (what CI ships) can only ever tell the user to download a release manually.
+ * itself. On macOS, Squirrel.Mac installs an update only when the new bundle
+ * satisfies the running app's designated requirement. An ad-hoc or unsigned
+ * build can never satisfy the next version's check, so it can only tell the
+ * user to download a release manually. A stable identity (Developer ID or the
+ * fork's self-signed certificate) can.
  */
 export interface UpdaterCapabilities {
   autoUpdateSupported: boolean;

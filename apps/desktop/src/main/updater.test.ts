@@ -502,12 +502,12 @@ describe("resolveCapabilities", () => {
     expect(detectSigning).not.toHaveBeenCalled();
   });
 
-  it("supports auto-update on a Developer ID signed macOS build", async () => {
+  it("supports auto-update on any stable signing identity", async () => {
     await expect(
       resolveCapabilities({
         ...base,
         platform: "darwin",
-        detectSigning: async () => "developer-id",
+        detectSigning: async () => "identity",
       }),
     ).resolves.toMatchObject({ autoUpdateSupported: true, blocker: null });
   });
