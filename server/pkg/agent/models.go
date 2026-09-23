@@ -172,6 +172,9 @@ const modelCacheTTL = 60 * time.Second
 // subprocess, so a wrapper that only reaches the real CLI through a
 // subcommand (`ccms start q36`) is enumerated as the CLI it actually runs
 // rather than as the wrapper (GH #7046).
+//
+// An agent custom_env on ctx (WithModelEnvOverlay) is applied by endpoint
+// readers. The machine config is what a request with no overlay sees.
 func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (Catalog, error) {
 	decl, declared := lookupModelDiscovery(providerType)
 	if declared && decl.Kind == modelDiscoveryManual {

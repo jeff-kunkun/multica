@@ -63,6 +63,44 @@ func applyModelDiscoveryProbe(ctx context.Context, decl modelDiscoveryDecl) mode
 	return decl
 }
 
+type modelEnvOverlayKey struct{}
+
+// WithModelEnvOverlay attaches an agent's custom_env to a model-list request.
+// Endpoint readers consult it and let those values win over the machine's
+// own config files. The map is copied; the key stays in this process and is
+// not part of the catalog result.
+func WithModelEnvOverlay(ctx context.Context, overlay map[string]string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	copied := cloneModelEnvOverlay(overlay)
+	if len(copied) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, modelEnvOverlayKey{}, copied)
+}
+
+// ModelEnvOverlay returns the agent custom_env attached to ctx, or nil when
+// the request is for the machine config alone.
+func ModelEnvOverlay(ctx context.Context) map[string]string {
+	if ctx == nil {
+		return nil
+	}
+	overlay, _ := ctx.Value(modelEnvOverlayKey{}).(map[string]string)
+	return overlay
+}
+
+func cloneModelEnvOverlay(overlay map[string]string) map[string]string {
+	if len(overlay) == 0 {
+		return nil
+	}
+	copied := make(map[string]string, len(overlay))
+	for key, value := range overlay {
+		copied[key] = value
+	}
+	return copied
+}
+
 // walkModelDiscoveryChain is the one model-list path. Every runtime uses it.
 // The first step that obtains a list stops the walk:
 //

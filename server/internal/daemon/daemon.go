@@ -4788,7 +4788,10 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	}
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
+			// The overlay is the agent's custom_env. Endpoint readers let it
+			// win over the machine config. It is not logged.
+			listCtx := agent.WithModelEnvOverlay(ctx, resp.PendingModelList.EnvOverlay)
+			go d.handleModelList(listCtx, *rt, resp.PendingModelList.ID)
 		}
 	}
 	if resp.PendingProviderConfig != nil {

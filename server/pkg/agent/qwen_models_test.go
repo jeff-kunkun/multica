@@ -172,6 +172,72 @@ func TestDiscoverQwenModelsListsAndDoesNotCacheMisses(t *testing.T) {
 	}
 }
 
+func TestListModelsQwenCustomEnvOverlayWins(t *testing.T) {
+	const secret = "sk-overlay-do-not-leak"
+	var fileHits atomic.Int32
+	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fileHits.Add(1)
+		_, _ = w.Write([]byte(`{"data":[{"id":"from-file"}]}`))
+	}))
+	t.Cleanup(fileSrv.Close)
+
+	var overlayHits atomic.Int32
+	var overlayDown atomic.Bool
+	overlaySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		overlayHits.Add(1)
+		if got := r.Header.Get("Authorization"); got != "Bearer "+secret {
+			t.Errorf("Authorization = %q", got)
+		}
+		if strings.Contains(r.URL.String(), secret) {
+			t.Errorf("request URL contains the key: %s", r.URL.String())
+		}
+		if overlayDown.Load() {
+			http.Error(w, secret, http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"nexus-coder"}]}`))
+	}))
+	t.Cleanup(overlaySrv.Close)
+
+	dir := t.TempDir()
+	writeQwenFile(t, dir, ".env", "OPENAI_BASE_URL="+fileSrv.URL+"/v1\nOPENAI_API_KEY=file-key\nOPENAI_MODEL=from-file\n")
+	withQwenHome(t, dir)
+
+	ctx := WithModelEnvOverlay(context.Background(), map[string]string{
+		"OPENAI_BASE_URL": overlaySrv.URL + "/v1",
+		"OPENAI_API_KEY":  secret,
+		"OPENAI_MODEL":    "nexus-coder",
+	})
+	got, err := ListModels(ctx, "qwen", Command{})
+	if err != nil {
+		t.Fatalf("overlay endpoint: %v", err)
+	}
+	if len(got.Models) != 1 || got.Models[0].ID != "nexus-coder" || !got.Models[0].Default {
+		t.Fatalf("models = %+v, want the overlay endpoint", got.Models)
+	}
+	if overlayHits.Load() != 1 {
+		t.Fatalf("overlay probe calls = %d, want 1", overlayHits.Load())
+	}
+	if fileHits.Load() != 0 {
+		t.Fatalf("machine config was probed %d times; the agent overlay should win", fileHits.Load())
+	}
+
+	overlayDown.Store(true)
+	_, err = ListModels(ctx, "qwen", Command{})
+	if err == nil || !strings.Contains(err.Error(), "暂时无法获取") {
+		t.Fatalf("overlay outage error = %v", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error leaked the key: %q", err)
+	}
+	if fileHits.Load() != 0 {
+		t.Fatal("an overlay outage fell through to the machine endpoint")
+	}
+	if overlayHits.Load() != 2 {
+		t.Fatalf("overlay probe calls = %d, want 2 — a success was cached across the outage", overlayHits.Load())
+	}
+}
+
 func TestDiscoverOpenAICompatibleModelsConfirmedEmpty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[]}`))

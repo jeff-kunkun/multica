@@ -27,20 +27,13 @@ func defaultQwenConfigHome(overlay map[string]string) string {
 	return filepath.Join(userHome, ".qwen")
 }
 
-// discoverQwenModels lists the models of the OpenAI-compatible endpoint Qwen
-// Code is configured to call.
-//
-// The endpoint comes from the machine's Qwen home (.env and settings.json).
-// overlay is the agent custom_env when a caller has it: those values win over
-// the files, the same way a value already in the process environment wins
-// over dotenv. The runtime model picker has no agent, so it passes nil and
-// reads the machine config. The API key is used only for the local probe.
-// qwenModelEndpoint is the chain's endpoint step for Qwen Code. The model
-// picker is per runtime and has no agent, so it reads the machine's Qwen
-// home. An agent's custom_env wins only when a caller passes it through
-// discoverQwenModels.
-func qwenModelEndpoint(context.Context) (string, string, string, error) {
-	return qwenEndpointFields(nil)
+// qwenModelEndpoint is the chain's endpoint step for Qwen Code. The machine
+// home (.env and settings.json) is the base. An agent custom_env attached
+// with WithModelEnvOverlay wins over those files, the same way a value
+// already in the process environment wins over dotenv. The API key is used
+// only for the local probe.
+func qwenModelEndpoint(ctx context.Context) (string, string, string, error) {
+	return qwenEndpointFields(ModelEnvOverlay(ctx))
 }
 
 func qwenEndpointFields(overlay map[string]string) (string, string, string, error) {
