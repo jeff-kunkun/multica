@@ -389,7 +389,7 @@
       "billing": "Billing",
       "config_transfer": "Export & import",
       "routing": "Routing",
-      "project_sharing": "Project sharing"
+      "project_sharing": "Permissions & sharing"
     },
     "groups": {
       "personal": "Personal",
@@ -1779,10 +1779,10 @@
     "seats_empty": "No candidate seats yet."
   },
   "project_sharing": {
-    "title": "Project sharing",
-    "description": "Manage which workspace members can see each project and its resources.",
-    "section_title": "Projects",
-    "section_description": "Changing a project scope updates all issues and repositories currently in that project.",
+    "title": "Permissions & sharing",
+    "description": "Choose who can see your projects, tasks, and connected resources.",
+    "section_title": "Project access",
+    "section_description": "Set a project to private, share it with selected project members, or share it with the whole workspace. Existing tasks and repositories follow the project scope.",
     "loading": "Loading projects…",
     "empty": "No projects yet.",
     "visibility_private": "Only me",
