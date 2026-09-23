@@ -6,7 +6,9 @@ import type {
 } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
+  InstallerReadyPayload,
   ManualUpdateCheckResult,
+  OpenInstallerResult,
   UpdateAvailablePayload,
   UpdateCheckRecord,
   UpdateDownloadProgressPayload,
@@ -404,6 +406,8 @@ const updaterAPI = {
     subscribeUpdater("updater:download-progress", callback),
   onUpdateDownloaded: (callback: (info: UpdateAvailablePayload) => void) =>
     subscribeUpdater("updater:update-downloaded", callback),
+  onInstallerReady: (callback: (installer: InstallerReadyPayload) => void) =>
+    subscribeUpdater("updater:installer-ready", callback),
   onError: (callback: (error: UpdaterErrorPayload) => void) =>
     subscribeUpdater("updater:error", callback),
   downloadUpdate: (): Promise<void> => ipcRenderer.invoke("updater:download"),
@@ -412,6 +416,12 @@ const updaterAPI = {
     ipcRenderer.invoke("updater:get-capabilities"),
   getLastCheck: (): Promise<UpdateCheckRecord | null> =>
     ipcRenderer.invoke("updater:get-last-check"),
+  getInstaller: (): Promise<InstallerReadyPayload | null> =>
+    ipcRenderer.invoke("updater:get-installer"),
+  openInstaller: (): Promise<OpenInstallerResult> =>
+    ipcRenderer.invoke("updater:open-installer"),
+  revealInstaller: (): Promise<OpenInstallerResult> =>
+    ipcRenderer.invoke("updater:reveal-installer"),
   openLogFile: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("updater:open-log"),
   getPreferences: (): Promise<UpdaterPreferences> =>

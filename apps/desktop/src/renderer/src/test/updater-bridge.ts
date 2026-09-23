@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import type {
+  InstallerReadyPayload,
   UpdateAvailablePayload,
   UpdateCheckRecord,
   UpdateDownloadProgressPayload,
@@ -23,6 +24,7 @@ export interface UpdaterBridgeFake {
     updateAvailable: (info: UpdateAvailablePayload) => void;
     downloadProgress: (progress: UpdateDownloadProgressPayload) => void;
     updateDownloaded: (info: UpdateAvailablePayload) => void;
+    installerReady: (installer: InstallerReadyPayload) => void;
     error: (error: UpdaterErrorPayload) => void;
   };
   fns: {
@@ -30,6 +32,9 @@ export interface UpdaterBridgeFake {
     installUpdate: ReturnType<typeof vi.fn>;
     getCapabilities: ReturnType<typeof vi.fn>;
     getLastCheck: ReturnType<typeof vi.fn>;
+    getInstaller: ReturnType<typeof vi.fn>;
+    openInstaller: ReturnType<typeof vi.fn>;
+    revealInstaller: ReturnType<typeof vi.fn>;
     openLogFile: ReturnType<typeof vi.fn>;
     getPreferences: ReturnType<typeof vi.fn>;
     setAutomaticUpdates: ReturnType<typeof vi.fn>;
@@ -42,19 +47,34 @@ export interface UpdaterBridgeFake {
 
 export const SUPPORTED_CAPABILITIES: UpdaterCapabilities = {
   autoUpdateSupported: true,
+  assistedInstallSupported: false,
   blocker: null,
   releasePageUrl: "https://github.com/jeff-kunkun/multica/releases/latest",
   logPath: "/logs/main.log",
 };
 
+/** What a released ad-hoc macOS build reports: it downloads, you install. */
 export const MAC_UNSIGNED_CAPABILITIES: UpdaterCapabilities = {
   ...SUPPORTED_CAPABILITIES,
   autoUpdateSupported: false,
+  assistedInstallSupported: true,
+  blocker: "mac-unsigned",
+};
+
+/** The degenerate case: no in-place install and no installer to fetch. */
+export const NO_UPDATE_PATH_CAPABILITIES: UpdaterCapabilities = {
+  ...SUPPORTED_CAPABILITIES,
+  autoUpdateSupported: false,
+  assistedInstallSupported: false,
   blocker: "mac-unsigned",
 };
 
 export function installUpdaterBridge(
-  overrides: { capabilities?: UpdaterCapabilities; lastCheck?: UpdateCheckRecord | null } = {},
+  overrides: {
+    capabilities?: UpdaterCapabilities;
+    lastCheck?: UpdateCheckRecord | null;
+    installer?: InstallerReadyPayload | null;
+  } = {},
 ): UpdaterBridgeFake {
   useUpdaterStore.getState().reset();
 
@@ -83,6 +103,9 @@ export function installUpdaterBridge(
       .fn()
       .mockResolvedValue(overrides.capabilities ?? SUPPORTED_CAPABILITIES),
     getLastCheck: vi.fn().mockResolvedValue(overrides.lastCheck ?? null),
+    getInstaller: vi.fn().mockResolvedValue(overrides.installer ?? null),
+    openInstaller: vi.fn().mockResolvedValue({ success: true }),
+    revealInstaller: vi.fn().mockResolvedValue({ success: true }),
     openLogFile: vi.fn().mockResolvedValue({ success: true }),
     getPreferences: vi.fn().mockResolvedValue({ automaticUpdates: true }),
     setAutomaticUpdates: vi.fn(),
@@ -102,6 +125,7 @@ export function installUpdaterBridge(
       onUpdateAvailable: subscribe<UpdateAvailablePayload>("update-available"),
       onDownloadProgress: subscribe<UpdateDownloadProgressPayload>("download-progress"),
       onUpdateDownloaded: subscribe<UpdateAvailablePayload>("update-downloaded"),
+      onInstallerReady: subscribe<InstallerReadyPayload>("installer-ready"),
       onError: subscribe<UpdaterErrorPayload>("error"),
       ...fns,
     },
@@ -114,6 +138,7 @@ export function installUpdaterBridge(
       updateAvailable: emitTo("update-available"),
       downloadProgress: emitTo("download-progress"),
       updateDownloaded: emitTo("update-downloaded"),
+      installerReady: emitTo("installer-ready"),
       error: emitTo("error"),
     },
     fns,

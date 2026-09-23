@@ -21,6 +21,7 @@ function connectUpdaterEvents(): void {
     window.updater.onUpdateAvailable((info) => store.updateAvailable(info.version)),
     window.updater.onDownloadProgress(({ percent }) => store.downloadProgress(percent)),
     window.updater.onUpdateDownloaded((info) => store.updateDownloaded(info.version)),
+    window.updater.onInstallerReady((installer) => store.installerReady(installer)),
     window.updater.onError(({ message }) => store.failed(message)),
   ];
   disconnect = () => {
@@ -50,6 +51,16 @@ function hydrateFromMain(): void {
     .then((capabilities) => store.setCapabilities(capabilities))
     .catch(() => undefined);
   void window.updater
+    .getInstaller()
+    .then((installer) => {
+      // A .dmg downloaded before this component mounted is not replayed as an
+      // event; without this the card disappears on a window reload.
+      if (installer && useUpdaterStore.getState().phase.status === "idle") {
+        store.installerReady(installer);
+      }
+    })
+    .catch(() => undefined);
+  void window.updater
     .getLastCheck()
     .then((record) => {
       if (record && useUpdaterStore.getState().lastCheck === null) {
@@ -63,13 +74,17 @@ export interface UpdaterView {
   phase: UpdatePhase;
   lastCheck: UpdateCheckRecord | null;
   capabilities: UpdaterCapabilities | null;
-  /** False on an ad-hoc or unsigned macOS build: only the release page can help. */
+  /** False on an ad-hoc or unsigned macOS build: it cannot swap itself out. */
   autoUpdateSupported: boolean;
+  /** True when such a build still downloads the .dmg for a manual install. */
+  assistedInstallSupported: boolean;
   check: () => Promise<void>;
   download: () => Promise<void>;
   install: () => Promise<void>;
   openReleasePage: () => Promise<void>;
   openLogFile: () => Promise<void>;
+  openInstaller: () => Promise<void>;
+  revealInstaller: () => Promise<void>;
 }
 
 export function useUpdater(): UpdaterView {
@@ -136,15 +151,29 @@ export function useUpdater(): UpdaterView {
     await window.updater.openLogFile();
   }, []);
 
+  const openInstaller = useCallback(async () => {
+    const result = await window.updater.openInstaller();
+    if (!result.success) {
+      useUpdaterStore.getState().failed(result.error);
+    }
+  }, []);
+
+  const revealInstaller = useCallback(async () => {
+    await window.updater.revealInstaller();
+  }, []);
+
   return {
     phase,
     lastCheck,
     capabilities,
     autoUpdateSupported: capabilities?.autoUpdateSupported ?? true,
+    assistedInstallSupported: capabilities?.assistedInstallSupported ?? false,
     check,
     download,
     install,
     openReleasePage,
     openLogFile,
+    openInstaller,
+    revealInstaller,
   };
 }

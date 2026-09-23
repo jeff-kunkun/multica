@@ -1,9 +1,12 @@
 import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
 import { app, type BrowserWindow, ipcMain, shell } from "electron";
 import log from "electron-log/main";
+import { join } from "node:path";
 import {
   releasePageUrl,
+  type InstallerReadyPayload,
   type ManualUpdateCheckResult,
+  type OpenInstallerResult,
   type UpdateCheckRecord,
   type UpdateCheckTrigger,
   type UpdaterCapabilities,
@@ -16,6 +19,10 @@ import {
   updaterPreferencesPath,
 } from "./updater-preferences";
 import { detectMacSigning, type MacSigningStatus } from "./mac-signing";
+import {
+  fetchInstallerForVersion,
+  type DownloadedInstaller,
+} from "./mac-installer";
 
 // Background updates: electron-updater downloads on its own as soon as
 // `update-available` fires (see resolveCapabilities for the macOS exception,
@@ -68,6 +75,7 @@ type RendererChannel =
   | "updater:update-available"
   | "updater:download-progress"
   | "updater:update-downloaded"
+  | "updater:installer-ready"
   | "updater:error";
 
 function isDestroyedObjectError(err: unknown): boolean {
@@ -96,7 +104,7 @@ function errorMessage(err: unknown): string {
 }
 
 /**
- * Decide whether this build can install updates by itself. Only macOS has a
+ * Decide how far this build can carry an update on its own. Only macOS has a
  * hard blocker: Squirrel.Mac checks the downloaded bundle against the running
  * app's designated requirement. An ad-hoc signature pins that requirement to
  * this binary's cdhash, and an unsigned bundle has nothing to match, so those
@@ -104,6 +112,10 @@ function errorMessage(err: unknown): string {
  * the fork's self-signed certificate) pins the requirement to the certificate
  * instead, and a later build signed with the same cert matches. We ask
  * codesign rather than guessing from the version string.
+ *
+ * A build that fails that test is not sent away empty-handed: it still gets
+ * `assistedInstallSupported`, where the app downloads the release `.dmg`
+ * itself and the user only performs the drag into Applications.
  */
 export async function resolveCapabilities(
   probe: {
@@ -130,19 +142,39 @@ export async function resolveCapabilities(
   // Dev runs never auto-update (electron-updater has no app-update.yml), so
   // there is nothing to block; report "supported" and let the check no-op.
   if (platform !== "darwin" || !isPackaged) {
-    return { ...base, autoUpdateSupported: true, blocker: null };
+    return {
+      ...base,
+      autoUpdateSupported: true,
+      assistedInstallSupported: false,
+      blocker: null,
+    };
   }
 
   const signing = await detectSigning(executablePath);
   if (signing === "identity") {
-    return { ...base, autoUpdateSupported: true, blocker: null };
+    return {
+      ...base,
+      autoUpdateSupported: true,
+      assistedInstallSupported: false,
+      blocker: null,
+    };
   }
-  return { ...base, autoUpdateSupported: false, blocker: "mac-unsigned" };
+  return {
+    ...base,
+    autoUpdateSupported: false,
+    assistedInstallSupported: true,
+    blocker: "mac-unsigned",
+  };
 }
 
 export interface SetupAutoUpdaterOptions {
   /** Test seam: override the capability probe (signing check, platform). */
   resolveCapabilities?: () => Promise<UpdaterCapabilities>;
+  /** Test seam: override the assisted `.dmg` fetch. */
+  fetchInstaller?: (
+    version: string,
+    onProgress: (percent: number) => void,
+  ) => Promise<DownloadedInstaller>;
 }
 
 function updaterLogPath(): string | null {
@@ -151,6 +183,17 @@ function updaterLogPath(): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The `app-update.yml` electron-updater itself resolved. Reading the same file
+ * keeps the assisted `.dmg` download pointed at whatever feed served the
+ * metadata — including the override electron-updater honours in development.
+ */
+function updateConfigPath(): string {
+  const configured = (autoUpdater as unknown as { updateConfigPath?: string | null })
+    .updateConfigPath;
+  return configured ?? join(process.resourcesPath, "app-update.yml");
 }
 
 export function setupAutoUpdater(
@@ -181,16 +224,78 @@ export function setupAutoUpdater(
     options.resolveCapabilities ??
     (() => resolveCapabilities({ logPath: updaterLogPath() }))
   )().then((capabilities) => {
-    // Don't pull a package we can never install: on an ad-hoc or unsigned
-    // macOS build the user is sent to the release page instead.
+    // Don't let Squirrel stage a package it would fail to apply: on an ad-hoc
+    // or unsigned macOS build the assisted path below fetches the .dmg
+    // instead, so the download still happens — just not through electron-updater.
     autoUpdater.autoDownload = capabilities.autoUpdateSupported;
     if (!capabilities.autoUpdateSupported) {
       log.warn(
-        `[updater] automatic install unavailable (${capabilities.blocker}); manual download only`,
+        `[updater] in-place install unavailable (${capabilities.blocker}); ` +
+          `${capabilities.assistedInstallSupported ? "downloading the installer for a manual drag into Applications" : "manual download only"}`,
       );
     }
     return capabilities;
   });
+
+  // --- Assisted install (macOS without a stable signing identity) ----------
+  // electron-updater is out of the picture here: it would stage a package
+  // Squirrel refuses to apply. We fetch the release .dmg ourselves, report
+  // progress on the same renderer channel as a normal download, and finish in
+  // `installer-ready` instead of `update-downloaded` — the card there asks for
+  // the drag into Applications rather than a restart.
+  let installerReady: InstallerReadyPayload | null = null;
+  let assistedDownload: Promise<void> | null = null;
+  let offeredVersion: string | null = null;
+
+  // `update-available` does not fire for a check whose result the renderer
+  // already has (a repeat check for the same version), so the last check
+  // record is the second source for "which version is on offer".
+  const versionFromLastCheck = (): string | null =>
+    lastCheck?.ok && lastCheck.available ? lastCheck.latestVersion : null;
+
+  const fetchInstaller =
+    options.fetchInstaller ??
+    ((version: string, onProgress: (percent: number) => void) =>
+      fetchInstallerForVersion({
+        version,
+        arch: process.arch,
+        configPath: updateConfigPath(),
+        userDataPath: app.getPath("userData"),
+        onProgress,
+      }));
+
+  const startAssistedDownload = (version: string): Promise<void> => {
+    if (assistedDownload) return assistedDownload;
+    if (installerReady?.version === version) {
+      sendToLiveRenderer(getMainWindow(), "updater:installer-ready", installerReady);
+      return Promise.resolve();
+    }
+
+    sendToLiveRenderer(getMainWindow(), "updater:download-progress", { percent: 0 });
+    const run = fetchInstaller(version, (percent) => {
+      sendToLiveRenderer(getMainWindow(), "updater:download-progress", { percent });
+    })
+      .then((result) => {
+        installerReady = {
+          version,
+          fileName: result.fileName,
+          path: result.path,
+        };
+        log.info(`[updater] installer ready for manual install: ${result.path}`);
+        sendToLiveRenderer(getMainWindow(), "updater:installer-ready", installerReady);
+      })
+      .catch((err) => {
+        log.error("[updater] installer download failed:", err);
+        sendToLiveRenderer(getMainWindow(), "updater:error", {
+          message: errorMessage(err),
+        });
+      })
+      .finally(() => {
+        if (assistedDownload === run) assistedDownload = null;
+      });
+    assistedDownload = run;
+    return run;
+  };
 
   // Single-flight guard around checkForUpdates(). With autoDownload=true the
   // startup, periodic, and manual triggers can all kick off downloads, and
@@ -296,9 +401,16 @@ export function setupAutoUpdater(
   };
 
   autoUpdater.on("update-available", (info) => {
+    offeredVersion = info.version;
     sendToLiveRenderer(getMainWindow(), "updater:update-available", {
       version: info.version,
       releaseNotes: info.releaseNotes,
+    });
+    // Mirror electron-updater's own autoDownload on the assisted path: the
+    // user should never have to ask for the bytes, only for the install.
+    void capabilitiesReady.then((capabilities) => {
+      if (!capabilities.assistedInstallSupported) return;
+      return startAssistedDownload(info.version);
     });
   });
 
@@ -325,9 +437,17 @@ export function setupAutoUpdater(
     });
   });
 
-  // Manual download: the "Download" / "Retry" button in the renderer. Also
-  // the only download path once autoDownload is off.
+  // Manual download: the "Download" / "Retry" button in the renderer. Routed
+  // to whichever downloader this build can actually finish with.
   ipcMain.handle("updater:download", async () => {
+    const capabilities = await capabilitiesReady;
+    if (capabilities.assistedInstallSupported) {
+      const version = offeredVersion ?? versionFromLastCheck();
+      if (!version) throw new Error("No update version has been offered yet");
+      await startAssistedDownload(version);
+      return;
+    }
+
     try {
       await autoUpdater.downloadUpdate();
     } catch (err) {
@@ -339,6 +459,26 @@ export function setupAutoUpdater(
 
   ipcMain.handle("updater:install", () => {
     autoUpdater.quitAndInstall(false, true);
+  });
+
+  ipcMain.handle(
+    "updater:get-installer",
+    (): InstallerReadyPayload | null => installerReady,
+  );
+
+  // Mount the .dmg. Finder then shows the drag-to-Applications window that is
+  // the whole point of this path, so no extra guidance has to be rendered on
+  // top of the OS's own.
+  ipcMain.handle("updater:open-installer", async (): Promise<OpenInstallerResult> => {
+    if (!installerReady) return { success: false, error: "No installer downloaded" };
+    const error = await shell.openPath(installerReady.path);
+    return error ? { success: false, error } : { success: true };
+  });
+
+  ipcMain.handle("updater:reveal-installer", (): OpenInstallerResult => {
+    if (!installerReady) return { success: false, error: "No installer downloaded" };
+    shell.showItemInFolder(installerReady.path);
+    return { success: true };
   });
 
   ipcMain.handle(

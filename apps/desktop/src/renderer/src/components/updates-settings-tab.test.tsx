@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import {
   installUpdaterBridge,
   MAC_UNSIGNED_CAPABILITIES,
+  NO_UPDATE_PATH_CAPABILITIES,
   type UpdaterBridgeFake,
 } from "../test/updater-bridge";
 
@@ -31,11 +32,16 @@ const translations = {
       download: "Download",
       downloading_progress: "Downloading v{{version}} · {{percent}}%",
       downloaded: "v{{version}} downloaded — restart to install.",
+      installer_ready: "v{{version}} downloaded — open it and drag Multica into Applications.",
+      open_installer: "Open installer",
+      reveal_installer: "Show in Finder",
       restart_now: "Restart now",
       failed: "Update failed: {{error}}",
       retry_download: "Retry download",
       manual_only_title: "Manual download only",
       manual_only_description: "Unsigned build",
+      assisted_install_title: "Installed by hand",
+      assisted_install_description: "This build downloads the installer for you.",
       open_release_page: "Open release page",
       last_check_label: "Last check",
       last_check_never: "not yet",
@@ -202,8 +208,8 @@ describe("UpdatesSettingsTab", () => {
     );
   });
 
-  it("switches to the manual-download path on an unsigned macOS build", async () => {
-    bridge = installUpdaterBridge({ capabilities: MAC_UNSIGNED_CAPABILITIES });
+  it("switches to the manual-download path when nothing can be fetched", async () => {
+    bridge = installUpdaterBridge({ capabilities: NO_UPDATE_PATH_CAPABILITIES });
     render(<UpdatesSettingsTab />);
 
     await waitFor(() =>
@@ -220,6 +226,54 @@ describe("UpdatesSettingsTab", () => {
     expect(bridge.fns.openExternal).toHaveBeenCalledWith(
       "https://github.com/jeff-kunkun/multica/releases/latest",
     );
+  });
+
+  it("keeps the in-app download on an unsigned macOS build", async () => {
+    bridge = installUpdaterBridge({ capabilities: MAC_UNSIGNED_CAPABILITIES });
+    render(<UpdatesSettingsTab />);
+
+    await waitFor(() =>
+      expect(screen.getByText("Installed by hand")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("Manual download only")).not.toBeInTheDocument();
+
+    act(() => bridge.emit.updateAvailable({ version: "1.3.0" }));
+
+    expect(screen.getByText("v1.3.0 is available.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(bridge.fns.downloadUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("shows where the installer landed and how to finish the install", async () => {
+    bridge = installUpdaterBridge({ capabilities: MAC_UNSIGNED_CAPABILITIES });
+    render(<UpdatesSettingsTab />);
+    await act(async () => {});
+
+    act(() =>
+      bridge.emit.installerReady({
+        version: "1.3.0",
+        fileName: "multica-desktop-1.3.0-mac-arm64.dmg",
+        path: "/Users/x/Library/Application Support/Multica/installers/multica-desktop-1.3.0-mac-arm64.dmg",
+      }),
+    );
+
+    expect(
+      screen.getByText("v1.3.0 downloaded — open it and drag Multica into Applications."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "/Users/x/Library/Application Support/Multica/installers/multica-desktop-1.3.0-mac-arm64.dmg",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restart now" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open installer" }));
+    await act(async () => {});
+    expect(bridge.fns.openInstaller).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show in Finder" }));
+    await act(async () => {});
+    expect(bridge.fns.revealInstaller).toHaveBeenCalledOnce();
   });
 
   it("opens the updater log from the settings page", async () => {

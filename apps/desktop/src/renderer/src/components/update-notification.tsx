@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, ArrowDownToLine, RefreshCw, X } from "lucide-react";
+import { AlertCircle, ArrowDownToLine, FolderOpen, PackageOpen, RefreshCw, X } from "lucide-react";
 import { useUpdater } from "../hooks/use-updater";
 import type { UpdatePhase } from "../stores/updater-store";
 
@@ -18,6 +18,7 @@ function isActionable(phase: UpdatePhase): boolean {
     phase.status === "available" ||
     phase.status === "downloading" ||
     phase.status === "downloaded" ||
+    phase.status === "installer-ready" ||
     phase.status === "error"
   );
 }
@@ -28,8 +29,16 @@ const primaryButton =
   "inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-caption font-medium text-primary-foreground hover:bg-primary/90 transition-colors";
 
 export function UpdateNotification() {
-  const { phase, autoUpdateSupported, download, install, openReleasePage } =
-    useUpdater();
+  const {
+    phase,
+    autoUpdateSupported,
+    assistedInstallSupported,
+    download,
+    install,
+    openReleasePage,
+    openInstaller,
+    revealInstaller,
+  } = useUpdater();
   const [dismissedPhase, setDismissedPhase] = useState<UpdatePhase["status"] | null>(
     null,
   );
@@ -60,31 +69,36 @@ export function UpdateNotification() {
         <X className="size-3.5" />
       </button>
 
-      {phase.status === "available" && !autoUpdateSupported && (
-        <Card
-          icon={<ArrowDownToLine className="size-4 text-primary" />}
-          tone="bg-primary/10"
-          title="Manual download required"
-          body={`v${phase.version} is available, but this build is ad-hoc signed or unsigned, so macOS can't install it automatically.`}
-        >
-          <button type="button" onClick={() => void openReleasePage()} className={primaryButton}>
-            Open release page
-          </button>
-        </Card>
-      )}
+      {/* Only a build that can neither install itself nor fetch its own
+          installer has nothing to offer but a browser link. */}
+      {phase.status === "available" &&
+        !autoUpdateSupported &&
+        !assistedInstallSupported && (
+          <Card
+            icon={<ArrowDownToLine className="size-4 text-primary" />}
+            tone="bg-primary/10"
+            title="Manual download required"
+            body={`v${phase.version} is available, but this build can't download or install it on its own.`}
+          >
+            <button type="button" onClick={() => void openReleasePage()} className={primaryButton}>
+              Open release page
+            </button>
+          </Card>
+        )}
 
-      {phase.status === "available" && autoUpdateSupported && (
-        <Card
-          icon={<ArrowDownToLine className="size-4 text-primary" />}
-          tone="bg-primary/10"
-          title="Update available"
-          body={`v${phase.version} is ready to download.`}
-        >
-          <button type="button" onClick={() => void download()} className={primaryButton}>
-            Download
-          </button>
-        </Card>
-      )}
+      {phase.status === "available" &&
+        (autoUpdateSupported || assistedInstallSupported) && (
+          <Card
+            icon={<ArrowDownToLine className="size-4 text-primary" />}
+            tone="bg-primary/10"
+            title="Update available"
+            body={`v${phase.version} is ready to download.`}
+          >
+            <button type="button" onClick={() => void download()} className={primaryButton}>
+              Download
+            </button>
+          </Card>
+        )}
 
       {phase.status === "downloading" && (
         <Card
@@ -117,6 +131,35 @@ export function UpdateNotification() {
         </Card>
       )}
 
+      {/* The assisted finish line: the .dmg is on disk, and the one step this
+          build is not allowed to take on its own is the drag into
+          Applications. Opening the image puts Finder's own drag window on
+          screen, which is the clearest instruction available. */}
+      {phase.status === "installer-ready" && (
+        <Card
+          icon={<PackageOpen className="size-4 text-success" />}
+          tone="bg-success/10"
+          title="Installer downloaded"
+          body={`v${phase.version} is downloaded. Open it, then drag Multica into Applications and replace the old copy.`}
+        >
+          <button
+            type="button"
+            onClick={() => void revealInstaller()}
+            className={secondaryButton}
+          >
+            <FolderOpen className="size-3.5 mr-1" />
+            Show in Finder
+          </button>
+          <button
+            type="button"
+            onClick={() => void openInstaller()}
+            className={primaryButton}
+          >
+            Open installer
+          </button>
+        </Card>
+      )}
+
       {phase.status === "error" && (
         <Card
           icon={<AlertCircle className="size-4 text-destructive" />}
@@ -124,7 +167,7 @@ export function UpdateNotification() {
           title="Update failed"
           body={phase.message}
         >
-          {phase.version && autoUpdateSupported && (
+          {phase.version && (autoUpdateSupported || assistedInstallSupported) && (
             <button type="button" onClick={() => void download()} className={primaryButton}>
               Retry download
             </button>
