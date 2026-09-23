@@ -46,8 +46,16 @@ import { fileURLToPath } from "node:url";
 const PAYLOAD_PATTERN = /\.(?:dmg|zip|exe|AppImage|deb|rpm)$/;
 /** electron-updater block maps, published alongside each payload. */
 const BLOCKMAP_PATTERN = /\.blockmap$/;
-/** electron-updater feed metadata (`latest-mac.yml`, `latest-x64.yml`, ...). */
-const FEED_PATTERN = /^latest(?:-[A-Za-z0-9._-]+)?\.ya?ml$/;
+/**
+ * electron-updater feed metadata (`latest-mac.yml`, `latest-x64.yml`, ...).
+ *
+ * Two channel prefixes, never one: `latest*` is what installed stable clients
+ * poll, `beta*` is what a `-test.N` build writes. Both are feeds, so both are
+ * subject to the upload ordering below — a `beta-mac.yml` that fell through
+ * this pattern would not be collected as a release asset at all, and the test
+ * channel would advertise nothing.
+ */
+const FEED_PATTERN = /^(?:latest|beta)(?:-[A-Za-z0-9._-]+)?\.ya?ml$/;
 
 const DEFAULT_REPO = "jeff-kunkun/multica";
 
@@ -134,7 +142,7 @@ export function collectLocalAssets(distDir) {
 
   if (found.size === 0) {
     throw new Error(
-      `[assets] no release assets found under ${root}; expected installers, blockmaps, or latest*.yml`,
+      `[assets] no release assets found under ${root}; expected installers, blockmaps, or latest*.yml / beta*.yml`,
     );
   }
   return [...found.values()].sort((left, right) =>

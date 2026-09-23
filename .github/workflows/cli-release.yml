@@ -120,18 +120,35 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # A `-test.N` tag is a prerelease, and a prerelease must stay out of
+          # the repository's "Latest" pointer — that is what installed stable
+          # Desktop clients follow. This workflow races desktop-release.yml to
+          # create the release from the same tag push, so it has to know the
+          # channel too; whichever one wins, the release is flagged correctly.
+          prerelease=false
+          if [[ "$TAG" == *-* ]]; then
+            prerelease=true
+          fi
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "release $TAG already exists; CLI assets will be added to it"
-            exit 0
+          else
+            # The Desktop workflow may be creating the same release right now;
+            # losing that race is fine as long as the release ends up there.
+            create_flags=()
+            if [[ "$prerelease" == "true" ]]; then
+              create_flags+=(--prerelease)
+            fi
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --verify-tag \
+              ${create_flags[@]+"${create_flags[@]}"} \
+              --title "Multica $TAG (kun fork)" \
+              --generate-notes \
+              || gh release view "$TAG" --repo "$REPO" >/dev/null
           fi
-          # The Desktop workflow may be creating the same release right now;
-          # losing that race is fine as long as the release ends up there.
-          gh release create "$TAG" \
-            --repo "$REPO" \
-            --verify-tag \
-            --title "Multica $TAG (kun fork)" \
-            --generate-notes \
-            || gh release view "$TAG" --repo "$REPO" >/dev/null
+          if [[ "$prerelease" == "true" ]]; then
+            gh release edit "$TAG" --repo "$REPO" --prerelease
+          fi
 
       - name: Upload CLI assets
         id: upload

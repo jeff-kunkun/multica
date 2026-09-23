@@ -65,6 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
     steps:
       - name: Resolve the release tag
         id: meta
@@ -86,6 +87,15 @@ jobs:
             exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          # The tag decides the channel, and nothing else does. The strict
+          # semver check above only lets a dash through as a prerelease
+          # segment, so `vX.Y.Z-test.N` is exactly the test channel and
+          # `vX.Y.Z` is exactly the stable one.
+          if [[ "$tag" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
       # Creating the release here rather than inside each packaging job is what
       # keeps the matrix from racing: `gh release create` is not idempotent, and
@@ -96,22 +106,41 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.meta.outputs.tag }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
         run: |
           set -euo pipefail
+          # A prerelease tag must never become the repository's "Latest"
+          # release: that is the pointer `/releases/latest` resolves to and the
+          # one electron-updater follows for stable clients. Without this flag
+          # a `-test.N` tag silently redirects every installed stable client to
+          # the test build the moment it is published.
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "release $TAG already exists; its assets will be replaced"
-            exit 0
+          else
+            # `|| gh release view` because cli-release.yml creates the same
+            # release from the same tag push: whichever workflow loses the race
+            # sees the other's release, which is the state this step wants.
+            create_flags=()
+            # `&&` instead of `if` would be a landmine under `set -e`: a false
+            # test makes the whole command fail and kills the step.
+            if [[ "$PRERELEASE" == "true" ]]; then
+              create_flags+=(--prerelease)
+            fi
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --verify-tag \
+              ${create_flags[@]+"${create_flags[@]}"} \
+              --title "Multica Desktop $TAG (kun fork)" \
+              --generate-notes \
+              --notes "macOS (Apple Silicon)、Windows (x64/arm64)、Linux (x64/arm64) 桌面安装包。macOS 为 ad-hoc 签名、未公证，首次打开需在「系统设置 → 隐私与安全性」中放行，或执行 \`xattr -cr /Applications/Multica.app\`；Windows 与 Linux 包未签名。资产由 Desktop Release workflow 构建并上传，上传后会逐个核对 \`state=uploaded\` 与文件大小。" \
+              || gh release view "$TAG" --repo "$REPO" >/dev/null
           fi
-          # `|| gh release view` because cli-release.yml creates the same
-          # release from the same tag push: whichever workflow loses the race
-          # sees the other's release, which is the state this step wants.
-          gh release create "$TAG" \
-            --repo "$REPO" \
-            --verify-tag \
-            --title "Multica Desktop $TAG (kun fork)" \
-            --generate-notes \
-            --notes "macOS (Apple Silicon)、Windows (x64/arm64)、Linux (x64/arm64) 桌面安装包。macOS 为 ad-hoc 签名、未公证，首次打开需在「系统设置 → 隐私与安全性」中放行，或执行 \`xattr -cr /Applications/Multica.app\`；Windows 与 Linux 包未签名。资产由 Desktop Release workflow 构建并上传，上传后会逐个核对 \`state=uploaded\` 与文件大小。" \
-            || gh release view "$TAG" --repo "$REPO" >/dev/null
+          # Enforce the flag whoever created the release: cli-release.yml
+          # publishes from the same tag push and may well have won the race,
+          # and a republish of an older tag inherits whatever flag it carries.
+          if [[ "$PRERELEASE" == "true" ]]; then
+            gh release edit "$TAG" --repo "$REPO" --prerelease
+          fi
 
   package:
     needs: prepare

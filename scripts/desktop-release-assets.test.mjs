@@ -68,6 +68,53 @@ test("uploads payloads before blockmaps and feed metadata last", () => {
   ]);
 });
 
+test("treats the test channel's beta feeds as feed metadata, not as junk", () => {
+  const dir = tempDir();
+  try {
+    // What a `v0.5.5-test.1` build writes: the same payloads, but the feeds
+    // carry the beta prefix so they cannot collide with the stable channel.
+    writeFile(join(dir, "multica-desktop-0.5.5-test.1-mac-arm64.dmg"), 8);
+    writeFile(join(dir, "beta-mac.yml"), 3);
+    writeFile(join(dir, "beta-arm64.yml"), 3);
+    writeFile(join(dir, "beta.yml"), 3);
+
+    const assets = collectLocalAssets(dir);
+    assert.deepEqual(assets.map((asset) => asset.name), [
+      "beta-arm64.yml",
+      "beta-mac.yml",
+      "beta.yml",
+      "multica-desktop-0.5.5-test.1-mac-arm64.dmg",
+    ]);
+
+    // Red line 7 applies to both channels: a feed published before the payload
+    // it describes advertises a download that 404s.
+    const waves = uploadWaves(assets).map((wave) =>
+      wave.map((asset) => asset.name),
+    );
+    assert.deepEqual(waves, [
+      ["multica-desktop-0.5.5-test.1-mac-arm64.dmg"],
+      ["beta-arm64.yml", "beta-mac.yml", "beta.yml"],
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("keeps both channels' feeds behind the payloads in one ordering", () => {
+  const ordered = orderAssetsForUpload([
+    { name: "beta-mac.yml" },
+    { name: "latest-mac.yml" },
+    { name: "a.dmg.blockmap" },
+    { name: "a.dmg" },
+  ]).map((asset) => asset.name);
+  assert.deepEqual(ordered, [
+    "a.dmg",
+    "a.dmg.blockmap",
+    "beta-mac.yml",
+    "latest-mac.yml",
+  ]);
+});
+
 test("collects only publishable files, recursively and by basename", () => {
   const dir = tempDir();
   try {
