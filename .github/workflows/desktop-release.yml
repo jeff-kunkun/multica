@@ -98,8 +98,19 @@ jobs:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
+          # Test tags (`vX.Y.Z-test.N`) must be GitHub prereleases. The stable
+          # client asks GitHub for /releases/latest, which hides prereleases;
+          # a test build published as a full release would become "latest" and
+          # the stable feed file would 404 inside it.
+          prerelease=()
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-test\.[0-9]+$ ]]; then
+            prerelease=(--prerelease)
+          fi
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "release $TAG already exists; its assets will be replaced"
+            if [[ ${#prerelease[@]} -gt 0 ]]; then
+              gh release edit "$TAG" --repo "$REPO" --prerelease
+            fi
             exit 0
           fi
           # `|| gh release view` because cli-release.yml creates the same
@@ -111,7 +122,11 @@ jobs:
             --title "Multica Desktop $TAG (kun fork)" \
             --generate-notes \
             --notes "macOS (Apple Silicon)、Windows (x64/arm64)、Linux (x64/arm64) 桌面安装包。macOS 为 ad-hoc 签名、未公证，首次打开需在「系统设置 → 隐私与安全性」中放行，或执行 \`xattr -cr /Applications/Multica.app\`；Windows 与 Linux 包未签名。资产由 Desktop Release workflow 构建并上传，上传后会逐个核对 \`state=uploaded\` 与文件大小。" \
+            "${prerelease[@]}" \
             || gh release view "$TAG" --repo "$REPO" >/dev/null
+          if [[ ${#prerelease[@]} -gt 0 ]]; then
+            gh release edit "$TAG" --repo "$REPO" --prerelease
+          fi
 
   package:
     needs: prepare
@@ -214,9 +229,16 @@ jobs:
           # notarization when APPLE_TEAM_ID is absent); Windows and Linux ship
           # unsigned, with the CLI carrying the trust boundary.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # Flip to "true" in the same change that injects Apple Developer ID
+          # secrets (CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID,
+          # APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID) and turns
+          # CSC_IDENTITY_AUTO_DISCOVERY back on. package.mjs bakes this into
+          # the app. Until then macOS only prompts and opens the installer;
+          # Windows and Linux still install updates themselves.
+          MULTICA_MAC_SIGNED_UPDATES: "false"
           # No publisher token: publishing happens below so the upload can be
-          # verified. electron-builder still writes the latest*.yml feeds and
-          # the blockmaps with --publish never.
+          # verified. electron-builder still writes the latest*.yml / beta*.yml
+          # feeds and the blockmaps with --publish never.
         run: node scripts/package.mjs --${{ matrix.platform }} ${{ matrix.archs }} --publish never
 
       - name: Drop zombie assets left by an earlier failed upload

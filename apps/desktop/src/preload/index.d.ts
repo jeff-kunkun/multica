@@ -12,6 +12,7 @@ import type {
 } from "../shared/issue-window";
 import type {
   ManualUpdateCheckResult,
+  UpdateSnapshot,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import type {
@@ -248,8 +249,13 @@ interface UpdaterAPI {
   ) => () => void;
   downloadUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
+  getState: () => Promise<UpdateSnapshot>;
+  onState: (callback: (state: UpdateSnapshot) => void) => () => void;
   getPreferences: () => Promise<UpdaterPreferences>;
   setAutomaticUpdates: (enabled: boolean) => Promise<UpdaterPreferences>;
+  setReleaseChannel: (
+    channel: UpdaterPreferences["releaseChannel"],
+  ) => Promise<UpdaterPreferences>;
   checkForUpdates: () => Promise<ManualUpdateCheckResult>;
 }
 

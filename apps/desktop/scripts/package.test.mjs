@@ -8,6 +8,7 @@ import {
   deriveVersion,
   DESCRIBE_ARGS,
   envWithLocalBins,
+  macSignedUpdatesEnv,
   normalizeGitVersion,
   parsePackageArgs,
   resolveBuildMatrix,
@@ -348,6 +349,49 @@ describe("builderArgsForTarget", () => {
     ]);
   });
 
+  it("publishes a test tag onto the beta feed, including macOS arm64", () => {
+    expect(
+      builderArgsForTarget(
+        { platform: "mac", arch: "arm64" },
+        {
+          allPlatforms: false,
+          sharedArgs: ["--publish", "never"],
+          platformTargets: { mac: ["dmg", "zip"], win: [], linux: [] },
+          requestedPlatforms: ["mac"],
+          requestedArchs: ["arm64"],
+        },
+        "0.5.5-test.1",
+        { hostPlatform: "darwin" },
+      ),
+    ).toEqual([
+      "-c.extraMetadata.version=0.5.5-test.1",
+      "--mac",
+      "dmg",
+      "zip",
+      "--arm64",
+      "--publish",
+      "never",
+      "-c.publish.channel=beta",
+    ]);
+  });
+
+  it("publishes a test tag onto beta-arm64 for Windows arm64", () => {
+    expect(
+      builderArgsForTarget(
+        { platform: "win", arch: "arm64" },
+        {
+          allPlatforms: false,
+          sharedArgs: ["--publish", "never"],
+          platformTargets: { mac: [], win: ["nsis"], linux: [] },
+          requestedPlatforms: ["win"],
+          requestedArchs: ["arm64"],
+        },
+        "0.5.5-test.2",
+        { hostPlatform: "win32" },
+      ),
+    ).toContain("-c.publish.channel=beta-arm64");
+  });
+
   it("keeps macOS arm64 on the existing latest-mac update channel", () => {
     expect(
       builderArgsForTarget(
@@ -394,6 +438,14 @@ describe("builderArgsForTarget", () => {
       "--publish",
       "never",
     ]);
+  });
+});
+
+describe("macSignedUpdatesEnv", () => {
+  it("bakes a signed-update flag only when the workflow turns the switch on", () => {
+    expect(macSignedUpdatesEnv({})).toBe("false");
+    expect(macSignedUpdatesEnv({ MULTICA_MAC_SIGNED_UPDATES: "false" })).toBe("false");
+    expect(macSignedUpdatesEnv({ MULTICA_MAC_SIGNED_UPDATES: "true" })).toBe("true");
   });
 });
 

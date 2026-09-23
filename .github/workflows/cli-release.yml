@@ -120,8 +120,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # Keep test tags (`vX.Y.Z-test.N`) as prereleases even if this
+          # workflow creates the GitHub release before Desktop does.
+          # /releases/latest must stay on the stable line.
+          prerelease=()
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-test\.[0-9]+$ ]]; then
+            prerelease=(--prerelease)
+          fi
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "release $TAG already exists; CLI assets will be added to it"
+            if [[ ${#prerelease[@]} -gt 0 ]]; then
+              gh release edit "$TAG" --repo "$REPO" --prerelease
+            fi
             exit 0
           fi
           # The Desktop workflow may be creating the same release right now;
@@ -131,7 +141,11 @@ jobs:
             --verify-tag \
             --title "Multica $TAG (kun fork)" \
             --generate-notes \
+            "${prerelease[@]}" \
             || gh release view "$TAG" --repo "$REPO" >/dev/null
+          if [[ ${#prerelease[@]} -gt 0 ]]; then
+            gh release edit "$TAG" --repo "$REPO" --prerelease
+          fi
 
       - name: Upload CLI assets
         id: upload

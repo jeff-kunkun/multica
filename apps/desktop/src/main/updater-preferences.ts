@@ -1,26 +1,35 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { UpdaterPreferences } from "../shared/updater-types";
+import type { ReleaseChannel, UpdaterPreferences } from "../shared/updater-types";
 
 export const DEFAULT_UPDATER_PREFERENCES: UpdaterPreferences = {
   automaticUpdates: true,
+  releaseChannel: "stable",
 };
 
 export function updaterPreferencesPath(userDataPath: string): string {
   return join(userDataPath, "updater-preferences.json");
 }
 
-function parseUpdaterPreferences(value: unknown): UpdaterPreferences {
-  const candidate = value as { automaticUpdates?: unknown } | null;
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    typeof candidate?.automaticUpdates === "boolean"
-  ) {
-    return { automaticUpdates: candidate.automaticUpdates };
-  }
+function releaseChannelFrom(value: unknown): ReleaseChannel {
+  return value === "test" ? "test" : "stable";
+}
 
-  return { ...DEFAULT_UPDATER_PREFERENCES };
+function parseUpdaterPreferences(value: unknown): UpdaterPreferences {
+  if (typeof value !== "object" || value === null) {
+    return { ...DEFAULT_UPDATER_PREFERENCES };
+  }
+  const candidate = value as {
+    automaticUpdates?: unknown;
+    releaseChannel?: unknown;
+  };
+  if (typeof candidate.automaticUpdates !== "boolean") {
+    return { ...DEFAULT_UPDATER_PREFERENCES };
+  }
+  return {
+    automaticUpdates: candidate.automaticUpdates,
+    releaseChannel: releaseChannelFrom(candidate.releaseChannel),
+  };
 }
 
 export async function loadUpdaterPreferences(

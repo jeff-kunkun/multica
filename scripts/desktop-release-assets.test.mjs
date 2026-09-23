@@ -15,6 +15,7 @@ import test from "node:test";
 import {
   collectLocalAssets,
   compareReleaseAssets,
+  assetRank,
   orderAssetsForUpload,
   parseArgs,
   readReleaseAssets,
@@ -52,6 +53,22 @@ function fakeGh(dir, { assets = [], apiStatus = 0 } = {}) {
   chmodSync(path, 0o755);
   return path;
 }
+
+test("treats both latest and beta feeds as update metadata", () => {
+  for (const name of [
+    "latest-mac.yml",
+    "latest-arm64.yml",
+    "latest-x64-mac.yml",
+    "beta-mac.yml",
+    "beta-x64-mac.yml",
+    "beta-linux-arm64.yml",
+    "beta-arm64.yml",
+  ]) {
+    assert.equal(assetRank(name), 2, name);
+  }
+  assert.equal(assetRank("builder-debug.yml"), -1);
+  assert.equal(assetRank("test-mac.yml"), -1);
+});
 
 test("uploads payloads before blockmaps and feed metadata last", () => {
   const ordered = orderAssetsForUpload([
