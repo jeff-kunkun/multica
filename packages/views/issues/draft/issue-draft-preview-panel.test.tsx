@@ -484,12 +484,51 @@ describe("IssueDraftPreviewPanel group", () => {
     expect(
       screen.getByText("Created in Backlog, waiting for their stage: 1."),
     ).toBeTruthy();
-    // And the parent, which is created but starts nothing.
+    // The default fixture has no parent assignee, so no one can advance the
+    // next stage when this group's current stage finishes.
     expect(
       screen.getByText(
-        "The parent coordinates this group, so it does not auto-start.",
+        "The parent coordinates this group, but no one will be woken to advance the next stage when a stage finishes.",
       ),
     ).toBeTruthy();
+  });
+
+  it.each([
+    ["unassigned", null, null],
+    ["assigned to a person", "member", "user-1"],
+  ])("warns that a parent %s will not advance later stages", (_label, type, id) => {
+    renderPanel({
+      draft: { ...GROUP, assignee_type: type, assignee_id: id },
+      stage: "ready",
+      canConfirm: true,
+    });
+
+    expect(
+      screen.getByText(
+        "The parent coordinates this group, but no one will be woken to advance the next stage when a stage finishes.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("The parent coordinates this group, so it does not auto-start."),
+    ).toBeNull();
+  });
+
+  it.each([
+    ["agent", "ag-parent"],
+    ["squad", "sq-parent"],
+  ])("keeps an assigned %s parent described as the coordinator", (type, id) => {
+    renderPanel({
+      draft: { ...GROUP, assignee_type: type, assignee_id: id },
+      stage: "ready",
+      canConfirm: true,
+    });
+
+    expect(
+      screen.getByText("The parent coordinates this group, so it does not auto-start."),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(/no one will be woken to advance the next stage/),
+    ).toBeNull();
   });
 
   it("writes the deleted sub-issue out of the payload it saves", () => {

@@ -1065,7 +1065,7 @@
     "generate": "Générer l'aperçu",
     "confirm": "Confirmer et créer",
     "confirming": "Création…",
-    "confirm_hint": "Créer la tâche met aussi en file d'attente le travail de l'assigné.",
+    "confirm_hint": "La confirmation met en file d'attente le travail des agents ou équipes assignés lorsque leur statut le permet ; les étapes suivantes du groupe attendent.",
     "confirm_unsaved": "Enregistrez d'abord vos modifications — la confirmation crée le brouillon enregistré, pas ce qui est à l'écran.",
     "parent_label": "Tâche parente",
     "group_title": "Sous-tâches",
@@ -1101,7 +1101,7 @@
     "reopen_failed": "Impossible de rouvrir cet alignement.",
     "parent_built": "La tâche parente existe déjà et n'est pas réécrite par ce tour.",
     "parent_built_link": "Ouvrir la tâche parente",
-    "group_summary_parent": "La tâche parente coordonne ce groupe et ne démarre pas automatiquement.",
+    "group_summary_parent": "La tâche parente coordonne ce groupe, mais personne ne sera réveillé pour faire avancer l'étape suivante à la fin d'une étape.",
     "created_title": "Tâche créée",
     "created_group_title": "{{count}} tâches créées",
     "assignee_dropped": "« {{title}} » n’a pas pu être assignée et a été créée sans assignation.",
@@ -1186,7 +1186,8 @@
     "record_created_title": "Cet alignement a produit une tâche",
     "record_issue_link": "Ouvrir la tâche",
     "record_abandoned_title": "Cet alignement a été abandonné",
-    "record_abandoned_hint": "Aucune tâche n'a été créée."
+    "record_abandoned_hint": "Aucune tâche n'a été créée.",
+    "group_summary_parent_assigned": "La tâche parente coordonne ce groupe et ne démarre pas automatiquement."
   },
   "sub_issue_accordion": {
     "count_one": "{{count}} sous-tâche",

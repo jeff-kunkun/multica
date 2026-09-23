@@ -1065,7 +1065,7 @@
     "generate": "Generate preview",
     "confirm": "Confirm and create",
     "confirming": "Creating…",
-    "confirm_hint": "Creating the issue also enqueues the assignee's work.",
+    "confirm_hint": "Confirming enqueues assigned agent or squad work when its status allows; later group stages wait.",
     "confirm_unsaved": "Save your edits first — confirming creates the saved draft, not what is on screen.",
     "parent_label": "Parent issue",
     "group_title": "Sub-issues",
@@ -1101,7 +1101,7 @@
     "reopen_failed": "Could not reopen this alignment.",
     "parent_built": "The parent issue already exists and is not rewritten by this round.",
     "parent_built_link": "Open the parent",
-    "group_summary_parent": "The parent coordinates this group, so it does not auto-start.",
+    "group_summary_parent": "The parent coordinates this group, but no one will be woken to advance the next stage when a stage finishes.",
     "created_title": "Issue created",
     "created_group_title": "{{count}} issues created",
     "assignee_dropped": "“{{title}}” could not be assigned, so it was created unassigned.",
@@ -1189,7 +1189,8 @@
     "record_abandoned_hint": "No issue was created.",
     "assignee_suggestions_loading": "Finding suggested assignees…",
     "assignee_suggestions_failed": "Suggestions are unavailable. You can still confirm, but unassigned rows need a manual choice.",
-    "assignee_unassigned": "Unassigned — you can still confirm and assign it later."
+    "assignee_unassigned": "Unassigned — you can still confirm and assign it later.",
+    "group_summary_parent_assigned": "The parent coordinates this group, so it does not auto-start."
   },
   "sub_issue_accordion": {
     "count_one": "{{count}} sub-issue",

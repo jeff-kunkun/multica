@@ -1034,7 +1034,7 @@
     "generate": "生成结构化预览",
     "confirm": "确认并创建",
     "confirming": "创建中…",
-    "confirm_hint": "创建任务会同时给负责人派发执行。",
+    "confirm_hint": "确认后，状态允许时会派发给已指派的智能体或小队；任务组的后续阶段会等待。",
     "confirm_unsaved": "先保存改动。确认创建的是已保存的草稿，不是屏幕上这一份。",
     "parent_label": "父任务",
     "group_title": "拆出的子任务",
@@ -1069,7 +1069,7 @@
     "reopen_failed": "没能重开这场对齐。",
     "parent_built": "父单已经建出，本轮不会回写它的字段。",
     "parent_built_link": "打开父单",
-    "group_summary_parent": "父任务负责协调这一组，不会自动开跑。",
+    "group_summary_parent": "父任务负责协调这一组，但阶段结束后不会有人被叫醒去推进下一阶段。",
     "created_title": "任务已创建",
     "created_group_title": "已创建 {{count}} 个任务",
     "assignee_dropped": "「{{title}}」的负责人没能指派上，任务已创建，目前未分配。",
@@ -1157,7 +1157,8 @@
     "record_abandoned_hint": "没有产出任务。",
     "assignee_suggestions_loading": "正在查找建议负责人…",
     "assignee_suggestions_failed": "负责人建议暂时不可用。仍可确认，但未分配的任务需要手动选择。",
-    "assignee_unassigned": "未分配——仍可确认，之后再指派。"
+    "assignee_unassigned": "未分配——仍可确认，之后再指派。",
+    "group_summary_parent_assigned": "父任务负责协调这一组，不会自动开跑。"
   },
   "sub_issue_accordion": {
     "count_other": "{{count}} 个子任务",

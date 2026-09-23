@@ -810,7 +810,11 @@ export function IssueDraftPreviewPanel({
               groupPlan.total > 1 &&
               groupPlan.rows[0]?.outcome !== "starts" ? (
                 <p className="text-caption text-muted-foreground">
-                  {t(($) => $.alignment.group_summary_parent)}
+                  {groupPlan.rows[0]?.assigneeId &&
+                  (groupPlan.rows[0].assigneeType === "agent" ||
+                    groupPlan.rows[0].assigneeType === "squad")
+                    ? t(($) => $.alignment.group_summary_parent_assigned)
+                    : t(($) => $.alignment.group_summary_parent)}
                 </p>
               ) : null}
               {isContinuation && groupPlan.built > 0 ? (
