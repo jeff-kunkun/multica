@@ -389,7 +389,7 @@
       "billing": "账单与套餐",
       "config_transfer": "配置导出/导入",
       "routing": "路由",
-      "project_sharing": "项目共享"
+      "project_sharing": "权限与共享"
     },
     "groups": {
       "personal": "个人设置",
@@ -1270,11 +1270,16 @@
       "download": "下载",
       "downloading_progress": "正在下载 v{{version}} · {{percent}}%",
       "downloaded": "v{{version}} 已下载——重启即可安装。",
+      "installer_ready": "v{{version}} 已下载——打开安装包，把 Multica 拖进「应用程序」覆盖旧版本。",
+      "open_installer": "打开安装包",
+      "reveal_installer": "在访达中显示",
       "restart_now": "立即重启",
       "failed": "更新失败：{{error}}",
       "retry_download": "重试下载",
       "manual_only_title": "仅支持手动下载",
-      "manual_only_description": "这个包没有 Apple Developer ID 签名，macOS 不允许自动安装下载的更新。发现新版本时这里会提示，请到 Release 页面手动安装。",
+      "manual_only_description": "这个包是 ad-hoc 签名或未签名，下一版对不上，系统不会自动安装更新。发现新版本时这里会提示，请到 Release 页面手动安装。",
+      "assisted_install_title": "只剩最后一步要手动",
+      "assisted_install_description": "这个包是 ad-hoc 签名，系统不允许它替换自己。更新照样由 Multica 自动下载，需要你动手的只有：打开安装包，把 Multica 拖进「应用程序」覆盖旧版本。",
       "open_release_page": "打开 Release 页面",
       "last_check_label": "上次检查",
       "last_check_never": "尚未检查",
@@ -1767,10 +1772,10 @@
     "seats_empty": "还没有候选席位。"
   },
   "project_sharing": {
-    "title": "项目共享",
-    "description": "按项目管理工作区成员可以看到的内容。",
-    "section_title": "项目",
-    "section_description": "修改项目范围会同步更新该项目当前包含的所有任务和仓库。",
+    "title": "权限与共享",
+    "description": "统一设置项目、任务和关联资源谁可以查看。",
+    "section_title": "项目访问权限",
+    "section_description": "可以设为仅自己、共享给项目成员，或共享给整个团队；项目里的任务和仓库会跟随项目范围。",
     "loading": "正在加载项目…",
     "empty": "还没有项目。",
     "visibility_private": "仅自己",

@@ -23,13 +23,43 @@ Info.plist entries=30
 TeamIdentifier=not set
 `;
 
+// Self-signed certificates also report TeamIdentifier=not set. The Authority
+// line is the stable identity; classifying this as ad-hoc would turn off
+// auto-update for every kun release signed with CSC_LINK.
+const SELF_SIGNED = `Executable=/Applications/Multica.app/Contents/MacOS/Multica
+Identifier=ai.multica.desktop
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20400 size=1234 flags=0x0(none) hashes=30+7 location=embedded
+Signature size=4800
+Authority=Multica Kun Self-Signed
+Signed Time=Sep 23, 2026 at 16:00:00
+Info.plist entries=30
+TeamIdentifier=not set
+`;
+
+const ADHOC_LEGACY = `Executable=/Applications/Multica.app/Contents/MacOS/Multica
+Identifier=ai.multica.desktop
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20400 size=1234 flags=0x2(adhoc) hashes=30+7 location=embedded
+Info.plist entries=30
+TeamIdentifier=not set
+`;
+
 describe("parseCodesignOutput", () => {
-  it("recognises a Developer ID signature", () => {
-    expect(parseCodesignOutput(DEVELOPER_ID)).toBe("developer-id");
+  it("recognises a Developer ID signature as a stable identity", () => {
+    expect(parseCodesignOutput(DEVELOPER_ID)).toBe("identity");
   });
 
-  it("recognises an ad-hoc signature (what CI ships)", () => {
+  it("recognises a self-signed certificate as a stable identity", () => {
+    expect(parseCodesignOutput(SELF_SIGNED)).toBe("identity");
+  });
+
+  it("recognises an ad-hoc signature (what CI ships without a certificate)", () => {
     expect(parseCodesignOutput(ADHOC)).toBe("adhoc");
+  });
+
+  it("treats an old ad-hoc report without Signature=adhoc as ad-hoc", () => {
+    expect(parseCodesignOutput(ADHOC_LEGACY)).toBe("adhoc");
   });
 
   it("recognises an unsigned binary from codesign's failure text", () => {

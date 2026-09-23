@@ -18,9 +18,11 @@
 // renderer code and white-screens on launch.
 //
 // Extra CLI args after `pnpm package --` are forwarded to electron-builder
-// unchanged (e.g. `--mac --arm64`). For an unsigned local smoke-test
-// build, set `CSC_IDENTITY_AUTO_DISCOVERY=false` so electron-builder falls
-// back to an ad-hoc signature instead of requiring a Developer ID cert.
+// unchanged (e.g. `--mac --arm64`). A release build signs macOS with the
+// self-signed certificate in `CSC_LINK` / `CSC_KEY_PASSWORD` (see
+// docs/kun/desktop-release.md). For an unsigned local smoke-test build,
+// set `CSC_IDENTITY_AUTO_DISCOVERY=false` so electron-builder falls back to
+// an ad-hoc signature. Ad-hoc builds cannot install later updates.
 //
 // The `normalizeGitVersion`, `deriveVersion`, and `DESCRIBE_ARGS` exports let
 // tests cover version derivation both as a pure string transform and as the
@@ -349,11 +351,29 @@ export function builderArgsForTarget(
     disableMacNotarize = false,
     hostPlatform = process.platform,
     useScopedOutputDir = false,
+    forceMacCodeSigning = false,
   } = {},
 ) {
   const builderArgs = [];
   if (version) builderArgs.push(`-c.extraMetadata.version=${version}`);
   if (disableMacNotarize) builderArgs.push("-c.mac.notarize=false");
+  if (target.platform === "mac" && forceMacCodeSigning) {
+    // CSC_LINK is set, so a missing or unusable identity must fail the job.
+    // Without this, arm64 silently falls back to an ad-hoc signature and the
+    // release looks green while auto-update stays broken.
+    builderArgs.push("-c.forceCodeSigning=true");
+  }
+  if (target.platform === "mac") {
+    // electron-builder.yml leaves the hardened runtime off. A self-signed
+    // certificate cannot satisfy it, and the process is killed on launch.
+    // Notarization (APPLE_TEAM_ID present) requires it, so that path turns
+    // it back on. spctl --assess rejects every unnotarized signature and
+    // would fail the self-signed CI job, so it stays off in that case.
+    builderArgs.push(
+      `-c.mac.hardenedRuntime=${disableMacNotarize ? "false" : "true"}`,
+    );
+    if (disableMacNotarize) builderArgs.push("-c.mac.gatekeeperAssess=false");
+  }
   builderArgs.push(PLATFORM_CONFIG[target.platform].builderFlag);
   const requestedTargets = parsed.platformTargets[target.platform];
   if (
@@ -491,6 +511,10 @@ function main() {
       disableMacNotarize,
       hostPlatform: process.platform,
       useScopedOutputDir,
+      // A certificate was provided, either as CSC_LINK or as a keychain the
+      // CI step already imported and trusted (CSC_KEYCHAIN). Do not quietly
+      // ship an ad-hoc build.
+      forceMacCodeSigning: Boolean(process.env.CSC_LINK || process.env.CSC_KEYCHAIN),
     });
 
     // Step 4: invoke electron-builder for the current target only.
