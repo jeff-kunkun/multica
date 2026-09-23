@@ -217,6 +217,8 @@ jobs:
 
       - name: Package Desktop — ${{ matrix.label }}
         working-directory: apps/desktop
+        # The script below is bash; windows-latest defaults to pwsh.
+        shell: bash
         env:
           # macOS only. An empty secret keeps the ad-hoc fallback in the
           # script below, so a branch without CSC_LINK still goes green.
