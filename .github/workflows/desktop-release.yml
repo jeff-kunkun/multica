@@ -246,6 +246,10 @@ jobs:
             unset CSC_KEY_PASSWORD
           else
             echo "No CSC_LINK for this job — ad-hoc on macOS, unsigned on Windows and Linux."
+            # The step env always defines CSC_LINK, empty here. electron-builder
+            # treats a defined-but-empty CSC_LINK as a path relative to the
+            # working directory and fails with "apps/desktop not a file".
+            unset CSC_LINK CSC_KEY_PASSWORD
             export CSC_IDENTITY_AUTO_DISCOVERY=false
           fi
           node scripts/package.mjs --${{ matrix.platform }} ${{ matrix.archs }} --publish never
