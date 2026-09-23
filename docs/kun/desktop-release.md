@@ -16,6 +16,46 @@ DENE-352 补上了第二类踩坑：**上传到一半断了，命令行却报成
 8. **不在 Release 说明、评论、产物里写任何 token / 凭据 / 环境变量值。**
 9. **版本号只由 tag 决定。** `apps/desktop/scripts/package.mjs` 从 `git describe --tags --match 'v[0-9]*'` 推导版本，与 GoReleaser 给 CLI 的 `main.version` 同源。不要手改 `apps/desktop/package.json` 的 `version`。
 
+## 双通道：测试版 / 正式版
+
+这条 fork 发两条线，客户端装上哪条就只收哪条的包，互不串台。
+
+| 通道 | 从哪条分支打 tag | tag 形状 | 更新清单文件 | 谁装 |
+| --- | --- | --- | --- | --- |
+| 测试版（test） | `kun` tip | `v0.5.5-test.1`、`v0.5.5-test.2` | `beta*.yml` | kun 本机；愿意先吃 bug 的人 |
+| 正式版（stable） | `release` tip | `v0.5.5` | `latest*.yml` | kk、zi 与默认用户 |
+
+纪律：
+
+1. **正式版的每一行代码都必须先在测试通道上出现过。** 发正式版的动作只有一个——把 `kun` 快进合进 `release`，然后在 `release` 上打 `vX.Y.Z`。不在 `release` 上开发、不 cherry-pick、不 force-push。
+2. **测试 tag 只从 `kun` tip 打。** 形状固定为 `vX.Y.Z-test.N`：`X.Y.Z` 是**下一个**正式版号，`N` 从 1 递增。semver 里 `0.5.5-test.3 < 0.5.5`，所以测试用户后来装到正式版 `0.5.5` 时是一次正常升级，不需要降级放行。
+3. **通道名不要手改。** `apps/desktop/scripts/package.mjs` 按 tag 的 prerelease 段推导通道前缀（`latest` / `beta`），再按平台与架构补后缀；`apps/desktop/src/main/updater.ts` 在运行时按用户选择的通道 + 本机架构拼出同一个名字。两边必须同源，改一边就是断更新。
+4. **通道由用户在「设置 → 更新」里自己选，默认正式版。** 选择持久化在 `updater-preferences`，切换后立即重新查一次。从测试版切回正式版是一次**降级**（`0.5.5-test.3` → `0.5.4`），必须临时打开 `allowDowngrade`，否则用户会永远卡在测试通道上。
+5. **切通道不换安装包本身。** 同一份 `.app` / `.exe` 只是换了查询哪份 yml，不需要用户重装。
+
+发一版正式版：
+
+```bash
+git fetch origin --prune
+git checkout release && git merge --ff-only origin/kun && git push origin release
+git tag v0.5.5 && git push origin v0.5.5
+```
+
+发一版测试版：
+
+```bash
+git fetch origin --prune && git log --oneline origin/kun -1
+git tag v0.5.5-test.1 && git push origin v0.5.5-test.1
+```
+
+两种 tag 都会触发 `.github/workflows/desktop-release.yml`（它的 tag 正则已经接受 `-suffix`），构建、上传、逐个核对资产的流程完全一样，差别只在写出哪一组 yml。
+
+### macOS 自动更新的硬限制
+
+CI 出的 macOS 包是 **ad-hoc 签名、未公证**（`CSC_IDENTITY_AUTO_DISCOVERY: "false"`）。Squirrel.Mac 在安装更新前会校验新包的代码签名与正在运行的 app 是否同源，ad-hoc 签名必然对不上——所以**只要没有 Apple Developer ID 证书，macOS 的静默自动更新在任何通道上都不会成功**。这不是代码缺陷，改 updater 代码也修不好。
+
+在拿到证书之前，macOS 上的正确行为是：发现新版本 → 明确告诉用户 → 引导到 Release 页面手动下载。Windows 与 Linux 不受这条限制，全自动更新可以做通。
+
 ## 主路径：CI 发版（默认走这条）
 
 ```bash
