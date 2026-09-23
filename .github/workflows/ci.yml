@@ -855,6 +855,13 @@ jobs:
       - name: Test Desktop release asset verification
         run: node --test scripts/desktop-release-assets.test.mjs
 
+      # Also fork-only, and for the same reason: the release workflows' own
+      # gate cannot catch a test tag published without `--prerelease`, and that
+      # single omission takes the stable update channel down for every
+      # installed client.
+      - name: Test release pre-release flagging
+        run: node --test scripts/release-prerelease.test.mjs
+
   frontend-quality:
     needs: changes
     if: ${{ needs.changes.outputs.quality_only == 'true' }}

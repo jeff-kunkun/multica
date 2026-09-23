@@ -42,17 +42,42 @@ export function isTestReleaseVersion(version: string): boolean {
  * `null` is the untouched electron-updater default (`latest` / `latest-mac.yml`
  * / `latest-linux*.yml`). The arch-specific stable names already installed
  * clients request — `latest-x64`, `latest-arm64` — stay byte-for-byte.
+ *
+ * The test channel is `test` on every platform and architecture, and that is
+ * not a style choice — electron-updater's GitHub provider leaves us no other
+ * name (`out/providers/GitHubProvider.js`, 6.8.3):
+ *
+ *   1. Tag discovery. With `allowPrerelease` on, the provider walks the
+ *      releases atom feed and only accepts a tag whose own prerelease segment
+ *      equals `updater.channel` (or is `alpha`/`beta` when the channel itself
+ *      is `alpha`/`beta`). Our tags are `vX.Y.Z-test.N`, so `test` matches and
+ *      `test-arm64` matches nothing at all — the provider then throws
+ *      `ERR_UPDATER_NO_PUBLISHED_VERSIONS` and the channel is simply dead.
+ *   2. Manifest name. Having picked that tag, the provider *overwrites* the
+ *      channel with `getCustomChannelName(semver.prerelease(tag)[0])`, i.e.
+ *      `test` plus its own platform suffix, and requests `test.yml` (Windows),
+ *      `test-mac.yml` (macOS), `test-linux[-arch].yml` (Linux). Whatever we
+ *      put in `updater.channel` is discarded at this point.
+ *
+ * So on Linux electron-updater still separates the architectures for us, while
+ * on Windows and macOS the test channel is necessarily one manifest per
+ * platform: `test.yml` is the Windows x64 build and `test-mac.yml` the macOS
+ * arm64 build — the architectures this fork actually releases. package.mjs
+ * publishes the secondary architectures under `test-arm64` / `test-x64` so
+ * they cannot clobber the shared manifest; nothing requests those names.
+ *
+ * Stable is unaffected: it runs with `allowPrerelease` off, where the provider
+ * honours `updater.channel` verbatim.
  */
 export function feedNameForReleaseChannel(
   releaseChannel: ReleaseChannel,
   platform: NodeJS.Platform,
   arch: string,
 ): string | null {
-  const prefix = releaseChannel === "test" ? "beta" : "latest";
-  if (platform === "win32" && arch === "arm64") return `${prefix}-arm64`;
-  if (platform === "darwin" && arch === "x64") return `${prefix}-x64`;
-  if (prefix === "latest") return null;
-  return "beta";
+  if (releaseChannel === "test") return "test";
+  if (platform === "win32" && arch === "arm64") return "latest-arm64";
+  if (platform === "darwin" && arch === "x64") return "latest-x64";
+  return null;
 }
 
 export function shouldAllowStableDowngrade(

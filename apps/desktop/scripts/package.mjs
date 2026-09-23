@@ -322,21 +322,37 @@ export function isTestReleaseVersion(version) {
 }
 
 /**
- * Publish-channel name shared with `updater.ts`. `null` means "do not pass
- * `-c.publish.channel`", which is electron-builder's default `latest` feed —
- * the name already-installed stable clients are checking.
+ * Publish-channel name shared with `feedNameForReleaseChannel` in
+ * `src/main/updater.ts`. `null` means "do not pass `-c.publish.channel`",
+ * which is electron-builder's default `latest` feed — the name
+ * already-installed stable clients are checking.
  *
  * Stable: win arm64 `latest-arm64`, mac x64 `latest-x64`, everything else
  * omitted (`latest` / `latest-mac.yml` / `latest-linux*.yml`).
- * Test: the same suffixes with the `beta` prefix (`beta`, `beta-x64`,
- * `beta-arm64`).
+ * Test: the same suffixes with the `test` prefix.
+ *
+ * The prefix is `test`, not some prettier synonym, because electron-updater's
+ * GitHub provider derives it from the tag itself: on `vX.Y.Z-test.N` it
+ * requests `getCustomChannelName(semver.prerelease(tag)[0])`, i.e. `test.yml`
+ * / `test-mac.yml` / `test-linux[-arch].yml`, no matter what the client put in
+ * `updater.channel`. Publishing under any other prefix is a channel that 404s.
+ * See the long note on `feedNameForReleaseChannel` for the full provider
+ * contract.
+ *
+ * That same derivation drops the architecture suffix on Windows and macOS, so
+ * only the arch that publishes the bare `test` channel is reachable there —
+ * win x64 and mac arm64, the two this fork releases. The secondary arches
+ * still get `test-arm64` / `test-x64` so their manifests cannot clobber the
+ * shared one; no client requests those names today. Linux needs no special
+ * case: electron-updater appends `-linux[-arch]` itself, so both Linux arches
+ * are reachable under the bare `test` channel.
  */
 export function publishChannelForTarget(version, platform, arch) {
-  const prefix = isTestReleaseVersion(version) ? "beta" : "latest";
+  const prefix = isTestReleaseVersion(version) ? "test" : "latest";
   if (platform === "win" && arch === "arm64") return `${prefix}-arm64`;
   if (platform === "mac" && arch === "x64") return `${prefix}-x64`;
   if (prefix === "latest") return null;
-  return "beta";
+  return prefix;
 }
 
 export function builderArgsForTarget(
@@ -379,7 +395,7 @@ export function builderArgsForTarget(
   // Windows and arm64 macOS feeds unchanged for installed clients, and route
   // the additional architectures to explicit channels. updater.ts pins the
   // matching channel at runtime. A `-test.N` tag swaps the `latest` prefix
-  // for `beta` and keeps those same suffixes.
+  // for `test` and keeps those same suffixes.
   if (target.platform === "mac" && target.arch === "x64") {
     // Scope the Electron 39 platform floor to the new Intel package so this
     // change does not rewrite established Apple Silicon bundle metadata.

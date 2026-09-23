@@ -124,11 +124,25 @@ jobs:
             echo "release $TAG already exists; CLI assets will be added to it"
             exit 0
           fi
+          # Same pre-release rule as desktop-release.yml: a `vX.Y.Z-test.N` tag
+          # is the Desktop test channel, and a test release left un-flagged is
+          # what `GET /releases/latest` hands to every stable Desktop client.
+          # Either workflow can win the create race, so both must set it.
+          # Deliberately a plain string expanded unquoted: an empty array
+          # expansion (`"${arr[@]}"`) is an unbound-variable error under
+          # `set -u` on bash 3.2, which is what macOS developers reproducing
+          # this step locally are running.
+          prerelease_flag=""
+          if [[ "$TAG" == *-* ]]; then
+            prerelease_flag="--prerelease"
+            echo "tagging $TAG as a GitHub pre-release (test channel)"
+          fi
           # The Desktop workflow may be creating the same release right now;
           # losing that race is fine as long as the release ends up there.
           gh release create "$TAG" \
             --repo "$REPO" \
             --verify-tag \
+            ${prerelease_flag} \
             --title "Multica $TAG (kun fork)" \
             --generate-notes \
             || gh release view "$TAG" --repo "$REPO" >/dev/null

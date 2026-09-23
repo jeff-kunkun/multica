@@ -102,12 +102,31 @@ jobs:
             echo "release $TAG already exists; its assets will be replaced"
             exit 0
           fi
+          # A `vX.Y.Z-test.N` tag is the test channel and MUST be created as a
+          # GitHub pre-release. Stable clients run with `allowPrerelease` off,
+          # where electron-updater resolves the tag through
+          # `GET /releases/latest` — an endpoint that returns the newest
+          # release only if it is not flagged pre-release. Publish a test
+          # release without the flag and every stable client resolves to it,
+          # asks for a `latest*.yml` that release does not carry, and dies with
+          # ERR_UPDATER_CHANNEL_FILE_NOT_FOUND. The flag is what keeps the two
+          # channels from colliding on that endpoint.
+          # Deliberately a plain string expanded unquoted: an empty array
+          # expansion (`"${arr[@]}"`) is an unbound-variable error under
+          # `set -u` on bash 3.2, which is what macOS developers reproducing
+          # this step locally are running.
+          prerelease_flag=""
+          if [[ "$TAG" == *-* ]]; then
+            prerelease_flag="--prerelease"
+            echo "tagging $TAG as a GitHub pre-release (test channel)"
+          fi
           # `|| gh release view` because cli-release.yml creates the same
           # release from the same tag push: whichever workflow loses the race
           # sees the other's release, which is the state this step wants.
           gh release create "$TAG" \
             --repo "$REPO" \
             --verify-tag \
+            ${prerelease_flag} \
             --title "Multica Desktop $TAG (kun fork)" \
             --generate-notes \
             --notes "macOS (Apple Silicon)、Windows (x64/arm64)、Linux (x64/arm64) 桌面安装包。macOS 为 ad-hoc 签名、未公证，首次打开需在「系统设置 → 隐私与安全性」中放行，或执行 \`xattr -cr /Applications/Multica.app\`；Windows 与 Linux 包未签名。资产由 Desktop Release workflow 构建并上传，上传后会逐个核对 \`state=uploaded\` 与文件大小。" \

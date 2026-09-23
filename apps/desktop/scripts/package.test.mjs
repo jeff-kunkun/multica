@@ -373,7 +373,7 @@ describe("builderArgsForTarget", () => {
     ]);
   });
 
-  it("keeps the established stable feed names and uses beta for -test.N", () => {
+  it("keeps the established stable feed names and uses test for -test.N", () => {
     const stableNames = {
       "mac:arm64": null,
       "mac:x64": "latest-x64",
@@ -382,13 +382,17 @@ describe("builderArgsForTarget", () => {
       "linux:x64": null,
       "linux:arm64": null,
     };
+    // The prefix is `test` because electron-updater derives it from the tag's
+    // own prerelease segment; see publishChannelForTarget. `mac:x64` and
+    // `win:arm64` keep an arch suffix only so their manifests cannot clobber
+    // the shared one — no client asks for those two names.
     const testNames = {
-      "mac:arm64": "beta",
-      "mac:x64": "beta-x64",
-      "win:x64": "beta",
-      "win:arm64": "beta-arm64",
-      "linux:x64": "beta",
-      "linux:arm64": "beta",
+      "mac:arm64": "test",
+      "mac:x64": "test-x64",
+      "win:x64": "test",
+      "win:arm64": "test-arm64",
+      "linux:x64": "test",
+      "linux:arm64": "test",
     };
 
     for (const [key, channel] of Object.entries(stableNames)) {
@@ -406,7 +410,7 @@ describe("builderArgsForTarget", () => {
     }
   });
 
-  it("passes the beta channel through builder args without renaming stable feeds", () => {
+  it("passes the test channel through builder args without renaming stable feeds", () => {
     const parsed = {
       allPlatforms: false,
       sharedArgs: ["--publish", "never"],
@@ -430,7 +434,7 @@ describe("builderArgsForTarget", () => {
       "0.5.5-test.3",
       { hostPlatform: "darwin" },
     );
-    expect(test).toContain("-c.publish.channel=beta");
+    expect(test).toContain("-c.publish.channel=test");
     expect(test).not.toContain("-c.publish.channel=latest");
   });
 

@@ -78,7 +78,7 @@ function updaterWithChannelSideEffect() {
 }
 
 describe("release channel feed", () => {
-  it("keeps the established stable names and uses beta for the test line", () => {
+  it("keeps the established stable names and uses a bare test feed", () => {
     const stable = {
       "darwin:arm64": null,
       "darwin:x64": "latest-x64",
@@ -87,13 +87,17 @@ describe("release channel feed", () => {
       "linux:x64": null,
       "linux:arm64": null,
     } as const;
+    // Every platform and arch selects the same bare `test` feed: on a
+    // `-test.N` tag electron-updater rebuilds the name from the tag itself and
+    // an arch-suffixed channel matches no tag at all. updater-github-feed.test
+    // pins that against the real provider.
     const test = {
-      "darwin:arm64": "beta",
-      "darwin:x64": "beta-x64",
-      "win32:x64": "beta",
-      "win32:arm64": "beta-arm64",
-      "linux:x64": "beta",
-      "linux:arm64": "beta",
+      "darwin:arm64": "test",
+      "darwin:x64": "test",
+      "win32:x64": "test",
+      "win32:arm64": "test",
+      "linux:x64": "test",
+      "linux:arm64": "test",
     } as const;
 
     for (const [key, channel] of Object.entries(stable)) {
@@ -124,7 +128,7 @@ describe("release channel feed", () => {
     expect(updater.allowDowngrade).toBe(true);
 
     applyReleaseChannel(updater, "test", "0.5.5-test.3", "win32", "arm64");
-    expect(updater.channel).toBe("beta-arm64");
+    expect(updater.channel).toBe("test");
     expect(updater.allowDowngrade).toBe(false);
     expect(updater.allowPrerelease).toBe(true);
 
