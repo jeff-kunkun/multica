@@ -52,12 +52,16 @@ type visibilityViewer struct {
 	userID pgtype.UUID
 	role   permission.Role
 	// projectIDs is listAccessibleProjectIDs' answer: explicit project_member
-	// rows plus led projects, or every project in the workspace for an
-	// owner/admin. Not a new query — the same one saved views already use.
+	// rows plus led projects, or every project in the workspace for the
+	// owner. Not a new query — the same one saved views already use.
 	projectIDs []pgtype.UUID
 	projectSet map[[16]byte]struct{}
 	agentSet   map[[16]byte]struct{}
-	bypass     visibilityBypassReason
+	// sharedIssues / sharedRepos: resource_share rows naming this viewer,
+	// keyed by resource_id (issue id text, repo URL).
+	sharedIssues map[string]struct{}
+	sharedRepos  map[string]struct{}
+	bypass       visibilityBypassReason
 }
 
 // visibilityViewerFor loads the caller's sharing facts for one workspace.
@@ -101,12 +105,29 @@ func (h *Handler) visibilityViewerForUser(ctx context.Context, wsUUID, userUUID 
 	if err != nil {
 		return visibilityViewer{}, fmt.Errorf("visibility: owned agents: %w", err)
 	}
+	shares, err := h.Queries.ListResourceSharesForMember(ctx, db.ListResourceSharesForMemberParams{
+		WorkspaceID: wsUUID,
+		MemberID:    userUUID,
+	})
+	if err != nil {
+		return visibilityViewer{}, fmt.Errorf("visibility: direct shares: %w", err)
+	}
 	v := visibilityViewer{
-		userID:     userUUID,
-		role:       permission.Role(member.Role),
-		projectIDs: projectIDs,
-		projectSet: make(map[[16]byte]struct{}, len(projectIDs)),
-		agentSet:   make(map[[16]byte]struct{}, len(agentIDs)),
+		userID:       userUUID,
+		role:         permission.Role(member.Role),
+		projectIDs:   projectIDs,
+		projectSet:   make(map[[16]byte]struct{}, len(projectIDs)),
+		agentSet:     make(map[[16]byte]struct{}, len(agentIDs)),
+		sharedIssues: map[string]struct{}{},
+		sharedRepos:  map[string]struct{}{},
+	}
+	for _, share := range shares {
+		switch share.ResourceType {
+		case "issue":
+			v.sharedIssues[share.ResourceID] = struct{}{}
+		case "repo":
+			v.sharedRepos[share.ResourceID] = struct{}{}
+		}
 	}
 	for _, id := range projectIDs {
 		if id.Valid {
@@ -169,23 +190,26 @@ func (v visibilityViewer) canSee(vis string, rel permission.Relation) bool {
 	return permission.CanSee(v.role, permission.Visibility(vis), rel)
 }
 
-// canSeeIssueFields is the Go twin of issueVisibilitySQL, taking the four
-// columns the decision needs rather than a row type. sqlc gives each list
-// query its own row struct, and every one of them has to answer this question
-// the same way.
+// canSeeIssueFields is the Go twin of issueVisibilitySQL, taking the columns
+// the decision needs rather than a row type. sqlc gives each list query its
+// own row struct, and every one of them has to answer this question the same
+// way. The issue id is what a direct share (resource_share) names.
 func (v visibilityViewer) canSeeIssueFields(
-	visibility, creatorType string, creatorID, projectID pgtype.UUID,
+	issueID pgtype.UUID, visibility, creatorType string, creatorID, projectID pgtype.UUID,
 	assigneeType string, assigneeID pgtype.UUID,
 ) bool {
 	rel := v.relation(creatorType, creatorID, projectID)
 	rel.IsCreator = rel.IsCreator || v.isOwnedAgent(creatorType, creatorID)
 	rel.IsAssignee = v.isMe(assigneeType, assigneeID) || v.isOwnedAgent(assigneeType, assigneeID)
+	if issueID.Valid {
+		_, rel.SharedWith = v.sharedIssues[uuidToString(issueID)]
+	}
 	return v.canSee(visibility, rel)
 }
 
 // canSeeIssue is canSeeIssueFields over a full issue row.
 func (v visibilityViewer) canSeeIssue(issue db.Issue) bool {
-	return v.canSeeIssueFields(
+	return v.canSeeIssueFields(issue.ID,
 		issue.Visibility, issue.CreatorType, issue.CreatorID, issue.ProjectID,
 		issue.AssigneeType.String, issue.AssigneeID)
 }
@@ -229,6 +253,7 @@ func (v visibilityViewer) canSeeRepo(entry workspaceRepoRef, repoProjectIDs []pg
 			break
 		}
 	}
+	_, rel.SharedWith = v.sharedRepos[entry.URL]
 	return v.canSee(entry.Visibility, rel)
 }
 
@@ -293,6 +318,9 @@ func (v visibilityViewer) issueVisibilitySQL(alias string, addArg func(any) stri
 			"(%s.visibility = 'project' AND %s.project_id = ANY(%s::uuid[]))",
 			alias, alias, addArg(v.projectIDs)))
 	}
+	parts = append(parts, fmt.Sprintf(
+		"(%s.visibility = 'project' AND EXISTS (SELECT 1 FROM resource_share share WHERE share.workspace_id = %s.workspace_id AND share.resource_type = 'issue' AND share.resource_id = %s.id::text AND share.member_id = %s::uuid))",
+		alias, alias, alias, addArg(v.userID)))
 	return "(" + strings.Join(parts, " OR ") + ")"
 }
 
