@@ -9,6 +9,7 @@ import type {
   InstallerReadyPayload,
   ManualUpdateCheckResult,
   OpenInstallerResult,
+  ReleaseChannel,
   UpdateAvailablePayload,
   UpdateCheckRecord,
   UpdateDownloadProgressPayload,
@@ -428,6 +429,8 @@ const updaterAPI = {
     ipcRenderer.invoke("updater:get-preferences"),
   setAutomaticUpdates: (enabled: boolean): Promise<UpdaterPreferences> =>
     ipcRenderer.invoke("updater:set-automatic-updates", enabled),
+  setReleaseChannel: (channel: ReleaseChannel): Promise<UpdaterPreferences> =>
+    ipcRenderer.invoke("updater:set-release-channel", channel),
   checkForUpdates: (): Promise<ManualUpdateCheckResult> =>
     ipcRenderer.invoke("updater:check"),
 };

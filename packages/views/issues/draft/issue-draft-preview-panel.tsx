@@ -809,8 +809,17 @@ export function IssueDraftPreviewPanel({
               {!isContinuation &&
               groupPlan.total > 1 &&
               groupPlan.rows[0]?.outcome !== "starts" ? (
+                // The parent of a group is its coordinator, so it never starts
+                // work here. What the line may NOT say is that the chain is
+                // closed: the stage barrier only wakes an agent or squad
+                // assignee, so an unassigned parent — or one held by a person —
+                // leaves every later stage in Backlog with nobody told. Same
+                // sentence, two very different promises (see
+                // `issueDraftNodeWakesOnStageClose`).
                 <p className="text-caption text-muted-foreground">
-                  {t(($) => $.alignment.group_summary_parent)}
+                  {groupPlan.coordinatorWakeable
+                    ? t(($) => $.alignment.group_summary_parent)
+                    : t(($) => $.alignment.group_summary_parent_unwoken)}
                 </p>
               ) : null}
               {isContinuation && groupPlan.built > 0 ? (

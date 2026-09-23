@@ -105,9 +105,17 @@ jobs:
           # `|| gh release view` because cli-release.yml creates the same
           # release from the same tag push: whichever workflow loses the race
           # sees the other's release, which is the state this step wants.
+          # A `vX.Y.Z-<suffix>` tag is the test line. Mark it prerelease so
+          # `/releases/latest` (what stable clients' electron-updater asks)
+          # keeps resolving to the newest vX.Y.Z and never to a test build.
+          prerelease_flag=()
+          if [[ "$TAG" == *-* ]]; then
+            prerelease_flag=(--prerelease)
+          fi
           gh release create "$TAG" \
             --repo "$REPO" \
             --verify-tag \
+            ${prerelease_flag[@]+"${prerelease_flag[@]}"} \
             --title "Multica Desktop $TAG (kun fork)" \
             --generate-notes \
             --notes "macOS (Apple Silicon)、Windows (x64/arm64)、Linux (x64/arm64) 桌面安装包。macOS 在配置了 CSC_LINK 时用同一张自签证书签名，否则为 ad-hoc 签名；两种都未公证。首次打开若被拦，到「系统设置 → 隐私与安全性」放行，或执行 \`xattr -dr com.apple.quarantine /Applications/Multica.app\`。自动更新不要求把这张证书设为始终信任。Windows 与 Linux 包未签名。资产由 Desktop Release workflow 构建并上传，上传后会逐个核对 \`state=uploaded\` 与文件大小。" \

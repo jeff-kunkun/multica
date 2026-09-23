@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { BrowserWindow, WebContents } from "electron";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +18,8 @@ const ctx = vi.hoisted(() => ({
   })),
   downloadUpdate: vi.fn(),
   quitAndInstall: vi.fn(),
+  setFeedURL: vi.fn(),
+  fetchText: vi.fn<(url: string) => Promise<string>>(),
   getVersion: vi.fn(() => "0.3.17"),
   userDataPath: "",
   openPath: vi.fn(async () => ""),
@@ -36,8 +38,10 @@ vi.mock("electron-updater", () => {
     autoDownload: false,
     autoInstallOnAppQuit: false,
     logger: null as unknown,
-    channel: undefined as string | undefined,
+    channel: null as string | null,
     allowDowngrade: false,
+    allowPrerelease: false,
+    setFeedURL: ctx.setFeedURL,
     on: vi.fn((event: string, handler: Handler) => {
       const handlers = ctx.handlers.get(event) ?? [];
       handlers.push(handler);
@@ -72,10 +76,16 @@ vi.mock("electron-log/main", () => ({ default: ctx.log }));
 import { autoUpdater } from "electron-updater";
 import log from "electron-log/main";
 import {
-  configureMacX64UpdateChannel,
+  applyStableFeed,
+  applyTestFeed,
+  feedNameForReleaseChannel,
+  pickNewestTestReleaseTag,
   resolveCapabilities,
   setupAutoUpdater,
+  testReleaseFeedOptions,
+  type ChannelConfigurableUpdater,
   type SetupAutoUpdaterOptions,
+  type UpdateFeedOptions,
 } from "./updater";
 import { updaterPreferencesPath } from "./updater-preferences";
 import type { UpdaterCapabilities } from "../shared/updater-types";
@@ -98,42 +108,146 @@ const MAC_UNSIGNED: UpdaterCapabilities = {
 
 // Every setup in this file resolves capabilities synchronously-ish via a stub
 // so the platform / codesign probe never touches the host machine.
+const RELEASES_ATOM = (...tags: string[]) =>
+  `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">${tags
+    .map(
+      (tag) =>
+        `<entry><id>tag:github.com,2008:Repository/1/${tag}</id><link rel="alternate" type="text/html" href="https://github.com/jeff-kunkun/multica/releases/tag/${tag}"/><title>Multica Desktop ${tag} (kun fork)</title></entry>`,
+    )
+    .join("")}</feed>`;
+
 function setup(
   getMainWindow: () => BrowserWindow | null,
   capabilities: UpdaterCapabilities = SUPPORTED,
-  fetchInstaller?: SetupAutoUpdaterOptions["fetchInstaller"],
+  fetchInstallerOrAtom?: SetupAutoUpdaterOptions["fetchInstaller"] | string,
 ) {
+  const fetchInstaller = typeof fetchInstallerOrAtom === "function" ? fetchInstallerOrAtom : undefined;
+  const atom = typeof fetchInstallerOrAtom === "string" ? fetchInstallerOrAtom : RELEASES_ATOM("v0.5.5-test.2", "v0.5.4", "v0.5.5-test.1");
   setupAutoUpdater(getMainWindow, {
     resolveCapabilities: async () => capabilities,
     fetchInstaller,
+    fetchText: ctx.fetchText.mockResolvedValue(atom),
   });
 }
 
-describe("macOS x64 update channel", () => {
-  it("does not touch established architecture paths", () => {
-    for (const [platform, arch] of [
-      ["darwin", "arm64"],
-      ["win32", "x64"],
-      ["win32", "arm64"],
-      ["linux", "arm64"],
-    ] as const) {
-      const updater = { channel: null, allowDowngrade: true };
+function updaterWithChannelSideEffect(): ChannelConfigurableUpdater & {
+  setFeedURL: Mock<(options: UpdateFeedOptions) => void>;
+} {
+  let channel: string | null = null;
+  return {
+    allowDowngrade: false,
+    allowPrerelease: false,
+    setFeedURL: vi.fn<(options: UpdateFeedOptions) => void>(),
+    get channel() {
+      return channel;
+    },
+    set channel(value: string | null) {
+      channel = value;
+      // AppUpdater.channel does this. Tests below must still observe the
+      // value the feed helpers assign afterwards.
+      this.allowDowngrade = true;
+    },
+  };
+}
 
-      configureMacX64UpdateChannel(updater, platform, arch);
+describe("release channel feed", () => {
+  it("keeps the established stable names and uses the tag's test segment for the test line", () => {
+    const stable = {
+      "darwin:arm64": null,
+      "darwin:x64": "latest-x64",
+      "win32:x64": null,
+      "win32:arm64": "latest-arm64",
+      "linux:x64": null,
+      "linux:arm64": null,
+    } as const;
+    const test = {
+      "darwin:arm64": "test",
+      "darwin:x64": "test-x64",
+      "win32:x64": "test",
+      "win32:arm64": "test-arm64",
+      "linux:x64": "test",
+      "linux:arm64": "test",
+    } as const;
 
-      expect(updater).toEqual({ channel: null, allowDowngrade: true });
+    for (const [key, channel] of Object.entries(stable)) {
+      const [platform, arch] = key.split(":") as [NodeJS.Platform, string];
+      expect(feedNameForReleaseChannel("stable", platform, arch)).toBe(channel);
+    }
+    for (const [key, channel] of Object.entries(test)) {
+      const [platform, arch] = key.split(":") as [NodeJS.Platform, string];
+      expect(feedNameForReleaseChannel("test", platform, arch)).toBe(channel);
     }
   });
 
-  it("does not enable downgrades when selecting an architecture feed", () => {
-    const updater = { channel: null, allowDowngrade: true };
+  it("turns allowDowngrade back off after the channel setter enables it", () => {
+    const updater = updaterWithChannelSideEffect();
 
-    configureMacX64UpdateChannel(updater, "darwin", "x64");
+    applyStableFeed(updater, "0.5.4", "darwin", "x64");
 
-    expect(updater).toEqual({
-      channel: "latest-x64",
-      allowDowngrade: false,
+    expect(updater.channel).toBe("latest-x64");
+    expect(updater.allowDowngrade).toBe(false);
+    expect(updater.allowPrerelease).toBe(false);
+    // A client that never left stable keeps its app-update.yml provider.
+    expect(updater.setFeedURL).not.toHaveBeenCalled();
+  });
+
+  it("allows a downgrade only while a test build is pointed at stable", () => {
+    const updater = updaterWithChannelSideEffect();
+
+    applyStableFeed(updater, "0.5.5-test.3", "darwin", "arm64");
+    expect(updater.channel).toBeNull();
+    expect(updater.allowDowngrade).toBe(true);
+
+    applyTestFeed(updater, "v0.5.5-test.3", "win32", "arm64");
+    expect(updater.channel).toBe("test-arm64");
+    expect(updater.allowDowngrade).toBe(false);
+    expect(updater.allowPrerelease).toBe(true);
+    expect(updater.setFeedURL).toHaveBeenLastCalledWith({
+      provider: "generic",
+      url: "https://github.com/jeff-kunkun/multica/releases/download/v0.5.5-test.3",
+      channel: "test-arm64",
+      useMultipleRangeRequest: false,
     });
+
+    applyStableFeed(updater, "0.5.5-test.3", "darwin", "arm64", true);
+    expect(updater.channel).toBe("latest");
+    expect(updater.allowDowngrade).toBe(true);
+    expect(updater.allowPrerelease).toBe(false);
+    expect(updater.setFeedURL).toHaveBeenLastCalledWith({
+      provider: "github",
+      owner: "jeff-kunkun",
+      repo: "multica",
+    });
+  });
+
+  it("aims the test feed at the exact manifest package.mjs publishes per arch", () => {
+    // Names that must round-trip with publishChannelForTarget in package.mjs.
+    expect(testReleaseFeedOptions("v0.5.5-test.1", "test")).toEqual({
+      provider: "generic",
+      url: "https://github.com/jeff-kunkun/multica/releases/download/v0.5.5-test.1",
+      channel: "test",
+      useMultipleRangeRequest: false,
+    });
+    expect(testReleaseFeedOptions("v0.5.5-test.1", "test-x64")).toMatchObject({
+      channel: "test-x64",
+      url: "https://github.com/jeff-kunkun/multica/releases/download/v0.5.5-test.1",
+    });
+  });
+
+  it("picks the highest vX.Y.Z-test.N tag out of the releases feed", () => {
+    expect(
+      pickNewestTestReleaseTag(
+        RELEASES_ATOM("v0.5.5-test.2", "v0.5.4", "v0.5.5-test.10", "v0.5.5-test.3"),
+      ),
+    ).toBe("v0.5.5-test.10");
+    expect(
+      pickNewestTestReleaseTag(RELEASES_ATOM("v0.5.6-test.1", "v0.5.5-test.9")),
+    ).toBe("v0.5.6-test.1");
+    // Stable tags, other prerelease flavours, and CLI-only tags never match.
+    expect(
+      pickNewestTestReleaseTag(RELEASES_ATOM("v0.5.4", "v0.5.5-beta.1", "v0.5.5-rc.1")),
+    ).toBeNull();
+    expect(pickNewestTestReleaseTag("")).toBeNull();
   });
 });
 
@@ -231,6 +345,13 @@ describe("setupAutoUpdater", () => {
     ctx.log.warn.mockClear();
     (autoUpdater as unknown as { logger: unknown }).logger = null;
     (autoUpdater as unknown as { autoDownload: boolean }).autoDownload = false;
+    ctx.getVersion.mockReset();
+    ctx.getVersion.mockReturnValue("0.3.17");
+    ctx.setFeedURL.mockClear();
+    ctx.fetchText.mockReset();
+    autoUpdater.channel = null;
+    autoUpdater.allowDowngrade = false;
+    autoUpdater.allowPrerelease = false;
   });
 
   afterEach(() => {
@@ -244,6 +365,7 @@ describe("setupAutoUpdater", () => {
 
     await expect(invokeIpc("updater:get-preferences")).resolves.toEqual({
       automaticUpdates: true,
+      releaseChannel: "stable",
     });
 
     await vi.advanceTimersByTimeAsync(5_000);
@@ -273,12 +395,12 @@ describe("setupAutoUpdater", () => {
 
     await expect(
       invokeIpc("updater:set-automatic-updates", false),
-    ).resolves.toEqual({ automaticUpdates: false });
+    ).resolves.toEqual({ automaticUpdates: false, releaseChannel: "stable" });
     expect(
       JSON.parse(
         readFileSync(updaterPreferencesPath(ctx.userDataPath), "utf-8"),
       ),
-    ).toEqual({ automaticUpdates: false });
+    ).toEqual({ automaticUpdates: false, releaseChannel: "stable" });
 
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000 + 5_000);
     expect(ctx.checkForUpdates).not.toHaveBeenCalled();
@@ -333,6 +455,147 @@ describe("setupAutoUpdater", () => {
     expect(send).toHaveBeenCalledWith("updater:download-progress", {
       percent: 42,
     });
+  });
+
+  it("uses the saved release channel for the feed", async () => {
+    writeFileSync(
+      updaterPreferencesPath(ctx.userDataPath),
+      JSON.stringify({ automaticUpdates: true, releaseChannel: "test" }),
+    );
+    setup(() => null);
+
+    await expect(invokeIpc("updater:get-preferences")).resolves.toEqual({
+      automaticUpdates: true,
+      releaseChannel: "test",
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flushPromises();
+
+    expect(ctx.fetchText).toHaveBeenCalledWith(
+      "https://github.com/jeff-kunkun/multica/releases.atom",
+    );
+    const feed = feedNameForReleaseChannel("test", process.platform, process.arch) ?? "test";
+    expect(ctx.setFeedURL).toHaveBeenLastCalledWith({
+      provider: "generic",
+      url: "https://github.com/jeff-kunkun/multica/releases/download/v0.5.5-test.2",
+      channel: feed,
+      useMultipleRangeRequest: false,
+    });
+    expect(autoUpdater.channel).toBe(feed);
+    expect(autoUpdater.allowPrerelease).toBe(true);
+    expect(autoUpdater.allowDowngrade).toBe(false);
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+    // The feed is resolved before, not after, electron-updater is asked.
+    expect(ctx.setFeedURL.mock.invocationCallOrder[0]).toBeLessThan(
+      ctx.checkForUpdates.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("keeps stable clients on the app-update.yml provider", async () => {
+    setup(() => null);
+    await invokeIpc("updater:get-preferences");
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flushPromises();
+
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(ctx.fetchText).not.toHaveBeenCalled();
+    expect(ctx.setFeedURL).not.toHaveBeenCalled();
+    expect(autoUpdater.allowPrerelease).toBe(false);
+  });
+
+  it("rechecks immediately when the release channel changes", async () => {
+    const { win, send } = makeWindow();
+    setup(() => win);
+    await invokeIpc("updater:get-preferences");
+    ctx.checkForUpdates.mockClear();
+
+    await expect(invokeIpc("updater:set-release-channel", "test")).resolves.toEqual({
+      automaticUpdates: true,
+      releaseChannel: "test",
+    });
+    await flushPromises();
+
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(ctx.setFeedURL).toHaveBeenLastCalledWith(
+      expect.objectContaining({ provider: "generic", channel: expect.stringMatching(/^test/) }),
+    );
+    expect(send).toHaveBeenCalledWith("updater:checking", { trigger: "manual" });
+    expect(
+      JSON.parse(readFileSync(updaterPreferencesPath(ctx.userDataPath), "utf8")),
+    ).toEqual({ automaticUpdates: true, releaseChannel: "test" });
+  });
+
+  it("allows a downgrade when a test build switches back to stable", async () => {
+    ctx.getVersion.mockReturnValue("0.5.5-test.3");
+    writeFileSync(
+      updaterPreferencesPath(ctx.userDataPath),
+      JSON.stringify({ automaticUpdates: true, releaseChannel: "test" }),
+    );
+    setup(() => null);
+    await invokeIpc("updater:get-preferences");
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flushPromises();
+    expect(autoUpdater.allowDowngrade).toBe(false);
+    ctx.checkForUpdates.mockClear();
+
+    await invokeIpc("updater:set-release-channel", "stable");
+    await flushPromises();
+
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(autoUpdater.allowDowngrade).toBe(true);
+    expect(autoUpdater.allowPrerelease).toBe(false);
+    // The generic test provider is replaced by the GitHub one again.
+    expect(ctx.setFeedURL).toHaveBeenLastCalledWith({
+      provider: "github",
+      owner: "jeff-kunkun",
+      repo: "multica",
+    });
+    expect(autoUpdater.channel).toBe(
+      feedNameForReleaseChannel("stable", process.platform, process.arch) ?? "latest",
+    );
+  });
+
+  it("falls back to the stable feed while no test release exists yet", async () => {
+    writeFileSync(
+      updaterPreferencesPath(ctx.userDataPath),
+      JSON.stringify({ automaticUpdates: true, releaseChannel: "test" }),
+    );
+    setup(() => null, SUPPORTED, RELEASES_ATOM("v0.5.4", "v0.5.3"));
+    await invokeIpc("updater:get-preferences");
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flushPromises();
+
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(ctx.setFeedURL).not.toHaveBeenCalled();
+    expect(autoUpdater.allowPrerelease).toBe(false);
+    expect(ctx.log.info).toHaveBeenCalledWith(
+      expect.stringContaining("no vX.Y.Z-test.N release published yet"),
+    );
+  });
+
+  it("records a failed releases-feed fetch instead of checking the wrong line", async () => {
+    writeFileSync(
+      updaterPreferencesPath(ctx.userDataPath),
+      JSON.stringify({ automaticUpdates: true, releaseChannel: "test" }),
+    );
+    setup(() => null);
+    ctx.fetchText.mockRejectedValue(new Error("offline"));
+    await invokeIpc("updater:get-preferences");
+
+    const result = await invokeIpc("updater:check");
+
+    expect(result).toEqual({ ok: false, error: "offline" });
+    expect(ctx.checkForUpdates).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown release channel", async () => {
+    setup(() => null);
+    await expect(invokeIpc("updater:set-release-channel", "nightly")).rejects.toThrow(
+      TypeError,
+    );
   });
 
   it("rethrows non-destroy errors from webContents.send", () => {

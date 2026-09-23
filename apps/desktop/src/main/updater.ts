@@ -3,10 +3,12 @@ import { app, type BrowserWindow, ipcMain, shell } from "electron";
 import log from "electron-log/main";
 import { join } from "node:path";
 import {
+  RELEASE_REPO,
   releasePageUrl,
   type InstallerReadyPayload,
   type ManualUpdateCheckResult,
   type OpenInstallerResult,
+  type ReleaseChannel,
   type UpdateCheckRecord,
   type UpdateCheckTrigger,
   type UpdaterCapabilities,
@@ -32,39 +34,182 @@ import {
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
-// Windows arm64 ships its own update metadata channel because
-// electron-builder's `latest.yml` is not arch-suffixed on Windows — both
-// arches would otherwise collide on the same file in the GitHub Release.
-// See scripts/package.mjs (builderArgsForTarget) for the publish-side half
-// of this pact. Pin the channel here so arm64 clients fetch
-// `latest-arm64.yml` instead of the x64 metadata.
-if (process.platform === "win32" && process.arch === "arm64") {
-  autoUpdater.channel = "latest-arm64";
-}
-
-interface ChannelConfigurableUpdater {
+/**
+ * The slice of electron-updater's AppUpdater the channel logic touches.
+ * `setFeedURL` is what swaps the provider: the test line cannot be served by
+ * the GitHub provider (see `prepareFeedForCheck`), so it points a generic
+ * provider at one release's download directory instead.
+ */
+export interface ChannelConfigurableUpdater {
   channel: string | null;
   allowDowngrade: boolean;
+  allowPrerelease: boolean;
+  setFeedURL: (options: UpdateFeedOptions) => void;
 }
 
-export function configureMacX64UpdateChannel(
+export type UpdateFeedOptions =
+  | { provider: "github"; owner: string; repo: string }
+  | {
+      provider: "generic";
+      url: string;
+      channel: string;
+      useMultipleRangeRequest: boolean;
+    };
+
+/**
+ * `vX.Y.Z-test.N` is the test line. A distance suffix after that tag
+ * (`0.5.5-test.3-2-gabcdef`) is still that line. Stable tags and the
+ * describe form `0.5.4-14-gabcdef` are not.
+ */
+export function isTestReleaseVersion(version: string): boolean {
+  const match = version
+    .replace(/^v/, "")
+    .match(/^\d+\.\d+\.\d+(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?/);
+  if (!match?.[1]) return false;
+  return match[1].split(".")[0] === "test";
+}
+
+/**
+ * Channel name shared with `publishChannelForTarget` in scripts/package.mjs;
+ * electron-updater appends `-mac` / `-linux[-arch]` / `.yml` itself.
+ * `null` is the untouched electron-updater default (`latest` / `latest-mac.yml`
+ * / `latest-linux*.yml`). The arch-specific stable names already installed
+ * clients request — `latest-x64`, `latest-arm64` — stay byte-for-byte.
+ *
+ * The test prefix is `test`, not `beta`: it must equal the prerelease
+ * segment of the `vX.Y.Z-test.N` tag, because that is the only channel name
+ * electron-updater's GitHub provider will ever look up for a prerelease.
+ */
+export function feedNameForReleaseChannel(
+  releaseChannel: ReleaseChannel,
+  platform: NodeJS.Platform,
+  arch: string,
+): string | null {
+  const prefix = releaseChannel === "test" ? "test" : "latest";
+  if (platform === "win32" && arch === "arm64") return `${prefix}-arm64`;
+  if (platform === "darwin" && arch === "x64") return `${prefix}-x64`;
+  if (prefix === "latest") return null;
+  return prefix;
+}
+
+export function shouldAllowStableDowngrade(
+  releaseChannel: ReleaseChannel,
+  currentVersion: string,
+): boolean {
+  // `0.5.5-test.3` → `0.5.4` is a downgrade. Leaving this off traps the user
+  // on the test line. It is not the AppUpdater.channel setter's side effect:
+  // that flag is assigned explicitly below, after the setter runs.
+  return releaseChannel === "stable" && isTestReleaseVersion(currentVersion);
+}
+
+const TEST_TAG_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)-test\.(\d+)$/;
+
+/**
+ * Newest `vX.Y.Z-test.N` tag in a GitHub releases Atom feed
+ * (`https://github.com/<owner>/<repo>/releases.atom`). Ordered by version,
+ * not feed position, so a republished older test release cannot win.
+ * `null` when the feed carries no test release at all.
+ */
+export function pickNewestTestReleaseTag(atomXml: string): string | null {
+  let best: { tag: string; key: number[] } | null = null;
+  for (const match of atomXml.matchAll(/\/releases\/tag\/([^"'<>\s]+)/g)) {
+    const tag = decodeURIComponent(match[1]);
+    const parts = TEST_TAG_PATTERN.exec(tag);
+    if (!parts) continue;
+    const key = parts.slice(1, 5).map(Number);
+    if (best === null || compareVersionKeys(key, best.key) > 0) {
+      best = { tag, key };
+    }
+  }
+  return best?.tag ?? null;
+}
+
+function compareVersionKeys(a: number[], b: number[]): number {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+export function githubReleaseFeedOptions(): UpdateFeedOptions {
+  const [owner, repo] = RELEASE_REPO.split("/");
+  return { provider: "github", owner, repo };
+}
+
+export function testReleaseFeedOptions(
+  tag: string,
+  channel: string,
+): UpdateFeedOptions {
+  return {
+    provider: "generic",
+    url: `https://github.com/${RELEASE_REPO}/releases/download/${tag}`,
+    channel,
+    // GitHub serves release assets from S3, which rejects multi-range
+    // requests; electron-updater's own GitHub provider pins the same flag.
+    useMultipleRangeRequest: false,
+  };
+}
+
+export function releasesAtomUrl(): string {
+  return `https://github.com/${RELEASE_REPO}/releases.atom`;
+}
+
+/**
+ * Point the updater at the stable feed: electron-updater's GitHub provider,
+ * `latest*.yml` under whatever `/releases/latest` resolves to. This is the
+ * path every installed client has been on; only the channel name and the
+ * downgrade flag are set here, and the provider is only rebuilt when a test
+ * feed replaced it earlier in this session.
+ */
+export function applyStableFeed(
   updater: ChannelConfigurableUpdater,
+  currentVersion: string,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+  restoreProvider = false,
+): void {
+  if (restoreProvider) updater.setFeedURL(githubReleaseFeedOptions());
+  const feed = feedNameForReleaseChannel("stable", platform, arch);
+  // Assigning `.channel` sets allowDowngrade to true. Once it is a string,
+  // a later `null` throws, so the default stable feed is spelled `latest`
+  // only after some other feed was selected. `latest` still resolves to
+  // `latest-mac.yml` / `latest.yml` / `latest-linux*.yml`.
+  if (feed != null) {
+    updater.channel = feed;
+  } else if (updater.channel != null) {
+    updater.channel = "latest";
+  }
+  updater.allowDowngrade = shouldAllowStableDowngrade("stable", currentVersion);
+  updater.allowPrerelease = false;
+}
+
+/**
+ * Point the updater at one test release. electron-updater's GitHub provider
+ * cannot serve this line: with `allowPrerelease` it derives the channel file
+ * from the tag's prerelease segment alone (`test-mac.yml`, never
+ * `test-x64-mac.yml`), and without it `/releases/latest` skips prereleases.
+ * So the tag is resolved here from the releases feed and a generic provider
+ * is aimed at that release's download directory with the exact channel name
+ * package.mjs published.
+ */
+export function applyTestFeed(
+  updater: ChannelConfigurableUpdater,
+  tag: string,
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
 ): void {
-  if (platform !== "darwin" || arch !== "x64") return;
-
-  // AppUpdater.channel enables allowDowngrade as a side effect. This channel
-  // isolates a CPU architecture, not a release train, so preserve normal
-  // monotonic version behavior after selecting the architecture feed.
-  updater.channel = "latest-x64";
+  const feed = feedNameForReleaseChannel("test", platform, arch) ?? "test";
+  updater.setFeedURL(testReleaseFeedOptions(tag, feed));
+  updater.channel = feed;
+  // Moving onto the test line is never a downgrade worth forcing: a stable
+  // client newer than every test build simply sees "up to date".
   updater.allowDowngrade = false;
+  updater.allowPrerelease = true;
 }
 
-// electron-builder does not architecture-suffix macOS update metadata.
-// package.mjs publishes macOS x64 as `latest-x64-mac.yml`; the established
-// arm64 feed and runtime path remain unchanged.
-configureMacX64UpdateChannel(autoUpdater);
+// Pin the architecture feed before preferences load. The saved channel is
+// applied again once preferences resolve, before the first check.
+applyStableFeed(autoUpdater, "0.0.0");
 
 const STARTUP_CHECK_DELAY_MS = 5_000;
 const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
@@ -175,6 +320,18 @@ export interface SetupAutoUpdaterOptions {
     version: string,
     onProgress: (percent: number) => void,
   ) => Promise<DownloadedInstaller>;
+  /** Test seam: fetch the GitHub releases Atom feed as text. */
+  fetchText?: (url: string) => Promise<string>;
+}
+
+async function fetchTextWithFetch(url: string): Promise<string> {
+  const response = await fetch(url, {
+    headers: { accept: "application/atom+xml, application/xml, text/xml, */*" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET ${url} failed: HTTP ${response.status}`);
+  }
+  return response.text();
 }
 
 function updaterLogPath(): string | null {
@@ -209,16 +366,50 @@ export function setupAutoUpdater(
   const preferencesFilePath = updaterPreferencesPath(app.getPath("userData"));
   let automaticUpdatesEnabled =
     DEFAULT_UPDATER_PREFERENCES.automaticUpdates;
+  let releaseChannel: ReleaseChannel =
+    DEFAULT_UPDATER_PREFERENCES.releaseChannel;
   let startupCheckElapsed = false;
   let startupTimer: ReturnType<typeof setTimeout> | null = null;
   let periodicTimer: ReturnType<typeof setInterval> | null = null;
   let lastCheck: UpdateCheckRecord | null = null;
+  const currentPreferences = (): UpdaterPreferences => ({
+    automaticUpdates: automaticUpdatesEnabled,
+    releaseChannel,
+  });
+  const fetchText = options.fetchText ?? fetchTextWithFetch;
+  // Which provider autoUpdater currently holds. The stable GitHub provider is
+  // only rebuilt after a test feed replaced it, so clients that never leave
+  // stable keep the exact app-update.yml path they have always used.
+  let activeFeed: "stable" | "test" = "stable";
   const preferencesReady = loadUpdaterPreferences(preferencesFilePath).then(
     (preferences) => {
       automaticUpdatesEnabled = preferences.automaticUpdates;
+      releaseChannel = preferences.releaseChannel;
+      if (releaseChannel === "stable") {
+        applyStableFeed(autoUpdater, app.getVersion());
+      }
       return preferences;
     },
   );
+
+  // Aim autoUpdater at the feed for the selected channel right before a
+  // check. The test line has to be re-resolved every time because the newest
+  // `-test.N` tag moves; stable only needs the provider restored once.
+  const prepareFeedForCheck = async (): Promise<void> => {
+    if (releaseChannel === "test") {
+      const tag = pickNewestTestReleaseTag(await fetchText(releasesAtomUrl()));
+      if (tag) {
+        applyTestFeed(autoUpdater, tag);
+        activeFeed = "test";
+        return;
+      }
+      log.info(
+        "[updater] no vX.Y.Z-test.N release published yet; checking the stable feed instead",
+      );
+    }
+    applyStableFeed(autoUpdater, app.getVersion(), process.platform, process.arch, activeFeed === "test");
+    activeFeed = "stable";
+  };
 
   const capabilitiesReady = (
     options.resolveCapabilities ??
@@ -309,6 +500,7 @@ export function setupAutoUpdater(
     if (inFlightCheck) return inFlightCheck;
     sendToLiveRenderer(getMainWindow(), "updater:checking", { trigger });
     const p = capabilitiesReady
+      .then(() => prepareFeedForCheck())
       .then(() => autoUpdater.checkForUpdates())
       .then((result): UpdateCheckRecord => {
         // checkForUpdates resolves as soon as metadata is fetched; the actual
@@ -503,7 +695,7 @@ export function setupAutoUpdater(
     "updater:get-preferences",
     async (): Promise<UpdaterPreferences> => {
       await preferencesReady;
-      return { automaticUpdates: automaticUpdatesEnabled };
+      return currentPreferences();
     },
   );
 
@@ -516,9 +708,9 @@ export function setupAutoUpdater(
 
       await preferencesReady;
       const wasEnabled = automaticUpdatesEnabled;
-      const preferences = { automaticUpdates: enabled };
-      await saveUpdaterPreferences(preferencesFilePath, preferences);
       automaticUpdatesEnabled = enabled;
+      const preferences = currentPreferences();
+      await saveUpdaterPreferences(preferencesFilePath, preferences);
 
       if (!enabled) {
         cancelBackgroundChecks();
@@ -531,6 +723,28 @@ export function setupAutoUpdater(
         scheduleBackgroundChecks();
       }
 
+      return preferences;
+    },
+  );
+
+  ipcMain.handle(
+    "updater:set-release-channel",
+    async (_event, channel: unknown): Promise<UpdaterPreferences> => {
+      if (channel !== "stable" && channel !== "test") {
+        throw new TypeError('releaseChannel must be "stable" or "test"');
+      }
+
+      await preferencesReady;
+      releaseChannel = channel;
+      const preferences = currentPreferences();
+      await saveUpdaterPreferences(preferencesFilePath, preferences);
+      // A check already in flight is for the previous feed. Wait it out, then
+      // look up the feed just selected — don't wait for the hourly poll.
+      // checkForUpdatesOnce never rejects: failures become a check record.
+      const pending = inFlightCheck;
+      const recheck = () => void checkForUpdatesOnce("manual");
+      if (pending) void pending.finally(recheck);
+      else recheck();
       return preferences;
     },
   );

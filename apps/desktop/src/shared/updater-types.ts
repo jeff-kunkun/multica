@@ -1,5 +1,8 @@
+export type ReleaseChannel = "stable" | "test";
+
 export interface UpdaterPreferences {
   automaticUpdates: boolean;
+  releaseChannel: ReleaseChannel;
 }
 
 export type ManualUpdateCheckResult =

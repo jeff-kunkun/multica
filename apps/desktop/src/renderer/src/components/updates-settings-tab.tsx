@@ -41,6 +41,9 @@ export function UpdatesSettingsTab() {
     revealInstaller,
   } = useUpdater();
   const [automaticUpdates, setAutomaticUpdates] = useState(true);
+  const [releaseChannel, setReleaseChannel] = useState<"stable" | "test">(
+    "stable",
+  );
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [savingPreference, setSavingPreference] = useState(false);
   const currentVersion = window.desktopAPI.appInfo.version;
@@ -50,7 +53,11 @@ export function UpdatesSettingsTab() {
     void window.updater
       .getPreferences()
       .then((preferences) => {
-        if (mounted) setAutomaticUpdates(preferences.automaticUpdates);
+        if (!mounted) return;
+        setAutomaticUpdates(preferences.automaticUpdates);
+        setReleaseChannel(
+          preferences.releaseChannel === "test" ? "test" : "stable",
+        );
       })
       .catch(() => {
         // The main process falls back to enabled when preferences cannot be
@@ -100,6 +107,28 @@ export function UpdatesSettingsTab() {
   // browser. Only the last one is "manual download".
   const manualOnly = !autoUpdateSupported && !assistedInstallSupported;
   const checking = phase.status === "checking";
+  const handleReleaseChannelChange = useCallback(
+    async (value: string) => {
+      if (value !== "stable" && value !== "test") return;
+      if (value === releaseChannel) return;
+      setSavingPreference(true);
+      try {
+        const preferences = await window.updater.setReleaseChannel(value);
+        setReleaseChannel(preferences.releaseChannel);
+        setAutomaticUpdates(preferences.automaticUpdates);
+        toast.success(t(($) => $.auto_save.toast_saved), {
+          id: "settings-auto-save",
+        });
+        // The main process re-checks the newly selected line on its own and
+        // streams checking / check-result back, so nothing else to do here.
+      } catch {
+        toast.error(t(($) => $.desktop.updates.release_channel_save_failed));
+      } finally {
+        setSavingPreference(false);
+      }
+    },
+    [releaseChannel, t],
+  );
 
   return (
     <SettingsTab
@@ -151,6 +180,29 @@ export function UpdatesSettingsTab() {
             </Button>
           </SettingsRow>
         )}
+
+        <SettingsRow
+          label={t(($) => $.desktop.updates.release_channel_title)}
+          description={t(($) => $.desktop.updates.release_channel_description)}
+          size="select-wide"
+        >
+          <select
+            aria-label={t(($) => $.desktop.updates.release_channel_title)}
+            className="h-9 w-full rounded-lg border border-input bg-background px-2 text-body text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            value={releaseChannel}
+            disabled={!preferencesReady || savingPreference}
+            onChange={(event) => {
+              void handleReleaseChannelChange(event.target.value);
+            }}
+          >
+            <option value="stable">
+              {t(($) => $.desktop.updates.release_channel_stable)}
+            </option>
+            <option value="test">
+              {t(($) => $.desktop.updates.release_channel_test)}
+            </option>
+          </select>
+        </SettingsRow>
 
         <SettingsRow
           label={t(($) => $.desktop.updates.check_section_title)}
