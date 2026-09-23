@@ -25,14 +25,20 @@ func TestEveryRuntimeDeclaresModelDiscovery(t *testing.T) {
 		}
 	}
 	for id, decl := range modelDiscoveryByProvider {
-		if decl.Kind != modelDiscoveryManual {
-			continue
-		}
-		if strings.TrimSpace(decl.Reason) == "" {
-			t.Errorf("%s is manual-only without a reason", id)
-		}
-		if ModelSelectionSupported(id) {
-			t.Errorf("%s is manual-only but the picker would still offer a model list", id)
+		switch decl.Kind {
+		case modelDiscoveryManual:
+			if strings.TrimSpace(decl.Reason) == "" {
+				t.Errorf("%s is manual-only without a reason", id)
+			}
+			if ModelSelectionSupported(id) {
+				t.Errorf("%s is manual-only but the picker would still offer a model list", id)
+			}
+		case modelDiscoveryChain:
+			_, hasEndpoint := modelEndpointSources[id]
+			cmd, hasCommand := modelListCommands[id]
+			if !hasEndpoint && (!hasCommand || !listCommandRegistered(cmd)) {
+				t.Errorf("%s declares the fallback chain but registers neither an endpoint nor a readonly list command", id)
+			}
 		}
 	}
 

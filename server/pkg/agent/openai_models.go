@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,18 +33,63 @@ var openAIModelsHTTP = &http.Client{
 	},
 }
 
-// discoverOpenAICompatibleModels asks an OpenAI-compatible endpoint for its
-// model ids. baseURL is the API root the runtime actually calls (it already
-// includes /v1 when the runtime's config does). apiKey is sent only as a
-// Bearer header on this process; it is never written into the URL, the error
-// text, or a log line. defaultModel, when it matches a returned id, is marked
-// Default so the picker can badge it.
+// probeAuthScheme is how one GET {base}/models presents the key. The key
+// stays in a header on this process. It is never written into the URL, the
+// error text, or a log line.
+type probeAuthScheme int
+
+const (
+	probeAuthBearer probeAuthScheme = iota
+	probeAuthAnthropic
+)
+
+// probeRetryable marks a probe failure that may be the wrong auth scheme or
+// the other catalog shape. Connection failures and ordinary HTTP errors are
+// not retryable: a second request would only wait twice for the same outage.
+type probeRetryable struct{ err error }
+
+func (e probeRetryable) Error() string { return e.err.Error() }
+func (e probeRetryable) Unwrap() error { return e.err }
+
+func isProbeRetryable(err error) bool {
+	var retryable probeRetryable
+	return errors.As(err, &retryable)
+}
+
+// discoverOpenAICompatibleModels asks an endpoint for its model ids, trying
+// the OpenAI bearer scheme and then, only when that looks like the wrong
+// scheme or shape, the Anthropic x-api-key scheme. See
+// discoverCompatibleEndpointModels.
+func discoverOpenAICompatibleModels(ctx context.Context, baseURL, apiKey, defaultModel string) ([]Model, error) {
+	return discoverCompatibleEndpointModels(ctx, baseURL, apiKey, defaultModel)
+}
+
+// discoverCompatibleEndpointModels asks the endpoint named by a runtime's own
+// config for its model ids. baseURL is the API root the runtime actually
+// calls (it already includes /v1 when the runtime's config does).
+// defaultModel, when it matches a returned id, is marked Default so the
+// picker can badge it.
+//
+// The first request uses Authorization: Bearer. A 401, a 403, or a 2xx body
+// that is not a model list is retried once with the Anthropic headers
+// (x-api-key and anthropic-version) when a key is present. A transport
+// failure or any other status is returned as-is, so a tunnel that is down
+// costs one timeout.
 //
 // A transport failure, a non-2xx status, or a body that is not a model list
-// is an error. That error is how the picker says the list is temporarily
-// unavailable. A parsed list that happens to be empty is a confirmed empty
-// catalog (nil error): the endpoint answered and has nothing to offer.
-func discoverOpenAICompatibleModels(ctx context.Context, baseURL, apiKey, defaultModel string) ([]Model, error) {
+// on both attempts is an error. That error is how the picker says the list
+// is temporarily unavailable. A parsed list that happens to be empty is a
+// confirmed empty catalog (nil error): the endpoint answered and has nothing
+// to offer.
+func discoverCompatibleEndpointModels(ctx context.Context, baseURL, apiKey, defaultModel string) ([]Model, error) {
+	models, err := probeEndpointModels(ctx, baseURL, apiKey, defaultModel, probeAuthBearer)
+	if err == nil || strings.TrimSpace(apiKey) == "" || !isProbeRetryable(err) {
+		return models, err
+	}
+	return probeEndpointModels(ctx, baseURL, apiKey, defaultModel, probeAuthAnthropic)
+}
+
+func probeEndpointModels(ctx context.Context, baseURL, apiKey, defaultModel string, scheme probeAuthScheme) ([]Model, error) {
 	endpoint, host, err := openAIModelsEndpoint(baseURL)
 	if err != nil {
 		return nil, err
@@ -54,9 +100,7 @@ func discoverOpenAICompatibleModels(ctx context.Context, baseURL, apiKey, defaul
 	if err != nil {
 		return nil, errModelsListUnavailable("无法发起模型列表请求")
 	}
-	if key := strings.TrimSpace(apiKey); key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
-	}
+	applyModelsAuth(req, apiKey, scheme)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := openAIModelsHTTP.Do(req)
@@ -68,17 +112,34 @@ func discoverOpenAICompatibleModels(ctx context.Context, baseURL, apiKey, defaul
 	if err != nil {
 		return nil, errModelsListUnavailable("读不到 " + host + " 的响应")
 	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, probeRetryable{err: errModelsListUnavailable(fmt.Sprintf("端点返回了 HTTP %d", resp.StatusCode))}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, errModelsListUnavailable(fmt.Sprintf("端点返回了 HTTP %d", resp.StatusCode))
 	}
 	models, empty, err := parseOpenAIModelList(body, strings.TrimSpace(defaultModel))
 	if err != nil {
-		return nil, errModelsListUnavailable("端点没有返回模型清单")
+		return nil, probeRetryable{err: errModelsListUnavailable("端点没有返回模型清单")}
 	}
 	if empty {
 		return nil, nil
 	}
 	return models, nil
+}
+
+func applyModelsAuth(req *http.Request, apiKey string, scheme probeAuthScheme) {
+	key := strings.TrimSpace(apiKey)
+	if key == "" || req == nil {
+		return
+	}
+	switch scheme {
+	case probeAuthAnthropic:
+		req.Header.Set("x-api-key", key)
+		req.Header.Set("anthropic-version", "2023-06-01")
+	default:
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 }
 
 // openAIModelsEndpoint turns a configured API root into {root}/models and

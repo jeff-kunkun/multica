@@ -8,12 +8,16 @@ type modelDiscoveryKind int
 
 const (
 	// modelDiscoveryDedicated means ListModels already has a discoverer for
-	// this runtime (a switch case, or BuiltinRuntime.ModelDiscovery). The
-	// fallback chain does not replace that result.
+	// this runtime (a switch case, or BuiltinRuntime.ModelDiscovery). That
+	// result is returned as-is. The fallback chain does not replace it, so
+	// the runtimes that already discover models keep their current behavior.
 	modelDiscoveryDedicated modelDiscoveryKind = iota
-	// modelDiscoveryEndpoint means the catalog comes from the OpenAI-compatible
-	// endpoint named by the runtime's own config. Qwen Code is this kind.
-	modelDiscoveryEndpoint
+	// modelDiscoveryChain means there is no dedicated discoverer. ListModels
+	// walks the shared chain: the endpoint named by this runtime's own
+	// config, then a readonly list command registered for it, then manual
+	// entry. A step that is not registered is skipped. A step that finds a
+	// list — including a confirmed empty one — stops the walk.
+	modelDiscoveryChain
 	// modelDiscoveryManual means the runtime cannot be given a per-task model.
 	// Reason is required. The picker shows "managed by the runtime" rather than
 	// an empty catalog; ModelSelectionSupported must agree.
@@ -25,9 +29,12 @@ type modelDiscoveryDecl struct {
 	Reason string
 }
 
-// modelDiscoveryByProvider is the declaration table. The switch in ListModels
-// still performs the lookup; this table is what makes a forgotten runtime fail
-// a test instead of shipping as a silent empty catalog.
+// modelDiscoveryByProvider is the declaration table. Dedicated runtimes are
+// still looked up by the switch in ListModels. Chain and manual runtimes, and
+// any provider this table does not know, go through walkModelDiscoveryChain.
+// A runtime added to SupportedTypes or BuiltinRuntimes without an entry fails
+// TestEveryRuntimeDeclaresModelDiscovery instead of shipping as a silent
+// empty catalog.
 var modelDiscoveryByProvider = map[string]modelDiscoveryDecl{
 	"claude":      {Kind: modelDiscoveryDedicated},
 	"codebuddy":   {Kind: modelDiscoveryDedicated},
@@ -52,7 +59,7 @@ var modelDiscoveryByProvider = map[string]modelDiscoveryDecl{
 	"dim":         {Kind: modelDiscoveryDedicated},
 	"devin":       {Kind: modelDiscoveryDedicated},
 	"omp":         {Kind: modelDiscoveryDedicated},
-	"qwen":        {Kind: modelDiscoveryEndpoint},
+	"qwen":        {Kind: modelDiscoveryChain},
 	"qwenpaw":     {Kind: modelDiscoveryManual, Reason: "session/set_model writes the shared agent profile, not the task"},
 	"mcode":       {Kind: modelDiscoveryManual, Reason: "MCode ACP exposes no session-scoped model selection"},
 	"zeroclaw":    {Kind: modelDiscoveryManual, Reason: "ZeroClaw has no session/set_model; the model comes from its agent profile"},

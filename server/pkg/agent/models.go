@@ -170,23 +170,34 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 	// Built-in runtime identities (e.g. "omp") declare their model discovery
 	// strategy in the descriptor. Resolve generically before the protocol-
 	// family switch so no runtime-specific case is needed below. When the
-	// descriptor has no ModelDiscovery strategy, return an empty catalog
-	// (not the family's default) — running a semantically incompatible
-	// discovery command (e.g. omp rejecting --list-models) is worse than
-	// degrading to manual entry.
+	// descriptor has no ModelDiscovery strategy, do not run the family's
+	// command — a semantically incompatible one (omp rejecting --list-models)
+	// is worse than walking the shared chain.
 	if desc, ok := BuiltinRuntimeByID(providerType); ok {
 		if desc.ModelDiscovery != nil {
 			return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 				return discovered(desc.ModelDiscovery(ctx, runtimeCmd))
 			})
 		}
-		// No discoverer on the descriptor. A manual declaration is an empty
-		// catalog the picker explains; anything else is "we could not look",
-		// not "this runtime has no models".
+		// No discoverer on the descriptor. Do not run the protocol family's
+		// command (omp rejects --list-models). A manual declaration is an
+		// empty catalog the picker explains; anything else walks the shared
+		// chain, which reports "temporarily unavailable" when this runtime
+		// registered neither an endpoint nor a list command.
 		if decl, declared := modelDiscoveryByProvider[providerType]; declared && decl.Kind == modelDiscoveryManual {
 			return Catalog{Models: []Model{}}, nil
 		}
-		return Catalog{}, errModelsListUnavailable("这个运行时没有登记发现方式")
+		return walkModelDiscoveryChain(ctx, providerType, runtimeCmd, modelEndpointSources, modelListCommands)
+	}
+	if decl, declared := modelDiscoveryByProvider[providerType]; !declared || decl.Kind != modelDiscoveryDedicated {
+		if declared && decl.Kind == modelDiscoveryManual {
+			return Catalog{Models: []Model{}}, nil
+		}
+		// Chain runtimes, and providers this build does not know, share one
+		// walk. Unknown used to be a hard "unknown agent type" error. The
+		// walk has nothing registered for them, so the picker hears that the
+		// list is temporarily unavailable and manual entry stays open.
+		return walkModelDiscoveryChain(ctx, providerType, runtimeCmd, modelEndpointSources, modelListCommands)
 	}
 	switch providerType {
 	case "claude":
@@ -270,31 +281,6 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discoverCodebuddyModels(ctx, runtimeCmd)
 		})
-	case "qwen":
-		// Qwen Code talks to whatever OpenAI-compatible endpoint its home
-		// config names. Probe that endpoint directly. This is deliberately
-		// not cachedDiscovery: a tunnel that is down must not be remembered
-		// as an empty catalog, and the next refresh has to see the tunnel
-		// as it is now. The probe is one HTTP GET, not a CLI spawn.
-		//
-		// The picker is per runtime, so it reads the machine's Qwen home.
-		// An agent's custom_env wins when a caller passes it to
-		// discoverQwenModels; this path has no agent.
-		return discovered(discoverQwenModels(ctx, nil))
-	case "qwenpaw":
-		// QwenPaw's model selection is unsupported (session/set_model
-		// persists to agent scope, not session scope), so there is no
-		// consumer for a discovered catalog. It is also not an
-		// OpenAI-compatible endpoint Multica can read without spawning ACP.
-		// Return an empty list rather than a probe that nothing would use.
-		// If upstream makes model selection session-scoped, restore a
-		// discovery helper here modelled on discoverTraecliModels.
-		return Catalog{Models: []Model{}}, nil
-	case "mcode":
-		// MCode's ACP server does not expose session-scoped model selection or
-		// a model catalog, and it has no OpenAI-compatible base URL to probe.
-		// The configured MCode runtime owns the model choice.
-		return Catalog{Models: []Model{}}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
@@ -310,21 +296,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discoverDimModels(ctx, runtimeCmd)
 		})
-	case "zeroclaw":
-		// ZeroClaw's ACP server advertises no catalog: session/new answers
-		// exactly {sessionId, workspaceDir} (verified against 0.8.4), and it
-		// has no session-scoped model selection to consume one anyway — see
-		// ModelSelectionSupported. Its model lives in the ZeroClaw agent
-		// profile, not an OpenAI-compatible base URL, so the shared /models
-		// probe has nothing to call. Return an empty list rather than
-		// spawning an ACP subprocess that can only ever come back empty.
-		return Catalog{Models: []Model{}}, nil
 	default:
-		// A provider this build does not know still goes through the same
-		// notice as a missed probe: the picker says the list is temporarily
-		// unavailable and keeps manual entry. It does not render as an
-		// authoritative empty catalog.
-		return Catalog{}, errModelsListUnavailable("这个运行时没有登记发现方式")
+		// Declared dedicated, but no case above implements it. This is a
+		// missed registration, not an authoritative empty catalog.
+		return Catalog{}, errModelsListUnavailable("这个运行时登记了专用发现器，但没有实现")
 	}
 }
 

@@ -201,6 +201,55 @@ func TestDiscoverOpenAICompatibleModelsUnreachable(t *testing.T) {
 	}
 }
 
+func TestDiscoverCompatibleEndpointModelsRetriesAnthropicAuth(t *testing.T) {
+	const secret = "sk-anthropic-do-not-leak"
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if strings.Contains(r.URL.String(), secret) {
+			t.Errorf("request URL contains the key: %s", r.URL.String())
+		}
+		if r.Header.Get("x-api-key") == secret && r.Header.Get("anthropic-version") == "2023-06-01" && r.Header.Get("Authorization") == "" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"claude-sonnet","display_name":"Claude Sonnet","type":"model"}]}`))
+			return
+		}
+		http.Error(w, secret, http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	models, err := discoverCompatibleEndpointModels(context.Background(), srv.URL+"/v1", secret, "claude-sonnet")
+	if err != nil {
+		t.Fatalf("anthropic retry: %v", err)
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("probe calls = %d, want bearer then x-api-key", hits.Load())
+	}
+	if len(models) != 1 || models[0].ID != "claude-sonnet" || models[0].Label != "Claude Sonnet" || !models[0].Default {
+		t.Fatalf("models = %+v", models)
+	}
+}
+
+func TestDiscoverCompatibleEndpointModelsDoesNotRetryOutage(t *testing.T) {
+	const secret = "sk-outage-do-not-leak"
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Error(w, secret, http.StatusBadGateway)
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := discoverCompatibleEndpointModels(context.Background(), srv.URL+"/v1", secret, "nexus-coder")
+	if err == nil || !strings.Contains(err.Error(), "HTTP 502") {
+		t.Fatalf("error = %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("probe calls = %d, want 1 — an outage must not be retried as another auth scheme", hits.Load())
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error leaked the key: %q", err)
+	}
+}
+
 func TestOpenAIModelsEndpointJoinsModelsPath(t *testing.T) {
 	got, host, err := openAIModelsEndpoint("http://user:sk-secret@127.0.0.1:8090/v1/")
 	if err != nil {
