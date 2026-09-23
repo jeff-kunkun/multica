@@ -33,6 +33,7 @@ export interface UpdaterBridgeFake {
     openLogFile: ReturnType<typeof vi.fn>;
     getPreferences: ReturnType<typeof vi.fn>;
     setAutomaticUpdates: ReturnType<typeof vi.fn>;
+    setReleaseChannel: ReturnType<typeof vi.fn>;
     checkForUpdates: ReturnType<typeof vi.fn>;
     openExternal: ReturnType<typeof vi.fn>;
   };
@@ -84,8 +85,11 @@ export function installUpdaterBridge(
       .mockResolvedValue(overrides.capabilities ?? SUPPORTED_CAPABILITIES),
     getLastCheck: vi.fn().mockResolvedValue(overrides.lastCheck ?? null),
     openLogFile: vi.fn().mockResolvedValue({ success: true }),
-    getPreferences: vi.fn().mockResolvedValue({ automaticUpdates: true }),
+    getPreferences: vi
+      .fn()
+      .mockResolvedValue({ automaticUpdates: true, releaseChannel: "stable" }),
     setAutomaticUpdates: vi.fn(),
+    setReleaseChannel: vi.fn(),
     checkForUpdates: vi.fn(),
     openExternal: vi.fn().mockResolvedValue(undefined),
   };
