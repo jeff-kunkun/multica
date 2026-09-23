@@ -23,6 +23,7 @@ const ctx = vi.hoisted(() => ({
   getVersion: vi.fn(() => "0.3.17"),
   userDataPath: "",
   openPath: vi.fn(async () => ""),
+  showItemInFolder: vi.fn(),
   log: {
     error: vi.fn(),
     warn: vi.fn(),
@@ -66,6 +67,7 @@ vi.mock("electron", () => ({
   },
   shell: {
     openPath: ctx.openPath,
+    showItemInFolder: ctx.showItemInFolder,
   },
 }));
 
@@ -82,6 +84,7 @@ import {
   setupAutoUpdater,
   testReleaseFeedOptions,
   type ChannelConfigurableUpdater,
+  type SetupAutoUpdaterOptions,
   type UpdateFeedOptions,
 } from "./updater";
 import { updaterPreferencesPath } from "./updater-preferences";
@@ -89,14 +92,17 @@ import type { UpdaterCapabilities } from "../shared/updater-types";
 
 const SUPPORTED: UpdaterCapabilities = {
   autoUpdateSupported: true,
+  assistedInstallSupported: false,
   blocker: null,
   releasePageUrl: "https://github.com/jeff-kunkun/multica/releases/latest",
   logPath: "/logs/main.log",
 };
 
+/** A default ad-hoc macOS build: no in-place install, but it fetches the .dmg. */
 const MAC_UNSIGNED: UpdaterCapabilities = {
   ...SUPPORTED,
   autoUpdateSupported: false,
+  assistedInstallSupported: true,
   blocker: "mac-unsigned",
 };
 
@@ -113,10 +119,13 @@ const RELEASES_ATOM = (...tags: string[]) =>
 function setup(
   getMainWindow: () => BrowserWindow | null,
   capabilities: UpdaterCapabilities = SUPPORTED,
-  atom: string = RELEASES_ATOM("v0.5.5-test.2", "v0.5.4", "v0.5.5-test.1"),
+  fetchInstallerOrAtom?: SetupAutoUpdaterOptions["fetchInstaller"] | string,
 ) {
+  const fetchInstaller = typeof fetchInstallerOrAtom === "function" ? fetchInstallerOrAtom : undefined;
+  const atom = typeof fetchInstallerOrAtom === "string" ? fetchInstallerOrAtom : RELEASES_ATOM("v0.5.5-test.2", "v0.5.4", "v0.5.5-test.1");
   setupAutoUpdater(getMainWindow, {
     resolveCapabilities: async () => capabilities,
+    fetchInstaller,
     fetchText: ctx.fetchText.mockResolvedValue(atom),
   });
 }
@@ -331,6 +340,7 @@ describe("setupAutoUpdater", () => {
     ctx.quitAndInstall.mockClear();
     ctx.getVersion.mockClear();
     ctx.openPath.mockClear();
+    ctx.showItemInFolder.mockClear();
     ctx.log.error.mockClear();
     ctx.log.warn.mockClear();
     (autoUpdater as unknown as { logger: unknown }).logger = null;
@@ -733,7 +743,7 @@ describe("setupAutoUpdater", () => {
   });
 
   it("runs the manual download through electron-updater and surfaces failures", async () => {
-    setup(() => null);
+    setup(() => null, SUPPORTED);
     ctx.downloadUpdate.mockResolvedValueOnce(undefined);
 
     await expect(invokeIpc("updater:download")).resolves.toBeUndefined();
@@ -741,6 +751,179 @@ describe("setupAutoUpdater", () => {
 
     ctx.downloadUpdate.mockRejectedValueOnce(new Error("disk full"));
     await expect(invokeIpc("updater:download")).rejects.toThrow("disk full");
+  });
+
+  // --- Assisted install: the default macOS build, no certificate anywhere ---
+  // These cover the path a `CSC_LINK`-less release takes: electron-updater
+  // cannot install in place, so the app fetches the .dmg itself and asks for
+  // the drag into Applications.
+  describe("assisted install on an unsigned macOS build", () => {
+    const installer = {
+      path: "/Users/x/Library/Application Support/Multica/installers/multica-desktop-0.4.0-mac-arm64.dmg",
+      fileName: "multica-desktop-0.4.0-mac-arm64.dmg",
+      bytes: 220_000_000,
+    };
+
+    type FetchInstaller = NonNullable<SetupAutoUpdaterOptions["fetchInstaller"]>;
+
+    function setupAssisted(
+      getMainWindow: () => BrowserWindow | null,
+      fetchInstaller: ReturnType<typeof vi.fn<FetchInstaller>> = vi.fn<FetchInstaller>(
+        async () => installer,
+      ),
+    ) {
+      setup(getMainWindow, MAC_UNSIGNED, fetchInstaller);
+      return fetchInstaller;
+    }
+
+    it("downloads the installer itself as soon as an update is offered", async () => {
+      const { win, send } = makeWindow();
+      const fetchInstaller = setupAssisted(() => win);
+
+      emitUpdater("update-available", { version: "0.4.0" });
+      await flushPromises();
+
+      expect(fetchInstaller).toHaveBeenCalledWith("0.4.0", expect.any(Function));
+      expect(send).toHaveBeenCalledWith("updater:download-progress", { percent: 0 });
+      expect(send).toHaveBeenCalledWith("updater:installer-ready", {
+        version: "0.4.0",
+        fileName: installer.fileName,
+        path: installer.path,
+      });
+      // The renderer must not be told to restart: nothing was staged.
+      expect(send).not.toHaveBeenCalledWith(
+        "updater:update-downloaded",
+        expect.anything(),
+      );
+    });
+
+    it("reports the installer download's own progress", async () => {
+      const { win, send } = makeWindow();
+      setupAssisted(
+        () => win,
+        vi.fn<FetchInstaller>(async (_version, onProgress) => {
+          onProgress(42);
+          return installer;
+        }),
+      );
+
+      emitUpdater("update-available", { version: "0.4.0" });
+      await flushPromises();
+
+      expect(send).toHaveBeenCalledWith("updater:download-progress", { percent: 42 });
+    });
+
+    it("never stages a package Squirrel would refuse", async () => {
+      setupAssisted(() => null);
+
+      await invokeIpc("updater:get-capabilities");
+
+      expect((autoUpdater as unknown as { autoDownload: boolean }).autoDownload).toBe(
+        false,
+      );
+      expect(ctx.downloadUpdate).not.toHaveBeenCalled();
+    });
+
+    it("routes the Download button to the installer fetch, once", async () => {
+      const fetchInstaller = setupAssisted(() => null);
+
+      emitUpdater("update-available", { version: "0.4.0" });
+      await Promise.all([
+        invokeIpc("updater:download"),
+        invokeIpc("updater:download"),
+      ]);
+
+      expect(fetchInstaller).toHaveBeenCalledTimes(1);
+      expect(ctx.downloadUpdate).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the last check when no update-available event fired", async () => {
+      const fetchInstaller = setupAssisted(() => null);
+      ctx.checkForUpdates.mockResolvedValueOnce({
+        updateInfo: { version: "0.4.0" },
+        isUpdateAvailable: true,
+      });
+
+      await invokeIpc("updater:check");
+      await invokeIpc("updater:download");
+
+      expect(fetchInstaller).toHaveBeenCalledWith("0.4.0", expect.any(Function));
+    });
+
+    it("refuses to guess a version nobody has been offered", async () => {
+      setupAssisted(() => null);
+
+      await expect(invokeIpc("updater:download")).rejects.toThrow(
+        "No update version has been offered yet",
+      );
+    });
+
+    it("surfaces a failed installer download instead of going quiet", async () => {
+      const { win, send } = makeWindow();
+      setupAssisted(
+        () => win,
+        vi.fn<FetchInstaller>(async () => {
+          throw new Error("HTTP 404 for .../multica-desktop-0.4.0-mac-arm64.dmg");
+        }),
+      );
+
+      emitUpdater("update-available", { version: "0.4.0" });
+      await flushPromises();
+
+      expect(send).toHaveBeenCalledWith("updater:error", {
+        message: expect.stringContaining("HTTP 404"),
+      });
+      expect(send).not.toHaveBeenCalledWith(
+        "updater:installer-ready",
+        expect.anything(),
+      );
+    });
+
+    it("opens and reveals the downloaded installer", async () => {
+      setupAssisted(() => null);
+      emitUpdater("update-available", { version: "0.4.0" });
+      await flushPromises();
+
+      await expect(invokeIpc("updater:get-installer")).resolves.toMatchObject({
+        version: "0.4.0",
+        path: installer.path,
+      });
+      await expect(invokeIpc("updater:open-installer")).resolves.toEqual({
+        success: true,
+      });
+      expect(ctx.openPath).toHaveBeenCalledWith(installer.path);
+      await expect(invokeIpc("updater:reveal-installer")).resolves.toEqual({
+        success: true,
+      });
+      expect(ctx.showItemInFolder).toHaveBeenCalledWith(installer.path);
+    });
+
+    it("reports the reason when opening fails", async () => {
+      setupAssisted(() => null);
+      emitUpdater("update-available", { version: "0.4.0" });
+      await flushPromises();
+      ctx.openPath.mockResolvedValueOnce("disk image is corrupt");
+
+      await expect(invokeIpc("updater:open-installer")).resolves.toEqual({
+        success: false,
+        error: "disk image is corrupt",
+      });
+    });
+
+    it("has nothing to open before a download has finished", async () => {
+      setupAssisted(() => null);
+
+      await expect(invokeIpc("updater:get-installer")).resolves.toBeNull();
+      await expect(invokeIpc("updater:open-installer")).resolves.toEqual({
+        success: false,
+        error: "No installer downloaded",
+      });
+      await expect(invokeIpc("updater:reveal-installer")).resolves.toEqual({
+        success: false,
+        error: "No installer downloaded",
+      });
+      expect(ctx.openPath).not.toHaveBeenCalled();
+    });
   });
 
   it("opens the electron-log file for the updater", async () => {
@@ -764,14 +947,18 @@ describe("resolveCapabilities", () => {
     expect(detectSigning).not.toHaveBeenCalled();
   });
 
-  it("supports auto-update on a Developer ID signed macOS build", async () => {
+  it("supports auto-update on any stable signing identity", async () => {
     await expect(
       resolveCapabilities({
         ...base,
         platform: "darwin",
-        detectSigning: async () => "developer-id",
+        detectSigning: async () => "identity",
       }),
-    ).resolves.toMatchObject({ autoUpdateSupported: true, blocker: null });
+    ).resolves.toMatchObject({
+      autoUpdateSupported: true,
+      assistedInstallSupported: false,
+      blocker: null,
+    });
   });
 
   it.each(["adhoc", "unsigned", "unknown"] as const)(
@@ -785,6 +972,7 @@ describe("resolveCapabilities", () => {
         }),
       ).resolves.toMatchObject({
         autoUpdateSupported: false,
+        assistedInstallSupported: true,
         blocker: "mac-unsigned",
         releasePageUrl: "https://github.com/jeff-kunkun/multica/releases/latest",
       });

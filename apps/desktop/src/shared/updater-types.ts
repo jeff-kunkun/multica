@@ -42,18 +42,38 @@ export type AutoUpdateBlocker = "mac-unsigned";
 
 /**
  * Whether the running build can complete the download → install path by
- * itself. On macOS, Squirrel.Mac refuses to install a package whose signature
- * does not match the running app's Developer ID, so an ad-hoc signed build
- * (what CI ships) can only ever tell the user to download a release manually.
+ * itself. On macOS, Squirrel.Mac installs an update only when the new bundle
+ * satisfies the running app's designated requirement. An ad-hoc or unsigned
+ * build can never satisfy the next version's check, so it cannot swap itself
+ * out. A stable identity (Developer ID or the fork's self-signed certificate)
+ * can.
+ *
+ * `assistedInstallSupported` is the macOS consolation prize: the app still
+ * downloads the release `.dmg` on its own and then asks the user for the one
+ * step Squirrel is not allowed to take — dragging the new app into
+ * Applications. Only the install is manual; the download is not.
  */
 export interface UpdaterCapabilities {
   autoUpdateSupported: boolean;
+  assistedInstallSupported: boolean;
   blocker: AutoUpdateBlocker | null;
   /** GitHub Releases page for the fork; the manual fallback opens this. */
   releasePageUrl: string;
   /** On-disk updater log (electron-log), or null when the logger has no file. */
   logPath: string | null;
 }
+
+/**
+ * A release `.dmg` this app downloaded and parked on disk, waiting for the
+ * user to open it and drag the app across.
+ */
+export interface InstallerReadyPayload {
+  version: string;
+  fileName: string;
+  path: string;
+}
+
+export type OpenInstallerResult = { success: true } | { success: false; error: string };
 
 export interface UpdateAvailablePayload {
   version: string;

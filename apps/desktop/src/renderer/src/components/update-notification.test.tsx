@@ -5,6 +5,7 @@ import { UpdateNotification } from "./update-notification";
 import {
   installUpdaterBridge,
   MAC_UNSIGNED_CAPABILITIES,
+  NO_UPDATE_PATH_CAPABILITIES,
   type UpdaterBridgeFake,
 } from "../test/updater-bridge";
 
@@ -88,8 +89,8 @@ describe("UpdateNotification", () => {
     );
   });
 
-  it("does not pretend to auto-update on an unsigned macOS build", async () => {
-    bridge = installUpdaterBridge({ capabilities: MAC_UNSIGNED_CAPABILITIES });
+  it("points at the browser only when there is no in-app path at all", async () => {
+    bridge = installUpdaterBridge({ capabilities: NO_UPDATE_PATH_CAPABILITIES });
     render(<UpdateNotification />);
     await act(async () => {});
 
@@ -136,6 +137,88 @@ describe("UpdateNotification", () => {
     act(() => bridge.emit.updateDownloaded({ version: "0.4.27" }));
 
     expect(screen.getByText("Update ready")).toBeInTheDocument();
+  });
+
+  // The default macOS release has no certificate: it cannot install in place,
+  // but it does fetch the .dmg, so the card must offer a download rather than
+  // a browser link.
+  it("still offers the download on an unsigned macOS build", async () => {
+    bridge = installUpdaterBridge({ capabilities: MAC_UNSIGNED_CAPABILITIES });
+    render(<UpdateNotification />);
+    await act(async () => {});
+
+    act(() => bridge.emit.updateAvailable({ version: "0.4.27" }));
+
+    expect(screen.queryByText("Manual download required")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(bridge.fns.downloadUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("asks for the drag into Applications once the installer is on disk", async () => {
+    bridge = installUpdaterBridge({ capabilities: MAC_UNSIGNED_CAPABILITIES });
+    render(<UpdateNotification />);
+    await act(async () => {});
+
+    act(() =>
+      bridge.emit.installerReady({
+        version: "0.4.27",
+        fileName: "multica-desktop-0.4.27-mac-arm64.dmg",
+        path: "/Users/x/Library/Application Support/Multica/installers/multica-desktop-0.4.27-mac-arm64.dmg",
+      }),
+    );
+
+    expect(screen.getByText("Installer downloaded")).toBeInTheDocument();
+    expect(
+      screen.getByText(/drag Multica into Applications/i),
+    ).toBeInTheDocument();
+    // Nothing is staged, so a restart would do nothing but close the app.
+    expect(screen.queryByRole("button", { name: "Restart now" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Open installer/ }));
+    await act(async () => {});
+    expect(bridge.fns.openInstaller).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: /Show in Finder/ }));
+    await act(async () => {});
+    expect(bridge.fns.revealInstaller).toHaveBeenCalledOnce();
+  });
+
+  it("reports why the installer would not open", async () => {
+    bridge = installUpdaterBridge({ capabilities: MAC_UNSIGNED_CAPABILITIES });
+    bridge.fns.openInstaller.mockResolvedValue({
+      success: false,
+      error: "No installer downloaded",
+    });
+    render(<UpdateNotification />);
+    await act(async () => {});
+    act(() =>
+      bridge.emit.installerReady({
+        version: "0.4.27",
+        fileName: "multica-desktop-0.4.27-mac-arm64.dmg",
+        path: "/tmp/multica-desktop-0.4.27-mac-arm64.dmg",
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Open installer/ }));
+    await act(async () => {});
+
+    expect(screen.getByText("Update failed")).toBeInTheDocument();
+    expect(screen.getByText("No installer downloaded")).toBeInTheDocument();
+  });
+
+  it("restores the installer card after a window reload", async () => {
+    bridge = installUpdaterBridge({
+      capabilities: MAC_UNSIGNED_CAPABILITIES,
+      installer: {
+        version: "0.4.27",
+        fileName: "multica-desktop-0.4.27-mac-arm64.dmg",
+        path: "/tmp/multica-desktop-0.4.27-mac-arm64.dmg",
+      },
+    });
+    render(<UpdateNotification />);
+    await act(async () => {});
+
+    expect(screen.getByText("Installer downloaded")).toBeInTheDocument();
   });
 
   it("detaches the IPC listeners when the last consumer unmounts", () => {

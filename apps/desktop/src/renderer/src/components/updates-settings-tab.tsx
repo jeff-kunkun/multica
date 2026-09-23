@@ -5,7 +5,9 @@ import {
   Check,
   ExternalLink,
   FileText,
+  FolderOpen,
   Loader2,
+  PackageOpen,
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
@@ -29,11 +31,14 @@ export function UpdatesSettingsTab() {
     lastCheck,
     capabilities,
     autoUpdateSupported,
+    assistedInstallSupported,
     check,
     download,
     install,
     openReleasePage,
     openLogFile,
+    openInstaller,
+    revealInstaller,
   } = useUpdater();
   const [automaticUpdates, setAutomaticUpdates] = useState(true);
   const [releaseChannel, setReleaseChannel] = useState<"stable" | "test">(
@@ -97,7 +102,10 @@ export function UpdatesSettingsTab() {
     return `${formatCheckedAt(record.checkedAt)} · ${trigger} · ${outcome}`;
   };
 
-  const manualOnly = !autoUpdateSupported;
+  // Three tiers, not two: this build installs updates itself, or it downloads
+  // them and asks for a drag into Applications, or it can only point at a
+  // browser. Only the last one is "manual download".
+  const manualOnly = !autoUpdateSupported && !assistedInstallSupported;
   const checking = phase.status === "checking";
   const handleReleaseChannelChange = useCallback(
     async (value: string) => {
@@ -151,6 +159,21 @@ export function UpdatesSettingsTab() {
             description={t(($) => $.desktop.updates.manual_only_description)}
             align="start"
           >
+            <Button variant="outline" size="sm" onClick={() => void openReleasePage()}>
+              <ExternalLink className="size-3.5" />
+              {t(($) => $.desktop.updates.open_release_page)}
+            </Button>
+          </SettingsRow>
+        )}
+
+        {assistedInstallSupported && (
+          <SettingsRow
+            label={t(($) => $.desktop.updates.assisted_install_title)}
+            description={t(($) => $.desktop.updates.assisted_install_description)}
+            align="start"
+          >
+            {/* The app fetches the .dmg on its own; this is only for someone
+                who would rather pick an asset by hand. */}
             <Button variant="outline" size="sm" onClick={() => void openReleasePage()}>
               <ExternalLink className="size-3.5" />
               {t(($) => $.desktop.updates.open_release_page)}
@@ -234,6 +257,19 @@ export function UpdatesSettingsTab() {
                   })}
                 </p>
               )}
+              {phase.status === "installer-ready" && (
+                <p className="mt-2 inline-flex items-start gap-1.5">
+                  <PackageOpen className="size-3.5 mt-0.5 shrink-0 text-success" />
+                  <span>
+                    {t(($) => $.desktop.updates.installer_ready, {
+                      version: phase.version,
+                    })}
+                    <span className="block font-mono break-all text-muted-foreground">
+                      {phase.path}
+                    </span>
+                  </span>
+                </p>
+              )}
               {phase.status === "error" && (
                 <p className="mt-2 inline-flex items-center gap-1.5 text-destructive">
                   <AlertCircle className="size-3.5" />
@@ -270,6 +306,22 @@ export function UpdatesSettingsTab() {
                 <ExternalLink className="size-3.5" />
                 {t(($) => $.desktop.updates.open_release_page)}
               </Button>
+            )}
+            {phase.status === "installer-ready" && (
+              <>
+                <Button size="sm" onClick={() => void openInstaller()}>
+                  <PackageOpen className="size-3.5" />
+                  {t(($) => $.desktop.updates.open_installer)}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void revealInstaller()}
+                >
+                  <FolderOpen className="size-3.5" />
+                  {t(($) => $.desktop.updates.reveal_installer)}
+                </Button>
+              </>
             )}
             {phase.status === "error" && phase.version && !manualOnly && (
               <Button size="sm" onClick={() => void download()}>
