@@ -348,7 +348,10 @@ func TestAgentCreatedProjectRequiresWorkspaceOwner(t *testing.T) {
 		name    string
 		agentID string
 	}{
-		{name: "ownerless agent", agentID: dbfx.Agent(t, "vis-ownerless-agent", "", testutil.Cols{})},
+		// Override the fixture's default human owner explicitly. An omitted
+		// column keeps the fixture user as owner, which would exercise the
+		// accepted owner path instead of the ownerless rejection path.
+		{name: "ownerless agent", agentID: dbfx.Agent(t, "vis-ownerless-agent", "", testutil.Cols{"owner_id": nil})},
 		{name: "agent outside workspace", agentID: unknownAgentID},
 	}
 	for _, tc := range cases {
