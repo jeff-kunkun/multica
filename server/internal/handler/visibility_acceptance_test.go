@@ -332,3 +332,37 @@ func TestAgentCreatedProjectKeepsOwnerVisibilityAfterPrivate(t *testing.T) {
 		}
 	}
 }
+
+// An agent-created project must never be left without a human creator: once
+// its workspace visibility is narrowed to private, that project would
+// otherwise be invisible to every member. Reject both an ownerless agent and
+// an agent that is not present in the requested workspace before inserting the
+// project.
+func TestAgentCreatedProjectRequiresWorkspaceOwner(t *testing.T) {
+	requireDB(t)
+
+	owner := visibilityTestMember(t, "Vis Agent Create Owner", "vis-agent-create-owner@multica.ai")
+	unknownAgentID := "00000000-0000-0000-0000-000000000000"
+
+	cases := []struct {
+		name    string
+		agentID string
+	}{
+		{name: "ownerless agent", agentID: dbfx.Agent(t, "vis-ownerless-agent", "", testutil.Cols{})},
+		{name: "agent outside workspace", agentID: unknownAgentID},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			title := "rejected agent project " + tc.name
+			req := newRequestAs(owner, "POST", "/api/projects?workspace_id="+testWorkspaceID,
+				map[string]any{"title": title})
+			req.Header.Set("X-Actor-Source", "task_token")
+			req.Header.Set("X-Agent-ID", tc.agentID)
+			testutil.Call(t, testHandler.CreateProject, req).Want(400)
+
+			if count := dbfx.Count(t, `SELECT count(*) FROM project WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title); count != 0 {
+				t.Fatalf("rejected agent project was inserted (%d rows)", count)
+			}
+		})
+	}
+}

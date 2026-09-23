@@ -431,13 +431,19 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		// Agent requests carry the owner's user id in X-User-ID, but resolve
 		// the owner from the workspace-scoped agent row so fallback headers
 		// cannot assign ownership to an unrelated member.
-		if agentUUID, agentErr := parseUUIDSafe(actorID); agentErr == nil {
-			if agent, agentErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-				ID: agentUUID, WorkspaceID: wsUUID,
-			}); agentErr == nil && agent.OwnerID.Valid {
-				createParams.CreatedBy = agent.OwnerID
-			}
+		agentUUID, agentErr := parseUUIDSafe(actorID)
+		if agentErr != nil {
+			writeError(w, http.StatusBadRequest, "agent-created project requires a valid workspace agent with a human owner")
+			return
 		}
+		agent, agentErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID: agentUUID, WorkspaceID: wsUUID,
+		})
+		if agentErr != nil || !agent.OwnerID.Valid {
+			writeError(w, http.StatusBadRequest, "agent-created project requires a workspace agent with a human owner")
+			return
+		}
+		createParams.CreatedBy = agent.OwnerID
 	}
 
 	// Without resources, keep the simple non-tx path.
