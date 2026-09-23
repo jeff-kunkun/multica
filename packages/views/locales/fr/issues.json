@@ -1161,6 +1161,8 @@
     "config_thinking_none": "Ce modèle n'a pas de réglage d'effort de raisonnement.",
     "config_capabilities_hint": "{{count}} sur 3 activées",
     "config_capabilities_count": "{{count}} méthode(s)",
+    "capability_preference_loading": "Chargement des dernières méthodes…",
+    "capability_preference_failed": "Impossible de lire vos dernières méthodes. Les valeurs par défaut sont cochées, et vous pouvez quand même commencer.",
     "config_pick_runtime": "Choisir une machine",
     "capability_label": "Méthodes d'alignement",
     "capability_wayfinder": "Carte de décision",

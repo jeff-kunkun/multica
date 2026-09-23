@@ -1161,6 +1161,8 @@
     "config_thinking_none": "This model has no reasoning-effort dial.",
     "config_capabilities_hint": "{{count}} of 3 on",
     "config_capabilities_count": "{{count}} method(s)",
+    "capability_preference_loading": "Loading your last alignment methods…",
+    "capability_preference_failed": "Couldn't load your last alignment methods. The usual defaults are selected, and you can still start.",
     "config_pick_runtime": "Choose a machine",
     "capability_label": "Alignment methods",
     "capability_wayfinder": "Decision map",

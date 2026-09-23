@@ -1129,6 +1129,8 @@
     "config_thinking_none": "このモデルに推論深度の設定はありません。",
     "config_capabilities_hint": "{{count}}/3 有効",
     "config_capabilities_count": "手法 {{count}} 件",
+    "capability_preference_loading": "前回の手法を読み込み中…",
+    "capability_preference_failed": "前回の手法を読み込めませんでした。初期設定を使います。このまま開始できます。",
     "config_pick_runtime": "実行マシンを選ぶ",
     "capability_label": "すり合わせの手法",
     "capability_wayfinder": "意思決定マップ",
