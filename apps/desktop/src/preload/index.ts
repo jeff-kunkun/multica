@@ -7,7 +7,11 @@ import type {
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
   ManualUpdateCheckResult,
+  UpdateAvailableInfo,
+  UpdateCheckRecord,
+  UpdaterErrorInfo,
   UpdaterPreferences,
+  UpdaterSnapshot,
 } from "../shared/updater-types";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
@@ -379,8 +383,8 @@ const daemonAPI = {
 };
 
 const updaterAPI = {
-  onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
-    const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
+  onUpdateAvailable: (callback: (info: UpdateAvailableInfo) => void) => {
+    const handler = (_: unknown, info: UpdateAvailableInfo) => callback(info);
     ipcRenderer.on("updater:update-available", handler);
     return () => ipcRenderer.removeListener("updater:update-available", handler);
   },
@@ -397,6 +401,16 @@ const updaterAPI = {
     ipcRenderer.on("updater:update-downloaded", handler);
     return () => ipcRenderer.removeListener("updater:update-downloaded", handler);
   },
+  onUpdaterError: (callback: (info: UpdaterErrorInfo) => void) => {
+    const handler = (_: unknown, info: UpdaterErrorInfo) => callback(info);
+    ipcRenderer.on("updater:error", handler);
+    return () => ipcRenderer.removeListener("updater:error", handler);
+  },
+  onCheckResult: (callback: (result: UpdateCheckRecord) => void) => {
+    const handler = (_: unknown, result: UpdateCheckRecord) => callback(result);
+    ipcRenderer.on("updater:check-result", handler);
+    return () => ipcRenderer.removeListener("updater:check-result", handler);
+  },
   downloadUpdate: () => ipcRenderer.invoke("updater:download"),
   installUpdate: () => ipcRenderer.invoke("updater:install"),
   getPreferences: (): Promise<UpdaterPreferences> =>
@@ -405,6 +419,8 @@ const updaterAPI = {
     ipcRenderer.invoke("updater:set-automatic-updates", enabled),
   checkForUpdates: (): Promise<ManualUpdateCheckResult> =>
     ipcRenderer.invoke("updater:check"),
+  getSnapshot: (): Promise<UpdaterSnapshot> =>
+    ipcRenderer.invoke("updater:get-snapshot"),
 };
 
 if (process.contextIsolated) {

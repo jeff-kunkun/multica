@@ -12,7 +12,11 @@ import type {
 } from "../shared/issue-window";
 import type {
   ManualUpdateCheckResult,
+  UpdateAvailableInfo,
+  UpdateCheckRecord,
+  UpdaterErrorInfo,
   UpdaterPreferences,
+  UpdaterSnapshot,
 } from "../shared/updater-types";
 import type {
   WorktreeCleanupResult,
@@ -241,16 +245,19 @@ interface DaemonAPI {
 }
 
 interface UpdaterAPI {
-  onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
+  onUpdateAvailable: (callback: (info: UpdateAvailableInfo) => void) => () => void;
   onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
   onUpdateDownloaded: (
     callback: (info: { version: string; releaseNotes?: string }) => void,
   ) => () => void;
+  onUpdaterError: (callback: (info: UpdaterErrorInfo) => void) => () => void;
+  onCheckResult: (callback: (result: UpdateCheckRecord) => void) => () => void;
   downloadUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
   getPreferences: () => Promise<UpdaterPreferences>;
   setAutomaticUpdates: (enabled: boolean) => Promise<UpdaterPreferences>;
   checkForUpdates: () => Promise<ManualUpdateCheckResult>;
+  getSnapshot: () => Promise<UpdaterSnapshot>;
 }
 
 declare global {

@@ -1,8 +1,13 @@
 import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
 import { app, type BrowserWindow, ipcMain } from "electron";
-import type {
-  ManualUpdateCheckResult,
-  UpdaterPreferences,
+import {
+  DESKTOP_RELEASES_PAGE_URL,
+  clampUpdatePercent,
+  type ManualUpdateCheckResult,
+  type UpdateCheckRecord,
+  type UpdateCheckSource,
+  type UpdaterPreferences,
+  type UpdaterSnapshot,
 } from "../shared/updater-types";
 import {
   DEFAULT_UPDATER_PREFERENCES,
@@ -10,10 +15,17 @@ import {
   saveUpdaterPreferences,
   updaterPreferencesPath,
 } from "./updater-preferences";
+import { createUpdaterLogger, type UpdaterLogger } from "./updater-logger";
+import {
+  macAppBundlePath,
+  readCodesignOutput,
+  shouldRequireManualDownload,
+} from "./updater-signature";
 
-// Silent background updates: electron-updater downloads on its own as soon
-// as `update-available` fires; we only surface UI when the package is fully
-// downloaded and ready to install on next quit.
+// Background download stays on for builds that can actually install the
+// package. Unsigned darwin builds flip autoDownload off once the signature
+// check resolves — Squirrel.Mac rejects those installs, so the renderer
+// offers the release page instead of a progress bar that will fail.
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
@@ -57,7 +69,15 @@ const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 type RendererChannel =
   | "updater:update-available"
   | "updater:download-progress"
-  | "updater:update-downloaded";
+  | "updater:update-downloaded"
+  | "updater:error"
+  | "updater:check-result";
+
+type CheckResult = {
+  updateInfo?: { version?: string };
+  isUpdateAvailable?: boolean;
+  downloadPromise?: Promise<unknown>;
+} | null;
 
 function isDestroyedObjectError(err: unknown): boolean {
   return err instanceof Error && err.message.includes("Object has been destroyed");
@@ -80,12 +100,37 @@ function sendToLiveRenderer(
   }
 }
 
+function describeUpdaterError(err: unknown, message?: unknown): string {
+  if (typeof message === "string" && message.trim()) return message.trim();
+  if (err instanceof Error && err.message.trim()) return err.message.trim();
+  if (typeof err === "string" && err.trim()) return err.trim();
+  return "Update failed";
+}
+
+function emptySnapshot(): UpdaterSnapshot {
+  return {
+    phase: "idle",
+    version: null,
+    percent: null,
+    error: null,
+    manualDownloadRequired: false,
+    releasePageUrl: DESKTOP_RELEASES_PAGE_URL,
+    lastCheck: null,
+  };
+}
+
 // Single-flight guard around checkForUpdates(). With autoDownload=true the
 // startup, periodic, and manual triggers can all kick off downloads, and
 // overlapping calls have caused duplicate download warnings in the past
 // (see electronjs.org/docs/latest/api/auto-updater). Coalesce concurrent
 // callers onto the same in-flight promise.
 let inFlightCheck: Promise<unknown> | null = null;
+let activeLogger: UpdaterLogger | null = null;
+let environmentGeneration = 0;
+let reportUpdaterError: (err: unknown, message?: unknown) => void = (err) => {
+  console.error("Auto-updater error:", err);
+};
+
 function checkForUpdatesOnce(): Promise<unknown> {
   if (inFlightCheck) return inFlightCheck;
   const p = autoUpdater
@@ -95,11 +140,9 @@ function checkForUpdatesOnce(): Promise<unknown> {
       // download (when autoDownload=true) is exposed on result.downloadPromise.
       // Without a handler a download failure becomes an unhandled rejection
       // in the main process — Node may terminate it on future versions.
-      void (result as { downloadPromise?: Promise<unknown> } | null)?.downloadPromise?.catch(
-        (err) => {
-          console.error("Failed to download update:", err);
-        },
-      );
+      void (result as CheckResult)?.downloadPromise?.catch((err) => {
+        reportUpdaterError(err);
+      });
       return result;
     })
     .finally(() => {
@@ -109,13 +152,30 @@ function checkForUpdatesOnce(): Promise<unknown> {
   return p;
 }
 
+async function detectManualDownloadRequired(): Promise<boolean> {
+  let signatureText: string | null = null;
+  if (process.platform === "darwin" && app.isPackaged) {
+    try {
+      signatureText = await readCodesignOutput(macAppBundlePath(app.getPath("exe")));
+    } catch (err) {
+      activeLogger?.warn("Could not read the macOS code signature.", err);
+      signatureText = null;
+    }
+  }
+  return shouldRequireManualDownload({
+    platform: process.platform,
+    packaged: app.isPackaged,
+    signatureText,
+  });
+}
+
 export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
   const preferencesFilePath = updaterPreferencesPath(app.getPath("userData"));
-  let automaticUpdatesEnabled =
-    DEFAULT_UPDATER_PREFERENCES.automaticUpdates;
+  let automaticUpdatesEnabled = DEFAULT_UPDATER_PREFERENCES.automaticUpdates;
   let startupCheckElapsed = false;
   let startupTimer: ReturnType<typeof setTimeout> | null = null;
   let periodicTimer: ReturnType<typeof setInterval> | null = null;
+  const snapshot = emptySnapshot();
   const preferencesReady = loadUpdaterPreferences(preferencesFilePath).then(
     (preferences) => {
       automaticUpdatesEnabled = preferences.automaticUpdates;
@@ -123,14 +183,87 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     },
   );
 
-  const runAutomaticCheck = (errorMessage: string): void => {
+  activeLogger = createUpdaterLogger(app.getPath("logs"));
+  autoUpdater.logger = activeLogger;
+  autoUpdater.autoDownload = true;
+  activeLogger.info("Updater logger attached.");
+
+  const send = (channel: RendererChannel, payload: unknown): void => {
+    sendToLiveRenderer(getMainWindow(), channel, payload);
+  };
+
+  reportUpdaterError = (err: unknown, message?: unknown): void => {
+    const text = describeUpdaterError(err, message);
+    activeLogger?.error("Auto-updater error:", text);
+    snapshot.phase = "error";
+    snapshot.error = text;
+    send("updater:error", { message: text });
+  };
+
+  const generation = ++environmentGeneration;
+  const environmentReady = detectManualDownloadRequired().then((required) => {
+    // A newer setupAutoUpdater call owns the updater. Ignore this decision so
+    // a late signature read cannot flip autoDownload back.
+    if (generation !== environmentGeneration) return required;
+    snapshot.manualDownloadRequired = required;
+    autoUpdater.autoDownload = !required;
+    return required;
+  });
+
+  const publishCheck = (record: UpdateCheckRecord): void => {
+    snapshot.lastCheck = record;
+    if (!record.ok) {
+      if (snapshot.phase !== "downloading" && snapshot.phase !== "downloaded") {
+        snapshot.phase = "error";
+        snapshot.error = record.error ?? "Update check failed";
+      }
+    } else if (record.available) {
+      if (record.latestVersion && !snapshot.version) {
+        snapshot.version = record.latestVersion;
+      }
+      if (snapshot.phase === "idle" || snapshot.phase === "checking") {
+        snapshot.phase = "available";
+        snapshot.version = record.latestVersion ?? snapshot.version;
+        snapshot.error = null;
+      }
+    } else if (snapshot.phase !== "downloading" && snapshot.phase !== "downloaded") {
+      snapshot.phase = "idle";
+      snapshot.version = null;
+      snapshot.percent = null;
+      snapshot.error = null;
+    }
+    send("updater:check-result", record);
+  };
+
+  const runAutomaticCheck = (source: UpdateCheckSource): void => {
     void preferencesReady
-      .then(() => {
+      .then(async () => {
+        await environmentReady;
         if (!automaticUpdatesEnabled) return;
-        return checkForUpdatesOnce();
+        try {
+          const result = (await checkForUpdatesOnce()) as CheckResult;
+          publishCheck(checkRecord(source, result));
+        } catch (err) {
+          const error = describeUpdaterError(err);
+          activeLogger?.error(`Update check failed (${source}):`, error);
+          publishCheck({
+            checkedAt: new Date().toISOString(),
+            source,
+            ok: false,
+            currentVersion: app.getVersion(),
+            error,
+          });
+        }
       })
       .catch((err) => {
-        console.error(errorMessage, err);
+        const error = describeUpdaterError(err);
+        activeLogger?.error(`Update check failed (${source}):`, error);
+        publishCheck({
+          checkedAt: new Date().toISOString(),
+          source,
+          ok: false,
+          error,
+        });
       });
   };
 
@@ -142,14 +275,14 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
       startupTimer = setTimeout(() => {
         startupTimer = null;
         startupCheckElapsed = true;
-        runAutomaticCheck("Failed to check for updates:");
+        runAutomaticCheck("startup");
       }, STARTUP_CHECK_DELAY_MS);
     }
     if (periodicTimer === null) {
       // Background poll so long-running sessions still pick up new releases
       // without requiring the user to restart the app.
       periodicTimer = setInterval(() => {
-        runAutomaticCheck("Periodic update check failed:");
+        runAutomaticCheck("periodic");
       }, PERIODIC_CHECK_INTERVAL_MS);
     }
   };
@@ -170,33 +303,44 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
   };
 
   autoUpdater.on("update-available", (info) => {
-    // Forwarded for renderer-side state tracking only; the notification UI
-    // does not render an "available" affordance with autoDownload=true.
-    sendToLiveRenderer(getMainWindow(), "updater:update-available", {
+    if (snapshot.phase !== "downloading" && snapshot.phase !== "downloaded") {
+      snapshot.phase = "available";
+      snapshot.percent = null;
+      snapshot.error = null;
+    }
+    snapshot.version = info.version;
+    send("updater:update-available", {
       version: info.version,
-      releaseNotes: info.releaseNotes,
+      releaseNotes: typeof info.releaseNotes === "string" ? info.releaseNotes : undefined,
+      manualDownloadRequired: snapshot.manualDownloadRequired,
+      releasePageUrl: snapshot.releasePageUrl,
     });
   });
 
   autoUpdater.on("download-progress", (progress) => {
-    sendToLiveRenderer(getMainWindow(), "updater:download-progress", {
-      percent: progress.percent,
-    });
+    if (snapshot.manualDownloadRequired) return;
+    const percent = clampUpdatePercent(progress.percent);
+    snapshot.phase = "downloading";
+    snapshot.percent = percent;
+    snapshot.error = null;
+    send("updater:download-progress", { percent });
   });
 
   autoUpdater.on("update-downloaded", (info: UpdateDownloadedEvent) => {
-    sendToLiveRenderer(getMainWindow(), "updater:update-downloaded", {
+    snapshot.phase = "downloaded";
+    snapshot.version = info.version;
+    snapshot.percent = 100;
+    snapshot.error = null;
+    send("updater:update-downloaded", {
       version: info.version,
-      releaseNotes: info.releaseNotes,
+      releaseNotes: typeof info.releaseNotes === "string" ? info.releaseNotes : undefined,
     });
   });
 
-  autoUpdater.on("error", (err) => {
-    console.error("Auto-updater error:", err);
+  autoUpdater.on("error", (err, message) => {
+    reportUpdaterError(err, message);
   });
 
-  // Retained for IPC back-compat with older renderer bundles. With
-  // autoDownload=true the renderer no longer triggers this path.
   ipcMain.handle("updater:download", () => {
     return autoUpdater.downloadUpdate();
   });
@@ -205,13 +349,10 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     autoUpdater.quitAndInstall(false, true);
   });
 
-  ipcMain.handle(
-    "updater:get-preferences",
-    async (): Promise<UpdaterPreferences> => {
-      await preferencesReady;
-      return { automaticUpdates: automaticUpdatesEnabled };
-    },
-  );
+  ipcMain.handle("updater:get-preferences", async (): Promise<UpdaterPreferences> => {
+    await preferencesReady;
+    return { automaticUpdates: automaticUpdatesEnabled };
+  });
 
   ipcMain.handle(
     "updater:set-automatic-updates",
@@ -232,7 +373,7 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
         // If the startup check has already passed while the preference was off,
         // enabling it should take effect now instead of waiting up to one hour.
         if (startupCheckElapsed) {
-          runAutomaticCheck("Failed to check for updates:");
+          runAutomaticCheck("reenable");
         }
         scheduleBackgroundChecks();
       }
@@ -241,34 +382,55 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     },
   );
 
+  ipcMain.handle("updater:get-snapshot", async (): Promise<UpdaterSnapshot> => {
+    await environmentReady;
+    return {
+      ...snapshot,
+      lastCheck: snapshot.lastCheck ? { ...snapshot.lastCheck } : null,
+    };
+  });
+
   ipcMain.handle("updater:check", async (): Promise<ManualUpdateCheckResult> => {
     try {
-      const result = (await checkForUpdatesOnce()) as
-        | { updateInfo: { version: string }; isUpdateAvailable?: boolean }
-        | null;
-      const currentVersion = app.getVersion();
-      // Trust electron-updater's own decision rather than re-deriving it from
-      // a version-string compare. The two diverge for pre-release channels,
-      // staged rollouts, downgrades, and minimum-system-version gates — in
-      // those cases updateInfo.version differs from app.getVersion() but no
-      // `update-available` event fires, so showing "available" here would
-      // promise a download prompt that never appears.
+      await environmentReady;
+      const result = (await checkForUpdatesOnce()) as CheckResult;
+      const record = checkRecord("manual", result);
+      publishCheck(record);
       return {
         ok: true,
-        currentVersion,
-        latestVersion: result?.updateInfo.version ?? currentVersion,
-        available: result?.isUpdateAvailable ?? false,
+        currentVersion: record.currentVersion ?? app.getVersion(),
+        latestVersion: record.latestVersion ?? app.getVersion(),
+        available: record.available ?? false,
       };
     } catch (err) {
-      return {
+      const error = describeUpdaterError(err);
+      activeLogger?.error("Update check failed (manual):", error);
+      publishCheck({
+        checkedAt: new Date().toISOString(),
+        source: "manual",
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      };
+        error,
+      });
+      return { ok: false, error };
     }
   });
 
   // Initial check shortly after startup so we don't block boot, plus a
   // background poll for long-running sessions. Both are torn down when the
   // user disables automatic updates and re-armed when they turn them back on.
+  // The check itself waits until the signature decision is known, so an
+  // unsigned Mac never starts a download that cannot install.
   scheduleBackgroundChecks();
+}
+
+function checkRecord(source: UpdateCheckSource, result: CheckResult): UpdateCheckRecord {
+  const currentVersion = app.getVersion();
+  return {
+    checkedAt: new Date().toISOString(),
+    source,
+    ok: true,
+    currentVersion,
+    latestVersion: result?.updateInfo?.version ?? currentVersion,
+    available: result?.isUpdateAvailable ?? false,
+  };
 }

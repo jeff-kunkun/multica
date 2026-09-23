@@ -1,38 +1,62 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { RefreshCw, X } from "lucide-react";
-
-// Downloads run silently in the background (main process has
-// autoDownload=true). The renderer only renders UI once the package is fully
-// downloaded and waiting for a restart.
-type UpdateState =
-  | { status: "idle" }
-  | { status: "ready"; version: string };
+import { useT } from "@multica/views/i18n";
+import { UpdateProgressBar } from "./update-progress";
+import {
+  canOfferInAppDownload,
+  shouldOfferReleasePage,
+  useUpdaterState,
+} from "../hooks/use-updater-state";
 
 function changelogUrl(version: string): string {
   return `https://multica.ai/changelog#release-${version.replace(/\./g, "-")}`;
 }
 
+const primaryButtonClass =
+  "inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-caption font-medium text-primary-foreground hover:bg-primary/90 transition-colors";
+const secondaryButtonClass =
+  "inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-caption font-medium text-foreground hover:bg-accent transition-colors";
+
 export function UpdateNotification() {
-  const [state, setState] = useState<UpdateState>({ status: "idle" });
-  const [dismissed, setDismissed] = useState(false);
+  const { t } = useT("settings");
+  const { state, downloadUpdate, installUpdate, openReleasePage } = useUpdaterState();
+  const dismissKey = `${state.phase}:${state.version ?? ""}:${state.errorMessage ?? ""}`;
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
 
-  useEffect(() => {
-    const cleanup = window.updater.onUpdateDownloaded((info) => {
-      setState({ status: "ready", version: info.version });
-      setDismissed(false);
-    });
-    return cleanup;
-  }, []);
+  const visible =
+    state.phase === "available" ||
+    state.phase === "downloading" ||
+    state.phase === "downloaded" ||
+    state.phase === "error";
+  if (!visible || dismissedKey === dismissKey) return null;
 
-  if (state.status === "idle") return null;
-  if (dismissed) return null;
+  const version = state.version ?? "";
+  const manual = shouldOfferReleasePage(state);
+  const offerDownload = canOfferInAppDownload(state);
+
+  let title = t(($) => $.desktop.updates.available_title);
+  let body = t(($) => $.desktop.updates.update_available, { version });
+  if (state.phase === "downloading") {
+    title = t(($) => $.desktop.updates.downloading_update, { version });
+    body = "";
+  } else if (state.phase === "downloaded") {
+    title = t(($) => $.desktop.updates.update_ready);
+    body = t(($) => $.desktop.updates.ready_to_install, { version });
+  } else if (state.phase === "error") {
+    title = t(($) => $.desktop.updates.update_failed);
+    body = state.errorMessage ?? "";
+  } else if (manual) {
+    title = t(($) => $.desktop.updates.manual_title);
+    body = t(($) => $.desktop.updates.manual_download_required, { version });
+  }
 
   return (
     <div className="fixed bottom-4 right-4 z-50 w-80 rounded-lg border border-border bg-background p-4 shadow-lg animate-in slide-in-from-bottom-2 fade-in duration-300">
       <button
         type="button"
-        onClick={() => setDismissed(true)}
+        onClick={() => setDismissedKey(dismissKey)}
         className="absolute top-2 right-2 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
+        aria-label={t(($) => $.desktop.updates.dismiss)}
       >
         <X className="size-3.5" />
       </button>
@@ -41,28 +65,42 @@ export function UpdateNotification() {
         <div className="mt-0.5 rounded-md bg-success/10 p-1.5">
           <RefreshCw className="size-4 text-success" />
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-body font-medium">Update ready</p>
-          <p className="text-caption text-muted-foreground mt-0.5">
-            v{state.version} will be applied on next launch.
-          </p>
+        <div className="min-w-0 flex-1">
+          <p className="text-body font-medium">{title}</p>
+          {body ? (
+            <p className="mt-0.5 text-caption text-muted-foreground">{body}</p>
+          ) : null}
+          {state.phase === "downloading" ? (
+            <UpdateProgressBar
+              percent={state.percent ?? 0}
+              label={t(($) => $.desktop.updates.downloading_update, { version })}
+            />
+          ) : null}
           <div className="mt-2 flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() =>
-                window.desktopAPI.openExternal(changelogUrl(state.version))
-              }
-              className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-caption font-medium text-foreground hover:bg-accent transition-colors"
-            >
-              See changelog
-            </button>
-            <button
-              type="button"
-              onClick={() => window.updater.installUpdate()}
-              className="inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-caption font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              Restart now
-            </button>
+            {state.phase === "downloaded" && version ? (
+              <button
+                type="button"
+                onClick={() => window.desktopAPI.openExternal(changelogUrl(version))}
+                className={secondaryButtonClass}
+              >
+                {t(($) => $.desktop.updates.see_changelog)}
+              </button>
+            ) : null}
+            {offerDownload ? (
+              <button type="button" onClick={() => void downloadUpdate()} className={primaryButtonClass}>
+                {t(($) => $.desktop.updates.download)}
+              </button>
+            ) : null}
+            {manual ? (
+              <button type="button" onClick={() => void openReleasePage()} className={primaryButtonClass}>
+                {t(($) => $.desktop.updates.open_releases)}
+              </button>
+            ) : null}
+            {state.phase === "downloaded" ? (
+              <button type="button" onClick={() => void installUpdate()} className={primaryButtonClass}>
+                {t(($) => $.desktop.updates.restart_now)}
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

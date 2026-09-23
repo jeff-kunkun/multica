@@ -12,7 +12,11 @@ const ctx = vi.hoisted(() => ({
   handlers: new Map<string, Handler[]>(),
   ipcHandlers: new Map<string, IpcHandler>(),
   ipcHandle: vi.fn(),
-  checkForUpdates: vi.fn(async () => ({
+  checkForUpdates: vi.fn(async (): Promise<{
+    updateInfo: { version: string };
+    isUpdateAvailable: boolean;
+    downloadPromise?: Promise<unknown>;
+  }> => ({
     updateInfo: { version: "0.3.18" },
     isUpdateAvailable: false,
   })),
@@ -20,6 +24,8 @@ const ctx = vi.hoisted(() => ({
   quitAndInstall: vi.fn(),
   getVersion: vi.fn(() => "0.3.17"),
   userDataPath: "",
+  isPackaged: false,
+  readCodesignOutput: vi.fn(async (_bundlePath: string) => ""),
 }));
 
 vi.mock("electron-updater", () => {
@@ -37,6 +43,11 @@ vi.mock("electron-updater", () => {
     checkForUpdates: ctx.checkForUpdates,
     downloadUpdate: ctx.downloadUpdate,
     quitAndInstall: ctx.quitAndInstall,
+    logger: null as {
+      info: (...args: unknown[]) => void;
+      warn: (...args: unknown[]) => void;
+      error: (...args: unknown[]) => void;
+    } | null,
   };
   return { autoUpdater };
 });
@@ -45,6 +56,9 @@ vi.mock("electron", () => ({
   app: {
     getVersion: ctx.getVersion,
     getPath: vi.fn(() => ctx.userDataPath),
+    get isPackaged() {
+      return ctx.isPackaged;
+    },
   },
   BrowserWindow: class BrowserWindow {},
   ipcMain: {
@@ -52,10 +66,26 @@ vi.mock("electron", () => ({
   },
 }));
 
+vi.mock("./updater-signature", async () => {
+  const actual = await vi.importActual<typeof import("./updater-signature")>(
+    "./updater-signature",
+  );
+  return {
+    ...actual,
+    readCodesignOutput: (bundlePath: string) => ctx.readCodesignOutput(bundlePath),
+  };
+});
+
+import { autoUpdater } from "electron-updater";
+import {
+  DESKTOP_RELEASES_PAGE_URL,
+  type UpdaterSnapshot,
+} from "../shared/updater-types";
 import {
   configureMacX64UpdateChannel,
   setupAutoUpdater,
 } from "./updater";
+import { updaterLogFilePath } from "./updater-logger";
 import { updaterPreferencesPath } from "./updater-preferences";
 
 describe("macOS x64 update channel", () => {
@@ -92,10 +122,10 @@ function emitUpdater(event: string, ...args: unknown[]) {
   }
 }
 
-async function invokeIpc(channel: string, ...args: unknown[]) {
+async function invokeIpc<T = unknown>(channel: string, ...args: unknown[]): Promise<T> {
   const handler = ctx.ipcHandlers.get(channel);
   if (!handler) throw new Error(`Missing IPC handler: ${channel}`);
-  return handler({}, ...args);
+  return (await handler({}, ...args)) as T;
 }
 
 function makeWindow() {
@@ -163,10 +193,17 @@ describe("setupAutoUpdater", () => {
     ctx.ipcHandle.mockImplementation((channel: string, handler: IpcHandler) => {
       ctx.ipcHandlers.set(channel, handler);
     });
-    ctx.checkForUpdates.mockClear();
+    ctx.checkForUpdates.mockReset();
+    ctx.checkForUpdates.mockImplementation(async () => ({
+      updateInfo: { version: "0.3.18" },
+      isUpdateAvailable: false,
+    }));
     ctx.downloadUpdate.mockClear();
     ctx.quitAndInstall.mockClear();
     ctx.getVersion.mockClear();
+    ctx.isPackaged = false;
+    ctx.readCodesignOutput.mockReset();
+    ctx.readCodesignOutput.mockResolvedValue("");
   });
 
   afterEach(() => {
@@ -278,5 +315,146 @@ describe("setupAutoUpdater", () => {
     expect(() => emitUpdater("download-progress", { percent: 42 })).toThrow(
       "boom",
     );
+  });
+
+  it("forwards updater errors and writes them to the updater log", () => {
+    const { win, send } = makeWindow();
+    setupAutoUpdater(() => win);
+
+    expect(autoUpdater.logger).toMatchObject({
+      info: expect.any(Function),
+      warn: expect.any(Function),
+      error: expect.any(Function),
+    });
+    autoUpdater.logger?.info("updater-log-probe");
+    emitUpdater("error", new Error("Code signature mismatch"));
+
+    expect(send).toHaveBeenCalledWith("updater:error", {
+      message: "Code signature mismatch",
+    });
+    const log = readFileSync(updaterLogFilePath(ctx.userDataPath), "utf8");
+    expect(log).toContain("updater-log-probe");
+    expect(log).toContain("Code signature mismatch");
+  });
+
+  it("forwards a rejected download to the renderer", async () => {
+    const downloadPromise = Promise.reject(new Error("download exploded"));
+    ctx.checkForUpdates.mockResolvedValue({
+      updateInfo: { version: "2.0.0" },
+      isUpdateAvailable: true,
+      downloadPromise,
+    });
+    const { win, send } = makeWindow();
+    setupAutoUpdater(() => win);
+
+    await expect(invokeIpc("updater:check")).resolves.toMatchObject({
+      ok: true,
+      available: true,
+      latestVersion: "2.0.0",
+    });
+    await downloadPromise.catch(() => undefined);
+
+    expect(send).toHaveBeenCalledWith("updater:error", {
+      message: "download exploded",
+    });
+  });
+
+  it("records startup and hourly check results, including failures", async () => {
+    ctx.checkForUpdates
+      .mockResolvedValueOnce({
+        updateInfo: { version: "0.3.17" },
+        isUpdateAvailable: false,
+      })
+      .mockRejectedValueOnce(new Error("hourly lookup failed"));
+    const { win, send } = makeWindow();
+    setupAutoUpdater(() => win);
+    await invokeIpc<UpdaterSnapshot>("updater:get-snapshot");
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(send).toHaveBeenCalledWith(
+      "updater:check-result",
+      expect.objectContaining({
+        source: "startup",
+        ok: true,
+        available: false,
+        latestVersion: "0.3.17",
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    expect(send).toHaveBeenCalledWith(
+      "updater:check-result",
+      expect.objectContaining({
+        source: "periodic",
+        ok: false,
+        error: "hourly lookup failed",
+      }),
+    );
+
+    const snapshot = await invokeIpc<UpdaterSnapshot>("updater:get-snapshot");
+    expect(snapshot.lastCheck).toMatchObject({
+      source: "periodic",
+      ok: false,
+      error: "hourly lookup failed",
+    });
+    expect(snapshot.phase).toBe("error");
+  });
+
+  it("reads the running bundle's signature before deciding macOS auto-download", async () => {
+    ctx.isPackaged = true;
+    ctx.readCodesignOutput.mockResolvedValue(
+      "Authority=Developer ID Application: Multica (ABCDE12345)\n",
+    );
+    setupAutoUpdater(() => null);
+
+    const snapshot = await invokeIpc<UpdaterSnapshot>("updater:get-snapshot");
+
+    if (process.platform === "darwin") {
+      expect(ctx.readCodesignOutput).toHaveBeenCalledTimes(1);
+      expect(snapshot.manualDownloadRequired).toBe(false);
+      expect(autoUpdater.autoDownload).toBe(true);
+    } else {
+      expect(ctx.readCodesignOutput).not.toHaveBeenCalled();
+      expect(snapshot.manualDownloadRequired).toBe(false);
+      expect(autoUpdater.autoDownload).toBe(true);
+    }
+  });
+
+  it("does not auto-download a packaged darwin build without Developer ID", async () => {
+    ctx.isPackaged = true;
+    ctx.readCodesignOutput.mockResolvedValue("Signature=adhoc\nflags=0x2(adhoc)\n");
+    const { win, send } = makeWindow();
+    setupAutoUpdater(() => win);
+
+    const snapshot = await invokeIpc<UpdaterSnapshot>("updater:get-snapshot");
+    emitUpdater("update-available", { version: "9.1.0", releaseNotes: "notes" });
+
+    if (process.platform !== "darwin") {
+      expect(snapshot.manualDownloadRequired).toBe(false);
+      expect(autoUpdater.autoDownload).toBe(true);
+      return;
+    }
+
+    expect(ctx.readCodesignOutput).toHaveBeenCalledTimes(1);
+    expect(snapshot.manualDownloadRequired).toBe(true);
+    expect(snapshot.releasePageUrl).toBe(DESKTOP_RELEASES_PAGE_URL);
+    expect(autoUpdater.autoDownload).toBe(false);
+    expect(send).toHaveBeenCalledWith("updater:update-available", {
+      version: "9.1.0",
+      releaseNotes: "notes",
+      manualDownloadRequired: true,
+      releasePageUrl: DESKTOP_RELEASES_PAGE_URL,
+    });
+  });
+
+  it("treats an unpackaged darwin app as a manual download without calling codesign", async () => {
+    ctx.isPackaged = false;
+    setupAutoUpdater(() => null);
+
+    const snapshot = await invokeIpc<UpdaterSnapshot>("updater:get-snapshot");
+
+    expect(ctx.readCodesignOutput).not.toHaveBeenCalled();
+    expect(snapshot.manualDownloadRequired).toBe(process.platform === "darwin");
+    expect(autoUpdater.autoDownload).toBe(process.platform !== "darwin");
   });
 });
