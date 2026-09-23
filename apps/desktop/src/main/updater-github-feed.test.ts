@@ -24,6 +24,11 @@ vi.mock("electron", () => ({
 vi.mock("electron-updater", () => ({
   autoUpdater: { channel: null, allowDowngrade: false, allowPrerelease: false },
 }));
+// electron-log/main loads the Electron binary on import, which a node-environment
+// test has no business doing.
+vi.mock("electron-log/main", () => ({
+  default: { warn: vi.fn(), error: vi.fn(), transports: { file: { getFile: () => null } } },
+}));
 
 import { GitHubProvider } from "electron-updater/out/providers/GitHubProvider.js";
 import type { AppUpdater } from "electron-updater";
