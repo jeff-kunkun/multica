@@ -477,6 +477,11 @@ func refuseChannelChatRouteHistoryRollbackWith(ctx context.Context, query rowQue
 }
 
 var upMigrationConditions = map[string]migrationCondition{
+	// Upstream renumbered this drop from 469 to 468, but this fork already
+	// shipped the drop as 469_drop_reference_only_column (its up migration is
+	// idempotent for exactly that collision). On a database where 469 ran, the
+	// 468 copy finds the column gone and its unguarded DELETE aborts startup.
+	"468_drop_reference_only_column": skipMigration("same change already applied as 469_drop_reference_only_column"),
 	// Preserve applied history; pending 469 is superseded by the bounded expand
 	// migration. SaaS backfills separately; self-host converges in 491.
 	"469_issue_status_lifecycle_categories": skipMigration("superseded by 478 expansion and 491 convergence (MUL-7365)"),
