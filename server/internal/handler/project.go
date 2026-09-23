@@ -416,17 +416,17 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Priority:    priority,
 		StartDate:   startDate,
 		DueDate:     dueDate,
-		// A new project is private (DENE-698). created_by is what makes that
-		// survivable: 'private' means "the creator and nobody else", so a
-		// project with no creator recorded would be a project nobody can see.
-		// An agent-created project records no creator and is therefore
-		// visible through the management fallback only until someone shares
-		// it — the same as any other unshared resource.
+		// A human-created project starts private. An agent-created project has
+		// no human creator column, so keeping it private would create an orphan
+		// project that its owner cannot discover. Agent work starts workspace
+		// visible; a human can narrow it later through the normal sharing flow.
 		Visibility: pgtype.Text{String: string(permission.DefaultVisibility), Valid: true},
 	}
 	if creatorUUID, creatorErr := parseUUIDSafe(userID); creatorErr == nil {
 		if actorType, _ := h.resolveActor(r, userID, workspaceID); actorType == "member" {
 			createParams.CreatedBy = creatorUUID
+		} else if actorType == "agent" {
+			createParams.Visibility = pgtype.Text{String: string(permission.VisibilityWorkspace), Valid: true}
 		}
 	}
 

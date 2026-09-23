@@ -269,3 +269,30 @@ func TestAssigneeSeesAPrivateIssueTheyWereGiven(t *testing.T) {
 		t.Fatalf("assignment changed the scope to %q; it must stay private", visibility)
 	}
 }
+
+// An agent is an execution identity, not the person who owns the work. The
+// owner's private issue must therefore remain visible to that human in both
+// detail and list reads, while unrelated members still get the normal 404.
+func TestAgentOwnerSeesPrivateAgentIssue(t *testing.T) {
+	requireDB(t)
+
+	owner := visibilityTestMember(t, "Vis Agent Owner", "vis-agent-owner@multica.ai")
+	stranger := visibilityTestMember(t, "Vis Agent Stranger", "vis-agent-stranger@multica.ai")
+	agentID := dbfx.Agent(t, "owned visibility agent", "", testutil.Cols{"owner_id": owner})
+	issueID := dbfx.Issue(t, "agent-owned private work", testutil.Cols{
+		"creator_type": "agent",
+		"creator_id":   agentID,
+		"visibility":   "private",
+	})
+
+	get := func(userID string) *testutil.Response {
+		req := withURLParam(newRequestAs(userID, "GET", "/api/issues/"+issueID, nil), "id", issueID)
+		return testutil.Call(t, testHandler.GetIssue, req)
+	}
+	get(owner).Want(200)
+	get(stranger).Want(404)
+
+	if _, ok := issueIDsInList(t, owner, "/api/issues?workspace_id="+testWorkspaceID)[issueID]; !ok {
+		t.Fatal("the agent owner cannot find the private issue in the list")
+	}
+}
