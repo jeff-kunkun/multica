@@ -398,6 +398,20 @@ describe("planIssueDraftGroup", () => {
     expect(plan.parked).toBe(0);
   });
 
+  it("treats a parent with children as coordination and an unassigned stage one row as unassigned", () => {
+    const plan = planIssueDraftGroup(
+      payload({
+        assignee_type: "agent",
+        assignee_id: "parent-agent",
+        children: [child({ key: "a", stage: 1 })],
+      }),
+    );
+    expect(plan.rows[0]?.outcome).toBe("coordinates");
+    expect(plan.rows[1]?.outcome).toBe("unassigned");
+    expect(plan.starting).toBe(0);
+    expect(plan.parked).toBe(0);
+  });
+
   it("never counts a coordinator root as starting, even with an agent on it", () => {
     // The root's assignee is the seat the stage barrier wakes, not an
     // executor. Counting it would promise a run that the confirm suppresses.
