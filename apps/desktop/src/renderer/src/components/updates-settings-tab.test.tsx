@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 const mocks = vi.hoisted(() => ({
   getPreferences: vi.fn(),
   setAutomaticUpdates: vi.fn(),
+  setReleaseChannel: vi.fn(),
   checkForUpdates: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -19,6 +20,12 @@ const translations = {
       automatic_updates_title: "Automatic background updates",
       automatic_updates_description: "Download updates in the background",
       automatic_updates_save_failed: "Failed to save update settings",
+      release_channel_title: "Update channel",
+      release_channel_description:
+        "Stable and test use the same install. Switching checks the selected line right away.",
+      release_channel_stable: "Stable",
+      release_channel_test: "Test (updates more often, may be unstable)",
+      release_channel_save_failed: "Failed to save the update channel",
       check_section_title: "Check for updates",
       check_section_description: "Check manually",
       up_to_date: "Up to date",
@@ -57,8 +64,10 @@ describe("UpdatesSettingsTab", () => {
   beforeEach(() => {
     mocks.getPreferences.mockReset().mockResolvedValue({
       automaticUpdates: true,
+      releaseChannel: "stable",
     });
     mocks.setAutomaticUpdates.mockReset();
+    mocks.setReleaseChannel.mockReset();
     mocks.checkForUpdates.mockReset();
     mocks.toastSuccess.mockReset();
     mocks.toastError.mockReset();
@@ -72,14 +81,21 @@ describe("UpdatesSettingsTab", () => {
       value: {
         getPreferences: mocks.getPreferences,
         setAutomaticUpdates: mocks.setAutomaticUpdates,
+        setReleaseChannel: mocks.setReleaseChannel,
         checkForUpdates: mocks.checkForUpdates,
       },
     });
   });
 
   it("loads the persisted preference and saves changes from the switch", async () => {
-    mocks.getPreferences.mockResolvedValue({ automaticUpdates: false });
-    mocks.setAutomaticUpdates.mockResolvedValue({ automaticUpdates: true });
+    mocks.getPreferences.mockResolvedValue({
+      automaticUpdates: false,
+      releaseChannel: "stable",
+    });
+    mocks.setAutomaticUpdates.mockResolvedValue({
+      automaticUpdates: true,
+      releaseChannel: "stable",
+    });
     render(<UpdatesSettingsTab />);
 
     const toggle = screen.getByRole("switch", {
@@ -99,6 +115,44 @@ describe("UpdatesSettingsTab", () => {
     });
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Settings saved", {
       id: "settings-auto-save",
+    });
+  });
+
+  it("switches the release channel and checks for updates immediately", async () => {
+    mocks.getPreferences.mockResolvedValue({
+      automaticUpdates: true,
+      releaseChannel: "test",
+    });
+    mocks.setReleaseChannel.mockResolvedValue({
+      automaticUpdates: true,
+      releaseChannel: "stable",
+    });
+    mocks.checkForUpdates.mockResolvedValue({
+      ok: true,
+      currentVersion: "1.2.3",
+      latestVersion: "0.5.4",
+      available: true,
+    });
+    render(<UpdatesSettingsTab />);
+
+    const channel = screen.getByRole("combobox", { name: "Update channel" });
+    await waitFor(() => expect(channel).toBeEnabled());
+    expect(channel).toHaveValue("test");
+    expect(
+      screen.getByRole("option", {
+        name: "Test (updates more often, may be unstable)",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Stable" })).toBeInTheDocument();
+    expect(screen.getByText(/same install/i)).toBeInTheDocument();
+    expect(screen.queryByText(/reinstall/i)).not.toBeInTheDocument();
+
+    fireEvent.change(channel, { target: { value: "stable" } });
+
+    await waitFor(() => {
+      expect(mocks.setReleaseChannel).toHaveBeenCalledWith("stable");
+      expect(mocks.checkForUpdates).toHaveBeenCalledTimes(1);
+      expect(channel).toHaveValue("stable");
     });
   });
 });

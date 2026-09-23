@@ -2,6 +2,7 @@ import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
 import { app, type BrowserWindow, ipcMain } from "electron";
 import type {
   ManualUpdateCheckResult,
+  ReleaseChannel,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import {
@@ -17,39 +18,80 @@ import {
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
-// Windows arm64 ships its own update metadata channel because
-// electron-builder's `latest.yml` is not arch-suffixed on Windows — both
-// arches would otherwise collide on the same file in the GitHub Release.
-// See scripts/package.mjs (builderArgsForTarget) for the publish-side half
-// of this pact. Pin the channel here so arm64 clients fetch
-// `latest-arm64.yml` instead of the x64 metadata.
-if (process.platform === "win32" && process.arch === "arm64") {
-  autoUpdater.channel = "latest-arm64";
-}
-
 interface ChannelConfigurableUpdater {
   channel: string | null;
   allowDowngrade: boolean;
+  allowPrerelease: boolean;
 }
 
-export function configureMacX64UpdateChannel(
+/**
+ * `vX.Y.Z-test.N` is the test line. A distance suffix after that tag
+ * (`0.5.5-test.3-2-gabcdef`) is still that line. Stable tags and the
+ * describe form `0.5.4-14-gabcdef` are not.
+ */
+export function isTestReleaseVersion(version: string): boolean {
+  const match = version
+    .replace(/^v/, "")
+    .match(/^\d+\.\d+\.\d+(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?/);
+  if (!match?.[1]) return false;
+  return match[1].split(".")[0] === "test";
+}
+
+/**
+ * Feed name shared with `publishChannelForTarget` in scripts/package.mjs.
+ * `null` is the untouched electron-updater default (`latest` / `latest-mac.yml`
+ * / `latest-linux*.yml`). The arch-specific stable names already installed
+ * clients request — `latest-x64`, `latest-arm64` — stay byte-for-byte.
+ */
+export function feedNameForReleaseChannel(
+  releaseChannel: ReleaseChannel,
+  platform: NodeJS.Platform,
+  arch: string,
+): string | null {
+  const prefix = releaseChannel === "test" ? "beta" : "latest";
+  if (platform === "win32" && arch === "arm64") return `${prefix}-arm64`;
+  if (platform === "darwin" && arch === "x64") return `${prefix}-x64`;
+  if (prefix === "latest") return null;
+  return "beta";
+}
+
+export function shouldAllowStableDowngrade(
+  releaseChannel: ReleaseChannel,
+  currentVersion: string,
+): boolean {
+  // `0.5.5-test.3` → `0.5.4` is a downgrade. Leaving this off traps the user
+  // on the test line. It is not the AppUpdater.channel setter's side effect:
+  // that flag is assigned explicitly below, after the setter runs.
+  return releaseChannel === "stable" && isTestReleaseVersion(currentVersion);
+}
+
+export function applyReleaseChannel(
   updater: ChannelConfigurableUpdater,
+  releaseChannel: ReleaseChannel,
+  currentVersion: string,
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
 ): void {
-  if (platform !== "darwin" || arch !== "x64") return;
-
-  // AppUpdater.channel enables allowDowngrade as a side effect. This channel
-  // isolates a CPU architecture, not a release train, so preserve normal
-  // monotonic version behavior after selecting the architecture feed.
-  updater.channel = "latest-x64";
-  updater.allowDowngrade = false;
+  const feed = feedNameForReleaseChannel(releaseChannel, platform, arch);
+  // Assigning `.channel` sets allowDowngrade to true. Once it is a string,
+  // a later `null` throws, so the default stable feed is spelled `latest`
+  // only after some other feed was selected. `latest` still resolves to
+  // `latest-mac.yml` / `latest.yml` / `latest-linux*.yml`.
+  if (feed != null) {
+    updater.channel = feed;
+  } else if (updater.channel != null) {
+    updater.channel = "latest";
+  }
+  updater.allowDowngrade = shouldAllowStableDowngrade(
+    releaseChannel,
+    currentVersion,
+  );
+  updater.allowPrerelease = releaseChannel === "test";
 }
 
-// electron-builder does not architecture-suffix macOS update metadata.
-// package.mjs publishes macOS x64 as `latest-x64-mac.yml`; the established
-// arm64 feed and runtime path remain unchanged.
-configureMacX64UpdateChannel(autoUpdater);
+// Pin the architecture feed before preferences load. The saved channel is
+// applied again once preferences resolve, before the first check.
+applyReleaseChannel(autoUpdater, "stable", "0.0.0");
 
 const STARTUP_CHECK_DELAY_MS = 5_000;
 const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
@@ -113,12 +155,20 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
   const preferencesFilePath = updaterPreferencesPath(app.getPath("userData"));
   let automaticUpdatesEnabled =
     DEFAULT_UPDATER_PREFERENCES.automaticUpdates;
+  let releaseChannel: ReleaseChannel =
+    DEFAULT_UPDATER_PREFERENCES.releaseChannel;
   let startupCheckElapsed = false;
   let startupTimer: ReturnType<typeof setTimeout> | null = null;
   let periodicTimer: ReturnType<typeof setInterval> | null = null;
+  const currentPreferences = (): UpdaterPreferences => ({
+    automaticUpdates: automaticUpdatesEnabled,
+    releaseChannel,
+  });
   const preferencesReady = loadUpdaterPreferences(preferencesFilePath).then(
     (preferences) => {
       automaticUpdatesEnabled = preferences.automaticUpdates;
+      releaseChannel = preferences.releaseChannel;
+      applyReleaseChannel(autoUpdater, releaseChannel, app.getVersion());
       return preferences;
     },
   );
@@ -209,7 +259,7 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     "updater:get-preferences",
     async (): Promise<UpdaterPreferences> => {
       await preferencesReady;
-      return { automaticUpdates: automaticUpdatesEnabled };
+      return currentPreferences();
     },
   );
 
@@ -222,9 +272,9 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
 
       await preferencesReady;
       const wasEnabled = automaticUpdatesEnabled;
-      const preferences = { automaticUpdates: enabled };
-      await saveUpdaterPreferences(preferencesFilePath, preferences);
       automaticUpdatesEnabled = enabled;
+      const preferences = currentPreferences();
+      await saveUpdaterPreferences(preferencesFilePath, preferences);
 
       if (!enabled) {
         cancelBackgroundChecks();
@@ -237,6 +287,35 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
         scheduleBackgroundChecks();
       }
 
+      return preferences;
+    },
+  );
+
+  ipcMain.handle(
+    "updater:set-release-channel",
+    async (_event, channel: unknown): Promise<UpdaterPreferences> => {
+      if (channel !== "stable" && channel !== "test") {
+        throw new TypeError('releaseChannel must be "stable" or "test"');
+      }
+
+      await preferencesReady;
+      releaseChannel = channel;
+      const preferences = currentPreferences();
+      await saveUpdaterPreferences(preferencesFilePath, preferences);
+      applyReleaseChannel(autoUpdater, releaseChannel, app.getVersion());
+      // A check already in flight is for the previous feed. Wait it out, then
+      // look up the feed just selected — don't wait for the hourly poll.
+      const pending = inFlightCheck;
+      const recheck = () => {
+        void checkForUpdatesOnce().catch((err) => {
+          console.error(
+            "Failed to check for updates after channel change:",
+            err,
+          );
+        });
+      };
+      if (pending) void pending.finally(recheck);
+      else recheck();
       return preferences;
     },
   );

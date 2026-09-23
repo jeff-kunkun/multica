@@ -7,6 +7,7 @@ import type {
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
   ManualUpdateCheckResult,
+  ReleaseChannel,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import {
@@ -403,6 +404,8 @@ const updaterAPI = {
     ipcRenderer.invoke("updater:get-preferences"),
   setAutomaticUpdates: (enabled: boolean): Promise<UpdaterPreferences> =>
     ipcRenderer.invoke("updater:set-automatic-updates", enabled),
+  setReleaseChannel: (channel: ReleaseChannel): Promise<UpdaterPreferences> =>
+    ipcRenderer.invoke("updater:set-release-channel", channel),
   checkForUpdates: (): Promise<ManualUpdateCheckResult> =>
     ipcRenderer.invoke("updater:check"),
 };

@@ -52,37 +52,86 @@ vi.mock("electron", () => ({
   },
 }));
 
+import { autoUpdater } from "electron-updater";
 import {
-  configureMacX64UpdateChannel,
+  applyReleaseChannel,
+  feedNameForReleaseChannel,
   setupAutoUpdater,
 } from "./updater";
 import { updaterPreferencesPath } from "./updater-preferences";
 
-describe("macOS x64 update channel", () => {
-  it("does not touch established architecture paths", () => {
-    for (const [platform, arch] of [
-      ["darwin", "arm64"],
-      ["win32", "x64"],
-      ["win32", "arm64"],
-      ["linux", "arm64"],
-    ] as const) {
-      const updater = { channel: null, allowDowngrade: true };
+function updaterWithChannelSideEffect() {
+  let channel: string | null = null;
+  return {
+    allowDowngrade: false,
+    allowPrerelease: false,
+    get channel() {
+      return channel;
+    },
+    set channel(value: string | null) {
+      channel = value;
+      // AppUpdater.channel does this. Tests below must still observe the
+      // value applyReleaseChannel assigns afterwards.
+      this.allowDowngrade = true;
+    },
+  };
+}
 
-      configureMacX64UpdateChannel(updater, platform, arch);
+describe("release channel feed", () => {
+  it("keeps the established stable names and uses beta for the test line", () => {
+    const stable = {
+      "darwin:arm64": null,
+      "darwin:x64": "latest-x64",
+      "win32:x64": null,
+      "win32:arm64": "latest-arm64",
+      "linux:x64": null,
+      "linux:arm64": null,
+    } as const;
+    const test = {
+      "darwin:arm64": "beta",
+      "darwin:x64": "beta-x64",
+      "win32:x64": "beta",
+      "win32:arm64": "beta-arm64",
+      "linux:x64": "beta",
+      "linux:arm64": "beta",
+    } as const;
 
-      expect(updater).toEqual({ channel: null, allowDowngrade: true });
+    for (const [key, channel] of Object.entries(stable)) {
+      const [platform, arch] = key.split(":") as [NodeJS.Platform, string];
+      expect(feedNameForReleaseChannel("stable", platform, arch)).toBe(channel);
+    }
+    for (const [key, channel] of Object.entries(test)) {
+      const [platform, arch] = key.split(":") as [NodeJS.Platform, string];
+      expect(feedNameForReleaseChannel("test", platform, arch)).toBe(channel);
     }
   });
 
-  it("does not enable downgrades when selecting an architecture feed", () => {
-    const updater = { channel: null, allowDowngrade: true };
+  it("turns allowDowngrade back off after the channel setter enables it", () => {
+    const updater = updaterWithChannelSideEffect();
 
-    configureMacX64UpdateChannel(updater, "darwin", "x64");
+    applyReleaseChannel(updater, "stable", "0.5.4", "darwin", "x64");
 
-    expect(updater).toEqual({
-      channel: "latest-x64",
-      allowDowngrade: false,
-    });
+    expect(updater.channel).toBe("latest-x64");
+    expect(updater.allowDowngrade).toBe(false);
+    expect(updater.allowPrerelease).toBe(false);
+  });
+
+  it("allows a downgrade only while a test build is pointed at stable", () => {
+    const updater = updaterWithChannelSideEffect();
+
+    applyReleaseChannel(updater, "stable", "0.5.5-test.3", "darwin", "arm64");
+    expect(updater.channel).toBeNull();
+    expect(updater.allowDowngrade).toBe(true);
+
+    applyReleaseChannel(updater, "test", "0.5.5-test.3", "win32", "arm64");
+    expect(updater.channel).toBe("beta-arm64");
+    expect(updater.allowDowngrade).toBe(false);
+    expect(updater.allowPrerelease).toBe(true);
+
+    applyReleaseChannel(updater, "stable", "0.5.5-test.3", "darwin", "arm64");
+    expect(updater.channel).toBe("latest");
+    expect(updater.allowDowngrade).toBe(true);
+    expect(updater.allowPrerelease).toBe(false);
   });
 });
 
@@ -166,7 +215,11 @@ describe("setupAutoUpdater", () => {
     ctx.checkForUpdates.mockClear();
     ctx.downloadUpdate.mockClear();
     ctx.quitAndInstall.mockClear();
-    ctx.getVersion.mockClear();
+    ctx.getVersion.mockReset();
+    ctx.getVersion.mockReturnValue("0.3.17");
+    autoUpdater.channel = null;
+    autoUpdater.allowDowngrade = false;
+    autoUpdater.allowPrerelease = false;
   });
 
   afterEach(() => {
@@ -180,6 +233,7 @@ describe("setupAutoUpdater", () => {
 
     await expect(invokeIpc("updater:get-preferences")).resolves.toEqual({
       automaticUpdates: true,
+      releaseChannel: "stable",
     });
 
     await vi.advanceTimersByTimeAsync(5_000);
@@ -209,12 +263,12 @@ describe("setupAutoUpdater", () => {
 
     await expect(
       invokeIpc("updater:set-automatic-updates", false),
-    ).resolves.toEqual({ automaticUpdates: false });
+    ).resolves.toEqual({ automaticUpdates: false, releaseChannel: "stable" });
     expect(
       JSON.parse(
         readFileSync(updaterPreferencesPath(ctx.userDataPath), "utf-8"),
       ),
-    ).toEqual({ automaticUpdates: false });
+    ).toEqual({ automaticUpdates: false, releaseChannel: "stable" });
 
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000 + 5_000);
     expect(ctx.checkForUpdates).not.toHaveBeenCalled();
@@ -269,6 +323,58 @@ describe("setupAutoUpdater", () => {
     expect(send).toHaveBeenCalledWith("updater:download-progress", {
       percent: 42,
     });
+  });
+
+  it("uses the saved release channel for the feed", async () => {
+    writeFileSync(
+      updaterPreferencesPath(ctx.userDataPath),
+      JSON.stringify({ automaticUpdates: false, releaseChannel: "test" }),
+    );
+    setupAutoUpdater(() => null);
+
+    await expect(invokeIpc("updater:get-preferences")).resolves.toEqual({
+      automaticUpdates: false,
+      releaseChannel: "test",
+    });
+    expect(autoUpdater.channel).toBe(
+      feedNameForReleaseChannel("test", process.platform, process.arch),
+    );
+    expect(autoUpdater.allowPrerelease).toBe(true);
+    expect(autoUpdater.allowDowngrade).toBe(false);
+  });
+
+  it("rechecks immediately when the release channel changes", async () => {
+    setupAutoUpdater(() => null);
+    await invokeIpc("updater:get-preferences");
+    ctx.checkForUpdates.mockClear();
+
+    await expect(invokeIpc("updater:set-release-channel", "test")).resolves.toEqual({
+      automaticUpdates: true,
+      releaseChannel: "test",
+    });
+
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(autoUpdater.channel).toBe(
+      feedNameForReleaseChannel("test", process.platform, process.arch),
+    );
+  });
+
+  it("allows a downgrade when a test build switches back to stable", async () => {
+    ctx.getVersion.mockReturnValue("0.5.5-test.3");
+    writeFileSync(
+      updaterPreferencesPath(ctx.userDataPath),
+      JSON.stringify({ automaticUpdates: true, releaseChannel: "test" }),
+    );
+    setupAutoUpdater(() => null);
+    await invokeIpc("updater:get-preferences");
+    expect(autoUpdater.allowDowngrade).toBe(false);
+    ctx.checkForUpdates.mockClear();
+
+    await invokeIpc("updater:set-release-channel", "stable");
+
+    expect(autoUpdater.allowDowngrade).toBe(true);
+    expect(autoUpdater.allowPrerelease).toBe(false);
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
   });
 
   it("rethrows non-destroy errors from webContents.send", () => {
