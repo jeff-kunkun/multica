@@ -192,9 +192,26 @@ func (v visibilityViewer) canSeeIssue(issue db.Issue) bool {
 
 // canSeeProject: a project is its own project, so "in project" means the
 // viewer can reach this project.
+//
+// Two project-only widenings on top of the generic matrix (DENE-698 follow-up):
+//
+//   - The workspace owner sees every project in their own workspace, at any
+//     scope. "仅我可见" means "only me" where me is the workspace owner; a
+//     private project the owner cannot see is a lockout, not privacy — the very
+//     bug this branch fixes. This never widens to admins or to human friends
+//     (member/guest); they stay bound by the scope tiers below.
+//   - A project created or led by an agent this viewer owns counts as the
+//     viewer's own, exactly as an owned agent's issues do (canSeeIssueFields).
+//     An agent is its human's extension, so putting one in the lead seat must
+//     not hide a private project from the person that agent belongs to.
 func (v visibilityViewer) canSeeProject(p db.Project) bool {
+	if !v.bypasses() && v.role == permission.RoleOwner {
+		return true
+	}
+	isCreator := (p.CreatedBy.Valid && v.userID.Valid && p.CreatedBy.Bytes == v.userID.Bytes) ||
+		v.isOwnedAgent(p.LeadType.String, p.LeadID)
 	return v.canSee(p.Visibility, permission.Relation{
-		IsCreator:    p.CreatedBy.Valid && v.userID.Valid && p.CreatedBy.Bytes == v.userID.Bytes,
+		IsCreator:    isCreator,
 		InProject:    v.inProject(p.ID),
 		LeadsProject: p.LeadType.Valid && p.LeadType.String == "member" && p.LeadID.Valid && v.userID.Valid && p.LeadID.Bytes == v.userID.Bytes,
 	})
@@ -288,7 +305,17 @@ func (v visibilityViewer) projectVisibilitySQL(alias string, addArg func(any) st
 	if !v.role.Valid() || !v.userID.Valid {
 		return "FALSE"
 	}
-	parts := []string{fmt.Sprintf("%s.created_by = %s::uuid", alias, addArg(v.userID))}
+	// Owner sees every project in the workspace — the Go twin's owner branch.
+	if v.role == permission.RoleOwner {
+		return "TRUE"
+	}
+	parts := []string{
+		fmt.Sprintf("%s.created_by = %s::uuid", alias, addArg(v.userID)),
+		// A project led by an agent this viewer owns counts as the viewer's own,
+		// mirroring the agent clauses in issueVisibilitySQL and isOwnedAgent.
+		fmt.Sprintf("(%s.lead_type = 'agent' AND EXISTS (SELECT 1 FROM agent lead_agent WHERE lead_agent.id = %s.lead_id AND lead_agent.workspace_id = %s.workspace_id AND lead_agent.owner_id = %s::uuid))",
+			alias, alias, alias, addArg(v.userID)),
+	}
 	if v.role != permission.RoleGuest {
 		parts = append(parts, fmt.Sprintf("%s.visibility = 'workspace'", alias))
 	}
