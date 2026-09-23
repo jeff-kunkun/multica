@@ -12,6 +12,7 @@ import type {
 } from "../shared/issue-window";
 import type {
   ManualUpdateCheckResult,
+  ReleaseChannel,
   UpdateAvailablePayload,
   UpdateCheckRecord,
   UpdateDownloadProgressPayload,
@@ -262,6 +263,7 @@ interface UpdaterAPI {
   openLogFile: () => Promise<{ success: boolean; error?: string }>;
   getPreferences: () => Promise<UpdaterPreferences>;
   setAutomaticUpdates: (enabled: boolean) => Promise<UpdaterPreferences>;
+  setReleaseChannel: (channel: ReleaseChannel) => Promise<UpdaterPreferences>;
   checkForUpdates: () => Promise<ManualUpdateCheckResult>;
 }
 

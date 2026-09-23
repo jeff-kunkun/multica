@@ -21,6 +21,12 @@ const translations = {
       automatic_updates_title: "Automatic background updates",
       automatic_updates_description: "Download updates in the background",
       automatic_updates_save_failed: "Failed to save update settings",
+      release_channel_title: "Update channel",
+      release_channel_description:
+        "Stable and test use the same install. Switching checks the selected line right away.",
+      release_channel_stable: "Stable",
+      release_channel_test: "Test (updates more often, may be unstable)",
+      release_channel_save_failed: "Failed to save the update channel",
       check_section_title: "Check for updates",
       check_section_description: "Check manually",
       up_to_date: "Up to date",
@@ -83,8 +89,14 @@ describe("UpdatesSettingsTab", () => {
   });
 
   it("loads the persisted preference and saves changes from the switch", async () => {
-    bridge.fns.getPreferences.mockResolvedValue({ automaticUpdates: false });
-    bridge.fns.setAutomaticUpdates.mockResolvedValue({ automaticUpdates: true });
+    bridge.fns.getPreferences.mockResolvedValue({
+      automaticUpdates: false,
+      releaseChannel: "stable",
+    });
+    bridge.fns.setAutomaticUpdates.mockResolvedValue({
+      automaticUpdates: true,
+      releaseChannel: "stable",
+    });
     render(<UpdatesSettingsTab />);
 
     const toggle = screen.getByRole("switch", {
@@ -229,5 +241,54 @@ describe("UpdatesSettingsTab", () => {
     fireEvent.click(button);
 
     expect(bridge.fns.openLogFile).toHaveBeenCalledOnce();
+  });
+
+  it("lets the user pick the update channel and hands the choice to the main process", async () => {
+    bridge.fns.getPreferences.mockResolvedValue({
+      automaticUpdates: true,
+      releaseChannel: "test",
+    });
+    bridge.fns.setReleaseChannel.mockResolvedValue({
+      automaticUpdates: true,
+      releaseChannel: "stable",
+    });
+    render(<UpdatesSettingsTab />);
+
+    const channel = screen.getByRole("combobox", { name: "Update channel" });
+    await waitFor(() => expect(channel).toBeEnabled());
+    expect(channel).toHaveValue("test");
+    expect(
+      screen.getByRole("option", {
+        name: "Test (updates more often, may be unstable)",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Stable" })).toBeInTheDocument();
+    // Same install, no reinstall: the copy must not scare the user off.
+    expect(screen.getByText(/same install/i)).toBeInTheDocument();
+    expect(screen.queryByText(/reinstall/i)).not.toBeInTheDocument();
+
+    fireEvent.change(channel, { target: { value: "stable" } });
+
+    await waitFor(() => {
+      expect(bridge.fns.setReleaseChannel).toHaveBeenCalledWith("stable");
+      expect(channel).toHaveValue("stable");
+    });
+    expect(mocks.toastSuccess).toHaveBeenCalled();
+    // The main process re-checks on its own; the renderer must not double up.
+    expect(bridge.fns.checkForUpdates).not.toHaveBeenCalled();
+  });
+
+  it("keeps the previous channel and reports when saving it fails", async () => {
+    bridge.fns.setReleaseChannel.mockRejectedValue(new Error("disk"));
+    render(<UpdatesSettingsTab />);
+
+    const channel = screen.getByRole("combobox", { name: "Update channel" });
+    await waitFor(() => expect(channel).toBeEnabled());
+    fireEvent.change(channel, { target: { value: "test" } });
+
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith("Failed to save the update channel"),
+    );
+    expect(channel).toHaveValue("stable");
   });
 });
