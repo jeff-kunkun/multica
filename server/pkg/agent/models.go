@@ -180,7 +180,13 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 				return discovered(desc.ModelDiscovery(ctx, runtimeCmd))
 			})
 		}
-		return Catalog{Models: []Model{}}, nil
+		// No discoverer on the descriptor. A manual declaration is an empty
+		// catalog the picker explains; anything else is "we could not look",
+		// not "this runtime has no models".
+		if decl, declared := modelDiscoveryByProvider[providerType]; declared && decl.Kind == modelDiscoveryManual {
+			return Catalog{Models: []Model{}}, nil
+		}
+		return Catalog{}, errModelsListUnavailable("这个运行时没有登记发现方式")
 	}
 	switch providerType {
 	case "claude":
@@ -314,7 +320,11 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// spawning an ACP subprocess that can only ever come back empty.
 		return Catalog{Models: []Model{}}, nil
 	default:
-		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
+		// A provider this build does not know still goes through the same
+		// notice as a missed probe: the picker says the list is temporarily
+		// unavailable and keeps manual entry. It does not render as an
+		// authoritative empty catalog.
+		return Catalog{}, errModelsListUnavailable("这个运行时没有登记发现方式")
 	}
 }
 

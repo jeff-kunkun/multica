@@ -90,12 +90,12 @@ type qwenProviderRow struct {
 // an empty catalog.
 func resolveQwenEndpoint(dir string, overlay map[string]string) (qwenEndpoint, error) {
 	if strings.TrimSpace(dir) == "" {
-		return qwenEndpoint{}, errQwenModelsUnavailable("没有读到 OpenAI 兼容端点")
+		return qwenEndpoint{}, errModelsListUnavailable("没有读到 OpenAI 兼容端点")
 	}
 	settings, settingsErr := readQwenSettings(filepath.Join(dir, "settings.json"))
 	fileEnv, fileErr := readDotEnvFile(filepath.Join(dir, ".env"))
 	if settingsErr != nil && fileErr != nil && len(overlay) == 0 {
-		return qwenEndpoint{}, errQwenModelsUnavailable("没有读到 Qwen 配置")
+		return qwenEndpoint{}, errModelsListUnavailable("没有读到 Qwen 配置")
 	}
 	settingsEnv := stringMap(settings.Env)
 
@@ -123,7 +123,7 @@ func resolveQwenEndpoint(dir string, overlay map[string]string) (qwenEndpoint, e
 	}
 
 	if endpoint.BaseURL == "" {
-		return qwenEndpoint{}, errQwenModelsUnavailable("没有读到 OpenAI 兼容端点")
+		return qwenEndpoint{}, errModelsListUnavailable("没有读到 OpenAI 兼容端点")
 	}
 	return endpoint, nil
 }

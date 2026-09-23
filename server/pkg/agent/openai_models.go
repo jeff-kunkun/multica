@@ -52,7 +52,7 @@ func discoverOpenAICompatibleModels(ctx context.Context, baseURL, apiKey, defaul
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, errQwenModelsUnavailable("无法发起模型列表请求")
+		return nil, errModelsListUnavailable("无法发起模型列表请求")
 	}
 	if key := strings.TrimSpace(apiKey); key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
@@ -61,19 +61,19 @@ func discoverOpenAICompatibleModels(ctx context.Context, baseURL, apiKey, defaul
 
 	resp, err := openAIModelsHTTP.Do(req)
 	if err != nil {
-		return nil, errQwenModelsUnavailable("连不上 " + host)
+		return nil, errModelsListUnavailable("连不上 " + host)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, openAIModelsBodyLimit))
 	if err != nil {
-		return nil, errQwenModelsUnavailable("读不到 " + host + " 的响应")
+		return nil, errModelsListUnavailable("读不到 " + host + " 的响应")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, errQwenModelsUnavailable(fmt.Sprintf("端点返回了 HTTP %d", resp.StatusCode))
+		return nil, errModelsListUnavailable(fmt.Sprintf("端点返回了 HTTP %d", resp.StatusCode))
 	}
 	models, empty, err := parseOpenAIModelList(body, strings.TrimSpace(defaultModel))
 	if err != nil {
-		return nil, errQwenModelsUnavailable("端点没有返回模型清单")
+		return nil, errModelsListUnavailable("端点没有返回模型清单")
 	}
 	if empty {
 		return nil, nil
@@ -88,7 +88,7 @@ func discoverOpenAICompatibleModels(ctx context.Context, baseURL, apiKey, defaul
 func openAIModelsEndpoint(baseURL string) (endpoint, host string, err error) {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return "", "", errQwenModelsUnavailable("没有读到 OpenAI 兼容端点")
+		return "", "", errModelsListUnavailable("没有读到 OpenAI 兼容端点")
 	}
 	host = parsed.Host
 	parsed.User = nil
@@ -107,8 +107,9 @@ func openAIModelsEndpoint(baseURL string) (endpoint, host string, err error) {
 }
 
 type openAIModelEntry struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
 }
 
 // parseOpenAIModelList reads an OpenAI-compatible listing.
@@ -161,6 +162,9 @@ func modelsFromOpenAIEntries(entries []openAIModelEntry, defaultModel string) ([
 		seen[id] = true
 		label := strings.TrimSpace(entry.Name)
 		if label == "" {
+			label = strings.TrimSpace(entry.DisplayName)
+		}
+		if label == "" {
 			label = id
 		}
 		models = append(models, Model{
@@ -175,6 +179,6 @@ func modelsFromOpenAIEntries(entries []openAIModelEntry, defaultModel string) ([
 	return models, false, nil
 }
 
-func errQwenModelsUnavailable(reason string) error {
+func errModelsListUnavailable(reason string) error {
 	return fmt.Errorf("暂时无法获取模型列表：%s", reason)
 }
