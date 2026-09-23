@@ -46,12 +46,8 @@ func TestPlanForSeparatesWeeklyModelAndTransient(t *testing.T) {
 		t.Fatalf("parsed reset = %s", parsed.RecoverAt)
 	}
 
-	capacity, ok := PlanFor(string(taskfailure.ReasonAgentProviderCapacityOrRateLimit), "quota exceeded but API Error: 429 Too Many Requests", own, now)
-	if !ok || capacity.Kind != KindProviderCapacity || capacity.Scope() != ScopeAgent || capacity.ModelKey != "" {
-		t.Fatalf("capacity plan = %+v ok=%v, want a capacity cooldown, not a quota breaker", capacity, ok)
-	}
-	if capacity.Condition != ConditionCapacityCooldown || !capacity.RecoverAt.Equal(now.Add(time.Hour)) {
-		t.Fatalf("capacity recovery = %s %s", capacity.Condition, capacity.RecoverAt)
+	if _, ok := PlanFor(string(taskfailure.ReasonAgentProviderCapacityOrRateLimit), "quota exceeded but API Error: 429 Too Many Requests", own, now); ok {
+		t.Fatal("capacity reason must not open a breaker even if the text mentions quota")
 	}
 	if _, ok := PlanFor(string(taskfailure.ReasonAgentProviderNetwork), "connection reset by peer", own, now); ok {
 		t.Fatal("network failure must not open a breaker")
@@ -59,15 +55,8 @@ func TestPlanForSeparatesWeeklyModelAndTransient(t *testing.T) {
 	if ShouldInspect(string(taskfailure.ReasonAgentProviderQuotaLimit), "weekly usage limit") != true {
 		t.Fatal("quota reason must be inspected")
 	}
-	if !ShouldInspect(string(taskfailure.ReasonAgentProviderCapacityOrRateLimit), "Selected model is at capacity. Please try a different model.") {
-		t.Fatal("capacity reason must be inspected")
-	}
 	if ShouldInspect(string(taskfailure.ReasonTimeout), "weekly usage limit") {
 		t.Fatal("a named non-quota reason must not be inspected")
-	}
-	coarse, ok := PlanFor("agent_error", "Selected model is at capacity. Please try a different model.", own, now)
-	if !ok || coarse.Kind != KindProviderCapacity {
-		t.Fatalf("coarse capacity text = %+v ok=%v", coarse, ok)
 	}
 }
 
@@ -119,50 +108,6 @@ func TestPickSameTierThenExactlyOneDown(t *testing.T) {
 	untagged.Tier = ""
 	if _, ok := Pick(untagged, roster, ladder); ok {
 		t.Fatal("a seat with no tier has no same-tier or one-down replacement")
-	}
-}
-
-func TestPickCapacityPrefersAnotherHouseThenDropsOneTier(t *testing.T) {
-	ladder := []string{"strongest", "strong", "medium", "weak"}
-	failed := Seat{ID: "gpt", Name: "特兰克斯", Tier: "strong", Direction: "游戏", Provider: OpenAIHouse, AvoidHouse: OpenAIHouse}
-	roster := []Seat{
-		failed,
-		{ID: "gpt-same", Name: "阿A", Tier: "strong", Direction: "游戏", Provider: OpenAIHouse, Eligible: true},
-		{ID: "grok", Name: "孙悟天", Tier: "strong", Provider: "xai", Eligible: true},
-		{ID: "claude", Name: "孙悟空", Tier: "strong", Provider: AnthropicHouse, Eligible: true},
-		{ID: "down-gpt", Name: "克林", Tier: "medium", Provider: OpenAIHouse, Eligible: true},
-		{ID: "two-down", Name: "比克", Tier: "weak", Provider: "deepseek", Eligible: true},
-	}
-
-	// Quota, and any failure that does not set AvoidHouse, still prefers the
-	// same direction even when that seat is another GPT.
-	plain := failed
-	plain.AvoidHouse = ""
-	got, ok := Pick(plain, roster, ladder)
-	if !ok || got.Seat.ID != "gpt-same" || got.SteppedDown {
-		t.Fatalf("quota pick = %+v ok=%v, want the same-direction GPT seat", got, ok)
-	}
-
-	got, ok = Pick(failed, roster, ladder)
-	if !ok || got.Seat.ID != "claude" || got.SteppedDown {
-		t.Fatalf("cross-house pick = %+v ok=%v, want the Claude seat on the same tier", got, ok)
-	}
-
-	roster[3].Eligible = false // claude gone; Grok is still a different house
-	got, ok = Pick(failed, roster, ladder)
-	if !ok || got.Seat.ID != "grok" || got.SteppedDown {
-		t.Fatalf("other house = %+v ok=%v, want Grok rather than another GPT or a step down", got, ok)
-	}
-
-	roster[2].Eligible = false // same tier is only GPT
-	got, ok = Pick(failed, roster, ladder)
-	if !ok || got.Seat.ID != "down-gpt" || !got.SteppedDown {
-		t.Fatalf("one down = %+v ok=%v, want the GPT seat one tier down", got, ok)
-	}
-
-	roster[4].Eligible = false
-	if _, ok := Pick(failed, roster, ladder); ok {
-		t.Fatal("must not walk two tiers down once the same house is the only same-tier choice")
 	}
 }
 

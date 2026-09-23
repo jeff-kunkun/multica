@@ -5306,22 +5306,13 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		}
 	}
 
-	// Capacity that will not be retried in place takes the relay path the
-	// sweeper already uses. A hold means the issue was reassigned or blocked
-	// on purpose, so the provider's English sentence is not the last word.
-	capacityHeld := false
-	if retried == nil && task.IssueID.Valid {
-		capacityHeld = s.relayCapacityIfRetriesSpent(ctx, task, failureReason, errMsg)
-	}
-
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup. Delegated failures keep this existing failed-issue comment
 	// in addition to the coordinator recovery signal, preserving visibility on
-	// both sides of a cross-issue handoff. A capacity relay posts its own
-	// audit instead of the raw provider sentence.
-	if errMsg != "" && task.IssueID.Valid && retried == nil && !capacityHeld {
+	// both sides of a cross-issue handoff.
+	if errMsg != "" && task.IssueID.Valid && retried == nil {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(failureCommentBody(failureReason, errMsg)), "system", task.TriggerCommentID, task.ID)
 	}
 
@@ -6422,11 +6413,9 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			}
 		}
 		if !retryPending {
-			// Quota exhaustion is not retried (DENE-675). A capacity miss
-			// reaches this call only because MaybeRetryFailedTask just
-			// declined it. Break the spent seat and hand the unfinished
-			// issue to another seat before the in_progress → todo reset
-			// below looks for an active task.
+			// Quota exhaustion is not retried (DENE-675). Break the spent seat
+			// and hand the unfinished issue to another seat before the
+			// in_progress → todo reset below looks for an active task.
 			hold, err := s.RelayQuotaFailure(ctx, t)
 			if err != nil {
 				slog.Warn("handle failed tasks: quota relay failed",
