@@ -6998,7 +6998,7 @@ func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 	case "antigravity":
 		return sharedBriefViaAntigravityAddDir
 	case "openclaw", "kimi", "traecli", "qwenpaw",
-		"codebuddy", "dim", "grok", "dsh", "kiro", "qoder", "qoderclicn", "zeroclaw":
+		"codebuddy", "dim", "devin", "grok", "dsh", "kiro", "qoder", "qoderclicn", "zeroclaw":
 		return sharedBriefInline
 	default:
 		// mcode is intentionally unsupported: it ignores ExecOptions.SystemPrompt
