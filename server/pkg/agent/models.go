@@ -265,21 +265,29 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 			return discoverCodebuddyModels(ctx, runtimeCmd)
 		})
 	case "qwen":
-		// Qwen Code has no account-independent headless model catalog. An
-		// empty list keeps the runtime default and manual model entry available
-		// without advertising a Token-Plan-specific model to other accounts.
-		return Catalog{Models: []Model{}}, nil
+		// Qwen Code talks to whatever OpenAI-compatible endpoint its home
+		// config names. Probe that endpoint directly. This is deliberately
+		// not cachedDiscovery: a tunnel that is down must not be remembered
+		// as an empty catalog, and the next refresh has to see the tunnel
+		// as it is now. The probe is one HTTP GET, not a CLI spawn.
+		//
+		// The picker is per runtime, so it reads the machine's Qwen home.
+		// An agent's custom_env wins when a caller passes it to
+		// discoverQwenModels; this path has no agent.
+		return discovered(discoverQwenModels(ctx, nil))
 	case "qwenpaw":
 		// QwenPaw's model selection is unsupported (session/set_model
 		// persists to agent scope, not session scope), so there is no
-		// consumer for a discovered catalog. Return an empty list to
-		// avoid spawning an ACP subprocess that has no effect. If upstream
-		// makes model selection session-scoped, restore a discovery helper
-		// here modelled on discoverTraecliModels.
+		// consumer for a discovered catalog. It is also not an
+		// OpenAI-compatible endpoint Multica can read without spawning ACP.
+		// Return an empty list rather than a probe that nothing would use.
+		// If upstream makes model selection session-scoped, restore a
+		// discovery helper here modelled on discoverTraecliModels.
 		return Catalog{Models: []Model{}}, nil
 	case "mcode":
 		// MCode's ACP server does not expose session-scoped model selection or
-		// a model catalog. The configured MCode runtime owns the model choice.
+		// a model catalog, and it has no OpenAI-compatible base URL to probe.
+		// The configured MCode runtime owns the model choice.
 		return Catalog{Models: []Model{}}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
@@ -300,8 +308,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// ZeroClaw's ACP server advertises no catalog: session/new answers
 		// exactly {sessionId, workspaceDir} (verified against 0.8.4), and it
 		// has no session-scoped model selection to consume one anyway — see
-		// ModelSelectionSupported. Return an empty list rather than spawning
-		// an ACP subprocess that can only ever come back empty.
+		// ModelSelectionSupported. Its model lives in the ZeroClaw agent
+		// profile, not an OpenAI-compatible base URL, so the shared /models
+		// probe has nothing to call. Return an empty list rather than
+		// spawning an ACP subprocess that can only ever come back empty.
 		return Catalog{Models: []Model{}}, nil
 	default:
 		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
