@@ -11,8 +11,7 @@
     "usage": "Analytics",
     "runtimes": "Runtimes",
     "skills": "Skills",
-    "settings": "Settings",
-    "permissions": "Permissions"
+    "settings": "Settings"
   },
   "tab": {
     "issue": "Issue",

@@ -389,7 +389,7 @@
       "billing": "账单与套餐",
       "config_transfer": "配置导出/导入",
       "routing": "路由",
-      "project_sharing": "权限与共享"
+      "project_sharing": "项目共享"
     },
     "groups": {
       "personal": "个人设置",
@@ -1772,10 +1772,10 @@
     "seats_empty": "还没有候选席位。"
   },
   "project_sharing": {
-    "title": "权限与共享",
-    "description": "统一设置项目、任务和关联资源谁可以查看。",
-    "section_title": "项目访问权限",
-    "section_description": "可以设为仅自己、共享给项目成员，或共享给整个团队；项目里的任务和仓库会跟随项目范围。",
+    "title": "项目共享",
+    "description": "按项目管理工作区成员可以看到的内容。",
+    "section_title": "项目",
+    "section_description": "修改项目范围会同步更新该项目当前包含的所有任务和仓库。",
     "loading": "正在加载项目…",
     "empty": "还没有项目。",
     "visibility_private": "仅自己",

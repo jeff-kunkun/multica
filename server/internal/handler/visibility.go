@@ -56,7 +56,6 @@ type visibilityViewer struct {
 	// owner/admin. Not a new query — the same one saved views already use.
 	projectIDs []pgtype.UUID
 	projectSet map[[16]byte]struct{}
-	agentSet   map[[16]byte]struct{}
 	bypass     visibilityBypassReason
 }
 
@@ -94,28 +93,15 @@ func (h *Handler) visibilityViewerForUser(ctx context.Context, wsUUID, userUUID 
 	if err != nil {
 		return visibilityViewer{}, fmt.Errorf("visibility: accessible projects: %w", err)
 	}
-	agentIDs, err := h.Queries.ListAgentIDsOwnedByMember(ctx, db.ListAgentIDsOwnedByMemberParams{
-		WorkspaceID: wsUUID,
-		OwnerID:     userUUID,
-	})
-	if err != nil {
-		return visibilityViewer{}, fmt.Errorf("visibility: owned agents: %w", err)
-	}
 	v := visibilityViewer{
 		userID:     userUUID,
 		role:       permission.Role(member.Role),
 		projectIDs: projectIDs,
 		projectSet: make(map[[16]byte]struct{}, len(projectIDs)),
-		agentSet:   make(map[[16]byte]struct{}, len(agentIDs)),
 	}
 	for _, id := range projectIDs {
 		if id.Valid {
 			v.projectSet[id.Bytes] = struct{}{}
-		}
-	}
-	for _, id := range agentIDs {
-		if id.Valid {
-			v.agentSet[id.Bytes] = struct{}{}
 		}
 	}
 	return v, nil
@@ -154,14 +140,6 @@ func (v visibilityViewer) isMe(actorType string, actorID pgtype.UUID) bool {
 	return actorType == "member" && actorID.Valid && v.userID.Valid && actorID.Bytes == v.userID.Bytes
 }
 
-func (v visibilityViewer) isOwnedAgent(actorType string, actorID pgtype.UUID) bool {
-	if actorType != "agent" || !actorID.Valid {
-		return false
-	}
-	_, ok := v.agentSet[actorID.Bytes]
-	return ok
-}
-
 func (v visibilityViewer) canSee(vis string, rel permission.Relation) bool {
 	if v.bypasses() {
 		return true
@@ -178,8 +156,7 @@ func (v visibilityViewer) canSeeIssueFields(
 	assigneeType string, assigneeID pgtype.UUID,
 ) bool {
 	rel := v.relation(creatorType, creatorID, projectID)
-	rel.IsCreator = rel.IsCreator || v.isOwnedAgent(creatorType, creatorID)
-	rel.IsAssignee = v.isMe(assigneeType, assigneeID) || v.isOwnedAgent(assigneeType, assigneeID)
+	rel.IsAssignee = v.isMe(assigneeType, assigneeID)
 	return v.canSee(visibility, rel)
 }
 
@@ -263,10 +240,6 @@ func (v visibilityViewer) issueVisibilitySQL(alias string, addArg func(any) stri
 			alias, alias, addArg(v.userID)),
 		fmt.Sprintf("(%s.assignee_type = 'member' AND %s.assignee_id = %s::uuid)",
 			alias, alias, addArg(v.userID)),
-		fmt.Sprintf("(%s.creator_type = 'agent' AND EXISTS (SELECT 1 FROM agent owner_agent WHERE owner_agent.id = %s.creator_id AND owner_agent.workspace_id = %s.workspace_id AND owner_agent.owner_id = %s::uuid))",
-			alias, alias, alias, addArg(v.userID)),
-		fmt.Sprintf("(%s.assignee_type = 'agent' AND EXISTS (SELECT 1 FROM agent assignee_agent WHERE assignee_agent.id = %s.assignee_id AND assignee_agent.workspace_id = %s.workspace_id AND assignee_agent.owner_id = %s::uuid))",
-			alias, alias, alias, addArg(v.userID)),
 	}
 	if v.role != permission.RoleGuest {
 		parts = append(parts, fmt.Sprintf("%s.visibility = 'workspace'", alias))
