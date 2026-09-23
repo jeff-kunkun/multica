@@ -1129,6 +1129,8 @@
     "config_thinking_none": "이 모델에는 추론 강도 설정이 없습니다.",
     "config_capabilities_hint": "{{count}}/3 켜짐",
     "config_capabilities_count": "방법 {{count}}개",
+    "capability_preference_loading": "지난 방법을 불러오는 중…",
+    "capability_preference_failed": "지난 방법을 읽지 못했습니다. 시스템 기본값을 사용합니다. 그래도 시작할 수 있습니다.",
     "config_pick_runtime": "실행 머신 선택",
     "capability_label": "정렬 방법",
     "capability_wayfinder": "의사결정 지도",
