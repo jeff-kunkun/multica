@@ -405,8 +405,8 @@ export function planIssueDraftGroup(
     rows,
     total: rows.length,
     creating: incoming.length,
-    starting: incoming.filter((row) => row.startsOnCreate).length,
-    parked: incoming.filter((row) => row.status === "backlog").length,
+    starting: incoming.filter((row) => row.outcome === "starts").length,
+    parked: incoming.filter((row) => row.outcome === "parked").length,
     built: rows.length - incoming.length,
   };
 }
