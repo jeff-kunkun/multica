@@ -32,6 +32,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/permission"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/sparsecheckout"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -3057,6 +3058,16 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if issue.Description.Valid {
 			resp.IssueDescription = issue.Description.String
 		}
+		checkoutPaths, pathsErr := sparsecheckout.MetadataString(issue.Metadata)
+		if pathsErr != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+				r.Context(), task,
+				"Issue metadata checkout_paths is not a string of repository paths. Set it with `multica issue metadata set --key checkout_paths --value apps/web` or delete the key.",
+				taskfailure.ReasonEnvironmentPrepareFailed,
+				"error_invalid_checkout_paths", http.StatusBadRequest, "invalid checkout_paths metadata",
+			)
+		}
+		resp.CheckoutPaths = checkoutPaths
 		resp.IssueStatus = issue.Status
 		resp.IssueAssigneeType = issue.AssigneeType.String
 		resp.IssueAssigneeID = uuidToString(issue.AssigneeID)

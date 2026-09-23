@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/sparsecheckout"
 )
 
 // sessionContinuityNoticeFor picks the notice matching what this surface
@@ -70,6 +71,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
 	b.WriteString(buildStaleLocalBaselineBlock(opts.staleLocalBaselineNotice))
 	b.WriteString(buildDependencyInstallBlock(opts.dependencyInstallCommand))
+	b.WriteString(buildSparseCheckoutBlock(task.CheckoutPaths))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -168,6 +170,24 @@ func buildStaleLocalBaselineBlock(notice string) string {
 		return ""
 	}
 	return "## Local baseline may be stale\n\n" + strings.TrimSpace(notice) + " Treat the files in this worktree as the authoritative snapshot for this turn, and mention the stale baseline if it affects your conclusion.\n\n"
+}
+
+// buildSparseCheckoutBlock tells the agent what a declared checkout scope
+// means. A missing file in that checkout is not evidence the file is absent
+// from the repository; sparse-add is the check that says which.
+func buildSparseCheckoutBlock(declared string) string {
+	scope, err := sparsecheckout.Parse(declared)
+	if err != nil {
+		return "## Sparse checkout\n\nThe issue's checkout_paths declaration could not be read (" + err.Error() + "). The checkout was not narrowed.\n\n"
+	}
+	if !scope.Active() {
+		return ""
+	}
+	return "## Sparse checkout\n\n" +
+		"This task declared checkout paths: " + strings.Join(scope.Paths, ", ") + ".\n" +
+		"A task worktree (local worktree mode, or `multica repo checkout`) contains those directories plus the repository's root files — lockfile, workspace manifest, root build config. Other directories are not on disk; each one contains " + sparsecheckout.MarkerName + " explaining that.\n" +
+		"A file that is not on disk may still be in the repository. Before concluding it does not exist, run `multica repo sparse-add <path>`. That command checks the path out when it is in git, and tells you when it is not.\n" +
+		"This run's own checkout of the user's directory (in_place or shared) is never narrowed. `multica repo checkout --full` checks out a whole repository; `--paths a,b` overrides the declaration. Pass one of those when checking out a different repository.\n\n"
 }
 
 func buildDependencyInstallBlock(command string) string {

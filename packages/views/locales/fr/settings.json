@@ -1224,10 +1224,32 @@
       "check_section_title": "Rechercher des mises à jour",
       "check_section_description": "Vous serez invité à redémarrer une fois le téléchargement terminé.",
       "up_to_date": "Vous avez la dernière version.",
-      "downloading": "La v{{version}} se télécharge en arrière-plan — vous serez averti quand elle sera prête à installer.",
       "check_now": "Vérifier maintenant",
       "checking": "Vérification…",
-      "description": "Contrôlez les mises à jour automatiques en arrière-plan ou recherchez manuellement une nouvelle version."
+      "description": "Contrôlez les mises à jour automatiques en arrière-plan ou recherchez manuellement une nouvelle version.",
+      "available": "La v{{version}} est disponible.",
+      "available_manual": "La v{{version}} est disponible — téléchargez-la depuis la page des versions.",
+      "download": "Télécharger",
+      "downloading_progress": "Téléchargement de la v{{version}} · {{percent}} %",
+      "downloaded": "v{{version}} téléchargée — redémarrez pour l'installer.",
+      "restart_now": "Redémarrer maintenant",
+      "failed": "Échec de la mise à jour : {{error}}",
+      "retry_download": "Réessayer le téléchargement",
+      "manual_only_title": "Téléchargement manuel uniquement",
+      "manual_only_description": "Cette version n'est pas signée avec un Apple Developer ID ; macOS refuse donc d'installer automatiquement les mises à jour téléchargées. Les nouvelles versions sont annoncées ici ; installez-les depuis la page des versions.",
+      "open_release_page": "Ouvrir la page des versions",
+      "last_check_label": "Dernière vérification",
+      "last_check_never": "jamais",
+      "last_check_available": "v{{version}} trouvée",
+      "last_check_up_to_date": "à jour",
+      "last_check_failed": "échec : {{error}}",
+      "last_check_trigger": {
+        "startup": "au lancement",
+        "periodic": "toutes les heures",
+        "manual": "manuelle"
+      },
+      "log_title": "Journal des mises à jour",
+      "open_log": "Ouvrir le journal"
     },
     "daemon": {
       "title": "Démon",
@@ -1700,7 +1722,7 @@
     "gateway_pair_incomplete": "Un point d'accès a besoin de ses deux composants. Si un seul est renseigné, le point d'accès partagé du déploiement est utilisé à la place.",
     "gateway_default_model": "Le modèle par défaut de ce déploiement est {{model}}.",
     "filters_title": "Filtres de candidats",
-    "filters_placeholder": "Prévu pour une version ultérieure ; non implémenté dans celle-ci. Aujourd'hui, les candidats sont restreints par direction et filtrés par la confiance.",
+    "filters_placeholder": "Un siège annulé, archivé, désactivé, injoignable, mort ou à quota épuisé est écarté avant la prochaine attribution. Le quota d'un fournisseur n'est qu'un indice : une lecture manquante ne retire pas tous ses sièges.",
     "health_checking": "Vérification…",
     "health_recheck": "Revérifier",
     "health_connected": "Connecté · auto-vérifié {{when}}",
@@ -1727,6 +1749,22 @@
         "chip": "Sans effet",
         "detail": "Le modèle a été rejeté, est injoignable, a été supprimé ou est en pause après des échecs répétés. Se comporte comme un routage désactivé ; rien n'apparaît sur les tâches."
       }
-    }
+    },
+    "context_title": "Contexte d'attribution",
+    "policy_label": "Invite de routage",
+    "policy_description": "Ce texte choisit le palier. Le travail ordinaire reste au palier moyen ou fort ; le travail simple et peu risqué peut aller au palier faible ; seul le travail complexe ou à haut risque monte. Il ne change pas le statut.",
+    "policy_restore": "Rétablir l'invite par défaut",
+    "policy_save_error": "Enregistrement impossible. Votre texte est toujours dans la zone.",
+    "policy_saving": "Enregistrement…",
+    "policy_saved": "Enregistré",
+    "quota_title": "Quota des fournisseurs",
+    "quota_description": "Claude, Codex et Grok, selon le dernier relevé. Un chiffre manquant ou périmé reste inconnu. Le quota ne décide pas si un siège est vivant.",
+    "quota_unknown": "inconnu",
+    "quota_exhausted": "épuisé",
+    "quota_available": "{{percent}} % utilisé",
+    "quota_resets": "réinitialisation {{when}}",
+    "quota_updated": "mis à jour {{when}}",
+    "seats_title": "Sièges candidats",
+    "seats_empty": "Aucun siège candidat."
   }
 }

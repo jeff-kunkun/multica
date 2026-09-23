@@ -1044,6 +1044,8 @@
     "child_title": "하위 이슈 {{n}} 제목",
     "child_starts_now": "즉시 실행",
     "child_parked": "단계 대기",
+    "child_unassigned": "미할당, 자동 실행하지 않음",
+    "child_assigned_person": "사람에게 할당됨, 자동 실행하지 않음",
     "child_remove": "하위 이슈 {{n}} 삭제",
     "child_hint": "제안: {{hint}}",
     "group_summary": "확인하면 이슈 {{count}}개가 생성됩니다.",
@@ -1067,9 +1069,11 @@
     "reopen_failed": "이 정렬을 다시 열 수 없었습니다.",
     "parent_built": "상위 이슈는 이미 존재하며 이번 라운드에서 다시 쓰이지 않습니다.",
     "parent_built_link": "상위 이슈 열기",
-    "group_summary_parent": "상위 이슈는 담당자 없이 생성되어 스스로는 아무것도 실행하지 않습니다.",
+    "group_summary_parent": "상위 이슈는 이 그룹을 조정하며 자동으로 실행되지 않습니다.",
     "created_title": "이슈가 생성되었습니다",
     "created_group_title": "이슈 {{count}}개 생성됨",
+    "assignee_dropped": "'{{title}}'의 담당자를 지정하지 못해 미할당 상태로 생성되었습니다.",
+    "assignee_dropped_several": "이슈 {{count}}개의 담당자를 지정하지 못해 모두 미할당 상태로 생성되었습니다.",
     "retired_title": "이 정렬은 끝났습니다",
     "retired_description": "미완료 초안 목록에 더 이상 없습니다.",
     "load_failed": "정렬을 불러오지 못했습니다.",
@@ -1150,7 +1154,10 @@
     "record_created_title": "이 정렬에서 이슈 1건이 생성되었습니다",
     "record_issue_link": "생성된 이슈 열기",
     "record_abandoned_title": "이 정렬은 포기되었습니다",
-    "record_abandoned_hint": "생성된 이슈가 없습니다."
+    "record_abandoned_hint": "생성된 이슈가 없습니다.",
+    "assignee_suggestions_loading": "추천 담당자를 찾는 중…",
+    "assignee_suggestions_failed": "추천을 불러오지 못했습니다. 미할당 항목은 직접 선택할 수 있습니다.",
+    "assignee_unassigned": "미할당 — 확인한 뒤 할당할 수 있습니다."
   },
   "sub_issue_accordion": {
     "count_other": "하위 태스크 {{count}}개",

@@ -115,14 +115,23 @@ vi.mock("../components/pickers/assignee-picker", () => ({
     onUpdate,
   }: {
     assigneeId: string | null;
-    onUpdate: (u: { assignee_type: string; assignee_id: string }) => void;
+    onUpdate: (u: { assignee_type?: string | null; assignee_id?: string | null }) => void;
   }) => (
-    <button
-      type="button"
-      onClick={() => onUpdate({ assignee_type: "agent", assignee_id: "ag-9" })}
-    >
-      assignee-picker:{String(assigneeId)}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => onUpdate({ assignee_type: "agent", assignee_id: "ag-9" })}
+      >
+        assignee-picker:{String(assigneeId)}
+      </button>
+      <button
+        type="button"
+        aria-label={`clear-assignee:${String(assigneeId)}`}
+        onClick={() => onUpdate({ assignee_type: null, assignee_id: null })}
+      >
+        clear-assignee
+      </button>
+    </>
   ),
 }));
 
@@ -478,7 +487,7 @@ describe("IssueDraftPreviewPanel group", () => {
     // And the parent, which is created but starts nothing.
     expect(
       screen.getByText(
-        "The parent is created unassigned, so it starts nothing on its own.",
+        "The parent coordinates this group, so it does not auto-start.",
       ),
     ).toBeTruthy();
   });
@@ -552,7 +561,7 @@ describe("IssueDraftPreviewPanel group", () => {
       },
       stage: "ready",
     });
-    expect(screen.getByText("Waits for its stage")).toBeTruthy();
+    expect(screen.getByText("Unassigned, won't auto-start")).toBeTruthy();
     expect(screen.queryByText(/Starting right away/)).toBeNull();
   });
 
@@ -621,6 +630,65 @@ describe("IssueDraftPreviewPanel group", () => {
       "href",
       "/acme/issues/i1",
     );
+  });
+
+  it("names the seat a confirm could not apply", () => {
+    // The seat the user saw beside the row is not the seat the issue got. This
+    // footer is the only place that difference is ever visible, and the fix
+    // (assigning it) happens on the issue, which the row already links to.
+    renderPanel({
+      draft: GROUP,
+      stage: "created",
+      createdIssues: [
+        { id: "i1", identifier: "MUL-1", title: "Parent", status: "todo" },
+        { id: "i2", identifier: "MUL-2", title: "Child", status: "backlog" },
+      ],
+      assignmentWarnings: [
+        {
+          key: "c1",
+          title: "Child",
+          reason: "cannot assign to archived agent",
+        },
+      ],
+    });
+    expect(
+      screen.getByText(
+        "“Child” could not be assigned, so it was created unassigned.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("counts several dropped seats instead of listing them all", () => {
+    renderPanel({
+      draft: GROUP,
+      stage: "created",
+      createdIssues: [
+        { id: "i1", identifier: "MUL-1", title: "Parent", status: "todo" },
+      ],
+      assignmentWarnings: [
+        { key: "c1", title: "Child one", reason: "archived agent" },
+        { key: "c2", title: "Child two", reason: "archived agent" },
+      ],
+    });
+    expect(
+      screen.getByText(
+        "2 issues could not be assigned, so they were created unassigned.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says nothing about seats when every assignment landed", () => {
+    // A warning about nothing is noise on the one screen where the user is
+    // checking what the confirm actually created.
+    renderPanel({
+      draft: GROUP,
+      stage: "created",
+      createdIssues: [
+        { id: "i1", identifier: "MUL-1", title: "Parent", status: "todo" },
+      ],
+      assignmentWarnings: [],
+    });
+    expect(screen.queryByText(/could not be assigned/)).toBeNull();
   });
 });
 
@@ -956,5 +1024,45 @@ describe("assignee suggestions", () => {
     renderPanel({ stage: "ready", draft: READY, onSave, pending: true, assigneeSuggestions: [SEAT, SEAT] });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("keeps confirmation available and explains unavailable suggestions", () => {
+    renderPanel({
+      stage: "ready",
+      draft: READY,
+      canConfirm: true,
+      assigneeSuggestionsError: true,
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Suggestions are unavailable",
+    );
+    expect(screen.getAllByText(/Unassigned/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole("button", { name: "Confirm and create" })).toBeEnabled();
+  });
+
+  it("shows the loading state while suggestions are being resolved", () => {
+    renderPanel({ stage: "ready", draft: READY, assigneeSuggestionsLoading: true });
+    expect(screen.getByRole("status")).toHaveTextContent("Finding suggested assignees");
+  });
+
+  it("persists a cleared child as unassigned when the same suggestion returns", async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    const { rerenderWith } = renderPanel({ stage: "ready", draft: READY, onSave, assigneeSuggestions: [SEAT, SEAT] });
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const clearButtons = screen.getAllByRole("button", { name: "clear-assignee:agent-1" });
+    fireEvent.click(clearButtons[1]!);
+
+    // A refetched answer is a new array, but the panel's offered-row memory
+    // must keep the child empty after the user cleared it.
+    const suggestionsAgain = [{ ...SEAT }, { ...SEAT }];
+    rerenderWith({ assigneeSuggestions: suggestionsAgain });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+    const [saved] = onSave.mock.calls[1] as [IssueDraftPayload, string];
+    expect(saved.children?.[0]?.assignee_id ?? null).toBeNull();
+    expect(saved.children?.[0]?.assignee_type ?? null).toBeNull();
   });
 });

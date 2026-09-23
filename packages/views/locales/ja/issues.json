@@ -1044,6 +1044,8 @@
     "child_title": "サブタスク {{n}} のタイトル",
     "child_starts_now": "すぐに実行",
     "child_parked": "ステージ待ち",
+    "child_unassigned": "未割り当て、自動開始しません",
+    "child_assigned_person": "担当者に割り当て済み、自動開始しません",
     "child_remove": "サブタスク {{n}} を削除",
     "child_hint": "候補: {{hint}}",
     "group_summary": "確認すると {{count}} 件のタスクを作成します。",
@@ -1067,9 +1069,11 @@
     "reopen_failed": "このすり合わせを再開できませんでした。",
     "parent_built": "親課題はすでに存在し、このラウンドでは書き換えられません。",
     "parent_built_link": "親課題を開く",
-    "group_summary_parent": "親タスクは担当者なしで作成されるため、単独では何も実行しません。",
+    "group_summary_parent": "親タスクはこのグループを調整し、自動では開始しません。",
     "created_title": "タスクを作成しました",
     "created_group_title": "{{count}} 件のタスクを作成しました",
+    "assignee_dropped": "「{{title}}」の担当者を設定できず、タスクは未アサインで作成されました。",
+    "assignee_dropped_several": "{{count}} 件のタスクは担当者を設定できず、未アサインで作成されました。",
     "retired_title": "このすり合わせは終了しました",
     "retired_description": "未完了の下書きには表示されません。",
     "load_failed": "すり合わせを読み込めませんでした。",
@@ -1150,7 +1154,10 @@
     "record_created_title": "このすり合わせから課題が1件作成されました",
     "record_issue_link": "作成された課題を開く",
     "record_abandoned_title": "このすり合わせは破棄されました",
-    "record_abandoned_hint": "課題は作成されていません。"
+    "record_abandoned_hint": "課題は作成されていません。",
+    "assignee_suggestions_loading": "担当者の候補を検索中…",
+    "assignee_suggestions_failed": "候補を取得できません。未割り当ての行は手動で選べます。",
+    "assignee_unassigned": "未割り当て — 確認後に割り当てできます。"
   },
   "sub_issue_accordion": {
     "count_other": "サブタスク {{count}} 件",

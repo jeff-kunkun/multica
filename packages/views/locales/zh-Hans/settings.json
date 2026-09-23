@@ -388,7 +388,8 @@
       "mcp": "MCP",
       "billing": "账单与套餐",
       "config_transfer": "配置导出/导入",
-      "routing": "路由"
+      "routing": "路由",
+      "project_sharing": "项目共享"
     },
     "groups": {
       "personal": "个人设置",
@@ -1256,10 +1257,32 @@
       "check_section_title": "检查更新",
       "check_section_description": "下载完成后会提示重启。",
       "up_to_date": "已是最新版本。",
-      "downloading": "v{{version}} 正在后台下载——准备好安装时会通知你。",
       "check_now": "立即检查",
       "checking": "检查中...",
-      "description": "控制后台自动更新，或手动检查新版本。"
+      "description": "控制后台自动更新，或手动检查新版本。",
+      "available": "v{{version}} 可用。",
+      "available_manual": "v{{version}} 可用——请到 Release 页面手动下载。",
+      "download": "下载",
+      "downloading_progress": "正在下载 v{{version}} · {{percent}}%",
+      "downloaded": "v{{version}} 已下载——重启即可安装。",
+      "restart_now": "立即重启",
+      "failed": "更新失败：{{error}}",
+      "retry_download": "重试下载",
+      "manual_only_title": "仅支持手动下载",
+      "manual_only_description": "这个包没有 Apple Developer ID 签名，macOS 不允许自动安装下载的更新。发现新版本时这里会提示，请到 Release 页面手动安装。",
+      "open_release_page": "打开 Release 页面",
+      "last_check_label": "上次检查",
+      "last_check_never": "尚未检查",
+      "last_check_available": "发现 v{{version}}",
+      "last_check_up_to_date": "已是最新",
+      "last_check_failed": "失败：{{error}}",
+      "last_check_trigger": {
+        "startup": "启动时",
+        "periodic": "每小时",
+        "manual": "手动"
+      },
+      "log_title": "更新日志文件",
+      "open_log": "打开日志"
     },
     "daemon": {
       "title": "守护进程",
@@ -1693,7 +1716,7 @@
     "gateway_pair_incomplete": "端点要两半都填。只填一半时走的仍是部署共用端点。",
     "gateway_default_model": "该部署自己的默认模型是 {{model}}。",
     "filters_title": "候选筛选层",
-    "filters_placeholder": "以后支持，本版不实现。今天的候选只按方向预筛加置信度过闸。",
+    "filters_placeholder": "取消、归档、停用、运行时不可达、已死亡或额度用尽的席位，会在下一次分配前被排除。供应商额度只是提示：某一家没有新鲜数据，不会把这家的席位全部判死。",
     "health_checking": "自检中…",
     "health_recheck": "重新自检",
     "health_connected": "已连通 · {{when}}自检",
@@ -1720,6 +1743,47 @@
         "chip": "未生效",
         "detail": "模型被拒、连不通、已删除，或正在失败后的冷却期。完全走原版，票上不会出现任何提示。"
       }
-    }
+    },
+    "context_title": "分配上下文",
+    "policy_label": "路由提示词",
+    "policy_description": "这段文字决定档位怎么选。普通工作落在中或强；简单、明确、低风险的工作可以用弱；只有复杂或高风险才上探强或最强。它不能改状态，也不能执行动作。",
+    "policy_restore": "恢复系统默认提示词",
+    "policy_save_error": "保存失败，编辑内容还在。",
+    "policy_saving": "保存中…",
+    "policy_saved": "已保存",
+    "quota_title": "供应商额度",
+    "quota_description": "Claude、Codex、Grok 最近一次上报。没有或过期的数字显示未知。额度不能决定某个席位是否还活着。",
+    "quota_unknown": "未知",
+    "quota_exhausted": "已用尽",
+    "quota_available": "已用 {{percent}}%",
+    "quota_resets": "{{when}} 重置",
+    "quota_updated": "更新于 {{when}}",
+    "seats_title": "候选席位",
+    "seats_empty": "还没有候选席位。"
+  },
+  "project_sharing": {
+    "title": "项目共享",
+    "description": "按项目管理工作区成员可以看到的内容。",
+    "section_title": "项目",
+    "section_description": "修改项目范围会同步更新该项目当前包含的所有任务和仓库。",
+    "loading": "正在加载项目…",
+    "empty": "还没有项目。",
+    "visibility_private": "仅自己",
+    "visibility_project": "项目成员",
+    "visibility_workspace": "全工作区",
+    "members": "{{count}} 名成员",
+    "guests": "{{count}} 名访客",
+    "resources": "{{count}} 项资源",
+    "no_members": "目前只有你，别人暂时看不到。",
+    "manage_members": "管理项目成员",
+    "read_only": "访客可以查看共享项目，但不能修改共享范围。",
+    "change_for": "修改 {{name}} 的共享范围",
+    "confirm_title": "更新 {{name}} 的共享范围？",
+    "confirm_description": "将把 {{count}} 项资源更新为“{{visibility}}”，其中 {{privateCount}} 项当前为私有。",
+    "cancel": "取消",
+    "confirm": "应用",
+    "saving": "应用中…",
+    "preview_loading": "正在加载预览…预览准备好之前不能确认。",
+    "preview_failed": "预览加载失败，请重试后再确认。"
   }
 }

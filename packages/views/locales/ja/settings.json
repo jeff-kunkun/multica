@@ -1256,10 +1256,32 @@
       "check_section_title": "アップデートを確認",
       "check_section_description": "ダウンロード完了後に再起動を案内します。",
       "up_to_date": "最新バージョンを使用しています。",
-      "downloading": "v{{version}} をバックグラウンドでダウンロード中です。インストールの準備が整うとお知らせします。",
       "check_now": "今すぐ確認",
       "checking": "確認中…",
-      "description": "バックグラウンドでの自動アップデートを設定するか、新しいバージョンを手動で確認します。"
+      "description": "バックグラウンドでの自動アップデートを設定するか、新しいバージョンを手動で確認します。",
+      "available": "v{{version}} が利用可能です。",
+      "available_manual": "v{{version}} が利用可能です。リリースページから手動でダウンロードしてください。",
+      "download": "ダウンロード",
+      "downloading_progress": "v{{version}} をダウンロード中 · {{percent}}%",
+      "downloaded": "v{{version}} のダウンロードが完了しました。再起動するとインストールされます。",
+      "restart_now": "今すぐ再起動",
+      "failed": "アップデートに失敗しました: {{error}}",
+      "retry_download": "ダウンロードを再試行",
+      "manual_only_title": "手動ダウンロードのみ",
+      "manual_only_description": "このビルドは Apple Developer ID で署名されていないため、macOS はダウンロードしたアップデートの自動インストールを拒否します。新しいバージョンはここで通知されるので、リリースページからインストールしてください。",
+      "open_release_page": "リリースページを開く",
+      "last_check_label": "最終確認",
+      "last_check_never": "未確認",
+      "last_check_available": "v{{version}} が見つかりました",
+      "last_check_up_to_date": "最新です",
+      "last_check_failed": "失敗: {{error}}",
+      "last_check_trigger": {
+        "startup": "起動時",
+        "periodic": "1 時間ごと",
+        "manual": "手動"
+      },
+      "log_title": "アップデートログ",
+      "open_log": "ログを開く"
     },
     "daemon": {
       "title": "デーモン",
@@ -1693,7 +1715,7 @@
     "gateway_pair_incomplete": "エンドポイントは両方の入力が必要です。片方だけの場合はデプロイ共通のエンドポイントを使います。",
     "gateway_default_model": "そのデプロイ自体の既定モデルは {{model}} です。",
     "filters_title": "候補フィルター",
-    "filters_placeholder": "今後対応予定。今回は未実装です。",
+    "filters_placeholder": "取消、アーカイブ、停止、到達不能、死亡、または残量切れの席は次の割り当て前に外します。プロバイダ残量はヒントです。読み取れないからといって、そのプロバイダの席を全部除外はしません。",
     "health_checking": "確認中…",
     "health_recheck": "再チェック",
     "health_connected": "接続済み · {{when}}に自己チェック",
@@ -1720,6 +1742,22 @@
         "chip": "無効",
         "detail": "モデルが拒否・到達不可・削除済み、または連続失敗後のクールダウン中です。オフと同じ動作で、課題には何も表示されません。"
       }
-    }
+    },
+    "context_title": "割り当てコンテキスト",
+    "policy_label": "ルーティングの指示",
+    "policy_description": "この文章が段位の選び方です。普通の仕事は中か強、単純でリスクの低い仕事は弱、複雑または高リスクだけが強か最強に上がります。状態は変えられません。",
+    "policy_restore": "既定の指示に戻す",
+    "policy_save_error": "保存できませんでした。編集内容はそのまま残っています。",
+    "policy_saving": "保存中…",
+    "policy_saved": "保存しました",
+    "quota_title": "プロバイダの残量",
+    "quota_description": "Claude、Codex、Grok の直近の報告です。無い、または古い数値は不明のままです。残量だけでは席の生死は決まりません。",
+    "quota_unknown": "不明",
+    "quota_exhausted": "使い切り",
+    "quota_available": "{{percent}}% 使用",
+    "quota_resets": "{{when}} にリセット",
+    "quota_updated": "{{when}} 更新",
+    "seats_title": "候補の席",
+    "seats_empty": "候補の席はまだありません。"
   }
 }

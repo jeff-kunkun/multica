@@ -5,6 +5,7 @@ import { ExternalLink, FileText, Loader2, Trash2 } from "lucide-react";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   applyIssueDraftAssigneeSuggestions,
+  ISSUE_DRAFT_ROOT_ROW,
   type DraftAssigneeSuggestion,
 } from "@multica/core/issue-drafts";
 import {
@@ -17,6 +18,7 @@ import type {
   Attachment,
   Issue,
   IssueAssigneeType,
+  IssueDraftAssignmentWarning,
   IssueDraftChild,
   IssueDraftCreatedIssue,
   IssueDraftPayload,
@@ -80,6 +82,8 @@ export function IssueDraftPreviewPanel({
   runtimesLoading,
   members,
   assigneeSuggestions,
+  assigneeSuggestionsLoading = false,
+  assigneeSuggestionsError = false,
   currentUserId,
   switchingRuntime,
   pending,
@@ -87,6 +91,7 @@ export function IssueDraftPreviewPanel({
   readOnly: readOnlyProp,
   producedIssueId,
   createdIssues,
+  assignmentWarnings,
   round,
   continuation,
   builtChildren,
@@ -110,6 +115,8 @@ export function IssueDraftPreviewPanel({
   runtimesLoading: boolean;
   members: MemberWithUser[];
   assigneeSuggestions?: readonly (DraftAssigneeSuggestion | null)[];
+  assigneeSuggestionsLoading?: boolean;
+  assigneeSuggestionsError?: boolean;
   currentUserId: string | null;
   switchingRuntime: boolean;
   /** A turn is running: nothing may be written while the carrier is replying. */
@@ -137,6 +144,13 @@ export function IssueDraftPreviewPanel({
    * which is what `[issue_id]` means (DENE-411).
    */
   createdIssues?: IssueDraftCreatedIssue[] | null;
+  /**
+   * Nodes a confirm created unassigned because the seat displayed beside them
+   * could not be applied. Empty (or absent) means every assignment landed, and
+   * the footer then says nothing extra — a warning about nothing is noise on
+   * the one screen where the user is checking what was created.
+   */
+  assignmentWarnings?: readonly IssueDraftAssignmentWarning[];
   /**
    * Which round this alignment is on: 1 for a first pass, one more per reopen.
    * Only shown past the first, because "round 1" on a brand-new alignment is a
@@ -306,6 +320,9 @@ export function IssueDraftPreviewPanel({
   };
 
   const updateChild = (index: number, patch: Partial<IssueDraftChild>) => {
+    if (patch.assignee_id !== undefined || patch.assignee_type !== undefined) {
+      offeredRows.current.add(children[index]?.key ?? "");
+    }
     setEditing({
       ...value,
       children: children.map((child, at) =>
@@ -474,15 +491,33 @@ export function IssueDraftPreviewPanel({
                   open={parentLocked ? false : undefined}
                   align="start"
                   onUpdate={(updates) =>
-                    setEditing({
-                      ...value,
-                      assignee_type: updates.assignee_type ?? null,
-                      assignee_id: updates.assignee_id ?? null,
-                    })
+                    (() => {
+                      offeredRows.current.add(ISSUE_DRAFT_ROOT_ROW);
+                      setEditing({
+                        ...value,
+                        assignee_type: updates.assignee_type ?? null,
+                        assignee_id: updates.assignee_id ?? null,
+                      });
+                    })()
                   }
                 />
               </div>
             </div>
+            {assigneeSuggestionsLoading ? (
+              <p className="text-caption text-muted-foreground" role="status">
+                {t(($) => $.alignment.assignee_suggestions_loading)}
+              </p>
+            ) : null}
+            {assigneeSuggestionsError ? (
+              <p className="text-caption text-destructive" role="alert">
+                {t(($) => $.alignment.assignee_suggestions_failed)}
+              </p>
+            ) : null}
+            {!value.assignee_id && children.length === 0 ? (
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.alignment.assignee_unassigned)}
+              </p>
+            ) : null}
 
             <div className="space-y-2">
               <span className="text-caption text-muted-foreground">
@@ -615,7 +650,7 @@ export function IssueDraftPreviewPanel({
                 ) : null}
                 {newChildren.map(({ child, index }) => {
                   const row = groupPlan.rows[index + 1];
-                  const startsNow = row?.startsOnCreate === true;
+                  const outcome = row?.outcome ?? "unassigned";
                   return (
                     <div
                       key={child.key}
@@ -628,14 +663,18 @@ export function IssueDraftPreviewPanel({
                         <span
                           className={cn(
                             "ml-auto text-caption",
-                            startsNow
+                            outcome === "starts"
                               ? "font-medium text-foreground"
                               : "text-muted-foreground",
                           )}
                         >
-                          {startsNow
+                          {outcome === "starts"
                             ? t(($) => $.alignment.child_starts_now)
-                            : t(($) => $.alignment.child_parked)}
+                            : outcome === "parked"
+                              ? t(($) => $.alignment.child_parked)
+                              : outcome === "member"
+                                ? t(($) => $.alignment.child_assigned_person)
+                                : t(($) => $.alignment.child_unassigned)}
                         </span>
                         <Button
                           variant="ghost"
@@ -723,6 +762,7 @@ export function IssueDraftPreviewPanel({
           <CreatedGroupFooter
             issues={createdIssues ?? null}
             fallbackIssueId={producedIssueId ?? null}
+            assignmentWarnings={assignmentWarnings ?? EMPTY_ASSIGNMENT_WARNINGS}
           />
         ) : (
           <>
@@ -768,7 +808,7 @@ export function IssueDraftPreviewPanel({
               ) : null}
               {!isContinuation &&
               groupPlan.total > 1 &&
-              groupPlan.rows[0]?.startsOnCreate !== true ? (
+              groupPlan.rows[0]?.outcome !== "starts" ? (
                 <p className="text-caption text-muted-foreground">
                   {t(($) => $.alignment.group_summary_parent)}
                 </p>
@@ -929,13 +969,21 @@ function AlignmentRecordFooter({
  * A backend that predates groups reports the root alone, and the row that
  * produces carries no title or identifier: saying "1 issue" is the honest
  * version of that, because that is all the server told us.
+ *
+ * `assignmentWarnings` is the one thing this footer can report that the rows
+ * cannot: a seat the user saw beside a row was not applied, so that issue was
+ * created unassigned. It is said in words rather than as a mark on the row —
+ * the rows here are links to issues, and the correction the user needs ("set a
+ * seat on that issue") happens on the issue, not on this page (DENE-694).
  */
 function CreatedGroupFooter({
   issues,
   fallbackIssueId,
+  assignmentWarnings,
 }: {
   issues: IssueDraftCreatedIssue[] | null;
   fallbackIssueId: string | null;
+  assignmentWarnings: readonly IssueDraftAssignmentWarning[];
 }) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
@@ -964,6 +1012,17 @@ function CreatedGroupFooter({
       {rows.length > 1 ? (
         <p className="text-caption text-muted-foreground">
           {t(($) => $.alignment.created_group_title, { count: rows.length })}
+        </p>
+      ) : null}
+      {assignmentWarnings.length > 0 ? (
+        <p className="text-caption text-foreground">
+          {assignmentWarnings.length === 1
+            ? t(($) => $.alignment.assignee_dropped, {
+                title: assignmentWarnings[0]?.title || "—",
+              })
+            : t(($) => $.alignment.assignee_dropped_several, {
+                count: assignmentWarnings.length,
+              })}
         </p>
       ) : null}
       <ul className="space-y-1">
@@ -1076,6 +1135,9 @@ const EMPTY_ATTACHMENTS: readonly Attachment[] = [];
 /** A first round has nothing adopted, and the empty set is the honest default
  *  for a caller that does not know about continuation rounds at all. */
 const EMPTY_BUILT_KEYS: ReadonlySet<string> = new Set<string>();
+
+/** Every assignment landed. The footer says nothing about seats then. */
+const EMPTY_ASSIGNMENT_WARNINGS: readonly IssueDraftAssignmentWarning[] = [];
 
 function sameDraft(a: IssueDraftPayload, b: IssueDraftPayload): boolean {
   return (

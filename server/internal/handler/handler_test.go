@@ -907,9 +907,9 @@ func TestCreateSubIssueExplicitEmptyProjectDoesNotInherit(t *testing.T) {
 }
 
 func TestUpdateIssueInheritsParentProjectOnlyWhenUnset(t *testing.T) {
-	var parentProjectID, childProjectID, parentID, emptyChildID, setChildID string
+	var parentProjectID, childProjectID, parentID, emptyChildID, setChildID, clearedWhileAttachingID string
 	defer func() {
-		for _, issueID := range []string{setChildID, emptyChildID, parentID} {
+		for _, issueID := range []string{setChildID, clearedWhileAttachingID, emptyChildID, parentID} {
 			if issueID == "" {
 				continue
 			}
@@ -970,6 +970,23 @@ func TestUpdateIssueInheritsParentProjectOnlyWhenUnset(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&emptyChild)
 	if emptyChild.ProjectID != nil {
 		t.Fatalf("re-attaching the parent restored project %v", emptyChild.ProjectID)
+	}
+
+	// Naming project_id in the same request as the parent is an explicit
+	// choice, including null. The single-field inheritance must not fill it.
+	w = testutil.Call(t, testHandler.CreateIssue, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Empty child cleared while attaching",
+	})).Want(http.StatusCreated)
+	var clearedWhileAttaching IssueResponse
+	json.NewDecoder(w.Body).Decode(&clearedWhileAttaching)
+	clearedWhileAttachingID = clearedWhileAttaching.ID
+	w = testutil.Call(t, testHandler.UpdateIssue, withURLParam(newRequest("PUT", "/api/issues/"+clearedWhileAttachingID, map[string]any{
+		"parent_issue_id": parentID,
+		"project_id":      nil,
+	}), "id", clearedWhileAttachingID)).Want(http.StatusOK)
+	json.NewDecoder(w.Body).Decode(&clearedWhileAttaching)
+	if clearedWhileAttaching.ProjectID != nil {
+		t.Fatalf("explicit empty project on attach was overwritten with %v", clearedWhileAttaching.ProjectID)
 	}
 
 	w = testutil.Call(t, testHandler.CreateIssue, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{

@@ -3543,13 +3543,17 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 // that is being attached and does not already have one, when this write did
 // not name a project. An issue that already has a project keeps it, and an
 // explicit project in the same request (including null) is left untouched.
-// A parent with no project, or a project row that is gone, leaves the issue
-// empty rather than failing the parent link.
+// Sending the parent the issue already has is not a new attachment: a project
+// the user cleared stays cleared. A parent with no project, or a project row
+// that is gone, leaves the issue empty rather than failing the parent link.
 func inheritUnsetProjectFromNewParent(ctx context.Context, q *db.Queries, params *db.UpdateIssueParams, current db.Issue, rawFields map[string]json.RawMessage) error {
 	if _, touched := rawFields["project_id"]; touched {
 		return nil
 	}
 	if _, touched := rawFields["parent_issue_id"]; !touched || !params.ParentIssueID.Valid {
+		return nil
+	}
+	if current.ParentIssueID.Valid && current.ParentIssueID == params.ParentIssueID {
 		return nil
 	}
 	if current.ProjectID.Valid {
@@ -3957,6 +3961,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		err = h.runWithIssueStatusGuard(r.Context(), prevIssue.WorkspaceID, statusKeyForGuard, func(q *db.Queries) error {
+			// A parent-only write (the attach-as-child path) never enters
+			// updateIssueAtomically, so the same inheritance has to run here.
+			// An explicit project_id in this request, including null, still wins.
+			if innerErr := inheritUnsetProjectFromNewParent(r.Context(), q, &params, prevIssue, rawFields); innerErr != nil {
+				return innerErr
+			}
 			var innerErr error
 			issue, innerErr = q.UpdateIssue(r.Context(), params)
 			return innerErr

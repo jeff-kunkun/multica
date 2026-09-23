@@ -12,6 +12,12 @@ import type {
 } from "../shared/issue-window";
 import type {
   ManualUpdateCheckResult,
+  UpdateAvailablePayload,
+  UpdateCheckRecord,
+  UpdateDownloadProgressPayload,
+  UpdaterCapabilities,
+  UpdaterCheckingPayload,
+  UpdaterErrorPayload,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import type {
@@ -241,13 +247,19 @@ interface DaemonAPI {
 }
 
 interface UpdaterAPI {
-  onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
-  onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
-  onUpdateDownloaded: (
-    callback: (info: { version: string; releaseNotes?: string }) => void,
+  onChecking: (callback: (payload: UpdaterCheckingPayload) => void) => () => void;
+  onCheckResult: (callback: (record: UpdateCheckRecord) => void) => () => void;
+  onUpdateAvailable: (callback: (info: UpdateAvailablePayload) => void) => () => void;
+  onDownloadProgress: (
+    callback: (progress: UpdateDownloadProgressPayload) => void,
   ) => () => void;
+  onUpdateDownloaded: (callback: (info: UpdateAvailablePayload) => void) => () => void;
+  onError: (callback: (error: UpdaterErrorPayload) => void) => () => void;
   downloadUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
+  getCapabilities: () => Promise<UpdaterCapabilities>;
+  getLastCheck: () => Promise<UpdateCheckRecord | null>;
+  openLogFile: () => Promise<{ success: boolean; error?: string }>;
   getPreferences: () => Promise<UpdaterPreferences>;
   setAutomaticUpdates: (enabled: boolean) => Promise<UpdaterPreferences>;
   checkForUpdates: () => Promise<ManualUpdateCheckResult>;

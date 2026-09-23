@@ -388,7 +388,8 @@
       "mcp": "MCP",
       "billing": "Billing",
       "config_transfer": "Export & import",
-      "routing": "Routing"
+      "routing": "Routing",
+      "project_sharing": "Project sharing"
     },
     "groups": {
       "personal": "Personal",
@@ -1259,10 +1260,32 @@
       "check_section_title": "Check for updates",
       "check_section_description": "You'll be prompted to restart when the download is ready.",
       "up_to_date": "You're on the latest version.",
-      "downloading": "v{{version}} is downloading in the background — you'll be notified when it's ready to install.",
       "check_now": "Check now",
       "checking": "Checking…",
-      "description": "Control automatic background updates or check for a new version manually."
+      "description": "Control automatic background updates or check for a new version manually.",
+      "available": "v{{version}} is available.",
+      "available_manual": "v{{version}} is available — download it from the release page.",
+      "download": "Download",
+      "downloading_progress": "Downloading v{{version}} · {{percent}}%",
+      "downloaded": "v{{version}} downloaded — restart to install.",
+      "restart_now": "Restart now",
+      "failed": "Update failed: {{error}}",
+      "retry_download": "Retry download",
+      "manual_only_title": "Manual download only",
+      "manual_only_description": "This build isn't signed with an Apple Developer ID, so macOS refuses to install downloaded updates automatically. New versions are announced here; install them from the release page.",
+      "open_release_page": "Open release page",
+      "last_check_label": "Last check",
+      "last_check_never": "not yet",
+      "last_check_available": "v{{version}} found",
+      "last_check_up_to_date": "up to date",
+      "last_check_failed": "failed: {{error}}",
+      "last_check_trigger": {
+        "startup": "at launch",
+        "periodic": "hourly",
+        "manual": "manual"
+      },
+      "log_title": "Updater log",
+      "open_log": "Open log"
     },
     "daemon": {
       "title": "Daemon",
@@ -1700,7 +1723,7 @@
     "gateway_pair_incomplete": "An endpoint needs both halves. With only one filled in, the deployment’s shared endpoint is used instead.",
     "gateway_default_model": "That deployment’s own default model is {{model}}.",
     "filters_title": "Candidate filters",
-    "filters_placeholder": "Supported later; not implemented in this version. Today candidates are narrowed by direction and gated by confidence.",
+    "filters_placeholder": "A seat that is cancelled, archived, switched off, unreachable, dead, or out of quota is left out before the next assignment. Provider quota is only a hint: a missing reading does not remove every seat on that provider.",
     "health_checking": "Checking…",
     "health_recheck": "Re-check",
     "health_connected": "Connected · self-checked {{when}}",
@@ -1727,6 +1750,47 @@
         "chip": "Not in effect",
         "detail": "The model was rejected, is unreachable, was deleted, or is cooling down after repeated failures. Behaves like off; nothing appears on any issue."
       }
-    }
+    },
+    "context_title": "Assignment context",
+    "policy_label": "Routing prompt",
+    "policy_description": "This text decides which tier gets the work. Ordinary work stays on medium or strong; simple, explicit, low-risk work can use weak; only complex or high-risk work steps up. It cannot change status or take an action.",
+    "policy_restore": "Restore the default prompt",
+    "policy_save_error": "Could not save. Your edit is still in the box.",
+    "policy_saving": "Saving…",
+    "policy_saved": "Saved",
+    "quota_title": "Provider quota",
+    "quota_description": "Claude, Codex, and Grok, as last reported. Missing or stale numbers stay unknown. Quota does not decide whether a seat is alive.",
+    "quota_unknown": "unknown",
+    "quota_exhausted": "used up",
+    "quota_available": "{{percent}}% used",
+    "quota_resets": "resets {{when}}",
+    "quota_updated": "updated {{when}}",
+    "seats_title": "Candidate seats",
+    "seats_empty": "No candidate seats yet."
+  },
+  "project_sharing": {
+    "title": "Project sharing",
+    "description": "Manage which workspace members can see each project and its resources.",
+    "section_title": "Projects",
+    "section_description": "Changing a project scope updates all issues and repositories currently in that project.",
+    "loading": "Loading projects…",
+    "empty": "No projects yet.",
+    "visibility_private": "Only me",
+    "visibility_project": "Project members",
+    "visibility_workspace": "Entire workspace",
+    "members": "{{count}} members",
+    "guests": "{{count}} guests",
+    "resources": "{{count}} resources",
+    "no_members": "Only you can currently see this project. Others cannot see it yet.",
+    "manage_members": "Manage project members",
+    "read_only": "Guests can view shared projects but cannot change sharing.",
+    "change_for": "Change sharing for {{name}}",
+    "confirm_title": "Update sharing for {{name}}?",
+    "confirm_description": "This will update {{count}} resources, including {{privateCount}} that are currently private, to {{visibility}}.",
+    "cancel": "Cancel",
+    "confirm": "Apply",
+    "saving": "Applying…",
+    "preview_loading": "Loading the preview… You cannot apply changes until it is ready.",
+    "preview_failed": "The preview could not be loaded. Try again before applying changes."
   }
 }
