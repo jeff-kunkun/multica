@@ -3930,6 +3930,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
 	})
+	// A member moved off this issue may have just lost the only reason they
+	// could see it. The content frame above is filtered for exactly those
+	// recipients, so the id-only frame is what evicts their cached copy
+	// (DENE-717). Unconditional because an unassign arrives as explicit nulls,
+	// which leaves assigneeChanged false; the helper does the real check.
+	h.invalidateFormerAssignee(r.Context(), prevIssue, issue, actorType, actorID)
 	if attachmentsChanged {
 		// The full owner snapshot must be admitted before an auxiliary event at
 		// the same revision. Otherwise clients advance only the revision here and
@@ -4728,6 +4734,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			"priority_changed": priorityChanged,
 			"project_changed":  projectChanged,
 		})
+		// See the single-update path: an unassign is expressed as explicit
+		// nulls, so this cannot be gated on the assignee_changed flag.
+		h.invalidateFormerAssignee(r.Context(), prevIssue, issue, actorType, actorID)
 
 		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
 		// mirrors UpdateIssue. See that handler for the rationale.
