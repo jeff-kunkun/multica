@@ -41,15 +41,19 @@ function runtime(metadata: Record<string, unknown>): AgentRuntime {
   };
 }
 
-function renderControls(metadata: Record<string, unknown>, canManage = true) {
-  return render(
+function controlsTree(metadata: Record<string, unknown>, canManage = true) {
+  return (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <AgentCLIUpdateControls
         runtime={runtime(metadata)}
         canManage={canManage}
       />
-    </I18nProvider>,
+    </I18nProvider>
   );
+}
+
+function renderControls(metadata: Record<string, unknown>, canManage = true) {
+  return render(controlsTree(metadata, canManage));
 }
 
 const snapshot = {
@@ -103,6 +107,50 @@ describe("agent CLI update controls", () => {
       fireEvent.click(screen.getByRole("button", { name: "Update now" }));
     });
     expect(api.requestAgentCLIUpdate).toHaveBeenCalledWith("rt-1");
+  });
+
+  it("follows the daemon after an update request instead of spinning", async () => {
+    vi.mocked(api.requestAgentCLIUpdate).mockResolvedValue(undefined);
+    const view = renderControls(snapshot);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Update now" }));
+    });
+
+    view.rerender(
+      controlsTree({
+        cli_update: { ...snapshot.cli_update, phase: "waiting", error: "" },
+      }),
+    );
+    expect(
+      screen.getByText("Waiting until this machine is idle"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Updating…")).not.toBeInTheDocument();
+
+    view.rerender(
+      controlsTree({
+        cli_update: {
+          ...snapshot.cli_update,
+          phase: "failed",
+          error: "network is down",
+        },
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Update now" })).toBeEnabled();
+    expect(screen.getByText("network is down")).toBeInTheDocument();
+    expect(screen.queryByText("Updating…")).not.toBeInTheDocument();
+
+    view.rerender(
+      controlsTree({
+        cli_update: {
+          ...snapshot.cli_update,
+          phase: "current",
+          current_version: "2.1.9",
+          error: "",
+        },
+      }),
+    );
+    expect(screen.getByText("Up to date")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update now" })).toBeEnabled();
   });
 
   it("turns auto-follow off", async () => {

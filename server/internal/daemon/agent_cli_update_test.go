@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -160,6 +161,56 @@ func TestReconcileAgentCLIReportsCheckFailure(t *testing.T) {
 	}
 	if status.Phase != agentCLIPhaseCheckFailed || status.Error == "" {
 		t.Fatalf("status = %#v", status)
+	}
+}
+
+func TestAgentCLIFollowFromTwoWorkspacesAppliesOnce(t *testing.T) {
+	bin := "/usr/local/bin/claude"
+	d, bodies := newAgentCLITestDaemon(t, bin, "1.2.0")
+	d.runtimeIndex = map[string]Runtime{
+		"rt-a": {ID: "rt-a", Provider: "claude"},
+		"rt-b": {ID: "rt-b", Provider: "claude"},
+	}
+	d.agentCLIFollowFile = filepath.Join(t.TempDir(), "follow.json")
+
+	off := false
+	on := true
+	d.handleAgentCLICommand("rt-a", &PendingAgentCLI{Follow: &off, FollowID: "fa"})
+	d.handleAgentCLICommand("rt-b", &PendingAgentCLI{Follow: &on, FollowID: "fb"})
+	settled, err := os.ReadFile(d.agentCLIFollowFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same clicks come back on the next heartbeats. They must not flip
+	// the shared switch or rewrite the preference file.
+	d.handleAgentCLICommand("rt-a", &PendingAgentCLI{Follow: &off, FollowID: "fa"})
+	d.handleAgentCLICommand("rt-b", &PendingAgentCLI{Follow: &on, FollowID: "fb"})
+	retried, err := os.ReadFile(d.agentCLIFollowFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(settled) != string(retried) {
+		t.Fatalf("retry rewrote follow preference:\n%s\n%s", settled, retried)
+	}
+	if !d.agentCLIWantsFollow("claude") {
+		t.Fatal("the later workspace click did not stick")
+	}
+
+	d.reconcileAgentCLIs(context.Background())
+	got := map[string]bool{}
+	for _, raw := range *bodies {
+		var envelope struct {
+			AppliedFollowID string `json:"applied_follow_id"`
+		}
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.AppliedFollowID != "" {
+			got[envelope.AppliedFollowID] = true
+		}
+	}
+	if !got["fa"] || !got["fb"] {
+		t.Fatalf("acks = %#v", got)
 	}
 }
 

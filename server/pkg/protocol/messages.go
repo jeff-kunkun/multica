@@ -555,9 +555,12 @@ type DaemonHeartbeatPendingUpdate struct {
 
 // DaemonHeartbeatPendingAgentCLI is a follow-switch or a one-shot upgrade of
 // the agent CLI behind this runtime. Follow is omitted when the user has not
-// changed it. The daemon keeps its own default (on) until a value arrives.
+// changed it. FollowID identifies that one click so the server can drop it
+// after the daemon applies it; the next click gets a new id. The daemon keeps
+// its own default (on) until a value arrives.
 type DaemonHeartbeatPendingAgentCLI struct {
 	Follow    *bool  `json:"follow,omitempty"`
+	FollowID  string `json:"follow_id,omitempty"`
 	UpdateNow bool   `json:"update_now,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
 }

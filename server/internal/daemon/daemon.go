@@ -473,7 +473,11 @@ type Daemon struct {
 	agentCLIFollow       map[string]bool // explicit per-provider choice; missing means follow (default on)
 	agentCLIFollowLoaded bool
 	agentCLIFollowFile   string // tests pin this; empty uses the profile dir
-	agentCLIManual       agentCLIManual
+	// agentCLIFollowSeen is the last follow click applied for each runtime.
+	// Heartbeats repeat a click until the server clears it; applying that
+	// same id again would flip the one switch shared by every workspace.
+	agentCLIFollowSeen map[string]string
+	agentCLIManual     agentCLIManual
 	// Test seams. Nil uses the real network, exec, and post-upgrade refresh.
 	agentCLIFetch        func(ctx context.Context, url string) ([]byte, error)
 	agentCLIRun          func(ctx context.Context, name string, args ...string) ([]byte, error)

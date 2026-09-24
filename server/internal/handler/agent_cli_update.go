@@ -81,7 +81,8 @@ func (h *Handler) requireManageableAgentCLI(w http.ResponseWriter, r *http.Reque
 }
 
 // ReportAgentCLIStatus merges the daemon's snapshot into runtime metadata and
-// clears a manual update once the daemon says that request finished.
+// clears a manual update or a follow click once the daemon says that one
+// finished. A newer click keeps its own id, so a late ack cannot drop it.
 func (h *Handler) ReportAgentCLIStatus(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	rt, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
@@ -91,6 +92,7 @@ func (h *Handler) ReportAgentCLIStatus(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		CLIUpdate        json.RawMessage `json:"cli_update"`
 		AppliedRequestID string          `json:"applied_request_id"`
+		AppliedFollowID  string          `json:"applied_follow_id"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAgentCLIUpdateBytes)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -109,9 +111,16 @@ func (h *Handler) ReportAgentCLIStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to store CLI status")
 		return
 	}
-	if body.AppliedRequestID != "" && h.AgentCLICommands != nil {
-		if err := h.AgentCLICommands.ClearUpdate(r.Context(), runtimeID, body.AppliedRequestID); err != nil {
-			slog.Warn("clear agent CLI update request", "error", err, "runtime_id", runtimeID)
+	if h.AgentCLICommands != nil {
+		if body.AppliedRequestID != "" {
+			if err := h.AgentCLICommands.ClearUpdate(r.Context(), runtimeID, body.AppliedRequestID); err != nil {
+				slog.Warn("clear agent CLI update request", "error", err, "runtime_id", runtimeID)
+			}
+		}
+		if body.AppliedFollowID != "" {
+			if err := h.AgentCLICommands.ClearFollow(r.Context(), runtimeID, body.AppliedFollowID); err != nil {
+				slog.Warn("clear agent CLI follow", "error", err, "runtime_id", runtimeID)
+			}
 		}
 	}
 	if changed > 0 && rt.WorkspaceID.Valid {

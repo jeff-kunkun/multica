@@ -102,8 +102,11 @@ export function AgentCLIUpdateControls({
     try {
       await api.requestAgentCLIUpdate(runtime.id);
     } catch {
-      setBusy(null);
       setLocalError(t(($) => $.agent_cli.update_request_failed));
+    } finally {
+      // Queueing the upgrade is not the upgrade. Waiting, failure, and
+      // "already current" arrive on the daemon's next report.
+      setBusy(null);
     }
   };
 

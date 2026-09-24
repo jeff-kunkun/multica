@@ -82,12 +82,25 @@ func (d *Daemon) handleAgentCLICommand(runtimeID string, cmd *PendingAgentCLI) {
 	d.ensureAgentCLIFollowLocked()
 	changed := false
 	if cmd.Follow != nil {
-		current, ok := d.agentCLIFollow[rt.Provider]
-		if !ok || current != *cmd.Follow {
-			d.agentCLIFollow[rt.Provider] = *cmd.Follow
-			changed = true
-			if err := d.writeAgentCLIFollowLocked(); err != nil && d.logger != nil {
-				d.logger.Warn("save agent CLI follow preference", "provider", rt.Provider, "error", err)
+		// A repeated heartbeat still carries the click until the server
+		// hears that it was applied. The value is one per CLI, so applying
+		// the same click twice fights a newer click from another workspace.
+		already := cmd.FollowID != "" && d.agentCLIFollowSeen[runtimeID] == cmd.FollowID
+		if !already {
+			current, ok := d.agentCLIFollow[rt.Provider]
+			if !ok || current != *cmd.Follow {
+				d.agentCLIFollow[rt.Provider] = *cmd.Follow
+				changed = true
+				if err := d.writeAgentCLIFollowLocked(); err != nil && d.logger != nil {
+					d.logger.Warn("save agent CLI follow preference", "provider", rt.Provider, "error", err)
+				}
+			}
+			if cmd.FollowID != "" {
+				if d.agentCLIFollowSeen == nil {
+					d.agentCLIFollowSeen = map[string]string{}
+				}
+				d.agentCLIFollowSeen[runtimeID] = cmd.FollowID
+				changed = true
 			}
 		}
 	}
@@ -432,15 +445,32 @@ func (d *Daemon) publishAgentCLIStatus(ctx context.Context, provider string, sta
 	if d.client == nil {
 		return
 	}
+	acks := d.agentCLIFollowAcks()
 	for _, rt := range d.runtimesForProvider(provider) {
 		body := map[string]any{"cli_update": status}
 		if manual.RequestID != "" && manual.RuntimeID == rt.ID {
 			body["applied_request_id"] = manual.RequestID
 		}
+		if id := acks[rt.ID]; id != "" {
+			body["applied_follow_id"] = id
+		}
 		if err := d.client.ReportAgentCLIStatus(ctx, rt.ID, body); err != nil && d.logger != nil {
 			d.logger.Warn("report agent CLI status", "provider", provider, "runtime_id", rt.ID, "error", err)
 		}
 	}
+}
+
+func (d *Daemon) agentCLIFollowAcks() map[string]string {
+	d.agentCLIMu.Lock()
+	defer d.agentCLIMu.Unlock()
+	if len(d.agentCLIFollowSeen) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(d.agentCLIFollowSeen))
+	for runtimeID, followID := range d.agentCLIFollowSeen {
+		out[runtimeID] = followID
+	}
+	return out
 }
 
 func (d *Daemon) ensureAgentCLIFollowLocked() {

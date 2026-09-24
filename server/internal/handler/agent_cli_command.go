@@ -17,10 +17,12 @@ type AgentCLICommandStore interface {
 	SetUpdate(ctx context.Context, runtimeID, requestID string) error
 	Peek(ctx context.Context, runtimeID string) (*protocol.DaemonHeartbeatPendingAgentCLI, error)
 	ClearUpdate(ctx context.Context, runtimeID, requestID string) error
+	ClearFollow(ctx context.Context, runtimeID, followID string) error
 }
 
 type agentCLICommandRecord struct {
 	Follow    *bool  `json:"follow,omitempty"`
+	FollowID  string `json:"follow_id,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
 }
 
@@ -28,7 +30,11 @@ func (r agentCLICommandRecord) pending() *protocol.DaemonHeartbeatPendingAgentCL
 	if r.Follow == nil && r.RequestID == "" {
 		return nil
 	}
-	cmd := &protocol.DaemonHeartbeatPendingAgentCLI{Follow: r.Follow}
+	cmd := &protocol.DaemonHeartbeatPendingAgentCLI{}
+	if r.Follow != nil {
+		cmd.Follow = r.Follow
+		cmd.FollowID = r.FollowID
+	}
 	if r.RequestID != "" {
 		cmd.UpdateNow = true
 		cmd.RequestID = r.RequestID
@@ -50,6 +56,7 @@ func (s *InMemoryAgentCLICommandStore) SetFollow(_ context.Context, runtimeID st
 	defer s.mu.Unlock()
 	rec := s.cmds[runtimeID]
 	rec.Follow = &follow
+	rec.FollowID = randomID()
 	s.cmds[runtimeID] = rec
 	return nil
 }
@@ -73,11 +80,28 @@ func (s *InMemoryAgentCLICommandStore) ClearUpdate(_ context.Context, runtimeID,
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, ok := s.cmds[runtimeID]
-	if !ok || rec.RequestID != requestID {
+	if !ok || requestID == "" || rec.RequestID != requestID {
 		return nil
 	}
 	rec.RequestID = ""
 	if rec.Follow == nil {
+		delete(s.cmds, runtimeID)
+		return nil
+	}
+	s.cmds[runtimeID] = rec
+	return nil
+}
+
+func (s *InMemoryAgentCLICommandStore) ClearFollow(_ context.Context, runtimeID, followID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.cmds[runtimeID]
+	if !ok || followID == "" || rec.FollowID != followID {
+		return nil
+	}
+	rec.Follow = nil
+	rec.FollowID = ""
+	if rec.RequestID == "" {
 		delete(s.cmds, runtimeID)
 		return nil
 	}
@@ -134,6 +158,7 @@ func (s *RedisAgentCLICommandStore) SetFollow(ctx context.Context, runtimeID str
 		return err
 	}
 	rec.Follow = &follow
+	rec.FollowID = randomID()
 	return s.save(ctx, runtimeID, rec)
 }
 
@@ -159,9 +184,22 @@ func (s *RedisAgentCLICommandStore) ClearUpdate(ctx context.Context, runtimeID, 
 	if err != nil {
 		return err
 	}
-	if rec.RequestID != requestID {
+	if requestID == "" || rec.RequestID != requestID {
 		return nil
 	}
 	rec.RequestID = ""
+	return s.save(ctx, runtimeID, rec)
+}
+
+func (s *RedisAgentCLICommandStore) ClearFollow(ctx context.Context, runtimeID, followID string) error {
+	rec, err := s.load(ctx, runtimeID)
+	if err != nil {
+		return err
+	}
+	if followID == "" || rec.FollowID != followID {
+		return nil
+	}
+	rec.Follow = nil
+	rec.FollowID = ""
 	return s.save(ctx, runtimeID, rec)
 }
