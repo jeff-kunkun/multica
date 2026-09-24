@@ -67,6 +67,8 @@ export interface ShareScopeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   target: ShareScopeTarget;
+  /** Scope pre-selected on open; defaults to the saved scope. */
+  initialScope?: VisibilityScope;
   onSaved?: (result: { visibility: VisibilityScope; audience_size?: number }) => void;
 }
 
@@ -89,12 +91,13 @@ export function ShareScopeDialog({
   open,
   onOpenChange,
   target,
+  initialScope,
   onSaved,
 }: ShareScopeDialogProps) {
   const { t } = useT("common");
   const wsId = useWorkspaceId();
   const currentUserId = useAuthStore((state) => state.user?.id ?? null);
-  const [scope, setScope] = useState<VisibilityScope>(target.currentScope ?? "private");
+  const [scope, setScope] = useState<VisibilityScope>(initialScope ?? target.currentScope ?? "private");
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
@@ -134,12 +137,12 @@ export function ShareScopeDialog({
 
   useEffect(() => {
     if (open) {
-      setScope(target.currentScope ?? "private");
+      setScope(initialScope ?? target.currentScope ?? "private");
       setError(null);
       setConfirming(false);
       setPickerError(null);
     }
-  }, [open, target.currentScope, target.resourceId]);
+  }, [open, initialScope, target.currentScope, target.resourceId]);
 
   // People the owner picked: project members for a project, direct shares otherwise.
   const pickedIds = useMemo(() => {
