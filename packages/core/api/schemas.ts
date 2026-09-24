@@ -1821,7 +1821,6 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   // Seat strength for automatic dispatch (DENE-633). Optional because a
   // desktop build can talk to a backend that predates the column.
   routing_tier: z.string().optional().catch(undefined),
-  switchable_models: z.array(z.unknown()).optional(),
   owner_id: z.string().nullable().default(null),
   skills: z.array(z.unknown()).default([]),
   disabled_runtime_skills: z.array(z.unknown()).optional(),
