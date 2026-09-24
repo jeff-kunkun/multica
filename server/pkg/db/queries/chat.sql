@@ -1148,7 +1148,11 @@ SELECT
     sqlc.narg(trigger_evidence_ref_id),
     sqlc.narg('fire_at')::timestamptz,
     sqlc.narg('channel_context_revision')::bigint,
-    $4,
+    COALESCE((SELECT wt.id FROM work_thread wt
+              WHERE wt.chat_session_id = $4 AND wt.agent_id = $1 AND wt.runtime_id = $2
+                AND wt.model IS NOT DISTINCT FROM (SELECT a.model FROM agent a WHERE a.id = $1)
+                AND wt.permission_mode IS NOT DISTINCT FROM (SELECT a.permission_mode FROM agent a WHERE a.id = $1)
+              ORDER BY wt.updated_at DESC, wt.id DESC LIMIT 1), gen_random_uuid()),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING *;

@@ -1742,6 +1742,9 @@ type WorkThread struct {
 	ContinuityBreakReason pgtype.Text        `json:"continuity_break_reason"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	RuntimeID             pgtype.UUID        `json:"runtime_id"`
+	Model                 pgtype.Text        `json:"model"`
+	PermissionMode        pgtype.Text        `json:"permission_mode"`
 }
 
 type Workspace struct {

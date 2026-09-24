@@ -532,9 +532,11 @@ SELECT
     sqlc.narg(rerun_of_task_id),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
-    COALESCE((SELECT t.work_thread_id FROM agent_task_queue t
-              WHERE t.issue_id = $3 AND t.agent_id = $1 AND t.work_thread_id IS NOT NULL
-              ORDER BY t.created_at DESC LIMIT 1), gen_random_uuid()),
+    COALESCE((SELECT wt.id FROM work_thread wt
+              WHERE wt.issue_id = $3 AND wt.agent_id = $1 AND wt.runtime_id = $2
+                AND wt.model IS NOT DISTINCT FROM (SELECT a.model FROM agent a WHERE a.id = $1)
+                AND wt.permission_mode IS NOT DISTINCT FROM (SELECT a.permission_mode FROM agent a WHERE a.id = $1)
+              ORDER BY wt.updated_at DESC, wt.id DESC LIMIT 1), gen_random_uuid()),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
@@ -578,9 +580,11 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     @fire_at,
-    COALESCE((SELECT t.work_thread_id FROM agent_task_queue t
-              WHERE t.issue_id = $3 AND t.agent_id = $1 AND t.work_thread_id IS NOT NULL
-              ORDER BY t.created_at DESC LIMIT 1), gen_random_uuid()),
+    COALESCE((SELECT wt.id FROM work_thread wt
+              WHERE wt.issue_id = $3 AND wt.agent_id = $1 AND wt.runtime_id = $2
+                AND wt.model IS NOT DISTINCT FROM (SELECT a.model FROM agent a WHERE a.id = $1)
+                AND wt.permission_mode IS NOT DISTINCT FROM (SELECT a.permission_mode FROM agent a WHERE a.id = $1)
+              ORDER BY wt.updated_at DESC, wt.id DESC LIMIT 1), gen_random_uuid()),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
