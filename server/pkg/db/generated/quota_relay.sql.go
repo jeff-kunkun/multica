@@ -30,6 +30,29 @@ func (q *Queries) AbandonQuotaRelay(ctx context.Context, arg AbandonQuotaRelayPa
 	return result.RowsAffected(), nil
 }
 
+const countQuotaBreakersSinceSuccess = `-- name: CountQuotaBreakersSinceSuccess :one
+SELECT count(*)::int
+FROM agent_quota_breaker b
+WHERE b.agent_id = $1
+  AND b.opened_at > now() - interval '24 hours'
+  AND b.opened_at > COALESCE((
+      SELECT max(t.completed_at)
+      FROM agent_task_queue t
+      WHERE t.agent_id = b.agent_id AND t.status = 'completed'
+  ), '-infinity'::timestamptz)
+`
+
+// How many breakers this seat opened in the last 24 hours, counting only
+// those that came after its latest successful task. Two or more is the
+// repeated-breaker signal: routing stops preferring the seat until it
+// finishes one task, or until those openings age out of the window.
+func (q *Queries) CountQuotaBreakersSinceSuccess(ctx context.Context, agentID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countQuotaBreakersSinceSuccess, agentID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const getQuotaRelayBySourceTask = `-- name: GetQuotaRelayBySourceTask :one
 
 SELECT id, workspace_id, source_task_id, issue_id, from_agent_id, to_agent_id, scope, model_key, outcome, tier_from, tier_to, wait_reason, handoff_note, audit_comment, trigger_comment_id, created_at, updated_at FROM agent_quota_relay
@@ -133,6 +156,43 @@ func (q *Queries) InsertQuotaRelay(ctx context.Context, arg InsertQuotaRelayPara
 	return i, err
 }
 
+const listDemotedQuotaAgentIDs = `-- name: ListDemotedQuotaAgentIDs :many
+SELECT b.agent_id
+FROM agent_quota_breaker b
+WHERE b.workspace_id = $1
+  AND b.opened_at > now() - interval '24 hours'
+  AND b.opened_at > COALESCE((
+      SELECT max(t.completed_at)
+      FROM agent_task_queue t
+      WHERE t.agent_id = b.agent_id AND t.status = 'completed'
+  ), '-infinity'::timestamptz)
+GROUP BY b.agent_id
+HAVING count(*) >= 2
+`
+
+// Seats routing should not prefer. Same rule as CountQuotaBreakersSinceSuccess,
+// for every seat in the workspace. An open breaker already turns work off;
+// this list is what remains after the seat is accepting work again.
+func (q *Queries) ListDemotedQuotaAgentIDs(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listDemotedQuotaAgentIDs, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var agent_id pgtype.UUID
+		if err := rows.Scan(&agent_id); err != nil {
+			return nil, err
+		}
+		items = append(items, agent_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenQuotaBreakerAgentIDs = `-- name: ListOpenQuotaBreakerAgentIDs :many
 SELECT agent_id FROM agent_quota_breaker
 WHERE workspace_id = $1 AND recovered_at IS NULL
@@ -192,6 +252,91 @@ func (q *Queries) ListPendingQuotaRelays(ctx context.Context, limit int32) ([]Ag
 			&i.TriggerCommentID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnstartedIssuesForAgent = `-- name: ListUnstartedIssuesForAgent :many
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility
+FROM issue i
+WHERE i.workspace_id = $1
+  AND i.assignee_type = 'agent'
+  AND i.assignee_id = $2
+  AND i.status IN ('todo', 'in_progress', 'backlog')
+  AND i.triage_state IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue t
+      WHERE t.issue_id = i.id
+        AND t.autopilot_run_id IS NOT NULL
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue t
+      WHERE t.issue_id = i.id
+        AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
+  )
+ORDER BY i.number
+LIMIT $3
+`
+
+type ListUnstartedIssuesForAgentParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AssigneeID  pgtype.UUID `json:"assignee_id"`
+	Limit       int32       `json:"limit"`
+}
+
+// Issues still assigned to a seat that has not begun executing them.
+// A dispatched, running, or waiting task means the run already started.
+// Queued and deferred tasks have not, and an issue with no task at all
+// has not either. Autopilot runs keep their own scheduler.
+func (q *Queries) ListUnstartedIssuesForAgent(ctx context.Context, arg ListUnstartedIssuesForAgentParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listUnstartedIssuesForAgent, arg.WorkspaceID, arg.AssigneeID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.Stage,
+			&i.Properties,
+			&i.Revision,
+			&i.LastActivityAt,
+			&i.TriageState,
+			&i.ReviewerType,
+			&i.ReviewerID,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}

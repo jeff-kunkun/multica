@@ -2,6 +2,7 @@ package routing
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -121,6 +122,45 @@ func (r *Router) assignmentComment(
 	b.WriteString(changeSlotFooter)
 	b.WriteString("\n\n**路由没有改过状态** —— 状态是事实，只有干活的席位知道。")
 	return b.String()
+}
+
+// DemotionFootnote says why a repeatedly broken seat was not the first
+// choice, or why it still was when the rung had nobody else. Empty when
+// nobody on the chosen rung is demoted.
+func DemotionFootnote(ladder Ladder, roster map[string]Agent, chosen *Seat) string {
+	if chosen == nil {
+		return ""
+	}
+	var skipped []string
+	chosenDemoted := false
+	for _, agent := range roster {
+		if !agent.Demoted || agentTierKey(ladder, agent) != chosen.TierKey {
+			continue
+		}
+		if agent.ID == chosen.ID {
+			chosenDemoted = true
+			continue
+		}
+		skipped = append(skipped, agent.Name)
+	}
+	sort.Strings(skipped)
+	if len(skipped) > 0 {
+		return "同档的" + strings.Join(skipped, "、") + " 24 小时内熔断了至少两次。恢复后新票先不派给这一席，直到它自己做成一单。"
+	}
+	if chosenDemoted {
+		return chosen.Name + " 24 小时内熔断了至少两次。这档没有别的席位可派，所以仍由它接。做成一单之后才会重新优先。"
+	}
+	return ""
+}
+
+func agentTierKey(ladder Ladder, agent Agent) string {
+	if key, ok := ladder.NormalizeTier(agent.Tier); ok && key != "" {
+		return key
+	}
+	if key, ok := ladder.TierOf(agent.Name); ok {
+		return key
+	}
+	return ""
 }
 
 // coordinatorNote is the division of labour a group root's decision comment

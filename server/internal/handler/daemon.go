@@ -4831,6 +4831,10 @@ type TaskCompleteRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// SessionRestartReason is set when this run had to open a new CLI
+	// session because the prior one could not be resumed. Older daemons
+	// omit it.
+	SessionRestartReason string `json:"session_restart_reason,omitempty"`
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
@@ -4848,6 +4852,7 @@ func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
 	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+	req.SessionRestartReason = util.SanitizeTextForPostgres(req.SessionRestartReason)
 }
 
 func sanitizeTaskFailRequest(req *TaskFailRequest) {
@@ -4858,6 +4863,7 @@ func sanitizeTaskFailRequest(req *TaskFailRequest) {
 	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+	req.SessionRestartReason = util.SanitizeTextForPostgres(req.SessionRestartReason)
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
@@ -4912,6 +4918,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			BranchName:            req.BranchName,
 			SessionRolloutMissing: req.SessionRolloutMissing,
 			RetiredSessionID:      req.RetiredSessionID,
+			SessionRestartReason:  req.SessionRestartReason,
 		})
 		return
 	}
@@ -4938,6 +4945,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.emitIssueExecutedOnFirstCompletion(r, task)
+	h.TaskService.NoteSessionRestart(r.Context(), *task, req.SessionRestartReason)
 
 	// MUL-4195: guarantee at-least-once processing. If a member posted a
 	// deliberate comment while this run was executing (or one was merged into
@@ -5618,6 +5626,9 @@ type TaskFailRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// SessionRestartReason is set when this run had to open a new CLI
+	// session because the prior one could not be resumed.
+	SessionRestartReason string `json:"session_restart_reason,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -5680,6 +5691,7 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 	}
 
 	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error, "failure_reason", req.FailureReason)
+	h.TaskService.NoteSessionRestart(r.Context(), *task, req.SessionRestartReason)
 	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 }
 
