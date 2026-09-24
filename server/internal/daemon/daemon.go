@@ -7000,7 +7000,7 @@ func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 		return sharedBriefViaCursorAddDir
 	case "antigravity":
 		return sharedBriefViaAntigravityAddDir
-	case "openclaw", "kimi", "traecli", "qwenpaw",
+	case "openclaw", "kimi", "traecli", "qwenpaw", "qwen",
 		"codebuddy", "dim", "devin", "grok", "dsh", "kiro", "qoder", "qoderclicn", "zeroclaw":
 		return sharedBriefInline
 	default:

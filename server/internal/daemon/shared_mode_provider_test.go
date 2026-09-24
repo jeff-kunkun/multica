@@ -39,6 +39,14 @@ func TestSharedModeBriefDelivery(t *testing.T) {
 	if got := sharedModeBriefDelivery("grok"); got != sharedBriefInline {
 		t.Errorf("grok = %v, want sharedBriefInline", got)
 	}
+	// Qwen Code reads QWEN.md only from the cwd; its backend prepends
+	// SystemPrompt onto the stdin prompt, so shared mode rides that route.
+	if got := sharedModeBriefDelivery("qwen"); got != sharedBriefInline {
+		t.Errorf("qwen = %v, want sharedBriefInline (stdin prompt prepend)", got)
+	}
+	if err := sharedModeProviderSupported("qwen"); err != nil {
+		t.Errorf("sharedModeProviderSupported(qwen) = %v, want nil", err)
+	}
 	if got := sharedModeBriefDelivery("cursor"); got != sharedBriefViaCursorAddDir {
 		t.Errorf("cursor = %v, want sharedBriefViaCursorAddDir (--add-dir skills + stdin brief)", got)
 	}
