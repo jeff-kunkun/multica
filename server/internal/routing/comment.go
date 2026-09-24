@@ -128,6 +128,23 @@ func (r *Router) assignmentComment(
 // it: the work lives in the sub-issues, the root supervises (DENE-812).
 const coordinatorNote = "**分工**：这张是父票，活在子票里——每张子票有自己的执行席，一步步往前推；父票的执行席只做监督：盯子票进度、阶段收口后把下一阶段提到待办、疏通卡住的子票、子票没人就派人，全部收口后把父票整体交验收。父票不替子票干活，子票之外冒出的新活开新子票。\n\n"
 
+func disabledReviewerNote(from, to string, steppedDown bool) string {
+	if from == "" {
+		from = "原验收席"
+	}
+	if steppedDown {
+		return fmt.Sprintf("验收席 %s 已停用，不接新活。同档没有另一家还能接的席位，复审改由下一档的 %s 接手，避开了执行席本人。原席位恢复后不会自动抢回；只有它仍是这张票指定的验收人、而且新席位还没开跑时才会换回去。", from, to)
+	}
+	return fmt.Sprintf("验收席 %s 已停用，不接新活。复审改由同档另一家模型的 %s 接手，避开了执行席本人。原席位恢复后不会自动抢回；只有它仍是这张票指定的验收人、而且新席位还没开跑时才会换回去。", from, to)
+}
+
+func disabledReviewerStuck(from string) string {
+	if from == "" {
+		from = "原验收席"
+	}
+	return fmt.Sprintf("验收席 %s 已停用，不接新活。同档没有另一家供应商，降一档也没有能接的席位。这张票停在待验收，需要人指定验收席。", from)
+}
+
 // handoffComment is the in-review-row comment. Every handoff it describes is
 // to a seat: the reviewer slot never names a person.
 func (r *Router) handoffComment(issue Issue, to string, decidedHere bool) string {

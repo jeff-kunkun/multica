@@ -42,6 +42,9 @@ type fakeStore struct {
 	// quietAssigns are the assigns written without starting a run.
 	quietAssigns []string
 	reviewer     []string
+	// offRoster is seats Roster hides because work is switched off.
+	offRoster map[string]Agent
+	relays    []ReviewerRelay
 
 	// activeRun is the executor's still-open task. The in-review row must
 	// not start the reviewer until it is cleared, which is what the
@@ -139,6 +142,41 @@ func (f *fakeStore) SetReviewerIfUnset(_ context.Context, _, _ string, ref Revie
 	// who was chosen, and an id would make each one restate the fixture.
 	f.reviewer = append(f.reviewer, ref.Label())
 	return true, nil
+}
+
+func (f *fakeStore) OffRosterSeat(_ context.Context, _, agentID string) (Agent, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("off_roster"); err != nil {
+		return Agent{}, false, err
+	}
+	agent, ok := f.offRoster[agentID]
+	return agent, ok, nil
+}
+
+func (f *fakeStore) ReplaceReviewer(_ context.Context, _, _, currentID string, ref ReviewerRef) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("replace_reviewer"); err != nil {
+		return false, err
+	}
+	if f.issue.Reviewer.Kind != ReviewerAgent || f.issue.Reviewer.ID != currentID {
+		return false, nil
+	}
+	f.issue.Reviewer = ref
+	f.reviewerTaken = true
+	f.reviewer = append(f.reviewer, ref.Label())
+	return true, nil
+}
+
+func (f *fakeStore) RememberReviewerRelay(_ context.Context, _, _ string, note ReviewerRelay) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("remember_relay"); err != nil {
+		return err
+	}
+	f.relays = append(f.relays, note)
+	return nil
 }
 
 func (f *fakeStore) Handoff(_ context.Context, _, _, assigneeType, assigneeID string) error {

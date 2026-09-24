@@ -1526,6 +1526,10 @@ type commentAgentTrigger struct {
 	// need not be a squad member. Completion may replay it only if creation
 	// recorded it as a planned input.
 	NonLeaderAgentReply bool
+	// RelayFromID is set when this run covers an @ whose seat is switched off.
+	RelayFromID   string
+	RelayFromName string
+	RelayToName   string
 }
 
 type commentTriggerComputeOptions struct {
@@ -2018,6 +2022,7 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 		markCommentTriggersFresh(triggers)
 	}
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
+	h.noteMissedMentionRelays(ctx, issue, comment.ID, targets)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	return commentTriggerOutcomes(targets, enqueued)
 }
@@ -2107,6 +2112,7 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 		results[uuidToString(trigger.Agent.ID)] = commentEnqueueResult{status: status, reason: reason, execSquadID: execSquadID}
 	}
 	for _, trigger := range triggers {
+		h.noteMentionRelay(ctx, issue, triggerCommentID, trigger)
 		status, reason := h.resolveCommentTriggerEnqueue(ctx, issue, trigger, triggerCommentID)
 		record(trigger, status, reason)
 	}
@@ -3137,6 +3143,11 @@ type commentMentionTarget struct {
 	// the resolver runs for the composer PREVIEW as well, so it only records
 	// what happened — writing the notice is the trigger path's job.
 	unusable *blockedRuntimeNotice
+	// RelayMissed is an explicit @ whose seat is switched off and has nobody
+	// of another family to cover it. The write path leaves a comment; preview
+	// only records the flag.
+	RelayMissed     bool
+	RelayedFromName string
 }
 
 // blockedRuntimeNotice is a refusal worth leaving on the issue: which agent, and
@@ -3260,6 +3271,26 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				blockTarget("squad", m.ID, ReasonTargetUnavailable)
 				continue
 			}
+			if !agent.WorkEnabled {
+				if repl, ok := h.coverDisabledMention(ctx, issue, agent, authorType, authorID, opts.OriginatorUserID, wsID); ok {
+					hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, repl.ID, opts)
+					if err != nil {
+						blockTarget("squad", m.ID, ReasonInternalError)
+						continue
+					}
+					add(commentAgentTrigger{
+						Agent: repl, Source: commentTriggerSourceMentionAgent, AlreadyPending: hasPending,
+						RelayFromID: uuidToString(agent.ID), RelayFromName: agent.Name, RelayToName: repl.Name,
+					})
+					addTarget(commentMentionTarget{TargetType: "squad", TargetID: m.ID, ExecAgentID: uuidToString(repl.ID)})
+					continue
+				}
+				addTarget(commentMentionTarget{
+					TargetType: "squad", TargetID: m.ID, Status: DispatchBlocked, ReasonCode: ReasonTargetUnavailable,
+					RelayMissed: true, RelayedFromName: agent.Name,
+				})
+				continue
+			}
 			// Same shared verdict as the direct-agent branch below.
 			if verdict, err := service.AgentReadiness(ctx, h.runtimeLookup(obsmetrics.RuntimeLookupSourceComment), agent); err == nil && verdict.Blocked() {
 				blockUnusableTarget("squad", m.ID, agent, verdict)
@@ -3312,6 +3343,26 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		}
 		if agent.ArchivedAt.Valid {
 			blockTarget("agent", m.ID, ReasonTargetUnavailable)
+			continue
+		}
+		if !agent.WorkEnabled {
+			if repl, ok := h.coverDisabledMention(ctx, issue, agent, authorType, authorID, opts.OriginatorUserID, wsID); ok {
+				hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, repl.ID, opts)
+				if err != nil {
+					blockTarget("agent", m.ID, ReasonInternalError)
+					continue
+				}
+				add(commentAgentTrigger{
+					Agent: repl, Source: commentTriggerSourceMentionAgent, AlreadyPending: hasPending,
+					RelayFromID: uuidToString(agent.ID), RelayFromName: agent.Name, RelayToName: repl.Name,
+				})
+				addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, ExecAgentID: uuidToString(repl.ID)})
+				continue
+			}
+			addTarget(commentMentionTarget{
+				TargetType: "agent", TargetID: m.ID, Status: DispatchBlocked, ReasonCode: ReasonTargetUnavailable,
+				RelayMissed: true, RelayedFromName: agent.Name,
+			})
 			continue
 		}
 		// One readiness verdict for every admission path (service.AgentReadiness).

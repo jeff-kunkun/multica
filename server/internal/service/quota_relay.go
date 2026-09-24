@@ -87,6 +87,7 @@ func (s *TaskService) RecoverExpiredQuotaBreakers(ctx context.Context) (int, err
 		return 0, nil
 	}
 	released := 0
+	var restored []pgtype.UUID
 	err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		due, err := qtx.LockDueQuotaBreakers(ctx, 100)
 		if err != nil {
@@ -108,10 +109,24 @@ func (s *TaskService) RecoverExpiredQuotaBreakers(ctx context.Context) (int, err
 				return err
 			}
 			released += int(n)
+			if n > 0 {
+				restored = append(restored, agentID)
+			}
 		}
 		return nil
 	})
-	return released, err
+	if err != nil {
+		return released, err
+	}
+	for _, agentID := range restored {
+		if recErr := s.ReclaimDesignatedReviews(ctx, agentID); recErr != nil {
+			slog.Warn("quota relay: reclaim designated reviewer failed",
+				"agent_id", util.UUIDToString(agentID),
+				"error", recErr,
+			)
+		}
+	}
+	return released, nil
 }
 
 type quotaRelayPrepared struct {
