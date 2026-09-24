@@ -39,6 +39,10 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		// hard rules
 		"never invent requirements",
 		"never reduce multi-sentence input",
+		// title shape is the brief's Title Style section; this line only
+		// routes the run at it and must not revive the old free-form summary.
+		"Follow `## Title Style`",
+		"omit the project segment of the title",
 		// attachment boundary (MUL-5696): the ban is scoped to URLs, and file
 		// delivery defers to the quick-create ## Output section — a blanket
 		// "do NOT pass --attachment" contradicted it (it names --attachment
@@ -222,6 +226,7 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 		"--project \"" + projectID + "\"",
 		"Web App",
 		"modal selection is authoritative",
+		`This issue's project name is "Web App"`,
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {

@@ -17,6 +17,7 @@ import enIssues from "../../locales/en/issues.json";
 
 const setActiveSession = vi.fn();
 const archiveMutate = vi.fn();
+const updateMutate = vi.fn();
 
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: ({ actorId }: { actorId: string }) => (
@@ -45,6 +46,7 @@ vi.mock("@multica/core/chat/mutations", () => ({
   useDeleteChatSession: () => ({ mutate: vi.fn(), isPending: false }),
   useSetChatSessionPinned: () => ({ mutate: vi.fn(), isPending: false }),
   useSetChatSessionArchived: () => ({ mutate: archiveMutate, isPending: false }),
+  useUpdateChatSession: () => ({ mutate: updateMutate, isPending: false }),
 }));
 
 vi.mock("@tanstack/react-query", async (importOriginal) => {
@@ -276,6 +278,39 @@ describe("ChatThreadList compact row menu", () => {
     expect(trigger.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):hidden/);
     expect(strip.className).toContain("[@media(hover:hover)]:group-hover/row:flex");
     expect(strip.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):group-/);
+  });
+});
+
+describe("ChatThreadList title rename", () => {
+  beforeEach(() => {
+    updateMutate.mockClear();
+  });
+
+  it("opens rename from the title and does not select the row", () => {
+    const { onSelectSession } = renderList(null);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat s1" }));
+
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("textbox", { name: enChat.session_history.row_rename_aria }),
+    ).toBeInTheDocument();
+  });
+
+  it("saves the new title for the list to pick up", () => {
+    renderList(null);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat s1" }));
+    const input = screen.getByRole("textbox", {
+      name: enChat.session_history.row_rename_aria,
+    });
+    fireEvent.change(input, { target: { value: "Billing · retry invoices" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(updateMutate).toHaveBeenCalledWith({
+      sessionId: "s1",
+      title: "Billing · retry invoices",
+    });
   });
 });
 
