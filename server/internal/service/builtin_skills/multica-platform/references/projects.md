@@ -169,8 +169,13 @@ landed on the user's own branch in between are not local edits and are not
 replayed; the conversation branch stays a separate line of work. When the
 uncommitted edits conflict with the branch, the worktree is handed to the agent
 mid-merge and the run delivers nothing until the agent resolves it. The same
-conflict is offered once; the next turn skips that replay and says so, so an
-unresolved replay cannot block every later run.
+conflict is offered once. If it still conflicts, the next turn skips that
+replay, says so, and does not record the edit as already on the branch; a
+later turn applies it once the branch can take it. A resolution that commits
+nothing is not a delivery of the edit, so the following turn offers it again.
+Records already under `refs/multica/local-state/` are not rewritten: a record
+from before this behaviour is read by the snapshot commit's parent, which is
+the user HEAD it was taken against.
 
 `shared` runs the agent in the user's directory like `in_place`, but without
 the per-directory lock: tasks on the directory run concurrently, and Multica

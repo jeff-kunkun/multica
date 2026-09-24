@@ -248,8 +248,9 @@ type LocalWorktree struct {
 	userHead      string
 	priorUserHead string
 	// replayAbandoned is the fingerprint of a replay this turn deliberately
-	// did not apply. Recorded with the branch so the snapshot tree is not
-	// mistaken for content the branch contains.
+	// did not apply. The branch does not contain it, so the recorded snapshot
+	// stays the one the branch already carries. The fingerprint is what lets
+	// the next turn try the same edit again instead of treating it as delivered.
 	replayAbandoned string
 	// snapshotPending is set when Prepare left the user's edits unmerged in the
 	// worktree: the branch does not carry userState yet, and only a commit made
@@ -571,6 +572,19 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	// An unresolved merge means the branch does not carry this turn's snapshot
 	// yet; only a commit after the agent resolves can put it there.
 	wt.snapshotPending = len(replay.conflicts) > 0
+	// A skipped replay is not on the branch either. Recording this turn's
+	// snapshot would make the next diff empty, and the edit would never be
+	// offered again. Keep the snapshot the branch actually carries. The
+	// abandoned fingerprint stays on the record so a later turn applies the
+	// edit once the branch can take it.
+	if replay.abandoned != "" && wt.priorState != "" {
+		wt.userState = wt.priorState
+		if wt.priorUserHead != "" {
+			wt.userHead = wt.priorUserHead
+		} else if recovered := recoverCarriedUserHead(gitRoot, wt.priorState); recovered != "" {
+			wt.userHead = recovered
+		}
+	}
 	// Whether the user has uncommitted work at all — replayed by this turn or
 	// already carried by the branch it continued.
 	_, diffErr := runGit(gitRoot, "diff", "--quiet", headSHA, userState)
@@ -613,10 +627,12 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 			// and everything downstream measures the delivery against it.
 			wt.BaseCommit = baseline
 		}
-		// The branch now carries this snapshot, so record it — together with the
-		// owner, which is what lets the next task prove this branch is its own
-		// before continuing it. Recorded here as well as at Finalize so a turn
-		// that never reaches Finalize still leaves the branch identifiable.
+		// Record what this branch carries, together with the owner that lets the
+		// next task prove the branch is its own. A skipped replay records the
+		// previous snapshot (the branch does not contain the edit); every other
+		// clean prepare records this turn's. Recorded here as well as at
+		// Finalize so a turn that never reaches Finalize still leaves the
+		// branch identifiable.
 		if err := wt.recordState(wt.BaseCommit, logger); err != nil && logger != nil {
 			logger.Warn("execenv: could not record the task branch before the run (non-fatal; Finalize records the delivered tip)",
 				"branch", wt.Branch, "error", err)
@@ -1327,8 +1343,9 @@ const (
 	// by walking to the snapshot commit.
 	userHeadTrailer = "Multica-User-Head"
 	// replayAbandonedTrailer names a replay that was skipped after it had
-	// already conflicted once. The record's tree is still the user's
-	// directory, and the branch does not contain that replay.
+	// already conflicted once. The record's tree stays the snapshot the
+	// branch actually carries, not the user's current directory, so the next
+	// turn can try that replay again.
 	replayAbandonedTrailer   = "Multica-Replay-Abandoned"
 	replayFingerprintTrailer = "Multica-Replay-Fingerprint"
 	replayCountTrailer       = "Multica-Replay-Count"
@@ -1357,7 +1374,11 @@ type branchRecord struct {
 	// record written before the trailer existed; recoverCarriedUserHead reads
 	// it from the snapshot commit in that case.
 	userHead string
-	owner    branchOwner
+	// replayAbandoned is set when userHead/state were kept from the previous
+	// record because a replay was skipped. Empty on records that predate the
+	// trailer, and on records whose tree really is what the branch carries.
+	replayAbandoned string
+	owner           branchOwner
 }
 
 // writeBranchRecord records the branch as carrying userState at checkpoint, and
@@ -1430,6 +1451,8 @@ func readBranchRecord(gitRoot, commit string) (branchRecord, error) {
 			record.owner.ConversationID = value
 		case userHeadTrailer:
 			record.userHead = value
+		case replayAbandonedTrailer:
+			record.replayAbandoned = value
 		}
 	}
 	if checkpoint, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", "--quiet", commit+"^2"); err == nil {
@@ -1473,6 +1496,10 @@ type taskBranchPlan struct {
 	tracksState bool
 	// owner is the identity the branch is recorded under.
 	owner branchOwner
+	// replayAbandoned is the fingerprint of a replay an earlier turn skipped.
+	// The recorded tree does not contain it. Empty when that tree is what the
+	// branch carries.
+	replayAbandoned string
 }
 
 // altName disambiguates a branch a live sibling already holds.
@@ -1559,6 +1586,7 @@ func planForConversationBranch(gitRoot, name, headSHA string, owner branchOwner,
 	if plan.priorUserHead == "" {
 		plan.priorUserHead = recoverCarriedUserHead(gitRoot, record.state)
 	}
+	plan.replayAbandoned = record.replayAbandoned
 	plan.priorCheckpoint = record.checkpoint
 	if logger != nil {
 		logger.Info("execenv: continuing the conversation's existing branch",
@@ -1686,12 +1714,12 @@ type replayResult struct {
 	// conflicts names the files git could not merge. Non-empty means the
 	// worktree holds an unresolved merge, on purpose.
 	conflicts []string
-	// skippedNotice explains a replay this turn refused to attempt because the
-	// same one already conflicted. Empty when the replay ran or there was
-	// nothing to replay.
+	// skippedNotice explains a replay this turn left out because the same one
+	// still conflicted. Empty when the replay ran or there was nothing to replay.
 	skippedNotice string
 	// abandoned is the fingerprint recorded with the branch when the replay
-	// was skipped, so the snapshot tree is not mistaken for branch content.
+	// was skipped. The recorded tree stays the snapshot the branch already
+	// carries, so the next turn can try this replay again.
 	abandoned string
 }
 
@@ -1727,13 +1755,18 @@ type replayResult struct {
 // the same lines, which is the failure being removed.
 //
 // A conflict that is still real (the user rewrote lines the agent also rewrote)
-// stays in the worktree for the agent the first time. The same replay a second
-// time is skipped: the worktree stays on the branch, the prompt says the edits
-// were not brought across, and the run can deliver. Records already in
-// refs/multica/local-state/* are not rewritten. The next continuation reads
-// the old user HEAD from the snapshot parent, so a clean checkout stops
-// replaying committed history. Commits an earlier buggy replay already put on
-// the branch stay there until someone resets the branch.
+// stays in the worktree for the agent the first time. The same replay is tried
+// again on the next turn. When it still conflicts, this turn skips it so
+// delivery is not blocked, and the recorded snapshot stays the one the branch
+// actually carries — recording the user's tree here would make the next diff
+// empty and the edit would never land. A later turn applies it once the branch
+// can take it. Records already in refs/multica/local-state/* are not rewritten.
+// The next continuation reads the old user HEAD from the trailer or the
+// snapshot parent, so a clean checkout stops replaying committed history.
+// Commits an earlier buggy replay already put on the branch stay there until
+// someone resets the branch. An abandoned fingerprint on a record whose tree
+// was already advanced (the unmerged first cut of this fix) is not repaired:
+// that tree diff is empty, and there is no earlier snapshot left to replay.
 func replayUserState(worktreePath string, plan taskBranchPlan, snapshot string, logger *slog.Logger) (replayResult, error) {
 	if !plan.continues {
 		return replayIncrement(worktreePath, plan.base, snapshot, plan, logger)
@@ -1786,15 +1819,28 @@ func replayIncrement(worktreePath, carried, snapshot string, plan taskBranchPlan
 	}
 
 	fingerprint, fpErr := replayFingerprint(worktreePath, carried, snapshot)
-	if plan.continues && fpErr == nil {
+	treeFingerprint, treeErr := replayTreeFingerprint(worktreePath, carried, snapshot)
+	// Two ways to recognise a replay that already conflicted. The attempt ref
+	// is keyed to the carried commit, so a resolution that committed nothing
+	// (and rewrote that commit) is offered again. The abandoned trailer is
+	// keyed to the trees, so a skip — which keeps those trees and may rewrite
+	// the record — is tried again without blocking delivery, and is not
+	// recorded as delivered.
+	var repeated replayAttempt
+	repeat := false
+	if plan.continues && treeErr == nil && plan.replayAbandoned == treeFingerprint {
+		repeated = replayAttempt{fingerprint: fingerprint, count: 1, snapshot: snapshot}
+		if head, headErr := runGitTrimmed(worktreePath, "rev-parse", "--verify", "--quiet", snapshot+"^"); headErr == nil {
+			repeated.userHead = head
+		}
+		if prev, ok := readReplayAttempt(worktreePath, plan.name); ok && len(prev.files) > 0 {
+			repeated.files = prev.files
+		}
+		repeat = true
+	} else if plan.continues && fpErr == nil {
 		if prev, ok := readReplayAttempt(worktreePath, plan.name); ok && prev.fingerprint == fingerprint && prev.count >= 1 {
-			clearReplayAttempt(worktreePath, plan.name, logger)
-			notice := replaySkippedNotice(plan.name, prev)
-			if logger != nil {
-				logger.Warn("execenv: skipping a local-directory replay that already conflicted once",
-					"branch", plan.name, "fingerprint", fingerprint, "files", prev.files)
-			}
-			return replayResult{skippedNotice: notice, abandoned: fingerprint}, nil
+			repeated = prev
+			repeat = true
 		}
 	}
 
@@ -1843,6 +1889,33 @@ func replayIncrement(worktreePath, carried, snapshot string, plan taskBranchPlan
 		abortCherryPick(worktreePath, logger)
 		return replayResult{}, fmt.Errorf("execenv: could not replay your local edits onto a fresh task worktree: %s: %w",
 			strings.TrimSpace(out), pickErr)
+	}
+	if repeat {
+		abortCherryPick(worktreePath, logger)
+		if still, stillErr := unmergedPaths(worktreePath); stillErr == nil && len(still) == 0 {
+			if len(repeated.files) == 0 {
+				repeated.files = conflicts
+			}
+			if repeated.snapshot == "" {
+				repeated.snapshot = snapshot
+			}
+			if writeErr := writeReplayAttempt(worktreePath, plan.name, repeated); writeErr != nil && logger != nil {
+				logger.Warn("execenv: could not keep the skipped replay on record, so the next turn may offer the conflict again",
+					"branch", plan.name, "error", writeErr)
+			}
+			notice := replaySkippedNotice(plan.name, repeated)
+			if logger != nil {
+				logger.Warn("execenv: local-directory replay still conflicts; leaving it outstanding and not blocking delivery",
+					"branch", plan.name, "fingerprint", treeFingerprint, "files", conflicts)
+			}
+			abandoned := treeFingerprint
+			if abandoned == "" {
+				abandoned = fingerprint
+			}
+			return replayResult{skippedNotice: notice, abandoned: abandoned}, nil
+		}
+		// The worktree is still conflicted. Hand that to the agent rather than
+		// claiming the replay was left out of a clean tree.
 	}
 
 	// Keep the conflict, drop only the sequencer state: the agent should see an
@@ -1894,11 +1967,31 @@ func uncommittedPatchesEqual(dir, oldHead, oldTree, newHead, newTree string) boo
 }
 
 func replayFingerprint(dir, carried, snapshot string) (string, error) {
+	// The carried commit, not only its tree. Rewriting the record — a new
+	// checkpoint after the user commits on the branch, or a resolution that
+	// committed nothing — changes this id, so the next turn offers the
+	// conflict again instead of treating that resolution as final.
 	tree, err := runGitTrimmed(dir, "rev-parse", "--verify", snapshot+"^{tree}")
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256([]byte(carried + "\n" + tree))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// replayTreeFingerprint identifies the outstanding edit itself. The record
+// commit changes when a skipped replay is written down again, and the edit
+// has to stay recognisable across that rewrite or the next turn forgets it.
+func replayTreeFingerprint(dir, carried, snapshot string) (string, error) {
+	carriedTree, err := runGitTrimmed(dir, "rev-parse", "--verify", carried+"^{tree}")
+	if err != nil {
+		return "", err
+	}
+	tree, err := runGitTrimmed(dir, "rev-parse", "--verify", snapshot+"^{tree}")
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte("tree\n" + carriedTree + "\n" + tree))
 	return hex.EncodeToString(sum[:]), nil
 }
 
@@ -1979,7 +2072,7 @@ func (w *LocalWorktree) unmergedReplayError(unmerged []string) error {
 	return fmt.Errorf(
 		"refusing to deliver branch %s: replaying local-directory snapshot %s (user HEAD %s when the snapshot was taken) left %s unmerged in the task worktree.%s "+
 			"The worktree is preserved at %s (listed by `git worktree list` in %s) — resolve the conflict there, or re-run the task and let the agent finish the merge. "+
-			"The same replay conflict is offered once; the next run skips it and continues the branch without those edits",
+			"The same replay conflict is offered once. If it still conflicts, the next run skips it without recording those edits as delivered, and tries again once the branch can take them",
 		w.Branch, snapshot, head, quotedPaths(unmerged), prior, w.Path, w.GitRoot)
 }
 
@@ -2009,7 +2102,7 @@ func replaySkippedNotice(branch string, prev replayAttempt) string {
 		head = "unknown"
 	}
 	return fmt.Sprintf(
-		"Replay of local-directory snapshot %s (user HEAD %s when it was taken) onto branch %s was skipped. The same conflict already happened once, on %s, and replaying it again would block delivery without merging those edits. This worktree does not contain that replay: the edits are still in the user's checkout and they are not on this branch. Say that in your reply. A different edit will be replayed on a later turn.",
+		"Replay of local-directory snapshot %s (user HEAD %s when it was taken) onto branch %s was skipped. The same conflict already happened once, on %s, and it still conflicts, so this turn left those edits out rather than block delivery. This worktree does not contain that replay: the edits are still in the user's checkout and they are not on this branch. Say that in your reply. They are not recorded as delivered; a later turn applies them if this branch can take them.",
 		snapshot, head, branch, files)
 }
 

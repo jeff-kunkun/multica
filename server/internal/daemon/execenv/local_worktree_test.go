@@ -908,6 +908,8 @@ const (
 	turnOneTask   = "11112222-3333-4444-5555-aaaaaaaaaaaa"
 	turnTwoTask   = "11112222-3333-4444-5555-bbbbbbbbbbbb"
 	turnThreeTask = "11112222-3333-4444-5555-cccccccccccc"
+	turnFourTask  = "11112222-3333-4444-5555-dddddddddddd"
+	turnFiveTask  = "11112222-3333-4444-5555-eeeeeeeeeeee"
 )
 
 // The bug this fixes: every comment on one issue produced a new branch forked
@@ -1246,6 +1248,89 @@ func TestPrepareLocalWorktreeHandsConflictingUserEditsToTheAgent(t *testing.T) {
 	if got := gitRun(t, repo, "show", "agent/j/mul-6881:tracked.txt"); got != "rewritten by the agent" {
 		t.Errorf("branch content after the skipped replay = %q, want the agent's version", got)
 	}
+}
+
+// Skipping a replay must not record the user's still-uncommitted edit as
+// something the branch already carries. Doing so makes the next turn's tree
+// diff empty, so the edit is never offered again — including after the branch
+// has moved to a tree that can take it (DENE-814 review).
+func TestSkippedReplayKeepsUncommittedEditsOutstanding(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work in progress\n")
+
+	first := prepareTurn(t, repo, "DENE-814", turnOneTask)
+	writeFile(t, filepath.Join(first.WorkDir, "tracked.txt"), "rewritten by the agent\n")
+	finalizeOK(t, first)
+	branch := "agent/j/dene-814"
+	carriedBeforeConflict := carriedFile(t, repo, branch, "tracked.txt")
+	if carriedBeforeConflict != "user work in progress" {
+		t.Fatalf("carried snapshot = %q, want the user's original uncommitted text", carriedBeforeConflict)
+	}
+
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "rewritten by the user instead\n")
+	second := prepareTurn(t, repo, "DENE-814", turnTwoTask)
+	if len(second.ReplayConflicts) == 0 {
+		t.Fatal("turn two saw no conflict")
+	}
+	if _, err := second.Finalize(worktreeTestLogger()); err == nil {
+		t.Fatal("Finalize delivered a branch while the merge was still open")
+	}
+	_ = removeLocalWorktreeDir(repo, second.Path, worktreeTestLogger())
+
+	third := prepareTurn(t, repo, "DENE-814", turnThreeTask)
+	if len(third.ReplayConflicts) != 0 {
+		t.Fatalf("the same conflict blocked delivery again: %v", third.ReplayConflicts)
+	}
+	if third.ReplaySkippedNotice == "" {
+		t.Fatal("turn three skipped nothing; the repeat conflict has no exit")
+	}
+	finalizeOK(t, third)
+	if got := carriedFile(t, repo, branch, "tracked.txt"); got != carriedBeforeConflict {
+		t.Fatalf("skipped replay recorded %q as carried, want the snapshot the branch actually has (%q)", got, carriedBeforeConflict)
+	}
+
+	// The user's edit is still uncommitted. The next turn must not treat the
+	// empty-looking diff of a wrongly advanced snapshot as "already delivered".
+	fourth := prepareTurn(t, repo, "DENE-814", turnFourTask)
+	if len(fourth.ReplayConflicts) != 0 {
+		t.Fatalf("follow-up after a skip blocked on the same conflict: %v", fourth.ReplayConflicts)
+	}
+	if fourth.ReplaySkippedNotice == "" || !strings.Contains(fourth.ReplaySkippedNotice, "tracked.txt") {
+		t.Fatalf("follow-up forgot an outstanding conflicting edit: %q", fourth.ReplaySkippedNotice)
+	}
+	if got := readFile(t, filepath.Join(fourth.WorkDir, "tracked.txt")); got != "rewritten by the agent\n" {
+		t.Fatalf("follow-up worktree = %q, want the branch version while the edit is still outstanding", got)
+	}
+	if got := carriedFile(t, repo, branch, "tracked.txt"); got != carriedBeforeConflict {
+		t.Fatalf("follow-up recorded %q as carried while the edit is still only in the user's checkout", got)
+	}
+	if got := readFile(t, filepath.Join(repo, "tracked.txt")); got != "rewritten by the user instead\n" {
+		t.Fatalf("user checkout changed to %q", got)
+	}
+	// Move the branch back to the carried text so the outstanding edit can apply.
+	writeFile(t, filepath.Join(fourth.WorkDir, "tracked.txt"), "user work in progress\n")
+	finalizeOK(t, fourth)
+
+	fifth := prepareTurn(t, repo, "DENE-814", turnFiveTask)
+	if len(fifth.ReplayConflicts) != 0 {
+		t.Fatalf("outstanding edit conflicted after the branch could take it: %v", fifth.ReplayConflicts)
+	}
+	if fifth.ReplaySkippedNotice != "" {
+		t.Fatalf("outstanding edit was skipped again after the branch could take it: %s", fifth.ReplaySkippedNotice)
+	}
+	if got := readFile(t, filepath.Join(fifth.WorkDir, "tracked.txt")); got != "rewritten by the user instead\n" {
+		t.Fatalf("follow-up worktree = %q, want the user's still-uncommitted edit replayed", got)
+	}
+	if got := readFile(t, filepath.Join(repo, "tracked.txt")); got != "rewritten by the user instead\n" {
+		t.Fatalf("replaying onto the task branch wrote the user's checkout: %q", got)
+	}
+}
+
+func carriedFile(t *testing.T, repo, branch, name string) string {
+	t.Helper()
+	ref := gitRun(t, repo, "rev-parse", userStateRef(branch))
+	return gitRun(t, repo, "show", ref+":"+name)
 }
 
 // The A/B/C round trip: the user's conflicting edit survives until the agent
