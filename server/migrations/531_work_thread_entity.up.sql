@@ -77,4 +77,3 @@ CREATE TRIGGER sync_work_thread_from_task
 AFTER INSERT OR UPDATE OF work_thread_id, context_generation, context_message_limit,
   context_token_budget, session_id, continuity_break_reason ON agent_task_queue
 FOR EACH ROW EXECUTE FUNCTION sync_work_thread_from_task();
-
