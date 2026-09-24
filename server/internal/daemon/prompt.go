@@ -69,6 +69,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	b.WriteString(buildSharedWorkspaceBlock(opts.sharedWorkspace))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
+	b.WriteString(buildReplaySkippedBlock(opts.replaySkippedNotice))
 	b.WriteString(buildStaleLocalBaselineBlock(opts.staleLocalBaselineNotice))
 	b.WriteString(buildDependencyInstallBlock(opts.dependencyInstallCommand))
 	b.WriteString(buildSparseCheckoutBlock(task.CheckoutPaths))
@@ -87,6 +88,7 @@ type promptOpts struct {
 	sharedLocalDirectory     bool
 	sharedWorkspace          bool
 	worktreeReplayConflicts  []string
+	replaySkippedNotice      string
 	staleLocalBaselineNotice string
 	dependencyInstallCommand string
 }
@@ -121,6 +123,13 @@ func WithSharedWorkspace() PromptOption {
 // resolves it (MUL-6881).
 func WithWorktreeReplayConflicts(files []string) PromptOption {
 	return func(o *promptOpts) { o.worktreeReplayConflicts = files }
+}
+
+// WithReplaySkipped tells the turn that a local-directory replay was not
+// applied because the same conflict already happened once. The notice is the
+// text execenv built, including which snapshot and which files.
+func WithReplaySkipped(notice string) PromptOption {
+	return func(o *promptOpts) { o.replaySkippedNotice = strings.TrimSpace(notice) }
 }
 
 // WithStaleLocalBaseline explains that a local_directory worktree could not
@@ -163,6 +172,13 @@ func buildSharedWorkspaceBlock(shared bool) string {
 	b.WriteString("Your working directory is a shared workspace: the project owner set it to run tasks concurrently, so other tasks on this machine may be working in it right now and no task holds a lock on it. Multica keeps its own runtime files out of this directory; nothing here was written for you except by the workspace itself.\n\n")
 	b.WriteString("Follow the workspace's own conventions for isolation — typically a task-specific branch or worktree inside the sub-repository you are changing. Do not edit a shared checkout's mainline (main/dev) in place, do not run commands that rewrite files across the whole directory, and when you must change a file other tasks may also touch, say so in your reply.\n\n")
 	return b.String()
+}
+
+func buildReplaySkippedBlock(notice string) string {
+	if strings.TrimSpace(notice) == "" {
+		return ""
+	}
+	return "## Local edits were not replayed\n\n" + strings.TrimSpace(notice) + "\n\n"
 }
 
 func buildStaleLocalBaselineBlock(notice string) string {
@@ -360,7 +376,7 @@ func buildWorktreeReplayConflictBlock(files []string) string {
 		fmt.Fprintf(&b, "- …and %d more; `git status` in this worktree lists them all\n", len(files)-listed)
 	}
 	b.WriteString("\nResolve it before anything else, with ordinary git commands — `git status` lists the unmerged paths, `git diff` shows both sides, `git add <file>` marks each one done. The \"ours\" side is what you wrote last turn; \"theirs\" is the user's newer edit, and it is the side you have not seen before, so read it before choosing. Keep both intentions where they are compatible; where they are not, prefer the user's and say so in your reply.\n\n")
-	b.WriteString("This run cannot deliver its branch while any file is still unmerged — the task fails and the worktree is kept for a human instead. Do not commit conflict markers.\n\n")
+	b.WriteString("This run cannot deliver its branch while any file is still unmerged — the task fails and the worktree is kept for a human instead. Do not commit conflict markers. The same conflict is offered once; if this run leaves it unresolved, the next run skips the replay and continues the branch without those edits.\n\n")
 	return b.String()
 }
 

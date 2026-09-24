@@ -2174,6 +2174,18 @@ func TestWorktreeReplayConflictBlock(t *testing.T) {
 	})
 }
 
+func TestReplaySkippedBlockNamesTheSnapshot(t *testing.T) {
+	t.Parallel()
+	task := Task{IssueID: "issue-1", IssueIdentifier: "DENE-814"}
+	out := BuildPrompt(task, "claude", WithReplaySkipped("Replay of local-directory snapshot abcdef12 (user HEAD 1234abcd when it was taken) onto branch agent/j/dene-814 was skipped."))
+	if !strings.Contains(out, "## Local edits were not replayed") || !strings.Contains(out, "abcdef12") {
+		t.Fatalf("skip notice missing from the prompt:\n%s", out)
+	}
+	if strings.Contains(BuildPrompt(task, "claude"), "Local edits were not replayed") {
+		t.Fatal("skip notice leaked into a normal prompt")
+	}
+}
+
 // TestSharedWorkspaceBlock covers the notice a shared-mode task gets. It is a
 // different message from the lock-exempt one: here nobody holds the lock, by
 // the owner's decision, and the guidance is about the workspace's own

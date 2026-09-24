@@ -164,9 +164,13 @@ created — or one that no longer contains the recorded commit, i.e. deleted and
 recreated or force-moved — is left alone and the task falls back to
 `agent/<agent>/<issue>-<id>`.
 
-A turn replays only what the user changed since that snapshot; when those edits
-conflict with the branch's own work the worktree is handed to the agent
-mid-merge and the run delivers nothing until the agent resolves it.
+A turn replays the user's uncommitted work since that snapshot. Commits that
+landed on the user's own branch in between are not local edits and are not
+replayed; the conversation branch stays a separate line of work. When the
+uncommitted edits conflict with the branch, the worktree is handed to the agent
+mid-merge and the run delivers nothing until the agent resolves it. The same
+conflict is offered once; the next turn skips that replay and says so, so an
+unresolved replay cannot block every later run.
 
 `shared` runs the agent in the user's directory like `in_place`, but without
 the per-directory lock: tasks on the directory run concurrently, and Multica
