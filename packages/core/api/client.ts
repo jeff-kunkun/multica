@@ -3102,12 +3102,13 @@ export class ApiClient {
 
   async issueWorkThreadAction(
     issueId: string,
-    action: "continue" | "interrupt" | "queue",
+    action: "continue" | "interrupt" | "queue" | "prioritize",
     summary?: string,
+    taskId?: string,
   ): Promise<{ action: string; state: string; task_id?: string; thread_id?: string; session_id?: string }> {
     return this.fetch(`/api/issues/${issueId}/work-thread/action`, {
       method: "POST",
-      body: JSON.stringify({ action, summary }),
+      body: JSON.stringify({ action, summary, task_id: taskId }),
     });
   }
 

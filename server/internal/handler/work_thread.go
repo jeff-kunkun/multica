@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -60,6 +61,7 @@ const workThreadQueueLimit = 50
 type WorkThreadActionRequest struct {
 	Action  string `json:"action"`
 	Summary string `json:"summary,omitempty"`
+	TaskID  string `json:"task_id,omitempty"`
 }
 
 // WorkThreadAction mutates one Issue work thread while preserving its
@@ -88,17 +90,38 @@ func (h *Handler) WorkThreadAction(w http.ResponseWriter, r *http.Request) {
 		return
 	case "queue":
 		task, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+		coalesced := errors.Is(err, service.ErrDuplicatePendingTask)
+		if coalesced {
+			task, err = h.appendQueuedWorkThreadInput(r, issue.ID, req.Summary)
+		}
 		if err != nil {
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
-		if req.Summary != "" {
+		if req.Summary != "" && !coalesced {
 			if _, err := h.DB.Exec(r.Context(), `UPDATE agent_task_queue SET trigger_summary = $2 WHERE id = $1`, task.ID, req.Summary); err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to record queued input")
 				return
 			}
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"action": req.Action, "state": "queued", "task_id": uuidToString(task.ID), "thread_id": uuidToString(task.WorkThreadID)})
+		return
+	case "prioritize":
+		taskID, ok := parseUUIDOrBadRequest(w, req.TaskID, "task id")
+		if !ok {
+			return
+		}
+		prioritized, activeID, err := h.prioritizeIssueWorkThreadInput(r, issue.ID, taskID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusConflict, "task is no longer queued or there is no active turn to interrupt")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to prioritize work thread input")
+			return
+		}
+		h.TaskService.BroadcastTaskQueued(r.Context(), prioritized)
+		writeJSON(w, http.StatusAccepted, map[string]any{"action": req.Action, "state": "prioritized", "task_id": uuidToString(prioritized.ID), "active_task_id": uuidToString(activeID)})
 		return
 	case "continue":
 		task, err := h.continueWorkThread(r, issue.ID)
@@ -159,6 +182,51 @@ func (h *Handler) cancelIssueWorkThread(r *http.Request, issueID pgtype.UUID) er
 		}
 	}
 	return nil
+}
+
+// appendQueuedWorkThreadInput keeps the single pending-task fence intact while
+// preserving a follow-up submitted during an already queued turn. The summary
+// is bounded so repeated clicks cannot grow the task row without limit.
+func (h *Handler) appendQueuedWorkThreadInput(r *http.Request, issueID pgtype.UUID, summary string) (db.AgentTaskQueue, error) {
+	const maxSummary = 4000
+	if len(summary) > maxSummary {
+		summary = summary[:maxSummary]
+	}
+	var taskID pgtype.UUID
+	err := h.DB.QueryRow(r.Context(), `
+		UPDATE agent_task_queue
+		SET trigger_summary = LEFT(CONCAT_WS(E'\\n', NULLIF(trigger_summary, ''), NULLIF($2, '')), $3)
+		WHERE issue_id = $1 AND status = 'queued'
+		RETURNING id
+	`, issueID, summary, maxSummary).Scan(&taskID)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	return h.Queries.GetAgentTask(r.Context(), taskID)
+}
+
+func (h *Handler) prioritizeIssueWorkThreadInput(r *http.Request, issueID, taskID pgtype.UUID) (db.AgentTaskQueue, pgtype.UUID, error) {
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		return db.AgentTaskQueue{}, pgtype.UUID{}, err
+	}
+	defer tx.Rollback(r.Context())
+	var activeID pgtype.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM agent_task_queue WHERE issue_id=$1 AND status IN ('dispatched','running','waiting_local_directory') ORDER BY created_at,id LIMIT 1 FOR UPDATE`, issueID).Scan(&activeID); err != nil {
+		return db.AgentTaskQueue{}, pgtype.UUID{}, pgx.ErrNoRows
+	}
+	if _, err := tx.Exec(r.Context(), `UPDATE agent_task_queue SET priority = 3 WHERE issue_id=$1 AND status='queued' AND id<>$2 AND priority>=4`, issueID, taskID); err != nil {
+		return db.AgentTaskQueue{}, pgtype.UUID{}, err
+	}
+	var prioritizedID pgtype.UUID
+	if err := tx.QueryRow(r.Context(), `UPDATE agent_task_queue SET priority=4 WHERE id=$1 AND issue_id=$2 AND status='queued' RETURNING id`, taskID, issueID).Scan(&prioritizedID); err != nil {
+		return db.AgentTaskQueue{}, pgtype.UUID{}, pgx.ErrNoRows
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		return db.AgentTaskQueue{}, pgtype.UUID{}, err
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), prioritizedID)
+	return task, activeID, err
 }
 
 func (h *Handler) ChatWorkThreadAction(w http.ResponseWriter, r *http.Request) {

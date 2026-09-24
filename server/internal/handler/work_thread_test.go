@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -99,7 +100,7 @@ func TestWorkThreadActionRejectsContinueWhileActive(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldTaskID := uuid.NewString()
-	_, err = testPool.Exec(t.Context(), `INSERT INTO agent_task_queue (id, agent_id, issue_id, work_thread_id, status, priority) VALUES ($1,$2,$3,$4,'running',0)`, oldTaskID, agentID, issueID, threadID)
+	_, err = testPool.Exec(t.Context(), `INSERT INTO agent_task_queue (id, agent_id, runtime_id, issue_id, work_thread_id, status, priority) VALUES ($1,$2,$3,$4,$5,'running',0)`, oldTaskID, agentID, handlerTestRuntimeID(t), issueID, threadID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +131,7 @@ func TestWorkThreadActionInterruptsActiveTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldTaskID := uuid.NewString()
-	_, err = testPool.Exec(t.Context(), `INSERT INTO agent_task_queue (id, agent_id, issue_id, work_thread_id, status, priority) VALUES ($1,$2,$3,$4,'running',0)`, oldTaskID, agentID, issueID, threadID)
+	_, err = testPool.Exec(t.Context(), `INSERT INTO agent_task_queue (id, agent_id, runtime_id, issue_id, work_thread_id, status, priority) VALUES ($1,$2,$3,$4,$5,'running',0)`, oldTaskID, agentID, handlerTestRuntimeID(t), issueID, threadID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,5 +164,62 @@ func TestWorkThreadActionInterruptsActiveTurn(t *testing.T) {
 	}
 	if oldStatus != "running" {
 		t.Fatalf("older thread status=%q, want running", oldStatus)
+	}
+}
+
+func TestWorkThreadActionContinuePreservesCancelledSession(t *testing.T) {
+	issueID := dbfx.Issue(t, "resume cancelled work thread", testutil.Cols{"status": "in_progress"})
+	agentID := createHandlerTestAgent(t, "Resume Work Thread Agent", []byte("[]"))
+	threadID := uuid.NewString()
+	sessionID := uuid.NewString()
+	_, err := testPool.Exec(t.Context(), `INSERT INTO work_thread (id, agent_id, issue_id, last_session_id) VALUES ($1,$2,$3,$4)`, threadID, agentID, issueID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentID := uuid.NewString()
+	_, err = testPool.Exec(t.Context(), `INSERT INTO agent_task_queue (id, agent_id, runtime_id, issue_id, work_thread_id, status, priority, session_id, completed_at) VALUES ($1,$2,$6,$3,$4,'cancelled',0,$5,now())`, parentID, agentID, issueID, threadID, sessionID, handlerTestRuntimeID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(t.Context(), `DELETE FROM agent_task_queue WHERE work_thread_id=$1`, threadID)
+		testPool.Exec(t.Context(), `DELETE FROM work_thread WHERE id=$1`, threadID)
+	})
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/work-thread/action", map[string]any{"action": "continue"}), "id", issueID)
+	testutil.Call(t, testHandler.WorkThreadAction, req).Want(http.StatusAccepted)
+	var got pgtype.UUID
+	if err := testPool.QueryRow(t.Context(), `SELECT session_id FROM agent_task_queue WHERE work_thread_id=$1 AND status='queued'`, threadID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Valid || got.String() != sessionID {
+		t.Fatalf("session_id=%v, want %s", got, sessionID)
+	}
+}
+
+func TestWorkThreadActionPrioritizesQueuedInput(t *testing.T) {
+	issueID := dbfx.Issue(t, "prioritize work thread", testutil.Cols{"status": "in_progress"})
+	agentID := createHandlerTestAgent(t, "Prioritize Work Thread Agent", []byte("[]"))
+	threadID := uuid.NewString()
+	_, err := testPool.Exec(t.Context(), `INSERT INTO work_thread (id, agent_id, issue_id) VALUES ($1,$2,$3)`, threadID, agentID, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeID, queuedID := uuid.NewString(), uuid.NewString()
+	_, err = testPool.Exec(t.Context(), `INSERT INTO agent_task_queue (id, agent_id, runtime_id, issue_id, work_thread_id, status, priority) VALUES ($1,$2,$6,$3,$4,'running',0),($5,$2,$6,$3,$4,'queued',0)`, activeID, agentID, issueID, threadID, queuedID, handlerTestRuntimeID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(t.Context(), `DELETE FROM agent_task_queue WHERE work_thread_id=$1`, threadID)
+		testPool.Exec(t.Context(), `DELETE FROM work_thread WHERE id=$1`, threadID)
+	})
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/work-thread/action", map[string]any{"action": "prioritize", "task_id": queuedID}), "id", issueID)
+	testutil.Call(t, testHandler.WorkThreadAction, req).Want(http.StatusAccepted)
+	var priority int
+	if err := testPool.QueryRow(t.Context(), `SELECT priority FROM agent_task_queue WHERE id=$1`, queuedID).Scan(&priority); err != nil {
+		t.Fatal(err)
+	}
+	if priority != 4 {
+		t.Fatalf("priority=%d, want 4", priority)
 	}
 }
