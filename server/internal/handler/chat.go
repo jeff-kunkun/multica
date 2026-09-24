@@ -206,19 +206,20 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			resp = append(resp, ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				ProjectID:   uuidToPtr(s.ProjectID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.UnreadCount > 0,
-				UnreadCount: int(s.UnreadCount),
-				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
-				Pinned:      s.PinnedAt.Valid,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
+				ID:                    uuidToString(s.ID),
+				WorkspaceID:           uuidToString(s.WorkspaceID),
+				AgentID:               uuidToString(s.AgentID),
+				CreatorID:             uuidToString(s.CreatorID),
+				ProjectID:             uuidToPtr(s.ProjectID),
+				Title:                 s.Title,
+				Status:                s.Status,
+				HasUnread:             s.UnreadCount > 0,
+				UnreadCount:           int(s.UnreadCount),
+				LastMessage:           buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
+				Pinned:                s.PinnedAt.Valid,
+				ProjectNudgeDismissed: s.ProjectNudgeDismissedAt.Valid,
+				CreatedAt:             timestampToString(s.CreatedAt),
+				UpdatedAt:             timestampToString(s.UpdatedAt),
 			})
 		}
 	} else {
@@ -236,19 +237,20 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			resp = append(resp, ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				ProjectID:   uuidToPtr(s.ProjectID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.UnreadCount > 0,
-				UnreadCount: int(s.UnreadCount),
-				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
-				Pinned:      s.PinnedAt.Valid,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
+				ID:                    uuidToString(s.ID),
+				WorkspaceID:           uuidToString(s.WorkspaceID),
+				AgentID:               uuidToString(s.AgentID),
+				CreatorID:             uuidToString(s.CreatorID),
+				ProjectID:             uuidToPtr(s.ProjectID),
+				Title:                 s.Title,
+				Status:                s.Status,
+				HasUnread:             s.UnreadCount > 0,
+				UnreadCount:           int(s.UnreadCount),
+				LastMessage:           buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
+				Pinned:                s.PinnedAt.Valid,
+				ProjectNudgeDismissed: s.ProjectNudgeDismissedAt.Valid,
+				CreatedAt:             timestampToString(s.CreatedAt),
+				UpdatedAt:             timestampToString(s.UpdatedAt),
 			})
 		}
 	}
@@ -585,6 +587,60 @@ func (h *Handler) SetChatSessionPinned(w http.ResponseWriter, r *http.Request) {
 		Title:         updated.Title,
 		Pinned:        &pinned,
 		UpdatedAt:     timestampToString(updated.UpdatedAt),
+	})
+
+	responses := []ChatSessionResponse{chatSessionToResponse(updated)}
+	if err := h.hydrateChatSessionProjectIDs(r.Context(), responses); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat session projects")
+		return
+	}
+	writeJSON(w, http.StatusOK, responses[0])
+}
+
+type DismissChatSessionProjectNudgeRequest struct {
+	Dismissed bool `json:"dismissed"`
+}
+
+// DismissChatSessionProjectNudge records that this chat does not need a
+// project. The choice lives on the session, so another browser loading the
+// same chat does not show the reminder again. One-way: the product has no
+// "remind me again" affordance. Does not bump updated_at.
+func (h *Handler) DismissChatSessionProjectNudge(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	var req DismissChatSessionProjectNudgeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !req.Dismissed {
+		writeError(w, http.StatusBadRequest, "dismissed must be true")
+		return
+	}
+
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+
+	updated, err := h.Queries.DismissChatSessionProjectNudge(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update chat session")
+		return
+	}
+
+	resolvedSessionID := uuidToString(updated.ID)
+	dismissed := updated.ProjectNudgeDismissedAt.Valid
+	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
+		ChatSessionID:         resolvedSessionID,
+		Title:                 updated.Title,
+		ProjectNudgeDismissed: &dismissed,
+		UpdatedAt:             timestampToString(updated.UpdatedAt),
 	})
 
 	responses := []ChatSessionResponse{chatSessionToResponse(updated)}
@@ -2020,6 +2076,11 @@ type ChatSessionResponse struct {
 	// Pinned marks a chat the user has stuck to the top of the list. Populated
 	// by list endpoints and by the pin/unpin + single-session responses.
 	Pinned bool `json:"pinned"`
+	// ProjectNudgeDismissed is true once the creator has said this chat does
+	// not need a project. The reminder stays gone on every device. Always
+	// present so a client can tell "not dismissed" from a missing field on an
+	// older server (older servers omit it; clients treat that as not dismissed).
+	ProjectNudgeDismissed bool `json:"project_nudge_dismissed"`
 	// ChannelSource is present only for Chats created from an external channel.
 	// IsCurrentChannelRoute distinguishes the active route generation from an
 	// older Chat that remains readable and writable in Multica.
@@ -2269,16 +2330,17 @@ type ChatMessageResponse struct {
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 	return ChatSessionResponse{
-		ID:          uuidToString(s.ID),
-		WorkspaceID: uuidToString(s.WorkspaceID),
-		AgentID:     uuidToString(s.AgentID),
-		CreatorID:   uuidToString(s.CreatorID),
-		ProjectID:   uuidToPtr(s.ProjectID),
-		Title:       s.Title,
-		Status:      s.Status,
-		Pinned:      s.PinnedAt.Valid,
-		CreatedAt:   timestampToString(s.CreatedAt),
-		UpdatedAt:   timestampToString(s.UpdatedAt),
+		ID:                    uuidToString(s.ID),
+		WorkspaceID:           uuidToString(s.WorkspaceID),
+		AgentID:               uuidToString(s.AgentID),
+		CreatorID:             uuidToString(s.CreatorID),
+		ProjectID:             uuidToPtr(s.ProjectID),
+		Title:                 s.Title,
+		Status:                s.Status,
+		Pinned:                s.PinnedAt.Valid,
+		ProjectNudgeDismissed: s.ProjectNudgeDismissedAt.Valid,
+		CreatedAt:             timestampToString(s.CreatedAt),
+		UpdatedAt:             timestampToString(s.UpdatedAt),
 	}
 }
 

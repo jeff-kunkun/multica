@@ -4,6 +4,28 @@
     "select_prompt": "Pick a conversation, or start a new one with +",
     "agent_link_no_access": "You don't have access to chat with this agent."
   },
+  "project_bar": {
+    "all": "All",
+    "more": "⋯ More ({{count}})",
+    "menu_title": "Projects",
+    "done": "Done",
+    "search": "Search projects…",
+    "pinned": "Pinned — drag to reorder",
+    "pinned_empty": "Nothing pinned yet",
+    "other": "Other projects — most recent chat first",
+    "none": "No project",
+    "chat_count_one": "{{count}} chat",
+    "chat_count_other": "{{count}} chats",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "drag": "Drag to reorder",
+    "empty": "No chats for this project yet",
+    "unread": "Unread"
+  },
+  "project_nudge": {
+    "bind": "Bind to a project",
+    "casual": "This is a casual chat and doesn't need a project"
+  },
   "fab": {
     "running": "Multica is working...",
     "unread_one": "{{count}} unread chat",

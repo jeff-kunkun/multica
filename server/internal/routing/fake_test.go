@@ -43,6 +43,16 @@ type fakeStore struct {
 	quietAssigns []string
 	reviewer     []string
 
+	// activeRun is the executor's still-open task. The in-review row must
+	// not start the reviewer until it is cleared, which is what the
+	// completion callback does.
+	activeRun bool
+	// reviewerRuns records seats that already have a run for this stay.
+	// Handoff sets it, the same way the real store reads the task row.
+	reviewerRuns map[string]bool
+	// memberNotified records people already sent this stay's notice.
+	memberNotified map[string]bool
+
 	errOn map[string]error
 }
 
@@ -67,9 +77,11 @@ func newFakeStore() *fakeStore {
 			"贝吉塔游戏": {ID: "a-vegeta-g", Name: "贝吉塔游戏"},
 			"比克游戏":  {ID: "a-piccolo-g", Name: "比克游戏"},
 		},
-		target:   Member{UserID: "user-1", Name: "Kun"},
-		comments: map[CommentKind][]string{},
-		errOn:    map[string]error{},
+		target:         Member{UserID: "user-1", Name: "Kun"},
+		comments:       map[CommentKind][]string{},
+		reviewerRuns:   map[string]bool{},
+		memberNotified: map[string]bool{},
+		errOn:          map[string]error{},
 	}
 }
 
@@ -136,7 +148,46 @@ func (f *fakeStore) Handoff(_ context.Context, _, _, assigneeType, assigneeID st
 		return err
 	}
 	f.handoffs = append(f.handoffs, assigneeType+":"+assigneeID)
+	// The real handoff both moves the ticket and starts the run. Recording
+	// both is what lets a second Route see "already handed off this round"
+	// instead of handing off again.
+	f.issue.AssigneeType = assigneeType
+	f.issue.AssigneeID = assigneeID
+	if assigneeType == "agent" {
+		f.reviewerRuns[assigneeID] = true
+	}
 	return nil
+}
+
+func (f *fakeStore) Acceptance(_ context.Context, _ string, issue Issue) (AcceptanceState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("acceptance"); err != nil {
+		return AcceptanceState{}, err
+	}
+	engaged := issue.Reviewer.Kind == ReviewerAgent &&
+		issue.AssigneeType == "agent" &&
+		issue.AssigneeID == issue.Reviewer.ID &&
+		f.reviewerRuns[issue.Reviewer.ID]
+	return AcceptanceState{
+		ActiveRun:      f.activeRun,
+		AgentEngaged:   engaged,
+		MemberNotified: f.memberNotified[issue.Reviewer.ID],
+	}, nil
+}
+
+func (f *fakeStore) NotifyMember(_ context.Context, _, _ string, member Member) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("notify_member"); err != nil {
+		return false, err
+	}
+	if member.UserID == "" || f.memberNotified[member.UserID] {
+		return false, nil
+	}
+	f.memberNotified[member.UserID] = true
+	f.subs = append(f.subs, member.UserID)
+	return true, nil
 }
 
 func (f *fakeStore) HasComment(_ context.Context, _, _ string, kind CommentKind) (bool, error) {
@@ -167,6 +218,7 @@ func (f *fakeStore) Subscribe(_ context.Context, _, _, userID string) error {
 		return err
 	}
 	f.subs = append(f.subs, userID)
+	f.memberNotified[userID] = true
 	return nil
 }
 

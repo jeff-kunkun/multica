@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
@@ -13,8 +13,16 @@ import {
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useChatStore } from "@multica/core/chat";
+import { chatSessionProjectIds } from "@multica/core/chat/project-context";
+import {
+  sessionMatchesChatProjectFilter,
+  type ChatProjectFilter,
+} from "@multica/core/chat/project-bar";
+import {
+  useDismissChatProjectNudge,
+  useRegenerateChatQuickActions,
+} from "@multica/core/chat/mutations";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
-import { useRegenerateChatQuickActions } from "@multica/core/chat/mutations";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./components/use-quick-actions-failure-toast";
 import { useQuery } from "@tanstack/react-query";
@@ -27,6 +35,8 @@ import { ChatInput } from "./components/chat-input";
 import { ProviderQuotaStrip } from "./components/provider-quota-strip";
 import { ChatQueue } from "./components/chat-queue";
 import { ChatThreadList } from "./components/chat-thread-list";
+import { ChatProjectBar } from "./components/chat-project-bar";
+import { ChatProjectNudge } from "./components/chat-project-nudge";
 import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
 import { NewChatButton } from "./components/new-chat-button";
@@ -81,6 +91,15 @@ export function ChatPage() {
   // conversation pane is always mounted so it only needs to reset itself once a
   // real session takes over.
   const [composingNew, setComposingNew] = useState(false);
+  const [projectFilter, setProjectFilter] = useState<ChatProjectFilter>({ type: "all" });
+  const dismissProjectNudge = useDismissChatProjectNudge();
+  const visibleSessions = useMemo(
+    () =>
+      c.sessions.filter((session) =>
+        sessionMatchesChatProjectFilter(chatSessionProjectIds(session), projectFilter),
+      ),
+    [c.sessions, projectFilter],
+  );
   useEffect(() => {
     // Read the LIVE store value for the same reason as the session sync
     // effects below: under StrictMode's double-invoke this effect replays
@@ -224,14 +243,27 @@ export function ChatPage() {
     </PageHeader>
   );
 
+  const projectBar = (
+    <ChatProjectBar
+      projects={c.projects ?? []}
+      sessions={c.sessions}
+      userId={c.user?.id ?? null}
+      filter={projectFilter}
+      onFilterChange={setProjectFilter}
+    />
+  );
+
   const listBody = (
     <div className="px-2 py-1">
       <ChatThreadList
-        sessions={c.sessions}
+        sessions={visibleSessions}
         agents={c.agents}
         activeSessionId={c.activeSessionId}
         onSelectSession={handleSelect}
         onArchive={handleArchive}
+        emptyLabel={
+          projectFilter.type === "all" ? undefined : t(($) => $.project_bar.empty)
+        }
       />
       {/* Below the conversations and outside them: an alignment is a different
           kind of thing, kept out of the chat list by the access boundary its
@@ -255,6 +287,14 @@ export function ChatPage() {
           session={c.currentSession}
           agent={c.activeAgent}
           onArchive={handleArchive}
+        />
+      )}
+      {c.currentSession && (
+        <ChatProjectNudge
+          session={c.currentSession}
+          onBind={changeProjectContext}
+          onDismiss={() => dismissProjectNudge.mutate(c.currentSession!.id)}
+          dismissing={dismissProjectNudge.isPending}
         />
       )}
       {c.showSkeleton ? (
@@ -380,6 +420,7 @@ export function ChatPage() {
     return (
       <div className="flex flex-1 flex-col min-h-0">
         {listHeader}
+        {projectBar}
         <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
       </div>
     );
@@ -406,6 +447,7 @@ export function ChatPage() {
       >
         <div className="flex flex-col border-r h-full">
           {listHeader}
+          {projectBar}
           <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
         </div>
       </ResizablePanel>

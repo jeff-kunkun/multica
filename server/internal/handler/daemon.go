@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/permission"
@@ -4957,6 +4958,16 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// follow-up run which takes this issue off the stalled list.
 	h.TaskService.HandleCompletedTasks(r.Context(), []db.AgentTaskQueue{*task})
 
+	// The executor's status write to in_review usually lands while this run
+	// is still open, and the in-review row waits for the run to end before
+	// it wakes the reviewer. Ask again now that the run is gone. A follow-up
+	// queued by reconcile above still counts as an active run, so this does
+	// not start the reviewer on top of it. No-op unless the ticket is
+	// actually waiting on acceptance.
+	if task.IssueID.Valid {
+		h.routeIssueDetached(logger.RequestAttrs(r), workspaceID, uuidToString(task.IssueID))
+	}
+
 	// Best-effort revoke of any agent task token minted at claim time.
 	// The token would naturally expire at the 24h watermark and is also
 	// cascaded on agent_task deletion, but eagerly deleting it on
@@ -5671,6 +5682,14 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 		return
 	}
 	h.TaskService.NotifyTaskFinished(*task)
+
+	// Same acceptance retry as CompleteTask. A run that fails after the
+	// executor has already moved the ticket to in_review must not swallow
+	// the handoff; if a retry was queued, the active-run guard defers until
+	// that retry ends.
+	if task.IssueID.Valid {
+		h.routeIssueDetached(logger.RequestAttrs(r), workspaceID, uuidToString(task.IssueID))
+	}
 
 	// Best-effort revoke of the mat_ task token minted at claim. Same
 	// rationale as CompleteTask — eager deletion shrinks the post-

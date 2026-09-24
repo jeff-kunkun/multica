@@ -38,6 +38,7 @@
       "hours": "{{count}}시간",
       "days": "{{count}}일"
     },
+    "unread_count_other": "읽지 않음 {{count}}개",
     "archived_title": "보관됨",
     "archived_empty": "보관된 알림이 없습니다",
     "unarchive_tooltip": "보관 해제",

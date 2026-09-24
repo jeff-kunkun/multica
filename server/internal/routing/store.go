@@ -121,6 +121,22 @@ const (
 	LabelHuman    = "交给人"
 )
 
+// AcceptanceState is the slice of "what is already happening on this stay in
+// review" that the in-review row needs. It is a read, never a write.
+type AcceptanceState struct {
+	// ActiveRun is a queued, dispatched, running, or waiting task on the
+	// issue. The executor's own run counts: the reviewer is not started
+	// until that run has finished, and the completion callback asks again.
+	ActiveRun bool
+	// AgentEngaged is true when the reviewer seat already holds the ticket
+	// and already has a run for this stay. A run from an earlier stay, or a
+	// handoff comment left over from one, does not count.
+	AgentEngaged bool
+	// MemberNotified is true when the person named as reviewer was already
+	// sent the acceptance notice for this stay.
+	MemberNotified bool
+}
+
 // CommentKind identifies a routing comment. It is also the de-duplication key:
 // one comment of each kind per issue, which is what keeps repeated status
 // flips from re-notifying and re-explaining.
@@ -183,6 +199,15 @@ type Store interface {
 	// called with assigneeType "agent" — routing does not hand tickets to
 	// people, it notifies them.
 	Handoff(ctx context.Context, workspaceID, issueID, assigneeType, assigneeID string) error
+
+	// Acceptance reports whether this stay in review already has a run or a
+	// notice, and whether any run is still active on the ticket. The in-review
+	// row and the completion callback both read it so they make the same
+	// decision: wake once per stay, and never while a run is still in flight.
+	Acceptance(ctx context.Context, workspaceID string, issue Issue) (AcceptanceState, error)
+	// NotifyMember sends the one acceptance notice for this stay to the person
+	// named in the reviewer slot. False means this stay already has one.
+	NotifyMember(ctx context.Context, workspaceID, issueID string, member Member) (bool, error)
 
 	HasComment(ctx context.Context, workspaceID, issueID string, kind CommentKind) (bool, error)
 	// PostComment writes one routing comment and reports whether THIS call

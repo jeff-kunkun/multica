@@ -512,8 +512,21 @@ func buildQuickCreatePrompt(task Task) string {
 
 	b.WriteString("Field rules:\n\n")
 
-	// title
-	b.WriteString("- **title**: required. A concise but semantically rich summary. If the input references external resources (PRs, issues, URLs), use your judgment on whether fetching the resource would produce a meaningfully better title — e.g. \"review PR #123\" → \"Review PR #123: Refactor auth module to OAuth2\". Strip filler words but preserve key semantic information.\n\n")
+	// title — the shape lives once, in the brief's Title Style section.
+	// This line only names this run's project, so the two prompts cannot
+	// drift into different title styles.
+	b.WriteString("- **title**: required. Follow `## Title Style`. ")
+	switch {
+	case task.ProjectTitle != "":
+		fmt.Fprintf(&b, "This issue's project name is %q — copy it into the title exactly as that section describes.\n", task.ProjectTitle)
+	case task.ProjectExplicitNone:
+		b.WriteString("This issue has no project — omit the project segment of the title.\n")
+	case task.ProjectID != "":
+		b.WriteString("A project was picked, but its display name is not in this message — omit the project segment of the title rather than inventing a name. The `--project` flag below still places the issue.\n")
+	default:
+		b.WriteString("No project was picked — omit the project segment of the title unless the user named one.\n")
+	}
+	b.WriteString("  If the input references a PR or URL, you may fetch it so the work phrase names the real change. The shape does not change.\n\n")
 
 	// description — the core optimization
 	b.WriteString("- **description**: The description is the executing agent's primary context. Aim for high fidelity — they should grasp the user's intent as if they had read the raw input themselves. Use a two-section structure:\n\n")

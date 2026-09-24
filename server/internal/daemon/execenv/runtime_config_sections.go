@@ -7,6 +7,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/internal/titling"
 )
 
 // This file holds the runtime brief assembler — the post-MUL-3560 path
@@ -388,6 +389,15 @@ func writeAvailableCommandsQuickCreate(b *strings.Builder) {
 func writeIssueBodyFormatting(b *strings.Builder) {
 	b.WriteString("## Issue Body Formatting\n\n")
 	b.WriteString("An issue title already serves as its H1. By default, do not add a Markdown H1 (`# ...`) to an issue body or description; start with prose or `##` subheadings. Only add an H1 when the user specifically requests one.\n\n")
+}
+
+// writeTitleStyle emits the shared title convention. Every kind can author
+// an issue title (chat on request, quick-create always, autopilot when its
+// instructions say so, issue runs when they open a sub-issue), so the
+// section is not gated. The words live in titling; this writer only routes
+// them into the brief.
+func writeTitleStyle(b *strings.Builder) {
+	b.WriteString(titling.IssueTitleBriefSection)
 }
 
 // commentReceiptRule picks the receipt mode for a posting command. It trails
@@ -1104,6 +1114,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	----------------------+---------+--------+-----------+--------------+------
 //	Available Commands    |   full  |  full  |   full    |   minimal    | full
 //	Issue Body Formatting |    ✓    |   ✓    |     ✓     |      ✓       |  ✓
+//	Title Style           |    ✓    |   ✓    |     ✓     |      ✓       |  ✓
 //	Comment Formatting    |    ✓    |   ✓    |     —     |      —       |  —
 //	Repositories          |    △    |   △    |     △     |      —       |  △
 //	Project Context       |    △    |   △    |     △     |      △       |  △
@@ -1138,6 +1149,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeAvailableCommands(&b, ctx)
 	}
 	writeIssueBodyFormatting(&b)
+	writeTitleStyle(&b)
 
 	if kind == kindIssue {
 		writeCommentFormatting(&b)

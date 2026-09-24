@@ -118,6 +118,11 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: mockToastError },
 }));
 
+vi.mock("@multica/core/chat/mutations", () => ({
+  useDismissChatProjectNudge: () => ({ mutate: vi.fn(), isPending: false }),
+  useRegenerateChatQuickActions: () => ({ mutateAsync: vi.fn() }),
+}));
+
 vi.mock("@multica/core/chat", () => ({
   useChatStore: Object.assign(
     (selector?: (s: { activeSessionId: string | null }) => unknown) =>
