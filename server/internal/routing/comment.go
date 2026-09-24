@@ -11,7 +11,7 @@ import (
 // separate one would have to be found, would not be readable by the person the
 // decision affects, and would drift from what the ticket actually shows.
 
-const changeSlotFooter = "改右侧任一格即可，改完那一格不会被自动改回。"
+const changeSlotFooter = "改右侧任一格即可，改完那一格不会被自动改回。改执行人不会取消原来的 run；原来的席位如果还在跑，要停就取消那个 run。改到最强档要在评论里写明理由。"
 
 func pct(v float64) string {
 	return strconv.FormatFloat(v*100, 'f', 0, 64) + "%"
