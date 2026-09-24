@@ -270,7 +270,13 @@
     "rename": "이름 변경",
     "delete": "채팅 삭제",
     "archive": "채팅 보관",
-    "unarchive": "채팅 보관 해제"
+    "unarchive": "채팅 보관 해제",
+    "copy_link": "세션 링크 복사",
+    "link_copied": "세션 링크를 복사했습니다",
+    "copy_conversation": "대화 전체를 Markdown으로 복사",
+    "conversation_copied": "대화를 복사했습니다",
+    "copy_role_user": "나",
+    "copy_role_assistant": "어시스턴트"
   },
   "provider_quota": {
     "label": "할당량",

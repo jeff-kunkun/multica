@@ -108,7 +108,7 @@ export function ChatThreadList({
   // affordance simply stays off.
   const slug = useWorkspaceSlug();
   const sessionHref = (sessionId: string) =>
-    slug ? `${paths.workspace(slug).chat()}?session=${sessionId}` : null;
+    slug ? paths.workspace(slug).chatSession(sessionId) : null;
   // Optional: the list renders bare in tests; without an adapter the web
   // modifier-click affordance stays off (desktop keeps selection anyway).
   const navigation = useOptionalNavigation();

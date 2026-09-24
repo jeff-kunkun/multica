@@ -481,25 +481,29 @@ const MessageBubble = memo(function MessageBubble({
   const { message } = item;
 
   if (message.role === "user") {
+    const copyContent = canonicalAnswerText(message).trim();
     return (
       <div className="flex justify-end">
-        <div className="rounded-2xl bg-muted px-3.5 py-2 text-body max-w-[80%] break-words">
-          {/* User messages are authored as markdown in ContentEditor, so they
-           * render through the SAME RichContent as assistant replies and as
-           * Issue/Comment — a Mermaid fence a user pastes is a diagram here
-           * too. `compact` trims the leading/trailing block margins so a
-           * single-line bubble stays as tight as the plain-text version. */}
-          <RichContent
-            content={message.content}
-            attachments={message.attachments}
-            density="compact"
-            phase="settled"
-          />
-          <AttachmentList
-            attachments={message.attachments}
-            content={message.content}
-            className="mt-1.5"
-          />
+        <div className="flex max-w-[80%] flex-col items-end gap-1">
+          <div className="rounded-2xl bg-muted px-3.5 py-2 text-body break-words">
+            {/* User messages are authored as markdown in ContentEditor, so they
+             * render through the SAME RichContent as assistant replies and as
+             * Issue/Comment — a Mermaid fence a user pastes is a diagram here
+             * too. `compact` trims the leading/trailing block margins so a
+             * single-line bubble stays as tight as the plain-text version. */}
+            <RichContent
+              content={message.content}
+              attachments={message.attachments}
+              density="compact"
+              phase="settled"
+            />
+            <AttachmentList
+              attachments={message.attachments}
+              content={message.content}
+              className="mt-1.5"
+            />
+          </div>
+          {copyContent.length > 0 && <MessageCopyButton content={copyContent} />}
         </div>
       </div>
     );

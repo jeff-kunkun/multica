@@ -183,6 +183,23 @@ func (q *Queries) ClearChatSessionSessionIfMatches(ctx context.Context, arg Clea
 	return err
 }
 
+const countHandoffChatMessages = `-- name: CountHandoffChatMessages :one
+SELECT count(*)::int AS count
+FROM chat_message
+WHERE chat_session_id = $1
+  AND message_kind <> 'channel_command'
+  AND message_kind <> 'onboarding_kickoff'
+`
+
+// Visible turns a takeover read may describe. Channel commands and the hidden
+// onboarding kickoff are not part of the conversation a new session continues.
+func (q *Queries) CountHandoffChatMessages(ctx context.Context, chatSessionID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countHandoffChatMessages, chatSessionID)
+	var count int32
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createChatDraftRestore = `-- name: CreateChatDraftRestore :one
 INSERT INTO chat_draft_restore (id, chat_session_id, task_id, content, attachment_ids)
 VALUES ($1, $2, $3, $4, $5)
@@ -997,6 +1014,26 @@ func (q *Queries) GetChatSessionInWorkspace(ctx context.Context, arg GetChatSess
 		&i.ProjectNudgeDismissedAt,
 	)
 	return i, err
+}
+
+const getEarliestHandoffUserMessage = `-- name: GetEarliestHandoffUserMessage :one
+SELECT content
+FROM chat_message
+WHERE chat_session_id = $1
+  AND role = 'user'
+  AND message_kind <> 'channel_command'
+  AND message_kind <> 'onboarding_kickoff'
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+// The first thing the person asked, so a summary can say what the session is
+// about without paging the whole transcript into the new session.
+func (q *Queries) GetEarliestHandoffUserMessage(ctx context.Context, chatSessionID pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getEarliestHandoffUserMessage, chatSessionID)
+	var content string
+	err := row.Scan(&content)
+	return content, err
 }
 
 const getLastChatTaskSession = `-- name: GetLastChatTaskSession :one
