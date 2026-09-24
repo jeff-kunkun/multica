@@ -24,6 +24,7 @@ import {
   useDeleteChatSession,
   useSetChatSessionArchived,
   useSetChatSessionPinned,
+  useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
@@ -37,6 +38,7 @@ import { resolveClickIntent, useOptionalNavigation } from "../../navigation";
 import { createLogger } from "@multica/core/logger";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useLocale, useT } from "../../i18n";
+import { SessionRenameInput } from "./session-rename-input";
 
 const apiLogger = createLogger("chat.api");
 
@@ -67,8 +69,8 @@ function toPreview(content: string): string {
  * name + last-message preview + time, with a red unread *count* badge. An
  * in-flight agent shows a "typing…" indicator; a failed last reply shows a
  * destructive hint. Rows are rendered in the server's order (most-recent
- * activity first). Renaming lives in the conversation header's ⋯ menu, not
- * here.
+ * activity first). Clicking the title renames in place — the same editor the
+ * conversation header uses — and the rest of the row still opens the chat.
  *
  * Two views, toggled locally: the default "history" view lists active chats and
  * hovering a row reveals pin + archive (or stop, while running) — archiving is
@@ -134,9 +136,13 @@ export function ChatThreadList({
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [confirmingStopId, setConfirmingStopId] = useState<string | null>(null);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
+  // One row edits at a time. The id (not the session) keeps a stale closure
+  // from writing over a newer title that arrived on the socket.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   const deleteSession = useDeleteChatSession();
   const setPinned = useSetChatSessionPinned();
   const setArchived = useSetChatSessionArchived();
+  const updateSession = useUpdateChatSession();
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const queryClient = useQueryClient();
 
@@ -156,6 +162,14 @@ export function ChatThreadList({
     if (!confirmingStopId || pendingTaskBySessionId.has(confirmingStopId)) return;
     setConfirmingStopId(null);
   }, [confirmingStopId, pendingTaskBySessionId]);
+
+  const handleSubmitRename = (sessionId: string, raw: string) => {
+    const trimmed = raw.trim();
+    const current = sessions.find((s) => s.id === sessionId);
+    setRenamingId(null);
+    if (!trimmed || trimmed === current?.title) return;
+    updateSession.mutate({ sessionId, title: trimmed });
+  };
 
   const handleConfirmDelete = (session: ChatSession) => {
     const sessionId = session.id;
@@ -218,6 +232,7 @@ export function ChatThreadList({
     const unread = isCurrent ? 0 : (session.unread_count ?? 0);
     const isConfirmingDelete = confirmingDeleteId === session.id;
     const isConfirmingStop = confirmingStopId === session.id && !!pendingTask;
+    const isRenaming = renamingId === session.id;
     const isConfirmingAction = isConfirmingDelete || isConfirmingStop;
     const titleText = session.title?.trim() || t(($) => $.window.untitled);
     const last = session.last_message ?? null;
@@ -323,7 +338,7 @@ export function ChatThreadList({
         aria-current={isCurrent ? "true" : undefined}
         tabIndex={0}
         onClick={(e) => {
-          if (isConfirmingAction || e.defaultPrevented) return;
+          if (isConfirmingAction || isRenaming || e.defaultPrevented) return;
           // Plain click keeps the master-detail selection. On web, a modifier
           // click opens the session as its own browser tab. Desktop tabs
           // dedupe chat by pathname (a session is view state, not a subject —
@@ -354,7 +369,7 @@ export function ChatThreadList({
           window.open(getShareableUrl(href), "_blank", "noopener,noreferrer");
         }}
         onKeyDown={(e) => {
-          if (isConfirmingAction) return;
+          if (isConfirmingAction || isRenaming) return;
           handleRowActivationKey(e, () => onSelectSession(session));
         }}
         className={cn(
@@ -382,10 +397,31 @@ export function ChatThreadList({
                 className="size-3 shrink-0 -rotate-45 fill-current text-muted-foreground"
               />
             )}
-            <span className={cn("min-w-0 flex-1 truncate text-body", unread > 0 ? "font-semibold text-foreground" : "font-medium")}>
-              {titleText}
-            </span>
-            <span className="ml-auto shrink-0 text-micro text-muted-foreground">{timeText}</span>
+            {isRenaming ? (
+              <SessionRenameInput
+                initialValue={session.title ?? ""}
+                onSubmit={(value) => handleSubmitRename(session.id, value)}
+                onCancel={() => setRenamingId(null)}
+              />
+            ) : (
+              <button
+                type="button"
+                title={t(($) => $.session_history.row_rename_aria)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRenamingId(session.id);
+                }}
+                className={cn(
+                  "min-w-0 flex-1 truncate text-left text-body outline-none hover:text-foreground/80 focus-visible:text-foreground/80",
+                  unread > 0 ? "font-semibold text-foreground" : "font-medium",
+                )}
+              >
+                {titleText}
+              </button>
+            )}
+            {!isRenaming && (
+              <span className="ml-auto shrink-0 text-micro text-muted-foreground">{timeText}</span>
+            )}
           </div>
 
           {/* Line 2: preview + unread badge, or an inline confirm prompt */}
@@ -450,7 +486,7 @@ export function ChatThreadList({
             below, which a pointer without hover can never reach. It takes real
             layout space (rather than overlaying the preview) and gives way to
             the hover strip on a hover-capable pointer. */}
-        {!isConfirmingAction && (
+        {!isConfirmingAction && !isRenaming && (
           <RowActionsMenu
             label={t(($) => $.list.row_actions_aria)}
             groups={[rowActions]}
@@ -460,7 +496,7 @@ export function ChatThreadList({
         {/* Hover actions — absolutely positioned so showing/hiding them never
             changes the row height (which was making the list jump). Keyboard
             focus reveals them too, so they are reachable without a mouse. */}
-        {!isConfirmingAction && (
+        {!isConfirmingAction && !isRenaming && (
           <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 [@media(hover:hover)]:group-hover/row:flex [@media(hover:hover)]:group-focus-within/row:flex">
             {rowActions.map((action) => (
               <RowAction
