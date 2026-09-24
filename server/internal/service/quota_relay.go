@@ -167,9 +167,10 @@ type idleTransfer struct {
 // of money. It is decided inside the breaker transaction (first opening
 // only) and sent after it commits.
 type balanceAlert struct {
-	agent  db.Agent
-	issue  pgtype.UUID
-	detail string
+	agent    db.Agent
+	issue    pgtype.UUID
+	detail   string
+	siblings []string
 }
 
 func quotaFailureWorthRelay(task db.AgentTaskQueue) bool {
@@ -235,35 +236,36 @@ func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQu
 				alert = &balanceAlert{agent: agent, issue: locked.IssueID, detail: quotaAcceptanceText([]byte(quotaError(locked)))}
 			}
 		}
-		suppressAt, err := suppressQuotaSeat(ctx, qtx, agent)
+		// Shut every seat on the empty account first, then move the work:
+		// a sibling still enabled would be picked as the replacement and
+		// fail on the same account (DENE-870).
+		seats, err := quotaAccountSeats(ctx, qtx, agent, plan)
 		if err != nil {
 			return err
 		}
-		if _, err := qtx.UpsertQuotaBreaker(ctx, db.UpsertQuotaBreakerParams{
-			WorkspaceID:            agent.WorkspaceID,
-			AgentID:                agent.ID,
-			Scope:                  plan.Scope(),
-			ModelKey:               plan.ModelKey,
-			Reason:                 string(plan.Kind),
-			SourceTaskID:           locked.ID,
-			Detail:                 quotaAcceptanceText([]byte(quotaError(locked))),
-			RecoverAt:              pgtype.Timestamptz{Time: plan.RecoverAt, Valid: true},
-			RecoverCondition:       plan.Condition,
-			SuppressAgentUpdatedAt: suppressAt,
-		}); err != nil {
-			return fmt.Errorf("open quota breaker: %w", err)
+		for _, seat := range seats {
+			if err := openQuotaBreaker(ctx, qtx, seat, locked, plan); err != nil {
+				return err
+			}
 		}
 		demotion := quotaDemotionLine(ctx, qtx, agent)
-		var moved []idleTransfer
-		if balance {
-			moved, err = s.transferBrokenSeatIssues(ctx, qtx, locked, agent)
-		} else {
-			moved, err = s.reassignUnstartedIssues(ctx, qtx, locked, agent, demotion)
+		for _, seat := range seats {
+			var moved []idleTransfer
+			if balance {
+				moved, err = s.transferBrokenSeatIssues(ctx, qtx, locked, seat)
+			} else {
+				moved, err = s.reassignUnstartedIssues(ctx, qtx, locked, seat, quotaDemotionLine(ctx, qtx, seat))
+			}
+			if err != nil {
+				return err
+			}
+			idle = append(idle, moved...)
 		}
-		if err != nil {
-			return err
+		if alert != nil {
+			for _, seat := range seats[1:] {
+				alert.siblings = append(alert.siblings, seat.Name)
+			}
 		}
-		idle = moved
 
 		if !locked.IssueID.Valid {
 			_, err = insertQuotaRelay(ctx, qtx, locked, agent, plan, db.InsertQuotaRelayParams{Outcome: "skipped_no_issue"})
@@ -565,6 +567,73 @@ func quotaRelayGiveUp(err error) bool {
 		strings.Contains(msg, "archived") ||
 		strings.Contains(msg, "no runtime") ||
 		strings.Contains(msg, "fail-closed")
+}
+
+// quotaAccountSeats is the failed seat followed by every other seat that
+// goes down with it. An empty balance takes the base role, all its
+// specialisations and any seat bound to the same account. A weekly window or
+// capacity miss on a base role takes the specialisations running on its
+// profile. A specialisation's own window stays on that one seat.
+func quotaAccountSeats(ctx context.Context, qtx *db.Queries, agent db.Agent, plan quotarelay.Plan) ([]db.Agent, error) {
+	seats := []db.Agent{agent}
+	if plan.Scope() == quotarelay.ScopeModel || !agent.RuntimeID.Valid {
+		return seats, nil
+	}
+	if plan.Kind != quotarelay.KindBalanceExhausted {
+		if agent.ParentAgentID.Valid {
+			return seats, nil
+		}
+		children, err := qtx.ListInheritingSpecialisations(ctx, db.ListInheritingSpecialisationsParams{
+			WorkspaceID:   agent.WorkspaceID,
+			ParentAgentID: agent.ID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list inheriting specialisations: %w", err)
+		}
+		return append(seats, children...), nil
+	}
+	root := agent.ID
+	if agent.ParentAgentID.Valid {
+		root = agent.ParentAgentID
+	}
+	env := agent.CustomEnv
+	if len(env) == 0 {
+		env = []byte("{}")
+	}
+	siblings, err := qtx.ListQuotaAccountSiblings(ctx, db.ListQuotaAccountSiblingsParams{
+		WorkspaceID: agent.WorkspaceID,
+		AgentID:     agent.ID,
+		RuntimeID:   agent.RuntimeID,
+		RootID:      root,
+		CustomEnv:   env,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list quota account siblings: %w", err)
+	}
+	return append(seats, siblings...), nil
+}
+
+// openQuotaBreaker turns one seat's work off and records why.
+func openQuotaBreaker(ctx context.Context, qtx *db.Queries, agent db.Agent, task db.AgentTaskQueue, plan quotarelay.Plan) error {
+	suppressAt, err := suppressQuotaSeat(ctx, qtx, agent)
+	if err != nil {
+		return err
+	}
+	if _, err := qtx.UpsertQuotaBreaker(ctx, db.UpsertQuotaBreakerParams{
+		WorkspaceID:            agent.WorkspaceID,
+		AgentID:                agent.ID,
+		Scope:                  plan.Scope(),
+		ModelKey:               plan.ModelKey,
+		Reason:                 string(plan.Kind),
+		SourceTaskID:           task.ID,
+		Detail:                 quotaAcceptanceText([]byte(quotaError(task))),
+		RecoverAt:              pgtype.Timestamptz{Time: plan.RecoverAt, Valid: true},
+		RecoverCondition:       plan.Condition,
+		SuppressAgentUpdatedAt: suppressAt,
+	}); err != nil {
+		return fmt.Errorf("open quota breaker: %w", err)
+	}
+	return nil
 }
 
 func suppressQuotaSeat(ctx context.Context, qtx *db.Queries, agent db.Agent) (pgtype.Timestamptz, error) {
@@ -1044,7 +1113,7 @@ func (s *TaskService) alertBalanceOwners(ctx context.Context, alert balanceAlert
 		slog.Warn("quota relay: list owners for balance alert failed", "agent_id", util.UUIDToString(alert.agent.ID), "error", err)
 		return
 	}
-	body := quotarelay.BalanceOwnerAlert(alert.agent.Name, alert.detail, moved)
+	body := quotarelay.BalanceOwnerAlert(alert.agent.Name, alert.detail, moved, alert.siblings...)
 	details, _ := json.Marshal(map[string]string{
 		"wait_reason": "seat_balance_exhausted",
 		"agent_id":    util.UUIDToString(alert.agent.ID),

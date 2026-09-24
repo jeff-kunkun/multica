@@ -28,6 +28,15 @@ func TestBalanceExhaustionMovesWorkCrossHouseAndAlertsOnce(t *testing.T) {
 	if _, err := w.pool.Exec(ctx, `UPDATE issue SET reviewer_id = $2 WHERE id = $1`, w.issueID, w.mediumID); err != nil {
 		t.Fatalf("source reviewer: %v", err)
 	}
+	// The other houses run their own CLIs, so their own runtime. Only the
+	// Grok family and the seat bound to the same Grok account stay behind.
+	otherRuntime := seedQuotaRuntime(t, w, "other-house")
+	if _, err := w.pool.Exec(ctx, `UPDATE agent SET runtime_id = $4 WHERE id IN ($1, $2, $3)`,
+		w.sameID, w.mediumID, w.siblingID, otherRuntime); err != nil {
+		t.Fatalf("move other houses: %v", err)
+	}
+	sameAccountID := seedQuotaAgent(t, w, "jump-broker维护", w.runtimeID, `{}`)
+	otherAccountID := seedQuotaAgent(t, w, "孙悟天二号", w.runtimeID, `{"GROK_HOME":"/accounts/2"}`)
 
 	insertIssue := func(title, status string, number int, reviewer string) string {
 		t.Helper()
@@ -52,6 +61,11 @@ func TestBalanceExhaustionMovesWorkCrossHouseAndAlertsOnce(t *testing.T) {
 	}
 	// Its reviewer is the GPT seat, so it must go to Claude.
 	todoID := insertIssue("还没开跑", "todo", 9102, w.sameID)
+	// The base role's own ticket has to leave the spent account too.
+	baseTicketID := insertIssue("基础角色手上的", "in_progress", 9104, "")
+	if _, err := w.pool.Exec(ctx, `UPDATE issue SET assignee_id = $2 WHERE id = $1`, baseTicketID, w.parentID); err != nil {
+		t.Fatalf("base ticket: %v", err)
+	}
 
 	svc := w.service()
 	hold, err := svc.RelayQuotaFailure(ctx, w.task(t))
@@ -66,6 +80,39 @@ func TestBalanceExhaustionMovesWorkCrossHouseAndAlertsOnce(t *testing.T) {
 	if enabled {
 		t.Fatal("a seat whose account is spent must stop taking work")
 	}
+	// Kun's rule: shut the whole account down before moving the work. The
+	// base role, its specialisation and the seat on the same account are
+	// all off; a seat bound to another account keeps working.
+	for _, id := range []string{w.parentID, sameAccountID} {
+		var on bool
+		var open int
+		if err := w.pool.QueryRow(ctx, `
+			SELECT a.work_enabled, (SELECT count(*) FROM agent_quota_breaker b
+				WHERE b.agent_id = a.id AND b.recovered_at IS NULL AND b.reason = 'balance_exhausted')
+			FROM agent a WHERE a.id = $1`, id).Scan(&on, &open); err != nil {
+			t.Fatalf("account seat %s: %v", id, err)
+		}
+		if on || open != 1 {
+			t.Fatalf("seat %s on the spent account enabled=%v open breakers=%d", id, on, open)
+		}
+	}
+	var otherOn bool
+	if err := w.pool.QueryRow(ctx, `SELECT work_enabled FROM agent WHERE id = $1`, otherAccountID).Scan(&otherOn); err != nil {
+		t.Fatalf("other account seat: %v", err)
+	}
+	if !otherOn {
+		t.Fatal("a seat bound to another account was shut down")
+	}
+	var stranded int
+	if err := w.pool.QueryRow(ctx, `
+		SELECT count(*) FROM issue WHERE assignee_id IN ($1, $2, $3) AND status IN ('todo', 'in_progress', 'blocked')`,
+		w.failedID, w.parentID, sameAccountID).Scan(&stranded); err != nil {
+		t.Fatalf("stranded: %v", err)
+	}
+	if stranded != 0 {
+		t.Fatalf("%d open tickets still sit on the spent account", stranded)
+	}
+
 	var reason, condition string
 	var farOff bool
 	if err := w.pool.QueryRow(ctx, `
@@ -126,6 +173,14 @@ func TestBalanceExhaustionMovesWorkCrossHouseAndAlertsOnce(t *testing.T) {
 	if n := countAlerts(); n != 1 {
 		t.Fatalf("owner alerts = %d, want 1", n)
 	}
+	var alertBody string
+	if err := w.pool.QueryRow(ctx, `
+		SELECT body FROM inbox_item WHERE workspace_id = $1 AND type = 'seat_balance_exhausted'`, w.workspaceID).Scan(&alertBody); err != nil {
+		t.Fatalf("alert body: %v", err)
+	}
+	if !strings.Contains(alertBody, "孙悟天游戏") || !strings.Contains(alertBody, "jump-broker维护") {
+		t.Fatalf("owner alert must name the seats that went down with it:\n%s", alertBody)
+	}
 
 	// A run already on the wire fails on the same empty account: no second
 	// reminder.
@@ -158,4 +213,65 @@ func TestBalanceExhaustionMovesWorkCrossHouseAndAlertsOnce(t *testing.T) {
 	if got := assigneeOf(todoID); got != w.mediumID {
 		t.Fatalf("todo ticket pulled back to %s", got)
 	}
+}
+
+// DENE-870: a weekly window on a base role is its inheriting
+// specialisations' window too; a specialisation with its own profile, and a
+// seat merely sharing the runtime, keep working.
+func TestWeeklyLimitOnABaseRoleTakesItsInheritingSpecialisations(t *testing.T) {
+	w := seedQuotaWorld(t, string(taskfailure.ReasonAgentProviderQuotaLimit), "Weekly usage limit reached", true)
+	ctx := context.Background()
+	// Make the failing seat the base role and hang two specialisations off it.
+	if _, err := w.pool.Exec(ctx, `UPDATE agent SET parent_agent_id = NULL, runtime_inherited = FALSE WHERE id = $1`, w.failedID); err != nil {
+		t.Fatalf("base role: %v", err)
+	}
+	inheritedID := seedQuotaAgent(t, w, "孙悟饭游戏", w.runtimeID, `{}`)
+	ownID := seedQuotaAgent(t, w, "孙悟饭学术", w.runtimeID, `{}`)
+	if _, err := w.pool.Exec(ctx, `
+		UPDATE agent SET parent_agent_id = $2::uuid, runtime_inherited = (id = $1::uuid) WHERE id IN ($1::uuid, $3::uuid)`,
+		inheritedID, w.failedID, ownID); err != nil {
+		t.Fatalf("specialisations: %v", err)
+	}
+	if _, err := w.service().RelayQuotaFailure(ctx, w.task(t)); err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+	enabled := func(id string) bool {
+		t.Helper()
+		var on bool
+		if err := w.pool.QueryRow(ctx, `SELECT work_enabled FROM agent WHERE id = $1`, id).Scan(&on); err != nil {
+			t.Fatalf("agent %s: %v", id, err)
+		}
+		return on
+	}
+	if enabled(w.failedID) || enabled(inheritedID) {
+		t.Fatal("the base role and its inheriting specialisation must both stop")
+	}
+	if !enabled(ownID) || !enabled(w.siblingID) {
+		t.Fatal("a weekly window must not reach a specialisation with its own profile or an unrelated seat")
+	}
+}
+
+func seedQuotaRuntime(t *testing.T, w quotaWorld, name string) string {
+	t.Helper()
+	var id string
+	if err := w.pool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		VALUES ($1, $2, 'local', 'claude', 'online', '', '{}'::jsonb, $3, now())
+		RETURNING id`, w.workspaceID, name, w.userID).Scan(&id); err != nil {
+		t.Fatalf("seed runtime %s: %v", name, err)
+	}
+	return id
+}
+
+func seedQuotaAgent(t *testing.T, w quotaWorld, name, runtimeID, env string) string {
+	t.Helper()
+	var id string
+	if err := w.pool.QueryRow(context.Background(), `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility,
+			max_concurrent_tasks, owner_id, instructions, custom_env, custom_args, model)
+		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 1, $4, '', $5::jsonb, '[]'::jsonb, 'grok-4.7')
+		RETURNING id`, w.workspaceID, name, runtimeID, w.userID, env).Scan(&id); err != nil {
+		t.Fatalf("seed agent %s: %v", name, err)
+	}
+	return id
 }

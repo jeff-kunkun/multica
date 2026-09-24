@@ -254,3 +254,31 @@ WHERE t.issue_id = $1
       FROM agent_task_queue c
       WHERE c.issue_id = t.issue_id AND c.status = 'completed'
   ), '-infinity'::timestamptz);
+
+-- name: ListQuotaAccountSiblings :many
+-- DENE-870: the other seats burning the same account as a seat whose
+-- account-level quota or balance ran out. Same runtime (one provider CLI on
+-- one machine) and either the same base-role family — the base role and
+-- every specialisation under it — or an identical custom_env, which is where
+-- an agent binds a numbered account directory. Archived seats are left out.
+SELECT * FROM agent a
+WHERE a.workspace_id = @workspace_id
+  AND a.id <> @agent_id
+  AND a.archived_at IS NULL
+  AND a.runtime_id = @runtime_id
+  AND (
+      a.id = @root_id
+      OR a.parent_agent_id = @root_id
+      OR a.custom_env = @custom_env::jsonb
+  )
+ORDER BY a.created_at, a.id;
+
+-- name: ListInheritingSpecialisations :many
+-- DENE-870: a base role's specialisations that run on its runtime profile.
+-- A weekly window or capacity miss on the base role is theirs too.
+SELECT * FROM agent
+WHERE workspace_id = @workspace_id
+  AND parent_agent_id = @parent_agent_id
+  AND runtime_inherited
+  AND archived_at IS NULL
+ORDER BY created_at, id;
