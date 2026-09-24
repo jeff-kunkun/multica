@@ -71,6 +71,57 @@ func TestStageAdvancePromotesWhenParentSeatIsOff(t *testing.T) {
 	}
 }
 
+func TestStageAdvancePromotesClearNextStageWithoutWakingParent(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newChildDoneFixture(t, "in_progress")
+	parentSeat := createHandlerTestAgent(t, "阶段推进父票-孙悟天", nil)
+	worker := createHandlerTestAgent(t, "阶段推进子票-布尔玛", nil)
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", parentSeat)
+	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET stage = 1 WHERE id = $1`, fx.child.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	w := testutil.Call(t, testHandler.CreateIssue, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           "stage two no extra dependency",
+		"description":     "没有额外依赖",
+		"status":          "backlog",
+		"parent_issue_id": fx.parent.ID,
+		"assignee_type":   "agent",
+		"assignee_id":     worker,
+	})).Want(http.StatusCreated)
+	var stageTwo IssueResponse
+	w.JSON(&stageTwo)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1 OR issue_id = $2`, fx.parent.ID, stageTwo.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, stageTwo.ID)
+	})
+	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET stage = 2, status = 'backlog' WHERE id = $1`, stageTwo.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, stageTwo.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "todo" {
+		t.Fatalf("stage 2 status = %q, want todo", status)
+	}
+	if got := countPendingTasksForAgent(t, stageTwo.ID, worker); got != 1 {
+		t.Fatalf("stage 2 pending runs = %d, want 1", got)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, parentSeat); got != 0 {
+		t.Fatalf("parent seat was woken %d times, want 0", got)
+	}
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "提到待办") {
+		t.Fatalf("comment = %s", content)
+	}
+}
+
 func TestMentionOfDisabledSeatRelaysToAnotherFamily(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

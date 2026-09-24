@@ -354,6 +354,24 @@ UPDATE issue AS i SET
 WHERE i.id = $1 AND i.workspace_id = $3
 RETURNING *;
 
+-- name: PromoteBacklogIssueToTodo :one
+-- Stage advance only. A child still in backlog moves to todo; a second close
+-- that arrives after the first already promoted the row matches nothing, so
+-- the caller does not start another run. Repositioning matches UpdateIssueStatus.
+UPDATE issue AS i SET
+    status = 'todo',
+    position = (
+        SELECT COALESCE(MIN(target.position), 0) - 1
+        FROM issue AS target
+        WHERE target.workspace_id = i.workspace_id
+          AND target.status = 'todo'
+    ),
+    revision = i.revision + 1,
+    last_activity_at = GREATEST(COALESCE(i.last_activity_at, i.updated_at), now()),
+    updated_at = now()
+WHERE i.id = sqlc.arg('id') AND i.workspace_id = sqlc.arg('workspace_id') AND i.status = 'backlog'
+RETURNING *;
+
 -- name: CreateIssueWithOrigin :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,

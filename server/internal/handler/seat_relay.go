@@ -149,9 +149,13 @@ func (h *Handler) promoteClearNextStage(ctx context.Context, parent db.Issue, ch
 		if label == "" {
 			label = item.Title
 		}
-		updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-			ID: child.ID, Status: "todo", WorkspaceID: child.WorkspaceID,
+		updated, err := h.Queries.PromoteBacklogIssueToTodo(ctx, db.PromoteBacklogIssueToTodoParams{
+			ID: child.ID, WorkspaceID: child.WorkspaceID,
 		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Another close already moved this child out of backlog.
+			continue
+		}
 		if err != nil {
 			slog.Warn("stage advance: promote failed", "error", err, "child_id", item.ID)
 			held = append(held, stagegate.Hold{ID: item.ID, Identifier: item.Identifier, Title: item.Title, Reason: "提到待办失败"})
