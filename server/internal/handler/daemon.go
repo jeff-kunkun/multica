@@ -1262,7 +1262,11 @@ type DaemonHeartbeatRequest struct {
 	RuntimeID           string                       `json:"runtime_id"`
 	SupportsBatchImport bool                         `json:"supports_batch_import,omitempty"`
 	PlanLimits          *protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
-	Jev                 *protocol.JevStatusSnapshot  `json:"jev,omitempty"`
+	// AgentPlanLimits is the per-agent counterpart of PlanLimits (DENE-715),
+	// keyed by agent id. Optional: a daemon that predates it, or one that has
+	// never run an account-bound agent, simply omits it.
+	AgentPlanLimits map[string]protocol.PlanLimitsSnapshot `json:"agent_plan_limits,omitempty"`
+	Jev             *protocol.JevStatusSnapshot            `json:"jev,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -1407,6 +1411,14 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid jev")
 		return
 	}
+	// Per-agent snapshots are best-effort: a malformed entry is dropped rather
+	// than failing the heartbeat, because the same request is also how this
+	// machine's runtimes stay online (DENE-715).
+	agentPlanLimitsJSON, agentPlanLimitsErr := validateAgentPlanLimits(req.AgentPlanLimits, rt.Provider)
+	if agentPlanLimitsErr != nil {
+		slog.Warn("dropping unusable agent plan limits",
+			"runtime_id", req.RuntimeID, "error", agentPlanLimitsErr)
+	}
 
 	updateStart := time.Now()
 	if err := h.recordHeartbeat(r.Context(), rt); err != nil {
@@ -1416,6 +1428,12 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.applyStoredPlanLimits(r.Context(), rt.ID, uuidToString(rt.WorkspaceID), planLimitsJSON); err != nil {
+		updateMs = time.Since(updateStart).Milliseconds()
+		outcome = "error_update"
+		writeError(w, http.StatusInternalServerError, "heartbeat failed")
+		return
+	}
+	if err := h.applyStoredAgentPlanLimits(r.Context(), uuidToString(rt.WorkspaceID), agentPlanLimitsJSON); err != nil {
 		updateMs = time.Since(updateStart).Milliseconds()
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
@@ -1476,7 +1494,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // captured each runtime's liveness state in a connection lease, so the hot
 // path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
 // fallback for a daemon that stops receiving WebSocket acknowledgements.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot, jev *protocol.JevStatusSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot, agentPlanLimits map[string]protocol.PlanLimitsSnapshot, jev *protocol.JevStatusSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
@@ -1495,6 +1513,13 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if err != nil {
 		return nil, fmt.Errorf("invalid jev: %w", err)
 	}
+	// Same best-effort rule as the HTTP path: a per-agent entry that fails
+	// validation is dropped, never a reason to tear down the connection.
+	agentPlanLimitsJSON, agentPlanLimitsErr := validateAgentPlanLimits(agentPlanLimits, state.Provider)
+	if agentPlanLimitsErr != nil {
+		slog.Warn("dropping unusable agent plan limits",
+			"runtime_id", runtimeID, "error", agentPlanLimitsErr)
+	}
 	if err := h.recordHeartbeatLease(ctx, runtimeID, lease); err != nil {
 		if isNotFound(err) {
 			if h.DaemonRuntimeGone != nil {
@@ -1510,6 +1535,9 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		return nil, fmt.Errorf("invalid runtime_id: %w", err)
 	}
 	if err := h.applyStoredPlanLimits(ctx, runtimeUUID, state.WorkspaceID, planLimitsJSON); err != nil {
+		return nil, err
+	}
+	if err := h.applyStoredAgentPlanLimits(ctx, state.WorkspaceID, agentPlanLimitsJSON); err != nil {
 		return nil, err
 	}
 	if err := h.applyStoredJevStatus(ctx, runtimeUUID, state.WorkspaceID, jevStatusJSON); err != nil {
@@ -1556,6 +1584,42 @@ func (h *Handler) applyStoredPlanLimits(ctx context.Context, runtimeUUID pgtype.
 			"runtime_id":          uuidToString(runtimeUUID),
 			"plan_limits_updated": true,
 		})
+	}
+	return nil
+}
+
+// applyStoredAgentPlanLimits persists the per-agent snapshots of one heartbeat
+// and asks clients to refetch only the agents whose row actually changed
+// (DENE-715).
+//
+// The workspace predicate is what keeps a daemon from writing a seat outside
+// the workspaces it is authorized for: the runtime already passed the workspace
+// check, and an agent running on it belongs to that same workspace. A row count
+// of zero therefore means "nothing to say" — either unchanged or not this
+// workspace's — and neither is worth a broadcast.
+func (h *Handler) applyStoredAgentPlanLimits(ctx context.Context, workspaceID string, snapshots map[pgtype.UUID][]byte) error {
+	if len(snapshots) == 0 {
+		return nil
+	}
+	workspaceUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return fmt.Errorf("invalid workspace id: %w", err)
+	}
+	for agentUUID, snapshot := range snapshots {
+		updated, err := h.Queries.UpdateAgentPlanLimits(ctx, db.UpdateAgentPlanLimitsParams{
+			ID:          agentUUID,
+			WorkspaceID: workspaceUUID,
+			PlanLimits:  snapshot,
+		})
+		if err != nil {
+			return fmt.Errorf("update agent plan limits: %w", err)
+		}
+		if updated > 0 && workspaceID != "" {
+			h.publish(protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
+				"agent_id":            uuidToString(agentUUID),
+				"plan_limits_updated": true,
+			})
+		}
 	}
 	return nil
 }

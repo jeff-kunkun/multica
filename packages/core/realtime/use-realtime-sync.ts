@@ -1072,7 +1072,15 @@ export function useRealtimeSync(
         return;
       }
       const wsId = getCurrentWsId();
-      if (wsId) qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      if (!wsId) return;
+      // An agent-scoped snapshot lives on the agent row, so refetching runtimes
+      // would not move the number the panel reads (DENE-715). The runtime row
+      // and the agent row are separate carriers with separate readers.
+      if (payload.agent_id) {
+        qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+        return;
+      }
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     });
 
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {

@@ -1793,6 +1793,11 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   custom_args: z.array(z.string()).default([]),
   has_custom_env: z.boolean().optional(),
   custom_env_key_count: z.number().optional(),
+  // Per-agent subscription windows (DENE-715). Optional-and-caught like
+  // runtime.plan_limits: a backend that predates the field omits it, and its
+  // absence has to read as "fall back to the runtime row" rather than failing
+  // the whole agent parse.
+  plan_limits: PlanLimitsSnapshotSchema.nullable().optional().catch(undefined),
   mcp_config: z.unknown().nullable().optional(),
   mcp_config_redacted: z.boolean().optional(),
   composio_toolkit_allowlist: z.array(z.string()).optional(),

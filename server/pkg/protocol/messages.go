@@ -428,6 +428,17 @@ type DaemonHeartbeatRequestPayload struct {
 	RuntimeID           string              `json:"runtime_id"`
 	SupportsBatchImport bool                `json:"supports_batch_import,omitempty"`
 	PlanLimits          *PlanLimitsSnapshot `json:"plan_limits,omitempty"`
+	// AgentPlanLimits carries one snapshot per AGENT whose CLI account is not
+	// the daemon-default one, keyed by agent id (DENE-715).
+	//
+	// It exists because agent_runtime.plan_limits is one row per
+	// (workspace, daemon, provider) while a single Claude runtime serves every
+	// Claude seat on that machine: an agent switched to a numbered account
+	// (custom_env CLAUDE_CONFIG_DIR) cannot be told apart from its unbound
+	// siblings by the runtime row alone. PlanLimits stays the runtime's default
+	// account snapshot, so a daemon that never fills this map — or an agent it
+	// has not run yet — keeps exactly the previous behavior.
+	AgentPlanLimits map[string]PlanLimitsSnapshot `json:"agent_plan_limits,omitempty"`
 	// Jev is the host-level JEV (fast judgement layer) status observed by the
 	// daemon. There is one state directory per machine, so every runtime frame
 	// of a daemon carries the same snapshot. Daemons that predate the field
