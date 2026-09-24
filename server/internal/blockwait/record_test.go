@@ -176,6 +176,29 @@ func TestReleaseDoesNotStayInReview(t *testing.T) {
 	}
 }
 
+func TestDecideCloseMergesGreenAndBlocksTheRest(t *testing.T) {
+	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	if DecideClose(nil, now).Action != ReleaseDone {
+		t.Fatal("no open PR should close")
+	}
+	merged := PRSnapshot{Number: 51, State: "merged", Mergeable: "clean", Checks: "SUCCESS"}
+	if DecideClose([]PRSnapshot{merged}, now).Action != ReleaseDone {
+		t.Fatal("an already merged PR should close")
+	}
+	clean := DecideClose([]PRSnapshot{{Number: 51, State: "open", Mergeable: "clean", Checks: "SUCCESS", URL: "https://example/pull/51"}}, now)
+	if clean.Action != ReleaseMerge || !strings.Contains(clean.Reason, "再关票") {
+		t.Fatalf("clean green PR = %#v", clean)
+	}
+	dirty := DecideClose([]PRSnapshot{{Number: 51, State: "open", Mergeable: "dirty", URL: "https://example/pull/51"}}, now)
+	if dirty.Action != ReleaseBlock || !dirty.Record.Structured() || !strings.Contains(dirty.Reason, "不标完成") {
+		t.Fatalf("conflict = %#v", dirty)
+	}
+	pending := DecideClose([]PRSnapshot{{Number: 51, State: "open", Mergeable: "clean", Checks: "PENDING"}}, now)
+	if pending.Action != ReleaseBlock || !strings.Contains(pending.Record.WaitCondition, "还没出结果") {
+		t.Fatalf("pending checks = %#v", pending)
+	}
+}
+
 func TestStaleWaitDoesNotOpenANewBlock(t *testing.T) {
 	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
 	stale, err := Accept(map[string]any{

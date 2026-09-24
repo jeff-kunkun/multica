@@ -168,6 +168,19 @@ const (
 	KindCompleted CommentKind = "completed"
 )
 
+// ReviewerRelay is the acceptance cover written while the designated reviewer
+// cannot take work. Designated is true when the slot already named them —
+// recovery gives the ticket back only in that case, and only before the cover
+// has started.
+type ReviewerRelay struct {
+	OriginalID      string
+	OriginalName    string
+	ReplacementID   string
+	ReplacementName string
+	Designated      bool
+	CoveredAt       time.Time
+}
+
 // Store is everything Route needs from the rest of the server. Every write on
 // it is either conditional (the ...IfUnset pair) or explicitly a handoff, so
 // the fill-only-empty-slots rule is enforced in SQL rather than by reading
@@ -193,6 +206,15 @@ type Store interface {
 	// nothing to provision and nothing that can be missing: every workspace
 	// with routing on has it.
 	SetReviewerIfUnset(ctx context.Context, workspaceID, issueID string, ref ReviewerRef) (written bool, err error)
+	// OffRosterSeat loads a seat Roster hides because work is switched off.
+	// Missing and archived seats return ok=false: those are not a temporary
+	// disable this row may cover.
+	OffRosterSeat(ctx context.Context, workspaceID, agentID string) (Agent, bool, error)
+	// ReplaceReviewer overwrites the reviewer slot while it still names currentID.
+	ReplaceReviewer(ctx context.Context, workspaceID, issueID, currentID string, ref ReviewerRef) (written bool, err error)
+	// RememberReviewerRelay records the designated reviewer and who is covering,
+	// so recovery can give the ticket back only while the cover has not started.
+	RememberReviewerRelay(ctx context.Context, workspaceID, issueID string, note ReviewerRelay) error
 	// Handoff reassigns an issue that already has an assignee. Unlike the two
 	// above this is not a fill: the in-review row hands the ticket from the
 	// seat that did the work to the seat that accepts it. It is only ever

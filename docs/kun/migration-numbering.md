@@ -33,15 +33,20 @@
 
 ## 怎么取号
 
-1. 动手写迁移前，先对 `origin/kun` 取最新号，不要看自己分支的本地目录：
+1. 取号与建文件是一条命令：
 
    ```bash
-   git fetch origin kun
-   git ls-tree --name-only origin/kun:server/migrations | sort -V | tail -1
+   make migration-new NAME=issue_status_icon
    ```
 
-   取到的最大号 +1 就是你的号。
-2. 每条迁移一个号，up/down 成对建。改完跑 `make sqlc`（如果影响到查询）和 `make migration-lint`。
+   它做三件事：
+
+   - `git fetch origin kun`（取不到时打 warning，退回本地已有的 `origin/kun` ref：号可能偏旧，合入前的门禁就是这种时候的兜底）；
+   - 取 `origin/kun:server/migrations` 和本地 `server/migrations` **两边**的最大编号，+1 作为你的号；
+   - 建出 `server/migrations/NNN_<name>.up.sql` 和 `NNN_<name>.down.sql` 两个空文件。已存在的文件绝不覆盖；`<name>` 用全小写下划线（字母、数字、单下划线）。
+
+   两条空文件已经成对，所以 `make migration-lint` 在写 SQL 之前就是绿的。
+2. 写 up/down SQL。改到查询就跑 `make sqlc` 重新生成。
 3. **合入前再核一次。** 分支开得久，`kun` 上可能已经有人用掉了你的号。PR 的 `migration-lint` job 红了、报 `share numeric prefix N`，就是这种情况。
 4. 撞号了怎么改：把自己这条迁移改成新的最大号 +1（up/down 一起改名），如果 sqlc 生成代码或 Go 里引用了旧文件名，一并改。**不要**动 `kun` 上已经合入的那条，它可能已经在某个环境跑过了。
 5. 这条迁移还没在任何环境跑过（只在自己 worktree 的库里跑过）就可以放心改名；本地库用 `make db-reset` 重建即可。

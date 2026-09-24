@@ -310,14 +310,14 @@ archived statuses remain readable via an explicit status filter.
   status at all: a run that reaches `/complete` cleanly while the issue is
   still `in_progress` with nothing queued behind it leaves a system comment
   carrying `completion-stall:run-completed-without-terminal-status`, naming the
-  current assignee and the parent issue. It reports the stall; it never moves
-  the issue and never starts a run, so deciding whether to continue the work or
-  close the issue out is the dispatcher's job. One issue gets at most one such
-  comment per 30 minutes, and an issue that still has a non-terminal child is
+  current assignee and the parent issue, then queues one recovery run for that
+  same assignee, told to finish the work and close through the close protocol.
+  It never moves the issue. One issue gets at most one such
+  signal per 30 minutes, and an issue that still has a non-terminal child is
   never signalled — dispatching sub-issues and staying `in_progress` is the
   documented way to record that the work continues below. A run ending is therefore still not the issue ending,
   and an agent that delivered part of its acceptance criteria must write the
-  status itself instead of relying on the completion path.
+  status itself: leaving it `in_progress` just buys another run.
 
 ## Automatic routing (off unless the workspace turned it on)
 
@@ -392,10 +392,10 @@ the limit posts a system comment in the triggering thread instead of stopping
 silently.
 
 The same settings section holds a run time limit
-(`agent_task_timeout_minutes`, `0`/absent = none). A run that outlives it is
-failed with reason `task_time_limit`, is not auto-retried, and the platform
-posts a system comment with the measured runtime on the issue and, for a
-sub-issue, on its parent.
+(`agent_task_timeout_minutes`, `0`/absent = none). A run that outlives it fails with reason `task_time_limit`:
+a round boundary, not a wrong result. The platform continues the same CLI session and working directory
+until the attempt budget is spent, and the continuation is told to close out finished work and split what remains.
+When the budget is spent the issue becomes `blocked` with a comment instead of sitting in `todo`; a sub-issue also leaves a short note on its parent.
 
 Rows come back running-first, newest-first within a status, and the family read
 is capped at 20. When the cap truncates the answer the CLI prints a warning on

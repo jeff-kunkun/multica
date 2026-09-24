@@ -141,6 +141,7 @@ type Task struct {
 	PriorWorkDir                  string               `json:"prior_work_dir,omitempty"`                   // work_dir from a previous task on this issue
 	PriorSessionResumeUnavailable bool                 `json:"prior_session_resume_unavailable,omitempty"` // MUL-5305: server signals a more recent Codex session was withheld (rollout missing) and PriorSessionID (if any) is an older fallback; the run must disclose the continuity gap even if that older session resumes cleanly. Absent/false on old servers.
 	ContinueInterruptedSession    bool                 `json:"continue_interrupted_session,omitempty"`     // DENE-727: auto-retry inherited a resume-safe parent session; daemon sends a continue prompt instead of re-injecting the original task. omitempty so old daemons ignore it and keep today's full prompt while still resuming.
+	ContinueAfterTimeLimit        bool                 `json:"continue_after_time_limit,omitempty"`        // DENE-857: the interrupted turn hit the workspace time limit. The continue prompt closes out finished work and splits what remains. Old daemons ignore it and send the generic continue prompt.
 	// SessionRestartReason is filled by the daemon when a continue-retry
 	// cannot actually resume and has to open a new CLI session. It is not
 	// part of the claim payload.

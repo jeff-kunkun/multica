@@ -842,8 +842,12 @@ type AgentTaskResponse struct {
 	// and sends a short continue prompt instead of re-injecting the original
 	// task. omitempty keeps it off the wire for every other claim and for old
 	// daemons.
-	ContinueInterruptedSession bool   `json:"continue_interrupted_session,omitempty"`
-	WorkDir                    string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
+	ContinueInterruptedSession bool `json:"continue_interrupted_session,omitempty"`
+	// ContinueAfterTimeLimit marks a continue-retry whose parent stopped on
+	// the workspace time limit (DENE-857). The daemon's continue prompt then
+	// tells the agent to close out finished work and split what remains.
+	ContinueAfterTimeLimit bool   `json:"continue_after_time_limit,omitempty"`
+	WorkDir                string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
 	// the UI. For standard tasks it strips the daemon's workspaces root while
 	// preserving either the legacy or readable workspace/task segments; for local_directory
@@ -3119,6 +3123,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("sync agent specialisations work_enabled failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update agent specialisations")
 			return
+		}
+	}
+	if req.WorkEnabled != nil && *req.WorkEnabled && !existing.WorkEnabled && h.TaskService != nil {
+		if err := h.TaskService.ReclaimDesignatedReviews(r.Context(), updated.ID); err != nil {
+			slog.Warn("reclaim designated reviewer failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		}
+		for _, spec := range toggledSpecialisations {
+			if err := h.TaskService.ReclaimDesignatedReviews(r.Context(), spec.ID); err != nil {
+				slog.Warn("reclaim designated reviewer failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(spec.ID))...)
+			}
 		}
 	}
 

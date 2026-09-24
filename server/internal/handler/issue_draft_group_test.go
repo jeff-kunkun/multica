@@ -919,10 +919,9 @@ func TestFinalizeIssueDraftCoordinatorRootIsCreatedWithoutARun(t *testing.T) {
 	}
 }
 
-// Closing stage 1 wakes the coordinator through the EXISTING stage barrier, and
-// leaves stage 2 parked for it to promote. Nothing new dispatches here: the root
-// is awake precisely because it was created active.
-func TestFinalizeIssueDraftStageBarrierWakesTheCoordinator(t *testing.T) {
+// Closing stage 1 promotes a stage-2 sub-issue whose description states no
+// extra dependency. The coordinator is not woken to do that promotion.
+func TestFinalizeIssueDraftStageBarrierPromotesAClearNextStage(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -954,25 +953,20 @@ func TestFinalizeIssueDraftStageBarrierWakesTheCoordinator(t *testing.T) {
 	updateChildStatus(t, stageOne.ID, "done")
 
 	if got := countSystemCommentsOn(t, root.ID); got != 1 {
-		t.Fatalf("closing stage 1 produced %d coordinator comments, want 1", got)
+		t.Fatalf("closing stage 1 produced %d comments, want 1", got)
 	}
-	if got := issueDraftGroupTaskCount(t, root.ID); got != 1 {
-		t.Fatalf("closing stage 1 queued %d coordinator tasks, want 1 — the next stage "+
-			"has nobody to promote it otherwise", got)
+	content := parentSystemCommentContent(t, root.ID)
+	if !strings.Contains(content, "提到待办") {
+		t.Fatalf("stage comment does not say the next stage was promoted: %s", content)
 	}
-	if got := issueDraftGroupStoredStatus(t, stageTwo.ID); got != "backlog" {
-		t.Fatalf("stage 2 status after stage 1 closed = %q, want backlog: the server "+
-			"detects and wakes, the coordinator promotes", got)
+	if got := issueDraftGroupTaskCount(t, root.ID); got != 0 {
+		t.Fatalf("closing stage 1 queued %d coordinator tasks, want 0 — a clear next stage does not wait for the parent", got)
 	}
-	if got := issueDraftGroupTaskCount(t, stageTwo.ID); got != 0 {
-		t.Fatalf("stage 2 started on its own (%d tasks)", got)
+	if got := issueDraftGroupStoredStatus(t, stageTwo.ID); got != "todo" {
+		t.Fatalf("stage 2 status after stage 1 closed = %q, want todo", got)
 	}
-
-	// The coordinator is the one that promotes, through the ordinary status
-	// write. That is the whole point of waking it.
-	updateChildStatus(t, stageTwo.ID, "todo")
 	if got := issueDraftGroupTaskCount(t, stageTwo.ID); got != 1 {
-		t.Fatalf("promoting stage 2 queued %d tasks, want 1", got)
+		t.Fatalf("stage 2 queued %d tasks, want 1", got)
 	}
 }
 
