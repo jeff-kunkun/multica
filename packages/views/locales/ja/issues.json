@@ -1162,7 +1162,14 @@
     "record_abandoned_hint": "課題は作成されていません。",
     "assignee_suggestions_loading": "担当者の候補を検索中…",
     "assignee_suggestions_failed": "候補を取得できません。未割り当ての行は手動で選べます。",
-    "assignee_unassigned": "未割り当て — 確認後に割り当てできます。"
+    "assignee_unassigned": "未割り当て — 確認後に割り当てできます。",
+    "project_will_create": "新規作成：{{name}}",
+    "project_create_hint": "このプロジェクトをタスクと一緒に作ります。",
+    "project_use_existing": "既存のプロジェクトを使う",
+    "project_skip": "プロジェクトに入れない",
+    "project_suggestion": "提案：「{{name}}」",
+    "confirm_with_project": "プロジェクトと {{count}} 件のタスクを作成",
+    "project_directory_failed": "フォルダを作れなかったので、ほかも作成していません。"
   },
   "sub_issue_accordion": {
     "count_other": "サブタスク {{count}} 件",

@@ -745,6 +745,88 @@ func TestFinalizeIssueDraftGroupCreatesNothingWhenTheQuotaCannotCoverIt(t *testi
 	}
 }
 
+// The project, the parent and the children are one confirm. Every issue in the
+// group is filed under the project this request created, not under whatever
+// the draft happened to be pointing at.
+func TestFinalizeIssueDraftCreatesTheProjectWithTheGroup(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cleanupIssueDraftGroup(t)
+
+	session := startIssueDraftSession(t)
+	saved := saveIssueDraft(t, session.SessionID, 0, "ready", draftGroupPayload("group with a new project",
+		draftChild("c1", "first piece", "todo"),
+		draftChild("c2", "second piece", "todo"),
+	))
+	title := "DENE-843 " + session.SessionID
+	t.Cleanup(func() {
+		dbfx.Cleanup(t, `DELETE FROM project WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
+	})
+
+	var finalized FinalizeIssueDraftResponse
+	testutil.Call(t, testHandler.FinalizeIssueDraft, withURLParam(newRequest(http.MethodPost, "/api/issue-drafts/"+session.SessionID+"/finalize", map[string]any{
+		"expected_revision": saved.Revision,
+		"new_project": map[string]any{
+			"title":       title,
+			"icon":        "🛗",
+			"description": "图像追溯的安全加固",
+		},
+	}), "sessionId", session.SessionID)).Want(http.StatusOK).JSON(&finalized)
+
+	if len(finalized.Issues) != 3 {
+		t.Fatalf("the response carries %d issues, want the root plus 2 children", len(finalized.Issues))
+	}
+	var projectID string
+	dbfx.QueryRow(t, `SELECT id FROM project WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&projectID)
+	for i, issue := range finalized.Issues {
+		var got string
+		dbfx.QueryRow(t, `SELECT project_id FROM issue WHERE id = $1`, issue.ID).Scan(&got)
+		if got != projectID {
+			t.Fatalf("issue %d project_id = %s, want the new project %s", i, got, projectID)
+		}
+	}
+}
+
+// A group that cannot be created must not leave the project behind either.
+func TestFinalizeIssueDraftRollsBackTheNewProjectWhenTheGroupDoesNotFit(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cleanupIssueDraftGroup(t)
+
+	limit := dbfx.Count(t, `SELECT COUNT(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID) + 1
+	stub := entitlementtest.New()
+	stub.Set(uuid.MustParse(testWorkspaceID), entitlement.GateIssueCount, entitlement.Decision{
+		Gate:           entitlement.Gate{Action: entitlement.ActionEnforce, Limit: &limit},
+		PolicyRevision: 34,
+	})
+	priorProvider := testHandler.IssueService.Entitlements
+	testHandler.IssueService.Entitlements = stub
+	t.Cleanup(func() { testHandler.IssueService.Entitlements = priorProvider })
+
+	session := startIssueDraftSession(t)
+	saved := saveIssueDraft(t, session.SessionID, 0, "ready", draftGroupPayload("over quota with a project",
+		draftChild("c1", "quota child one", "todo"),
+		draftChild("c2", "quota child two", "todo"),
+		draftChild("c3", "quota child three", "todo"),
+	))
+	title := "DENE-843 rollback " + session.SessionID
+
+	res := testutil.Call(t, testHandler.FinalizeIssueDraft, withURLParam(newRequest(http.MethodPost, "/api/issue-drafts/"+session.SessionID+"/finalize", map[string]any{
+		"expected_revision": saved.Revision,
+		"new_project":       map[string]any{"title": title},
+	}), "sessionId", session.SessionID))
+	res.Want(http.StatusPaymentRequired)
+
+	if got := dbfx.Count(t, `SELECT COUNT(*) FROM project WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title); got != 0 {
+		t.Fatalf("a group that did not fit left %d projects behind", got)
+	}
+	if got := issueDraftGroupIssueCount(t); got != 0 {
+		t.Fatalf("a rolled-back confirm left %d issues", got)
+	}
+}
+
 // issueDraftGroupTaskCount counts the tasks a single issue of a group enqueued.
 // agent_task_queue carries no foreign key, so this is the only place a confirm's
 // "did it actually start work" question can be answered.

@@ -2553,6 +2553,25 @@ export const IssueDraftChildSchema = z.object({
  * malformed array is not something to render half of, and an alignment that
  * settled on one issue legitimately has none.
  */
+const IssueDraftProjectProposalSchema = z
+  .object({
+    action: z.enum(["existing", "create"]),
+    name: z.string(),
+    icon: z.string().nullish().catch(null),
+    description: z.string().nullish().catch(null),
+  })
+  .loose();
+
+const IssueDraftProjectChoiceSchema = z
+  .object({
+    kind: z.enum(["none", "existing", "create"]),
+    project_id: z.string().nullish().catch(null),
+    name: z.string().nullish().catch(null),
+    icon: z.string().nullish().catch(null),
+    description: z.string().nullish().catch(null),
+  })
+  .loose();
+
 export const IssueDraftPayloadSchema = z.object({
   title: z.string().catch(""),
   description: z.string().catch(""),
@@ -2563,6 +2582,11 @@ export const IssueDraftPayloadSchema = z.object({
   project_id: z.string().nullish().catch(null),
   parent_issue_id: z.string().nullish().catch(null),
   children: z.array(IssueDraftChildSchema).catch([]),
+  // A malformed proposal costs the proposal, not the draft: the person can
+  // still confirm the issues, and the panel treats a missing proposal as
+  // "no opinion".
+  project_proposal: IssueDraftProjectProposalSchema.nullish().catch(null),
+  project_choice: IssueDraftProjectChoiceSchema.nullish().catch(null),
 }).loose();
 
 /**

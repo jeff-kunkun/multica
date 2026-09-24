@@ -2147,7 +2147,15 @@ export class ApiClient {
    */
   async finalizeIssueDraft(
     sessionId: string,
-    data: { expected_revision: number },
+    data: {
+      expected_revision: number;
+      new_project?: {
+        title: string;
+        icon?: string;
+        description?: string;
+        directory?: Record<string, unknown>;
+      };
+    },
   ): Promise<IssueDraftFinalizeResult> {
     const raw = await this.fetch<unknown>(
       `/api/issue-drafts/${sessionId}/finalize`,
