@@ -42,6 +42,10 @@ threshold (Settings → Routing, default 24 hours):
 - The status is moved to done **only** when the 验收席 already left a pass verdict
   on the ticket, and the comment recording it says which remark it read. With
   nothing from the reviewer on the ticket this branch cannot be taken at all.
+- The sweep does not merge, and it is not the release path. The acceptance seat
+  merges and sets `done` in the same turn as the pass when the checks this
+  change owns are green and the ticket does not explicitly name a person and a
+  decision. Waiting for this sweep leaves the PR open.
 - A top-level ticket that reached `in_review` before its 验收席 was ever decided gets the
   slot filled now and is handed on — this is the same row as `in_review` above,
   and it runs even when the assignee is a person.
