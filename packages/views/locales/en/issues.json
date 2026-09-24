@@ -620,7 +620,9 @@
       "resolve_failed": "Failed to resolve thread",
       "unresolve_failed": "Failed to unresolve thread"
     },
-    "align_action": "Align on this first"
+    "align_action": "Align on this first",
+    "trigger_blocked_access_requested": "The agent's owner has been asked to approve this — it starts once they do",
+    "trigger_blocked_short_access_requested": "Waiting for owner approval"
   },
   "reply": {
     "placeholder": "Leave a reply...",

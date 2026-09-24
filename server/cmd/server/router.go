@@ -2248,6 +2248,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// the system instruction layer. Idempotent per workspace.
 				r.Post("/mika", h.CreateMikaAgent)
 				r.Route("/{id}", func(r chi.Router) {
+					// Timed access passes (DENE-808), owner-only.
+					r.Get("/access-passes", h.ListAgentAccessPasses)
+					r.Post("/access-passes", h.CreateAgentAccessPass)
+					r.Delete("/access-passes/{passId}", h.RevokeAgentAccessPass)
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
 					r.Post("/archive", h.ArchiveAgent)
@@ -2483,6 +2487,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/chat/thread", h.GetChatThread)
 
 			// Inbox
+			// Agent doorbell rings (DENE-808): owner approves / declines.
+			r.Route("/api/agent-access-requests", func(r chi.Router) {
+				r.Get("/", h.ListAgentAccessRequests)
+				r.Post("/{id}/approve", h.ApproveAgentAccessRequest)
+				r.Post("/{id}/decline", h.DeclineAgentAccessRequest)
+			})
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				// Archived notifications, for the inbox's "Archived" sub-view.

@@ -598,7 +598,9 @@
       "resolve_failed": "Échec de la résolution du fil",
       "unresolve_failed": "Échec de la réouverture du fil"
     },
-    "align_action": "Alignez d'abord cette tâche"
+    "align_action": "Alignez d'abord cette tâche",
+    "trigger_blocked_access_requested": "Le propriétaire de l'agent a été sollicité pour approuver : l'exécution démarrera ensuite",
+    "trigger_blocked_short_access_requested": "En attente du propriétaire"
   },
   "reply": {
     "placeholder": "Laisser une réponse...",

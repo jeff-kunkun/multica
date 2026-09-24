@@ -605,7 +605,9 @@
       "resolve_failed": "스레드를 해결하지 못했습니다",
       "unresolve_failed": "스레드 해결을 취소하지 못했습니다"
     },
-    "align_action": "이 댓글로 정렬 시작"
+    "align_action": "이 댓글로 정렬 시작",
+    "trigger_blocked_access_requested": "에이전트 소유자에게 승인을 요청했습니다. 승인 후 시작됩니다",
+    "trigger_blocked_short_access_requested": "소유자 승인 대기 중"
   },
   "reply": {
     "placeholder": "답글 남기기...",
