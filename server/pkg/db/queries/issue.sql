@@ -114,6 +114,56 @@ WHERE workspace_id = sqlc.arg('workspace_id')
     OR metadata @> sqlc.arg('waiting_on_id')::jsonb
   );
 
+-- name: ListIssuesBlockedByToken :many
+-- DENE-850: waiters whose block.blocked_by list names this identifier or UUID.
+-- Commas are the token boundaries, so DENE-80 does not match DENE-806.
+-- close.waiting_on stays on ListIssuesWaitingOn; callers dedupe the two.
+SELECT * FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND (
+    ',' || replace(COALESCE(metadata->>'block.blocked_by', ''), ' ', '') || ','
+  ) LIKE ('%,' || sqlc.arg('token')::text || ',%');
+
+-- name: ListBlockPatrolCandidates :many
+-- DENE-850 patrol. Due clocks come first. Quiet in_review and unstructured
+-- blocked follow. A blocked issue that names who it waits on is included only
+-- once it has been quiet, so a missed wake still surfaces; the caller holds
+-- the row when that blocker is still open.
+SELECT * FROM issue
+WHERE status IN ('blocked', 'in_review')
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_task_queue t
+    WHERE t.issue_id = issue.id
+      AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  )
+  AND (
+    (
+      COALESCE(metadata->>'block.wake_at', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+      AND (metadata->>'block.wake_at')::timestamptz <= now()
+    )
+    OR (
+      COALESCE(metadata->>'block.wait_timeout', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+      AND (metadata->>'block.wait_timeout')::timestamptz <= now()
+    )
+    OR (
+      COALESCE(last_activity_at, updated_at) < sqlc.arg('quiet_before')::timestamptz
+      AND (
+        status = 'in_review'
+        OR status = 'blocked'
+      )
+    )
+  )
+ORDER BY
+  CASE
+    WHEN COALESCE(metadata->>'block.wake_at', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+      AND (metadata->>'block.wake_at')::timestamptz <= now() THEN 0
+    WHEN COALESCE(metadata->>'block.blocked_by', '') = ''
+      AND COALESCE(metadata->>'close.waiting_on', '') = '' THEN 1
+    ELSE 2
+  END,
+  COALESCE(last_activity_at, updated_at)
+LIMIT sqlc.arg('row_limit')::int;
+
 -- name: LockIssueForChannelMediaBind :one
 -- Channel media resolves after /issue creation. Hold a key-share lock while
 -- the attachment row is written so a concurrent issue delete cannot land

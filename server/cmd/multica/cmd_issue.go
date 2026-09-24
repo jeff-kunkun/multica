@@ -614,6 +614,12 @@ func init() {
 	// issue status
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+	issueStatusCmd.Flags().String("blocked-by", "", "Comma-separated issue identifiers this blocked issue is waiting on")
+	issueStatusCmd.Flags().String("wake-at", "", "RFC3339 time to wake a blocked issue for another look")
+	issueStatusCmd.Flags().String("wait-condition", "", "External condition a blocked issue is waiting on")
+	issueStatusCmd.Flags().String("wait-probe", "", "How to check the wait condition")
+	issueStatusCmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
+	issueStatusCmd.Flags().String("needs-human", "", "Member UUID a blocked issue is waiting on")
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
@@ -1757,6 +1763,18 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	body := map[string]any{"status": status}
 	if noStart {
 		body["suppress_run"] = true
+	}
+	for _, pair := range []struct{ flag, key string }{
+		{"blocked-by", "blocked_by"},
+		{"wake-at", "wake_at"},
+		{"wait-condition", "wait_condition"},
+		{"wait-probe", "wait_probe"},
+		{"wait-timeout", "wait_timeout"},
+		{"needs-human", "needs_human"},
+	} {
+		if v, _ := cmd.Flags().GetString(pair.flag); v != "" {
+			body[pair.key] = v
+		}
 	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {

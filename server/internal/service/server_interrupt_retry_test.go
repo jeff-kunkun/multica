@@ -21,7 +21,7 @@ func TestServerInterruptRetriesAndThenBlocks(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	q := db.New(pool)
-	_, userID, agentID, issueID := seedAttributionFixture(t, pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
 
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
@@ -106,7 +106,7 @@ func TestServerInterruptRetriesAndThenBlocks(t *testing.T) {
 		t.Fatalf("issue status after exhaustion = %q, want blocked", issueStatus)
 	}
 	finalNotice := latestComment(t, pool, issueID)
-	for _, want := range []string{"被平台中断", "自动续跑没有再排", "第 2 次，共 2 次", "blocked", "mention://member/" + userID, "请接手"} {
+	for _, want := range []string{"被平台中断", "自动续跑没有再排", "第 2 次，共 2 次", "blocked", "重新叫醒这张票的执行人", "不用别人来重派"} {
 		if !strings.Contains(finalNotice, want) {
 			t.Errorf("give-up notice %q does not contain %q", finalNotice, want)
 		}

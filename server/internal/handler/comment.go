@@ -1965,6 +1965,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).
 	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs)
+	h.maybeReleaseOnAcceptance(r.Context(), issue, comment)
 
 	writeJSON(w, http.StatusCreated, resp)
 }

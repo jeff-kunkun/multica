@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/chattitle"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -5326,6 +5327,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	} else if errMsg != "" && task.IssueID.Valid && retried == nil && !capacityHeld {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(failureCommentBody(failureReason, errMsg)), "system", task.TriggerCommentID, task.ID)
 	}
+	if retried == nil && task.IssueID.Valid {
+		s.noteParentOfChildRunFailure(ctx, task)
+	}
 
 	// Quick-create tasks: push a failure inbox notification to the
 	// requester so they can either retry or fall back to the advanced form
@@ -5491,7 +5495,61 @@ func (s *TaskService) blockIssueAfterServerInterrupt(ctx context.Context, issue 
 		return false
 	}
 	s.broadcastIssueUpdated(ctx, updated, issue.Status)
+	s.stampBlockWake(ctx, updated, "平台中断后的自动续跑已经用完，到点重新叫醒执行人")
 	return true
+}
+
+// stampBlockWake records a due clock so the patrol wakes this issue's own
+// assignee. It does not start a run and does not mention anyone upstream.
+func (s *TaskService) stampBlockWake(ctx context.Context, issue db.Issue, condition string) {
+	if !issue.ID.Valid {
+		return
+	}
+	if !issue.WorkspaceID.Valid {
+		loaded, err := s.Queries.GetIssue(ctx, issue.ID)
+		if err != nil {
+			slog.Warn("block wake: load issue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+			return
+		}
+		issue = loaded
+	}
+	when, err := json.Marshal(time.Now().Add(blockwait.QuietAfter).UTC().Format(time.RFC3339))
+	if err != nil {
+		return
+	}
+	cond, err := json.Marshal(condition)
+	if err != nil {
+		return
+	}
+	for key, value := range map[string][]byte{"block.wake_at": when, "block.wait_condition": cond} {
+		if _, err := s.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+			ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key, Value: value,
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("block wake: metadata write failed", "issue_id", util.UUIDToString(issue.ID), "key", key, "error", err)
+		}
+	}
+}
+
+// noteParentOfChildRunFailure tells the parent what happened without asking
+// its assignee to re-dispatch. Delegated cross-issue failures already leave
+// that sentence on the recovery comment.
+func (s *TaskService) noteParentOfChildRunFailure(ctx context.Context, task db.AgentTaskQueue) {
+	if !task.IssueID.Valid || task.DelegatedFromTaskID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil || !issue.ParentIssueID.Valid {
+		return
+	}
+	parent, err := s.Queries.GetIssue(ctx, issue.ParentIssueID)
+	if err != nil || parent.WorkspaceID != issue.WorkspaceID {
+		return
+	}
+	s.createSystemNotice(ctx, parent, blockwait.DownstreamFailureNotice(
+		IssueIdentifier(s.getIssuePrefix(issue.WorkspaceID), issue.Number),
+		util.UUIDToString(issue.ID),
+		"运行失败",
+	))
 }
 
 // serverInterruptHandoffMention names the person who should pick the issue up
@@ -5544,12 +5602,12 @@ func serverInterruptNotice(agentName string, task db.AgentTaskQueue, retried *db
 	default:
 		fmt.Fprintf(&b, "自动续跑没有再排（第 %d 次，共 %d 次）。", task.Attempt, task.MaxAttempts)
 		if blocked {
-			b.WriteString("这张票已改为 blocked。")
+			b.WriteString("这张票已改为 blocked。到点后平台会重新叫醒这张票的执行人，不用别人来重派。")
 		}
 		if mention != "" {
 			b.WriteString(mention)
+			b.WriteString("这是知会，不用你去重派。")
 		}
-		b.WriteString("请接手：在这条评论下说是否继续，或重新打开运行。")
 	}
 	return b.String()
 }
@@ -6861,13 +6919,23 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("find recovery comment: %w", err)
 		}
+		content := delegatedFailureRecoveryContent(target.failed, target.source)
+		if failed.IssueID.Valid && failed.IssueID != target.issue.ID {
+			if child, loadErr := qtx.GetIssue(ctx, failed.IssueID); loadErr == nil {
+				content = blockwait.DownstreamFailureNotice(
+					IssueIdentifier(s.getIssuePrefix(child.WorkspaceID), child.Number),
+					util.UUIDToString(child.ID),
+					"运行失败",
+				)
+			}
+		}
 		createdComment, err := qtx.CreateComment(ctx, db.CreateCommentParams{
 			ID:           dbid.NewV7(),
 			IssueID:      target.issue.ID,
 			WorkspaceID:  target.issue.WorkspaceID,
 			AuthorType:   "system",
 			AuthorID:     pgtype.UUID{Valid: true},
-			Content:      delegatedFailureRecoveryContent(target.failed, target.source),
+			Content:      content,
 			Type:         delegatedFailureRecoveryCommentType,
 			ParentID:     target.source.TriggerCommentID,
 			SourceTaskID: failed.ID,
@@ -7085,6 +7153,18 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 // reconciliation schedule the follow-up. The three-pass loop closes state
 // changes around those writes.
 func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, target *delegatedFailureRecoveryTarget, excludeTaskID pgtype.UUID) (delegatedFailureRecoveryDispatchOutcome, error) {
+	// A failed run on a different issue used to wake the upstream coordinator
+	// and ask them to re-dispatch. That person is not the repair seat. Leave
+	// the informational comment, record a wake on the failed issue, and do
+	// not start the upstream run (DENE-850). Same-issue delegation still
+	// returns to its coordinator.
+	if target.failed.IssueID.Valid && target.failed.IssueID != target.issue.ID {
+		if _, err := s.Queries.SettleDelegatedFailureRecoveryComment(ctx, target.comment.ID); err != nil {
+			return delegatedFailureRecoveryCovered, fmt.Errorf("settle downstream failure notice: %w", err)
+		}
+		s.stampBlockWake(ctx, db.Issue{ID: target.failed.IssueID}, "下游运行失败，到点重新叫醒执行人")
+		return delegatedFailureRecoveryCovered, nil
+	}
 	// Signal creation has committed before reaching this shared dispatch path.
 	// Refresh the issue because its status may have changed since creation or
 	// sweep selection; a paused/unreadable lifecycle never settles the signal.
