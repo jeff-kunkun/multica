@@ -179,8 +179,8 @@ func TestReleaseDoesNotStayInReview(t *testing.T) {
 func TestStaleWaitDoesNotOpenANewBlock(t *testing.T) {
 	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
 	stale, err := Accept(map[string]any{
-		KeyWakeAt:        now.Add(-5 * time.Hour).Format(time.RFC3339),
-		KeyBlockedBy:     "DENE-1",
+		KeyWakeAt:          now.Add(-5 * time.Hour).Format(time.RFC3339),
+		KeyBlockedBy:       "DENE-1",
 		"close.waiting_on": "DENE-1",
 	}, Input{}, now)
 	if err != nil {

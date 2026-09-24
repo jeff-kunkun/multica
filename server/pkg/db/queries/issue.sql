@@ -125,12 +125,13 @@ WHERE workspace_id = sqlc.arg('workspace_id')
   ) LIKE ('%,' || sqlc.arg('token')::text || ',%');
 
 -- name: ListBlockPatrolCandidates :many
--- DENE-850 patrol. Due clocks come first. Quiet in_review and unstructured
--- blocked follow. A blocked issue that names who it waits on is included only
--- once it has been quiet, so a missed wake still surfaces; the caller holds
--- the row when that blocker is still open.
+-- DENE-850 patrol. Only rows stamped block.watched after this feature began
+-- watching them, so a deploy does not walk tickets already sitting in review.
+-- Clocks are compared as UTC text. The writer uses RFC3339 with a Z suffix.
+-- Casting to timestamptz would abort every workspace's sweep on one bad value.
 SELECT * FROM issue
 WHERE status IN ('blocked', 'in_review')
+  AND COALESCE(metadata->>'block.watched', '') = '1'
   AND NOT EXISTS (
     SELECT 1 FROM agent_task_queue t
     WHERE t.issue_id = issue.id
@@ -138,25 +139,21 @@ WHERE status IN ('blocked', 'in_review')
   )
   AND (
     (
-      COALESCE(metadata->>'block.wake_at', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
-      AND (metadata->>'block.wake_at')::timestamptz <= now()
+      COALESCE(metadata->>'block.wake_at', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+      AND metadata->>'block.wake_at' <= to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
     )
     OR (
-      COALESCE(metadata->>'block.wait_timeout', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
-      AND (metadata->>'block.wait_timeout')::timestamptz <= now()
+      COALESCE(metadata->>'block.wait_timeout', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+      AND metadata->>'block.wait_timeout' <= to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
     )
     OR (
       COALESCE(last_activity_at, updated_at) < sqlc.arg('quiet_before')::timestamptz
-      AND (
-        status = 'in_review'
-        OR status = 'blocked'
-      )
     )
   )
 ORDER BY
   CASE
-    WHEN COALESCE(metadata->>'block.wake_at', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
-      AND (metadata->>'block.wake_at')::timestamptz <= now() THEN 0
+    WHEN COALESCE(metadata->>'block.wake_at', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+      AND metadata->>'block.wake_at' <= to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') THEN 0
     WHEN COALESCE(metadata->>'block.blocked_by', '') = ''
       AND COALESCE(metadata->>'close.waiting_on', '') = '' THEN 1
     ELSE 2

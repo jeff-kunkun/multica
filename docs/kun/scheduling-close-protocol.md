@@ -345,7 +345,7 @@ Stage 2 只做三件事：把 2.3 决策表写进 Builder/Reviewer/Operator/Disp
 
 阻塞扩展校验：`conclusion=blocked` 的新记录必须同时提供上述两个字段；旧记录缺少两字段时保持可读兼容。`block_kind=dependency` 必须有非空 `close.waiting_on`，且 `decision` / `permission` 必须指定具体的 `member`、`agent` 或 `squad` 责任人。非 blocked 收口的两个字段必须为空或不存在，避免解除阻塞后残留旧原因。人类审核逾期阈值按产品决策为 24 小时；`capacity` 阻塞不计入“需要你”摘要。
 
-切到 `blocked` 本身还要在 `multica issue status` 上带上挡路说明（DENE-850）：`--blocked-by`、`--wake-at`、`--wait-condition` 加 `--wait-timeout`、或 `--needs-human`，至少一种。Agent 不带这些字段会被拒绝。`close.waiting_on` 仍然会在被等票进入终态时叫醒等待方；`block.blocked_by` 是同一条边上的多票写法。验收通过由平台合并并关票，合不进去就写成结构化阻塞，不留在 `in_review`。没有运行、等待已到期或根本没写等待的 `blocked` / `in_review`，巡检大约 30 分钟内叫醒。这层不替代取消重试（DENE-813）、额度换席（DENE-836）或停用席位叫醒（DENE-848）。
+切到 `blocked` 本身还要在 `multica issue status` 上带上挡路说明（DENE-850）：`--blocked-by`、`--wake-at`、`--wait-condition` 加 `--wait-timeout`、或 `--needs-human`，至少一种。Agent 不带这些字段会被拒绝；上次用过、已经到点或已经叫醒过的记录不算。票离开 `blocked` 时整套 `block.*` 等待会被清掉。`close.waiting_on` 仍然会在被等票进入终态时叫醒等待方；`block.blocked_by` 是同一条边上的多票写法。验收通过只认单独一行的 `verdict: pass`（或 `multica issue comment add --verdict pass`），由平台合并并关票，合不进去就写成结构化阻塞，不留在 `in_review`。句子里的「通过」只提示怎么写这一行，不会合并。同一段等待最多叫醒一次；验收人是人、或票在等 `needs_human` 时只留言，不排运行。巡检只看本功能开始盯上之后才进入阻塞或待验收的票。这层不替代取消重试（DENE-813）、额度换席（DENE-836）或停用席位叫醒（DENE-848）。
 
 校验（Stage 2 测试写死）：
 

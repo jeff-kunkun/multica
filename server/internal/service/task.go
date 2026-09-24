@@ -5502,8 +5502,44 @@ func (s *TaskService) blockIssueAfterServerInterrupt(ctx context.Context, issue 
 	return true
 }
 
-// stampBlockWake records a due clock so the patrol wakes this issue's own
-// assignee. It does not start a run and does not mention anyone upstream.
+// blockFailedChild turns a failed child into a structured block with a clock
+// that is already due. The patrol only looks at blocked and in_review, so a
+// wake_at left on an in_progress issue is never seen. in_review and terminal
+// statuses stay where a person put them.
+func (s *TaskService) blockFailedChild(ctx context.Context, issueID pgtype.UUID, condition string) {
+	if !issueID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, issueID)
+	if err != nil {
+		slog.Warn("block failed child: load issue failed", "issue_id", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	switch issue.Status {
+	case issuestatus.Done, issuestatus.Cancelled, issuestatus.InReview:
+		return
+	case issuestatus.Blocked:
+	default:
+		updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:          issue.ID,
+			Status:      issuestatus.Blocked,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			slog.Warn("block failed child: status update failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+			return
+		}
+		s.broadcastIssueUpdated(ctx, updated, issue.Status)
+		issue = updated
+	}
+	rec := blockwait.FailureWake(time.Now(), condition)
+	pairs := rec.Pairs()
+	pairs[blockwait.KeyWatched] = blockwait.WatchedYes
+	s.writeBlockMeta(ctx, issue, pairs)
+}
+
+// stampBlockWake records a clock QuietAfter from now and marks the issue
+// watched, so the patrol can see a block this process just created.
 func (s *TaskService) stampBlockWake(ctx context.Context, issue db.Issue, condition string) {
 	if !issue.ID.Valid {
 		return
@@ -5516,17 +5552,22 @@ func (s *TaskService) stampBlockWake(ctx context.Context, issue db.Issue, condit
 		}
 		issue = loaded
 	}
-	when, err := json.Marshal(time.Now().Add(blockwait.QuietAfter).UTC().Format(time.RFC3339))
-	if err != nil {
-		return
-	}
-	cond, err := json.Marshal(condition)
-	if err != nil {
-		return
-	}
-	for key, value := range map[string][]byte{"block.wake_at": when, "block.wait_condition": cond} {
+	when := time.Now().Add(blockwait.QuietAfter).UTC().Format(time.RFC3339)
+	s.writeBlockMeta(ctx, issue, map[string]string{
+		blockwait.KeyWakeAt:        when,
+		blockwait.KeyWaitCondition: condition,
+		blockwait.KeyWatched:       blockwait.WatchedYes,
+	})
+}
+
+func (s *TaskService) writeBlockMeta(ctx context.Context, issue db.Issue, pairs map[string]string) {
+	for key, value := range pairs {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			continue
+		}
 		if _, err := s.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
-			ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key, Value: value,
+			ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key, Value: raw,
 		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			slog.Warn("block wake: metadata write failed", "issue_id", util.UUIDToString(issue.ID), "key", key, "error", err)
 		}
@@ -5548,11 +5589,46 @@ func (s *TaskService) noteParentOfChildRunFailure(ctx context.Context, task db.A
 	if err != nil || parent.WorkspaceID != issue.WorkspaceID {
 		return
 	}
+	childID := util.UUIDToString(issue.ID)
+	if s.failureAlreadyNoted(parent, childID) {
+		return
+	}
 	s.createSystemNotice(ctx, parent, blockwait.DownstreamFailureNotice(
 		IssueIdentifier(s.getIssuePrefix(issue.WorkspaceID), issue.Number),
-		util.UUIDToString(issue.ID),
+		childID,
 		"运行失败",
 	))
+	s.rememberFailureNotice(ctx, parent, childID)
+}
+
+func issueMetaMap(raw []byte) map[string]any {
+	meta := map[string]any{}
+	if len(raw) == 0 {
+		return meta
+	}
+	_ = json.Unmarshal(raw, &meta)
+	if meta == nil {
+		return map[string]any{}
+	}
+	return meta
+}
+
+func (s *TaskService) failureAlreadyNoted(issue db.Issue, childID string) bool {
+	return blockwait.AlreadyWoken(blockwait.MetaString(issueMetaMap(issue.Metadata), blockwait.KeyFailNoted), childID)
+}
+
+func (s *TaskService) rememberFailureNotice(ctx context.Context, issue db.Issue, childID string) {
+	fresh, err := s.Queries.GetIssue(ctx, issue.ID)
+	if err != nil {
+		fresh = issue
+	}
+	existing := blockwait.MetaString(issueMetaMap(fresh.Metadata), blockwait.KeyFailNoted)
+	if blockwait.AlreadyWoken(existing, childID) {
+		return
+	}
+	s.writeBlockMeta(ctx, fresh, map[string]string{
+		blockwait.KeyFailNoted: blockwait.MarkWoken(existing, childID),
+	})
 }
 
 // serverInterruptHandoffMention names the person who should pick the issue up
@@ -7165,7 +7241,7 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 		if _, err := s.Queries.SettleDelegatedFailureRecoveryComment(ctx, target.comment.ID); err != nil {
 			return delegatedFailureRecoveryCovered, fmt.Errorf("settle downstream failure notice: %w", err)
 		}
-		s.stampBlockWake(ctx, db.Issue{ID: target.failed.IssueID}, "下游运行失败，到点重新叫醒执行人")
+		s.blockFailedChild(ctx, target.failed.IssueID, "下游运行失败，到点重新叫醒执行人")
 		return delegatedFailureRecoveryCovered, nil
 	}
 	// Signal creation has committed before reaching this shared dispatch path.

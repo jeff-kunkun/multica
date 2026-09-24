@@ -112,6 +112,20 @@ func TestPatrolWakesUnstructuredBlockAndDueClock(t *testing.T) {
 	if !strings.Contains(body, "复查时间") {
 		t.Fatalf("clock comment = %s", body)
 	}
+	var wakeAt *string
+	if err := testPool.QueryRow(ctx, `SELECT metadata->>'block.wake_at' FROM issue WHERE id = $1`, clocked.ID).Scan(&wakeAt); err != nil {
+		t.Fatalf("read wake_at: %v", err)
+	}
+	if wakeAt != nil && *wakeAt != "" {
+		t.Fatalf("wake_at still set after the wake: %s", *wakeAt)
+	}
+	loaded, err = testHandler.Queries.GetIssue(ctx, parseUUID(clocked.ID))
+	if err != nil {
+		t.Fatalf("reload consumed: %v", err)
+	}
+	if testHandler.patrolOne(ctx, loaded) {
+		t.Fatal("the same clock woke a second time")
+	}
 }
 
 type fakeMerger struct {
@@ -144,7 +158,7 @@ func TestAcceptancePassMergesAndCloses(t *testing.T) {
 	testHandler.maybeReleaseOnAcceptance(context.Background(), loaded, db.Comment{
 		AuthorType: "agent",
 		AuthorID:   parseUUID(agentID),
-		Content:    "验收通过，等待合并流程。",
+		Content:    "可以合。\nverdict: pass\n",
 		Type:       "comment",
 	})
 	var status string
@@ -153,6 +167,66 @@ func TestAcceptancePassMergesAndCloses(t *testing.T) {
 	}
 	if status != "done" {
 		t.Fatalf("status = %q, want done", status)
+	}
+}
+
+func TestProsePassDoesNotMerge(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "prose pass", "in_review")
+	agentID := handlerTestAgentID(t)
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE issue SET reviewer_type = 'agent', reviewer_id = $2 WHERE id = $1`,
+		issue.ID, agentID); err != nil {
+		t.Fatalf("set reviewer: %v", err)
+	}
+	loaded, err := testHandler.Queries.GetIssue(context.Background(), parseUUID(issue.ID))
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	testHandler.maybeReleaseOnAcceptance(context.Background(), loaded, db.Comment{
+		AuthorType: "agent",
+		AuthorID:   parseUUID(agentID),
+		Content:    "阻断：验收通过后没有合并，请修复",
+		Type:       "comment",
+	})
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, issue.ID).Scan(&status); err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if status != "in_review" {
+		t.Fatalf("status = %q, want in_review", status)
+	}
+}
+
+func TestLeavingBlockedClearsTheWait(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "clear block", "in_progress")
+	agentID := handlerTestAgentID(t)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"status":     "blocked",
+		"blocked_by": "DENE-806",
+	})
+	req = withURLParam(req, "id", issue.ID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("block: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	updateIssueStatusHTTP(t, issue.ID, "in_progress")
+	var blockedBy *string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT metadata->>'block.blocked_by' FROM issue WHERE id = $1`, issue.ID).Scan(&blockedBy); err != nil {
+		t.Fatalf("read metadata: %v", err)
+	}
+	if blockedBy != nil && *blockedBy != "" {
+		t.Fatalf("blocked_by survived leaving blocked: %s", *blockedBy)
 	}
 }
 
