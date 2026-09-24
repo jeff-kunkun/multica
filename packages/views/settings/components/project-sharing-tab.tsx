@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { FolderKanban, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { projectKeys, projectListOptions } from "@multica/core/projects";
@@ -49,6 +50,9 @@ export function ProjectSharingTab() {
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: [...projectKeys.detail(wsId, vars.id), "visibility-preview"] });
       setPending(null);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error && error.message ? error.message : t(($) => $.project_sharing.save_failed));
     },
   });
   const canManageProject = (project: (typeof projects)[number]) =>
