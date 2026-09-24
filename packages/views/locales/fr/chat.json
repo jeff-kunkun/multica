@@ -4,6 +4,28 @@
     "select_prompt": "Choisissez une conversation, ou démarrez-en une nouvelle avec +",
     "agent_link_no_access": "Vous n'avez pas accès à la discussion avec cet agent."
   },
+  "project_bar": {
+    "all": "Tout",
+    "more": "⋯ Plus ({{count}})",
+    "menu_title": "Projets",
+    "done": "Terminé",
+    "search": "Rechercher un projet…",
+    "pinned": "Épinglés — glisser pour réordonner",
+    "pinned_empty": "Aucun projet épinglé",
+    "other": "Autres projets — discussion la plus récente d'abord",
+    "none": "Sans projet",
+    "chat_count_one": "{{count}} discussion",
+    "chat_count_other": "{{count}} discussions",
+    "pin": "Épingler",
+    "unpin": "Retirer l'épingle",
+    "drag": "Glisser pour réordonner",
+    "empty": "Aucune discussion dans ce projet",
+    "unread": "Non lu"
+  },
+  "project_nudge": {
+    "bind": "Lier à un projet",
+    "casual": "C'est une discussion libre, pas besoin de projet"
+  },
   "fab": {
     "running": "Multica travaille...",
     "unread_one": "{{count}} discussion non lue",

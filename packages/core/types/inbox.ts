@@ -70,6 +70,11 @@ export interface InboxItem {
   archived: boolean;
   created_at: string;
   details: Record<string, string> | null;
+  /**
+   * Number of unread notifications in this grouped row.
+   * Computed client-side during issue grouping.
+   */
+  unread_count?: number;
 }
 
 

@@ -40,6 +40,8 @@
       "hours": "{{count}} h",
       "days": "{{count}} j"
     },
+    "unread_count_one": "{{count}} notification non lue",
+    "unread_count_other": "{{count}} notifications non lues",
     "archived_title": "Archivées",
     "archived_empty": "Aucune notification archivée",
     "unarchive_tooltip": "Désarchiver",

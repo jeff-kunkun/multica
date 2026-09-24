@@ -323,6 +323,15 @@ SET pinned_at = CASE WHEN @pinned::bool THEN COALESCE(pinned_at, now()) ELSE NUL
 WHERE id = $1
 RETURNING *;
 
+-- name: DismissChatSessionProjectNudge :one
+-- Record that this chat does not need a project, so the bind reminder stays
+-- gone on every device. COALESCE keeps the original dismissal. Does NOT touch
+-- updated_at: dismissing a prompt is not conversation activity.
+UPDATE chat_session
+SET project_nudge_dismissed_at = COALESCE(project_nudge_dismissed_at, now())
+WHERE id = $1
+RETURNING *;
+
 -- name: SetChatSessionArchived :one
 -- Archive/unarchive a chat session by flipping status between 'active' and
 -- 'archived'. Bumps updated_at so the row re-sorts on the receiving list. The

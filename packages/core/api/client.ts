@@ -4418,6 +4418,15 @@ export class ApiClient {
     });
   }
 
+  /** Remember that this chat does not need a project. One-way; the row is
+   *  what makes the reminder stay gone in another browser. */
+  async dismissChatProjectNudge(id: string): Promise<ChatSession> {
+    return this.fetch(`/api/chat/sessions/${id}/project-nudge`, {
+      method: "PATCH",
+      body: JSON.stringify({ dismissed: true }),
+    });
+  }
+
   async setChatSessionArchived(id: string, archived: boolean): Promise<ChatSession> {
     return this.fetch(`/api/chat/sessions/${id}/archive`, {
       method: "PATCH",
@@ -4671,9 +4680,18 @@ export class ApiClient {
       }
       throw err;
     }
+    const originalContentType = res.headers.get("X-Original-Content-Type") ?? "";
+    const contentType = res.headers.get("Content-Type") ?? "";
+    // The preview proxy always answers `text/plain` and stamps the original
+    // MIME. A 200 `text/html` document without that header is a frontend
+    // fallback (the SPA shell), not the file. Rendering it as Markdown
+    // produces an empty white pane instead of the failure message.
+    if (!originalContentType && /^\s*text\/html\b/i.test(contentType)) {
+      throw new Error("attachment preview returned a document instead of the file");
+    }
     return {
       text: await res.text(),
-      originalContentType: res.headers.get("X-Original-Content-Type") ?? "",
+      originalContentType,
     };
   }
 

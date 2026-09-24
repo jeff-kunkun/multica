@@ -286,6 +286,40 @@ export function useSetChatSessionPinned() {
 }
 
 /**
+ * Mark a chat as not needing a project. Optimistically flips the flag on the
+ * cached row so the reminder disappears immediately; the server row is what
+ * another browser reads. Does not re-sort — this is not activity.
+ */
+export function useDismissChatProjectNudge() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: (sessionId: string) => {
+      logger.info("dismissChatProjectNudge.start", { sessionId });
+      return api.dismissChatProjectNudge(sessionId);
+    },
+    onMutate: async (sessionId) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+      const prevSessions = qc.getQueryData<ChatSession[]>(chatKeys.sessions(wsId));
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) =>
+        old?.map((s) =>
+          s.id === sessionId ? { ...s, project_nudge_dismissed: true } : s,
+        ),
+      );
+      return { prevSessions };
+    },
+    onError: (err, sessionId, ctx) => {
+      logger.error("dismissChatProjectNudge.error.rollback", { sessionId, err });
+      if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+/**
  * Archives or unarchives a chat session. Optimistically flips `status` in the
  * cached list so the row moves between the active list and the "Archived" view
  * instantly (both filter on status locally); rolls back on error. Bumps
