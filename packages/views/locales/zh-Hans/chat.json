@@ -270,7 +270,13 @@
     "rename": "重命名会话",
     "delete": "删除会话",
     "archive": "归档会话",
-    "unarchive": "取消归档"
+    "unarchive": "取消归档",
+    "copy_link": "复制会话链接",
+    "link_copied": "已复制会话链接",
+    "copy_conversation": "复制整段对话为 Markdown",
+    "conversation_copied": "已复制整段对话",
+    "copy_role_user": "你",
+    "copy_role_assistant": "助手"
   },
   "provider_quota": {
     "label": "额度",
