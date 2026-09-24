@@ -670,6 +670,7 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 type (
 	HeartbeatResponse       = protocol.DaemonHeartbeatAckPayload
 	PendingUpdate           = protocol.DaemonHeartbeatPendingUpdate
+	PendingAgentCLI         = protocol.DaemonHeartbeatPendingAgentCLI
 	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
 	PendingProviderConfig   = protocol.DaemonHeartbeatPendingProviderConfig
 	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
@@ -695,6 +696,18 @@ func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, planLimits
 // ReportUpdateResult sends the CLI update result back to the server.
 func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/update/%s/result", runtimeID, updateID), result, nil)
+}
+
+// ReportAgentCLIStatus stores the current/latest/error snapshot for one
+// agent CLI on the runtime row the page reads.
+func (c *Client) ReportAgentCLIStatus(ctx context.Context, runtimeID string, body map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/agent-cli/status", runtimeID), body, nil)
+}
+
+// RefreshModelCatalog drops the cached model list and asks the server to
+// enqueue a fresh discovery. The next heartbeat claims that request.
+func (c *Client) RefreshModelCatalog(ctx context.Context, runtimeID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/model-catalog/refresh", runtimeID), map[string]any{}, nil)
 }
 
 // ReportModelListResult sends the model-discovery result back to the server.

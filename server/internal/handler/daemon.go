@@ -1472,6 +1472,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if ack.PendingUpdate != nil {
 		resp["pending_update"] = ack.PendingUpdate
 	}
+	if ack.PendingAgentCLI != nil {
+		resp["pending_agent_cli"] = ack.PendingAgentCLI
+	}
 	if ack.PendingModelList != nil {
 		resp["pending_model_list"] = ack.PendingModelList
 	}
@@ -1776,6 +1779,13 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 		RuntimeID:          runtimeID,
 		Status:             "ok",
 		ServerCapabilities: []string{protocol.DaemonCapabilityRPCV1},
+	}
+	if h.AgentCLICommands != nil {
+		if cmd, err := h.AgentCLICommands.Peek(ctx, runtimeID); err != nil {
+			slog.Warn("agent CLI command peek failed", "error", err, "runtime_id", runtimeID)
+		} else if cmd != nil {
+			ack.PendingAgentCLI = cmd
+		}
 	}
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
