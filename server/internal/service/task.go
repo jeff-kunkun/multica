@@ -4527,6 +4527,9 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	// task inside the completion transaction below. It is broadcast (chat:done)
 	// only after the transaction commits.
 	var chatAssistantMsg *db.ChatMessage
+	// deliveryNotice is set when this run landed on a branch that is not the
+	// issue's canonical delivery line; it is said on the issue after commit.
+	var deliveryNotice string
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
 			return err
@@ -4551,6 +4554,11 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 		if err := SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, t); err != nil {
 			return err
 		}
+		notice, err := s.recordDeliveryBranch(ctx, qtx, t)
+		if err != nil {
+			return err
+		}
+		deliveryNotice = notice
 
 		if t.ChatSessionID.Valid {
 			// Pin the chat_session's runtime_id alongside the session_id so the
@@ -4634,6 +4642,7 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	s.postDeliveryNotice(ctx, task, deliveryNotice)
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -4977,6 +4986,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		failureInputVersion = taskFailureInputVersion(parentForFailure)
 	}
 	failureFingerprint := taskfailure.Fingerprint(failureReason, errMsg)
+	// deliveryNotice: this run's branch is not the issue's canonical line.
+	var deliveryNotice string
 
 	// Pre-compute the auto-retry so the retry child can be created inside the
 	// SAME transaction as the fail (MUL-4351). Doing it atomically closes the
@@ -5051,6 +5062,11 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			return err
 		}
 		task = t
+		notice, derr := s.recordDeliveryBranch(ctx, qtx, t)
+		if derr != nil {
+			return derr
+		}
+		deliveryNotice = notice
 		if wantRetry && taskfailure.IsDeterministic(errMsg) && t.FailureInputVersion.Valid && t.FailureFingerprint.Valid {
 			matches, countErr := qtx.CountConsecutiveFailureFingerprint(ctx, db.CountConsecutiveFailureFingerprintParams{
 				FailureInputVersion: pgtype.Text{String: t.FailureInputVersion.String, Valid: true},
@@ -5292,6 +5308,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
+	s.postDeliveryNotice(ctx, task, deliveryNotice)
 
 	// The auto-retry child (if any) was created inside the transaction above so
 	// no newer chat task could jump ahead of it. Surface it now: broadcast
@@ -8907,4 +8924,30 @@ func agentToMap(a db.Agent) map[string]any {
 		"archived_at":          util.TimestampToPtr(a.ArchivedAt),
 		"archived_by":          util.UUIDToPtr(a.ArchivedBy),
 	}
+}
+
+// recordDeliveryBranch files the branch a finished run reported under its
+// issue (DENE-820) inside the finishing transaction, and returns the notice
+// to post when that branch is a new non-canonical line. An empty notice
+// means the run continued the canonical line or produced no branch.
+func (s *TaskService) recordDeliveryBranch(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue) (string, error) {
+	row, newLine, err := RecordIssueDeliveryBranch(ctx, qtx, task)
+	if err != nil {
+		return "", fmt.Errorf("record delivery branch: %w", err)
+	}
+	if row == nil || !newLine {
+		return "", nil
+	}
+	canonical, err := qtx.GetIssueCanonicalDeliveryBranch(ctx, task.IssueID)
+	if err != nil {
+		return "", fmt.Errorf("read canonical delivery branch: %w", err)
+	}
+	return UnclassifiedDeliveryLineNotice(canonical.BranchName, row.BranchName), nil
+}
+
+func (s *TaskService) postDeliveryNotice(ctx context.Context, task db.AgentTaskQueue, notice string) {
+	if notice == "" || !task.IssueID.Valid {
+		return
+	}
+	s.createAgentComment(ctx, task.IssueID, task.AgentID, notice, "system", task.TriggerCommentID, task.ID)
 }

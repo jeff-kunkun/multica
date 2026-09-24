@@ -750,13 +750,17 @@ type AgentTaskResponse struct {
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
-	IssueID              string                 `json:"issue_id"`
-	WorkspaceID          string                 `json:"workspace_id"`
-	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
-	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
+	ID              string `json:"id"`
+	AgentID         string `json:"agent_id"`
+	RuntimeID       string `json:"runtime_id"`
+	IssueID         string `json:"issue_id"`
+	WorkspaceID     string `json:"workspace_id"`
+	WorkspaceSlug   string `json:"workspace_slug,omitempty"`
+	IssueIdentifier string `json:"issue_identifier,omitempty"`
+	// CanonicalBranch is the issue's canonical delivery branch (DENE-820).
+	// A worktree-mode daemon continues it even when another seat created
+	// it, so a rerun never opens a second delivery line by accident.
+	CanonicalBranch      string                 `json:"canonical_branch,omitempty"`
 	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
 	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
 	// daemon renders as MCP tools for this task. Resolved at claim time so

@@ -85,13 +85,17 @@ type IssueStatusData struct {
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
-	IssueID              string                 `json:"issue_id"`
-	WorkspaceID          string                 `json:"workspace_id"`
-	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
-	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
+	ID              string `json:"id"`
+	AgentID         string `json:"agent_id"`
+	RuntimeID       string `json:"runtime_id"`
+	IssueID         string `json:"issue_id"`
+	WorkspaceID     string `json:"workspace_id"`
+	WorkspaceSlug   string `json:"workspace_slug,omitempty"`
+	IssueIdentifier string `json:"issue_identifier,omitempty"`
+	// CanonicalBranch is the issue's canonical delivery branch (DENE-820);
+	// empty until the issue's first run delivered one. Worktree mode
+	// continues it ahead of the seat's own conversation branch.
+	CanonicalBranch      string                 `json:"canonical_branch,omitempty"`
 	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
 	// RemoteMCPDaemonToken stays inside the daemon and authenticates the local
 	// broker's credential-resolution calls. It must never enter agent env/config.

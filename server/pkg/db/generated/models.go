@@ -898,6 +898,22 @@ type Issue struct {
 	Visibility         string             `json:"visibility"`
 }
 
+type IssueDeliveryBranch struct {
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	BranchName    string             `json:"branch_name"`
+	Role          string             `json:"role"`
+	Resolution    pgtype.Text        `json:"resolution"`
+	ResolvedAt    pgtype.Timestamptz `json:"resolved_at"`
+	CleanupStatus string             `json:"cleanup_status"`
+	CleanupNote   pgtype.Text        `json:"cleanup_note"`
+	CleanedAt     pgtype.Timestamptz `json:"cleaned_at"`
+	FirstTaskID   pgtype.UUID        `json:"first_task_id"`
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssueDependency struct {
 	ID               pgtype.UUID `json:"id"`
 	IssueID          pgtype.UUID `json:"issue_id"`
