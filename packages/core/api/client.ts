@@ -2917,9 +2917,13 @@ export class ApiClient {
   // fabricated empty catalog or an endless spinner (MUL-5444).
   async initiateListModels(
     runtimeId: string,
-    options: { force?: boolean } = {},
+    options: { force?: boolean; agentId?: string } = {},
   ): Promise<RuntimeModelListRequest> {
-    const query = options.force === true ? "?force=true" : "";
+    const params = new URLSearchParams();
+    if (options.force === true) params.set("force", "true");
+    if (options.agentId) params.set("agent_id", options.agentId);
+    const encoded = params.toString();
+    const query = encoded === "" ? "" : `?${encoded}`;
     const raw = await this.fetch<unknown>(
       `/api/runtimes/${runtimeId}/models${query}`,
       {

@@ -95,33 +95,9 @@ func (r *Router) log() *slog.Logger {
 // reviewer property, its own comments, and the subscriber list — and the last
 // one only so a mention actually notifies.
 func (r *Router) Route(ctx context.Context, workspaceID, issueID string) (Outcome, error) {
-	settings, err := r.Store.Settings(ctx, workspaceID)
-	if err != nil {
-		return Outcome{State: StateOff, Action: ActionSkipped, Reason: "settings unreadable"}, err
-	}
-	state := settings.State()
-	if !state.Active() {
-		// Off and incomplete are the pre-existing code path, to the letter:
-		// no request, no write, no comment, and no mention.
-		return Outcome{State: state, Action: ActionSkipped, Reason: "routing not enabled"}, nil
-	}
-
-	// The breaker is checked before the issue is even loaded. While it is
-	// cooling down the workspace is "ineffective": the reason belongs in the
-	// settings section, and a ticket must not be told about it again.
-	if open, _, reason := r.Breaker.Open(workspaceID); open {
-		return Outcome{State: StateIneffective, Action: ActionSkipped, Reason: reason}, nil
-	}
-
-	issue, err := r.Store.Issue(ctx, workspaceID, issueID)
-	if err != nil {
-		return Outcome{State: state, Action: ActionSkipped, Reason: "issue unreadable"}, err
-	}
-
-	if issue.AssignedToHuman() && !humanHeldIsRoutable(issue) {
-		// A person's ticket is a person's ticket. Nothing is filled, nothing
-		// is said, nobody is pinged.
-		return Outcome{State: state, Action: ActionSkipped, Reason: "assignee is a person"}, nil
+	settings, issue, done, err := r.admit(ctx, workspaceID, issueID)
+	if done != nil {
+		return *done, err
 	}
 
 	// A child issue is execution-only. It may still receive an executor at
@@ -130,12 +106,12 @@ func (r *Router) Route(ctx context.Context, workspaceID, issueID string) (Outcom
 	// row, or a direct `issue route` call cannot start an independent review
 	// chain.
 	if issue.ParentIssueID != "" && issue.Status == "in_review" {
-		return Outcome{State: state, Action: ActionNoop, Reason: "sub-issue has no acceptance route"}, nil
+		return Outcome{State: settings.State(), Action: ActionNoop, Reason: "sub-issue has no acceptance route"}, nil
 	}
 
 	switch issue.Status {
 	case "todo":
-		return r.routeTodo(ctx, workspaceID, settings, issue)
+		return r.routeTodo(ctx, workspaceID, settings, issue, fillStarts)
 	case "in_review":
 		return r.routeInReview(ctx, workspaceID, settings, issue)
 	case "blocked":
@@ -144,12 +120,85 @@ func (r *Router) Route(ctx context.Context, workspaceID, issueID string) (Outcom
 		// in_progress: somebody is working, do not interrupt.
 		// backlog: nobody intends to work on it yet.
 		// done / cancelled: over.
-		return Outcome{State: state, Action: ActionNoop, Reason: "status has no routing behaviour"}, nil
+		return Outcome{State: settings.State(), Action: ActionNoop, Reason: "status has no routing behaviour"}, nil
 	default:
 		// Unknown category. Fail closed: an unrecognised status is not a
 		// licence to guess who should hold the ticket.
-		return Outcome{State: state, Action: ActionNoop, Reason: "unknown status category " + issue.Status}, nil
+		return Outcome{State: settings.State(), Action: ActionNoop, Reason: "unknown status category " + issue.Status}, nil
 	}
+}
+
+// RouteGroupNode is the create-time pass for an issue an alignment confirm
+// just wrote as part of a group (DENE-812). Route alone cannot seat such a
+// group: the root is created in_progress so it coordinates instead of running,
+// and every sub-issue past stage 1 is created in backlog so it waits — two
+// statuses the state table deliberately leaves alone. Without this pass a
+// confirmed group kept whatever seats the preview happened to hold, and the
+// rows the preview left empty stayed empty for good: the stage barrier woke
+// nobody on an unheld root, and a promoted child reached todo only if
+// somebody promoted it.
+//
+// It is the same todo row — same ladder, same judge, same fill-only-empty
+// slots, same one decision comment per issue — with one difference per node
+// kind, carried by the fill mode:
+//
+//   - a todo sub-issue (stage 1) is seated and its run starts, exactly as
+//     Route would do it;
+//   - a backlog sub-issue (a later stage) is seated and parked: nothing runs
+//     from backlog, so the seat starts when its stage is promoted to todo;
+//   - the root of a group is seated as the coordinator, reviewer slot
+//     included, and its run is NOT started — the stage barrier and the
+//     sub-issues' completions are what wake it.
+//
+// Anything else — a node somebody already moved on, a root without
+// sub-issues — gets exactly what Route gives it.
+func (r *Router) RouteGroupNode(ctx context.Context, workspaceID, issueID string) (Outcome, error) {
+	settings, issue, done, err := r.admit(ctx, workspaceID, issueID)
+	if done != nil {
+		return *done, err
+	}
+	switch {
+	case issue.ParentIssueID != "" && issue.Status == "backlog":
+		return r.routeTodo(ctx, workspaceID, settings, issue, fillParked)
+	case issue.ParentIssueID == "" && issue.HasChildren && issue.Status == "in_progress":
+		return r.routeTodo(ctx, workspaceID, settings, issue, fillCoordinator)
+	}
+	return r.Route(ctx, workspaceID, issueID)
+}
+
+// admit is the prelude every entry point shares: the switch, the breaker, the
+// issue itself, and the one ticket routing never touches. A non-nil Outcome
+// is the answer and the caller returns it with the error as is.
+func (r *Router) admit(ctx context.Context, workspaceID, issueID string) (Settings, Issue, *Outcome, error) {
+	settings, err := r.Store.Settings(ctx, workspaceID)
+	if err != nil {
+		return settings, Issue{}, &Outcome{State: StateOff, Action: ActionSkipped, Reason: "settings unreadable"}, err
+	}
+	state := settings.State()
+	if !state.Active() {
+		// Off and incomplete are the pre-existing code path, to the letter:
+		// no request, no write, no comment, and no mention.
+		return settings, Issue{}, &Outcome{State: state, Action: ActionSkipped, Reason: "routing not enabled"}, nil
+	}
+
+	// The breaker is checked before the issue is even loaded. While it is
+	// cooling down the workspace is "ineffective": the reason belongs in the
+	// settings section, and a ticket must not be told about it again.
+	if open, _, reason := r.Breaker.Open(workspaceID); open {
+		return settings, Issue{}, &Outcome{State: StateIneffective, Action: ActionSkipped, Reason: reason}, nil
+	}
+
+	issue, err := r.Store.Issue(ctx, workspaceID, issueID)
+	if err != nil {
+		return settings, Issue{}, &Outcome{State: state, Action: ActionSkipped, Reason: "issue unreadable"}, err
+	}
+
+	if issue.AssignedToHuman() && !humanHeldIsRoutable(issue) {
+		// A person's ticket is a person's ticket. Nothing is filled, nothing
+		// is said, nobody is pinged.
+		return settings, issue, &Outcome{State: state, Action: ActionSkipped, Reason: "assignee is a person"}, nil
+	}
+	return settings, issue, nil, nil
 }
 
 // humanHeldIsRoutable carves ONE case out of "a person holds it, do not
@@ -175,8 +224,22 @@ func humanHeldIsRoutable(issue Issue) bool {
 	return issue.Status == "in_review" && issue.Reviewer.Empty()
 }
 
+// fillMode is what an executor seat written by routeTodo does next.
+type fillMode int
+
+const (
+	// fillStarts — the todo row proper: the assignment starts the seat's run.
+	fillStarts fillMode = iota
+	// fillParked — a later-stage sub-issue: seated now, runs when its stage is
+	// promoted to todo. Nothing runs from backlog, so the write starts nothing.
+	fillParked
+	// fillCoordinator — the root of a group: seated to supervise its
+	// sub-issues, and its run is not started by the write.
+	fillCoordinator
+)
+
 // routeTodo is the only row that fills slots.
-func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Settings, issue Issue) (Outcome, error) {
+func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Settings, issue Issue, mode fillMode) (Outcome, error) {
 	// Declined until a write proves otherwise: the action is derived from what
 	// was written, at the bottom of this function.
 	out := Outcome{State: StateEnabled, Action: ActionDeclined}
@@ -261,7 +324,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		} else {
 			labelStill := labelSeatOK && seatIn(fresh, labelSeat)
 			seat, source, why := r.pickExecutor(fresh, labelSeat, labelStill, verdict, threshold)
-			written, err := r.Store.AssignAgentIfUnassigned(ctx, workspaceID, issue.ID, seat)
+			written, err := r.Store.AssignAgentIfUnassigned(ctx, workspaceID, issue.ID, seat, mode == fillStarts)
 			if err != nil {
 				return out, err
 			}
@@ -337,12 +400,16 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	// The one condition that earns an @: the ticket is in a state where
 	// nobody will move it. Here that means the executor slot is still empty,
 	// so the ticket sits in todo until a person notices.
+	// A parked sub-issue is the exception: it is not sitting in todo, and its
+	// stage's promotion routes it again, so an empty slot there is not yet a
+	// ticket nobody will move.
 	stillUnassigned := needExecutor && executor == nil
+	notify := stillUnassigned && mode != fillParked
 	body := r.assignmentComment(issue, match, candidates, verdict, threshold,
 		executor, executorSource, reviewer, reviewerFallback, fallbackWhy, humanSignoff,
-		needExecutor, needReviewer, stillUnassigned)
+		needExecutor, needReviewer, notify, mode)
 
-	return r.deliver(ctx, workspaceID, issue, KindAssignment, body, stillUnassigned, out)
+	return r.deliver(ctx, workspaceID, issue, KindAssignment, body, notify, out)
 }
 
 // Where the executor seat came from, for the decision comment.

@@ -165,6 +165,7 @@ type Task struct {
 	IssueCommentSummaries     []IssueContextComment `json:"issue_comment_summaries,omitempty"`
 	IssueTriggerThread        []IssueContextComment `json:"issue_trigger_thread,omitempty"`
 	IssueNewComments          []IssueContextComment `json:"issue_new_comments,omitempty"`
+	IssueSubIssues            []SubIssueRef         `json:"issue_sub_issues,omitempty"` // the task issue's sub-issues; non-empty means this run holds a coordinator (DENE-812)
 	IssueContextGeneratedAt   string                `json:"issue_context_generated_at,omitempty"`
 	IssueContextTruncated     bool                  `json:"issue_context_truncated,omitempty"`
 	ChatSessionID             string                `json:"chat_session_id,omitempty"`              // non-empty for chat tasks
@@ -249,6 +250,17 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+}
+
+// SubIssueRef mirrors handler.SubIssueRef.
+type SubIssueRef struct {
+	ID           string `json:"id"`
+	Identifier   string `json:"identifier,omitempty"`
+	Title        string `json:"title"`
+	Status       string `json:"status"`
+	Stage        int32  `json:"stage,omitempty"`
+	AssigneeType string `json:"assignee_type,omitempty"`
+	AssigneeName string `json:"assignee_name,omitempty"`
 }
 
 type IssueContextComment struct {

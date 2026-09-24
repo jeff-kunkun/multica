@@ -965,6 +965,13 @@ func (h *Handler) FinalizeIssueDraft(w http.ResponseWriter, r *http.Request) {
 	// an adopted group belongs to the confirm that created it.
 	if created {
 		completed.AssignmentWarnings = warnings
+		// The rows this confirm wrote never went through the create hook, so
+		// routing seats them here: every node the preview left unheld gets an
+		// executor, and the root its reviewer (DENE-812). Filling only empty
+		// slots makes an adopted node in the same group a no-op.
+		for _, issue := range issues {
+			h.RouteGroupNodeAsync(r, uuidToString(session.WorkspaceID), uuidToString(issue.ID))
+		}
 	}
 	writeJSON(w, http.StatusOK, *completed)
 }

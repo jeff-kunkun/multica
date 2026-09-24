@@ -169,8 +169,9 @@ type Store interface {
 	RoutingFacts(ctx context.Context, workspaceID string, agentIDs, providers []string) (RoutingFacts, error)
 	// AssignAgentIfUnassigned fills the executor slot only while it is still
 	// empty. Reports whether THIS call wrote it. Starting the seat's run is
-	// the store's job, because assignment is what wakes an agent.
-	AssignAgentIfUnassigned(ctx context.Context, workspaceID, issueID string, seat Seat) (written bool, err error)
+	// the store's job, because assignment is what wakes an agent — unless
+	// start is false: a group's coordinator is seated without being woken.
+	AssignAgentIfUnassigned(ctx context.Context, workspaceID, issueID string, seat Seat, start bool) (written bool, err error)
 	// SetReviewerIfUnset fills the reviewer slot only while it is still empty.
 	// The slot is a field on the issue, not a workspace property, so there is
 	// nothing to provision and nothing that can be missing: every workspace
