@@ -153,10 +153,7 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// brief the daemon keeps out of the cwd (shared local_directory mode)
 	// arrives as SystemPrompt and rides the same stdin, prepended the way
 	// grok/kimi/dsh do.
-	userText := prompt
-	if opts.SystemPrompt != "" {
-		userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
-	}
+	userText := withSystemPrompt(opts.SystemPrompt, prompt)
 	writeErrCh := make(chan error, 1)
 	go func() {
 		_, err := io.WriteString(stdin, userText)
