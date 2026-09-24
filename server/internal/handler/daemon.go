@@ -2766,6 +2766,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
 	var issueNumber int32
+	// subIssues are the task issue's children, loaded with the issue and
+	// rendered once the workspace prefix is known (DENE-812).
+	var subIssues []db.Issue
 	// Claim-only capability: this server resolves the squad-leader role on the
 	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
 	// from the briefing text. Set unconditionally — on every claim, leader or
@@ -3051,6 +3054,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		resp.ThreadName = issue.Title
 		issueNumber = issue.Number
+		if !issue.ParentIssueID.Valid {
+			if children, err := h.Queries.ListChildIssues(r.Context(), issue.ID); err == nil {
+				subIssues = children
+			}
+		}
 		// Inline a bounded issue snapshot so a fresh daemon run can orient without
 		// repeating the mandatory issue/comment reads. Older daemons ignore these
 		// additive fields.
@@ -4034,6 +4042,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.WorkspaceSlug = ws.Slug
 		if issueNumber > 0 {
 			resp.IssueIdentifier = service.IssueIdentifier(ws.IssuePrefix, issueNumber)
+		}
+		resp.IssueSubIssues = h.claimSubIssues(r.Context(), ws.IssuePrefix, subIssues)
+		if len(subIssues) > maxClaimSubIssues {
+			resp.IssueContextTruncated = true
 		}
 		if ws.Context.Valid {
 			resp.WorkspaceContext = ws.Context.String

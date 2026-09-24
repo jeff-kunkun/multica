@@ -64,6 +64,36 @@ func (h *Handler) RouteIssueAsync(r *http.Request, workspaceID, issueID string) 
 	}()
 }
 
+// RouteGroupNodeAsync is RouteIssueAsync for an issue an alignment confirm
+// just created as part of a group — see routing.RouteGroupNode for what it
+// does differently. Detached for the same reason: a group is many model calls,
+// and none of them belongs on the confirm's latency path.
+func (h *Handler) RouteGroupNodeAsync(r *http.Request, workspaceID, issueID string) {
+	if h.Routing == nil || workspaceID == "" || issueID == "" {
+		return
+	}
+	attrs := logger.RequestAttrs(r)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), routeTimeout)
+		defer cancel()
+		outcome, err := h.Routing.RouteGroupNode(ctx, workspaceID, issueID)
+		if err != nil {
+			slog.Warn("group routing pass failed",
+				append(attrs, "workspace_id", workspaceID, "issue_id", issueID, "error", err)...)
+			return
+		}
+		if outcome.Action == routing.ActionSkipped || outcome.Action == routing.ActionNoop {
+			return
+		}
+		slog.Info("group routing pass",
+			append(attrs,
+				"workspace_id", workspaceID,
+				"issue_id", issueID,
+				"action", string(outcome.Action),
+				"mentioned", outcome.Mentioned)...)
+	}()
+}
+
 // RouteIssue is the manual entry point behind POST /api/issues/{id}/route,
 // which is what `multica issue route` calls.
 //

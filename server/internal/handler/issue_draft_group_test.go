@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -1072,5 +1073,80 @@ func TestIssueDraftCoordinatorStatusIsActive(t *testing.T) {
 	if !issuestatus.IsBuiltIn(issueDraftCoordinatorStatus) {
 		t.Fatalf("coordinator status %q is not a built-in status; a workspace whose "+
 			"catalog is empty would refuse the create", issueDraftCoordinatorStatus)
+	}
+}
+
+// DENE-812: a group confirmed with empty seats is seated by routing — every
+// sub-issue gets an executor, the root gets its coordinator and reviewer — and
+// only the stage-1 child starts running. The root coordinates and the stage-2
+// child waits for its stage, seated or not.
+func TestFinalizeIssueDraftGroupIsSeatedByRouting(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cleanupIssueDraftGroup(t)
+
+	agentID := handlerTestAgentID(t)
+	var previousTier *string
+	dbfx.QueryRow(t, `SELECT routing_tier FROM agent WHERE id = $1`, agentID).Scan(&previousTier)
+	t.Cleanup(func() { dbfx.Exec(t, `UPDATE agent SET routing_tier = $2 WHERE id = $1`, agentID, previousTier) })
+	dbfx.Exec(t, `UPDATE agent SET routing_tier = 'medium' WHERE id = $1`, agentID)
+	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+
+	first := draftChild("r1", "routed stage one", "todo")
+	first["stage"] = 1
+	parked := draftChild("r2", "routed stage two", "backlog")
+	parked["stage"] = 2
+	session := startIssueDraftSession(t)
+	saved := saveIssueDraft(t, session.SessionID, 0, "ready", draftGroupPayload("routed parent", first, parked))
+
+	var finalized FinalizeIssueDraftResponse
+	testutil.Call(t, testHandler.FinalizeIssueDraft, finalizeRequest(t, session.SessionID, saved.Revision)).
+		Want(http.StatusOK).JSON(&finalized)
+
+	seated := func(title string) bool {
+		return dbfx.Count(t, `
+			SELECT COUNT(*) FROM issue
+			WHERE workspace_id = $1 AND title = $2 AND assignee_type = 'agent' AND assignee_id = $3
+		`, testWorkspaceID, title, agentID) == 1
+	}
+	titles := []string{"routed parent", "routed stage one", "routed stage two"}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		all := true
+		for _, title := range titles {
+			all = all && seated(title)
+		}
+		if all {
+			break
+		}
+		if time.Now().After(deadline) {
+			for _, title := range titles {
+				t.Logf("%s seated = %v", title, seated(title))
+			}
+			t.Fatal("routing did not seat every node of the confirmed group")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if dbfx.Count(t, `
+		SELECT COUNT(*) FROM issue
+		WHERE workspace_id = $1 AND title = 'routed parent' AND reviewer_type IS NOT NULL
+	`, testWorkspaceID) != 1 {
+		t.Fatal("the root's reviewer slot was not filled")
+	}
+	queued := func(title string) int {
+		return dbfx.Count(t, `
+			SELECT COUNT(*) FROM agent_task_queue
+			WHERE issue_id IN (SELECT id FROM issue WHERE workspace_id = $1 AND title = $2)
+		`, testWorkspaceID, title)
+	}
+	if got := queued("routed stage one"); got != 1 {
+		t.Fatalf("stage 1 child queued %d tasks, want 1", got)
+	}
+	if got := queued("routed parent"); got != 0 {
+		t.Fatalf("root queued %d tasks; a coordinator is seated without a run", got)
+	}
+	if got := queued("routed stage two"); got != 0 {
+		t.Fatalf("stage 2 child queued %d tasks; a parked stage must not start work", got)
 	}
 }
