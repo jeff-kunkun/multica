@@ -19,6 +19,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 const quotaRelayPendingBatch = 50
@@ -35,16 +36,20 @@ func (s *TaskService) RelayQuotaFailure(ctx context.Context, task db.AgentTaskQu
 	if s == nil || s.Queries == nil || !quotaFailureWorthRelay(task) {
 		return false, nil
 	}
-	prepared, err := s.prepareQuotaRelay(ctx, task)
-	if err != nil || prepared == nil {
+	prepared, idle, err := s.prepareQuotaRelay(ctx, task)
+	if err != nil {
 		return false, err
 	}
-	if prepared.enqueue {
+	if prepared != nil && prepared.enqueue {
 		if err := s.finishQuotaRelay(ctx, prepared.relay); err != nil {
 			return true, err
 		}
 	}
 	s.publishQuotaRelaySideEffects(ctx, prepared)
+	s.finishIdleTransfers(ctx, idle)
+	if prepared == nil {
+		return false, nil
+	}
 	return prepared.hold, nil
 }
 
@@ -123,6 +128,18 @@ type quotaRelayPrepared struct {
 	prevStatus string
 }
 
+// idleTransfer is one not-yet-started issue moved off a broken seat.
+// Enqueue happens after the breaker transaction commits, because the
+// enqueue reads the assignee through a different connection.
+type idleTransfer struct {
+	issue      db.Issue
+	prevStatus string
+	comment    *db.Comment
+	note       string
+	actor      pgtype.UUID
+	enqueue    bool
+}
+
 func quotaFailureWorthRelay(task db.AgentTaskQueue) bool {
 	reason := ""
 	if task.FailureReason.Valid {
@@ -135,8 +152,9 @@ func quotaFailureWorthRelay(task db.AgentTaskQueue) bool {
 	return quotarelay.ShouldInspect(reason, text)
 }
 
-func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQueue) (*quotaRelayPrepared, error) {
+func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQueue) (*quotaRelayPrepared, []idleTransfer, error) {
 	var prepared *quotaRelayPrepared
+	var idle []idleTransfer
 	err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		locked, err := qtx.LockTaskForQuotaRelay(ctx, task.ID)
 		if err != nil {
@@ -189,6 +207,12 @@ func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQu
 		}); err != nil {
 			return fmt.Errorf("open quota breaker: %w", err)
 		}
+		demotion := quotaDemotionLine(ctx, qtx, agent)
+		moved, err := s.reassignUnstartedIssues(ctx, qtx, locked, agent, demotion)
+		if err != nil {
+			return err
+		}
+		idle = moved
 
 		if !locked.IssueID.Valid {
 			_, err = insertQuotaRelay(ctx, qtx, locked, agent, plan, db.InsertQuotaRelayParams{Outcome: "skipped_no_issue"})
@@ -203,6 +227,7 @@ func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQu
 			return err
 		}
 		handoff := quotaHandoff(locked, agent, issue, plan)
+		handoff.Demotion = demotion
 		if locked.AutopilotRunID.Valid {
 			_, err = insertQuotaRelay(ctx, qtx, locked, agent, plan, db.InsertQuotaRelayParams{Outcome: "skipped_autopilot", IssueID: issue.ID})
 			return err
@@ -242,7 +267,10 @@ func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQu
 		}
 		return s.stageQuotaReplacement(ctx, qtx, locked, agent, issue, plan, handoff, choice, &prepared)
 	})
-	return prepared, err
+	if err != nil {
+		return nil, nil, err
+	}
+	return prepared, idle, nil
 }
 
 func preparedFromExisting(existing db.AgentQuotaRelay) *quotaRelayPrepared {
@@ -697,11 +725,186 @@ func capacityAvoidHouse(task db.AgentTaskQueue, name string) string {
 	if !quotarelay.IsCapacityFailure(quotaReason(task), quotaError(task)) {
 		return ""
 	}
+	// Any house, not only GPT. A Claude seat that is full should not hand
+	// the work to another Claude seat either: the same provider is usually
+	// full together. One tier down still may land on the same house when
+	// the rung has nobody else.
 	provider, ok := routing.DefaultLadder.ProviderOf(name)
-	if !ok || provider != quotarelay.OpenAIHouse {
+	if !ok || provider == "" {
 		return ""
 	}
 	return provider
+}
+
+func quotaDemotionLine(ctx context.Context, qtx *db.Queries, agent db.Agent) string {
+	n, err := qtx.CountQuotaBreakersSinceSuccess(ctx, agent.ID)
+	if err != nil || n < 2 {
+		return ""
+	}
+	return quotarelay.DemotionLine(agent.Name, int(n))
+}
+
+// reassignUnstartedIssues moves tickets that are assigned to the broken
+// seat but have not started. The failing ticket itself is left to the
+// relay: it already has a failed task and its own handoff.
+func (s *TaskService) reassignUnstartedIssues(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, agent db.Agent, demotion string) ([]idleTransfer, error) {
+	choice, found, err := pickQuotaReplacement(ctx, qtx, task, agent, agent.WorkspaceID)
+	if err != nil || !found {
+		return nil, err
+	}
+	issues, err := qtx.ListUnstartedIssuesForAgent(ctx, db.ListUnstartedIssuesForAgentParams{
+		WorkspaceID: agent.WorkspaceID,
+		AssigneeID:  agent.ID,
+		Limit:       50,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sourceID := ""
+	if task.IssueID.Valid {
+		sourceID = util.UUIDToString(task.IssueID)
+	}
+	crossHouse := capacityAvoidHouse(task, agent.Name) != ""
+	actor := task.AccountableUserID
+	if !actor.Valid {
+		actor = task.OriginatorUserID
+	}
+	replacementID := util.MustParseUUID(choice.Seat.ID)
+	out := make([]idleTransfer, 0, len(issues))
+	for _, listed := range issues {
+		if util.UUIDToString(listed.ID) == sourceID {
+			continue
+		}
+		issue, err := qtx.LockIssueForQuotaRelay(ctx, listed.ID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if issue.Status != "todo" && issue.Status != "in_progress" && issue.Status != "backlog" {
+			continue
+		}
+		reassigned, err := qtx.ReassignIssueToAgentIfCurrent(ctx, db.ReassignIssueToAgentIfCurrentParams{
+			AssigneeID:        replacementID,
+			ID:                issue.ID,
+			WorkspaceID:       issue.WorkspaceID,
+			CurrentAssigneeID: agent.ID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if _, err := qtx.CancelPendingTasksByIssueAndAgent(ctx, db.CancelPendingTasksByIssueAndAgentParams{
+			IssueID: issue.ID,
+			AgentID: agent.ID,
+		}); err != nil {
+			return nil, err
+		}
+		tierLabel := choice.Seat.Tier
+		if tier, ok := routing.DefaultLadder.TierByKey(choice.Seat.Tier); ok && tier.Label != "" {
+			tierLabel = tier.Label
+		}
+		audit := quotarelay.AuditIdle(agent.Name, choice.Seat.Name, tierLabel, crossHouse, choice.SteppedDown, demotion)
+		if reassigned.Status == "backlog" {
+			audit += "\n这张票还在待排期，先改了执行人，轮到开跑时由新席位接。\n"
+		}
+		comment, err := postQuotaAudit(ctx, qtx, reassigned, audit, task.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, idleTransfer{
+			issue:      reassigned,
+			prevStatus: issue.Status,
+			comment:    comment,
+			note:       quotarelay.IdleHandoffNote(agent.Name, choice.Seat.Name, choice.SteppedDown),
+			actor:      actor,
+			enqueue:    reassigned.Status == "todo" || reassigned.Status == "in_progress",
+		})
+	}
+	return out, nil
+}
+
+func freshSessionNoticeReason(reason string) bool {
+	switch reason {
+	case string(taskfailure.ReasonAgentProviderCapacityOrRateLimit),
+		string(taskfailure.ReasonAgentProviderNetwork),
+		string(taskfailure.ReasonAgentProviderServerError),
+		string(taskfailure.ReasonTimeout),
+		string(taskfailure.ReasonRuntimeOffline),
+		string(taskfailure.ReasonRuntimeRecovery),
+		serverInterruptFailureReason:
+		return true
+	default:
+		return false
+	}
+}
+
+// noteUnresumedRetry says the automatic retry opened a new CLI session
+// because the failed run left nothing that can be resumed.
+func (s *TaskService) noteUnresumedRetry(ctx context.Context, task db.AgentTaskQueue, rolloutMissing bool) {
+	why := "上一轮在留下可恢复的 CLI session 之前就失败了。"
+	if rolloutMissing {
+		why = "上一轮的 Codex 会话文件没有落到本机，续不上。"
+	}
+	s.NoteSessionRestart(ctx, task, why)
+}
+
+// NoteSessionRestart posts the human explanation when a run had to open a
+// new CLI session. Empty reason posts nothing. The same task reports at
+// most once.
+func (s *TaskService) NoteSessionRestart(ctx context.Context, task db.AgentTaskQueue, reason string) {
+	reason = strings.TrimSpace(reason)
+	if s == nil || s.Queries == nil || reason == "" || !task.IssueID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("session restart notice: load issue failed",
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+		return
+	}
+	comment, err := s.Queries.CreateRoutingComment(ctx, db.CreateRoutingCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorID:    pgtype.UUID{Valid: true},
+		Content:     "这次运行新开了 CLI 对话，没有续上原来的会话。原因：" + reason,
+		RoutingKind: "session_restart:" + util.UUIDToString(task.ID),
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("session restart notice: comment failed",
+				"task_id", util.UUIDToString(task.ID),
+				"error", err,
+			)
+		}
+		return
+	}
+	s.publishQuotaComment(ctx, &comment)
+}
+
+func (s *TaskService) finishIdleTransfers(ctx context.Context, idle []idleTransfer) {
+	for _, item := range idle {
+		if item.comment != nil {
+			s.publishQuotaComment(ctx, item.comment)
+		}
+		if s != nil && s.Bus != nil {
+			s.broadcastIssueUpdated(ctx, item.issue, item.prevStatus)
+		}
+		if !item.enqueue {
+			continue
+		}
+		if _, err := s.enqueueIssueTask(ctx, item.issue, pgtype.UUID{}, false, item.note, item.actor, pgtype.UUID{}, pgtype.Timestamptz{}, OriginDerived); err != nil && !errors.Is(err, ErrDuplicatePendingTask) {
+			slog.Warn("quota relay: unstarted issue enqueue failed",
+				"issue_id", util.UUIDToString(item.issue.ID),
+				"error", err,
+			)
+		}
+	}
 }
 
 func quotaSeatDirection(name string) string {

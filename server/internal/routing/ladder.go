@@ -247,6 +247,12 @@ func (l Ladder) pickTagged(seats []Agent, direction string) (Agent, string, bool
 	if len(seats) == 0 {
 		return Agent{}, "", false
 	}
+	// A seat that keeps tripping the breaker is not the first choice on its
+	// rung. When everyone on the rung is demoted, the ordinary pick stands:
+	// the work still needs a seat.
+	if resting := withoutDemoted(seats); len(resting) > 0 {
+		seats = resting
+	}
 	if direction != "" {
 		for _, a := range seats {
 			if l.seatDirection(a.Name) == direction {
@@ -260,6 +266,16 @@ func (l Ladder) pickTagged(seats []Agent, direction string) (Agent, string, bool
 		}
 	}
 	return seats[0], l.seatDirection(seats[0].Name), true
+}
+
+func withoutDemoted(seats []Agent) []Agent {
+	out := make([]Agent, 0, len(seats))
+	for _, seat := range seats {
+		if !seat.Demoted {
+			out = append(out, seat)
+		}
+	}
+	return out
 }
 
 // seatDirection reads the direction off a seat name by the naming convention
@@ -317,6 +333,10 @@ type Agent struct {
 	// from the model id, because the same model at a different thinking level
 	// is a different rung and two seats may sit on one model deliberately.
 	Tier string
+	// Demoted is set when this seat opened two or more breakers in the last
+	// day and has not finished a task since. Routing still uses it when the
+	// rung has nobody else.
+	Demoted bool
 }
 
 // SeatByTier finds the candidate on a named rung.
