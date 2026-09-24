@@ -2359,6 +2359,19 @@ describe("ApiClient model discovery response schema", () => {
     expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
   });
 
+  it("sends the agent id when the picker is for one agent", async () => {
+    stubJSON(completed);
+
+    await new ApiClient("https://api.example.test").initiateListModels("rt-1", {
+      force: true,
+      agentId: "agent-1",
+    });
+
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/runtimes/rt-1/models?force=true&agent_id=agent-1",
+    );
+  });
+
   // The picker drives a state machine off `status`, so a malformed body must
   // become an explicit failure — not a fabricated empty catalog, and not an
   // endless "discovering models" spinner.

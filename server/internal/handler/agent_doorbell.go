@@ -44,6 +44,22 @@ const (
 	inboxTypeAgentAccessDeclined = "agent_access_declined"
 )
 
+// inboxItemIsPersonalNotice reports whether an inbox item is addressed to the
+// recipient personally rather than being a projection of an issue they follow.
+// Doorbell rings and receipts are about the recipient's own agent (or their
+// own request), so the issue-visibility filter that scopes ordinary issue
+// notifications (DENE-698) must not swallow them: the owner has to hear the
+// bell even when the ticket it rang on is not shared with them. The item only
+// carries the saved summary and metadata, never the issue body. Keep in step
+// with the type list in CountUnreadInbox / CountUnreadInboxByWorkspace.
+func inboxItemIsPersonalNotice(itemType string) bool {
+	switch itemType {
+	case inboxTypeAgentAccessRequest, inboxTypeAgentAccessApproved, inboxTypeAgentAccessDeclined:
+		return true
+	}
+	return false
+}
+
 // AgentAccessRequestResponse is the wire shape of one doorbell ring.
 type AgentAccessRequestResponse struct {
 	ID                 string  `json:"id"`

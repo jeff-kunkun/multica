@@ -542,8 +542,13 @@ type DaemonHeartbeatPendingUpdate struct {
 
 // DaemonHeartbeatPendingModelList describes a request for the daemon to
 // enumerate the runtime's supported models.
+//
+// EnvOverlay is the requesting agent's custom_env, when the picker named one
+// agent. It rides the daemon heartbeat only. The browser's model-list
+// response does not carry it, and nothing in the catalog result may echo it.
 type DaemonHeartbeatPendingModelList struct {
-	ID string `json:"id"`
+	ID         string            `json:"id"`
+	EnvOverlay map[string]string `json:"env_overlay,omitempty"`
 }
 
 // DaemonHeartbeatPendingProviderConfig describes a request for the daemon to

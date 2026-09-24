@@ -875,6 +875,7 @@ type AgentTaskResponse struct {
 	IssueCommentSummaries    []IssueContextComment `json:"issue_comment_summaries,omitempty"`
 	IssueTriggerThread       []IssueContextComment `json:"issue_trigger_thread,omitempty"`
 	IssueNewComments         []IssueContextComment `json:"issue_new_comments,omitempty"`
+	IssueSubIssues           []SubIssueRef         `json:"issue_sub_issues,omitempty"` // the task issue's sub-issues; non-empty tells the run it holds a coordinator (DENE-812)
 	IssueContextGeneratedAt  string                `json:"issue_context_generated_at,omitempty"`
 	IssueContextTruncated    bool                  `json:"issue_context_truncated,omitempty"`
 	ChatSessionID            string                `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
@@ -1121,6 +1122,72 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+}
+
+// SubIssueRef is one sub-issue of the task issue, as the claim
+// snapshot carries it: enough for a coordinator to see who holds what and
+// which stage is live, without a read per child.
+type SubIssueRef struct {
+	ID           string `json:"id"`
+	Identifier   string `json:"identifier,omitempty"`
+	Title        string `json:"title"`
+	Status       string `json:"status"`
+	Stage        int32  `json:"stage,omitempty"`
+	AssigneeType string `json:"assignee_type,omitempty"`
+	AssigneeName string `json:"assignee_name,omitempty"`
+}
+
+// maxClaimSubIssues bounds the list a claim carries; a larger tree is one
+// `multica issue children` away and the snapshot says it was truncated.
+const maxClaimSubIssues = 40
+
+// claimSubIssues renders a parent's children for the claim snapshot. Names
+// are resolved best-effort: an unresolvable holder still shows its type, and
+// an unassigned child — the thing a coordinator most needs to see — shows
+// none.
+func (h *Handler) claimSubIssues(ctx context.Context, prefix string, children []db.Issue) []SubIssueRef {
+	if len(children) == 0 {
+		return nil
+	}
+	out := make([]SubIssueRef, 0, min(len(children), maxClaimSubIssues))
+	names := map[string]string{}
+	for _, child := range children {
+		if len(out) == maxClaimSubIssues {
+			break
+		}
+		item := SubIssueRef{
+			ID:     uuidToString(child.ID),
+			Title:  child.Title,
+			Status: child.Status,
+		}
+		if prefix != "" {
+			item.Identifier = service.IssueIdentifier(prefix, child.Number)
+		}
+		if child.Stage.Valid {
+			item.Stage = child.Stage.Int32
+		}
+		if child.AssigneeType.Valid && child.AssigneeID.Valid {
+			item.AssigneeType = child.AssigneeType.String
+			key := item.AssigneeType + ":" + uuidToString(child.AssigneeID)
+			name, seen := names[key]
+			if !seen {
+				switch item.AssigneeType {
+				case "agent":
+					if a, err := h.Queries.GetAgent(ctx, child.AssigneeID); err == nil {
+						name = a.Name
+					}
+				case "member":
+					if u, err := h.Queries.GetUser(ctx, child.AssigneeID); err == nil {
+						name = u.Name
+					}
+				}
+				names[key] = name
+			}
+			item.AssigneeName = name
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // IssueContextComment is a bounded comment snapshot included in a daemon claim.
@@ -3018,14 +3085,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A base role owns the availability of its direct specialisations when it
-	// is turned off. The child update is deliberately one-way: turning the base
-	// role back on leaves each specialisation's independent setting untouched.
-	var disabledSpecialisations []db.Agent
-	if req.WorkEnabled != nil && !*req.WorkEnabled {
-		disabledSpecialisations, err = h.Queries.DisableAgentSpecialisations(r.Context(), updated.ID)
+	// A base role owns the availability of its direct specialisations: turning
+	// it off or on sets every specialisation to the same value.
+	var toggledSpecialisations []db.Agent
+	if req.WorkEnabled != nil && !updated.ParentAgentID.Valid {
+		toggledSpecialisations, err = h.Queries.SetAgentSpecialisationsWorkEnabled(r.Context(), db.SetAgentSpecialisationsWorkEnabledParams{
+			WorkEnabled:   *req.WorkEnabled,
+			ParentAgentID: updated.ID,
+		})
 		if err != nil {
-			slog.Warn("disable agent specialisations failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			slog.Warn("sync agent specialisations work_enabled failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update agent specialisations")
 			return
 		}
@@ -3137,7 +3206,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		h.publishAgentUpdate(r, child)
 	}
-	for _, child := range disabledSpecialisations {
+	for _, child := range toggledSpecialisations {
 		h.publishAgentUpdate(r, child)
 	}
 

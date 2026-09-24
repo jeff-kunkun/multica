@@ -11,7 +11,7 @@ import (
 // separate one would have to be found, would not be readable by the person the
 // decision affects, and would drift from what the ticket actually shows.
 
-const changeSlotFooter = "改右侧任一格即可，改完那一格不会被自动改回。"
+const changeSlotFooter = "改右侧任一格即可，改完那一格不会被自动改回。改执行人不会取消原来的 run；原来的席位如果还在跑，要停就取消那个 run。改到最强档要在评论里写明理由。"
 
 func pct(v float64) string {
 	return strconv.FormatFloat(v*100, 'f', 0, 64) + "%"
@@ -49,23 +49,33 @@ func (r *Router) assignmentComment(
 	humanSignoff bool,
 	needExecutor, needReviewer bool,
 	stillUnassigned bool,
+	mode fillMode,
 ) string {
 	var b strings.Builder
 	b.WriteString("## 自动选派\n\n")
+
+	// What the written seat does next. Only the todo row starts a run.
+	next := "已派出，run 已启动"
+	switch mode {
+	case fillParked:
+		next = "已就位，run 没启动——所在阶段提到待办时才开跑"
+	case fillCoordinator:
+		next = "已就位做**协调席**，run 没启动——子票推进到阶段收口时会叫醒它"
+	}
 
 	// Executor slot.
 	switch {
 	case !needExecutor:
 		b.WriteString("- **执行席**：由你指定，未改动\n")
 	case executor != nil && executorSource == pickLabel:
-		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，按票上的「%s」标签选的，没问模型）→ 已派出，run 已启动\n",
-			executor.Name, executor.TierLabel, executor.TierLabel))
+		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，按票上的「%s」标签选的，没问模型）→ %s\n",
+			executor.Name, executor.TierLabel, executor.TierLabel, next))
 	case executor != nil && executorSource == pickFallback:
-		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，**兜底档**——裁决置信度 %s 低于阈值 %s，或它点的档位这里没有席位）→ 仍然派出，run 已启动。觉得档位不对直接改，改了路由不会再碰\n",
-			executor.Name, executor.TierLabel, pct(v.ExecutorConfidence), pct(threshold)))
+		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，**兜底档**——裁决置信度 %s 低于阈值 %s，或它点的档位这里没有席位）→ 仍然%s。觉得档位不对直接改，改了路由不会再碰\n",
+			executor.Name, executor.TierLabel, pct(v.ExecutorConfidence), pct(threshold), next))
 	case executor != nil:
-		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，置信度 %s ≥ 阈值 %s）→ 已派出，run 已启动\n",
-			executor.Name, executor.TierLabel, pct(v.ExecutorConfidence), pct(threshold)))
+		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，置信度 %s ≥ 阈值 %s）→ %s\n",
+			executor.Name, executor.TierLabel, pct(v.ExecutorConfidence), pct(threshold), next))
 	default:
 		b.WriteString("- **执行席**：⚠️ 未填——这一格在本次裁决与写入之间被别人占了\n")
 	}
@@ -102,6 +112,9 @@ func (r *Router) assignmentComment(
 			reviewer.Label()))
 	}
 
+	if mode == fillCoordinator {
+		b.WriteString(coordinatorNote)
+	}
 	if stillUnassigned {
 		b.WriteString("⚠️ 执行席没派出去，这张票会一直躺在待办，所以 @ 你一次。\n\n")
 	}
@@ -109,6 +122,11 @@ func (r *Router) assignmentComment(
 	b.WriteString("\n\n**路由没有改过状态** —— 状态是事实，只有干活的席位知道。")
 	return b.String()
 }
+
+// coordinatorNote is the division of labour a group root's decision comment
+// states once, where both the coordinator and the sub-issues' executors read
+// it: the work lives in the sub-issues, the root supervises (DENE-812).
+const coordinatorNote = "**分工**：这张是父票，活在子票里——每张子票有自己的执行席，一步步往前推；父票的执行席只做监督：盯子票进度、阶段收口后把下一阶段提到待办、疏通卡住的子票、子票没人就派人，全部收口后把父票整体交验收。父票不替子票干活，子票之外冒出的新活开新子票。\n\n"
 
 // handoffComment is the in-review-row comment. Every handoff it describes is
 // to a seat: the reviewer slot never names a person.

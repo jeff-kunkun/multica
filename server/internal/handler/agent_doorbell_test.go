@@ -453,3 +453,65 @@ func TestDoorbell_ListRequestsAndOwnerOnlyToggle(t *testing.T) {
 		t.Fatal("doorbell_enabled should be false after owner update")
 	}
 }
+
+// TestDoorbell_RingSurvivesIssueInvisibleToOwner: the doorbell is a personal
+// notice. The owner must hear it — list and unread badge — even when the
+// ticket it rang on is private to the requester and not shared with them.
+func TestDoorbell_RingSurvivesIssueInvisibleToOwner(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	agentID, ownerID, memberID := privateAgentTestFixture(t)
+	armDoorbell(t, agentID)
+	issueID := createCommentTriggerPreviewIssue(t, "doorbell on a private ticket", "", "")
+	// Private to the ringing member: the owner is neither creator, assignee,
+	// nor a share target, so ordinary issue notifications would be filtered.
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE issue SET visibility = 'private', creator_type = 'member', creator_id = $2 WHERE id = $1`, issueID, memberID); err != nil {
+		t.Fatalf("make issue private to member: %v", err)
+	}
+
+	resp := memberMentionsAgent(t, memberID, issueID, agentID)
+	if out := findCommentOutcome(t, resp.TriggerOutcomes, agentID); out.ReasonCode != ReasonAccessRequested {
+		t.Fatalf("outcome = %+v, want access_requested", out)
+	}
+
+	ownerInbox := func(method, path string) *http.Request {
+		r := newRequestAs(ownerID, method, path, nil)
+		r.Header.Set("X-Workspace-ID", testWorkspaceID)
+		return r
+	}
+	w := httptest.NewRecorder()
+	inboxWorkspaceHandler(testHandler.ListInbox)(w, ownerInbox(http.MethodGet, "/api/inbox"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListInbox: got %d: %s", w.Code, w.Body.String())
+	}
+	var items []InboxItemResponse
+	if err := json.NewDecoder(w.Body).Decode(&items); err != nil {
+		t.Fatalf("decode inbox: %v", err)
+	}
+	rings := 0
+	for _, it := range items {
+		if it.Type == inboxTypeAgentAccessRequest && it.IssueID != nil && *it.IssueID == issueID {
+			rings++
+		}
+	}
+	if rings != 1 {
+		t.Fatalf("owner sees %d doorbell rings for the private ticket, want 1 (items=%d)", rings, len(items))
+	}
+
+	w = httptest.NewRecorder()
+	inboxWorkspaceHandler(testHandler.CountUnreadInbox)(w, ownerInbox(http.MethodGet, "/api/inbox/unread-count"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("CountUnreadInbox: got %d: %s", w.Code, w.Body.String())
+	}
+	var count struct {
+		Count int64 `json:"count"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&count); err != nil {
+		t.Fatalf("decode count: %v", err)
+	}
+	if count.Count < 1 {
+		t.Fatalf("owner unread count = %d, want >= 1 (the ring must light the badge)", count.Count)
+	}
+}
