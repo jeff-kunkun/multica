@@ -244,3 +244,82 @@ func setIssueMetadataString(t *testing.T, issueID, key, value string) {
 		t.Fatalf("set %s: expected 200, got %d: %s", key, w.Code, w.Body.String())
 	}
 }
+
+// TestPatrolSeatsEmptyReviewInsteadOfWakingExecutor is DENE-860 at 12:10: the
+// 30-minute reminder used to land on the executor because the acceptance seat
+// was empty. The patrol now fills the seat and starts it; the executor is not
+// asked to review its own work.
+func TestPatrolSeatsEmptyReviewInsteadOfWakingExecutor(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	executor := ensureLadderAgent(t, "孙悟空")
+	ensureLadderAgent(t, "孙悟天")
+
+	ageIntoSeatlessReview := func(t *testing.T, issueID string) db.Issue {
+		t.Helper()
+		if _, err := testPool.Exec(ctx, `
+			UPDATE issue SET status = 'in_review', reviewer_type = NULL, reviewer_id = NULL,
+				metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object($2::text, '1'),
+				last_activity_at = now() - interval '2 hours', updated_at = now() - interval '2 hours'
+			WHERE id = $1`, issueID, blockwait.KeyWatched); err != nil {
+			t.Fatalf("age into seatless review: %v", err)
+		}
+		loaded, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		return loaded
+	}
+
+	t.Run("agent executor gets a seat, not a nudge", func(t *testing.T) {
+		issue := createIssueHTTP(t, "seatless review", "in_progress")
+		setIssueAssigneeDirect(t, issue.ID, "agent", executor)
+		loaded := ageIntoSeatlessReview(t, issue.ID)
+		if !testHandler.patrolOne(ctx, loaded) {
+			t.Fatal("seatless in_review was not acted on")
+		}
+		if got := countPendingTasksForAgent(t, issue.ID, executor); got != 0 {
+			t.Fatalf("executor tasks = %d, want 0: the patrol must not wake the executor", got)
+		}
+		var status, reviewerID string
+		if err := testPool.QueryRow(ctx, `
+			SELECT status, COALESCE(reviewer_id::text, '') FROM issue WHERE id = $1
+		`, issue.ID).Scan(&status, &reviewerID); err != nil {
+			t.Fatalf("read issue: %v", err)
+		}
+		if status != "in_review" || reviewerID == "" || reviewerID == executor {
+			t.Fatalf("status = %q reviewer = %q, want in_review with a seat other than %s", status, reviewerID, executor)
+		}
+		if got := countPendingTasksForAgent(t, issue.ID, reviewerID); got != 1 {
+			t.Fatalf("acceptance tasks = %d, want 1", got)
+		}
+		body, _, _, _ := systemCommentOn(t, issue.ID)
+		if !strings.Contains(body, "验收席") || !strings.Contains(body, "验收已经开始") {
+			t.Fatalf("comment = %s", body)
+		}
+	})
+
+	t.Run("no seat possible becomes a block a person can see", func(t *testing.T) {
+		issue := createIssueHTTP(t, "seatless review human executor", "in_progress")
+		setIssueAssigneeDirect(t, issue.ID, "member", testUserID)
+		loaded := ageIntoSeatlessReview(t, issue.ID)
+		if !testHandler.patrolOne(ctx, loaded) {
+			t.Fatal("seatless in_review was not acted on")
+		}
+		var status, needsHuman string
+		if err := testPool.QueryRow(ctx, `
+			SELECT status, COALESCE(metadata->>$2, '') FROM issue WHERE id = $1
+		`, issue.ID, blockwait.KeyNeedsHuman).Scan(&status, &needsHuman); err != nil {
+			t.Fatalf("read issue: %v", err)
+		}
+		if status != "blocked" || needsHuman != testUserID {
+			t.Fatalf("status = %q needs_human = %q, want blocked pointing at the workspace owner %s", status, needsHuman, testUserID)
+		}
+		body, _, _, _ := systemCommentOn(t, issue.ID)
+		if !strings.Contains(body, "补不上验收席") || !strings.Contains(body, "mention://member/"+testUserID) {
+			t.Fatalf("comment = %s", body)
+		}
+	})
+}
