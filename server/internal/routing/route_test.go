@@ -327,6 +327,9 @@ func TestJudgeAskingForAPersonStillWritesASeat(t *testing.T) {
 	if !strings.Contains(body, "@ 对应的人") {
 		t.Errorf("comment does not tell the seat to ping the person:\n%s", body)
 	}
+	if !strings.Contains(body, "不是停票的理由") {
+		t.Errorf("comment lets 需要人拍板 be read as a hold:\n%s", body)
+	}
 }
 
 func TestNoReviewNeededWritesAValueRatherThanLeavingTheSlotEmpty(t *testing.T) {
@@ -864,6 +867,9 @@ func TestInReviewFillsAnEmptyReviewerSlotAndHandsOff(t *testing.T) {
 	body := store.comments[KindHandoff][0]
 	if !strings.Contains(body, "现场定了一个") {
 		t.Errorf("handoff comment hides that the reviewer was decided at this row:\n%s", body)
+	}
+	if !strings.Contains(body, "就在这一轮合并并关票") {
+		t.Errorf("handoff comment does not release a pass in the same turn:\n%s", body)
 	}
 }
 

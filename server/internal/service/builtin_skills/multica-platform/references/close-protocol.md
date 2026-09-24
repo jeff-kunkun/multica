@@ -67,11 +67,15 @@ Role defaults:
 |---|---|---|---|
 | Builder (PR / needs review) | `awaiting_review` | `in_review` | mention Reviewer. Title carries the identifier. Do not `done` while waiting. Leave `Closes` for merge |
 | Builder (no acceptance gate) | `delivered` | `done` | `stage_done`; do not mention the parent assignee |
-| Reviewer pass, not yet merged | do not change conclusion | keep `in_review` | do not start a Builder run unless `needs-work` |
-| Reviewer pass and merged | `delivered` | `done` if the webhook did not | `stage_done` |
+| Reviewer pass, owned checks green, no explicit human hold | `delivered` | merge in this same turn, then `done` (skip the status write if the merge webhook already set it) | `stage_done` |
+| Reviewer pass, but the ticket explicitly names a person and a decision only they can make | `awaiting_human` | `in_review` | `none`. The comment names that person and the decision. A routing note that says 需要人拍板 is not this row |
+| Reviewer pass, but a check this change owns is red | not a close | `in_progress`, mention Builder | `mention` |
+| Reviewer pass and already merged | `delivered` | `done` if the webhook did not | `stage_done` |
 | Reviewer `needs-work` | not a close | `in_progress` or keep, mention Builder | `mention` |
 | Operator ship/ops delivery | `delivered` | `done` | `stage_done`, or mention the next seat if AC says so |
 | Dispatcher promoting the next stage | do not write child `close.*` | child `backlog → todo` | server enqueues. Keep the parent `in_progress` until the chain is done |
+
+A pass does not stop at `in_review`. Refusing to merge or to close after a pass is not a conclusion. A check that is already red on the base branch belongs to the base branch, not to this change, and is not a reason to skip the merge. The only pass that stays in `in_review` is the explicit human row above. If the host rejects the merge, say the rejection in the comment and use `blocked` with `block_kind=permission` — do not invent a hold while the PR is still mergeable.
 
 A Dispatcher advancement turn is only: `multica issue children`, read `close.*`
 on the parent and the current stage's children, then either promote the next

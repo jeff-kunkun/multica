@@ -98,7 +98,7 @@ func (r *Router) assignmentComment(
 	b.WriteString("\n")
 
 	if humanSignoff && reviewer.Kind == ReviewerAgent {
-		b.WriteString(fmt.Sprintf("这次验收里有需要人拍板的部分：**%s** 先做检查、合并、关票，遇到只有人能定的事，由它在票下 @ 对应的人。票不会被改派给人。\n\n",
+		b.WriteString(fmt.Sprintf("这次验收里有需要人拍板的部分：**%s** 先做检查、合并、关票，遇到只有人能定的事，由它在票下 @ 对应的人。票不会被改派给人。这句不是停票的理由：检查通过就合并、关票；真有一件只有人能定的事，才 @ 那个人，并把人和那件事写明。\n\n",
 			reviewer.Label()))
 	}
 
@@ -126,6 +126,7 @@ func (r *Router) handoffComment(issue Issue, to string, decidedHere bool) string
 	}
 	b.WriteString("- 指派本身就是叫醒，这个席位的 run 已启动\n")
 	b.WriteString("\n验收席只做检查、合并、关票，不重做这张票的活；认为要返工就把票改回执行席并说明原因。遇到只有人能定的事，在票下 @ 对应的人，不要把票改派给人。\n")
+	b.WriteString("验收通过、且这次改动自己的检查是绿的，就在这一轮合并并关票。主干上本来就红的检查，以及路由写的「需要人拍板」，都不是停在待验收的理由。只有票上写明在等哪个人做哪个决定时，才停在待验收。\n")
 	b.WriteString("\n**路由没有改过状态。**")
 	return b.String()
 }

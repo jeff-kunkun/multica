@@ -571,6 +571,10 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Prefer a real parent + stage",
 				"already has a queued or running task",
 				"A sub-issue never owns an acceptance conclusion",
+				// DENE-810: a pass releases. The old row told the reviewer
+				// to keep in_review until somebody else merged.
+				"Reviewer pass, owned checks green, no explicit human hold",
+				"A pass does not stop at `in_review`",
 			},
 			notWant: []string{
 				// The MUL-6966 / MUL-5442 bans on teaching the generic KV bag
@@ -592,6 +596,9 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Top-level issues only own acceptance",
 				"not considered by the stale-review sweep",
 				"`in_review` (top-level only)",
+				// DENE-810: the stall sweep catches up a status. It is not
+				// the path that merges.
+				"The sweep does not merge",
 			},
 		},
 		{
