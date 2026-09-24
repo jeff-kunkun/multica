@@ -9270,6 +9270,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.LocalWorktree != nil && env.LocalWorktree.StaleBaselineNotice != "" {
 		promptOptions = append(promptOptions, WithStaleLocalBaseline(env.LocalWorktree.StaleBaselineNotice))
 	}
+	if env.LocalWorktree != nil && env.LocalWorktree.ReplaySkippedNotice != "" {
+		promptOptions = append(promptOptions, WithReplaySkipped(env.LocalWorktree.ReplaySkippedNotice))
+	}
 	if command := dependencyInstallCommand(env.WorkDir); command != "" {
 		promptOptions = append(promptOptions, WithDependencyInstallCommand(command))
 	}
