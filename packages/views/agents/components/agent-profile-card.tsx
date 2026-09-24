@@ -20,6 +20,7 @@ import { HealthIcon } from "../../runtimes/components/shared";
 import { availabilityConfig } from "../presence";
 import { AgentJevIndicator } from "./agent-jev-indicator";
 import { AgentQuotaCapsule } from "./agent-quota-meter";
+import { providerSeatModelDisplay } from "./provider-seat-model";
 import { VisibilityBadge } from "./visibility-badge";
 import { useT } from "../../i18n";
 
@@ -207,8 +208,11 @@ function RuntimeRow({
   );
 }
 
-// Model row — the runtime-native model id the agent runs (`agent.model`),
-// with the reasoning/effort token appended as a small badge whenever the
+// Model row — the model the agent runs (`agent.model`), rendered through
+// `providerSeatModelDisplay` so a provider-preset seat reads as
+// `provider · model name` instead of the percent-encoded string it is stored
+// as. The raw value stays the source of truth; only the text changes.
+// The reasoning/effort token is appended as a small badge whenever the
 // agent pins one. An empty model means "no override": the runtime CLI's own
 // default decides at run time, so we render a "Runtime default" placeholder
 // rather than a bare dash. The model id is mono so provider-slug ids like
@@ -226,6 +230,7 @@ function ModelRow({
 }) {
   const { t } = useT("agents");
   const hasModel = model.trim().length > 0;
+  const modelLabel = providerSeatModelDisplay(model);
   const effort = thinkingLevel?.trim();
   return (
     <div className="flex items-center gap-1.5">
@@ -233,8 +238,8 @@ function ModelRow({
         {t(($) => $.profile_card.model_label)}
       </span>
       {hasModel ? (
-        <span className="min-w-0 truncate font-mono text-micro" title={model}>
-          {model}
+        <span className="min-w-0 truncate font-mono text-micro" title={modelLabel}>
+          {modelLabel}
         </span>
       ) : (
         <span className="min-w-0 truncate text-muted-foreground">
