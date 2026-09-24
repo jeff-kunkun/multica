@@ -392,13 +392,10 @@ the limit posts a system comment in the triggering thread instead of stopping
 silently.
 
 The same settings section holds a run time limit
-(`agent_task_timeout_minutes`, `0`/absent = none). A run that outlives it
-fails with reason `task_time_limit`. That is a round boundary, not a wrong
-result: the platform continues the same CLI session and working directory
-until the run's attempt budget is spent, and the continuation is told to
-close out finished work and split what remains. When the budget is spent the
-issue becomes `blocked` with a comment, instead of sitting in `todo`. A
-sub-issue also leaves a short note on its parent.
+(`agent_task_timeout_minutes`, `0`/absent = none). A run that outlives it fails with reason `task_time_limit`:
+a round boundary, not a wrong result. The platform continues the same CLI session and working directory
+until the attempt budget is spent, and the continuation is told to close out finished work and split what remains.
+When the budget is spent the issue becomes `blocked` with a comment instead of sitting in `todo`; a sub-issue also leaves a short note on its parent.
 
 Rows come back running-first, newest-first within a status, and the family read
 is capped at 20. When the cap truncates the answer the CLI prints a warning on
