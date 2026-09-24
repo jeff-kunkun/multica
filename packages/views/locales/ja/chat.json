@@ -4,6 +4,27 @@
     "select_prompt": "会話を選ぶか、＋ で新規作成してください",
     "agent_link_no_access": "このエージェントとチャットする権限がありません。"
   },
+  "project_bar": {
+    "all": "すべて",
+    "more": "⋯ その他 ({{count}})",
+    "menu_title": "プロジェクト",
+    "done": "完了",
+    "search": "プロジェクトを検索…",
+    "pinned": "ピン留め（ドラッグで並べ替え）",
+    "pinned_empty": "ピン留めはまだありません",
+    "other": "その他（最近のチャット順）",
+    "none": "プロジェクトなし",
+    "chat_count_other": "{{count}} 件のチャット",
+    "pin": "ピン留め",
+    "unpin": "ピン留めを外す",
+    "drag": "ドラッグして並べ替え",
+    "empty": "このプロジェクトにはまだチャットがありません",
+    "unread": "未読"
+  },
+  "project_nudge": {
+    "bind": "プロジェクトに紐づける",
+    "casual": "これは気軽なチャットなので、プロジェクトは不要です"
+  },
   "fab": {
     "running": "Multica が作業中です...",
     "unread_other": "未読のチャット {{count}}件",

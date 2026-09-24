@@ -351,6 +351,8 @@ type ChatSessionUpdatedPayload = {
   project_ids?: string[];
   pinned?: boolean;
   status?: "active" | "archived";
+  /** Present only when the creator dismisses the "bind a project" reminder. */
+  project_nudge_dismissed?: boolean;
   updated_at?: string;
 };
 
@@ -391,6 +393,9 @@ export function applyChatSessionUpdatedToCache(
             ...("project_ids" in payload ? { project_ids: payload.project_ids } : {}),
             pinned: payload.pinned ?? s.pinned,
             status: payload.status ?? s.status,
+            ...("project_nudge_dismissed" in payload
+              ? { project_nudge_dismissed: payload.project_nudge_dismissed }
+              : {}),
             updated_at: payload.updated_at ?? s.updated_at,
             ...(payload.status === "archived"
               ? { unread_count: 0, has_unread: false }

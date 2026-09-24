@@ -4370,6 +4370,15 @@ export class ApiClient {
     });
   }
 
+  /** Remember that this chat does not need a project. One-way; the row is
+   *  what makes the reminder stay gone in another browser. */
+  async dismissChatProjectNudge(id: string): Promise<ChatSession> {
+    return this.fetch(`/api/chat/sessions/${id}/project-nudge`, {
+      method: "PATCH",
+      body: JSON.stringify({ dismissed: true }),
+    });
+  }
+
   async setChatSessionArchived(id: string, archived: boolean): Promise<ChatSession> {
     return this.fetch(`/api/chat/sessions/${id}/archive`, {
       method: "PATCH",

@@ -110,6 +110,9 @@ export interface ChatSession {
   /** True when the user has pinned this chat to the top of the list.
    *  Optional so older clients / non-list payloads stay valid. */
   pinned?: boolean;
+  /** True once the creator said this chat does not need a project. Absent
+   *  on a server that predates the field — treat that as "not dismissed". */
+  project_nudge_dismissed?: boolean;
   /** Present for Chats created by an external Channel. Historical Chats keep
    *  their source even after a newer route generation becomes current. */
   channel_source?: ChatChannelSource;
