@@ -235,14 +235,15 @@ UPDATE agent SET
 WHERE id = $1
 RETURNING *;
 
--- name: DisableAgentSpecialisations :many
--- Turning off a base role also turns off its direct specialisations. This is
--- intentionally one-way: re-enabling the base role must not override a
--- specialisation's own work setting.
+-- name: SetAgentSpecialisationsWorkEnabled :many
+-- A specialisation is its base role plus extra prompt, skills and MCP, so its
+-- work switch follows the base role in both directions: turning the base role
+-- off or on sets every direct specialisation to the same value. Only rows that
+-- actually change are returned, so callers broadcast just those.
 UPDATE agent
-SET work_enabled = FALSE, updated_at = now()
-WHERE parent_agent_id = $1
-  AND work_enabled = TRUE
+SET work_enabled = sqlc.arg('work_enabled')::boolean, updated_at = now()
+WHERE parent_agent_id = sqlc.arg('parent_agent_id')::uuid
+  AND work_enabled <> sqlc.arg('work_enabled')::boolean
 RETURNING *;
 
 -- name: SetAgentParentAgent :one
