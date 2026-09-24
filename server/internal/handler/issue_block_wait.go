@@ -26,14 +26,14 @@ const blockPatrolLimit = 50
 // the issue is waiting on. Members can still drag a card; the patrol picks an
 // unstructured one up. A non-empty rejection is a 400.
 func (h *Handler) gateBlockedStatus(r *http.Request, issue db.Issue, req UpdateIssueRequest, actorType string) (blockwait.Record, bool, string) {
-	rec, err := blockwait.Merge(parseIssueMetadata(issue.Metadata), blockwait.Input{
+	rec, err := blockwait.Accept(parseIssueMetadata(issue.Metadata), blockwait.Input{
 		BlockedBy:     deref(req.BlockedBy),
 		WakeAt:        deref(req.WakeAt),
 		WaitCondition: deref(req.WaitCondition),
 		WaitProbe:     deref(req.WaitProbe),
 		WaitTimeout:   deref(req.WaitTimeout),
 		NeedsHuman:    deref(req.NeedsHuman),
-	})
+	}, time.Now())
 	if err != nil {
 		return rec, false, err.Error()
 	}
@@ -85,6 +85,49 @@ func (h *Handler) recentCommentBodies(ctx context.Context, issue db.Issue) []str
 func (h *Handler) persistBlockRecord(ctx context.Context, issue db.Issue, rec blockwait.Record) {
 	for key, value := range rec.Pairs() {
 		h.setIssueMetaString(ctx, issue, key, value)
+	}
+}
+
+func (h *Handler) deleteIssueMeta(ctx context.Context, issue db.Issue, key string) {
+	if _, err := h.Queries.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Key:         key,
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("block wait: metadata delete failed", "error", err, "issue_id", uuidToString(issue.ID), "key", key)
+	}
+}
+
+// syncBlockWait drops a wait that no longer belongs to the status the issue
+// just entered, and marks a newly blocked or in-review issue as watched so
+// the patrol does not walk tickets that were already sitting there.
+func (h *Handler) syncBlockWait(ctx context.Context, prev, next db.Issue) {
+	if prev.Status == next.Status {
+		return
+	}
+	if prev.Status == "blocked" && next.Status != "blocked" {
+		for _, key := range blockwait.WaitKeys() {
+			h.deleteIssueMeta(ctx, next, key)
+		}
+	}
+	if prev.Status == "in_review" && next.Status != "in_review" {
+		h.deleteIssueMeta(ctx, next, blockwait.KeyReleased)
+		h.deleteIssueMeta(ctx, next, blockwait.KeyReviewNudged)
+	}
+	if prev.Status == "done" && next.Status != "done" {
+		h.deleteIssueMeta(ctx, next, blockwait.KeyReleased)
+	}
+	if next.Status == "in_review" && prev.Status != "in_review" {
+		for _, key := range blockwait.ClockKeys() {
+			h.deleteIssueMeta(ctx, next, key)
+		}
+		h.deleteIssueMeta(ctx, next, blockwait.KeyReleased)
+		h.deleteIssueMeta(ctx, next, blockwait.KeyReviewNudged)
+		h.setIssueMetaString(ctx, next, blockwait.KeyReviewRound, time.Now().UTC().Format(time.RFC3339))
+		h.setIssueMetaString(ctx, next, blockwait.KeyWatched, blockwait.WatchedYes)
+	}
+	if next.Status == "blocked" && prev.Status != "blocked" {
+		h.setIssueMetaString(ctx, next, blockwait.KeyWatched, blockwait.WatchedYes)
 	}
 }
 
@@ -201,10 +244,13 @@ func (h *Handler) maybeReleaseOnAcceptance(ctx context.Context, issue db.Issue, 
 	if issue.Status != "in_review" {
 		return
 	}
-	if !blockwait.IsAcceptancePass(comment.Content) {
+	if !h.authorIsReviewer(issue, comment) {
 		return
 	}
-	if !h.authorIsReviewer(issue, comment) {
+	if !blockwait.IsAcceptancePass(comment.Content) {
+		if blockwait.LooksLikePassHint(comment.Content) {
+			h.postBlockComment(ctx, issue, "这句看起来像验收通过。平台只认单独一行的 verdict: pass，或者评论时带上 --verdict pass。写在句子里的「通过」不会合并，也不会关票。")
+		}
 		return
 	}
 	meta := parseIssueMetadata(issue.Metadata)
@@ -264,6 +310,7 @@ func (h *Handler) finishAcceptedIssue(ctx context.Context, issue db.Issue, reaso
 		}
 		return
 	}
+	h.syncBlockWait(ctx, issue, updated)
 	h.publishBlockStatus(issue, updated)
 	h.postBlockComment(ctx, updated, reason)
 	h.notifyParentOfChildDone(ctx, issue, updated)
@@ -280,6 +327,7 @@ func (h *Handler) blockAcceptedIssue(ctx context.Context, issue db.Issue, decisi
 		slog.Warn("block wait: block after pass failed", "error", err, "issue_id", uuidToString(issue.ID))
 		return
 	}
+	h.syncBlockWait(ctx, issue, updated)
 	h.persistBlockRecord(ctx, updated, decision.Record)
 	h.publishBlockStatus(issue, updated)
 	h.postBlockComment(ctx, updated, decision.Reason)
@@ -319,7 +367,7 @@ func (h *Handler) mergeAcceptedIssue(ctx context.Context, issue db.Issue, prs []
 	}
 	h.blockAcceptedIssue(ctx, issue, decision)
 	if errors.Is(err, errPullMergeUnavailable) {
-		h.wakeIssueOwner(ctx, issue, "验收已经通过。请合并关联的 PR，然后把这张票关了。合不进去就让它停在阻塞上。")
+		h.wakeIssueOwner(ctx, issue, "验收已经通过。请合并关联的 PR，然后把这张票关了。合不进去就让它停在阻塞上。", false)
 	}
 }
 
@@ -384,6 +432,9 @@ func (h *Handler) SweepBlockWaits(ctx context.Context) (int, error) {
 
 func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 	meta := parseIssueMetadata(issue.Metadata)
+	if blockwait.MetaString(meta, blockwait.KeyWatched) != blockwait.WatchedYes {
+		return false
+	}
 	rec := blockwait.ParseMetadata(meta)
 	blockers := h.blockerViews(ctx, issue, rec)
 	quiet := time.Since(activityTime(issue))
@@ -395,14 +446,7 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 			hasLast = true
 		}
 	}
-	bodies := h.recentCommentBodies(ctx, issue)
-	pass := false
-	for _, body := range bodies {
-		if blockwait.IsAcceptancePass(body) {
-			pass = true
-			break
-		}
-	}
+	round, hasRound := parseMetaTime(blockwait.MetaString(meta, blockwait.KeyReviewRound))
 	decision := blockwait.DecidePatrol(blockwait.PatrolInput{
 		Status:         issue.Status,
 		Quiet:          quiet,
@@ -411,25 +455,53 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 		Now:            time.Now(),
 		LastPatrol:     last,
 		HasLastPatrol:  hasLast,
-		HasPassComment: pass && h.reviewerWrotePass(ctx, issue, bodies),
-		ReleasedPass:   blockwait.MetaString(meta, blockwait.KeyReleased) == blockwait.ReleasedPass,
+		HasPassComment: h.passInThisRound(ctx, issue, round, hasRound),
+		ReleasedPass:   hasRound && blockwait.MetaString(meta, blockwait.KeyReleased) == blockwait.ReleasedPass,
+		SegmentNudged:  blockwait.MetaString(meta, blockwait.KeySegmentNudged) == "1",
+		ReviewNudged:   blockwait.MetaString(meta, blockwait.KeyReviewNudged) == "1",
+		ReviewerHuman:  issue.ReviewerType.Valid && issue.ReviewerType.String == "member",
 	})
+	if decision.Action != blockwait.ActionRelease && decision.Action != blockwait.ActionWake {
+		return false
+	}
+	h.applyPatrolFollowUp(ctx, issue, meta, decision)
 	switch decision.Action {
 	case blockwait.ActionRelease:
-		h.setIssueMetaString(ctx, issue, blockwait.KeyPatrolAt, time.Now().UTC().Format(time.RFC3339))
 		h.releaseAcceptedIssue(ctx, issue, decision)
-		return true
 	case blockwait.ActionWake:
-		h.setIssueMetaString(ctx, issue, blockwait.KeyPatrolAt, time.Now().UTC().Format(time.RFC3339))
-		h.wakeIssueOwner(ctx, issue, decision.Reason)
-		return true
-	default:
-		return false
+		h.wakeIssueOwner(ctx, issue, decision.Reason, decision.CommentOnly)
+	}
+	return true
+}
+
+func parseMetaTime(raw string) (time.Time, bool) {
+	if raw == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+func (h *Handler) applyPatrolFollowUp(ctx context.Context, issue db.Issue, meta map[string]any, decision blockwait.Decision) {
+	set, drop := decision.FollowUp(
+		time.Now(),
+		blockwait.MetaString(meta, blockwait.KeyBlockedBy),
+		blockwait.MetaString(meta, "close.waiting_on"),
+		blockwait.MetaString(meta, blockwait.KeyWokenBy),
+	)
+	for _, key := range drop {
+		h.deleteIssueMeta(ctx, issue, key)
+	}
+	for key, value := range set {
+		h.setIssueMetaString(ctx, issue, key, value)
 	}
 }
 
-func (h *Handler) reviewerWrotePass(ctx context.Context, issue db.Issue, bodies []string) bool {
-	if !issue.ReviewerID.Valid {
+func (h *Handler) passInThisRound(ctx context.Context, issue db.Issue, round time.Time, hasRound bool) bool {
+	if !hasRound || !issue.ReviewerID.Valid {
 		return false
 	}
 	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
@@ -439,7 +511,13 @@ func (h *Handler) reviewerWrotePass(ctx context.Context, issue db.Issue, bodies 
 		return false
 	}
 	for _, c := range comments {
-		if c.AuthorID == issue.ReviewerID && blockwait.IsAcceptancePass(c.Content) {
+		if c.AuthorID != issue.ReviewerID || !c.CreatedAt.Valid {
+			continue
+		}
+		if issue.ReviewerType.Valid && c.AuthorType != issue.ReviewerType.String {
+			continue
+		}
+		if blockwait.PassInRound(c.Content, c.CreatedAt.Time, round) {
 			return true
 		}
 	}
@@ -508,23 +586,40 @@ func activityTime(issue db.Issue) time.Time {
 // wakeIssueOwner starts the assignee (or the reviewer, while in review) and
 // leaves a sentence. A disabled seat is named and not replaced here — that
 // handoff belongs to the disabled-seat path.
-func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason string) {
+func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason string, commentOnly bool) {
 	targetType, targetID := issue.AssigneeType, issue.AssigneeID
 	if issue.Status == "in_review" && issue.ReviewerType.Valid && issue.ReviewerID.Valid && issue.ReviewerType.String != "none" {
 		targetType, targetID = issue.ReviewerType, issue.ReviewerID
 	}
+	if blockwait.MetaString(parseIssueMetadata(issue.Metadata), blockwait.KeyNeedsHuman) != "" {
+		commentOnly = true
+	}
 	mention := ""
-	if targetType.Valid && targetID.Valid && (targetType.String == "agent" || targetType.String == "squad") {
+	if targetType.Valid && targetID.Valid && (targetType.String == "agent" || targetType.String == "squad") && !commentOnly {
 		mention = h.buildParentAssigneeMention(ctx, db.Issue{AssigneeType: targetType, AssigneeID: targetID, WorkspaceID: issue.WorkspaceID})
 	}
+	if targetType.Valid && targetID.Valid && targetType.String == "member" {
+		commentOnly = true
+		mention = h.memberWakeMention(ctx, targetID)
+	}
 	comment := h.postBlockComment(ctx, issue, mention+reason)
-	if !targetType.Valid || !targetID.Valid {
+	if commentOnly || !targetType.Valid || !targetID.Valid || !comment.ID.Valid {
 		return
 	}
 	waker := issue
 	waker.AssigneeType = targetType
 	waker.AssigneeID = targetID
-	if comment.ID.Valid {
-		h.dispatchWaitingOnAssigneeTrigger(ctx, waker, comment.ID)
+	h.dispatchWaitingOnAssigneeTrigger(ctx, waker, comment.ID)
+}
+
+func (h *Handler) memberWakeMention(ctx context.Context, userID pgtype.UUID) string {
+	user, err := h.Queries.GetUser(ctx, userID)
+	if err != nil {
+		return ""
 	}
+	name := sanitizeMentionLabel(user.Name)
+	if name == "" {
+		name = "member"
+	}
+	return fmt.Sprintf("[@%s](mention://member/%s) ", name, uuidToString(userID))
 }

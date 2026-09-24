@@ -3387,6 +3387,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issue := res.Issue
+	if issue.Status == "blocked" || issue.Status == "in_review" {
+		h.setIssueMetaString(r.Context(), issue, blockwait.KeyWatched, blockwait.WatchedYes)
+	}
+	if issue.Status == "in_review" {
+		h.setIssueMetaString(r.Context(), issue, blockwait.KeyReviewRound, time.Now().UTC().Format(time.RFC3339))
+	}
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
 	resp := issueToResponse(issue, prefix)
@@ -4118,6 +4124,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// (MUL-2538 — replaces the agent-prompt rule that caused self-mention
 	// loops in PR #2918). The helper guards on transition + parent state and
 	// fails best-effort.
+	if statusChanged {
+		h.syncBlockWait(r.Context(), prevIssue, issue)
+	}
 	if persistBlock {
 		h.persistBlockRecord(r.Context(), issue, blockRecord)
 	}
@@ -4861,6 +4870,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
+		if statusChanged {
+			h.syncBlockWait(r.Context(), prevIssue, issue)
+		}
 		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
 		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 

@@ -25,13 +25,47 @@ const (
 	KeyWokenBy       = "block.woken_by"
 	KeyPatrolAt      = "block.patrol_at"
 	KeyReleased      = "block.released"
+	KeyWatched       = "block.watched"
+	KeySegmentNudged = "block.segment_nudged"
+	KeyReviewNudged  = "block.review_nudged"
+	KeyReviewRound   = "block.review_round_at"
+	KeyFailNoted     = "block.fail_noted"
 
 	// QuietAfter is how long a blocked or in-review issue with nobody running
-	// may sit before the patrol picks it up.
+	// may sit before the patrol picks it up. A segment is nudged at most once.
 	QuietAfter = 30 * time.Minute
 
 	ReleasedPass = "pass"
+	WatchedYes   = "1"
+
+	// VerdictPassLine and VerdictHoldLine are the only acceptance markers that
+	// may merge or close an issue. They must be a line by themselves.
+	VerdictPassLine = "verdict: pass"
+	VerdictHoldLine = "verdict: hold"
 )
+
+// WaitKeys are the structured wait. Leaving blocked drops all of them, so a
+// later block cannot reuse a consumed clock or an old blocker.
+func WaitKeys() []string {
+	return []string{
+		KeyBlockedBy,
+		KeyWakeAt,
+		KeyWaitCondition,
+		KeyWaitProbe,
+		KeyWaitTimeout,
+		KeyNeedsHuman,
+		KeyWokenBy,
+		KeyPatrolAt,
+		KeySegmentNudged,
+		"close.waiting_on",
+	}
+}
+
+// ClockKeys are execution clocks. Entering in_review drops them so a leftover
+// failure wake cannot keep paging the reviewer.
+func ClockKeys() []string {
+	return []string{KeyWakeAt, KeyWaitCondition, KeyWaitProbe, KeyWaitTimeout}
+}
 
 // Record is the wait written when an issue becomes blocked. At least one of
 // the four kinds must be present: another issue, a clock, a probe with a
@@ -105,6 +139,61 @@ func ParseMetadata(meta map[string]any) Record {
 	}
 	r.NeedsHuman = MetaString(meta, KeyNeedsHuman)
 	return r
+}
+
+// StillWaiting keeps a stored wait that has not come due yet. A past clock is
+// spent. Blockers and close.waiting_on are not carried: a new block has to
+// name them again, otherwise an old record would satisfy the gate.
+func (r Record) StillWaiting(now time.Time) Record {
+	var out Record
+	if r.HasWakeAt && now.Before(r.WakeAt) {
+		out.WakeAt = r.WakeAt
+		out.HasWakeAt = true
+	}
+	if strings.TrimSpace(r.WaitCondition) != "" && r.HasWaitTimeout && now.Before(r.WaitTimeout) {
+		out.WaitCondition = strings.TrimSpace(r.WaitCondition)
+		out.WaitProbe = strings.TrimSpace(r.WaitProbe)
+		out.WaitTimeout = r.WaitTimeout
+		out.HasWaitTimeout = true
+	}
+	out.NeedsHuman = strings.TrimSpace(r.NeedsHuman)
+	return out
+}
+
+// AsMeta is the metadata map Merge reads back.
+func (r Record) AsMeta() map[string]any {
+	out := map[string]any{}
+	for key, value := range r.Pairs() {
+		out[key] = value
+	}
+	return out
+}
+
+// Accept is the block gate. It sees the fields on this request plus any
+// stored wait that is still in the future. A previous block's blockers do
+// not count.
+func Accept(existing map[string]any, in Input, now time.Time) (Record, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return Merge(ParseMetadata(existing).StillWaiting(now).AsMeta(), in)
+}
+
+// FailureWake is the structured block written when a child run fails and
+// nobody else is going to pick it up. The clock is already due, so the next
+// patrol — well inside QuietAfter — wakes the child.
+func FailureWake(now time.Time, condition string) Record {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if strings.TrimSpace(condition) == "" {
+		condition = "下游运行失败，到点重新叫醒执行人"
+	}
+	return Record{
+		HasWakeAt:     true,
+		WakeAt:        now.UTC(),
+		WaitCondition: strings.TrimSpace(condition),
+	}
 }
 
 // Merge overlays a status-change input onto the record already stored.

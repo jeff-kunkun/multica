@@ -114,15 +114,47 @@ func TestPatrolWakesAtClockAndPicksUpUnstructured(t *testing.T) {
 	}
 }
 
-func TestAcceptancePassPhrases(t *testing.T) {
-	if !IsAcceptancePass("验收通过，等待合并流程。") {
-		t.Fatal("the DENE-806 wording is a pass")
+func TestAcceptancePassIsAStandaloneMarker(t *testing.T) {
+	if IsAcceptancePass("验收通过，等待合并流程。") {
+		t.Fatal("prose that sounds like a pass must not merge")
 	}
-	if IsAcceptancePass("验收不通过，需要修改。") {
-		t.Fatal("a rejection must not pass")
+	if IsAcceptancePass("阻断：验收通过后没有合并，请修复") {
+		t.Fatal("a rejection that quotes the spec must not merge")
 	}
-	if IsAcceptancePass("暂不合并，检查是红的。") {
-		t.Fatal("an explicit hold must not pass")
+	if IsAcceptancePass("未通过") || IsAcceptancePass("驳回，验收通过两个字出现在理由里") {
+		t.Fatal("未通过 and 驳回 must not merge")
+	}
+	if !IsAcceptancePass("看完了。\nverdict: pass\n") {
+		t.Fatal("a standalone verdict line is a pass")
+	}
+	if IsAcceptancePass("正文里写 verdict: pass 但不单独成行") {
+		t.Fatal("the marker has to be its own line")
+	}
+	if IsAcceptancePass("verdict: pass\nverdict: hold") {
+		t.Fatal("hold wins when both markers are present")
+	}
+	if !LooksLikePassHint("验收通过，等待合并流程。") {
+		t.Fatal("prose pass is a hint")
+	}
+	if LooksLikePassHint("阻断：验收通过后没有合并，请修复") {
+		t.Fatal("a rejection must not be hinted as a pass")
+	}
+	round := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	if PassInRound("verdict: pass\n", round.Add(-time.Hour), round) {
+		t.Fatal("a pass from the previous round does not count")
+	}
+	if !PassInRound("verdict: pass\n", round.Add(time.Minute), round) {
+		t.Fatal("a pass after this round started counts")
+	}
+	if PassInRound("verdict: pass\n", round.Add(time.Minute), time.Time{}) {
+		t.Fatal("without a round start, history is not a pass")
+	}
+	body, err := AppendVerdict("可以合。", "pass")
+	if err != nil || !IsAcceptancePass(body) {
+		t.Fatalf("append = %q, %v", body, err)
+	}
+	if _, err := AppendVerdict("可以合。", "maybe"); err == nil {
+		t.Fatal("unknown verdict must fail")
 	}
 }
 
@@ -141,6 +173,140 @@ func TestReleaseDoesNotStayInReview(t *testing.T) {
 	}
 	if !strings.Contains(dirty.Reason, "不继续停在待验收") {
 		t.Fatalf("reason = %q", dirty.Reason)
+	}
+}
+
+func TestStaleWaitDoesNotOpenANewBlock(t *testing.T) {
+	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	stale, err := Accept(map[string]any{
+		KeyWakeAt:        now.Add(-5 * time.Hour).Format(time.RFC3339),
+		KeyBlockedBy:     "DENE-1",
+		"close.waiting_on": "DENE-1",
+	}, Input{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.Structured() {
+		t.Fatalf("consumed wait must not satisfy the gate: %#v", stale)
+	}
+	future, err := Accept(map[string]any{
+		KeyWakeAt: now.Add(time.Hour).Format(time.RFC3339),
+	}, Input{}, now)
+	if err != nil || !future.Structured() || !future.HasWakeAt {
+		t.Fatalf("a future clock is still a wait: %#v, %v", future, err)
+	}
+	named, err := Accept(map[string]any{KeyBlockedBy: "DENE-1"}, Input{BlockedBy: "DENE-806"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(named.BlockedBy) != 1 || named.BlockedBy[0] != "DENE-806" {
+		t.Fatalf("only this request's blocker counts, got %#v", named.BlockedBy)
+	}
+}
+
+func TestPastClockWakesOnce(t *testing.T) {
+	now := time.Date(2026, 9, 24, 16, 0, 0, 0, time.UTC)
+	first := DecidePatrol(PatrolInput{
+		Status:        "blocked",
+		Record:        Record{HasWakeAt: true, WakeAt: now.Add(-5 * time.Hour)},
+		Now:           now,
+		LastPatrol:    now.Add(-31 * time.Minute),
+		HasLastPatrol: true,
+	})
+	if first.Action != ActionWake || !first.ConsumeWakeAt || !first.MarkSegment {
+		t.Fatalf("first wake = %#v", first)
+	}
+	later := DecidePatrol(PatrolInput{
+		Status:        "blocked",
+		SegmentNudged: true,
+		Quiet:         61 * time.Minute,
+		Now:           now.Add(61 * time.Minute),
+		LastPatrol:    now,
+		HasLastPatrol: true,
+	})
+	if later.Action != ActionHold {
+		t.Fatalf("same segment woke again: %#v", later)
+	}
+	set, drop := first.FollowUp(now, "", "", "")
+	if _, ok := set[KeySegmentNudged]; !ok {
+		t.Fatal("wake must record the segment")
+	}
+	found := false
+	for _, key := range drop {
+		if key == KeyWakeAt {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("wake must consume the clock, drop = %#v", drop)
+	}
+}
+
+func TestInReviewNudgeIsOnceAndHumanIsCommentOnly(t *testing.T) {
+	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	nudge := DecidePatrol(PatrolInput{
+		Status:        "in_review",
+		Quiet:         QuietAfter,
+		Now:           now,
+		ReviewerHuman: true,
+	})
+	if nudge.Action != ActionWake || !nudge.CommentOnly || !nudge.MarkReview {
+		t.Fatalf("human nudge = %#v", nudge)
+	}
+	again := DecidePatrol(PatrolInput{
+		Status:       "in_review",
+		Quiet:        2 * time.Hour,
+		ReviewNudged: true,
+		Now:          now.Add(2 * time.Hour),
+	})
+	if again.Action != ActionHold {
+		t.Fatalf("second review nudge = %#v", again)
+	}
+	agent := DecidePatrol(PatrolInput{Status: "in_review", Quiet: QuietAfter, Now: now})
+	if agent.Action != ActionWake || agent.CommentOnly {
+		t.Fatalf("agent reviewer should be woken once with a run: %#v", agent)
+	}
+	leftover := DecidePatrol(PatrolInput{
+		Status: "in_review",
+		Record: Record{HasWakeAt: true, WakeAt: now.Add(-time.Hour)},
+		Now:    now,
+	})
+	if leftover.Action != ActionHold {
+		t.Fatalf("a leftover clock must not page the reviewer: %#v", leftover)
+	}
+	if DecidePatrol(PatrolInput{Status: "in_review", ReleasedPass: true, Now: now}).Action != ActionRelease {
+		t.Fatal("a pass recorded for this round still closes")
+	}
+}
+
+func TestNeedsHumanDoesNotEnqueue(t *testing.T) {
+	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	got := DecidePatrol(PatrolInput{
+		Status: "blocked",
+		Record: Record{HasWakeAt: true, WakeAt: now.Add(-time.Minute), NeedsHuman: "00000000-0000-0000-0000-000000000001"},
+		Now:    now,
+	})
+	if got.Action != ActionWake || !got.CommentOnly {
+		t.Fatalf("needs_human = %#v", got)
+	}
+}
+
+func TestFailedChildIsDueInsideTheQuietWindow(t *testing.T) {
+	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	rec := FailureWake(now, "下游运行失败，到点重新叫醒执行人")
+	if !rec.Structured() {
+		t.Fatal("failure wake must be a structured block")
+	}
+	if rec.WakeAt.After(now.Add(QuietAfter)) {
+		t.Fatalf("wake_at = %s, later than 30 minutes", rec.WakeAt)
+	}
+	parked := DecidePatrol(PatrolInput{Status: "in_progress", Record: rec, Now: now.Add(time.Minute), Quiet: time.Minute})
+	if parked.Action != ActionHold {
+		t.Fatalf("in_progress is invisible to the patrol: %#v", parked)
+	}
+	due := DecidePatrol(PatrolInput{Status: "blocked", Record: rec, Now: now.Add(time.Minute)})
+	if due.Action != ActionWake {
+		t.Fatalf("blocked child = %#v", due)
 	}
 }
 

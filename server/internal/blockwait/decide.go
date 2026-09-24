@@ -41,61 +41,121 @@ type PatrolInput struct {
 	HasLastPatrol  bool
 	HasPassComment bool
 	ReleasedPass   bool
+	// SegmentNudged is set after this blocked episode already produced a wake.
+	SegmentNudged bool
+	// ReviewNudged is set after this in_review round already produced a nudge.
+	ReviewNudged bool
+	// ReviewerHuman means the acceptance seat is a person. The patrol leaves a
+	// comment and does not enqueue a run.
+	ReviewerHuman bool
 }
 
 // Decision is what the patrol or the acceptance hook should do, plus the
 // sentence to leave on the issue.
 type Decision struct {
-	Action string
-	Reason string
-	Record Record
+	Action         string
+	Reason         string
+	Record         Record
+	ConsumeWakeAt  bool
+	ConsumeWait    bool
+	ConsumeBlocker string
+	MarkSegment    bool
+	MarkReview     bool
+	// CommentOnly leaves the sentence and does not enqueue a run.
+	CommentOnly bool
 }
 
 // DecidePatrol picks a single next step for one stalled issue.
+// A due clock, a cleared blocker, or a quiet unstructured block wakes once;
+// the caller consumes that reason. in_review is not woken for a leftover
+// execution clock. A pass is only the caller's structured verdict for this
+// review round.
 func DecidePatrol(in PatrolInput) Decision {
 	if in.Now.IsZero() {
 		in.Now = time.Now()
 	}
 	recentPatrol := in.HasLastPatrol && in.Now.Sub(in.LastPatrol) < QuietAfter
-	// A wake that came due after the last patrol is a new event. Anything else
-	// we already said stays said until the quiet window passes again.
 	if recentPatrol {
-		if in.Record.HasWakeAt && in.LastPatrol.Before(in.Record.WakeAt) && !in.Now.Before(in.Record.WakeAt) {
-			return Decision{Action: ActionWake, Reason: "到了预定的复查时间，叫醒执行人。"}
+		if in.Status == "blocked" && clockBecameDue(in) {
+			return blockedWake(in, clockDecision())
 		}
 		return Decision{Action: ActionHold}
 	}
 
-	for _, blocker := range in.Blockers {
-		if blocker.Cleared() && !recentPatrol {
-			return Decision{Action: ActionWake, Reason: fmt.Sprintf("挡路的 %s 已经解除（%s），叫醒等待方继续。", blocker.Ref, blocker.Status)}
+	if in.Status == "blocked" {
+		for _, blocker := range in.Blockers {
+			if blocker.Cleared() {
+				return blockedWake(in, Decision{
+					Action:         ActionWake,
+					Reason:         fmt.Sprintf("挡路的 %s 已经解除（%s），叫醒等待方继续。", blocker.Ref, blocker.Status),
+					ConsumeBlocker: blocker.Ref,
+					MarkSegment:    true,
+				})
+			}
 		}
-	}
-	if in.Record.HasWakeAt && !in.Now.Before(in.Record.WakeAt) && !recentPatrol {
-		return Decision{Action: ActionWake, Reason: "到了预定的复查时间，叫醒执行人。"}
-	}
-	if in.Record.HasWaitTimeout && !in.Now.Before(in.Record.WaitTimeout) && !recentPatrol {
-		what := in.Record.WaitCondition
-		if what == "" {
-			what = "外部条件"
+		if in.Record.HasWakeAt && !in.Now.Before(in.Record.WakeAt) {
+			return blockedWake(in, clockDecision())
 		}
-		return Decision{Action: ActionWake, Reason: fmt.Sprintf("等「%s」已经过了截止时间，叫醒执行人复查。", what)}
-	}
-	if in.Status == "in_review" && (in.HasPassComment || in.ReleasedPass) && !recentPatrol {
-		return Decision{Action: ActionRelease, Reason: "验收已经通过，但票还停在待验收。平台按通过收口。"}
-	}
-	if in.Quiet >= QuietAfter && !recentPatrol {
-		if in.Status == "in_review" {
-			return Decision{Action: ActionWake, Reason: "待验收超过 30 分钟没有运行，叫醒验收人。"}
+		if in.Record.HasWaitTimeout && !in.Now.Before(in.Record.WaitTimeout) {
+			what := in.Record.WaitCondition
+			if what == "" {
+				what = "外部条件"
+			}
+			return blockedWake(in, Decision{
+				Action:      ActionWake,
+				Reason:      fmt.Sprintf("等「%s」已经过了截止时间，叫醒执行人复查。", what),
+				ConsumeWait: true,
+				MarkSegment: true,
+			})
 		}
-		if in.Status == "blocked" && !in.Record.Structured() {
-			return Decision{Action: ActionWake, Reason: "这张票标了阻塞，但没写在等什么，也没有运行。平台把它接回来。"}
+		if in.Quiet >= QuietAfter && !in.Record.Structured() && !in.SegmentNudged {
+			return blockedWake(in, Decision{
+				Action:      ActionWake,
+				Reason:      "这张票标了阻塞，但没写在等什么，也没有运行。平台把它接回来。",
+				MarkSegment: true,
+			})
 		}
-		if in.Status == "blocked" && waitingOnOpen(in) {
+		if in.Quiet >= QuietAfter && waitingOnOpen(in) {
 			return Decision{Action: ActionHold, Reason: "挡路的票还没结束。"}
+		}
+		return Decision{Action: ActionHold}
+	}
+
+	if in.Status == "in_review" {
+		if in.HasPassComment || in.ReleasedPass {
+			return Decision{Action: ActionRelease, Reason: "验收已经通过，但票还停在待验收。平台按通过收口。"}
+		}
+		if in.Quiet >= QuietAfter && !in.ReviewNudged {
+			d := Decision{
+				Action:      ActionWake,
+				Reason:      "待验收超过 30 分钟没有新的结论，提醒验收人看一下。",
+				MarkReview:  true,
+				CommentOnly: in.ReviewerHuman || strings.TrimSpace(in.Record.NeedsHuman) != "",
+			}
+			return d
 		}
 	}
 	return Decision{Action: ActionHold}
+}
+
+func clockBecameDue(in PatrolInput) bool {
+	return in.Record.HasWakeAt && in.LastPatrol.Before(in.Record.WakeAt) && !in.Now.Before(in.Record.WakeAt)
+}
+
+func clockDecision() Decision {
+	return Decision{
+		Action:        ActionWake,
+		Reason:        "到了预定的复查时间，叫醒执行人。",
+		ConsumeWakeAt: true,
+		MarkSegment:   true,
+	}
+}
+
+func blockedWake(in PatrolInput, d Decision) Decision {
+	if strings.TrimSpace(in.Record.NeedsHuman) != "" {
+		d.CommentOnly = true
+	}
+	return d
 }
 
 func waitingOnOpen(in PatrolInput) bool {
@@ -208,27 +268,46 @@ func prLabel(pr PRSnapshot) string {
 }
 
 var (
-	passPhrases = []string{"验收通过", "通过验收", "等待合并", "待合并", "verdict: pass", "verdict=pass"}
-	holdPhrases = []string{"验收不通过", "不通过", "needs-work", "需要修改", "打回", "暂不合并"}
+	// hintPhrases only suggest that a reviewer may have meant to pass. They
+	// never merge or close.
+	hintPhrases = []string{"验收通过", "通过验收", "等待合并", "待合并"}
+	holdPhrases = []string{"验收不通过", "未通过", "不通过", "驳回", "阻断", "needs-work", "需要修改", "打回", "暂不合并"}
 )
 
-// IsAcceptancePass reports whether a reviewer comment is a pass. A hold phrase
-// wins, so "验收不通过" is not a pass.
-func IsAcceptancePass(body string) bool {
-	if IsAcceptanceHold(body) {
-		return false
-	}
-	lower := strings.ToLower(body)
-	for _, phrase := range passPhrases {
-		if strings.Contains(lower, strings.ToLower(phrase)) {
-			return true
+// Verdict reports a standalone acceptance marker. "hold" wins when both lines
+// are present. Prose that merely contains the words is not a verdict.
+func Verdict(body string) string {
+	pass, hold := false, false
+	for _, line := range strings.Split(body, "\n") {
+		switch strings.ToLower(strings.TrimSpace(line)) {
+		case VerdictPassLine:
+			pass = true
+		case VerdictHoldLine:
+			hold = true
 		}
 	}
-	return false
+	if hold {
+		return "hold"
+	}
+	if pass {
+		return "pass"
+	}
+	return ""
 }
 
-// IsAcceptanceHold reports whether the comment refuses the pass.
+// IsAcceptancePass reports whether the comment carries the pass marker on its
+// own line. A hold marker wins.
+func IsAcceptancePass(body string) bool {
+	return Verdict(body) == "pass"
+}
+
+// IsAcceptanceHold reports whether the comment refuses the pass, either with
+// the hold marker or with a refusal phrase. Refusal phrases do not themselves
+// merge; they only stop a pass hint.
 func IsAcceptanceHold(body string) bool {
+	if Verdict(body) == "hold" {
+		return true
+	}
 	lower := strings.ToLower(body)
 	for _, phrase := range holdPhrases {
 		if strings.Contains(lower, strings.ToLower(phrase)) {
@@ -236,4 +315,101 @@ func IsAcceptanceHold(body string) bool {
 		}
 	}
 	return false
+}
+
+// LooksLikePassHint reports prose that sounds like a pass but is not the
+// marker. Callers may tell the reviewer how to write the marker. They must
+// not merge.
+func LooksLikePassHint(body string) bool {
+	if IsAcceptancePass(body) || IsAcceptanceHold(body) {
+		return false
+	}
+	lower := strings.ToLower(body)
+	for _, phrase := range hintPhrases {
+		if strings.Contains(lower, strings.ToLower(phrase)) {
+			return true
+		}
+	}
+	return false
+}
+
+// PassInRound reports a pass marker written at or after this review round
+// started. A missing round matches nothing, so a previous round's comment
+// cannot close the issue.
+func PassInRound(body string, commentAt, roundAt time.Time) bool {
+	if roundAt.IsZero() || commentAt.Before(roundAt) {
+		return false
+	}
+	return IsAcceptancePass(body)
+}
+
+// AppendVerdict adds the standalone marker line. An empty verdict leaves the
+// body unchanged. The marker is not repeated when it is already its own line.
+func AppendVerdict(body, verdict string) (string, error) {
+	verdict = strings.ToLower(strings.TrimSpace(verdict))
+	if verdict == "" {
+		return body, nil
+	}
+	if verdict != "pass" && verdict != "hold" {
+		return "", fmt.Errorf("verdict 只能是 pass 或 hold")
+	}
+	if Verdict(body) == verdict {
+		return body, nil
+	}
+	line := "verdict: " + verdict
+	body = strings.TrimRight(body, "\n")
+	if body == "" {
+		return line + "\n", nil
+	}
+	return body + "\n\n" + line + "\n", nil
+}
+
+// FollowUp is the metadata to write after a patrol acts. Drops are consumed
+// reasons; sets are the nudge flags and whatever remains of a blocker list.
+func (d Decision) FollowUp(now time.Time, blockedBy, waitingOn, woken string) (set map[string]string, drop []string) {
+	set = map[string]string{}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if d.Action == ActionWake || d.Action == ActionRelease {
+		set[KeyPatrolAt] = now.UTC().Format(time.RFC3339)
+	}
+	if d.ConsumeWakeAt {
+		drop = append(drop, KeyWakeAt)
+	}
+	if d.ConsumeWait {
+		drop = append(drop, KeyWaitTimeout, KeyWaitCondition, KeyWaitProbe)
+	}
+	if ref := strings.TrimSpace(d.ConsumeBlocker); ref != "" {
+		nextBlocked, dropBlocked, dropWaiting := consumeBlocker(blockedBy, waitingOn, ref)
+		if dropBlocked {
+			drop = append(drop, KeyBlockedBy)
+		} else {
+			set[KeyBlockedBy] = nextBlocked
+		}
+		if dropWaiting {
+			drop = append(drop, "close.waiting_on")
+		}
+		set[KeyWokenBy] = MarkWoken(woken, ref)
+	}
+	if d.MarkSegment {
+		set[KeySegmentNudged] = "1"
+	}
+	if d.MarkReview {
+		set[KeyReviewNudged] = "1"
+	}
+	return set, drop
+}
+
+func consumeBlocker(blockedBy, waitingOn, ref string) (next string, dropBlocked, dropWaiting bool) {
+	var kept []string
+	for _, token := range splitTokens(blockedBy) {
+		if token != ref {
+			kept = append(kept, token)
+		}
+	}
+	next = strings.Join(kept, ",")
+	dropBlocked = next == ""
+	dropWaiting = strings.TrimSpace(waitingOn) == ref
+	return next, dropBlocked, dropWaiting
 }
