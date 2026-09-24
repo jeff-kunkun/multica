@@ -177,10 +177,11 @@ multica issue metadata set <issue-id> --key close.at --value 2026-09-15T12:00:00
 - 证据：PR URL、验证命令、未测项。
 - 下一责任人：Reviewer agent UUID。
 - 唤醒：证据评论含 `mention://agent/<reviewer>`。**禁止**同时 `done`。
+- 通过之后不留在本场景。验收席在同一轮合并并收成 `delivered` / `done`。停在 `in_review` 只属于场景 D，而且必须写明人和决定。路由的「需要人拍板」不是场景 D。
 
 **`in_review`（场景 D，人工验收）**
 
-- 用：真机、余额、第三方账号、kk zi 本人感受。DENE-193 电话播报是原型。
+- 用：真机、余额、第三方账号、kk zi 本人感受。DENE-193 电话播报是原型。这不是默认。验收通过但没写明人和决定的，走放行，不走这里。
 - 状态：`in_review`。
 - 证据：已做项 +「待人工测试」清单，不得把未测写成已过。
 - 下一责任人：人类 member。`wake_action=none`（member mention 不入队）。若需要 agent 盯着，另设 dispatcher 为 next_owner 并 `mention`。
@@ -362,12 +363,22 @@ Stage 2 只做三件事：把 2.3 决策表写进 Builder/Reviewer/Operator/Disp
 | Builder（父票有 PR/需审） | `awaiting_review` | `in_review` | mention Reviewer。PR 标题带 identifier；**不要**在仍等 Reviewer 时 `done`。`Closes` 留给合并 |
 | Builder（子票交付） | `delivered` | `done` | `stage_done`；不设置或触发独立 Reviewer，由父票统一验收 |
 | Builder（无验收门） | `delivered` | `done` | `stage_done`，禁止再 mention 父 assignee |
-| Reviewer 通过且尚未合并 | 不改结论 | 保持 `in_review` | 不新开 run 给 Builder，除非 `needs-work` |
-| Reviewer 通过且 Builder 已合并 / Reviewer 自合并 | `delivered` | 若 webhook 未把票打成 `done`，CLI 补 `done` | `stage_done` |
+| Reviewer 通过，这次改动自己的检查是绿的，且没有显式人工保留 | `delivered` | 同一轮合并 PR，然后 `done`（webhook 已写成 `done` 就不要再写） | `stage_done` |
+| Reviewer 通过，但票上写明在等某个人做某个只有这个人能做的决定 | `awaiting_human` | `in_review` | `none`。评论写出那个人和要定的事。路由评论里的「需要人拍板」不是这一行 |
+| Reviewer 通过，但这次改动自己的检查是红的 | 不收口 | `in_progress`，mention Builder | `mention` |
+| Reviewer 通过且已经合并 | `delivered` | 若 webhook 未把票打成 `done`，CLI 补 `done` | `stage_done` |
 | Reviewer `needs-work` | 不收口 | `in_progress` 或保持，并 mention Builder | `mention` |
 | Operator 发布/运维票交付 | `delivered` | `done` | `stage_done` 或按 AC mention 下一席 |
 | Dispatcher 晋升下一 stage | 不写子票 `close.*` | 子票 `backlog → todo`（T9） | server 入队；Dispatcher 本票保持 `in_progress` 直到整条链完成 |
 | 任一角色人工验收未完成 | `awaiting_human` | `in_review` | 见 2.3 D |
+
+验收通过的默认是放行，不是停在 `in_review` 等人去点合并。DENE-792 停在这里：验收已经通过，这次改动自己的检查是绿的，主干上本来就红、且和基线一致的检查被写成了「暂不合并、暂不关票」。那不是停的理由。`kun` 没有分支保护，当时的 PR 是可以合并的。
+
+放行条件，同一轮做完：验收结论是通过；这次改动自己负责的检查是绿的（基线上同样失败的检查不算这次的失败）；票上没有写明还在等哪个人做哪个决定。然后合并 PR，再把票写成 `done`（合并 webhook 已经写成 `done` 就不要再写一遍）。
+
+仍然停在 `in_review` 的唯一通过路径是显式人工保留：`close.conclusion=awaiting_human`，评论里写出那个人和要定的事。路由评论里的「需要人拍板」不是这张保留——那句话的意思是席位照样检查、合并、关票，只有人能定的那一件再 @ 人。
+
+这次改动自己的检查是红的：不收口，退回 `in_progress` 并 mention Builder。GitHub 真的拒绝合并时，把拒绝原因写进评论，用 `blocked` + `block_kind=permission`，不要在 PR 仍可合并时假装要等人。
 
 Dispatcher **禁止**在 Stage N 子票仍是 `in_review`/`blocked`/`in_progress` 时把 Stage N+1 从 `backlog` 提到 `todo`。晋升条件写死：`issue children` 里该 stage 的 `done` 计数 = `total`（cancelled 计入 done 侧，与 `status_category` 终态一致）。
 

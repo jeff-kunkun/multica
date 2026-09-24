@@ -207,8 +207,12 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"the board should show the issue being worked while you work, not only after",
 		// No assignee gate: the judgment applies to whoever is running.
 		"whoever the assignee is",
-		// Delivery lands in in_review and the ceiling keeps `done` human.
-		"`done` stays human",
+		// Delivery lands in in_review. A pass releases in the same turn:
+		// the acceptance seat merges and writes done. A person is in
+		// that path only when the ticket names them and the decision.
+		"merges and sets `done` in that same turn",
+		"close.conclusion=awaiting_human",
+		"Do not leave a passed ticket in `in_review`",
 		// Acceptance is a parent-level decision; child delivery feeds the
 		// barrier instead of creating a second review chain.
 		"acceptance state belongs only to a top-level issue",
@@ -252,6 +256,8 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"A turn that only answers, reviews, or consults",
 		"you only answered a question, reviewed, or discussed",
 		"in whatever form: code, research",
+		// DENE-810: a pass used to stop here for a person to click merge.
+		"`done` stays human",
 	} {
 		if strings.Contains(out, banned) {
 			t.Errorf("brief still carries retired status gate %q (MUL-6417)\n---\n%s", banned, out)
