@@ -68,10 +68,29 @@ type WorkThreadActionRequest struct {
 // continuity key. Continue clones the latest resumable turn inside the same
 // transaction; interrupt cancels active turns; queue appends a new input.
 // The database unique pending-task fence is the final concurrency guard.
+//
+// Every action runs behind the same gates kun already applies to the
+// equivalent direct action, so the panel is never a back door:
+//   - continue / queue enqueue a run for the thread's (or assignee) agent, so
+//     they re-validate canInvokeAgent (MUL-4525) and refuse a derived run while
+//     the issue is in Triage, exactly like RerunIssue;
+//   - interrupt is a user cancellation, so it goes through CancelTaskByUser
+//     with the operator recorded, after the private-agent access check the
+//     id-only cancel endpoint applies.
 func (h *Handler) WorkThreadAction(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
 		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
+	canInvoke := func(agent db.Agent) bool {
+		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
 	}
 	var req WorkThreadActionRequest
 	if r.Body != nil {
@@ -82,17 +101,48 @@ func (h *Handler) WorkThreadAction(w http.ResponseWriter, r *http.Request) {
 	}
 	switch req.Action {
 	case "interrupt":
-		if err := h.cancelIssueWorkThread(r, issue.ID); err != nil {
+		threadID, agentID, err := h.latestIssueWorkThread(r, issue.ID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusInternalServerError, "failed to interrupt work thread")
 			return
+		}
+		if err == nil {
+			agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: agentID, WorkspaceID: issue.WorkspaceID})
+			if err != nil {
+				writeError(w, http.StatusNotFound, "work thread agent not found")
+				return
+			}
+			if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+				writeError(w, http.StatusForbidden, "you do not have access to this agent")
+				return
+			}
+			if err := h.cancelIssueWorkThread(r, threadID, h.taskCancellationActor(r.Context(), actorType, actorID)); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to interrupt work thread")
+				return
+			}
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"action": req.Action, "state": "interrupted"})
 		return
 	case "queue":
-		task, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+		// A queued input is a derived run of the issue's assignee: gate the
+		// resolved target before anything is written, as RerunIssue does.
+		targetAgent, err := h.issueRunTargetAgent(r, issue)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		if !canInvoke(targetAgent) {
+			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+			return
+		}
+		task, err := h.TaskService.EnqueueTaskForIssueByActor(r.Context(), issue, memberActorUserID(actorType, actorID))
+		if errors.Is(err, service.ErrIssueInTriage) {
+			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonIssueInTriage)
+			return
+		}
 		coalesced := errors.Is(err, service.ErrDuplicatePendingTask)
 		if coalesced {
-			task, err = h.appendQueuedWorkThreadInput(r, issue.ID, req.Summary)
+			task, err = h.appendQueuedWorkThreadInput(r, issue.ID, targetAgent.ID, req.Summary)
 		}
 		if err != nil {
 			writeError(w, http.StatusConflict, err.Error())
@@ -124,7 +174,32 @@ func (h *Handler) WorkThreadAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, map[string]any{"action": req.Action, "state": "prioritized", "task_id": uuidToString(prioritized.ID), "active_task_id": uuidToString(activeID)})
 		return
 	case "continue":
-		task, err := h.continueWorkThread(r, issue.ID)
+		// Resuming the thread is a derived run of its own agent (nobody named
+		// it), so it follows RerunIssue's no-source rule: refused in Triage,
+		// and the historical thread agent must be invocable by the operator.
+		if issue.TriageState.Valid {
+			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonIssueInTriage)
+			return
+		}
+		threadID, agentID, err := h.latestIssueWorkThread(r, issue.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusConflict, "work thread has no resumable turn or already has a pending turn")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to continue work thread")
+			return
+		}
+		targetAgent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: agentID, WorkspaceID: issue.WorkspaceID})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "work thread agent not found")
+			return
+		}
+		if !canInvoke(targetAgent) {
+			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+			return
+		}
+		task, err := h.continueWorkThread(r, threadID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusConflict, "work thread has no resumable turn or already has a pending turn")
 			return
@@ -140,21 +215,47 @@ func (h *Handler) WorkThreadAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// cancelIssueWorkThread scopes interruption to the latest primary thread for
-// the issue. An issue can retain older threads after an agent/model boundary
-// change; stopping one must not cancel those unrelated runs.
-func (h *Handler) cancelIssueWorkThread(r *http.Request, issueID pgtype.UUID) error {
-	var threadID pgtype.UUID
-	if err := h.DB.QueryRow(r.Context(), `
-		SELECT id FROM work_thread
+// issueRunTargetAgent resolves the agent a derived issue run would target —
+// the assignee, or the leader of the assigned squad — the same way
+// RerunIssue does when no source task is named.
+func (h *Handler) issueRunTargetAgent(r *http.Request, issue db.Issue) (db.Agent, error) {
+	var agentID pgtype.UUID
+	switch {
+	case issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid:
+		agentID = issue.AssigneeID
+	case issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid:
+		squad, err := h.Queries.GetSquad(r.Context(), issue.AssigneeID)
+		if err != nil {
+			return db.Agent{}, errors.New("issue is assigned to a squad but squad not found")
+		}
+		agentID = squad.LeaderID
+	default:
+		return db.Agent{}, errors.New("issue is not assigned to an agent or squad")
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: agentID, WorkspaceID: issue.WorkspaceID})
+	if err != nil {
+		return db.Agent{}, errors.New("target agent not found")
+	}
+	return agent, nil
+}
+
+// latestIssueWorkThread returns the issue's primary thread and its agent. An
+// issue can retain older threads after an agent/model boundary change;
+// actions always address the newest one so stopping it never touches those
+// unrelated runs.
+func (h *Handler) latestIssueWorkThread(r *http.Request, issueID pgtype.UUID) (threadID, agentID pgtype.UUID, err error) {
+	err = h.DB.QueryRow(r.Context(), `
+		SELECT id, agent_id FROM work_thread
 		WHERE issue_id = $1
 		ORDER BY updated_at DESC, id DESC
-		LIMIT 1`, issueID).Scan(&threadID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		return err
-	}
+		LIMIT 1`, issueID).Scan(&threadID, &agentID)
+	return threadID, agentID, err
+}
+
+// cancelIssueWorkThread cancels every live turn of one thread as an explicit
+// user cancellation, so the run history records who stopped it and the
+// delegated-failure sweeper does not rebuild the turn the operator just ended.
+func (h *Handler) cancelIssueWorkThread(r *http.Request, threadID pgtype.UUID, actor service.TaskCancellationActor) error {
 	rows, err := h.DB.Query(r.Context(), `
 		SELECT id FROM agent_task_queue
 		WHERE work_thread_id = $1
@@ -177,7 +278,7 @@ func (h *Handler) cancelIssueWorkThread(r *http.Request, issueID pgtype.UUID) er
 	}
 	rows.Close()
 	for _, taskID := range taskIDs {
-		if _, err := h.TaskService.CancelTask(r.Context(), taskID); err != nil {
+		if _, err := h.TaskService.CancelTaskByUser(r.Context(), taskID, actor); err != nil {
 			return err
 		}
 	}
@@ -185,9 +286,12 @@ func (h *Handler) cancelIssueWorkThread(r *http.Request, issueID pgtype.UUID) er
 }
 
 // appendQueuedWorkThreadInput keeps the single pending-task fence intact while
-// preserving a follow-up submitted during an already queued turn. The summary
-// is bounded so repeated clicks cannot grow the task row without limit.
-func (h *Handler) appendQueuedWorkThreadInput(r *http.Request, issueID pgtype.UUID, summary string) (db.AgentTaskQueue, error) {
+// preserving a follow-up submitted during an already queued turn. The row is
+// the one the fence just refused to duplicate — this issue, this agent, no
+// comment thread — so several agents queued on one issue never share the
+// update. The summary is bounded so repeated clicks cannot grow the task row
+// without limit.
+func (h *Handler) appendQueuedWorkThreadInput(r *http.Request, issueID, agentID pgtype.UUID, summary string) (db.AgentTaskQueue, error) {
 	const maxSummary = 4000
 	if len(summary) > maxSummary {
 		summary = summary[:maxSummary]
@@ -195,10 +299,15 @@ func (h *Handler) appendQueuedWorkThreadInput(r *http.Request, issueID pgtype.UU
 	var taskID pgtype.UUID
 	err := h.DB.QueryRow(r.Context(), `
 		UPDATE agent_task_queue
-		SET trigger_summary = LEFT(CONCAT_WS(E'\\n', NULLIF(trigger_summary, ''), NULLIF($2, '')), $3)
-		WHERE issue_id = $1 AND status = 'queued'
+		SET trigger_summary = LEFT(CONCAT_WS(E'\n', NULLIF(trigger_summary, ''), NULLIF($2, '')), $3)
+		WHERE id = (
+			SELECT id FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $4 AND comment_thread_id IS NULL AND status = 'queued'
+			ORDER BY created_at ASC, id ASC
+			LIMIT 1
+		)
 		RETURNING id
-	`, issueID, summary, maxSummary).Scan(&taskID)
+	`, issueID, summary, maxSummary, agentID).Scan(&taskID)
 	if err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -229,21 +338,34 @@ func (h *Handler) prioritizeIssueWorkThreadInput(r *http.Request, issueID, taskI
 	return task, activeID, err
 }
 
+// ChatWorkThreadAction mirrors the chat rules kun already enforces on the
+// composer and the cancel endpoint (DENE-840): seeing a chat is not enough.
+// Interrupt is the creator's alone, like CancelTaskByUser. Continue enqueues a
+// run, so — like SendChatMessage — a non-creator needs speak access and the run
+// is authorized as the creator, whose agent grant and quota it uses.
 func (h *Handler) ChatWorkThreadAction(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, ctxWorkspaceID(r.Context()), chi.URLParam(r, "sessionId"))
+	workspaceID := ctxWorkspaceID(r.Context())
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, chi.URLParam(r, "sessionId"))
 	if !ok {
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	var req WorkThreadActionRequest
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 	switch req.Action {
 	case "interrupt":
+		// Chat privacy: only the member who opened the conversation may
+		// cancel its task, even though the chat may be shared.
+		if uuidToString(session.CreatorID) != userID {
+			writeError(w, http.StatusForbidden, "not your task")
+			return
+		}
 		var ids []pgtype.UUID
 		rows, err := h.DB.Query(r.Context(), `SELECT id FROM agent_task_queue WHERE chat_session_id = $1 AND status IN ('queued','dispatched','running','waiting_local_directory')`, session.ID)
 		if err != nil {
@@ -257,14 +379,40 @@ func (h *Handler) ChatWorkThreadAction(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		rows.Close()
+		actor := h.taskCancellationActor(r.Context(), actorType, actorID)
 		for _, id := range ids {
-			if _, err := h.TaskService.CancelTask(r.Context(), id); err != nil {
+			if _, err := h.TaskService.CancelTaskByUser(r.Context(), id, actor); err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to interrupt work thread")
 				return
 			}
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"action": req.Action, "state": "interrupted"})
 	case "continue":
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: session.AgentID, WorkspaceID: session.WorkspaceID})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		invokeActorType, invokeActorID := actorType, actorID
+		invokeOriginator := h.invokeOriginatorFromRequest(r, actorType, actorID)
+		if actorType != "agent" && uuidToString(session.CreatorID) != userID {
+			access, err := h.chatAccessFor(r.Context(), session, userID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to check chat access")
+				return
+			}
+			if !access.speak {
+				writeError(w, http.StatusForbidden, "you can view this chat but not send messages")
+				return
+			}
+			invokeActorType = "member"
+			invokeActorID = uuidToString(session.CreatorID)
+			invokeOriginator = invokeActorID
+		}
+		if !h.canInvokeAgent(r.Context(), agent, invokeActorType, invokeActorID, invokeOriginator, workspaceID) {
+			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+			return
+		}
 		task, err := h.continueChatWorkThread(r, session.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusConflict, "work thread has no resumable turn or already has a pending turn")
@@ -305,25 +453,28 @@ func (h *Handler) continueChatWorkThread(r *http.Request, sessionID pgtype.UUID)
 	return task, nil
 }
 
-func (h *Handler) continueWorkThread(r *http.Request, issueID pgtype.UUID) (db.AgentTaskQueue, error) {
+// continueWorkThread clones the latest resumable turn of one already-gated
+// thread. The thread id is the one the caller authorized, so the resumed run
+// can never belong to a different agent than the one that passed the gate.
+func (h *Handler) continueWorkThread(r *http.Request, threadID pgtype.UUID) (db.AgentTaskQueue, error) {
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		return db.AgentTaskQueue{}, err
 	}
 	defer tx.Rollback(r.Context())
-	var threadID, taskID pgtype.UUID
+	var taskID pgtype.UUID
 	var status string
 	var sessionID pgtype.Text
 	err = tx.QueryRow(r.Context(), `
-		SELECT wt.id, latest.id, latest.status, latest.session_id
+		SELECT latest.id, latest.status, latest.session_id
 		FROM work_thread wt
 		JOIN LATERAL (
 			SELECT id, status, session_id FROM agent_task_queue
 			WHERE work_thread_id = wt.id ORDER BY created_at DESC, id DESC LIMIT 1
 		) latest ON true
-		WHERE wt.issue_id = $1
+		WHERE wt.id = $1
 		  AND NOT EXISTS (SELECT 1 FROM agent_task_queue WHERE work_thread_id = wt.id AND status IN ('queued','dispatched','running','waiting_local_directory'))
-		FOR UPDATE OF wt`, issueID).Scan(&threadID, &taskID, &status, &sessionID)
+		FOR UPDATE OF wt`, threadID).Scan(&taskID, &status, &sessionID)
 	if err != nil || (status != "cancelled" && status != "failed") || !sessionID.Valid || sessionID.String == "" {
 		return db.AgentTaskQueue{}, pgx.ErrNoRows
 	}
