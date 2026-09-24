@@ -678,6 +678,19 @@ func TestCapacityMovesUnstartedIssuesOffTheGPTSeat(t *testing.T) {
 		VALUES ($1, $2, $3, 'queued', 0)`, w.failedID, w.runtimeID, idleID); err != nil {
 		t.Fatalf("queued task: %v", err)
 	}
+	// Already ran and is waiting on something else, nothing queued: stays.
+	var watchingID string
+	if err := w.pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority, status, number)
+		VALUES ($1, '盯子票中', 'member', $2, 'agent', $3, 'high', 'in_progress', 9003)
+		RETURNING id`, w.workspaceID, w.userID, w.failedID).Scan(&watchingID); err != nil {
+		t.Fatalf("watching issue: %v", err)
+	}
+	if _, err := w.pool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, completed_at)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '3 hours')`, w.failedID, w.runtimeID, watchingID); err != nil {
+		t.Fatalf("watching task: %v", err)
+	}
 
 	hold, err := w.service().RelayQuotaFailure(ctx, w.task(t))
 	if err != nil || !hold {
@@ -729,6 +742,13 @@ func TestCapacityMovesUnstartedIssuesOffTheGPTSeat(t *testing.T) {
 	}
 	if queuedFor != 0 {
 		t.Fatalf("backlog issue queued %d tasks, want 0", queuedFor)
+	}
+
+	if err := w.pool.QueryRow(ctx, `SELECT assignee_id::text FROM issue WHERE id = $1`, watchingID).Scan(&assignee); err != nil {
+		t.Fatalf("watching assignee: %v", err)
+	}
+	if assignee != w.failedID {
+		t.Fatalf("in_progress issue with finished run and nothing queued moved to %s", assignee)
 	}
 }
 

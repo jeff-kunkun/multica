@@ -153,6 +153,19 @@ WHERE i.workspace_id = $1
       WHERE t.issue_id = i.id
         AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
   )
+  -- An in_progress issue that already ran and has nothing queued is not
+  -- waiting for a pickup (a coordinator watching its sub-issues, a PR
+  -- waiting on review). Moving it would start a run nobody asked for.
+  AND (
+      i.status <> 'in_progress'
+      OR EXISTS (
+          SELECT 1 FROM agent_task_queue t
+          WHERE t.issue_id = i.id AND t.status IN ('queued', 'deferred')
+      )
+      OR NOT EXISTS (
+          SELECT 1 FROM agent_task_queue t WHERE t.issue_id = i.id
+      )
+  )
 ORDER BY i.number
 LIMIT $3;
 
