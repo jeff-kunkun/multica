@@ -224,6 +224,20 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"Your turn produced none of the issue's own deliverable",
 		// Invariant 2: concurrent agents converge instead of flapping.
 		"This no-write default is what keeps concurrent runs from flapping the board",
+		// DENE-859: a close is one call. The brief names the command, the
+		// atomicity claim, the legacy path's standing, and the decision table
+		// that maps each close outcome to its flags.
+		"use `multica issue close`",
+		"evidence comment, the status, and the `close.*` record together",
+		"a status write followed by a separate comment is the legacy path and stays accepted",
+		"| Where the issue stands | Call |",
+		"`--outcome done --evidence-file ./close.md`",
+		"`--outcome in_review --evidence-file ./close.md`",
+		"`--outcome blocked --evidence-file ./close.md`",
+		"a blocked close without one is rejected",
+		"`--outcome done --verdict pass --evidence-file ./close.md`",
+		"never as a silent `in_review`",
+		"`multica issue comment add <id> --verdict hold --content-file ./review.md`",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status rule missing %q\n---\n%s", want, out)
@@ -2434,5 +2448,30 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 		if !strings.Contains(brief, wantWhy) {
 			t.Errorf("%s brief states %q without %q; a rule with no reason is the first one dropped under pressure", name, wantRule, wantWhy)
 		}
+	}
+}
+
+// TestAvailableCommandsListIssueClose pins the `issue close` bullet in the
+// core command list (DENE-859): the close is discoverable without --help,
+// and the bullet states the one-transaction guarantee and the honesty rule
+// (quote the reply's status/merge/woken, do not restate it from memory).
+func TestAvailableCommandsListIssueClose(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
+	for _, want := range []string{
+		"- `multica issue close <id> --outcome <done|in_review|blocked|cancelled> --evidence-file <path>",
+		"land in one transaction",
+		"rejected naming exactly what is missing",
+		"`--verdict pass` is the acceptance seat's release",
+		"quote it, do not restate it from memory",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("available commands missing %q\n---\n%s", want, out)
+		}
+	}
+	closeIdx := strings.Index(out, "- `multica issue close <id>")
+	childrenIdx := strings.Index(out, "- `multica issue children <id>")
+	if closeIdx < 0 || childrenIdx < 0 || closeIdx > childrenIdx {
+		t.Errorf("issue close bullet should sit with the status commands, before children (close=%d children=%d)", closeIdx, childrenIdx)
 	}
 }
