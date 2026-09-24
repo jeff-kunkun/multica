@@ -4,6 +4,27 @@
     "select_prompt": "대화를 선택하거나 +로 새로 시작하세요",
     "agent_link_no_access": "이 에이전트와 채팅할 권한이 없습니다."
   },
+  "project_bar": {
+    "all": "전체",
+    "more": "⋯ 더보기 ({{count}})",
+    "menu_title": "프로젝트",
+    "done": "완료",
+    "search": "프로젝트 검색…",
+    "pinned": "고정 (끌어 순서 변경)",
+    "pinned_empty": "고정한 프로젝트가 없습니다",
+    "other": "다른 프로젝트 (최근 채팅순)",
+    "none": "프로젝트 없음",
+    "chat_count_other": "채팅 {{count}}개",
+    "pin": "고정",
+    "unpin": "고정 해제",
+    "drag": "끌어 순서 변경",
+    "empty": "이 프로젝트에는 아직 채팅이 없습니다",
+    "unread": "읽지 않음"
+  },
+  "project_nudge": {
+    "bind": "프로젝트에 연결",
+    "casual": "가벼운 채팅이라 프로젝트가 필요 없습니다"
+  },
   "fab": {
     "running": "Multica가 작업 중입니다...",
     "unread_other": "읽지 않은 채팅 {{count}}개",

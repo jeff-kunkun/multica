@@ -416,8 +416,12 @@ type ChatSessionUpdatedPayload struct {
 	Pinned *bool `json:"pinned,omitempty"`
 	// Status is set only by the archive/unarchive path ("active"/"archived");
 	// nil on rename/pin so a receiver leaves the existing status untouched.
-	Status    *string `json:"status,omitempty"`
-	UpdatedAt string  `json:"updated_at"`
+	Status *string `json:"status,omitempty"`
+	// ProjectNudgeDismissed is set only when the creator marks the chat as
+	// not needing a project. nil on every other update so a receiver leaves
+	// the existing flag untouched.
+	ProjectNudgeDismissed *bool  `json:"project_nudge_dismissed,omitempty"`
+	UpdatedAt             string `json:"updated_at"`
 }
 
 // DaemonHeartbeatRequestPayload is sent from daemon to server over WebSocket

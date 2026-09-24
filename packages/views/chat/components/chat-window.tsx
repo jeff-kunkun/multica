@@ -54,6 +54,7 @@ import {
 } from "@multica/core/chat/queries";
 import {
   useCreateChatSession,
+  useDismissChatProjectNudge,
   useMarkChatSessionRead,
   useRegenerateChatQuickActions,
   useSetChatSessionArchived,
@@ -75,6 +76,7 @@ import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { useChatTaskActions } from "./use-chat-task-actions";
 import { useChatInputFocus } from "./use-chat-input-focus";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
+import { ChatProjectNudge } from "./chat-project-nudge";
 import { ChatInput } from "./chat-input";
 import { ProviderQuotaStrip } from "./provider-quota-strip";
 import { ChatQueue } from "./chat-queue";
@@ -119,6 +121,7 @@ export function ChatWindow() {
   // Toast when an accepted refresh later fails in the daemon (async half).
   useQuickActionsFailureToast(activeSessionId ?? null);
   const regenerateQuickActions = useRegenerateChatQuickActions();
+  const dismissProjectNudge = useDismissChatProjectNudge();
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const selectedProjectIds = useChatStore((s) => s.selectedProjectIds);
   const setOpen = useChatStore((s) => s.setOpen);
@@ -958,6 +961,15 @@ export function ChatWindow() {
           </Tooltip>
         </div>
       </div>
+
+      {currentSession && (
+        <ChatProjectNudge
+          session={currentSession}
+          onBind={handleProjectsChange}
+          onDismiss={() => dismissProjectNudge.mutate(currentSession.id)}
+          dismissing={dismissProjectNudge.isPending}
+        />
+      )}
 
       {/* Messages / skeleton / empty state */}
       {showSkeleton ? (

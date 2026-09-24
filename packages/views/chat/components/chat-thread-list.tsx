@@ -86,6 +86,7 @@ export function ChatThreadList({
   activeSessionId,
   onSelectSession,
   onArchive,
+  emptyLabel,
 }: {
   sessions: ChatSession[];
   agents: Agent[];
@@ -95,6 +96,9 @@ export function ChatThreadList({
   // aware (desktop advances to the next chat; mobile drops back to the list)
   // and routes through the shared controller — see ChatPage.handleArchive.
   onArchive: (session: ChatSession) => void;
+  /** Replaces the default "no chats" line. The project bar uses this when a
+   *  filter matches nothing. */
+  emptyLabel?: string;
 }) {
   const { t } = useT("chat");
   const locale = useLocale();
@@ -554,7 +558,7 @@ export function ChatThreadList({
     return (
       <>
         <div className="px-2 py-1.5 text-caption text-muted-foreground">
-          {t(($) => $.window.no_previous)}
+          {emptyLabel ?? t(($) => $.window.no_previous)}
         </div>
         {archivedEntry}
       </>

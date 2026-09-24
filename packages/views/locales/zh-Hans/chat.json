@@ -4,6 +4,27 @@
     "select_prompt": "选择一个对话，或点 + 新建",
     "agent_link_no_access": "你没有权限与该智能体聊天。"
   },
+  "project_bar": {
+    "all": "全部",
+    "more": "⋯ 更多 ({{count}})",
+    "menu_title": "项目栏",
+    "done": "完成",
+    "search": "搜项目…",
+    "pinned": "置顶（拖动调整顺序）",
+    "pinned_empty": "还没有置顶",
+    "other": "其他项目（按最近聊天自动排）",
+    "none": "无项目",
+    "chat_count_other": "{{count}} 个聊天",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "drag": "拖动调整顺序",
+    "empty": "这个项目下还没有聊天",
+    "unread": "有未读"
+  },
+  "project_nudge": {
+    "bind": "绑定到项目",
+    "casual": "这是随手聊，不需要项目"
+  },
   "fab": {
     "running": "Multica 正在工作...",
     "unread_other": "{{count}} 条未读对话",
