@@ -577,7 +577,7 @@ func (h *Handler) blockReviewNeedingHuman(ctx context.Context, issue db.Issue, w
 		rec.NeedsHuman = uuidToString(managers[0])
 		mention = h.memberWakeMention(ctx, managers[0])
 	} else {
-		rec = blockwait.FailureWake(time.Now(), "验收席由人来定")
+		rec = blockwait.FailureWake(time.Now(), "验收席由人来定", 1)
 	}
 	h.blockAcceptedIssue(ctx, issue, blockwait.Decision{
 		Record: rec,
