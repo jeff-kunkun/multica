@@ -3062,14 +3062,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A base role owns the availability of its direct specialisations when it
-	// is turned off. The child update is deliberately one-way: turning the base
-	// role back on leaves each specialisation's independent setting untouched.
-	var disabledSpecialisations []db.Agent
-	if req.WorkEnabled != nil && !*req.WorkEnabled {
-		disabledSpecialisations, err = h.Queries.DisableAgentSpecialisations(r.Context(), updated.ID)
+	// A base role owns the availability of its direct specialisations: turning
+	// it off or on sets every specialisation to the same value.
+	var toggledSpecialisations []db.Agent
+	if req.WorkEnabled != nil && !updated.ParentAgentID.Valid {
+		toggledSpecialisations, err = h.Queries.SetAgentSpecialisationsWorkEnabled(r.Context(), db.SetAgentSpecialisationsWorkEnabledParams{
+			WorkEnabled:   *req.WorkEnabled,
+			ParentAgentID: updated.ID,
+		})
 		if err != nil {
-			slog.Warn("disable agent specialisations failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			slog.Warn("sync agent specialisations work_enabled failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update agent specialisations")
 			return
 		}
@@ -3181,7 +3183,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		h.publishAgentUpdate(r, child)
 	}
-	for _, child := range disabledSpecialisations {
+	for _, child := range toggledSpecialisations {
 		h.publishAgentUpdate(r, child)
 	}
 
