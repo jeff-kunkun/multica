@@ -3467,6 +3467,12 @@ type UpdateIssueRequest struct {
 	WaitProbe     *string `json:"wait_probe,omitempty"`
 	WaitTimeout   *string `json:"wait_timeout,omitempty"`
 	NeedsHuman    *string `json:"needs_human,omitempty"`
+	// NoCodeReason is the declared exit from the review gate (DENE-869). An
+	// agent moving an issue to in_review without a linked open/draft/merged PR
+	// is refused unless it says here why this ticket carries no code (docs,
+	// research). The reason is echoed in the system comment; people are not
+	// gated and may leave it empty.
+	NoCodeReason *string `json:"no_code_reason,omitempty"`
 }
 
 func mergeIssueChannelMediaDescription(current, incoming string, base *string, attachments []db.Attachment) string {
@@ -3788,8 +3794,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	var blockRecord blockwait.Record
 	persistBlock := false
+	// Resolved once: the blocked gate (DENE-850) and the review gate (DENE-869)
+	// both apply to agents only.
+	statusActorType := ""
+	if statusKeyForGuard != "" && statusKeyForGuard != prevIssue.Status {
+		statusActorType, _ = h.resolveActor(r, userID, workspaceID)
+	}
 	if statusKeyForGuard == issuestatus.Blocked && prevIssue.Status != issuestatus.Blocked {
-		actorType, _ := h.resolveActor(r, userID, workspaceID)
+		actorType := statusActorType
 		rec, persist, reject := h.gateBlockedStatus(r, prevIssue, req, actorType)
 		if reject != "" {
 			writeError(w, http.StatusBadRequest, reject)
@@ -3978,7 +3990,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	tr := h.guardSilentStall(r.Context(), prevIssue, statusKeyForGuard, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, touchedReviewerType || touchedReviewerID)
+	tr := h.guardSilentStall(r.Context(), prevIssue, statusKeyForGuard, statusActorType, deref(req.NoCodeReason), params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, touchedReviewerType || touchedReviewerID)
 	if tr.refuse != "" {
 		writeError(w, http.StatusConflict, tr.refuse)
 		return
@@ -4846,7 +4858,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		batchTransition := h.guardSilentStall(r.Context(), prevIssue, batchStatusKey, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, false)
+		batchActorType, _ := h.resolveActor(r, userID, workspaceID)
+		batchTransition := h.guardSilentStall(r.Context(), prevIssue, batchStatusKey, batchActorType, "", params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, false)
 		if batchTransition.refuse != "" {
 			continue
 		}
