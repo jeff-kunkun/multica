@@ -1231,7 +1231,7 @@ func taskErrorType(reason string) string {
 	switch reason {
 	case "runtime_offline", "runtime_recovery":
 		return "runtime"
-	case "timeout", "codex_semantic_inactivity":
+	case "timeout", "codex_semantic_inactivity", "task_time_limit":
 		return "timeout"
 	case "iteration_limit", "agent_fallback_message":
 		return "agent_output"
@@ -5408,10 +5408,16 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 // this row was still running (DENE-813). A person invoking cancel-task or halt
 // never writes this reason: those paths set status=cancelled and leave
 // failure_reason empty, so they stay off this map.
+//
+// task_time_limit is the workspace wall clock stopping a healthy run (DENE-857).
+// The session is still good, so the retry continues it and tells the agent to
+// close out finished work and split what remains. The budget is the task's
+// ordinary max_attempts; spending it blocks the issue.
 var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonRuntimeOffline):                   true,
 	string(taskfailure.ReasonRuntimeRecovery):                  true,
 	string(taskfailure.ReasonTimeout):                          true,
+	string(taskfailure.ReasonTaskTimeLimit):                    true,
 	"codex_semantic_inactivity":                                true,
 	string(taskfailure.ReasonAgentProviderNetwork):             true,
 	string(taskfailure.ReasonAgentProviderCapacityOrRateLimit): true,
@@ -6478,51 +6484,106 @@ func (s *TaskService) FailTasksOverWorkspaceTimeLimit(ctx context.Context) ([]db
 	})
 }
 
-// NotifyTaskTimeLimit tells the people who can decide what happens next that
-// a run was stopped by the workspace time limit: how long it ran, which agent,
-// and how to continue. The notice lands on the task's issue and, for a
-// sub-issue, on its parent too, because the parent is where a supervising
-// human or agent is watching the children.
-func (s *TaskService) NotifyTaskTimeLimit(ctx context.Context, tasks []db.AgentTaskQueue) {
-	for _, t := range tasks {
-		if !t.IssueID.Valid {
-			continue
-		}
-		issue, err := s.Queries.GetIssue(ctx, t.IssueID)
-		if err != nil {
-			slog.Warn("task time limit notice: load issue failed", "task_id", util.UUIDToString(t.ID), "error", err)
-			continue
-		}
-		ran := "an unknown duration"
-		if t.StartedAt.Valid {
-			end := time.Now()
-			if t.CompletedAt.Valid {
-				end = t.CompletedAt.Time
-			}
-			if d := end.Sub(t.StartedAt.Time); d > 0 {
-				ran = d.Round(time.Minute).String()
-			}
-		}
-		agentName := "An agent"
-		if agent, err := s.Queries.GetAgent(ctx, t.AgentID); err == nil && agent.Name != "" {
-			agentName = agent.Name
-		}
-		ownerID, mention := s.taskTimeLimitMention(ctx, issue)
-		summary := fmt.Sprintf("%s was stopped after running for %s: it reached this workspace's task time limit. The run was not retried. Issue status at stop: %s.", agentName, ran, issue.Status)
-		s.createSystemNotice(ctx, issue, mention+summary+" Comment here to start a new run, or raise the limit in workspace settings.")
-		s.notifyTaskTimeLimitOwner(ctx, issue, t, ownerID, summary)
-
-		if !issue.ParentIssueID.Valid {
-			continue
-		}
-		parent, err := s.Queries.GetIssue(ctx, issue.ParentIssueID)
-		if err != nil || parent.WorkspaceID != issue.WorkspaceID {
-			continue
-		}
-		s.createSystemNotice(ctx, parent, fmt.Sprintf(
-			"%sSub-issue [%s](mention://issue/%s) was stopped: %s ran for %s and reached this workspace's task time limit. The run was not retried.",
-			mention, issue.Title, util.UUIDToString(issue.ID), agentName, ran))
+// noteTaskTimeLimit records a workspace time-limit stop. A retry child means
+// the same session continues; a nil child means the attempt budget is spent
+// and the issue must leave todo / in_progress.
+func (s *TaskService) noteTaskTimeLimit(ctx context.Context, task db.AgentTaskQueue, retried *db.AgentTaskQueue) {
+	if !task.IssueID.Valid {
+		return
 	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("task time limit notice: load issue failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	ran := "一段时间"
+	if task.StartedAt.Valid {
+		end := time.Now()
+		if task.CompletedAt.Valid {
+			end = task.CompletedAt.Time
+		}
+		if d := end.Sub(task.StartedAt.Time); d > 0 {
+			ran = d.Round(time.Minute).String()
+		}
+	}
+	blocked := false
+	if retried != nil {
+		if issue.Status == issuestatus.Todo {
+			if updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ID: issue.ID, Status: issuestatus.InProgress, WorkspaceID: issue.WorkspaceID,
+			}); err != nil {
+				slog.Warn("task time limit notice: keep issue in progress failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+			} else {
+				s.broadcastIssueUpdated(ctx, updated, issue.Status)
+				issue = updated
+			}
+		}
+	} else {
+		blocked = s.blockIssueAfterTimeLimit(ctx, issue)
+	}
+	mention := ""
+	ownerID := pgtype.UUID{}
+	if retried == nil {
+		ownerID, mention = s.taskTimeLimitMention(ctx, issue)
+	}
+	summary := taskTimeLimitNotice(ran, task, retried, blocked, mention)
+	s.createSystemNotice(ctx, issue, summary)
+	if retried == nil {
+		s.notifyTaskTimeLimitOwner(ctx, issue, task, ownerID, summary)
+	}
+	if !issue.ParentIssueID.Valid {
+		return
+	}
+	parent, err := s.Queries.GetIssue(ctx, issue.ParentIssueID)
+	if err != nil || parent.WorkspaceID != issue.WorkspaceID {
+		return
+	}
+	child := IssueIdentifier(s.getIssuePrefix(issue.WorkspaceID), issue.Number)
+	parentNote := fmt.Sprintf("子票 %s 跑满了工作区时限（%s）。", child, ran)
+	if retried != nil {
+		parentNote += fmt.Sprintf("已安排续跑：第 %d 次，共 %d 次，沿用原来的会话。", retried.Attempt, retried.MaxAttempts)
+	} else if blocked {
+		parentNote += "自动续跑用完了，子票已改为 blocked。"
+	} else {
+		parentNote += "没有再安排续跑。"
+	}
+	s.createSystemNotice(ctx, parent, parentNote)
+}
+
+func (s *TaskService) blockIssueAfterTimeLimit(ctx context.Context, issue db.Issue) bool {
+	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	if effective != issuestatus.InProgress && effective != issuestatus.Todo {
+		return false
+	}
+	updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID: issue.ID, Status: issuestatus.Blocked, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("task time limit notice: block issue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		return false
+	}
+	s.broadcastIssueUpdated(ctx, updated, issue.Status)
+	s.stampBlockWake(ctx, updated, "工作区时限内的自动续跑已经用完，到点重新叫醒执行人")
+	return true
+}
+
+func taskTimeLimitNotice(ran string, task db.AgentTaskQueue, retried *db.AgentTaskQueue, blocked bool, mention string) string {
+	if retried != nil {
+		return fmt.Sprintf(
+			"这轮跑了 %s，到了工作区的时限，不是这张票做错了。已自动安排续跑：第 %d 次，共 %d 次，沿用原来的会话和工作目录。续跑会先把已经做完的进度收口，再把剩下的工作拆小。",
+			ran, retried.Attempt, retried.MaxAttempts,
+		)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "这轮跑了 %s，到了工作区的时限。自动续跑没有再排（第 %d 次，共 %d 次）。", ran, task.Attempt, task.MaxAttempts)
+	if blocked {
+		b.WriteString("这张票已改为 blocked，不再停在待办或进行中没人管。到点后平台会重新叫醒执行人。")
+	}
+	if mention != "" {
+		b.WriteString(mention)
+		b.WriteString("这是知会，请决定是加长时限，还是把剩下的工作拆开。")
+	}
+	return b.String()
 }
 
 // taskTimeLimitMention picks who to wake for a time-limit stop: the project
@@ -6694,17 +6755,39 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	processedIssues := make(map[string]bool)
 	retriedIssues := make(map[string]bool)
 	quotaHeldIssues := make(map[string]bool)
+	timeLimitHeld := make(map[string]bool)
 	retried := 0
 
 	for _, t := range tasks {
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
 		retryPending := false
+		var continued *db.AgentTaskQueue
 		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+			continued = child
 			retryPending = true
 			retried++
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true
+			}
+		}
+		failureReason := "agent_error"
+		if t.FailureReason.Valid && t.FailureReason.String != "" {
+			failureReason = t.FailureReason.String
+		}
+		if failureReason == string(taskfailure.ReasonTaskTimeLimit) && t.IssueID.Valid {
+			issueKey := util.UUIDToString(t.IssueID)
+			if continued == nil {
+				if has, err := s.Queries.HasRetryTaskForParent(ctx, t.ID); err == nil && has {
+					// An earlier pass already continued this run. Do not
+					// read the missing child as an exhausted budget.
+					retriedIssues[issueKey] = true
+				} else {
+					s.noteTaskTimeLimit(ctx, t, nil)
+					timeLimitHeld[issueKey] = true
+				}
+			} else {
+				s.noteTaskTimeLimit(ctx, t, continued)
 			}
 		}
 		if !retryPending {
@@ -6732,10 +6815,6 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			}
 		}
 
-		failureReason := "agent_error"
-		if t.FailureReason.Valid && t.FailureReason.String != "" {
-			failureReason = t.FailureReason.String
-		}
 		s.captureTaskFailed(ctx, t)
 
 		workspaceID := ""
@@ -6754,7 +6833,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				// projects a nonterminal custom key onto a built-in, so this is
 				// a key comparison on purpose. (MUL-6243, MUL-7240)
 				effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] && !quotaHeldIssues[issueKey] {
+				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] && !quotaHeldIssues[issueKey] && !timeLimitHeld[issueKey] {
 					processedIssues[issueKey] = true
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {

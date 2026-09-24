@@ -226,6 +226,77 @@ func DecideRelease(prs []PRSnapshot, now time.Time) Decision {
 	}
 }
 
+// DecideClose is the gate on a direct move to done. An open linked PR that is
+// cleanly mergeable and whose checks are green is merged by the caller; any
+// other open PR becomes a structured block. No open PR allows the close.
+func DecideClose(prs []PRSnapshot, now time.Time) Decision {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	var open []PRSnapshot
+	for _, pr := range prs {
+		if strings.EqualFold(pr.State, "open") {
+			open = append(open, pr)
+		}
+	}
+	if len(open) == 0 {
+		return Decision{Action: ReleaseDone}
+	}
+	for _, pr := range open {
+		if prReadyToMerge(pr) {
+			continue
+		}
+		rec := Record{
+			WaitCondition:  prCloseBlockReason(pr),
+			HasWaitTimeout: true,
+			WaitTimeout:    now.Add(QuietAfter),
+			HasWakeAt:      true,
+			WakeAt:         now.Add(QuietAfter),
+		}
+		return Decision{
+			Action: ReleaseBlock,
+			Reason: fmt.Sprintf("这张票要关，但 %s。先改成阻塞，不标完成。", rec.WaitCondition),
+			Record: rec,
+		}
+	}
+	label := prLabel(open[0])
+	return Decision{
+		Action: ReleaseMerge,
+		Reason: fmt.Sprintf("这张票要关，%s 能干净合并且检查是绿的。平台先合并，再关票。", label),
+		Record: Record{HasWakeAt: true, WakeAt: now.Add(QuietAfter), WaitCondition: "等待合并 " + label},
+	}
+}
+
+func prReadyToMerge(pr PRSnapshot) bool {
+	switch strings.ToLower(strings.TrimSpace(pr.Mergeable)) {
+	case "clean", "has_hooks":
+	default:
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(pr.Checks)) {
+	case "", "success", "passing", "neutral", "skipped":
+		return true
+	default:
+		return false
+	}
+}
+
+func prCloseBlockReason(pr PRSnapshot) string {
+	if prBlocked(pr) {
+		return prBlockReason(pr)
+	}
+	label := prLabel(pr)
+	switch strings.ToLower(strings.TrimSpace(pr.Checks)) {
+	case "pending", "expected", "queued", "in_progress":
+		return label + " 的检查还没出结果"
+	}
+	switch strings.ToLower(strings.TrimSpace(pr.Mergeable)) {
+	case "", "unknown":
+		return label + " 还没确认能干净合并"
+	}
+	return label + " 现在不能直接合并"
+}
+
 func prBlocked(pr PRSnapshot) bool {
 	switch strings.ToLower(pr.Mergeable) {
 	case "dirty", "blocked", "behind":

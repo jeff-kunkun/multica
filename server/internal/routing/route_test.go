@@ -433,6 +433,36 @@ func TestInReviewWithNoReviewNeededChangesNothing(t *testing.T) {
 	}
 }
 
+func TestPickAcceptanceSeatChangesFamily(t *testing.T) {
+	store := newFakeStore()
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-goku"
+	store.roster["特兰克斯"] = Agent{ID: "a-trunks", Name: "特兰克斯"}
+	store.roster["孙悟天"] = Agent{ID: "a-goten", Name: "孙悟天"}
+
+	ref, why, ok := newRouter(store, &fakeJudge{}).PickAcceptanceSeat(context.Background(), "ws", store.issue)
+	if !ok {
+		t.Fatalf("pick failed: %s", why)
+	}
+	if ref.ID == "a-goku" || ref.ID == "" {
+		t.Fatalf("reviewer = %+v, want a different seat", ref)
+	}
+	if ref.ID != "a-goten" && ref.ID != "a-trunks" {
+		t.Fatalf("reviewer = %+v, want 孙悟天 or 特兰克斯", ref)
+	}
+	if !strings.Contains(why, "同档换一家模型") && !strings.Contains(why, "下一档") {
+		t.Fatalf("why = %q, want the cross-family rule", why)
+	}
+
+	alone := newFakeStore()
+	alone.roster = map[string]Agent{"孙悟空": {ID: "a-goku", Name: "孙悟空"}}
+	alone.issue.AssigneeType = "agent"
+	alone.issue.AssigneeID = "a-goku"
+	if _, why, ok := newRouter(alone, &fakeJudge{}).PickAcceptanceSeat(context.Background(), "ws", alone.issue); ok {
+		t.Fatalf("a lone seat was accepted: %s", why)
+	}
+}
+
 func TestInReviewHandsOffAtMostOnce(t *testing.T) {
 	store := newFakeStore()
 	store.issue.Status = "in_review"

@@ -447,6 +447,10 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// session and workdir. A person's cancel-task/halt does not use this
 		// reason.
 		{reason: "cancelled", wantType: "cancelled", wantResumeOK: true, wantRetry: true},
+		// DENE-857: the workspace wall clock stopped a healthy run. Resume-safe
+		// so the next attempt keeps the session, and retryable until the
+		// attempt budget is spent.
+		{reason: "task_time_limit", wantType: "timeout", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
 		{reason: "agent_error.context_overflow", wantType: "agent_error", wantResumeOK: false, wantRetry: false},

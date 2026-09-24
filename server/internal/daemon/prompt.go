@@ -464,7 +464,11 @@ func buildPromptBody(task Task, provider string) string {
 // shouldContinueInterruptedSession requires a live PriorSessionID.
 func buildInterruptedRetryPrompt(task Task, provider string) string {
 	var b strings.Builder
-	b.WriteString("Your previous turn was interrupted by a transient error before it finished. Continue from where you left off in this same session. Do not restart the task, and do not re-read or re-send the original request unless you no longer have that context.\n\n")
+	if task.ContinueAfterTimeLimit {
+		b.WriteString("Your previous turn stopped because it reached the workspace task time limit. The work was not rejected. Continue in this same session and the same working directory. First close out the progress already on disk so it is not lost. Then split whatever is still unfinished into smaller pieces, and finish the next piece in this turn. Do not restart the task from scratch.\n\n")
+	} else {
+		b.WriteString("Your previous turn was interrupted by a transient error before it finished. Continue from where you left off in this same session. Do not restart the task, and do not re-read or re-send the original request unless you no longer have that context.\n\n")
+	}
 	if task.ChatSessionID != "" {
 		return b.String()
 	}

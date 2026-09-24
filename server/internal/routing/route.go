@@ -458,6 +458,40 @@ func (r *Router) pickExecutor(candidates []Seat, labelSeat Seat, labelled bool, 
 	return fallback, pickFallback, why
 }
 
+// PickAcceptanceSeat chooses a reviewer for an issue that is about to enter
+// in_review with an empty reviewer slot. It does not call the judge: the
+// rule is the ladder's, same rung and a different model family, or one rung
+// down when that rung has only one family. The seat that did the work is
+// never returned. ok is false when nothing else can check the work.
+func (r *Router) PickAcceptanceSeat(ctx context.Context, workspaceID string, issue Issue) (ReviewerRef, string, bool) {
+	if r == nil || r.Store == nil {
+		return ReviewerRef{}, "没有验收席名册", false
+	}
+	settings, err := r.Store.Settings(ctx, workspaceID)
+	if err != nil {
+		return ReviewerRef{}, "读不到工作区的席位设置", false
+	}
+	ladder := r.Ladder
+	if len(ladder.Tiers) == 0 {
+		ladder = DefaultLadder
+	}
+	ladder = ladder.WithProjects(settings.Projects)
+	direction := ladder.Direction(issue.ProjectName)
+	roster, err := r.Store.Roster(ctx, workspaceID)
+	if err != nil {
+		return ReviewerRef{}, "读不到席位名册", false
+	}
+	candidates := ladder.Candidates(direction, roster)
+	ref, why := r.fallbackReviewer(ladder, direction, roster, candidates, nil, issue)
+	if ref.Kind != ReviewerAgent || ref.ID == "" || ref.ID == issue.AssigneeID {
+		if why == "" {
+			why = "选不出和执行席不同的验收席"
+		}
+		return ReviewerRef{}, why, false
+	}
+	return ref, why, true
+}
+
 // fallbackReviewer is the reviewer the ladder implies when the judge cannot
 // name one with confidence. It never resolves to a person, and it never
 // resolves to the strongest rung: that rung is written only when the judge

@@ -4265,6 +4265,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// on the full-prompt path.
 	if task.RetryOfTaskID.Valid && !task.ForceFreshSession && task.SessionID.Valid {
 		resp.ContinueInterruptedSession = true
+		if parent, err := h.Queries.GetAgentTask(r.Context(), task.RetryOfTaskID); err == nil &&
+			parent.FailureReason.Valid && parent.FailureReason.String == "task_time_limit" {
+			resp.ContinueAfterTimeLimit = true
+		}
 	}
 
 	return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, nil
