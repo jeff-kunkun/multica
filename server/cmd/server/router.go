@@ -2051,6 +2051,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/properties/{propertyId}", h.SetIssueProperty)
 					r.Delete("/properties/{propertyId}", h.DeleteIssueProperty)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
+					r.Get("/delivery", h.GetIssueDelivery)
+					r.Put("/delivery/canonical", h.SetIssueDeliveryCanonical)
+					r.Post("/delivery/classify", h.ClassifyIssueDeliveryBranch)
+					r.Post("/delivery/cleanup", h.RecordIssueDeliveryCleanup)
 				})
 			})
 

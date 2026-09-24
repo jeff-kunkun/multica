@@ -128,6 +128,14 @@ type LocalWorktreeParams struct {
 	// out the whole repository. A declaration narrows only this task's
 	// worktree; the user's own checkout stays complete.
 	CheckoutPaths string
+	// CanonicalBranch is the issue's canonical delivery branch as the server
+	// records it (DENE-820). When it exists in this repository and its record
+	// belongs to the same workspace and conversation, the task continues it
+	// even though another seat created it — a rerun by a different agent
+	// must land on the issue's one delivery line, not open a second one
+	// named after itself. Empty, or absent locally, falls back to the
+	// conversation branch rules below.
+	CanonicalBranch string
 	// ResumeWorkDir is the previous run's agent cwd on a same-seat retry.
 	// When it names a working copy this repository can recreate — a direct
 	// child of the worktree root that is not on disk — Prepare builds this
@@ -1540,6 +1548,21 @@ func resolveTaskBranch(gitRoot string, params LocalWorktreeParams, headSHA strin
 	if params.ConversationKey == "" || !owner.valid() {
 		return taskScoped
 	}
+	// The issue's canonical line first (DENE-820). Only an EXISTING branch is
+	// continued: inventing the canonical name on a machine that never had it
+	// would claim to be that line while sharing no history with it.
+	if canonical := strings.TrimSpace(params.CanonicalBranch); canonical != "" {
+		if tip, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", "--quiet", "refs/heads/"+canonical); err == nil && tip != "" {
+			plan, ok := planForBranch(gitRoot, canonical, headSHA, owner, sameDeliveryLine, logger)
+			if ok {
+				return plan
+			}
+			if logger != nil {
+				logger.Info("execenv: canonical delivery branch is not this issue's; not continuing it",
+					"git_root", gitRoot, "branch", canonical)
+			}
+		}
+	}
 	preferred := fmt.Sprintf("agent/%s/%s", agentSegment, sanitizeName(params.ConversationKey))
 	for _, name := range []string{preferred, preferred + "-" + owner.fingerprint()} {
 		plan, ok := planForConversationBranch(gitRoot, name, headSHA, owner, logger)
@@ -1557,6 +1580,23 @@ func resolveTaskBranch(gitRoot string, params LocalWorktreeParams, headSHA strin
 // planForConversationBranch reports how this task would use one candidate
 // branch name, and whether it may use it at all.
 func planForConversationBranch(gitRoot, name, headSHA string, owner branchOwner, logger *slog.Logger) (taskBranchPlan, bool) {
+	return planForBranch(gitRoot, name, headSHA, owner, sameOwner, logger)
+}
+
+// ownerMatch decides whether a branch's recorded owner lets this task
+// continue it. sameOwner is the conversation-branch rule: all three ids.
+// sameDeliveryLine is the canonical-branch rule (DENE-820): the issue is the
+// delivery aggregate, so any seat of the same workspace working the same
+// conversation continues its canonical line; the agent id may differ.
+type ownerMatch func(recorded, owner branchOwner) bool
+
+func sameOwner(recorded, owner branchOwner) bool { return recorded == owner }
+
+func sameDeliveryLine(recorded, owner branchOwner) bool {
+	return recorded.WorkspaceID == owner.WorkspaceID && recorded.ConversationID == owner.ConversationID
+}
+
+func planForBranch(gitRoot, name, headSHA string, owner branchOwner, match ownerMatch, logger *slog.Logger) (taskBranchPlan, bool) {
 	plan := taskBranchPlan{
 		name:           name,
 		base:           headSHA,
@@ -1569,7 +1609,7 @@ func planForConversationBranch(gitRoot, name, headSHA string, owner branchOwner,
 		// Free to create.
 		return plan, true
 	}
-	record, owned := branchOwnedBy(gitRoot, name, owner, logger)
+	record, owned := branchOwnedByMatch(gitRoot, name, owner, match, logger)
 	if !owned {
 		return taskBranchPlan{}, false
 	}
@@ -1608,12 +1648,16 @@ func planForConversationBranch(gitRoot, name, headSHA string, owner branchOwner,
 // A branch with no record is not ours by definition: every branch this code
 // creates writes one before its task is allowed to run.
 func branchOwnedBy(gitRoot, branch string, owner branchOwner, logger *slog.Logger) (branchRecord, bool) {
+	return branchOwnedByMatch(gitRoot, branch, owner, sameOwner, logger)
+}
+
+func branchOwnedByMatch(gitRoot, branch string, owner branchOwner, match ownerMatch, logger *slog.Logger) (branchRecord, bool) {
 	ref, err := readUserStateRef(gitRoot, branch)
 	if err != nil || ref == "" {
 		return branchRecord{}, false
 	}
 	record, err := readBranchRecord(gitRoot, ref)
-	if err != nil || record.owner != owner || record.checkpoint == "" {
+	if err != nil || !record.owner.valid() || !match(record.owner, owner) || record.checkpoint == "" {
 		return branchRecord{}, false
 	}
 	if _, err := runGit(gitRoot, "merge-base", "--is-ancestor", record.checkpoint, "refs/heads/"+branch); err != nil {

@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -314,13 +315,44 @@ func (h *Handler) releaseAcceptedIssue(ctx context.Context, issue db.Issue, seed
 	if seed.Reason != "" && decision.Reason != "" {
 		decision.Reason = seed.Reason + decision.Reason
 	}
+	// The delivery aggregate (DENE-820) decides whether anything is still
+	// unaccounted for before the pass is allowed to close or merge. An
+	// unresolved rescue line or an unclassified second line turns the pass
+	// into a structured block: the reviewer said the work is good, but the
+	// platform cannot yet say which branch that work is on.
+	var delivery *service.IssueDelivery
+	if decision.Action == blockwait.ReleaseDone || decision.Action == blockwait.ReleaseMerge {
+		var deliveryErr error
+		delivery, deliveryErr = service.BuildIssueDelivery(ctx, h.Queries, issue)
+		if deliveryErr != nil {
+			slog.Warn("block wait: load delivery failed", "error", deliveryErr, "issue_id", uuidToString(issue.ID))
+		}
+		openHeads := []string{}
+		for _, pr := range prs {
+			if pr.State == "open" && pr.Branch.Valid {
+				openHeads = append(openHeads, pr.Branch.String)
+			}
+		}
+		if blocker := service.DeliveryMergeBlocker(delivery, openHeads); blocker != "" {
+			decision.Action = blockwait.ReleaseBlock
+			decision.Reason = "验收已经通过，但交付线还没对齐：" + blocker + "。先标成阻塞，`multica issue delivery <issue>` 看现场。"
+			decision.Record.WaitCondition = "交付线对齐：" + blocker
+			if !decision.Record.HasWakeAt {
+				decision.Record.HasWakeAt = true
+				decision.Record.WakeAt = time.Now().Add(blockwait.QuietAfter).UTC()
+			}
+			out := h.blockAcceptedIssue(ctx, issue, decision)
+			h.wakeIssueOwner(ctx, issue, "验收已经通过，但这张票的交付线还没对齐："+blocker+"。请用 `multica issue delivery` 归类分支或换 canonical，再把票推回验收。", false)
+			return out
+		}
+	}
 	switch decision.Action {
 	case blockwait.ReleaseDone:
 		return h.finishAcceptedIssue(ctx, issue, decision.Reason)
 	case blockwait.ReleaseBlock:
 		return h.blockAcceptedIssue(ctx, issue, decision)
 	case blockwait.ReleaseMerge:
-		return h.mergeAcceptedIssue(ctx, issue, prs, decision)
+		return h.mergeAcceptedIssue(ctx, issue, prs, delivery, decision)
 	}
 	return releaseOutcome{Status: issue.Status, Note: decision.Reason}
 }
@@ -362,12 +394,19 @@ func (h *Handler) blockAcceptedIssue(ctx context.Context, issue db.Issue, decisi
 	return releaseOutcome{Status: updated.Status, Note: decision.Reason}
 }
 
-func (h *Handler) mergeAcceptedIssue(ctx context.Context, issue db.Issue, prs []db.ListPullRequestsByIssueRow, decision blockwait.Decision) releaseOutcome {
+func (h *Handler) mergeAcceptedIssue(ctx context.Context, issue db.Issue, prs []db.ListPullRequestsByIssueRow, delivery *service.IssueDelivery, decision blockwait.Decision) releaseOutcome {
+	// The PR on the canonical branch is the delivery; only when no PR sits on
+	// it does the first open PR stand in, as before DENE-820.
 	var open *db.ListPullRequestsByIssueRow
 	for i := range prs {
-		if prs[i].State == "open" {
+		if prs[i].State != "open" {
+			continue
+		}
+		if open == nil {
 			open = &prs[i]
-			break
+		}
+		if delivery != nil && delivery.Canonical != nil && prs[i].Branch.Valid && prs[i].Branch.String == delivery.Canonical.Branch {
+			open = &prs[i]
 		}
 	}
 	if open == nil {

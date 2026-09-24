@@ -8958,8 +8958,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				// that stripped it for a daemon lacking the capability, lands
 				// on the same default — which is what this daemon implements
 				// either way (DENE-617).
-				WorktreeRoot:  strings.TrimSpace(localAssignment.Ref.WorktreeRoot),
-				ResumeWorkDir: resumeWorkDir,
+				WorktreeRoot:    strings.TrimSpace(localAssignment.Ref.WorktreeRoot),
+				ResumeWorkDir:   resumeWorkDir,
+				CanonicalBranch: strings.TrimSpace(task.CanonicalBranch),
 			}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
