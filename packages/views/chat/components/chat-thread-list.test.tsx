@@ -42,6 +42,21 @@ vi.mock("@multica/core/chat", () => ({
     selector({ setActiveSession }),
 }));
 
+const authState = vi.hoisted(() => ({ userId: "user-1" as string | null }));
+
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (s: { user: { id: string } | null }) => unknown) =>
+    selector({ user: authState.userId ? { id: authState.userId } : null }),
+}));
+
+vi.mock("./chat-access-dialog", () => ({
+  ChatAccessDialog: () => null,
+}));
+
+vi.mock("./chat-visibility-notice", () => ({
+  ChatVisibilityNotice: () => null,
+}));
+
 vi.mock("@multica/core/chat/mutations", () => ({
   useDeleteChatSession: () => ({ mutate: vi.fn(), isPending: false }),
   useSetChatSessionPinned: () => ({ mutate: vi.fn(), isPending: false }),
@@ -114,8 +129,13 @@ function renderList(
 
 const ARCHIVE_LABEL = enChat.list.archive;
 
+beforeEach(() => {
+  authState.userId = "user-1";
+});
+
 describe("ChatThreadList archive delegation", () => {
   beforeEach(() => {
+    authState.userId = "user-1";
     setActiveSession.mockClear();
     archiveMutate.mockClear();
   });
@@ -226,6 +246,7 @@ describe("ChatThreadList agent identity", () => {
 // Touch has no hover, so the hover strip's actions also live in a per-row menu.
 describe("ChatThreadList compact row menu", () => {
   beforeEach(() => {
+    authState.userId = "user-1";
     setActiveSession.mockClear();
     archiveMutate.mockClear();
   });
@@ -251,6 +272,16 @@ describe("ChatThreadList compact row menu", () => {
     openRowMenu(0);
 
     expect(await screen.findByRole("menuitem", { name: enChat.list.pin })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: enChat.list.edit_access })).toBeInTheDocument();
+  });
+
+  it("hides pin, access, and archive from someone who did not create the chat", () => {
+    authState.userId = "someone-else";
+    renderList(null);
+
+    expect(screen.queryByRole("button", { name: enChat.list.row_actions_aria })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: ARCHIVE_LABEL })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Chat s1" })).not.toBeInTheDocument();
   });
 
   it("does not select the row when the menu opens", () => {
@@ -283,6 +314,7 @@ describe("ChatThreadList compact row menu", () => {
 
 describe("ChatThreadList title rename", () => {
   beforeEach(() => {
+    authState.userId = "user-1";
     updateMutate.mockClear();
   });
 

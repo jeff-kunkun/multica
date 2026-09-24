@@ -277,6 +277,9 @@ type ChatMessagePayload struct {
 	Content       string `json:"content"`
 	TaskID        string `json:"task_id,omitempty"`
 	CreatedAt     string `json:"created_at"`
+	// SenderUserID is the person who typed this user message. Empty on
+	// assistant rows and on agent-authored turns.
+	SenderUserID string `json:"sender_user_id,omitempty"`
 }
 
 // Chat message kinds (chat_message.message_kind). Additive: unknown values
@@ -370,6 +373,15 @@ type ChatCancelFinalizedPayload struct {
 // ChatSessionReadPayload is broadcast when the creator marks a session as read.
 // Fires to other devices so their unread counts stay in sync.
 type ChatSessionReadPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	// ReaderUserID is whose cursor moved. Other people keep their own.
+	ReaderUserID string `json:"reader_user_id,omitempty"`
+}
+
+// ChatSessionInvalidatedPayload is the id-only frame sent when sharing
+// changes. It is delivered even to people who can no longer see the chat,
+// so their client drops the cached row. It carries no title or transcript.
+type ChatSessionInvalidatedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 }
 

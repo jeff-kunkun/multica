@@ -327,11 +327,13 @@ export function ChatPage() {
           isFetchingOlderMessages={c.isFetchingOlderMessages}
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
           onQuickAction={(action) => c.handleSend(action.prompt)}
+          creatorId={c.currentSession?.creator_id}
           quickActionsDisabled={
             !!c.pendingTaskId ||
             c.isSessionArchived ||
             c.isAgentArchived ||
             c.isAgentAccessRevoked ||
+            c.isChatViewOnly ||
             !c.isAgentRuntimeBound ||
             c.noAgent
           }
@@ -354,7 +356,11 @@ export function ChatPage() {
         />
       )}
 
-      {c.isAgentAccessRevoked ? (
+      {c.isChatViewOnly ? (
+        <p className="px-4 py-2 text-caption text-muted-foreground">
+          {t(($) => $.sharing.view_only)}
+        </p>
+      ) : c.isAgentAccessRevoked ? (
         <AgentAccessRevokedBanner agentName={c.activeAgent?.name} />
       ) : c.noAgent ? (
         <NoAgentBanner />
@@ -393,6 +399,7 @@ export function ChatPage() {
           c.isSessionArchived ||
           c.isAgentArchived ||
           c.isAgentAccessRevoked ||
+          c.isChatViewOnly ||
           !c.isAgentRuntimeBound
         }
         noAgent={c.noAgent}

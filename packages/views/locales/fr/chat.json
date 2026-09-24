@@ -268,7 +268,10 @@
     "archive": "Archiver",
     "unarchive": "Désarchiver",
     "archived_title": "Archivées",
-    "row_actions_aria": "Actions de discussion"
+    "row_actions_aria": "Actions de discussion",
+    "edit_access": "Modifier l'accès",
+    "private_tag": "Privé",
+    "extra_tag": "Personnes en plus"
   },
   "header": {
     "view_profile": "Voir le profil de l'agent",
@@ -290,5 +293,34 @@
     "used": "{{percent}} %",
     "resets": "réinitialisation {{when}}",
     "updated": "mis à jour {{when}}"
+  },
+  "sharing": {
+    "title": "Modifier l'accès",
+    "follow": "Suivre le projet",
+    "follow_hint_bound": "Les membres de {{projects}} peuvent voir et écrire",
+    "follow_hint_unbound": "Liez un projet avant de choisir ceci",
+    "extra": "Suivre le projet + personnes en plus",
+    "extra_hint": "Les membres du projet, plus les personnes ci-dessous",
+    "private": "Privé",
+    "private_hint": "Vous seul pouvez le voir. Il disparaît des autres listes",
+    "view": "Lecture seule",
+    "speak": "Peut écrire",
+    "add": "Ajouter une personne…",
+    "remove": "Retirer",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "note_bound": "Le passer en privé le retire tout de suite des autres listes. Vous pouvez revenir en arrière.",
+    "note_unbound": "Une discussion sans projet reste privée.",
+    "view_only": "Vous pouvez lire cette discussion, pas y écrire.",
+    "header_private": "Vous seul",
+    "header_project": "Les membres du projet peuvent voir et écrire",
+    "header_extra": "Membres du projet, plus des personnes en plus",
+    "search": "Chercher une personne…"
+  },
+  "notice": {
+    "title": "Certaines discussions sont visibles par les membres du projet",
+    "body": "Vous avez {{count}} discussions que les membres du projet peuvent maintenant voir.",
+    "make_private": "Rendre la sélection privée",
+    "dismiss": "Compris"
   }
 }

@@ -4370,6 +4370,38 @@ export class ApiClient {
     });
   }
 
+  async getChatAccess(sessionId: string): Promise<import("../types").ChatAccessSettings> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/access`);
+  }
+
+  async putChatAccess(
+    sessionId: string,
+    body: {
+      mode: "project" | "extra" | "private";
+      shares?: { user_id: string; access: "view" | "speak" }[];
+    },
+  ): Promise<import("../types").ChatAccessSettings> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/access`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getChatVisibilityNotice(): Promise<import("../types").ChatVisibilityNotice> {
+    return this.fetch("/api/chat/visibility-notice");
+  }
+
+  async dismissChatVisibilityNotice(): Promise<void> {
+    await this.fetch("/api/chat/visibility-notice/dismiss", { method: "POST" });
+  }
+
+  async makeChatSessionsPrivate(sessionIds: string[]): Promise<{ updated: number }> {
+    return this.fetch("/api/chat/sessions/make-private", {
+      method: "POST",
+      body: JSON.stringify({ session_ids: sessionIds }),
+    });
+  }
+
   async getChatSession(id: string): Promise<ChatSession> {
     const raw: unknown = await this.fetch(`/api/chat/sessions/${id}`);
     return parseWithFallback(raw, ChatSessionSchema, EMPTY_CHAT_SESSION, {

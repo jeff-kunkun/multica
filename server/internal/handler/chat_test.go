@@ -910,6 +910,10 @@ func TestListChatSessions_ArchivedSessionReportsZeroUnread(t *testing.T) {
 		`UPDATE chat_session SET last_read_at = 'epoch' WHERE id = $1`, sessionID); err != nil {
 		t.Fatalf("reset last_read_at: %v", err)
 	}
+	if _, err := testPool.Exec(ctx,
+		`UPDATE chat_session_read SET last_read_at = 'epoch' WHERE chat_session_id = $1`, sessionID); err != nil {
+		t.Fatalf("reset read cursor: %v", err)
+	}
 
 	unreadOf := func() (int, bool) {
 		t.Helper()

@@ -201,6 +201,7 @@ export function applyChatMessageToCache(
       content: payload.content ?? "",
       task_id: payload.task_id ?? null,
       created_at: payload.created_at ?? new Date().toISOString(),
+      sender_user_id: payload.sender_user_id,
     });
   }
   invalidateChatMessageQueries(qc, sessionId);
@@ -1040,7 +1041,7 @@ export function useRealtimeSync(
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
-      "chat:session_created", "chat:session_deleted", "chat:session_updated",
+      "chat:session_created", "chat:session_deleted", "chat:session_updated", "chat:session_invalidated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -1813,6 +1814,16 @@ export function useRealtimeSync(
     // handler keeps OTHER tabs/devices in sync and also clears the active
     // session pointer so a deleted session doesn't keep the chat window
     // pointed at vanished messages.
+    const unsubChatSessionInvalidated = ws.on("chat:session_invalidated", (p) => {
+      const payload = p as { chat_session_id: string };
+      const id = getCurrentWsId();
+      if (id) {
+        invalidateSessionLists();
+        qc.invalidateQueries({ queryKey: chatKeys.session(id, payload.chat_session_id) });
+      }
+      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+    });
+
     const unsubChatSessionDeleted = ws.on("chat:session_deleted", (p) => {
       const payload = p as { chat_session_id: string };
       chatWsLogger.info("chat:session_deleted (global)", payload);
@@ -1880,6 +1891,7 @@ export function useRealtimeSync(
       unsubTaskFailed();
       unsubChatSessionRead();
       unsubChatSessionCreated();
+      unsubChatSessionInvalidated();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
       if (taskMessageFlushTimer) clearTimeout(taskMessageFlushTimer);
