@@ -780,6 +780,14 @@ export interface Agent {
    */
   work_enabled?: boolean;
   /**
+   * Doorbell (kun fork, DENE-808). When on, a member who is not allowed to
+   * invoke this agent does not get a plain refusal: their @mention or
+   * assignment becomes a pending access request the owner approves or
+   * declines from the inbox. Default off; only the owner can flip it. Older
+   * backends omit the field; treat `undefined` as off.
+   */
+  doorbell_enabled?: boolean;
+  /**
    * Display-only model lineup (kun fork, DENE-200): the default model, the
    * ordered fallback chain and models borrowable for batch work. Never used
    * for routing. Older servers omit it; treat undefined as [].
@@ -1033,6 +1041,8 @@ export interface UpdateAgentRequest {
    * stops the seat taking new work without archiving it.
    */
   work_enabled?: boolean;
+  /** Owner-only doorbell switch (DENE-808). Omitted preserves the saved value. */
+  doorbell_enabled?: boolean;
   /**
    * Re-parents this agent (DENE-301). Tri-state semantics:
    *   - field omitted → no change
@@ -1767,4 +1777,84 @@ export interface RuntimeProviderPresetsResult {
   presets: RuntimeProviderPreset[];
   active: RuntimeProviderPresetActive | null;
   clearedActive: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Agent borrowing: doorbell requests + timed access passes (kun fork, DENE-808)
+// ---------------------------------------------------------------------------
+
+export type AgentAccessRequestStatus = "pending" | "approved" | "declined" | "expired";
+export type AgentAccessTriggerKind = "mention" | "assign";
+
+/** One member's ask to use an agent they cannot normally invoke. */
+export interface AgentAccessRequest {
+  id: string;
+  workspace_id: string;
+  agent_id: string;
+  agent_name: string;
+  requester_id: string;
+  requester_name: string;
+  requester_email: string;
+  requester_avatar_url: string | null;
+  issue_id: string | null;
+  issue_number: number | null;
+  issue_title: string | null;
+  comment_id: string | null;
+  trigger_kind: AgentAccessTriggerKind;
+  summary: string;
+  status: AgentAccessRequestStatus;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface AgentAccessRequestList {
+  /** Requests waiting on agents the caller owns. */
+  incoming: AgentAccessRequest[];
+  /** Requests the caller raised. */
+  outgoing: AgentAccessRequest[];
+}
+
+/** A time-limited grant letting one member invoke one agent. */
+export interface AgentAccessPass {
+  id: string;
+  workspace_id: string;
+  agent_id: string;
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  user_avatar_url: string | null;
+  granted_by: string;
+  expires_at: string;
+  revoked_at: string | null;
+  request_id: string | null;
+  created_at: string;
+  active: boolean;
+}
+
+export interface ApproveAgentAccessRequestBody {
+  /** Absolute expiry for a pass issued alongside the approval. */
+  pass_expires_at?: string;
+  /** Relative alternative to `pass_expires_at`. */
+  pass_duration_minutes?: number;
+}
+
+/** Server-side admission result of replaying the approved trigger. */
+export interface AgentAccessReplayOutcome {
+  status: "queued" | "coalesced" | "deferred" | "blocked" | string;
+  reason_code: string;
+  task_id?: string | null;
+}
+
+export interface ApproveAgentAccessRequestResponse {
+  request: AgentAccessRequest;
+  pass: AgentAccessPass | null;
+  replay: AgentAccessReplayOutcome | null;
+}
+
+export interface CreateAgentAccessPassRequest {
+  user_id: string;
+  expires_at?: string;
+  duration_minutes?: number;
 }

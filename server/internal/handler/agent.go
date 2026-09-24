@@ -171,8 +171,16 @@ type AgentResponse struct {
 	// specialisations, and does not cancel running tasks — it is simply
 	// not selected for automatic dispatch, not woken by assignment, and
 	// does not claim new runs.
-	WorkEnabled bool   `json:"work_enabled"`
-	Model       string `json:"model"`
+	WorkEnabled bool `json:"work_enabled"`
+	// DoorbellEnabled (DENE-808): when true, a member who may not invoke this
+	// agent rings a doorbell instead of being refused — the owner gets an
+	// approval request in their inbox, and the agent is listed to members
+	// so they can @ it. Default false: an owner opts in per agent, so the
+	// private-agent guarantees (not listed, not enumerable) hold untouched
+	// until they do. When false, the refusal stays a plain
+	// invocation_not_allowed.
+	DoorbellEnabled bool   `json:"doorbell_enabled"`
+	Model           string `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
@@ -309,6 +317,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks:       a.MaxConcurrentTasks,
 		AutoRetryEnabled:         a.AutoRetryEnabled,
 		WorkEnabled:              a.WorkEnabled,
+		DoorbellEnabled:          a.DoorbellEnabled,
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
@@ -1571,11 +1580,15 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
 		return
 	}
+	var passAgents map[string]struct{}
+	if actorType == "member" {
+		passAgents = h.activePassAgentIDs(r.Context(), workspaceID, actorID)
+	}
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
 		targets := targetsByAgent[uuidToString(a.ID)]
 		if actorType == "member" {
-			if !memberAllowedToViewAgent(a, targets, actorID, member.Role) {
+			if !memberAllowedToViewAgentWithPasses(a, targets, actorID, member.Role, passAgents) {
 				continue
 			}
 		}
@@ -2301,6 +2314,9 @@ type UpdateAgentRequest struct {
 	// WorkEnabled is omitted-preserves / present-sets, same contract as
 	// AutoRetryEnabled (DENE-714).
 	WorkEnabled *bool `json:"work_enabled"`
+	// DoorbellEnabled (DENE-808): omitted-preserves / present-sets. Only the
+	// agent owner may change it.
+	DoorbellEnabled *bool `json:"doorbell_enabled"`
 	// ParentAgentID re-parents this agent (DENE-301): a non-empty value attaches
 	// it to a base role, and an explicitly empty string detaches it. The field
 	// is a tri-state like thinking_level — omitted preserves, `""` clears, a
@@ -2652,6 +2668,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.WorkEnabled != nil {
 		params.WorkEnabled = pgtype.Bool{Bool: *req.WorkEnabled, Valid: true}
+	}
+	if req.DoorbellEnabled != nil {
+		if uuidToString(existing.OwnerID) != requestUserID(r) && existing.DoorbellEnabled != *req.DoorbellEnabled {
+			writeError(w, http.StatusForbidden, "only the agent owner can change the doorbell setting")
+			return
+		}
+		params.DoorbellEnabled = pgtype.Bool{Bool: *req.DoorbellEnabled, Valid: true}
 	}
 	if req.AvatarURL != nil {
 		avatarURL, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, existing.AvatarUrl.String)

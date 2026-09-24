@@ -1829,6 +1829,7 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   // Reversible seat gate (DENE-714). Same omit/malformed contract as
   // auto_retry_enabled: only an explicit false is off.
   work_enabled: z.boolean().optional().catch(undefined),
+  doorbell_enabled: z.boolean().optional().catch(undefined),
 }).loose() as z.ZodType<Agent>;
 
 // Malformed ROWS are dropped individually, the same way a blocked mention is
