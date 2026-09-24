@@ -1737,7 +1737,7 @@ type WorkThread struct {
 	ContextGeneration     int32              `json:"context_generation"`
 	ContextMessageLimit   int32              `json:"context_message_limit"`
 	ContextTokenBudget    int32              `json:"context_token_budget"`
-	LastSessionID         pgtype.UUID        `json:"last_session_id"`
+	LastSessionID         pgtype.Text        `json:"last_session_id"`
 	LastTurnID            pgtype.UUID        `json:"last_turn_id"`
 	ContinuityBreakReason pgtype.Text        `json:"continuity_break_reason"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`

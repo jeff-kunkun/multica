@@ -229,13 +229,16 @@ func (h *Handler) continueWorkThread(r *http.Request, issueID pgtype.UUID) (db.A
 type workThreadRow struct {
 	ThreadID, AgentID, IssueID, ChatSessionID pgtype.UUID
 	Generation, MessageLimit, TokenBudget     int32
-	LastSessionID, LastTurnID                 pgtype.UUID
+	LastTurnID                                pgtype.UUID
+	LastSessionID                             pgtype.Text
 	BreakReason                               pgtype.Text
 	UpdatedAt                                 time.Time
-	CurrentID, CurrentSessionID               pgtype.UUID
+	CurrentID                                 pgtype.UUID
+	CurrentSessionID                          pgtype.Text
 	CurrentStatus                             pgtype.Text
 	CurrentStartedAt                          pgtype.Timestamptz
-	LastID, LastTaskSessionID                 pgtype.UUID
+	LastID                                    pgtype.UUID
+	LastTaskSessionID                         pgtype.Text
 	LastStatus                                pgtype.Text
 	LastCompletedAt                           pgtype.Timestamptz
 }
@@ -356,23 +359,23 @@ func (h *Handler) writeWorkThreadSnapshot(w http.ResponseWriter, r *http.Request
 		ThreadID: uuidToString(row.ThreadID), AgentID: uuidToString(row.AgentID),
 		IssueID: uuidToString(row.IssueID), ChatSessionID: uuidToString(row.ChatSessionID),
 		Continuous: row.Generation > 0 || row.LastSessionID.Valid || row.LastTurnID.Valid,
-		SessionID:  uuidToString(row.CurrentSessionID), QueuedInputs: []WorkThreadInput{},
+		SessionID:  row.CurrentSessionID.String, QueuedInputs: []WorkThreadInput{},
 		Context: WorkThreadContext{Generation: row.Generation, MessageLimit: row.MessageLimit, TokenBudget: row.TokenBudget,
 			SummaryAvailable: false, BreakReason: row.BreakReason.String},
 		UpdatedAt: row.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		State:     "idle",
 	}
 	if !snapshot.CurrentTurnExists() && row.LastTurnID.Valid {
-		snapshot.SessionID = uuidToString(row.LastSessionID)
+		snapshot.SessionID = row.LastSessionID.String
 	}
 	if row.CurrentID.Valid {
 		snapshot.State = "active"
 		snapshot.CurrentTurn = &WorkThreadTurn{ID: uuidToString(row.CurrentID), Status: row.CurrentStatus.String,
-			SessionID: uuidToString(row.CurrentSessionID), StartedAt: timestampToString(row.CurrentStartedAt)}
+			SessionID: row.CurrentSessionID.String, StartedAt: timestampToString(row.CurrentStartedAt)}
 	}
 	if row.LastID.Valid {
 		snapshot.LastTurn = &WorkThreadTurn{ID: uuidToString(row.LastID), Status: row.LastStatus.String,
-			SessionID: uuidToString(row.LastTaskSessionID), StartedAt: timestampToString(row.LastCompletedAt)}
+			SessionID: row.LastTaskSessionID.String, StartedAt: timestampToString(row.LastCompletedAt)}
 		if snapshot.State == "idle" {
 			switch row.LastStatus.String {
 			case "cancelled", "failed":

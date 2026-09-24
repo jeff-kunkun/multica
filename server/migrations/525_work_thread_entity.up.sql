@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS work_thread (
   context_generation INT NOT NULL DEFAULT 0,
   context_message_limit INT NOT NULL DEFAULT 50,
   context_token_budget INT NOT NULL DEFAULT 12000,
-  last_session_id UUID,
+  last_session_id TEXT,
   last_turn_id UUID,
   continuity_break_reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
