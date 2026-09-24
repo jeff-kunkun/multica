@@ -38,6 +38,7 @@
       "hours": "{{count}}時間",
       "days": "{{count}}日"
     },
+    "unread_count_other": "{{count}} 件の未読",
     "archived_title": "アーカイブ済み",
     "archived_empty": "アーカイブされた通知はありません",
     "unarchive_tooltip": "アーカイブ解除",

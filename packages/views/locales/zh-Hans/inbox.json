@@ -38,6 +38,7 @@
       "hours": "{{count}} 小时",
       "days": "{{count}} 天"
     },
+    "unread_count_other": "{{count}} 条未读",
     "archived_title": "已归档",
     "archived_empty": "暂无已归档通知",
     "unarchive_tooltip": "取消归档",
