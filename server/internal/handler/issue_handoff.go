@@ -1,14 +1,18 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -58,12 +62,24 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "routing is unavailable")
 			return
 		}
+		// A reviewer handoff is a real status transition. Go through UpdateIssue
+		// so the review delivery gate and acceptance-seat guard run with the
+		// request's actor identity; calling Route alone bypasses both guards.
+		if target == "reviewer" && issue.Status != "in_review" {
+			if !h.handoffSetInReview(w, r, issue) {
+				return
+			}
+			issue, ok = h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+			if !ok {
+				return
+			}
+		}
 		out, err := h.Routing.Route(r.Context(), uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		resp := HandoffIssueResponse{Target: target, TargetType: "seat", Routed: out.ExecutorWritten != nil || !out.ReviewerWritten.Empty(), Reason: out.Reason}
+		resp := HandoffIssueResponse{Target: target, TargetType: target, Routed: out.ExecutorWritten != nil || !out.ReviewerWritten.Empty() || out.Mentioned, RunCreated: (target == "reviewer" && out.Action == routing.ActionHandedOff) || (target == "dispatcher" && out.ExecutorWritten != nil), Reason: out.Reason}
 		if out.ReviewerWritten.ID != "" {
 			resp.TargetID = out.ReviewerWritten.ID
 			resp.TargetName = out.ReviewerWritten.Name
@@ -88,24 +104,10 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := HandoffIssueResponse{Target: target, TargetType: "agent", TargetID: uuidToString(agent.ID), TargetName: agent.Name}
-	pending, err := h.Queries.HasPendingTaskForIssueAndAgent(r.Context(), db.HasPendingTaskForIssueAndAgentParams{IssueID: issue.ID, AgentID: agent.ID, HeadSha: pgtype.Text{}})
+	pending, err := h.Queries.HasActiveTaskForIssueAndAgent(r.Context(), db.HasActiveTaskForIssueAndAgentParams{IssueID: issue.ID, AgentID: agent.ID})
 	if err != nil {
 		writeError(w, 500, "check existing run failed")
 		return
-	}
-	comments, err := h.Queries.ListCommentsForIssue(r.Context(), db.ListCommentsForIssueParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, Limit: 500})
-	if err != nil {
-		writeError(w, 500, "check existing handoff failed")
-		return
-	}
-	mention := "mention://agent/" + uuidToString(agent.ID)
-	for _, c := range comments {
-		if strings.Contains(c.Content, mention) {
-			resp.Duplicate = true
-			resp.Reason = "agent already mentioned"
-			writeJSON(w, http.StatusOK, resp)
-			return
-		}
 	}
 	if pending {
 		resp.Duplicate = true
@@ -139,4 +141,26 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Routed, resp.RunCreated = true, true
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// handoffSetInReview reuses the canonical issue update path so reviewer
+// handoffs cannot skip the PR/no-code gate or acceptance-seat guard.
+func (h *Handler) handoffSetInReview(w http.ResponseWriter, r *http.Request, issue db.Issue) bool {
+	req := r.Clone(r.Context())
+	req.Method = http.MethodPut
+	req.Body = io.NopCloser(bytes.NewReader([]byte(`{"status":"in_review"}`)))
+	req.ContentLength = int64(len(`{"status":"in_review"}`))
+	rec := httptest.NewRecorder()
+	h.UpdateIssue(rec, req)
+	if rec.Code >= http.StatusOK && rec.Code < http.StatusMultipleChoices {
+		return true
+	}
+	for key, values := range rec.Header() {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.WriteHeader(rec.Code)
+	_, _ = io.Copy(w, rec.Result().Body)
+	return false
 }

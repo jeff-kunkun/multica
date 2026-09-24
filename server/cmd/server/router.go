@@ -2030,6 +2030,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// and with the outcome in the response — `multica issue
 					// route` is this endpoint.
 					r.Post("/route", h.RouteIssue)
+					r.Post("/handoff", h.HandoffIssue)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
 					r.Get("/task-runs", h.ListTasksByIssue)
