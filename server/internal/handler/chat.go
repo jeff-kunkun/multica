@@ -238,7 +238,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
-			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.PinnedAt, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID))
+			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID))
 		}
 	} else {
 		rows, err := h.Queries.ListChatSessionsByCreator(r.Context(), db.ListChatSessionsByCreatorParams{
@@ -257,7 +257,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
-			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.PinnedAt, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID))
+			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID))
 		}
 	}
 	if err := h.hydrateChatSessionChannelMetadata(r.Context(), resp); err != nil {
@@ -586,10 +586,11 @@ type SetChatSessionPinnedRequest struct {
 	Pinned bool `json:"pinned"`
 }
 
-// SetChatSessionPinned pins or unpins a chat so it sticks to the top of the
-// caller's conversation list. Pin state is per-session and, since sessions are
-// per-creator, inherently per-user. It never bumps updated_at (see the SQL) so
-// an unpinned chat does not jump the activity-sorted list.
+// SetChatSessionPinned pins or unpins a chat for the caller. The pin is the
+// caller's own sidebar pin row (DENE-866), so anyone who can see the chat —
+// not only its creator — may pin it, and doing so changes nothing for the
+// other people it is shared with. It never touches the session row, so an
+// unpinned chat does not jump the activity-sorted list.
 func (h *Handler) SetChatSessionPinned(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -608,34 +609,18 @@ func (h *Handler) SetChatSessionPinned(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !denyUnlessChatCreator(w, session, userID) {
+
+	if err := h.setChatPin(r.Context(), workspaceID, userID, session, req.Pinned); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update chat pin")
 		return
 	}
 
-	updated, err := h.Queries.SetChatSessionPinned(r.Context(), db.SetChatSessionPinnedParams{
-		ID:     session.ID,
-		Pinned: req.Pinned,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update chat session")
-		return
-	}
-
-	resolvedSessionID := uuidToString(updated.ID)
-	pinned := updated.PinnedAt.Valid
-	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
-		ChatSessionID: resolvedSessionID,
-		Title:         updated.Title,
-		Pinned:        &pinned,
-		UpdatedAt:     timestampToString(updated.UpdatedAt),
-	})
-
-	responses := []ChatSessionResponse{chatSessionToResponse(updated)}
+	responses := []ChatSessionResponse{chatSessionToResponse(session)}
 	if err := h.hydrateChatSessionProjectIDs(r.Context(), responses); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load chat session projects")
 		return
 	}
-	if err := h.decorateChatSession(r.Context(), userID, updated, &responses[0]); err != nil {
+	if err := h.decorateChatSession(r.Context(), userID, session, &responses[0]); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load chat access")
 		return
 	}
@@ -961,6 +946,15 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// pinned_item has no FK onto chat_session, so every viewer's sidebar pin
+	// for this chat is pruned here (DENE-866).
+	if err := qtx.DeletePinnedItemsByItem(r.Context(), db.DeletePinnedItemsByItemParams{
+		ItemType: pinnedItemTypeChat,
+		ItemID:   session.ID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session pins")
+		return
+	}
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,
 		WorkspaceID: session.WorkspaceID,
@@ -2422,7 +2416,8 @@ type ChatLastMessage struct {
 func chatSessionListResponse(
 	id, workspaceID, agentID, creatorID, projectID pgtype.UUID,
 	title, status, visibility, access, agentName string,
-	pinnedAt, projectNudgeDismissedAt, createdAt, updatedAt pgtype.Timestamptz,
+	pinned bool,
+	projectNudgeDismissedAt, createdAt, updatedAt pgtype.Timestamptz,
 	unreadCount, extraCount int32,
 	agentRuntimeBound, agentArchived bool,
 	lastAt pgtype.Timestamptz, lastContent, lastRole string, lastFailure pgtype.Text, lastKind string, lastSender pgtype.UUID,
@@ -2438,7 +2433,7 @@ func chatSessionListResponse(
 		HasUnread:             unreadCount > 0,
 		UnreadCount:           int(unreadCount),
 		LastMessage:           buildChatLastMessage(lastAt, lastContent, lastRole, lastFailure, lastKind, lastSender),
-		Pinned:                pinnedAt.Valid,
+		Pinned:                pinned,
 		Visibility:            visibility,
 		Access:                access,
 		ExtraCount:            int(extraCount),
@@ -2506,7 +2501,7 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		ProjectID:             uuidToPtr(s.ProjectID),
 		Title:                 s.Title,
 		Status:                s.Status,
-		Pinned:                s.PinnedAt.Valid,
+		// Pinned is per viewer (DENE-866); decorateChatSession fills it in.
 		Visibility:            s.Visibility,
 		ProjectNudgeDismissed: s.ProjectNudgeDismissedAt.Valid,
 		CreatedAt:             timestampToString(s.CreatedAt),
