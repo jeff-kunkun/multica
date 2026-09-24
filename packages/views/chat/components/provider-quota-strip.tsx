@@ -17,6 +17,10 @@ const LABELS: Record<string, string> = {
  * The three provider quotas under the chat composer. Numbers come from the
  * server snapshot. A missing or stale reading stays "unknown" — this strip
  * does not guess a percentage or decide that a seat is dead.
+ *
+ * Hidden below `md`: on phones the global ProviderStatusBar already shows
+ * quota right under this strip, and two stacked quota readouts crowd the
+ * composer.
  */
 export function ProviderQuotaStrip() {
   const workspace = useCurrentWorkspace();
@@ -41,7 +45,7 @@ export function ProviderQuotaStrip() {
 
   return (
     <div
-      className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-micro text-muted-foreground"
+      className="mt-1.5 hidden flex-wrap items-center gap-x-3 gap-y-1 px-1 text-micro text-muted-foreground md:flex"
       aria-label={t(($) => $.provider_quota.label)}
     >
       {rows.map((quota) => (
