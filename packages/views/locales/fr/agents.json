@@ -218,6 +218,8 @@
     "section_access_hint": "Contrôlez qui peut exécuter cet agent et utiliser les capacités qui lui sont connectées.",
     "prop_work_enabled": "Accepter du travail",
     "prop_work_enabled_hint": "Désactivé, ce poste reste dans la liste mais n'est pas retenu pour l'attribution automatique, n'est pas réveillé par une assignation et ne prend pas de nouvelles exécutions. Les exécutions en cours ne sont pas interrompues.",
+    "prop_work_pause_balance": "Mis en pause par la plateforme : le solde du compte est épuisé (402) et ne reviendra pas seul. Rechargez ou changez de compte, puis réactivez ce poste. Les tickets déjà confiés à d'autres postes y restent.",
+    "prop_work_pause_quota": "Mis en pause par la plateforme : le quota du modèle est épuisé. Le poste se réactive seul à la remise à zéro du quota.",
     "prop_auto_retry": "Nouvelle tentative automatique",
     "prop_auto_retry_hint": "Désactivé, les échecs tels qu'une limite de capacité ou une coupure réseau remontent immédiatement, sans nouvelle tentative. Vous pouvez toujours relancer une exécution vous-même.",
     "prop_switchable_models": "Gamme de modèles",

@@ -316,7 +316,7 @@ func TestNeedsHumanDoesNotEnqueue(t *testing.T) {
 
 func TestFailedChildIsDueInsideTheQuietWindow(t *testing.T) {
 	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
-	rec := FailureWake(now, "下游运行失败，到点重新叫醒执行人")
+	rec := FailureWake(now, "下游运行失败，到点重新叫醒执行人", 1)
 	if !rec.Structured() {
 		t.Fatal("failure wake must be a structured block")
 	}
@@ -340,5 +340,34 @@ func TestDownstreamNoticeDoesNotAskForRedispatch(t *testing.T) {
 	}
 	if !strings.Contains(got, "不用你去重派") || !strings.Contains(got, "DENE-806") {
 		t.Fatalf("notice = %s", got)
+	}
+}
+
+// DENE-870: a child that keeps failing the same way is not re-woken every
+// minute; the clock moves out with each failure in a row.
+func TestFailureWakeBacksOff(t *testing.T) {
+	now := time.Date(2026, 9, 24, 13, 48, 0, 0, time.UTC)
+	cases := []struct {
+		failures int
+		want     time.Duration
+	}{
+		{0, 0}, {1, 0}, {2, 5 * time.Minute}, {3, 15 * time.Minute}, {4, time.Hour}, {5, 4 * time.Hour}, {40, 4 * time.Hour},
+	}
+	for _, c := range cases {
+		rec := FailureWake(now, "", c.failures)
+		if !rec.HasWakeAt || !rec.WakeAt.Equal(now.Add(c.want)) {
+			t.Fatalf("failures=%d wake_at=%v, want %v", c.failures, rec.WakeAt, now.Add(c.want))
+		}
+	}
+	// A backed-off clock is structured, so the patrol holds instead of
+	// treating the block as unexplained.
+	rec := FailureWake(now, "", 3)
+	d := DecidePatrol(PatrolInput{Now: now.Add(time.Minute), Status: "blocked", Record: rec, Quiet: time.Hour})
+	if d.Action == ActionWake {
+		t.Fatalf("patrol woke a backed-off child early: %+v", d)
+	}
+	d = DecidePatrol(PatrolInput{Now: now.Add(16 * time.Minute), Status: "blocked", Record: rec, Quiet: time.Hour})
+	if d.Action != ActionWake {
+		t.Fatalf("patrol did not wake once the backoff elapsed: %+v", d)
 	}
 }

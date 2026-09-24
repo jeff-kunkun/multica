@@ -241,6 +241,8 @@
     "prop_concurrency": "并发",
     "prop_work_enabled": "承接工作",
     "prop_work_enabled_hint": "关闭后，这个席位仍在列表里，但不会被自动选派、指派也不会唤醒，也不会领取新的运行。已经在跑的运行不会中断。",
+    "prop_work_pause_balance": "平台已暂停：账号余额用完了（402），不会自己恢复。充值或换账号后，把这里重新打开即可；已经转给别的席位的票不会拉回来。",
+    "prop_work_pause_quota": "平台已暂停：模型额度用完了，额度重置后会自动恢复。",
     "prop_auto_retry": "自动重试",
     "prop_auto_retry_hint": "关闭后，容量不足、网络抖动等失败会直接报出来，不再由平台自动重试。仍可手动重试运行。",
     "prop_switchable_models": "可换档",
