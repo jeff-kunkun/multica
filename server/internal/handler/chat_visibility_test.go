@@ -271,3 +271,77 @@ func TestChatProjectSharing(t *testing.T) {
 		t.Fatalf("B direct get after private: %d %s, want 404", bGetW.Code, bGetW.Body.String())
 	}
 }
+
+// TestBindingUnboundChatFollowsProject: an unbound chat is private. Binding
+// the first project promotes it to project visibility, so a project member
+// can see it and speak. Creating the chat already bound does the same thing.
+func TestBindingUnboundChatFollowsProject(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "ChatBindAgent", []byte("[]"))
+	bID := insertChatPerson(t, "chat-bind-b", "member")
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, visibility, created_by)
+		VALUES ($1, 'Chat bind project', 'project', $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&projectID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = $1`, projectID)
+		testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO project_member (workspace_id, project_id, member_id) VALUES ($1, $2, $3)
+	`, testWorkspaceID, projectID, bID); err != nil {
+		t.Fatalf("add project member: %v", err)
+	}
+
+	createReq := chatAs(t, testUserID, newRequest("POST", "/api/chat/sessions", map[string]any{
+		"agent_id": agentID,
+		"title":    "bind later",
+	}))
+	createW := httptest.NewRecorder()
+	testHandler.CreateChatSession(createW, createReq)
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("create chat: %d %s", createW.Code, createW.Body.String())
+	}
+	var created ChatSessionResponse
+	if err := json.Unmarshal(createW.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if created.Visibility != "private" {
+		t.Fatalf("unbound visibility = %q, want private", created.Visibility)
+	}
+	if _, ok := chatListed(listChatsAs(t, bID), created.ID); ok {
+		t.Fatal("B can see an unbound chat")
+	}
+
+	patchReq := chatAs(t, testUserID, newRequest("PATCH", "/api/chat/sessions/"+created.ID, map[string]any{
+		"project_id": projectID,
+	}))
+	patchReq = withURLParam(patchReq, "sessionId", created.ID)
+	patchW := httptest.NewRecorder()
+	testHandler.UpdateChatSession(patchW, patchReq)
+	if patchW.Code != http.StatusOK {
+		t.Fatalf("bind project: %d %s", patchW.Code, patchW.Body.String())
+	}
+	var bound ChatSessionResponse
+	if err := json.Unmarshal(patchW.Body.Bytes(), &bound); err != nil {
+		t.Fatalf("decode bind: %v", err)
+	}
+	if bound.Visibility != "project" {
+		t.Fatalf("bound visibility = %q, want project", bound.Visibility)
+	}
+	bSession, ok := chatListed(listChatsAs(t, bID), created.ID)
+	if !ok {
+		t.Fatal("project member B cannot see the chat after it was bound")
+	}
+	if bSession.Access != "speak" {
+		t.Fatalf("B access = %q, want speak", bSession.Access)
+	}
+}

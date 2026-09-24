@@ -559,6 +559,18 @@ func (h *Handler) replaceChatSessionProjects(ctx context.Context, session db.Cha
 	if err != nil {
 		return db.ChatSession{}, err
 	}
+	// A chat with no project is private. The first bind is what makes it
+	// follow that project, matching a chat that was created already bound.
+	// A later project change leaves an explicit private choice alone.
+	if !session.ProjectID.Valid && len(projectIDs) > 0 && session.Visibility == "private" {
+		updated, err = qtx.SetChatSessionVisibility(ctx, db.SetChatSessionVisibilityParams{
+			ID:         updated.ID,
+			Visibility: "project",
+		})
+		if err != nil {
+			return db.ChatSession{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return db.ChatSession{}, err
 	}
