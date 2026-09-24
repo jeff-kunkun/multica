@@ -239,6 +239,9 @@ func buildIssueContextBlock(task Task) string {
 	if task.IssueAssigneeType != "" || task.IssueAssigneeID != "" {
 		fmt.Fprintf(&b, "Assignee: %s %s\n", task.IssueAssigneeType, task.IssueAssigneeID)
 	}
+	// Ahead of the description: the snapshot is cut from the end, and a long
+	// plan must not be what pushes the division of labour out of it.
+	writeCoordinatorRole(&b, task.IssueSubIssues)
 	if task.IssueDescription != "" {
 		fmt.Fprintf(&b, "Description:\n%s\n", task.IssueDescription)
 	}
@@ -285,6 +288,37 @@ func buildIssueContextBlock(task Task) string {
 		cut = cut[:len(cut)-size]
 	}
 	return cut + marker
+}
+
+// writeCoordinatorRole states the division of labour when the task issue is a
+// parent (DENE-812): the work lives in the sub-issues, each held by its own
+// executor, and this run supervises. Without it a woken parent reads the whole
+// plan in its description and does every sub-issue's work itself, leaving the
+// sub-issues it was split into as empty bookkeeping.
+func writeCoordinatorRole(b *strings.Builder, subs []SubIssueRef) {
+	if len(subs) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "Coordinator role: this issue is the parent of %d sub-issue(s). The work lives in the sub-issues, each held by its own executor and moved forward there; this issue supervises. On this issue you: keep every open sub-issue held (an unassigned one gets an executor via `multica issue route <id>` or `multica issue assign`); when a stage closes, promote the next stage's sub-issues from backlog to todo; unblock or reassign a stuck sub-issue; and once the whole tree is terminal, check the pieces fit and move this issue to acceptance. Do not implement a sub-issue's deliverable here, and do not finish a sub-issue for its executor; new work that fits no sub-issue becomes a new sub-issue.\n", len(subs))
+	b.WriteString("Sub-issues:\n")
+	for _, s := range subs {
+		name := s.Identifier
+		if name == "" {
+			name = s.ID
+		}
+		holder := "UNASSIGNED"
+		if s.AssigneeType != "" {
+			holder = s.AssigneeType
+			if s.AssigneeName != "" {
+				holder += " " + s.AssigneeName
+			}
+		}
+		stage := ""
+		if s.Stage > 0 {
+			stage = fmt.Sprintf(", stage %d", s.Stage)
+		}
+		fmt.Fprintf(b, "- %s %q (%s%s, %s)\n", name, s.Title, s.Status, stage, holder)
+	}
 }
 
 // buildWorktreeReplayConflictBlock tells the turn that its own working tree

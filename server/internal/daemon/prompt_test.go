@@ -2347,3 +2347,26 @@ func TestBuildPromptIssueContextSnapshotAndBudget(t *testing.T) {
 		t.Fatal("bounded issue context must remain valid UTF-8")
 	}
 }
+
+// DENE-812: a parent's run is told it coordinates, and sees who holds each
+// sub-issue — an unassigned one included — even under a long description.
+func TestBuildPromptParentIssueCarriesCoordinatorRole(t *testing.T) {
+	subs := []SubIssueRef{
+		{ID: "c1", Identifier: "DENE-2", Title: "后端", Status: "todo", Stage: 1, AssigneeType: "agent", AssigneeName: "孙悟天"},
+		{ID: "c2", Identifier: "DENE-3", Title: "前端", Status: "backlog", Stage: 2},
+	}
+	out := BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "Plan", IssueDescription: strings.Repeat("x", maxIssueContextBytes*2), IssueContextGeneratedAt: "now", IssueSubIssues: subs}, "claude")
+	for _, want := range []string{
+		"Coordinator role: this issue is the parent of 2 sub-issue(s)",
+		"Do not implement a sub-issue's deliverable here",
+		`- DENE-2 "后端" (todo, stage 1, agent 孙悟天)`,
+		`- DENE-3 "前端" (backlog, stage 2, UNASSIGNED)`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("prompt missing %q", want)
+		}
+	}
+	if strings.Contains(BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "Leaf", IssueContextGeneratedAt: "now"}, "claude"), "Coordinator role") {
+		t.Fatal("a leaf issue must not be told it coordinates")
+	}
+}
