@@ -40,6 +40,15 @@
     "scripts/ci-scope.mjs",
     "scripts/ci-scope.test.mjs"
   ],
+  "migrations": [
+    "server/migrations/**",
+    "server/internal/migrations/migrations_lint_test.go",
+    "Makefile",
+    ".github/workflows/ci.yml",
+    ".github/ci-paths.json",
+    "scripts/ci-scope.mjs",
+    "scripts/ci-scope.test.mjs"
+  ],
   "runtime": [
     "packages/core/runtimes/cli-version.ts",
     "scripts/agent-cli-command-names.txt",

@@ -90,6 +90,10 @@ sudo scripts/install-selfhost-autoupdate.sh
 
 装、停、查状态、手工回滚见 [docs/kun/selfhost-autoupdate.md](docs/kun/selfhost-autoupdate.md)。
 
+## 迁移编号
+
+并行分支各自取号会撞号（DENE-730、DENE-763），撞了运行时不报错。`make migration-lint` 是 PR CI 与 release 必经门禁，468–501 的历史双号是冻结白名单、不再扩。取号、改号与门禁细节见 [docs/kun/migration-numbering.md](docs/kun/migration-numbering.md)。
+
 ## 边界
 
 - 不向 `multica-ai/multica` 开 PR 或 push。
