@@ -3387,73 +3387,6 @@ func (q *Queries) DeleteUnstartedQuickCreateRetryTask(ctx context.Context, taskI
 	return result.RowsAffected(), nil
 }
 
-const disableAgentSpecialisations = `-- name: DisableAgentSpecialisations :many
-UPDATE agent
-SET work_enabled = FALSE, updated_at = now()
-WHERE parent_agent_id = $1
-  AND work_enabled = TRUE
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id, runtime_inherited, routing_tier, work_enabled
-`
-
-// Turning off a base role also turns off its direct specialisations. This is
-// intentionally one-way: re-enabling the base role must not override a
-// specialisation's own work setting.
-func (q *Queries) DisableAgentSpecialisations(ctx context.Context, parentAgentID pgtype.UUID) ([]Agent, error) {
-	rows, err := q.db.Query(ctx, disableAgentSpecialisations, parentAgentID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Agent{}
-	for rows.Next() {
-		var i Agent
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Name,
-			&i.AvatarUrl,
-			&i.RuntimeMode,
-			&i.RuntimeConfig,
-			&i.Visibility,
-			&i.Status,
-			&i.MaxConcurrentTasks,
-			&i.OwnerID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Description,
-			&i.RuntimeID,
-			&i.Instructions,
-			&i.ArchivedAt,
-			&i.ArchivedBy,
-			&i.CustomEnv,
-			&i.CustomArgs,
-			&i.McpConfig,
-			&i.Model,
-			&i.ThinkingLevel,
-			&i.ComposioToolkitAllowlist,
-			&i.PermissionMode,
-			&i.Kind,
-			&i.SystemKey,
-			&i.DisabledRuntimeSkills,
-			&i.ServiceTier,
-			&i.ConversationStarters,
-			&i.SwitchableModels,
-			&i.AutoRetryEnabled,
-			&i.ParentAgentID,
-			&i.RuntimeInherited,
-			&i.RoutingTier,
-			&i.WorkEnabled,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const expireStaleQueuedTasks = `-- name: ExpireStaleQueuedTasks :many
 WITH victims AS (
     SELECT id FROM agent_task_queue
@@ -9119,6 +9052,79 @@ func (q *Queries) SetAgentParentAgent(ctx context.Context, arg SetAgentParentAge
 		&i.WorkEnabled,
 	)
 	return i, err
+}
+
+const setAgentSpecialisationsWorkEnabled = `-- name: SetAgentSpecialisationsWorkEnabled :many
+UPDATE agent
+SET work_enabled = $1::boolean, updated_at = now()
+WHERE parent_agent_id = $2::uuid
+  AND work_enabled <> $1::boolean
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id, runtime_inherited, routing_tier, work_enabled
+`
+
+type SetAgentSpecialisationsWorkEnabledParams struct {
+	WorkEnabled   bool        `json:"work_enabled"`
+	ParentAgentID pgtype.UUID `json:"parent_agent_id"`
+}
+
+// A specialisation is its base role plus extra prompt, skills and MCP, so its
+// work switch follows the base role in both directions: turning the base role
+// off or on sets every direct specialisation to the same value. Only rows that
+// actually change are returned, so callers broadcast just those.
+func (q *Queries) SetAgentSpecialisationsWorkEnabled(ctx context.Context, arg SetAgentSpecialisationsWorkEnabledParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, setAgentSpecialisationsWorkEnabled, arg.WorkEnabled, arg.ParentAgentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.ConversationStarters,
+			&i.SwitchableModels,
+			&i.AutoRetryEnabled,
+			&i.ParentAgentID,
+			&i.RuntimeInherited,
+			&i.RoutingTier,
+			&i.WorkEnabled,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setAgentTaskBranchName = `-- name: SetAgentTaskBranchName :exec
