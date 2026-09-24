@@ -383,6 +383,38 @@ func TestInReviewHandsOffToAgentWithoutMentioning(t *testing.T) {
 	}
 }
 
+func TestInReviewCoversADisabledReviewerWithAnotherFamily(t *testing.T) {
+	store := newFakeStore()
+	store.issue.Status = "in_review"
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-bulma"
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerAgent, ID: "a-gohan", Name: "孙悟饭"}
+	store.offRoster = map[string]Agent{
+		"a-gohan": {ID: "a-gohan", Name: "孙悟饭", Tier: "strongest"},
+	}
+
+	out, err := newRouter(store, &fakeJudge{}).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Action != ActionHandedOff {
+		t.Fatalf("action = %q reason %q, want handed off", out.Action, out.Reason)
+	}
+	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-bulma-g" {
+		t.Fatalf("handoffs = %v, want the other strongest family and not the executor", store.handoffs)
+	}
+	if store.issue.Reviewer.ID != "a-bulma-g" {
+		t.Fatalf("reviewer = %s, want 布尔玛游戏", store.issue.Reviewer.ID)
+	}
+	if len(store.relays) != 1 || !store.relays[0].Designated || store.relays[0].OriginalID != "a-gohan" {
+		t.Fatalf("relay = %+v, want the designated original remembered", store.relays)
+	}
+	body := store.comments[KindHandoff][0]
+	if !strings.Contains(body, "已停用") || !strings.Contains(body, "布尔玛游戏") {
+		t.Fatalf("handoff comment does not explain the cover:\n%s", body)
+	}
+}
+
 // A person can still be put in the slot by hand, and old tickets already hold
 // one. That person gets pinged — and keeps their hands free: reassigning the
 // ticket to them is what made the status unmovable, because every later

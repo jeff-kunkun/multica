@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/multica-ai/multica/server/pkg/llm"
 )
@@ -729,25 +730,37 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 
 	// An agent reviewer. The reference is resolved against the roster on the
 	// spot: a seat that has since been archived is no longer a reviewer, and
-	// saying so beats handing the ticket to a seat that cannot run.
+	// saying so beats handing the ticket to a seat that cannot run. A seat
+	// that is only switched off is still a reviewer — the wake moves to
+	// another family instead of vanishing.
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {
 		return out, err
 	}
 	seatAgent, ok := agentByID(roster, issue.Reviewer.ID)
 	if !ok {
-		return Outcome{
-			State:           StateEnabled,
-			Action:          ActionNoop,
-			Reason:          "reviewer seat not in roster",
-			ReviewerWritten: out.ReviewerWritten,
-		}, nil
+		card, found, err := r.Store.OffRosterSeat(ctx, workspaceID, issue.Reviewer.ID)
+		if err != nil {
+			return out, err
+		}
+		if !found {
+			return Outcome{
+				State:           StateEnabled,
+				Action:          ActionNoop,
+				Reason:          "reviewer seat not in roster",
+				ReviewerWritten: out.ReviewerWritten,
+			}, nil
+		}
+		return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, card, out)
 	}
 	facts, err := r.Store.RoutingFacts(ctx, workspaceID, []string{seatAgent.ID}, settings.ProviderKeys())
 	if err != nil {
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
 	}
 	if snap, ok := facts.Seats[seatAgent.ID]; ok && Unselectable(snap.Availability) {
+		if snap.Availability == AvailabilityDisabled {
+			return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, seatAgent, out)
+		}
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "reviewer seat is not eligible"}, nil
 	}
 	if err := r.Store.Handoff(ctx, workspaceID, issue.ID, "agent", seatAgent.ID); err != nil {
@@ -759,6 +772,74 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 	// explanation.
 	body := r.handoffComment(issue, seatAgent.Name, decidedHere)
 	return r.deliver(ctx, workspaceID, issue, KindHandoff, body, false, out)
+}
+
+// handOffToSubstitute covers an acceptance wake whose reviewer cannot take
+// work. The slot already names them, so they stay the designated reviewer:
+// recovery may give the ticket back only before the cover has started.
+func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, settings Settings, issue Issue, roster map[string]Agent, disabled Agent, out Outcome) (Outcome, error) {
+	ladder := r.Ladder.WithProjects(settings.Projects)
+	direction := ladder.Direction(issue.ProjectName)
+	holder := seatFromRoster(ladder, map[string]Agent{disabled.Name: disabled}, disabled.ID)
+	if holder.Name == "" {
+		holder.Name = disabled.Name
+	}
+	if holder.ID == "" {
+		holder.ID = disabled.ID
+	}
+	var avoid []string
+	if issue.AssigneeType == "agent" && issue.AssigneeID != "" && issue.AssigneeID != disabled.ID {
+		avoid = append(avoid, issue.AssigneeID)
+	}
+	replacement, steppedDown, ok := SubstituteSeat(ladder, holder, roster, avoid, direction)
+	if !ok {
+		body := disabledReviewerStuck(disabled.Name)
+		stuck, err := r.deliver(ctx, workspaceID, issue, CommentKind("reviewer_off:"+disabled.ID), body, true, out)
+		if err != nil {
+			return stuck, err
+		}
+		stuck.Action = ActionAdvised
+		stuck.Reason = "reviewer seat is off and no replacement"
+		return stuck, nil
+	}
+	ref := seatReviewer(replacement)
+	written, err := r.Store.ReplaceReviewer(ctx, workspaceID, issue.ID, disabled.ID, ref)
+	if err != nil {
+		return out, err
+	}
+	if !written {
+		return Outcome{
+			State:           StateEnabled,
+			Action:          ActionNoop,
+			Reason:          "reviewer slot changed",
+			ReviewerWritten: out.ReviewerWritten,
+		}, nil
+	}
+	if err := r.Store.RememberReviewerRelay(ctx, workspaceID, issue.ID, ReviewerRelay{
+		OriginalID:      disabled.ID,
+		OriginalName:    disabled.Name,
+		ReplacementID:   replacement.ID,
+		ReplacementName: replacement.Name,
+		Designated:      true,
+		CoveredAt:       time.Now().UTC(),
+	}); err != nil {
+		return out, err
+	}
+	issue.Reviewer = ref
+	out.ReviewerWritten = ref
+	if err := r.Store.Handoff(ctx, workspaceID, issue.ID, "agent", replacement.ID); err != nil {
+		return out, err
+	}
+	note := disabledReviewerNote(disabled.Name, replacement.Name, steppedDown)
+	body := note + "\n\n" + r.handoffComment(issue, replacement.Name, false)
+	delivered, err := r.deliver(ctx, workspaceID, issue, KindHandoff, body, false, out)
+	if err != nil {
+		return delivered, err
+	}
+	if !delivered.Commented {
+		return r.deliver(ctx, workspaceID, issue, CommentKind("reviewer_off:"+disabled.ID+":"+replacement.ID), note, false, delivered)
+	}
+	return delivered, nil
 }
 
 // agentByID finds a seat in the roster by id. The roster is keyed by name

@@ -2209,6 +2209,70 @@ func (q *Queries) MaterializeIssueChannelMediaMarkdown(ctx context.Context, arg 
 	return i, err
 }
 
+const promoteBacklogIssueToTodo = `-- name: PromoteBacklogIssueToTodo :one
+UPDATE issue AS i SET
+    status = 'todo',
+    position = (
+        SELECT COALESCE(MIN(target.position), 0) - 1
+        FROM issue AS target
+        WHERE target.workspace_id = i.workspace_id
+          AND target.status = 'todo'
+    ),
+    revision = i.revision + 1,
+    last_activity_at = GREATEST(COALESCE(i.last_activity_at, i.updated_at), now()),
+    updated_at = now()
+WHERE i.id = $1 AND i.workspace_id = $2 AND i.status = 'backlog'
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility
+`
+
+type PromoteBacklogIssueToTodoParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Stage advance only. A child still in backlog moves to todo; a second close
+// that arrives after the first already promoted the row matches nothing, so
+// the caller does not start another run. Repositioning matches UpdateIssueStatus.
+func (q *Queries) PromoteBacklogIssueToTodo(ctx context.Context, arg PromoteBacklogIssueToTodoParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, promoteBacklogIssueToTodo, arg.ID, arg.WorkspaceID)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+		&i.Revision,
+		&i.LastActivityAt,
+		&i.TriageState,
+		&i.ReviewerType,
+		&i.ReviewerID,
+		&i.Visibility,
+	)
+	return i, err
+}
+
 const setIssueMetadataKey = `-- name: SetIssueMetadataKey :one
 
 UPDATE issue SET

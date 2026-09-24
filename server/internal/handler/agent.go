@@ -3121,6 +3121,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.WorkEnabled != nil && *req.WorkEnabled && !existing.WorkEnabled && h.TaskService != nil {
+		if err := h.TaskService.ReclaimDesignatedReviews(r.Context(), updated.ID); err != nil {
+			slog.Warn("reclaim designated reviewer failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		}
+		for _, spec := range toggledSpecialisations {
+			if err := h.TaskService.ReclaimDesignatedReviews(r.Context(), spec.ID); err != nil {
+				slog.Warn("reclaim designated reviewer failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(spec.ID))...)
+			}
+		}
+	}
 
 	// Nullable runtime overrides: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
