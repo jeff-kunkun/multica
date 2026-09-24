@@ -585,6 +585,13 @@ type Daemon struct {
 	planQuotaClaudeURL string
 	planQuotaCodexURL  string
 	planQuotaProbeFn   func() agent.PlanQuotaProbe
+	// planAgentQuota tracks the per-seat account binding behind the runtime
+	// snapshot above: which account directory each agent's task environment
+	// binds, and the newest windows observed for it (DENE-715). Guarded by
+	// planAgentMu. See plan_limits_agent.go for why the runtime row is not
+	// enough on its own.
+	planAgentMu    sync.Mutex
+	planAgentQuota map[string]*agentPlanQuota
 
 	// reconcile fans out a "re-check server state now" signal to subscribers
 	// (watchTaskCancellation, workspaceSyncLoop) so the WS connect/reconnect
@@ -4738,7 +4745,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
 	d.maybeRefreshPlanQuota()
 	d.refreshJevStatus()
-	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid), d.jevStatusSnapshot())
+	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid), d.agentPlanLimitsForRuntime(rid), d.jevStatusSnapshot())
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -4893,7 +4900,7 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 	}
 	hbCtx, cancel := context.WithTimeout(ctx, pendingWorkHeartbeatTimeout)
 	d.refreshJevStatus()
-	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID), d.jevStatusSnapshot())
+	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID), d.agentPlanLimitsForRuntime(runtimeID), d.jevStatusSnapshot())
 	cancel()
 	if err != nil {
 		if isRuntimeNotFoundError(err) {
@@ -9263,6 +9270,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.LocalWorktree != nil && env.LocalWorktree.StaleBaselineNotice != "" {
 		promptOptions = append(promptOptions, WithStaleLocalBaseline(env.LocalWorktree.StaleBaselineNotice))
 	}
+	if env.LocalWorktree != nil && env.LocalWorktree.ReplaySkippedNotice != "" {
+		promptOptions = append(promptOptions, WithReplaySkipped(env.LocalWorktree.ReplaySkippedNotice))
+	}
 	if command := dependencyInstallCommand(env.WorkDir); command != "" {
 		promptOptions = append(promptOptions, WithDependencyInstallCommand(command))
 	}
@@ -9388,6 +9398,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	// Remember which CLI account this agent's child will run as, read from the
+	// environment we just layered (DENE-715). The plan-quota probe is per
+	// runtime, and one runtime serves every seat on this machine, so without
+	// this the quota panel of an agent switched to a numbered account would
+	// keep naming the daemon's own account.
+	d.recordAgentAccountBinding(task.RuntimeID, task.AgentID, provider, agentCustomEnv, agentEnv)
 	// Shared-mode OpenCode: the sidecar is an additive config directory, not
 	// a replacement for the user's global config. Set this after custom_env
 	// so a user OPENCODE_CONFIG_DIR cannot point the child away from the

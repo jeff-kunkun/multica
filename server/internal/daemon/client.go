@@ -670,12 +670,15 @@ type (
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
-func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, planLimits *protocol.PlanLimitsSnapshot, jev *protocol.JevStatusSnapshot) (*HeartbeatResponse, error) {
+// agentPlanLimits carries the per-seat snapshots of this runtime's
+// account-bound agents, keyed by agent id; nil when there are none (DENE-715).
+func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, planLimits *protocol.PlanLimitsSnapshot, agentPlanLimits map[string]protocol.PlanLimitsSnapshot, jev *protocol.JevStatusSnapshot) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id":            runtimeID,
 		"supports_batch_import": true,
 		"plan_limits":           planLimits,
+		"agent_plan_limits":     agentPlanLimits,
 		"jev":                   jev,
 	}, &resp); err != nil {
 		return nil, err
