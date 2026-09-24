@@ -1684,6 +1684,23 @@ describe("ApiClient", () => {
       expect(originalContentType).toBe("text/markdown");
     });
 
+    it("rejects an HTML document that is not the preview proxy", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response("<html><body><div id=\"root\"></div></body></html>", {
+            status: 200,
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getAttachmentTextContent("att-1")).rejects.toThrow(
+        /document instead of the file/,
+      );
+    });
+
     it("throws PreviewTooLargeError on 413", async () => {
       const { PreviewTooLargeError } = await import("./client");
       vi.stubGlobal(
