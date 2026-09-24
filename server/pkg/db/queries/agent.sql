@@ -735,7 +735,7 @@ INSERT INTO agent_task_queue (
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
-    channel_context_revision, id
+    channel_context_revision, failure_input_version, id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -755,7 +755,7 @@ SELECT
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, sqlc.narg(fire_at),
-    p.channel_context_revision,
+    p.channel_context_revision, p.failure_input_version,
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
@@ -1512,6 +1512,8 @@ SET status = 'failed',
     completed_at = now(),
     error = $2,
     failure_reason = COALESCE(sqlc.narg('failure_reason'), 'agent_error'),
+    failure_input_version = sqlc.narg('failure_input_version'),
+    failure_fingerprint = sqlc.narg('failure_fingerprint'),
     session_id = CASE WHEN sqlc.arg('session_rollout_missing') THEN NULL ELSE COALESCE(sqlc.narg('session_id'), session_id) END,
     work_dir = COALESCE(sqlc.narg('work_dir'), work_dir),
     durable_work_dir = COALESCE(sqlc.narg('durable_work_dir'), durable_work_dir),
@@ -1521,6 +1523,19 @@ SET status = 'failed',
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
+
+-- name: CountConsecutiveFailureFingerprint :one
+SELECT COUNT(*)::bigint
+FROM (
+    SELECT failure_fingerprint
+    FROM agent_task_queue
+    WHERE failure_input_version = sqlc.arg('failure_input_version')
+      AND status = 'failed'
+      AND failure_fingerprint IS NOT NULL
+    ORDER BY completed_at DESC NULLS LAST, id DESC
+    LIMIT 2
+) recent
+WHERE failure_fingerprint = sqlc.arg('failure_fingerprint');
 
 -- name: UpdateAgentTaskSession :exec
 -- Pins the resume pointer mid-flight so a daemon crash leaves a usable

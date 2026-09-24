@@ -4971,6 +4971,12 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	// is normalised too, and before the retry pre-compute below so the upgraded
 	// reason is what decides retry eligibility.
 	failureReason = taskfailure.NormalizeDaemonReason(failureReason, errMsg).String()
+	parentForFailure, parentErr := s.Queries.GetAgentTask(ctx, taskID)
+	failureInputVersion := ""
+	if parentErr == nil {
+		failureInputVersion = taskFailureInputVersion(parentForFailure)
+	}
+	failureFingerprint := taskfailure.Fingerprint(failureReason, errMsg)
 
 	// Pre-compute the auto-retry so the retry child can be created inside the
 	// SAME transaction as the fail (MUL-4351). Doing it atomically closes the
@@ -5019,17 +5025,20 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 
 	var task db.AgentTaskQueue
 	var retried *db.AgentTaskQueue
+	deterministicEscalated := false
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
 			return err
 		}
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
-			ID:             taskID,
-			Error:          pgtype.Text{String: errMsg, Valid: true},
-			FailureReason:  pgtype.Text{String: failureReason, Valid: failureReason != ""},
-			SessionID:      pgtype.Text{String: sessionID, Valid: sessionID != ""},
-			WorkDir:        pgtype.Text{String: workDir, Valid: workDir != ""},
-			DurableWorkDir: pgtype.Text{String: durableWorkDir, Valid: durableWorkDir != ""},
+			ID:                  taskID,
+			Error:               pgtype.Text{String: errMsg, Valid: true},
+			FailureReason:       pgtype.Text{String: failureReason, Valid: failureReason != ""},
+			FailureInputVersion: pgtype.Text{String: failureInputVersion, Valid: failureInputVersion != ""},
+			FailureFingerprint:  pgtype.Text{String: failureFingerprint, Valid: true},
+			SessionID:           pgtype.Text{String: sessionID, Valid: sessionID != ""},
+			WorkDir:             pgtype.Text{String: workDir, Valid: workDir != ""},
+			DurableWorkDir:      pgtype.Text{String: durableWorkDir, Valid: durableWorkDir != ""},
 			// A failed run can still have produced a branch: worktree mode
 			// commits whatever the agent left before tearing the worktree down,
 			// precisely so partial work survives. Dropping the name here would
@@ -5042,6 +5051,22 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			return err
 		}
 		task = t
+		if wantRetry && taskfailure.IsDeterministic(errMsg) && t.FailureInputVersion.Valid && t.FailureFingerprint.Valid {
+			matches, countErr := qtx.CountConsecutiveFailureFingerprint(ctx, db.CountConsecutiveFailureFingerprintParams{
+				FailureInputVersion: pgtype.Text{String: t.FailureInputVersion.String, Valid: true},
+				FailureFingerprint:  pgtype.Text{String: t.FailureFingerprint.String, Valid: true},
+			})
+			if countErr != nil {
+				return fmt.Errorf("count repeated failure fingerprint: %w", countErr)
+			}
+			if matches >= 2 {
+				deterministicEscalated = true
+				wantRetry = false
+				slog.Warn("task auto-retry stopped after repeated deterministic failure",
+					"task_id", util.UUIDToString(task.ID), "failure_input_version", t.FailureInputVersion.String,
+					"failure_fingerprint", t.FailureFingerprint.String)
+			}
+		}
 
 		// Atomic with the status flip, same as the completion path. A failed
 		// coordinator that already received the recovery comment has consumed
@@ -5327,6 +5352,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	// provider sentence.
 	if isServerInterruptFailure(failureReason) && task.IssueID.Valid {
 		s.noteServerInterrupt(ctx, task, retried)
+	} else if deterministicEscalated && task.IssueID.Valid {
+		s.noteDeterministicFailure(ctx, task, failureReason)
 	} else if errMsg != "" && task.IssueID.Valid && retried == nil && !capacityHeld {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(failureCommentBody(failureReason, errMsg)), "system", task.TriggerCommentID, task.ID)
 	}
@@ -5366,6 +5393,79 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	s.broadcastTaskFailedEvent(ctx, task, errMsg, failureReason, retried != nil)
 
 	return &task, true, nil
+}
+
+// taskFailureInputVersion identifies the user input shared by an attempt and
+// all of its automatic retries. A comment or chat batch is preferred; the
+// issue fallback covers legacy task rows that predate those ownership fields.
+func taskFailureInputVersion(task db.AgentTaskQueue) string {
+	if task.ChatInputTaskID.Valid {
+		return "chat:" + util.UUIDToString(task.ChatInputTaskID)
+	}
+	if task.TriggerCommentID.Valid {
+		return "comment:" + util.UUIDToString(task.TriggerCommentID)
+	}
+	if task.IssueID.Valid {
+		return "issue:" + util.UUIDToString(task.IssueID)
+	}
+	return ""
+}
+
+func (s *TaskService) noteDeterministicFailure(ctx context.Context, task db.AgentTaskQueue, reason string) {
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return
+	}
+	condition := fmt.Sprintf("同一输入连续撞上同样的确定性失败（%s），等人修好环境后重跑", reason)
+	switch issue.Status {
+	case issuestatus.Done, issuestatus.Cancelled, issuestatus.InReview:
+	default:
+		if issue.Status != issuestatus.Blocked {
+			updated, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ID: task.IssueID, Status: issuestatus.Blocked, WorkspaceID: issue.WorkspaceID,
+			})
+			if updateErr != nil {
+				slog.Warn("deterministic failure: block issue failed",
+					"issue_id", util.UUIDToString(issue.ID), "error", updateErr)
+				break
+			}
+			s.broadcastIssueUpdated(ctx, updated, issue.Status)
+			issue = updated
+		}
+		// A blocked issue must say what it waits on (DENE-850). Without
+		// needs_human the patrol would wake the same executor into the same
+		// wall after QuietAfter, which is the loop this exit exists to end.
+		pairs := map[string]string{
+			blockwait.KeyWaitCondition: condition,
+			blockwait.KeyWatched:       blockwait.WatchedYes,
+		}
+		if human := s.deterministicFailureHuman(ctx, task, issue); human != "" {
+			pairs[blockwait.KeyNeedsHuman] = human
+		}
+		s.writeBlockMeta(ctx, issue, pairs)
+	}
+	s.createAgentComment(ctx, task.IssueID, task.AgentID,
+		fmt.Sprintf("自动重试已停止：同一输入连续出现相同的确定性失败（%s，fingerprint %s）。这张票已转为 blocked 等人处理：请检查权限、磁盘或 replay 冲突并修复环境，再重新运行这张票；平台不会再自动重排同一个执行人。", reason, task.FailureFingerprint.String),
+		"system", task.TriggerCommentID, task.ID)
+}
+
+// deterministicFailureHuman picks the person a deterministic failure waits
+// on: whoever the run was accountable to, else the issue's human creator,
+// else the owner of the seat that failed.
+func (s *TaskService) deterministicFailureHuman(ctx context.Context, task db.AgentTaskQueue, issue db.Issue) string {
+	if task.AccountableUserID.Valid {
+		return util.UUIDToString(task.AccountableUserID)
+	}
+	if task.OriginatorUserID.Valid {
+		return util.UUIDToString(task.OriginatorUserID)
+	}
+	if issue.CreatorType == "member" && issue.CreatorID.Valid {
+		return util.UUIDToString(issue.CreatorID)
+	}
+	if agent, err := s.Queries.GetAgent(ctx, task.AgentID); err == nil && agent.OwnerID.Valid {
+		return util.UUIDToString(agent.OwnerID)
+	}
+	return ""
 }
 
 // retryableReasons enumerates failure reasons that the auto-retry path is
