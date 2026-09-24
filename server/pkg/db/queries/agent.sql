@@ -3111,3 +3111,16 @@ SELECT comment_thread_root_id(@comment_id::uuid)::uuid AS id;
 UPDATE agent_task_queue
 SET code_decision = sqlc.arg('code_decision')
 WHERE id = sqlc.arg('id');
+
+-- name: UpdateAgentPlanLimits :execrows
+-- Stores the daemon's normalized, credential-free provider snapshot for THIS
+-- agent's own CLI account, which is how an agent bound to a numbered account
+-- shows its own windows instead of the runtime's default one (DENE-715).
+-- Same IS DISTINCT FROM guard as UpdateAgentRuntimePlanLimits: the snapshot is
+-- a pure function of the account's live state, so an unchanged observation
+-- costs zero writes and zero broadcasts.
+UPDATE agent
+SET plan_limits = @plan_limits
+WHERE id = @id
+  AND workspace_id = @workspace_id
+  AND plan_limits IS DISTINCT FROM @plan_limits;

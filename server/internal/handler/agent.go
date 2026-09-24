@@ -133,12 +133,18 @@ type AgentResponse struct {
 	// base role can have children. Archived specialisations are not counted:
 	// they no longer block archiving the base role. Populated on the agents
 	// list (0 for a specialisation); the detail response leaves it nil.
-	ChildCount    *int            `json:"child_count,omitempty"`
-	AvatarURL     *string         `json:"avatar_url"`
-	RuntimeMode   string          `json:"runtime_mode"`
-	RuntimeConfig any             `json:"runtime_config"`
-	CustomArgs    []string        `json:"custom_args"`
-	McpConfig     json.RawMessage `json:"mcp_config"`
+	ChildCount    *int    `json:"child_count,omitempty"`
+	AvatarURL     *string `json:"avatar_url"`
+	RuntimeMode   string  `json:"runtime_mode"`
+	RuntimeConfig any     `json:"runtime_config"`
+	// PlanLimits is this agent's own subscription windows, present only when
+	// the daemon reported a snapshot for the CLI account this agent binds
+	// (DENE-715). Absent or null means the client should fall back to the
+	// runtime's plan_limits — the agent has no binding of its own, or the
+	// daemon has not run it yet.
+	PlanLimits *protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
+	CustomArgs []string                     `json:"custom_args"`
+	McpConfig  json.RawMessage              `json:"mcp_config"`
 	// custom_env is intentionally NOT serialized on agent resources. The
 	// agent_list/get/create/update/archive/restore responses and WS events
 	// only expose coarse metadata (has_custom_env, custom_env_key_count) so
@@ -272,6 +278,21 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		}
 	}
 
+	// plan_limits is the daemon's snapshot for THIS agent's own CLI account,
+	// reported only for agents bound to a numbered account (DENE-715). NULL
+	// means "nothing agent-specific to say", and readers then fall back to the
+	// runtime row exactly as they did before. Like the runtime copy it is
+	// credential-free: percentages, window lengths and reset times only.
+	var planLimits *protocol.PlanLimitsSnapshot
+	if len(a.PlanLimits) > 0 {
+		var snapshot protocol.PlanLimitsSnapshot
+		if err := json.Unmarshal(a.PlanLimits, &snapshot); err != nil {
+			slog.Warn("failed to unmarshal agent plan_limits", "agent_id", uuidToString(a.ID), "error", err)
+		} else {
+			planLimits = &snapshot
+		}
+	}
+
 	// composio_toolkit_allowlist: the column is stored as TEXT[] and arrives
 	// here as a []string (sqlc). NULL and `{}` both serialize as nil through
 	// the postgres driver — both correctly mean "no toolkits", but the API
@@ -302,6 +323,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		McpConfig:                mcpConfig,
 		HasCustomEnv:             envKeyCount > 0,
 		CustomEnvKeyCount:        envKeyCount,
+		PlanLimits:               planLimits,
 		Visibility:               a.Visibility,
 		PermissionMode:           a.PermissionMode,
 		InvocationTargets:        []AgentInvocationTargetDTO{},

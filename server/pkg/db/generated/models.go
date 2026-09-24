@@ -59,6 +59,7 @@ type Agent struct {
 	RuntimeInherited      bool        `json:"runtime_inherited"`
 	RoutingTier           pgtype.Text `json:"routing_tier"`
 	WorkEnabled           bool        `json:"work_enabled"`
+	PlanLimits            []byte      `json:"plan_limits"`
 }
 
 type AgentBuilderDraft struct {

@@ -124,7 +124,11 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           agent running?" without opening the detail page. */}
       <div className="flex flex-col gap-1.5 text-caption">
         <RuntimeRow agent={agent} runtime={runtime} />
-        <AgentQuotaCapsule agentId={agent.id} runtime={runtime} />
+        <AgentQuotaCapsule
+          agentId={agent.id}
+          runtime={runtime}
+          planLimits={agent.plan_limits}
+        />
         <AgentJevIndicator agent={agent} runtime={runtime} />
         <ModelRow model={agent.model} thinkingLevel={agent.thinking_level} />
         {agent.skills.length > 0 && (
