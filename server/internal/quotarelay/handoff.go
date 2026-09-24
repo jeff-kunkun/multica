@@ -238,9 +238,15 @@ func AuditBalanceTransfer(fromName, toName, toTier string, steppedDown, started 
 
 // BalanceOwnerAlert is the one reminder a workspace owner gets when a seat's
 // account runs out of money.
-func BalanceOwnerAlert(seatName, detail string, moved int) string {
+// siblings are the other seats on the same account (the base role's
+// specialisations and so on) that went down with it.
+func BalanceOwnerAlert(seatName, detail string, moved int, siblings ...string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "「%s」的账号余额用完了（402），这一席已自动停用，不会自己恢复。请去充值或给这一席换账号，然后在席位设置里重新启用。", seatName)
+	if len(siblings) == 0 {
+		fmt.Fprintf(&b, "「%s」的账号余额用完了（402），这一席已自动停用，不会自己恢复。请去充值或给这一席换账号，然后在席位设置里重新启用。", seatName)
+	} else {
+		fmt.Fprintf(&b, "「%s」的账号余额用完了（402），这一席和用同一个账号的「%s」都已自动停用，不会自己恢复。请去充值或换账号，然后逐个在席位设置里重新启用。", seatName, strings.Join(siblings, "」「"))
+	}
 	if moved > 0 {
 		fmt.Fprintf(&b, "它手上 %d 张票已经转给另一家模型的席位接着做，恢复后不会抢回来。", moved)
 	}
