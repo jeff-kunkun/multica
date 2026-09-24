@@ -238,6 +238,69 @@ func (q *Queries) CreateRoutingComment(ctx context.Context, arg CreateRoutingCom
 	return i, err
 }
 
+const hasAcceptanceNoticeSince = `-- name: HasAcceptanceNoticeSince :one
+SELECT EXISTS (
+    SELECT 1 FROM inbox_item
+    WHERE issue_id = $1::uuid
+      AND workspace_id = $2::uuid
+      AND recipient_type = 'member'
+      AND recipient_id = $3::uuid
+      AND type = 'routing_needs_you'
+      AND created_at >= $4::timestamptz - interval '30 seconds'
+)::bool
+`
+
+type HasAcceptanceNoticeSinceParams struct {
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RecipientID pgtype.UUID        `json:"recipient_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+}
+
+// The person named as reviewer already got the acceptance notice for THIS
+// stay. Same 30s skew as HasReviewerRunSince, and for the same reason.
+func (q *Queries) HasAcceptanceNoticeSince(ctx context.Context, arg HasAcceptanceNoticeSinceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasAcceptanceNoticeSince,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.Since,
+	)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const hasReviewerRunSince = `-- name: HasReviewerRunSince :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue
+    WHERE issue_id = $1::uuid
+      AND agent_id = $2::uuid
+      AND status <> 'cancelled'
+      AND created_at >= $3::timestamptz - interval '30 seconds'
+)::bool
+`
+
+type HasReviewerRunSinceParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	AgentID pgtype.UUID        `json:"agent_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+}
+
+// The reviewer seat already has a run for THIS stay in review.
+//
+// Cancelled rows do not count: a wake that was cancelled never happened.
+// The 30s skew covers the activity row landing a moment AFTER the run the
+// status-change hook just started — the listener is asynchronous, and a
+// strict "created_at >= entered_review_at" would miss the run it itself
+// caused and start a second one.
+func (q *Queries) HasReviewerRunSince(ctx context.Context, arg HasReviewerRunSinceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasReviewerRunSince, arg.IssueID, arg.AgentID, arg.Since)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const hasRoutingComment = `-- name: HasRoutingComment :one
 SELECT EXISTS (
     SELECT 1 FROM comment
@@ -497,9 +560,13 @@ type ReassignIssueParams struct {
 }
 
 // The in-review handoff. Unlike the two above this is not a fill: it moves a
-// ticket that already has an assignee to whoever accepts it. It is still
-// guarded — by the one-comment-per-kind index on the handoff comment — so a
-// status flipped back and forth cannot reassign twice.
+// ticket that already has an assignee to whoever accepts it.
+//
+// The one-comment-per-kind index does NOT guard this write. That index only
+// keeps the explanation comment to one per issue. A later stay — the work
+// was sent back, redone, and the ticket entered in_review again — calls this
+// again and starts another run. Two callbacks in the SAME stay collapse on
+// the pending-task unique index, not on the comment.
 func (q *Queries) ReassignIssue(ctx context.Context, arg ReassignIssueParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, reassignIssue,
 		arg.AssigneeType,

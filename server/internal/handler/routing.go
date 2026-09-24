@@ -38,10 +38,21 @@ const routingModelListTimeout = 20 * time.Second
 // same moment, which is exactly the race the conditional writes and the
 // one-comment-per-kind index exist to absorb.
 func (h *Handler) RouteIssueAsync(r *http.Request, workspaceID, issueID string) {
+	h.routeIssueDetached(logger.RequestAttrs(r), workspaceID, issueID)
+}
+
+// routeIssueDetached runs one routing pass off the request that caused it.
+//
+// Status changes call it directly. A run that ends also calls it: the
+// executor usually moves the ticket to in_review while its own run is still
+// open, and the in-review row refuses to start the reviewer until that run
+// is gone. Both callers share this function so a duplicate — the status hook
+// and the completion callback racing — is one decision, made twice, not two
+// implementations.
+func (h *Handler) routeIssueDetached(attrs []any, workspaceID, issueID string) {
 	if h.Routing == nil || workspaceID == "" || issueID == "" {
 		return
 	}
-	attrs := logger.RequestAttrs(r)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), routeTimeout)
 		defer cancel()
