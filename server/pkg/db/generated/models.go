@@ -60,6 +60,35 @@ type Agent struct {
 	RoutingTier           pgtype.Text `json:"routing_tier"`
 	WorkEnabled           bool        `json:"work_enabled"`
 	PlanLimits            []byte      `json:"plan_limits"`
+	DoorbellEnabled       bool        `json:"doorbell_enabled"`
+}
+
+type AgentAccessPass struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	GrantedBy   pgtype.UUID        `json:"granted_by"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+	RequestID   pgtype.UUID        `json:"request_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentAccessRequest struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	RequesterID pgtype.UUID        `json:"requester_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	CommentID   pgtype.UUID        `json:"comment_id"`
+	TriggerKind string             `json:"trigger_kind"`
+	Summary     string             `json:"summary"`
+	Status      string             `json:"status"`
+	ResolvedBy  pgtype.UUID        `json:"resolved_by"`
+	ResolvedAt  pgtype.Timestamptz `json:"resolved_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type AgentBuilderDraft struct {

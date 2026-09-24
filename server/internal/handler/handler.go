@@ -222,6 +222,7 @@ type Handler struct {
 	SeatCapacityWorker    *seatcapacity.Worker
 	EmailService          *service.EmailService
 	UpdateStore           UpdateStore
+	AgentCLICommands      AgentCLICommandStore
 	ModelListStore        ModelListStore
 	ProviderPresetStore   ProviderPresetStore
 	LocalSkillListStore   LocalSkillListStore
@@ -521,6 +522,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:                 emailService,
 		UpdateStore:                  NewInMemoryUpdateStore(),
+		AgentCLICommands:             NewInMemoryAgentCLICommandStore(),
 		ModelListStore:               NewInMemoryModelListStore(),
 		ProviderPresetStore:          NewInMemoryProviderPresetStore(),
 		ModelCatalogCache:            NewInMemoryModelCatalogCache(),

@@ -416,6 +416,9 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	body := r.assignmentComment(issue, match, candidates, verdict, threshold,
 		executor, executorSource, reviewer, reviewerFallback, fallbackWhy, humanSignoff,
 		needExecutor, needReviewer, notify, mode)
+	if note := DemotionFootnote(ladder, roster, executor); note != "" {
+		body += "\n\n" + note
+	}
 
 	return r.deliver(ctx, workspaceID, issue, KindAssignment, body, notify, out)
 }

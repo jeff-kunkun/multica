@@ -3952,6 +3952,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	_, touchedID := rawFields["assignee_id"]
 	if touchedType || touchedID {
 		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
+			// DENE-808: a member refused for lack of invoke permission rings
+			// the agent's doorbell instead when it is on; the owner's
+			// approval replays this assignment.
+			if status == http.StatusForbidden && h.ringDoorbellForAssign(r.Context(), r, prevIssue, params.AssigneeType.String, params.AssigneeID) {
+				h.writeDispatchBlocked(w, http.StatusForbidden, ReasonAccessRequested)
+				return
+			}
 			writeError(w, status, msg)
 			return
 		}

@@ -697,7 +697,8 @@ func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
 	b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 	b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
-	b.WriteString("- Keep responses concise and direct\n\n")
+	b.WriteString("- Keep responses concise and direct\n")
+	b.WriteString("- When the user hands you another chat to take over — a session link or id, often phrased \"接管这个：<url>\" — read it before acting with `multica chat history --session <url-or-id> --output json`. You receive a short summary plus the latest messages, not the full transcript. Page older messages with `--before <next_cursor>` from the previous response. The read works only for a session in this workspace that this person is allowed to open; anyone outside the workspace gets nothing. Do the read silently, then continue the work from what you found. `multica chat thread --session <url-or-id>` reads the same transcript.\n\n")
 }
 
 // writeWorkflowQuickCreate emits the quick-create workflow's hard

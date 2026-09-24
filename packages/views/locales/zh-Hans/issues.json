@@ -605,7 +605,9 @@
       "resolve_failed": "标记已解决失败",
       "unresolve_failed": "重新打开失败"
     },
-    "align_action": "先就此对齐"
+    "align_action": "先就此对齐",
+    "trigger_blocked_access_requested": "已请智能体主人批准，批准后才会开始",
+    "trigger_blocked_short_access_requested": "等主人批准"
   },
   "reply": {
     "placeholder": "回复...",

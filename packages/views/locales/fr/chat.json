@@ -275,7 +275,13 @@
     "rename": "Renommer la discussion",
     "archive": "Archiver la discussion",
     "unarchive": "Désarchiver la discussion",
-    "delete": "Supprimer la discussion"
+    "delete": "Supprimer la discussion",
+    "copy_link": "Copier le lien de la session",
+    "link_copied": "Lien de la session copié",
+    "copy_conversation": "Copier la conversation en Markdown",
+    "conversation_copied": "Conversation copiée",
+    "copy_role_user": "Vous",
+    "copy_role_assistant": "Assistant"
   },
   "provider_quota": {
     "label": "Quota",

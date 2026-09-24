@@ -2019,6 +2019,7 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 		markCommentTriggersFresh(triggers)
 	}
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
+	h.ringDoorbellTargets(ctx, issue, comment, actorType, actorID, targets)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	return commentTriggerOutcomes(targets, enqueued)
 }
@@ -3138,6 +3139,10 @@ type commentMentionTarget struct {
 	// the resolver runs for the composer PREVIEW as well, so it only records
 	// what happened — writing the notice is the trigger path's job.
 	unusable *blockedRuntimeNotice
+	// doorbell carries the agent whose doorbell this refused member mention
+	// should ring (DENE-808). Same preview/trigger split as unusable: the
+	// resolver only records it; ringDoorbellTargets does the write.
+	doorbell *db.Agent
 }
 
 // blockedRuntimeNotice is a refusal worth leaving on the issue: which agent, and
@@ -3308,6 +3313,13 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		}
 		// Private-agent gate first, before any archived/runtime state is read.
 		if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID) {
+			if doorbellApplies(agent, authorType) {
+				// DENE-808: the refusal becomes a ring for the owner. Still a
+				// blocked target — no run exists until the owner approves.
+				rung := agent
+				addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, Status: DispatchBlocked, ReasonCode: ReasonAccessRequested, doorbell: &rung})
+				continue
+			}
 			blockTarget("agent", m.ID, ReasonInvocationNotAllowed)
 			continue
 		}

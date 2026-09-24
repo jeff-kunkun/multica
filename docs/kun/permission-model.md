@@ -14,7 +14,7 @@ DENE-695 权限系统的判定规则。这篇是给人读的矩阵；可执行�
 - 唯一的例外方向是 Owner / Admin 的「管理兜底」，见下文——它来自 `listAccessibleProjectIDs` 的既有行为，不是新规则。
 
 **范围内的资源**：Issue（评论、附件跟随所属 issue）、项目、仓库。
-**不在范围内**：Agent 与 Squad（归 `agent.permission_mode` + `agent_invocation_target`，Parent B）；工作区设置 / 成员 / 计费（只看档位，不参与共享）。
+**不在范围内**：Agent 与 Squad（归 `agent.permission_mode` + `agent_invocation_target`；门铃请求与限时通行证也只作用在这条调用门上，不进入本矩阵。Parent B）；工作区设置 / 成员 / 计费（只看档位，不参与共享）。
 
 ## 判定顺序
 

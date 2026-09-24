@@ -275,7 +275,13 @@
     "rename": "Rename chat",
     "archive": "Archive chat",
     "unarchive": "Unarchive chat",
-    "delete": "Delete chat"
+    "delete": "Delete chat",
+    "copy_link": "Copy session link",
+    "link_copied": "Session link copied",
+    "copy_conversation": "Copy conversation as Markdown",
+    "conversation_copied": "Conversation copied",
+    "copy_role_user": "You",
+    "copy_role_assistant": "Assistant"
   },
   "provider_quota": {
     "label": "Quota",

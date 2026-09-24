@@ -22,10 +22,14 @@ import {
   useDismissChatProjectNudge,
   useRegenerateChatQuickActions,
 } from "@multica/core/chat/mutations";
-import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
+import {
+  chatMessagesOptions,
+  chatQuickActionsPendingOptions,
+} from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./components/use-quick-actions-failure-toast";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { chatSessionIdFromLocation } from "@multica/core/paths";
 import type { Agent, ChatSession } from "@multica/core/types";
 import { PageHeader } from "../layout/page-header";
 import { useNavigation } from "../navigation";
@@ -54,10 +58,11 @@ import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
  * conversation logic with the floating FAB via `useChatController`; the
  * left rail reuses `ChatThreadList`.
  *
- * Selection is URL-addressable via `?session=<id>` so a thread can be
- * deep-linked, opened from a notification, and survive refresh. The chat
- * store's `activeSessionId` stays the source of truth (both surfaces read
- * it); the URL is kept in sync in both directions. `?agent=<id>` is the
+ * Selection is URL-addressable via `/chat/<session-id>` so a thread can be
+ * deep-linked, opened from a notification, and survive refresh. Older
+ * `?session=` links still open. The chat store's `activeSessionId` stays the
+ * source of truth (both surfaces read it); the URL is kept in sync in both
+ * directions. `?agent=<id>` is the
  * complementary one-shot deep link for a NEW chat: it starts a fresh compose
  * bound to that agent and is then stripped from the URL.
  *
@@ -69,7 +74,8 @@ import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
  */
 export function ChatPage() {
   const { t } = useT("chat");
-  const { searchParams, replace } = useNavigation();
+  const { pathname, searchParams, replace } = useNavigation();
+  const queryClient = useQueryClient();
   const wsPaths = useWorkspacePaths();
   const isCompact = useIsCompact();
 
@@ -83,7 +89,7 @@ export function ChatPage() {
   // Toast when an accepted refresh later fails in the daemon (async half).
   useQuickActionsFailureToast(c.activeSessionId ?? null);
   const regenerateQuickActions = useRegenerateChatQuickActions();
-  const urlSession = searchParams.get("session") || null;
+  const urlSession = chatSessionIdFromLocation(pathname, searchParams);
   const urlAgent = searchParams.get("agent") || null;
 
   // "Composing a brand-new chat" — the user hit ⊕ but hasn't sent yet, so no
@@ -109,8 +115,8 @@ export function ChatPage() {
     if (useChatStore.getState().activeSessionId) setComposingNew(false);
   }, [c.activeSessionId]);
 
-  // Two-way sync between the URL (`?session=`) and the chat store's
-  // activeSessionId. Both effects read the LIVE store value via
+  // Two-way sync between the URL (`/chat/<id>`, or the older `?session=`) and
+  // the chat store's activeSessionId. Both effects read the LIVE store value via
   // `useChatStore.getState()` rather than the render-captured `c.activeSessionId`.
   // That is what keeps them from fighting on mount: a naive mirror effect fires
   // with the stale (null) snapshot and "corrects" the URL by stripping the
@@ -130,10 +136,16 @@ export function ChatPage() {
   // store → URL: thread selection, "new chat", and sessions created by sending.
   useEffect(() => {
     const live = useChatStore.getState().activeSessionId;
-    const current = searchParams.get("session") || null;
+    const current = chatSessionIdFromLocation(pathname, searchParams);
     if (live !== current) {
-      const base = wsPaths.chat();
-      replace(live ? `${base}?session=${live}` : base);
+      replace(live ? wsPaths.chatSession(live) : wsPaths.chat());
+      return;
+    }
+    // An older `?session=` link opened the right chat. Move the address bar
+    // onto the stable path the copy button shares.
+    if (live) {
+      const canonical = wsPaths.chatSession(live);
+      if (pathname !== canonical) replace(canonical);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- react to store only
   }, [c.activeSessionId]);
@@ -287,6 +299,11 @@ export function ChatPage() {
           session={c.currentSession}
           agent={c.activeAgent}
           onArchive={handleArchive}
+          loadAllMessages={() =>
+            c.hasOlderMessages
+              ? queryClient.fetchQuery(chatMessagesOptions(c.currentSession!.id))
+              : Promise.resolve(c.messages)
+          }
         />
       )}
       {c.currentSession && (
