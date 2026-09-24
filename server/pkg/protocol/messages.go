@@ -188,6 +188,7 @@ const (
 	PendingWorkKindProviderConfig   = "provider_config"
 	PendingWorkKindLocalSkills      = "local_skills"
 	PendingWorkKindLocalSkillImport = "local_skill_import"
+	PendingWorkKindAgentCLI         = "agent_cli"
 )
 
 // PendingWorkPayload is sent from server to daemon as a wakeup hint when a
@@ -529,6 +530,7 @@ type DaemonHeartbeatAckPayload struct {
 	ServerCapabilities      []string                                `json:"server_capabilities,omitempty"`
 	RuntimeGone             bool                                    `json:"runtime_gone,omitempty"`
 	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
+	PendingAgentCLI         *DaemonHeartbeatPendingAgentCLI         `json:"pending_agent_cli,omitempty"`
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
 	PendingProviderConfig   *DaemonHeartbeatPendingProviderConfig   `json:"pending_provider_config,omitempty"`
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
@@ -549,6 +551,15 @@ const HeartbeatStatusRuntimeGone = "runtime_gone"
 type DaemonHeartbeatPendingUpdate struct {
 	ID            string `json:"id"`
 	TargetVersion string `json:"target_version"`
+}
+
+// DaemonHeartbeatPendingAgentCLI is a follow-switch or a one-shot upgrade of
+// the agent CLI behind this runtime. Follow is omitted when the user has not
+// changed it. The daemon keeps its own default (on) until a value arrives.
+type DaemonHeartbeatPendingAgentCLI struct {
+	Follow    *bool  `json:"follow,omitempty"`
+	UpdateNow bool   `json:"update_now,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // DaemonHeartbeatPendingModelList describes a request for the daemon to

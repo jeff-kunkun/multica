@@ -2902,6 +2902,20 @@ export class ApiClient {
     });
   }
 
+  async setAgentCLIFollow(runtimeId: string, follow: boolean): Promise<void> {
+    await this.fetch(`/api/runtimes/${runtimeId}/agent-cli/follow`, {
+      method: "POST",
+      body: JSON.stringify({ follow }),
+    });
+  }
+
+  async requestAgentCLIUpdate(runtimeId: string): Promise<void> {
+    await this.fetch(`/api/runtimes/${runtimeId}/agent-cli/update`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
   async getUpdateResult(
     runtimeId: string,
     updateId: string,

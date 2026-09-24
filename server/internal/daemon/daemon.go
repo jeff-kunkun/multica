@@ -466,6 +466,20 @@ type Daemon struct {
 	// local state change that makes a provider registrable again.
 	agentDiscoveryKick chan struct{}
 
+	// agentCLIUpdateKick wakes agentCLIUpdateLoop for a manual update or for
+	// the moment the machine becomes idle. Buffered like agentDiscoveryKick.
+	agentCLIUpdateKick   chan struct{}
+	agentCLIMu           sync.Mutex
+	agentCLIFollow       map[string]bool // explicit per-provider choice; missing means follow (default on)
+	agentCLIFollowLoaded bool
+	agentCLIFollowFile   string // tests pin this; empty uses the profile dir
+	agentCLIManual       agentCLIManual
+	// Test seams. Nil uses the real network, exec, and post-upgrade refresh.
+	agentCLIFetch        func(ctx context.Context, url string) ([]byte, error)
+	agentCLIRun          func(ctx context.Context, name string, args ...string) ([]byte, error)
+	agentCLILookPath     func(name string) (string, error)
+	agentCLIAfterUpgrade func(ctx context.Context, provider string)
+
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
@@ -787,6 +801,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		profileLaunchSpecs:        make(map[string]profileLaunchSpec),
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentDiscoveryKick:        make(chan struct{}, 1),
+		agentCLIUpdateKick:        make(chan struct{}, 1),
 		agentVersions:             make(map[string]string),
 		skippedAgents:             make(map[string]string),
 		resolvedPaths:             make(map[string]healedAgent),
@@ -2233,6 +2248,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// workspace sync loop because that one runs on a thirty-minute consistency
 	// interval — far too slow for "install a CLI, see it under Runtimes".
 	go d.agentDiscoveryLoop(ctx)
+	go d.agentCLIUpdateLoop(ctx)
 
 	taskWakeups := make(chan taskWakeup, 256)
 	go d.taskWakeupLoop(ctx, taskWakeups)
@@ -4793,6 +4809,9 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp.PendingUpdate != nil {
 		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
 	}
+	if resp.PendingAgentCLI != nil {
+		d.handleAgentCLICommand(runtimeID, resp.PendingAgentCLI)
+	}
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			// The overlay is the agent's custom_env. Endpoint readers let it
@@ -5780,7 +5799,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			lease := newTaskSlotLease(sem, slot, func() { signalPollerWakeup(wakeup) })
 			go func(t Task, lease *taskSlotLease) {
 				defer taskWG.Done()
-				defer d.activeTasks.Add(-1)
+				defer d.finishActiveTask()
 				// Release local capacity before waking the poller (the lease does
 				// both). The task's terminal callback and local cleanup have both
 				// finished at this point, so a successor that was previously
