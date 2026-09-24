@@ -1512,6 +1512,26 @@ func TestBuildPromptInterruptedRetryContinuesSession(t *testing.T) {
 	}
 }
 
+func TestBuildPromptTimeLimitRetryClosesOutAndSplits(t *testing.T) {
+	task := Task{
+		IssueID:                    "issue-limit-1",
+		TriggerCommentID:           "trigger-limit-1",
+		TriggerCommentContent:      "the original request",
+		PriorSessionID:             "sess-limit",
+		ContinueInterruptedSession: true,
+		ContinueAfterTimeLimit:     true,
+	}
+	out := BuildPrompt(task, "claude")
+	for _, want := range []string{"workspace task time limit", "same session", "same working directory", "close out the progress", "split whatever is still unfinished"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("time-limit continue prompt missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "the original request") {
+		t.Fatalf("time-limit continue must not re-send the original request:\n%s", out)
+	}
+}
+
 func TestBuildPromptInterruptedRetryFallsBackWhenSessionMissing(t *testing.T) {
 	task := Task{
 		IssueID:                    "issue-retry-2",

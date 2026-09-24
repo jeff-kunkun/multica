@@ -3978,6 +3978,23 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	tr := h.guardSilentStall(r.Context(), prevIssue, statusKeyForGuard, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, touchedReviewerType || touchedReviewerID)
+	if tr.refuse != "" {
+		writeError(w, http.StatusConflict, tr.refuse)
+		return
+	}
+	if tr.status != "" {
+		statusKeyForGuard = tr.status
+		params.Status = pgtype.Text{String: tr.status, Valid: true}
+	}
+	if tr.setReviewer {
+		params.ReviewerType = tr.reviewerType
+		params.ReviewerID = tr.reviewerID
+	}
+	if tr.persistBlock {
+		blockRecord = tr.block
+		persistBlock = true
+	}
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
@@ -4026,6 +4043,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
 	}
+	issue = h.finishStatusTransition(r.Context(), issue, tr)
 
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
@@ -4828,6 +4846,17 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
+		batchTransition := h.guardSilentStall(r.Context(), prevIssue, batchStatusKey, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, false)
+		if batchTransition.refuse != "" {
+			continue
+		}
+		if batchTransition.status != "" {
+			params.Status = pgtype.Text{String: batchTransition.status, Valid: true}
+		}
+		if batchTransition.setReviewer {
+			params.ReviewerType = batchTransition.reviewerType
+			params.ReviewerID = batchTransition.reviewerID
+		}
 
 		var issue db.Issue
 		if req.Updates.Description != nil {
@@ -4860,6 +4889,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
 			continue
+		}
+		issue = h.finishStatusTransition(r.Context(), issue, batchTransition)
+		if batchTransition.persistBlock {
+			h.persistBlockRecord(r.Context(), issue, batchTransition.block)
 		}
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
