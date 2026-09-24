@@ -91,14 +91,21 @@ Squirrel 在安装更新前会用当前应用的 designated requirement 校验�
 
 本机磁盘上的 feed 大约 0.3 秒传完，没有逐条进度日志，当前环境也没有屏幕录制权限，所以没有截到进度条。下载完成和版本变化由日志和安装后的版本号证明。
 
+## 默认发测试版，正式版等 owner 通知（2026-09-24 起）
+
+- **每次更新默认只发测试版**：tag 用 `vX.Y.Z-test.N`，CI 会自动标成 prerelease，只推给在设置里选了测试通道的客户端。
+- **正式版 `vX.Y.Z` 不自动发**，只有 owner 明确说「发正式版」才打。「打包」「发一版」默认都指测试版。
+- **测试版号必须高于当前最新正式版**：最新正式版是 `v0.5.7` 时，测试版从 `v0.5.8-test.1` 起，后续递增 `test.N`；等 owner 通知转正时再打 `v0.5.8`。`applyTestFeed` 不允许降级，`0.5.7-test.1` 在 semver 上低于 `0.5.7`，已装 0.5.7 的客户端会一直显示「已是最新」。
+- 起因：v0.5.6、v0.5.7 直接发了正式版，中间没有测试版，事后补发了 `v0.5.8-test.1`。
+
 ## 主路径：CI 发版（默认走这条）
 
 ```bash
 # 1. 确认要发的 commit 已经在 kun（CI 从 tag 指向的 commit 构建）
 git fetch origin --prune && git log --oneline origin/kun -1
 
-# 2. 打 tag 并推送：上一版 patch +1
-git tag v0.4.58 && git push origin v0.4.58
+# 2. 打 tag 并推送：默认是测试版（见上一节）；正式版只在 owner 通知后打
+git tag v0.4.58-test.1 && git push origin v0.4.58-test.1
 ```
 
 推送 tag 后 `.github/workflows/desktop-release.yml` 会自动：
