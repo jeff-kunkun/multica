@@ -1834,9 +1834,15 @@ SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_
             AND rs.resource_id = cs.id::text)::int AS extra_count,
        COALESCE(ag.name, '') AS agent_name,
        COALESCE(ag.runtime_id IS NOT NULL, false)::bool AS agent_runtime_bound,
-       COALESCE(ag.archived_at IS NOT NULL, false)::bool AS agent_archived
+       COALESCE(ag.archived_at IS NOT NULL, false)::bool AS agent_archived,
+       (pin.id IS NOT NULL)::bool AS pinned
 FROM chat_session cs
 LEFT JOIN agent ag ON ag.id = cs.agent_id
+LEFT JOIN pinned_item pin
+       ON pin.workspace_id = cs.workspace_id
+      AND pin.user_id = $1
+      AND pin.item_type = 'chat'
+      AND pin.item_id = cs.id
 LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind, sender_user_id
     FROM chat_message m
@@ -1872,7 +1878,7 @@ WHERE cs.workspace_id = $3
     OR
     lm.created_at IS NOT NULL
   )
-ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC
+ORDER BY (pin.id IS NOT NULL) DESC, pin.position ASC, COALESCE(lm.created_at, cs.updated_at) DESC
 `
 
 type ListAllChatSessionsByCreatorParams struct {
@@ -1913,6 +1919,7 @@ type ListAllChatSessionsByCreatorRow struct {
 	AgentName                string             `json:"agent_name"`
 	AgentRuntimeBound        bool               `json:"agent_runtime_bound"`
 	AgentArchived            bool               `json:"agent_archived"`
+	Pinned                   bool               `json:"pinned"`
 }
 
 // Unlike ListChatSessionsByCreator this returns archived sessions too (for the
@@ -1922,6 +1929,7 @@ type ListAllChatSessionsByCreatorRow struct {
 // so any residual unread is uncleanable and must not light up any badge. Gating
 // on status here is the single source of truth for all unread surfaces (FAB,
 // sidebar Chat tab, chat-window header) — see MUL-4360.
+// The viewer's own sidebar pin (DENE-866): pinned is per person, not per chat.
 func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllChatSessionsByCreatorParams) ([]ListAllChatSessionsByCreatorRow, error) {
 	rows, err := q.db.Query(ctx, listAllChatSessionsByCreator, arg.ViewerID, arg.ProjectIds, arg.WorkspaceID)
 	if err != nil {
@@ -1963,6 +1971,7 @@ func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllC
 			&i.AgentName,
 			&i.AgentRuntimeBound,
 			&i.AgentArchived,
+			&i.Pinned,
 		); err != nil {
 			return nil, err
 		}
@@ -2613,9 +2622,15 @@ SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_
             AND rs.resource_id = cs.id::text)::int AS extra_count,
        COALESCE(ag.name, '') AS agent_name,
        COALESCE(ag.runtime_id IS NOT NULL, false)::bool AS agent_runtime_bound,
-       COALESCE(ag.archived_at IS NOT NULL, false)::bool AS agent_archived
+       COALESCE(ag.archived_at IS NOT NULL, false)::bool AS agent_archived,
+       (pin.id IS NOT NULL)::bool AS pinned
 FROM chat_session cs
 LEFT JOIN agent ag ON ag.id = cs.agent_id
+LEFT JOIN pinned_item pin
+       ON pin.workspace_id = cs.workspace_id
+      AND pin.user_id = $1
+      AND pin.item_type = 'chat'
+      AND pin.item_id = cs.id
 LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind, sender_user_id
     FROM chat_message m
@@ -2652,7 +2667,7 @@ WHERE cs.workspace_id = $3
     OR
     lm.created_at IS NOT NULL
   )
-ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC
+ORDER BY (pin.id IS NOT NULL) DESC, pin.position ASC, COALESCE(lm.created_at, cs.updated_at) DESC
 `
 
 type ListChatSessionsByCreatorParams struct {
@@ -2693,11 +2708,13 @@ type ListChatSessionsByCreatorRow struct {
 	AgentName                string             `json:"agent_name"`
 	AgentRuntimeBound        bool               `json:"agent_runtime_bound"`
 	AgentArchived            bool               `json:"agent_archived"`
+	Pinned                   bool               `json:"pinned"`
 }
 
 // IM-style list of the chats this viewer may see (DENE-840): their own, plus
 // project-scoped chats whose project they belong to, plus chats shared with
 // them. Unread is counted from THIS viewer's cursor, not the session's.
+// The viewer's own sidebar pin (DENE-866): pinned is per person, not per chat.
 func (q *Queries) ListChatSessionsByCreator(ctx context.Context, arg ListChatSessionsByCreatorParams) ([]ListChatSessionsByCreatorRow, error) {
 	rows, err := q.db.Query(ctx, listChatSessionsByCreator, arg.ViewerID, arg.ProjectIds, arg.WorkspaceID)
 	if err != nil {
@@ -2739,6 +2756,7 @@ func (q *Queries) ListChatSessionsByCreator(ctx context.Context, arg ListChatSes
 			&i.AgentName,
 			&i.AgentRuntimeBound,
 			&i.AgentArchived,
+			&i.Pinned,
 		); err != nil {
 			return nil, err
 		}
@@ -3845,50 +3863,6 @@ type SetChatSessionArchivedParams struct {
 // conversation is effectively read-only until it is unarchived.
 func (q *Queries) SetChatSessionArchived(ctx context.Context, arg SetChatSessionArchivedParams) (ChatSession, error) {
 	row := q.db.QueryRow(ctx, setChatSessionArchived, arg.ID, arg.Archived)
-	var i ChatSession
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.AgentID,
-		&i.CreatorID,
-		&i.Title,
-		&i.SessionID,
-		&i.WorkDir,
-		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.UnreadSince,
-		&i.RuntimeID,
-		&i.LastReadAt,
-		&i.IsAgentIntro,
-		&i.PinnedAt,
-		&i.ProjectID,
-		&i.ExplicitlyCreatedAt,
-		&i.ProjectNudgeDismissedAt,
-		&i.Visibility,
-	)
-	return i, err
-}
-
-const setChatSessionPinned = `-- name: SetChatSessionPinned :one
-UPDATE chat_session
-SET pinned_at = CASE WHEN $2::bool THEN COALESCE(pinned_at, now()) ELSE NULL END
-WHERE id = $1
-RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at, project_nudge_dismissed_at, visibility
-`
-
-type SetChatSessionPinnedParams struct {
-	ID     pgtype.UUID `json:"id"`
-	Pinned bool        `json:"pinned"`
-}
-
-// Pin/unpin a chat. Deliberately does NOT touch updated_at: pinning is a
-// list-ordering preference, not activity, so it must not bump the session's
-// last-activity sort key (which would make an unpinned chat jump the list).
-// pinned = true stamps pinned_at only when it was NULL, so re-pinning keeps
-// the original pin order; pinned = false clears it.
-func (q *Queries) SetChatSessionPinned(ctx context.Context, arg SetChatSessionPinnedParams) (ChatSession, error) {
-	row := q.db.QueryRow(ctx, setChatSessionPinned, arg.ID, arg.Pinned)
 	var i ChatSession
 	err := row.Scan(
 		&i.ID,

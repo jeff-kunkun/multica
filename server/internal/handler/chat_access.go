@@ -96,6 +96,11 @@ func (h *Handler) decorateChatSession(ctx context.Context, userID string, sessio
 		return err
 	}
 	resp.Access = access.level
+	pinned, err := h.chatPinnedFor(ctx, session.WorkspaceID, session.ID, userID)
+	if err != nil {
+		return err
+	}
+	resp.Pinned = pinned
 	agent, err := h.Queries.GetAgent(ctx, session.AgentID)
 	if err == nil {
 		resp.AgentName = agent.Name

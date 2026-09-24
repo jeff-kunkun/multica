@@ -275,13 +275,27 @@ describe("ChatThreadList compact row menu", () => {
     expect(screen.getByRole("menuitem", { name: enChat.list.edit_access })).toBeInTheDocument();
   });
 
-  it("hides pin, access, and archive from someone who did not create the chat", () => {
+  it("keeps pin but hides access and archive from someone who did not create the chat", async () => {
+    // Pins are per viewer (DENE-866): anyone who can see a shared chat may
+    // pin it for themselves, while manage actions stay with the creator.
     authState.userId = "someone-else";
     renderList(null);
 
-    expect(screen.queryByRole("button", { name: enChat.list.row_actions_aria })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: ARCHIVE_LABEL })).not.toBeInTheDocument();
+    openRowMenu(0);
+    expect(await screen.findByRole("menuitem", { name: enChat.list.pin })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: ARCHIVE_LABEL })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: enChat.list.edit_access })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Chat s1" })).not.toBeInTheDocument();
+  });
+
+  it("marks active rows draggable with the chat-pin payload", () => {
+    renderList(null);
+
+    const row = screen.getByText("Chat s1").closest("[draggable]");
+    expect(row).toHaveAttribute("draggable", "true");
+    const setData = vi.fn();
+    fireEvent.dragStart(row!, { dataTransfer: { setData, effectAllowed: "none" } });
+    expect(setData).toHaveBeenCalledWith("application/x-multica-chat-session", "s1");
   });
 
   it("does not select the row when the menu opens", () => {

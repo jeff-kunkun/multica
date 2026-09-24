@@ -77,9 +77,16 @@ SELECT cs.*,
             AND rs.resource_id = cs.id::text)::int AS extra_count,
        COALESCE(ag.name, '') AS agent_name,
        COALESCE(ag.runtime_id IS NOT NULL, false)::bool AS agent_runtime_bound,
-       COALESCE(ag.archived_at IS NOT NULL, false)::bool AS agent_archived
+       COALESCE(ag.archived_at IS NOT NULL, false)::bool AS agent_archived,
+       (pin.id IS NOT NULL)::bool AS pinned
 FROM chat_session cs
 LEFT JOIN agent ag ON ag.id = cs.agent_id
+-- The viewer's own sidebar pin (DENE-866): pinned is per person, not per chat.
+LEFT JOIN pinned_item pin
+       ON pin.workspace_id = cs.workspace_id
+      AND pin.user_id = sqlc.arg(viewer_id)
+      AND pin.item_type = 'chat'
+      AND pin.item_id = cs.id
 LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind, sender_user_id
     FROM chat_message m
@@ -116,7 +123,7 @@ WHERE cs.workspace_id = sqlc.arg(workspace_id)
     OR
     lm.created_at IS NOT NULL
   )
-ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
+ORDER BY (pin.id IS NOT NULL) DESC, pin.position ASC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
 -- name: ListAllChatSessionsByCreator :many
 -- Unlike ListChatSessionsByCreator this returns archived sessions too (for the
@@ -171,9 +178,16 @@ SELECT cs.*,
             AND rs.resource_id = cs.id::text)::int AS extra_count,
        COALESCE(ag.name, '') AS agent_name,
        COALESCE(ag.runtime_id IS NOT NULL, false)::bool AS agent_runtime_bound,
-       COALESCE(ag.archived_at IS NOT NULL, false)::bool AS agent_archived
+       COALESCE(ag.archived_at IS NOT NULL, false)::bool AS agent_archived,
+       (pin.id IS NOT NULL)::bool AS pinned
 FROM chat_session cs
 LEFT JOIN agent ag ON ag.id = cs.agent_id
+-- The viewer's own sidebar pin (DENE-866): pinned is per person, not per chat.
+LEFT JOIN pinned_item pin
+       ON pin.workspace_id = cs.workspace_id
+      AND pin.user_id = sqlc.arg(viewer_id)
+      AND pin.item_type = 'chat'
+      AND pin.item_id = cs.id
 LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind, sender_user_id
     FROM chat_message m
@@ -209,7 +223,7 @@ WHERE cs.workspace_id = sqlc.arg(workspace_id)
     OR
     lm.created_at IS NOT NULL
   )
-ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
+ORDER BY (pin.id IS NOT NULL) DESC, pin.position ASC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
 -- name: ListAgentBuilderSessionsByCreator :many
 -- The caller's unfinished agent-creation conversations.
@@ -423,17 +437,6 @@ WHERE cs.project_id = $1 AND cs.workspace_id = $2;
 -- it alone", NOT as an error.
 UPDATE chat_session SET title = @new_title, updated_at = now()
 WHERE id = @id AND title = @expected_title
-RETURNING *;
-
--- name: SetChatSessionPinned :one
--- Pin/unpin a chat. Deliberately does NOT touch updated_at: pinning is a
--- list-ordering preference, not activity, so it must not bump the session's
--- last-activity sort key (which would make an unpinned chat jump the list).
--- pinned = true stamps pinned_at only when it was NULL, so re-pinning keeps
--- the original pin order; pinned = false clears it.
-UPDATE chat_session
-SET pinned_at = CASE WHEN @pinned::bool THEN COALESCE(pinned_at, now()) ELSE NULL END
-WHERE id = $1
 RETURNING *;
 
 -- name: DismissChatSessionProjectNudge :one
