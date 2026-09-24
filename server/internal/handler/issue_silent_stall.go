@@ -193,7 +193,7 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue) sta
 		slog.Warn("close gate: list pull requests failed", "issue_id", uuidToString(issue.ID), "error", err)
 		tr.status = issuestatus.Blocked
 		tr.persistBlock = true
-		tr.block = blockwait.FailureWake(time.Now(), "关单前没能读到关联的 PR")
+		tr.block = blockwait.FailureWake(time.Now(), "关单前没能读到关联的 PR", 1)
 		tr.note = "这张票要关，但没能核对关联的 PR。先改成阻塞，不标完成。"
 		return tr
 	}
@@ -215,7 +215,7 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue) sta
 		if err := h.mergeOpenPulls(ctx, prs); err != nil {
 			rec := decision.Record
 			if !rec.Structured() {
-				rec = blockwait.FailureWake(time.Now(), "关联 PR 没能合并")
+				rec = blockwait.FailureWake(time.Now(), "关联 PR 没能合并", 1)
 			}
 			if reason := mergeFailureCondition(err, prs); reason != "" {
 				rec.WaitCondition = reason

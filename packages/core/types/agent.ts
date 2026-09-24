@@ -597,6 +597,14 @@ export interface MikaBootstrapResponse extends Agent {
   onboarding_session?: ChatSession;
 }
 
+export interface AgentWorkPause {
+  reason: string;
+  detail?: string;
+  condition?: string;
+  recover_at?: string;
+  opened_at: string;
+}
+
 export interface Agent {
   id: string;
   workspace_id: string;
@@ -792,6 +800,13 @@ export interface Agent {
    * `undefined` as enabled. Only `=== false` is off.
    */
   work_enabled?: boolean;
+  /**
+   * Why the platform turned the seat off (DENE-870), from its open quota
+   * breaker. Absent for a seat a person turned off. `recover_at` is absent
+   * when only a person can bring it back (reason `balance_exhausted`: top
+   * up, then re-enable).
+   */
+  work_pause?: AgentWorkPause;
   /**
    * Doorbell (kun fork, DENE-808). When on, a member who is not allowed to
    * invoke this agent does not get a plain refusal: their @mention or

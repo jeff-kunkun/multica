@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/quotarelay"
 	"github.com/multica-ai/multica/server/internal/routing"
@@ -36,7 +37,7 @@ func (s *TaskService) RelayQuotaFailure(ctx context.Context, task db.AgentTaskQu
 	if s == nil || s.Queries == nil || !quotaFailureWorthRelay(task) {
 		return false, nil
 	}
-	prepared, idle, err := s.prepareQuotaRelay(ctx, task)
+	prepared, idle, alert, err := s.prepareQuotaRelay(ctx, task)
 	if err != nil {
 		return false, err
 	}
@@ -47,6 +48,13 @@ func (s *TaskService) RelayQuotaFailure(ctx context.Context, task db.AgentTaskQu
 	}
 	s.publishQuotaRelaySideEffects(ctx, prepared)
 	s.finishIdleTransfers(ctx, idle)
+	if alert != nil {
+		moved := len(idle)
+		if prepared != nil && prepared.relay.ToAgentID.Valid {
+			moved++
+		}
+		s.alertBalanceOwners(ctx, *alert, moved)
+	}
 	if prepared == nil {
 		return false, nil
 	}
@@ -155,6 +163,15 @@ type idleTransfer struct {
 	enqueue    bool
 }
 
+// balanceAlert is the one owner reminder for a seat whose account ran out
+// of money. It is decided inside the breaker transaction (first opening
+// only) and sent after it commits.
+type balanceAlert struct {
+	agent  db.Agent
+	issue  pgtype.UUID
+	detail string
+}
+
 func quotaFailureWorthRelay(task db.AgentTaskQueue) bool {
 	reason := ""
 	if task.FailureReason.Valid {
@@ -167,9 +184,10 @@ func quotaFailureWorthRelay(task db.AgentTaskQueue) bool {
 	return quotarelay.ShouldInspect(reason, text)
 }
 
-func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQueue) (*quotaRelayPrepared, []idleTransfer, error) {
+func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQueue) (*quotaRelayPrepared, []idleTransfer, *balanceAlert, error) {
 	var prepared *quotaRelayPrepared
 	var idle []idleTransfer
+	var alert *balanceAlert
 	err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		locked, err := qtx.LockTaskForQuotaRelay(ctx, task.ID)
 		if err != nil {
@@ -204,6 +222,19 @@ func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQu
 		if !ok {
 			return nil
 		}
+		balance := plan.Kind == quotarelay.KindBalanceExhausted
+		if balance {
+			seen, err := qtx.HasOpenQuotaBreakerForReason(ctx, db.HasOpenQuotaBreakerForReasonParams{
+				AgentID: agent.ID,
+				Reason:  string(plan.Kind),
+			})
+			if err != nil {
+				return err
+			}
+			if !seen {
+				alert = &balanceAlert{agent: agent, issue: locked.IssueID, detail: quotaAcceptanceText([]byte(quotaError(locked)))}
+			}
+		}
 		suppressAt, err := suppressQuotaSeat(ctx, qtx, agent)
 		if err != nil {
 			return err
@@ -223,7 +254,12 @@ func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQu
 			return fmt.Errorf("open quota breaker: %w", err)
 		}
 		demotion := quotaDemotionLine(ctx, qtx, agent)
-		moved, err := s.reassignUnstartedIssues(ctx, qtx, locked, agent, demotion)
+		var moved []idleTransfer
+		if balance {
+			moved, err = s.transferBrokenSeatIssues(ctx, qtx, locked, agent)
+		} else {
+			moved, err = s.reassignUnstartedIssues(ctx, qtx, locked, agent, demotion)
+		}
 		if err != nil {
 			return err
 		}
@@ -243,6 +279,7 @@ func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQu
 		}
 		handoff := quotaHandoff(locked, agent, issue, plan)
 		handoff.Demotion = demotion
+		handoff.Branch = canonicalBranch(ctx, qtx, issue.ID)
 		if locked.AutopilotRunID.Valid {
 			_, err = insertQuotaRelay(ctx, qtx, locked, agent, plan, db.InsertQuotaRelayParams{Outcome: "skipped_autopilot", IssueID: issue.ID})
 			return err
@@ -273,7 +310,7 @@ func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQu
 			return s.skipQuotaRelay(ctx, qtx, locked, agent, issue, plan, handoff, "skipped_active", "这张票已经有别的进行中的任务")
 		}
 
-		choice, found, err := pickQuotaReplacement(ctx, qtx, locked, agent, issue.WorkspaceID)
+		choice, found, err := pickQuotaReplacement(ctx, qtx, locked, agent, issue.WorkspaceID, reviewerSeatExclusion(issue))
 		if err != nil {
 			return err
 		}
@@ -283,9 +320,9 @@ func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQu
 		return s.stageQuotaReplacement(ctx, qtx, locked, agent, issue, plan, handoff, choice, &prepared)
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return prepared, idle, nil
+	return prepared, idle, alert, nil
 }
 
 func preparedFromExisting(existing db.AgentQuotaRelay) *quotaRelayPrepared {
@@ -382,6 +419,13 @@ func (s *TaskService) stageQuotaReplacement(ctx context.Context, qtx *db.Queries
 			WorkspaceID: reassigned.WorkspaceID,
 		})
 		if err != nil {
+			return err
+		}
+	}
+	if prev == "blocked" {
+		// A failed-child clock written just before this relay would
+		// otherwise fire the moment the issue is blocked again.
+		if err := dropBlockWaitKeys(ctx, qtx, reassigned); err != nil {
 			return err
 		}
 	}
@@ -550,8 +594,12 @@ func capacityRetriesRemain(task db.AgentTaskQueue, agent db.Agent) bool {
 // failure the daemon reported itself never reaches that sweeper, so the
 // exhausted capacity attempt has to enter the relay here or the issue stays
 // in progress with the provider's English sentence.
+//
+// A quota exhaustion the daemon reported takes the same path (DENE-870):
+// before this, a 402 that never reached the sweeper left the seat enabled,
+// and every wake handed the issue back to the same empty account.
 func (s *TaskService) relayCapacityIfRetriesSpent(ctx context.Context, task db.AgentTaskQueue, failureReason, errMsg string) bool {
-	if s == nil || !quotarelay.IsCapacityFailure(failureReason, errMsg) {
+	if s == nil || !quotarelay.ShouldInspect(failureReason, errMsg) {
 		return false
 	}
 	hold, err := s.RelayQuotaFailure(ctx, task)
@@ -565,14 +613,27 @@ func (s *TaskService) relayCapacityIfRetriesSpent(ctx context.Context, task db.A
 	return hold
 }
 
-func pickQuotaReplacement(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, failed db.Agent, workspaceID pgtype.UUID) (quotarelay.Choice, bool, error) {
-	agents, err := qtx.ListAgents(ctx, workspaceID)
+func pickQuotaReplacement(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, failed db.Agent, workspaceID pgtype.UUID, exclude []string) (quotarelay.Choice, bool, error) {
+	failedSeat, roster, err := quotaRoster(ctx, qtx, task, failed, workspaceID)
 	if err != nil {
 		return quotarelay.Choice{}, false, err
 	}
+	failedSeat.Exclude = exclude
+	choice, ok := quotarelay.Pick(failedSeat, roster, routing.DefaultLadder.TierKeys())
+	return choice, ok, nil
+}
+
+// quotaRoster is the failed seat and every seat the relay may pick from.
+// Built once per breaker so a batch transfer does not reread the roster per
+// ticket.
+func quotaRoster(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, failed db.Agent, workspaceID pgtype.UUID) (quotarelay.Seat, []quotarelay.Seat, error) {
+	agents, err := qtx.ListAgents(ctx, workspaceID)
+	if err != nil {
+		return quotarelay.Seat{}, nil, err
+	}
 	open, err := qtx.ListOpenQuotaBreakerAgentIDs(ctx, workspaceID)
 	if err != nil {
-		return quotarelay.Choice{}, false, err
+		return quotarelay.Seat{}, nil, err
 	}
 	broken := make(map[string]bool, len(open))
 	for _, id := range open {
@@ -597,11 +658,46 @@ func pickQuotaReplacement(ctx context.Context, qtx *db.Queries, task db.AgentTas
 			failedSeat = seat
 			failedSeat.Eligible = false
 			failedSeat.AvoidHouse = capacityAvoidHouse(task, agent.Name)
+			failedSeat.StrictHouse = balanceFailure(task)
 		}
 		roster = append(roster, seat)
 	}
-	choice, ok := quotarelay.Pick(failedSeat, roster, routing.DefaultLadder.TierKeys())
-	return choice, ok, nil
+	return failedSeat, roster, nil
+}
+
+// reviewerSeatExclusion keeps the replacement off the issue's own acceptance
+// seat: the executor and the reviewer must not be the same seat.
+func reviewerSeatExclusion(issue db.Issue) []string {
+	if issue.ReviewerType.Valid && issue.ReviewerType.String == "agent" && issue.ReviewerID.Valid {
+		return []string{util.UUIDToString(issue.ReviewerID)}
+	}
+	return nil
+}
+
+func balanceFailure(task db.AgentTaskQueue) bool {
+	plan, ok := quotarelay.PlanFor(quotaReason(task), quotaError(task), quotarelay.Binding{}, time.Time{})
+	return ok && plan.Kind == quotarelay.KindBalanceExhausted
+}
+
+func canonicalBranch(ctx context.Context, qtx *db.Queries, issueID pgtype.UUID) string {
+	row, err := qtx.GetIssueCanonicalDeliveryBranch(ctx, issueID)
+	if err != nil {
+		return ""
+	}
+	return row.BranchName
+}
+
+func dropBlockWaitKeys(ctx context.Context, qtx *db.Queries, issue db.Issue) error {
+	for _, key := range blockwait.WaitKeys() {
+		if _, err := qtx.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Key:         key,
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	}
+	return nil
 }
 
 func insertQuotaRelay(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, agent db.Agent, plan quotarelay.Plan, extra db.InsertQuotaRelayParams) (*db.AgentQuotaRelay, error) {
@@ -737,7 +833,9 @@ func planSeatTier(agent db.Agent) string {
 }
 
 func capacityAvoidHouse(task db.AgentTaskQueue, name string) string {
-	if !quotarelay.IsCapacityFailure(quotaReason(task), quotaError(task)) {
+	// A seat whose account ran out of money leaves its house too: Grok
+	// goes to Claude or GPT, GPT to Claude or Grok (DENE-870).
+	if !quotarelay.IsCapacityFailure(quotaReason(task), quotaError(task)) && !balanceFailure(task) {
 		return ""
 	}
 	// Any house, not only GPT. A Claude seat that is full should not hand
@@ -763,7 +861,7 @@ func quotaDemotionLine(ctx context.Context, qtx *db.Queries, agent db.Agent) str
 // seat but have not started. The failing ticket itself is left to the
 // relay: it already has a failed task and its own handoff.
 func (s *TaskService) reassignUnstartedIssues(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, agent db.Agent, demotion string) ([]idleTransfer, error) {
-	choice, found, err := pickQuotaReplacement(ctx, qtx, task, agent, agent.WorkspaceID)
+	choice, found, err := pickQuotaReplacement(ctx, qtx, task, agent, agent.WorkspaceID, nil)
 	if err != nil || !found {
 		return nil, err
 	}
@@ -840,6 +938,164 @@ func (s *TaskService) reassignUnstartedIssues(ctx context.Context, qtx *db.Queri
 		})
 	}
 	return out, nil
+}
+
+// transferBrokenSeatIssues moves every todo, in-progress, or blocked ticket
+// off a seat whose account ran out of money, started or not, to a seat of
+// another house. Each ticket gets its own pick so the replacement is never
+// that ticket's acceptance seat. The failing ticket itself is left to the
+// relay. Blocked tickets change hands but are not started: the patrol wakes
+// the new seat when their clock is due.
+func (s *TaskService) transferBrokenSeatIssues(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, agent db.Agent) ([]idleTransfer, error) {
+	failedSeat, roster, err := quotaRoster(ctx, qtx, task, agent, agent.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	issues, err := qtx.ListOpenIssuesForBrokenSeat(ctx, db.ListOpenIssuesForBrokenSeatParams{
+		WorkspaceID: agent.WorkspaceID,
+		AssigneeID:  agent.ID,
+		Limit:       50,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sourceID := ""
+	if task.IssueID.Valid {
+		sourceID = util.UUIDToString(task.IssueID)
+	}
+	actor := task.AccountableUserID
+	if !actor.Valid {
+		actor = task.OriginatorUserID
+	}
+	out := make([]idleTransfer, 0, len(issues))
+	for _, listed := range issues {
+		if util.UUIDToString(listed.ID) == sourceID {
+			continue
+		}
+		issue, err := qtx.LockIssueForQuotaRelay(ctx, listed.ID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if issue.Status != "todo" && issue.Status != "in_progress" && issue.Status != "blocked" {
+			continue
+		}
+		seat := failedSeat
+		seat.Exclude = reviewerSeatExclusion(issue)
+		choice, found := quotarelay.Pick(seat, roster, routing.DefaultLadder.TierKeys())
+		if !found {
+			continue
+		}
+		replacementID := util.MustParseUUID(choice.Seat.ID)
+		reassigned, err := qtx.ReassignIssueToAgentIfCurrent(ctx, db.ReassignIssueToAgentIfCurrentParams{
+			AssigneeID:        replacementID,
+			ID:                issue.ID,
+			WorkspaceID:       issue.WorkspaceID,
+			CurrentAssigneeID: agent.ID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if _, err := qtx.CancelPendingTasksByIssueAndAgent(ctx, db.CancelPendingTasksByIssueAndAgentParams{
+			IssueID: issue.ID,
+			AgentID: agent.ID,
+		}); err != nil {
+			return nil, err
+		}
+		started, err := qtx.HasIssueRunHistory(ctx, issue.ID)
+		if err != nil {
+			return nil, err
+		}
+		branch := canonicalBranch(ctx, qtx, issue.ID)
+		tierLabel := choice.Seat.Tier
+		if tier, ok := routing.DefaultLadder.TierByKey(choice.Seat.Tier); ok && tier.Label != "" {
+			tierLabel = tier.Label
+		}
+		audit := quotarelay.AuditBalanceTransfer(agent.Name, choice.Seat.Name, tierLabel, choice.SteppedDown, started, branch)
+		comment, err := postQuotaAudit(ctx, qtx, reassigned, audit, task.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, idleTransfer{
+			issue:      reassigned,
+			prevStatus: issue.Status,
+			comment:    comment,
+			note:       quotarelay.BalanceTransferNote(agent.Name, choice.Seat.Name, branch, started),
+			actor:      actor,
+			enqueue:    reassigned.Status == "todo" || reassigned.Status == "in_progress",
+		})
+	}
+	return out, nil
+}
+
+// alertBalanceOwners tells each workspace owner, once per episode, that a
+// seat ran out of money and needs a top-up or another account.
+func (s *TaskService) alertBalanceOwners(ctx context.Context, alert balanceAlert, moved int) {
+	if s == nil || s.Queries == nil {
+		return
+	}
+	members, err := s.Queries.ListMembers(ctx, alert.agent.WorkspaceID)
+	if err != nil {
+		slog.Warn("quota relay: list owners for balance alert failed", "agent_id", util.UUIDToString(alert.agent.ID), "error", err)
+		return
+	}
+	body := quotarelay.BalanceOwnerAlert(alert.agent.Name, alert.detail, moved)
+	details, _ := json.Marshal(map[string]string{
+		"wait_reason": "seat_balance_exhausted",
+		"agent_id":    util.UUIDToString(alert.agent.ID),
+	})
+	for _, member := range members {
+		if member.Role != "owner" {
+			continue
+		}
+		item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			WorkspaceID:   alert.agent.WorkspaceID,
+			RecipientType: "member",
+			RecipientID:   member.UserID,
+			Type:          "seat_balance_exhausted",
+			Severity:      "action_required",
+			IssueID:       alert.issue,
+			Title:         fmt.Sprintf("「%s」余额用完了，请充值或换账号", alert.agent.Name),
+			Body:          pgtype.Text{String: body, Valid: true},
+			ActorType:     pgtype.Text{String: "system", Valid: true},
+			Details:       details,
+			ID:            dbid.NewV7(),
+		})
+		if err != nil {
+			slog.Warn("quota relay: balance alert failed", "agent_id", util.UUIDToString(alert.agent.ID), "error", err)
+			continue
+		}
+		if s.Bus == nil {
+			continue
+		}
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventInboxNew,
+			WorkspaceID: util.UUIDToString(item.WorkspaceID),
+			ActorType:   "system",
+			Payload: map[string]any{"item": map[string]any{
+				"id":             util.UUIDToString(item.ID),
+				"workspace_id":   util.UUIDToString(item.WorkspaceID),
+				"recipient_type": item.RecipientType,
+				"recipient_id":   util.UUIDToString(item.RecipientID),
+				"type":           item.Type,
+				"severity":       item.Severity,
+				"issue_id":       util.UUIDToPtr(item.IssueID),
+				"title":          item.Title,
+				"body":           util.TextToPtr(item.Body),
+				"read":           item.Read,
+				"archived":       item.Archived,
+				"created_at":     util.TimestampToString(item.CreatedAt),
+				"actor_type":     util.TextToPtr(item.ActorType),
+				"actor_id":       util.UUIDToPtr(item.ActorID),
+				"details":        json.RawMessage(item.Details),
+			}},
+		})
+	}
 }
 
 func freshSessionNoticeReason(reason string) bool {

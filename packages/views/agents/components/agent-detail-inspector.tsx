@@ -482,7 +482,13 @@ export function AgentDetailInspector({
           </SettingsRow>
           <SettingsRow
             label={t(($) => $.inspector.prop_work_enabled)}
-            description={t(($) => $.inspector.prop_work_enabled_hint)}
+            description={
+              isAgentWorkEnabled(agent) || !agent.work_pause
+                ? t(($) => $.inspector.prop_work_enabled_hint)
+                : agent.work_pause.reason === "balance_exhausted"
+                  ? t(($) => $.inspector.prop_work_pause_balance)
+                  : t(($) => $.inspector.prop_work_pause_quota)
+            }
           >
             <Switch
               checked={isAgentWorkEnabled(agent)}
