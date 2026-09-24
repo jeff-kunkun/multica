@@ -14,6 +14,7 @@ export type WSEventType =
   | "issue:updated"
   | "issue_attachments:changed"
   | "issue:deleted"
+  | "issue:invalidated"
   | "comment:created"
   | "comment:updated"
   | "comment:deleted"
@@ -122,6 +123,18 @@ export interface IssueUpdatedPayload {
 
 export interface IssueDeletedPayload {
   issue_id: string;
+}
+
+/**
+ * The id-only invalidation frame (DENE-717). It carries no content — a sharing
+ * scope changed, a project membership moved, or an assignee was removed — and
+ * tells the client to drop whatever it cached and refetch through the HTTP
+ * reads, which apply the caller's own visibility. Either id may be absent; a
+ * project-scoped invalidation names only the project.
+ */
+export interface IssueInvalidatedPayload {
+  issue_id?: string;
+  project_id?: string;
 }
 
 export interface IssueLabelsChangedPayload {
@@ -541,8 +554,13 @@ export interface InvitationRevokedPayload {
 // Broadcast when a daemon heartbeat persisted a new credential-free
 // plan_limits or JEV snapshot. Routine 15s heartbeats do not reach the browser:
 // both flags are set only when the stored row actually changed.
+//
+// Two shapes travel on this event. A runtime snapshot names `runtime_id`; a
+// per-agent snapshot names `agent_id` instead, because one runtime serves every
+// CLI seat on the machine and the agent is what the seat belongs to (DENE-715).
 export interface DaemonHeartbeatPayload {
   runtime_id?: string;
+  agent_id?: string;
   plan_limits_updated?: boolean;
   jev_updated?: boolean;
 }
@@ -578,6 +596,7 @@ export interface WSEventPayloadMap {
   "issue:created": IssueCreatedPayload;
   "issue:updated": IssueUpdatedPayload;
   "issue:deleted": IssueDeletedPayload;
+  "issue:invalidated": IssueInvalidatedPayload;
   "issue_attachments:changed": IssueAttachmentsChangedPayload;
   "issue_labels:changed": IssueLabelsChangedPayload;
   "issue_properties:changed": IssuePropertiesChangedPayload;

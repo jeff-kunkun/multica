@@ -39,7 +39,9 @@ type fakeStore struct {
 	subs     []string
 	handoffs []string
 	assigns  []string
-	reviewer []string
+	// quietAssigns are the assigns written without starting a run.
+	quietAssigns []string
+	reviewer     []string
 
 	// activeRun is the executor's still-open task. The in-review row must
 	// not start the reviewer until it is cleared, which is what the
@@ -106,7 +108,7 @@ func (f *fakeStore) RoutingFacts(context.Context, string, []string, []string) (R
 	}
 	return f.facts, nil
 }
-func (f *fakeStore) AssignAgentIfUnassigned(_ context.Context, _, _ string, seat Seat) (bool, error) {
+func (f *fakeStore) AssignAgentIfUnassigned(_ context.Context, _, _ string, seat Seat, start bool) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("assign"); err != nil {
@@ -117,6 +119,9 @@ func (f *fakeStore) AssignAgentIfUnassigned(_ context.Context, _, _ string, seat
 	}
 	f.assigneeTaken = true
 	f.assigns = append(f.assigns, seat.Name)
+	if !start {
+		f.quietAssigns = append(f.quietAssigns, seat.Name)
+	}
 	return true, nil
 }
 

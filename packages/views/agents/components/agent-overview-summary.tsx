@@ -79,6 +79,7 @@ export function AgentOverviewSummary({
               <AgentQuotaCapsule
                 agentId={agent.id}
                 runtime={runtime}
+                planLimits={agent.plan_limits}
                 now={now}
                 labeled={false}
               />
@@ -135,7 +136,12 @@ export function AgentOverviewSummary({
         )}
       </section>
 
-      <AgentQuotaMeter agentId={agent.id} runtime={runtime} now={now} />
+      <AgentQuotaMeter
+        agentId={agent.id}
+        runtime={runtime}
+        planLimits={agent.plan_limits}
+        now={now}
+      />
       <AgentPerformanceSummary agent={agent} />
     </aside>
   );

@@ -247,8 +247,8 @@ func TestLowConfidenceStillDispatchesToTheFallbackRung(t *testing.T) {
 	if len(store.assigns) != 1 || store.assigns[0] != "孙悟空游戏" {
 		t.Errorf("assigns = %v, want the fallback rung (孙悟空游戏), not the unconfident pick", store.assigns)
 	}
-	if len(store.reviewer) != 1 || store.reviewer[0] != "布尔玛游戏" {
-		t.Errorf("reviewer = %v, want the rung above the executor", store.reviewer)
+	if len(store.reviewer) != 1 || store.reviewer[0] != "贝吉塔游戏" {
+		t.Errorf("reviewer = %v, want the rung below the executor, not the strongest", store.reviewer)
 	}
 	if out.Action != ActionAssigned {
 		t.Errorf("action = %q, want %q", out.Action, ActionAssigned)
@@ -275,9 +275,10 @@ func TestReviewerIsNeverTheSeatThatDidTheWork(t *testing.T) {
 	if len(store.reviewer) != 1 {
 		t.Fatalf("reviewer writes = %v", store.reviewer)
 	}
-	// Promoted one rung up rather than accepting a self-review.
-	if store.reviewer[0] != "布尔玛游戏" {
-		t.Errorf("reviewer = %q, want the rung above the executor (布尔玛游戏)", store.reviewer[0])
+	// Same rung, and this roster has no second model family there, so the check
+	// steps down. It does not promote into the strongest rung.
+	if store.reviewer[0] != "贝吉塔游戏" {
+		t.Errorf("reviewer = %q, want 贝吉塔游戏 — one rung down, not the strongest", store.reviewer[0])
 	}
 }
 
@@ -317,8 +318,8 @@ func TestJudgeAskingForAPersonStillWritesASeat(t *testing.T) {
 		t.Fatalf("reviewer kind = %q, want %q — the slot may never name a person",
 			out.ReviewerWritten.Kind, ReviewerAgent)
 	}
-	if len(store.reviewer) != 1 || store.reviewer[0] != "布尔玛游戏" {
-		t.Errorf("reviewer = %v, want [布尔玛游戏] — the rung above the executor", store.reviewer)
+	if len(store.reviewer) != 1 || store.reviewer[0] != "贝吉塔游戏" {
+		t.Errorf("reviewer = %v, want [贝吉塔游戏] — same tier has no second model, so one rung down", store.reviewer)
 	}
 	body := store.comments[KindAssignment][0]
 	if !strings.Contains(body, "需要人拍板") {
@@ -326,6 +327,9 @@ func TestJudgeAskingForAPersonStillWritesASeat(t *testing.T) {
 	}
 	if !strings.Contains(body, "@ 对应的人") {
 		t.Errorf("comment does not tell the seat to ping the person:\n%s", body)
+	}
+	if !strings.Contains(body, "不是停票的理由") {
+		t.Errorf("comment lets 需要人拍板 be read as a hold:\n%s", body)
 	}
 }
 
@@ -891,7 +895,7 @@ func TestLowConfidenceReportsTheFallbackWithAReadableReason(t *testing.T) {
 	if out.Action != ActionAssigned || out.ExecutorWritten == nil || out.ReviewerWritten.Empty() {
 		t.Fatalf("outcome = %+v, want both slots written", out)
 	}
-	for _, want := range []string{"executor fell back to 孙悟空游戏: confidence 47% < threshold 70%", "reviewer fell back to 布尔玛游戏: confidence 38% < threshold 70%"} {
+	for _, want := range []string{"executor fell back to 孙悟空游戏: confidence 47% < threshold 70%", "reviewer fell back to 贝吉塔游戏: confidence 38% < threshold 70%"} {
 		if !strings.Contains(out.Reason, want) {
 			t.Errorf("reason = %q, want it to contain %q", out.Reason, want)
 		}
@@ -1036,6 +1040,9 @@ func TestInReviewFillsAnEmptyReviewerSlotAndHandsOff(t *testing.T) {
 	if !strings.Contains(body, "现场定了一个") {
 		t.Errorf("handoff comment hides that the reviewer was decided at this row:\n%s", body)
 	}
+	if !strings.Contains(body, "就在这一轮合并并关票") {
+		t.Errorf("handoff comment does not release a pass in the same turn:\n%s", body)
+	}
 }
 
 // A seat may not accept its own output, including when the reviewer is decided
@@ -1079,11 +1086,10 @@ func TestInReviewDecisionNeverTouchesStatus(t *testing.T) {
 	}
 }
 
-// Plenty of work is done by agents that carry no tier label at all. "The
-// ladder has no rung above this seat" is then a fact about the ladder, not
-// about the ticket, and answering it with a person is how every mechanical
-// check ends up queued on somebody's desk. The top rung takes those.
-func TestOffLadderExecutorFallsBackToTheTopRungNotAPerson(t *testing.T) {
+// Plenty of work is done by agents that carry no tier label at all. The
+// fallback rung checks those. The strongest rung does not: an unlabelled
+// executor is not a confident "strongest" verdict.
+func TestOffLadderExecutorFallsBackToTheFallbackRungNotTheStrongest(t *testing.T) {
 	store := newFakeStore()
 	store.issue.Status = "in_review"
 	store.issue.AssigneeType = "agent"
@@ -1099,12 +1105,15 @@ func TestOffLadderExecutorFallsBackToTheTopRungNotAPerson(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ReviewerWritten.Label() != "布尔玛游戏" {
-		t.Errorf("reviewer = %q, want 布尔玛游戏 — an unlabelled executor must not force a human check",
+	if out.ReviewerWritten.Label() != "孙悟空游戏" {
+		t.Errorf("reviewer = %q, want 孙悟空游戏 — an unlabelled executor lands on the fallback rung",
 			out.ReviewerWritten.Label())
 	}
-	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-bulma-g" {
-		t.Errorf("handoffs = %v, want [agent:a-bulma-g]", store.handoffs)
+	if strings.Contains(out.ReviewerWritten.Label(), "布尔玛") {
+		t.Errorf("reviewer = %q, fallback must not be the strongest rung", out.ReviewerWritten.Label())
+	}
+	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-goku-g" {
+		t.Errorf("handoffs = %v, want [agent:a-goku-g]", store.handoffs)
 	}
 }
 
@@ -1133,5 +1142,60 @@ func TestTopRungExecutorFallsBackToTheRungBelow(t *testing.T) {
 	}
 	if out.ReviewerWritten.Label() != "孙悟空游戏" {
 		t.Errorf("reviewer = %q, want 孙悟空游戏", out.ReviewerWritten.Label())
+	}
+}
+
+// The acceptance bar: an executor on the strong rung must not drag the
+// fallback reviewer onto the strongest rung. With no second model family on
+// strong, the check steps down.
+func TestStrongExecutorFallbackReviewerIsNotStrongest(t *testing.T) {
+	store := newFakeStore()
+	judge := &fakeJudge{verdict: Verdict{
+		ExecutorTier: "strong", ExecutorConfidence: 0.9,
+		Reviewer: ReviewerSeat, ReviewerTier: "strongest", ReviewerConfidence: 0.2,
+	}}
+
+	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.ExecutorWritten == nil || out.ExecutorWritten.TierKey != "strong" {
+		t.Fatalf("executor = %+v, want the strong rung", out.ExecutorWritten)
+	}
+	if out.ReviewerWritten.Kind != ReviewerAgent {
+		t.Fatalf("reviewer = %+v, want a seat", out.ReviewerWritten)
+	}
+	if out.ReviewerWritten.Label() == "布尔玛游戏" || strings.Contains(out.ReviewerWritten.Label(), "孙悟饭") {
+		t.Fatalf("reviewer = %q, fallback must not be the strongest rung", out.ReviewerWritten.Label())
+	}
+	if out.ReviewerWritten.Label() != "贝吉塔游戏" {
+		t.Errorf("reviewer = %q, want 贝吉塔游戏", out.ReviewerWritten.Label())
+	}
+	body := store.comments[KindAssignment][0]
+	if !strings.Contains(body, "改到最强档要在评论里写明理由") || !strings.Contains(body, "不会取消原来的 run") {
+		t.Errorf("decision comment does not warn about a manual reassignment:\n%s", body)
+	}
+}
+
+// When the strong rung has a second model family, the fallback reviewer is
+// that seat. It is still not the strongest rung.
+func TestStrongExecutorFallbackReviewerUsesAnotherModelOnTheSameTier(t *testing.T) {
+	store := newFakeStore()
+	store.roster["特兰克斯游戏"] = Agent{ID: "a-trunks-g", Name: "特兰克斯游戏"}
+	judge := &fakeJudge{verdict: Verdict{
+		ExecutorTier: "strong", ExecutorConfidence: 0.9,
+		Reviewer: ReviewerSeat, ReviewerTier: "strongest", ReviewerConfidence: 0.2,
+	}}
+
+	out, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.ReviewerWritten.Label() != "特兰克斯游戏" {
+		t.Fatalf("reviewer = %q, want 特兰克斯游戏 — the other model family on the strong rung", out.ReviewerWritten.Label())
+	}
+	body := store.comments[KindAssignment][0]
+	if !strings.Contains(body, "同档换一家模型") {
+		t.Errorf("comment does not say the reviewer stayed on the rung:\n%s", body)
 	}
 }

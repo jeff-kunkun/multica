@@ -133,12 +133,18 @@ type AgentResponse struct {
 	// base role can have children. Archived specialisations are not counted:
 	// they no longer block archiving the base role. Populated on the agents
 	// list (0 for a specialisation); the detail response leaves it nil.
-	ChildCount    *int            `json:"child_count,omitempty"`
-	AvatarURL     *string         `json:"avatar_url"`
-	RuntimeMode   string          `json:"runtime_mode"`
-	RuntimeConfig any             `json:"runtime_config"`
-	CustomArgs    []string        `json:"custom_args"`
-	McpConfig     json.RawMessage `json:"mcp_config"`
+	ChildCount    *int    `json:"child_count,omitempty"`
+	AvatarURL     *string `json:"avatar_url"`
+	RuntimeMode   string  `json:"runtime_mode"`
+	RuntimeConfig any     `json:"runtime_config"`
+	// PlanLimits is this agent's own subscription windows, present only when
+	// the daemon reported a snapshot for the CLI account this agent binds
+	// (DENE-715). Absent or null means the client should fall back to the
+	// runtime's plan_limits — the agent has no binding of its own, or the
+	// daemon has not run it yet.
+	PlanLimits *protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
+	CustomArgs []string                     `json:"custom_args"`
+	McpConfig  json.RawMessage              `json:"mcp_config"`
 	// custom_env is intentionally NOT serialized on agent resources. The
 	// agent_list/get/create/update/archive/restore responses and WS events
 	// only expose coarse metadata (has_custom_env, custom_env_key_count) so
@@ -272,6 +278,21 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		}
 	}
 
+	// plan_limits is the daemon's snapshot for THIS agent's own CLI account,
+	// reported only for agents bound to a numbered account (DENE-715). NULL
+	// means "nothing agent-specific to say", and readers then fall back to the
+	// runtime row exactly as they did before. Like the runtime copy it is
+	// credential-free: percentages, window lengths and reset times only.
+	var planLimits *protocol.PlanLimitsSnapshot
+	if len(a.PlanLimits) > 0 {
+		var snapshot protocol.PlanLimitsSnapshot
+		if err := json.Unmarshal(a.PlanLimits, &snapshot); err != nil {
+			slog.Warn("failed to unmarshal agent plan_limits", "agent_id", uuidToString(a.ID), "error", err)
+		} else {
+			planLimits = &snapshot
+		}
+	}
+
 	// composio_toolkit_allowlist: the column is stored as TEXT[] and arrives
 	// here as a []string (sqlc). NULL and `{}` both serialize as nil through
 	// the postgres driver — both correctly mean "no toolkits", but the API
@@ -302,6 +323,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		McpConfig:                mcpConfig,
 		HasCustomEnv:             envKeyCount > 0,
 		CustomEnvKeyCount:        envKeyCount,
+		PlanLimits:               planLimits,
 		Visibility:               a.Visibility,
 		PermissionMode:           a.PermissionMode,
 		InvocationTargets:        []AgentInvocationTargetDTO{},
@@ -856,12 +878,17 @@ type AgentTaskResponse struct {
 	// the same zero. Only the first of those answers "has anything else been
 	// said on this issue", so only the first may waive the workflow's comment
 	// scan. Absent on old servers, which is the safe reading (MUL-6984).
-	NewCommentsDeltaKnown    bool                  `json:"new_comments_delta_known,omitempty"`
-	IssueTitle               string                `json:"issue_title,omitempty"`
-	IssueDescription         string                `json:"issue_description,omitempty"`
+	NewCommentsDeltaKnown bool   `json:"new_comments_delta_known,omitempty"`
+	IssueTitle            string `json:"issue_title,omitempty"`
+	IssueDescription      string `json:"issue_description,omitempty"`
+	// CheckoutPaths is the issue's checkout_paths metadata: repo-relative
+	// directories this task wants on disk. Empty (and absent on old servers)
+	// checks out the whole repository.
+	CheckoutPaths            string                `json:"checkout_paths,omitempty"`
 	IssueCommentSummaries    []IssueContextComment `json:"issue_comment_summaries,omitempty"`
 	IssueTriggerThread       []IssueContextComment `json:"issue_trigger_thread,omitempty"`
 	IssueNewComments         []IssueContextComment `json:"issue_new_comments,omitempty"`
+	IssueSubIssues           []SubIssueRef         `json:"issue_sub_issues,omitempty"` // the task issue's sub-issues; non-empty tells the run it holds a coordinator (DENE-812)
 	IssueContextGeneratedAt  string                `json:"issue_context_generated_at,omitempty"`
 	IssueContextTruncated    bool                  `json:"issue_context_truncated,omitempty"`
 	ChatSessionID            string                `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
@@ -888,6 +915,7 @@ type AgentTaskResponse struct {
 	SquadName                string                `json:"squad_name,omitempty"`                  // display name for the picker squad
 	ParentIssueID            string                `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
 	ParentIssueIdentifier    string                `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	ProjectExplicitNone      bool                  `json:"project_explicit_none,omitempty"`       // user cleared the project; the daemon prompt must pass an empty --project
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -1107,6 +1135,72 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+}
+
+// SubIssueRef is one sub-issue of the task issue, as the claim
+// snapshot carries it: enough for a coordinator to see who holds what and
+// which stage is live, without a read per child.
+type SubIssueRef struct {
+	ID           string `json:"id"`
+	Identifier   string `json:"identifier,omitempty"`
+	Title        string `json:"title"`
+	Status       string `json:"status"`
+	Stage        int32  `json:"stage,omitempty"`
+	AssigneeType string `json:"assignee_type,omitempty"`
+	AssigneeName string `json:"assignee_name,omitempty"`
+}
+
+// maxClaimSubIssues bounds the list a claim carries; a larger tree is one
+// `multica issue children` away and the snapshot says it was truncated.
+const maxClaimSubIssues = 40
+
+// claimSubIssues renders a parent's children for the claim snapshot. Names
+// are resolved best-effort: an unresolvable holder still shows its type, and
+// an unassigned child — the thing a coordinator most needs to see — shows
+// none.
+func (h *Handler) claimSubIssues(ctx context.Context, prefix string, children []db.Issue) []SubIssueRef {
+	if len(children) == 0 {
+		return nil
+	}
+	out := make([]SubIssueRef, 0, min(len(children), maxClaimSubIssues))
+	names := map[string]string{}
+	for _, child := range children {
+		if len(out) == maxClaimSubIssues {
+			break
+		}
+		item := SubIssueRef{
+			ID:     uuidToString(child.ID),
+			Title:  child.Title,
+			Status: child.Status,
+		}
+		if prefix != "" {
+			item.Identifier = service.IssueIdentifier(prefix, child.Number)
+		}
+		if child.Stage.Valid {
+			item.Stage = child.Stage.Int32
+		}
+		if child.AssigneeType.Valid && child.AssigneeID.Valid {
+			item.AssigneeType = child.AssigneeType.String
+			key := item.AssigneeType + ":" + uuidToString(child.AssigneeID)
+			name, seen := names[key]
+			if !seen {
+				switch item.AssigneeType {
+				case "agent":
+					if a, err := h.Queries.GetAgent(ctx, child.AssigneeID); err == nil {
+						name = a.Name
+					}
+				case "member":
+					if u, err := h.Queries.GetUser(ctx, child.AssigneeID); err == nil {
+						name = u.Name
+					}
+				}
+				names[key] = name
+			}
+			item.AssigneeName = name
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // IssueContextComment is a bounded comment snapshot included in a daemon claim.
@@ -2990,6 +3084,21 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A base role owns the availability of its direct specialisations: turning
+	// it off or on sets every specialisation to the same value.
+	var toggledSpecialisations []db.Agent
+	if req.WorkEnabled != nil && !updated.ParentAgentID.Valid {
+		toggledSpecialisations, err = h.Queries.SetAgentSpecialisationsWorkEnabled(r.Context(), db.SetAgentSpecialisationsWorkEnabledParams{
+			WorkEnabled:   *req.WorkEnabled,
+			ParentAgentID: updated.ID,
+		})
+		if err != nil {
+			slog.Warn("sync agent specialisations work_enabled failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent specialisations")
+			return
+		}
+	}
+
 	// Nullable runtime overrides: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
 	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
@@ -3094,6 +3203,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if child.ID == updated.ID {
 			continue
 		}
+		h.publishAgentUpdate(r, child)
+	}
+	for _, child := range toggledSpecialisations {
 		h.publishAgentUpdate(r, child)
 	}
 

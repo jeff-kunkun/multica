@@ -124,8 +124,10 @@ func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	}
 	// The routing gateway key lives in this column and must never leave the
 	// server. Stripped here, in the one function every workspace response goes
-	// through, rather than at each of its call sites.
+	// through, rather than at each of its call sites. The log-export git token
+	// sits in the same column under its own key and obeys the same rule.
 	settings = redactRoutingSettings(settings)
+	settings = redactLogExportSettings(settings)
 	var repos any
 	if w.Repos != nil {
 		json.Unmarshal(w.Repos, &repos)
@@ -471,9 +473,10 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
 	if req.Settings != nil {
-		// The client cannot echo back the routing key it was never sent, so
-		// the stored one is carried forward unless this write explicitly sets
-		// or clears it. Without this, any unrelated settings save wipes it.
+		// The client cannot echo back the routing key or the log-export git
+		// token it was never sent, so the stored ones are carried forward
+		// unless this write explicitly sets or clears them. Without this, any
+		// unrelated settings save wipes them.
 		var stored []byte
 		if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
 			stored = existing.Settings
@@ -484,9 +487,19 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 				"this deployment cannot store a routing key (no MULTICA_ROUTING_SECRET_KEY or JWT_SECRET)")
 			return
 		}
+		// Chain the log-export merge onto the already-merged value: the two
+		// blocks coexist in the same column, and running one must not discard
+		// the other's carried-forward secret.
+		merged, ok = h.applyLogExportToken(merged, stored)
+		if !ok {
+			writeError(w, http.StatusServiceUnavailable,
+				"this deployment cannot store a log export git token (no MULTICA_LOG_EXPORT_SECRET_KEY or JWT_SECRET)")
+			return
+		}
 		s, _ := json.Marshal(merged)
 		params.Settings = s
 	}
+	var droppedRepoURLs []string
 	if req.Repos != nil {
 		var storedRepos []byte
 		if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
@@ -498,6 +511,13 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.Repos = reposJSON
+		// Repos dropped from the list take their direct shares with them.
+		kept := workspaceReposByURL(reposJSON)
+		for url := range workspaceReposByURL(storedRepos) {
+			if _, ok := kept[url]; !ok {
+				droppedRepoURLs = append(droppedRepoURLs, url)
+			}
+		}
 	}
 	if req.IssuePrefix != nil {
 		prefix, ok := normalizeIssuePrefix(*req.IssuePrefix)
@@ -530,6 +550,8 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update workspace: "+err.Error())
 		return
 	}
+
+	h.deleteRepoShares(r.Context(), ws.ID, droppedRepoURLs)
 
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)

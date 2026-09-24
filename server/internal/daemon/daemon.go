@@ -32,6 +32,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/selfexec"
+	"github.com/multica-ai/multica/server/internal/sparsecheckout"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -176,7 +177,7 @@ func taskScopedAuthToken(task Task) (string, error) {
 }
 
 func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesRoot, serverURL string, healthPort, slot int, tempDir string) map[string]string {
-	return map[string]string{
+	env := map[string]string{
 		"MULTICA_TOKEN":        token,
 		cli.TaskConfigRootEnv:  configRoot,
 		TaskWorkspacesRootEnv:  workspacesRoot,
@@ -191,6 +192,10 @@ func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesR
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
 	}
+	if paths := strings.TrimSpace(task.CheckoutPaths); paths != "" {
+		env[sparsecheckout.EnvVar] = paths
+	}
+	return env
 }
 
 // taskRunner executes a single agent task and returns the result.
@@ -580,6 +585,13 @@ type Daemon struct {
 	planQuotaClaudeURL string
 	planQuotaCodexURL  string
 	planQuotaProbeFn   func() agent.PlanQuotaProbe
+	// planAgentQuota tracks the per-seat account binding behind the runtime
+	// snapshot above: which account directory each agent's task environment
+	// binds, and the newest windows observed for it (DENE-715). Guarded by
+	// planAgentMu. See plan_limits_agent.go for why the runtime row is not
+	// enough on its own.
+	planAgentMu    sync.Mutex
+	planAgentQuota map[string]*agentPlanQuota
 
 	// reconcile fans out a "re-check server state now" signal to subscribers
 	// (watchTaskCancellation, workspaceSyncLoop) so the WS connect/reconnect
@@ -4733,7 +4745,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
 	d.maybeRefreshPlanQuota()
 	d.refreshJevStatus()
-	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid), d.jevStatusSnapshot())
+	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid), d.agentPlanLimitsForRuntime(rid), d.jevStatusSnapshot())
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -4783,7 +4795,10 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	}
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
+			// The overlay is the agent's custom_env. Endpoint readers let it
+			// win over the machine config. It is not logged.
+			listCtx := agent.WithModelEnvOverlay(ctx, resp.PendingModelList.EnvOverlay)
+			go d.handleModelList(listCtx, *rt, resp.PendingModelList.ID)
 		}
 	}
 	if resp.PendingProviderConfig != nil {
@@ -4885,7 +4900,7 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 	}
 	hbCtx, cancel := context.WithTimeout(ctx, pendingWorkHeartbeatTimeout)
 	d.refreshJevStatus()
-	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID), d.jevStatusSnapshot())
+	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID), d.agentPlanLimitsForRuntime(runtimeID), d.jevStatusSnapshot())
 	cancel()
 	if err != nil {
 		if isRuntimeNotFoundError(err) {
@@ -6672,10 +6687,12 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		failureReason := result.FailureReason
 		if failureReason == "" {
 			if result.Status == "cancelled" {
-				// "cancelled" is a deliberate non-failure terminal
-				// state masquerading as a failure_reason — preserved
-				// outside the canonical taxonomy so the UI can render
-				// it differently from a real failure.
+				// The run context died and the server had not already
+				// finalized this row (a person cancel is observed by the
+				// poller above and never reaches here). The server treats
+				// failure_reason "cancelled" as a recoverable platform
+				// interrupt: it retries within max_attempts and leaves a
+				// notice on the issue (DENE-813).
 				failureReason = "cancelled"
 			} else {
 				// MUL-2946: classify the agent's comment text so the
@@ -6992,16 +7009,32 @@ func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 		return sharedBriefViaCursorAddDir
 	case "antigravity":
 		return sharedBriefViaAntigravityAddDir
-	case "openclaw", "kimi", "traecli", "qwenpaw",
-		"codebuddy", "dim", "grok", "dsh", "kiro", "qoder", "qoderclicn", "zeroclaw":
+	case "openclaw", "kimi", "traecli", "qwenpaw", "qwen", "pi", "omp", "codearts",
+		"codebuddy", "dim", "devin", "grok", "dsh", "kiro", "qoder", "qoderclicn", "zeroclaw":
 		return sharedBriefInline
 	default:
-		// mcode is intentionally unsupported: it ignores ExecOptions.SystemPrompt
-		// and only reads cwd-scoped AGENTS.md (see mcode.go). Shared mode writes
-		// the brief under the sidecar root, so listing mcode here would start a
-		// task with no brief and no skills.
+		// Refused on purpose; sharedModeRefusedProviders records why.
 		return sharedBriefUnsupported
 	}
+}
+
+// sharedModeRefusedProviders is every supported runtime that shared mode
+// refuses, with the reason it has no brief route yet. The provider-table test
+// requires each agent.SupportedTypes entry to have a route or an entry here,
+// so a new backend cannot fall into shared mode's refusal unnoticed.
+var sharedModeRefusedProviders = map[string]string{
+	// Hermes ACP deliberately drops SystemPrompt: prepending the full brief
+	// to the user turn has tripped upstream safety filters (hermes.go).
+	"hermes": "inline brief trips upstream safety filters",
+	// mcode ignores ExecOptions.SystemPrompt and only reads cwd AGENTS.md
+	// (mcode.go, DENE-125).
+	"mcode": "reads the brief only from cwd AGENTS.md",
+	// reasonix sends the bare prompt over ACP and has no verified route.
+	"reasonix": "no verified brief route",
+	// copilot and deveco carry the prompt on argv; a brief of tens of KB
+	// there breaks the Windows command-line limit.
+	"copilot": "prompt travels on argv",
+	"deveco":  "prompt travels on argv",
 }
 
 // sharedModeBriefOverlay is the ExtraArgs / SystemPrompt pair a shared-mode
@@ -8263,6 +8296,23 @@ func qualifyTaskModel(
 	return qualified
 }
 
+// sameSeatRetryWorkDir is the previous cwd a same-seat retry may rebuild, or
+// "" when this run must start a fresh working copy.
+//
+// A different seat (the capacity handoff that moves the issue to another
+// agent) is a new conversation and passes previousDirReusable false from the
+// caller, because shouldContinueInterruptedSession is already false there.
+// previousDirReusable is the path check: the directory is a missing child of
+// this repository's worktree root. previousDirInUse is the live-task check.
+// Either one failing leaves the retry on a new directory, and the resume gate
+// then drops the session instead of sending the CLI somewhere it cannot find.
+func sameSeatRetryWorkDir(task Task, previousDirReusable, previousDirInUse bool) string {
+	if !shouldContinueInterruptedSession(task) || !previousDirReusable || previousDirInUse {
+		return ""
+	}
+	return task.PriorWorkDir
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (taskResult TaskResult, returnErr error) {
 	phaseRecorder := taskPhaseRecorderFromContext(ctx)
 	phaseRecorder.Mark(taskPhasePrepareStarted)
@@ -8281,6 +8331,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// multiple workspaces share a host.
 	if task.WorkspaceID == "" {
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
+	}
+	if _, err := sparsecheckout.Parse(task.CheckoutPaths); err != nil {
+		return TaskResult{}, fmt.Errorf("issue metadata checkout_paths: %w", err)
 	}
 
 	prepareTimeout := d.effectiveTaskPrepareTimeout()
@@ -8839,15 +8892,43 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
 			}
 		} else if localAssignment.UsesWorktree() {
+			// Same-seat retry only. The env root stays this task's own
+			// directory (GC and the env-root lock key off the task id); what
+			// has to stay put is the working copy the CLI's conversation is
+			// filed under. A different seat never sets the continue flag, so
+			// it keeps a new copy. A path that is missing, busy, or not under
+			// this repo's worktree root is not offered, and Prepare falls
+			// back to a fresh copy without deleting anything.
+			resumeWorkDir := ""
+			if shouldContinueInterruptedSession(task) && task.PriorWorkDir != "" {
+				reusable, inUse := false, false
+				gitRoot, gitErr := execenv.ResolveGitRoot(localAssignment.AbsPath)
+				if gitErr != nil {
+					taskLog.Info("same-seat retry: repository not resolved; starting a fresh worktree", "error", gitErr)
+				} else if wtRoot, rootErr := execenv.ResolveWorktreeRoot(gitRoot, strings.TrimSpace(localAssignment.Ref.WorktreeRoot)); rootErr != nil {
+					taskLog.Info("same-seat retry: worktree root refused; starting a fresh worktree", "error", rootErr)
+				} else if dir, ok := execenv.ReusableWorktreeDir(wtRoot, gitRoot, localAssignment.AbsPath, task.PriorWorkDir); !ok {
+					taskLog.Info("same-seat retry: previous worktree unavailable; starting a fresh worktree",
+						"prior_work_dir", task.PriorWorkDir)
+				} else if d.worktreeCleanup.IsActive(dir) {
+					inUse = true
+					taskLog.Info("same-seat retry: previous worktree still in use; starting a fresh worktree", "path", dir)
+				} else {
+					reusable = true
+				}
+				resumeWorkDir = sameSeatRetryWorkDir(task, reusable, inUse)
+			}
 			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{
-				LocalPath: localAssignment.AbsPath,
+				LocalPath:     localAssignment.AbsPath,
+				CheckoutPaths: task.CheckoutPaths,
 				// Empty when the resource names no location; execenv then
 				// uses the repository's sibling (DefaultWorktreeRoot). An
 				// older server that does not send the field, or a newer one
 				// that stripped it for a daemon lacking the capability, lands
 				// on the same default — which is what this daemon implements
 				// either way (DENE-617).
-				WorktreeRoot: strings.TrimSpace(localAssignment.Ref.WorktreeRoot),
+				WorktreeRoot:  strings.TrimSpace(localAssignment.Ref.WorktreeRoot),
+				ResumeWorkDir: resumeWorkDir,
 			}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
@@ -9189,6 +9270,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.LocalWorktree != nil && env.LocalWorktree.StaleBaselineNotice != "" {
 		promptOptions = append(promptOptions, WithStaleLocalBaseline(env.LocalWorktree.StaleBaselineNotice))
 	}
+	if env.LocalWorktree != nil && env.LocalWorktree.ReplaySkippedNotice != "" {
+		promptOptions = append(promptOptions, WithReplaySkipped(env.LocalWorktree.ReplaySkippedNotice))
+	}
 	if command := dependencyInstallCommand(env.WorkDir); command != "" {
 		promptOptions = append(promptOptions, WithDependencyInstallCommand(command))
 	}
@@ -9314,6 +9398,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	// Remember which CLI account this agent's child will run as, read from the
+	// environment we just layered (DENE-715). The plan-quota probe is per
+	// runtime, and one runtime serves every seat on this machine, so without
+	// this the quota panel of an agent switched to a numbered account would
+	// keep naming the daemon's own account.
+	d.recordAgentAccountBinding(task.RuntimeID, task.AgentID, provider, agentCustomEnv, agentEnv)
 	// Shared-mode OpenCode: the sidecar is an additive config directory, not
 	// a replacement for the user's global config. Set this after custom_env
 	// so a user OPENCODE_CONFIG_DIR cannot point the child away from the
@@ -9554,6 +9644,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// The endpoint needs to know whether this project pinned a directory
 		// on this machine before it decides to clone anything (DENE-595).
 		LocalDirectory: localAssignment,
+		CheckoutPaths:  task.CheckoutPaths,
 	})
 	defer d.clearActiveRepoCheckoutTask(agentToken)
 
@@ -9853,11 +9944,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Usage:         usageEntries,
 		}, nil
 	case "cancelled":
-		// Server cancelled the task (e.g. issue reassignment, user cancel).
-		// handleTask's cancelledByPoll branch already discards this result,
-		// so this case is mainly defensive — and preserves the "cancelled"
-		// status string for the "agent finished" log line so operators can
-		// distinguish "task cancelled by server" from a real timeout.
+		// The run context was cancelled and no server-side terminal status
+		// had been observed yet (handleTask's cancelledByPoll branch
+		// discards that case before we get here). Reaching this report means
+		// the daemon itself is stopping the process — restart, self-reload,
+		// or shutdown — and the server will retry it (DENE-813). The comment
+		// string is the machine record; the issue notice is written server-side.
 		return TaskResult{
 			Status:    "cancelled",
 			Comment:   "task cancelled by server",

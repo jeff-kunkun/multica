@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/sparsecheckout"
 )
 
 // sessionContinuityNoticeFor picks the notice matching what this surface
@@ -68,8 +69,10 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	b.WriteString(buildSharedWorkspaceBlock(opts.sharedWorkspace))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
+	b.WriteString(buildReplaySkippedBlock(opts.replaySkippedNotice))
 	b.WriteString(buildStaleLocalBaselineBlock(opts.staleLocalBaselineNotice))
 	b.WriteString(buildDependencyInstallBlock(opts.dependencyInstallCommand))
+	b.WriteString(buildSparseCheckoutBlock(task.CheckoutPaths))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -85,6 +88,7 @@ type promptOpts struct {
 	sharedLocalDirectory     bool
 	sharedWorkspace          bool
 	worktreeReplayConflicts  []string
+	replaySkippedNotice      string
 	staleLocalBaselineNotice string
 	dependencyInstallCommand string
 }
@@ -119,6 +123,13 @@ func WithSharedWorkspace() PromptOption {
 // resolves it (MUL-6881).
 func WithWorktreeReplayConflicts(files []string) PromptOption {
 	return func(o *promptOpts) { o.worktreeReplayConflicts = files }
+}
+
+// WithReplaySkipped tells the turn that a local-directory replay was not
+// applied because the same conflict already happened once. The notice is the
+// text execenv built, including which snapshot and which files.
+func WithReplaySkipped(notice string) PromptOption {
+	return func(o *promptOpts) { o.replaySkippedNotice = strings.TrimSpace(notice) }
 }
 
 // WithStaleLocalBaseline explains that a local_directory worktree could not
@@ -163,11 +174,36 @@ func buildSharedWorkspaceBlock(shared bool) string {
 	return b.String()
 }
 
+func buildReplaySkippedBlock(notice string) string {
+	if strings.TrimSpace(notice) == "" {
+		return ""
+	}
+	return "## Local edits were not replayed\n\n" + strings.TrimSpace(notice) + "\n\n"
+}
+
 func buildStaleLocalBaselineBlock(notice string) string {
 	if strings.TrimSpace(notice) == "" {
 		return ""
 	}
 	return "## Local baseline may be stale\n\n" + strings.TrimSpace(notice) + " Treat the files in this worktree as the authoritative snapshot for this turn, and mention the stale baseline if it affects your conclusion.\n\n"
+}
+
+// buildSparseCheckoutBlock tells the agent what a declared checkout scope
+// means. A missing file in that checkout is not evidence the file is absent
+// from the repository; sparse-add is the check that says which.
+func buildSparseCheckoutBlock(declared string) string {
+	scope, err := sparsecheckout.Parse(declared)
+	if err != nil {
+		return "## Sparse checkout\n\nThe issue's checkout_paths declaration could not be read (" + err.Error() + "). The checkout was not narrowed.\n\n"
+	}
+	if !scope.Active() {
+		return ""
+	}
+	return "## Sparse checkout\n\n" +
+		"This task declared checkout paths: " + strings.Join(scope.Paths, ", ") + ".\n" +
+		"A task worktree (local worktree mode, or `multica repo checkout`) contains those directories plus the repository's root files — lockfile, workspace manifest, root build config. Other directories are not on disk; each one contains " + sparsecheckout.MarkerName + " explaining that.\n" +
+		"A file that is not on disk may still be in the repository. Before concluding it does not exist, run `multica repo sparse-add <path>`. That command checks the path out when it is in git, and tells you when it is not.\n" +
+		"This run's own checkout of the user's directory (in_place or shared) is never narrowed. `multica repo checkout --full` checks out a whole repository; `--paths a,b` overrides the declaration. Pass one of those when checking out a different repository.\n\n"
 }
 
 func buildDependencyInstallBlock(command string) string {
@@ -219,6 +255,9 @@ func buildIssueContextBlock(task Task) string {
 	if task.IssueAssigneeType != "" || task.IssueAssigneeID != "" {
 		fmt.Fprintf(&b, "Assignee: %s %s\n", task.IssueAssigneeType, task.IssueAssigneeID)
 	}
+	// Ahead of the description: the snapshot is cut from the end, and a long
+	// plan must not be what pushes the division of labour out of it.
+	writeCoordinatorRole(&b, task.IssueSubIssues)
 	if task.IssueDescription != "" {
 		fmt.Fprintf(&b, "Description:\n%s\n", task.IssueDescription)
 	}
@@ -267,6 +306,37 @@ func buildIssueContextBlock(task Task) string {
 	return cut + marker
 }
 
+// writeCoordinatorRole states the division of labour when the task issue is a
+// parent (DENE-812): the work lives in the sub-issues, each held by its own
+// executor, and this run supervises. Without it a woken parent reads the whole
+// plan in its description and does every sub-issue's work itself, leaving the
+// sub-issues it was split into as empty bookkeeping.
+func writeCoordinatorRole(b *strings.Builder, subs []SubIssueRef) {
+	if len(subs) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "Coordinator role: this issue is the parent of %d sub-issue(s). The work lives in the sub-issues, each held by its own executor and moved forward there; this issue supervises. On this issue you: keep every open sub-issue held (an unassigned one gets an executor via `multica issue route <id>` or `multica issue assign`); when a stage closes, promote the next stage's sub-issues from backlog to todo; unblock or reassign a stuck sub-issue; and once the whole tree is terminal, check the pieces fit and move this issue to acceptance. Do not implement a sub-issue's deliverable here, and do not finish a sub-issue for its executor; new work that fits no sub-issue becomes a new sub-issue.\n", len(subs))
+	b.WriteString("Sub-issues:\n")
+	for _, s := range subs {
+		name := s.Identifier
+		if name == "" {
+			name = s.ID
+		}
+		holder := "UNASSIGNED"
+		if s.AssigneeType != "" {
+			holder = s.AssigneeType
+			if s.AssigneeName != "" {
+				holder += " " + s.AssigneeName
+			}
+		}
+		stage := ""
+		if s.Stage > 0 {
+			stage = fmt.Sprintf(", stage %d", s.Stage)
+		}
+		fmt.Fprintf(b, "- %s %q (%s%s, %s)\n", name, s.Title, s.Status, stage, holder)
+	}
+}
+
 // buildWorktreeReplayConflictBlock tells the turn that its own working tree
 // starts out mid-merge, and that finishing that merge comes before the task.
 //
@@ -306,7 +376,7 @@ func buildWorktreeReplayConflictBlock(files []string) string {
 		fmt.Fprintf(&b, "- …and %d more; `git status` in this worktree lists them all\n", len(files)-listed)
 	}
 	b.WriteString("\nResolve it before anything else, with ordinary git commands — `git status` lists the unmerged paths, `git diff` shows both sides, `git add <file>` marks each one done. The \"ours\" side is what you wrote last turn; \"theirs\" is the user's newer edit, and it is the side you have not seen before, so read it before choosing. Keep both intentions where they are compatible; where they are not, prefer the user's and say so in your reply.\n\n")
-	b.WriteString("This run cannot deliver its branch while any file is still unmerged — the task fails and the worktree is kept for a human instead. Do not commit conflict markers.\n\n")
+	b.WriteString("This run cannot deliver its branch while any file is still unmerged — the task fails and the worktree is kept for a human instead. Do not commit conflict markers. The same conflict is offered once; if this run leaves it unresolved, the next run skips the replay and continues the branch without those edits.\n\n")
 	return b.String()
 }
 
@@ -496,13 +566,16 @@ func buildQuickCreatePrompt(task Task) string {
 	// omitted so the platform routes to the workspace default. Always pass
 	// the UUID (never a name) so the issue lands in the right project even
 	// when several share a title.
-	if task.ProjectID != "" {
+	switch {
+	case task.ProjectID != "":
 		if task.ProjectTitle != "" {
 			fmt.Fprintf(&b, "- **project**: required for this run. Pass `--project %q` so the new issue lands in project %q (the user picked it in the quick-create modal). Do not infer a different project from the prompt text — the modal selection is authoritative.\n", task.ProjectID, task.ProjectTitle)
 		} else {
 			fmt.Fprintf(&b, "- **project**: required for this run. Pass `--project %q` so the new issue lands in the project the user picked in the quick-create modal. Do not infer a different project from the prompt text — the modal selection is authoritative.\n", task.ProjectID)
 		}
-	} else {
+	case task.ProjectExplicitNone:
+		b.WriteString("- **project**: required for this run. Pass `--project \"\"` so the new issue stays without a project. The user cleared it; leaving the flag off would make the issue inherit its parent's project.\n")
+	default:
 		b.WriteString("- **project**: omit. The platform will route the issue to the workspace default.\n")
 	}
 	// parent — pinned by the modal when the user opened it from "Add sub

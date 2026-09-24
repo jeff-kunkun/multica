@@ -239,6 +239,14 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 	if strings.Contains(plain, "--project") {
 		t.Errorf("buildQuickCreatePrompt without project must NOT mention --project, got:\n%s", plain)
 	}
+
+	cleared := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt:   "fix the login button color",
+		ProjectExplicitNone: true,
+	})
+	if !strings.Contains(cleared, "--project \"\"") {
+		t.Errorf("buildQuickCreatePrompt with an explicit empty project must require --project \"\", got:\n%s", cleared)
+	}
 }
 
 func TestBuildQuickCreatePromptExplicitPriorityAndDueDate(t *testing.T) {
@@ -2166,6 +2174,18 @@ func TestWorktreeReplayConflictBlock(t *testing.T) {
 	})
 }
 
+func TestReplaySkippedBlockNamesTheSnapshot(t *testing.T) {
+	t.Parallel()
+	task := Task{IssueID: "issue-1", IssueIdentifier: "DENE-814"}
+	out := BuildPrompt(task, "claude", WithReplaySkipped("Replay of local-directory snapshot abcdef12 (user HEAD 1234abcd when it was taken) onto branch agent/j/dene-814 was skipped."))
+	if !strings.Contains(out, "## Local edits were not replayed") || !strings.Contains(out, "abcdef12") {
+		t.Fatalf("skip notice missing from the prompt:\n%s", out)
+	}
+	if strings.Contains(BuildPrompt(task, "claude"), "Local edits were not replayed") {
+		t.Fatal("skip notice leaked into a normal prompt")
+	}
+}
+
 // TestSharedWorkspaceBlock covers the notice a shared-mode task gets. It is a
 // different message from the lock-exempt one: here nobody holds the lock, by
 // the owner's decision, and the guidance is about the workspace's own
@@ -2337,5 +2357,28 @@ func TestBuildPromptIssueContextSnapshotAndBudget(t *testing.T) {
 	unicodePrompt := BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "中文", IssueDescription: strings.Repeat("中文评论", maxIssueContextBytes), IssueContextGeneratedAt: "now"}, "claude")
 	if !utf8.ValidString(unicodePrompt) {
 		t.Fatal("bounded issue context must remain valid UTF-8")
+	}
+}
+
+// DENE-812: a parent's run is told it coordinates, and sees who holds each
+// sub-issue — an unassigned one included — even under a long description.
+func TestBuildPromptParentIssueCarriesCoordinatorRole(t *testing.T) {
+	subs := []SubIssueRef{
+		{ID: "c1", Identifier: "DENE-2", Title: "后端", Status: "todo", Stage: 1, AssigneeType: "agent", AssigneeName: "孙悟天"},
+		{ID: "c2", Identifier: "DENE-3", Title: "前端", Status: "backlog", Stage: 2},
+	}
+	out := BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "Plan", IssueDescription: strings.Repeat("x", maxIssueContextBytes*2), IssueContextGeneratedAt: "now", IssueSubIssues: subs}, "claude")
+	for _, want := range []string{
+		"Coordinator role: this issue is the parent of 2 sub-issue(s)",
+		"Do not implement a sub-issue's deliverable here",
+		`- DENE-2 "后端" (todo, stage 1, agent 孙悟天)`,
+		`- DENE-3 "前端" (backlog, stage 2, UNASSIGNED)`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("prompt missing %q", want)
+		}
+	}
+	if strings.Contains(BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "Leaf", IssueContextGeneratedAt: "now"}, "claude"), "Coordinator role") {
+		t.Fatal("a leaf issue must not be told it coordinates")
 	}
 }

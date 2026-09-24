@@ -16,7 +16,7 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { AppLink, useBackOrReplace, useNavigation } from "../../navigation";
+import { AppLink, useBackOrReplace } from "../../navigation";
 import {
   Archive,
   Calendar,
@@ -107,6 +107,7 @@ import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { ThreadMinimap, type ThreadMinimapThread } from "./thread-minimap";
 import { collectThreadParticipants, collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
+import { IssueLogExportButton } from "../../common/log-export";
 import { ExecutionLogSection } from "./execution-log-section";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
@@ -1165,7 +1166,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const id = issueId;
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
-  const navigation = useNavigation();
   const openModal = useModalStore((state) => state.open);
 
   // Issue navigation — read from TQ list cache
@@ -1427,15 +1427,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
    * this issue, so whatever the conversation settles on is filed beneath it
    * instead of founding a second top-level issue.
    *
-   * The project and assignee seeds are deliberately NOT carried: the
-   * conversation decides who does the work, and the panel already inherits the
-   * project from the shared draft slot.
+   * The project is seeded from this issue so the alignment starts in the same
+   * place; the user can change or clear it before the conversation begins.
+   * The assignee is still left to the conversation.
    */
   const openCommentAlign = useCallback((commentId: string) => {
     if (!issue) return;
     openAlignIssue({
       anchor_comment_id: commentId,
       parent_issue_id: issue.id,
+      project_id: issue.project_id,
     });
   }, [issue]);
 
@@ -2360,16 +2361,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-          {/* Core props — always rendered. */}
+          {/* Core props — always rendered, except the acceptance slot below. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label={t(($) => $.detail.prop_reviewer)}>
-            <ReviewerPicker reviewerType={issue.reviewer_type} reviewerId={issue.reviewer_id} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
+          {/* 验收席 is parent-scoped: acceptance belongs to the top-level
+              issue, and a sub-issue is execution-only. An empty slot on a
+              sub-issue is therefore not a requirement — offering one would
+              invite a reviewer that routing never hands the ticket to. A
+              value somebody recorded by hand still renders, so existing
+              tickets keep their decision and can clear it. */}
+          {(issue.parent_issue_id == null || issue.reviewer_type != null) && (
+            <PropRow label={t(($) => $.detail.prop_reviewer)}>
+              <ReviewerPicker reviewerType={issue.reviewer_type} reviewerId={issue.reviewer_id} onUpdate={handleUpdateField} align="start" />
+            </PropRow>
+          )}
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker
               projectId={issue.project_id}
@@ -2879,6 +2888,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 it never overlaps the title (which truncates to make room).
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} />
+            {/* Exports the newest run's logs; self-hides when the issue has
+                no runs. The range picker inside reaches the rest of the
+                history, so the header needs no run picker of its own. */}
+            <IssueLogExportButton issueId={id} issueIdentifier={issue.identifier} />
             {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <Tooltip>
                 <TooltipTrigger
@@ -3144,6 +3157,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               draftId={alignmentDraftId}
               groupIssues={alignmentGroupIssues}
               parentIssueId={issue.id}
+              projectId={issue.project_id}
               selfStarted={alignmentDraftId !== null}
               startedByAnother={alignmentHeldByAnother}
             />
@@ -3650,12 +3664,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           onSaved={(result) => {
             setShareAudienceSize(result.audience_size);
           }}
-          onManageMembers={issue.project_id ? () => {
-            const projectId = issue.project_id;
-            if (!projectId) return;
-            setShareScopeOpen(false);
-            navigation.push(paths.projectDetail(projectId));
-          } : undefined}
         />
       </div>
     </ImageSequenceProvider>

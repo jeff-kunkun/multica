@@ -18,11 +18,19 @@ export interface Project {
   due_date: string | null;
   created_at: string;
   updated_at: string;
+  created_by?: string | null;
   issue_count: number;
   done_count: number;
   resource_count: number;
   /** Resource sharing scope. Older servers omit this field. */
   visibility?: "private" | "project" | "workspace";
+}
+
+export interface ProjectVisibilityPreview {
+  project_id: string;
+  visibility: "private" | "project" | "workspace";
+  affected_count: number;
+  previously_private_count: number;
 }
 
 export interface CreateProjectRequest {
@@ -68,6 +76,16 @@ export interface ProjectMember {
   name: string;
   email: string;
   avatar_url: string | null;
+}
+
+/** A person granted direct access to one issue or repository ("specific people" scope). */
+export interface ResourceShare {
+  member_id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+  added_by: string | null;
+  created_at: string;
 }
 
 // ProjectResource is a typed pointer from a project to an external resource.

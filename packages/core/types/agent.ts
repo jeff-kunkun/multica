@@ -177,6 +177,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "reasonix",
   "dsh",
   "dim",
+  "devin",
   "kiro",
   "antigravity",
   "qoder",
@@ -684,6 +685,19 @@ export interface Agent {
    * alongside `has_custom_env`. Treat `undefined` as zero. MUL-2600.
    */
   custom_env_key_count?: number;
+  /**
+   * This agent's own subscription windows, reported by the daemon that runs it
+   * (DENE-715).
+   *
+   * Plan limits live on the runtime, but one runtime serves every CLI seat on
+   * the machine: an agent switched to a numbered account still shares its
+   * runtime row with its unbound siblings. The daemon therefore reports the
+   * bound agent's own account snapshot here, and readers prefer it over
+   * `runtime.plan_limits`. Absent or `null` means "no agent-specific snapshot"
+   * — the agent has no account binding, or the daemon has not run it yet — and
+   * the runtime's value is the correct fallback.
+   */
+  plan_limits?: PlanLimitsSnapshot | null;
   /**
    * MCP server configuration forwarded to runtimes that consume
    * `agent.mcp_config` (see providerSupportsMcpConfig). Each backend

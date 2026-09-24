@@ -1700,6 +1700,10 @@ type QuickCreateContext struct {
 	// pass `--parent <uuid>` so the sub-issue relationship is preserved
 	// across the manual→agent mode flip.
 	ParentIssueID string `json:"parent_issue_id,omitempty"`
+	// ProjectExplicitNone is set when the user cleared the project on a
+	// sub-issue. The prompt then requires `--project ""` so create does not
+	// treat the omitted flag as "inherit the parent".
+	ProjectExplicitNone bool `json:"project_explicit_none,omitempty"`
 	// SourceContextID identifies the immutable pending capture that must attach
 	// to the one issue this quick-create chain produces.
 	SourceContextID string `json:"source_context_id,omitempty"`
@@ -1728,14 +1732,25 @@ const QuickCreateContextType = "quick_create"
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
 func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, nil)
+	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, false, nil)
+}
+
+// EnqueueQuickCreateTaskChoosingProject is EnqueueQuickCreateTask plus the
+// caller's explicit "no project" choice. projectExplicitNone tells the agent
+// to pass an empty --project so a sub-issue does not inherit its parent.
+func (s *TaskService) EnqueueQuickCreateTaskChoosingProject(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone bool) (db.AgentTaskQueue, error) {
+	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, projectExplicitNone, nil)
 }
 
 func (s *TaskService) EnqueueQuickCreateTaskWithSourceContext(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, capture SourceContextCapture) (db.AgentTaskQueue, error) {
-	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, &capture)
+	return s.EnqueueQuickCreateTaskWithSourceContextChoosingProject(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, false, capture)
 }
 
-func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, capture *SourceContextCapture) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueQuickCreateTaskWithSourceContextChoosingProject(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone bool, capture SourceContextCapture) (db.AgentTaskQueue, error) {
+	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, projectExplicitNone, &capture)
+}
+
+func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone bool, capture *SourceContextCapture) (db.AgentTaskQueue, error) {
 	if err := CheckIssueCreateCapacity(ctx, s.Queries, s.Entitlements, workspaceID); err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("preflight quick-create issue capacity: %w", err)
 	}
@@ -1770,6 +1785,7 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if parentIssueID.Valid {
 		payload.ParentIssueID = util.UUIDToString(parentIssueID)
 	}
+	payload.ProjectExplicitNone = projectExplicitNone
 	if capture != nil {
 		payload.SourceContextID = util.UUIDToString(capture.ID)
 	}
@@ -5290,13 +5306,24 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		}
 	}
 
-	// Skip the per-failure system comment when we'll immediately retry —
-	// the new task will surface its own status to the user, and we don't
-	// want to spam the issue with "task timed out" messages on every
-	// daemon hiccup. Delegated failures keep this existing failed-issue comment
-	// in addition to the coordinator recovery signal, preserving visibility on
-	// both sides of a cross-issue handoff.
-	if errMsg != "" && task.IssueID.Valid && retried == nil {
+	// Capacity that will not be retried in place takes the relay path the
+	// sweeper already uses. A hold means the issue was reassigned or blocked
+	// on purpose, so the provider's English sentence is not the last word.
+	capacityHeld := false
+	if retried == nil && task.IssueID.Valid {
+		capacityHeld = s.relayCapacityIfRetriesSpent(ctx, task, failureReason, errMsg)
+	}
+
+	// A platform interrupt (daemon shutdown while the server still considered
+	// the run alive) always leaves a notice, including when a retry was just
+	// queued. Other failures stay quiet on the retry path so a flaky timeout
+	// does not post a comment on every attempt. Delegated failures keep this
+	// existing failed-issue comment in addition to the coordinator recovery
+	// signal. A capacity relay posts its own audit instead of the raw
+	// provider sentence.
+	if isServerInterruptFailure(failureReason) && task.IssueID.Valid {
+		s.noteServerInterrupt(ctx, task, retried)
+	} else if errMsg != "" && task.IssueID.Valid && retried == nil && !capacityHeld {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(failureCommentBody(failureReason, errMsg)), "system", task.TriggerCommentID, task.ID)
 	}
 
@@ -5369,6 +5396,11 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 // provider answered wrong", so an unattended issue run must not die on them.
 // Resume stays safe for the same reason as provider_network: nothing about the
 // conversation is what the provider rejected.
+//
+// "cancelled" here is the daemon's report that its own run context died while
+// this row was still running (DENE-813). A person invoking cancel-task or halt
+// never writes this reason: those paths set status=cancelled and leave
+// failure_reason empty, so they stay off this map.
 var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonRuntimeOffline):                   true,
 	string(taskfailure.ReasonRuntimeRecovery):                  true,
@@ -5378,6 +5410,148 @@ var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonAgentProviderCapacityOrRateLimit): true,
 	string(taskfailure.ReasonAgentProviderServerError):         true,
 	string(taskfailure.ReasonSkillBundleUnavailable):           true,
+	serverInterruptFailureReason:                               true,
+}
+
+// serverInterruptFailureReason is the failure_reason a daemon writes when it
+// reports a run whose process context was cancelled and the server had not
+// already finalized the row. The observed error text is "task cancelled by
+// server". The usual cause is the daemon process itself exiting (restart,
+// self-reload, shutdown) and cancelling every in-flight run on the way down.
+const serverInterruptFailureReason = "cancelled"
+
+func isServerInterruptFailure(reason string) bool {
+	return reason == serverInterruptFailureReason
+}
+
+// noteServerInterrupt tells the issue what happened to a run the platform
+// stopped, whether or not a retry was queued. When nothing will continue the
+// issue, it leaves blocked instead of in_progress so the board does not show
+// a run that nobody is doing.
+func (s *TaskService) noteServerInterrupt(ctx context.Context, task db.AgentTaskQueue, retried *db.AgentTaskQueue) {
+	if !task.IssueID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("server interrupt notice: load issue failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return
+	}
+	alreadyRunning := retried != nil
+	if !alreadyRunning {
+		hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+		if checkErr != nil {
+			slog.Warn("server interrupt notice: active check failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(task.IssueID),
+				"error", checkErr,
+			)
+		} else {
+			alreadyRunning = hasActive
+		}
+	}
+	blocked := false
+	if !alreadyRunning {
+		blocked = s.blockIssueAfterServerInterrupt(ctx, issue)
+	}
+	mention := ""
+	if !alreadyRunning {
+		mention = s.serverInterruptHandoffMention(ctx, issue, task)
+	}
+	agentName := ""
+	if agent, aerr := s.Queries.GetAgent(ctx, task.AgentID); aerr == nil {
+		agentName = agent.Name
+	}
+	s.createAgentComment(ctx, task.IssueID, task.AgentID,
+		serverInterruptNotice(agentName, task, retried, alreadyRunning, blocked, mention),
+		"system", task.TriggerCommentID, task.ID)
+}
+
+// blockIssueAfterServerInterrupt moves an issue that still looks open onto
+// blocked. in_review and done stay where a person already put them.
+func (s *TaskService) blockIssueAfterServerInterrupt(ctx context.Context, issue db.Issue) bool {
+	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	if effective != issuestatus.InProgress && effective != issuestatus.Todo {
+		return false
+	}
+	updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          issue.ID,
+		Status:      issuestatus.Blocked,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("server interrupt notice: block issue failed",
+			"issue_id", util.UUIDToString(issue.ID),
+			"error", err,
+		)
+		return false
+	}
+	s.broadcastIssueUpdated(ctx, updated, issue.Status)
+	return true
+}
+
+// serverInterruptHandoffMention names the person who should pick the issue up
+// once automatic retries are spent: the human who started the run, then the
+// issue creator, then the same owner fallback the time-limit notice uses.
+// The executing agent is named in prose and not mentioned — mentioning an
+// agent would start another run.
+func (s *TaskService) serverInterruptHandoffMention(ctx context.Context, issue db.Issue, task db.AgentTaskQueue) string {
+	candidates := []pgtype.UUID{task.OriginatorUserID, task.AccountableUserID, task.InitiatorUserID}
+	if issue.CreatorType == "member" && issue.CreatorID.Valid {
+		candidates = append(candidates, issue.CreatorID)
+	}
+	for _, id := range candidates {
+		if mention := s.memberMention(ctx, id); mention != "" {
+			return mention
+		}
+	}
+	_, mention := s.taskTimeLimitMention(ctx, issue)
+	return mention
+}
+
+func (s *TaskService) memberMention(ctx context.Context, userID pgtype.UUID) string {
+	if !userID.Valid {
+		return ""
+	}
+	user, err := s.Queries.GetUser(ctx, userID)
+	if err != nil || strings.TrimSpace(user.Name) == "" {
+		return ""
+	}
+	name := strings.NewReplacer("[", "", "]", "").Replace(user.Name)
+	return fmt.Sprintf("[@%s](mention://member/%s) ", name, util.UUIDToString(userID))
+}
+
+func serverInterruptNotice(agentName string, task db.AgentTaskQueue, retried *db.AgentTaskQueue, alreadyRunning, blocked bool, mention string) string {
+	when := time.Now().UTC().Format("2006-01-02 15:04 UTC")
+	if task.CompletedAt.Valid {
+		when = task.CompletedAt.Time.UTC().Format("2006-01-02 15:04 UTC")
+	}
+	who := "这次运行"
+	if agentName != "" {
+		who = agentName + " 的这次运行"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s在 %s 被平台中断。原因是本机运行环境中途退出（daemon 重启或断线）。", who, when)
+	switch {
+	case retried != nil:
+		fmt.Fprintf(&b, "已自动安排续跑：第 %d 次，共 %d 次，沿用原来的会话和工作目录。", retried.Attempt, retried.MaxAttempts)
+	case alreadyRunning:
+		b.WriteString("没有另排一次，因为这张票上已经有运行在排队或进行。")
+	default:
+		fmt.Fprintf(&b, "自动续跑没有再排（第 %d 次，共 %d 次）。", task.Attempt, task.MaxAttempts)
+		if blocked {
+			b.WriteString("这张票已改为 blocked。")
+		}
+		if mention != "" {
+			b.WriteString(mention)
+		}
+		b.WriteString("请接手：在这条评论下说是否继续，或重新打开运行。")
+	}
+	return b.String()
 }
 
 // runtime_offline retries start deferred, not queued: their positive fire_at
@@ -6382,6 +6556,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	affectedAgents := make(map[string]pgtype.UUID)
 	processedIssues := make(map[string]bool)
 	retriedIssues := make(map[string]bool)
+	quotaHeldIssues := make(map[string]bool)
 	retried := 0
 
 	for _, t := range tasks {
@@ -6396,6 +6571,21 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			}
 		}
 		if !retryPending {
+			// Quota exhaustion is not retried (DENE-675). A capacity miss
+			// reaches this call only because MaybeRetryFailedTask just
+			// declined it. Break the spent seat and hand the unfinished
+			// issue to another seat before the in_progress → todo reset
+			// below looks for an active task.
+			hold, err := s.RelayQuotaFailure(ctx, t)
+			if err != nil {
+				slog.Warn("handle failed tasks: quota relay failed",
+					"task_id", util.UUIDToString(t.ID),
+					"error", err,
+				)
+			}
+			if hold && t.IssueID.Valid {
+				quotaHeldIssues[util.UUIDToString(t.IssueID)] = true
+			}
 			if _, err := s.recoverDelegatedTaskFailure(ctx, t); err != nil {
 				slog.Warn("handle failed tasks: delegated failure recovery failed",
 					"task_id", util.UUIDToString(t.ID),
@@ -6427,7 +6617,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				// projects a nonterminal custom key onto a built-in, so this is
 				// a key comparison on purpose. (MUL-6243, MUL-7240)
 				effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
+				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] && !quotaHeldIssues[issueKey] {
 					processedIssues[issueKey] = true
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {

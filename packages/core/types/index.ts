@@ -1,5 +1,5 @@
 export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssigneeType, IssueReviewerType, IssueMetadata, IssueMetadataValue, IssueAgentGuardResponse, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext } from "./issue";
-export type { IssueDraft, IssueDraftStatus, IssueDraftPayload, IssueDraftChild, IssueDraftCreatedIssue, IssueDraftPolicy, IssueDraftCapabilities, IssueDraftSession, IssueDraftSummary, IssueDraftFinalizeResult, IssueDraftRuntimeSwitch } from "./issue-draft";
+export type { IssueDraft, IssueDraftStatus, IssueDraftPayload, IssueDraftChild, IssueDraftCreatedIssue, IssueDraftAssignmentWarning, IssueDraftPolicy, IssueDraftCapabilities, IssueDraftSession, IssueDraftSummary, IssueDraftFinalizeResult, IssueDraftRuntimeSwitch } from "./issue-draft";
 export type {
   IssueStatusCategory,
   IssueStatusEntry,
@@ -165,6 +165,10 @@ export type {
   TaskLogExport,
   TaskLogExportBundle,
   TaskLogExportEntry,
+  TaskLogExportPush,
+  TaskLogExportRedaction,
+  TaskLogExportReport,
+  TaskLogExportReportChannel,
   TaskLogExportRun,
   TaskLogExportScope,
   TaskLogExportTaskView,
@@ -206,7 +210,9 @@ export type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  ProjectVisibilityPreview,
   ProjectMember,
+  ResourceShare,
   ProjectResource,
   ProjectResourceType,
   ProjectResourceRef,

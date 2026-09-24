@@ -207,12 +207,16 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"the board should show the issue being worked while you work, not only after",
 		// No assignee gate: the judgment applies to whoever is running.
 		"whoever the assignee is",
-		// Delivery lands in in_review and the ceiling keeps `done` human.
-		"`done` stays human",
-		// Assigned deliverables must not be misread as status-neutral
-		// research: stage barriers and parent notifications key off the
-		// delivery write.
-		"stage barriers and parent notifications depend on that signal",
+		// Delivery lands in in_review. A pass releases in the same turn:
+		// the acceptance seat merges and writes done. A person is in
+		// that path only when the ticket names them and the decision.
+		"merges and sets `done` in that same turn",
+		"close.conclusion=awaiting_human",
+		"Do not leave a passed ticket in `in_review`",
+		// Acceptance is a parent-level decision; child delivery feeds the
+		// barrier instead of creating a second review chain.
+		"acceptance state belongs only to a top-level issue",
+		"parent barrier can account for it",
 		// Invariant 1: conversation does not move the board. Ancillary is
 		// defined by OUTPUT (no part of the issue's own deliverable), not by
 		// activity words like "research" that also describe real work.
@@ -252,6 +256,8 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"A turn that only answers, reviews, or consults",
 		"you only answered a question, reviewed, or discussed",
 		"in whatever form: code, research",
+		// DENE-810: a pass used to stop here for a person to click merge.
+		"`done` stays human",
 	} {
 		if strings.Contains(out, banned) {
 			t.Errorf("brief still carries retired status gate %q (MUL-6417)\n---\n%s", banned, out)
@@ -736,6 +742,23 @@ func TestSubIssueCreationSectionIsUnconditional(t *testing.T) {
 	}
 }
 
+func TestIssueStatusRuleKeepsAcceptanceAtParent(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
+	for _, want := range []string{
+		"acceptance state belongs only to a top-level issue",
+		"complete child-issue tree",
+		"A sub-issue is execution-only",
+		"do not fill or trigger a reviewer for it",
+		"do not move it to `in_review`",
+		"parent barrier can account for it",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("issue status rule missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
 // Workspace Context block: workspace.context (the per-workspace system prompt
 // owners set in Settings → General) must reach the brief as `## Workspace
 // Context` for every task kind so agents see a consistent shared system prompt
@@ -1083,6 +1106,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"reasonix", "AGENTS.md"},
 		{"dsh", "AGENTS.md"},
 		{"dim", "AGENTS.md"},
+		{"devin", "AGENTS.md"},
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
@@ -1463,6 +1487,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"reasonix", "AGENTS.md"},
 		{"dsh", "AGENTS.md"},
 		{"dim", "AGENTS.md"},
+		{"devin", "AGENTS.md"},
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},

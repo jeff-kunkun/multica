@@ -116,6 +116,13 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 			}
 		}
 	}
+	if !row.ParentIssueID.Valid {
+		// Only a top-level issue can be a group's coordinator, and the judge
+		// is told either way: a parent is a different job from a leaf.
+		if children, err := s.h.Queries.ListChildIssues(ctx, row.ID); err == nil {
+			out.HasChildren = len(children) > 0
+		}
+	}
 	out.Reviewer = s.reviewerRef(ctx, row)
 	return out, nil
 }
@@ -182,7 +189,7 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 	return out, nil
 }
 
-func (s routingStore) AssignAgentIfUnassigned(ctx context.Context, workspaceID, issueID string, seat routing.Seat) (bool, error) {
+func (s routingStore) AssignAgentIfUnassigned(ctx context.Context, workspaceID, issueID string, seat routing.Seat, start bool) (bool, error) {
 	wsID, err := util.ParseUUID(workspaceID)
 	if err != nil {
 		return false, err
@@ -214,8 +221,12 @@ func (s routingStore) AssignAgentIfUnassigned(ctx context.Context, workspaceID, 
 	prev.AssigneeID = pgtype.UUID{}
 	s.publishIssueUpdated(prev, issue)
 	// Assignment IS the wake-up: the seat's run starts from the assignment,
-	// so routing never needs to mention an agent it just dispatched.
-	s.h.IssueService.StartAssignedAgent(ctx, issue)
+	// so routing never needs to mention an agent it just dispatched. A
+	// coordinator seat is the one write that must not wake: its group was
+	// just created and the sub-issues are where the work starts.
+	if start {
+		s.h.IssueService.StartAssignedAgent(ctx, issue)
+	}
 	return true, nil
 }
 

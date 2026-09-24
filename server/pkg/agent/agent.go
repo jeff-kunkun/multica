@@ -24,18 +24,31 @@ type Backend interface {
 	Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error)
 }
 
+// withSystemPrompt prepends the runtime brief to the task prompt, the shape
+// every inline-brief backend sends: brief, a Markdown rule, then the task.
+// An empty systemPrompt returns prompt unchanged.
+func withSystemPrompt(systemPrompt, prompt string) string {
+	if systemPrompt == "" {
+		return prompt
+	}
+	return systemPrompt + "\n\n---\n\n" + prompt
+}
+
 // ExecOptions configures a single execution.
 type ExecOptions struct {
 	Cwd   string
 	Model string
 	// SystemPrompt carries the Multica runtime brief for the few providers
-	// that cannot pick it up from disk. The daemon leaves it empty for every
-	// other provider (see daemon.providerNeedsInlineSystemPrompt), because the
-	// brief is already delivered as a per-task context file in the workdir —
-	// CLAUDE.md, AGENTS.md, CODEBUDDY.md or QWEN.md depending on the runtime.
+	// that cannot pick it up from disk (daemon.providerNeedsInlineSystemPrompt),
+	// and for shared local_directory runs, where the daemon keeps the brief
+	// file out of the cwd (daemon.sharedModeBriefDelivery == sharedBriefInline).
+	// Otherwise it is empty: the brief is already a per-task context file in
+	// the workdir — CLAUDE.md, AGENTS.md, CODEBUDDY.md or QWEN.md.
 	//
 	// A backend must therefore NOT assume this is populated, and adding a new
 	// backend that only reads SystemPrompt will silently receive nothing.
+	// A backend listed as sharedBriefInline MUST deliver it when set
+	// (withSystemPrompt), or shared-mode tasks run without their brief.
 	SystemPrompt string
 	ThreadName   string
 	MaxTurns     int
@@ -347,8 +360,8 @@ type Config struct {
 // add deveco, migration 179 to add grok, migration 202 to add qwen,
 // migration 242 to add qoderclicn, migration 253 to add qwenpaw,
 // migration 254 to add reasonix, migration 313 to add dsh, migration 342 to
-// add mcode, migration 370 to add dim, migration 403 to add zeroclaw, and
-// migration 441 to add codearts): a custom runtime profile may
+// add mcode, migration 370 to add dim, migration 403 to add zeroclaw,
+// migration 441 to add codearts, and migration 519 to add devin): a custom runtime profile may
 // only be based on a backend Multica officially supports.
 // qoder and qoderclicn share the same ACP backend; keeping both provider keys
 // lets the daemon auto-detect and register the international and China-region
@@ -383,6 +396,7 @@ var SupportedTypes = []string{
 	"mcode",
 	"dim",
 	"zeroclaw",
+	"devin",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -470,6 +484,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &dshBackend{cfg: cfg}, nil
 	case "dim":
 		return &dimBackend{cfg: cfg}, nil
+	case "devin":
+		return &devinBackend{cfg: cfg}, nil
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
 	case "antigravity":
@@ -533,6 +549,7 @@ var launchHeaders = map[string]string{
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
 	"dim":         "dim acp",
+	"devin":       "devin acp",
 	"mcode":       "mcode acp",
 	"zeroclaw":    "zeroclaw acp",
 }
