@@ -372,6 +372,12 @@ deleted_chat_session_reads AS (
     DELETE FROM chat_session_read
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
 ),
+-- work_thread (migration 531) has no foreign keys and no workspace_id; the
+-- agent set is its teardown key. Chat and issue threads both belong to a
+-- workspace agent, so this covers every row the workspace owned.
+deleted_work_threads AS (
+    DELETE FROM work_thread WHERE agent_id IN (SELECT id FROM ws_agents)
+),
 -- One dismissed-notice row per person. workspace_id is the teardown key.
 deleted_chat_visibility_notices AS (
     DELETE FROM chat_visibility_notice WHERE workspace_id = $1

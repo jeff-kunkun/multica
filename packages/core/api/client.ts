@@ -1,5 +1,6 @@
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
+import type { WorkThreadSnapshot } from "../types/work_thread";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -3169,6 +3170,22 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/active-task`);
   }
 
+  async getIssueWorkThread(issueId: string): Promise<WorkThreadSnapshot | null> {
+    return this.fetch(`/api/issues/${issueId}/work-thread`);
+  }
+
+  async issueWorkThreadAction(
+    issueId: string,
+    action: "continue" | "interrupt" | "queue" | "prioritize",
+    summary?: string,
+    taskId?: string,
+  ): Promise<{ action: string; state: string; task_id?: string; thread_id?: string; session_id?: string }> {
+    return this.fetch(`/api/issues/${issueId}/work-thread/action`, {
+      method: "POST",
+      body: JSON.stringify({ action, summary, task_id: taskId }),
+    });
+  }
+
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
     const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`);
     return parseWithFallback<TaskMessagePayload[]>(raw, TaskMessageListSchema, [], {
@@ -4600,6 +4617,21 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/pending-task`);
     return parseWithFallback(raw, ChatPendingTaskSchema, EMPTY_CHAT_PENDING_TASK, {
       endpoint: "GET /api/chat/sessions/:id/pending-task",
+    });
+  }
+
+  async getChatWorkThread(sessionId: string): Promise<WorkThreadSnapshot | null> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/work-thread`);
+  }
+
+  async chatWorkThreadAction(
+    sessionId: string,
+    action: "continue" | "interrupt" | "queue",
+    summary?: string,
+  ): Promise<{ action: string; state: string; task_id?: string; thread_id?: string; session_id?: string }> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/work-thread/action`, {
+      method: "POST",
+      body: JSON.stringify({ action, summary }),
     });
   }
 

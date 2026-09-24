@@ -147,6 +147,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"verification_code":                  workspaceDeleteKeep,
 	"visibility_audit":                   workspaceDelete,
 	"webhook_delivery":                   workspaceDelete,
+	"work_thread":                        workspaceDelete,
 	"workspace":                          workspaceDelete,
 	"workspace_invitation":               workspaceDelete,
 	"workspace_module_visibility":        workspaceDelete,
