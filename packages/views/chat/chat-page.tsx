@@ -37,6 +37,7 @@ import { NoAgentBanner } from "./components/no-agent-banner";
 import { ArchivedAgentBanner } from "./components/archived-agent-banner";
 import { AgentAccessRevokedBanner } from "./components/agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
+import { WorkThreadPanel } from "../common/work-thread-panel";
 
 /**
  * Chat tab — the first-class two-pane surface (thread list on the left,
@@ -257,6 +258,7 @@ export function ChatPage() {
           onArchive={handleArchive}
         />
       )}
+      {c.currentSession && <div className="flex shrink-0 px-3 py-1"><WorkThreadPanel kind="chat" id={c.currentSession.id} /></div>}
       {c.showSkeleton ? (
         <ChatMessageSkeleton />
       ) : c.hasMessages ? (

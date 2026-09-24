@@ -1729,6 +1729,21 @@ type WebhookDelivery struct {
 	ReplayIdempotencyKey   pgtype.Text        `json:"replay_idempotency_key"`
 }
 
+type WorkThread struct {
+	ID                    pgtype.UUID        `json:"id"`
+	AgentID               pgtype.UUID        `json:"agent_id"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	ChatSessionID         pgtype.UUID        `json:"chat_session_id"`
+	ContextGeneration     int32              `json:"context_generation"`
+	ContextMessageLimit   int32              `json:"context_message_limit"`
+	ContextTokenBudget    int32              `json:"context_token_budget"`
+	LastSessionID         pgtype.UUID        `json:"last_session_id"`
+	LastTurnID            pgtype.UUID        `json:"last_turn_id"`
+	ContinuityBreakReason pgtype.Text        `json:"continuity_break_reason"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Workspace struct {
 	ID           pgtype.UUID        `json:"id"`
 	Name         string             `json:"name"`

@@ -117,6 +117,82 @@ func (h *Handler) WorkThreadAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *Handler) ChatWorkThreadAction(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, ctxWorkspaceID(r.Context()), chi.URLParam(r, "sessionId"))
+	if !ok {
+		return
+	}
+	var req WorkThreadActionRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	switch req.Action {
+	case "interrupt":
+		var ids []pgtype.UUID
+		rows, err := h.DB.Query(r.Context(), `SELECT id FROM agent_task_queue WHERE chat_session_id = $1 AND status IN ('queued','dispatched','running','waiting_local_directory')`, session.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to inspect chat work thread")
+			return
+		}
+		for rows.Next() {
+			var id pgtype.UUID
+			if rows.Scan(&id) == nil {
+				ids = append(ids, id)
+			}
+		}
+		rows.Close()
+		for _, id := range ids {
+			if _, err := h.TaskService.CancelTask(r.Context(), id); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to interrupt work thread")
+				return
+			}
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"action": req.Action, "state": "interrupted"})
+	case "continue":
+		task, err := h.continueChatWorkThread(r, session.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusConflict, "work thread has no resumable turn or already has a pending turn")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to continue work thread")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"action": req.Action, "state": "queued", "task_id": uuidToString(task.ID), "thread_id": uuidToString(task.WorkThreadID), "session_id": task.SessionID.String})
+	case "queue":
+		writeError(w, http.StatusConflict, "chat queue inputs must be sent through the composer")
+	default:
+		writeError(w, http.StatusBadRequest, "action must be continue, interrupt, or queue")
+	}
+}
+
+func (h *Handler) continueChatWorkThread(r *http.Request, sessionID pgtype.UUID) (db.AgentTaskQueue, error) {
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	defer tx.Rollback(r.Context())
+	var taskID pgtype.UUID
+	var status string
+	var sid pgtype.Text
+	err = tx.QueryRow(r.Context(), `SELECT latest.id, latest.status, latest.session_id FROM work_thread wt JOIN LATERAL (SELECT id,status,session_id FROM agent_task_queue WHERE work_thread_id=wt.id ORDER BY created_at DESC,id DESC LIMIT 1) latest ON true WHERE wt.chat_session_id=$1 AND NOT EXISTS (SELECT 1 FROM agent_task_queue WHERE work_thread_id=wt.id AND status IN ('queued','dispatched','running','waiting_local_directory')) FOR UPDATE OF wt`, sessionID).Scan(&taskID, &status, &sid)
+	if err != nil || (status != "cancelled" && status != "failed") || !sid.Valid || sid.String == "" {
+		return db.AgentTaskQueue{}, pgx.ErrNoRows
+	}
+	task, err := h.Queries.WithTx(tx).CreateRetryTask(r.Context(), db.CreateRetryTaskParams{ID: taskID})
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	return task, nil
+}
+
 func (h *Handler) continueWorkThread(r *http.Request, issueID pgtype.UUID) (db.AgentTaskQueue, error) {
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {

@@ -368,3 +368,5 @@ export type {
   WorkspaceSubscriptionSeatReconcileResult,
   CreateWorkspaceSubscriptionPortalResponse,
 } from "./billing";
+
+export type { WorkThreadSnapshot, WorkThreadTurn, WorkThreadInput } from "./work_thread";

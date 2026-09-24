@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -87,4 +88,53 @@ func TestGetChatWorkThreadEnforcesSessionOwnership(t *testing.T) {
 	sessionID := insertChatSessionAs(t, agentID, otherUser)
 	req := withURLParam(newRequest(http.MethodGet, "/api/chat/sessions/"+sessionID+"/work-thread", nil), "sessionId", sessionID)
 	testutil.Call(t, testHandler.GetChatWorkThread, req).Want(http.StatusForbidden)
+}
+
+func TestWorkThreadActionRejectsContinueWhileActive(t *testing.T) {
+	issueID := dbfx.Issue(t, "work thread action conflict", testutil.Cols{"status": "in_progress"})
+	agentID := createHandlerTestAgent(t, "Work Thread Action Agent", []byte("[]"))
+	threadID := uuid.NewString()
+	_, err := testPool.Exec(t.Context(), `INSERT INTO work_thread (id, agent_id, issue_id) VALUES ($1,$2,$3)`, threadID, agentID, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := uuid.NewString()
+	_, err = testPool.Exec(t.Context(), `INSERT INTO agent_task_queue (id, agent_id, issue_id, work_thread_id, status, priority) VALUES ($1,$2,$3,$4,'running',0)`, taskID, agentID, issueID, threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(t.Context(), `DELETE FROM agent_task_queue WHERE id=$1`, taskID)
+		testPool.Exec(t.Context(), `DELETE FROM work_thread WHERE id=$1`, threadID)
+	})
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/work-thread/action", strings.NewReader(`{"action":"continue"}`)), "id", issueID)
+	testutil.Call(t, testHandler.WorkThreadAction, req).Want(http.StatusConflict)
+}
+
+func TestWorkThreadActionInterruptsActiveTurn(t *testing.T) {
+	issueID := dbfx.Issue(t, "work thread action interrupt", testutil.Cols{"status": "in_progress"})
+	agentID := createHandlerTestAgent(t, "Work Thread Interrupt Agent", []byte("[]"))
+	threadID := uuid.NewString()
+	_, err := testPool.Exec(t.Context(), `INSERT INTO work_thread (id, agent_id, issue_id) VALUES ($1,$2,$3)`, threadID, agentID, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := uuid.NewString()
+	_, err = testPool.Exec(t.Context(), `INSERT INTO agent_task_queue (id, agent_id, issue_id, work_thread_id, status, priority) VALUES ($1,$2,$3,$4,'running',0)`, taskID, agentID, issueID, threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(t.Context(), `DELETE FROM agent_task_queue WHERE id=$1`, taskID)
+		testPool.Exec(t.Context(), `DELETE FROM work_thread WHERE id=$1`, threadID)
+	})
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/work-thread/action", strings.NewReader(`{"action":"interrupt"}`)), "id", issueID)
+	testutil.Call(t, testHandler.WorkThreadAction, req).Want(http.StatusAccepted)
+	var status string
+	if err := testPool.QueryRow(t.Context(), `SELECT status FROM agent_task_queue WHERE id=$1`, taskID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "cancelled" {
+		t.Fatalf("status=%q, want cancelled", status)
+	}
 }

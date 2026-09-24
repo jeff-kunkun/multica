@@ -3100,6 +3100,17 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/work-thread`);
   }
 
+  async issueWorkThreadAction(
+    issueId: string,
+    action: "continue" | "interrupt" | "queue",
+    summary?: string,
+  ): Promise<{ action: string; state: string; task_id?: string; thread_id?: string; session_id?: string }> {
+    return this.fetch(`/api/issues/${issueId}/work-thread/action`, {
+      method: "POST",
+      body: JSON.stringify({ action, summary }),
+    });
+  }
+
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
     const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`);
     return parseWithFallback<TaskMessagePayload[]>(raw, TaskMessageListSchema, [], {
@@ -4495,6 +4506,17 @@ export class ApiClient {
 
   async getChatWorkThread(sessionId: string): Promise<WorkThreadSnapshot | null> {
     return this.fetch(`/api/chat/sessions/${sessionId}/work-thread`);
+  }
+
+  async chatWorkThreadAction(
+    sessionId: string,
+    action: "continue" | "interrupt" | "queue",
+    summary?: string,
+  ): Promise<{ action: string; state: string; task_id?: string; thread_id?: string; session_id?: string }> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/work-thread/action`, {
+      method: "POST",
+      body: JSON.stringify({ action, summary }),
+    });
   }
 
   async prioritizeQueuedChatTask(
