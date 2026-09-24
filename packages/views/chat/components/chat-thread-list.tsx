@@ -27,6 +27,7 @@ import {
   useSetChatSessionPinned,
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
+import { CHAT_PIN_DRAG_TYPE } from "@multica/core/pins/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { useAuthStore } from "@multica/core/auth";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
@@ -298,10 +299,21 @@ export function ChatThreadList({
     // and the hover strip with it — so they cannot drift. The archived view
     // is the only place hard-delete lives; the history view offers the
     // reversible archive instead.
-    // Pin, access, archive, and delete write the session itself. Only the
-    // creator can do that. A project member who can speak still sees Stop
-    // while a reply is running.
+    // Access, archive, and delete write the session itself. Only the creator
+    // can do that. A project member who can speak still sees Stop while a
+    // reply is running. Pin is the viewer's own (DENE-866), so everyone who
+    // can see the chat gets it.
     const canManage = session.creator_id === currentUserId;
+    const pinAction: RowActionItem = {
+      key: "pin",
+      icon: session.pinned ? (
+        <PinOff className="size-3.5" />
+      ) : (
+        <Pin className="size-3.5 -rotate-45" />
+      ),
+      label: session.pinned ? t(($) => $.list.unpin) : t(($) => $.list.pin),
+      onSelect: () => setPinned.mutate({ sessionId: session.id, pinned: !session.pinned }),
+    };
     const rowActions: RowActionItem[] =
       view === "archived"
         ? canManage
@@ -323,21 +335,9 @@ export function ChatThreadList({
             ]
           : []
         : [
+            pinAction,
             ...(canManage
               ? [
-                  {
-                    key: "pin",
-                    icon: session.pinned ? (
-                      <PinOff className="size-3.5" />
-                    ) : (
-                      <Pin className="size-3.5 -rotate-45" />
-                    ),
-                    label: session.pinned
-                      ? t(($) => $.list.unpin)
-                      : t(($) => $.list.pin),
-                    onSelect: () =>
-                      setPinned.mutate({ sessionId: session.id, pinned: !session.pinned }),
-                  },
                   {
                     key: "access",
                     icon: <LockKeyhole className="size-3.5" />,
@@ -373,6 +373,14 @@ export function ChatThreadList({
         key={session.id}
         aria-current={isCurrent ? "true" : undefined}
         tabIndex={0}
+        // A row can be dragged into the sidebar's pinned group to pin it
+        // (DENE-866). Native DnD, since the sidebar is a separate tree.
+        draggable={view !== "archived" && !isRenaming}
+        onDragStart={(e) => {
+          e.dataTransfer.setData(CHAT_PIN_DRAG_TYPE, session.id);
+          e.dataTransfer.setData("text/plain", session.title ?? "");
+          e.dataTransfer.effectAllowed = "copy";
+        }}
         onClick={(e) => {
           if (isConfirmingAction || isRenaming || e.defaultPrevented) return;
           // Plain click keeps the master-detail selection. On web, a modifier
