@@ -257,6 +257,8 @@
     "prop_concurrency": "Concurrency",
     "prop_work_enabled": "Accept work",
     "prop_work_enabled_hint": "When off, this seat stays in the list but is not selected for automatic dispatch, is not woken by assignment, and does not claim new runs. Running work is not stopped.",
+    "prop_work_pause_balance": "Paused by the platform: the account ran out of balance (402) and will not recover by itself. Top up or switch the account, then turn this back on. Tickets already handed to other seats stay with them.",
+    "prop_work_pause_quota": "Paused by the platform: the model quota ran out. It turns back on by itself when the quota resets.",
     "prop_auto_retry": "Auto retry",
     "prop_auto_retry_hint": "When off, failures such as capacity limits or network cuts surface immediately instead of retrying. You can still retry a run yourself.",
     "prop_switchable_models": "Model lineup",

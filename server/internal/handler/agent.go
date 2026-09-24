@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/coderesolve"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/quotarelay"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -30,6 +31,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
@@ -178,6 +180,9 @@ type AgentResponse struct {
 	// not selected for automatic dispatch, not woken by assignment, and
 	// does not claim new runs.
 	WorkEnabled bool `json:"work_enabled"`
+	// WorkPause says why the platform turned the seat off (DENE-870), taken
+	// from its open quota breaker. Absent for a seat a person turned off.
+	WorkPause *AgentWorkPause `json:"work_pause,omitempty"`
 	// DoorbellEnabled (DENE-808): when true, a member who may not invoke this
 	// agent rings a doorbell instead of being refused — the owner gets an
 	// approval request in their inbox, and the agent is listed to members
@@ -1681,6 +1686,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	if actorType == "member" {
 		passAgents = h.activePassAgentIDs(r.Context(), workspaceID, actorID)
 	}
+	pauses := h.workPauses(r.Context(), parseUUID(workspaceID))
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
 		targets := targetsByAgent[uuidToString(a.ID)]
@@ -1690,6 +1696,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp := h.agentToResponse(a)
+		applyWorkPause(&resp, a, pauses)
 		// The map is keyed by runtime, and active + archived agents may share one.
 		// Keep the archived guard here as well as in the loader so an active sibling
 		// cannot leak its projection onto an archived response.
@@ -1754,6 +1761,9 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := h.agentToResponse(agent)
+	if !agent.WorkEnabled {
+		applyWorkPause(&resp, agent, h.workPauses(r.Context(), agent.WorkspaceID))
+	}
 	// resp is a slice, not a pointer, so the enrichment must write through the
 	// slice element it is handed: taking the address of the local variable here
 	// would fill a copy and serve an empty parent_agent_name.
@@ -3129,6 +3139,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A balance breaker has no timer: a person turning the seat back on after
+	// topping up is its recovery. Tickets it handed to other seats stay there.
+	if req.WorkEnabled != nil && *req.WorkEnabled && !existing.WorkEnabled {
+		for _, seatID := range append([]pgtype.UUID{updated.ID}, agentIDs(toggledSpecialisations)...) {
+			if _, err := h.Queries.CloseManualQuotaBreakers(r.Context(), seatID); err != nil {
+				slog.Warn("close balance breaker failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(seatID))...)
+			}
+		}
+	}
 	if req.WorkEnabled != nil && *req.WorkEnabled && !existing.WorkEnabled && h.TaskService != nil {
 		if err := h.TaskService.ReclaimDesignatedReviews(r.Context(), updated.ID); err != nil {
 			slog.Warn("reclaim designated reviewer failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
@@ -4160,4 +4179,60 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func agentIDs(agents []db.Agent) []pgtype.UUID {
+	ids := make([]pgtype.UUID, 0, len(agents))
+	for _, agent := range agents {
+		ids = append(ids, agent.ID)
+	}
+	return ids
+}
+
+// AgentWorkPause is the platform's reason a seat is not taking work.
+// RecoverAt is empty when nothing but a person can bring it back — a
+// balance breaker waits for a top-up and a manual re-enable.
+type AgentWorkPause struct {
+	Reason    string `json:"reason"`
+	Detail    string `json:"detail,omitempty"`
+	Condition string `json:"condition,omitempty"`
+	RecoverAt string `json:"recover_at,omitempty"`
+	OpenedAt  string `json:"opened_at"`
+}
+
+// workPauses maps agent id to its newest open breaker. A lookup failure
+// only drops the explanation, never the agent list.
+func (h *Handler) workPauses(ctx context.Context, workspaceID pgtype.UUID) map[string]AgentWorkPause {
+	rows, err := h.Queries.ListOpenQuotaBreakers(ctx, workspaceID)
+	if err != nil {
+		slog.Warn("list open quota breakers failed", "error", err)
+		return nil
+	}
+	out := make(map[string]AgentWorkPause, len(rows))
+	for _, row := range rows {
+		id := uuidToString(row.AgentID)
+		if _, seen := out[id]; seen {
+			continue
+		}
+		pause := AgentWorkPause{
+			Reason:    row.Reason,
+			Detail:    redact.Text(clipRunes(strings.TrimSpace(row.Detail), 300)),
+			Condition: row.RecoverCondition,
+			OpenedAt:  timestampToString(row.OpenedAt),
+		}
+		if !quotarelay.IsManualRecovery(quotarelay.Kind(row.Reason)) {
+			pause.RecoverAt = timestampToString(row.RecoverAt)
+		}
+		out[id] = pause
+	}
+	return out
+}
+
+func applyWorkPause(resp *AgentResponse, agent db.Agent, pauses map[string]AgentWorkPause) {
+	if agent.WorkEnabled {
+		return
+	}
+	if pause, ok := pauses[uuidToString(agent.ID)]; ok {
+		resp.WorkPause = &pause
+	}
 }

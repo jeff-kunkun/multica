@@ -5655,7 +5655,12 @@ func (s *TaskService) blockFailedChild(ctx context.Context, issueID pgtype.UUID,
 		s.broadcastIssueUpdated(ctx, updated, issue.Status)
 		issue = updated
 	}
-	rec := blockwait.FailureWake(time.Now(), condition)
+	failures, err := s.Queries.CountIssueFailuresSinceSuccess(ctx, issue.ID)
+	if err != nil {
+		slog.Warn("block failed child: count failures failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		failures = 1
+	}
+	rec := blockwait.FailureWake(time.Now(), condition, int(failures))
 	pairs := rec.Pairs()
 	pairs[blockwait.KeyWatched] = blockwait.WatchedYes
 	s.writeBlockMeta(ctx, issue, pairs)

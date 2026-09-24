@@ -577,7 +577,7 @@ func (h *Handler) blockReviewNeedingHuman(ctx context.Context, issue db.Issue, w
 		rec.NeedsHuman = uuidToString(managers[0])
 		mention = h.memberWakeMention(ctx, managers[0])
 	} else {
-		rec = blockwait.FailureWake(time.Now(), "验收席由人来定")
+		rec = blockwait.FailureWake(time.Now(), "验收席由人来定", 1)
 	}
 	h.blockAcceptedIssue(ctx, issue, blockwait.Decision{
 		Record: rec,
@@ -710,6 +710,13 @@ func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason str
 	if blockwait.MetaString(parseIssueMetadata(issue.Metadata), blockwait.KeyNeedsHuman) != "" {
 		commentOnly = true
 	}
+	if !commentOnly && targetType.Valid && targetID.Valid && targetType.String == "agent" {
+		var covered bool
+		issue, targetID, reason, covered = h.coverDisabledWakeTarget(ctx, issue, targetID, reason)
+		if !covered {
+			commentOnly = true
+		}
+	}
 	mention := ""
 	if targetType.Valid && targetID.Valid && (targetType.String == "agent" || targetType.String == "squad") && !commentOnly {
 		mention = h.buildParentAssigneeMention(ctx, db.Issue{AssigneeType: targetType, AssigneeID: targetID, WorkspaceID: issue.WorkspaceID})
@@ -726,6 +733,56 @@ func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason str
 	waker.AssigneeType = targetType
 	waker.AssigneeID = targetID
 	h.dispatchWaitingOnAssigneeTrigger(ctx, waker, comment.ID)
+}
+
+// coverDisabledWakeTarget keeps the patrol from waking a seat that is not
+// taking work (DENE-870). Before this, a seat turned off after its account
+// ran out of money was @-mentioned every time the clock came due, failed
+// again, and was blocked again with a fresh clock. An executor seat that is
+// off hands the ticket to another house's seat, never the ticket's own
+// reviewer; the new seat carries on from the ticket's comments and branch.
+// With nobody to take it, or when the off seat is the reviewer, the wake
+// becomes a plain comment and nobody is dispatched. covered is false when
+// the wake must not dispatch.
+func (h *Handler) coverDisabledWakeTarget(ctx context.Context, issue db.Issue, targetID pgtype.UUID, reason string) (db.Issue, pgtype.UUID, string, bool) {
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID: targetID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || agent.ArchivedAt.Valid || agent.WorkEnabled {
+		return issue, targetID, reason, true
+	}
+	isAssignee := issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID == targetID
+	if !isAssignee {
+		return issue, targetID, reason + fmt.Sprintf(" 验收人 %s 已停用，平台没有叫醒它，请重新启用或换一位验收人。", agent.Name), false
+	}
+	var avoid []string
+	if issue.ReviewerType.Valid && issue.ReviewerType.String == "agent" && issue.ReviewerID.Valid {
+		avoid = append(avoid, uuidToString(issue.ReviewerID))
+	}
+	replacement, _, ok := h.substituteAgent(ctx, issue.WorkspaceID, agent, avoid, "")
+	if !ok {
+		return issue, targetID, reason + fmt.Sprintf(" 执行人 %s 已停用，暂时没有能接手的席位，平台没有叫醒它。重新启用或改派后再继续。", agent.Name), false
+	}
+	updated, err := h.Queries.ReassignIssueToAgentIfCurrent(ctx, db.ReassignIssueToAgentIfCurrentParams{
+		AssigneeID:        replacement.ID,
+		ID:                issue.ID,
+		WorkspaceID:       issue.WorkspaceID,
+		CurrentAssigneeID: agent.ID,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("block wait: reassign off seat failed", "issue_id", uuidToString(issue.ID), "error", err)
+		}
+		return issue, targetID, reason + fmt.Sprintf(" 执行人 %s 已停用，平台没有叫醒它。", agent.Name), false
+	}
+	if _, err := h.Queries.CancelPendingTasksByIssueAndAgent(ctx, db.CancelPendingTasksByIssueAndAgentParams{
+		IssueID: issue.ID, AgentID: agent.ID,
+	}); err != nil {
+		slog.Warn("block wait: cancel off seat tasks failed", "issue_id", uuidToString(issue.ID), "error", err)
+	}
+	h.publish(protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), "system", "", RoutingIssueUpdatedPayload(issue, updated))
+	note := fmt.Sprintf(" 原执行人 %s 已停用，这张票改由 %s 接手：先读评论和原分支上的提交，接着做，别从头来。", agent.Name, replacement.Name)
+	return updated, replacement.ID, reason + note, true
 }
 
 func (h *Handler) memberWakeMention(ctx context.Context, userID pgtype.UUID) string {

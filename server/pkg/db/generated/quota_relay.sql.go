@@ -30,6 +30,44 @@ func (q *Queries) AbandonQuotaRelay(ctx context.Context, arg AbandonQuotaRelayPa
 	return result.RowsAffected(), nil
 }
 
+const closeManualQuotaBreakers = `-- name: CloseManualQuotaBreakers :execrows
+UPDATE agent_quota_breaker
+SET recovered_at = now()
+WHERE agent_id = $1 AND reason = 'balance_exhausted' AND recovered_at IS NULL
+`
+
+// DENE-870: a balance breaker has no timer. A person turning the seat back
+// on after topping up is the recovery.
+func (q *Queries) CloseManualQuotaBreakers(ctx context.Context, agentID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, closeManualQuotaBreakers, agentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const countIssueFailuresSinceSuccess = `-- name: CountIssueFailuresSinceSuccess :one
+SELECT count(*)::int
+FROM agent_task_queue t
+WHERE t.issue_id = $1
+  AND t.status = 'failed'
+  AND t.completed_at > now() - interval '24 hours'
+  AND t.completed_at > COALESCE((
+      SELECT max(c.completed_at)
+      FROM agent_task_queue c
+      WHERE c.issue_id = t.issue_id AND c.status = 'completed'
+  ), '-infinity'::timestamptz)
+`
+
+// DENE-870 backoff: how many runs on this issue failed in a row, counting
+// only the last day and only after its latest completed run.
+func (q *Queries) CountIssueFailuresSinceSuccess(ctx context.Context, issueID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countIssueFailuresSinceSuccess, issueID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countQuotaBreakersSinceSuccess = `-- name: CountQuotaBreakersSinceSuccess :one
 SELECT count(*)::int
 FROM agent_quota_breaker b
@@ -83,6 +121,42 @@ func (q *Queries) GetQuotaRelayBySourceTask(ctx context.Context, sourceTaskID pg
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const hasIssueRunHistory = `-- name: HasIssueRunHistory :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue
+    WHERE issue_id = $1 AND status IN ('completed', 'failed', 'cancelled')
+)
+`
+
+func (q *Queries) HasIssueRunHistory(ctx context.Context, issueID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasIssueRunHistory, issueID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const hasOpenQuotaBreakerForReason = `-- name: HasOpenQuotaBreakerForReason :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_quota_breaker
+    WHERE agent_id = $1 AND reason = $2 AND recovered_at IS NULL
+)
+`
+
+type HasOpenQuotaBreakerForReasonParams struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	Reason  string      `json:"reason"`
+}
+
+// DENE-870: the owner reminder for a seat that ran out of money goes out
+// once per episode. An open breaker with the same reason means it already
+// went out.
+func (q *Queries) HasOpenQuotaBreakerForReason(ctx context.Context, arg HasOpenQuotaBreakerForReasonParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOpenQuotaBreakerForReason, arg.AgentID, arg.Reason)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const insertQuotaRelay = `-- name: InsertQuotaRelay :one
@@ -193,6 +267,90 @@ func (q *Queries) ListDemotedQuotaAgentIDs(ctx context.Context, workspaceID pgty
 	return items, nil
 }
 
+const listOpenIssuesForBrokenSeat = `-- name: ListOpenIssuesForBrokenSeat :many
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility
+FROM issue i
+WHERE i.workspace_id = $1
+  AND i.assignee_type = 'agent'
+  AND i.assignee_id = $2
+  AND i.status IN ('todo', 'in_progress', 'blocked')
+  AND i.triage_state IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue t
+      WHERE t.issue_id = i.id
+        AND t.autopilot_run_id IS NOT NULL
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue t
+      WHERE t.issue_id = i.id
+        AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
+  )
+ORDER BY i.number
+LIMIT $3
+`
+
+type ListOpenIssuesForBrokenSeatParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AssigneeID  pgtype.UUID `json:"assignee_id"`
+	Limit       int32       `json:"limit"`
+}
+
+// DENE-870: everything a seat whose account ran out of money still holds,
+// including tickets it already started. A ticket with a run on the wire is
+// left alone: that run will fail on the same empty account and relay itself.
+func (q *Queries) ListOpenIssuesForBrokenSeat(ctx context.Context, arg ListOpenIssuesForBrokenSeatParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listOpenIssuesForBrokenSeat, arg.WorkspaceID, arg.AssigneeID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.Stage,
+			&i.Properties,
+			&i.Revision,
+			&i.LastActivityAt,
+			&i.TriageState,
+			&i.ReviewerType,
+			&i.ReviewerID,
+			&i.Visibility,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenQuotaBreakerAgentIDs = `-- name: ListOpenQuotaBreakerAgentIDs :many
 SELECT agent_id FROM agent_quota_breaker
 WHERE workspace_id = $1 AND recovered_at IS NULL
@@ -211,6 +369,49 @@ func (q *Queries) ListOpenQuotaBreakerAgentIDs(ctx context.Context, workspaceID 
 			return nil, err
 		}
 		items = append(items, agent_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenQuotaBreakers = `-- name: ListOpenQuotaBreakers :many
+SELECT agent_id, reason, detail, recover_condition, recover_at, opened_at
+FROM agent_quota_breaker
+WHERE workspace_id = $1 AND recovered_at IS NULL
+ORDER BY opened_at DESC
+`
+
+type ListOpenQuotaBreakersRow struct {
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	Reason           string             `json:"reason"`
+	Detail           string             `json:"detail"`
+	RecoverCondition string             `json:"recover_condition"`
+	RecoverAt        pgtype.Timestamptz `json:"recover_at"`
+	OpenedAt         pgtype.Timestamptz `json:"opened_at"`
+}
+
+func (q *Queries) ListOpenQuotaBreakers(ctx context.Context, workspaceID pgtype.UUID) ([]ListOpenQuotaBreakersRow, error) {
+	rows, err := q.db.Query(ctx, listOpenQuotaBreakers, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOpenQuotaBreakersRow{}
+	for rows.Next() {
+		var i ListOpenQuotaBreakersRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.Reason,
+			&i.Detail,
+			&i.RecoverCondition,
+			&i.RecoverAt,
+			&i.OpenedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
