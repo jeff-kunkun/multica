@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -499,8 +500,11 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 		SegmentNudged:  blockwait.MetaString(meta, blockwait.KeySegmentNudged) == "1",
 		ReviewNudged:   blockwait.MetaString(meta, blockwait.KeyReviewNudged) == "1",
 		ReviewerHuman:  issue.ReviewerType.Valid && issue.ReviewerType.String == "member",
+		ReviewerEmpty:  reviewerSlotEmpty(issue),
 	})
-	if decision.Action != blockwait.ActionRelease && decision.Action != blockwait.ActionWake {
+	switch decision.Action {
+	case blockwait.ActionRelease, blockwait.ActionWake, blockwait.ActionSeat:
+	default:
 		return false
 	}
 	h.applyPatrolFollowUp(ctx, issue, meta, decision)
@@ -509,8 +513,76 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 		h.releaseAcceptedIssue(ctx, issue, decision)
 	case blockwait.ActionWake:
 		h.wakeIssueOwner(ctx, issue, decision.Reason, decision.CommentOnly)
+	case blockwait.ActionSeat:
+		h.seatQuietReview(ctx, issue, decision.Reason)
 	}
 	return true
+}
+
+// reviewerSlotEmpty reports an acceptance slot nobody has answered. "none" is
+// an answer ("this issue needs no acceptance pass"), so it is not empty.
+func reviewerSlotEmpty(issue db.Issue) bool {
+	if !issue.ReviewerType.Valid || strings.TrimSpace(issue.ReviewerType.String) == "" {
+		return true
+	}
+	if issue.ReviewerType.String == "none" {
+		return false
+	}
+	return !issue.ReviewerID.Valid
+}
+
+// seatQuietReview is the patrol's answer to an in_review issue whose
+// acceptance seat is empty (DENE-869). It fills the seat the same way the
+// status write does and starts it; when no seat can be picked the wait
+// becomes a structured block pointing at a workspace manager, so a person
+// sees it instead of two agents waiting on each other.
+func (h *Handler) seatQuietReview(ctx context.Context, issue db.Issue, reason string) {
+	var tr statusTransition
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
+		tr = h.pickAcceptanceSeat(ctx, issue, issue.AssigneeID)
+	} else {
+		tr.refuse = "执行席不是 Agent，平台选不出与之不同的验收席"
+	}
+	if tr.refuse == "" && tr.setReviewer {
+		updated, err := h.Queries.SetIssueReviewerIfUnset(ctx, db.SetIssueReviewerIfUnsetParams{
+			ReviewerType: tr.reviewerType.String,
+			ReviewerID:   tr.reviewerID,
+			ID:           issue.ID,
+			WorkspaceID:  issue.WorkspaceID,
+		})
+		if err != nil {
+			slog.Warn("block wait: seat quiet review failed", "error", err, "issue_id", uuidToString(issue.ID))
+			tr.refuse = "验收席没能写进这张票"
+		} else {
+			h.publishBlockStatus(issue, updated)
+			tr.note = reason + tr.note
+			h.finishStatusTransition(ctx, updated, tr)
+			return
+		}
+	}
+	h.blockReviewNeedingHuman(ctx, issue, reason+tr.refuse+"。")
+}
+
+// blockReviewNeedingHuman turns a seatless review into a structured block
+// that names a workspace manager: the platform could not find a reviewer, so
+// a person has to. The block is what keeps the patrol from asking again.
+func (h *Handler) blockReviewNeedingHuman(ctx context.Context, issue db.Issue, why string) {
+	managers, err := h.Queries.ListWorkspaceManagerUserIDs(ctx, issue.WorkspaceID)
+	if err != nil {
+		slog.Warn("block wait: list managers failed", "error", err, "issue_id", uuidToString(issue.ID))
+	}
+	rec := blockwait.Record{}
+	mention := ""
+	if len(managers) > 0 && managers[0].Valid {
+		rec.NeedsHuman = uuidToString(managers[0])
+		mention = h.memberWakeMention(ctx, managers[0])
+	} else {
+		rec = blockwait.FailureWake(time.Now(), "验收席由人来定")
+	}
+	h.blockAcceptedIssue(ctx, issue, blockwait.Decision{
+		Record: rec,
+		Reason: mention + why + "平台补不上验收席，这张票改成阻塞，等人指定验收席后再送审（`multica issue update <issue> --reviewer <name>`）。",
+	})
 }
 
 func parseMetaTime(raw string) (time.Time, bool) {
@@ -629,6 +701,11 @@ func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason str
 	targetType, targetID := issue.AssigneeType, issue.AssigneeID
 	if issue.Status == "in_review" && issue.ReviewerType.Valid && issue.ReviewerID.Valid && issue.ReviewerType.String != "none" {
 		targetType, targetID = issue.ReviewerType, issue.ReviewerID
+	}
+	if issue.Status == "in_review" && reviewerSlotEmpty(issue) {
+		// The executor already said it is done; asking it to review its own
+		// work only produces "请验收". Leave the sentence, start nobody.
+		commentOnly = true
 	}
 	if blockwait.MetaString(parseIssueMetadata(issue.Metadata), blockwait.KeyNeedsHuman) != "" {
 		commentOnly = true

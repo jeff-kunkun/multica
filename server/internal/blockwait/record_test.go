@@ -343,6 +343,56 @@ func TestDownstreamNoticeDoesNotAskForRedispatch(t *testing.T) {
 	}
 }
 
+func TestQuietReviewWithoutSeatIsSeatedNotNudged(t *testing.T) {
+	now := time.Date(2026, 9, 24, 12, 10, 0, 0, time.UTC)
+	seatless := DecidePatrol(PatrolInput{
+		Status:        "in_review",
+		Quiet:         QuietAfter,
+		ReviewerEmpty: true,
+		Now:           now,
+	})
+	if seatless.Action != ActionSeat {
+		t.Fatalf("seatless in_review action = %s, want %s", seatless.Action, ActionSeat)
+	}
+	if seatless.MarkReview {
+		t.Fatal("seating must not spend the one review nudge")
+	}
+	set, _ := seatless.FollowUp(now, "", "", "")
+	if set[KeyPatrolAt] == "" {
+		t.Fatal("seating must stamp the patrol clock so it is not retried every sweep")
+	}
+
+	nudgedBefore := DecidePatrol(PatrolInput{
+		Status:        "in_review",
+		Quiet:         2 * time.Hour,
+		ReviewerEmpty: true,
+		ReviewNudged:  true,
+		Now:           now,
+	})
+	if nudgedBefore.Action != ActionSeat {
+		t.Fatalf("an earlier nudge must not silence a seatless review, got %s", nudgedBefore.Action)
+	}
+
+	seated := DecidePatrol(PatrolInput{
+		Status: "in_review",
+		Quiet:  QuietAfter,
+		Now:    now,
+	})
+	if seated.Action != ActionWake || !seated.MarkReview {
+		t.Fatalf("seated in_review keeps the reviewer nudge, got %+v", seated)
+	}
+
+	fresh := DecidePatrol(PatrolInput{
+		Status:        "in_review",
+		Quiet:         5 * time.Minute,
+		ReviewerEmpty: true,
+		Now:           now,
+	})
+	if fresh.Action != ActionHold {
+		t.Fatalf("a fresh seatless review still gets its 30 minutes, got %s", fresh.Action)
+	}
+}
+
 // DENE-870: a child that keeps failing the same way is not re-woken every
 // minute; the clock moves out with each failure in a row.
 func TestFailureWakeBacksOff(t *testing.T) {
