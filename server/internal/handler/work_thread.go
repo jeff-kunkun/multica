@@ -80,7 +80,7 @@ func (h *Handler) WorkThreadAction(w http.ResponseWriter, r *http.Request) {
 	}
 	switch req.Action {
 	case "interrupt":
-		if err := h.TaskService.CancelTasksForIssue(r.Context(), issue.ID); err != nil {
+		if err := h.cancelIssueWorkThread(r, issue.ID); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to interrupt work thread")
 			return
 		}
@@ -115,6 +115,50 @@ func (h *Handler) WorkThreadAction(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusBadRequest, "action must be continue, interrupt, or queue")
 	}
+}
+
+// cancelIssueWorkThread scopes interruption to the latest primary thread for
+// the issue. An issue can retain older threads after an agent/model boundary
+// change; stopping one must not cancel those unrelated runs.
+func (h *Handler) cancelIssueWorkThread(r *http.Request, issueID pgtype.UUID) error {
+	var threadID pgtype.UUID
+	if err := h.DB.QueryRow(r.Context(), `
+		SELECT id FROM work_thread
+		WHERE issue_id = $1
+		ORDER BY updated_at DESC, id DESC
+		LIMIT 1`, issueID).Scan(&threadID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	rows, err := h.DB.Query(r.Context(), `
+		SELECT id FROM agent_task_queue
+		WHERE work_thread_id = $1
+		  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')`, threadID)
+	if err != nil {
+		return err
+	}
+	var taskIDs []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		taskIDs = append(taskIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, taskID := range taskIDs {
+		if _, err := h.TaskService.CancelTask(r.Context(), taskID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *Handler) ChatWorkThreadAction(w http.ResponseWriter, r *http.Request) {
