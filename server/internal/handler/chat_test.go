@@ -95,8 +95,17 @@ func TestSendChatMessage_UsesChatSessionAsWorkThread(t *testing.T) {
 	`, []string{firstID, secondID}).Scan(&got); err != nil {
 		t.Fatalf("read chat work threads: %v", err)
 	}
-	if len(got) != 2 || got[0] != sessionID || got[1] != sessionID {
-		t.Fatalf("chat tasks work threads = %v, want both %s", got, sessionID)
+	// Both turns share one durable thread, and that thread is keyed to the
+	// chat session (the work_thread entity has its own id since migration 531).
+	if len(got) != 2 || got[0] == "" || got[0] != got[1] {
+		t.Fatalf("chat tasks work threads = %v, want one shared thread", got)
+	}
+	var threadSession string
+	if err := testPool.QueryRow(ctx, `SELECT chat_session_id::text FROM work_thread WHERE id = $1`, got[0]).Scan(&threadSession); err != nil {
+		t.Fatalf("read work_thread: %v", err)
+	}
+	if threadSession != sessionID {
+		t.Fatalf("work_thread.chat_session_id = %s, want %s", threadSession, sessionID)
 	}
 }
 

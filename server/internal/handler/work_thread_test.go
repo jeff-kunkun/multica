@@ -88,7 +88,8 @@ func TestGetChatWorkThreadEnforcesSessionOwnership(t *testing.T) {
 	sessionID := insertChatSessionAs(t, agentID, otherUser)
 	req := withURLParam(newRequest(http.MethodGet, "/api/chat/sessions/"+sessionID+"/work-thread", nil), "sessionId", sessionID)
 	req = withChatTestWorkspaceCtx(t, req)
-	testutil.Call(t, testHandler.GetChatWorkThread, req).Want(http.StatusForbidden)
+	// kun hides another person's private chat as 404 (DENE-840), not 403.
+	testutil.Call(t, testHandler.GetChatWorkThread, req).Want(http.StatusNotFound)
 }
 
 func TestWorkThreadActionRejectsContinueWhileActive(t *testing.T) {
