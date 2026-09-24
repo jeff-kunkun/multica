@@ -4117,6 +4117,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.WorkspaceSlug = ws.Slug
 		if issueNumber > 0 {
 			resp.IssueIdentifier = service.IssueIdentifier(ws.IssuePrefix, issueNumber)
+			if canonical, err := h.Queries.GetIssueCanonicalDeliveryBranch(r.Context(), task.IssueID); err == nil {
+				resp.CanonicalBranch = canonical.BranchName
+			}
 		}
 		resp.IssueSubIssues = h.claimSubIssues(r.Context(), ws.IssuePrefix, subIssues)
 		if len(subIssues) > maxClaimSubIssues {
@@ -5977,6 +5980,7 @@ func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		delivered = true
+		h.recordCancelledTaskDeliveryBranch(r, task, branch)
 	}
 	if msg := strings.TrimSpace(req.ErrorMessage); msg != "" {
 		reason := strings.TrimSpace(req.FailureReason)
@@ -6915,4 +6919,33 @@ func (h *Handler) GetTaskGCCheck(w http.ResponseWriter, r *http.Request) {
 		"status":       task.Status,
 		"completed_at": task.CompletedAt.Time,
 	})
+}
+
+// recordCancelledTaskDeliveryBranch files a cancelled run's branch under its
+// issue (DENE-820). The complete/fail paths do this inside their
+// transaction; cancel is the third way a worktree branch reaches the server.
+// A failure here is logged, not returned: the branch name is already
+// persisted on the task and the aggregate re-derives from task rows.
+func (h *Handler) recordCancelledTaskDeliveryBranch(r *http.Request, task db.AgentTaskQueue, branch string) {
+	if !task.IssueID.Valid {
+		return
+	}
+	task.BranchName = pgtype.Text{String: branch, Valid: true}
+	row, newLine, err := service.RecordIssueDeliveryBranch(r.Context(), h.Queries, task)
+	if err != nil {
+		slog.Warn("cancel ack: record delivery branch failed", "task_id", uuidToString(task.ID), "error", err)
+		return
+	}
+	if row == nil || !newLine {
+		return
+	}
+	canonical, err := h.Queries.GetIssueCanonicalDeliveryBranch(r.Context(), task.IssueID)
+	if err != nil {
+		return
+	}
+	issue, err := h.Queries.GetIssue(r.Context(), task.IssueID)
+	if err != nil {
+		return
+	}
+	h.postBlockComment(r.Context(), issue, service.UnclassifiedDeliveryLineNotice(canonical.BranchName, row.BranchName))
 }
