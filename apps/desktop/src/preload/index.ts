@@ -6,7 +6,16 @@ import type {
 } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
+  InstallerReadyPayload,
   ManualUpdateCheckResult,
+  OpenInstallerResult,
+  ReleaseChannel,
+  UpdateAvailablePayload,
+  UpdateCheckRecord,
+  UpdateDownloadProgressPayload,
+  UpdaterCapabilities,
+  UpdaterCheckingPayload,
+  UpdaterErrorPayload,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import {
@@ -243,6 +252,9 @@ const desktopAPI = {
   /** Validate that a path is an existing readable+writable directory. */
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
+  /** Create a local Git repository in a plain folder. Nothing is uploaded. */
+  initLocalGit: (path: string) =>
+    ipcRenderer.invoke("local-directory:init-git", path),
   validateWritablePath: (path: string) =>
     ipcRenderer.invoke("local-directory:writable", path),
   /** This machine's parallel-copy cleanup: report, policy, one-off removal.
@@ -252,6 +264,14 @@ const desktopAPI = {
     ipcRenderer.invoke("worktree-cleanup:save-settings", settings),
   removeWorktreeCopy: (path: string) =>
     ipcRenderer.invoke("worktree-cleanup:remove", path),
+  /** This machine's shared session folder: where questions with no code land. */
+  sharedScratchReport: () => ipcRenderer.invoke("shared-scratch:report"),
+  saveSharedScratchSettings: (settings: unknown) =>
+    ipcRenderer.invoke("shared-scratch:save-settings", settings),
+  removeSharedSession: (path: string) =>
+    ipcRenderer.invoke("shared-scratch:remove", path),
+  cleanExpiredSharedSessions: () =>
+    ipcRenderer.invoke("shared-scratch:clean-expired"),
   listLocalDirectorySharedOverrides: () =>
     ipcRenderer.invoke("local-directory:list-shared-overrides"),
   setLocalDirectorySharedOverride: (input: {
@@ -367,31 +387,50 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:open-log-file"),
 };
 
+function subscribeUpdater<T>(
+  channel: string,
+  callback: (payload: T) => void,
+): () => void {
+  const handler = (_: unknown, payload: T) => callback(payload);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
 const updaterAPI = {
-  onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
-    const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
-    ipcRenderer.on("updater:update-available", handler);
-    return () => ipcRenderer.removeListener("updater:update-available", handler);
-  },
-  onDownloadProgress: (callback: (progress: { percent: number }) => void) => {
-    const handler = (_: unknown, progress: { percent: number }) => callback(progress);
-    ipcRenderer.on("updater:download-progress", handler);
-    return () => ipcRenderer.removeListener("updater:download-progress", handler);
-  },
-  onUpdateDownloaded: (
-    callback: (info: { version: string; releaseNotes?: string }) => void,
-  ) => {
-    const handler = (_: unknown, info: { version: string; releaseNotes?: string }) =>
-      callback(info);
-    ipcRenderer.on("updater:update-downloaded", handler);
-    return () => ipcRenderer.removeListener("updater:update-downloaded", handler);
-  },
-  downloadUpdate: () => ipcRenderer.invoke("updater:download"),
-  installUpdate: () => ipcRenderer.invoke("updater:install"),
+  onChecking: (callback: (payload: UpdaterCheckingPayload) => void) =>
+    subscribeUpdater("updater:checking", callback),
+  onCheckResult: (callback: (record: UpdateCheckRecord) => void) =>
+    subscribeUpdater("updater:check-result", callback),
+  onUpdateAvailable: (callback: (info: UpdateAvailablePayload) => void) =>
+    subscribeUpdater("updater:update-available", callback),
+  onDownloadProgress: (callback: (progress: UpdateDownloadProgressPayload) => void) =>
+    subscribeUpdater("updater:download-progress", callback),
+  onUpdateDownloaded: (callback: (info: UpdateAvailablePayload) => void) =>
+    subscribeUpdater("updater:update-downloaded", callback),
+  onInstallerReady: (callback: (installer: InstallerReadyPayload) => void) =>
+    subscribeUpdater("updater:installer-ready", callback),
+  onError: (callback: (error: UpdaterErrorPayload) => void) =>
+    subscribeUpdater("updater:error", callback),
+  downloadUpdate: (): Promise<void> => ipcRenderer.invoke("updater:download"),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke("updater:install"),
+  getCapabilities: (): Promise<UpdaterCapabilities> =>
+    ipcRenderer.invoke("updater:get-capabilities"),
+  getLastCheck: (): Promise<UpdateCheckRecord | null> =>
+    ipcRenderer.invoke("updater:get-last-check"),
+  getInstaller: (): Promise<InstallerReadyPayload | null> =>
+    ipcRenderer.invoke("updater:get-installer"),
+  openInstaller: (): Promise<OpenInstallerResult> =>
+    ipcRenderer.invoke("updater:open-installer"),
+  revealInstaller: (): Promise<OpenInstallerResult> =>
+    ipcRenderer.invoke("updater:reveal-installer"),
+  openLogFile: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("updater:open-log"),
   getPreferences: (): Promise<UpdaterPreferences> =>
     ipcRenderer.invoke("updater:get-preferences"),
   setAutomaticUpdates: (enabled: boolean): Promise<UpdaterPreferences> =>
     ipcRenderer.invoke("updater:set-automatic-updates", enabled),
+  setReleaseChannel: (channel: ReleaseChannel): Promise<UpdaterPreferences> =>
+    ipcRenderer.invoke("updater:set-release-channel", channel),
   checkForUpdates: (): Promise<ManualUpdateCheckResult> =>
     ipcRenderer.invoke("updater:check"),
 };

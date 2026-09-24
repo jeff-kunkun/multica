@@ -102,10 +102,31 @@ func (h *Handler) audienceSize(ctx context.Context, wsUUID pgtype.UUID, vis perm
 }
 
 func (h *Handler) visibilityAudienceSize(ctx context.Context, wsUUID pgtype.UUID, change visibilityChange) int32 {
-	if change.resourceType == "module" {
+	switch change.resourceType {
+	case "module":
 		return h.moduleAudienceSize(ctx, wsUUID, change.next, change.projectID)
+	case "issue", "repo":
+		return h.resourceAudienceSize(ctx, wsUUID, change.next, change.projectID, change.resourceType, change.resourceID)
 	}
 	return h.audienceSize(ctx, wsUUID, change.next, change.projectID)
+}
+
+// resourceAudienceSize is audienceSize for an issue or repo, whose "specific
+// people" audience is its project's people plus its own direct shares.
+func (h *Handler) resourceAudienceSize(ctx context.Context, wsUUID pgtype.UUID, vis permission.Visibility, projectID pgtype.UUID, resourceType, resourceID string) int32 {
+	n := h.audienceSize(ctx, wsUUID, vis, projectID)
+	if vis != permission.VisibilityProject {
+		return n
+	}
+	shares, err := h.Queries.CountResourceShares(ctx, db.CountResourceSharesParams{
+		WorkspaceID:  wsUUID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+	})
+	if err != nil {
+		return n
+	}
+	return n + int32(shares)
 }
 
 // moduleAudienceSize is the snapshot written with a module audit row.
@@ -244,9 +265,8 @@ func (h *Handler) SetIssueVisibility(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "you cannot change this issue's sharing scope")
 		return
 	}
-	if !permission.CanSetVisibility(vis, issue.ProjectID.Valid) {
-		writeError(w, http.StatusBadRequest,
-			"project visibility needs a project: add this issue to a project first")
+	if !permission.CanSetVisibility(vis) {
+		writeError(w, http.StatusBadRequest, "invalid visibility")
 		return
 	}
 
@@ -273,6 +293,11 @@ func (h *Handler) SetIssueVisibility(w http.ResponseWriter, r *http.Request) {
 
 	wsID := uuidToString(issue.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	// The id-only invalidation goes first: recipients who just lost access must
+	// evict their cached copy, and the content frame below is filtered for
+	// exactly those recipients. Recipients who gained access have nothing
+	// cached and pick the issue up from the update that follows.
+	h.publishIssueInvalidated(wsID, actorType, actorID, uuidToString(updated.ID), "", "")
 	h.publish(protocol.EventIssueUpdated, wsID, actorType, actorID, map[string]any{
 		"issue": issueToResponse(updated, h.getIssuePrefix(r.Context(), issue.WorkspaceID)),
 	})
@@ -280,7 +305,7 @@ func (h *Handler) SetIssueVisibility(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":            uuidToString(updated.ID),
 		"visibility":    updated.Visibility,
-		"audience_size": h.audienceSize(r.Context(), issue.WorkspaceID, vis, issue.ProjectID),
+		"audience_size": h.resourceAudienceSize(r.Context(), issue.WorkspaceID, vis, issue.ProjectID, "issue", uuidToString(issue.ID)),
 	})
 }
 
@@ -416,12 +441,7 @@ func (h *Handler) SetProjectVisibility(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rel := permission.Relation{
-		IsCreator: project.CreatedBy.Valid && viewer.userID.Valid && project.CreatedBy.Bytes == viewer.userID.Bytes,
-		InProject: viewer.inProject(project.ID),
-	}
-	if !viewer.bypasses() &&
-		!permission.Allowed(viewer.role, permission.ActionChangeVisibility, permission.Visibility(project.Visibility), rel) {
+	if !viewer.canChangeProjectVisibility(project) {
 		writeError(w, http.StatusForbidden, "you cannot change this project's sharing scope")
 		return
 	}
@@ -500,9 +520,18 @@ func (h *Handler) SetProjectVisibility(w http.ResponseWriter, r *http.Request) {
 
 	wsID := uuidToString(project.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	// A project's scope sweep re-scopes every issue it holds, so the invalidation
+	// names the project rather than each issue: the client refetches its lists
+	// and the HTTP filter decides what comes back.
+	h.publishIssueInvalidated(wsID, actorType, actorID, "", uuidToString(updated.ID), "")
 	h.publish(protocol.EventProjectUpdated, wsID, actorType, actorID, map[string]any{
 		"project": projectToResponse(updated),
 	})
+	// The sweep may also have re-scoped repositories, which live in the
+	// workspace snapshot rather than in the project's own events.
+	if len(repoSweep) > 0 {
+		h.publishWorkspaceSnapshot(r.Context(), project.WorkspaceID, wsID, actorType, actorID)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"project_id":               uuidToString(updated.ID),
@@ -622,23 +651,12 @@ func (h *Handler) SetRepoVisibility(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entry := entries[index]
-	rel := permission.Relation{
-		IsCreator: entry.CreatedBy != "" && entry.CreatedBy == uuidToString(viewer.userID),
-	}
-	for _, id := range projectIDs {
-		if viewer.inProject(id) {
-			rel.InProject = true
-			break
-		}
-	}
-	if !viewer.bypasses() &&
-		!permission.Allowed(viewer.role, permission.ActionChangeVisibility, permission.Visibility(entry.Visibility), rel) {
+	if !viewer.canChangeRepoVisibility(entry, projectIDs) {
 		writeError(w, http.StatusForbidden, "you cannot change this repository's sharing scope")
 		return
 	}
-	if !permission.CanSetVisibility(vis, len(projectIDs) > 0) {
-		writeError(w, http.StatusBadRequest,
-			"project visibility needs a project: add this repository to a project first")
+	if !permission.CanSetVisibility(vis) {
+		writeError(w, http.StatusBadRequest, "invalid visibility")
 		return
 	}
 
@@ -660,11 +678,36 @@ func (h *Handler) SetRepoVisibility(w http.ResponseWriter, r *http.Request) {
 		projectID:    scopedProject,
 	})
 
+	// Repos travel inside the workspace snapshot, so the snapshot is what a
+	// client refetches — with its own visibility applied at delivery time.
+	wsID := uuidToString(wsUUID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	h.publishWorkspaceSnapshot(r.Context(), wsUUID, wsID, actorType, actorID)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":           req.URL,
 		"visibility":    string(vis),
-		"audience_size": h.audienceSize(r.Context(), wsUUID, vis, scopedProject),
+		"audience_size": h.resourceAudienceSize(r.Context(), wsUUID, vis, scopedProject, "repo", req.URL),
 	})
+}
+
+// canChangeRepoVisibility is the tier rule for a repo's scope and its direct
+// shares: the caller must see the repo and hold ActionChangeVisibility on it.
+func (v visibilityViewer) canChangeRepoVisibility(entry workspaceRepoRef, projectIDs []pgtype.UUID) bool {
+	if v.bypasses() {
+		return true
+	}
+	rel := permission.Relation{
+		IsCreator: entry.CreatedBy != "" && entry.CreatedBy == uuidToString(v.userID),
+	}
+	for _, id := range projectIDs {
+		if v.inProject(id) {
+			rel.InProject = true
+			break
+		}
+	}
+	_, rel.SharedWith = v.sharedRepos[entry.URL]
+	return permission.Allowed(v.role, permission.ActionChangeVisibility, permission.Visibility(entry.Visibility), rel)
 }
 
 // repoProjectIDs is which projects list this repository as a resource. It is

@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/sparsecheckout"
 )
 
 // sessionContinuityNoticeFor picks the notice matching what this surface
@@ -70,6 +71,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
 	b.WriteString(buildStaleLocalBaselineBlock(opts.staleLocalBaselineNotice))
 	b.WriteString(buildDependencyInstallBlock(opts.dependencyInstallCommand))
+	b.WriteString(buildSparseCheckoutBlock(task.CheckoutPaths))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -168,6 +170,24 @@ func buildStaleLocalBaselineBlock(notice string) string {
 		return ""
 	}
 	return "## Local baseline may be stale\n\n" + strings.TrimSpace(notice) + " Treat the files in this worktree as the authoritative snapshot for this turn, and mention the stale baseline if it affects your conclusion.\n\n"
+}
+
+// buildSparseCheckoutBlock tells the agent what a declared checkout scope
+// means. A missing file in that checkout is not evidence the file is absent
+// from the repository; sparse-add is the check that says which.
+func buildSparseCheckoutBlock(declared string) string {
+	scope, err := sparsecheckout.Parse(declared)
+	if err != nil {
+		return "## Sparse checkout\n\nThe issue's checkout_paths declaration could not be read (" + err.Error() + "). The checkout was not narrowed.\n\n"
+	}
+	if !scope.Active() {
+		return ""
+	}
+	return "## Sparse checkout\n\n" +
+		"This task declared checkout paths: " + strings.Join(scope.Paths, ", ") + ".\n" +
+		"A task worktree (local worktree mode, or `multica repo checkout`) contains those directories plus the repository's root files — lockfile, workspace manifest, root build config. Other directories are not on disk; each one contains " + sparsecheckout.MarkerName + " explaining that.\n" +
+		"A file that is not on disk may still be in the repository. Before concluding it does not exist, run `multica repo sparse-add <path>`. That command checks the path out when it is in git, and tells you when it is not.\n" +
+		"This run's own checkout of the user's directory (in_place or shared) is never narrowed. `multica repo checkout --full` checks out a whole repository; `--paths a,b` overrides the declaration. Pass one of those when checking out a different repository.\n\n"
 }
 
 func buildDependencyInstallBlock(command string) string {
@@ -496,13 +516,16 @@ func buildQuickCreatePrompt(task Task) string {
 	// omitted so the platform routes to the workspace default. Always pass
 	// the UUID (never a name) so the issue lands in the right project even
 	// when several share a title.
-	if task.ProjectID != "" {
+	switch {
+	case task.ProjectID != "":
 		if task.ProjectTitle != "" {
 			fmt.Fprintf(&b, "- **project**: required for this run. Pass `--project %q` so the new issue lands in project %q (the user picked it in the quick-create modal). Do not infer a different project from the prompt text — the modal selection is authoritative.\n", task.ProjectID, task.ProjectTitle)
 		} else {
 			fmt.Fprintf(&b, "- **project**: required for this run. Pass `--project %q` so the new issue lands in the project the user picked in the quick-create modal. Do not infer a different project from the prompt text — the modal selection is authoritative.\n", task.ProjectID)
 		}
-	} else {
+	case task.ProjectExplicitNone:
+		b.WriteString("- **project**: required for this run. Pass `--project \"\"` so the new issue stays without a project. The user cleared it; leaving the flag off would make the issue inherit its parent's project.\n")
+	default:
 		b.WriteString("- **project**: omit. The platform will route the issue to the workspace default.\n")
 	}
 	// parent — pinned by the modal when the user opened it from "Add sub

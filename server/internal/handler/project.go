@@ -416,18 +416,36 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Priority:    priority,
 		StartDate:   startDate,
 		DueDate:     dueDate,
-		// A new project is private (DENE-698). created_by is what makes that
-		// survivable: 'private' means "the creator and nobody else", so a
-		// project with no creator recorded would be a project nobody can see.
-		// An agent-created project records no creator and is therefore
-		// visible through the management fallback only until someone shares
-		// it — the same as any other unshared resource.
+		// Every project starts private (DENE-698): zero trust, nothing shared to
+		// human friends until the owner shares it. An agent-created project is
+		// no exception — it records the agent's human owner as created_by, and
+		// because that owner (the workspace owner or the agent's owner) always
+		// sees their own private projects (canSeeProject), private is safe to
+		// keep as the default here too.
 		Visibility: pgtype.Text{String: string(permission.DefaultVisibility), Valid: true},
 	}
-	if creatorUUID, creatorErr := parseUUIDSafe(userID); creatorErr == nil {
-		if actorType, _ := h.resolveActor(r, userID, workspaceID); actorType == "member" {
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if actorType == "member" {
+		if creatorUUID, creatorErr := parseUUIDSafe(userID); creatorErr == nil {
 			createParams.CreatedBy = creatorUUID
 		}
+	} else if actorType == "agent" {
+		// Agent requests carry the owner's user id in X-User-ID, but resolve
+		// the owner from the workspace-scoped agent row so fallback headers
+		// cannot assign ownership to an unrelated member.
+		agentUUID, agentErr := parseUUIDSafe(actorID)
+		if agentErr != nil {
+			writeError(w, http.StatusBadRequest, "agent-created project requires a valid workspace agent with a human owner")
+			return
+		}
+		agent, agentErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID: agentUUID, WorkspaceID: wsUUID,
+		})
+		if agentErr != nil || !agent.OwnerID.Valid {
+			writeError(w, http.StatusBadRequest, "agent-created project requires a workspace agent with a human owner")
+			return
+		}
+		createParams.CreatedBy = agent.OwnerID
 	}
 
 	// Without resources, keep the simple non-tx path.

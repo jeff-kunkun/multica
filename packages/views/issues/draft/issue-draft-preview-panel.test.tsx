@@ -115,14 +115,23 @@ vi.mock("../components/pickers/assignee-picker", () => ({
     onUpdate,
   }: {
     assigneeId: string | null;
-    onUpdate: (u: { assignee_type: string; assignee_id: string }) => void;
+    onUpdate: (u: { assignee_type?: string | null; assignee_id?: string | null }) => void;
   }) => (
-    <button
-      type="button"
-      onClick={() => onUpdate({ assignee_type: "agent", assignee_id: "ag-9" })}
-    >
-      assignee-picker:{String(assigneeId)}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => onUpdate({ assignee_type: "agent", assignee_id: "ag-9" })}
+      >
+        assignee-picker:{String(assigneeId)}
+      </button>
+      <button
+        type="button"
+        aria-label={`clear-assignee:${String(assigneeId)}`}
+        onClick={() => onUpdate({ assignee_type: null, assignee_id: null })}
+      >
+        clear-assignee
+      </button>
+    </>
   ),
 }));
 
@@ -439,6 +448,22 @@ function childTitleInput(n: number): HTMLInputElement {
   return screen.getByLabelText(`Sub-issue ${n} title`) as HTMLInputElement;
 }
 
+/**
+ * The two shapes the parent line can take, and the difference is not cosmetic
+ * (DENE-755). `PARENT_COORDINATES` is a group whose parent carries an agent or
+ * squad: the stage barrier wakes it when a stage closes, so it really does
+ * coordinate a chain. `PARENT_UNWOKEN` is a group where nobody would be woken —
+ * an unassigned parent, or one held by a person — and saying only "it
+ * coordinates" there reads as a chain that is closed when the later stages will
+ * in fact sit in Backlog forever.
+ */
+const PARENT_COORDINATES =
+  "The parent coordinates this group, so it starts no work of its own at confirm.";
+const PARENT_UNWOKEN =
+  "The parent coordinates this group, but no agent or squad holds it: when a stage closes, nobody is woken to promote the next one — it stays in Backlog until a person promotes it.";
+const PARENT_UNASSIGNED_NOTICE =
+  "Unassigned — you can still confirm and assign it later.";
+
 function savedPayload(onSave: ReturnType<typeof vi.fn>): IssueDraftPayload {
   return onSave.mock.calls[0]?.[0] as IssueDraftPayload;
 }
@@ -475,12 +500,13 @@ describe("IssueDraftPreviewPanel group", () => {
     expect(
       screen.getByText("Created in Backlog, waiting for their stage: 1."),
     ).toBeTruthy();
-    // And the parent, which is created but starts nothing.
-    expect(
-      screen.getByText(
-        "The parent is created unassigned, so it starts nothing on its own.",
-      ),
-    ).toBeTruthy();
+    // And the parent, which is created but starts nothing. This fixture's parent
+    // is UNASSIGNED, so the line may not stop at "it coordinates": with no agent
+    // or squad on the parent, `notifyParentOfChildDone` wakes nobody and every
+    // later stage stays parked. The coordination-only line belongs to a parent
+    // something can actually be woken on.
+    expect(screen.getByText(PARENT_UNWOKEN)).toBeTruthy();
+    expect(screen.queryByText(PARENT_COORDINATES)).toBeNull();
   });
 
   it("writes the deleted sub-issue out of the payload it saves", () => {
@@ -552,7 +578,7 @@ describe("IssueDraftPreviewPanel group", () => {
       },
       stage: "ready",
     });
-    expect(screen.getByText("Waits for its stage")).toBeTruthy();
+    expect(screen.getByText("Unassigned, won't auto-start")).toBeTruthy();
     expect(screen.queryByText(/Starting right away/)).toBeNull();
   });
 
@@ -621,6 +647,116 @@ describe("IssueDraftPreviewPanel group", () => {
       "href",
       "/acme/issues/i1",
     );
+  });
+
+  it("names the seat a confirm could not apply", () => {
+    // The seat the user saw beside the row is not the seat the issue got. This
+    // footer is the only place that difference is ever visible, and the fix
+    // (assigning it) happens on the issue, which the row already links to.
+    renderPanel({
+      draft: GROUP,
+      stage: "created",
+      createdIssues: [
+        { id: "i1", identifier: "MUL-1", title: "Parent", status: "todo" },
+        { id: "i2", identifier: "MUL-2", title: "Child", status: "backlog" },
+      ],
+      assignmentWarnings: [
+        {
+          key: "c1",
+          title: "Child",
+          reason: "cannot assign to archived agent",
+        },
+      ],
+    });
+    expect(
+      screen.getByText(
+        "“Child” could not be assigned, so it was created unassigned.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("counts several dropped seats instead of listing them all", () => {
+    renderPanel({
+      draft: GROUP,
+      stage: "created",
+      createdIssues: [
+        { id: "i1", identifier: "MUL-1", title: "Parent", status: "todo" },
+      ],
+      assignmentWarnings: [
+        { key: "c1", title: "Child one", reason: "archived agent" },
+        { key: "c2", title: "Child two", reason: "archived agent" },
+      ],
+    });
+    expect(
+      screen.getByText(
+        "2 issues could not be assigned, so they were created unassigned.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says nothing about seats when every assignment landed", () => {
+    // A warning about nothing is noise on the one screen where the user is
+    // checking what the confirm actually created.
+    renderPanel({
+      draft: GROUP,
+      stage: "created",
+      createdIssues: [
+        { id: "i1", identifier: "MUL-1", title: "Parent", status: "todo" },
+      ],
+      assignmentWarnings: [],
+    });
+    expect(screen.queryByText(/could not be assigned/)).toBeNull();
+  });
+});
+
+/**
+ * DENE-755: whether the parent line may promise a chain. The server wakes the
+ * parent's assignee when a stage closes, but `notifyParentOfChildDone` skips a
+ * parent held by a person (MUL-2538) and there is no seat at all to wake on an
+ * unassigned one. In those two shapes every stage after the first stays in
+ * Backlog with no comment and no inbox row, so the panel has to say so — the
+ * coordination sentence alone reads as "this advances itself", which is the one
+ * thing that is not true.
+ */
+describe("IssueDraftPreviewPanel parent wakeup", () => {
+  it("says nobody will be woken when the parent is unassigned", () => {
+    renderPanel({ draft: GROUP, stage: "ready", canConfirm: true });
+    expect(screen.getByText(PARENT_UNWOKEN)).toBeTruthy();
+    expect(screen.queryByText(PARENT_COORDINATES)).toBeNull();
+  });
+
+  it("says nobody will be woken when the parent is held by a person", () => {
+    renderPanel({
+      draft: { ...GROUP, assignee_type: "member", assignee_id: "u1" },
+      stage: "ready",
+      canConfirm: true,
+    });
+    expect(screen.getByText(PARENT_UNWOKEN)).toBeTruthy();
+    expect(screen.queryByText(PARENT_COORDINATES)).toBeNull();
+    // A parent with a real assignee is not "unassigned", whatever else the
+    // footer has to say about it.
+    expect(screen.queryByText(PARENT_UNASSIGNED_NOTICE)).toBeNull();
+  });
+
+  it("keeps the coordination line when an agent holds the parent", () => {
+    renderPanel({
+      draft: { ...GROUP, assignee_type: "agent", assignee_id: "ag-parent" },
+      stage: "ready",
+      canConfirm: true,
+    });
+    expect(screen.getByText(PARENT_COORDINATES)).toBeTruthy();
+    expect(screen.queryByText(PARENT_UNWOKEN)).toBeNull();
+    expect(screen.queryByText(PARENT_UNASSIGNED_NOTICE)).toBeNull();
+  });
+
+  it("keeps the coordination line when a squad holds the parent", () => {
+    renderPanel({
+      draft: { ...GROUP, assignee_type: "squad", assignee_id: "sq-parent" },
+      stage: "ready",
+      canConfirm: true,
+    });
+    expect(screen.getByText(PARENT_COORDINATES)).toBeTruthy();
+    expect(screen.queryByText(PARENT_UNWOKEN)).toBeNull();
   });
 });
 
@@ -956,5 +1092,45 @@ describe("assignee suggestions", () => {
     renderPanel({ stage: "ready", draft: READY, onSave, pending: true, assigneeSuggestions: [SEAT, SEAT] });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("keeps confirmation available and explains unavailable suggestions", () => {
+    renderPanel({
+      stage: "ready",
+      draft: READY,
+      canConfirm: true,
+      assigneeSuggestionsError: true,
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Suggestions are unavailable",
+    );
+    expect(screen.getAllByText(/Unassigned/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole("button", { name: "Confirm and create" })).toBeEnabled();
+  });
+
+  it("shows the loading state while suggestions are being resolved", () => {
+    renderPanel({ stage: "ready", draft: READY, assigneeSuggestionsLoading: true });
+    expect(screen.getByRole("status")).toHaveTextContent("Finding suggested assignees");
+  });
+
+  it("persists a cleared child as unassigned when the same suggestion returns", async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    const { rerenderWith } = renderPanel({ stage: "ready", draft: READY, onSave, assigneeSuggestions: [SEAT, SEAT] });
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const clearButtons = screen.getAllByRole("button", { name: "clear-assignee:agent-1" });
+    fireEvent.click(clearButtons[1]!);
+
+    // A refetched answer is a new array, but the panel's offered-row memory
+    // must keep the child empty after the user cleared it.
+    const suggestionsAgain = [{ ...SEAT }, { ...SEAT }];
+    rerenderWith({ assigneeSuggestions: suggestionsAgain });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+    const [saved] = onSave.mock.calls[1] as [IssueDraftPayload, string];
+    expect(saved.children?.[0]?.assignee_id ?? null).toBeNull();
+    expect(saved.children?.[0]?.assignee_type ?? null).toBeNull();
   });
 });

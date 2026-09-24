@@ -11,13 +11,26 @@ import type {
   IssueWindowRequest,
 } from "../shared/issue-window";
 import type {
+  InstallerReadyPayload,
   ManualUpdateCheckResult,
+  OpenInstallerResult,
+  ReleaseChannel,
+  UpdateAvailablePayload,
+  UpdateCheckRecord,
+  UpdateDownloadProgressPayload,
+  UpdaterCapabilities,
+  UpdaterCheckingPayload,
+  UpdaterErrorPayload,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import type {
   WorktreeCleanupResult,
   WorktreeCleanupSettings,
 } from "../main/worktree-cleanup";
+import type {
+  SharedScratchResult,
+  SharedScratchSettings,
+} from "../main/shared-scratch";
 import type {
   DaemonStatus,
   DaemonPrefs,
@@ -137,6 +150,12 @@ interface DesktopAPI {
     /** The repository root containing the directory, when there is one. */
     git_root?: string;
   }>;
+  /** Create a local Git repository in a plain folder. Nothing is uploaded. */
+  initLocalGit: (path: string) => Promise<{
+    ok: boolean;
+    reason?: "not_absolute" | "not_a_directory" | "inside_repo" | "error";
+    error?: string;
+  }>;
   /** Whether `path` (or its nearest existing ancestor) is writable. Used for
    *  worktree_root, which the first task often creates. */
   validateWritablePath: (path: string) => Promise<{ ok: boolean }>;
@@ -149,6 +168,15 @@ interface DesktopAPI {
   ) => Promise<WorktreeCleanupResult>;
   /** Remove one working copy now. The daemon still applies every keep rule. */
   removeWorktreeCopy: (path: string) => Promise<WorktreeCleanupResult>;
+  /** Where the shared session folder is, how big it is, and what is in it. */
+  sharedScratchReport: () => Promise<SharedScratchResult>;
+  saveSharedScratchSettings: (
+    settings: SharedScratchSettings,
+  ) => Promise<SharedScratchResult>;
+  /** Remove one idle session folder. The daemon still applies every keep rule. */
+  removeSharedSession: (path: string) => Promise<SharedScratchResult>;
+  /** Remove session folders the retention window already calls expired. */
+  cleanExpiredSharedSessions: () => Promise<SharedScratchResult>;
   /** Local skip-mutex overrides for folders stored as in_place on a server
    *  that does not accept execution_mode=shared. */
   listLocalDirectorySharedOverrides: () => Promise<
@@ -222,15 +250,28 @@ interface DaemonAPI {
 }
 
 interface UpdaterAPI {
-  onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
-  onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
-  onUpdateDownloaded: (
-    callback: (info: { version: string; releaseNotes?: string }) => void,
+  onChecking: (callback: (payload: UpdaterCheckingPayload) => void) => () => void;
+  onCheckResult: (callback: (record: UpdateCheckRecord) => void) => () => void;
+  onUpdateAvailable: (callback: (info: UpdateAvailablePayload) => void) => () => void;
+  onDownloadProgress: (
+    callback: (progress: UpdateDownloadProgressPayload) => void,
   ) => () => void;
+  onUpdateDownloaded: (callback: (info: UpdateAvailablePayload) => void) => () => void;
+  onInstallerReady: (
+    callback: (installer: InstallerReadyPayload) => void,
+  ) => () => void;
+  onError: (callback: (error: UpdaterErrorPayload) => void) => () => void;
   downloadUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
+  getCapabilities: () => Promise<UpdaterCapabilities>;
+  getLastCheck: () => Promise<UpdateCheckRecord | null>;
+  getInstaller: () => Promise<InstallerReadyPayload | null>;
+  openInstaller: () => Promise<OpenInstallerResult>;
+  revealInstaller: () => Promise<OpenInstallerResult>;
+  openLogFile: () => Promise<{ success: boolean; error?: string }>;
   getPreferences: () => Promise<UpdaterPreferences>;
   setAutomaticUpdates: (enabled: boolean) => Promise<UpdaterPreferences>;
+  setReleaseChannel: (channel: ReleaseChannel) => Promise<UpdaterPreferences>;
   checkForUpdates: () => Promise<ManualUpdateCheckResult>;
 }
 

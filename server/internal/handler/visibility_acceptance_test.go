@@ -83,10 +83,11 @@ func TestNewIssueIsPrivateAndInvisibleToAnotherMember(t *testing.T) {
 	}
 }
 
-// An issue in no project cannot be given 'project' scope: that tier names a
-// project's people, so without a project it names nobody. The API says so
-// before the CHECK constraint has to.
-func TestProjectScopeIsRejectedForAnIssueInNoProject(t *testing.T) {
+// An issue in no project can still take the 'specific people' scope (kun
+// fork): its audience is then exactly its direct shares. Before a share it
+// reaches only its creator; after one, the person named sees it and nobody
+// else does.
+func TestSpecificPeopleScopeWorksForAnIssueInNoProject(t *testing.T) {
 	requireDB(t)
 
 	author := visibilityTestMember(t, "Vis Loner", "vis-loner@multica.ai")
@@ -99,15 +100,41 @@ func TestProjectScopeIsRejectedForAnIssueInNoProject(t *testing.T) {
 	req := withURLParam(
 		newRequestAs(author, "PUT", "/api/issues/"+issueID+"/visibility", map[string]any{"visibility": "project"}),
 		"id", issueID)
-	testutil.Call(t, testHandler.SetIssueVisibility, req).Want(400)
+	testutil.Call(t, testHandler.SetIssueVisibility, req).Want(200)
 
-	// The constraint behind the API rejects the same write, so a client that
-	// skips the handler cannot produce the row either.
-	_, err := testPool.Exec(context.Background(),
-		`UPDATE issue SET visibility = 'project' WHERE id = $1`, issueID)
-	if err == nil {
-		t.Fatal("the database accepted 'project' scope on an issue that belongs to no project")
+	friend := visibilityTestMember(t, "Vis Friend", "vis-friend@multica.ai")
+	stranger := visibilityTestMember(t, "Vis Passerby", "vis-passerby@multica.ai")
+	get := func(userID string) *testutil.Response {
+		r := withURLParam(newRequestAs(userID, "GET", "/api/issues/"+issueID, nil), "id", issueID)
+		return testutil.Call(t, testHandler.GetIssue, r)
 	}
+	get(friend).Want(404)
+
+	// Only someone who may change the scope may name people.
+	share := func(asUser, memberID string) *testutil.Response {
+		r := withURLParam(newRequestAs(asUser, "POST", "/api/issues/"+issueID+"/shares",
+			map[string]any{"member_id": memberID}), "id", issueID)
+		return testutil.Call(t, testHandler.AddIssueShare, r)
+	}
+	share(author, friend).Want(201)
+	share(author, friend).Want(201) // idempotent
+	get(friend).Want(200)
+	get(stranger).Want(404)
+	share(friend, stranger).Want(403)
+
+	var listed []ResourceShareResponse
+	testutil.Call(t, testHandler.ListIssueShares,
+		withURLParam(newRequestAs(author, "GET", "/api/issues/"+issueID+"/shares", nil), "id", issueID)).
+		Want(200).JSON(&listed)
+	if len(listed) != 1 || listed[0].MemberID != friend {
+		t.Fatalf("shares = %+v, want just the friend", listed)
+	}
+
+	unshare := testutil.WithURLParams(
+		newRequestAs(author, "DELETE", "/api/issues/"+issueID+"/shares/"+friend, nil),
+		"id", issueID, "memberId", friend)
+	testutil.Call(t, testHandler.RemoveIssueShare, unshare).Want(204)
+	get(friend).Want(404)
 }
 
 // A project is the bulk shortcut: changing its scope overwrites everything it
@@ -268,4 +295,157 @@ func TestAssigneeSeesAPrivateIssueTheyWereGiven(t *testing.T) {
 	if visibility != "private" {
 		t.Fatalf("assignment changed the scope to %q; it must stay private", visibility)
 	}
+}
+
+// An agent is an execution identity, not the person who owns the work. The
+// owner's private issue must therefore remain visible to that human in both
+// detail and list reads, while unrelated members still get the normal 404.
+func TestAgentOwnerSeesPrivateAgentIssue(t *testing.T) {
+	requireDB(t)
+
+	owner := visibilityTestMember(t, "Vis Agent Owner", "vis-agent-owner@multica.ai")
+	stranger := visibilityTestMember(t, "Vis Agent Stranger", "vis-agent-stranger@multica.ai")
+	agentID := dbfx.Agent(t, "owned visibility agent", "", testutil.Cols{"owner_id": owner})
+	issueID := dbfx.Issue(t, "agent-owned private work", testutil.Cols{
+		"creator_type": "agent",
+		"creator_id":   agentID,
+		"visibility":   "private",
+	})
+
+	get := func(userID string) *testutil.Response {
+		req := withURLParam(newRequestAs(userID, "GET", "/api/issues/"+issueID, nil), "id", issueID)
+		return testutil.Call(t, testHandler.GetIssue, req)
+	}
+	get(owner).Want(200)
+	get(stranger).Want(404)
+
+	if _, ok := issueIDsInList(t, owner, "/api/issues?workspace_id="+testWorkspaceID)[issueID]; !ok {
+		t.Fatal("the agent owner cannot find the private issue in the list")
+	}
+}
+
+// Projects created through an agent request start private like every other
+// project (kun fork: "仅我可见" by default). The agent's owner must still see
+// it through the owned-agent lead/creator rule while unrelated members lose
+// both list and detail access.
+func TestAgentCreatedProjectKeepsOwnerVisibilityAfterPrivate(t *testing.T) {
+	requireDB(t)
+
+	owner := visibilityTestMember(t, "Vis Agent Owner", "vis-agent-owner@multica.ai")
+	stranger := visibilityTestMember(t, "Vis Agent Stranger", "vis-agent-stranger@multica.ai")
+	agentID := dbfx.Agent(t, "vis-owned-agent", "", testutil.Cols{"owner_id": owner})
+
+	req := newRequestAs(owner, "POST", "/api/projects?workspace_id="+testWorkspaceID,
+		map[string]any{"title": "agent-owned project"})
+	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Agent-ID", agentID)
+	var created struct {
+		ID         string `json:"id"`
+		Visibility string `json:"visibility"`
+	}
+	testutil.Call(t, testHandler.CreateProject, req).Want(201).JSON(&created)
+	if created.Visibility != "private" {
+		t.Fatalf("agent-created project visibility = %q, want private", created.Visibility)
+	}
+
+	setPrivate := withURLParam(newRequestAs(owner, "PUT", "/api/projects/"+created.ID+"/visibility",
+		map[string]any{"visibility": "private"}), "id", created.ID)
+	testutil.Call(t, testHandler.SetProjectVisibility, setPrivate).Want(200)
+
+	listPath := "/api/projects?workspace_id=" + testWorkspaceID
+	var ownerList struct {
+		Projects []struct {
+			ID string `json:"id"`
+		} `json:"projects"`
+	}
+	testutil.Call(t, testHandler.ListProjects, newRequestAs(owner, "GET", listPath, nil)).Want(200).JSON(&ownerList)
+	found := false
+	for _, project := range ownerList.Projects {
+		if project.ID == created.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("agent owner lost the private project from the project list")
+	}
+
+	testutil.Call(t, testHandler.GetProject,
+		withURLParam(newRequestAs(owner, "GET", "/api/projects/"+created.ID, nil), "id", created.ID)).Want(200)
+	testutil.Call(t, testHandler.GetProject,
+		withURLParam(newRequestAs(stranger, "GET", "/api/projects/"+created.ID, nil), "id", created.ID)).Want(404)
+
+	var strangerList struct {
+		Projects []struct {
+			ID string `json:"id"`
+		} `json:"projects"`
+	}
+	testutil.Call(t, testHandler.ListProjects, newRequestAs(stranger, "GET", listPath, nil)).Want(200).JSON(&strangerList)
+	for _, project := range strangerList.Projects {
+		if project.ID == created.ID {
+			t.Fatal("unrelated member found the private agent-owned project in the list")
+		}
+	}
+}
+
+// An agent-created project must never be left without a human creator: once
+// its workspace visibility is narrowed to private, that project would
+// otherwise be invisible to every member. Reject both an ownerless agent and
+// an agent that is not present in the requested workspace before inserting the
+// project.
+func TestAgentCreatedProjectRequiresWorkspaceOwner(t *testing.T) {
+	requireDB(t)
+
+	owner := visibilityTestMember(t, "Vis Agent Create Owner", "vis-agent-create-owner@multica.ai")
+	unknownAgentID := "00000000-0000-0000-0000-000000000000"
+
+	cases := []struct {
+		name    string
+		agentID string
+	}{
+		// Override the fixture's default human owner explicitly. An omitted
+		// column keeps the fixture user as owner, which would exercise the
+		// accepted owner path instead of the ownerless rejection path.
+		{name: "ownerless agent", agentID: dbfx.Agent(t, "vis-ownerless-agent", "", testutil.Cols{"owner_id": nil})},
+		{name: "agent outside workspace", agentID: unknownAgentID},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			title := "rejected agent project " + tc.name
+			req := newRequestAs(owner, "POST", "/api/projects?workspace_id="+testWorkspaceID,
+				map[string]any{"title": title})
+			req.Header.Set("X-Actor-Source", "task_token")
+			req.Header.Set("X-Agent-ID", tc.agentID)
+			testutil.Call(t, testHandler.CreateProject, req).Want(400)
+
+			if count := dbfx.Count(t, `SELECT count(*) FROM project WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title); count != 0 {
+				t.Fatalf("rejected agent project was inserted (%d rows)", count)
+			}
+		})
+	}
+}
+
+// The owner sees every project in their workspace (canSeeProject), so they
+// must also be able to reshare one. Production had private projects with no
+// created_by: the owner could open them, but every scope change came back 403
+// and the settings page looked like it ignored the click.
+func TestOwnerCanChangeScopeOfPrivateProjectTheyDidNotCreate(t *testing.T) {
+	requireDB(t)
+
+	stranger := visibilityTestMember(t, "Vis Scope Stranger", "vis-scope-stranger@multica.ai")
+	projectID := dbfx.Project(t, "creatorless", testutil.Cols{"visibility": "private"})
+	dbfx.Cleanup(t, `DELETE FROM visibility_audit WHERE workspace_id = $1 AND resource_id = $2`,
+		testWorkspaceID, projectID)
+
+	for _, scope := range []string{"project", "workspace", "private"} {
+		testutil.Call(t, testHandler.SetProjectVisibility,
+			withURLParam(newRequest("PUT", "/api/projects/"+projectID+"/visibility",
+				map[string]any{"visibility": scope}), "id", projectID),
+		).Want(200)
+	}
+
+	// A plain member who cannot see it still cannot touch it.
+	testutil.Call(t, testHandler.SetProjectVisibility,
+		withURLParam(newRequestAs(stranger, "PUT", "/api/projects/"+projectID+"/visibility",
+			map[string]any{"visibility": "workspace"}), "id", projectID),
+	).Want(404)
 }

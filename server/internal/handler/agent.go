@@ -861,9 +861,13 @@ type AgentTaskResponse struct {
 	// the same zero. Only the first of those answers "has anything else been
 	// said on this issue", so only the first may waive the workflow's comment
 	// scan. Absent on old servers, which is the safe reading (MUL-6984).
-	NewCommentsDeltaKnown    bool                  `json:"new_comments_delta_known,omitempty"`
-	IssueTitle               string                `json:"issue_title,omitempty"`
-	IssueDescription         string                `json:"issue_description,omitempty"`
+	NewCommentsDeltaKnown bool   `json:"new_comments_delta_known,omitempty"`
+	IssueTitle            string `json:"issue_title,omitempty"`
+	IssueDescription      string `json:"issue_description,omitempty"`
+	// CheckoutPaths is the issue's checkout_paths metadata: repo-relative
+	// directories this task wants on disk. Empty (and absent on old servers)
+	// checks out the whole repository.
+	CheckoutPaths            string                `json:"checkout_paths,omitempty"`
 	IssueCommentSummaries    []IssueContextComment `json:"issue_comment_summaries,omitempty"`
 	IssueTriggerThread       []IssueContextComment `json:"issue_trigger_thread,omitempty"`
 	IssueNewComments         []IssueContextComment `json:"issue_new_comments,omitempty"`
@@ -893,6 +897,7 @@ type AgentTaskResponse struct {
 	SquadName                string                `json:"squad_name,omitempty"`                  // display name for the picker squad
 	ParentIssueID            string                `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
 	ParentIssueIdentifier    string                `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	ProjectExplicitNone      bool                  `json:"project_explicit_none,omitempty"`       // user cleared the project; the daemon prompt must pass an empty --project
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -3000,6 +3005,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A base role owns the availability of its direct specialisations when it
+	// is turned off. The child update is deliberately one-way: turning the base
+	// role back on leaves each specialisation's independent setting untouched.
+	var disabledSpecialisations []db.Agent
+	if req.WorkEnabled != nil && !*req.WorkEnabled {
+		disabledSpecialisations, err = h.Queries.DisableAgentSpecialisations(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("disable agent specialisations failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent specialisations")
+			return
+		}
+	}
+
 	// Nullable runtime overrides: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
 	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
@@ -3104,6 +3122,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if child.ID == updated.ID {
 			continue
 		}
+		h.publishAgentUpdate(r, child)
+	}
+	for _, child := range disabledSpecialisations {
 		h.publishAgentUpdate(r, child)
 	}
 
