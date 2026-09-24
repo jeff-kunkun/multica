@@ -268,7 +268,10 @@
     "archive": "Archive",
     "unarchive": "Unarchive",
     "archived_title": "Archived",
-    "row_actions_aria": "Chat actions"
+    "row_actions_aria": "Chat actions",
+    "edit_access": "Edit access",
+    "private_tag": "Private",
+    "extra_tag": "Extra people"
   },
   "header": {
     "view_profile": "View agent profile",
@@ -290,5 +293,34 @@
     "used": "{{percent}}%",
     "resets": "resets {{when}}",
     "updated": "updated {{when}}"
+  },
+  "sharing": {
+    "title": "Edit access",
+    "follow": "Follow the project",
+    "follow_hint_bound": "Members of {{projects}} can see this chat and speak in it",
+    "follow_hint_unbound": "Bind a project before choosing this",
+    "extra": "Follow the project + extra people",
+    "extra_hint": "Project members, plus the people below",
+    "private": "Private",
+    "private_hint": "Only you can see it. It disappears from everyone else's list",
+    "view": "Can view",
+    "speak": "Can speak",
+    "add": "Add a person…",
+    "remove": "Remove",
+    "save": "Save",
+    "cancel": "Cancel",
+    "note_bound": "Making it private hides it from other people's lists right away. You can change it back.",
+    "note_unbound": "A chat with no project stays private.",
+    "view_only": "You can read this chat, but you can't send messages.",
+    "header_private": "Only you",
+    "header_project": "Project members can see and speak",
+    "header_extra": "Project members, plus extra people",
+    "search": "Search people…"
+  },
+  "notice": {
+    "title": "Some of your chats are now visible to project members",
+    "body": "You have {{count}} chats that project members can now see.",
+    "make_private": "Make selected private",
+    "dismiss": "Got it"
   }
 }

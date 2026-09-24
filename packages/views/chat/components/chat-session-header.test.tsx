@@ -24,6 +24,11 @@ vi.mock("@multica/core/chat", () => ({
     selector({ setActiveSession: vi.fn() }),
 }));
 
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (s: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: "user-1" } }),
+}));
+
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));

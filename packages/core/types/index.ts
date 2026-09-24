@@ -192,6 +192,9 @@ export {
 export type {
   ChatSession,
   ChatLastMessage,
+  ChatShareGrant,
+  ChatAccessSettings,
+  ChatVisibilityNotice,
   ChatPinnedAgent,
   ChatMessage,
   ChatQuickAction,

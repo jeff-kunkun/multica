@@ -857,6 +857,7 @@ export const ChatMessageSchema = z.object({
   // Optional additive data degrades independently: a malformed suggestion
   // must not hide the assistant reply that contains it.
   quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),
+  sender_user_id: z.string().nullable().optional(),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
@@ -2295,6 +2296,7 @@ const ChatLastMessageSchema = z.object({
     "onboarding_kickoff",
     "onboarding_opening",
   ]).optional().catch(undefined),
+  sender_user_id: z.string().nullable().optional(),
 }).loose();
 
 const ChatChannelSourceSchema = z.object({
@@ -2316,6 +2318,12 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   unread_count: z.number().optional(),
   last_message: ChatLastMessageSchema.nullable().optional().catch(undefined),
   pinned: z.boolean().optional(),
+  visibility: z.enum(["private", "project"]).optional().catch(undefined),
+  access: z.enum(["owner", "speak", "view"]).optional().catch(undefined),
+  extra_count: z.number().optional().catch(undefined),
+  agent_name: z.string().optional().catch(undefined),
+  agent_runtime_bound: z.boolean().optional().catch(undefined),
+  agent_archived: z.boolean().optional().catch(undefined),
   project_nudge_dismissed: z.boolean().optional().catch(undefined),
   channel_source: ChatChannelSourceSchema.optional().catch(undefined),
   is_current_channel_route: z.boolean().optional().catch(undefined),

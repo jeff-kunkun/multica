@@ -159,6 +159,9 @@ func (h *Handler) loadIssueDraftSession(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return db.ChatSession{}, false
 	}
+	if !denyUnlessChatCreator(w, session, userID) {
+		return db.ChatSession{}, false
+	}
 	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load chat agent")
