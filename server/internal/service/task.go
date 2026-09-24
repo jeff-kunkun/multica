@@ -5314,14 +5314,16 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		capacityHeld = s.relayCapacityIfRetriesSpent(ctx, task, failureReason, errMsg)
 	}
 
-	// Skip the per-failure system comment when we'll immediately retry —
-	// the new task will surface its own status to the user, and we don't
-	// want to spam the issue with "task timed out" messages on every
-	// daemon hiccup. Delegated failures keep this existing failed-issue comment
-	// in addition to the coordinator recovery signal, preserving visibility on
-	// both sides of a cross-issue handoff. A capacity relay posts its own
-	// audit instead of the raw provider sentence.
-	if errMsg != "" && task.IssueID.Valid && retried == nil && !capacityHeld {
+	// A platform interrupt (daemon shutdown while the server still considered
+	// the run alive) always leaves a notice, including when a retry was just
+	// queued. Other failures stay quiet on the retry path so a flaky timeout
+	// does not post a comment on every attempt. Delegated failures keep this
+	// existing failed-issue comment in addition to the coordinator recovery
+	// signal. A capacity relay posts its own audit instead of the raw
+	// provider sentence.
+	if isServerInterruptFailure(failureReason) && task.IssueID.Valid {
+		s.noteServerInterrupt(ctx, task, retried)
+	} else if errMsg != "" && task.IssueID.Valid && retried == nil && !capacityHeld {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(failureCommentBody(failureReason, errMsg)), "system", task.TriggerCommentID, task.ID)
 	}
 
@@ -5394,6 +5396,11 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 // provider answered wrong", so an unattended issue run must not die on them.
 // Resume stays safe for the same reason as provider_network: nothing about the
 // conversation is what the provider rejected.
+//
+// "cancelled" here is the daemon's report that its own run context died while
+// this row was still running (DENE-813). A person invoking cancel-task or halt
+// never writes this reason: those paths set status=cancelled and leave
+// failure_reason empty, so they stay off this map.
 var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonRuntimeOffline):                   true,
 	string(taskfailure.ReasonRuntimeRecovery):                  true,
@@ -5403,6 +5410,148 @@ var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonAgentProviderCapacityOrRateLimit): true,
 	string(taskfailure.ReasonAgentProviderServerError):         true,
 	string(taskfailure.ReasonSkillBundleUnavailable):           true,
+	serverInterruptFailureReason:                               true,
+}
+
+// serverInterruptFailureReason is the failure_reason a daemon writes when it
+// reports a run whose process context was cancelled and the server had not
+// already finalized the row. The observed error text is "task cancelled by
+// server". The usual cause is the daemon process itself exiting (restart,
+// self-reload, shutdown) and cancelling every in-flight run on the way down.
+const serverInterruptFailureReason = "cancelled"
+
+func isServerInterruptFailure(reason string) bool {
+	return reason == serverInterruptFailureReason
+}
+
+// noteServerInterrupt tells the issue what happened to a run the platform
+// stopped, whether or not a retry was queued. When nothing will continue the
+// issue, it leaves blocked instead of in_progress so the board does not show
+// a run that nobody is doing.
+func (s *TaskService) noteServerInterrupt(ctx context.Context, task db.AgentTaskQueue, retried *db.AgentTaskQueue) {
+	if !task.IssueID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("server interrupt notice: load issue failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return
+	}
+	alreadyRunning := retried != nil
+	if !alreadyRunning {
+		hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+		if checkErr != nil {
+			slog.Warn("server interrupt notice: active check failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(task.IssueID),
+				"error", checkErr,
+			)
+		} else {
+			alreadyRunning = hasActive
+		}
+	}
+	blocked := false
+	if !alreadyRunning {
+		blocked = s.blockIssueAfterServerInterrupt(ctx, issue)
+	}
+	mention := ""
+	if !alreadyRunning {
+		mention = s.serverInterruptHandoffMention(ctx, issue, task)
+	}
+	agentName := ""
+	if agent, aerr := s.Queries.GetAgent(ctx, task.AgentID); aerr == nil {
+		agentName = agent.Name
+	}
+	s.createAgentComment(ctx, task.IssueID, task.AgentID,
+		serverInterruptNotice(agentName, task, retried, alreadyRunning, blocked, mention),
+		"system", task.TriggerCommentID, task.ID)
+}
+
+// blockIssueAfterServerInterrupt moves an issue that still looks open onto
+// blocked. in_review and done stay where a person already put them.
+func (s *TaskService) blockIssueAfterServerInterrupt(ctx context.Context, issue db.Issue) bool {
+	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	if effective != issuestatus.InProgress && effective != issuestatus.Todo {
+		return false
+	}
+	updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          issue.ID,
+		Status:      issuestatus.Blocked,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("server interrupt notice: block issue failed",
+			"issue_id", util.UUIDToString(issue.ID),
+			"error", err,
+		)
+		return false
+	}
+	s.broadcastIssueUpdated(ctx, updated, issue.Status)
+	return true
+}
+
+// serverInterruptHandoffMention names the person who should pick the issue up
+// once automatic retries are spent: the human who started the run, then the
+// issue creator, then the same owner fallback the time-limit notice uses.
+// The executing agent is named in prose and not mentioned — mentioning an
+// agent would start another run.
+func (s *TaskService) serverInterruptHandoffMention(ctx context.Context, issue db.Issue, task db.AgentTaskQueue) string {
+	candidates := []pgtype.UUID{task.OriginatorUserID, task.AccountableUserID, task.InitiatorUserID}
+	if issue.CreatorType == "member" && issue.CreatorID.Valid {
+		candidates = append(candidates, issue.CreatorID)
+	}
+	for _, id := range candidates {
+		if mention := s.memberMention(ctx, id); mention != "" {
+			return mention
+		}
+	}
+	_, mention := s.taskTimeLimitMention(ctx, issue)
+	return mention
+}
+
+func (s *TaskService) memberMention(ctx context.Context, userID pgtype.UUID) string {
+	if !userID.Valid {
+		return ""
+	}
+	user, err := s.Queries.GetUser(ctx, userID)
+	if err != nil || strings.TrimSpace(user.Name) == "" {
+		return ""
+	}
+	name := strings.NewReplacer("[", "", "]", "").Replace(user.Name)
+	return fmt.Sprintf("[@%s](mention://member/%s) ", name, util.UUIDToString(userID))
+}
+
+func serverInterruptNotice(agentName string, task db.AgentTaskQueue, retried *db.AgentTaskQueue, alreadyRunning, blocked bool, mention string) string {
+	when := time.Now().UTC().Format("2006-01-02 15:04 UTC")
+	if task.CompletedAt.Valid {
+		when = task.CompletedAt.Time.UTC().Format("2006-01-02 15:04 UTC")
+	}
+	who := "这次运行"
+	if agentName != "" {
+		who = agentName + " 的这次运行"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s在 %s 被平台中断。原因是本机运行环境中途退出（daemon 重启或断线）。", who, when)
+	switch {
+	case retried != nil:
+		fmt.Fprintf(&b, "已自动安排续跑：第 %d 次，共 %d 次，沿用原来的会话和工作目录。", retried.Attempt, retried.MaxAttempts)
+	case alreadyRunning:
+		b.WriteString("没有另排一次，因为这张票上已经有运行在排队或进行。")
+	default:
+		fmt.Fprintf(&b, "自动续跑没有再排（第 %d 次，共 %d 次）。", task.Attempt, task.MaxAttempts)
+		if blocked {
+			b.WriteString("这张票已改为 blocked。")
+		}
+		if mention != "" {
+			b.WriteString(mention)
+		}
+		b.WriteString("请接手：在这条评论下说是否继续，或重新打开运行。")
+	}
+	return b.String()
 }
 
 // runtime_offline retries start deferred, not queued: their positive fire_at
