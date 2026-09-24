@@ -502,6 +502,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	if rdb != nil {
 		h.UpdateStore = handler.NewRedisUpdateStore(rdb)
+		h.AgentCLICommands = handler.NewRedisAgentCLICommandStore(rdb)
 		h.ModelListStore = handler.NewRedisModelListStore(rdb)
 		h.ModelCatalogCache = handler.NewRedisModelCatalogCache(rdb)
 		h.ProviderPresetStore = handler.NewRedisProviderPresetStore(rdb)
@@ -1535,6 +1536,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/skill-bundles/resolve", h.ResolveTaskSkillBundles)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/update/{updateId}/result", h.ReportUpdateResult)
+		r.Post("/runtimes/{runtimeId}/agent-cli/status", h.ReportAgentCLIStatus)
+		r.Post("/runtimes/{runtimeId}/model-catalog/refresh", h.RefreshRuntimeModelCatalog)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
 		r.Post("/runtimes/{runtimeId}/provider-presets/{requestId}/result", h.ReportProviderPresetResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/{requestId}/result", h.ReportLocalSkillListResult)
@@ -2248,6 +2251,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// the system instruction layer. Idempotent per workspace.
 				r.Post("/mika", h.CreateMikaAgent)
 				r.Route("/{id}", func(r chi.Router) {
+					// Timed access passes (DENE-808), owner-only.
+					r.Get("/access-passes", h.ListAgentAccessPasses)
+					r.Post("/access-passes", h.CreateAgentAccessPass)
+					r.Delete("/access-passes/{passId}", h.RevokeAgentAccessPass)
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
 					r.Post("/archive", h.ArchiveAgent)
@@ -2378,6 +2385,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/usage/by-hour", h.GetRuntimeUsageByHour)
 					r.Get("/activity", h.GetRuntimeTaskActivity)
 					r.Post("/update", h.InitiateUpdate)
+					r.Post("/agent-cli/follow", h.SetAgentCLIFollow)
+					r.Post("/agent-cli/update", h.RequestAgentCLIUpdate)
 					r.Get("/update/{updateId}", h.GetUpdate)
 					r.Post("/models", h.InitiateListModels)
 					r.Get("/models/{requestId}", h.GetModelListRequest)
@@ -2487,6 +2496,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/chat/thread", h.GetChatThread)
 
 			// Inbox
+			// Agent doorbell rings (DENE-808): owner approves / declines.
+			r.Route("/api/agent-access-requests", func(r chi.Router) {
+				r.Get("/", h.ListAgentAccessRequests)
+				r.Post("/{id}/approve", h.ApproveAgentAccessRequest)
+				r.Post("/{id}/decline", h.DeclineAgentAccessRequest)
+			})
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				// Archived notifications, for the inbox's "Archived" sub-view.

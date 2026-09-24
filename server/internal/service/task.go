@@ -5286,6 +5286,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, *retried)
 			s.NotifyTaskEnqueued(ctx, *retried)
 		}
+		if !retried.SessionID.Valid && freshSessionNoticeReason(failureReason) {
+			s.noteUnresumedRetry(ctx, task, sessionRolloutMissing)
+		}
 	}
 
 	// A delegated task that has reached a terminal failure must hand control

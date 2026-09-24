@@ -312,6 +312,11 @@ type Result struct {
 	// its model catalog, and that the process tree was reaped afterwards.
 	// Like codexInitializeRetrySafe it is not part of the public contract.
 	codexStartupRefreshRetrySafe bool
+	// SessionRestartReason is set when this run had a prior CLI session and
+	// had to open a new one because that session could not be resumed.
+	// Empty when the run continued the prior session, or never had one.
+	// The server posts it on the issue; it is not a failure reason.
+	SessionRestartReason string
 }
 
 // Config configures a Backend instance.

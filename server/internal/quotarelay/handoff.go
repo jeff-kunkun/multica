@@ -27,6 +27,9 @@ type Handoff struct {
 	ReplacementTier string
 	SteppedDown     bool
 	WaitReason      string
+	// Demotion is set when this opening is the second-or-later breaker in
+	// the seat's recent window. Empty when the seat is not being demoted.
+	Demotion string
 }
 
 func (h Handoff) scope() string {
@@ -103,6 +106,9 @@ func AuditRelay(h Handoff) string {
 	fmt.Fprintf(&b, "- 停用席位：%s（%s）。只停这一席，共享模型配置和其他席位未改。\n", h.FailedName, h.FailedID)
 	fmt.Fprintf(&b, "- 接力：%s（%s，%s）\n", h.ReplacementName, h.ReplacementTier, stepLabel(h.SteppedDown))
 	fmt.Fprintf(&b, "- 恢复：%s，预计 %s\n", h.Condition, h.RecoverAt.UTC().Format(time.RFC3339))
+	if h.Demotion != "" {
+		fmt.Fprintf(&b, "- 降权：%s\n", h.Demotion)
+	}
 	fmt.Fprintf(&b, "- %s\n", h.tokens())
 	return b.String()
 }
@@ -115,14 +121,60 @@ func AuditWait(h Handoff) string {
 	fmt.Fprintf(&b, "- 停用席位：%s（%s）。只停这一席，共享模型配置和其他席位未改。\n", h.FailedName, h.FailedID)
 	fmt.Fprintf(&b, "- 等待：%s\n", h.WaitReason)
 	fmt.Fprintf(&b, "- 恢复：%s，预计 %s。本票改为 blocked，避免停在进行中却没有执行者。\n", h.Condition, h.RecoverAt.UTC().Format(time.RFC3339))
+	if h.Demotion != "" {
+		fmt.Fprintf(&b, "- 降权：%s\n", h.Demotion)
+	}
 	fmt.Fprintf(&b, "- %s\n", h.tokens())
 	return b.String()
 }
 
 // AuditSkip records a breaker that did not move the assignee.
 func AuditSkip(h Handoff, why string) string {
-	return fmt.Sprintf("## 额度熔断\n\n- 原因：%s\n- 停用席位：%s（%s）。未改派：%s。\n- 恢复：%s，预计 %s\n- %s\n",
-		h.reasonLabel(), h.FailedName, h.FailedID, why, h.Condition, h.RecoverAt.UTC().Format(time.RFC3339), h.tokens())
+	demotion := ""
+	if h.Demotion != "" {
+		demotion = fmt.Sprintf("- 降权：%s\n", h.Demotion)
+	}
+	return fmt.Sprintf("## 额度熔断\n\n- 原因：%s\n- 停用席位：%s（%s）。未改派：%s。\n- 恢复：%s，预计 %s\n%s- %s\n",
+		h.reasonLabel(), h.FailedName, h.FailedID, why, h.Condition, h.RecoverAt.UTC().Format(time.RFC3339), demotion, h.tokens())
+}
+
+// DemotionLine is the sentence a repeated breaker leaves on the ticket.
+func DemotionLine(name string, count int) string {
+	return fmt.Sprintf("%s 在 24 小时内熔断了 %d 次。恢复后，新票先派给别的席位，直到这一席自己做成一单。", name, count)
+}
+
+// IdleHandoffNote is the opening note on a ticket that had not started
+// when its seat broke.
+func IdleHandoffNote(fromName, toName string, steppedDown bool) string {
+	step := "同档另一家供应商"
+	if steppedDown {
+		step = "低一档"
+	}
+	return fmt.Sprintf("席位熔断转派。上一席位「%s」停用时这张票还没开跑，改由「%s」接（%s）。请从这张票的当前讨论继续，不要另开任务。", fromName, toName, step)
+}
+
+// AuditIdle records moving a not-yet-started ticket off a broken seat.
+// crossHouse is true when the replacement was required to be a different
+// provider. steppedDown is true when the same tier had nobody eligible.
+func AuditIdle(fromName, toName, toTier string, crossHouse, steppedDown bool, demotion string) string {
+	var why string
+	switch {
+	case steppedDown && crossHouse:
+		why = "同档没有别的供应商可接，所以降了一档。"
+	case crossHouse:
+		why = "同档换了一家供应商。同一家模型多半一起挤，所以不转给同族席位。"
+	case steppedDown:
+		why = "同档没有可接的席位，所以降了一档。"
+	default:
+		why = "同档另一席接上。"
+	}
+	var b strings.Builder
+	b.WriteString("## 席位熔断，未开跑的票已转走\n\n")
+	fmt.Fprintf(&b, "这张票还没开跑，从「%s」转到「%s」（%s）。%s\n", fromName, toName, toTier, why)
+	if demotion != "" {
+		fmt.Fprintf(&b, "\n降权：%s\n", demotion)
+	}
+	return b.String()
 }
 
 func threadLabel(id string) string {

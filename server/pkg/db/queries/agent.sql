@@ -231,6 +231,10 @@ UPDATE agent SET
     -- TRUE makes it follow its base role again. Setting it back to "not
     -- applicable" belongs to SetAgentParentAgent, which owns the detach.
     runtime_inherited = COALESCE(sqlc.narg('runtime_inherited')::boolean, runtime_inherited),
+    -- Doorbell switch (DENE-808): same omitted-preserves / present-sets
+    -- contract as work_enabled. FALSE keeps the plain refusal for members
+    -- outside the allow-list; TRUE turns that refusal into an approval request.
+    doorbell_enabled = COALESCE(sqlc.narg('doorbell_enabled')::boolean, doorbell_enabled),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
