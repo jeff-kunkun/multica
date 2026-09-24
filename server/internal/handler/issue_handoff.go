@@ -36,6 +36,10 @@ type HandoffIssueResponse struct {
 	Reason     string `json:"reason,omitempty"`
 }
 
+func handoffDuplicateReason(reason string) bool {
+	return strings.Contains(reason, "already") || strings.Contains(reason, "active")
+}
+
 // HandoffIssue performs routing and explicit agent handoff atomically from
 // the caller's point of view, and reports the writes that actually happened.
 func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
@@ -80,9 +84,25 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp := HandoffIssueResponse{Target: target, TargetType: target, Routed: out.ExecutorWritten != nil || !out.ReviewerWritten.Empty() || out.Mentioned, RunCreated: (target == "reviewer" && out.Action == routing.ActionHandedOff) || (target == "dispatcher" && out.ExecutorWritten != nil), Reason: out.Reason}
-		if out.ReviewerWritten.ID != "" {
-			resp.TargetID = out.ReviewerWritten.ID
-			resp.TargetName = out.ReviewerWritten.Name
+		if target == "reviewer" {
+			resp.TargetID = uuidToString(issue.ReviewerID)
+			resp.TargetName = issue.ReviewerID.String()
+			if issue.ReviewerType.Valid && issue.ReviewerType.String == "agent" && issue.ReviewerID.Valid {
+				if a, e := h.Queries.GetAgent(r.Context(), issue.ReviewerID); e == nil {
+					resp.TargetName = a.Name
+				}
+			}
+			if resp.TargetID != "" {
+				active, e := h.Queries.HasActiveTaskForIssueAndAgent(r.Context(), db.HasActiveTaskForIssueAndAgentParams{IssueID: issue.ID, AgentID: issue.ReviewerID})
+				if e == nil {
+					resp.RunCreated = active
+				}
+			}
+		} else if out.ExecutorWritten != nil {
+			resp.TargetName = out.ExecutorWritten.Name
+		}
+		if handoffDuplicateReason(out.Reason) {
+			resp.Duplicate = true
 		}
 		writeJSON(w, http.StatusOK, resp)
 		return
@@ -146,7 +166,7 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 // handoffSetInReview reuses the canonical issue update path so reviewer
 // handoffs cannot skip the PR/no-code gate or acceptance-seat guard.
 func (h *Handler) handoffSetInReview(w http.ResponseWriter, r *http.Request, issue db.Issue) bool {
-	req := r.Clone(r.Context())
+	req := r.Clone(withSkipIssueRouting(r.Context()))
 	req.Method = http.MethodPut
 	req.Body = io.NopCloser(bytes.NewReader([]byte(`{"status":"in_review"}`)))
 	req.ContentLength = int64(len(`{"status":"in_review"}`))
