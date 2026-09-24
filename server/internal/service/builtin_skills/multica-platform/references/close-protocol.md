@@ -10,7 +10,10 @@ invent field names, write order, statuses, or wake actions.
 
 Write order — stop on the first failure:
 
-1. `multica issue status <id> <status>`
+1. `multica issue status <id> <status>`. Moving to `blocked` must carry the
+   wait on this command: `--blocked-by`, `--wake-at`, `--wait-condition` with
+   `--wait-timeout`, or `--needs-human`. Writing `close.*` afterwards does
+   not replace that.
 2. Evidence comment (`--content-file`; keep `--parent` when this turn has a
    trigger). Capture the comment id. Headings, in this order:
    `## 结论` / `## 状态` / `## 证据` / `## 下一责任人` / `## 唤醒动作`

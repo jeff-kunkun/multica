@@ -293,6 +293,12 @@ archived statuses remain readable via an explicit status filter.
 - **`done`** on a child issue posts a system comment on its parent. If a PR
   carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
   itself on merge — you do not also need to flip it manually.
+- **`blocked`** requires the wait on the same `multica issue status <id> blocked`
+  call: `--blocked-by <DENE-N>`, `--wake-at <RFC3339>`, `--wait-condition` with
+  `--wait-timeout`, or `--needs-human <member uuid>`. An agent change without
+  one is rejected; "等 DENE-N" in a comment is only a suggestion. A cleared
+  blocker or a passed acceptance wakes the waiter. The patrol wakes a quiet
+  blocked or in-review issue with no run after about 30 minutes.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going. To stop a running task, cancel the

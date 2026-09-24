@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issueguard"
@@ -3386,6 +3387,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issue := res.Issue
+	if issue.Status == "blocked" || issue.Status == "in_review" {
+		h.setIssueMetaString(r.Context(), issue, blockwait.KeyWatched, blockwait.WatchedYes)
+	}
+	if issue.Status == "in_review" {
+		h.setIssueMetaString(r.Context(), issue, blockwait.KeyReviewRound, time.Now().UTC().Format(time.RFC3339))
+	}
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
 	resp := issueToResponse(issue, prefix)
@@ -3451,6 +3458,15 @@ type UpdateIssueRequest struct {
 	// predate the handoff UI removal. It is consumed only when this write starts
 	// a run and is never stored on the issue itself.
 	HandoffNote string `json:"handoff_note,omitempty"`
+	// Block fields are required when an agent moves the issue to blocked
+	// (DENE-850). At least one kind must be present: another issue, a clock,
+	// a probe with a deadline, or a person.
+	BlockedBy     *string `json:"blocked_by,omitempty"`
+	WakeAt        *string `json:"wake_at,omitempty"`
+	WaitCondition *string `json:"wait_condition,omitempty"`
+	WaitProbe     *string `json:"wait_probe,omitempty"`
+	WaitTimeout   *string `json:"wait_timeout,omitempty"`
+	NeedsHuman    *string `json:"needs_human,omitempty"`
 }
 
 func mergeIssueChannelMediaDescription(current, incoming string, base *string, attachments []db.Attachment) string {
@@ -3769,6 +3785,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		statusKeyForGuard = statusKey
 		params.Status = pgtype.Text{String: statusKey, Valid: true}
+	}
+	var blockRecord blockwait.Record
+	persistBlock := false
+	if statusKeyForGuard == issuestatus.Blocked && prevIssue.Status != issuestatus.Blocked {
+		actorType, _ := h.resolveActor(r, userID, workspaceID)
+		rec, persist, reject := h.gateBlockedStatus(r, prevIssue, req, actorType)
+		if reject != "" {
+			writeError(w, http.StatusBadRequest, reject)
+			return
+		}
+		blockRecord = rec
+		persistBlock = persist
 	}
 	if req.Priority != nil {
 		if !validateIssueEnum(w, "priority", *req.Priority, validIssuePriorities) {
@@ -4096,6 +4124,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// (MUL-2538 — replaces the agent-prompt rule that caused self-mention
 	// loops in PR #2918). The helper guards on transition + parent state and
 	// fails best-effort.
+	if statusChanged {
+		h.syncBlockWait(r.Context(), prevIssue, issue)
+	}
+	if persistBlock {
+		h.persistBlockRecord(r.Context(), issue, blockRecord)
+	}
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
 		h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
@@ -4836,6 +4870,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
+		if statusChanged {
+			h.syncBlockWait(r.Context(), prevIssue, issue)
+		}
 		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
 		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 

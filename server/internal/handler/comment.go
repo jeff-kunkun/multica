@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1479,6 +1480,9 @@ type CreateCommentRequest struct {
 	ParentID         *string  `json:"parent_id"`
 	AttachmentIDs    []string `json:"attachment_ids"`
 	SuppressAgentIDs []string `json:"suppress_agent_ids"`
+	// Verdict is the only acceptance signal that can merge and close. "pass"
+	// or "hold" is stored as its own line. Prose that merely says 通过 does not.
+	Verdict string `json:"verdict,omitempty"`
 }
 
 type CommentTriggerPreviewRequest struct {
@@ -1706,6 +1710,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// the plausible cause of GH #5388. Mirrors the skill-import sanitization;
 	// normalizing first means all-NUL content is correctly treated as empty.
 	req.Content = sanitizeNullBytes(req.Content)
+	var verdictErr error
+	req.Content, verdictErr = blockwait.AppendVerdict(req.Content, req.Verdict)
+	if verdictErr != nil {
+		writeError(w, http.StatusBadRequest, verdictErr.Error())
+		return
+	}
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
@@ -1965,6 +1975,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).
 	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs)
+	h.maybeReleaseOnAcceptance(r.Context(), issue, comment)
 
 	writeJSON(w, http.StatusCreated, resp)
 }

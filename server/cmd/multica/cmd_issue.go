@@ -19,6 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -614,6 +615,12 @@ func init() {
 	// issue status
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+	issueStatusCmd.Flags().String("blocked-by", "", "Comma-separated issue identifiers this blocked issue is waiting on")
+	issueStatusCmd.Flags().String("wake-at", "", "RFC3339 time to wake a blocked issue for another look")
+	issueStatusCmd.Flags().String("wait-condition", "", "External condition a blocked issue is waiting on")
+	issueStatusCmd.Flags().String("wait-probe", "", "How to check the wait condition")
+	issueStatusCmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
+	issueStatusCmd.Flags().String("needs-human", "", "Member UUID a blocked issue is waiting on")
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
@@ -665,6 +672,7 @@ func init() {
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent run must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
+	issueCommentAddCmd.Flags().String("verdict", "", "Acceptance verdict written as its own line: pass or hold. This is what merges and closes; the words 通过 in the body do not")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -1758,6 +1766,18 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	if noStart {
 		body["suppress_run"] = true
 	}
+	for _, pair := range []struct{ flag, key string }{
+		{"blocked-by", "blocked_by"},
+		{"wake-at", "wake_at"},
+		{"wait-condition", "wait_condition"},
+		{"wait-probe", "wait_probe"},
+		{"wait-timeout", "wait_timeout"},
+		{"needs-human", "needs_human"},
+	} {
+		if v, _ := cmd.Flags().GetString(pair.flag); v != "" {
+			body[pair.key] = v
+		}
+	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update status: %w", err)
@@ -2265,8 +2285,16 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	verdict, _ := cmd.Flags().GetString("verdict")
+	if !hasContent && strings.TrimSpace(verdict) == "" {
+		return fmt.Errorf("--content, --content-stdin, --content-file, or --verdict is required")
+	}
 	if !hasContent {
-		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
+		content = ""
+	}
+	content, err = blockwait.AppendVerdict(content, verdict)
+	if err != nil {
+		return err
 	}
 	if err := guardLocalPathLinks(content, "comment body",
 		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` (repeatable) and drop the link."); err != nil {
