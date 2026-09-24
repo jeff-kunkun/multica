@@ -823,12 +823,6 @@ export interface Agent {
    * backends omit the field; treat `undefined` as off.
    */
   doorbell_enabled?: boolean;
-  /**
-   * Display-only model lineup (kun fork, DENE-200): the default model, the
-   * ordered fallback chain and models borrowable for batch work. Never used
-   * for routing. Older servers omit it; treat undefined as [].
-   */
-  switchable_models?: AgentSwitchableModel[];
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -1065,8 +1059,6 @@ export interface UpdateAgentRequest {
    * `""` takes the seat off the ladder, and a tier key sets the rung.
    */
   routing_tier?: string;
-  /** Replaces the display-only model lineup wholesale; `[]` clears it. */
-  switchable_models?: AgentSwitchableModel[];
   /**
    * Platform auto-retry switch. Omitted preserves the saved value; `false`
    * turns platform auto-retry off without affecting manual rerun.
@@ -1100,15 +1092,6 @@ export interface UpdateAgentRequest {
    * it was already running with.
    */
   runtime_inherited?: boolean;
-}
-
-export type AgentSwitchableModelRole = "default" | "fallback" | "batch";
-
-/** One entry of `Agent.switchable_models`. */
-export interface AgentSwitchableModel {
-  model: string;
-  role: AgentSwitchableModelRole;
-  note: string;
 }
 
 /**

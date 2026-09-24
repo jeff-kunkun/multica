@@ -11,8 +11,6 @@ export type {
 export type {
   Agent,
   AgentConversationStarter,
-  AgentSwitchableModel,
-  AgentSwitchableModelRole,
   AgentStatus,
   AgentRuntimeMode,
   AgentVisibility,
