@@ -255,6 +255,11 @@ type AgentTaskQueue struct {
 	CodeDecision              []byte      `json:"code_decision"`
 	FailureInputVersion       pgtype.Text `json:"failure_input_version"`
 	FailureFingerprint        pgtype.Text `json:"failure_fingerprint"`
+	WorkThreadID              pgtype.UUID `json:"work_thread_id"`
+	ContextGeneration         int32       `json:"context_generation"`
+	ContextMessageLimit       int32       `json:"context_message_limit"`
+	ContextTokenBudget        int32       `json:"context_token_budget"`
+	ContinuityBreakReason     pgtype.Text `json:"continuity_break_reason"`
 }
 
 type AgentToLabel struct {
@@ -1786,6 +1791,24 @@ type WebhookDelivery struct {
 	DispatchAttempts       int32              `json:"dispatch_attempts"`
 	ReasonCode             pgtype.Text        `json:"reason_code"`
 	ReplayIdempotencyKey   pgtype.Text        `json:"replay_idempotency_key"`
+}
+
+type WorkThread struct {
+	ID                    pgtype.UUID        `json:"id"`
+	AgentID               pgtype.UUID        `json:"agent_id"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	ChatSessionID         pgtype.UUID        `json:"chat_session_id"`
+	ContextGeneration     int32              `json:"context_generation"`
+	ContextMessageLimit   int32              `json:"context_message_limit"`
+	ContextTokenBudget    int32              `json:"context_token_budget"`
+	LastSessionID         pgtype.Text        `json:"last_session_id"`
+	LastTurnID            pgtype.UUID        `json:"last_turn_id"`
+	ContinuityBreakReason pgtype.Text        `json:"continuity_break_reason"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	RuntimeID             pgtype.UUID        `json:"runtime_id"`
+	Model                 pgtype.Text        `json:"model"`
+	PermissionMode        pgtype.Text        `json:"permission_mode"`
 }
 
 type Workspace struct {

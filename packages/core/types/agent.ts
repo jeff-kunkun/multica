@@ -384,6 +384,14 @@ export interface AgentTask {
   id: string;
   agent_id: string;
   runtime_id: string;
+  /** Durable continuity boundary shared by turns for the same work item. */
+  work_thread_id?: string;
+  /** Increments when the provider context must be rebuilt after compression/overflow. */
+  context_generation?: number;
+  /** Server-enforced upper bound for issue/comment context included in a claim. */
+  context_message_limit?: number;
+  /** Conservative token budget for the inline context snapshot. */
+  context_token_budget?: number;
   // Empty string ("") when the task has no linked issue — either chat- or
   // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
   // which source produced it.

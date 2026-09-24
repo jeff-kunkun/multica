@@ -64,6 +64,51 @@ func TestSendChatMessage_ReportsPositionInsteadOfQueuedStatus(t *testing.T) {
 	}
 }
 
+func TestSendChatMessage_UsesChatSessionAsWorkThread(t *testing.T) {
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "ChatWorkThreadAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	send := func(content string) string {
+		t.Helper()
+		req := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{"content": content})
+		req = withURLParam(req, "sessionId", sessionID)
+		req = withChatTestWorkspaceCtx(t, req)
+		w := httptest.NewRecorder()
+		testHandler.SendChatMessage(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("SendChatMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var response SendChatMessageResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode send response: %v", err)
+		}
+		return response.TaskID
+	}
+
+	firstID := send("first")
+	secondID := send("second")
+	var got []string
+	if err := testPool.QueryRow(ctx, `
+		SELECT array_agg(work_thread_id::text ORDER BY created_at)
+		FROM agent_task_queue WHERE id = ANY($1::uuid[])
+	`, []string{firstID, secondID}).Scan(&got); err != nil {
+		t.Fatalf("read chat work threads: %v", err)
+	}
+	// Both turns share one durable thread, and that thread is keyed to the
+	// chat session (the work_thread entity has its own id since migration 531).
+	if len(got) != 2 || got[0] == "" || got[0] != got[1] {
+		t.Fatalf("chat tasks work threads = %v, want one shared thread", got)
+	}
+	var threadSession string
+	if err := testPool.QueryRow(ctx, `SELECT chat_session_id::text FROM work_thread WHERE id = $1`, got[0]).Scan(&threadSession); err != nil {
+		t.Fatalf("read work_thread: %v", err)
+	}
+	if threadSession != sessionID {
+		t.Fatalf("work_thread.chat_session_id = %s, want %s", threadSession, sessionID)
+	}
+}
+
 func TestSendChatMessage_DeferredPredecessorStaysHeadAcrossPromotion(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
