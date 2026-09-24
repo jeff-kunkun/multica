@@ -750,13 +750,18 @@ type AgentTaskResponse struct {
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
-	ID              string `json:"id"`
-	AgentID         string `json:"agent_id"`
-	RuntimeID       string `json:"runtime_id"`
-	IssueID         string `json:"issue_id"`
-	WorkspaceID     string `json:"workspace_id"`
-	WorkspaceSlug   string `json:"workspace_slug,omitempty"`
-	IssueIdentifier string `json:"issue_identifier,omitempty"`
+	ID                    string `json:"id"`
+	AgentID               string `json:"agent_id"`
+	RuntimeID             string `json:"runtime_id"`
+	WorkThreadID          string `json:"work_thread_id,omitempty"`
+	ContextGeneration     int32  `json:"context_generation,omitempty"`
+	ContextMessageLimit   int32  `json:"context_message_limit,omitempty"`
+	ContextTokenBudget    int32  `json:"context_token_budget,omitempty"`
+	ContinuityBreakReason string `json:"continuity_break_reason,omitempty"`
+	IssueID               string `json:"issue_id"`
+	WorkspaceID           string `json:"workspace_id"`
+	WorkspaceSlug         string `json:"workspace_slug,omitempty"`
+	IssueIdentifier       string `json:"issue_identifier,omitempty"`
 	// CanonicalBranch is the issue's canonical delivery branch (DENE-820).
 	// A worktree-mode daemon continues it even when another seat created
 	// it, so a rerun never opens a second delivery line by accident.
@@ -1339,6 +1344,11 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),
 		RuntimeID:              uuidToString(t.RuntimeID),
+		WorkThreadID:           uuidToString(t.WorkThreadID),
+		ContextGeneration:      t.ContextGeneration,
+		ContextMessageLimit:    t.ContextMessageLimit,
+		ContextTokenBudget:     t.ContextTokenBudget,
+		ContinuityBreakReason:  textToString(t.ContinuityBreakReason),
 		IssueID:                uuidToString(t.IssueID),
 		WorkspaceID:            workspaceID,
 		Status:                 t.Status,
