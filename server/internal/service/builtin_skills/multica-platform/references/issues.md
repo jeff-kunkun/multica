@@ -310,14 +310,14 @@ archived statuses remain readable via an explicit status filter.
   status at all: a run that reaches `/complete` cleanly while the issue is
   still `in_progress` with nothing queued behind it leaves a system comment
   carrying `completion-stall:run-completed-without-terminal-status`, naming the
-  current assignee and the parent issue. It reports the stall; it never moves
-  the issue and never starts a run, so deciding whether to continue the work or
-  close the issue out is the dispatcher's job. One issue gets at most one such
-  comment per 30 minutes, and an issue that still has a non-terminal child is
+  current assignee and the parent issue, then queues one recovery run for that
+  same assignee, told to finish the work and close through the close protocol.
+  It never moves the issue. One issue gets at most one such
+  signal per 30 minutes, and an issue that still has a non-terminal child is
   never signalled — dispatching sub-issues and staying `in_progress` is the
   documented way to record that the work continues below. A run ending is therefore still not the issue ending,
   and an agent that delivered part of its acceptance criteria must write the
-  status itself instead of relying on the completion path.
+  status itself: leaving it `in_progress` just buys another run.
 
 ## Automatic routing (off unless the workspace turned it on)
 
