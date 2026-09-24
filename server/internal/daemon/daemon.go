@@ -7002,16 +7002,32 @@ func sharedModeBriefDelivery(provider string) sharedBriefDelivery {
 		return sharedBriefViaCursorAddDir
 	case "antigravity":
 		return sharedBriefViaAntigravityAddDir
-	case "openclaw", "kimi", "traecli", "qwenpaw",
+	case "openclaw", "kimi", "traecli", "qwenpaw", "qwen", "pi", "omp", "codearts",
 		"codebuddy", "dim", "devin", "grok", "dsh", "kiro", "qoder", "qoderclicn", "zeroclaw":
 		return sharedBriefInline
 	default:
-		// mcode is intentionally unsupported: it ignores ExecOptions.SystemPrompt
-		// and only reads cwd-scoped AGENTS.md (see mcode.go). Shared mode writes
-		// the brief under the sidecar root, so listing mcode here would start a
-		// task with no brief and no skills.
+		// Refused on purpose; sharedModeRefusedProviders records why.
 		return sharedBriefUnsupported
 	}
+}
+
+// sharedModeRefusedProviders is every supported runtime that shared mode
+// refuses, with the reason it has no brief route yet. The provider-table test
+// requires each agent.SupportedTypes entry to have a route or an entry here,
+// so a new backend cannot fall into shared mode's refusal unnoticed.
+var sharedModeRefusedProviders = map[string]string{
+	// Hermes ACP deliberately drops SystemPrompt: prepending the full brief
+	// to the user turn has tripped upstream safety filters (hermes.go).
+	"hermes": "inline brief trips upstream safety filters",
+	// mcode ignores ExecOptions.SystemPrompt and only reads cwd AGENTS.md
+	// (mcode.go, DENE-125).
+	"mcode": "reads the brief only from cwd AGENTS.md",
+	// reasonix sends the bare prompt over ACP and has no verified route.
+	"reasonix": "no verified brief route",
+	// copilot and deveco carry the prompt on argv; a brief of tens of KB
+	// there breaks the Windows command-line limit.
+	"copilot": "prompt travels on argv",
+	"deveco":  "prompt travels on argv",
 }
 
 // sharedModeBriefOverlay is the ExtraArgs / SystemPrompt pair a shared-mode
