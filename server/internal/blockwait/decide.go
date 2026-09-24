@@ -11,6 +11,10 @@ const (
 	ActionHold    = "hold"
 	ActionWake    = "wake"
 	ActionRelease = "release"
+	// ActionSeat is the in_review round whose acceptance seat is empty: fill
+	// the seat and start it, or turn the wait into a structured block a person
+	// can see. Waking the executor is never the answer here (DENE-869).
+	ActionSeat = "seat"
 )
 
 // BlockerView is the live state of one issue this record waits on.
@@ -48,6 +52,10 @@ type PatrolInput struct {
 	// ReviewerHuman means the acceptance seat is a person. The patrol leaves a
 	// comment and does not enqueue a run.
 	ReviewerHuman bool
+	// ReviewerEmpty means the acceptance slot was never answered: no seat and
+	// not "none". A quiet in_review round with an empty slot is seated, not
+	// nudged — a nudge would land on the executor, who can only say "请验收".
+	ReviewerEmpty bool
 }
 
 // Decision is what the patrol or the acceptance hook should do, plus the
@@ -124,6 +132,12 @@ func DecidePatrol(in PatrolInput) Decision {
 	if in.Status == "in_review" {
 		if in.HasPassComment || in.ReleasedPass {
 			return Decision{Action: ActionRelease, Reason: "验收已经通过，但票还停在待验收。平台按通过收口。"}
+		}
+		if in.Quiet >= QuietAfter && in.ReviewerEmpty {
+			return Decision{
+				Action: ActionSeat,
+				Reason: "待验收超过 30 分钟，但这张票没有验收席，执行人不是该被提醒的人。",
+			}
 		}
 		if in.Quiet >= QuietAfter && !in.ReviewNudged {
 			d := Decision{
@@ -442,7 +456,7 @@ func (d Decision) FollowUp(now time.Time, blockedBy, waitingOn, woken string) (s
 	if now.IsZero() {
 		now = time.Now()
 	}
-	if d.Action == ActionWake || d.Action == ActionRelease {
+	if d.Action == ActionWake || d.Action == ActionRelease || d.Action == ActionSeat {
 		set[KeyPatrolAt] = now.UTC().Format(time.RFC3339)
 	}
 	if d.ConsumeWakeAt {
