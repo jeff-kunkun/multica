@@ -14,8 +14,8 @@ record under this protocol before anything lands. A close missing a piece is
 rejected naming the missing item; nothing is half-written.
 
 ```bash
-multica issue close <id> --outcome done      --evidence-file ./close.md            # delivered, sub-issue or no acceptance gate
-multica issue close <id> --outcome in_review --evidence-file ./close.md            # top-level, awaiting acceptance (routing hands to the seat)
+multica issue close <id> --outcome done      --evidence-file ./close.md            # delivered; an open linked PR is merged first, or the close lands as blocked and says so
+multica issue close <id> --outcome in_review --evidence-file ./close.md            # top-level, awaiting acceptance (empty reviewer slot is filled, then routing hands over)
 multica issue close <id> --outcome blocked   --evidence-file ./close.md --blocked-by DENE-196   # or --wake-at / --wait-condition + --wait-timeout / --needs-human
 multica issue close <id> --outcome done --verdict pass --evidence-file ./close.md  # acceptance seat: merge the open PR, then done
 ```

@@ -237,6 +237,8 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"`--outcome in_review --evidence-file ./close.md`",
 		"`--outcome blocked --evidence-file ./close.md`",
 		"a blocked close without one is rejected",
+		"an open linked PR is merged first; if it cannot be, the close lands as `blocked`",
+		"an empty reviewer slot is filled with a different-family acceptance seat in the same call",
 		"`--outcome done --verdict pass --evidence-file ./close.md`",
 		"never as a silent `in_review`",
 		"`multica issue comment add <id> --verdict hold --content-file ./review.md`",

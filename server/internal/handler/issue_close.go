@@ -149,12 +149,35 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	// Pre-flight: the record is checked against §6.1 with a placeholder
 	// evidence id, so a bad close is refused before anything is written.
-	probe := cloneStringMap(rec.meta)
-	probe[closeprotocol.KeyEvidenceCommentID] = "pending"
-	probe[closeprotocol.KeyAt] = time.Now().UTC().Format(time.RFC3339)
-	if err := closeprotocol.Validate(probe, statusKey, body); err != nil {
+	if err := closeprotocol.Validate(closeProbe(rec.meta), statusKey, body); err != nil {
 		writeError(w, http.StatusBadRequest, closeRejection(err))
 		return
+	}
+	// The same gate `issue status` runs (DENE-857): a done with an open
+	// linked PR merges it first or is rewritten as a structured block; an
+	// in_review from an agent executor with an empty reviewer slot gets a
+	// different-family acceptance seat or is refused. The close reports
+	// whichever of those actually happened.
+	var tr statusTransition
+	if outcome == issuestatus.Done || outcome == issuestatus.InReview {
+		tr = h.guardSilentStall(ctx, issue, statusKey, issue.AssigneeType, issue.AssigneeID, issue.ReviewerType, issue.ReviewerID, false)
+		if tr.refuse != "" {
+			writeError(w, http.StatusConflict, tr.refuse)
+			return
+		}
+		if tr.status != "" && tr.status != statusKey {
+			statusKey = tr.status
+			outcome = tr.status
+			rec = closeRecordFromGate(statusKey, tr)
+			if err := closeprotocol.Validate(closeProbe(rec.meta), statusKey, body); err != nil {
+				writeError(w, http.StatusBadRequest, closeRejection(err))
+				return
+			}
+		}
+		if tr.setReviewer {
+			rec.meta[closeprotocol.KeyNextOwnerType] = tr.reviewerType.String
+			rec.meta[closeprotocol.KeyNextOwnerID] = uuidToString(tr.reviewerID)
+		}
 	}
 
 	prev := issue
@@ -185,7 +208,23 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		updated = issue
-		if statusKey != issue.Status {
+		if tr.setReviewer {
+			updated, err = qtx.SetIssueReviewerIfUnset(ctx, db.SetIssueReviewerIfUnsetParams{
+				ReviewerType: tr.reviewerType.String,
+				ReviewerID:   tr.reviewerID,
+				ID:           issue.ID,
+				WorkspaceID:  issue.WorkspaceID,
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Someone filled the slot between the gate and the write;
+				// keep theirs, the record is corrected after reload.
+				updated, err = qtx.GetIssue(ctx, issue.ID)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		if statusKey != updated.Status {
 			updated, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 				ID:          issue.ID,
 				Status:      statusKey,
@@ -194,6 +233,10 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
+		}
+		if tr.setReviewer && updated.ReviewerType.Valid {
+			rec.meta[closeprotocol.KeyNextOwnerType] = updated.ReviewerType.String
+			rec.meta[closeprotocol.KeyNextOwnerID] = uuidToString(updated.ReviewerID)
 		}
 		rec.meta[closeprotocol.KeyEvidenceCommentID] = uuidToString(created.ID)
 		rec.meta[closeprotocol.KeyAt] = time.Now().UTC().Format(time.RFC3339)
@@ -264,6 +307,9 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	if outcome == issuestatus.Blocked {
 		h.persistBlockRecord(ctx, updated, rec.block)
 	}
+	updated = h.finishStatusTransition(ctx, updated, tr)
+	resp.Merged = tr.merged
+	resp.PRURL = tr.prURL
 	originator := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	resp.Triggers = h.triggerTasksForComment(ctx, updated, comment, parentComment, actorType, actorID, originator, nil)
 	if resp.StatusChanged {
@@ -274,6 +320,15 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		resp.Woken = describeCloseWake(updated, rec, prefix, len(waiters))
 	} else {
 		resp.Woken = []string{"状态没变（本来就是 " + updated.Status + "），只补了证据和收口记录；没有叫醒任何人"}
+	}
+	if tr.merged {
+		resp.Woken = append([]string{"关联 PR 已先合并（" + tr.prURL + "），再写 done"}, resp.Woken...)
+	}
+	if tr.status != "" && tr.status != strings.ToLower(strings.TrimSpace(req.Outcome)) {
+		resp.Warnings = append(resp.Warnings, "你要的是 "+strings.ToLower(strings.TrimSpace(req.Outcome))+"，平台实际落的是 "+updated.Status+"："+strings.TrimSpace(tr.note))
+	}
+	if tr.setReviewer {
+		resp.Woken = append(resp.Woken, strings.TrimSpace(tr.note))
 	}
 	for _, t := range resp.Triggers {
 		resp.Woken = append(resp.Woken, "证据里 @ 到的对象："+describeTrigger(t))
@@ -472,6 +527,36 @@ func (h *Handler) deriveCloseRecord(r *http.Request, issue db.Issue, req CloseIs
 		}
 	}
 	return rec, ""
+}
+
+// closeProbe is the record as closeprotocol.Validate will see it, with the
+// two fields only the transaction can fill stubbed in.
+func closeProbe(meta map[string]string) map[string]string {
+	probe := cloneStringMap(meta)
+	probe[closeprotocol.KeyEvidenceCommentID] = "pending"
+	probe[closeprotocol.KeyAt] = time.Now().UTC().Format(time.RFC3339)
+	return probe
+}
+
+// closeRecordFromGate is the record for a close the DENE-857 gate rewrote:
+// the caller asked for done, the linked PR did not merge, and the ticket is
+// blocked on the gate's wait record instead.
+func closeRecordFromGate(statusKey string, tr statusTransition) closeRecord {
+	kind, action := blockKindFor(tr.block, "")
+	meta := map[string]string{
+		closeprotocol.KeyStatus:        statusKey,
+		closeprotocol.KeyConclusion:    closeprotocol.ConclusionBlocked,
+		closeprotocol.KeyNextOwnerType: closeprotocol.OwnerNone,
+		closeprotocol.KeyNextOwnerID:   "",
+		closeprotocol.KeyWaitingOn:     "",
+		closeprotocol.KeyWakeAction:    closeprotocol.WakeNone,
+		closeprotocol.KeyBlockKind:     kind,
+		closeprotocol.KeyBlockAction:   action,
+	}
+	if len(tr.block.BlockedBy) > 0 {
+		meta[closeprotocol.KeyWaitingOn] = tr.block.BlockedBy[0]
+	}
+	return closeRecord{meta: meta, block: tr.block}
 }
 
 // blockKindFor maps the wait record to the §6.1 blocker kind and a short

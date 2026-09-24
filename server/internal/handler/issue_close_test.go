@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -343,5 +344,111 @@ func TestCloseVerdictPassMergeFailureReportsBlocked(t *testing.T) {
 	}
 	if got := issueMetaString(t, issue.ID, closeprotocol.KeyBlockKind); got != closeprotocol.BlockExternal {
 		t.Fatalf("close.block_kind = %q", got)
+	}
+}
+
+// seedOpenPullForIssue links one open, clean PR to the issue and returns its
+// URL. Cleanup removes both rows.
+func seedOpenPullForIssue(t *testing.T, issueID string, number int) string {
+	t.Helper()
+	ctx := context.Background()
+	url := "https://example.test/pr/" + fmtInt(number)
+	var prID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO github_pull_request (workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, pr_created_at, pr_updated_at, head_sha, mergeable_state)
+		VALUES ($1, 1, 'multica-ai', 'multica', $2, 'close PR', 'open', $3, now(), now(), $4, 'clean')
+		RETURNING id
+	`, testWorkspaceID, number, url, "sha"+fmtInt(number)).Scan(&prID); err != nil {
+		t.Fatalf("seed PR: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID)
+		testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID)
+	})
+	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
+		t.Fatalf("link PR: %v", err)
+	}
+	return url
+}
+
+func fmtInt(n int) string { return fmt.Sprintf("%d", n) }
+
+// An executor's plain `--outcome done` with an open linked PR goes through the
+// same gate as `issue status done` (DENE-857): the PR is merged first and the
+// response says so.
+func TestCloseDoneWithOpenPullMergesFirst(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "close done open PR", "in_progress")
+	agentID := handlerTestAgentID(t)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+	url := seedOpenPullForIssue(t, issue.ID, 999861)
+	prev := testHandler.PRMerger
+	testHandler.PRMerger = fakeMerger{}
+	t.Cleanup(func() { testHandler.PRMerger = prev })
+
+	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"outcome": "done", "evidence": "PR " + url + "，本地测试全绿。"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	var resp CloseIssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Merged || resp.PRURL != url || resp.Status != "done" {
+		t.Fatalf("merged = %v url = %q status = %q, want merged + done", resp.Merged, resp.PRURL, resp.Status)
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "done" {
+		t.Fatalf("db status = %s, want done", got)
+	}
+	if !strings.Contains(strings.Join(resp.Woken, "\n"), "已先合并") {
+		t.Fatalf("woken should report the merge, got %v", resp.Woken)
+	}
+}
+
+// The same close when the merge fails: the caller asked for done, the gate
+// rewrote it to a structured block, and the close record follows the status
+// actually written — the response carries the warning instead of a false done.
+func TestCloseDoneWithUnmergeablePullIsRewrittenToBlocked(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "close done PR merge fails", "in_progress")
+	agentID := handlerTestAgentID(t)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+	seedOpenPullForIssue(t, issue.ID, 999862)
+	prev := testHandler.PRMerger
+	testHandler.PRMerger = fakeMerger{err: errPullNotMergeable}
+	t.Cleanup(func() { testHandler.PRMerger = prev })
+
+	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"outcome": "done", "evidence": "PR 开着，测试全绿。"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	var resp CloseIssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Merged || resp.Status != "blocked" || resp.PrevStatus != "in_progress" {
+		t.Fatalf("merged = %v status = %q prev = %q, want unmerged + blocked", resp.Merged, resp.Status, resp.PrevStatus)
+	}
+	if len(resp.Warnings) == 0 || !strings.Contains(resp.Warnings[0], "实际落的是 blocked") {
+		t.Fatalf("warnings should name the rewrite, got %v", resp.Warnings)
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "blocked" {
+		t.Fatalf("db status = %s, want blocked", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyConclusion); got != closeprotocol.ConclusionBlocked {
+		t.Fatalf("close.conclusion = %q", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyStatus); got != "blocked" {
+		t.Fatalf("close.status = %q", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyBlockKind); got != closeprotocol.BlockExternal {
+		t.Fatalf("close.block_kind = %q", got)
+	}
+	if got := issueMetaString(t, issue.ID, "block.wait_condition"); got == "" {
+		t.Fatalf("block.wait_condition should carry the merge failure")
 	}
 }

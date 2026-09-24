@@ -119,8 +119,8 @@ DENE-213 的任务说明要求「去 DENE-196 发一条评论，mention 验收�
 CLI（DENE-859 起）：一条命令做完整个收口。
 
 ```bash
-multica issue close <id> --outcome done      --evidence-file ./close.md                     # 交付：子票、或没有验收门的顶层票
-multica issue close <id> --outcome in_review --evidence-file ./close.md                     # 顶层票交付，等验收；路由把票交给验收席
+multica issue close <id> --outcome done      --evidence-file ./close.md                     # 交付：子票、或没有验收门的顶层票；关联 PR 还开着就先合并，合不进去落成 blocked 并在回复里说明
+multica issue close <id> --outcome in_review --evidence-file ./close.md                     # 顶层票交付，等验收；验收席为空则同一次调用补异族席位，再由路由交棒
 multica issue close <id> --outcome blocked   --evidence-file ./close.md --blocked-by DENE-196   # 或 --wake-at / --wait-condition + --wait-timeout / --needs-human
 multica issue close <id> --outcome done --verdict pass --evidence-file ./close.md           # 验收席放行：平台合并 PR，再写 done
 ```
@@ -391,7 +391,7 @@ Dispatcher **禁止**在 Stage N 子票仍是 `in_review`/`blocked`/`in_progress
 
 ### 6.3 Stage 2 代码落点（最小，不改调度器）
 
-DENE-859 之后的落点：`server/internal/handler/issue_close.go`（`POST /api/issues/{id}/close`，事务内评论 + 状态 + `close.*`，落库前 `closeprotocol.Validate`），`server/cmd/multica/cmd_issue.go`（`issue close`），`closeprotocol.WakeRoute`。四个场景的自动断言在 `issue_close_test.go`：`done` 缺证据被拒、`blocked` 缺等待被拒、正常 `in_review`、验收 `--verdict pass` 后合并。以下是 Stage 2 当时的记录。
+DENE-859 之后的落点：`server/internal/handler/issue_close.go`（`POST /api/issues/{id}/close`，事务内评论 + 状态 + `close.*`，落库前 `closeprotocol.Validate`；`done` / `in_review` 走和 `issue status` 相同的 `guardSilentStall`（DENE-857）：开着的 PR 先合、验收席空则补席，改写了状态时 `close.*` 随实际状态写，回复里带 `warnings`），`server/cmd/multica/cmd_issue.go`（`issue close`），`closeprotocol.WakeRoute`。四个场景的自动断言在 `issue_close_test.go`：`done` 缺证据被拒、`blocked` 缺等待被拒、正常 `in_review`、验收 `--verdict pass` 后合并。以下是 Stage 2 当时的记录。
 
 
 1. **builtin skill** `server/internal/service/builtin_skills/multica-platform/references/issues.md`：加「Close protocol」一节，指向本页决策表。这是 agent 运行时会读到的约束。
