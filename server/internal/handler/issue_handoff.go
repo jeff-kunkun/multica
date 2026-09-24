@@ -58,7 +58,7 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if target == "reviewer" || target == "dispatcher" {
-		if issue.ReviewerType.Valid && issue.ReviewerType.String == "member" {
+		if target == "reviewer" && issue.ReviewerType.Valid && issue.ReviewerType.String == "member" {
 			writeError(w, http.StatusConflict, "reviewer seat is filled by a person; handoff cannot replace a human reviewer")
 			return
 		}
@@ -70,7 +70,7 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 		// so the review delivery gate and acceptance-seat guard run with the
 		// request's actor identity; calling Route alone bypasses both guards.
 		if target == "reviewer" && issue.Status != "in_review" {
-			if !h.handoffSetInReview(w, r, issue) {
+			if !h.handoffSetInReview(w, r) {
 				return
 			}
 			issue, ok = h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
@@ -83,7 +83,8 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		resp := HandoffIssueResponse{Target: target, TargetType: target, Routed: out.ExecutorWritten != nil || !out.ReviewerWritten.Empty() || out.Mentioned, RunCreated: (target == "reviewer" && out.Action == routing.ActionHandedOff) || (target == "dispatcher" && out.ExecutorWritten != nil), Reason: out.Reason}
+		duplicate := handoffDuplicateReason(out.Reason)
+		resp := HandoffIssueResponse{Target: target, TargetType: target, Routed: out.ExecutorWritten != nil || !out.ReviewerWritten.Empty() || out.Mentioned, Duplicate: duplicate, Reason: out.Reason}
 		if target == "reviewer" {
 			resp.TargetID = uuidToString(issue.ReviewerID)
 			resp.TargetName = issue.ReviewerID.String()
@@ -95,14 +96,18 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 			if resp.TargetID != "" {
 				active, e := h.Queries.HasActiveTaskForIssueAndAgent(r.Context(), db.HasActiveTaskForIssueAndAgentParams{IssueID: issue.ID, AgentID: issue.ReviewerID})
 				if e == nil {
-					resp.RunCreated = active
+					resp.RunCreated = !duplicate && active
 				}
 			}
 		} else if out.ExecutorWritten != nil {
+			resp.TargetID = out.ExecutorWritten.ID
 			resp.TargetName = out.ExecutorWritten.Name
-		}
-		if handoffDuplicateReason(out.Reason) {
-			resp.Duplicate = true
+			if agentID, e := util.ParseUUID(out.ExecutorWritten.ID); e == nil {
+				active, e := h.Queries.HasActiveTaskForIssueAndAgent(r.Context(), db.HasActiveTaskForIssueAndAgentParams{IssueID: issue.ID, AgentID: agentID})
+				if e == nil {
+					resp.RunCreated = !duplicate && active
+				}
+			}
 		}
 		writeJSON(w, http.StatusOK, resp)
 		return
@@ -165,7 +170,7 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 
 // handoffSetInReview reuses the canonical issue update path so reviewer
 // handoffs cannot skip the PR/no-code gate or acceptance-seat guard.
-func (h *Handler) handoffSetInReview(w http.ResponseWriter, r *http.Request, issue db.Issue) bool {
+func (h *Handler) handoffSetInReview(w http.ResponseWriter, r *http.Request) bool {
 	req := r.Clone(withSkipIssueRouting(r.Context()))
 	req.Method = http.MethodPut
 	req.Body = io.NopCloser(bytes.NewReader([]byte(`{"status":"in_review"}`)))
