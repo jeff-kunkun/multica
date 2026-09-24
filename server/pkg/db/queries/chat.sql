@@ -1740,3 +1740,24 @@ WHERE workspace_id = $1
   AND status = 'active'
 ORDER BY created_at ASC
 LIMIT 1;
+
+-- name: CountHandoffChatMessages :one
+-- Visible turns a takeover read may describe. Channel commands and the hidden
+-- onboarding kickoff are not part of the conversation a new session continues.
+SELECT count(*)::int AS count
+FROM chat_message
+WHERE chat_session_id = $1
+  AND message_kind <> 'channel_command'
+  AND message_kind <> 'onboarding_kickoff';
+
+-- name: GetEarliestHandoffUserMessage :one
+-- The first thing the person asked, so a summary can say what the session is
+-- about without paging the whole transcript into the new session.
+SELECT content
+FROM chat_message
+WHERE chat_session_id = $1
+  AND role = 'user'
+  AND message_kind <> 'channel_command'
+  AND message_kind <> 'onboarding_kickoff'
+ORDER BY created_at ASC, id ASC
+LIMIT 1;

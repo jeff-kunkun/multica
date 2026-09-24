@@ -243,6 +243,12 @@ import type {
   TaskLogExportPush,
   TaskLogExportScope,
   CodeDecision,
+  AgentAccessRequest,
+  AgentAccessRequestList,
+  AgentAccessPass,
+  ApproveAgentAccessRequestBody,
+  ApproveAgentAccessRequestResponse,
+  CreateAgentAccessPassRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -2199,6 +2205,48 @@ export class ApiClient {
     });
   }
 
+  // --- Agent borrowing: doorbell requests + timed passes (DENE-808) ---
+
+  async listAgentAccessRequests(): Promise<AgentAccessRequestList> {
+    return this.fetch("/api/agent-access-requests");
+  }
+
+  async approveAgentAccessRequest(
+    id: string,
+    body: ApproveAgentAccessRequestBody = {},
+  ): Promise<ApproveAgentAccessRequestResponse> {
+    return this.fetch(`/api/agent-access-requests/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async declineAgentAccessRequest(id: string): Promise<AgentAccessRequest> {
+    return this.fetch(`/api/agent-access-requests/${id}/decline`, {
+      method: "POST",
+    });
+  }
+
+  async listAgentAccessPasses(agentId: string): Promise<AgentAccessPass[]> {
+    return this.fetch(`/api/agents/${agentId}/access-passes`);
+  }
+
+  async createAgentAccessPass(
+    agentId: string,
+    body: CreateAgentAccessPassRequest,
+  ): Promise<AgentAccessPass> {
+    return this.fetch(`/api/agents/${agentId}/access-passes`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async revokeAgentAccessPass(agentId: string, passId: string): Promise<AgentAccessPass> {
+    return this.fetch(`/api/agents/${agentId}/access-passes/${passId}`, {
+      method: "DELETE",
+    });
+  }
+
   async archiveAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
   }
@@ -2899,6 +2947,20 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/update`, {
       method: "POST",
       body: JSON.stringify({ target_version: targetVersion }),
+    });
+  }
+
+  async setAgentCLIFollow(runtimeId: string, follow: boolean): Promise<void> {
+    await this.fetch(`/api/runtimes/${runtimeId}/agent-cli/follow`, {
+      method: "POST",
+      body: JSON.stringify({ follow }),
+    });
+  }
+
+  async requestAgentCLIUpdate(runtimeId: string): Promise<void> {
+    await this.fetch(`/api/runtimes/${runtimeId}/agent-cli/update`, {
+      method: "POST",
+      body: JSON.stringify({}),
     });
   }
 

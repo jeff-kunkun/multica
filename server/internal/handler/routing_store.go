@@ -174,6 +174,14 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 	if err != nil {
 		return nil, err
 	}
+	demotedIDs, err := s.h.Queries.ListDemotedQuotaAgentIDs(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	demoted := make(map[string]bool, len(demotedIDs))
+	for _, id := range demotedIDs {
+		demoted[util.UUIDToString(id)] = true
+	}
 	out := make(map[string]routing.Agent, len(agents))
 	for _, a := range agents {
 		// Disabled seats stay on the agents list but are not routing
@@ -181,10 +189,12 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 		if !a.WorkEnabled {
 			continue
 		}
+		id := util.UUIDToString(a.ID)
 		out[a.Name] = routing.Agent{
-			ID:   util.UUIDToString(a.ID),
-			Name: a.Name,
-			Tier: a.RoutingTier.String,
+			ID:      id,
+			Name:    a.Name,
+			Tier:    a.RoutingTier.String,
+			Demoted: demoted[id],
 		}
 	}
 	return out, nil

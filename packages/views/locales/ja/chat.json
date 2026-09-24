@@ -270,7 +270,13 @@
     "rename": "名前を変更",
     "delete": "チャットを削除",
     "archive": "チャットをアーカイブ",
-    "unarchive": "アーカイブを解除"
+    "unarchive": "アーカイブを解除",
+    "copy_link": "セッションリンクをコピー",
+    "link_copied": "セッションリンクをコピーしました",
+    "copy_conversation": "会話全体を Markdown でコピー",
+    "conversation_copied": "会話をコピーしました",
+    "copy_role_user": "あなた",
+    "copy_role_assistant": "アシスタント"
   },
   "provider_quota": {
     "label": "残量",
