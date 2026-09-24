@@ -21,10 +21,11 @@ What it may do, and only when the slot is still **empty**:
   **Routing never writes a person
   into 验收席**: an issue a person holds is one routing never touches again, so
   a person in that slot freezes the issue there. When the judge decides the
-  acceptance needs a human call, the slot still gets a seat and the decision
-  comment tells that seat to @ the person instead.
+  acceptance needs a human call, use `multica issue handoff <id> --to reviewer`;
+  the server validates the seat and reports the actual dispatch.
 - **`in_review` (top-level only)** — hand the issue to the seat in 验收席
-  (which starts its run).
+  (which starts its run). For a deliberate handoff, use `multica issue handoff`;
+  do not write a manual @验收席 instruction.
   「不需要验收」 is left alone. A 验收席 a person filled with a **person** is
   notified with an @ and a subscription, and the issue is **not** reassigned —
   whoever is holding it keeps it, so its status can still be moved.
