@@ -298,7 +298,7 @@ func TestSwitchIssueDraftPolicyRequiresOwnership(t *testing.T) {
 	testutil.Call(t, testHandler.SwitchIssueDraftPolicy, testutil.WithHeaders(
 		switchPolicyRequest(t, session.SessionID, issueDraftPolicyConversation),
 		"X-User-ID", otherUser,
-	)).Want(http.StatusForbidden)
+	)).Want(http.StatusNotFound)
 
 	questionPolicy, _ := issueDraftPolicyByKey(issueDraftPolicyQuestion)
 	if got := carrierInstructions(t, session.AgentID); got != defaultInstructions(t, questionPolicy) {

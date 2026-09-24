@@ -59,7 +59,7 @@ import {
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
 import { useT } from "../../i18n";
 import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceId } from "@multica/core/hooks";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions } from "@multica/core/workspace/queries";
 
 // ─── Public component ────────────────────────────────────────────────────
@@ -450,9 +450,11 @@ function MessageAuthor({
   creatorId?: string;
 }) {
   const userId = useAuthStore((s) => s.user?.id ?? null);
-  const wsId = useWorkspaceId();
+  // A missing workspace route returns null. useWorkspaceId would throw and take
+  // the whole message list down, including render tests that have no route.
+  const wsId = useCurrentWorkspace()?.id;
   const { data: members = [] } = useQuery({
-    ...memberListOptions(wsId),
+    ...memberListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
   const who = senderId || creatorId;

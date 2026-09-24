@@ -460,12 +460,12 @@ export function ChatThreadList({
               </span>
             )}
             {!isRenaming && session.visibility === "private" && session.access === "owner" && (
-              <span className="shrink-0 rounded bg-red-100 px-1 text-[10px] text-red-700">
+              <span className="inline-flex shrink-0 items-center rounded-xs bg-destructive/10 px-1 text-micro font-medium text-destructive">
                 {t(($) => $.list.private_tag)}
               </span>
             )}
             {!isRenaming && (session.extra_count ?? 0) > 0 && (
-              <span className="shrink-0 rounded bg-blue-50 px-1 text-[10px] text-blue-700">
+              <span className="inline-flex shrink-0 items-center rounded-xs bg-info/10 px-1 text-micro font-medium text-info">
                 {t(($) => $.list.extra_tag)}
               </span>
             )}
