@@ -28,7 +28,7 @@ export function WorkThreadPanel({ kind, id }: Props) {
     setBusy(true);
     try {
       if (kind === "issue") await api.issueWorkThreadAction(id, name, name === "queue" ? "Queued from Work Thread controls" : undefined, taskId);
-      else await api.chatWorkThreadAction(id, name, name === "queue" ? "Queued from Work Thread controls" : undefined);
+      else if (name !== "prioritize") await api.chatWorkThreadAction(id, name, name === "queue" ? "Queued from Work Thread controls" : undefined);
       await queryClient.invalidateQueries({ queryKey });
     } finally {
       setBusy(false);
