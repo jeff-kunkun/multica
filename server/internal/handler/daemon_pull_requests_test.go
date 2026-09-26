@@ -2,9 +2,9 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -21,8 +21,9 @@ func reportIssuePRsHTTP(t *testing.T, issueID string, prs []DaemonPullRequest) {
 }
 
 // DENE-875 on a workspace with no GitHub App: the reported open PR cannot be
-// merged by the server, so done is refused into a block; once the caller's gh
-// reports the merge, the same close goes through.
+// merged by the server, so done is refused back to the closing agent (a block
+// would wait forever, DENE-899); once the caller's gh reports the merge, the
+// same close goes through.
 func TestReportedPullRequestDrivesDoneGateWithoutApp(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -31,7 +32,7 @@ func TestReportedPullRequestDrivesDoneGateWithoutApp(t *testing.T) {
 	agentID := handlerTestAgentID(t)
 	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
 	prev := testHandler.PRMerger
-	testHandler.PRMerger = fakeMerger{err: errors.New("no installation")}
+	testHandler.PRMerger = nil
 	t.Cleanup(func() {
 		testHandler.PRMerger = prev
 		testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE issue_id = $1`, issue.ID)
@@ -55,24 +56,45 @@ func TestReportedPullRequestDrivesDoneGateWithoutApp(t *testing.T) {
 	}
 
 	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"outcome": "done", "evidence": "PR " + pr.URL})
-	if w.Code != http.StatusOK {
-		t.Fatalf("close = %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "gh pr merge") {
+		t.Fatalf("close with open PR = %d: %s, want 409 naming gh pr merge", w.Code, w.Body.String())
 	}
-	if got := issueStatusDirect(t, issue.ID); got != "blocked" {
-		t.Fatalf("status with open PR = %s, want blocked", got)
+	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
+		t.Fatalf("status with open PR = %s, want unchanged", got)
 	}
 
 	merged := time.Now().UTC()
 	pr.State, pr.MergedAt = "merged", &merged
 	reportIssuePRsHTTP(t, issue.ID, []DaemonPullRequest{pr})
-	// The block ended the first run; the wake-up run closes again.
-	taskID = insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
 	w = closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"outcome": "done", "evidence": "PR " + pr.URL + " merged"})
 	if w.Code != http.StatusOK {
 		t.Fatalf("close after merge = %d: %s", w.Code, w.Body.String())
 	}
 	if got := issueStatusDirect(t, issue.ID); got != "done" {
 		t.Fatalf("status after merge report = %s, want done", got)
+	}
+}
+
+// DENE-899: a delivery branch with no PR the platform can see is refused back
+// to the closing agent instead of parked in a block nobody would ever release.
+func TestAgentCloseWithBranchButNoPullIsRefused(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "branch without PR", "in_progress")
+	agentID := handlerTestAgentID(t)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO issue_delivery_branch (issue_id, workspace_id, branch_name, role, agent_id)
+		VALUES ($1, $2, 'agent/agent/no-pr', 'canonical', $3)`, issue.ID, testWorkspaceID, agentID); err != nil {
+		t.Fatalf("seed delivery branch: %v", err)
+	}
+	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"outcome": "done", "evidence": "推上去了"})
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "gh pr create") {
+		t.Fatalf("close = %d: %s, want 409 naming gh pr create", w.Code, w.Body.String())
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
+		t.Fatalf("status = %s, want unchanged", got)
 	}
 }
 

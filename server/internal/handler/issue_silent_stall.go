@@ -282,11 +282,16 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 		tr.refuse = "这张票已经有 PR 或交付分支，不能用 `--no-code` 跳过合入门禁。"
 		return tr
 	}
+	// No PR yet is something the closing agent can fix in this run. Parking it
+	// as blocked waited on an event nobody produces (DENE-899): refuse instead.
 	if actorType == "agent" && len(prs) == 0 && deliveryBranchCount > 0 {
-		tr.status = issuestatus.Blocked
-		tr.persistBlock = true
-		tr.block = blockwait.FailureWake(time.Now(), "交付分支还没有关联并合入 PR", 1)
-		tr.note = "这张票有交付分支，但还查不到已合入的 PR。先改成阻塞，不标完成。"
+		tr.refuse = "这张票有交付分支，但平台查不到它的 PR。先用 `gh pr create` 开 PR（标题带票号，打向主线），再重跑这条 close；close 会用本机 gh 把 PR 报给平台。"
+		return tr
+	}
+	// Without a GitHub App the server can neither read an open PR's checks nor
+	// merge it, so any block here waits on nothing. The closing agent has gh.
+	if actorType == "agent" && hasOpenPull(prs) && !h.canMergePulls() {
+		tr.refuse = fmt.Sprintf("这台服务没有合并权限，合不了 %s。确认检查通过后用 `gh pr merge --squash` 自己合，再重跑这条 close；要别人验收就改用 `--outcome in_review`。", mergeTarget(prs))
 		return tr
 	}
 	decision := blockwait.DecideClose(h.gatePRSnapshots(ctx, prs), time.Now())
@@ -349,14 +354,26 @@ func (h *Handler) mergeOpenPulls(ctx context.Context, prs []db.ListPullRequestsB
 	return nil
 }
 
-func mergeFailureCondition(err error, prs []db.ListPullRequestsByIssueRow) string {
-	label := "关联 PR"
+func hasOpenPull(prs []db.ListPullRequestsByIssueRow) bool {
 	for _, pr := range prs {
-		if strings.EqualFold(pr.State, "open") && pr.HtmlUrl != "" {
-			label = pr.HtmlUrl
-			break
+		if strings.EqualFold(pr.State, "open") {
+			return true
 		}
 	}
+	return false
+}
+
+func mergeTarget(prs []db.ListPullRequestsByIssueRow) string {
+	for _, pr := range prs {
+		if strings.EqualFold(pr.State, "open") && pr.HtmlUrl != "" {
+			return pr.HtmlUrl
+		}
+	}
+	return "关联 PR"
+}
+
+func mergeFailureCondition(err error, prs []db.ListPullRequestsByIssueRow) string {
+	label := mergeTarget(prs)
 	switch {
 	case errors.Is(err, errPullMergeUnavailable):
 		return label + " 这台服务没有合并权限"
