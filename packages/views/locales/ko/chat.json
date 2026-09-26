@@ -281,14 +281,6 @@
     "copy_role_user": "나",
     "copy_role_assistant": "어시스턴트"
   },
-  "provider_quota": {
-    "label": "할당량",
-    "unknown": "알 수 없음",
-    "exhausted": "소진",
-    "used": "{{percent}}%",
-    "resets": "{{when}} 초기화",
-    "updated": "{{when}} 업데이트"
-  },
   "sharing": {
     "title": "권한 편집",
     "follow": "프로젝트 따르기",

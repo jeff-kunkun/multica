@@ -281,14 +281,6 @@
     "copy_role_user": "你",
     "copy_role_assistant": "助手"
   },
-  "provider_quota": {
-    "label": "额度",
-    "unknown": "未知",
-    "exhausted": "已用尽",
-    "used": "{{percent}}%",
-    "resets": "{{when}} 重置",
-    "updated": "更新于 {{when}}"
-  },
   "sharing": {
     "title": "编辑权限",
     "follow": "跟随项目",
