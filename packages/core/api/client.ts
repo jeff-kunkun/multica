@@ -1,5 +1,6 @@
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
+import type { ParkingRecordsResponse, WaitingSummon } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
 import { configStore } from "../config";
 import type {
@@ -3123,6 +3124,25 @@ export class ApiClient {
   // Workspace is resolved server-side from the X-Workspace-Slug header.
   async getAgentTaskSnapshot(): Promise<AgentTask[]> {
     return this.fetch(`/api/agent-task-snapshot`);
+  }
+
+  // Latest parking record of every issue that has one (DENE-881): running or
+  // parked, why it stopped, what came before, who moves next.
+  async listIssueParkingRecords(params?: {
+    unexplainedOnly?: boolean;
+    limit?: number;
+  }): Promise<ParkingRecordsResponse> {
+    const search = new URLSearchParams();
+    if (params?.unexplainedOnly) search.set("unexplained_only", "true");
+    if (params?.limit) search.set("limit", String(params.limit));
+    const query = search.toString();
+    return this.fetch(`/api/issues/parking${query ? `?${query}` : ""}`);
+  }
+
+  // The current user's unanswered calls in this workspace (DENE-880). A call
+  // closes server-side when the person replies on the issue.
+  async listWaitingSummons(): Promise<WaitingSummon[]> {
+    return this.fetch(`/api/summons/waiting`);
   }
 
   // Independent workspace-level projection. Unlike the task snapshot, this

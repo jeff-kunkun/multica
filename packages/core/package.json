@@ -59,6 +59,7 @@
     "./issues/stores/*": "./issues/stores/*.ts",
     "./issue-drafts": "./issue-drafts/index.ts",
     "./issue-drafts/*": "./issue-drafts/*.ts",
+    "./home": "./home/index.ts",
     "./inbox": "./inbox/index.ts",
     "./inbox/queries": "./inbox/queries.ts",
     "./inbox/mutations": "./inbox/mutations.ts",
