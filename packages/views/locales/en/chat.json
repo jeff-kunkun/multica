@@ -289,6 +289,8 @@
   "sharing": {
     "title": "Edit access",
     "follow": "Follow the project",
+    "workspace": "Entire workspace",
+    "workspace_hint": "All workspace members can see and speak in this chat",
     "follow_hint_bound": "Members of {{projects}} can see this chat and speak in it",
     "follow_hint_unbound": "Bind a project before choosing this",
     "extra": "Follow the project + extra people",

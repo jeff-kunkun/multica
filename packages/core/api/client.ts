@@ -4414,7 +4414,7 @@ export class ApiClient {
   async putChatAccess(
     sessionId: string,
     body: {
-      mode: "project" | "extra" | "private";
+      mode: "workspace" | "project" | "extra" | "private";
       shares?: { user_id: string; access: "view" | "speak" }[];
     },
   ): Promise<import("../types").ChatAccessSettings> {
