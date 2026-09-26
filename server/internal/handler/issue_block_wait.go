@@ -273,6 +273,9 @@ type releaseOutcome struct {
 	PRURL string
 	// Note is the sentence the chain left on the issue.
 	Note string
+	// Baseline is the "因主线原有失败放行" sentence when the merge let red
+	// checks through because the base branch already had them (DENE-892).
+	Baseline string
 }
 
 // releaseOnAcceptance is the once-per-stay half of maybeReleaseOnAcceptance:
@@ -302,17 +305,7 @@ func (h *Handler) releaseAcceptedIssue(ctx context.Context, issue db.Issue, seed
 		slog.Warn("block wait: list pull requests failed", "error", err, "issue_id", uuidToString(issue.ID))
 		return releaseOutcome{Status: issue.Status}
 	}
-	snapshots := make([]blockwait.PRSnapshot, 0, len(prs))
-	for _, pr := range prs {
-		snapshots = append(snapshots, blockwait.PRSnapshot{
-			Number:    int(pr.PrNumber),
-			State:     pr.State,
-			Mergeable: pr.MergeableState.String,
-			Checks:    pr.ChecksRollupState.String,
-			URL:       pr.HtmlUrl,
-		})
-	}
-	decision := blockwait.DecideRelease(snapshots, time.Now())
+	decision := blockwait.DecideRelease(h.gatePRSnapshots(ctx, prs), time.Now())
 	if seed.Reason != "" && decision.Reason != "" {
 		decision.Reason = seed.Reason + decision.Reason
 	}
@@ -353,7 +346,12 @@ func (h *Handler) releaseAcceptedIssue(ctx context.Context, issue db.Issue, seed
 	case blockwait.ReleaseBlock:
 		return h.blockAcceptedIssue(ctx, issue, decision)
 	case blockwait.ReleaseMerge:
-		return h.mergeAcceptedIssue(ctx, issue, prs, delivery, decision)
+		h.trackBaselineFix(ctx, issue, &decision, issue.ReviewerType.String, issue.ReviewerID)
+		out := h.mergeAcceptedIssue(ctx, issue, prs, delivery, decision)
+		if out.Merged && len(decision.Inherited) > 0 {
+			out.Baseline = strings.TrimPrefix(decision.Reason, seed.Reason)
+		}
+		return out
 	}
 	return releaseOutcome{Status: issue.Status, Note: decision.Reason}
 }
