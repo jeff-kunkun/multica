@@ -610,6 +610,17 @@ type ChatSession struct {
 	Visibility              string             `json:"visibility"`
 }
 
+type ChatSessionLinkReadAudit struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	ReaderWorkspaceID pgtype.UUID        `json:"reader_workspace_id"`
+	ReaderUserID      pgtype.UUID        `json:"reader_user_id"`
+	ReaderAgentID     pgtype.UUID        `json:"reader_agent_id"`
+	ReaderTaskID      pgtype.UUID        `json:"reader_task_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChatSessionProject struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
