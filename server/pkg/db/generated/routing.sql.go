@@ -642,7 +642,7 @@ SELECT i.id FROM issue i
 WHERE i.workspace_id = $1::uuid
   AND i.status = 'todo'
   AND COALESCE(i.assignee_type, '') <> 'member'
-  AND (i.assignee_id IS NULL OR i.reviewer_type IS NULL OR i.reviewer_id IS NULL)
+  AND (i.assignee_id IS NULL OR (i.parent_issue_id IS NULL AND (i.reviewer_type IS NULL OR i.reviewer_id IS NULL)))
   AND COALESCE(i.last_activity_at, i.updated_at) < $2::timestamptz
   AND NOT EXISTS (
       SELECT 1 FROM agent_task_queue q
