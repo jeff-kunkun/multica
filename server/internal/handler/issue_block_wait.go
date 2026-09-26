@@ -255,12 +255,38 @@ func (h *Handler) maybeReleaseOnAcceptance(ctx context.Context, issue db.Issue, 
 		}
 		return
 	}
+	h.releaseOnAcceptance(ctx, issue)
+}
+
+// releaseOutcome is what the merge chain actually did, so a caller that has
+// to report honestly (issue close --verdict pass, DENE-859) can say whether
+// the PR merged and where the ticket ended up instead of guessing.
+type releaseOutcome struct {
+	// Released is false when the pass was ignored: already released once.
+	Released bool
+	// Status the issue holds after the chain: done, blocked, or the status it
+	// already had when nothing could be written.
+	Status string
+	// Merged is true when an open PR was merged by this call.
+	Merged bool
+	// PRURL is the open PR the chain looked at, if any.
+	PRURL string
+	// Note is the sentence the chain left on the issue.
+	Note string
+}
+
+// releaseOnAcceptance is the once-per-stay half of maybeReleaseOnAcceptance:
+// the caller has already checked the author is the reviewer and the body
+// carries the pass line.
+func (h *Handler) releaseOnAcceptance(ctx context.Context, issue db.Issue) releaseOutcome {
 	meta := parseIssueMetadata(issue.Metadata)
 	if blockwait.MetaString(meta, blockwait.KeyReleased) == blockwait.ReleasedPass {
-		return
+		return releaseOutcome{Status: issue.Status}
 	}
 	h.setIssueMetaString(ctx, issue, blockwait.KeyReleased, blockwait.ReleasedPass)
-	h.releaseAcceptedIssue(ctx, issue, blockwait.Decision{Reason: "验收已经通过。"})
+	out := h.releaseAcceptedIssue(ctx, issue, blockwait.Decision{Reason: "验收已经通过。"})
+	out.Released = true
+	return out
 }
 
 func (h *Handler) authorIsReviewer(issue db.Issue, comment db.Comment) bool {
@@ -270,11 +296,11 @@ func (h *Handler) authorIsReviewer(issue db.Issue, comment db.Comment) bool {
 	return issue.ReviewerType.String == comment.AuthorType && issue.ReviewerID == comment.AuthorID
 }
 
-func (h *Handler) releaseAcceptedIssue(ctx context.Context, issue db.Issue, seed blockwait.Decision) {
+func (h *Handler) releaseAcceptedIssue(ctx context.Context, issue db.Issue, seed blockwait.Decision) releaseOutcome {
 	prs, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID)
 	if err != nil {
 		slog.Warn("block wait: list pull requests failed", "error", err, "issue_id", uuidToString(issue.ID))
-		return
+		return releaseOutcome{Status: issue.Status}
 	}
 	snapshots := make([]blockwait.PRSnapshot, 0, len(prs))
 	for _, pr := range prs {
@@ -316,22 +342,23 @@ func (h *Handler) releaseAcceptedIssue(ctx context.Context, issue db.Issue, seed
 				decision.Record.HasWakeAt = true
 				decision.Record.WakeAt = time.Now().Add(blockwait.QuietAfter).UTC()
 			}
-			h.blockAcceptedIssue(ctx, issue, decision)
+			out := h.blockAcceptedIssue(ctx, issue, decision)
 			h.wakeIssueOwner(ctx, issue, "验收已经通过，但这张票的交付线还没对齐："+blocker+"。请用 `multica issue delivery` 归类分支或换 canonical，再把票推回验收。", false)
-			return
+			return out
 		}
 	}
 	switch decision.Action {
 	case blockwait.ReleaseDone:
-		h.finishAcceptedIssue(ctx, issue, decision.Reason)
+		return h.finishAcceptedIssue(ctx, issue, decision.Reason)
 	case blockwait.ReleaseBlock:
-		h.blockAcceptedIssue(ctx, issue, decision)
+		return h.blockAcceptedIssue(ctx, issue, decision)
 	case blockwait.ReleaseMerge:
-		h.mergeAcceptedIssue(ctx, issue, prs, delivery, decision)
+		return h.mergeAcceptedIssue(ctx, issue, prs, delivery, decision)
 	}
+	return releaseOutcome{Status: issue.Status, Note: decision.Reason}
 }
 
-func (h *Handler) finishAcceptedIssue(ctx context.Context, issue db.Issue, reason string) {
+func (h *Handler) finishAcceptedIssue(ctx context.Context, issue db.Issue, reason string) releaseOutcome {
 	updated, err := h.Queries.CompleteIssueFromReview(ctx, db.CompleteIssueFromReviewParams{
 		ID:          issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -341,16 +368,17 @@ func (h *Handler) finishAcceptedIssue(ctx context.Context, issue db.Issue, reaso
 		if !errors.Is(err, pgx.ErrNoRows) {
 			slog.Warn("block wait: close after pass failed", "error", err, "issue_id", uuidToString(issue.ID))
 		}
-		return
+		return releaseOutcome{Status: issue.Status, Note: reason}
 	}
 	h.syncBlockWait(ctx, issue, updated)
 	h.publishBlockStatus(issue, updated)
 	h.postBlockComment(ctx, updated, reason)
 	h.notifyParentOfChildDone(ctx, issue, updated)
 	h.notifyWaitersOfIssueDone(ctx, issue, updated)
+	return releaseOutcome{Status: updated.Status, Note: reason}
 }
 
-func (h *Handler) blockAcceptedIssue(ctx context.Context, issue db.Issue, decision blockwait.Decision) {
+func (h *Handler) blockAcceptedIssue(ctx context.Context, issue db.Issue, decision blockwait.Decision) releaseOutcome {
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 		ID:          issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -358,15 +386,16 @@ func (h *Handler) blockAcceptedIssue(ctx context.Context, issue db.Issue, decisi
 	})
 	if err != nil {
 		slog.Warn("block wait: block after pass failed", "error", err, "issue_id", uuidToString(issue.ID))
-		return
+		return releaseOutcome{Status: issue.Status, Note: decision.Reason}
 	}
 	h.syncBlockWait(ctx, issue, updated)
 	h.persistBlockRecord(ctx, updated, decision.Record)
 	h.publishBlockStatus(issue, updated)
 	h.postBlockComment(ctx, updated, decision.Reason)
+	return releaseOutcome{Status: updated.Status, Note: decision.Reason}
 }
 
-func (h *Handler) mergeAcceptedIssue(ctx context.Context, issue db.Issue, prs []db.ListPullRequestsByIssueRow, delivery *service.IssueDelivery, decision blockwait.Decision) {
+func (h *Handler) mergeAcceptedIssue(ctx context.Context, issue db.Issue, prs []db.ListPullRequestsByIssueRow, delivery *service.IssueDelivery, decision blockwait.Decision) releaseOutcome {
 	// The PR on the canonical branch is the delivery; only when no PR sits on
 	// it does the first open PR stand in, as before DENE-820.
 	var open *db.ListPullRequestsByIssueRow
@@ -382,13 +411,14 @@ func (h *Handler) mergeAcceptedIssue(ctx context.Context, issue db.Issue, prs []
 		}
 	}
 	if open == nil {
-		h.finishAcceptedIssue(ctx, issue, decision.Reason)
-		return
+		return h.finishAcceptedIssue(ctx, issue, decision.Reason)
 	}
 	err := h.mergePullRequest(ctx, open.InstallationID, open.RepoOwner, open.RepoName, int(open.PrNumber))
 	if err == nil {
-		h.finishAcceptedIssue(ctx, issue, decision.Reason+" PR 已合并。")
-		return
+		out := h.finishAcceptedIssue(ctx, issue, decision.Reason+" PR 已合并。")
+		out.Merged = true
+		out.PRURL = open.HtmlUrl
+		return out
 	}
 	decision.Action = blockwait.ReleaseBlock
 	if errors.Is(err, errPullMergeUnavailable) {
@@ -405,10 +435,12 @@ func (h *Handler) mergeAcceptedIssue(ctx context.Context, issue db.Issue, prs []
 		decision.Record.HasWakeAt = true
 		decision.Record.WakeAt = time.Now().Add(blockwait.QuietAfter).UTC()
 	}
-	h.blockAcceptedIssue(ctx, issue, decision)
+	out := h.blockAcceptedIssue(ctx, issue, decision)
+	out.PRURL = open.HtmlUrl
 	if errors.Is(err, errPullMergeUnavailable) {
 		h.wakeIssueOwner(ctx, issue, "验收已经通过。请合并关联的 PR，然后把这张票关了。合不进去就让它停在阻塞上。", false)
 	}
+	return out
 }
 
 var (

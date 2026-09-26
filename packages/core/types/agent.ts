@@ -384,6 +384,14 @@ export interface AgentTask {
   id: string;
   agent_id: string;
   runtime_id: string;
+  /** Durable continuity boundary shared by turns for the same work item. */
+  work_thread_id?: string;
+  /** Increments when the provider context must be rebuilt after compression/overflow. */
+  context_generation?: number;
+  /** Server-enforced upper bound for issue/comment context included in a claim. */
+  context_message_limit?: number;
+  /** Conservative token budget for the inline context snapshot. */
+  context_token_budget?: number;
   // Empty string ("") when the task has no linked issue — either chat- or
   // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
   // which source produced it.
@@ -815,12 +823,6 @@ export interface Agent {
    * backends omit the field; treat `undefined` as off.
    */
   doorbell_enabled?: boolean;
-  /**
-   * Display-only model lineup (kun fork, DENE-200): the default model, the
-   * ordered fallback chain and models borrowable for batch work. Never used
-   * for routing. Older servers omit it; treat undefined as [].
-   */
-  switchable_models?: AgentSwitchableModel[];
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -1057,8 +1059,6 @@ export interface UpdateAgentRequest {
    * `""` takes the seat off the ladder, and a tier key sets the rung.
    */
   routing_tier?: string;
-  /** Replaces the display-only model lineup wholesale; `[]` clears it. */
-  switchable_models?: AgentSwitchableModel[];
   /**
    * Platform auto-retry switch. Omitted preserves the saved value; `false`
    * turns platform auto-retry off without affecting manual rerun.
@@ -1092,15 +1092,6 @@ export interface UpdateAgentRequest {
    * it was already running with.
    */
   runtime_inherited?: boolean;
-}
-
-export type AgentSwitchableModelRole = "default" | "fallback" | "batch";
-
-/** One entry of `Agent.switchable_models`. */
-export interface AgentSwitchableModel {
-  model: string;
-  role: AgentSwitchableModelRole;
-  note: string;
 }
 
 /**

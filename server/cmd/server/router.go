@@ -2001,6 +2001,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
+					r.Get("/work-thread", h.GetIssueWorkThread)
+					r.Post("/work-thread/action", h.WorkThreadAction)
 					r.Put("/", h.UpdateIssue)
 					// Sharing scope is its own action, not a field on the
 					// ordinary edit: it has its own tier rule and its own
@@ -2030,6 +2032,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// and with the outcome in the response — `multica issue
 					// route` is this endpoint.
 					r.Post("/route", h.RouteIssue)
+					// One-shot close protocol (DENE-859): evidence comment,
+					// status and close.* keys in one transaction, checked by
+					// closeprotocol.Validate — `multica issue close`.
+					r.Post("/close", h.CloseIssue)
+					// One-shot handoff (DENE-863): server routes, dedupes and
+					// reports what actually landed — `multica issue handoff`.
 					r.Post("/handoff", h.HandoffIssue)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
@@ -2464,6 +2472,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetChatSession)
 					r.Get("/access", h.GetChatSessionAccess)
 					r.Put("/access", h.PutChatSessionAccess)
+					r.Get("/work-thread", h.GetChatWorkThread)
+					r.Post("/work-thread/action", h.ChatWorkThreadAction)
 					r.Patch("/", h.UpdateChatSession)
 					r.Patch("/pin", h.SetChatSessionPinned)
 					r.Patch("/project-nudge", h.DismissChatSessionProjectNudge)

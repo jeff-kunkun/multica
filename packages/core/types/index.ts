@@ -11,8 +11,6 @@ export type {
 export type {
   Agent,
   AgentConversationStarter,
-  AgentSwitchableModel,
-  AgentSwitchableModelRole,
   AgentStatus,
   AgentRuntimeMode,
   AgentVisibility,
@@ -380,3 +378,5 @@ export type {
   WorkspaceSubscriptionSeatReconcileResult,
   CreateWorkspaceSubscriptionPortalResponse,
 } from "./billing";
+
+export type { WorkThreadSnapshot, WorkThreadTurn, WorkThreadInput } from "./work_thread";

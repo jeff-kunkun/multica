@@ -1821,7 +1821,6 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   // Seat strength for automatic dispatch (DENE-633). Optional because a
   // desktop build can talk to a backend that predates the column.
   routing_tier: z.string().optional().catch(undefined),
-  switchable_models: z.array(z.unknown()).optional(),
   owner_id: z.string().nullable().default(null),
   skills: z.array(z.unknown()).default([]),
   disabled_runtime_skills: z.array(z.unknown()).optional(),
@@ -2157,6 +2156,10 @@ export const AgentTaskSchema = z.object({
   id: z.string(),
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
+  work_thread_id: z.string().optional().catch(undefined),
+  context_generation: z.number().int().optional().catch(undefined),
+  context_message_limit: z.number().int().optional().catch(undefined),
+  context_token_budget: z.number().int().optional().catch(undefined),
   issue_id: z.string().default(""),
   status: z.string().default("cancelled"),
   priority: z.number().default(0),
