@@ -289,21 +289,13 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 		tr.note = "这张票有交付分支，但还查不到已合入的 PR。先改成阻塞，不标完成。"
 		return tr
 	}
-	snapshots := make([]blockwait.PRSnapshot, 0, len(prs))
-	for _, pr := range prs {
-		snapshots = append(snapshots, blockwait.PRSnapshot{
-			Number:    int(pr.PrNumber),
-			State:     pr.State,
-			Mergeable: pr.MergeableState.String,
-			Checks:    pr.ChecksRollupState.String,
-			URL:       pr.HtmlUrl,
-		})
-	}
-	decision := blockwait.DecideClose(snapshots, time.Now())
+	decision := blockwait.DecideClose(h.gatePRSnapshots(ctx, prs), time.Now())
 	switch decision.Action {
 	case blockwait.ReleaseDone:
 		return tr
 	case blockwait.ReleaseMerge:
+		actor, _ := util.ParseUUID(actorID)
+		h.trackBaselineFix(ctx, issue, &decision, actorType, actor)
 		if err := h.mergeOpenPulls(ctx, prs); err != nil {
 			rec := decision.Record
 			if !rec.Structured() {

@@ -437,7 +437,10 @@ type Handler struct {
 	// PRMerger overrides PRRefresh for the acceptance-pass merge (DENE-850).
 	// Tests set it; production leaves it nil and uses PRRefresh.
 	PRMerger PullMerger
-	cfg      Config
+	// PRBaseChecks overrides PRRefresh for reading a PR's base branch CI in
+	// the merge gates (DENE-892). Tests set it; production leaves it nil.
+	PRBaseChecks BaseCheckReader
+	cfg          Config
 }
 
 // PullMerger merges one linked pull request. A nil result from the deployment

@@ -138,10 +138,22 @@ the platform merges the open linked PR and sets `done`, or sets `done` directly
 when there is no open PR. When the merge fails — no merge permission on this
 server, PR not mergeable, merge error — the platform moves the issue to
 `blocked` with a structured wait and, for missing permission, wakes the
-executor to merge. 通过 inside a sentence merges nothing. A check that is
-already red on the base branch belongs to the base branch, not to this change,
-and is not a reason to withhold the verdict. The only pass that stays in
-`in_review` is the explicit human row above.
+executor to merge. 通过 inside a sentence merges nothing. The only pass that
+stays in `in_review` is the explicit human row above.
+
+A red check that is already red on the base branch belongs to the base branch,
+not to this change (DENE-892). Both merge gates — `--outcome done` and
+`--verdict pass` — compare the PR's red checks by name with the latest CI on
+the PR's base branch (`kun`): when every red check is also red there, nothing
+is still running, and the PR has no conflict or branch rule, the platform
+merges anyway, opens or reuses the one open `<base> 基线 CI 红` fix issue, and
+the reply and the issue say `因主线原有失败放行：<checks>` with the fix issue.
+A red check that is green or absent on the base, or a base that cannot be read,
+still blocks. Do not withhold a verdict for a base-branch failure, and do not
+merge by hand to get around the gate. The comparison is per job: a new failure
+inside a job that is already red on the base passes too, so the executor's
+evidence still says the failing tests were compared with the same tests on
+`kun`.
 
 A Dispatcher advancement turn is only: `multica issue children`, read `close.*`
 on the parent and the current stage's children, then either promote the next

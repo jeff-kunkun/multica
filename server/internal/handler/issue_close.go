@@ -459,6 +459,9 @@ func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, is
 	switch {
 	case out.Merged:
 		resp.Woken = []string{fmt.Sprintf("PR 已合并（%s），票已置 done", out.PRURL)}
+		if out.Baseline != "" {
+			resp.Woken = append(resp.Woken, out.Baseline)
+		}
 	case updated.Status == issuestatus.Done:
 		resp.Woken = []string{"没有待合并的 PR，票已置 done"}
 	case updated.Status == issuestatus.Blocked:
