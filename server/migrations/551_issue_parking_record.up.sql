@@ -2,9 +2,10 @@
 -- agent last said, who holds the next move — plus the platform refusals that
 -- used to live only in an HTTP 4xx response.
 --
--- First merged as 540_issue_parking_record, colliding with 540_issue_summon
--- (DENE-893). Databases that already ran 540 run this again under the new
--- name, so every statement is IF NOT EXISTS.
+-- Shipped as 540_issue_parking_record, which collided with 540_issue_summon.
+-- Renumbered to 551 (upstream already owns 502–550); every statement is
+-- IF NOT EXISTS so installations that already applied it under the old
+-- version re-run it as a no-op.
 
 CREATE TABLE IF NOT EXISTS issue_rejection (
     id           UUID PRIMARY KEY,
