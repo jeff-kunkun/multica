@@ -332,6 +332,11 @@ deleted_attachments AS (
 deleted_visibility_audits AS (
     DELETE FROM visibility_audit WHERE workspace_id = $1
 ),
+-- Cross-workspace chat link reads are workspace-owned audit rows. Delete them
+-- explicitly so teardown does not depend on the workspace FK cascade.
+deleted_chat_session_link_read_audits AS (
+    DELETE FROM chat_session_link_read_audit WHERE workspace_id = $1
+),
 -- Module-level sharing (DENE-699) is workspace-keyed with no foreign key.
 deleted_module_visibility AS (
     DELETE FROM workspace_module_visibility WHERE workspace_id = $1
