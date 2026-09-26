@@ -446,6 +446,11 @@ var (
 	errPullNotMergeable     = errors.New("pull request is not mergeable")
 )
 
+// canMergePulls reports whether mergePullRequest has any way to succeed.
+func (h *Handler) canMergePulls() bool {
+	return h.PRMerger != nil || (h.PRRefresh != nil && h.PRRefresh.Enabled())
+}
+
 func (h *Handler) mergePullRequest(ctx context.Context, installationID int64, owner, repo string, number int) error {
 	if h.PRMerger != nil {
 		return h.PRMerger.MergePullRequest(ctx, installationID, owner, repo, number)
