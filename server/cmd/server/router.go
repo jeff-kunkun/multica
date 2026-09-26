@@ -1998,6 +1998,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/quick-create", h.QuickCreateIssue)
 				r.Post("/preview-trigger", h.PreviewIssueTrigger)
 				r.Post("/batch-update", h.BatchUpdateIssues)
+				// One plan file, one transaction, the whole staged tree
+				// (DENE-864) — `multica plan apply`.
+				r.Post("/plan-apply", h.ApplyPlan)
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
@@ -2039,6 +2042,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// One-shot handoff (DENE-863): server routes, dedupes and
 					// reports what actually landed — `multica issue handoff`.
 					r.Post("/handoff", h.HandoffIssue)
+					// Promote the next stage once the one below is terminal
+					// (DENE-864) — `multica issue stage advance`.
+					r.Post("/stage-advance", h.AdvanceIssueStage)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
 					r.Get("/task-runs", h.ListTasksByIssue)
