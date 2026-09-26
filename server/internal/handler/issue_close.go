@@ -164,7 +164,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	// is refused. The close reports whichever of those actually happened.
 	var tr statusTransition
 	if outcome == issuestatus.Done || outcome == issuestatus.InReview {
-		tr = h.guardSilentStall(ctx, issue, statusKey, actorType, req.NoCodeReason, issue.AssigneeType, issue.AssigneeID, issue.ReviewerType, issue.ReviewerID, false)
+		tr = h.guardSilentStall(ctx, issue, statusKey, actorType, actorID, req.NoCodeReason, issue.AssigneeType, issue.AssigneeID, issue.ReviewerType, issue.ReviewerID, false)
 		if tr.refuse != "" {
 			writeError(w, http.StatusConflict, tr.refuse)
 			return
