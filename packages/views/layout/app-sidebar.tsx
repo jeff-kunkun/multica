@@ -22,6 +22,10 @@ import {
   LogOut,
   Plus,
   Check,
+  ArrowUpDown,
+  Pin,
+  PinOff,
+  Search,
   SquarePen,
   Sparkles,
   X,
@@ -63,6 +67,14 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys, moduleVisibilityOptions } from "@multica/core/workspace/queries";
 import { canAccessModule, navItemModule } from "@multica/core/workspace";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import {
+  arrangeWorkspaces,
+  useWorkspaceSwitcherPreference,
+  useWorkspaceSwitcherPreferenceStore,
+} from "@multica/core/workspace/switcher-preference";
+import { isImeComposing } from "@multica/core/utils";
+import type { Workspace } from "@multica/core/types";
+import { WorkspaceOrganizeDialog } from "./workspace-organize-dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxUnreadSummaryOptions, useInboxUnreadCount, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
@@ -102,6 +114,8 @@ const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>> = [];
 const PINNED_PREVIEW_LIMIT = 5;
+// The switcher grows a search box once the list stops fitting at a glance.
+const WORKSPACE_SEARCH_THRESHOLD = 5;
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
@@ -501,6 +515,74 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
 
   const createIssueShortcut = useShortcut("createIssue");
 
+  // Workspace switcher arrangement: this person's pins and order on this
+  // device, applied over the server list, then narrowed by the search box.
+  const switcherPreference = useWorkspaceSwitcherPreference(userId);
+  const toggleWorkspacePinned = useWorkspaceSwitcherPreferenceStore((s) => s.togglePinned);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [organizeOpen, setOrganizeOpen] = useState(false);
+  const [workspaceQuery, setWorkspaceQuery] = useState("");
+  const showWorkspaceSearch = workspaces.length > WORKSPACE_SEARCH_THRESHOLD;
+  const arrangedWorkspaces = useMemo(() => {
+    const { pinned, rest } = arrangeWorkspaces(workspaces, switcherPreference);
+    const query = workspaceQuery.trim().toLowerCase();
+    const matches = (ws: Workspace) => !query || ws.name.toLowerCase().includes(query);
+    return { pinned: pinned.filter(matches), rest: rest.filter(matches) };
+  }, [workspaces, switcherPreference, workspaceQuery]);
+  const firstWorkspaceMatch = arrangedWorkspaces.pinned[0] ?? arrangedWorkspaces.rest[0];
+  const pinnedWorkspaceIds = useMemo(
+    () => new Set(switcherPreference.pinned),
+    [switcherPreference.pinned],
+  );
+
+  const renderWorkspaceItem = (ws: Workspace) => {
+    const isPinned = pinnedWorkspaceIds.has(ws.id);
+    const pinLabel = isPinned
+      ? t(($) => $.sidebar.unpin_workspace)
+      : t(($) => $.sidebar.pin_workspace);
+    return (
+      <DropdownMenuItem
+        key={ws.id}
+        className="group/ws"
+        render={
+          <AppLink href={paths.workspace(ws.slug).issues()} />
+        }
+      >
+        <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
+        <span className="flex-1 truncate">{ws.name}</span>
+        {/* Points at the specific workspace holding unread
+            inbox items. Sits in the same right-edge slot as the
+            active-workspace check; the active workspace is
+            excluded (its unread is the Inbox nav count), so dot
+            and check never collide on one row. */}
+        {ws.id !== workspace?.id && unreadWsIds.has(ws.id) && (
+          <span className="size-2 rounded-full bg-brand" />
+        )}
+        {ws.id === workspace?.id && (
+          <Check className="h-3.5 w-3.5 text-primary" />
+        )}
+        {userId && (
+          <span
+            role="button"
+            aria-label={pinLabel}
+            title={pinLabel}
+            aria-pressed={isPinned}
+            className="hidden size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover/ws:flex group-data-highlighted/ws:flex hover:text-foreground"
+            onClick={(event) => {
+              // Pinning is a tweak to the list, not a choice of workspace:
+              // keep the menu open and stay where we are.
+              event.preventDefault();
+              event.stopPropagation();
+              toggleWorkspacePinned(userId, workspaces.map((w) => w.id), ws.id);
+            }}
+          >
+            {isPinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+          </span>
+        )}
+      </DropdownMenuItem>
+    );
+  };
+
   return (
       <Sidebar variant="inset">
         {topSlot}
@@ -508,7 +590,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         <SidebarHeader className={cn("py-3", headerClassName)} style={headerStyle}>
           <SidebarMenu>
             <SidebarMenuItem>
-              <DropdownMenu>
+              <DropdownMenu
+                open={switcherOpen}
+                onOpenChange={(open) => {
+                  setSwitcherOpen(open);
+                  if (!open) setWorkspaceQuery("");
+                }}
+              >
                 <DropdownMenuTrigger
                   render={
                     <SidebarMenuButton>
@@ -556,28 +644,56 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <DropdownMenuLabel className="text-caption text-muted-foreground">
                       {t(($) => $.sidebar.workspaces_label)}
                     </DropdownMenuLabel>
-                    {workspaces.map((ws) => (
-                      <DropdownMenuItem
-                        key={ws.id}
-                        render={
-                          <AppLink href={paths.workspace(ws.slug).issues()} />
-                        }
-                      >
-                        <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
-                        <span className="flex-1 truncate">{ws.name}</span>
-                        {/* Points at the specific workspace holding unread
-                            inbox items. Sits in the same right-edge slot as the
-                            active-workspace check; the active workspace is
-                            excluded (its unread is the Inbox nav count), so dot
-                            and check never collide on one row. */}
-                        {ws.id !== workspace?.id && unreadWsIds.has(ws.id) && (
-                          <span className="size-2 rounded-full bg-brand" />
-                        )}
-                        {ws.id === workspace?.id && (
-                          <Check className="h-3.5 w-3.5 text-primary" />
-                        )}
+                    {showWorkspaceSearch && (
+                      <div className="mx-1 mb-1 flex items-center gap-1.5 rounded-md border border-border px-2 py-1">
+                        <Search className="size-3.5 shrink-0 text-muted-foreground" />
+                        <input
+                          type="text"
+                          value={workspaceQuery}
+                          onChange={(e) => setWorkspaceQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (isImeComposing(e)) return;
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              if (firstWorkspaceMatch) {
+                                setSwitcherOpen(false);
+                                setWorkspaceQuery("");
+                                push(paths.workspace(firstWorkspaceMatch.slug).issues());
+                              }
+                              return;
+                            }
+                            // Arrows move into the list and Escape closes the
+                            // menu; every other key is typing, which the
+                            // menu's typeahead must not swallow.
+                            if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Escape") {
+                              e.stopPropagation();
+                            }
+                          }}
+                          placeholder={t(($) => $.sidebar.search_workspaces_placeholder)}
+                          aria-label={t(($) => $.sidebar.search_workspaces_placeholder)}
+                          className="min-w-0 flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
+                          autoFocus
+                        />
+                      </div>
+                    )}
+                    <div className="max-h-[50vh] overflow-y-auto">
+                      {arrangedWorkspaces.pinned.map(renderWorkspaceItem)}
+                      {arrangedWorkspaces.pinned.length > 0 && arrangedWorkspaces.rest.length > 0 && (
+                        <DropdownMenuSeparator />
+                      )}
+                      {arrangedWorkspaces.rest.map(renderWorkspaceItem)}
+                      {!firstWorkspaceMatch && workspaceQuery.trim() && (
+                        <p className="px-2 py-1.5 text-caption text-muted-foreground">
+                          {t(($) => $.sidebar.no_matching_workspaces, { query: workspaceQuery.trim() })}
+                        </p>
+                      )}
+                    </div>
+                    {userId && workspaces.length > 1 && (
+                      <DropdownMenuItem onClick={() => setOrganizeOpen(true)}>
+                        <ArrowUpDown className="h-3.5 w-3.5" />
+                        {t(($) => $.sidebar.organize_workspaces)}
                       </DropdownMenuItem>
-                    ))}
+                    )}
                     {!workspaceCreationDisabled && (
                       <DropdownMenuItem
                         onClick={() => push(paths.newWorkspace())}
@@ -634,6 +750,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
+              {userId && (
+                <WorkspaceOrganizeDialog
+                  open={organizeOpen}
+                  onOpenChange={setOrganizeOpen}
+                  workspaces={workspaces}
+                  userId={userId}
+                />
+              )}
             </SidebarMenuItem>
           </SidebarMenu>
           <SidebarMenu>
