@@ -150,7 +150,18 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid actor")
 		return
 	}
-	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AuthorType: authorType, AuthorID: authorUUID, Content: content, Type: "comment", ParentID: pgtype.UUID{}, SourceTaskID: pgtype.UUID{}, QuickActionID: pgtype.UUID{}, ViaPluginID: pgtype.UUID{}})
+	// An agent-initiated handoff must carry its own run on the comment row:
+	// EnqueueTaskForMention walks comment.source_task_id → parent task →
+	// originator_user_id to attribute the new run (`delegation`). Without the
+	// stamp the handed-off run resolves as unattributed and the chain the
+	// human started is lost (DENE-896). Same stamp CreateComment applies.
+	var sourceTaskID pgtype.UUID
+	if authorType == "agent" {
+		if task, ok := h.taskFromRequestHeader(r); ok {
+			sourceTaskID = task.ID
+		}
+	}
+	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AuthorType: authorType, AuthorID: authorUUID, Content: content, Type: "comment", ParentID: pgtype.UUID{}, SourceTaskID: sourceTaskID, QuickActionID: pgtype.UUID{}, ViaPluginID: pgtype.UUID{}})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, 404, "issue not found")
