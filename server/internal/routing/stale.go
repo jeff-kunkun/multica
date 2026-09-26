@@ -100,19 +100,18 @@ func (r *Router) SweepWorkspace(ctx context.Context, workspaceID string, report 
 	}
 
 	now := time.Now()
-	// The same bounded budget covers both rows. Todo tickets are routed first:
-	// they have never been given a seat, while in-review tickets already have
-	// an acceptance path that stale-review can wake. Repeated sweeps are safe
-	// because Route only fills empty slots.
-	todoIDs, err := r.Store.UnassignedTodos(ctx, workspaceID, now.Add(-todoSweepQuietAfter), staleSweepLimit)
+	// The same bounded budget covers both rows. Stale reviews are listed first
+	// but may take at most half of it: a todo that Route cannot seat (no
+	// eligible seat, reviewer declined) stays empty and comes back every pass,
+	// so without a reserved share enough of them would starve the acceptance
+	// row for good. Todo tickets are still routed first — they have never been
+	// given a seat — and take whatever the reviews left. Repeated sweeps are
+	// safe because Route only fills empty slots.
+	ids, err := r.Store.StaleReviews(ctx, workspaceID, now.Add(-settings.StaleAfter()), staleSweepLimit/2)
 	if err != nil {
 		return 0, err
 	}
-	remaining := staleSweepLimit - len(todoIDs)
-	if remaining < 0 {
-		remaining = 0
-	}
-	ids, err := r.Store.StaleReviews(ctx, workspaceID, now.Add(-settings.StaleAfter()), remaining)
+	todoIDs, err := r.Store.UnassignedTodos(ctx, workspaceID, now.Add(-todoSweepQuietAfter), staleSweepLimit-len(ids))
 	if err != nil {
 		return 0, err
 	}
