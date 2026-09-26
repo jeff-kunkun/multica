@@ -2040,6 +2040,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// status and close.* keys in one transaction, checked by
 					// closeprotocol.Validate — `multica issue close`.
 					r.Post("/close", h.CloseIssue)
+					// PR state from the caller's gh, refreshed by `issue
+					// close` so the done gate sees merges without a GitHub App.
+					r.Post("/pull-requests/report", h.ReportIssuePullRequests)
 					// One-shot handoff (DENE-863): server routes, dedupes and
 					// reports what actually landed — `multica issue handoff`.
 					r.Post("/handoff", h.HandoffIssue)

@@ -690,6 +690,12 @@ func setIssueMetaStringTx(ctx context.Context, q *db.Queries, issue db.Issue, ke
 		Key:         key,
 		Value:       raw,
 	})
+	// No row means the key already holds this value (the query skips no-op
+	// writes). A second close — blocked, then done — repeats keys such as
+	// close.next_owner_type=none and must not fail as "issue not found".
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
 	return err
 }
 

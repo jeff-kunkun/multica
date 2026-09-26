@@ -220,15 +220,12 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 	} else if delivery != nil {
 		deliveryBranchCount = len(delivery.Branches)
 	}
-	// An agent may not close a ticket that has an acceptance seat. The only
-	// agent escape hatch is the explicit no-code declaration, and that is valid
-	// only when neither a PR nor a delivery branch exists.
+	// An agent may not close a ticket whose acceptance seat is someone else.
+	// Without a seat the agent may close, but only through the merge gate below
+	// or, when neither a PR nor a delivery branch exists, an explicit no-code
+	// declaration.
 	if actorType == "agent" && reviewerIsAssigned(issue) && actorID != uuidToString(issue.ReviewerID) {
 		tr.refuse = "执行人不能直接关单：请用 `multica issue close --outcome in_review` 交给验收席。"
-		return tr
-	}
-	if actorType == "agent" && !reviewerIsAssigned(issue) && strings.TrimSpace(noCodeReason) == "" {
-		tr.refuse = "执行人不能直接关单：请用 `multica issue close --outcome in_review` 交给验收席，或为无代码票带上 `--no-code <原因>`。"
 		return tr
 	}
 	if actorType == "agent" && len(prs) == 0 && deliveryBranchCount == 0 {

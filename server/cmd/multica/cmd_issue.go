@@ -1928,6 +1928,9 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 	if verdict != "" {
 		body["verdict"] = verdict
 	}
+	if outcome == "done" || outcome == "in_review" {
+		refreshIssuePullRequests(ctx, client, issueRef.ID, issueRef.Display, outcome == "done" && verdict == "pass")
+	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/close", body, &result); err != nil {
 		return fmt.Errorf("close issue: %w", err)

@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -602,40 +601,39 @@ func (s resolvedChildStatuses) isTerminal(child db.Issue) bool {
 	return isTerminalChildStatus(s.status(child))
 }
 
-// realChildTerminalPredicate keeps a status row from advancing a stage unless
-// its code delivery is also accounted for. A done child is genuine when a
-// linked PR is merged, or when the close gate recorded an explicit no-code
-// declaration. Cancelled children remain terminal by definition.
+// realChildTerminalPredicate keeps a done child from advancing a stage when
+// its own PR evidence contradicts the status: linked PRs exist and none of them
+// is merged (DENE-859/862 were done with their PRs still open). A done child
+// with no linked PR stays terminal — agents cannot reach that state without the
+// close gate's no-code declaration, and a member's done is authoritative.
+// Cancelled children remain terminal by definition.
 func (h *Handler) realChildTerminalPredicate(ctx context.Context, statuses resolvedChildStatuses) func(db.Issue) bool {
 	cache := map[pgtype.UUID]bool{}
-	known := map[pgtype.UUID]bool{}
 	return func(child db.Issue) bool {
 		if !statuses.isTerminal(child) {
 			return false
 		}
-		if statuses.status(child) != "done" {
+		if statuses.status(child) != issuestatus.Done {
 			return true
 		}
-		if known[child.ID] {
-			return cache[child.ID]
+		if real, ok := cache[child.ID]; ok {
+			return real
 		}
-		known[child.ID] = true
-		meta := parseIssueMetadata(child.Metadata)
-		if strings.TrimSpace(blockwait.MetaString(meta, "close.no_code_reason")) != "" {
-			cache[child.ID] = true
-			return true
-		}
-		delivery, err := service.BuildIssueDelivery(ctx, h.Queries, child)
+		real := true
+		prs, err := h.Queries.ListPullRequestsByIssue(ctx, child.ID)
 		if err != nil {
-			return false
-		}
-		for _, branch := range delivery.Branches {
-			if branch.PullRequest != nil && branch.PullRequest.MergedAt != nil {
-				cache[child.ID] = true
-				return true
+			slog.Warn("child done: failed to list child PRs", "error", err, "issue_id", uuidToString(child.ID))
+		} else if len(prs) > 0 {
+			real = false
+			for _, pr := range prs {
+				if pr.MergedAt.Valid {
+					real = true
+					break
+				}
 			}
 		}
-		return false
+		cache[child.ID] = real
+		return real
 	}
 }
 
