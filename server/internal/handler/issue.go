@@ -4166,6 +4166,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if persistBlock {
 		h.persistBlockRecord(r.Context(), issue, blockRecord)
+		h.summonNeedsHuman(r.Context(), issue, blockRecord.NeedsHuman, actorType, actorID, "")
 	}
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)

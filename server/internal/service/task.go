@@ -4643,6 +4643,7 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
 	s.postDeliveryNotice(ctx, task, deliveryNotice)
+	s.remindSummonAnswerClose(ctx, task)
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -6649,9 +6650,25 @@ func (s *TaskService) noteTaskTimeLimit(ctx context.Context, task db.AgentTaskQu
 		ownerID, mention = s.taskTimeLimitMention(ctx, issue)
 	}
 	summary := taskTimeLimitNotice(ran, task, retried, blocked, mention)
-	s.createSystemNotice(ctx, issue, summary)
-	if retried == nil {
-		s.notifyTaskTimeLimitOwner(ctx, issue, task, ownerID, summary)
+	notice := s.createSystemNoticeComment(ctx, issue, summary)
+	if retried == nil && ownerID.Valid && notice != nil {
+		// The notice carries the @; the summon entry is what puts it in the
+		// person's inbox — a system comment's @ never gets there on its own.
+		if _, err := s.summoner().Summon(ctx, SummonInput{
+			Issue:      issue,
+			Recipient:  ownerID,
+			CallerType: "system",
+			Source:     SummonSourceTimeLimit,
+			Reason:     summary,
+			CommentID:  notice.ID,
+			Details: map[string]any{
+				"task_id":        util.UUIDToString(task.ID),
+				"agent_id":       util.UUIDToString(task.AgentID),
+				"failure_reason": string(taskfailure.ReasonTaskTimeLimit),
+			},
+		}); err != nil {
+			slog.Warn("task time limit notice: summon failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		}
 	}
 	if !issue.ParentIssueID.Valid {
 		return
@@ -6745,50 +6762,14 @@ func (s *TaskService) taskTimeLimitMention(ctx context.Context, issue db.Issue) 
 	return userID, fmt.Sprintf("[@%s](mention://member/%s) ", name, util.UUIDToString(userID))
 }
 
-// notifyTaskTimeLimitOwner puts the stop in the responsible member's inbox.
-// System comments never reach the inbox through their mentions (the comment
-// listener skips platform-authored bodies), and issue subscribers already get
-// the generic task_failed item, so this only covers a responsible member who
-// is not subscribed — typically a project lead or the workspace owner.
-func (s *TaskService) notifyTaskTimeLimitOwner(ctx context.Context, issue db.Issue, task db.AgentTaskQueue, userID pgtype.UUID, summary string) {
-	if !userID.Valid {
-		return
-	}
-	if subscribed, err := s.Queries.IsIssueSubscriber(ctx, db.IsIssueSubscriberParams{
-		IssueID: issue.ID, UserType: "member", UserID: userID,
-	}); err == nil && subscribed {
-		return
-	}
-	details, _ := json.Marshal(map[string]any{
-		"task_id":        util.UUIDToString(task.ID),
-		"agent_id":       util.UUIDToString(task.AgentID),
-		"failure_reason": string(taskfailure.ReasonTaskTimeLimit),
-	})
-	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-		ID:            dbid.NewV7(),
-		WorkspaceID:   issue.WorkspaceID,
-		RecipientType: "member",
-		RecipientID:   userID,
-		Type:          "task_failed",
-		Severity:      "action_required",
-		IssueID:       issue.ID,
-		Title:         issue.Title,
-		Body:          pgtype.Text{String: summary, Valid: true},
-		ActorType:     pgtype.Text{String: "agent", Valid: true},
-		ActorID:       task.AgentID,
-		Details:       details,
-	})
-	if err != nil {
-		slog.Warn("task time limit notice: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
-		return
-	}
-	if s.Bus != nil {
-		s.publishQuickCreateInbox(item, util.UUIDToString(issue.WorkspaceID), util.UUIDToString(task.AgentID), issue.Status)
-	}
-}
-
 // createSystemNotice posts a top-level system comment and broadcasts it.
 func (s *TaskService) createSystemNotice(ctx context.Context, issue db.Issue, content string) {
+	s.createSystemNoticeComment(ctx, issue, content)
+}
+
+// createSystemNoticeComment is createSystemNotice returning the comment, for
+// callers that hand it to the summon entry.
+func (s *TaskService) createSystemNoticeComment(ctx context.Context, issue db.Issue, content string) *db.Comment {
 	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		ID: dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
 		AuthorType: "system", AuthorID: pgtype.UUID{Valid: true},
@@ -6796,7 +6777,7 @@ func (s *TaskService) createSystemNotice(ctx context.Context, issue db.Issue, co
 	})
 	if err != nil {
 		slog.Warn("system notice: create comment failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
-		return
+		return nil
 	}
 	if s.Bus != nil {
 		s.Bus.Publish(events.Event{
@@ -6805,6 +6786,8 @@ func (s *TaskService) createSystemNotice(ctx context.Context, issue db.Issue, co
 			Payload: map[string]any{"comment": created.Comment(), "issue_title": issue.Title, "issue_revision": created.IssueRevision},
 		})
 	}
+	c := created.Comment()
+	return &c
 }
 
 // ExpireStaleQueuedTasks fails queued work whose runtime never came back.

@@ -2036,7 +2036,14 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	h.noteMissedMentionRelays(ctx, issue, comment.ID, targets)
 	h.ringDoorbellTargets(ctx, issue, comment, actorType, actorID, targets)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
-	return commentTriggerOutcomes(targets, enqueued)
+	outcomes := commentTriggerOutcomes(targets, enqueued)
+	// Summons (DENE-880) follow a new comment only; an edit neither answers
+	// a call nor makes a new one.
+	if len(forceFreshSession) == 0 || !forceFreshSession[0] {
+		h.recordMentionSummons(ctx, issue, comment, actorType, actorID)
+		h.answerSummons(ctx, issue, comment, actorType, actorID, triggerOutcomesStartedRun(outcomes))
+	}
+	return outcomes
 }
 
 // markCommentTriggersFresh applies the edit-only session policy after trigger

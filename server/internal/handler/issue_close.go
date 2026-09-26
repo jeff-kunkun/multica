@@ -65,6 +65,8 @@ type CloseIssueResponse struct {
 	Woken         []string                `json:"woken"`
 	Triggers      []CommentTriggerOutcome `json:"trigger_outcomes,omitempty"`
 	Warnings      []string                `json:"warnings,omitempty"`
+	// Summoned is true when --needs-human went through the summon entry.
+	Summoned bool `json:"summoned,omitempty"`
 }
 
 var closeOutcomes = []string{issuestatus.Done, issuestatus.InReview, issuestatus.Blocked, issuestatus.Cancelled}
@@ -311,6 +313,15 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	if outcome == issuestatus.Blocked {
 		h.persistBlockRecord(ctx, updated, rec.block)
 	}
+	// --needs-human names a person; the summon entry is what makes them hear
+	// it (inbox, subscription, a visible @). Before the evidence comment's own
+	// triggers run, so an @ of the same person there dedupes against this call.
+	if updated.Status == issuestatus.Blocked || updated.Status == issuestatus.InReview {
+		if rec.meta[closeprotocol.KeyNextOwnerType] == closeprotocol.OwnerMember && strings.TrimSpace(deref(req.NeedsHuman)) != "" {
+			h.summonNeedsHuman(ctx, updated, rec.meta[closeprotocol.KeyNextOwnerID], actorType, actorID, closeSummonReason(summary, evidence))
+			resp.Summoned = true
+		}
+	}
 	updated = h.finishStatusTransition(ctx, updated, tr)
 	resp.Merged = tr.merged
 	resp.PRURL = tr.prURL
@@ -339,6 +350,9 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, t := range resp.Triggers {
 		resp.Woken = append(resp.Woken, "证据里 @ 到的对象："+describeTrigger(t))
+	}
+	if resp.Summoned {
+		resp.Woken = append(resp.Woken, "已替你叫 --needs-human 的人：收件箱、关注、票上 @ 都已送到；他回复后平台叫醒执行智能体")
 	}
 
 	reloaded, err := h.Queries.GetIssue(ctx, issue.ID)
@@ -800,4 +814,13 @@ func closeOutcomeAllowed(v string) bool {
 		}
 	}
 	return false
+}
+
+// closeSummonReason is the "why" a --needs-human close hands the person: the
+// caller's summary when there is one, otherwise the head of the evidence.
+func closeSummonReason(summary, evidence string) string {
+	if s := strings.TrimSpace(summary); s != "" {
+		return truncateRunes(s, 200)
+	}
+	return truncateRunes(strings.TrimSpace(evidence), 200)
 }

@@ -2046,6 +2046,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// One-shot handoff (DENE-863): server routes, dedupes and
 					// reports what actually landed — `multica issue handoff`.
 					r.Post("/handoff", h.HandoffIssue)
+					// One "叫人" entry (DENE-880): inbox, subscription, a
+					// visible @ and an open call the reply answers —
+					// `multica issue summon`.
+					r.Post("/summon", h.SummonIssue)
 					// Promote the next stage once the one below is terminal
 					// (DENE-864) — `multica issue stage advance`.
 					r.Post("/stage-advance", h.AdvanceIssueStage)
@@ -2533,6 +2537,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/approve", h.ApproveAgentAccessRequest)
 				r.Post("/{id}/decline", h.DeclineAgentAccessRequest)
 			})
+			// Calls still waiting on the current user (DENE-880).
+			r.Get("/api/summons/waiting", h.ListWaitingSummons)
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				// Archived notifications, for the inbox's "Archived" sub-view.
