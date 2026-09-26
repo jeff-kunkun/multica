@@ -30,6 +30,10 @@ type statusTransition struct {
 	handoff      bool
 	refuse       string
 	noCode       string
+	// merged / prURL report a linked PR the done gate merged on the way, so
+	// `issue close` can say so instead of guessing from the note (DENE-859).
+	merged bool
+	prURL  string
 }
 
 func reviewerIsAssigned(issue db.Issue) bool {
@@ -279,6 +283,13 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 		tr.note = decision.Reason
 		if !strings.Contains(tr.note, "已合并") {
 			tr.note += " PR 已合并。"
+		}
+		tr.merged = true
+		for _, pr := range prs {
+			if strings.EqualFold(pr.State, "open") && pr.HtmlUrl != "" {
+				tr.prURL = pr.HtmlUrl
+				break
+			}
 		}
 		return tr
 	default:

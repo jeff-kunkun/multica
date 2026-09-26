@@ -1513,6 +1513,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
 		r.Post("/heartbeat", h.DaemonHeartbeat)
+		r.Post("/pull-requests/report", h.ReportDaemonPullRequests)
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces", h.ListDaemonWorkspaces)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
@@ -1998,6 +1999,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/quick-create", h.QuickCreateIssue)
 				r.Post("/preview-trigger", h.PreviewIssueTrigger)
 				r.Post("/batch-update", h.BatchUpdateIssues)
+				// One plan file, one transaction, the whole staged tree
+				// (DENE-864) — `multica plan apply`.
+				r.Post("/plan-apply", h.ApplyPlan)
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
@@ -2032,6 +2036,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// and with the outcome in the response — `multica issue
 					// route` is this endpoint.
 					r.Post("/route", h.RouteIssue)
+					// One-shot close protocol (DENE-859): evidence comment,
+					// status and close.* keys in one transaction, checked by
+					// closeprotocol.Validate — `multica issue close`.
+					r.Post("/close", h.CloseIssue)
+					// One-shot handoff (DENE-863): server routes, dedupes and
+					// reports what actually landed — `multica issue handoff`.
+					r.Post("/handoff", h.HandoffIssue)
+					// Promote the next stage once the one below is terminal
+					// (DENE-864) — `multica issue stage advance`.
+					r.Post("/stage-advance", h.AdvanceIssueStage)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
 					r.Get("/task-runs", h.ListTasksByIssue)
