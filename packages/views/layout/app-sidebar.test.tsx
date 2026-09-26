@@ -9,6 +9,7 @@ import { ApiError } from "@multica/core/api";
 import { renderWithI18n } from "../test/i18n";
 import type { PinnedItem } from "@multica/core/types";
 import { AppSidebar } from "./app-sidebar";
+import { useWorkspaceSwitcherPreferenceStore } from "@multica/core/workspace/switcher-preference";
 
 const { appForeground, chatSessions, chatStore, detail, deletePin, invitationApi, modules, navigation, pins, sidebarState, summary, workspaces } = vi.hoisted(() => ({
   appForeground: { current: true },
@@ -52,6 +53,7 @@ const { appForeground, chatSessions, chatStore, detail, deletePin, invitationApi
 
 vi.mock("@dnd-kit/core", () => ({
   DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  KeyboardSensor: vi.fn(),
   PointerSensor: vi.fn(),
   closestCenter: vi.fn(),
   useSensor: vi.fn(),
@@ -61,6 +63,8 @@ vi.mock("@dnd-kit/sortable", () => ({
   SortableContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useSortable: () => ({ attributes: {}, listeners: {}, setNodeRef: vi.fn() }),
   verticalListSortingStrategy: vi.fn(),
+  sortableKeyboardCoordinates: vi.fn(),
+  arrayMove: vi.fn(),
 }));
 vi.mock("@dnd-kit/utilities", () => ({ CSS: { Transform: { toString: () => undefined } } }));
 vi.mock("@multica/ui/components/ui/sidebar", () => ({
@@ -624,5 +628,66 @@ describe("pinned group holds projects only (DENE-876)", () => {
     pins.current = [pinOf("chat", "chat-1", 0), pinOf("issue", "issue-1", 1)];
     renderWithI18n(<AppSidebar />);
     expect(screen.queryByText("Pinned")).not.toBeInTheDocument();
+  });
+});
+
+describe("workspace switcher arrangement", () => {
+  const names = () =>
+    screen
+      .getAllByText(/ WS$/)
+      .map((node) => node.textContent);
+
+  beforeEach(() => {
+    summary.current = [];
+    useWorkspaceSwitcherPreferenceStore.setState({ byUser: {} });
+    workspaces.current = [
+      { id: "ws-1", name: "Active WS", slug: "active", avatar_url: null },
+      { id: "ws-2", name: "Beta WS", slug: "beta", avatar_url: null },
+      { id: "ws-3", name: "Gamma WS", slug: "gamma", avatar_url: null },
+    ];
+  });
+
+  it("lists pinned workspaces first and pins from the row without navigating", () => {
+    renderWithI18n(<AppSidebar />);
+    expect(names()).toEqual(["Active WS", "Beta WS", "Gamma WS"]);
+
+    const pinButtons = screen.getAllByRole("button", { name: "Pin to top" });
+    fireEvent.click(pinButtons[2]!);
+
+    expect(names()).toEqual(["Gamma WS", "Active WS", "Beta WS"]);
+    expect(useWorkspaceSwitcherPreferenceStore.getState().byUser["user-1"]?.pinned).toEqual(["ws-3"]);
+    expect(screen.getAllByRole("button", { name: "Unpin" })).toHaveLength(1);
+  });
+
+  it("keeps a person's arrangement to themselves", () => {
+    useWorkspaceSwitcherPreferenceStore.setState({
+      byUser: { "someone-else": { order: ["ws-3", "ws-2", "ws-1"], pinned: ["ws-3"] } },
+    });
+    renderWithI18n(<AppSidebar />);
+    expect(names()).toEqual(["Active WS", "Beta WS", "Gamma WS"]);
+  });
+
+  it("hides the search box until the list outgrows a glance", () => {
+    renderWithI18n(<AppSidebar />);
+    expect(screen.queryByRole("textbox", { name: "Search workspaces…" })).toBeNull();
+  });
+
+  it("filters by name once there are more than five workspaces", () => {
+    workspaces.current = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"].map((name, i) => ({
+      id: `ws-${i + 1}`,
+      name: `${name} WS`,
+      slug: name.toLowerCase(),
+      avatar_url: null,
+    }));
+    renderWithI18n(<AppSidebar />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Search workspaces…" }), {
+      target: { value: "eta" },
+    });
+    expect(names()).toEqual(["Beta WS", "Zeta WS"]);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search workspaces…" }), {
+      target: { value: "nope" },
+    });
+    expect(screen.getByText("No workspaces match “nope”")).toBeTruthy();
   });
 });
