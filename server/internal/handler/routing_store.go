@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -173,6 +174,14 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 	if err != nil {
 		return nil, err
 	}
+	demotedIDs, err := s.h.Queries.ListDemotedQuotaAgentIDs(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	demoted := make(map[string]bool, len(demotedIDs))
+	for _, id := range demotedIDs {
+		demoted[util.UUIDToString(id)] = true
+	}
 	out := make(map[string]routing.Agent, len(agents))
 	for _, a := range agents {
 		// Disabled seats stay on the agents list but are not routing
@@ -180,10 +189,12 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 		if !a.WorkEnabled {
 			continue
 		}
+		id := util.UUIDToString(a.ID)
 		out[a.Name] = routing.Agent{
-			ID:   util.UUIDToString(a.ID),
-			Name: a.Name,
-			Tier: a.RoutingTier.String,
+			ID:      id,
+			Name:    a.Name,
+			Tier:    a.RoutingTier.String,
+			Demoted: demoted[id],
 		}
 	}
 	return out, nil
@@ -266,6 +277,100 @@ func (s routingStore) SetReviewerIfUnset(ctx context.Context, workspaceID, issue
 	// in the timeline.
 	s.publishIssueUpdated(issue, issue)
 	return true, nil
+}
+
+func (s routingStore) OffRosterSeat(ctx context.Context, workspaceID, agentID string) (routing.Agent, bool, error) {
+	wsID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return routing.Agent{}, false, err
+	}
+	id, err := util.ParseUUID(agentID)
+	if err != nil {
+		return routing.Agent{}, false, err
+	}
+	agent, err := s.h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID: id, WorkspaceID: wsID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return routing.Agent{}, false, nil
+		}
+		return routing.Agent{}, false, err
+	}
+	if agent.ArchivedAt.Valid || agent.WorkEnabled {
+		return routing.Agent{}, false, nil
+	}
+	tier := ""
+	if agent.RoutingTier.Valid {
+		tier = agent.RoutingTier.String
+	}
+	return routing.Agent{ID: agentID, Name: agent.Name, Tier: tier}, true, nil
+}
+
+func (s routingStore) ReplaceReviewer(ctx context.Context, workspaceID, issueID, currentID string, ref routing.ReviewerRef) (bool, error) {
+	wsID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return false, err
+	}
+	id, err := util.ParseUUID(issueID)
+	if err != nil {
+		return false, err
+	}
+	current, err := util.ParseUUID(currentID)
+	if err != nil {
+		return false, err
+	}
+	next, err := util.ParseUUID(ref.ID)
+	if err != nil {
+		return false, err
+	}
+	prev, err := s.h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: wsID})
+	if err != nil {
+		return false, err
+	}
+	issue, err := s.h.Queries.ReplaceIssueReviewerIfCurrent(ctx, db.ReplaceIssueReviewerIfCurrentParams{
+		ReviewerID:        next,
+		ID:                id,
+		WorkspaceID:       wsID,
+		CurrentReviewerID: current,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	s.publishIssueUpdated(prev, issue)
+	return true, nil
+}
+
+func (s routingStore) RememberReviewerRelay(ctx context.Context, workspaceID, issueID string, note routing.ReviewerRelay) error {
+	wsID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return err
+	}
+	id, err := util.ParseUUID(issueID)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(map[string]any{
+		"original_id":      note.OriginalID,
+		"original_name":    note.OriginalName,
+		"replacement_id":   note.ReplacementID,
+		"replacement_name": note.ReplacementName,
+		"designated":       note.Designated,
+		"covered_at":       note.CoveredAt.UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.h.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+		Key: "reviewer_relay", Value: raw, ID: id, WorkspaceID: wsID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	return err
 }
 
 func (s routingStore) Handoff(ctx context.Context, workspaceID, issueID, assigneeType, assigneeID string) error {

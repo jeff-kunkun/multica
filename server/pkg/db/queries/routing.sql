@@ -22,6 +22,46 @@ WHERE id = sqlc.arg('id')::uuid
   AND assignee_id IS NULL
 RETURNING *;
 
+-- name: ReplaceIssueReviewerIfCurrent :one
+-- Overwrites the reviewer slot while it still names the seat we are covering
+-- for. A person who changed the slot between the read and this write wins:
+-- no row, and the caller does not hand the ticket to a stale substitute.
+UPDATE issue
+SET reviewer_type = 'agent',
+    reviewer_id = sqlc.arg('reviewer_id')::uuid,
+    revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
+    updated_at = now()
+WHERE id = sqlc.arg('id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND reviewer_type = 'agent'
+  AND reviewer_id = sqlc.arg('current_reviewer_id')::uuid
+RETURNING *;
+
+-- name: ListIssuesRelayedFromReviewer :many
+-- Tickets whose acceptance was covered for this seat while it was switched off.
+-- Containment hits idx_issue_metadata_gin. The caller still checks that the
+-- cover has not started and that the slot still names the replacement.
+SELECT * FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND status = 'in_review'
+  AND metadata @> jsonb_build_object(
+        'reviewer_relay',
+        jsonb_build_object('original_id', sqlc.arg('original_id')::text)
+      );
+
+-- name: AgentHasBegunWorkOnIssue :one
+-- True once a run for this seat has left the queue since the cover began.
+-- A still-queued row has not started: recovery may cancel it and give the
+-- ticket back. Work from an earlier stay does not count.
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue
+    WHERE issue_id = sqlc.arg('issue_id')::uuid
+      AND agent_id = sqlc.arg('agent_id')::uuid
+      AND status IN ('dispatched', 'running', 'waiting_local_directory', 'completed', 'failed')
+      AND created_at >= sqlc.arg('since')::timestamptz
+)::bool;
+
 -- name: SetIssueReviewerIfUnset :one
 -- Fills the reviewer slot only while it is still empty. reviewer_type IS NULL
 -- is the empty slot; 'none' ("needs no acceptance pass") is a written value

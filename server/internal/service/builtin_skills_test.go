@@ -518,6 +518,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"`value` keeps the stored ids",
 				"Acceptance is parent-scoped",
 				"the parent is the one issue that moves to unified `in_review`",
+				"--blocked-by <DENE-N>",
 			},
 			notWant: []string{
 				// MUL-6966 phase 1 banned teaching the generic KV bag.
@@ -575,6 +576,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// to keep in_review until somebody else merged.
 				"Reviewer pass, owned checks green, no explicit human hold",
 				"A pass does not stop at `in_review`",
+				"--blocked-by",
 			},
 			notWant: []string{
 				// The MUL-6966 / MUL-5442 bans on teaching the generic KV bag

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -226,6 +228,45 @@ var issueStatusCmd = &cobra.Command{
 		"Workspace Settings > Issue Statuses, and an unknown value errors with the full list.",
 	Args: exactArgs(2),
 	RunE: runIssueStatus,
+}
+
+var issueCloseCmd = &cobra.Command{
+	Use:   "close <id>",
+	Short: "Close out an issue in one call: evidence comment, status, close record",
+	Long: "One command for the close protocol. The server posts the evidence comment,\n" +
+		"writes the status and the close.* record in one transaction, and validates\n" +
+		"the record first — a close that is missing something is refused with the\n" +
+		"missing item named, and nothing is written.\n\n" +
+		"  --outcome done        delivered; a sub-issue's parent stage is notified\n" +
+		"  --outcome in_review   delivered, awaiting acceptance (top-level issues only;\n" +
+		"                        routing hands the ticket to the acceptance seat, do not @ it)\n" +
+		"  --outcome blocked     needs one wait: --blocked-by / --wake-at /\n" +
+		"                        --wait-condition with --wait-timeout / --needs-human\n" +
+		"  --outcome cancelled   dropped on purpose; say why in --evidence\n" +
+		"  --verdict pass        acceptance seat only, with --outcome done: the platform\n" +
+		"                        merges the open PR and sets done, or blocks with the reason\n\n" +
+		"--evidence is mandatory (PR link, test conclusion). Agent-authored bodies should\n" +
+		"use --evidence-file <path> inside the working directory. The response says what\n" +
+		"was actually written: the status, whether a PR merged, and who gets woken.\n" +
+		"The old path (`issue status` + `comment add`) keeps working.",
+	Args: exactArgs(1),
+	RunE: runIssueClose,
+}
+
+var issueHandoffCmd = &cobra.Command{
+	Use:   "handoff <id>",
+	Short: "Wake the next owner of an issue without closing it",
+	Long: "One command for handing an issue on. The server resolves the target, skips a\n" +
+		"target that already has an active run on this issue, and replies with what\n" +
+		"actually landed — never a hand-written @mention.\n\n" +
+		"  --to reviewer     the acceptance seat; refused if a person holds the seat\n" +
+		"  --to dispatcher   let routing pick the next owner\n" +
+		"  --to <agent>      a named agent (name or id)\n\n" +
+		"A close already hands over what it closes: `issue close --outcome in_review`\n" +
+		"routes the acceptance seat itself. The response reports target_name,\n" +
+		"run_created and duplicate — quote them, do not restate them from memory.",
+	Args: exactArgs(1),
+	RunE: runIssueHandoff,
 }
 
 var issueReorderCmd = &cobra.Command{
@@ -521,6 +562,8 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueCloseCmd)
+	issueCmd.AddCommand(issueHandoffCmd)
 	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
@@ -609,11 +652,21 @@ func init() {
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
+	issueUpdateCmd.Flags().String("no-code", "", "Why this issue carries no code delivery (docs, research). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+	issueStatusCmd.Flags().String("blocked-by", "", "Comma-separated issue identifiers this blocked issue is waiting on")
+	issueStatusCmd.Flags().String("wake-at", "", "RFC3339 time to wake a blocked issue for another look")
+	issueStatusCmd.Flags().String("wait-condition", "", "External condition a blocked issue is waiting on")
+	issueStatusCmd.Flags().String("wait-probe", "", "How to check the wait condition")
+	issueStatusCmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
+	issueStatusCmd.Flags().String("needs-human", "", "Member UUID a blocked issue is waiting on")
+	registerIssueCloseFlags(issueCloseCmd)
+	registerIssueHandoffFlags(issueHandoffCmd)
+	issueStatusCmd.Flags().String("no-code", "", "Why this issue carries no code delivery (docs, research). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
@@ -665,6 +718,7 @@ func init() {
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent run must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
+	issueCommentAddCmd.Flags().String("verdict", "", "Acceptance verdict written as its own line: pass or hold. This is what merges and closes; the words 通过 in the body do not")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -1559,6 +1613,9 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if statusChanged {
 		body["status"] = statusFlag
 	}
+	if v, _ := cmd.Flags().GetString("no-code"); v != "" {
+		body["no_code_reason"] = v
+	}
 	if priorityChanged {
 		body["priority"] = priorityFlag
 	}
@@ -1758,6 +1815,19 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	if noStart {
 		body["suppress_run"] = true
 	}
+	for _, pair := range []struct{ flag, key string }{
+		{"blocked-by", "blocked_by"},
+		{"wake-at", "wake_at"},
+		{"wait-condition", "wait_condition"},
+		{"wait-probe", "wait_probe"},
+		{"wait-timeout", "wait_timeout"},
+		{"needs-human", "needs_human"},
+		{"no-code", "no_code_reason"},
+	} {
+		if v, _ := cmd.Flags().GetString(pair.flag); v != "" {
+			body[pair.key] = v
+		}
+	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update status: %w", err)
@@ -1770,6 +1840,123 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+// registerIssueCloseFlags wires `issue close`; shared with its tests so they
+// exercise the flag set that ships.
+func registerIssueCloseFlags(cmd *cobra.Command) {
+	cmd.Flags().String("outcome", "", "Close outcome: done, in_review, blocked, or cancelled (required)")
+	cmd.Flags().String("evidence", "", "Evidence body: PR link, test conclusion (decodes \\n; prefer --evidence-file for multi-line)")
+	cmd.Flags().Bool("evidence-stdin", false, "Read the evidence body from stdin")
+	cmd.Flags().String("evidence-file", "", "Read the evidence body from a UTF-8 file inside the working directory")
+	cmd.Flags().Bool("allow-external-file", false, "Allow --evidence-file to read a path outside the current working directory")
+	cmd.Flags().String("summary", "", "One-line conclusion placed above the evidence; for blocked it is the close.block_action (80 chars max)")
+	cmd.Flags().String("parent", "", "Comment ID to reply under; a comment-triggered run defaults to its trigger comment")
+	cmd.Flags().String("blocked-by", "", "Comma-separated issue identifiers this blocked issue is waiting on")
+	cmd.Flags().String("wake-at", "", "RFC3339 time to wake a blocked issue for another look")
+	cmd.Flags().String("wait-condition", "", "External condition a blocked issue is waiting on")
+	cmd.Flags().String("wait-probe", "", "How to check the wait condition")
+	cmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
+	cmd.Flags().String("needs-human", "", "Member UUID whose decision or acceptance the issue waits on")
+	cmd.Flags().String("no-code", "", "Why this issue carries no code delivery (docs, research). An agent's --outcome in_review without a linked open/merged PR is refused unless this is given")
+	cmd.Flags().String("verdict", "", "Acceptance verdict, reviewer only: pass (merges and closes)")
+	cmd.Flags().String("output", "json", "Output format: table or json")
+}
+
+// registerIssueHandoffFlags wires `issue handoff`; shared with its tests.
+func registerIssueHandoffFlags(cmd *cobra.Command) {
+	cmd.Flags().String("to", "", "reviewer, dispatcher, or an agent name/id (required)")
+	cmd.Flags().String("output", "table", "Output format: table or json")
+}
+
+var validCloseOutcomes = []string{"done", "in_review", "blocked", "cancelled"}
+
+func runIssueClose(cmd *cobra.Command, args []string) error {
+	outcome, _ := cmd.Flags().GetString("outcome")
+	outcome = strings.ToLower(strings.TrimSpace(outcome))
+	if outcome == "" {
+		return fmt.Errorf("--outcome is required: one of %s", strings.Join(validCloseOutcomes, ", "))
+	}
+	if !slices.Contains(validCloseOutcomes, outcome) {
+		return fmt.Errorf("--outcome %q is not a close outcome; use one of %s", outcome, strings.Join(validCloseOutcomes, ", "))
+	}
+	evidence, hasEvidence, err := resolveTextFlag(cmd, "evidence")
+	if err != nil {
+		return err
+	}
+	if !hasEvidence || strings.TrimSpace(evidence) == "" {
+		return fmt.Errorf("--evidence, --evidence-stdin, or --evidence-file is required: a close needs the PR link or test conclusion it rests on")
+	}
+	if err := guardLocalPathLinks(evidence, "evidence",
+		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` and drop the link."); err != nil {
+		return err
+	}
+	verdict, _ := cmd.Flags().GetString("verdict")
+	verdict = strings.ToLower(strings.TrimSpace(verdict))
+	if verdict != "" && verdict != "pass" {
+		return fmt.Errorf("--verdict only accepts pass; a failed acceptance is not a close — post it with `multica issue comment add <id> --verdict hold --content-file <path>`")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	body := map[string]any{"outcome": outcome, "evidence": evidence}
+	for _, pair := range []struct{ flag, key string }{
+		{"summary", "summary"},
+		{"parent", "parent_id"},
+		{"blocked-by", "blocked_by"},
+		{"wake-at", "wake_at"},
+		{"wait-condition", "wait_condition"},
+		{"wait-probe", "wait_probe"},
+		{"wait-timeout", "wait_timeout"},
+		{"needs-human", "needs_human"},
+		{"no-code", "no_code_reason"},
+	} {
+		if v, _ := cmd.Flags().GetString(pair.flag); strings.TrimSpace(v) != "" {
+			body[pair.key] = v
+		}
+	}
+	if verdict != "" {
+		body["verdict"] = verdict
+	}
+	if outcome == "done" || outcome == "in_review" {
+		refreshIssuePullRequests(ctx, client, issueRef.ID, issueRef.Display, outcome == "done" && verdict == "pass")
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/close", body, &result); err != nil {
+		return fmt.Errorf("close issue: %w", err)
+	}
+
+	status, _ := result["status"].(string)
+	fmt.Fprintf(os.Stderr, "Issue %s closed: status %s", issueRef.Display, status)
+	if merged, _ := result["merged"].(bool); merged {
+		fmt.Fprint(os.Stderr, ", PR merged")
+	}
+	fmt.Fprintln(os.Stderr, ".")
+	if woken, ok := result["woken"].([]any); ok {
+		for _, line := range woken {
+			fmt.Fprintf(os.Stderr, "  - %v\n", line)
+		}
+	}
+	if warnings, ok := result["warnings"].([]any); ok {
+		for _, line := range warnings {
+			fmt.Fprintf(os.Stderr, "  ! %v\n", line)
+		}
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }
 
 // ---------------------------------------------------------------------------
@@ -2265,8 +2452,16 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	verdict, _ := cmd.Flags().GetString("verdict")
+	if !hasContent && strings.TrimSpace(verdict) == "" {
+		return fmt.Errorf("--content, --content-stdin, --content-file, or --verdict is required")
+	}
 	if !hasContent {
-		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
+		content = ""
+	}
+	content, err = blockwait.AppendVerdict(content, verdict)
+	if err != nil {
+		return err
 	}
 	if err := guardLocalPathLinks(content, "comment body",
 		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` (repeatable) and drop the link."); err != nil {

@@ -7,12 +7,13 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { renderWithI18n } from "../test/i18n";
+import type { PinnedItem } from "@multica/core/types";
 import { AppSidebar } from "./app-sidebar";
 
 const { appForeground, chatSessions, chatStore, detail, deletePin, invitationApi, modules, navigation, pins, sidebarState, summary, workspaces } = vi.hoisted(() => ({
   appForeground: { current: true },
   sidebarState: { setOpenMobile: vi.fn() },
-  chatSessions: { current: [] as { id?: string; unread_count?: number }[] },
+  chatSessions: { current: [] as { id?: string; title?: string | null; unread_count?: number }[] },
   chatStore: { current: { activeSessionId: null as string | null, isOpen: false } },
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
@@ -35,8 +36,8 @@ const { appForeground, chatSessions, chatStore, detail, deletePin, invitationApi
         id: "pin-1",
         workspace_id: "ws-1",
         user_id: "user-1",
-        item_type: "issue" as const,
-        item_id: "issue-1",
+        item_type: "project" as PinnedItem["item_type"],
+        item_id: "project-1",
         position: 0,
         created_at: "2026-05-06T00:00:00Z",
       },
@@ -66,7 +67,7 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   Sidebar: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SidebarGroup: ({ children }: { children: React.ReactNode }) => <div data-testid="sidebar-group">{children}</div>,
   SidebarGroupContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -143,6 +144,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
     chat: () => "/acme/chat",
+    chatSession: (id: string) => `/acme/chat/${id}`,
     myIssues: () => "/acme/my-issues",
     issues: () => "/acme/issues",
     projects: () => "/acme/projects",
@@ -182,14 +184,19 @@ vi.mock("@multica/core/inbox/queries", () => ({
   unreadWorkspaceIds: (entries: { workspace_id: string; count: number }[]) =>
     new Set(entries.filter((s) => s.count > 0).map((s) => s.workspace_id)),
 }));
-vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   useCreateModeStore: { getState: () => ({ lastMode: "agent" }) },
   openCreateIssueWithPreference: vi.fn(),
 }));
 vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: () => false }));
 vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
-vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
+vi.mock("@multica/core/pins/mutations", () => ({
+  useDeletePin: () => ({ mutate: deletePin }),
+  useReorderPins: () => ({ mutate: vi.fn() }),
+}));
+vi.mock("@multica/core/chat/queries", () => ({
+  chatSessionsOptions: (wsId: string) => ({ queryKey: ["chat", wsId, "sessions"] }),
+}));
 vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey: ["pins"] }) }));
 vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: () => ({ queryKey: ["project"] }) }));
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -206,11 +213,11 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   },
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "pins") return { data: pins.current };
-    if (queryKey[0] === "issue") return detail.current;
+    if (queryKey[0] === "project") return detail.current;
     if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
     if (queryKey[0] === "workspaces" && queryKey[2] === "modules") return { data: modules.current };
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
-    if (queryKey[0] === "chat" && queryKey[2] === "sessions") return { data: chatSessions.current };
+    if (queryKey[0] === "chat" && queryKey[2] === "sessions") return { data: chatSessions.current, isSuccess: true };
     return { data: [] };
   },
   useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: invitationApi.invalidateQueries }),
@@ -239,18 +246,18 @@ describe("PinRow", () => {
   });
 
   it("renders loaded details", async () => {
-    detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
+    detail.current = { isPending: false, isError: false, data: { id: "project-1", title: "Keep this pin" }, error: null };
     render(<AppSidebar />);
     expect(await screen.findByText("Keep this pin")).toBeInTheDocument();
     expect(screen.queryByText("MUL-123 Keep this pin")).not.toBeInTheDocument();
   });
 
   it("does not also highlight the parent workspace nav for an active pin", async () => {
-    navigation.current.pathname = "/acme/issues/issue-1";
+    navigation.current.pathname = "/acme/projects/project-1";
     detail.current = {
       isPending: false,
       isError: false,
-      data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" },
+      data: { id: "project-1", title: "Keep this pin" },
       error: null,
     };
 
@@ -260,7 +267,7 @@ describe("PinRow", () => {
       "data-active",
       "true",
     );
-    expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+    expect(container.querySelector('button[data-href="/acme/projects"]')).not.toHaveAttribute("data-active");
   });
 
   it("keeps the parent route active until a hidden pin is expanded", () => {
@@ -268,21 +275,21 @@ describe("PinRow", () => {
     pins.current = Array.from({ length: 6 }, (_, index) => ({
       ...originalPins[0]!,
       id: `pin-${index + 1}`,
-      item_id: `issue-${index + 1}`,
+      item_id: `project-${index + 1}`,
       position: index,
     }));
-    navigation.current.pathname = "/acme/issues/issue-6";
+    navigation.current.pathname = "/acme/projects/project-6";
     detail.current = {
       isPending: false,
       isError: false,
-      data: { identifier: "MUL-123", title: "Pinned issue", status: "todo" },
+      data: { id: "project-6", title: "Pinned project" },
       error: null,
     };
 
     try {
       const { container } = renderWithI18n(<AppSidebar />);
-      const parent = () => container.querySelector('button[data-href="/acme/issues"]');
-      const lastPin = () => container.querySelector('button[data-href="/acme/issues/issue-6"]');
+      const parent = () => container.querySelector('button[data-href="/acme/projects"]');
+      const lastPin = () => container.querySelector('button[data-href="/acme/projects/project-6"]');
 
       expect(lastPin()).not.toBeInTheDocument();
       expect(parent()).toHaveAttribute("data-active", "true");
@@ -568,5 +575,54 @@ describe("Pending invitation self-heal", () => {
     }
     expect(invitationApi.accept).toHaveBeenCalledTimes(1);
     expect(invitationApi.decline).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The pinned group holds projects only. Issue pins still rank issues in their
+// lists and chat pins still fill the Chat list's pinned group — neither shows
+// here, and neither is auto-unpinned for being hidden. (DENE-876)
+describe("pinned group holds projects only (DENE-876)", () => {
+  const savedPins = pins.current;
+  const pinOf = (item_type: PinnedItem["item_type"], item_id: string, position: number) => ({
+    ...savedPins[0]!,
+    id: `pin-${item_id}`,
+    item_type,
+    item_id,
+    position,
+  });
+
+  beforeEach(() => {
+    deletePin.mockReset();
+    navigation.current.pathname = "/acme/issues";
+    detail.current = { isPending: false, isError: false, data: { id: "project-1", title: "Project pin" }, error: null };
+    chatSessions.current = [{ id: "chat-1", title: "Roadmap sync", unread_count: 0 }];
+    summary.current = [];
+    workspaces.current = [];
+    modules.current = undefined;
+  });
+
+  afterEach(() => {
+    pins.current = savedPins;
+  });
+
+  it("renders only the project pin next to issue, view and chat pins", () => {
+    pins.current = [
+      pinOf("chat", "chat-1", 0),
+      pinOf("issue", "issue-1", 1),
+      pinOf("view", "view-1", 2),
+      pinOf("project", "project-1", 3),
+    ];
+    const { container } = renderWithI18n(<AppSidebar />);
+    expect(screen.getByText("Project pin")).toBeInTheDocument();
+    expect(screen.queryByText("Roadmap sync")).not.toBeInTheDocument();
+    expect(container.querySelector('button[data-href="/acme/chat/chat-1"]')).not.toBeInTheDocument();
+    expect(container.querySelector('button[data-href="/acme/issues/issue-1"]')).not.toBeInTheDocument();
+    expect(deletePin).not.toHaveBeenCalled();
+  });
+
+  it("hides the pinned group when no project is pinned", () => {
+    pins.current = [pinOf("chat", "chat-1", 0), pinOf("issue", "issue-1", 1)];
+    renderWithI18n(<AppSidebar />);
+    expect(screen.queryByText("Pinned")).not.toBeInTheDocument();
   });
 });

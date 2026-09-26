@@ -383,6 +383,38 @@ func TestInReviewHandsOffToAgentWithoutMentioning(t *testing.T) {
 	}
 }
 
+func TestInReviewCoversADisabledReviewerWithAnotherFamily(t *testing.T) {
+	store := newFakeStore()
+	store.issue.Status = "in_review"
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-bulma"
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerAgent, ID: "a-gohan", Name: "孙悟饭"}
+	store.offRoster = map[string]Agent{
+		"a-gohan": {ID: "a-gohan", Name: "孙悟饭", Tier: "strongest"},
+	}
+
+	out, err := newRouter(store, &fakeJudge{}).Route(context.Background(), "ws", "issue-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Action != ActionHandedOff {
+		t.Fatalf("action = %q reason %q, want handed off", out.Action, out.Reason)
+	}
+	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-bulma-g" {
+		t.Fatalf("handoffs = %v, want the other strongest family and not the executor", store.handoffs)
+	}
+	if store.issue.Reviewer.ID != "a-bulma-g" {
+		t.Fatalf("reviewer = %s, want 布尔玛游戏", store.issue.Reviewer.ID)
+	}
+	if len(store.relays) != 1 || !store.relays[0].Designated || store.relays[0].OriginalID != "a-gohan" {
+		t.Fatalf("relay = %+v, want the designated original remembered", store.relays)
+	}
+	body := store.comments[KindHandoff][0]
+	if !strings.Contains(body, "已停用") || !strings.Contains(body, "布尔玛游戏") {
+		t.Fatalf("handoff comment does not explain the cover:\n%s", body)
+	}
+}
+
 // A person can still be put in the slot by hand, and old tickets already hold
 // one. That person gets pinged — and keeps their hands free: reassigning the
 // ticket to them is what made the status unmovable, because every later
@@ -430,6 +462,36 @@ func TestInReviewWithNoReviewNeededChangesNothing(t *testing.T) {
 	}
 	if out.Action != ActionNoop || store.wrote() || store.commentCount() != 0 || out.Mentioned {
 		t.Errorf("an issue marked as needing no review was still handled: %+v", out)
+	}
+}
+
+func TestPickAcceptanceSeatChangesFamily(t *testing.T) {
+	store := newFakeStore()
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-goku"
+	store.roster["特兰克斯"] = Agent{ID: "a-trunks", Name: "特兰克斯"}
+	store.roster["孙悟天"] = Agent{ID: "a-goten", Name: "孙悟天"}
+
+	ref, why, ok := newRouter(store, &fakeJudge{}).PickAcceptanceSeat(context.Background(), "ws", store.issue)
+	if !ok {
+		t.Fatalf("pick failed: %s", why)
+	}
+	if ref.ID == "a-goku" || ref.ID == "" {
+		t.Fatalf("reviewer = %+v, want a different seat", ref)
+	}
+	if ref.ID != "a-goten" && ref.ID != "a-trunks" {
+		t.Fatalf("reviewer = %+v, want 孙悟天 or 特兰克斯", ref)
+	}
+	if !strings.Contains(why, "同档换一家模型") && !strings.Contains(why, "下一档") {
+		t.Fatalf("why = %q, want the cross-family rule", why)
+	}
+
+	alone := newFakeStore()
+	alone.roster = map[string]Agent{"孙悟空": {ID: "a-goku", Name: "孙悟空"}}
+	alone.issue.AssigneeType = "agent"
+	alone.issue.AssigneeID = "a-goku"
+	if _, why, ok := newRouter(alone, &fakeJudge{}).PickAcceptanceSeat(context.Background(), "ws", alone.issue); ok {
+		t.Fatalf("a lone seat was accepted: %s", why)
 	}
 }
 

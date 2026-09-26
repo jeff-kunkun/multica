@@ -7,7 +7,10 @@ import enChat from "../../locales/en/chat.json";
 const updateMutate = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/paths", () => ({
-  useWorkspacePaths: () => ({ agentDetail: (id: string) => `/agents/${id}` }),
+  useWorkspacePaths: () => ({
+    agentDetail: (id: string) => `/agents/${id}`,
+    chatSession: (id: string) => `/acme/chat/${id}`,
+  }),
 }));
 
 vi.mock("@multica/core/chat/mutations", () => ({
@@ -21,18 +24,27 @@ vi.mock("@multica/core/chat", () => ({
     selector({ setActiveSession: vi.fn() }),
 }));
 
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (s: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: "user-1" } }),
+}));
+
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));
 
 vi.mock("../../navigation", () => ({
   AppLink: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
+  useNavigation: () => ({
+    getShareableUrl: (path: string) => `https://example.test${path}`,
+  }),
 }));
 
 import { ChatSessionHeader } from "./chat-session-header";
 
 const TEST_RESOURCES = { en: { chat: enChat } };
 const RENAME_LABEL = enChat.header.rename;
+const MORE_LABEL = enChat.list.row_actions_aria;
 const OUTSIDE_LABEL = "Outside control";
 
 const session: ChatSession = {
@@ -59,7 +71,10 @@ function startRename(): HTMLInputElement {
       <button type="button">{OUTSIDE_LABEL}</button>
     </>,
   );
-  fireEvent.click(screen.getByTitle(RENAME_LABEL));
+  // The title is plain text; rename opens only from the ⋯ menu.
+  expect(screen.queryByTitle(RENAME_LABEL)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: MORE_LABEL }));
+  fireEvent.click(screen.getByRole("menuitem", { name: RENAME_LABEL }));
   return screen.getByRole("textbox", { name: RENAME_LABEL });
 }
 

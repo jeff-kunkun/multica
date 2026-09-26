@@ -24,6 +24,12 @@ const routeTimeout = 45 * time.Second
 
 const routingModelListTimeout = 20 * time.Second
 
+type skipIssueRoutingKey struct{}
+
+func withSkipIssueRouting(ctx context.Context) context.Context {
+	return context.WithValue(ctx, skipIssueRoutingKey{}, true)
+}
+
 // RouteIssueAsync is the hook. Both call sites — issue creation and status
 // change — call this one function; adding routing behaviour for another status
 // is a row in the routing state table, never a third hook.
@@ -38,6 +44,9 @@ const routingModelListTimeout = 20 * time.Second
 // same moment, which is exactly the race the conditional writes and the
 // one-comment-per-kind index exist to absorb.
 func (h *Handler) RouteIssueAsync(r *http.Request, workspaceID, issueID string) {
+	if r.Context().Value(skipIssueRoutingKey{}) == true {
+		return
+	}
 	h.routeIssueDetached(logger.RequestAttrs(r), workspaceID, issueID)
 }
 
@@ -50,7 +59,15 @@ func (h *Handler) RouteIssueAsync(r *http.Request, workspaceID, issueID string) 
 // and the completion callback racing — is one decision, made twice, not two
 // implementations.
 func (h *Handler) routeIssueDetached(attrs []any, workspaceID, issueID string) {
-	if h.Routing == nil || workspaceID == "" || issueID == "" {
+	if workspaceID == "" || issueID == "" {
+		return
+	}
+	if h.Routing == nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), routeTimeout)
+			defer cancel()
+			h.ensureAcceptanceRunning(ctx, workspaceID, issueID)
+		}()
 		return
 	}
 	go func() {
@@ -60,18 +77,16 @@ func (h *Handler) routeIssueDetached(attrs []any, workspaceID, issueID string) {
 		if err != nil {
 			slog.Warn("routing pass failed",
 				append(attrs, "workspace_id", workspaceID, "issue_id", issueID, "error", err)...)
-			return
+		} else if outcome.Action != routing.ActionSkipped && outcome.Action != routing.ActionNoop {
+			slog.Info("routing pass",
+				append(attrs,
+					"workspace_id", workspaceID,
+					"issue_id", issueID,
+					"state", string(outcome.State),
+					"action", string(outcome.Action),
+					"mentioned", outcome.Mentioned)...)
 		}
-		if outcome.Action == routing.ActionSkipped || outcome.Action == routing.ActionNoop {
-			return
-		}
-		slog.Info("routing pass",
-			append(attrs,
-				"workspace_id", workspaceID,
-				"issue_id", issueID,
-				"state", string(outcome.State),
-				"action", string(outcome.Action),
-				"mentioned", outcome.Mentioned)...)
+		h.ensureAcceptanceRunning(ctx, workspaceID, issueID)
 	}()
 }
 

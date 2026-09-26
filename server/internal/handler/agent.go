@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/coderesolve"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/quotarelay"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -30,6 +31,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
@@ -48,24 +50,6 @@ const (
 type AgentConversationStarter struct {
 	Label  string `json:"label"`
 	Prompt string `json:"prompt"`
-}
-
-const (
-	maxAgentSwitchableModels          = 32
-	maxAgentSwitchableModelIDLength   = 200
-	maxAgentSwitchableModelNoteLength = 200
-)
-
-// AgentSwitchableModel is one display-only entry in an agent's model
-// lineup (kun fork, DENE-200). Dispatch never reads it: the run still uses
-// agent.model on agent.runtime_id. Model ids may belong to another CLI, so
-// they are not validated against the runtime catalog.
-type AgentSwitchableModel struct {
-	Model string `json:"model"`
-	// Role is "default" (first choice), "fallback" (ordered degrade chain)
-	// or "batch" (borrowable for batch work).
-	Role string `json:"role"`
-	Note string `json:"note"`
 }
 
 type AgentResponse struct {
@@ -95,8 +79,6 @@ type AgentResponse struct {
 	// ConversationStarters are optional, agent-specific first-turn suggestions. An
 	// empty list tells clients to render their localized fallback prompts.
 	ConversationStarters []AgentConversationStarter `json:"conversation_starters"`
-	// SwitchableModels is the display-only model lineup; empty when unset.
-	SwitchableModels []AgentSwitchableModel `json:"switchable_models"`
 	// SystemKey identifies a product-defined agent (e.g. "mika"). Empty for
 	// every user- or template-created agent. The UI keys "this is maintained
 	// by Multica" off this rather than off the display name, which owners may
@@ -177,8 +159,19 @@ type AgentResponse struct {
 	// specialisations, and does not cancel running tasks — it is simply
 	// not selected for automatic dispatch, not woken by assignment, and
 	// does not claim new runs.
-	WorkEnabled bool   `json:"work_enabled"`
-	Model       string `json:"model"`
+	WorkEnabled bool `json:"work_enabled"`
+	// WorkPause says why the platform turned the seat off (DENE-870), taken
+	// from its open quota breaker. Absent for a seat a person turned off.
+	WorkPause *AgentWorkPause `json:"work_pause,omitempty"`
+	// DoorbellEnabled (DENE-808): when true, a member who may not invoke this
+	// agent rings a doorbell instead of being refused — the owner gets an
+	// approval request in their inbox, and the agent is listed to members
+	// so they can @ it. Default false: an owner opts in per agent, so the
+	// private-agent guarantees (not listed, not enumerable) hold untouched
+	// until they do. When false, the refusal stays a plain
+	// invocation_not_allowed.
+	DoorbellEnabled bool   `json:"doorbell_enabled"`
+	Model           string `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
@@ -270,14 +263,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		}
 	}
 
-	switchableModels := []AgentSwitchableModel{}
-	if len(a.SwitchableModels) > 0 {
-		if err := json.Unmarshal(a.SwitchableModels, &switchableModels); err != nil {
-			slog.Warn("failed to unmarshal agent switchable_models", "agent_id", uuidToString(a.ID), "error", err)
-			switchableModels = []AgentSwitchableModel{}
-		}
-	}
-
 	// plan_limits is the daemon's snapshot for THIS agent's own CLI account,
 	// reported only for agents bound to a numbered account (DENE-715). NULL
 	// means "nothing agent-specific to say", and readers then fall back to the
@@ -311,7 +296,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Description:              a.Description,
 		Instructions:             a.Instructions,
 		ConversationStarters:     conversationStarters,
-		SwitchableModels:         switchableModels,
 		SystemKey:                a.SystemKey.String,
 		SystemInstructions:       systemInstructionsFor(a),
 		ParentAgentID:            uuidToString(a.ParentAgentID),
@@ -331,6 +315,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks:       a.MaxConcurrentTasks,
 		AutoRetryEnabled:         a.AutoRetryEnabled,
 		WorkEnabled:              a.WorkEnabled,
+		DoorbellEnabled:          a.DoorbellEnabled,
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
@@ -545,6 +530,21 @@ func (h *Handler) syncInheritedAgentRuntimeProfiles(ctx context.Context, parentA
 	return children
 }
 
+// followsExecutionConfig reports whether a following specialisation also takes
+// its base role's execution config — custom_env, custom_args, mcp_config
+// (DENE-854). Only within one owner: env and MCP config carry the base role's
+// credentials, and a member who specialises someone else's public base role
+// must not receive them through their own env reveal. Mirrors the owner guard
+// in SyncInheritedAgentRuntimeProfiles; a NULL owner never matches.
+func followsExecutionConfig(childOwner, parentOwner pgtype.UUID) bool {
+	return childOwner.Valid && parentOwner.Valid && childOwner == parentOwner
+}
+
+// executionConfigFields are the UpdateAgent fields that belong to the
+// execution config a following specialisation takes from its base role.
+// custom_env is not listed: it has its own endpoint (UpdateAgentEnv).
+var executionConfigFields = []string{"custom_args", "mcp_config"}
+
 // publishAgentUpdate fans one agent row out to the workspace as an
 // agent:updated event. Used for the specialisations a base-role edit cascaded
 // into: their rows changed while the request's actor was editing the base role,
@@ -741,13 +741,22 @@ type AgentTaskResponse struct {
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
-	IssueID              string                 `json:"issue_id"`
-	WorkspaceID          string                 `json:"workspace_id"`
-	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
-	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
+	ID                    string `json:"id"`
+	AgentID               string `json:"agent_id"`
+	RuntimeID             string `json:"runtime_id"`
+	WorkThreadID          string `json:"work_thread_id,omitempty"`
+	ContextGeneration     int32  `json:"context_generation,omitempty"`
+	ContextMessageLimit   int32  `json:"context_message_limit,omitempty"`
+	ContextTokenBudget    int32  `json:"context_token_budget,omitempty"`
+	ContinuityBreakReason string `json:"continuity_break_reason,omitempty"`
+	IssueID               string `json:"issue_id"`
+	WorkspaceID           string `json:"workspace_id"`
+	WorkspaceSlug         string `json:"workspace_slug,omitempty"`
+	IssueIdentifier       string `json:"issue_identifier,omitempty"`
+	// CanonicalBranch is the issue's canonical delivery branch (DENE-820).
+	// A worktree-mode daemon continues it even when another seat created
+	// it, so a rerun never opens a second delivery line by accident.
+	CanonicalBranch      string                 `json:"canonical_branch,omitempty"`
 	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
 	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
 	// daemon renders as MCP tools for this task. Resolved at claim time so
@@ -833,8 +842,12 @@ type AgentTaskResponse struct {
 	// and sends a short continue prompt instead of re-injecting the original
 	// task. omitempty keeps it off the wire for every other claim and for old
 	// daemons.
-	ContinueInterruptedSession bool   `json:"continue_interrupted_session,omitempty"`
-	WorkDir                    string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
+	ContinueInterruptedSession bool `json:"continue_interrupted_session,omitempty"`
+	// ContinueAfterTimeLimit marks a continue-retry whose parent stopped on
+	// the workspace time limit (DENE-857). The daemon's continue prompt then
+	// tells the agent to close out finished work and split what remains.
+	ContinueAfterTimeLimit bool   `json:"continue_after_time_limit,omitempty"`
+	WorkDir                string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
 	// the UI. For standard tasks it strips the daemon's workspaces root while
 	// preserving either the legacy or readable workspace/task segments; for local_directory
@@ -1322,6 +1335,11 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),
 		RuntimeID:              uuidToString(t.RuntimeID),
+		WorkThreadID:           uuidToString(t.WorkThreadID),
+		ContextGeneration:      t.ContextGeneration,
+		ContextMessageLimit:    t.ContextMessageLimit,
+		ContextTokenBudget:     t.ContextTokenBudget,
+		ContinuityBreakReason:  textToString(t.ContinuityBreakReason),
 		IssueID:                uuidToString(t.IssueID),
 		WorkspaceID:            workspaceID,
 		Status:                 t.Status,
@@ -1660,15 +1678,21 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
 		return
 	}
+	var passAgents map[string]struct{}
+	if actorType == "member" {
+		passAgents = h.activePassAgentIDs(r.Context(), workspaceID, actorID)
+	}
+	pauses := h.workPauses(r.Context(), parseUUID(workspaceID))
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
 		targets := targetsByAgent[uuidToString(a.ID)]
 		if actorType == "member" {
-			if !memberAllowedToViewAgent(a, targets, actorID, member.Role) {
+			if !memberAllowedToViewAgentWithPasses(a, targets, actorID, member.Role, passAgents) {
 				continue
 			}
 		}
 		resp := h.agentToResponse(a)
+		applyWorkPause(&resp, a, pauses)
 		// The map is keyed by runtime, and active + archived agents may share one.
 		// Keep the archived guard here as well as in the loader so an active sibling
 		// cannot leak its projection onto an archived response.
@@ -1733,6 +1757,9 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := h.agentToResponse(agent)
+	if !agent.WorkEnabled {
+		applyWorkPause(&resp, agent, h.workPauses(r.Context(), agent.WorkspaceID))
+	}
 	// resp is a slice, not a pointer, so the enrichment must write through the
 	// slice element it is handed: taking the address of the local variable here
 	// would fill a copy and serve an empty parent_agent_name.
@@ -1895,35 +1922,6 @@ func normaliseAgentConversationStarters(starters []AgentConversationStarter) ([]
 		}
 		if utf8.RuneCountInString(item.Prompt) > maxAgentConversationStarterLength {
 			return nil, fmt.Errorf("conversation_starters[%d].prompt must be %d characters or fewer", i, maxAgentConversationStarterLength)
-		}
-		normalised = append(normalised, item)
-	}
-	return normalised, nil
-}
-
-func normaliseAgentSwitchableModels(models []AgentSwitchableModel) ([]AgentSwitchableModel, error) {
-	if len(models) > maxAgentSwitchableModels {
-		return nil, fmt.Errorf("switchable_models must contain at most %d items", maxAgentSwitchableModels)
-	}
-
-	normalised := make([]AgentSwitchableModel, 0, len(models))
-	for i, item := range models {
-		item.Model = strings.TrimSpace(item.Model)
-		item.Role = strings.TrimSpace(item.Role)
-		item.Note = strings.TrimSpace(item.Note)
-		if item.Model == "" {
-			return nil, fmt.Errorf("switchable_models[%d].model is required", i)
-		}
-		switch item.Role {
-		case "default", "fallback", "batch":
-		default:
-			return nil, fmt.Errorf("switchable_models[%d].role must be one of default, fallback, batch", i)
-		}
-		if utf8.RuneCountInString(item.Model) > maxAgentSwitchableModelIDLength {
-			return nil, fmt.Errorf("switchable_models[%d].model must be %d characters or fewer", i, maxAgentSwitchableModelIDLength)
-		}
-		if utf8.RuneCountInString(item.Note) > maxAgentSwitchableModelNoteLength {
-			return nil, fmt.Errorf("switchable_models[%d].note must be %d characters or fewer", i, maxAgentSwitchableModelNoteLength)
 		}
 		normalised = append(normalised, item)
 	}
@@ -2203,6 +2201,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		createdModel = parentAgent.Model
 		createdThinkingLevel = parentAgent.ThinkingLevel
 		createdServiceTier = parentAgent.ServiceTier
+		if followsExecutionConfig(parseUUID(ownerID), parentAgent.OwnerID) {
+			ce = parentAgent.CustomEnv
+			ca = parentAgent.CustomArgs
+			mc = parentAgent.McpConfig
+		}
 	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -2329,12 +2332,9 @@ type UpdateAgentRequest struct {
 	Description          *string                     `json:"description"`
 	Instructions         *string                     `json:"instructions"`
 	ConversationStarters *[]AgentConversationStarter `json:"conversation_starters"`
-	// SwitchableModels replaces the display-only lineup wholesale when
-	// present; `[]` clears it, omitted or null preserves it.
-	SwitchableModels *[]AgentSwitchableModel `json:"switchable_models"`
-	AvatarURL        *string                 `json:"avatar_url"`
-	RuntimeID        *string                 `json:"runtime_id"`
-	RuntimeConfig    any                     `json:"runtime_config"`
+	AvatarURL            *string                     `json:"avatar_url"`
+	RuntimeID            *string                     `json:"runtime_id"`
+	RuntimeConfig        any                         `json:"runtime_config"`
 	// custom_env is intentionally NOT updatable through this endpoint.
 	// Use `PUT /api/agents/{id}/env` for env changes — that path admits
 	// the agent owner or a workspace owner/admin, denies agent actors,
@@ -2390,6 +2390,9 @@ type UpdateAgentRequest struct {
 	// WorkEnabled is omitted-preserves / present-sets, same contract as
 	// AutoRetryEnabled (DENE-714).
 	WorkEnabled *bool `json:"work_enabled"`
+	// DoorbellEnabled (DENE-808): omitted-preserves / present-sets. Only the
+	// agent owner may change it.
+	DoorbellEnabled *bool `json:"doorbell_enabled"`
 	// ParentAgentID re-parents this agent (DENE-301): a non-empty value attaches
 	// it to a base role, and an explicitly empty string detaches it. The field
 	// is a tri-state like thinking_level — omitted preserves, `""` clears, a
@@ -2698,6 +2701,28 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "this agent follows its base role's runtime; pass runtime_inherited=false to give it its own runtime configuration")
 		return
 	}
+	// The execution config follows too, within one owner (DENE-854). Refused
+	// the same way as a runtime field: the next base-role edit would overwrite
+	// it, so accepting the write would only lose it later.
+	executionConfigTouched := false
+	for _, field := range executionConfigFields {
+		if _, ok := rawFields[field]; ok {
+			executionConfigTouched = true
+			break
+		}
+	}
+	if executionConfigTouched && inheritRuntime && parentAfter.Valid {
+		parentRow, err := h.Queries.GetAgent(r.Context(), parentAfter)
+		if err != nil {
+			slog.Warn("update agent: load base role failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent")
+			return
+		}
+		if followsExecutionConfig(existing.OwnerID, parentRow.OwnerID) {
+			writeError(w, http.StatusBadRequest, "this agent follows its base role's custom_args and mcp_config; edit the base role, or pass runtime_inherited=false to give it its own configuration")
+			return
+		}
+	}
 	if !parentAfter.Valid && inheritRuntime {
 		// Detaching. SetAgentParentAgent clears the flag with the parent, and the
 		// materialised profile stays behind, so the agent keeps exactly what it
@@ -2727,20 +2752,18 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		encoded, _ := json.Marshal(conversationStarters)
 		params.ConversationStarters = encoded
 	}
-	if req.SwitchableModels != nil {
-		switchableModels, err := normaliseAgentSwitchableModels(*req.SwitchableModels)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		encoded, _ := json.Marshal(switchableModels)
-		params.SwitchableModels = encoded
-	}
 	if req.AutoRetryEnabled != nil {
 		params.AutoRetryEnabled = pgtype.Bool{Bool: *req.AutoRetryEnabled, Valid: true}
 	}
 	if req.WorkEnabled != nil {
 		params.WorkEnabled = pgtype.Bool{Bool: *req.WorkEnabled, Valid: true}
+	}
+	if req.DoorbellEnabled != nil {
+		if uuidToString(existing.OwnerID) != requestUserID(r) && existing.DoorbellEnabled != *req.DoorbellEnabled {
+			writeError(w, http.StatusForbidden, "only the agent owner can change the doorbell setting")
+			return
+		}
+		params.DoorbellEnabled = pgtype.Bool{Bool: *req.DoorbellEnabled, Valid: true}
 	}
 	if req.AvatarURL != nil {
 		avatarURL, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, existing.AvatarUrl.String)
@@ -3098,6 +3121,25 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A balance breaker has no timer: a person turning the seat back on after
+	// topping up is its recovery. Tickets it handed to other seats stay there.
+	if req.WorkEnabled != nil && *req.WorkEnabled && !existing.WorkEnabled {
+		for _, seatID := range append([]pgtype.UUID{updated.ID}, agentIDs(toggledSpecialisations)...) {
+			if _, err := h.Queries.CloseManualQuotaBreakers(r.Context(), seatID); err != nil {
+				slog.Warn("close balance breaker failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(seatID))...)
+			}
+		}
+	}
+	if req.WorkEnabled != nil && *req.WorkEnabled && !existing.WorkEnabled && h.TaskService != nil {
+		if err := h.TaskService.ReclaimDesignatedReviews(r.Context(), updated.ID); err != nil {
+			slog.Warn("reclaim designated reviewer failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		}
+		for _, spec := range toggledSpecialisations {
+			if err := h.TaskService.ReclaimDesignatedReviews(r.Context(), spec.ID); err != nil {
+				slog.Warn("reclaim designated reviewer failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(spec.ID))...)
+			}
+		}
+	}
 
 	// Nullable runtime overrides: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
@@ -3165,9 +3207,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// exclusive by construction, because a row with a parent is not a base role.
 	//
 	// Run after the parent/flag writes so the copy is taken from the row this
-	// request just committed. Only a touched runtime field can have moved a base
-	// role's profile, so an unrelated edit (a rename, a prompt) does not walk
-	// the children.
+	// request just committed. Only a touched runtime or execution-config field can
+	// have moved a base role's profile, so an unrelated edit (a rename, a
+	// prompt) does not walk the children.
 	var syncedChildren []db.Agent
 	switch {
 	case updated.RuntimeInherited && updated.ParentAgentID.Valid:
@@ -3180,7 +3222,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				updated = child
 			}
 		}
-	case !updated.ParentAgentID.Valid && runtimeFieldsTouched:
+	case !updated.ParentAgentID.Valid && (runtimeFieldsTouched || executionConfigTouched):
 		syncedChildren = h.syncInheritedAgentRuntimeProfiles(r.Context(), updated.ID, r)
 	}
 
@@ -4119,4 +4161,60 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func agentIDs(agents []db.Agent) []pgtype.UUID {
+	ids := make([]pgtype.UUID, 0, len(agents))
+	for _, agent := range agents {
+		ids = append(ids, agent.ID)
+	}
+	return ids
+}
+
+// AgentWorkPause is the platform's reason a seat is not taking work.
+// RecoverAt is empty when nothing but a person can bring it back — a
+// balance breaker waits for a top-up and a manual re-enable.
+type AgentWorkPause struct {
+	Reason    string `json:"reason"`
+	Detail    string `json:"detail,omitempty"`
+	Condition string `json:"condition,omitempty"`
+	RecoverAt string `json:"recover_at,omitempty"`
+	OpenedAt  string `json:"opened_at"`
+}
+
+// workPauses maps agent id to its newest open breaker. A lookup failure
+// only drops the explanation, never the agent list.
+func (h *Handler) workPauses(ctx context.Context, workspaceID pgtype.UUID) map[string]AgentWorkPause {
+	rows, err := h.Queries.ListOpenQuotaBreakers(ctx, workspaceID)
+	if err != nil {
+		slog.Warn("list open quota breakers failed", "error", err)
+		return nil
+	}
+	out := make(map[string]AgentWorkPause, len(rows))
+	for _, row := range rows {
+		id := uuidToString(row.AgentID)
+		if _, seen := out[id]; seen {
+			continue
+		}
+		pause := AgentWorkPause{
+			Reason:    row.Reason,
+			Detail:    redact.Text(clipRunes(strings.TrimSpace(row.Detail), 300)),
+			Condition: row.RecoverCondition,
+			OpenedAt:  timestampToString(row.OpenedAt),
+		}
+		if !quotarelay.IsManualRecovery(quotarelay.Kind(row.Reason)) {
+			pause.RecoverAt = timestampToString(row.RecoverAt)
+		}
+		out[id] = pause
+	}
+	return out
+}
+
+func applyWorkPause(resp *AgentResponse, agent db.Agent, pauses map[string]AgentWorkPause) {
+	if agent.WorkEnabled {
+		return
+	}
+	if pause, ok := pauses[uuidToString(agent.ID)]; ok {
+		resp.WorkPause = &pause
+	}
 }

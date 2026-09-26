@@ -71,6 +71,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
 	b.WriteString(buildReplaySkippedBlock(opts.replaySkippedNotice))
 	b.WriteString(buildStaleLocalBaselineBlock(opts.staleLocalBaselineNotice))
+	b.WriteString(buildDeliveryBranchBlock(opts.deliveryBranch, opts.deliveryUpstream))
 	b.WriteString(buildDependencyInstallBlock(opts.dependencyInstallCommand))
 	b.WriteString(buildSparseCheckoutBlock(task.CheckoutPaths))
 	if task.PriorSessionResumeUnavailable {
@@ -90,6 +91,8 @@ type promptOpts struct {
 	worktreeReplayConflicts  []string
 	replaySkippedNotice      string
 	staleLocalBaselineNotice string
+	deliveryBranch           string
+	deliveryUpstream         string
 	dependencyInstallCommand string
 }
 
@@ -179,6 +182,29 @@ func buildReplaySkippedBlock(notice string) string {
 		return ""
 	}
 	return "## Local edits were not replayed\n\n" + strings.TrimSpace(notice) + "\n\n"
+}
+
+// WithDeliveryBranch names the task branch of a local_directory worktree run
+// and the one legal way to pick up newer code on it. Finalize delivers any end
+// state it can prove (DENE-874); this keeps runs from needing that.
+func WithDeliveryBranch(branch, upstream string) PromptOption {
+	return func(o *promptOpts) {
+		o.deliveryBranch = strings.TrimSpace(branch)
+		o.deliveryUpstream = strings.TrimSpace(upstream)
+	}
+}
+
+func buildDeliveryBranchBlock(branch, upstream string) string {
+	if branch == "" {
+		return ""
+	}
+	target := "origin/<main branch>"
+	if upstream != "" {
+		target = upstream
+	}
+	return "## Your delivery branch\n\n" +
+		"You are on `" + branch + "`: this run delivers whatever is committed on it when you finish. " +
+		"To work on newer code, run `git merge " + target + "` on this branch — do not create or switch to another branch.\n\n"
 }
 
 func buildStaleLocalBaselineBlock(notice string) string {
@@ -464,7 +490,11 @@ func buildPromptBody(task Task, provider string) string {
 // shouldContinueInterruptedSession requires a live PriorSessionID.
 func buildInterruptedRetryPrompt(task Task, provider string) string {
 	var b strings.Builder
-	b.WriteString("Your previous turn was interrupted by a transient error before it finished. Continue from where you left off in this same session. Do not restart the task, and do not re-read or re-send the original request unless you no longer have that context.\n\n")
+	if task.ContinueAfterTimeLimit {
+		b.WriteString("Your previous turn stopped because it reached the workspace task time limit. The work was not rejected. Continue in this same session and the same working directory. First close out the progress already on disk so it is not lost. Then split whatever is still unfinished into smaller pieces, and finish the next piece in this turn. Do not restart the task from scratch.\n\n")
+	} else {
+		b.WriteString("Your previous turn was interrupted by a transient error before it finished. Continue from where you left off in this same session. Do not restart the task, and do not re-read or re-send the original request unless you no longer have that context.\n\n")
+	}
 	if task.ChatSessionID != "" {
 		return b.String()
 	}

@@ -1,8 +1,5 @@
 "use client";
-import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-
-import { issueStatusCategory } from "@multica/core/issues";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
@@ -19,7 +16,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Layers,
+import {
   ChevronDown,
   ChevronRight,
   LogOut,
@@ -34,7 +31,6 @@ import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
-import { StatusIcon } from "../issues/components/status-icon";
 import {
   openAlignIssue,
   openCreateIssueWithPreference,
@@ -63,11 +59,6 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useAuthStore } from "@multica/core/auth";
-import { issueViewDetailOptions } from "@multica/core/issue-views/queries";
-import {
-  issueViewContainerKey,
-  useActiveIssueViewStore,
-} from "@multica/core/issue-views/active-view-store";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys, moduleVisibilityOptions } from "@multica/core/workspace/queries";
 import { canAccessModule, navItemModule } from "@multica/core/workspace";
@@ -81,7 +72,6 @@ import { api, ApiError } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
-import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
@@ -179,7 +169,7 @@ const NAV_ITEM_CLASS_NAME =
 
 /**
  * Presentational pin row. The `label` and `iconNode` are computed by the
- * parent `PinRow` from cached issue / project detail queries — keeping
+ * parent `PinRow` from the cached project detail query — keeping
  * this component dumb means the dnd-kit / navigation wiring lives in
  * one place and the data flow is explicit.
  */
@@ -190,8 +180,6 @@ function SortablePinItem({
   onUnpin,
   label,
   iconNode,
-  onNavigate,
-  isActiveOverride,
 }: {
   pin: PinnedItem;
   href: string;
@@ -199,10 +187,6 @@ function SortablePinItem({
   onUnpin: () => void;
   label: string;
   iconNode: React.ReactNode;
-  /** Runs on a real click (not a drag-release) before navigation. */
-  onNavigate?: () => void;
-  /** Overrides the plain path comparison (view pins carry extra state). */
-  isActiveOverride?: boolean;
 }) {
   const { t } = useT("layout");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pin.id });
@@ -213,7 +197,7 @@ function SortablePinItem({
   }, [isDragging]);
 
   const style = { transform: CSS.Transform.toString(transform), transition };
-  const isActive = isActiveOverride ?? pathname === href;
+  const isActive = pathname === href;
 
   return (
     <SidebarMenuItem
@@ -231,9 +215,7 @@ function SortablePinItem({
           if (wasDragged.current) {
             wasDragged.current = false;
             event.preventDefault();
-            return;
           }
-          onNavigate?.();
         }}
         className={cn(
           "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
@@ -268,14 +250,10 @@ function SortablePinItem({
 }
 
 /**
- * Smart wrapper that resolves a pin's display data (label + status/icon)
- * from the issue / project detail query cache. Both queries are declared
- * unconditionally with `enabled` gates so the hook order stays stable
- * regardless of `pin.item_type`.
+ * Resolves a project pin's display data from the project detail cache.
  *
  * Loading: render a flat skeleton so the sidebar height doesn't jump.
- * Missing (deleted item / 404): render nothing — the row hides itself
- * until the user unpins manually or a server-side cascade catches up.
+ * Missing (deleted project / 404): auto-unpin; any other error hides the row.
  */
 function PinRow({
   pin,
@@ -290,109 +268,16 @@ function PinRow({
   onUnpin: () => void;
   wsId: string;
 }) {
-  const isIssue = pin.item_type === "issue";
-  const statusCatalog = useIssueStatuses(wsId);
-  const isView = pin.item_type === "view";
-  const p = useWorkspacePaths();
-  const setActiveView = useActiveIssueViewStore((s) => s.setActive);
-  const issueQuery = useQuery({
-    ...issueDetailOptions(wsId, pin.item_id),
-    enabled: isIssue,
-  });
-  const projectQuery = useQuery({
-    ...projectDetailOptions(wsId, pin.item_id),
-    enabled: pin.item_type === "project",
-  });
-  const viewQuery = useQuery({
-    ...issueViewDetailOptions(wsId, pin.item_id),
-    enabled: isView,
-  });
+  const projectQuery = useQuery(projectDetailOptions(wsId, pin.item_id));
 
   const triggeredRef = useRef(false);
   useEffect(() => {
-    // Views are exempt from 404-auto-unpin: an installed desktop client
-    // talking to an older backend without the view endpoints sees 404 for
-    // every view pin — auto-unpinning would permanently delete them all.
-    // A deleted view's row simply hides instead.
-    if (isView) return;
-    const err = isIssue ? issueQuery.error : projectQuery.error;
+    const err = projectQuery.error;
     if (err instanceof ApiError && err.status === 404 && !triggeredRef.current) {
       triggeredRef.current = true;
       onUnpin();
     }
-  }, [isIssue, isView, issueQuery.error, onUnpin, projectQuery.error]);
-
-  const activeViewByContainer = useActiveIssueViewStore((s) => s.active);
-  if (isView) {
-    if (viewQuery.isPending) return <PinSkeleton />;
-    if (viewQuery.isError || !viewQuery.data) return null;
-    const view = viewQuery.data;
-    // One resolved scope drives the path AND the container key so an
-    // unrecognised scope_type from a newer backend degrades coherently.
-    const scopeType: "workspace" | "my" | "project" =
-      view.scope_type === "my"
-        ? "my"
-        : view.scope_type === "project" && view.scope_id
-          ? "project"
-          : "workspace";
-    const viewPath =
-      scopeType === "my"
-        ? p.myIssues()
-        : scopeType === "project"
-          ? p.projectDetail(view.scope_id!)
-          : p.issues();
-    const containerKey = issueViewContainerKey(wsId, {
-      scope_type: scopeType,
-      scope_id: scopeType === "project" ? view.scope_id : null,
-    });
-    return (
-      <SortablePinItem
-        pin={pin}
-        // ?view= keeps a web reload on the view for the surfaces that mount
-        // the URL-sync hook (/issues, /my-issues). Project pages don't sync
-        // yet — there the query is inert and reload falls back to the plain
-        // page; click-through activation still works everywhere.
-        href={`${viewPath}?view=${view.id}`}
-        pathname={pathname}
-        onUnpin={onUnpin}
-        label={view.name}
-        iconNode={<Layers className="!size-3.5 shrink-0" />}
-        // Active only when this exact view is open on its surface — the
-        // path alone also matches the plain tab.
-        isActiveOverride={
-          pathname === viewPath && activeViewByContainer[containerKey] === view.id
-        }
-        onNavigate={() => setActiveView(containerKey, view.id)}
-      />
-    );
-  }
-
-  if (isIssue) {
-    if (issueQuery.isPending) return <PinSkeleton />;
-    if (issueQuery.isError || !issueQuery.data) return null;
-    const issue = issueQuery.data;
-    const label = issue.title;
-    const iconNode = (
-      /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
-      <StatusIcon
-        status={issue.status}
-        color={statusCatalog.colorOf(issue.status)}
-        icon={statusCatalog.iconOf(issue.status)}
-        category={issueStatusCategory(issue) ?? undefined}
-        className="!size-3.5 shrink-0"
-      />
-    );
-    return (
-      <SortablePinItem
-        pin={pin}
-        href={href}
-        pathname={pathname}
-        onUnpin={onUnpin}
-        label={label}
-        iconNode={iconNode}
-      />
-    );
-  }
+  }, [onUnpin, projectQuery.error]);
 
   if (projectQuery.isPending) return <PinSkeleton />;
   if (projectQuery.isError || !projectQuery.data) return null;
@@ -522,17 +407,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
-  const getPinHref = useCallback(
-    (pin: PinnedItem) =>
-      pin.item_type === "issue"
-        ? p.issueDetail(pin.item_id)
-        : pin.item_type === "project"
-          ? p.projectDetail(pin.item_id)
-          // Views know their target only after their detail loads — the row
-          // resolves its own href; this placeholder never renders as a link.
-          : "",
-    [p],
-  );
+  const getPinHref = useCallback((pin: PinnedItem) => p.projectDetail(pin.item_id), [p]);
 
   // Local presentational copy of pinnedItems for drop-animation stability.
   // Follows TQ at rest; frozen during a drag gesture so a mid-drag cache
@@ -550,12 +425,18 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   useEffect(() => {
     setLocalPinnedWsId(wsId ?? null);
   }, [wsId]);
-  const visiblePinned = localPinnedWsId === (wsId ?? null) ? localPinned : EMPTY_PINS;
+  // The sidebar's pinned group holds projects only (DENE-876). Issue pins
+  // still rank issues to the top of their lists and chat pins still fill the
+  // Chat list's own pinned group; they just don't surface here.
+  const visiblePinned = useMemo(
+    () =>
+      localPinnedWsId === (wsId ?? null)
+        ? localPinned.filter((pin) => pin.item_type === "project")
+        : EMPTY_PINS,
+    [localPinned, localPinnedWsId, wsId],
+  );
   const pinsExpanded = expandedPinsWorkspaceId === wsId;
   const displayedPinned = pinsExpanded ? visiblePinned : visiblePinned.slice(0, PINNED_PREVIEW_LIMIT);
-  // View pins are absent here (their href resolves async): while a view
-  // pin is active the plain nav row for its surface stays highlighted too.
-  // Accepted — suppressing it would need every view detail lifted up here.
   const isActivePinnedRoute = displayedPinned.some((pin) => pathname === getPinHref(pin));
 
   const handleDragStart = useCallback(() => {
@@ -566,6 +447,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       isDraggingRef.current = false;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
+      // Move within the full list so hidden (non-project) pins keep their
+      // positions and stay in the shared cache.
       const oldIndex = localPinned.findIndex((p) => p.id === active.id);
       const newIndex = localPinned.findIndex((p) => p.id === over.id);
       if (oldIndex === -1 || newIndex === -1) return;

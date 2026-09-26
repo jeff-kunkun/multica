@@ -2,6 +2,7 @@ package routing
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -123,10 +124,66 @@ func (r *Router) assignmentComment(
 	return b.String()
 }
 
+// DemotionFootnote says why a repeatedly broken seat was not the first
+// choice, or why it still was when the rung had nobody else. Empty when
+// nobody on the chosen rung is demoted.
+func DemotionFootnote(ladder Ladder, roster map[string]Agent, chosen *Seat) string {
+	if chosen == nil {
+		return ""
+	}
+	var skipped []string
+	chosenDemoted := false
+	for _, agent := range roster {
+		if !agent.Demoted || agentTierKey(ladder, agent) != chosen.TierKey {
+			continue
+		}
+		if agent.ID == chosen.ID {
+			chosenDemoted = true
+			continue
+		}
+		skipped = append(skipped, agent.Name)
+	}
+	sort.Strings(skipped)
+	if len(skipped) > 0 {
+		return "同档的" + strings.Join(skipped, "、") + " 24 小时内熔断了至少两次。恢复后新票先不派给这一席，直到它自己做成一单。"
+	}
+	if chosenDemoted {
+		return chosen.Name + " 24 小时内熔断了至少两次。这档没有别的席位可派，所以仍由它接。做成一单之后才会重新优先。"
+	}
+	return ""
+}
+
+func agentTierKey(ladder Ladder, agent Agent) string {
+	if key, ok := ladder.NormalizeTier(agent.Tier); ok && key != "" {
+		return key
+	}
+	if key, ok := ladder.TierOf(agent.Name); ok {
+		return key
+	}
+	return ""
+}
+
 // coordinatorNote is the division of labour a group root's decision comment
 // states once, where both the coordinator and the sub-issues' executors read
 // it: the work lives in the sub-issues, the root supervises (DENE-812).
 const coordinatorNote = "**分工**：这张是父票，活在子票里——每张子票有自己的执行席，一步步往前推；父票的执行席只做监督：盯子票进度、阶段收口后把下一阶段提到待办、疏通卡住的子票、子票没人就派人，全部收口后把父票整体交验收。父票不替子票干活，子票之外冒出的新活开新子票。\n\n"
+
+func disabledReviewerNote(from, to string, steppedDown bool) string {
+	if from == "" {
+		from = "原验收席"
+	}
+	if steppedDown {
+		return fmt.Sprintf("验收席 %s 已停用，不接新活。同档没有另一家还能接的席位，复审改由下一档的 %s 接手，避开了执行席本人。原席位恢复后不会自动抢回；只有它仍是这张票指定的验收人、而且新席位还没开跑时才会换回去。", from, to)
+	}
+	return fmt.Sprintf("验收席 %s 已停用，不接新活。复审改由同档另一家模型的 %s 接手，避开了执行席本人。原席位恢复后不会自动抢回；只有它仍是这张票指定的验收人、而且新席位还没开跑时才会换回去。", from, to)
+}
+
+func disabledReviewerStuck(from string) string {
+	if from == "" {
+		from = "原验收席"
+	}
+	return fmt.Sprintf("验收席 %s 已停用，不接新活。同档没有另一家供应商，降一档也没有能接的席位。这张票停在待验收，需要人指定验收席。", from)
+}
 
 // handoffComment is the in-review-row comment. Every handoff it describes is
 // to a seat: the reviewer slot never names a person.

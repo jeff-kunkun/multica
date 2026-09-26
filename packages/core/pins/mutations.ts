@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useAuthStore } from "../auth";
 import { pinKeys } from "./queries";
+import { chatKeys } from "../chat/queries";
 import { useWorkspaceId } from "../hooks";
 import type { PinnedItem, PinnedItemType } from "../types";
 
@@ -17,8 +18,10 @@ export function useCreatePin() {
         old ? [...old, newPin] : [newPin],
       );
     },
-    onSettled: () => {
+    onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: pinKeys.list(wsId, userId) });
+      // The Chat list sorts on the same pin (DENE-866).
+      if (vars.item_type === "chat") qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
     },
   });
 }
@@ -41,8 +44,9 @@ export function useDeletePin() {
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(pinKeys.list(wsId, userId), ctx.prev);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: pinKeys.list(wsId, userId) });
+      if (vars.itemType === "chat") qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
     },
   });
 }

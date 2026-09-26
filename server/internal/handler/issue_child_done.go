@@ -48,9 +48,12 @@ import (
 //     unfinished stage is terminal (stageBarrierClosed). An unstaged sibling
 //     set is one implicit stage, so this fires once when the last sub-issue
 //     finishes instead of on every child — the default fix for the
-//     fire-on-every-child cascade reported in #4320. The woken assignee
-//     decides whether to promote the next stage (agent-driven advancement);
-//     the server only detects the barrier and wakes.
+//     fire-on-every-child cascade reported in #4320. When the next stage's
+//     backlog descriptions state no extra dependency, the server promotes
+//     those sub-issues to todo itself. A description that conflicts or names
+//     a dependency that cannot be checked stays in backlog, and the parent
+//     seat is woken to decide — or, if that seat is switched off, a same-tier
+//     seat from another provider.
 //
 // The comment is inserted directly via db.Queries (not through the
 // CreateComment HTTP handler) so it bypasses the generic on_comment trigger
@@ -152,7 +155,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 		slog.Warn("child done: failed to resolve sibling statuses", "error", err, "parent_id", uuidToString(parent.ID))
 		return
 	}
-	if !stageBarrierClosed(children, issue, statuses.isTerminal) {
+	if !stageBarrierClosed(children, issue, h.realChildTerminalPredicate(ctx, statuses)) {
 		return
 	}
 	staged := siblingsAreStaged(children)
@@ -249,7 +252,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			// Unstaged: one implicit stage. Fire once iff every child is terminal
 			// in the final state. stageBarrierClosed ignores `completed` on the
 			// unstaged path, so any completed child stands in for the barrier check.
-			if !stageBarrierClosed(children, g.children[0], statuses.isTerminal) {
+			if !stageBarrierClosed(children, g.children[0], h.realChildTerminalPredicate(ctx, statuses)) {
 				continue
 			}
 			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch, statuses, g.children)
@@ -264,7 +267,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		// reality rather than a mid-batch snapshot. A lower closed stage would
 		// re-introduce the stale "advance the next stage" instruction the bug was
 		// about.
-		rep, found := highestClosedBatchStage(children, g.children, statuses.isTerminal)
+		rep, found := highestClosedBatchStage(children, g.children, h.realChildTerminalPredicate(ctx, statuses))
 		if !found {
 			continue
 		}
@@ -341,6 +344,8 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	mentionPrefix := h.buildParentAssigneeMention(ctx, parent)
 
 	var content string
+	var nextStage int32
+	var blockedAdvance bool
 	if staged {
 		stageCancelledCount := countStageCancelled(children, closedStage, statuses.status)
 		stageCancelled := stageCancelledCount > 0
@@ -352,7 +357,9 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 			// warnings.
 			advanceHasCancelled = stageCancelled || batchClosedScopeHasCancelled(children, batchCompleted, closedStage, statuses.status)
 		}
-		summary, nextStage := stageProgressSummary(children, closedStage, statuses.status)
+		var summary string
+		summary, nextStage = stageProgressSummary(children, closedStage, statuses.status)
+		blockedAdvance = advanceHasCancelled
 		advance := stageAdvanceInstruction(nextStage, parentID, stageCancelledCount, advanceHasCancelled, parent.ParentIssueID.Valid)
 		if !stageCancelled {
 			// Keep the historical no-cancellation wording byte-identical for the
@@ -427,6 +434,15 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 		}
 	}
 
+	plan := h.planStageAdvance(ctx, parent, children, nextStage, statuses, blockedAdvance)
+	if plan.parentOff {
+		content = strings.TrimPrefix(content, mentionPrefix)
+		if plan.relay != nil {
+			content = fmt.Sprintf("[@%s](mention://agent/%s) ", sanitizeMentionLabel(plan.relay.Name), uuidToString(plan.relay.ID)) + content
+		}
+	}
+	content += plan.note
+
 	// author_type='system', author_id=zero UUID. The zero UUID is a valid 16
 	// byte value and the column is NOT NULL; frontend code should branch on
 	// author_type === 'system' rather than on the UUID value.
@@ -463,7 +479,16 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// notification + subscriber listeners both short-circuit on
 	// author_type='system'); this keeps smuggled mentions from the child
 	// title inert and gives the platform a single place to apply the loop
-	// and idempotency guards.
+	// and idempotency guards. A stage whose backlog had no extra dependency
+	// is already promoted, so that wake is not also asked to promote it. A
+	// parent seat that cannot take work is covered by another family.
+	if plan.skipWake {
+		return
+	}
+	if plan.relay != nil {
+		h.wakeStageRelay(ctx, parent, comment.ID, plan.relay)
+		return
+	}
 	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
 }
 
@@ -574,6 +599,42 @@ func (s resolvedChildStatuses) status(child db.Issue) string {
 
 func (s resolvedChildStatuses) isTerminal(child db.Issue) bool {
 	return isTerminalChildStatus(s.status(child))
+}
+
+// realChildTerminalPredicate keeps a done child from advancing a stage when
+// its own PR evidence contradicts the status: linked PRs exist and none of them
+// is merged (DENE-859/862 were done with their PRs still open). A done child
+// with no linked PR stays terminal — agents cannot reach that state without the
+// close gate's no-code declaration, and a member's done is authoritative.
+// Cancelled children remain terminal by definition.
+func (h *Handler) realChildTerminalPredicate(ctx context.Context, statuses resolvedChildStatuses) func(db.Issue) bool {
+	cache := map[pgtype.UUID]bool{}
+	return func(child db.Issue) bool {
+		if !statuses.isTerminal(child) {
+			return false
+		}
+		if statuses.status(child) != issuestatus.Done {
+			return true
+		}
+		if real, ok := cache[child.ID]; ok {
+			return real
+		}
+		real := true
+		prs, err := h.Queries.ListPullRequestsByIssue(ctx, child.ID)
+		if err != nil {
+			slog.Warn("child done: failed to list child PRs", "error", err, "issue_id", uuidToString(child.ID))
+		} else if len(prs) > 0 {
+			real = false
+			for _, pr := range prs {
+				if pr.MergedAt.Valid {
+					real = true
+					break
+				}
+			}
+		}
+		cache[child.ID] = real
+		return real
+	}
 }
 
 // resolveChildStatuses checks every status needed by the stage barrier and

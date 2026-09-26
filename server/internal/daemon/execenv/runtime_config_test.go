@@ -207,10 +207,12 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"the board should show the issue being worked while you work, not only after",
 		// No assignee gate: the judgment applies to whoever is running.
 		"whoever the assignee is",
-		// Delivery lands in in_review. A pass releases in the same turn:
-		// the acceptance seat merges and writes done. A person is in
-		// that path only when the ticket names them and the decision.
-		"merges and sets `done` in that same turn",
+		// Delivery lands in in_review. A pass releases through the
+		// verdict line (DENE-850): the platform merges and writes done.
+		// A person is in that path only when the ticket names them and
+		// the decision.
+		"--verdict pass` and the platform merges the open linked PR and sets `done`",
+		"A sentence that says 通过 is not a verdict",
 		"close.conclusion=awaiting_human",
 		"Do not leave a passed ticket in `in_review`",
 		// Acceptance is a parent-level decision; child delivery feeds the
@@ -224,6 +226,24 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"Your turn produced none of the issue's own deliverable",
 		// Invariant 2: concurrent agents converge instead of flapping.
 		"This no-write default is what keeps concurrent runs from flapping the board",
+		// DENE-859: a close is one call. The brief names the command, the
+		// atomicity claim, the legacy path's standing, and the decision table
+		// that maps each close outcome to its flags.
+		"use `multica issue close`",
+		"evidence comment, the status, and the `close.*` record together",
+		"a status write followed by a separate comment is the legacy path and stays accepted",
+		"| Where the issue stands | Call |",
+		"`--outcome done --evidence-file ./close.md`",
+		"`--outcome in_review --evidence-file ./close.md`",
+		"needs a linked open/merged PR",
+		"`--no-code <reason>`, otherwise the close is refused",
+		"`--outcome blocked --evidence-file ./close.md`",
+		"a blocked close without one is rejected",
+		"an open linked PR is merged first; if it cannot be, the close lands as `blocked`",
+		"an empty reviewer slot is filled with a different-family acceptance seat in the same call",
+		"`--outcome done --verdict pass --evidence-file ./close.md`",
+		"never as a silent `in_review`",
+		"`multica issue comment add <id> --verdict hold --content-file ./review.md`",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status rule missing %q\n---\n%s", want, out)
@@ -258,6 +278,8 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"in whatever form: code, research",
 		// DENE-810: a pass used to stop here for a person to click merge.
 		"`done` stays human",
+		// DENE-850: the seat no longer merges by hand; the verdict does.
+		"the acceptance seat merges and sets `done` in that same turn",
 	} {
 		if strings.Contains(out, banned) {
 			t.Errorf("brief still carries retired status gate %q (MUL-6417)\n---\n%s", banned, out)
@@ -525,6 +547,10 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 		// The blocked end-state keeps its own comment carve-out: an agent
 		// whose identity forbids comments must still be able to mark blocked.
 		"post a comment explaining the blocker unless your Agent Identity forbids issue comments",
+		// DENE-850: an agent's blocked write without a wait is rejected, so
+		// the brief names the wait flags on the same call.
+		"`--blocked-by <DENE-N>`",
+		"the server rejects an agent's `blocked` without one",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("issue brief missing identity-bound workflow text %q\n---\n%s", want, out)
@@ -2434,5 +2460,55 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 		if !strings.Contains(brief, wantWhy) {
 			t.Errorf("%s brief states %q without %q; a rule with no reason is the first one dropped under pressure", name, wantRule, wantWhy)
 		}
+	}
+}
+
+// TestAvailableCommandsListIssueClose pins the `issue close` bullet in the
+// core command list (DENE-859): the close is discoverable without --help,
+// and the bullet states the one-transaction guarantee and the honesty rule
+// (quote the reply's status/merge/woken, do not restate it from memory).
+func TestAvailableCommandsListIssueClose(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
+	for _, want := range []string{
+		"- `multica issue close <id> --outcome <done|in_review|blocked|cancelled> --evidence-file <path>",
+		"land in one transaction",
+		"rejected naming exactly what is missing",
+		"`--verdict pass` is the acceptance seat's release",
+		"quote it, do not restate it from memory",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("available commands missing %q\n---\n%s", want, out)
+		}
+	}
+	closeIdx := strings.Index(out, "- `multica issue close <id>")
+	childrenIdx := strings.Index(out, "- `multica issue children <id>")
+	if closeIdx < 0 || childrenIdx < 0 || closeIdx > childrenIdx {
+		t.Errorf("issue close bullet should sit with the status commands, before children (close=%d children=%d)", closeIdx, childrenIdx)
+	}
+}
+
+// TestAvailableCommandsListIssueHandoff pins the `issue handoff` bullet
+// (DENE-863): it sits beside `issue close`, replaces hand-written @mentions of
+// the acceptance seat, and carries the honest-reply rule.
+func TestAvailableCommandsListIssueHandoff(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
+	for _, want := range []string{
+		"- `multica issue handoff <id> --to <reviewer|dispatcher|agent-name>`",
+		"skips a target that already has an active run",
+		"refuses to put a person into the reviewer seat",
+		"instead of a hand-written @mention of the acceptance seat",
+		"not a close — `multica issue handoff <id>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("brief missing %q", want)
+		}
+	}
+	closeIdx := strings.Index(out, "- `multica issue close <id>")
+	handoffIdx := strings.Index(out, "- `multica issue handoff <id>")
+	childrenIdx := strings.Index(out, "- `multica issue children <id>")
+	if !(closeIdx >= 0 && closeIdx < handoffIdx && handoffIdx < childrenIdx) {
+		t.Errorf("issue handoff bullet should sit right after issue close (close=%d handoff=%d children=%d)", closeIdx, handoffIdx, childrenIdx)
 	}
 }

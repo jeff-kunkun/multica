@@ -745,6 +745,88 @@ func TestFinalizeIssueDraftGroupCreatesNothingWhenTheQuotaCannotCoverIt(t *testi
 	}
 }
 
+// The project, the parent and the children are one confirm. Every issue in the
+// group is filed under the project this request created, not under whatever
+// the draft happened to be pointing at.
+func TestFinalizeIssueDraftCreatesTheProjectWithTheGroup(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cleanupIssueDraftGroup(t)
+
+	session := startIssueDraftSession(t)
+	saved := saveIssueDraft(t, session.SessionID, 0, "ready", draftGroupPayload("group with a new project",
+		draftChild("c1", "first piece", "todo"),
+		draftChild("c2", "second piece", "todo"),
+	))
+	title := "DENE-843 " + session.SessionID
+	t.Cleanup(func() {
+		dbfx.Cleanup(t, `DELETE FROM project WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
+	})
+
+	var finalized FinalizeIssueDraftResponse
+	testutil.Call(t, testHandler.FinalizeIssueDraft, withURLParam(newRequest(http.MethodPost, "/api/issue-drafts/"+session.SessionID+"/finalize", map[string]any{
+		"expected_revision": saved.Revision,
+		"new_project": map[string]any{
+			"title":       title,
+			"icon":        "🛗",
+			"description": "图像追溯的安全加固",
+		},
+	}), "sessionId", session.SessionID)).Want(http.StatusOK).JSON(&finalized)
+
+	if len(finalized.Issues) != 3 {
+		t.Fatalf("the response carries %d issues, want the root plus 2 children", len(finalized.Issues))
+	}
+	var projectID string
+	dbfx.QueryRow(t, `SELECT id FROM project WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&projectID)
+	for i, issue := range finalized.Issues {
+		var got string
+		dbfx.QueryRow(t, `SELECT project_id FROM issue WHERE id = $1`, issue.ID).Scan(&got)
+		if got != projectID {
+			t.Fatalf("issue %d project_id = %s, want the new project %s", i, got, projectID)
+		}
+	}
+}
+
+// A group that cannot be created must not leave the project behind either.
+func TestFinalizeIssueDraftRollsBackTheNewProjectWhenTheGroupDoesNotFit(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cleanupIssueDraftGroup(t)
+
+	limit := dbfx.Count(t, `SELECT COUNT(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID) + 1
+	stub := entitlementtest.New()
+	stub.Set(uuid.MustParse(testWorkspaceID), entitlement.GateIssueCount, entitlement.Decision{
+		Gate:           entitlement.Gate{Action: entitlement.ActionEnforce, Limit: &limit},
+		PolicyRevision: 34,
+	})
+	priorProvider := testHandler.IssueService.Entitlements
+	testHandler.IssueService.Entitlements = stub
+	t.Cleanup(func() { testHandler.IssueService.Entitlements = priorProvider })
+
+	session := startIssueDraftSession(t)
+	saved := saveIssueDraft(t, session.SessionID, 0, "ready", draftGroupPayload("over quota with a project",
+		draftChild("c1", "quota child one", "todo"),
+		draftChild("c2", "quota child two", "todo"),
+		draftChild("c3", "quota child three", "todo"),
+	))
+	title := "DENE-843 rollback " + session.SessionID
+
+	res := testutil.Call(t, testHandler.FinalizeIssueDraft, withURLParam(newRequest(http.MethodPost, "/api/issue-drafts/"+session.SessionID+"/finalize", map[string]any{
+		"expected_revision": saved.Revision,
+		"new_project":       map[string]any{"title": title},
+	}), "sessionId", session.SessionID))
+	res.Want(http.StatusPaymentRequired)
+
+	if got := dbfx.Count(t, `SELECT COUNT(*) FROM project WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title); got != 0 {
+		t.Fatalf("a group that did not fit left %d projects behind", got)
+	}
+	if got := issueDraftGroupIssueCount(t); got != 0 {
+		t.Fatalf("a rolled-back confirm left %d issues", got)
+	}
+}
+
 // issueDraftGroupTaskCount counts the tasks a single issue of a group enqueued.
 // agent_task_queue carries no foreign key, so this is the only place a confirm's
 // "did it actually start work" question can be answered.
@@ -837,10 +919,9 @@ func TestFinalizeIssueDraftCoordinatorRootIsCreatedWithoutARun(t *testing.T) {
 	}
 }
 
-// Closing stage 1 wakes the coordinator through the EXISTING stage barrier, and
-// leaves stage 2 parked for it to promote. Nothing new dispatches here: the root
-// is awake precisely because it was created active.
-func TestFinalizeIssueDraftStageBarrierWakesTheCoordinator(t *testing.T) {
+// Closing stage 1 promotes a stage-2 sub-issue whose description states no
+// extra dependency. The coordinator is not woken to do that promotion.
+func TestFinalizeIssueDraftStageBarrierPromotesAClearNextStage(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -872,25 +953,20 @@ func TestFinalizeIssueDraftStageBarrierWakesTheCoordinator(t *testing.T) {
 	updateChildStatus(t, stageOne.ID, "done")
 
 	if got := countSystemCommentsOn(t, root.ID); got != 1 {
-		t.Fatalf("closing stage 1 produced %d coordinator comments, want 1", got)
+		t.Fatalf("closing stage 1 produced %d comments, want 1", got)
 	}
-	if got := issueDraftGroupTaskCount(t, root.ID); got != 1 {
-		t.Fatalf("closing stage 1 queued %d coordinator tasks, want 1 — the next stage "+
-			"has nobody to promote it otherwise", got)
+	content := parentSystemCommentContent(t, root.ID)
+	if !strings.Contains(content, "提到待办") {
+		t.Fatalf("stage comment does not say the next stage was promoted: %s", content)
 	}
-	if got := issueDraftGroupStoredStatus(t, stageTwo.ID); got != "backlog" {
-		t.Fatalf("stage 2 status after stage 1 closed = %q, want backlog: the server "+
-			"detects and wakes, the coordinator promotes", got)
+	if got := issueDraftGroupTaskCount(t, root.ID); got != 0 {
+		t.Fatalf("closing stage 1 queued %d coordinator tasks, want 0 — a clear next stage does not wait for the parent", got)
 	}
-	if got := issueDraftGroupTaskCount(t, stageTwo.ID); got != 0 {
-		t.Fatalf("stage 2 started on its own (%d tasks)", got)
+	if got := issueDraftGroupStoredStatus(t, stageTwo.ID); got != "todo" {
+		t.Fatalf("stage 2 status after stage 1 closed = %q, want todo", got)
 	}
-
-	// The coordinator is the one that promotes, through the ordinary status
-	// write. That is the whole point of waking it.
-	updateChildStatus(t, stageTwo.ID, "todo")
 	if got := issueDraftGroupTaskCount(t, stageTwo.ID); got != 1 {
-		t.Fatalf("promoting stage 2 queued %d tasks, want 1", got)
+		t.Fatalf("stage 2 queued %d tasks, want 1", got)
 	}
 }
 

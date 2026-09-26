@@ -250,6 +250,9 @@ type terminalTaskReport struct {
 	// run on the issue or chat can select it again, however many clean rows
 	// still reference it.
 	retiredSessionID string
+	// sessionRestartReason explains a new CLI session opened because the
+	// prior one could not be resumed. Empty on the common path.
+	sessionRestartReason string
 }
 
 type terminalReportSendFunc func(context.Context, terminalTaskReport, []time.Duration) error
@@ -465,6 +468,24 @@ type Daemon struct {
 	// agentConvergeMaxBackoff away, which is far too long to wait after a
 	// local state change that makes a provider registrable again.
 	agentDiscoveryKick chan struct{}
+
+	// agentCLIUpdateKick wakes agentCLIUpdateLoop for a manual update or for
+	// the moment the machine becomes idle. Buffered like agentDiscoveryKick.
+	agentCLIUpdateKick   chan struct{}
+	agentCLIMu           sync.Mutex
+	agentCLIFollow       map[string]bool // explicit per-provider choice; missing means follow (default on)
+	agentCLIFollowLoaded bool
+	agentCLIFollowFile   string // tests pin this; empty uses the profile dir
+	// agentCLIFollowSeen is the last follow click applied for each runtime.
+	// Heartbeats repeat a click until the server clears it; applying that
+	// same id again would flip the one switch shared by every workspace.
+	agentCLIFollowSeen map[string]string
+	agentCLIManual     agentCLIManual
+	// Test seams. Nil uses the real network, exec, and post-upgrade refresh.
+	agentCLIFetch        func(ctx context.Context, url string) ([]byte, error)
+	agentCLIRun          func(ctx context.Context, name string, args ...string) ([]byte, error)
+	agentCLILookPath     func(name string) (string, error)
+	agentCLIAfterUpgrade func(ctx context.Context, provider string)
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -787,6 +808,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		profileLaunchSpecs:        make(map[string]profileLaunchSpec),
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentDiscoveryKick:        make(chan struct{}, 1),
+		agentCLIUpdateKick:        make(chan struct{}, 1),
 		agentVersions:             make(map[string]string),
 		skippedAgents:             make(map[string]string),
 		resolvedPaths:             make(map[string]healedAgent),
@@ -2233,6 +2255,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// workspace sync loop because that one runs on a thirty-minute consistency
 	// interval — far too slow for "install a CLI, see it under Runtimes".
 	go d.agentDiscoveryLoop(ctx)
+	go d.agentCLIUpdateLoop(ctx)
 
 	taskWakeups := make(chan taskWakeup, 256)
 	go d.taskWakeupLoop(ctx, taskWakeups)
@@ -4793,6 +4816,9 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp.PendingUpdate != nil {
 		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
 	}
+	if resp.PendingAgentCLI != nil {
+		d.handleAgentCLICommand(runtimeID, resp.PendingAgentCLI)
+	}
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			// The overlay is the agent's custom_env. Endpoint readers let it
@@ -5780,7 +5806,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			lease := newTaskSlotLease(sem, slot, func() { signalPollerWakeup(wakeup) })
 			go func(t Task, lease *taskSlotLease) {
 				defer taskWG.Done()
-				defer d.activeTasks.Add(-1)
+				defer d.finishActiveTask()
 				// Release local capacity before waking the poller (the lease does
 				// both). The task's terminal callback and local cleanup have both
 				// finished at this point, so a successor that was previously
@@ -6313,7 +6339,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, lease *taskSlotLease
 		return
 	}
 
-	d.reportTaskResult(ctx, task.ID, result, taskLog)
+	d.reportTaskResultForTask(ctx, task, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the parent record (issue / chat session / autopilot run /
@@ -6661,6 +6687,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 // the next chat turn to resume there rather than start over and "forget"
 // the conversation.
 func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
+	d.reportTaskResultForTask(ctx, Task{ID: taskID}, result, taskLog)
+}
+
+func (d *Daemon) reportTaskResultForTask(ctx context.Context, task Task, result TaskResult, taskLog *slog.Logger) {
+	taskID := task.ID
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
@@ -6674,8 +6705,12 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			durableWorkDir:        result.DurableWorkDir,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
+			sessionRestartReason:  result.SessionRestartReason,
 		})
 		if err == nil {
+			if err := d.reportLocalPullRequests(ctx, task, result); err != nil {
+				taskLog.Warn("daemon PR report failed", "error", err)
+			}
 			return
 		}
 		// The original completion is already durable. Never overwrite it with a
@@ -6720,6 +6755,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			failureReason:         failureReason,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
+			sessionRestartReason:  result.SessionRestartReason,
 		}); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
@@ -6819,9 +6855,9 @@ func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTask
 	}
 	switch report.kind {
 	case terminalTaskReportComplete:
-		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
+		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.sessionRestartReason, schedule)
 	case terminalTaskReportFail:
-		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
+		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.sessionRestartReason, schedule)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}
@@ -7529,6 +7565,9 @@ func gateCodexResumeToRolloutPresence(task *Task, taskCtx *execenv.TaskContextFo
 	}
 	taskLog.Warn("dropping prior codex session: rollout not present in task CODEX_HOME; starting a fresh thread",
 		"session_id", task.PriorSessionID, "codex_home", codexHome)
+	if task.ContinueInterruptedSession && task.SessionRestartReason == "" {
+		task.SessionRestartReason = "原来的 Codex 会话文件不在本机，这次重试续不上，所以新开了对话。"
+	}
 	task.PriorSessionID = ""
 	taskCtx.PriorSessionResumed = false
 	// The user expected this run to continue the prior conversation; surface the
@@ -8927,8 +8966,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				// that stripped it for a daemon lacking the capability, lands
 				// on the same default — which is what this daemon implements
 				// either way (DENE-617).
-				WorktreeRoot:  strings.TrimSpace(localAssignment.Ref.WorktreeRoot),
-				ResumeWorkDir: resumeWorkDir,
+				WorktreeRoot:    strings.TrimSpace(localAssignment.Ref.WorktreeRoot),
+				ResumeWorkDir:   resumeWorkDir,
+				CanonicalBranch: strings.TrimSpace(task.CanonicalBranch),
 			}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
@@ -9052,6 +9092,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				taskResult.EnvRoot = env.RootDir
 			}
 			outcome, finalizeErr := env.LocalWorktree.Finalize(taskLog)
+			if outcome.Notice != "" {
+				taskLog.Info("local_directory: worktree delivered with a notice", "branch", outcome.Branch, "notice", outcome.Notice)
+			}
 			if outcome.Branch != "" {
 				taskResult.BranchName = outcome.Branch
 			}
@@ -9269,6 +9312,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if env.LocalWorktree != nil && env.LocalWorktree.StaleBaselineNotice != "" {
 		promptOptions = append(promptOptions, WithStaleLocalBaseline(env.LocalWorktree.StaleBaselineNotice))
+	}
+	if env.LocalWorktree != nil && env.LocalWorktree.Branch != "" {
+		promptOptions = append(promptOptions, WithDeliveryBranch(env.LocalWorktree.Branch, env.LocalWorktree.Upstream))
 	}
 	if env.LocalWorktree != nil && env.LocalWorktree.ReplaySkippedNotice != "" {
 		promptOptions = append(promptOptions, WithReplaySkipped(env.LocalWorktree.ReplaySkippedNotice))
@@ -9701,6 +9747,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// through the chat_session pointer (GH #6066).
 	var retiredSessionID string
 	defer func() { taskResult.RetiredSessionID = retiredSessionID }()
+	defer func() {
+		reason := result.SessionRestartReason
+		if reason == "" {
+			reason = task.SessionRestartReason
+		}
+		taskResult.SessionRestartReason = reason
+	}()
 
 	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
 		firstResult := result

@@ -66,6 +66,7 @@ type GitHubPullRequestResponse struct {
 	// "gitea", or "gitlab". The frontend uses it to pick the host icon and
 	// label (e.g. GitLab "merge request").
 	Provider        string  `json:"provider"`
+	Source          string  `json:"source,omitempty"`
 	WorkspaceID     string  `json:"workspace_id"`
 	RepoOwner       string  `json:"repo_owner"`
 	RepoName        string  `json:"repo_name"`
@@ -191,6 +192,7 @@ func githubPullRequestToResponse(p db.GithubPullRequest, snapshotEnabled bool) G
 	return GitHubPullRequestResponse{
 		ID:                uuidToString(p.ID),
 		Provider:          "github",
+		Source:            p.Source,
 		WorkspaceID:       uuidToString(p.WorkspaceID),
 		RepoOwner:         p.RepoOwner,
 		RepoName:          p.RepoName,
@@ -239,6 +241,7 @@ func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow, snapshotEnab
 	resp := GitHubPullRequestResponse{
 		ID:                uuidToString(p.ID),
 		Provider:          "github",
+		Source:            p.Source,
 		WorkspaceID:       uuidToString(p.WorkspaceID),
 		RepoOwner:         p.RepoOwner,
 		RepoName:          p.RepoName,
@@ -1938,6 +1941,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		slog.Warn("github: advance issue to done failed", "err", err)
 		return
 	}
+	h.syncBlockWait(ctx, issue, updated)
 
 	// Fire the platform parent-notification path on the same transition the
 	// HTTP UpdateIssue / BatchUpdateIssues paths use. A merged PR is one of
