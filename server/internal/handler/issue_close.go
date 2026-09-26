@@ -164,7 +164,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	// is refused. The close reports whichever of those actually happened.
 	var tr statusTransition
 	if outcome == issuestatus.Done || outcome == issuestatus.InReview {
-		tr = h.guardSilentStall(ctx, issue, statusKey, actorType, req.NoCodeReason, issue.AssigneeType, issue.AssigneeID, issue.ReviewerType, issue.ReviewerID, false)
+		tr = h.guardSilentStall(ctx, issue, statusKey, actorType, actorID, req.NoCodeReason, issue.AssigneeType, issue.AssigneeID, issue.ReviewerType, issue.ReviewerID, false)
 		if tr.refuse != "" {
 			writeError(w, http.StatusConflict, tr.refuse)
 			return
@@ -690,6 +690,12 @@ func setIssueMetaStringTx(ctx context.Context, q *db.Queries, issue db.Issue, ke
 		Key:         key,
 		Value:       raw,
 	})
+	// No row means the key already holds this value (the query skips no-op
+	// writes). A second close — blocked, then done — repeats keys such as
+	// close.next_owner_type=none and must not fail as "issue not found".
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
 	return err
 }
 
