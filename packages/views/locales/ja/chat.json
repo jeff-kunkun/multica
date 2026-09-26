@@ -284,6 +284,8 @@
   "sharing": {
     "title": "権限を編集",
     "follow": "プロジェクトに従う",
+    "workspace": "ワークスペース全体",
+    "workspace_hint": "ワークスペースの全メンバーがこのチャットを閲覧・発言できます",
     "follow_hint_bound": "{{projects}} のメンバーは閲覧も発言もできます",
     "follow_hint_unbound": "選ぶ前にプロジェクトを紐付けてください",
     "extra": "プロジェクトに従う + 追加",

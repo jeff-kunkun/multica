@@ -289,6 +289,8 @@
   "sharing": {
     "title": "Modifier l'accès",
     "follow": "Suivre le projet",
+    "workspace": "Tout l'espace de travail",
+    "workspace_hint": "Tous les membres de l'espace de travail peuvent voir et écrire dans cette discussion",
     "follow_hint_bound": "Les membres de {{projects}} peuvent voir et écrire",
     "follow_hint_unbound": "Liez un projet avant de choisir ceci",
     "extra": "Suivre le projet + personnes en plus",
