@@ -1,0 +1,314 @@
+<!doctype html>
+<!--
+  PROTOTYPE — 不会直接晋升 production。
+  问题：新「首页」（替代收件箱）该长啥样？
+  三个变体，?variant=A|B|C 切换，底部浮动条或 ← → 键切换。
+  数据：2026-09-26 工作区真实票（标「示例」的是补的演示数据）。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PROTOTYPE · 首页</title>
+<style>
+  :root{
+    --bg:#fafafa;--card:#fff;--fg:#18181b;--muted:#71717a;--faint:#a1a1aa;--line:#e4e4e7;--soft:#f4f4f5;
+    --red:#dc2626;--red-bg:#fef2f2;--amber:#b45309;--amber-bg:#fffbeb;--green:#15803d;--green-bg:#f0fdf4;
+    --blue:#1d4ed8;--blue-bg:#eff6ff;--violet:#6d28d9;--violet-bg:#f5f3ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif;color:var(--fg);background:var(--bg)}
+  .app{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
+  .side{border-right:1px solid var(--line);background:#f7f7f8;padding:12px 8px;font-size:13px}
+  .ws{font-weight:600;padding:6px 8px 14px}
+  .nav{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;color:#3f3f46}
+  .nav.on{background:#e9e9ec;color:var(--fg);font-weight:500}
+  .nav .cnt{margin-left:auto;font-size:11px;min-width:18px;text-align:center;border-radius:9px;padding:0 6px}
+  .cnt.need{background:var(--red);color:#fff}
+  .cnt.gray{background:var(--line);color:var(--muted)}
+  .sec-label{color:var(--faint);font-size:11px;padding:14px 8px 4px}
+  main{padding:28px 40px 120px;max-width:1180px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+  h2{font-size:13px;font-weight:600;margin:28px 0 10px;display:flex;align-items:center;gap:8px}
+  h2 .n{color:var(--muted);font-weight:400}
+  h2 .hint{margin-left:auto;color:var(--faint);font-weight:400;font-size:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px}
+  .row{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border-top:1px solid var(--line)}
+  .row:first-child{border-top:0}
+  .id{font:12px ui-monospace,Menlo,monospace;color:var(--muted);white-space:nowrap}
+  .t{font-weight:500}
+  .meta{color:var(--muted);font-size:12px;margin-top:2px}
+  .pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:1px 8px;border-radius:999px;white-space:nowrap;border:1px solid transparent}
+  .p-red{background:var(--red-bg);color:var(--red)} .p-amber{background:var(--amber-bg);color:var(--amber)}
+  .p-green{background:var(--green-bg);color:var(--green)} .p-blue{background:var(--blue-bg);color:var(--blue)}
+  .p-gray{background:var(--soft);color:var(--muted)} .p-violet{background:var(--violet-bg);color:var(--violet)}
+  .btn{font:inherit;font-size:12px;border:1px solid var(--line);background:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;white-space:nowrap}
+  .btn.pri{background:var(--fg);color:#fff;border-color:var(--fg)}
+  .grow{flex:1;min-width:0}
+  .bar{height:6px;background:var(--soft);border-radius:3px;overflow:hidden;display:flex}
+  .bar i{display:block;height:100%}
+  .sample{font-size:10px;color:var(--violet);border:1px dashed var(--violet);border-radius:4px;padding:0 4px;margin-left:6px;vertical-align:1px}
+  .quiet{color:var(--muted);font-size:12px;padding:10px 14px;border-top:1px dashed var(--line);cursor:pointer}
+  .quiet:hover{background:var(--soft)}
+  .why{font-size:12px;color:var(--muted);background:var(--soft);border-radius:8px;padding:10px 12px;margin-top:8px}
+  .empty{padding:18px 14px;color:var(--muted);font-size:13px}
+  .stages{display:flex;gap:4px;margin-top:6px}
+  .stages span{font-size:10px;padding:1px 6px;border-radius:4px;background:var(--soft);color:var(--faint)}
+  .stages span.done{background:var(--green-bg);color:var(--green)}
+  .stages span.cur{background:var(--blue-bg);color:var(--blue);font-weight:600}
+  .kids{padding:4px 14px 10px 40px}
+  .kid{display:flex;gap:10px;align-items:center;font-size:12px;padding:3px 0;color:#3f3f46}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  details summary{list-style:none;cursor:pointer} details summary::-webkit-details-marker{display:none}
+  /* B */
+  .split{display:grid;grid-template-columns:380px 1fr;gap:20px;align-items:start}
+  .q-item{padding:12px 14px;border-top:1px solid var(--line);cursor:pointer}
+  .q-item.sel{background:#f8f8fb;box-shadow:inset 3px 0 0 var(--fg)}
+  .detail{padding:20px}
+  .kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--muted)}
+  /* C */
+  .lane{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .lane .col{background:#f4f4f5;border-radius:10px;padding:10px;min-height:120px}
+  .col h3{font-size:12px;margin:2px 4px 10px;display:flex;gap:6px;align-items:center}
+  .tile{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px;font-size:13px}
+  .tile.hot{border-color:#fca5a5;box-shadow:0 0 0 3px var(--red-bg)}
+  .banner{display:flex;gap:14px;align-items:center;background:#fff;border:1px solid #fca5a5;border-left:4px solid var(--red);border-radius:10px;padding:14px 16px;margin-bottom:20px}
+  /* switcher */
+  .sw{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:6px;background:#111;color:#fff;border-radius:999px;padding:6px 8px;box-shadow:0 8px 30px rgba(0,0,0,.25);font-size:13px;z-index:9}
+  .sw button{background:#2a2a2e;color:#fff;border:0;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px}
+  .sw .lbl{padding:0 10px;min-width:280px;text-align:center}
+  .sw .tag{font-size:10px;background:#f59e0b;color:#111;border-radius:4px;padding:1px 5px;margin-right:6px;font-weight:700}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="ws">Multica 魔改 · DENE</div>
+    <div class="nav on">🏠 首页 <span class="cnt need" id="navNeed"></span></div>
+    <div class="nav">💬 聊天</div>
+    <div class="nav">📋 任务</div>
+    <div class="nav">🤖 智能体</div>
+    <div class="sec-label">二级入口</div>
+    <div class="nav">🗂 全部动态 <span class="cnt gray">87</span></div>
+    <div class="sec-label">置顶项目</div>
+    <div class="nav">Multica 魔改</div>
+    <div class="nav">通力电梯安全修复</div>
+    <div class="nav">tarot</div>
+  </aside>
+  <main id="root"></main>
+</div>
+<div class="sw">
+  <button id="prev" title="上一个 ←">‹</button>
+  <div class="lbl"><span class="tag">PROTOTYPE</span><span id="swl"></span></div>
+  <button id="next" title="下一个 →">›</button>
+</div>
+
+<script>
+/* ---------- 数据：2026-09-26 工作区快照 ---------- */
+const NOW = "今天 13:52";
+
+// 「需要你」：只收明确点名要人的信号
+const NEEDS = [
+  { id:"DENE-824", title:"临时缓解：视情况限制访问、重置特权账户密码并失效会话",
+    parent:"DENE-822 通力电梯漏洞修复", by:"布尔玛", when:"2 天前",
+    signal:"收口指名要人", kind:"blocked",
+    ask:"请私信 SSL VPN 网关和客户端配置，勿写入工单", action:"去私信", sample:false },
+  { id:"DENE-872", title:"tarot: 追问对话接续原问题、融牌、去 AI 味并分段",
+    parent:"tarot", by:"孙悟空出海", when:"40 分钟前",
+    signal:"@了你", kind:"mention",
+    ask:"「分段的断点你想按牌位分，还是按情绪转折分？两版截图在评论里。」", action:"回复", sample:true },
+  { id:"DENE-649", title:"读取 Apple Notes 最新笔记并更新到 HTML 网页",
+    parent:null, by:"特兰克斯", when:"5 小时前",
+    signal:"验收席是你", kind:"review",
+    ask:"交付物是一份 HTML 网页，等你打开看一眼再放行。", action:"验收", sample:true },
+];
+// 官方规则会多报、我们的规则挡掉的（待验收/卡住但没点名要人）
+const FILTERED = [
+  { id:"DENE-650", why:"卡住，等 Waffo 审核（close 没写要人）", st:"blocked" },
+  { id:"DENE-807", why:"卡住，验收席是布尔玛游戏（智能体）", st:"blocked" },
+  { id:"DENE-750", why:"卡住，验收席是布尔玛游戏（智能体）", st:"blocked" },
+];
+
+// 「我派出的」：按父任务聚合
+const SENT = [
+  { id:"DENE-822", title:"修复通力电梯图像追溯系统的未授权访问与管理员账户接管漏洞",
+    from:"对齐", project:"通力电梯安全修复", owner:"布尔玛", reviewer:"孙悟空",
+    stages:4, curStage:2, done:1, total:6, blocked:1, running:0,
+    last:{ tag:"卡住 · 需要你", cls:"p-red", text:"DENE-824 等你私信 VPN 配置" },
+    chatter:23, kids:[
+      ["DENE-823","done","环境搭建与探索：本地启动前后端",1],
+      ["DENE-824","blocked","临时缓解：限制访问、重置特权账户密码",2],
+      ["DENE-825","backlog","修复密码修改接口授权绕过",3],
+      ["DENE-826","backlog","敏感 API 端点强制认证与授权",3],
+      ["DENE-827","backlog","前端鉴权 UI/UX",3],
+      ["DENE-828","backlog","日志审查与公网暴露面排查",4]] },
+  { id:"DENE-633", title:"自动选派：每张票由 JEV 定执行席与验收席",
+    from:"对齐", project:"Multica 魔改", owner:"孙悟空", reviewer:"孙悟天",
+    stages:4, curStage:4, done:14, total:15, blocked:0, running:1,
+    last:{ tag:"进行中", cls:"p-blue", text:"DENE-707 孙悟饭 正在跑 · 路由接管存量票" },
+    chatter:41, kids:[["DENE-707","in_progress","路由接管更多格子：标签、项目、优先级",null]] },
+  { id:"DENE-871", title:"tarot: 优化 Yes/No 每日单张的洗牌与翻牌流程",
+    from:"聊天", project:"tarot", owner:"孙悟空出海", reviewer:"人造人18号出海",
+    stages:0, done:0, total:0, running:1,
+    last:{ tag:"进行中", cls:"p-blue", text:"孙悟空出海 正在跑" }, chatter:6, kids:[] },
+  { id:"DENE-722", title:"把项目里的记账 HTML 转为常驻进行中的任务，持续记账至周一报销",
+    from:"聊天", project:"个人事务", owner:"比克", reviewer:"孙悟天",
+    stages:0, done:0, total:0, running:0,
+    last:{ tag:"进行中", cls:"p-blue", text:"等下一笔账（常驻）" }, chatter:3, kids:[] },
+  { id:"DENE-650", title:"塔罗支付上架收口：Waffo 十档产品 + 店名/账单描述符/Resend",
+    from:"直接建", project:"tarot", owner:"特兰克斯", reviewer:"贝吉塔",
+    stages:0, done:0, total:0, running:0,
+    last:{ tag:"卡住 · 等外部", cls:"p-amber", text:"等 Waffo 审核回信" }, chatter:11, kids:[] },
+];
+
+// 「有什么变化」：按任务折叠，智能体之间的来回收成一行
+const CHANGES = [
+  { id:"DENE-875", title:"关单门禁改为必须真合入", result:"已完成", cls:"p-green", who:"孙悟饭", when:"1 小时前", chatter:12, pr:"#374 已合入" },
+  { id:"DENE-876", title:"侧边栏置顶区只保留项目", result:"已完成", cls:"p-green", who:"孙悟空", when:"2 小时前", chatter:7, pr:"已合入" },
+  { id:"DENE-874", title:"本地目录 worktree 收尾改为由平台分类交付点", result:"已完成", cls:"p-green", who:"孙悟空", when:"3 小时前", chatter:9, pr:"已合入" },
+  { id:"DENE-864", title:"建计划一条命令：multica plan apply", result:"阶段 3 完成", cls:"p-green", who:"孙悟空", when:"今天上午", chatter:15, pr:"父票推进到下一阶段" },
+];
+const MINE = []; // 你名下（人）没有进行中的任务
+
+const ST = { done:["#16a34a","完成"], blocked:["#dc2626","卡住"], in_progress:["#2563eb","进行中"], backlog:["#d4d4d8","未开始"], in_review:["#7c3aed","待验收"] };
+const sample = x => x ? '<span class="sample">示例</span>' : '';
+const fromPill = f => `<span class="pill ${f==="对齐"?"p-violet":f==="聊天"?"p-blue":"p-gray"}">来自${f}</span>`;
+const sigPill = s => `<span class="pill p-red">${s}</span>`;
+
+function progress(s){
+  if(!s.total) return `<div class="meta">单票 · 无子任务</div>`;
+  const w=n=>(n/s.total*100)+"%";
+  const run = s.kids.filter(k=>k[1]==="in_progress").length;
+  return `<div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+    <div class="bar" style="width:180px"><i style="width:${w(s.done)};background:#16a34a"></i><i style="width:${w(run)};background:#2563eb"></i><i style="width:${w(s.blocked||0)};background:#dc2626"></i></div>
+    <span class="meta" style="margin:0">${s.done}/${s.total} 子任务完成</span></div>`;
+}
+function stages(s){
+  if(!s.stages) return "";
+  let h='<div class="stages">';
+  for(let i=1;i<=s.stages;i++) h+=`<span class="${i<s.curStage?"done":i===s.curStage?"cur":""}">阶段 ${i}</span>`;
+  return h+'</div>';
+}
+function kids(s){
+  if(!s.kids.length) return "";
+  return `<details><summary class="quiet">展开 ${s.kids.length} 张子任务</summary><div class="kids">${
+    s.kids.map(k=>`<div class="kid"><span class="dot" style="background:${ST[k[1]][0]}"></span><span class="id">${k[0]}</span><span class="grow">${k[2]}</span><span class="meta" style="margin:0">${k[3]?"阶段 "+k[3]+" · ":""}${ST[k[1]][1]}</span></div>`).join("")}</div></details>`;
+}
+const needRow = n => `<div class="row">
+  <div class="grow">
+    <div>${sigPill(n.signal)} <span class="id">${n.id}</span> <span class="t">${n.title}</span>${sample(n.sample)}</div>
+    <div class="meta">${n.by} · ${n.when}${n.parent?" · 属于 "+n.parent:""}</div>
+    <div style="margin-top:6px;font-size:13px">“${n.ask}”</div>
+  </div>
+  <button class="btn pri">${n.action}</button></div>`;
+const filteredNote = () => `<details><summary class="quiet">另有 ${FILTERED.length} 张「待验收/卡住」没点名要人，官方规则会列在这里——点开看为什么挡掉</summary>
+  <div class="kids">${FILTERED.map(f=>`<div class="kid"><span class="dot" style="background:${ST[f.st][0]}"></span><span class="id">${f.id}</span><span class="grow">${f.why}</span></div>`).join("")}</div></details>`;
+const sentRow = s => `<div class="row" style="display:block">
+  <div style="display:flex;gap:12px;align-items:flex-start">
+    <div class="grow">
+      <div><span class="id">${s.id}</span> <span class="t">${s.title}</span></div>
+      <div class="meta">${fromPill(s.from)} · ${s.project} · 执行 ${s.owner} · 验收 ${s.reviewer}</div>
+      ${progress(s)}${stages(s)}
+    </div>
+    <div style="text-align:right;max-width:260px">
+      <span class="pill ${s.last.cls}">${s.last.tag}</span>
+      <div class="meta">${s.last.text}</div>
+    </div>
+  </div></div>${kids(s)}<div class="quiet" style="border-top:0;padding-top:0">🤖 智能体之间来回 ${s.chatter} 条 · 查看</div>`;
+const changeRow = c => `<div class="row">
+  <span class="pill ${c.cls}">${c.result}</span>
+  <div class="grow"><span class="id">${c.id}</span> <span class="t">${c.title}</span>
+    <div class="meta">${c.who} · ${c.when} · ${c.pr} · 🤖 其间来回 ${c.chatter} 条已折叠</div></div></div>`;
+
+/* ---------- 变体 A：官方骨架竖排 + 「我派出的」 ---------- */
+function A(){
+  return `<h1>首页</h1><div class="sub">${NOW} · 自上次来过有 ${CHANGES.length} 项变化</div>
+  <h2>需要你 <span class="n">${NEEDS.length}</span><span class="hint">只收明确点名要人的：收口要人 / 验收席是你 / @你</span></h2>
+  <div class="card">${NEEDS.map(needRow).join("")}${filteredNote()}</div>
+  <h2>我派出的 <span class="n">${SENT.length}</span><span class="hint">聊天、对齐、直接建出去的任务，按父任务看进度</span></h2>
+  <div class="card">${SENT.map(sentRow).join('<div style="border-top:1px solid var(--line)"></div>')}</div>
+  <h2>有什么变化 <span class="n">${CHANGES.length}</span><span class="hint">按任务折叠 · <a href="#">全部动态 →</a></span></h2>
+  <div class="card">${CHANGES.map(changeRow).join("")}</div>
+  <h2>我手上的 <span class="n">0</span></h2>
+  <div class="card"><div class="empty">你名下没有进行中或本周到期的任务。活都在智能体手上，见上面「我派出的」。</div></div>`;
+}
+
+/* ---------- 变体 B：左处理队列 + 右进度，一次处理一件 ---------- */
+let sel = 0;
+function B(){
+  const n = NEEDS[sel];
+  const parent = SENT.find(s=>n.parent && n.parent.startsWith(s.id));
+  return `<h1>首页</h1><div class="sub">${NOW} · 左边清空就可以走了 · <span class="kbd">J</span>/<span class="kbd">K</span> 上下切换</div>
+  <div class="split">
+    <div>
+      <h2 style="margin-top:0">需要你 <span class="n">${NEEDS.length}</span></h2>
+      <div class="card">${NEEDS.map((x,i)=>`<div class="q-item ${i===sel?"sel":""}" data-i="${i}">
+        <div>${sigPill(x.signal)}${sample(x.sample)}</div>
+        <div class="t" style="margin-top:4px">${x.title}</div>
+        <div class="meta"><span class="id">${x.id}</span> · ${x.by} · ${x.when}</div></div>`).join("")}${filteredNote()}</div>
+      <h2>有什么变化 <span class="n">${CHANGES.length}</span></h2>
+      <div class="card">${CHANGES.map(c=>`<div class="row"><span class="pill ${c.cls}">${c.result}</span><div class="grow" style="font-size:13px">${c.title}<div class="meta">${c.when} · 🤖 ${c.chatter} 条已折叠</div></div></div>`).join("")}</div>
+    </div>
+    <div>
+      <div class="card detail">
+        <div>${sigPill(n.signal)} <span class="id">${n.id}</span></div>
+        <div style="font-size:17px;font-weight:600;margin:6px 0">${n.title}</div>
+        <div class="meta">${n.by} · ${n.when}</div>
+        <div class="why" style="font-size:14px;color:var(--fg);margin-top:14px">“${n.ask}”</div>
+        <div style="display:flex;gap:8px;margin-top:14px"><button class="btn pri">${n.action}</button><button class="btn">打回</button><button class="btn">改派</button><button class="btn">稍后</button></div>
+        ${parent?`<h2>所在的大任务</h2><div class="card">${sentRow(parent)}</div>`:""}
+      </div>
+      <h2>我派出的 <span class="n">${SENT.length}</span></h2>
+      <div class="card">${SENT.filter(s=>s!==parent).map(s=>`<div class="row"><div class="grow"><span class="id">${s.id}</span> ${s.title}<div class="meta">${fromPill(s.from)} · ${s.owner}${s.total?" · "+s.done+"/"+s.total:""}</div></div><span class="pill ${s.last.cls}">${s.last.tag}</span></div>`).join("")}</div>
+    </div>
+  </div>`;
+}
+
+/* ---------- 变体 C：以「我派出的」为主角，按进展分列 ---------- */
+function C(){
+  const col = (name, dot, list) => `<div class="col"><h3><span class="dot" style="background:${dot}"></span>${name} <span class="n" style="color:var(--muted);font-weight:400">${list.length}</span></h3>${list.join("")}</div>`;
+  const tile = s => `<div class="tile ${s.last.tag.includes("需要你")?"hot":""}">
+    <div class="id">${s.id} · ${fromPill(s.from)}</div>
+    <div class="t" style="margin:4px 0">${s.title}</div>
+    ${s.total?`<div class="bar"><i style="width:${s.done/s.total*100}%;background:#16a34a"></i><i style="width:${(s.blocked||0)/s.total*100}%;background:#dc2626"></i></div><div class="meta">${s.done}/${s.total}${s.stages?" · 阶段 "+s.curStage+"/"+s.stages:""}</div>`:""}
+    <div class="meta">${s.last.text}</div>
+    <div class="meta" style="color:var(--faint)">🤖 ${s.chatter} 条来回已折叠</div></div>`;
+  const hot = SENT.filter(s=>s.last.tag.includes("需要你"));
+  const run = SENT.filter(s=>s.last.tag==="进行中");
+  const wait = SENT.filter(s=>s.last.tag.startsWith("卡住")&&!s.last.tag.includes("需要你"));
+  const doneT = CHANGES.map(c=>`<div class="tile"><div class="id">${c.id}</div><div class="t" style="margin:4px 0">${c.title}</div><div class="meta">${c.when} · ${c.pr}</div></div>`);
+  return `<h1>首页</h1><div class="sub">${NOW} · 你派出去的每件事现在在哪一格</div>
+  <div class="banner"><span style="font-size:20px">✋</span><div class="grow"><b>${NEEDS.length} 件事在等你</b>
+    <div class="meta">${NEEDS.map(n=>`${n.signal}：${n.id}`).join(" · ")}</div></div><button class="btn pri">逐个处理 →</button></div>
+  <div class="lane">
+    ${col("卡在你这", "#dc2626", hot.map(tile))}
+    ${col("智能体在跑", "#2563eb", run.map(tile))}
+    ${col("在等别的", "#d97706", wait.map(tile))}
+    ${col("最近完成", "#16a34a", doneT)}
+  </div>
+  ${filteredNote().replace('class="quiet"','class="quiet" style="margin-top:14px;border:0"')}
+  <h2>我手上的 <span class="n">0</span></h2><div class="card"><div class="empty">你名下没有进行中或本周到期的任务。</div></div>`;
+}
+
+/* ---------- 切换器 ---------- */
+const V = [["A","官方骨架竖排 + 我派出的",A],["B","左处理队列 · 右进度",B],["C","我派出的为主角 · 按进展分列",C]];
+function cur(){ const v=new URLSearchParams(location.search).get("variant")||"A"; return Math.max(0,V.findIndex(x=>x[0]===v)); }
+function render(){
+  const i=cur(); document.getElementById("root").innerHTML=V[i][2]();
+  document.getElementById("swl").textContent=`${V[i][0]} — ${V[i][1]}  (${i+1}/${V.length})`;
+  document.getElementById("navNeed").textContent=NEEDS.length;
+  document.querySelectorAll(".q-item").forEach(el=>el.onclick=()=>{sel=+el.dataset.i;render();});
+}
+function go(d){ const i=(cur()+d+V.length)%V.length; const u=new URL(location.href); u.searchParams.set("variant",V[i][0]); history.replaceState(null,"",u); render(); }
+document.getElementById("prev").onclick=()=>go(-1);
+document.getElementById("next").onclick=()=>go(1);
+addEventListener("keydown",e=>{
+  if(e.target.closest("input,textarea,[contenteditable]")) return;
+  if(e.key==="ArrowLeft") go(-1); if(e.key==="ArrowRight") go(1);
+  if(V[cur()][0]==="B"&&(e.key==="j"||e.key==="k")){ sel=(sel+(e.key==="j"?1:-1)+NEEDS.length)%NEEDS.length; render(); }
+});
+render();
+</script>
+</body>
+</html>
