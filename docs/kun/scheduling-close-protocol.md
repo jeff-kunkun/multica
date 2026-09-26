@@ -143,6 +143,10 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
 
 收口本身已经负责交棒：`--outcome in_review` 会自己路由到验收席，后面不要再补一次 `handoff --to reviewer`。
 
+叫人用 `multica issue summon <id> --to <成员> --reason "..."`（DENE-880，`POST /api/issues/{id}/summon`），不要手写 @。一次调用把四件事做完：写这个人的收件箱（`needs_you`，最高级「需要你」）、把他加成关注者、票上留一条看得见的 @、记一条「等他」的待回复记录。他回复之前再叫一次只回 `duplicate: true`，不出第二条。他回复后平台叫醒执行智能体（叫人的智能体，否则执行人）；那次运行结束票还停在 `blocked`，平台再提醒一次补收口。`issue close` / `issue status` 带 `--needs-human` 已经替你叫了这个人，不用再 summon。路由没人接（`routing_needs_you`）、巡检补不上验收席、跑满时限、额度熔断没人接力，这些场景都走同一个入口。成员自己 @ 成员照旧由提及通知进收件箱，入口只补一条「等他」记录，让他回复时叫醒执行者。
+
+每个人「等我回复」的清单：`GET /api/summons/waiting`（当前用户、当前工作区，未回复、票未结束，按时间倒序），每行带票号、标题、谁叫的（`caller_type` / `caller_name`）、来源（`source`）和原因（`reason`）。
+
 建一整棵分阶段子票用 `multica plan apply <plan.yaml>`（DENE-864，`POST /api/issues/plan-apply`），不要逐张 `issue create` 再改派：父票和全部子票在一个事务里建好，执行人建票时就坐上，stage 1 进 `todo` 开跑，后面的 stage 停在 `backlog`。同一份 plan 再 apply 只补缺的节点，已有的票不改。示例见 `docs/kun/examples/dene-858.plan.yaml`。
 
 阶段自动推进卡住、或调度席决定手动放下一段时用 `multica issue stage advance <父票>`（`POST /api/issues/{id}/stage-advance`）：当前 stage 全部终态才把下一 stage 的 `backlog` 提到 `todo` 并叫醒执行人；没完就回 409，点名还差哪几张票和它们的状态，什么都不写。

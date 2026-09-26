@@ -58,6 +58,15 @@ actually landed (`target_name`, `run_created`, `duplicate`):
 A close already hands over what it closes: `--outcome in_review` routes the
 seat itself, so do not follow it with `handoff --to reviewer`.
 
+Calling a person is `multica issue summon <id> --to <member> --reason "..."`
+(DENE-880, `POST /api/issues/{id}/summon`), not a hand-written @mention. One
+call writes their inbox row (`needs_you`, highest severity), subscribes them,
+leaves a visible @ on the ticket, and records an open call; a second call
+before they reply comes back as `duplicate: true`. Their reply wakes the
+executor, and if that run ends with the ticket still `blocked` the executor
+is reminded once to close again. `--needs-human <member>` on `issue close` or
+`issue status` already calls that person — do not summon them again.
+
 Legacy path, still accepted: `multica issue status <id> <status>` (with the
 wait flags when `blocked`), then the evidence comment (`--content-file`),
 then the eight keys via `multica issue metadata set` with `close.status`

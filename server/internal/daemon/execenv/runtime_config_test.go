@@ -2512,3 +2512,20 @@ func TestAvailableCommandsListIssueHandoff(t *testing.T) {
 		t.Errorf("issue handoff bullet should sit right after issue close (close=%d handoff=%d children=%d)", closeIdx, handoffIdx, childrenIdx)
 	}
 }
+
+// TestAvailableCommandsListIssueSummon pins the `issue summon` bullet
+// (DENE-880): the one way to call a person, and --needs-human already calls.
+func TestAvailableCommandsListIssueSummon(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
+	for _, want := range []string{
+		"- `multica issue summon <id> --to <member> --reason \"...\"`",
+		"instead of a hand-written @mention of a person",
+		"`--needs-human` already calls that person",
+		"not a close — `multica issue summon <id>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("brief missing %q", want)
+		}
+	}
+}

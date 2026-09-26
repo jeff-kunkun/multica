@@ -611,9 +611,30 @@ func (h *Handler) blockReviewNeedingHuman(ctx context.Context, issue db.Issue, w
 	} else {
 		rec = blockwait.FailureWake(time.Now(), "验收席由人来定", 1)
 	}
-	h.blockAcceptedIssue(ctx, issue, blockwait.Decision{
-		Record: rec,
-		Reason: mention + why + "平台补不上验收席，这张票改成阻塞，等人指定验收席后再送审（`multica issue update <issue> --reviewer <name>`）。",
+	reason := why + "平台补不上验收席，这张票改成阻塞，等人指定验收席后再送审（`multica issue update <issue> --reviewer <name>`）。"
+	h.blockAcceptedIssue(ctx, issue, blockwait.Decision{Record: rec, Reason: mention + reason})
+	if rec.NeedsHuman != "" {
+		// The block comment carries the @, but a system comment's @ reaches
+		// nobody's inbox; the summon entry writes the inbox row.
+		h.summonPatrol(ctx, issue, managers[0], reason, pgtype.UUID{}, true)
+	}
+}
+
+// summonPatrol is the patrol calling a person through the summon entry
+// (DENE-880). commentID is a block comment already carrying the @; unset
+// posts the entry's own. An unanswered call to the same person dedupes.
+func (h *Handler) summonPatrol(ctx context.Context, issue db.Issue, recipient pgtype.UUID, reason string, commentID pgtype.UUID, noComment bool) {
+	if !recipient.Valid {
+		return
+	}
+	_, _ = h.summonPerson(ctx, service.SummonInput{
+		Issue:      issue,
+		Recipient:  recipient,
+		CallerType: "system",
+		Source:     service.SummonSourcePatrol,
+		Reason:     reason,
+		CommentID:  commentID,
+		NoComment:  noComment,
 	})
 }
 
@@ -758,6 +779,11 @@ func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason str
 		mention = h.memberWakeMention(ctx, targetID)
 	}
 	comment := h.postBlockComment(ctx, issue, mention+reason)
+	if targetType.Valid && targetID.Valid && targetType.String == "member" {
+		h.summonPatrol(ctx, issue, targetID, reason, comment.ID, !comment.ID.Valid)
+	} else if human := blockwait.MetaString(parseIssueMetadata(issue.Metadata), blockwait.KeyNeedsHuman); human != "" {
+		h.summonPatrol(ctx, issue, parseUUID(human), reason, pgtype.UUID{}, false)
+	}
 	if commentOnly || !targetType.Valid || !targetID.Valid || !comment.ID.Valid {
 		return
 	}

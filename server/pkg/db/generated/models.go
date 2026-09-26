@@ -1058,6 +1058,23 @@ type IssueSubscriber struct {
 	OptOutScope    pgtype.Text        `json:"opt_out_scope"`
 }
 
+type IssueSummon struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	RecipientID     pgtype.UUID        `json:"recipient_id"`
+	CallerType      string             `json:"caller_type"`
+	CallerID        pgtype.UUID        `json:"caller_id"`
+	Source          string             `json:"source"`
+	Reason          string             `json:"reason"`
+	CommentID       pgtype.UUID        `json:"comment_id"`
+	InboxItemID     pgtype.UUID        `json:"inbox_item_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	AnsweredAt      pgtype.Timestamptz `json:"answered_at"`
+	AnswerCommentID pgtype.UUID        `json:"answer_comment_id"`
+	RemindedAt      pgtype.Timestamptz `json:"reminded_at"`
+}
+
 type IssueToLabel struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 	LabelID pgtype.UUID `json:"label_id"`
