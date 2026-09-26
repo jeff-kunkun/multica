@@ -30,6 +30,7 @@ type fakeStore struct {
 
 	// stale-review row
 	workspaces    []string
+	todoIDs       []string
 	staleIDs      []string
 	remarks       []string
 	statusWritten []string
@@ -262,6 +263,10 @@ func (f *fakeStore) Subscribe(_ context.Context, _, _, userID string) error {
 
 func (f *fakeStore) EnabledWorkspaces(context.Context) ([]string, error) {
 	return f.workspaces, f.fail("enabled_workspaces")
+}
+
+func (f *fakeStore) UnassignedTodos(_ context.Context, _ string, _ time.Time, _ int) ([]string, error) {
+	return f.todoIDs, f.fail("unassigned_todos")
 }
 
 func (f *fakeStore) StaleReviews(_ context.Context, _ string, _ time.Time, _ int) ([]string, error) {

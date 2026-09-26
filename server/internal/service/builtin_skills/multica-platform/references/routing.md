@@ -52,6 +52,20 @@ threshold (Settings → Routing, default 24 hours):
   and it runs even when the assignee is a person.
 - With routing switched off, the sweep does not run.
 
+The same sweep also backfills quiet legacy `todo` issues whose executor or
+reviewer slot is empty. It only considers `todo`, skips backlog, blocked, and
+human-held issues, and shares a 25-issue per-workspace budget with the
+stale-review row. Re-running it is safe because `Route` only fills empty slots.
+
+Routing-owned fields follow three gates: a downstream consumer must read the
+field; the value must be deterministic or verifiable (otherwise it stays
+empty); and the existing fill-only, conditional-write, one-comment rules
+remain in force. Projects are inherited from a parent issue, or from the one
+project attached to the source issue/chat of an agent run; multi-project chats
+remain empty. A child with priority `none` inherits its parent's priority.
+Labels and due dates are not routed, and status remains governed by server
+gates.
+
 验收席 is a native **top-level issue** field, not a workspace property:
 `reviewer_type` + `reviewer_id` on the issue, shaped exactly like `assignee_type` +
 `assignee_id`, plus one extra type. Set it by hand with

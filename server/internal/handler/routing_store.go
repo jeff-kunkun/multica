@@ -845,6 +845,29 @@ func (s routingStore) EnabledWorkspaces(ctx context.Context) ([]string, error) {
 
 // StaleReviews lists tickets awaiting acceptance that have been quiet since
 // before the given instant and have no run working on them.
+// UnassignedTodos lists quiet todo tickets with at least one empty routing
+// seat. The SQL filters the cheap, stable eligibility set; Route repeats the
+// human-held guard and applies the fill-only writes atomically.
+func (s routingStore) UnassignedTodos(ctx context.Context, workspaceID string, before time.Time, limit int) ([]string, error) {
+	wsID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.h.Queries.ListUnassignedTodoIssues(ctx, db.ListUnassignedTodoIssuesParams{
+		WorkspaceID: wsID,
+		Before:      pgtype.Timestamptz{Time: before, Valid: true},
+		Lim:         int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, id := range rows {
+		out = append(out, util.UUIDToString(id))
+	}
+	return out, nil
+}
+
 func (s routingStore) StaleReviews(ctx context.Context, workspaceID string, before time.Time, limit int) ([]string, error) {
 	wsID, err := util.ParseUUID(workspaceID)
 	if err != nil {

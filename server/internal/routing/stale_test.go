@@ -458,3 +458,23 @@ func TestStaleAfterFallsBackToTheDefault(t *testing.T) {
 		t.Errorf("StaleAfter(6) = %v, want 6h", got)
 	}
 }
+
+func TestSweepRoutesQuietTodoSeatsWithinSharedBudget(t *testing.T) {
+	store := newFakeStore()
+	store.workspaces = []string{"ws-1"}
+	store.todoIDs = []string{"issue-1"}
+	store.issue.Status = "todo"
+	store.issue.LastActivityAt = time.Now().Add(-time.Hour)
+	judge := &fakeJudge{verdict: confidentVerdict()}
+
+	report, err := newRouter(store, judge).Sweep(context.Background())
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if report.Examined != 1 {
+		t.Fatalf("examined = %d, want 1", report.Examined)
+	}
+	if len(store.assigns) != 1 {
+		t.Fatalf("todo executor assignments = %v, want one", store.assigns)
+	}
+}
