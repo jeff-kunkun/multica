@@ -1626,7 +1626,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// server/internal/handler/onboarding_shim.go.
 		r.Post("/api/me/onboarding/runtime-bootstrap", h.BootstrapOnboardingRuntime)
 		r.Post("/api/me/onboarding/no-runtime-bootstrap", h.BootstrapOnboardingNoRuntime)
-		r.Post("/api/cli-token", h.IssueCliToken)
+		// Credential exchange is human-only (DENE-896). A mat_ task token is
+		// bound to one workspace by its row; letting it mint a JWT here would
+		// hand a running agent an unbound human credential. Callers today are
+		// the web login page only (JWT cookie → JWT for CLI/desktop); no daemon
+		// or CLI path reaches this route with a machine credential.
+		r.With(handler.RequireHumanActor).Post("/api/cli-token", h.IssueCliToken)
 		// Sliding session renewal for clients that hold the session as a
 		// string (Desktop, mobile). Browsers get theirs re-issued inline by
 		// middleware.Auth and never call this (MUL-7436).
@@ -1900,6 +1905,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/share-links/join", h.JoinByShareLink)
 
 		r.Route("/api/tokens", func(r chi.Router) {
+			// Same boundary as /api/cli-token: a mat_ task token must not
+			// mint, list, renew, or revoke unbound mul_ tokens. Legitimate
+			// callers are `multica login` (JWT), the desktop daemon-manager
+			// (JWT) and the daemon's renewal loop (its own mul_ PAT, which
+			// the auth middleware leaves unmarked, so it passes this guard).
+			r.Use(handler.RequireHumanActor)
 			r.Get("/", h.ListPersonalAccessTokens)
 			r.Post("/", h.CreatePersonalAccessToken)
 			r.Post("/current/renew", h.RenewCurrentPersonalAccessToken)
