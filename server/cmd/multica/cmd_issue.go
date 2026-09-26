@@ -177,10 +177,15 @@ var issueListCmd = &cobra.Command{
 }
 
 var issueGetCmd = &cobra.Command{
-	Use:   "get <id>",
+	Use:   "get <id|url>",
 	Short: "Get issue details",
-	Args:  exactArgs(1),
-	RunE:  runIssueGet,
+	Long: "Get an issue by key (MUL-123), UUID, or its web URL.\n\n" +
+		"A URL into another workspace is read on behalf of the person who started this run, " +
+		"as far as their own membership there allows, and is read-only: the response carries a " +
+		"provenance block and a notice is printed on stderr. Run transcripts, logs and attachment " +
+		"downloads do not cross the workspace boundary.",
+	Args: exactArgs(1),
+	RunE: runIssueGet,
 }
 
 var issuePullRequestsCmd = &cobra.Command{
@@ -295,10 +300,13 @@ var issueCommentCmd = &cobra.Command{
 }
 
 var issueCommentListCmd = &cobra.Command{
-	Use:   "list <issue-id>",
+	Use:   "list <issue-id|url>",
 	Short: "List comments on an issue",
-	Args:  exactArgs(1),
-	RunE:  runIssueCommentList,
+	Long: "List comments on an issue given by key, UUID, or web URL. A URL into another workspace is " +
+		"served read-only through the link route (see `multica issue get --help`); the same paging " +
+		"and thread flags apply.",
+	Args: exactArgs(1),
+	RunE: runIssueCommentList,
 }
 
 var issueCommentAddCmd = &cobra.Command{
@@ -1103,9 +1111,32 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	issueRef, linked, err := resolveIssueReadTarget(ctx, client, args[0])
 	if err != nil {
 		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if linked != nil {
+		// Another workspace's issue, read through its link: the payload the
+		// link route returns (issue, run metadata, provenance) is the whole
+		// answer; there is no /api/issues/<id> to follow up with.
+		printLinkNotice(linked.Provenance)
+		if output == "table" {
+			issue := linked.Issue
+			headers := []string{"KEY", "WORKSPACE", "TITLE", "STATUS", "PRIORITY", "DESCRIPTION"}
+			rows := [][]string{{
+				issueDisplayKey(issue),
+				linked.Provenance.WorkspaceSlug,
+				strVal(issue, "title"),
+				strVal(issue, "status"),
+				strVal(issue, "priority"),
+				strVal(issue, "description"),
+			}}
+			cli.PrintTable(os.Stdout, headers, rows)
+			return nil
+		}
+		return cli.PrintJSON(os.Stdout, linked)
 	}
 
 	var issue map[string]any
@@ -1113,7 +1144,6 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get issue: %w", err)
 	}
 
-	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		actors := loadActorDisplayLookup(ctx, client)
 		assignee := formatAssignee(issue, actors)
@@ -2285,7 +2315,7 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	issueRef, linked, err := resolveIssueReadTarget(ctx, client, args[0])
 	if err != nil {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
@@ -2383,10 +2413,19 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	if len(params) > 0 {
 		path += "?" + params.Encode()
 	}
+	if linked != nil {
+		// Another workspace's issue: same query language, served by the
+		// read-only link route (attachment URLs stripped, provenance noted).
+		path = linkReadPath("/api/links/issue/comments", strings.TrimSpace(args[0]), params)
+		printLinkNotice(linked.Provenance)
+	}
 
 	var comments []map[string]any
 	respHeaders, err := client.GetJSONWithHeaders(ctx, path, &comments)
 	if err != nil {
+		if linked != nil {
+			return fmt.Errorf("list comments: %w", linkReadRequestError(err))
+		}
 		return fmt.Errorf("list comments: %w", err)
 	}
 	// The server emits the next-page cursor in headers when there is likely

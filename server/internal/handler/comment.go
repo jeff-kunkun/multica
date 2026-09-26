@@ -408,7 +408,17 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	h.writeCommentList(w, r, issue, false)
+}
 
+// writeCommentList is the body of ListComments after the issue has been
+// loaded and authorised: it parses the read-mode query parameters, fetches,
+// projects and writes the comment list. The cross-workspace link reader
+// (link_read.go) shares it so both surfaces speak the same query language;
+// stripAttachmentURLs is that reader's payload trim — attachment rows keep
+// their name, type and size but every URL is blanked, because a linked read
+// hands out no file access (DENE-897).
+func (h *Handler) writeCommentList(w http.ResponseWriter, r *http.Request, issue db.Issue, stripAttachmentURLs bool) {
 	q := r.URL.Query()
 
 	var sinceTime pgtype.Timestamptz
@@ -650,6 +660,9 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	for i, c := range result.Comments {
 		cid := uuidToString(c.ID)
 		resp[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
+		if stripAttachmentURLs {
+			resp[i].Attachments = redactAttachmentURLs(resp[i].Attachments)
+		}
 		// Attach roots_only orientation stats when present (nil map elsewhere).
 		if st, ok := result.RootStats[cid]; ok {
 			rc := st.ReplyCount
