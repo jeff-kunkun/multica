@@ -29,9 +29,9 @@ vi.mock("@multica/core/issues/mutations", () => ({
 vi.mock("@multica/core/home", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/home")>();
   const store = Object.assign(
-    (sel: (s: { seenAt: string | null; markSeen: typeof markSeen }) => unknown) =>
-      sel({ seenAt, markSeen }),
-    { getState: () => ({ seenAt, markSeen }) },
+    (sel: (s: { seenAt: Record<string, string>; markSeen: typeof markSeen }) => unknown) =>
+      sel({ seenAt: seenAt ? { "ws-1": seenAt } : {}, markSeen }),
+    { getState: () => ({ seenAt: seenAt ? { "ws-1": seenAt } : {}, markSeen }) },
   );
   return {
     ...actual,
@@ -158,7 +158,7 @@ describe("HomePage", () => {
     expect(within(done).queryByText("title 879")).toBeNull();
     fireEvent.click(within(done).getByRole("button", { name: "1 already seen" }));
     expect(within(done).getByText("title 879")).toBeInTheDocument();
-    expect(markSeen).toHaveBeenCalled();
+    expect(markSeen).toHaveBeenCalledWith("ws-1", expect.any(String));
   });
 });
 

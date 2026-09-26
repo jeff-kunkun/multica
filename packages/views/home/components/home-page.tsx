@@ -315,12 +315,12 @@ export function HomePage() {
   // "Done today" shows once. Read the mark left by the previous visit, then
   // move it to now — on arrival and again on leaving, so rows that finish
   // while the page is open also count as seen next time.
-  const [seenBefore] = useState(() => useDoneSeenStore.getState().seenAt);
+  const [seenBefore] = useState(() => useDoneSeenStore.getState().seenAt[wsId] ?? null);
   const markSeen = useDoneSeenStore((s) => s.markSeen);
   useEffect(() => {
-    markSeen(new Date().toISOString());
-    return () => markSeen(new Date().toISOString());
-  }, [markSeen]);
+    markSeen(wsId, new Date().toISOString());
+    return () => markSeen(wsId, new Date().toISOString());
+  }, [markSeen, wsId]);
   const done = useMemo(() => splitSeenDone(board.done, seenBefore), [board.done, seenBefore]);
   const [showSeen, setShowSeen] = useState(false);
 
@@ -357,6 +357,7 @@ export function HomePage() {
           variant="ghost"
           size="sm"
           className="text-muted-foreground"
+          nativeButton={false}
           render={<AppLink href={`${wsPaths.inbox()}?${LAYER_PARAM}=${ACTIVITY_LAYER_PARAM}`} />}
         >
           <History className="size-4" />
