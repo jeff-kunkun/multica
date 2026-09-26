@@ -9,6 +9,7 @@ let searchParams = new URLSearchParams();
 let board: InboxBoard;
 let seenAt: string | null = null;
 const markSeen = vi.fn();
+const takeSnapshot = vi.fn();
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/auth", () => ({
@@ -36,6 +37,10 @@ vi.mock("@multica/core/home", async (importOriginal) => {
   return {
     ...actual,
     useInboxBoard: () => ({ board, isLoading: false, isError: false }),
+    useBoardUnreadSnapshot: (wsId: string) => {
+      takeSnapshot(wsId);
+      return undefined;
+    },
     useDoneSeenStore: store,
   };
 });
@@ -68,6 +73,7 @@ function row(over: Partial<BoardRow> & { issueId: string; lane: BoardRow["lane"]
     next: null,
     at: "2026-09-26T08:00:00Z",
     timeline: [],
+    unread: 0,
     children: [],
     ...over,
   };
@@ -77,6 +83,7 @@ beforeEach(() => {
   push.mockReset();
   mutate.mockReset();
   markSeen.mockReset();
+  takeSnapshot.mockReset();
   searchParams = new URLSearchParams();
   seenAt = null;
   board = {
@@ -101,6 +108,7 @@ beforeEach(() => {
       }),
     ],
     running: [row({ issueId: "882", lane: "running", next: { type: "agent", id: "a-2" } })],
+    fresh: [],
     done: [
       row({ issueId: "880", lane: "done", at: "2026-09-26T10:00:00Z" }),
       row({ issueId: "879", lane: "done", at: "2026-09-26T06:00:00Z" }),
@@ -126,6 +134,26 @@ describe("HomePage", () => {
     expect(within(stalled).getByText("Next: name:a-1")).toBeInTheDocument();
 
     expect(within(screen.getByTestId("board-lane-running")).getByText("name:a-2")).toBeInTheDocument();
+  });
+
+  it("reads the board on arrival and marks what was unread (DENE-901)", () => {
+    board.running[0] = { ...board.running[0]!, unread: 2 };
+    board.fresh = [row({ issueId: "900", lane: "fresh", unread: 1 })];
+    renderWithI18n(<HomePage />);
+    expect(takeSnapshot).toHaveBeenCalledWith("ws-1");
+    expect(within(screen.getByTestId("board-lane-running")).getByText("2 new")).toBeInTheDocument();
+    const fresh = screen.getByTestId("board-lane-fresh");
+    expect(within(fresh).getByText("title 900")).toBeInTheDocument();
+    expect(within(fresh).getByText("1 new")).toBeInTheDocument();
+    const lanes = screen.getAllByTestId(/^board-lane-/).map((el) => el.dataset.testid);
+    expect(lanes.indexOf("board-lane-fresh")).toBe(lanes.indexOf("board-lane-done") - 1);
+    expect(screen.getAllByTestId("board-row-unread")).toHaveLength(2);
+  });
+
+  it("hides the new-activity lane when nothing is new", () => {
+    renderWithI18n(<HomePage />);
+    expect(screen.queryByTestId("board-lane-fresh")).toBeNull();
+    expect(screen.queryByTestId("board-row-unread")).toBeNull();
   });
 
   it("opens the issue when a row is clicked", () => {

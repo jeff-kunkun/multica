@@ -165,6 +165,11 @@
         "hint": "只亮一个标记，不打扰你",
         "empty": "现在没有智能体在跑"
       },
+      "fresh": {
+        "title": "有新动态",
+        "hint": "上次来过之后有新消息、又不在上面几栏的票。只在这次显示",
+        "empty": "没有新动态"
+      },
       "done": {
         "title": "今天做完",
         "hint": "显示一次，看过后自动收起",
@@ -185,6 +190,7 @@
       "stalled_unclosed": "做完没收口",
       "stalled_reply_unclosed": "回了话没收口",
       "running": "在跑",
+      "fresh": "新动态",
       "done": "做完"
     },
     "stuck": {
@@ -210,6 +216,7 @@
       "after": "之后没有新的运行，也没有收口"
     },
     "server_mark": "服务端判断",
+    "unread_other": "{{count}} 条新",
     "before": "停之前：{{text}}",
     "next": "下一棒：{{name}}",
     "next_none": "下一棒：没人接",

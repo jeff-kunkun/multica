@@ -2568,6 +2568,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// user. Backs the workspace-switcher dot for OTHER workspaces.
 				r.Get("/unread-summary", h.UnreadInboxSummary)
 				r.Post("/mark-all-read", h.MarkAllInboxRead)
+				// The board's unread snapshot and the ticket-level read
+				// (DENE-901).
+				r.Get("/unread-issues", h.ListUnreadInboxIssues)
+				r.Post("/issues/{issueId}/read", h.MarkIssueInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)

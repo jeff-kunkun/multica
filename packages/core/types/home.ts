@@ -87,3 +87,19 @@ export interface WaitingSummon {
   inbox_item_id: string | null;
   created_at: string;
 }
+
+/**
+ * GET /api/inbox/unread-issues — one row per issue the current user has
+ * unread inbox rows on (DENE-901). `held_count` of them hang on an open call
+ * and stay unread until the call is answered or closed.
+ */
+export interface UnreadInboxIssue {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  status: string;
+  parent_issue_id: string | null;
+  unread_count: number;
+  held_count: number;
+  latest_at: string;
+}

@@ -91,6 +91,58 @@ func (q *Queries) ClaimIssueSummonReminder(ctx context.Context, answerCommentID 
 	return i, err
 }
 
+const closeOpenIssueSummons = `-- name: CloseOpenIssueSummons :many
+UPDATE issue_summon
+SET answered_at = now()
+WHERE issue_id = $1 AND answered_at IS NULL
+  AND ($2::uuid IS NULL OR recipient_id = $2::uuid)
+RETURNING id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at
+`
+
+type CloseOpenIssueSummonsParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+}
+
+// The ticket moved on without a reply (DENE-901): it finished, or the person
+// called changed its status or owner themselves. The call is over; it is
+// closed the way an answer closes it, minus the answer comment, so no
+// reminder ever keys on it. A NULL recipient closes every call on the ticket.
+func (q *Queries) CloseOpenIssueSummons(ctx context.Context, arg CloseOpenIssueSummonsParams) ([]IssueSummon, error) {
+	rows, err := q.db.Query(ctx, closeOpenIssueSummons, arg.IssueID, arg.RecipientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueSummon{}
+	for rows.Next() {
+		var i IssueSummon
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.RecipientID,
+			&i.CallerType,
+			&i.CallerID,
+			&i.Source,
+			&i.Reason,
+			&i.CommentID,
+			&i.InboxItemID,
+			&i.CreatedAt,
+			&i.AnsweredAt,
+			&i.AnswerCommentID,
+			&i.RemindedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createIssueSummon = `-- name: CreateIssueSummon :one
 INSERT INTO issue_summon (
     workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id

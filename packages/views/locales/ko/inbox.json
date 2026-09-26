@@ -165,6 +165,11 @@
         "hint": "Just a marker, no noise",
         "empty": "No agent is running right now"
       },
+      "fresh": {
+        "title": "새 소식",
+        "hint": "지난 방문 이후 읽지 않은 소식이 있고 위 레인에 없는 티켓. 이번 방문에만 표시",
+        "empty": "새 소식이 없습니다"
+      },
       "done": {
         "title": "Done today",
         "hint": "Shown once, folded after you have seen it",
@@ -185,6 +190,7 @@
       "stalled_unclosed": "Done, not closed",
       "stalled_reply_unclosed": "Replied, not closed",
       "running": "Running",
+      "fresh": "새 소식",
       "done": "Done"
     },
     "stuck": {
@@ -210,6 +216,7 @@
       "after": "No run and no close since"
     },
     "server_mark": "Server verdict",
+    "unread_other": "새 소식 {{count}}건",
     "before": "Before: {{text}}",
     "next": "Next: {{name}}",
     "next_none": "Next: nobody",

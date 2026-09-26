@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentTask } from "../types/agent";
 import type { Issue } from "../types/issue";
-import type { ParkingRecord, WaitingSummon } from "../types/home";
+import type { ParkingRecord, UnreadInboxIssue, WaitingSummon } from "../types/home";
 import { buildInboxBoard, foldChildren, splitSeenDone, type BoardRow } from "./board";
 import { localDayWindow } from "./queries";
 
@@ -74,6 +74,19 @@ function issue(over: Partial<Issue> & { id: string }): Issue {
     updated_at: "2026-09-26T09:00:00Z",
     ...over,
   } as Issue;
+}
+
+function unread(over: Partial<UnreadInboxIssue> & { issue_id: string }): UnreadInboxIssue {
+  return {
+    identifier: `DENE-${over.issue_id}`,
+    title: `title ${over.issue_id}`,
+    status: "in_progress",
+    parent_issue_id: null,
+    unread_count: 1,
+    held_count: 0,
+    latest_at: "2026-09-26T08:30:00Z",
+    ...over,
+  };
 }
 
 const empty = { summons: [], parking: [], tasks: [], runningIssues: [], doneIssues: [] };
@@ -194,6 +207,57 @@ describe("buildInboxBoard", () => {
   });
 });
 
+describe("buildInboxBoard unread (DENE-901)", () => {
+  it("marks every lane's rows, children included, with their unread count", () => {
+    const board = buildInboxBoard({
+      ...empty,
+      userId: ME,
+      summons: [summon({ issue_id: "w" })],
+      parking: [record({ issue_id: "s" })],
+      tasks: [task({ issue_id: "r" })],
+      runningIssues: [issue({ id: "r", status: "in_progress" })],
+      doneIssues: [issue({ id: "p" }), issue({ id: "c", parent_issue_id: "p" })],
+      unread: [
+        unread({ issue_id: "w", unread_count: 2, held_count: 1 }),
+        unread({ issue_id: "s" }),
+        unread({ issue_id: "r", unread_count: 3 }),
+        unread({ issue_id: "c" }),
+      ],
+    });
+    expect(board.waiting[0]!.unread).toBe(2);
+    expect(board.stalled[0]!.unread).toBe(1);
+    expect(board.running[0]!.unread).toBe(3);
+    const parent = board.done.find((r) => r.issueId === "p")!;
+    expect(parent.unread).toBe(0);
+    expect(parent.children[0]!.unread).toBe(1);
+    expect(board.fresh).toEqual([]);
+  });
+
+  it("puts unread tickets no lane took in fresh, one row each, newest first", () => {
+    const board = buildInboxBoard({
+      ...empty,
+      userId: ME,
+      doneIssues: [issue({ id: "d" })],
+      unread: [
+        unread({ issue_id: "d" }),
+        unread({ issue_id: "p", latest_at: "2026-09-26T07:00:00Z" }),
+        unread({ issue_id: "c", parent_issue_id: "p", latest_at: "2026-09-26T09:00:00Z" }),
+        unread({ issue_id: "old", status: "done", unread_count: 0 }),
+      ],
+    });
+    expect(board.done.map((r) => r.issueId)).toEqual(["d"]);
+    expect(board.fresh.map((r) => r.issueId)).toEqual(["c", "p"]);
+    expect(board.fresh.every((r) => r.lane === "fresh" && r.children.length === 0)).toBe(true);
+    expect(board.fresh[0]).toMatchObject({ identifier: "DENE-c", unread: 1 });
+  });
+
+  it("leaves every row unmarked without a snapshot", () => {
+    const board = buildInboxBoard({ ...empty, userId: ME, parking: [record({ issue_id: "1" })] });
+    expect(board.stalled[0]!.unread).toBe(0);
+    expect(board.fresh).toEqual([]);
+  });
+});
+
 describe("foldChildren", () => {
   it("leaves a child alone when its parent is in another lane", () => {
     const rows = [{ issueId: "c", parentIssueId: "p", children: [] }] as unknown as BoardRow[];
@@ -209,6 +273,13 @@ describe("splitSeenDone", () => {
 
   it("shows everything before the first visit", () => {
     expect(splitSeenDone(rows, null).fresh).toHaveLength(2);
+  });
+
+  it("keeps a seen row shown while it has unread activity", () => {
+    const marked = [...rows.slice(0, 1), { ...rows[1]!, unread: 2 }];
+    const { fresh, seen } = splitSeenDone(marked, "2026-09-26T11:00:00Z");
+    expect(fresh.map((r) => r.issueId)).toEqual(["b"]);
+    expect(seen.map((r) => r.issueId)).toEqual(["a"]);
   });
 
   it("folds what finished before the last visit", () => {

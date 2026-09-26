@@ -1,7 +1,9 @@
-import { queryOptions, useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { agentTaskSnapshotOptions } from "../agents/queries";
+import { onInboxInvalidate, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
+import type { UnreadInboxIssue } from "../types/home";
 import { buildInboxBoard, type InboxBoard } from "./board";
 
 export const homeKeys = {
@@ -74,6 +76,47 @@ export function issuesByIdsOptions(wsId: string, ids: readonly string[]) {
   });
 }
 
+/**
+ * Opening the board reads everything (DENE-901): take the unread snapshot
+ * first, then mark all read. The snapshot is what the board marks as new for
+ * this visit; it lives in the mutation, so the refetches the read itself
+ * triggers cannot wipe the markers mid-visit. Rows an open call hangs on are
+ * skipped by the server and stay unread.
+ *
+ * Runs once per workspace per mount; the ref keeps StrictMode's double effect
+ * from reading twice. The result is kept in state rather than read from the
+ * mutation: StrictMode's remount detaches the mutation observer, and the
+ * snapshot would land nowhere.
+ */
+export function useBoardUnreadSnapshot(wsId: string): readonly UnreadInboxIssue[] | undefined {
+  const qc = useQueryClient();
+  const { mutateAsync } = useMutation({
+    mutationFn: async () => {
+      const unread = await api.listUnreadInboxIssues();
+      // A failed read still leaves the markers to show; the badge just stays.
+      if (unread.some((u) => u.unread_count > u.held_count)) {
+        await api.markAllInboxRead().catch(() => undefined);
+      }
+      return unread;
+    },
+    onSettled: () => {
+      void onInboxInvalidate(qc, wsId);
+      void onInboxSummaryInvalidate(qc);
+    },
+  });
+  const [snapshot, setSnapshot] = useState<{ wsId: string; rows: UnreadInboxIssue[] } | null>(null);
+  const took = useRef<string | null>(null);
+  useEffect(() => {
+    if (took.current === wsId) return;
+    took.current = wsId;
+    mutateAsync().then(
+      (rows) => setSnapshot({ wsId, rows }),
+      () => undefined,
+    );
+  }, [wsId, mutateAsync]);
+  return snapshot?.wsId === wsId ? snapshot.rows : undefined;
+}
+
 export interface InboxBoardResult {
   board: InboxBoard;
   isLoading: boolean;
@@ -83,13 +126,14 @@ export interface InboxBoardResult {
 const EMPTY: never[] = [];
 
 /**
- * The four lanes of the inbox, assembled from the summon list, the parking
+ * The lanes of the inbox, assembled from the summon list, the parking
  * records, the workspace task snapshot and today's finished issues.
  */
 export function useInboxBoard(
   wsId: string,
   userId: string | null,
   now: Date = new Date(),
+  unread?: readonly UnreadInboxIssue[],
 ): InboxBoardResult {
   const dayStart = localDayWindow(now).start;
   const day = useMemo(() => localDayWindow(new Date(dayStart)), [dayStart]);
@@ -120,8 +164,9 @@ export function useInboxBoard(
         tasks: tasks.data ?? EMPTY,
         runningIssues: runningIds.length > 0 ? (runningIssues.data ?? EMPTY) : EMPTY,
         doneIssues: done.data ?? EMPTY,
+        unread,
       }),
-    [userId, summons.data, parking.data, tasks.data, runningIds.length, runningIssues.data, done.data],
+    [userId, summons.data, parking.data, tasks.data, runningIds.length, runningIssues.data, done.data, unread],
   );
 
   return {

@@ -57,3 +57,14 @@ LEFT JOIN agent a ON s.caller_type = 'agent' AND a.id = s.caller_id
 WHERE s.workspace_id = $1 AND s.recipient_id = $2 AND s.answered_at IS NULL
   AND iss.status NOT IN ('done', 'cancelled')
 ORDER BY s.created_at DESC;
+
+-- name: CloseOpenIssueSummons :many
+-- The ticket moved on without a reply (DENE-901): it finished, or the person
+-- called changed its status or owner themselves. The call is over; it is
+-- closed the way an answer closes it, minus the answer comment, so no
+-- reminder ever keys on it. A NULL recipient closes every call on the ticket.
+UPDATE issue_summon
+SET answered_at = now()
+WHERE issue_id = $1 AND answered_at IS NULL
+  AND (sqlc.narg('recipient_id')::uuid IS NULL OR recipient_id = sqlc.narg('recipient_id')::uuid)
+RETURNING *;
