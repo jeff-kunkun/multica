@@ -253,6 +253,22 @@ var issueCloseCmd = &cobra.Command{
 	RunE: runIssueClose,
 }
 
+var issueHandoffCmd = &cobra.Command{
+	Use:   "handoff <id>",
+	Short: "Wake the next owner of an issue without closing it",
+	Long: "One command for handing an issue on. The server resolves the target, skips a\n" +
+		"target that already has an active run on this issue, and replies with what\n" +
+		"actually landed — never a hand-written @mention.\n\n" +
+		"  --to reviewer     the acceptance seat; refused if a person holds the seat\n" +
+		"  --to dispatcher   let routing pick the next owner\n" +
+		"  --to <agent>      a named agent (name or id)\n\n" +
+		"A close already hands over what it closes: `issue close --outcome in_review`\n" +
+		"routes the acceptance seat itself. The response reports target_name,\n" +
+		"run_created and duplicate — quote them, do not restate them from memory.",
+	Args: exactArgs(1),
+	RunE: runIssueHandoff,
+}
+
 var issueReorderCmd = &cobra.Command{
 	Use:   "reorder <id>",
 	Short: "Move an issue within its status column",
@@ -547,6 +563,7 @@ func init() {
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
 	issueCmd.AddCommand(issueCloseCmd)
+	issueCmd.AddCommand(issueHandoffCmd)
 	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
@@ -648,6 +665,7 @@ func init() {
 	issueStatusCmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
 	issueStatusCmd.Flags().String("needs-human", "", "Member UUID a blocked issue is waiting on")
 	registerIssueCloseFlags(issueCloseCmd)
+	registerIssueHandoffFlags(issueHandoffCmd)
 	issueStatusCmd.Flags().String("no-code", "", "Why this issue carries no code delivery (docs, research). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 
 	// issue reorder
@@ -1843,6 +1861,12 @@ func registerIssueCloseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("no-code", "", "Why this issue carries no code delivery (docs, research). An agent's --outcome in_review without a linked open/merged PR is refused unless this is given")
 	cmd.Flags().String("verdict", "", "Acceptance verdict, reviewer only: pass (merges and closes)")
 	cmd.Flags().String("output", "json", "Output format: table or json")
+}
+
+// registerIssueHandoffFlags wires `issue handoff`; shared with its tests.
+func registerIssueHandoffFlags(cmd *cobra.Command) {
+	cmd.Flags().String("to", "", "reviewer, dispatcher, or an agent name/id (required)")
+	cmd.Flags().String("output", "table", "Output format: table or json")
 }
 
 var validCloseOutcomes = []string{"done", "in_review", "blocked", "cancelled"}

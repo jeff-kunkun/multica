@@ -45,6 +45,19 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
 - The reply reports the status actually written, whether the PR merged, and
   who is woken. Quote it; do not restate it from memory.
 
+Waking the next owner without closing is `multica issue handoff` (DENE-863),
+not a hand-written @mention. The server routes, dedupes, and replies with what
+actually landed (`target_name`, `run_created`, `duplicate`):
+
+| you want | call |
+|---|---|
+| a named agent picks it up (Reviewer `needs-work` back to Builder, a concrete sub-task) | `multica issue handoff <id> --to <agent-name>` — no second run if that agent already has one active on this issue |
+| the dispatcher decides who is next | `multica issue handoff <id> --to dispatcher` |
+| an `in_review` issue whose acceptance seat never started | `multica issue handoff <id> --to reviewer` — refused with 409 when a person holds the seat; routing never writes a person there |
+
+A close already hands over what it closes: `--outcome in_review` routes the
+seat itself, so do not follow it with `handoff --to reviewer`.
+
 Legacy path, still accepted: `multica issue status <id> <status>` (with the
 wait flags when `blocked`), then the evidence comment (`--content-file`),
 then the eight keys via `multica issue metadata set` with `close.status`
@@ -89,7 +102,7 @@ Four closing scenes:
   server.
 - **in_review (agent Reviewer)** — PR / design / implementation needs
   Reviewer. Status `in_review`. `issue close --outcome in_review` routes it to
-  the seat; a hand-written record mentions the Reviewer. Do not `done`.
+  the seat; a hand-written record wakes it with `issue handoff --to reviewer`. Do not `done`.
 - **in_review (human acceptance)** — device, balance, third-party account, or
   a named human. Status `in_review`. `wake_action=none`. Barrier stays open
   on purpose.

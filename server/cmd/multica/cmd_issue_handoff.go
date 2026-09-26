@@ -3,23 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/multica-ai/multica/server/internal/cli"
-	"github.com/spf13/cobra"
 	"net/url"
 	"os"
+
+	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/spf13/cobra"
 )
-
-var issueHandoffCmd = &cobra.Command{
-	Use: "handoff <id>", Short: "Hand an issue to a reviewer, dispatcher, or named agent",
-	Args: cobra.ExactArgs(1),
-	RunE: runIssueHandoff,
-}
-
-func init() {
-	issueHandoffCmd.Flags().String("to", "", "reviewer, dispatcher, or an agent name")
-	issueHandoffCmd.Flags().String("output", "table", "Output format: table or json")
-	issueCmd.AddCommand(issueHandoffCmd)
-}
 
 func runIssueHandoff(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
