@@ -286,14 +286,6 @@
     "copy_role_user": "Vous",
     "copy_role_assistant": "Assistant"
   },
-  "provider_quota": {
-    "label": "Quota",
-    "unknown": "inconnu",
-    "exhausted": "épuisé",
-    "used": "{{percent}} %",
-    "resets": "réinitialisation {{when}}",
-    "updated": "mis à jour {{when}}"
-  },
   "sharing": {
     "title": "Modifier l'accès",
     "follow": "Suivre le projet",
