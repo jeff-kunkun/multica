@@ -569,6 +569,9 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 			},
 		},
 	})
+	// The parking record's one sentence comes from the same routing model,
+	// under the same switch and breaker (DENE-881).
+	taskSvc.ParkingSummarizer = h.Routing
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 	// The default passthrough scheduler reports sweeper-race recoveries so the
 	// daemon:register refresh fires even without the production batched wiring.

@@ -78,6 +78,10 @@ type TaskService struct {
 	// state for a self-hosted deployment with no MULTICA_LLM_* configuration.
 	// Wired in router.go from the same *llm.Client that backs chat auto-titling.
 	QuickActions ChatQuickActionsLLM
+	// ParkingSummarizer phrases the parking record's one sentence when the
+	// agent left none (DENE-881). Optional: nil keeps the fixed wording.
+	// Wired in router.go to the workspace routing model.
+	ParkingSummarizer ParkingSummarizer
 	// quickActionsInFlight (chat session id -> struct{}{}) and
 	// quickActionsRunning admit suggestion passes: one per session, and a
 	// process-wide ceiling. Both zero values are usable, so a TaskService built
@@ -6997,6 +7001,16 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 
 	for _, agentID := range affectedAgents {
 		s.ReconcileAgentStatus(ctx, agentID)
+	}
+	// Parking record last, after the retry and reset decisions above: a
+	// queued retry reads as still running, a reset reads as a stuck delivery.
+	parked := make(map[string]bool)
+	for _, t := range tasks {
+		if !t.IssueID.Valid || parked[util.UUIDToString(t.IssueID)] {
+			continue
+		}
+		parked[util.UUIDToString(t.IssueID)] = true
+		s.RecordParking(ctx, t.IssueID, t)
 	}
 	s.notifyTasksFinished(tasks)
 	return retried

@@ -11,10 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/parking"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // statusTransition is the adjustment a move into in_review or done needs
@@ -56,7 +58,46 @@ func reviewerIsAssigned(issue db.Issue) bool {
 // in in_review for two hours with reviewer_id NULL because this guard skipped
 // children; the seat is now filled here by the same ladder fallback the parent
 // gets, and ensureAcceptanceRunning starts it once the executor's run is gone.
+//
+// Every refusal it returns is also kept in issue_rejection, so the parking
+// record (DENE-881) can say "送审被拒" after the run is gone.
 func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, nextStatus string, actorType, actorID string, noCodeReason string, assigneeType pgtype.Text, assigneeID pgtype.UUID, reviewerType pgtype.Text, reviewerID pgtype.UUID, reviewerExplicit bool) statusTransition {
+	tr := h.decideSilentStall(ctx, issue, nextStatus, actorType, actorID, noCodeReason, assigneeType, assigneeID, reviewerType, reviewerID, reviewerExplicit)
+	if tr.refuse != "" {
+		h.recordRejection(ctx, issue, nextStatus, actorType, actorID, tr.refuse)
+	}
+	return tr
+}
+
+// recordRejection keeps a refused status move. Best effort: losing the row
+// only costs the parking record one reason, never the refusal itself.
+func (h *Handler) recordRejection(ctx context.Context, issue db.Issue, nextStatus, actorType, actorID, reason string) {
+	kind := parking.RejectClose
+	switch {
+	case strings.Contains(reason, "没有关联的 PR"):
+		kind = parking.RejectPRNotLinked
+	case nextStatus == issuestatus.InReview:
+		kind = parking.RejectReview
+	}
+	actor := pgtype.UUID{}
+	if id, err := util.ParseUUID(actorID); err == nil {
+		actor = id
+	}
+	if err := h.Queries.CreateIssueRejection(ctx, db.CreateIssueRejectionParams{
+		ID:          dbid.NewV7(),
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+		ActorType:   actorType,
+		ActorID:     actor,
+		Action:      "status:" + nextStatus,
+		Kind:        kind,
+		Reason:      reason,
+	}); err != nil {
+		slog.Warn("record rejection failed", "issue_id", uuidToString(issue.ID), "error", err)
+	}
+}
+
+func (h *Handler) decideSilentStall(ctx context.Context, issue db.Issue, nextStatus string, actorType, actorID string, noCodeReason string, assigneeType pgtype.Text, assigneeID pgtype.UUID, reviewerType pgtype.Text, reviewerID pgtype.UUID, reviewerExplicit bool) statusTransition {
 	var tr statusTransition
 	switch nextStatus {
 	case issuestatus.InReview:

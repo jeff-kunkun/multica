@@ -96,7 +96,8 @@
     "autopilot_quota_exceeded": "自動化の実行上限に達しました",
     "agent_access_request": "エージェント利用リクエスト",
     "agent_access_approved": "エージェント利用が承認されました",
-    "agent_access_declined": "エージェント利用が拒否されました"
+    "agent_access_declined": "エージェント利用が拒否されました",
+    "parking_unexplained": "理由なく停止"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",

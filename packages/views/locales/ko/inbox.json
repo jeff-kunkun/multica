@@ -96,7 +96,8 @@
     "autopilot_quota_exceeded": "자동화 실행 한도 도달",
     "agent_access_request": "에이전트 사용 요청",
     "agent_access_approved": "에이전트 사용 승인됨",
-    "agent_access_declined": "에이전트 사용 거절됨"
+    "agent_access_declined": "에이전트 사용 거절됨",
+    "parking_unexplained": "설명 없이 멈춤"
   },
   "labels": {
     "set_status_to": "상태 변경:",
