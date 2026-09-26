@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -531,8 +532,11 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 		SegmentNudged:  blockwait.MetaString(meta, blockwait.KeySegmentNudged) == "1",
 		ReviewNudged:   blockwait.MetaString(meta, blockwait.KeyReviewNudged) == "1",
 		ReviewerHuman:  issue.ReviewerType.Valid && issue.ReviewerType.String == "member",
+		ReviewerEmpty:  reviewerSlotEmpty(issue),
 	})
-	if decision.Action != blockwait.ActionRelease && decision.Action != blockwait.ActionWake {
+	switch decision.Action {
+	case blockwait.ActionRelease, blockwait.ActionWake, blockwait.ActionSeat:
+	default:
 		return false
 	}
 	h.applyPatrolFollowUp(ctx, issue, meta, decision)
@@ -541,8 +545,76 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 		h.releaseAcceptedIssue(ctx, issue, decision)
 	case blockwait.ActionWake:
 		h.wakeIssueOwner(ctx, issue, decision.Reason, decision.CommentOnly)
+	case blockwait.ActionSeat:
+		h.seatQuietReview(ctx, issue, decision.Reason)
 	}
 	return true
+}
+
+// reviewerSlotEmpty reports an acceptance slot nobody has answered. "none" is
+// an answer ("this issue needs no acceptance pass"), so it is not empty.
+func reviewerSlotEmpty(issue db.Issue) bool {
+	if !issue.ReviewerType.Valid || strings.TrimSpace(issue.ReviewerType.String) == "" {
+		return true
+	}
+	if issue.ReviewerType.String == "none" {
+		return false
+	}
+	return !issue.ReviewerID.Valid
+}
+
+// seatQuietReview is the patrol's answer to an in_review issue whose
+// acceptance seat is empty (DENE-869). It fills the seat the same way the
+// status write does and starts it; when no seat can be picked the wait
+// becomes a structured block pointing at a workspace manager, so a person
+// sees it instead of two agents waiting on each other.
+func (h *Handler) seatQuietReview(ctx context.Context, issue db.Issue, reason string) {
+	var tr statusTransition
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
+		tr = h.pickAcceptanceSeat(ctx, issue, issue.AssigneeID)
+	} else {
+		tr.refuse = "执行席不是 Agent，平台选不出与之不同的验收席"
+	}
+	if tr.refuse == "" && tr.setReviewer {
+		updated, err := h.Queries.SetIssueReviewerIfUnset(ctx, db.SetIssueReviewerIfUnsetParams{
+			ReviewerType: tr.reviewerType.String,
+			ReviewerID:   tr.reviewerID,
+			ID:           issue.ID,
+			WorkspaceID:  issue.WorkspaceID,
+		})
+		if err != nil {
+			slog.Warn("block wait: seat quiet review failed", "error", err, "issue_id", uuidToString(issue.ID))
+			tr.refuse = "验收席没能写进这张票"
+		} else {
+			h.publishBlockStatus(issue, updated)
+			tr.note = reason + tr.note
+			h.finishStatusTransition(ctx, updated, tr)
+			return
+		}
+	}
+	h.blockReviewNeedingHuman(ctx, issue, reason+tr.refuse+"。")
+}
+
+// blockReviewNeedingHuman turns a seatless review into a structured block
+// that names a workspace manager: the platform could not find a reviewer, so
+// a person has to. The block is what keeps the patrol from asking again.
+func (h *Handler) blockReviewNeedingHuman(ctx context.Context, issue db.Issue, why string) {
+	managers, err := h.Queries.ListWorkspaceManagerUserIDs(ctx, issue.WorkspaceID)
+	if err != nil {
+		slog.Warn("block wait: list managers failed", "error", err, "issue_id", uuidToString(issue.ID))
+	}
+	rec := blockwait.Record{}
+	mention := ""
+	if len(managers) > 0 && managers[0].Valid {
+		rec.NeedsHuman = uuidToString(managers[0])
+		mention = h.memberWakeMention(ctx, managers[0])
+	} else {
+		rec = blockwait.FailureWake(time.Now(), "验收席由人来定", 1)
+	}
+	h.blockAcceptedIssue(ctx, issue, blockwait.Decision{
+		Record: rec,
+		Reason: mention + why + "平台补不上验收席，这张票改成阻塞，等人指定验收席后再送审（`multica issue update <issue> --reviewer <name>`）。",
+	})
 }
 
 func parseMetaTime(raw string) (time.Time, bool) {
@@ -662,8 +734,20 @@ func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason str
 	if issue.Status == "in_review" && issue.ReviewerType.Valid && issue.ReviewerID.Valid && issue.ReviewerType.String != "none" {
 		targetType, targetID = issue.ReviewerType, issue.ReviewerID
 	}
+	if issue.Status == "in_review" && reviewerSlotEmpty(issue) {
+		// The executor already said it is done; asking it to review its own
+		// work only produces "请验收". Leave the sentence, start nobody.
+		commentOnly = true
+	}
 	if blockwait.MetaString(parseIssueMetadata(issue.Metadata), blockwait.KeyNeedsHuman) != "" {
 		commentOnly = true
+	}
+	if !commentOnly && targetType.Valid && targetID.Valid && targetType.String == "agent" {
+		var covered bool
+		issue, targetID, reason, covered = h.coverDisabledWakeTarget(ctx, issue, targetID, reason)
+		if !covered {
+			commentOnly = true
+		}
 	}
 	mention := ""
 	if targetType.Valid && targetID.Valid && (targetType.String == "agent" || targetType.String == "squad") && !commentOnly {
@@ -681,6 +765,56 @@ func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason str
 	waker.AssigneeType = targetType
 	waker.AssigneeID = targetID
 	h.dispatchWaitingOnAssigneeTrigger(ctx, waker, comment.ID)
+}
+
+// coverDisabledWakeTarget keeps the patrol from waking a seat that is not
+// taking work (DENE-870). Before this, a seat turned off after its account
+// ran out of money was @-mentioned every time the clock came due, failed
+// again, and was blocked again with a fresh clock. An executor seat that is
+// off hands the ticket to another house's seat, never the ticket's own
+// reviewer; the new seat carries on from the ticket's comments and branch.
+// With nobody to take it, or when the off seat is the reviewer, the wake
+// becomes a plain comment and nobody is dispatched. covered is false when
+// the wake must not dispatch.
+func (h *Handler) coverDisabledWakeTarget(ctx context.Context, issue db.Issue, targetID pgtype.UUID, reason string) (db.Issue, pgtype.UUID, string, bool) {
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID: targetID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || agent.ArchivedAt.Valid || agent.WorkEnabled {
+		return issue, targetID, reason, true
+	}
+	isAssignee := issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID == targetID
+	if !isAssignee {
+		return issue, targetID, reason + fmt.Sprintf(" 验收人 %s 已停用，平台没有叫醒它，请重新启用或换一位验收人。", agent.Name), false
+	}
+	var avoid []string
+	if issue.ReviewerType.Valid && issue.ReviewerType.String == "agent" && issue.ReviewerID.Valid {
+		avoid = append(avoid, uuidToString(issue.ReviewerID))
+	}
+	replacement, _, ok := h.substituteAgent(ctx, issue.WorkspaceID, agent, avoid, "")
+	if !ok {
+		return issue, targetID, reason + fmt.Sprintf(" 执行人 %s 已停用，暂时没有能接手的席位，平台没有叫醒它。重新启用或改派后再继续。", agent.Name), false
+	}
+	updated, err := h.Queries.ReassignIssueToAgentIfCurrent(ctx, db.ReassignIssueToAgentIfCurrentParams{
+		AssigneeID:        replacement.ID,
+		ID:                issue.ID,
+		WorkspaceID:       issue.WorkspaceID,
+		CurrentAssigneeID: agent.ID,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("block wait: reassign off seat failed", "issue_id", uuidToString(issue.ID), "error", err)
+		}
+		return issue, targetID, reason + fmt.Sprintf(" 执行人 %s 已停用，平台没有叫醒它。", agent.Name), false
+	}
+	if _, err := h.Queries.CancelPendingTasksByIssueAndAgent(ctx, db.CancelPendingTasksByIssueAndAgentParams{
+		IssueID: issue.ID, AgentID: agent.ID,
+	}); err != nil {
+		slog.Warn("block wait: cancel off seat tasks failed", "issue_id", uuidToString(issue.ID), "error", err)
+	}
+	h.publish(protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), "system", "", RoutingIssueUpdatedPayload(issue, updated))
+	note := fmt.Sprintf(" 原执行人 %s 已停用，这张票改由 %s 接手：先读评论和原分支上的提交，接着做，别从头来。", agent.Name, replacement.Name)
+	return updated, replacement.ID, reason + note, true
 }
 
 func (h *Handler) memberWakeMention(ctx context.Context, userID pgtype.UUID) string {

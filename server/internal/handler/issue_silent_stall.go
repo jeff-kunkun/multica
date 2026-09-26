@@ -34,18 +34,37 @@ type statusTransition struct {
 	prURL  string
 }
 
-// guardSilentStall stops two quiet stalls at the status write.
+// guardSilentStall stops three quiet stalls at the status write.
 //
-// An agent moving a parent issue into in_review with an empty reviewer slot
-// gets a different-family acceptance seat, or the write is refused. A move
+// An agent moving an issue into in_review must have something to review: a
+// linked PR that is open, draft, or merged, or an explicit no_code_reason for
+// tickets that never carry code (docs, research). People are not gated. The
+// empty reviewer slot is then filled with a different-family acceptance seat,
+// for a child issue as much as for a parent, or the write is refused. A move
 // to done while a linked PR is still open is either merged first or rewritten
 // as a structured block.
-func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, nextStatus string, assigneeType pgtype.Text, assigneeID pgtype.UUID, reviewerType pgtype.Text, reviewerID pgtype.UUID, reviewerExplicit bool) statusTransition {
+//
+// The child rule (DENE-869): routing.Route still treats a sub-issue as
+// execution-only and never starts an independent judge chain for it. That is
+// about *who decides*, not about whether the slot may stay empty. DENE-860 sat
+// in in_review for two hours with reviewer_id NULL because this guard skipped
+// children; the seat is now filled here by the same ladder fallback the parent
+// gets, and ensureAcceptanceRunning starts it once the executor's run is gone.
+func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, nextStatus string, actorType string, noCodeReason string, assigneeType pgtype.Text, assigneeID pgtype.UUID, reviewerType pgtype.Text, reviewerID pgtype.UUID, reviewerExplicit bool) statusTransition {
 	var tr statusTransition
 	switch nextStatus {
 	case issuestatus.InReview:
-		if issue.Status == issuestatus.InReview || issue.ParentIssueID.Valid {
+		if issue.Status == issuestatus.InReview {
 			return tr
+		}
+		if actorType == "agent" {
+			if refuse := h.refuseReviewWithoutDelivery(ctx, issue, noCodeReason); refuse != "" {
+				tr.refuse = refuse
+				return tr
+			}
+			if reason := strings.TrimSpace(noCodeReason); reason != "" {
+				tr.note = "执行人声明这张票没有代码交付：" + reason + "。"
+			}
 		}
 		if reviewerChosen(reviewerType, reviewerID, reviewerExplicit) {
 			return tr
@@ -53,7 +72,9 @@ func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, nextStat
 		if assigneeType.String != "agent" || !assigneeID.Valid {
 			return tr
 		}
-		return h.fillAcceptanceSeat(ctx, issue, assigneeID)
+		seat := h.fillAcceptanceSeat(ctx, issue, assigneeID)
+		seat.note = tr.note + seat.note
+		return seat
 	case issuestatus.Done:
 		if issue.Status == issuestatus.Done {
 			return tr
@@ -62,6 +83,31 @@ func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, nextStat
 	default:
 		return tr
 	}
+}
+
+// reviewDeliveryStates are the PR states that count as "there is something to
+// review". A closed-unmerged PR is not a delivery.
+var reviewDeliveryStates = map[string]bool{"open": true, "draft": true, "merged": true}
+
+// refuseReviewWithoutDelivery is the review gate: the sentence that refuses
+// an agent's move to in_review when the issue has no linked PR to review and
+// no declared reason for having none. Empty means the move may proceed.
+func (h *Handler) refuseReviewWithoutDelivery(ctx context.Context, issue db.Issue, noCodeReason string) string {
+	if strings.TrimSpace(noCodeReason) != "" {
+		return ""
+	}
+	prs, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID)
+	if err != nil {
+		slog.Warn("review gate: list pull requests failed", "issue_id", uuidToString(issue.ID), "error", err)
+		return "进不了待验收：没能读到这张票关联的 PR，稍后再试。"
+	}
+	for _, pr := range prs {
+		if reviewDeliveryStates[strings.ToLower(pr.State)] {
+			return ""
+		}
+	}
+	key := issueIdentifier(h.getIssuePrefix(ctx, issue.WorkspaceID), issue.Number)
+	return fmt.Sprintf("进不了待验收：%s 没有关联的 PR，验收人没有东西可看。先推分支、开 PR（标题带 %s），再送审；纯文档或调研类没有代码交付的票，用 `--no-code <原因>` 说明。", key, key)
 }
 
 func reviewerChosen(reviewerType pgtype.Text, reviewerID pgtype.UUID, explicit bool) bool {
@@ -77,11 +123,24 @@ func reviewerChosen(reviewerType pgtype.Text, reviewerID pgtype.UUID, explicit b
 	return reviewerID.Valid
 }
 
+// fillAcceptanceSeat picks the acceptance seat and, when none can be picked,
+// leaves the refusal on the issue. The status write it guards keeps the issue
+// where it was.
 func (h *Handler) fillAcceptanceSeat(ctx context.Context, issue db.Issue, assigneeID pgtype.UUID) statusTransition {
+	tr := h.pickAcceptanceSeat(ctx, issue, assigneeID)
+	if tr.refuse != "" {
+		h.postBlockComment(ctx, issue, tr.refuse+"。这张票保持原来的状态。")
+	}
+	return tr
+}
+
+// pickAcceptanceSeat chooses a different-family acceptance seat for an agent
+// executor. It writes nothing and posts nothing: the refusal, when there is
+// one, is in tr.refuse for the caller to deliver in its own words.
+func (h *Handler) pickAcceptanceSeat(ctx context.Context, issue db.Issue, assigneeID pgtype.UUID) statusTransition {
 	var tr statusTransition
 	if h.Routing == nil {
-		tr.refuse = "进不了待验收：这台服务没有验收席名册。"
-		h.postBlockComment(ctx, issue, tr.refuse+"这张票保持原来的状态。")
+		tr.refuse = "进不了待验收：这台服务没有验收席名册"
 		return tr
 	}
 	view := routing.Issue{
@@ -104,13 +163,11 @@ func (h *Handler) fillAcceptanceSeat(ctx context.Context, issue db.Issue, assign
 			why = "选不出和执行席不同的验收席"
 		}
 		tr.refuse = "进不了待验收：" + why
-		h.postBlockComment(ctx, issue, tr.refuse+"。这张票保持原来的状态。")
 		return tr
 	}
 	reviewerID, err := util.ParseUUID(ref.ID)
 	if err != nil {
-		tr.refuse = "进不了待验收：选中的验收席没有有效身份。"
-		h.postBlockComment(ctx, issue, tr.refuse+"这张票保持原来的状态。")
+		tr.refuse = "进不了待验收：选中的验收席没有有效身份"
 		return tr
 	}
 	name := ref.Name
@@ -140,7 +197,7 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue) sta
 		slog.Warn("close gate: list pull requests failed", "issue_id", uuidToString(issue.ID), "error", err)
 		tr.status = issuestatus.Blocked
 		tr.persistBlock = true
-		tr.block = blockwait.FailureWake(time.Now(), "关单前没能读到关联的 PR")
+		tr.block = blockwait.FailureWake(time.Now(), "关单前没能读到关联的 PR", 1)
 		tr.note = "这张票要关，但没能核对关联的 PR。先改成阻塞，不标完成。"
 		return tr
 	}
@@ -162,7 +219,7 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue) sta
 		if err := h.mergeOpenPulls(ctx, prs); err != nil {
 			rec := decision.Record
 			if !rec.Structured() {
-				rec = blockwait.FailureWake(time.Now(), "关联 PR 没能合并")
+				rec = blockwait.FailureWake(time.Now(), "关联 PR 没能合并", 1)
 			}
 			if reason := mergeFailureCondition(err, prs); reason != "" {
 				rec.WaitCondition = reason
@@ -268,7 +325,7 @@ func (h *Handler) ensureAcceptanceRunning(ctx context.Context, workspaceID, issu
 		return
 	}
 	issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: wsID})
-	if err != nil || issue.Status != issuestatus.InReview || issue.ParentIssueID.Valid {
+	if err != nil || issue.Status != issuestatus.InReview {
 		return
 	}
 	if !issue.ReviewerType.Valid || issue.ReviewerType.String != "agent" || !issue.ReviewerID.Valid {

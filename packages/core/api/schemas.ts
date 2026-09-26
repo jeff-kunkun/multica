@@ -857,6 +857,7 @@ export const ChatMessageSchema = z.object({
   // Optional additive data degrades independently: a malformed suggestion
   // must not hide the assistant reply that contains it.
   quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),
+  sender_user_id: z.string().nullable().optional(),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
@@ -1820,7 +1821,6 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   // Seat strength for automatic dispatch (DENE-633). Optional because a
   // desktop build can talk to a backend that predates the column.
   routing_tier: z.string().optional().catch(undefined),
-  switchable_models: z.array(z.unknown()).optional(),
   owner_id: z.string().nullable().default(null),
   skills: z.array(z.unknown()).default([]),
   disabled_runtime_skills: z.array(z.unknown()).optional(),
@@ -1834,6 +1834,16 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   // Reversible seat gate (DENE-714). Same omit/malformed contract as
   // auto_retry_enabled: only an explicit false is off.
   work_enabled: z.boolean().optional().catch(undefined),
+  work_pause: z
+    .object({
+      reason: z.string(),
+      detail: z.string().optional(),
+      condition: z.string().optional(),
+      recover_at: z.string().optional(),
+      opened_at: z.string().default(""),
+    })
+    .optional()
+    .catch(undefined),
   doorbell_enabled: z.boolean().optional().catch(undefined),
 }).loose() as z.ZodType<Agent>;
 
@@ -2146,6 +2156,10 @@ export const AgentTaskSchema = z.object({
   id: z.string(),
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
+  work_thread_id: z.string().optional().catch(undefined),
+  context_generation: z.number().int().optional().catch(undefined),
+  context_message_limit: z.number().int().optional().catch(undefined),
+  context_token_budget: z.number().int().optional().catch(undefined),
   issue_id: z.string().default(""),
   status: z.string().default("cancelled"),
   priority: z.number().default(0),
@@ -2295,6 +2309,7 @@ const ChatLastMessageSchema = z.object({
     "onboarding_kickoff",
     "onboarding_opening",
   ]).optional().catch(undefined),
+  sender_user_id: z.string().nullable().optional(),
 }).loose();
 
 const ChatChannelSourceSchema = z.object({
@@ -2316,6 +2331,12 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   unread_count: z.number().optional(),
   last_message: ChatLastMessageSchema.nullable().optional().catch(undefined),
   pinned: z.boolean().optional(),
+  visibility: z.enum(["private", "project"]).optional().catch(undefined),
+  access: z.enum(["owner", "speak", "view"]).optional().catch(undefined),
+  extra_count: z.number().optional().catch(undefined),
+  agent_name: z.string().optional().catch(undefined),
+  agent_runtime_bound: z.boolean().optional().catch(undefined),
+  agent_archived: z.boolean().optional().catch(undefined),
   project_nudge_dismissed: z.boolean().optional().catch(undefined),
   channel_source: ChatChannelSourceSchema.optional().catch(undefined),
   is_current_channel_route: z.boolean().optional().catch(undefined),

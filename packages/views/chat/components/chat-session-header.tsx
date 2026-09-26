@@ -43,11 +43,13 @@ import { isImeComposing } from "@multica/core/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { useAuthStore } from "@multica/core/auth";
 import { conversationToMarkdown } from "../lib/copy-text";
 
 /**
- * Per-session header for the conversation pane: agent avatar + editable chat
- * title + agent subtitle, with a ⋯ menu (rename / view agent profile / delete).
+ * Per-session header for the conversation pane: agent avatar + chat title +
+ * agent subtitle, with a ⋯ menu (rename / view agent profile / delete). The
+ * title itself is not clickable — renaming lives only in the ⋯ menu.
  * The avatar's hover card is the lightweight "view profile" affordance; the
  * menu item navigates to the full agent page.
  */
@@ -68,6 +70,16 @@ export function ChatSessionHeader({
   loadAllMessages?: () => Promise<ChatMessage[]>;
 }) {
   const { t } = useT("chat");
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+  const canManage = session.access === "owner" || session.creator_id === currentUserId;
+  const visibilityLabel =
+    session.visibility === "private"
+      ? t(($) => $.sharing.header_private)
+      : (session.extra_count ?? 0) > 0
+        ? t(($) => $.sharing.header_extra)
+        : session.visibility === "project"
+          ? t(($) => $.sharing.header_project)
+          : null;
   const { getShareableUrl } = useNavigation();
   const wsPaths = useWorkspacePaths();
   const updateSession = useUpdateChatSession();
@@ -233,20 +245,17 @@ export function ChatSessionHeader({
             className="w-full rounded-sm bg-background px-1 py-0.5 text-body font-semibold outline-none ring-1 ring-border focus-visible:ring-brand"
           />
         ) : (
-          <button
-            type="button"
-            onClick={startRename}
-            title={t(($) => $.header.rename)}
-            className="block max-w-full truncate text-left text-body font-semibold text-foreground outline-none hover:text-foreground/80 focus-visible:text-foreground/80"
-          >
-            {title}
-          </button>
+          <div className="truncate text-body font-semibold text-foreground">{title}</div>
         )}
-        {agent && (
+        {(agent || session.agent_name) && (
           <div className="truncate text-caption text-muted-foreground">
-            {agent.name}
-            {agent.description ? ` · ${agent.description}` : ""}
+            {agent?.name || session.agent_name}
+            {agent?.description ? ` · ${agent.description}` : ""}
+            {visibilityLabel ? ` · ${visibilityLabel}` : ""}
           </div>
+        )}
+        {!agent && !session.agent_name && visibilityLabel && (
+          <div className="truncate text-caption text-muted-foreground">{visibilityLabel}</div>
         )}
       </div>
 
@@ -263,15 +272,24 @@ export function ChatSessionHeader({
 
       <DropdownMenu>
         <DropdownMenuTrigger
-          render={<Button variant="ghost" size="icon-sm" className="text-muted-foreground" />}
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground"
+              aria-label={t(($) => $.list.row_actions_aria)}
+            />
+          }
         >
           <MoreHorizontal className="h-4 w-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-auto">
-          <DropdownMenuItem onClick={startRename}>
-            <Pencil className="h-4 w-4" />
-            {t(($) => $.header.rename)}
-          </DropdownMenuItem>
+          {canManage && (
+            <DropdownMenuItem onClick={startRename}>
+              <Pencil className="h-4 w-4" />
+              {t(($) => $.header.rename)}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={() => void copyConversation()}>
             <Copy className="h-4 w-4" />
             {t(($) => $.header.copy_conversation)}
@@ -284,25 +302,25 @@ export function ChatSessionHeader({
               {t(($) => $.header.view_profile)}
             </DropdownMenuItem>
           )}
-          <DropdownMenuSeparator />
-          {isArchived ? (
-            <>
-              <DropdownMenuItem onClick={doUnarchive}>
-                <ArchiveRestore className="h-4 w-4" />
-                {t(($) => $.header.unarchive)}
+          {canManage && <DropdownMenuSeparator />}
+          {canManage &&
+            (isArchived ? (
+              <>
+                <DropdownMenuItem onClick={doUnarchive}>
+                  <ArchiveRestore className="h-4 w-4" />
+                  {t(($) => $.header.unarchive)}
+                </DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete(true)}>
+                  <Trash2 className="h-4 w-4" />
+                  {t(($) => $.header.delete)}
+                </DropdownMenuItem>
+              </>
+            ) : (
+              <DropdownMenuItem onClick={doArchive}>
+                <Archive className="h-4 w-4" />
+                {t(($) => $.header.archive)}
               </DropdownMenuItem>
-              {/* Hard delete is offered only once a chat is archived. */}
-              <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete(true)}>
-                <Trash2 className="h-4 w-4" />
-                {t(($) => $.header.delete)}
-              </DropdownMenuItem>
-            </>
-          ) : (
-            <DropdownMenuItem onClick={doArchive}>
-              <Archive className="h-4 w-4" />
-              {t(($) => $.header.archive)}
-            </DropdownMenuItem>
-          )}
+            ))}
         </DropdownMenuContent>
       </DropdownMenu>
 

@@ -11,8 +11,6 @@ export type {
 export type {
   Agent,
   AgentConversationStarter,
-  AgentSwitchableModel,
-  AgentSwitchableModelRole,
   AgentStatus,
   AgentRuntimeMode,
   AgentVisibility,
@@ -192,6 +190,9 @@ export {
 export type {
   ChatSession,
   ChatLastMessage,
+  ChatShareGrant,
+  ChatAccessSettings,
+  ChatVisibilityNotice,
   ChatPinnedAgent,
   ChatMessage,
   ChatQuickAction,
@@ -377,3 +378,5 @@ export type {
   WorkspaceSubscriptionSeatReconcileResult,
   CreateWorkspaceSubscriptionPortalResponse,
 } from "./billing";
+
+export type { WorkThreadSnapshot, WorkThreadTurn, WorkThreadInput } from "./work_thread";

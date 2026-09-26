@@ -255,6 +255,11 @@ type AgentTaskQueue struct {
 	CodeDecision              []byte      `json:"code_decision"`
 	FailureInputVersion       pgtype.Text `json:"failure_input_version"`
 	FailureFingerprint        pgtype.Text `json:"failure_fingerprint"`
+	WorkThreadID              pgtype.UUID `json:"work_thread_id"`
+	ContextGeneration         int32       `json:"context_generation"`
+	ContextMessageLimit       int32       `json:"context_message_limit"`
+	ContextTokenBudget        int32       `json:"context_token_budget"`
+	ContinuityBreakReason     pgtype.Text `json:"continuity_break_reason"`
 }
 
 type AgentToLabel struct {
@@ -571,6 +576,7 @@ type ChatMessage struct {
 	ChannelOutboundInstallationID pgtype.UUID        `json:"channel_outbound_installation_id"`
 	ChannelOutboundChatID         pgtype.Text        `json:"channel_outbound_chat_id"`
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
+	SenderUserID                  pgtype.UUID        `json:"sender_user_id"`
 }
 
 type ChatPinnedAgent struct {
@@ -601,6 +607,7 @@ type ChatSession struct {
 	ProjectID               pgtype.UUID        `json:"project_id"`
 	ExplicitlyCreatedAt     pgtype.Timestamptz `json:"explicitly_created_at"`
 	ProjectNudgeDismissedAt pgtype.Timestamptz `json:"project_nudge_dismissed_at"`
+	Visibility              string             `json:"visibility"`
 }
 
 type ChatSessionProject struct {
@@ -610,6 +617,18 @@ type ChatSessionProject struct {
 	ProjectID     pgtype.UUID        `json:"project_id"`
 	Position      int32              `json:"position"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChatSessionRead struct {
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	UserID        pgtype.UUID        `json:"user_id"`
+	LastReadAt    pgtype.Timestamptz `json:"last_read_at"`
+}
+
+type ChatVisibilityNotice struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	DismissedAt pgtype.Timestamptz `json:"dismissed_at"`
 }
 
 type ClientUsageDaily struct {
@@ -1384,6 +1403,7 @@ type ResourceShare struct {
 	MemberID     pgtype.UUID        `json:"member_id"`
 	AddedBy      pgtype.UUID        `json:"added_by"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	Access       string             `json:"access"`
 }
 
 type RuntimeProfile struct {
@@ -1771,6 +1791,24 @@ type WebhookDelivery struct {
 	DispatchAttempts       int32              `json:"dispatch_attempts"`
 	ReasonCode             pgtype.Text        `json:"reason_code"`
 	ReplayIdempotencyKey   pgtype.Text        `json:"replay_idempotency_key"`
+}
+
+type WorkThread struct {
+	ID                    pgtype.UUID        `json:"id"`
+	AgentID               pgtype.UUID        `json:"agent_id"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	ChatSessionID         pgtype.UUID        `json:"chat_session_id"`
+	ContextGeneration     int32              `json:"context_generation"`
+	ContextMessageLimit   int32              `json:"context_message_limit"`
+	ContextTokenBudget    int32              `json:"context_token_budget"`
+	LastSessionID         pgtype.Text        `json:"last_session_id"`
+	LastTurnID            pgtype.UUID        `json:"last_turn_id"`
+	ContinuityBreakReason pgtype.Text        `json:"continuity_break_reason"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	RuntimeID             pgtype.UUID        `json:"runtime_id"`
+	Model                 pgtype.Text        `json:"model"`
+	PermissionMode        pgtype.Text        `json:"permission_mode"`
 }
 
 type Workspace struct {

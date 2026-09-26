@@ -1,5 +1,19 @@
 # Desktop 发版手册（kun 魔改线）
 
+发一版 Desktop 默认走测试通道，一条命令完成版本号计算、门禁检查、打 tag 和推送：
+
+```bash
+scripts/desktop-release.sh cut --channel test
+```
+
+先用 dry-run 检查将要执行的动作（不会 fetch、打 tag 或推送）：
+
+```bash
+scripts/desktop-release.sh cut --channel test --dry-run
+```
+
+命令只允许在 `kun`、干净且与 `origin/kun` 同步时执行。它会从最新正式版的下一个 patch 计算 `vX.Y.Z-test.N`，并递增同一基础版本的测试序号。正式版不属于默认流程；`--channel stable` 必须额外传 `--confirm-stable`。
+
 发一版 Desktop 给 kk zi 真机用，要走完的全流程与红线。写这份文档的直接原因是 DENE-276：那一轮打包实际只花 7 分钟，却在用户那边表现为「一个小时没动静」，最后产物躺在本地硬盘上没有发出去。下面每条纪律都对应一次真实踩坑。
 
 DENE-352 补上了第二类踩坑：**上传到一半断了，命令行却报成功**。本机到 `uploads.github.com` 的出站约 90–110 KB/s，230 MB 的 dmg 要 40 分钟不断线；`POST .../assets` 被 EOF 掐断时 `gh release upload` **退出码仍是 0**，失败的两个文件在 Release 上留成 `state=starter` 的僵尸资产（`gh release view` 看不见），而 `latest-mac.yml` 已经指向它们——0.4.55 用户的自动更新链路就是这样断的。结论：**发版搬到 GitHub Actions runner，并且上传后逐个资产核对**，见红线 1、2。
@@ -127,8 +141,7 @@ git tag v0.5.5 && git push origin v0.5.5
 发一版测试版：
 
 ```bash
-git fetch origin --prune && git log --oneline origin/kun -1
-git tag v0.5.5-test.1 && git push origin v0.5.5-test.1
+scripts/desktop-release.sh cut --channel test
 ```
 
 两种 tag 都会触发 `.github/workflows/desktop-release.yml`（它的 tag 正则已经接受 `-suffix`），构建、上传、逐个核对资产的流程完全一样，差别只在写出哪一组 yml。
@@ -142,11 +155,8 @@ CI 出的 macOS 包是 **ad-hoc 签名、未公证**（`CSC_IDENTITY_AUTO_DISCOV
 ## 主路径：CI 发版（默认走这条）
 
 ```bash
-# 1. 确认要发的 commit 已经在 kun（CI 从 tag 指向的 commit 构建）
-git fetch origin --prune && git log --oneline origin/kun -1
-
-# 2. 打 tag 并推送：默认是测试版（见上一节）；正式版只在 owner 通知后打
-git tag v0.4.58-test.1 && git push origin v0.4.58-test.1
+# 检查、计算版本号、打 tag 和推送
+scripts/desktop-release.sh cut --channel test
 ```
 
 推送 tag 后 `.github/workflows/desktop-release.yml` 会自动：

@@ -1,5 +1,6 @@
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
+import type { WorkThreadSnapshot } from "../types/work_thread";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -3169,6 +3170,22 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/active-task`);
   }
 
+  async getIssueWorkThread(issueId: string): Promise<WorkThreadSnapshot | null> {
+    return this.fetch(`/api/issues/${issueId}/work-thread`);
+  }
+
+  async issueWorkThreadAction(
+    issueId: string,
+    action: "continue" | "interrupt" | "queue" | "prioritize",
+    summary?: string,
+    taskId?: string,
+  ): Promise<{ action: string; state: string; task_id?: string; thread_id?: string; session_id?: string }> {
+    return this.fetch(`/api/issues/${issueId}/work-thread/action`, {
+      method: "POST",
+      body: JSON.stringify({ action, summary, task_id: taskId }),
+    });
+  }
+
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
     const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`);
     return parseWithFallback<TaskMessagePayload[]>(raw, TaskMessageListSchema, [], {
@@ -4370,6 +4387,38 @@ export class ApiClient {
     });
   }
 
+  async getChatAccess(sessionId: string): Promise<import("../types").ChatAccessSettings> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/access`);
+  }
+
+  async putChatAccess(
+    sessionId: string,
+    body: {
+      mode: "project" | "extra" | "private";
+      shares?: { user_id: string; access: "view" | "speak" }[];
+    },
+  ): Promise<import("../types").ChatAccessSettings> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/access`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getChatVisibilityNotice(): Promise<import("../types").ChatVisibilityNotice> {
+    return this.fetch("/api/chat/visibility-notice");
+  }
+
+  async dismissChatVisibilityNotice(): Promise<void> {
+    await this.fetch("/api/chat/visibility-notice/dismiss", { method: "POST" });
+  }
+
+  async makeChatSessionsPrivate(sessionIds: string[]): Promise<{ updated: number }> {
+    return this.fetch("/api/chat/sessions/make-private", {
+      method: "POST",
+      body: JSON.stringify({ session_ids: sessionIds }),
+    });
+  }
+
   async getChatSession(id: string): Promise<ChatSession> {
     const raw: unknown = await this.fetch(`/api/chat/sessions/${id}`);
     return parseWithFallback(raw, ChatSessionSchema, EMPTY_CHAT_SESSION, {
@@ -4568,6 +4617,21 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/pending-task`);
     return parseWithFallback(raw, ChatPendingTaskSchema, EMPTY_CHAT_PENDING_TASK, {
       endpoint: "GET /api/chat/sessions/:id/pending-task",
+    });
+  }
+
+  async getChatWorkThread(sessionId: string): Promise<WorkThreadSnapshot | null> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/work-thread`);
+  }
+
+  async chatWorkThreadAction(
+    sessionId: string,
+    action: "continue" | "interrupt" | "queue",
+    summary?: string,
+  ): Promise<{ action: string; state: string; task_id?: string; thread_id?: string; session_id?: string }> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/work-thread/action`, {
+      method: "POST",
+      body: JSON.stringify({ action, summary }),
     });
   }
 
@@ -5259,10 +5323,11 @@ export class ApiClient {
 
   // Pins
   async listPins(): Promise<PinnedItem[]> {
-    // include=view is the capability opt-in: the server withholds view pins
+    // include=view,chat is the capability opt-in: the server withholds view
+    // and chat pins
     // from clients that don't declare support (old builds treated any
     // non-issue pin as a project pin and auto-deleted it on 404).
-    return this.fetch("/api/pins?include=view");
+    return this.fetch("/api/pins?include=view,chat");
   }
 
   async createPin(data: CreatePinRequest): Promise<PinnedItem> {

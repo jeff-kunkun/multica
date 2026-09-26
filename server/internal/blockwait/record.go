@@ -180,12 +180,15 @@ func Accept(existing map[string]any, in Input, now time.Time) (Record, error) {
 }
 
 // FailureWake is the structured block written when a child run fails and
-// nobody else is going to pick it up. The clock is already due, so the next
-// patrol — well inside QuietAfter — wakes the child.
-func FailureWake(now time.Time, condition string) Record {
+// nobody else is going to pick it up. The first failure's clock is already
+// due, so the next patrol — well inside QuietAfter — wakes the child. Each
+// further failure in a row pushes the clock out (FailureBackoff), so a run
+// that keeps failing the same way is not re-woken every minute (DENE-870).
+func FailureWake(now time.Time, condition string, failures int) Record {
 	if now.IsZero() {
 		now = time.Now()
 	}
+	now = now.Add(FailureBackoff(failures))
 	if strings.TrimSpace(condition) == "" {
 		condition = "下游运行失败，到点重新叫醒执行人"
 	}
@@ -193,6 +196,24 @@ func FailureWake(now time.Time, condition string) Record {
 		HasWakeAt:     true,
 		WakeAt:        now.UTC(),
 		WaitCondition: strings.TrimSpace(condition),
+	}
+}
+
+// FailureBackoff is how long the patrol waits before waking a child whose
+// last failures runs failed in a row: none after the first, then 5 minutes,
+// 15 minutes, an hour, and four hours from the fifth on.
+func FailureBackoff(failures int) time.Duration {
+	switch {
+	case failures <= 1:
+		return 0
+	case failures == 2:
+		return 5 * time.Minute
+	case failures == 3:
+		return 15 * time.Minute
+	case failures == 4:
+		return time.Hour
+	default:
+		return 4 * time.Hour
 	}
 }
 

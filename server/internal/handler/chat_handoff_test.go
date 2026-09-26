@@ -95,8 +95,8 @@ func TestGetChatSessionHandoff_HidesOtherWorkspaceAndOtherOwner(t *testing.T) {
 
 	otherUser := httptest.NewRecorder()
 	testHandler.GetChatSessionHandoff(otherUser, handoffReq(t, sessionID, "", uuid.NewString()))
-	if otherUser.Code != http.StatusForbidden {
-		t.Fatalf("other owner status = %d, want 403: %s", otherUser.Code, otherUser.Body.String())
+	if otherUser.Code != http.StatusNotFound {
+		t.Fatalf("other owner status = %d, want 404: %s", otherUser.Code, otherUser.Body.String())
 	}
 	if strings.Contains(otherUser.Body.String(), "secret takeover plan") {
 		t.Fatalf("other owner response leaked the transcript: %s", otherUser.Body.String())

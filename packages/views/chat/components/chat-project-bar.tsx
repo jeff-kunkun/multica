@@ -399,8 +399,8 @@ function ProjectRow({
             onTogglePin();
           }}
           className={cn(
-            "shrink-0 rounded-sm p-1 text-muted-foreground outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring",
-            pinned ? "opacity-100" : "opacity-40 hover:opacity-100",
+            "shrink-0 rounded-sm p-1 outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring",
+            pinned ? "text-muted-foreground" : "text-faint-foreground hover:text-muted-foreground",
           )}
         >
           <Pin className="size-3.5" />

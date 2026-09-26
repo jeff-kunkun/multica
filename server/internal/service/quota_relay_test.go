@@ -82,7 +82,9 @@ func seedQuotaWorld(t *testing.T, failureReason, errorText string, ownModel bool
 	w.sameID = insertAgent(fmt.Sprintf("quota-same-%d", suffix), "other-model", "strong")
 	w.mediumID = insertAgent(fmt.Sprintf("quota-down-%d", suffix), "down-model", "medium")
 	w.siblingID = insertAgent(fmt.Sprintf("quota-sibling-%d", suffix), "gpt-special", "")
-	w.reviewerID = w.mediumID
+	// A seat of its own: the relay never hands work to the ticket's
+	// reviewer (DENE-870), so sharing a candidate seat would steer picks.
+	w.reviewerID = insertAgent(fmt.Sprintf("quota-reviewer-%d", suffix), "review-model", "")
 
 	inherited := !ownModel
 	if _, err := pool.Exec(ctx, `

@@ -635,6 +635,7 @@ func init() {
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
+	issueUpdateCmd.Flags().String("no-code", "", "Why this issue carries no code delivery (docs, research). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
@@ -647,6 +648,7 @@ func init() {
 	issueStatusCmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
 	issueStatusCmd.Flags().String("needs-human", "", "Member UUID a blocked issue is waiting on")
 	registerIssueCloseFlags(issueCloseCmd)
+	issueStatusCmd.Flags().String("no-code", "", "Why this issue carries no code delivery (docs, research). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
@@ -1593,6 +1595,9 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if statusChanged {
 		body["status"] = statusFlag
 	}
+	if v, _ := cmd.Flags().GetString("no-code"); v != "" {
+		body["no_code_reason"] = v
+	}
 	if priorityChanged {
 		body["priority"] = priorityFlag
 	}
@@ -1799,6 +1804,7 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		{"wait-probe", "wait_probe"},
 		{"wait-timeout", "wait_timeout"},
 		{"needs-human", "needs_human"},
+		{"no-code", "no_code_reason"},
 	} {
 		if v, _ := cmd.Flags().GetString(pair.flag); v != "" {
 			body[pair.key] = v

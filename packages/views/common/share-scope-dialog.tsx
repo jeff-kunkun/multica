@@ -300,7 +300,7 @@ export function ShareScopeDialog({
                         {t(($) => $.share_scope[meta.descriptionKey])}
                       </span>
                       {audienceSizeByScope[value] !== undefined && (
-                        <span className="mt-1 block text-caption font-medium text-foreground/70">
+                        <span className="mt-1 block text-caption font-medium text-muted-foreground">
                           {t(($) => $.share_scope.audience_count, { count: audienceSizeByScope[value] ?? 0 })}
                         </span>
                       )}

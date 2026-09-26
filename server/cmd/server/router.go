@@ -2001,6 +2001,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
+					r.Get("/work-thread", h.GetIssueWorkThread)
+					r.Post("/work-thread/action", h.WorkThreadAction)
 					r.Put("/", h.UpdateIssue)
 					// Sharing scope is its own action, not a field on the
 					// ordinary edit: it has its own tier rule and its own
@@ -2456,11 +2458,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Workspace-wide 30-day run counts per agent for the Agents-list RUNS column.
 			r.Get("/api/agent-run-counts", h.GetWorkspaceAgentRunCounts)
 
+			r.Get("/api/chat/visibility-notice", h.GetChatVisibilityNotice)
+			r.Post("/api/chat/visibility-notice/dismiss", h.DismissChatVisibilityNotice)
 			r.Route("/api/chat/sessions", func(r chi.Router) {
 				r.Post("/", h.CreateChatSession)
 				r.Get("/", h.ListChatSessions)
+				// Registered before /{sessionId} so "make-private" is not captured as an id.
+				r.Post("/make-private", h.MakeChatSessionsPrivate)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
+					r.Get("/access", h.GetChatSessionAccess)
+					r.Put("/access", h.PutChatSessionAccess)
+					r.Get("/work-thread", h.GetChatWorkThread)
+					r.Post("/work-thread/action", h.ChatWorkThreadAction)
 					r.Patch("/", h.UpdateChatSession)
 					r.Patch("/pin", h.SetChatSessionPinned)
 					r.Patch("/project-nudge", h.DismissChatSessionProjectNudge)
