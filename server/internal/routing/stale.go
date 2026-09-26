@@ -95,12 +95,23 @@ func (r *Router) SweepWorkspace(ctx context.Context, workspaceID string, report 
 	}
 
 	before := time.Now().Add(-settings.StaleAfter())
-	ids, err := r.Store.StaleReviews(ctx, workspaceID, before, staleSweepLimit)
+	// The same bounded budget covers both rows. Todo tickets are routed first:
+	// they have never been given a seat, while in-review tickets already have
+	// an acceptance path that stale-review can wake. Repeated sweeps are safe
+	// because Route only fills empty slots.
+	todoIDs, err := r.Store.UnassignedTodos(ctx, workspaceID, before, staleSweepLimit)
 	if err != nil {
 		return 0, err
 	}
+	remaining := staleSweepLimit - len(todoIDs)
+	if remaining < 0 { remaining = 0 }
+	ids, err := r.Store.StaleReviews(ctx, workspaceID, before, remaining)
+	if err != nil {
+		return 0, err
+	}
+	allIDs := append(todoIDs, ids...)
 	examined := 0
-	for _, issueID := range ids {
+	for _, issueID := range allIDs {
 		if err := ctx.Err(); err != nil {
 			return examined, err
 		}
