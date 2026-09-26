@@ -1828,6 +1828,10 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 			body[pair.key] = v
 		}
 	}
+	if status == "in_review" || status == "done" {
+		refreshIssuePullRequests(ctx, client, issueRef.ID, issueRef.Display, false)
+	}
+
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update status: %w", err)

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -27,7 +28,8 @@ var closeIdentRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*-\d+$`)
 // same step the gate would take through the App. Failures only warn: the
 // server gate stays fail-closed and blocks the close with a reason.
 func refreshIssuePullRequests(ctx context.Context, client *cli.APIClient, issueID, ident string, merge bool) {
-	if !closeIdentRe.MatchString(ident) {
+	ident, ok := resolvePRIdentifier(ctx, client, issueID, ident)
+	if !ok {
 		return
 	}
 	dir, err := os.Getwd()
@@ -52,6 +54,7 @@ func refreshIssuePullRequests(ctx context.Context, client *cli.APIClient, issueI
 		return
 	}
 	if len(prs) == 0 {
+		fmt.Fprintf(os.Stderr, "  ! gh found no PR matching %s in the title or current branch; check the PR title or branch contains the issue key\n", ident)
 		return
 	}
 	if merge {
@@ -76,6 +79,31 @@ func refreshIssuePullRequests(ctx context.Context, client *cli.APIClient, issueI
 	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/pull-requests/report", map[string]any{"pull_requests": prs}, nil); err != nil {
 		fmt.Fprintf(os.Stderr, "  ! could not report PR state: %v\n", err)
 	}
+}
+
+// resolvePRIdentifier turns a UUID issue reference into its human-facing key,
+// which is what gh can search for. A failed lookup is reported explicitly so
+// the caller never silently skips the App-free PR refresh.
+func resolvePRIdentifier(ctx context.Context, client *cli.APIClient, issueID, ident string) (string, bool) {
+	if closeIdentRe.MatchString(ident) {
+		return ident, true
+	}
+	if !uuidRegexp.MatchString(ident) {
+		fmt.Fprintf(os.Stderr, "  ! cannot refresh PR state: %q is neither an issue key nor a full UUID\n", ident)
+		return "", false
+	}
+	var issue map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID), &issue); err != nil {
+		fmt.Fprintf(os.Stderr, "  ! cannot resolve issue UUID %s to an issue key for gh PR lookup: %v\n", ident, err)
+		return "", false
+	}
+	key, _ := issue["identifier"].(string)
+	key = strings.TrimSpace(key)
+	if !closeIdentRe.MatchString(key) {
+		fmt.Fprintf(os.Stderr, "  ! issue UUID %s did not return a usable issue key; cannot look up PRs with gh\n", ident)
+		return "", false
+	}
+	return key, true
 }
 
 // namingIssue keeps PRs whose title or branch carries the identifier and

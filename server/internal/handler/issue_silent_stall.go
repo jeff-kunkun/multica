@@ -156,7 +156,7 @@ func (h *Handler) refuseReviewWithoutDelivery(ctx context.Context, issue db.Issu
 		}
 	}
 	key := issueIdentifier(h.getIssuePrefix(ctx, issue.WorkspaceID), issue.Number)
-	return fmt.Sprintf("进不了待验收：%s 没有关联的 PR，验收人没有东西可看。先推分支、开 PR（标题带 %s），再送审；纯文档或调研类没有代码交付的票，用 `--no-code <原因>` 说明。", key, key)
+	return fmt.Sprintf("进不了待验收：%s 没有关联的 PR，验收人没有东西可看。没有 GitHub App 时，请用票号重跑 `multica issue close %s`，并检查 PR 标题或分支里包含 %s；纯文档或调研类没有代码交付的票，用 `--no-code <原因>` 说明。", key, key, key)
 }
 
 func reviewerChosen(reviewerType pgtype.Text, reviewerID pgtype.UUID, explicit bool) bool {
