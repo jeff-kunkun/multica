@@ -1659,6 +1659,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// because they are JSON-API consumers that always have
 		// workspace context.
 		r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
+		// Read an issue by its link, workspace resolved from the URL, GET only
+		// (DENE-897). Gates run inside against the link's workspace.
+		h.MountLinkReadRoutes(r)
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
