@@ -317,3 +317,72 @@ func (s *TaskService) remindSummonAnswerClose(ctx context.Context, task db.Agent
 		slog.Warn("summon reminder: enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
 	}
 }
+
+// SettleSummonInbox reads the inbox rows the given calls hang on, once the
+// calls are answered or closed (DENE-901). Those rows are the ones the board's
+// mark-all and the ticket's mark-read leave alone; without this they would
+// stay unread forever. Each recipient's clients hear an inbox:batch-read so
+// the badge follows at once.
+func SettleSummonInbox(ctx context.Context, q *db.Queries, bus *events.Bus, summons []db.IssueSummon) {
+	if len(summons) == 0 {
+		return
+	}
+	ids := make([]pgtype.UUID, 0, len(summons))
+	for _, s := range summons {
+		ids = append(ids, s.ID)
+	}
+	rows, err := q.MarkIssueSummonInboxRead(ctx, ids)
+	if err != nil {
+		slog.Warn("summon: read inbox rows failed", "error", err)
+		return
+	}
+	if bus == nil {
+		return
+	}
+	type recipientKey struct{ workspace, recipient string }
+	counts := map[recipientKey]int{}
+	for _, row := range rows {
+		counts[recipientKey{util.UUIDToString(row.WorkspaceID), util.UUIDToString(row.RecipientID)}]++
+	}
+	for k, n := range counts {
+		bus.Publish(events.Event{
+			Type:        protocol.EventInboxBatchRead,
+			WorkspaceID: k.workspace,
+			ActorType:   "system",
+			Payload:     map[string]any{"recipient_id": k.recipient, "count": n},
+		})
+	}
+}
+
+// CloseSummonsOnProgress closes the calls a ticket no longer waits on
+// (DENE-901): every call once the ticket is done or cancelled, and the
+// actor's own calls when the person called changed the ticket's status or
+// owner themselves — the ticket moved on without a reply. The rows those
+// calls hang on are read with them.
+func CloseSummonsOnProgress(ctx context.Context, q *db.Queries, bus *events.Bus, issueID pgtype.UUID, actorType, actorID string, statusChanged, assigneeChanged bool) {
+	if !issueID.Valid || (!statusChanged && !assigneeChanged) {
+		return
+	}
+	issue, err := q.GetIssue(ctx, issueID)
+	if err != nil {
+		return
+	}
+	params := db.CloseOpenIssueSummonsParams{IssueID: issue.ID}
+	switch {
+	case issue.Status == "done" || issue.Status == "cancelled":
+	case actorType == "member":
+		recipient, err := util.ParseUUID(actorID)
+		if err != nil {
+			return
+		}
+		params.RecipientID = recipient
+	default:
+		return
+	}
+	closed, err := q.CloseOpenIssueSummons(ctx, params)
+	if err != nil {
+		slog.Warn("summon: close on progress failed", "error", err, "issue_id", util.UUIDToString(issue.ID))
+		return
+	}
+	SettleSummonInbox(ctx, q, bus, closed)
+}

@@ -307,6 +307,7 @@ func (h *Handler) answerSummons(ctx context.Context, issue db.Issue, comment db.
 		slog.Warn("summon: answer failed", "error", err, "issue_id", uuidToString(issue.ID))
 		return
 	}
+	service.SettleSummonInbox(ctx, h.Queries, h.Bus, answered)
 	if len(answered) == 0 || woke {
 		return
 	}

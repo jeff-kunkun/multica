@@ -10,6 +10,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useCreateComment } from "@multica/core/issues/mutations";
 import {
   splitSeenDone,
+  useBoardUnreadSnapshot,
   useDoneSeenStore,
   useInboxBoard,
   type BoardLane,
@@ -30,6 +31,7 @@ const LANE_TAG_CLASS: Record<BoardLane, string> = {
   waiting: "bg-destructive/10 text-destructive",
   stalled: "bg-warning/15 text-warning-foreground dark:text-warning",
   running: "bg-success/10 text-success",
+  fresh: "bg-info/10 text-info",
   done: "bg-muted text-muted-foreground",
 };
 
@@ -37,6 +39,7 @@ const LANE_PILL_CLASS: Record<BoardLane, string> = {
   waiting: "border-destructive/30 text-destructive",
   stalled: "border-warning/40 text-warning-foreground dark:text-warning",
   running: "border-success/30 text-success",
+  fresh: "border-info/30 text-info",
   done: "text-muted-foreground",
 };
 
@@ -50,6 +53,7 @@ function useBoardCopy() {
       const tags = t(($) => $.board.tag, { returnObjects: true }) as Record<string, string>;
       if (row.lane === "waiting") return tags[row.kind] ?? t(($) => $.board.tag.waiting_default);
       if (row.lane === "stalled") return tags[row.kind] ?? t(($) => $.board.stuck.default);
+      if (row.lane === "fresh") return t(($) => $.board.tag.fresh);
       return row.lane === "running" ? t(($) => $.board.tag.running) : t(($) => $.board.tag.done);
     };
     const reason = (row: BoardRow): string => {
@@ -217,6 +221,15 @@ function BoardRowView({
             >
               {row.title}
             </AppLink>
+            {row.unread > 0 && (
+              <span
+                className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-info"
+                data-testid="board-row-unread"
+              >
+                <span className="size-1.5 rounded-full bg-info" aria-hidden />
+                {copy.t(($) => $.board.unread, { count: row.unread })}
+              </span>
+            )}
             {row.lane === "stalled" && (
               <span className="shrink-0 rounded-sm bg-info/10 px-1 text-[11px] text-info">
                 {copy.t(($) => $.board.server_mark)}
@@ -304,13 +317,18 @@ function LaneSection({
   );
 }
 
-/** The inbox: one row per issue in four lanes (DENE-882). */
+/**
+ * The inbox: one row per issue in five lanes (DENE-882). Arriving reads
+ * everything but open calls; rows that were unread on arrival keep a marker
+ * for this visit (DENE-901).
+ */
 export function HomePage() {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const copy = useBoardCopy();
-  const { board, isLoading, isError } = useInboxBoard(wsId, userId);
+  const unread = useBoardUnreadSnapshot(wsId);
+  const { board, isLoading, isError } = useInboxBoard(wsId, userId, undefined, unread);
 
   // "Done today" shows once. Read the mark left by the previous visit, then
   // move it to now — on arrival and again on leaving, so rows that finish
@@ -328,9 +346,10 @@ export function HomePage() {
     waiting: board.waiting.length,
     stalled: board.stalled.length,
     running: board.running.length,
+    fresh: board.fresh.length,
     done: board.done.length,
   };
-  const lanes: BoardLane[] = ["waiting", "stalled", "running", "done"];
+  const lanes: BoardLane[] = ["waiting", "stalled", "running", "fresh", "done"];
 
   const seenFooter =
     done.seen.length > 0 ? (
@@ -391,6 +410,7 @@ export function HomePage() {
               <LaneSection lane="waiting" rows={board.waiting} copy={copy} />
               <LaneSection lane="stalled" rows={board.stalled} copy={copy} />
               <LaneSection lane="running" rows={board.running} copy={copy} />
+              {board.fresh.length > 0 && <LaneSection lane="fresh" rows={board.fresh} copy={copy} />}
               <LaneSection lane="done" rows={done.fresh} copy={copy} footer={seenFooter} />
             </>
           )}

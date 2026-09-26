@@ -168,6 +168,11 @@
         "hint": "Just a marker, no noise",
         "empty": "No agent is running right now"
       },
+      "fresh": {
+        "title": "New activity",
+        "hint": "Unread since your last visit, and in none of the lanes above. Shown this visit only",
+        "empty": "Nothing new"
+      },
       "done": {
         "title": "Done today",
         "hint": "Shown once, folded after you have seen it",
@@ -188,6 +193,7 @@
       "stalled_unclosed": "Done, not closed",
       "stalled_reply_unclosed": "Replied, not closed",
       "running": "Running",
+      "fresh": "New",
       "done": "Done"
     },
     "stuck": {
@@ -213,6 +219,8 @@
       "after": "No run and no close since"
     },
     "server_mark": "Server verdict",
+    "unread_one": "{{count}} new",
+    "unread_other": "{{count}} new",
     "before": "Before: {{text}}",
     "next": "Next: {{name}}",
     "next_none": "Next: nobody",

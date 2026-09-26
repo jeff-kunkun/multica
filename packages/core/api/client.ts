@@ -1,6 +1,6 @@
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
-import type { ParkingRecordsResponse, WaitingSummon } from "../types/home";
+import type { ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
 import { configStore } from "../config";
 import type {
@@ -3364,6 +3364,17 @@ export class ApiClient {
 
   async markAllInboxRead(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/mark-all-read", { method: "POST" });
+  }
+
+  // Issues the current user has unread inbox rows on, one row each (DENE-901).
+  // The board takes this as its snapshot before it marks everything read.
+  async listUnreadInboxIssues(): Promise<UnreadInboxIssue[]> {
+    return this.fetch("/api/inbox/unread-issues");
+  }
+
+  // Read one issue's inbox rows, except the ones an open call hangs on.
+  async markIssueInboxRead(issueId: string): Promise<{ count: number }> {
+    return this.fetch(`/api/inbox/issues/${issueId}/read`, { method: "POST" });
   }
 
   async archiveAllInbox(): Promise<{ count: number }> {

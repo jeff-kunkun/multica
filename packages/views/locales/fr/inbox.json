@@ -168,6 +168,11 @@
         "hint": "Just a marker, no noise",
         "empty": "No agent is running right now"
       },
+      "fresh": {
+        "title": "Du nouveau",
+        "hint": "Non lu depuis votre dernière visite et absent des colonnes ci-dessus. Affiché pour cette visite seulement",
+        "empty": "Rien de nouveau"
+      },
       "done": {
         "title": "Done today",
         "hint": "Shown once, folded after you have seen it",
@@ -188,6 +193,7 @@
       "stalled_unclosed": "Done, not closed",
       "stalled_reply_unclosed": "Replied, not closed",
       "running": "Running",
+      "fresh": "Nouveau",
       "done": "Done"
     },
     "stuck": {
@@ -213,6 +219,8 @@
       "after": "No run and no close since"
     },
     "server_mark": "Server verdict",
+    "unread_one": "{{count}} nouveau",
+    "unread_other": "{{count}} nouveaux",
     "before": "Before: {{text}}",
     "next": "Next: {{name}}",
     "next_none": "Next: nobody",

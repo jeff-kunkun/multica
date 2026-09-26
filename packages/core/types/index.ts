@@ -141,7 +141,7 @@ export type {
   PluginMCPTool,
   PluginTokenIssue,
 } from "./plugin";
-export type { ParkingOwner, ParkingEvent, ParkingCategory, ParkingRecord, ParkingRecordsResponse, WaitingSummon } from "./home";
+export type { ParkingOwner, ParkingEvent, ParkingCategory, ParkingRecord, ParkingRecordsResponse, WaitingSummon, UnreadInboxIssue } from "./home";
 export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread, ArchivedInboxPage, ArchivedInboxFacets } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
 export type { Comment, CommentType, CommentAuthorType, CommentTriggerPreview, CommentTriggerPreviewAgent, CommentTriggerSource, CommentTriggerOutcome, CommentTriggerStatus, Reaction } from "./comment";

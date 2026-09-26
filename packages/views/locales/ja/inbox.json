@@ -165,6 +165,11 @@
         "hint": "Just a marker, no noise",
         "empty": "No agent is running right now"
       },
+      "fresh": {
+        "title": "新着あり",
+        "hint": "前回以降に未読があり、上のどのレーンにも入らないチケット。今回だけ表示",
+        "empty": "新着はありません"
+      },
       "done": {
         "title": "Done today",
         "hint": "Shown once, folded after you have seen it",
@@ -185,6 +190,7 @@
       "stalled_unclosed": "Done, not closed",
       "stalled_reply_unclosed": "Replied, not closed",
       "running": "Running",
+      "fresh": "新着",
       "done": "Done"
     },
     "stuck": {
@@ -210,6 +216,7 @@
       "after": "No run and no close since"
     },
     "server_mark": "Server verdict",
+    "unread_other": "新着 {{count}} 件",
     "before": "Before: {{text}}",
     "next": "Next: {{name}}",
     "next_none": "Next: nobody",

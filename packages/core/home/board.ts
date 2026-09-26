@@ -1,6 +1,6 @@
 import type { AgentTask } from "../types/agent";
 import type { Issue } from "../types/issue";
-import type { ParkingEvent, ParkingRecord, WaitingSummon } from "../types/home";
+import type { ParkingEvent, ParkingRecord, UnreadInboxIssue, WaitingSummon } from "../types/home";
 
 /**
  * The one-row-per-issue inbox (DENE-882).
@@ -10,13 +10,18 @@ import type { ParkingEvent, ParkingRecord, WaitingSummon } from "../types/home";
  *             issue's parking record names the viewer as the next owner;
  *   stalled — the parking record says it stopped without explaining why;
  *   running — an agent is on it right now;
+ *   fresh   — it has unread inbox rows for the viewer but none of the
+ *             lanes above or below takes it (DENE-901);
  *   done    — it was finished today.
+ *
+ * Every row also carries how many unread inbox rows the viewer had on it when
+ * the board was opened, so the board can mark what is new this visit.
  *
  * The board only reads server verdicts. It never decides on its own that an
  * issue is stuck: the category comes from the parking record, the call from
  * the summon table.
  */
-export type BoardLane = "waiting" | "stalled" | "running" | "done";
+export type BoardLane = "waiting" | "stalled" | "running" | "fresh" | "done";
 
 export interface BoardOwner {
   type: string;
@@ -48,6 +53,8 @@ export interface BoardRow {
   /** The moment the row is about: call time, verdict time, start, finish. */
   at: string;
   timeline: ParkingEvent[];
+  /** Unread inbox rows on this issue when the board was opened. */
+  unread: number;
   children: BoardRow[];
 }
 
@@ -55,6 +62,7 @@ export interface InboxBoard {
   waiting: BoardRow[];
   stalled: BoardRow[];
   running: BoardRow[];
+  fresh: BoardRow[];
   done: BoardRow[];
 }
 
@@ -67,6 +75,8 @@ export interface InboxBoardInput {
   runningIssues: readonly Issue[];
   /** Issues finished today. */
   doneIssues: readonly Issue[];
+  /** The unread snapshot taken when the board was opened. */
+  unread?: readonly UnreadInboxIssue[];
 }
 
 const RUNNING_TASK_STATUSES = new Set<AgentTask["status"]>([
@@ -151,6 +161,7 @@ export function buildInboxBoard(input: InboxBoardInput): InboxBoard {
       next: input.userId ? { type: "member", id: input.userId } : null,
       at: s.created_at,
       timeline: record?.timeline ?? [],
+      unread: 0,
       children: [],
     });
   }
@@ -176,6 +187,7 @@ export function buildInboxBoard(input: InboxBoardInput): InboxBoard {
       next: owner(r.next_owner),
       at: r.evaluated_at,
       timeline: r.timeline,
+      unread: 0,
       children: [],
     });
   }
@@ -201,6 +213,7 @@ export function buildInboxBoard(input: InboxBoardInput): InboxBoard {
       next: owner(r.next_owner),
       at: r.evaluated_at,
       timeline: r.timeline,
+      unread: 0,
       children: [],
     });
   }
@@ -230,6 +243,7 @@ export function buildInboxBoard(input: InboxBoardInput): InboxBoard {
       next: { type: "agent", id: task.agent_id },
       at: task.started_at ?? task.dispatched_at ?? task.created_at,
       timeline: [],
+      unread: 0,
       children: [],
     });
   }
@@ -255,21 +269,57 @@ export function buildInboxBoard(input: InboxBoardInput): InboxBoard {
       next: null,
       at: issue.updated_at,
       timeline: [],
+      unread: 0,
       children: [],
     });
   }
 
+  // --- fresh: unread tickets no other lane took, one row each.
+  const unreadById = new Map((input.unread ?? []).map((u) => [u.issue_id, u]));
+  const fresh: BoardRow[] = [];
+  for (const u of unreadById.values()) {
+    if (placed.has(u.issue_id) || u.unread_count <= 0) continue;
+    placed.add(u.issue_id);
+    fresh.push({
+      issueId: u.issue_id,
+      identifier: u.identifier,
+      title: u.title,
+      parentIssueId: u.parent_issue_id,
+      lane: "fresh",
+      kind: "fresh",
+      stuckKind: "",
+      reason: "",
+      before: spokenSummary(records.get(u.issue_id)),
+      from: null,
+      fromName: "",
+      next: null,
+      at: u.latest_at,
+      timeline: [],
+      unread: 0,
+      children: [],
+    });
+  }
+
+  const mark = (rows: BoardRow[]) => {
+    for (const row of rows) row.unread = unreadById.get(row.issueId)?.unread_count ?? 0;
+    return rows.sort(newestFirst);
+  };
+
   return {
-    waiting: foldChildren(waiting.sort(newestFirst)),
-    stalled: foldChildren(stalled.sort(newestFirst)),
-    running: foldChildren(running.sort(newestFirst)),
-    done: foldChildren(done.sort(newestFirst)),
+    waiting: foldChildren(mark(waiting)),
+    stalled: foldChildren(mark(stalled)),
+    running: foldChildren(mark(running)),
+    // A ticket per row: a child here is new on its own account, not part of
+    // its parent's story.
+    fresh: mark(fresh),
+    done: foldChildren(mark(done)),
   };
 }
 
 /**
  * Split the done lane at the last time the viewer looked: rows finished after
  * it are new and shown; the rest fold away. With no mark yet everything is new.
+ * A row with unread activity stays shown whatever its finish time.
  */
 export function splitSeenDone(
   rows: readonly BoardRow[],
@@ -279,6 +329,6 @@ export function splitSeenDone(
   const mark = Date.parse(seenAt);
   const fresh: BoardRow[] = [];
   const seen: BoardRow[] = [];
-  for (const row of rows) (Date.parse(row.at) > mark ? fresh : seen).push(row);
+  for (const row of rows) (row.unread > 0 || Date.parse(row.at) > mark ? fresh : seen).push(row);
   return { fresh, seen };
 }
