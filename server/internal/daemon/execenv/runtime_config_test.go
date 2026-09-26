@@ -2487,3 +2487,28 @@ func TestAvailableCommandsListIssueClose(t *testing.T) {
 		t.Errorf("issue close bullet should sit with the status commands, before children (close=%d children=%d)", closeIdx, childrenIdx)
 	}
 }
+
+// TestAvailableCommandsListIssueHandoff pins the `issue handoff` bullet
+// (DENE-863): it sits beside `issue close`, replaces hand-written @mentions of
+// the acceptance seat, and carries the honest-reply rule.
+func TestAvailableCommandsListIssueHandoff(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
+	for _, want := range []string{
+		"- `multica issue handoff <id> --to <reviewer|dispatcher|agent-name>`",
+		"skips a target that already has an active run",
+		"refuses to put a person into the reviewer seat",
+		"instead of a hand-written @mention of the acceptance seat",
+		"not a close — `multica issue handoff <id>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("brief missing %q", want)
+		}
+	}
+	closeIdx := strings.Index(out, "- `multica issue close <id>")
+	handoffIdx := strings.Index(out, "- `multica issue handoff <id>")
+	childrenIdx := strings.Index(out, "- `multica issue children <id>")
+	if !(closeIdx >= 0 && closeIdx < handoffIdx && handoffIdx < childrenIdx) {
+		t.Errorf("issue handoff bullet should sit right after issue close (close=%d handoff=%d children=%d)", closeIdx, handoffIdx, childrenIdx)
+	}
+}

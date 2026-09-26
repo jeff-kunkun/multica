@@ -24,7 +24,8 @@ What it may do, and only when the slot is still **empty**:
   acceptance needs a human call, the slot still gets a seat and the decision
   comment tells that seat to @ the person instead.
 - **`in_review` (top-level only)** — hand the issue to the seat in 验收席
-  (which starts its run).
+  (which starts its run). To wake that seat by hand, use `multica issue
+  handoff <id> --to reviewer` — never a hand-written @验收席.
   「不需要验收」 is left alone. A 验收席 a person filled with a **person** is
   notified with an @ and a subscription, and the issue is **not** reassigned —
   whoever is holding it keeps it, so its status can still be moved.

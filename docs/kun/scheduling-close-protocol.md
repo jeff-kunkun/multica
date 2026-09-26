@@ -133,6 +133,16 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
 - `--verdict pass` 只配 `--outcome done`，且票必须已在 `in_review`、调用者是验收席：平台先合并 PR 再写 `done`；合不进去（PR 脏、检查红、host 拒绝）回 `blocked` + `block_kind=external`，把原因写进评论。验收不通过不是收口：`multica issue comment add <id> --verdict hold --content-file ./review.md` 叫醒执行人。
 - 返回值如实报：实际写入的状态、PR 有没有合并、叫醒了谁。评论里照抄，不要凭记忆复述。
 
+不收口、只叫醒下一棒时用 `multica issue handoff`（DENE-863，`POST /api/issues/{id}/handoff`），不要手写 @：服务端负责路由和查重，回复以实际落库为准（`target_name`、`run_created`、`duplicate`）。
+
+| 想要 | 调用 |
+|---|---|
+| 交给某个智能体（验收退回执行人、派一件具体的事） | `multica issue handoff <id> --to <智能体名>`；该智能体在这张票上已有进行中的 run 就回 `duplicate: true`，不再排第二个 |
+| 让调度席决定下一棒 | `multica issue handoff <id> --to dispatcher` |
+| 票已在 `in_review`，验收席却没开跑 | `multica issue handoff <id> --to reviewer`；验收席是人时回 409，路由永远不往这个席位填人 |
+
+收口本身已经负责交棒：`--outcome in_review` 会自己路由到验收席，后面不要再补一次 `handoff --to reviewer`。
+
 旧路径仍然可用（`multica issue status …` → 证据评论 → `multica issue metadata set` 逐键写 `close.*`），顺序写死：
 
 1. 先写 `issue.status`。切到 `blocked` 时同样要带等待字段。失败则停止，不写 metadata，不发唤醒 mention。
@@ -180,7 +190,7 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
 - 状态：`in_review`。
 - 证据：PR URL、验证命令、未测项。
 - 下一责任人：Reviewer agent UUID。
-- 唤醒：`issue close --outcome in_review` 写 `wake_action=route`，路由把票交给验收席；手写记录则证据评论含 `mention://agent/<reviewer>`。**禁止**同时 `done`。
+- 唤醒：`issue close --outcome in_review` 写 `wake_action=route`，路由把票交给验收席；手写记录则用 `multica issue handoff <id> --to reviewer` 叫醒验收席，不在评论里手写 @。**禁止**同时 `done`。
 - 通过之后不留在本场景。验收席用 `multica issue close <id> --outcome done --verdict pass`（或发一条带单独 `verdict: pass` 行的评论），平台合并关联 PR 并置 `done`；合不进去就改成结构化阻塞（DENE-850）。停在 `in_review` 只属于场景 D，而且必须写明人和决定。路由的「需要人拍板」不是场景 D。
 
 **`in_review`（场景 D，人工验收）**

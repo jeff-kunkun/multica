@@ -2036,6 +2036,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// status and close.* keys in one transaction, checked by
 					// closeprotocol.Validate — `multica issue close`.
 					r.Post("/close", h.CloseIssue)
+					// One-shot handoff (DENE-863): server routes, dedupes and
+					// reports what actually landed — `multica issue handoff`.
+					r.Post("/handoff", h.HandoffIssue)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
 					r.Get("/task-runs", h.ListTasksByIssue)
