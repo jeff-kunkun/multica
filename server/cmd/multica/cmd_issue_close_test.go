@@ -39,7 +39,7 @@ func TestIssueCloseCommandRegistration(t *testing.T) {
 	for _, name := range []string{
 		"outcome", "evidence", "evidence-stdin", "evidence-file", "allow-external-file",
 		"summary", "parent", "blocked-by", "wake-at", "wait-condition", "wait-probe",
-		"wait-timeout", "needs-human", "verdict", "output",
+		"wait-timeout", "needs-human", "no-code", "verdict", "output",
 	} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("issue close missing --%s", name)

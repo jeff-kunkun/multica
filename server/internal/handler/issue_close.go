@@ -44,7 +44,11 @@ type CloseIssueRequest struct {
 	WaitProbe     *string `json:"wait_probe,omitempty"`
 	WaitTimeout   *string `json:"wait_timeout,omitempty"`
 	NeedsHuman    *string `json:"needs_human,omitempty"`
-	Verdict       string  `json:"verdict,omitempty"`
+	// NoCodeReason is the declared exit from the DENE-869 review gate: an
+	// agent's in_review without a linked open/draft/merged PR is refused
+	// unless the ticket says why it carries no code (docs, research).
+	NoCodeReason string `json:"no_code_reason,omitempty"`
+	Verdict      string `json:"verdict,omitempty"`
 }
 
 // CloseIssueResponse reports what actually happened, not what was asked for:
@@ -153,14 +157,14 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, closeRejection(err))
 		return
 	}
-	// The same gate `issue status` runs (DENE-857): a done with an open
-	// linked PR merges it first or is rewritten as a structured block; an
-	// in_review from an agent executor with an empty reviewer slot gets a
-	// different-family acceptance seat or is refused. The close reports
-	// whichever of those actually happened.
+	// The same gate `issue status` runs (DENE-857 / DENE-869): a done with
+	// an open linked PR merges it first or is rewritten as a structured
+	// block; an agent's in_review needs a linked PR or a --no-code reason,
+	// and an empty reviewer slot gets a different-family acceptance seat or
+	// is refused. The close reports whichever of those actually happened.
 	var tr statusTransition
 	if outcome == issuestatus.Done || outcome == issuestatus.InReview {
-		tr = h.guardSilentStall(ctx, issue, statusKey, issue.AssigneeType, issue.AssigneeID, issue.ReviewerType, issue.ReviewerID, false)
+		tr = h.guardSilentStall(ctx, issue, statusKey, actorType, req.NoCodeReason, issue.AssigneeType, issue.AssigneeID, issue.ReviewerType, issue.ReviewerID, false)
 		if tr.refuse != "" {
 			writeError(w, http.StatusConflict, tr.refuse)
 			return
@@ -327,8 +331,11 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	if tr.status != "" && tr.status != strings.ToLower(strings.TrimSpace(req.Outcome)) {
 		resp.Warnings = append(resp.Warnings, "你要的是 "+strings.ToLower(strings.TrimSpace(req.Outcome))+"，平台实际落的是 "+updated.Status+"："+strings.TrimSpace(tr.note))
 	}
-	if tr.setReviewer {
-		resp.Woken = append(resp.Woken, strings.TrimSpace(tr.note))
+	// The gate's note (seat filled, no-code reason recorded) is a system
+	// comment already; the reply repeats it so the caller quotes what
+	// actually happened. A rewritten status carries it in Warnings instead.
+	if note := strings.TrimSpace(tr.note); note != "" && len(resp.Warnings) == 0 {
+		resp.Woken = append(resp.Woken, note)
 	}
 	for _, t := range resp.Triggers {
 		resp.Woken = append(resp.Woken, "证据里 @ 到的对象："+describeTrigger(t))

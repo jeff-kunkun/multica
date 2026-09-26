@@ -15,7 +15,7 @@ rejected naming the missing item; nothing is half-written.
 
 ```bash
 multica issue close <id> --outcome done      --evidence-file ./close.md            # delivered; an open linked PR is merged first, or the close lands as blocked and says so
-multica issue close <id> --outcome in_review --evidence-file ./close.md            # top-level, awaiting acceptance (empty reviewer slot is filled, then routing hands over)
+multica issue close <id> --outcome in_review --evidence-file ./close.md            # top-level, awaiting acceptance: needs a linked PR (or --no-code <reason>); empty reviewer slot is filled, then routing hands over
 multica issue close <id> --outcome blocked   --evidence-file ./close.md --blocked-by DENE-196   # or --wake-at / --wait-condition + --wait-timeout / --needs-human
 multica issue close <id> --outcome done --verdict pass --evidence-file ./close.md  # acceptance seat: merge the open PR, then done
 ```
@@ -30,7 +30,10 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
   <RFC3339>`, `--wait-condition "..." --wait-timeout <dur>`, or
   `--needs-human <member>`. Without one the close is rejected.
 - `--outcome in_review` is top-level only; a sub-issue asking for it is
-  rejected (use `done` or `blocked`). `--needs-human <member>` turns it into
+  rejected (use `done` or `blocked`). It runs the same review gate as
+  `issue status in_review` (DENE-869): an agent's close is refused unless the
+  issue has a linked open/draft/merged PR, or `--no-code <reason>` says why
+  the ticket carries no code (docs, research). `--needs-human <member>` turns it into
   `awaiting_human`; otherwise it is `awaiting_review` with `wake_action=route`
   — routing hands the ticket to the acceptance seat, no executor @mention.
 - `--verdict pass` is the acceptance seat's release and only pairs with

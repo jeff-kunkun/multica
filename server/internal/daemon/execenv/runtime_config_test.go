@@ -235,6 +235,8 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"| Where the issue stands | Call |",
 		"`--outcome done --evidence-file ./close.md`",
 		"`--outcome in_review --evidence-file ./close.md`",
+		"needs a linked open/merged PR",
+		"`--no-code <reason>`, otherwise the close is refused",
 		"`--outcome blocked --evidence-file ./close.md`",
 		"a blocked close without one is rejected",
 		"an open linked PR is merged first; if it cannot be, the close lands as `blocked`",

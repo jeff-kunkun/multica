@@ -120,7 +120,7 @@ CLI（DENE-859 起）：一条命令做完整个收口。
 
 ```bash
 multica issue close <id> --outcome done      --evidence-file ./close.md                     # 交付：子票、或没有验收门的顶层票；关联 PR 还开着就先合并，合不进去落成 blocked 并在回复里说明
-multica issue close <id> --outcome in_review --evidence-file ./close.md                     # 顶层票交付，等验收；验收席为空则同一次调用补异族席位，再由路由交棒
+multica issue close <id> --outcome in_review --evidence-file ./close.md                     # 顶层票交付，等验收；要有关联 PR（纯文档票用 --no-code <原因>）；验收席为空则同一次调用补异族席位，再由路由交棒
 multica issue close <id> --outcome blocked   --evidence-file ./close.md --blocked-by DENE-196   # 或 --wake-at / --wait-condition + --wait-timeout / --needs-human
 multica issue close <id> --outcome done --verdict pass --evidence-file ./close.md           # 验收席放行：平台合并 PR，再写 done
 ```
@@ -129,7 +129,7 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
 
 - `--evidence`（或 `--evidence-file` / `--evidence-stdin`）必填，`--summary` 放在证据上方。本回合有 triggering comment 时带同一 `--parent`；评论触发的 run 在同一张票上默认回那条线程。
 - `--outcome blocked` 必须带 DENE-850 的等待字段之一：`--blocked-by`、`--wake-at`、`--wait-condition` + `--wait-timeout`、`--needs-human`。不带即拒绝。
-- `--outcome in_review` 只给顶层票；子票用它会被拒绝（做完 `done`，卡住 `blocked`）。带 `--needs-human <member>` 记成 `awaiting_human`；不带则是 `awaiting_review` + `wake_action=route`，由路由填验收席，不要求评论里 @ 谁。
+- `--outcome in_review` 只给顶层票；子票用它会被拒绝（做完 `done`，卡住 `blocked`）。它走和 `issue status in_review` 同一道送审门禁（DENE-869）：智能体送审必须有关联的 open/draft/merged PR，纯文档或调研票用 `--no-code <原因>` 说明，否则被拒。带 `--needs-human <member>` 记成 `awaiting_human`；不带则是 `awaiting_review` + `wake_action=route`，由路由填验收席，不要求评论里 @ 谁。
 - `--verdict pass` 只配 `--outcome done`，且票必须已在 `in_review`、调用者是验收席：平台先合并 PR 再写 `done`；合不进去（PR 脏、检查红、host 拒绝）回 `blocked` + `block_kind=external`，把原因写进评论。验收不通过不是收口：`multica issue comment add <id> --verdict hold --content-file ./review.md` 叫醒执行人。
 - 返回值如实报：实际写入的状态、PR 有没有合并、叫醒了谁。评论里照抄，不要凭记忆复述。
 

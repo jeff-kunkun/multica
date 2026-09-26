@@ -146,6 +146,8 @@ func TestCloseInReviewWritesCommentStatusAndRecord(t *testing.T) {
 	issue := createIssueHTTP(t, "close in_review", "in_progress")
 	agentID := handlerTestAgentID(t)
 	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+	// The DENE-869 review gate: an agent's in_review needs a linked PR.
+	seedOpenPullForIssue(t, issue.ID, 1)
 
 	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
 		"outcome":  "in_review",
@@ -188,6 +190,63 @@ func TestCloseInReviewWritesCommentStatusAndRecord(t *testing.T) {
 	if len(resp.Woken) == 0 || !strings.Contains(strings.Join(resp.Woken, "\n"), "路由") {
 		t.Fatalf("woken should explain the routing hand-off, got %v", resp.Woken)
 	}
+}
+
+// An agent's in_review close runs the DENE-869 review gate `issue status`
+// runs: no linked PR and no declared no-code reason is a 409 that names the
+// exit, and the issue stays where it was. The same close with
+// no_code_reason goes through and the reason lands in the evidence trail.
+func TestCloseInReviewWithoutPullRequestReusesReviewGate(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "close in_review no pr", "in_progress")
+	agentID := handlerTestAgentID(t)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+
+	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
+		"outcome":  "in_review",
+		"evidence": "改动都在本地，还没推分支",
+	})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "PR") || !strings.Contains(body, issue.Identifier) || !strings.Contains(body, "--no-code") {
+		t.Fatalf("refusal must name the PR, the identifier and the exit, got %s", body)
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
+		t.Fatalf("status = %s, want the issue left in in_progress", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyStatus); got != "" {
+		t.Fatalf("a refused close must not leave a close record, got close.status=%q", got)
+	}
+
+	t.Run("a declared no-code reason is the exit", func(t *testing.T) {
+		docs := createIssueHTTP(t, "close in_review docs only", "in_progress")
+		taskID := insertIssueTaskWithStatus(t, agentID, docs.ID, "running")
+		w := closeIssueHTTP(t, docs.ID, agentID, taskID, map[string]any{
+			"outcome":        "in_review",
+			"evidence":       "docs/kun 下两篇文档已改，没有代码",
+			"no_code_reason": "纯文档票，改动在 docs/ 里已直接合入",
+		})
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+		}
+		var resp CloseIssueResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Status != "in_review" {
+			t.Fatalf("status = %s, want in_review", resp.Status)
+		}
+		if got := issueStatusDirect(t, docs.ID); got != "in_review" {
+			t.Fatalf("status = %s, want in_review", got)
+		}
+		if !strings.Contains(strings.Join(resp.Woken, "\n"), "纯文档票") {
+			t.Fatalf("the reply should carry the declared no-code reason, got %v", resp.Woken)
+		}
+	})
 }
 
 // A sub-issue never enters in_review: acceptance belongs to the parent.

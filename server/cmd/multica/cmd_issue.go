@@ -1840,6 +1840,7 @@ func registerIssueCloseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("wait-probe", "", "How to check the wait condition")
 	cmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
 	cmd.Flags().String("needs-human", "", "Member UUID whose decision or acceptance the issue waits on")
+	cmd.Flags().String("no-code", "", "Why this issue carries no code delivery (docs, research). An agent's --outcome in_review without a linked open/merged PR is refused unless this is given")
 	cmd.Flags().String("verdict", "", "Acceptance verdict, reviewer only: pass (merges and closes)")
 	cmd.Flags().String("output", "json", "Output format: table or json")
 }
@@ -1894,6 +1895,7 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 		{"wait-probe", "wait_probe"},
 		{"wait-timeout", "wait_timeout"},
 		{"needs-human", "needs_human"},
+		{"no-code", "no_code_reason"},
 	} {
 		if v, _ := cmd.Flags().GetString(pair.flag); strings.TrimSpace(v) != "" {
 			body[pair.key] = v
