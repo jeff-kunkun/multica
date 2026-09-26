@@ -108,7 +108,7 @@ function Timeline({ events, copy }: { events: ParkingEvent[]; copy: BoardCopy })
           <span className="min-w-0 break-words">{copy.event(e)}</span>
         </li>
       ))}
-      <li className="flex gap-3 text-caption text-muted-foreground/70">
+      <li className="flex gap-3 text-caption text-muted-foreground">
         <span className="shrink-0">…</span>
         <span>{copy.t(($) => $.board.event.after)}</span>
       </li>
@@ -199,7 +199,7 @@ function BoardRowView({
       >
         <span
           className={cn(
-            "h-fit w-fit rounded px-1.5 py-0.5 text-caption font-medium",
+            "h-fit w-fit rounded-sm px-1.5 py-0.5 text-caption font-medium",
             LANE_TAG_CLASS[row.lane],
           )}
         >
@@ -218,12 +218,12 @@ function BoardRowView({
               {row.title}
             </AppLink>
             {row.lane === "stalled" && (
-              <span className="shrink-0 rounded bg-info/10 px-1 text-[11px] text-info">
+              <span className="shrink-0 rounded-sm bg-info/10 px-1 text-[11px] text-info">
                 {copy.t(($) => $.board.server_mark)}
               </span>
             )}
           </div>
-          {reason && <p className="text-body text-foreground/90">{reason}</p>}
+          {reason && <p className="text-body text-foreground">{reason}</p>}
           {row.before && (
             <p className="line-clamp-2 text-caption text-muted-foreground">
               {copy.t(($) => $.board.before, { text: row.before })}
@@ -250,7 +250,7 @@ function BoardRowView({
           )}
         </div>
         <div className="flex flex-col items-end gap-0.5 text-right text-caption text-muted-foreground">
-          {meta && <span className="text-foreground/80">{meta}</span>}
+          {meta && <span className="text-foreground">{meta}</span>}
           <span>{time}</span>
         </div>
       </div>

@@ -217,7 +217,6 @@
     "from_to_you": "{{name}} → 你",
     "you": "你",
     "running_for": "已跑 {{time}}",
-    "children_one": "{{count}} 张子票",
     "children_other": "{{count}} 张子票",
     "expand": "前因后果",
     "collapse": "收起",
@@ -227,7 +226,6 @@
     "reply_sent": "已回复，执行的智能体会接着干",
     "reply_failed": "回复没发出去",
     "open_issue": "去任务",
-    "seen_one": "已看过的 {{count}} 条",
     "seen_other": "已看过的 {{count}} 条",
     "hide_seen": "收起看过的",
     "load_error": "有一部分数据没加载出来，稍后会自动重试"

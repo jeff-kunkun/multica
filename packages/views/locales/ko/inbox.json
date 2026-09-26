@@ -217,7 +217,6 @@
     "from_to_you": "{{name}} → you",
     "you": "you",
     "running_for": "running {{time}}",
-    "children_one": "{{count}} sub-issue",
     "children_other": "{{count}} sub-issues",
     "expand": "Why",
     "collapse": "Hide",
@@ -227,7 +226,6 @@
     "reply_sent": "Replied; the agent will pick it up",
     "reply_failed": "The reply was not sent",
     "open_issue": "Open issue",
-    "seen_one": "{{count}} already seen",
     "seen_other": "{{count}} already seen",
     "hide_seen": "Hide seen",
     "load_error": "Some of this did not load; it will retry shortly"
