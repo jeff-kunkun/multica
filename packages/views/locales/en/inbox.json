@@ -99,7 +99,8 @@
     "autopilot_quota_exceeded": "Autopilot run limit reached",
     "agent_access_request": "Agent access request",
     "agent_access_approved": "Agent access approved",
-    "agent_access_declined": "Agent access declined"
+    "agent_access_declined": "Agent access declined",
+    "parking_unexplained": "Stopped without explanation"
   },
   "labels": {
     "set_status_to": "Set status to",

@@ -96,7 +96,8 @@
     "autopilot_quota_exceeded": "自动化执行次数已用完",
     "agent_access_request": "智能体借用申请",
     "agent_access_approved": "智能体借用已批准",
-    "agent_access_declined": "智能体借用已拒绝"
+    "agent_access_declined": "智能体借用已拒绝",
+    "parking_unexplained": "停了没交代"
   },
   "labels": {
     "set_status_to": "状态设为",

@@ -99,7 +99,8 @@
     "autopilot_quota_exceeded": "Limite d'exécutions d'automatisation atteinte",
     "agent_access_request": "Demande d'accès à un agent",
     "agent_access_approved": "Accès à l'agent approuvé",
-    "agent_access_declined": "Accès à l'agent refusé"
+    "agent_access_declined": "Accès à l'agent refusé",
+    "parking_unexplained": "Arrêt sans explication"
   },
   "labels": {
     "set_status_to": "Statut défini sur",
