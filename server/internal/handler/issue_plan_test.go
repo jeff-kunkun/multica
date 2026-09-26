@@ -118,6 +118,30 @@ func TestApplyPlanBuildsStagedTreeAndReapplyIsIdempotent(t *testing.T) {
 	}
 }
 
+// Under an existing parent the plan is scoped to that parent: re-applying
+// adds nothing, the same key under another parent builds its own children.
+func TestApplyPlanUnderExistingParentIsScopedToThatParent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	title := "planscoped"
+	cleanupPlanIssues(t, title)
+	parentA := dbfx.Issue(t, title+" parent A", testutil.Cols{"status": "in_progress"})
+	parentB := dbfx.Issue(t, title+" parent B", testutil.Cols{"status": "in_progress"})
+	children := []ApplyPlanNode{{Key: "x", Title: title + " child", Stage: planStage(1)}}
+
+	for i, want := range []int{1, 0} {
+		code, resp, body := callApplyPlan(t, ApplyPlanRequest{Key: "scoped", ParentIssueID: &parentA, Children: children})
+		if code != http.StatusOK || resp.Created != want || resp.Parent.ID != parentA {
+			t.Fatalf("apply %d under A = %d created=%d parent=%s (%s), want %d under A", i+1, code, resp.Created, resp.Parent.ID, body, want)
+		}
+	}
+	code, resp, body := callApplyPlan(t, ApplyPlanRequest{Key: "scoped", ParentIssueID: &parentB, Children: children})
+	if code != http.StatusOK || resp.Created != 1 || len(resp.Children) != 1 {
+		t.Fatalf("apply under B = %d created=%d children=%d (%s), want its own child", code, resp.Created, len(resp.Children), body)
+	}
+}
+
 func TestApplyPlanRejectsChildWithoutStage(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

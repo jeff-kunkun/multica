@@ -146,6 +146,11 @@ func (h *Handler) ApplyPlan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A plan under an existing parent is identified per parent (set once the
+	// parent is resolved below): the same key under another issue is a
+	// different plan, not a re-apply.
+	identity := req.Key
+
 	creatorType, creatorID := h.resolveActor(r, userID, workspaceID)
 	build := func(node ApplyPlanNode, status string, stage pgtype.Int4, nodeKey string) (service.IssueCreateParams, bool) {
 		priority := node.Priority
@@ -183,7 +188,7 @@ func (h *Handler) ApplyPlan(w http.ResponseWriter, r *http.Request) {
 			CreatorID:      parseUUID(creatorID),
 			Stage:          stage,
 			OriginType:     pgtype.Text{String: planOriginType, Valid: true},
-			OriginID:       planNodeID(wsUUID, req.Key, nodeKey),
+			OriginID:       planNodeID(wsUUID, identity, nodeKey),
 			AllowDuplicate: true,
 		}, true
 	}
@@ -198,6 +203,7 @@ func (h *Handler) ApplyPlan(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		root, rootExists = parent, true
+		identity = req.Key + "\x00parent\x00" + uuidToString(parent.ID)
 	} else {
 		existing, err := h.Queries.GetIssueByOrigin(r.Context(), db.GetIssueByOriginParams{
 			WorkspaceID: wsUUID,
@@ -246,7 +252,7 @@ func (h *Handler) ApplyPlan(w http.ResponseWriter, r *http.Request) {
 			_, err := h.Queries.GetIssueByOrigin(r.Context(), db.GetIssueByOriginParams{
 				WorkspaceID: wsUUID,
 				OriginType:  pgtype.Text{String: planOriginType, Valid: true},
-				OriginID:    planNodeID(wsUUID, req.Key, child.Key),
+				OriginID:    planNodeID(wsUUID, identity, child.Key),
 			})
 			if err == nil {
 				continue // Already created by an earlier apply; never rewritten.
