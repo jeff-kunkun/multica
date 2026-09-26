@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/ghpr"
 )
 
 // newIssueCloseTestCmd mirrors the shipped flag set so runIssueClose can be
@@ -151,8 +154,17 @@ func TestRunIssueCloseSendsExpectedRequest(t *testing.T) {
 func TestRunIssueCloseVerdictPassReportsMerge(t *testing.T) {
 	chdirWithDaemonTaskMarker(t)
 	const issueID = "55555555-5555-4555-8555-555555555555"
+	origList, origMerge := ghListPRs, ghMergePR
+	t.Cleanup(func() { ghListPRs, ghMergePR = origList, origMerge })
+	ghListPRs = func(context.Context, string, ...string) ([]ghpr.PR, error) { return nil, nil }
+	ghMergePR = func(context.Context, string, string) error { t.Fatal("must not merge"); return nil }
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A UUID reference first resolves its issue key for the gh lookup.
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{"identifier": "DENE-5"})
+			return
+		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}

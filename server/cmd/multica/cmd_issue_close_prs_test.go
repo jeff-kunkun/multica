@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,7 +65,8 @@ func TestRefreshIssuePullRequestsMergesAndReports(t *testing.T) {
 	}
 }
 
-// Without a verdict nothing is merged; a UUID reference skips gh entirely.
+// Without a verdict nothing is merged. UUID references are resolved to their
+// issue key before gh is queried.
 func TestRefreshIssuePullRequestsReadOnlyAndSkip(t *testing.T) {
 	origList, origMerge := ghListPRs, ghMergePR
 	t.Cleanup(func() { ghListPRs, ghMergePR = origList, origMerge })
@@ -78,10 +82,56 @@ func TestRefreshIssuePullRequestsReadOnlyAndSkip(t *testing.T) {
 
 	refreshIssuePullRequests(context.Background(), client, "id", "55555555-5555-4555-8555-555555555555", true)
 	if calls != 0 {
-		t.Fatalf("uuid reference should skip gh, calls = %d", calls)
+		t.Fatalf("unresolvable uuid should not query gh, calls = %d", calls)
 	}
 	refreshIssuePullRequests(context.Background(), client, "id", "DENE-1", false)
 	if calls == 0 {
 		t.Fatal("identifier reference should read gh")
+	}
+}
+
+func TestRefreshIssuePullRequestsUUIDResolvesIssueKey(t *testing.T) {
+	const uuid = "55555555-5555-4555-8555-555555555555"
+	origList := ghListPRs
+	t.Cleanup(func() { ghListPRs = origList })
+	var filters []string
+	ghListPRs = func(context.Context, string, ...string) ([]ghpr.PR, error) {
+		filters = append(filters, "query")
+		return []ghpr.PR{{Title: "DENE-904: fix", Branch: "agent/dene-904", State: "open", URL: "https://github.com/o/r/pull/9"}}, nil
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/" + uuid:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": uuid, "identifier": "DENE-904"})
+		case "/api/issues/id/pull-requests/report":
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	client := cli.NewAPIClient(srv.URL, "", "mat_test")
+	refreshIssuePullRequests(context.Background(), client, uuid, uuid, false)
+	if len(filters) == 0 {
+		t.Fatal("UUID reference should query gh after resolving the issue key")
+	}
+}
+
+func TestRefreshIssuePullRequestsNoMatchReportsReason(t *testing.T) {
+	origList := ghListPRs
+	t.Cleanup(func() { ghListPRs = origList })
+	ghListPRs = func(context.Context, string, ...string) ([]ghpr.PR, error) { return nil, nil }
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusAccepted) }))
+	defer srv.Close()
+	client := cli.NewAPIClient(srv.URL, "", "mat_test")
+	old := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	refreshIssuePullRequests(context.Background(), client, "id", "DENE-904", false)
+	_ = w.Close()
+	os.Stderr = old
+	body, _ := io.ReadAll(r)
+	if !strings.Contains(string(body), "gh found no PR matching DENE-904") {
+		t.Fatalf("stderr = %q, want no-match reason", body)
 	}
 }
