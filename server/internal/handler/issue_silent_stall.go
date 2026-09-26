@@ -12,6 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/routing"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -28,6 +29,11 @@ type statusTransition struct {
 	note         string
 	handoff      bool
 	refuse       string
+	noCode       string
+}
+
+func reviewerIsAssigned(issue db.Issue) bool {
+	return issue.ReviewerType.Valid && issue.ReviewerType.String != "" && issue.ReviewerType.String != "none" && issue.ReviewerID.Valid
 }
 
 // guardSilentStall stops three quiet stalls at the status write.
@@ -46,7 +52,7 @@ type statusTransition struct {
 // in in_review for two hours with reviewer_id NULL because this guard skipped
 // children; the seat is now filled here by the same ladder fallback the parent
 // gets, and ensureAcceptanceRunning starts it once the executor's run is gone.
-func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, nextStatus string, actorType string, noCodeReason string, assigneeType pgtype.Text, assigneeID pgtype.UUID, reviewerType pgtype.Text, reviewerID pgtype.UUID, reviewerExplicit bool) statusTransition {
+func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, nextStatus string, actorType, actorID string, noCodeReason string, assigneeType pgtype.Text, assigneeID pgtype.UUID, reviewerType pgtype.Text, reviewerID pgtype.UUID, reviewerExplicit bool) statusTransition {
 	var tr statusTransition
 	switch nextStatus {
 	case issuestatus.InReview:
@@ -59,6 +65,7 @@ func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, nextStat
 				return tr
 			}
 			if reason := strings.TrimSpace(noCodeReason); reason != "" {
+				tr.noCode = reason
 				tr.note = "执行人声明这张票没有代码交付：" + reason + "。"
 			}
 		}
@@ -70,12 +77,13 @@ func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, nextStat
 		}
 		seat := h.fillAcceptanceSeat(ctx, issue, assigneeID)
 		seat.note = tr.note + seat.note
+		seat.noCode = tr.noCode
 		return seat
 	case issuestatus.Done:
 		if issue.Status == issuestatus.Done {
 			return tr
 		}
-		return h.guardDoneWithOpenPull(ctx, issue)
+		return h.guardDoneWithOpenPull(ctx, issue, actorType, actorID, noCodeReason)
 	default:
 		return tr
 	}
@@ -186,7 +194,7 @@ func (h *Handler) pickAcceptanceSeat(ctx context.Context, issue db.Issue, assign
 	return tr
 }
 
-func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue) statusTransition {
+func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, actorType, actorID, noCodeReason string) statusTransition {
 	var tr statusTransition
 	prs, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID)
 	if err != nil {
@@ -195,6 +203,48 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue) sta
 		tr.persistBlock = true
 		tr.block = blockwait.FailureWake(time.Now(), "关单前没能读到关联的 PR", 1)
 		tr.note = "这张票要关，但没能核对关联的 PR。先改成阻塞，不标完成。"
+		return tr
+	}
+	deliveryBranchCount := 0
+	if delivery, deliveryErr := service.BuildIssueDelivery(ctx, h.Queries, issue); deliveryErr != nil {
+		slog.Warn("close gate: build delivery failed", "issue_id", uuidToString(issue.ID), "error", deliveryErr)
+		tr.status = issuestatus.Blocked
+		tr.persistBlock = true
+		tr.block = blockwait.FailureWake(time.Now(), "关单前没能核对交付线", 1)
+		tr.note = "这张票要关，但没能核对交付线。先改成阻塞，不标完成。"
+		return tr
+	} else if delivery != nil {
+		deliveryBranchCount = len(delivery.Branches)
+	}
+	// An agent may not close a ticket that has an acceptance seat. The only
+	// agent escape hatch is the explicit no-code declaration, and that is valid
+	// only when neither a PR nor a delivery branch exists.
+	if actorType == "agent" && reviewerIsAssigned(issue) && actorID != uuidToString(issue.ReviewerID) {
+		tr.refuse = "执行人不能直接关单：请用 `multica issue close --outcome in_review` 交给验收席。"
+		return tr
+	}
+	if actorType == "agent" && !reviewerIsAssigned(issue) && strings.TrimSpace(noCodeReason) == "" {
+		tr.refuse = "执行人不能直接关单：请用 `multica issue close --outcome in_review` 交给验收席，或为无代码票带上 `--no-code <原因>`。"
+		return tr
+	}
+	if actorType == "agent" && len(prs) == 0 && deliveryBranchCount == 0 {
+		if strings.TrimSpace(noCodeReason) == "" {
+			tr.refuse = "这张票没有 PR 或交付分支，执行人关单必须带 `--no-code <原因>`。"
+			return tr
+		}
+		tr.noCode = strings.TrimSpace(noCodeReason)
+		tr.note = "执行人声明这张票没有代码交付：" + tr.noCode + "。"
+		return tr
+	}
+	if actorType == "agent" && strings.TrimSpace(noCodeReason) != "" {
+		tr.refuse = "这张票已经有 PR 或交付分支，不能用 `--no-code` 跳过合入门禁。"
+		return tr
+	}
+	if actorType == "agent" && len(prs) == 0 && deliveryBranchCount > 0 {
+		tr.status = issuestatus.Blocked
+		tr.persistBlock = true
+		tr.block = blockwait.FailureWake(time.Now(), "交付分支还没有关联并合入 PR", 1)
+		tr.note = "这张票有交付分支，但还查不到已合入的 PR。先改成阻塞，不标完成。"
 		return tr
 	}
 	snapshots := make([]blockwait.PRSnapshot, 0, len(prs))

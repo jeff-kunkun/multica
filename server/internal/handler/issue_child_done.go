@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -155,7 +156,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 		slog.Warn("child done: failed to resolve sibling statuses", "error", err, "parent_id", uuidToString(parent.ID))
 		return
 	}
-	if !stageBarrierClosed(children, issue, statuses.isTerminal) {
+	if !stageBarrierClosed(children, issue, h.realChildTerminalPredicate(ctx, statuses)) {
 		return
 	}
 	staged := siblingsAreStaged(children)
@@ -252,7 +253,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			// Unstaged: one implicit stage. Fire once iff every child is terminal
 			// in the final state. stageBarrierClosed ignores `completed` on the
 			// unstaged path, so any completed child stands in for the barrier check.
-			if !stageBarrierClosed(children, g.children[0], statuses.isTerminal) {
+			if !stageBarrierClosed(children, g.children[0], h.realChildTerminalPredicate(ctx, statuses)) {
 				continue
 			}
 			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch, statuses, g.children)
@@ -267,7 +268,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		// reality rather than a mid-batch snapshot. A lower closed stage would
 		// re-introduce the stale "advance the next stage" instruction the bug was
 		// about.
-		rep, found := highestClosedBatchStage(children, g.children, statuses.isTerminal)
+		rep, found := highestClosedBatchStage(children, g.children, h.realChildTerminalPredicate(ctx, statuses))
 		if !found {
 			continue
 		}
@@ -599,6 +600,43 @@ func (s resolvedChildStatuses) status(child db.Issue) string {
 
 func (s resolvedChildStatuses) isTerminal(child db.Issue) bool {
 	return isTerminalChildStatus(s.status(child))
+}
+
+// realChildTerminalPredicate keeps a status row from advancing a stage unless
+// its code delivery is also accounted for. A done child is genuine when a
+// linked PR is merged, or when the close gate recorded an explicit no-code
+// declaration. Cancelled children remain terminal by definition.
+func (h *Handler) realChildTerminalPredicate(ctx context.Context, statuses resolvedChildStatuses) func(db.Issue) bool {
+	cache := map[pgtype.UUID]bool{}
+	known := map[pgtype.UUID]bool{}
+	return func(child db.Issue) bool {
+		if !statuses.isTerminal(child) {
+			return false
+		}
+		if statuses.status(child) != "done" {
+			return true
+		}
+		if known[child.ID] {
+			return cache[child.ID]
+		}
+		known[child.ID] = true
+		meta := parseIssueMetadata(child.Metadata)
+		if strings.TrimSpace(blockwait.MetaString(meta, "close.no_code_reason")) != "" {
+			cache[child.ID] = true
+			return true
+		}
+		delivery, err := service.BuildIssueDelivery(ctx, h.Queries, child)
+		if err != nil {
+			return false
+		}
+		for _, branch := range delivery.Branches {
+			if branch.PullRequest != nil && branch.PullRequest.MergedAt != nil {
+				cache[child.ID] = true
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // resolveChildStatuses checks every status needed by the stage barrier and
