@@ -2032,6 +2032,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// and with the outcome in the response — `multica issue
 					// route` is this endpoint.
 					r.Post("/route", h.RouteIssue)
+					// One-shot close protocol (DENE-859): evidence comment,
+					// status and close.* keys in one transaction, checked by
+					// closeprotocol.Validate — `multica issue close`.
+					r.Post("/close", h.CloseIssue)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
 					r.Get("/task-runs", h.ListTasksByIssue)
