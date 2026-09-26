@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -368,14 +367,18 @@ func BuildIssueDelivery(ctx context.Context, q *db.Queries, issue db.Issue) (*Is
 		}
 	}
 
-	issueClosed := issue.Status == issuestatus.Done || issue.Status == issuestatus.Cancelled
+	// A status transition is not evidence that code was delivered.  In
+	// particular, a stale `done` row must not make the delivery line claim it
+	// was merged; only the observed PR state can establish that fact.  The close
+	// gate separately records explicit no-code declarations for tickets without
+	// a delivery line.
 	if out.Canonical == nil {
 		if len(out.Branches) > 0 {
 			out.Problems = append(out.Problems, "没有 canonical 交付线：用 set-canonical 指定一条")
 		}
-		out.Merged = issueClosed
+		out.Merged = false
 	} else {
-		out.Merged = issueClosed || (out.Canonical.PullRequest != nil && out.Canonical.PullRequest.MergedAt != nil)
+		out.Merged = out.Canonical.PullRequest != nil && out.Canonical.PullRequest.MergedAt != nil
 	}
 	for _, b := range out.Branches {
 		if b.Role == DeliveryRoleCanonical {
