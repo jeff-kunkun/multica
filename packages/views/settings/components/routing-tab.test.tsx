@@ -12,6 +12,7 @@ const updateWorkspace = vi.hoisted(() => vi.fn());
 const getRoutingHealth = vi.hoisted(() => vi.fn());
 const checkRoutingHealth = vi.hoisted(() => vi.fn());
 const listRoutingModels = vi.hoisted(() => vi.fn());
+const listAgents = vi.hoisted(() => vi.fn());
 const member = vi.hoisted(() => ({ role: "owner" as "owner" | "admin" | "member" }));
 const workspace = vi.hoisted(() => ({
   current: {
@@ -31,6 +32,7 @@ vi.mock("@multica/core/api", async (importOriginal) => {
       getRoutingHealth,
       checkRoutingHealth,
       listRoutingModels,
+      listAgents,
     },
   };
 });
@@ -101,6 +103,8 @@ beforeEach(() => {
   checkRoutingHealth.mockResolvedValue(HEALTHY);
   listRoutingModels.mockReset();
   listRoutingModels.mockResolvedValue({ models: [] });
+  listAgents.mockReset();
+  listAgents.mockResolvedValue([]);
   updateWorkspace.mockImplementation(async (_id: string, body: { settings?: unknown }) => ({
     ...workspace.current,
     settings: body.settings,
@@ -238,6 +242,8 @@ describe("RoutingTab", () => {
       stale_review_hours: 24,
       base_url: "",
       policy_prompt: "",
+      usage_priority: true,
+      allow_upshift: false,
       judge_enabled: false,
       analysis: { enabled: true, model: "gpt-5.6-luna", base_url: "" },
     });
@@ -564,5 +570,42 @@ describe("RoutingTab", () => {
     fireEvent.change(box, { target: { value: "Keep this draft." } });
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     expect(box).toHaveValue("Keep this draft.");
+  });
+});
+
+describe("RoutingTab seat order switches", () => {
+  it("writes usage priority and upshift into the routing block", async () => {
+    workspace.current.settings = {
+      routing: { enabled: true, model: "gpt-5.6-luna" },
+    };
+    render();
+    const usage = screen.getByRole("switch", { name: "Prefer ample usage" });
+    const upshift = screen.getByRole("switch", { name: "Allow one tier up" });
+    expect(usage).toHaveAttribute("data-checked");
+    expect(upshift).not.toHaveAttribute("data-checked");
+
+    await userEvent.click(upshift);
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
+    const [, body] = updateWorkspace.mock.calls.at(-1) as [
+      string,
+      { settings: { routing: Record<string, unknown> } },
+    ];
+    expect(body.settings.routing.usage_priority).toBe(true);
+    expect(body.settings.routing.allow_upshift).toBe(true);
+  });
+
+  it("greys out upshift while usage priority is off", () => {
+    workspace.current.settings = {
+      routing: {
+        enabled: true,
+        model: "gpt-5.6-luna",
+        usage_priority: false,
+        allow_upshift: true,
+      },
+    };
+    render();
+    const upshift = screen.getByRole("switch", { name: "Allow one tier up" });
+    expect(upshift).toHaveAttribute("data-disabled");
+    expect(upshift).not.toHaveAttribute("data-checked");
   });
 });

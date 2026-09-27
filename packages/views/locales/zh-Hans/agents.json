@@ -219,6 +219,7 @@
     "section_profile_hint": "管理该智能体在工作区内的展示方式。",
     "section_execution": "执行配置",
     "section_execution_hint": "选择运行时、模型、思考强度、速度和并行运行上限。",
+    "section_routing": "路由",
     "section_accounts": "账号",
     "section_accounts_hint": "在\"管理账号\"中添加、编辑或切换账号。",
     "section_access": "访问权限",
@@ -262,8 +263,10 @@
     "description_placeholder": "这个智能体做什么？",
     "save": "保存",
     "cancel": "取消",
-    "prop_routing_tier": "派单档位",
-    "prop_routing_tier_hint": "不设档位则不参与自动选派。"
+    "prop_routing_tier": "档位",
+    "prop_routing_tier_hint": "按强度匹配任务",
+    "prop_routing_usage": "用量",
+    "prop_routing_usage_hint": "账号额度的相对多少"
   },
   "overview": {
     "agent_context": "智能体",
@@ -316,9 +319,10 @@
     "routing_tier_strong": "强",
     "routing_tier_medium": "中",
     "routing_tier_weak": "弱",
-    "routing_tier_none": "不在阶梯里",
-    "routing_tier_none_title": "自动选派不会挑到这个席位，你仍然可以手动指派",
-    "routing_tier_tooltip": "派单档位 · {{value}}"
+    "routing_tier_none": "不参与",
+    "routing_usage_tight": "紧张",
+    "routing_usage_normal": "常规",
+    "routing_usage_ample": "充足"
   },
   "model_dropdown": {
     "label": "模型",

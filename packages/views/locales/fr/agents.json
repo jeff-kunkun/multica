@@ -208,6 +208,7 @@
     "cancel": "Annuler",
     "section_profile_hint": "Gérez la façon dont cet agent apparaît dans l'espace de travail.",
     "section_execution_hint": "Choisissez le runtime, le modèle, le niveau de réflexion, la vitesse et la limite d'exécutions parallèles.",
+    "section_routing": "Routage",
     "section_accounts": "Comptes",
     "section_accounts_hint": "Ajoutez, modifiez ou changez de compte dans Gérer les comptes.",
     "section_access_hint": "Contrôlez qui peut exécuter cet agent et utiliser les capacités qui lui sont connectées.",
@@ -222,8 +223,10 @@
     "inherited_config_notice": "Suit le rôle de base « {{name}} ». Pour le configurer ici, désactivez le suivi dans Général.",
     "prop_runtime_inherit_hint_off": "Utilise les réglages de runtime propres à cette spécialisation.",
     "avatar_hint": "Affiché dans les assignations, l'activité et la discussion.",
-    "prop_routing_tier": "Palier d'attribution",
-    "prop_routing_tier_hint": "Un poste sans palier n'est pas choisi par le routage."
+    "prop_routing_tier": "Palier",
+    "prop_routing_tier_hint": "Attribué aux tâches selon la force",
+    "prop_routing_usage": "Usage",
+    "prop_routing_usage_hint": "Quota de compte disponible, en relatif"
   },
   "overview": {
     "agent_context": "Agent",
@@ -277,9 +280,10 @@
     "routing_tier_strong": "Fort",
     "routing_tier_medium": "Moyen",
     "routing_tier_weak": "Léger",
-    "routing_tier_none": "Hors échelle",
-    "routing_tier_none_title": "Le routage ne choisit jamais ce poste automatiquement ; vous pouvez toujours l'assigner manuellement",
-    "routing_tier_tooltip": "Palier d'attribution · {{value}}"
+    "routing_tier_none": "Hors routage",
+    "routing_usage_tight": "Serré",
+    "routing_usage_normal": "Normal",
+    "routing_usage_ample": "Large"
   },
   "model_dropdown": {
     "label": "Modèle",

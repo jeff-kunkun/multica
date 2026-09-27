@@ -264,7 +264,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "no empty slot"}, nil
 	}
 
-	ladder := r.Ladder.WithProjects(settings.Projects)
+	ladder := r.Ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
 	match := ladder.ResolveDirection(issue.ProjectName)
 	direction := match.Direction
 	roster, err := r.Store.Roster(ctx, workspaceID)
@@ -433,6 +433,9 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	if note := DemotionFootnote(ladder, roster, executor); note != "" {
 		body += "\n\n" + note
 	}
+	if note := UpshiftFootnote(executor); note != "" {
+		body += "\n\n" + note
+	}
 
 	return r.deliver(ctx, workspaceID, issue, KindAssignment, body, notify, out)
 }
@@ -491,7 +494,7 @@ func (r *Router) PickAcceptanceSeat(ctx context.Context, workspaceID string, iss
 	if len(ladder.Tiers) == 0 {
 		ladder = DefaultLadder
 	}
-	ladder = ladder.WithProjects(settings.Projects)
+	ladder = ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
 	direction := ladder.Direction(issue.ProjectName)
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {
@@ -642,7 +645,9 @@ func (r *Router) decideReviewer(v Verdict, ladder Ladder, direction string, rost
 		if collides {
 			if alt, ok := ladder.SameTierAlternate(seat, direction, roster); ok {
 				seat = alt
-			} else if other, ok := stepDown(candidates, seat.TierKey); ok {
+			} else if other, ok := stepDown(candidates, seat.TierKey); ok && other.ID != seat.ID {
+				// With 「允许上调一档」 the rung below can be served by the very
+				// seat above it, so the step down has to be checked again.
 				seat = other
 			} else {
 				return ReviewerRef{}, false
@@ -827,7 +832,7 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 // work. The slot already names them, so they stay the designated reviewer:
 // recovery may give the ticket back only before the cover has started.
 func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, settings Settings, issue Issue, roster map[string]Agent, disabled Agent, out Outcome) (Outcome, error) {
-	ladder := r.Ladder.WithProjects(settings.Projects)
+	ladder := r.Ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
 	direction := ladder.Direction(issue.ProjectName)
 	holder := seatFromRoster(ladder, map[string]Agent{disabled.Name: disabled}, disabled.ID)
 	if holder.Name == "" {
@@ -915,7 +920,7 @@ func (r *Router) decideReviewerNow(ctx context.Context, workspaceID string, sett
 	noop := func(reason string) Outcome {
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: reason}
 	}
-	ladder := r.Ladder.WithProjects(settings.Projects)
+	ladder := r.Ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
 	direction := ladder.Direction(issue.ProjectName)
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {
@@ -1001,7 +1006,7 @@ func (r *Router) routeBlocked(ctx context.Context, workspaceID string, settings 
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "already advised"}, nil
 	}
 
-	ladder := r.Ladder.WithProjects(settings.Projects)
+	ladder := r.Ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
 	direction := ladder.Direction(issue.ProjectName)
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {

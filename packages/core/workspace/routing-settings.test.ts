@@ -19,10 +19,16 @@ import {
   type RoutingSettings,
 } from "./routing-settings";
 
-// The pre-split shape: the judge on, the analysis role off.
-const JUDGE_ONLY: Pick<RoutingSettings, "judge_enabled" | "analysis"> = {
+// The pre-split shape: the judge on, the analysis role off, and the usage
+// switches at their defaults.
+const JUDGE_ONLY: Pick<
+  RoutingSettings,
+  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift"
+> = {
   judge_enabled: true,
   analysis: { enabled: false, model: "", base_url: "" },
+  usage_priority: true,
+  allow_upshift: false,
 };
 
 const BASE: RoutingSettings = {
@@ -56,7 +62,27 @@ describe("parseRoutingSettings", () => {
       // A block saved before the split keeps the judge it had.
       judge_enabled: true,
       analysis: { enabled: false, model: "", base_url: "" },
+      usage_priority: true,
+      allow_upshift: false,
     });
+  });
+
+  // DENE-922: usage priority defaults on, so a block saved before the field
+  // existed reads as on; upshift defaults off.
+  it("reads the seat-order switches with their defaults", () => {
+    expect(parseRoutingSettings({ routing: { enabled: true } })).toMatchObject({
+      usage_priority: true,
+      allow_upshift: false,
+    });
+    expect(
+      parseRoutingSettings({
+        routing: { usage_priority: false, allow_upshift: true },
+      }),
+    ).toMatchObject({ usage_priority: false, allow_upshift: true });
+    // Only an explicit false turns usage priority off.
+    expect(
+      parseRoutingSettings({ routing: { usage_priority: "no" } }).usage_priority,
+    ).toBe(true);
   });
 
   // Every one of these must read as switched off: a payload the client cannot
@@ -210,6 +236,8 @@ describe("withRoutingSettings", () => {
         policy_prompt: "",
         judge_enabled: true,
         analysis: { enabled: false, model: "", base_url: "" },
+        usage_priority: true,
+        allow_upshift: false,
       },
     });
   });
@@ -230,6 +258,8 @@ describe("withRoutingSettings", () => {
       policy_prompt: "",
       judge_enabled: true,
       analysis: { enabled: false, model: "", base_url: "" },
+      usage_priority: true,
+      allow_upshift: false,
       projects: { tarot: "出海" },
       future: 1,
     });

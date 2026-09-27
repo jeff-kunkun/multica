@@ -334,7 +334,7 @@ func (h *Handler) attachRoutingContext(ctx context.Context, workspaceID string, 
 		resp.ProviderQuotas = routing.EnsureProviderQuotas(nil, keys)
 		return
 	}
-	seats := h.Routing.Ladder.WithProjects(settings.Projects).Candidates("", roster)
+	seats := h.Routing.Ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder()).Candidates("", roster)
 	ids := make([]string, 0, len(seats))
 	for _, seat := range seats {
 		ids = append(ids, seat.ID)
