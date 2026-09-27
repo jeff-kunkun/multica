@@ -2293,6 +2293,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// cannot mint an agent carrying `system_key` and thereby claim
 				// the system instruction layer. Idempotent per workspace.
 				r.Post("/mika", h.CreateMikaAgent)
+				// Batch edit of tier and usage from the routing seats table
+				// (DENE-922). One request, applied whole or not at all.
+				r.Put("/routing", h.BulkUpdateAgentRouting)
 				r.Route("/{id}", func(r chi.Router) {
 					// Timed access passes (DENE-808), owner-only.
 					r.Get("/access-passes", h.ListAgentAccessPasses)

@@ -36,7 +36,27 @@ describe("parseRoutingSettings", () => {
       stale_review_hours: 8,
       base_url: "",
       policy_prompt: "",
+      usage_priority: true,
+      allow_upshift: false,
     });
+  });
+
+  // DENE-922: usage priority defaults on, so a block saved before the field
+  // existed reads as on; upshift defaults off.
+  it("reads the seat-order switches with their defaults", () => {
+    expect(parseRoutingSettings({ routing: { enabled: true } })).toMatchObject({
+      usage_priority: true,
+      allow_upshift: false,
+    });
+    expect(
+      parseRoutingSettings({
+        routing: { usage_priority: false, allow_upshift: true },
+      }),
+    ).toMatchObject({ usage_priority: false, allow_upshift: true });
+    // Only an explicit false turns usage priority off.
+    expect(
+      parseRoutingSettings({ routing: { usage_priority: "no" } }).usage_priority,
+    ).toBe(true);
   });
 
   // Every one of these must read as switched off: a payload the client cannot
@@ -110,7 +130,7 @@ describe("normalizeThreshold", () => {
 describe("routingState", () => {
   it("is off while the switch is off, whatever else is set", () => {
     expect(
-      routingState({ enabled: false, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "" }),
+      routingState({ enabled: false, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "", usage_priority: true, allow_upshift: false }),
     ).toBe("off");
   });
 
@@ -118,21 +138,21 @@ describe("routingState", () => {
     // The state that exists because the product must not look enabled when it
     // is doing nothing.
     expect(
-      routingState({ enabled: true, model: "", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "" }),
+      routingState({ enabled: true, model: "", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "", usage_priority: true, allow_upshift: false }),
     ).toBe("incomplete");
     expect(
-      routingState({ enabled: true, model: "   ", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "" }),
+      routingState({ enabled: true, model: "   ", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "", usage_priority: true, allow_upshift: false }),
     ).toBe("incomplete");
   });
 
   it("is enabled when the switch is on and a model is chosen", () => {
     expect(
-      routingState({ enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "" }),
+      routingState({ enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "", usage_priority: true, allow_upshift: false }),
     ).toBe("enabled");
   });
 
   it("is ineffective only when the server says ineffective in so many words", () => {
-    const configured = { enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "" };
+    const configured = { enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "", usage_priority: true, allow_upshift: false };
     expect(routingState(configured, { state: "ineffective" })).toBe("ineffective");
     expect(routingState(configured, { state: "enabled" })).toBe("enabled");
     expect(routingState(configured, null)).toBe("enabled");
@@ -148,7 +168,7 @@ describe("routingState", () => {
     ["the fallback used when the response cannot be read", "off"],
   ])("does not report a fault for %s", (_label, state) => {
     expect(
-      routingState({ enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "" }, { state }),
+      routingState({ enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "", usage_priority: true, allow_upshift: false }, { state }),
     ).toBe("enabled");
   });
 
@@ -157,7 +177,7 @@ describe("routingState", () => {
     // light the red chip on a guess.
     expect(
       routingState(
-        { enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "" },
+        { enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "", usage_priority: true, allow_upshift: false },
         { state: "degraded" },
       ),
     ).toBe("enabled");
@@ -176,12 +196,12 @@ describe("withRoutingSettings", () => {
     expect(
       withRoutingSettings(
         { theme: "dark", other: { a: 1 } },
-        { enabled: true, model: " m ", confidence_threshold: 0.9, stale_review_hours: 24, base_url: "" },
+        { enabled: true, model: " m ", confidence_threshold: 0.9, stale_review_hours: 24, base_url: "", usage_priority: true, allow_upshift: false },
       ),
     ).toEqual({
       theme: "dark",
       other: { a: 1 },
-      routing: { enabled: true, model: "m", confidence_threshold: 0.9, stale_review_hours: 24, base_url: "", policy_prompt: "" },
+      routing: { enabled: true, model: "m", confidence_threshold: 0.9, stale_review_hours: 24, base_url: "", policy_prompt: "", usage_priority: true, allow_upshift: false },
     });
   });
 
@@ -190,7 +210,7 @@ describe("withRoutingSettings", () => {
   it("carries routing fields this form does not own through a save", () => {
     const out = withRoutingSettings(
       { routing: { enabled: false, model: "old", projects: { tarot: "出海" }, future: 1 } },
-      { enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "" },
+      { enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "", usage_priority: true, allow_upshift: false },
     );
     expect(out.routing).toEqual({
       enabled: true,
@@ -199,6 +219,8 @@ describe("withRoutingSettings", () => {
       stale_review_hours: 24,
       base_url: "",
       policy_prompt: "",
+      usage_priority: true,
+      allow_upshift: false,
       projects: { tarot: "出海" },
       future: 1,
     });
@@ -213,6 +235,8 @@ describe("withRoutingSettings", () => {
       confidence_threshold: 0.7,
       stale_review_hours: 24,
       base_url: "https://gw.example/v1",
+      usage_priority: true,
+      allow_upshift: false,
     });
     expect("api_key" in (out.routing as Record<string, unknown>)).toBe(false);
   });
@@ -220,13 +244,13 @@ describe("withRoutingSettings", () => {
   it("sends an empty key only when one was explicitly passed", () => {
     const cleared = withRoutingSettings(
       null,
-      { enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "" },
+      { enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "", usage_priority: true, allow_upshift: false },
       "",
     );
     expect((cleared.routing as Record<string, unknown>).api_key).toBe("");
     const set = withRoutingSettings(
       null,
-      { enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "" },
+      { enabled: true, model: "m", confidence_threshold: 0.7, stale_review_hours: 24, base_url: "", usage_priority: true, allow_upshift: false },
       "  sk-live  ",
     );
     expect((set.routing as Record<string, unknown>).api_key).toBe("sk-live");
@@ -239,6 +263,8 @@ describe("withRoutingSettings", () => {
       confidence_threshold: 9,
       stale_review_hours: 0,
       base_url: "",
+      usage_priority: true,
+      allow_upshift: false,
     });
     expect((out.routing as { confidence_threshold: number }).confidence_threshold).toBe(
       DEFAULT_CONFIDENCE_THRESHOLD,
@@ -260,7 +286,7 @@ describe("withRoutingSettings", () => {
   });
 
   it("round-trips through parse", () => {
-    const next = { enabled: true, model: "m", confidence_threshold: 0.42, stale_review_hours: 24, base_url: "", policy_prompt: "" };
+    const next = { enabled: true, model: "m", confidence_threshold: 0.42, stale_review_hours: 24, base_url: "", policy_prompt: "", usage_priority: true, allow_upshift: false };
     expect(parseRoutingSettings(withRoutingSettings({}, next))).toEqual(next);
   });
 });

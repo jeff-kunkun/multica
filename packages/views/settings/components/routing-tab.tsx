@@ -37,6 +37,7 @@ import {
   SettingsTab,
 } from "./settings-layout";
 import { useAutoSave } from "./use-auto-save";
+import { RoutingSeatsTable } from "./routing-seats-table";
 
 /**
  * The routing section — the ONLY screen this feature adds.
@@ -89,6 +90,8 @@ export function RoutingTab() {
   const [staleHours, setStaleHours] = useState(String(saved.stale_review_hours));
   const [baseUrl, setBaseUrl] = useState(saved.base_url);
   const [policyPrompt, setPolicyPrompt] = useState(saved.policy_prompt ?? "");
+  const [usagePriority, setUsagePriority] = useState(saved.usage_priority);
+  const [allowUpshift, setAllowUpshift] = useState(saved.allow_upshift);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const autoDiscoverKey = useRef("");
   const autoFilledModel = useRef("");
@@ -108,6 +111,8 @@ export function RoutingTab() {
     setStaleHours(String(next.stale_review_hours));
     setBaseUrl(next.base_url);
     setPolicyPrompt(next.policy_prompt ?? "");
+    setUsagePriority(next.usage_priority);
+    setAllowUpshift(next.allow_upshift);
     setKeyInput("");
     setAvailableModels([]);
     autoDiscoverKey.current = "";
@@ -123,8 +128,19 @@ export function RoutingTab() {
       stale_review_hours: normalizeStaleReviewHours(Number(staleHours)),
       base_url: baseUrl,
       policy_prompt: policyPrompt,
+      usage_priority: usagePriority,
+      allow_upshift: allowUpshift,
     }),
-    [enabled, model, threshold, staleHours, baseUrl, policyPrompt],
+    [
+      enabled,
+      model,
+      threshold,
+      staleHours,
+      baseUrl,
+      policyPrompt,
+      usagePriority,
+      allowUpshift,
+    ],
   );
 
   const discoverModels = useMutation({
@@ -178,7 +194,9 @@ export function RoutingTab() {
       a.confidence_threshold === b.confidence_threshold &&
       a.stale_review_hours === b.stale_review_hours &&
       a.base_url.trim() === b.base_url.trim() &&
-      (a.policy_prompt ?? "").trim() === (b.policy_prompt ?? "").trim(),
+      (a.policy_prompt ?? "").trim() === (b.policy_prompt ?? "").trim() &&
+      a.usage_priority === b.usage_priority &&
+      a.allow_upshift === b.allow_upshift,
   });
 
   // Live health from the server. Without it the fourth state is unreachable:
@@ -375,6 +393,32 @@ export function RoutingTab() {
               aria-label={t(($) => $.routing.stale_hours_label)}
             />
           </SettingsRow>
+
+          <SettingsRow
+            label={t(($) => $.routing.usage_priority_label)}
+            description={t(($) => $.routing.usage_priority_description)}
+          >
+            <Switch
+              checked={usagePriority}
+              disabled={!canManage || !enabled}
+              onCheckedChange={setUsagePriority}
+              aria-label={t(($) => $.routing.usage_priority_label)}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t(($) => $.routing.allow_upshift_label)}
+            description={t(($) => $.routing.allow_upshift_description)}
+          >
+            <Switch
+              // Upshift picks by usage, so it has nothing to go on while
+              // usage priority is off.
+              checked={allowUpshift && usagePriority}
+              disabled={!canManage || !enabled || !usagePriority}
+              onCheckedChange={setAllowUpshift}
+              aria-label={t(($) => $.routing.allow_upshift_label)}
+            />
+          </SettingsRow>
         </SettingsCard>
         <GatewayNote health={health.data} />
       </SettingsSection>
@@ -535,19 +579,7 @@ export function RoutingTab() {
         description={t(($) => $.routing.filters_placeholder)}
       >
         <SettingsCard>
-          {(health.data?.seats ?? []).length === 0 ? (
-            <p className="px-4 py-3 text-caption text-muted-foreground">
-              {t(($) => $.routing.seats_empty)}
-            </p>
-          ) : (
-            (health.data?.seats ?? []).map((seat) => (
-              <SettingsRow key={seat.agent_id} label={seat.tier}>
-                <span className="font-mono text-caption text-muted-foreground">
-                  {seat.availability}
-                </span>
-              </SettingsRow>
-            ))
-          )}
+          <RoutingSeatsTable wsId={workspace?.id ?? ""} canManage={canManage} />
         </SettingsCard>
       </SettingsSection>
     </SettingsTab>

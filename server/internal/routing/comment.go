@@ -153,6 +153,15 @@ func DemotionFootnote(ladder Ladder, roster map[string]Agent, chosen *Seat) stri
 	return ""
 }
 
+// UpshiftFootnote says the executor came from the rung above because every
+// seat on the judged rung was tagged tight. Empty otherwise.
+func UpshiftFootnote(chosen *Seat) string {
+	if chosen == nil || !chosen.Upshifted {
+		return ""
+	}
+	return fmt.Sprintf("%s档的席位用量都紧张，按「允许上调一档」改派上一档用量充足的 %s。", chosen.TierLabel, chosen.Name)
+}
+
 func agentTierKey(ladder Ladder, agent Agent) string {
 	if key, ok := ladder.NormalizeTier(agent.Tier); ok && key != "" {
 		return key

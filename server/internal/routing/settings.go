@@ -119,6 +119,13 @@ type Settings struct {
 	// request. Empty means DefaultWatchedProviders (claude, codex, grok).
 	// Replacing one key does not change the request shape.
 	WatchedProviders []string `json:"watched_providers,omitempty"`
+	// UsagePriority is 「用量优先」: inside a rung, a seat tagged ample goes
+	// before a tight one. A pointer because the default is ON and a workspace
+	// saved before the field existed must read as on (DENE-922).
+	UsagePriority *bool `json:"usage_priority,omitempty"`
+	// AllowUpshift is 「允许上调一档」: when every seat on the judged rung is
+	// tight, the rung above's ample seat takes the work. Off by default.
+	AllowUpshift bool `json:"allow_upshift,omitempty"`
 }
 
 // Target is where one judge call is sent: which model, on whose endpoint,

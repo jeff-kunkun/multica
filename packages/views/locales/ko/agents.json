@@ -219,6 +219,7 @@
     "section_profile_hint": "워크스페이스에서 이 에이전트가 표시되는 방식을 관리합니다.",
     "section_execution": "실행 설정",
     "section_execution_hint": "런타임, 모델, 추론 수준, 속도와 병렬 실행 한도를 설정합니다.",
+    "section_routing": "라우팅",
     "section_accounts": "계정",
     "section_accounts_hint": "이 에이전트가 사용하는 계정입니다. 추가·편집·전환은 모두 '계정 관리'에서 합니다.",
     "section_access": "접근 권한",
@@ -262,8 +263,10 @@
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
     "save": "저장",
     "cancel": "취소",
-    "prop_routing_tier": "배정 등급",
-    "prop_routing_tier_hint": "이슈 담당을 자동으로 정할 때 이 시트가 얼마나 강한지를 나타냅니다. 강도는 모델과 사고 수준, 프롬프트가 함께 결정하므로 같은 모델이라도 다른 등급에 둘 수 있습니다. 등급이 없는 시트는 사다리에서 빠집니다."
+    "prop_routing_tier": "등급",
+    "prop_routing_tier_hint": "강도에 맞춰 이슈에 배정합니다",
+    "prop_routing_usage": "사용량",
+    "prop_routing_usage_hint": "계정 한도의 상대적인 여유"
   },
   "overview": {
     "agent_context": "에이전트",
@@ -316,9 +319,10 @@
     "routing_tier_strong": "강",
     "routing_tier_medium": "중",
     "routing_tier_weak": "경량",
-    "routing_tier_none": "사다리에서 제외",
-    "routing_tier_none_title": "자동 배정에서 이 시트를 고르지 않습니다. 직접 지정하는 것은 여전히 가능합니다",
-    "routing_tier_tooltip": "배정 등급 · {{value}}"
+    "routing_tier_none": "제외",
+    "routing_usage_tight": "빠듯함",
+    "routing_usage_normal": "보통",
+    "routing_usage_ample": "넉넉함"
   },
   "model_dropdown": {
     "label": "모델",

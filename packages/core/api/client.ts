@@ -38,6 +38,8 @@ import type {
   AgentBuilderSessionSummary,
   StoredAgentDraft,
   UpdateAgentRequest,
+  BulkUpdateAgentRoutingRequest,
+  BulkUpdateAgentRoutingResponse,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
   AgentTask,
@@ -2213,6 +2215,16 @@ export class ApiClient {
   async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
     assertAgentConversationStartersWriteSupported(data);
     return this.fetch(`/api/agents/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Tier and/or usage on several seats in one all-or-nothing write. */
+  async bulkUpdateAgentRouting(
+    data: BulkUpdateAgentRoutingRequest,
+  ): Promise<BulkUpdateAgentRoutingResponse> {
+    return this.fetch("/api/agents/routing", {
       method: "PUT",
       body: JSON.stringify(data),
     });

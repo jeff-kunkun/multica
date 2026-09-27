@@ -235,6 +235,7 @@
     "section_profile_hint": "Manage how this agent appears across the workspace.",
     "section_execution": "Execution",
     "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel run limit.",
+    "section_routing": "Routing",
     "section_accounts": "Accounts",
     "section_accounts_hint": "The account this agent runs as. Adding, editing and switching all happen in Manage accounts.",
     "section_access": "Access",
@@ -278,8 +279,10 @@
     "description_placeholder": "What does this agent do?",
     "save": "Save",
     "cancel": "Cancel",
-    "prop_routing_tier": "Dispatch tier",
-    "prop_routing_tier_hint": "How strong this seat is when routing picks a seat for a ticket. You set it: strength is the model, the thinking level and the prompt together, so the same model can sit on two different rungs. A seat with no tier is off the ladder."
+    "prop_routing_tier": "Tier",
+    "prop_routing_tier_hint": "Matched to tasks by strength",
+    "prop_routing_usage": "Usage",
+    "prop_routing_usage_hint": "How much account quota this seat has, relatively"
   },
   "overview": {
     "agent_context": "Agent",
@@ -333,9 +336,10 @@
     "routing_tier_strong": "Strong",
     "routing_tier_medium": "Medium",
     "routing_tier_weak": "Light",
-    "routing_tier_none": "Off the ladder",
-    "routing_tier_none_title": "Routing never picks this seat automatically; you can still assign it by hand",
-    "routing_tier_tooltip": "Dispatch tier · {{value}}"
+    "routing_tier_none": "Off",
+    "routing_usage_tight": "Tight",
+    "routing_usage_normal": "Normal",
+    "routing_usage_ample": "Ample"
   },
   "model_dropdown": {
     "label": "Model",

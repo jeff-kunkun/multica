@@ -63,6 +63,17 @@ export interface RoutingSettings {
    * "let the model decide from habit".
    */
   policy_prompt?: string;
+  /**
+   * 「用量优先」: inside a rung, seats tagged ample go before tight ones.
+   * Default ON; the server reads a missing key as on, so this client does too.
+   */
+  usage_priority: boolean;
+  /**
+   * 「允许上调一档」: when every seat on the judged rung is tight, the rung
+   * above's ample seat takes the work. Default off, and meaningless while
+   * `usage_priority` is off.
+   */
+  allow_upshift: boolean;
 }
 
 /**
@@ -105,6 +116,8 @@ export const DEFAULT_ROUTING_SETTINGS: RoutingSettings = {
   stale_review_hours: DEFAULT_STALE_REVIEW_HOURS,
   base_url: "",
   policy_prompt: "",
+  usage_priority: true,
+  allow_upshift: false,
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -130,6 +143,8 @@ export function parseRoutingSettings(
     stale_review_hours: normalizeStaleReviewHours(block.stale_review_hours),
     base_url: typeof block.base_url === "string" ? block.base_url : "",
     policy_prompt: typeof block.policy_prompt === "string" ? block.policy_prompt : "",
+    usage_priority: block.usage_priority !== false,
+    allow_upshift: block.allow_upshift === true,
   };
 }
 
@@ -224,6 +239,8 @@ export function withRoutingSettings(
     stale_review_hours: normalizeStaleReviewHours(next.stale_review_hours),
     base_url: next.base_url.trim(),
     policy_prompt: (next.policy_prompt ?? "").trim(),
+    usage_priority: next.usage_priority,
+    allow_upshift: next.allow_upshift,
   };
   if (apiKey !== undefined) {
     block[ROUTING_API_KEY_FIELD] = apiKey.trim();

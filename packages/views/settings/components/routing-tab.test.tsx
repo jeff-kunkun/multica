@@ -12,6 +12,7 @@ const updateWorkspace = vi.hoisted(() => vi.fn());
 const getRoutingHealth = vi.hoisted(() => vi.fn());
 const checkRoutingHealth = vi.hoisted(() => vi.fn());
 const listRoutingModels = vi.hoisted(() => vi.fn());
+const listAgents = vi.hoisted(() => vi.fn());
 const member = vi.hoisted(() => ({ role: "owner" as "owner" | "admin" | "member" }));
 const workspace = vi.hoisted(() => ({
   current: {
@@ -31,6 +32,7 @@ vi.mock("@multica/core/api", async (importOriginal) => {
       getRoutingHealth,
       checkRoutingHealth,
       listRoutingModels,
+      listAgents,
     },
   };
 });
@@ -101,6 +103,8 @@ beforeEach(() => {
   checkRoutingHealth.mockResolvedValue(HEALTHY);
   listRoutingModels.mockReset();
   listRoutingModels.mockResolvedValue({ models: [] });
+  listAgents.mockReset();
+  listAgents.mockResolvedValue([]);
   updateWorkspace.mockImplementation(async (_id: string, body: { settings?: unknown }) => ({
     ...workspace.current,
     settings: body.settings,
@@ -108,6 +112,10 @@ beforeEach(() => {
   member.role = "owner";
   workspace.current = { id: "ws-1", name: "Acme", slug: "acme", settings: {} };
 });
+
+function enabledSwitch() {
+  return screen.getByRole("switch", { name: "Enable automatic dispatch" });
+}
 
 function chip() {
   return document.querySelector("[data-state]") as HTMLElement | null;
@@ -226,12 +234,14 @@ describe("RoutingTab", () => {
       stale_review_hours: 24,
       base_url: "",
       policy_prompt: "",
+      usage_priority: true,
+      allow_upshift: false,
     });
   });
 
   it("switching routing on writes enabled without inventing a model", async () => {
     render();
-    await userEvent.click(screen.getByRole("switch"));
+    await userEvent.click(enabledSwitch());
 
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
     const [, body] = updateWorkspace.mock.calls.at(-1) as [
@@ -308,10 +318,10 @@ describe("RoutingTab", () => {
     // Base UI's switch marks the disabled state with data-disabled rather
     // than the native attribute, so assert the behaviour too: a member who
     // clicks it must not produce a write.
-    expect(screen.getByRole("switch")).toHaveAttribute("data-disabled");
+    expect(enabledSwitch()).toHaveAttribute("data-disabled");
     expect(screen.getByLabelText(/routing model|路由模型/i)).toBeDisabled();
 
-    await userEvent.click(screen.getByRole("switch"));
+    await userEvent.click(enabledSwitch());
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(updateWorkspace).not.toHaveBeenCalled();
   });
@@ -426,7 +436,7 @@ describe("RoutingTab", () => {
     const { qc } = render();
     await healthSettled(qc);
 
-    await userEvent.click(screen.getByRole("switch"));
+    await userEvent.click(enabledSwitch());
     await userEvent.type(
       screen.getByLabelText(/routing model|路由模型/i),
       "gpt-5.6-luna",
@@ -440,7 +450,7 @@ describe("RoutingTab", () => {
     render();
     await waitFor(() => expect(getRoutingHealth).toHaveBeenCalledTimes(1));
 
-    await userEvent.click(screen.getByRole("switch"));
+    await userEvent.click(enabledSwitch());
 
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
     // Without the invalidation the settings the server derives health from
@@ -481,7 +491,7 @@ describe("RoutingTab", () => {
     render();
     await waitFor(() => expect(chip()?.getAttribute("data-state")).toBe("ineffective"));
 
-    await userEvent.click(screen.getByRole("switch"));
+    await userEvent.click(enabledSwitch());
     expect(chip()?.getAttribute("data-state")).toBe("off");
   });
 
@@ -512,5 +522,42 @@ describe("RoutingTab", () => {
     fireEvent.change(box, { target: { value: "Keep this draft." } });
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     expect(box).toHaveValue("Keep this draft.");
+  });
+});
+
+describe("RoutingTab seat order switches", () => {
+  it("writes usage priority and upshift into the routing block", async () => {
+    workspace.current.settings = {
+      routing: { enabled: true, model: "gpt-5.6-luna" },
+    };
+    render();
+    const usage = screen.getByRole("switch", { name: "Prefer ample usage" });
+    const upshift = screen.getByRole("switch", { name: "Allow one tier up" });
+    expect(usage).toHaveAttribute("data-checked");
+    expect(upshift).not.toHaveAttribute("data-checked");
+
+    await userEvent.click(upshift);
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
+    const [, body] = updateWorkspace.mock.calls.at(-1) as [
+      string,
+      { settings: { routing: Record<string, unknown> } },
+    ];
+    expect(body.settings.routing.usage_priority).toBe(true);
+    expect(body.settings.routing.allow_upshift).toBe(true);
+  });
+
+  it("greys out upshift while usage priority is off", () => {
+    workspace.current.settings = {
+      routing: {
+        enabled: true,
+        model: "gpt-5.6-luna",
+        usage_priority: false,
+        allow_upshift: true,
+      },
+    };
+    render();
+    const upshift = screen.getByRole("switch", { name: "Allow one tier up" });
+    expect(upshift).toHaveAttribute("data-disabled");
+    expect(upshift).not.toHaveAttribute("data-checked");
   });
 });

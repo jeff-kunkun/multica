@@ -208,6 +208,7 @@
     "cancel": "Annuler",
     "section_profile_hint": "Gérez la façon dont cet agent apparaît dans l'espace de travail.",
     "section_execution_hint": "Choisissez le runtime, le modèle, le niveau de réflexion, la vitesse et la limite d'exécutions parallèles.",
+    "section_routing": "Routage",
     "section_accounts": "Comptes",
     "section_accounts_hint": "Le compte avec lequel cet agent s'exécute. L'ajout, la modification et le changement de compte se font dans « Gérer les comptes ».",
     "section_access_hint": "Contrôlez qui peut exécuter cet agent et utiliser les capacités qui lui sont connectées.",
@@ -222,8 +223,10 @@
     "inherited_config_notice": "Ce réglage suit le rôle de base « {{name}} » : modifiez-le là-bas et le changement est synchronisé ici. Pour le configurer séparément, désactivez d'abord le suivi dans Général.",
     "prop_runtime_inherit_hint_off": "Cette spécialisation utilise son propre runtime, son modèle, son niveau de réflexion et sa vitesse. Activez cette option pour suivre à nouveau le rôle de base.",
     "avatar_hint": "Affiché dans les assignations, l'activité et la discussion.",
-    "prop_routing_tier": "Palier d'attribution",
-    "prop_routing_tier_hint": "La force de ce poste quand le routage choisit un poste pour une tâche. C'est vous qui la définissez : la force combine le modèle, le niveau de réflexion et le prompt, si bien qu'un même modèle peut occuper deux échelons différents. Un poste sans palier est hors échelle."
+    "prop_routing_tier": "Palier",
+    "prop_routing_tier_hint": "Attribué aux tâches selon la force",
+    "prop_routing_usage": "Usage",
+    "prop_routing_usage_hint": "Quota de compte disponible, en relatif"
   },
   "overview": {
     "agent_context": "Agent",
@@ -277,9 +280,10 @@
     "routing_tier_strong": "Fort",
     "routing_tier_medium": "Moyen",
     "routing_tier_weak": "Léger",
-    "routing_tier_none": "Hors échelle",
-    "routing_tier_none_title": "Le routage ne choisit jamais ce poste automatiquement ; vous pouvez toujours l'assigner manuellement",
-    "routing_tier_tooltip": "Palier d'attribution · {{value}}"
+    "routing_tier_none": "Hors routage",
+    "routing_usage_tight": "Serré",
+    "routing_usage_normal": "Normal",
+    "routing_usage_ample": "Large"
   },
   "model_dropdown": {
     "label": "Modèle",
