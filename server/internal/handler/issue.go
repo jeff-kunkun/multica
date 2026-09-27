@@ -3952,6 +3952,17 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ParentIssueID = pgtype.UUID{Valid: false} // explicit null = remove parent
 		}
 	}
+	// Sub-issues are execution-only: their acceptance seat belongs to the
+	// parent and must never be copied or assigned locally.  Clear both the
+	// explicit request and any stale reviewer already stored on an issue as
+	// soon as the resulting parent link is present.  Mark the pair as touched
+	// so the atomic update's concurrent-field refresh does not restore it.
+	if params.ParentIssueID.Valid {
+		params.ReviewerType = pgtype.Text{Valid: false}
+		params.ReviewerID = pgtype.UUID{Valid: false}
+		rawFields["reviewer_type"] = json.RawMessage("null")
+		rawFields["reviewer_id"] = json.RawMessage("null")
+	}
 	if _, ok := rawFields["project_id"]; ok {
 		if req.ProjectID != nil && strings.TrimSpace(*req.ProjectID) != "" {
 			projectUUID, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
@@ -4881,6 +4892,15 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			} else {
 				params.Stage = pgtype.Int4{Valid: false} // explicit null = unstage
 			}
+		}
+		// Sub-issues are execution-only. A batch re-parent can otherwise carry
+		// a legacy acceptance seat (or a seat copied from the parent) into the
+		// child because this path starts from the existing row. Keep the batch
+		// write aligned with UpdateIssue: any resulting parent link clears both
+		// reviewer columns before the status guard and atomic update run.
+		if params.ParentIssueID.Valid {
+			params.ReviewerType = pgtype.Text{Valid: false}
+			params.ReviewerID = pgtype.UUID{Valid: false}
 		}
 
 		// Validate the resulting assignee pair when this batch update touches
