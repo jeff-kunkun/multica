@@ -971,7 +971,8 @@ export function ChatWindow() {
                 />
               }
             >
-              <Minus />
+              {/* A phone sheet slides away downward; the desktop card minimises. */}
+              {isMobile ? <ChevronDown /> : <Minus />}
             </TooltipTrigger>
             <TooltipContent side="top">{t(($) => $.window.minimize_tooltip)}</TooltipContent>
           </Tooltip>

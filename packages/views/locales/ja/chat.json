@@ -5,7 +5,8 @@
     "agent_link_no_access": "このエージェントとチャットする権限がありません。",
     "search_placeholder": "チャットのタイトルや内容を検索…",
     "search_clear": "検索をクリア",
-    "search_empty": "一致するチャットはありません"
+    "search_empty": "一致するチャットはありません",
+    "back": "戻る"
   },
   "project_bar": {
     "all": "すべて",
