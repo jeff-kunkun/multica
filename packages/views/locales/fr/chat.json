@@ -5,7 +5,8 @@
     "agent_link_no_access": "Vous n'avez pas accès à la discussion avec cet agent.",
     "search_placeholder": "Rechercher un titre ou un contenu de discussion…",
     "search_clear": "Effacer la recherche",
-    "search_empty": "Aucune discussion ne correspond"
+    "search_empty": "Aucune discussion ne correspond",
+    "back": "Retour"
   },
   "project_bar": {
     "all": "Tout",

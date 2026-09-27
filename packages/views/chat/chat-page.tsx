@@ -33,7 +33,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { chatSessionIdFromLocation } from "@multica/core/paths";
 import type { Agent, ChatSession } from "@multica/core/types";
 import { PageHeader } from "../layout/page-header";
-import { useNavigation } from "../navigation";
+import { useBackOrReplace, useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { ChatMessageList, ChatMessageSkeleton } from "./components/chat-message-list";
 import { ChatInput } from "./components/chat-input";
@@ -88,7 +88,8 @@ function chatTitleMatches(session: ChatSession, words: string[], query: string) 
  */
 export function ChatPage() {
   const { t } = useT("chat");
-  const { pathname, searchParams, replace } = useNavigation();
+  const { pathname, searchParams, replace, push, back } = useNavigation();
+  const backOrReplace = useBackOrReplace();
   const queryClient = useQueryClient();
   const wsPaths = useWorkspacePaths();
   const isCompact = useIsCompact();
@@ -159,8 +160,22 @@ export function ChatPage() {
   // value the sibling effect just wrote, so the reconciliation converges in one
   // pass and is idempotent under StrictMode's double-invoke.
 
+  // How the compact conversation was reached, which decides where its back
+  // button goes (see `leaveConversation`):
+  //  - "pushed": picked from the list on this page — the list is one history
+  //    step behind, so the phone's back gesture and the button agree.
+  //  - "inplace": a new chat composed here — the URL only turns into the
+  //    session once it is sent, and never gained a list entry to step back to.
+  //  - null: arrived from elsewhere (Cmd+K, a notification, another page's
+  //    link), so back returns to the page that sent the person here.
+  const conversationEntry = useRef<"pushed" | "inplace" | null>(null);
+  // Set by a compact list pick so the store → URL sync below pushes instead of
+  // replacing, giving the conversation its own step in the back stack.
+  const pushNextSessionSync = useRef(false);
+
   // URL → store: deep link, refresh, notification click, back/forward.
   useEffect(() => {
+    if (!urlSession && !composingNew) conversationEntry.current = null;
     if (urlSession !== useChatStore.getState().activeSessionId) {
       c.setActiveSession(urlSession);
     }
@@ -171,8 +186,12 @@ export function ChatPage() {
   useEffect(() => {
     const live = useChatStore.getState().activeSessionId;
     const current = chatSessionIdFromLocation(pathname, searchParams);
+    const pushSync = pushNextSessionSync.current;
+    pushNextSessionSync.current = false;
     if (live !== current) {
-      replace(live ? wsPaths.chatSession(live) : wsPaths.chat());
+      const target = live ? wsPaths.chatSession(live) : wsPaths.chat();
+      if (pushSync && live) push(target);
+      else replace(target);
       return;
     }
     // An older `?session=` link opened the right chat. Move the address bar
@@ -202,8 +221,32 @@ export function ChatPage() {
 
   const handleSelect = (session: ChatSession) => {
     supersedeAgentIntent();
+    // A compact pick opens the conversation over the list; push so the back
+    // gesture returns to the list instead of leaving Chat altogether.
+    if (isCompact && !c.activeSessionId) {
+      pushNextSessionSync.current = true;
+      conversationEntry.current = "pushed";
+    }
     c.handleSelectSession(session);
     setComposingNew(false);
+  };
+
+  // Compact back button. A conversation opened from the list returns to it; one
+  // opened from another page returns to that page (a cold link falls back to
+  // the list rather than stepping off Multica).
+  const leaveConversation = () => {
+    const entry = conversationEntry.current;
+    conversationEntry.current = null;
+    if (entry === "pushed" && c.activeSessionId) {
+      back();
+      return;
+    }
+    if (entry === "inplace" || composingNew || !c.activeSessionId) {
+      c.setActiveSession(null);
+      setComposingNew(false);
+      return;
+    }
+    backOrReplace(wsPaths.chat());
   };
 
   // Single archive path for both entry points (thread-list row + conversation
@@ -215,8 +258,13 @@ export function ChatPage() {
     supersedeAgentIntent();
     if (session.id === c.activeSessionId) {
       if (isCompact) {
-        c.setActiveSession(null);
-        setComposingNew(false);
+        if (conversationEntry.current === "pushed") {
+          conversationEntry.current = null;
+          back();
+        } else {
+          c.setActiveSession(null);
+          setComposingNew(false);
+        }
       } else {
         c.advanceSelectionAfterArchive(session);
       }
@@ -228,6 +276,7 @@ export function ChatPage() {
     // A manual ⊕ pick outranks a pending deep link; when called FROM the
     // intent effect the ref is already set to this param, so this is a no-op.
     supersedeAgentIntent();
+    if (isCompact) conversationEntry.current = "inplace";
     if (agent) c.handleStartNewChat(agent);
     else c.handleNewChat();
     setComposingNew(true);
@@ -336,6 +385,22 @@ export function ChatPage() {
     </div>
   );
 
+  // Compact only: the conversation replaces the list, so it needs a way back.
+  // With a session open it sits inside the session header — one 48px bar, not
+  // a back bar stacked on the header; a new chat has no header yet, so it keeps
+  // a bar of its own below.
+  const compactBackButton = (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      onClick={leaveConversation}
+      aria-label={t(($) => $.page.back)}
+      className="-ml-2 shrink-0 text-muted-foreground"
+    >
+      <ArrowLeft className="h-4 w-4" />
+    </Button>
+  );
+
   // The conversation pane: message list / skeleton / empty above a persistent
   // banner + input. Identical composition to the floating window's body, so a
   // brand-new chat (no active session) shows the agent-aware empty state + input.
@@ -347,6 +412,7 @@ export function ChatPage() {
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession && (
         <ChatSessionHeader
+          leading={isCompact ? compactBackButton : undefined}
           session={c.currentSession}
           agent={c.activeAgent}
           onArchive={handleArchive}
@@ -474,20 +540,19 @@ export function ChatPage() {
     if (c.activeSessionId || composingNew) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          <div className="flex h-12 shrink-0 items-center border-b px-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                c.setActiveSession(null);
-                setComposingNew(false);
-              }}
-              className="gap-1.5 text-muted-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {t(($) => $.page.title)}
-            </Button>
-          </div>
+          {!c.currentSession && (
+            <div className="flex h-12 shrink-0 items-center border-b px-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={leaveConversation}
+                className="gap-1.5 text-muted-foreground"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                {t(($) => $.page.title)}
+              </Button>
+            </div>
+          )}
           {conversation}
         </div>
       );
