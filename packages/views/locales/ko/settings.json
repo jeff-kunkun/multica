@@ -1695,11 +1695,11 @@
   "routing": {
     "title": "라우팅",
     "description": "이슈가 생성되거나 상태가 바뀔 때 담당석과 검수석을 자동으로 채웁니다.",
-    "section_title": "라우팅 모델",
+    "section_title": "스위치와 임계값",
     "enabled_label": "자동 배정 사용",
     "enabled_description": "끄면 더 이상 자동으로 채우지 않으며, 기존 값은 유지됩니다.",
-    "model_label": "라우팅 모델",
-    "model_description": "엔드포인트와 키를 저장하면 모델을 고를 수 있고, 모델 ID를 직접 입력할 수도 있습니다.",
+    "model_label": "판정 모델",
+    "model_description": "티어를 고르는 모델입니다. 엔드포인트와 키를 저장하면 고를 수 있고, 모델 ID를 직접 입력할 수도 있습니다.",
     "model_discovering": "엔드포인트에서 모델을 불러오는 중…",
     "model_discover_failed": "모델을 불러오지 못했습니다. 모델 ID를 직접 입력하세요.",
     "model_discover_empty": "엔드포인트가 모델을 반환하지 않았습니다. 모델 ID를 직접 입력하세요.",
@@ -1712,7 +1712,6 @@
     "gateway_endpoint_workspace": "모델 id는 이 워크스페이스 전용 엔드포인트로 전송됩니다: {{host}}.",
     "gateway_endpoint_deployment": "모델 id는 배포 공용 LLM 엔드포인트로 전송됩니다: {{host}}.",
     "gateway_unset": "사용할 수 있는 엔드포인트가 없습니다. 아래에 엔드포인트와 키를 입력하세요.",
-    "gateway_title": "이 워크스페이스 전용 엔드포인트",
     "gateway_url_label": "엔드포인트 URL",
     "gateway_url_description": "OpenAI 호환 base URL이며, 비워 두면 배포 공용 엔드포인트를 사용합니다.",
     "gateway_url_placeholder": "https://api.example.com/v1 또는 https://api.typesafe.ai",
@@ -1743,7 +1742,7 @@
       },
       "incomplete": {
         "chip": "미완료",
-        "detail": "라우팅 모델을 아직 선택하지 않아 동작하지 않습니다."
+        "detail": "켜진 모델에 모델 ID가 아직 없어 동작하지 않습니다."
       },
       "enabled": {
         "chip": "사용 중",
@@ -1768,7 +1767,24 @@
     "quota_resets": "{{when}} 초기화",
     "quota_updated": "{{when}} 업데이트",
     "seats_title": "후보 좌석",
-    "seats_empty": "후보 좌석이 아직 없습니다."
+    "seats_empty": "후보 좌석이 아직 없습니다.",
+    "judge_title": "판정 모델",
+    "judge_description": "티어(약 / 중 / 강 / 최강)를 확률과 함께 고릅니다. 분석 모델이 켜져 있으면 정리된 사실만 봅니다.",
+    "judge_enabled_label": "판정 모델 사용",
+    "analysis_title": "분석 모델",
+    "analysis_description": "티켓 전체를 읽고 몇 가지 사실로 정리합니다: 변경 범위, 요구사항의 명확성, 실패 비용, 사람의 결정이 필요한지. 티켓이 멈추면 어디서 막혔는지 적습니다.",
+    "analysis_enabled_label": "분석 모델 사용",
+    "analysis_model_label": "분석 모델",
+    "analysis_model_description": "OpenAI 호환 채팅 모델이면 됩니다. 사실은 티켓별로 캐시되며 제목이나 설명이 바뀔 때만 다시 계산합니다.",
+    "analysis_url_label": "분석 모델 엔드포인트 URL",
+    "analysis_url_description": "OpenAI 호환 base URL. 둘 다 비워 두면 배포 공용 엔드포인트를 씁니다.",
+    "analysis_key_label": "분석 모델 API 키",
+    "modes": {
+      "none": "둘 다 꺼짐: 모델을 호출하지 않고 모든 티켓이 대체 티어로 갑니다.",
+      "analysis": "분석만: 분석 모델이 티어를 고르고, 임계값은 그 자기 보고 신뢰도에 적용됩니다.",
+      "analysis_judge": "둘 다 켜짐: 분석 모델이 사실을 정리하고 판정 모델이 그것으로 티어를 고릅니다.",
+      "judge": "판정만: 판정 모델이 티켓을 읽고 티어를 고릅니다."
+    }
   },
   "project_sharing": {
     "title": "권한 및 공유",

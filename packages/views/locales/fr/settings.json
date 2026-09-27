@@ -1702,11 +1702,11 @@
   "routing": {
     "title": "Routage",
     "description": "Attribue les sièges d'exécutant et de relecteur à la création d'une tâche et à chaque changement de statut.",
-    "section_title": "Modèle de routage",
+    "section_title": "Interrupteur et seuils",
     "enabled_label": "Activer la répartition automatique",
     "enabled_description": "Désactivé, les sièges ne sont plus attribués ; les valeurs existantes sont conservées.",
-    "model_label": "Modèle de routage",
-    "model_description": "Choisissez un modèle après avoir enregistré un point de terminaison et une clé, ou saisissez un identifiant.",
+    "model_label": "Modèle de jugement",
+    "model_description": "Le modèle qui choisit le niveau. Choisissez-le après avoir enregistré un point de terminaison et une clé, ou saisissez un identifiant.",
     "model_discovering": "Chargement des modèles depuis le point d'accès…",
     "model_discover_failed": "Impossible de charger les modèles. Saisissez un identifiant de modèle à la main.",
     "model_discover_empty": "Le point d'accès n'a renvoyé aucun modèle. Saisissez un identifiant de modèle à la main.",
@@ -1719,7 +1719,6 @@
     "gateway_endpoint_workspace": "L'identifiant du modèle est envoyé au point d'accès propre à cet espace de travail : {{host}}.",
     "gateway_endpoint_deployment": "L'identifiant du modèle est envoyé au point d'accès LLM partagé du déploiement : {{host}}.",
     "gateway_unset": "Aucun point de terminaison disponible. Renseignez un point de terminaison et une clé ci-dessous.",
-    "gateway_title": "Point d'accès propre à cet espace de travail",
     "gateway_url_label": "URL du point d'accès",
     "gateway_url_description": "Une URL de base compatible OpenAI ; laissez vide pour utiliser le point de terminaison partagé du déploiement.",
     "gateway_url_placeholder": "https://api.example.com/v1 ou https://api.typesafe.ai",
@@ -1750,7 +1749,7 @@
       },
       "incomplete": {
         "chip": "Incomplet",
-        "detail": "Aucun modèle de routage n'est choisi, le routage n'est donc pas actif."
+        "detail": "Un modèle activé n'a pas encore d'identifiant, le routage n'est donc pas actif."
       },
       "enabled": {
         "chip": "Activé",
@@ -1775,7 +1774,24 @@
     "quota_resets": "réinitialisation {{when}}",
     "quota_updated": "mis à jour {{when}}",
     "seats_title": "Sièges candidats",
-    "seats_empty": "Aucun siège candidat."
+    "seats_empty": "Aucun siège candidat.",
+    "judge_title": "Modèle de jugement",
+    "judge_description": "Choisit le niveau (faible / moyen / fort / le plus fort) avec une probabilité. Quand le modèle d’analyse est actif, il ne voit que les faits.",
+    "judge_enabled_label": "Utiliser le modèle de jugement",
+    "analysis_title": "Modèle d’analyse",
+    "analysis_description": "Lit tout le ticket et le résume en quelques faits : périmètre, clarté, coût d’une erreur, décision humaine requise. Quand un ticket s’arrête, il écrit où il bloque.",
+    "analysis_enabled_label": "Utiliser le modèle d’analyse",
+    "analysis_model_label": "Modèle d’analyse",
+    "analysis_model_description": "N’importe quel modèle de chat compatible OpenAI. Les faits sont mis en cache par ticket et recalculés seulement si le titre ou la description change.",
+    "analysis_url_label": "URL du point d’accès d’analyse",
+    "analysis_url_description": "Une base URL compatible OpenAI. Laissez les deux champs vides pour utiliser le point d’accès partagé du déploiement.",
+    "analysis_key_label": "Clé API d’analyse",
+    "modes": {
+      "none": "Aucun modèle actif : aucun appel, et chaque ticket prend le niveau de repli.",
+      "analysis": "Analyse seule : le modèle d’analyse choisit le niveau, et le seuil s’applique à sa confiance déclarée.",
+      "analysis_judge": "Les deux : le modèle d’analyse écrit les faits, le modèle de jugement choisit le niveau à partir d’eux.",
+      "judge": "Jugement seul : le modèle de jugement lit le ticket et choisit le niveau."
+    }
   },
   "project_sharing": {
     "title": "Autorisations et partage",

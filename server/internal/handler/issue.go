@@ -28,6 +28,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/permission"
+	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
@@ -3076,6 +3077,12 @@ type CreateIssueRequest struct {
 	OriginID   *string `json:"origin_id,omitempty"`
 
 	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
+
+	// RoutingFacts lets the creator — usually an agent that just wrote the
+	// ticket and already knows its shape — supply the facts routing would
+	// otherwise ask the analysis model for (DENE-923). They are cached
+	// against this content, so editing the ticket later invalidates them.
+	RoutingFacts *routing.Facts `json:"routing_facts,omitempty"`
 }
 
 func duplicateIssueMessage(issue IssueResponse) string {
@@ -3102,6 +3109,15 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
+	}
+	if req.RoutingFacts != nil {
+		facts := req.RoutingFacts.Normalize()
+		if !facts.Valid() {
+			writeError(w, http.StatusBadRequest,
+				"routing_facts: scope must be small|module|cross_module, clarity clear|vague, risk low|medium|high")
+			return
+		}
+		req.RoutingFacts = &facts
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
@@ -3414,6 +3430,18 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// same entry point. This call and the status change that may follow it
 	// moments later can both be in flight at once; the conditional writes and
 	// the one-comment-per-kind index are what make that safe.
+	if req.RoutingFacts != nil {
+		// Written before the route is queued, so the first route already
+		// finds them and skips the analysis call. Hashed from the stored
+		// row, not the request: the create path may have rewritten the body.
+		if err := h.writeAnalysisRecord(r.Context(), issue.WorkspaceID, issue.ID, routing.AnalysisRecord{
+			Facts:  *req.RoutingFacts,
+			Source: routing.FactsFromCreator,
+			Hash:   routing.ContentHash(issue.Title, issue.Description.String),
+		}); err != nil {
+			slog.Warn("routing facts write failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID))...)
+		}
+	}
 	h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
 
 	writeJSON(w, http.StatusCreated, resp)

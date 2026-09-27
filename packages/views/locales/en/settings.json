@@ -1702,11 +1702,11 @@
   "routing": {
     "title": "Routing",
     "description": "Fills the executor and reviewer seats when an issue is created or its status changes.",
-    "section_title": "Routing model",
+    "section_title": "Switch and thresholds",
     "enabled_label": "Enable automatic dispatch",
     "enabled_description": "When off, seats are no longer filled; existing values are kept.",
-    "model_label": "Routing model",
-    "model_description": "Pick a model after saving an endpoint and key, or type a model id.",
+    "model_label": "Judge model",
+    "model_description": "The model that picks the tier. Pick one after saving an endpoint and key, or type a model id.",
     "model_discovering": "Loading models from the endpoint…",
     "model_discover_failed": "Could not load models. Enter a model id manually.",
     "model_discover_empty": "The endpoint returned no models. Enter a model id manually.",
@@ -1719,7 +1719,6 @@
     "gateway_endpoint_workspace": "The model id is sent to this workspace's own endpoint: {{host}}.",
     "gateway_endpoint_deployment": "The model id is sent to the deployment's shared LLM endpoint: {{host}}.",
     "gateway_unset": "No endpoint is available. Set an endpoint and key below.",
-    "gateway_title": "This workspace's own endpoint",
     "gateway_url_label": "Endpoint URL",
     "gateway_url_description": "An OpenAI-compatible base URL; leave empty to use the deployment's shared endpoint.",
     "gateway_url_placeholder": "https://api.example.com/v1 or https://api.typesafe.ai",
@@ -1750,7 +1749,7 @@
       },
       "incomplete": {
         "chip": "Incomplete",
-        "detail": "No routing model is chosen yet, so routing is not active."
+        "detail": "A model that is turned on has no model id yet, so routing is not active."
       },
       "enabled": {
         "chip": "Enabled",
@@ -1775,7 +1774,24 @@
     "quota_resets": "resets {{when}}",
     "quota_updated": "updated {{when}}",
     "seats_title": "Candidate seats",
-    "seats_empty": "No candidate seats yet."
+    "seats_empty": "No candidate seats yet.",
+    "judge_title": "Judge model",
+    "judge_description": "Picks the tier (weak / medium / strong / strongest) with a probability. With the analysis model on, it sees only the facts.",
+    "judge_enabled_label": "Use the judge model",
+    "analysis_title": "Analysis model",
+    "analysis_description": "Reads the whole ticket and reduces it to a few facts: scope, clarity, cost of a mistake, whether a person must decide. When a ticket stops, it writes where it is stuck.",
+    "analysis_enabled_label": "Use the analysis model",
+    "analysis_model_label": "Analysis model",
+    "analysis_model_description": "Any OpenAI-compatible chat model. Its facts are cached per ticket and recomputed only when the title or description changes.",
+    "analysis_url_label": "Analysis endpoint URL",
+    "analysis_url_description": "An OpenAI-compatible base URL. Leave both fields empty to use the deployment’s shared endpoint.",
+    "analysis_key_label": "Analysis API key",
+    "modes": {
+      "none": "Neither model is on: no model is called, and every ticket goes to the fallback tier.",
+      "analysis": "Analysis only: the analysis model picks the tier, and the threshold gates its self-reported confidence.",
+      "analysis_judge": "Both on: the analysis model writes the facts and the judge picks the tier from them.",
+      "judge": "Judge only: the judge reads the ticket and picks the tier."
+    }
   },
   "project_sharing": {
     "title": "Permissions & sharing",
