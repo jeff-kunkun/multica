@@ -23,6 +23,7 @@ import {
   useRegenerateChatQuickActions,
 } from "@multica/core/chat/mutations";
 import {
+  chatMessageSearchOptions,
   chatMessagesOptions,
   chatQuickActionsPendingOptions,
 } from "@multica/core/chat/queries";
@@ -51,6 +52,19 @@ import { ArchivedAgentBanner } from "./components/archived-agent-banner";
 import { AgentAccessRevokedBanner } from "./components/agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
 import { WorkThreadPanel } from "../common/work-thread-panel";
+import { PageSearchInput } from "../common/page-search-input";
+import { matchesPinyin } from "../editor/extensions/pinyin-match";
+import { useDebouncedValue } from "../common/use-debounced-value";
+
+/**
+ * Title half of the chat page search: every word in the title, or the whole
+ * query as pinyin (from the start of the title, as in Cmd+K).
+ */
+function chatTitleMatches(session: ChatSession, words: string[], query: string) {
+  const title = session.title?.trim().toLowerCase() ?? "";
+  if (!title) return false;
+  return words.every((word) => title.includes(word)) || matchesPinyin(title, query);
+}
 
 /**
  * Chat tab — the first-class two-pane surface (thread list on the left,
@@ -99,13 +113,33 @@ export function ChatPage() {
   const [composingNew, setComposingNew] = useState(false);
   const [projectFilter, setProjectFilter] = useState<ChatProjectFilter>({ type: "all" });
   const dismissProjectNudge = useDismissChatProjectNudge();
-  const visibleSessions = useMemo(
-    () =>
-      c.sessions.filter((session) =>
-        sessionMatchesChatProjectFilter(chatSessionProjectIds(session), projectFilter),
-      ),
-    [c.sessions, projectFilter],
-  );
+  // In-page search: titles match locally on the keystroke; what was said in a
+  // chat comes from the server once typing settles. Archived chats match too.
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLowerCase();
+  const debouncedQuery = useDebouncedValue(query, 250);
+  const { data: contentHits } = useQuery(chatMessageSearchOptions(c.wsId, debouncedQuery));
+  const searchSnippets = useMemo(() => {
+    if (!query) return null;
+    const snippets = new Map<string, string>();
+    // Hits for a stale query would attach the wrong snippet; wait for the
+    // settled query instead.
+    if (debouncedQuery === query) {
+      for (const hit of contentHits ?? []) snippets.set(hit.session_id, hit.snippet);
+    }
+    return snippets;
+  }, [contentHits, debouncedQuery, query]);
+  const visibleSessions = useMemo(() => {
+    const inProject = c.sessions.filter((session) =>
+      sessionMatchesChatProjectFilter(chatSessionProjectIds(session), projectFilter),
+    );
+    if (!searchSnippets) return inProject;
+    const words = query.split(/\s+/).filter(Boolean);
+    return inProject.filter(
+      (session) =>
+        searchSnippets.has(session.id) || chatTitleMatches(session, words, query),
+    );
+  }, [c.sessions, projectFilter, query, searchSnippets]);
   useEffect(() => {
     // Read the LIVE store value for the same reason as the session sync
     // effects below: under StrictMode's double-invoke this effect replays
@@ -255,6 +289,18 @@ export function ChatPage() {
     </PageHeader>
   );
 
+  const searchBox = (
+    <div className="shrink-0 px-3 pt-2 pb-1">
+      <PageSearchInput
+        value={search}
+        onChange={setSearch}
+        placeholder={t(($) => $.page.search_placeholder)}
+        clearLabel={t(($) => $.page.search_clear)}
+        className="w-full"
+      />
+    </div>
+  );
+
   const projectBar = (
     <ChatProjectBar
       projects={c.projects ?? []}
@@ -273,8 +319,13 @@ export function ChatPage() {
         activeSessionId={c.activeSessionId}
         onSelectSession={handleSelect}
         onArchive={handleArchive}
+        search={searchSnippets ? { query, snippets: searchSnippets } : undefined}
         emptyLabel={
-          projectFilter.type === "all" ? undefined : t(($) => $.project_bar.empty)
+          searchSnippets
+            ? t(($) => $.page.search_empty)
+            : projectFilter.type === "all"
+              ? undefined
+              : t(($) => $.project_bar.empty)
         }
       />
       {/* Below the conversations and outside them: an alignment is a different
@@ -444,6 +495,7 @@ export function ChatPage() {
     return (
       <div className="flex flex-1 flex-col min-h-0">
         {listHeader}
+        {searchBox}
         {projectBar}
         <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
       </div>
@@ -471,6 +523,7 @@ export function ChatPage() {
       >
         <div className="flex flex-col border-r h-full">
           {listHeader}
+          {searchBox}
           {projectBar}
           <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
         </div>

@@ -1835,11 +1835,12 @@ func appendIssueDateFilter(where []string, addArg func(any) string, filter *issu
 	))
 }
 
-// appendIssueTableSearchFilter adds a quick identity search to the ordinary
-// ListIssues window. Unlike the ranked global search endpoint, this predicate
-// preserves the table's active filters, explicit sort, total, and pagination.
-// Every word must appear in the title; a complete identifier (or bare issue
-// number) also matches the immutable numeric issue number.
+// appendIssueTableSearchFilter adds a quick search to the ordinary ListIssues
+// window. Unlike the ranked global search endpoint, this predicate preserves
+// the table's active filters, explicit sort, total, and pagination. Every word
+// must appear somewhere in the issue — its title, its description, or any of
+// its comments (words may be spread across them); a complete identifier (or
+// bare issue number) also matches the immutable numeric issue number.
 func appendIssueTableSearchFilter(where []string, addArg func(any) string, raw string) []string {
 	query := strings.TrimSpace(raw)
 	if query == "" {
@@ -1849,12 +1850,16 @@ func appendIssueTableSearchFilter(where []string, addArg func(any) string, raw s
 	words := splitSearchTerms(strings.ToLower(query))
 	ors := make([]string, 0, 2)
 	if len(words) > 0 {
-		titleMatches := make([]string, 0, len(words))
+		wordMatches := make([]string, 0, len(words))
 		for _, word := range words {
-			pattern := "%" + escapeLike(word) + "%"
-			titleMatches = append(titleMatches, fmt.Sprintf("LOWER(i.title) LIKE %s", addArg(pattern)))
+			pattern := addArg("%" + escapeLike(word) + "%")
+			wordMatches = append(wordMatches, fmt.Sprintf(
+				"(LOWER(i.title) LIKE %[1]s OR LOWER(COALESCE(i.description, '')) LIKE %[1]s OR EXISTS ("+
+					"SELECT 1 FROM comment c WHERE c.workspace_id = i.workspace_id AND c.issue_id = i.id AND LOWER(c.content) LIKE %[1]s))",
+				pattern,
+			))
 		}
-		ors = append(ors, "("+strings.Join(titleMatches, " AND ")+")")
+		ors = append(ors, "("+strings.Join(wordMatches, " AND ")+")")
 	}
 	if number, ok := parseQueryNumber(query); ok {
 		ors = append(ors, fmt.Sprintf("i.number = %s", addArg(number)))

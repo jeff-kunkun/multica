@@ -2,7 +2,10 @@
   "page": {
     "title": "チャット",
     "select_prompt": "会話を選ぶか、＋ で新規作成してください",
-    "agent_link_no_access": "このエージェントとチャットする権限がありません。"
+    "agent_link_no_access": "このエージェントとチャットする権限がありません。",
+    "search_placeholder": "チャットのタイトルや内容を検索…",
+    "search_clear": "検索をクリア",
+    "search_empty": "一致するチャットはありません"
   },
   "project_bar": {
     "all": "すべて",

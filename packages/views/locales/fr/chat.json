@@ -2,7 +2,10 @@
   "page": {
     "title": "Discussion",
     "select_prompt": "Choisissez une conversation, ou démarrez-en une nouvelle avec +",
-    "agent_link_no_access": "Vous n'avez pas accès à la discussion avec cet agent."
+    "agent_link_no_access": "Vous n'avez pas accès à la discussion avec cet agent.",
+    "search_placeholder": "Rechercher un titre ou un contenu de discussion…",
+    "search_clear": "Effacer la recherche",
+    "search_empty": "Aucune discussion ne correspond"
   },
   "project_bar": {
     "all": "Tout",

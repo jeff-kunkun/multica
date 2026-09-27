@@ -257,7 +257,7 @@
     "no_value": "Aucune valeur",
     "unassigned": "Non assigné",
     "empty": "Aucune tâche ne correspond à cette vue.",
-    "search_placeholder": "Rechercher un titre ou un identifiant de tâche…",
+    "search_placeholder": "Rechercher un titre, un contenu ou un identifiant…",
     "search_clear": "Effacer la recherche",
     "load_failed": "Échec du chargement des tâches.",
     "load_failed_retry": "Réessayer",

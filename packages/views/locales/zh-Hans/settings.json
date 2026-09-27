@@ -231,6 +231,10 @@
         "label": "在任务中查找",
         "description": "搜索当前打开的任务详情。"
       },
+      "focusPageSearch": {
+        "label": "聚焦页内搜索",
+        "description": "跳到聊天页或任务页的搜索框。"
+      },
       "archiveInboxItem": {
         "label": "归档通知",
         "description": "归档当前打开的收件箱通知；在归档列表中则取消归档。"

@@ -2498,6 +2498,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListChatSessions)
 				// Registered before /{sessionId} so "make-private" is not captured as an id.
 				r.Post("/make-private", h.MakeChatSessionsPrivate)
+				r.Get("/search", h.SearchChatMessages)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Get("/access", h.GetChatSessionAccess)

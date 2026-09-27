@@ -275,7 +275,7 @@
     "no_value": "値なし",
     "unassigned": "未割り当て",
     "empty": "この表示に一致するタスクはありません。",
-    "search_placeholder": "タイトルまたはタスク ID を検索…",
+    "search_placeholder": "タイトル・内容・タスク ID を検索…",
     "search_clear": "検索をクリア",
     "load_failed": "タスクを読み込めませんでした。",
     "load_failed_retry": "再試行",
