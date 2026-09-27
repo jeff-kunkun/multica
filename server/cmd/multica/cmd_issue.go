@@ -638,6 +638,7 @@ func init() {
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
+	issueCreateCmd.Flags().String("routing-facts", "", `Routing facts as JSON, so routing skips the analysis call: {"scope":"small|module|cross_module","clarity":"clear|vague","risk":"low|medium|high","needs_human":false,"summary":"..."}`)
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
@@ -1493,6 +1494,14 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
 		body["allow_duplicate"] = true
+	}
+	if v, _ := cmd.Flags().GetString("routing-facts"); strings.TrimSpace(v) != "" {
+		var facts map[string]any
+		if err := json.Unmarshal([]byte(v), &facts); err != nil {
+			return fmt.Errorf("--routing-facts must be a JSON object: %w", err)
+		}
+		// The server validates the values; the CLI only checks the shape.
+		body["routing_facts"] = facts
 	}
 	aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
 	if resolveErr != nil {
