@@ -190,11 +190,12 @@ describe("RoutingTab", () => {
     const { qc } = render();
     await healthSettled(qc);
 
-    // Matched on the clause that only the protocol line carries: the endpoint
-    // field's own help text names TypeSafe too, and asserting on the product
-    // name alone would pass on a page that never reported the protocol.
+    // The System One explanation paragraph was dropped from the copy; the page
+    // still names the workspace's own endpoint as the one receiving the call.
     expect(
-      screen.getByText(/measured rather than self-reported/i),
+      screen.getByText(
+        "The model id is sent to this workspace's own endpoint: api.typesafe.ai.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -391,7 +392,8 @@ describe("RoutingTab", () => {
     });
     const { qc } = render();
     await healthSettled(qc);
-    expect(await screen.findByText(/MULTICA_LLM_BASE_URL/)).toBeTruthy();
+    expect(await screen.findByText(/No endpoint is available/)).toBeTruthy();
+    expect(screen.queryByText(/MULTICA_LLM_BASE_URL/)).toBeNull();
   });
 
   it("re-checks on demand and adopts the fresh report", async () => {
