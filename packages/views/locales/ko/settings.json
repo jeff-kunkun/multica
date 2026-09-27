@@ -231,6 +231,10 @@
         "label": "태스크에서 찾기",
         "description": "열린 태스크 상세 내용에서 검색합니다."
       },
+      "focusPageSearch": {
+        "label": "페이지 내 검색",
+        "description": "채팅 페이지나 태스크 페이지의 검색창으로 이동합니다."
+      },
       "archiveInboxItem": {
         "label": "알림 보관",
         "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다."

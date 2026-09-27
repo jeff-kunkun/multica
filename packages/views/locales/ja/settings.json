@@ -231,6 +231,10 @@
         "label": "タスク内を検索",
         "description": "開いているタスクの詳細を検索します。"
       },
+      "focusPageSearch": {
+        "label": "ページ内検索",
+        "description": "チャットページやタスクページの検索ボックスに移動します。"
+      },
       "archiveInboxItem": {
         "label": "通知をアーカイブ",
         "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。"

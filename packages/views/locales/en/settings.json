@@ -231,6 +231,10 @@
         "label": "Find in issue",
         "description": "Search within the open issue detail."
       },
+      "focusPageSearch": {
+        "label": "Focus page search",
+        "description": "Jump into the search box on the chat or issues page."
+      },
       "archiveInboxItem": {
         "label": "Archive notification",
         "description": "Archive the open inbox notification, or restore it while reading the archive."

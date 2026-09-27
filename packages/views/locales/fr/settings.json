@@ -231,6 +231,10 @@
         "label": "Rechercher dans la tâche",
         "description": "Rechercher dans la tâche ouverte."
       },
+      "focusPageSearch": {
+        "label": "Rechercher dans la page",
+        "description": "Placer le curseur dans la recherche de la page Discussions ou Tâches."
+      },
       "archiveInboxItem": {
         "label": "Archiver la notification",
         "description": "Archiver la notification ouverte, ou la restaurer lors de la consultation des archives."

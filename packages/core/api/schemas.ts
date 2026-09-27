@@ -2361,6 +2361,21 @@ export const ChatSessionListSchema = z
   .default([]);
 export const EMPTY_CHAT_SESSION_LIST: ChatSession[] = [];
 
+/** One chat whose messages contain the chat page's search text. */
+export const ChatMessageSearchHitSchema = z.object({
+  session_id: z.string(),
+  message_id: z.string(),
+  role: z.string().catch(""),
+  snippet: z.string().catch(""),
+  created_at: z.string().catch(""),
+});
+export type ChatMessageSearchHit = z.infer<typeof ChatMessageSearchHitSchema>;
+export const ChatMessageSearchHitListSchema = z
+  .array(ChatMessageSearchHitSchema.nullable().catch(null))
+  .transform((hits) => hits.filter((hit): hit is ChatMessageSearchHit => hit !== null))
+  .default([]);
+export const EMPTY_CHAT_MESSAGE_SEARCH_HITS: ChatMessageSearchHit[] = [];
+
 // Deferred-cancellation draft restores
 // (`GET /api/chat/sessions/{id}/draft-restores`, #5219) feed the composer
 // directly: `content` becomes the draft text, `attachments` re-bind on

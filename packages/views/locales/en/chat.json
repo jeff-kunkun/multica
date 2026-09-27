@@ -2,7 +2,10 @@
   "page": {
     "title": "Chat",
     "select_prompt": "Pick a conversation, or start a new one with +",
-    "agent_link_no_access": "You don't have access to chat with this agent."
+    "agent_link_no_access": "You don't have access to chat with this agent.",
+    "search_placeholder": "Search chat titles or content…",
+    "search_clear": "Clear search",
+    "search_empty": "No chats match"
   },
   "project_bar": {
     "all": "All",

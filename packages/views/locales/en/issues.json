@@ -279,7 +279,7 @@
     "no_value": "No value",
     "unassigned": "Unassigned",
     "empty": "No issues match this view.",
-    "search_placeholder": "Search title or issue ID…",
+    "search_placeholder": "Search title, content or ID…",
     "search_clear": "Clear search",
     "load_failed": "Failed to load issues.",
     "load_failed_retry": "Retry",
