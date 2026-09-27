@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>手机端内嵌预览 · 双滚动条改动预览</title>
+<style>
+  :root { --bg:#f6f6f7; --fg:#18181b; --muted:#71717a; --border:#e4e4e7; --accent:#2563eb; --bubble:#dbe7fd; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; color:var(--fg); background:#fff; padding:32px 40px 60px; }
+  h1 { font-size:24px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 28px; }
+  h2 { font-size:17px; margin:36px 0 14px; }
+  .row { display:flex; gap:36px; flex-wrap:wrap; align-items:flex-start; }
+  .col { display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .tag { font-weight:600; padding:3px 12px; border-radius:999px; font-size:13px; }
+  .bad { background:#fdecec; color:#b42318; } .good { background:#e8f6ec; color:#1a7f37; } .info { background:#eef2ff; color:#3538cd; }
+  .phone { width:300px; height:600px; border:10px solid #1c1c1e; border-radius:38px; overflow:hidden; background:var(--bg); position:relative; display:flex; flex-direction:column; }
+  .bar { height:48px; flex:none; display:flex; align-items:center; gap:8px; padding:0 14px; background:#fff; border-bottom:1px solid var(--border); font-weight:600; }
+  .bar .av { width:26px; height:26px; border-radius:50%; background:#c7d2fe; }
+  .feed { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
+  .msg { background:#fff; border:1px solid var(--border); border-radius:12px; padding:8px 11px; max-width:88%; }
+  .me { align-self:flex-end; background:var(--bubble); border-color:#bfd3fb; }
+  .composer { flex:none; height:52px; margin:8px; border:1px solid var(--border); border-radius:12px; background:#fff; color:var(--muted); display:flex; align-items:center; padding:0 12px; }
+  /* 内嵌预览 */
+  .embed { position:relative; border:1px solid var(--border); border-radius:10px; background:#fff; overflow:hidden; flex:none; }
+  .embed .doc { padding:12px; font-size:12px; }
+  .embed .doc h4 { margin:0 0 6px; font-size:13px; }
+  .embed .doc p { margin:0 0 8px; color:#52525b; }
+  .embed .doc .blk { height:40px; border-radius:6px; background:#eef2ff; margin-bottom:8px; }
+  .trap { height:330px; overflow-y:scroll; outline:2px dashed #ef4444; outline-offset:-2px; }
+  .poster { height:200px; }
+  .poster::after { content:""; position:absolute; left:0; right:0; bottom:0; height:70px; background:linear-gradient(transparent,#fff); pointer-events:none; }
+  .open { position:absolute; left:50%; bottom:10px; transform:translateX(-50%); z-index:2; background:var(--fg); color:#fff; border-radius:999px; padding:5px 14px; font-size:12px; white-space:nowrap; }
+  .tools { position:absolute; right:6px; top:6px; z-index:2; display:flex; gap:2px; background:#fffffff2; border:1px solid var(--border); border-radius:6px; padding:2px 4px; font-size:12px; color:var(--muted); }
+  .ghost { opacity:.15; }
+  .finger { position:absolute; width:34px; height:34px; border-radius:50%; background:rgba(239,68,68,.25); border:2px solid #ef4444; z-index:5; }
+  .finger.ok { background:rgba(26,127,55,.2); border-color:#1a7f37; }
+  .note { font-size:12px; color:var(--muted); width:300px; }
+  .modal { position:absolute; inset:0; background:#fff; display:flex; flex-direction:column; z-index:3; }
+  .modal .mbar { height:48px; display:flex; align-items:center; justify-content:space-between; padding:0 14px; border-bottom:1px solid var(--border); font-weight:600; }
+  .modal .doc { flex:1; overflow-y:auto; padding:14px; font-size:13px; }
+  .modal .doc .blk { height:60px; border-radius:6px; background:#eef2ff; margin-bottom:10px; }
+  table { border-collapse:collapse; margin-top:10px; font-size:13px; }
+  td,th { border:1px solid var(--border); padding:7px 12px; text-align:left; vertical-align:top; }
+  th { background:#fafafa; }
+</style>
+</head>
+<body>
+<h1>手机端内嵌预览 · 双滚动条改动预览</h1>
+<p class="sub">示意图：按源码结构还原的静态页面，数据是示例。涉及聊天和评论里内嵌的 HTML 附件、<code>```html</code> 代码块预览。</p>
+
+<h2>① 聊天里收到一个 HTML 附件</h2>
+<div class="row">
+  <div class="col">
+    <span class="tag bad">改前：480px 可滚动小窗，占掉大半屏</span>
+    <div class="phone">
+      <div class="bar"><span>←</span><span class="av"></span>排查部署失败</div>
+      <div class="feed">
+        <div class="msg">预览页做好了，见附件 👇</div>
+        <div class="embed trap">
+          <div class="tools ghost">⤢ ↗ ⤓</div>
+          <div class="doc">
+            <h4>手机端聊天返回 · 改动预览</h4>
+            <p>示意图：按源码结构还原的静态页面…</p>
+            <div class="blk"></div><div class="blk"></div><div class="blk"></div>
+            <p>① 聊天页打开一个会话…</p>
+            <div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div>
+          </div>
+        </div>
+        <div class="msg me">收到，我看看</div>
+      </div>
+      <span class="finger" style="left:130px;top:260px"></span>
+      <div class="composer">给 孙悟空 发消息…</div>
+    </div>
+    <p class="note">手指落在红框里，滚的是预览里面那页，聊天不动；预览滚到底才偶尔带动聊天。右上角工具栏靠鼠标悬停才出现，手机上几乎看不见，想全屏都找不到按钮。</p>
+  </div>
+
+  <div class="col">
+    <span class="tag good">改后：变成不可滚的缩略图，点一下全屏看</span>
+    <div class="phone">
+      <div class="bar"><span>←</span><span class="av"></span>排查部署失败</div>
+      <div class="feed">
+        <div class="msg">预览页做好了，见附件 👇</div>
+        <div class="embed poster">
+          <div class="tools">⤢ ↗ ⤓</div>
+          <div class="doc">
+            <h4>手机端聊天返回 · 改动预览</h4>
+            <p>示意图：按源码结构还原的静态页面…</p>
+            <div class="blk"></div><div class="blk"></div><div class="blk"></div>
+          </div>
+          <span class="open">点开全屏查看</span>
+        </div>
+        <div class="msg me">收到，我看看</div>
+        <div class="msg">另外 PR #396 已经合了</div>
+      </div>
+      <span class="finger ok" style="left:130px;top:190px"></span>
+      <div class="composer">给 孙悟空 发消息…</div>
+    </div>
+    <p class="note">缩略图高度降到约 200px、内部不接收手势——手指放哪都是在滚聊天。整块可以点，点了进全屏；工具栏常驻显示。</p>
+  </div>
+
+  <div class="col">
+    <span class="tag info">点开后：全屏预览，只有这一个滚动</span>
+    <div class="phone">
+      <div class="modal">
+        <div class="mbar"><span>✕ 手机端聊天返回…</span><span style="color:var(--muted);font-weight:400">↗ ⤓</span></div>
+        <div class="doc">
+          <h4 style="margin:0 0 8px">手机端聊天返回 · 改动预览</h4>
+          <p style="color:#52525b">示意图：按源码结构还原的静态页面…</p>
+          <div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div>
+        </div>
+      </div>
+    </div>
+    <p class="note">复用现有的全屏预览（桌面点 ⤢ 打开的同一个）。关掉或手机返回手势回到聊天原位置。</p>
+  </div>
+</div>
+
+<h2>② 影响范围</h2>
+<table>
+  <tr><th>场景</th><th>手机（窄屏）</th><th>电脑</th></tr>
+  <tr><td>HTML 附件内嵌预览（聊天、评论、任务描述）</td><td>改成缩略图 + 点开全屏</td><td>不变，仍是 480px 可交互小窗</td></tr>
+  <tr><td><code>```html</code> 代码块的预览</td><td>同上</td><td>不变</td></tr>
+  <tr><td>PDF</td><td>本来就是文件卡片，点开全屏，不内嵌，不用改</td><td>不变</td></tr>
+  <tr><td>全屏预览 / 新标签页打开</td><td>不变，里面正常滚</td><td>不变</td></tr>
+</table>
+<p class="note" style="width:auto;margin-top:12px">没选的方案：① 让预览按内容自动撑高——长页面会把聊天撑得老长；② 「点一下才激活滚动」——还是两层滚动，只是多了一步，手机上容易误触。</p>
+</body>
+</html>
