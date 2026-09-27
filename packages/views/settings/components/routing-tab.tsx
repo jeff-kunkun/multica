@@ -521,7 +521,6 @@ export function RoutingTab() {
 
       <SettingsSection
         title={t(($) => $.routing.policy_label)}
-        description={t(($) => $.routing.policy_description)}
         action={
           <div className="flex items-center gap-2">
             <SettingsSaveState
@@ -789,11 +788,6 @@ function GatewayNote({
     <div className="flex flex-col gap-1 px-0.5">
       {host ? (
         <p className="text-caption leading-5 text-muted-foreground">{scoped}</p>
-      ) : null}
-      {role?.gateway_protocol === "systemone" ? (
-        <p className="text-caption leading-5 text-muted-foreground">
-          {t(($) => $.routing.gateway_protocol_systemone)}
-        </p>
       ) : null}
       {health?.gateway_default_model ? (
         <p className="text-caption leading-5 text-muted-foreground">
