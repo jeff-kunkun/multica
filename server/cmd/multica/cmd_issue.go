@@ -661,7 +661,7 @@ func init() {
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
-	issueUpdateCmd.Flags().String("no-code", "", "Why this issue carries no code delivery (docs, research). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
+	issueUpdateCmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
@@ -675,7 +675,7 @@ func init() {
 	issueStatusCmd.Flags().String("needs-human", "", "Member UUID a blocked issue is waiting on")
 	registerIssueCloseFlags(issueCloseCmd)
 	registerIssueHandoffFlags(issueHandoffCmd)
-	issueStatusCmd.Flags().String("no-code", "", "Why this issue carries no code delivery (docs, research). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
+	issueStatusCmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
@@ -1901,7 +1901,7 @@ func registerIssueCloseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("wait-probe", "", "How to check the wait condition")
 	cmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
 	cmd.Flags().String("needs-human", "", "Member UUID whose decision or acceptance the issue waits on")
-	cmd.Flags().String("no-code", "", "Why this issue carries no code delivery (docs, research). An agent's --outcome in_review without a linked open/merged PR is refused unless this is given")
+	cmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent's --outcome in_review without a linked open/merged PR is refused unless this is given")
 	cmd.Flags().String("verdict", "", "Acceptance verdict, reviewer only: pass (merges and closes)")
 	cmd.Flags().String("output", "json", "Output format: table or json")
 }
