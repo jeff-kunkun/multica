@@ -4893,6 +4893,15 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				params.Stage = pgtype.Int4{Valid: false} // explicit null = unstage
 			}
 		}
+		// Sub-issues are execution-only. A batch re-parent can otherwise carry
+		// a legacy acceptance seat (or a seat copied from the parent) into the
+		// child because this path starts from the existing row. Keep the batch
+		// write aligned with UpdateIssue: any resulting parent link clears both
+		// reviewer columns before the status guard and atomic update run.
+		if params.ParentIssueID.Valid {
+			params.ReviewerType = pgtype.Text{Valid: false}
+			params.ReviewerID = pgtype.UUID{Valid: false}
+		}
 
 		// Validate the resulting assignee pair when this batch update touches
 		// either assignee field. Skip the issue silently on failure.
