@@ -10,8 +10,6 @@ import (
 // then ample goes first, then the name decides. 「允许上调一档」 lets a rung
 // whose every seat is tight borrow an ample seat from the rung above.
 
-func boolPtr(b bool) *bool { return &b }
-
 func TestNormalizeUsageAcceptsKeyAndLabel(t *testing.T) {
 	for _, tc := range []struct {
 		in   string

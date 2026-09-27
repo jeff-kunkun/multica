@@ -1695,11 +1695,11 @@
   "routing": {
     "title": "ルーティング",
     "description": "課題の作成時とステータス変更時に、担当席とレビュー席を自動で埋めます。",
-    "section_title": "ルーティングモデル",
+    "section_title": "スイッチとしきい値",
     "enabled_label": "自動アサインを有効にする",
     "enabled_description": "オフにすると自動で埋めなくなり、既存の値は保持されます。",
-    "model_label": "ルーティングモデル",
-    "model_description": "エンドポイントとキーを保存するとモデルを選べます。モデル ID の手入力もできます。",
+    "model_label": "判定モデル",
+    "model_description": "ティアを選ぶモデルです。エンドポイントとキーを保存すると選べます。モデル ID の手入力もできます。",
     "model_discovering": "エンドポイントからモデルを取得中…",
     "model_discover_failed": "モデルを取得できませんでした。モデル ID を手入力してください。",
     "model_discover_empty": "エンドポイントからモデルが返されませんでした。モデル ID を手入力してください。",
@@ -1716,7 +1716,6 @@
     "gateway_endpoint_workspace": "モデル id はこのワークスペース独自のエンドポイントに送信されます：{{host}}。",
     "gateway_endpoint_deployment": "モデル id はデプロイ共通の LLM エンドポイントに送信されます：{{host}}。",
     "gateway_unset": "利用できるエンドポイントがありません。下でエンドポイントとキーを設定してください。",
-    "gateway_title": "このワークスペース独自のエンドポイント",
     "gateway_url_label": "エンドポイント URL",
     "gateway_url_description": "OpenAI 互換の base URL。空欄ならデプロイ共用のエンドポイントを使います。",
     "gateway_url_placeholder": "https://api.example.com/v1 または https://api.typesafe.ai",
@@ -1747,7 +1746,7 @@
       },
       "incomplete": {
         "chip": "未完了",
-        "detail": "ルーティングモデルが未選択のため、まだ動作しません。"
+        "detail": "オンのモデルにモデル ID がないため、まだ動作しません。"
       },
       "enabled": {
         "chip": "有効",
@@ -1781,7 +1780,24 @@
     "seats_bulk_tier": "ティア…",
     "seats_bulk_usage": "使用量…",
     "seats_bulk_clear": "キャンセル",
-    "seats_save_error": "保存できませんでした。もう一度お試しください。"
+    "seats_save_error": "保存できませんでした。もう一度お試しください。",
+    "judge_title": "判定モデル",
+    "judge_description": "ティア（弱 / 中 / 強 / 最強）を確率付きで選びます。分析モデルがオンのときは、整理された事実だけを見ます。",
+    "judge_enabled_label": "判定モデルを使う",
+    "analysis_title": "分析モデル",
+    "analysis_description": "チケット全体を読み、いくつかの事実にまとめます：変更範囲、要件の明確さ、失敗のコスト、人の判断が必要か。止まったチケットには、どこで詰まっているかを書きます。",
+    "analysis_enabled_label": "分析モデルを使う",
+    "analysis_model_label": "分析モデル",
+    "analysis_model_description": "OpenAI 互換のチャットモデルなら何でも使えます。事実はチケットごとにキャッシュされ、タイトルか説明が変わったときだけ再計算されます。",
+    "analysis_url_label": "分析モデルのエンドポイント URL",
+    "analysis_url_description": "OpenAI 互換の base URL。両方空欄ならデプロイ共通のエンドポイントを使います。",
+    "analysis_key_label": "分析モデルの API キー",
+    "modes": {
+      "none": "どちらもオフ：モデルは呼ばれず、すべてのチケットがフォールバックのティアになります。",
+      "analysis": "分析のみ：分析モデルがティアを選び、しきい値はその自己申告の信頼度に適用されます。",
+      "analysis_judge": "両方オン：分析モデルが事実をまとめ、判定モデルがそれをもとにティアを選びます。",
+      "judge": "判定のみ：判定モデルがチケットを読んでティアを選びます。"
+    }
   },
   "project_sharing": {
     "title": "権限と共有",

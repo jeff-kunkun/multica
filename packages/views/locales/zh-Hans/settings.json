@@ -1695,11 +1695,11 @@
   "routing": {
     "title": "路由",
     "description": "新建任务和状态变化时，自动填写执行席与验收席。",
-    "section_title": "路由模型",
+    "section_title": "开关与阈值",
     "enabled_label": "启用自动选派",
     "enabled_description": "关闭后不再自动填写，已有值保留。",
-    "model_label": "路由模型",
-    "model_description": "保存端点和 Key 后可选择模型，也可手动填写模型 ID。",
+    "model_label": "判断模型",
+    "model_description": "选档用的模型。保存端点和 Key 后可选择，也可手动填写模型 ID。",
     "model_discovering": "正在从端点读取模型…",
     "model_discover_failed": "模型读取失败，请手动填写模型 ID。",
     "model_discover_empty": "端点没有返回模型，请手动填写模型 ID。",
@@ -1716,7 +1716,6 @@
     "gateway_endpoint_workspace": "模型 id 发往本工作区自己的端点：{{host}}。",
     "gateway_endpoint_deployment": "模型 id 发往部署共用的 LLM 端点：{{host}}。",
     "gateway_unset": "还没有可用的端点，请在下面填写端点和 Key。",
-    "gateway_title": "本工作区自己的端点",
     "gateway_url_label": "端点 URL",
     "gateway_url_description": "OpenAI 兼容的 base URL，留空则使用部署共用端点。",
     "gateway_url_placeholder": "https://api.example.com/v1 或 https://api.typesafe.ai",
@@ -1747,7 +1746,7 @@
       },
       "incomplete": {
         "chip": "未完成",
-        "detail": "还没选路由模型，暂不生效。"
+        "detail": "开着的模型还没填模型 ID，路由尚未生效。"
       },
       "enabled": {
         "chip": "已启用",
@@ -1781,7 +1780,24 @@
     "seats_bulk_tier": "档位…",
     "seats_bulk_usage": "用量…",
     "seats_bulk_clear": "取消",
-    "seats_save_error": "没有保存，请重试。"
+    "seats_save_error": "没有保存，请重试。",
+    "judge_title": "判断模型",
+    "judge_description": "只管选档（弱 / 中 / 强 / 最强）并给出概率。分析模型开着时，它只看整理好的事实。",
+    "judge_enabled_label": "启用判断模型",
+    "analysis_title": "分析模型",
+    "analysis_description": "读完整张票，整理成几条事实：改动范围、需求是否清楚、出错代价、是否要人拍板。票停下时写一句卡在哪了。",
+    "analysis_enabled_label": "启用分析模型",
+    "analysis_model_label": "分析模型",
+    "analysis_model_description": "任意 OpenAI 兼容的对话模型。整理出的事实按票缓存，只有标题或描述改了才重算。",
+    "analysis_url_label": "分析模型端点 URL",
+    "analysis_url_description": "OpenAI 兼容的 base URL。两项都留空就用部署共用的端点。",
+    "analysis_key_label": "分析模型 API Key",
+    "modes": {
+      "none": "两个都没开：不调用模型，每张票走兜底档。",
+      "analysis": "只开分析：分析模型直接选档，阈值卡它自报的置信度。",
+      "analysis_judge": "两个都开：分析模型整理事实，判断模型据此选档。",
+      "judge": "只开判断：判断模型读票选档。"
+    }
   },
   "project_sharing": {
     "title": "权限与共享",
