@@ -131,6 +131,31 @@ export interface ListGitHubInstallationsResponse {
   can_manage?: boolean;
 }
 
+/** A registered github.com repo and the bound installations that deliver its
+ * PR events (DENE-959). Empty `covered_by` means its PRs never link. */
+export interface GitHubCoverageRepo {
+  full_name: string;
+  url: string;
+  covered_by: string[];
+}
+
+/** A repo an installation covers but the workspace has not registered. */
+export interface GitHubCoverageUnregisteredRepo {
+  full_name: string;
+  html_url: string;
+  account_login: string;
+}
+
+export interface GitHubCoverageResponse {
+  /** False when the server cannot list installation repos (no App key). */
+  available: boolean;
+  registered: GitHubCoverageRepo[];
+  unregistered: GitHubCoverageUnregisteredRepo[];
+  /** Installations whose repo list could not be read; coverage unknown. */
+  failed_accounts: string[];
+  truncated: boolean;
+}
+
 export interface GitHubConnectResponse {
   /** The GitHub App install URL the browser should open. Empty when `configured` is false. */
   url?: string;

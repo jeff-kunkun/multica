@@ -71,6 +71,7 @@ import type {
   IssueTableRowsResponse,
   ListIssuesResponse,
   ListGitHubInstallationsResponse,
+  GitHubCoverageResponse,
   ListGitHubRepositoriesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
@@ -372,6 +373,30 @@ export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsRe
   configured: false,
   repository_browse_configured: false,
   can_manage: false,
+};
+
+export const GitHubCoverageResponseSchema = z.object({
+  available: z.boolean().optional().default(false),
+  registered: z.array(z.object({
+    full_name: z.string(),
+    url: z.string(),
+    covered_by: z.array(z.string()).default([]),
+  }).loose()).default([]),
+  unregistered: z.array(z.object({
+    full_name: z.string(),
+    html_url: z.string(),
+    account_login: z.string(),
+  }).loose()).default([]),
+  failed_accounts: z.array(z.string()).default([]),
+  truncated: z.boolean().optional().default(false),
+}).loose();
+
+export const EMPTY_GITHUB_COVERAGE_RESPONSE: GitHubCoverageResponse = {
+  available: false,
+  registered: [],
+  unregistered: [],
+  failed_accounts: [],
+  truncated: false,
 };
 
 export const GitHubConnectResponseSchema = z.object({
