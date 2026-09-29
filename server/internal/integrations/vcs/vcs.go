@@ -25,15 +25,12 @@ const (
 	KindForgejo Kind = "forgejo"
 	KindGitea   Kind = "gitea"
 	KindGitLab  Kind = "gitlab"
-	KindGitHub  Kind = "github"
 )
 
 // Valid reports whether k is a known provider kind.
 func (k Kind) Valid() bool {
 	switch k {
 	case KindForgejo, KindGitea, KindGitLab:
-		return true
-	case KindGitHub:
 		return true
 	}
 	return false

@@ -31,9 +31,8 @@ import { api } from "@multica/core/api";
 import type { ConnectVCSResponse, VCSProvider } from "@multica/core/types";
 import { useT } from "../../i18n";
 
-const PROVIDERS: VCSProvider[] = ["github", "gitlab", "forgejo", "gitea"];
+const PROVIDERS: VCSProvider[] = ["forgejo", "gitea", "gitlab"];
 const PROVIDER_LABELS: Record<VCSProvider, string> = {
-  github: "GitHub token",
   forgejo: "Forgejo",
   gitea: "Gitea",
   gitlab: "GitLab",
@@ -236,7 +235,7 @@ export function VCSTab() {
                   <Label htmlFor="vcs-url">{t(($) => $.vcs.form_instance_url_label)}</Label>
                   <Input
                     id="vcs-url"
-                    placeholder={provider === "github" ? "https://github.com" : "https://git.example.com"}
+                    placeholder="https://forgejo.example.com"
                     value={instanceUrl}
                     onChange={(e) => setInstanceUrl(e.target.value)}
                     disabled={connecting}
