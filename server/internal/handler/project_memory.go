@@ -184,6 +184,13 @@ func (h *Handler) projectMemoryIssue(ctx context.Context, issue db.Issue) *Proje
 
 func stringPtr(value string) *string { return &value }
 
+// ListProjectMemoryLocations is the checklist the close dialog and any other
+// client submit against. It is the same list projectmemory.Locations owns;
+// callers must not keep a second copy of the keys.
+func (h *Handler) ListProjectMemoryLocations(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"locations": projectmemory.Locations()})
+}
+
 // GetProjectMemory is the read-only status endpoint used by `project memory
 // status` and the project page. It always returns all five positions, even
 // before a daemon has reported its first check.
