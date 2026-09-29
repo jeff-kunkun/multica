@@ -44,7 +44,7 @@ App 用 GitHub 的 manifest 流程创建，字段和以前一样：
 
 不是所有者的人看到的是：需要工作区所有者来开通。
 
-智能体不打开浏览器时，用 `multica github-app status` 看现在是未配置、环境变量还是设置页创建的，用 `multica github-app setup-link`（可加 `--org`）拿到一个链接。人用已登录 GitHub 的浏览器打开这个链接，完成那一次密码确认。两条命令都支持 `--output json`。
+智能体不打开浏览器时，用 `multica github-app status` 看现在是未配置、环境变量还是设置页创建的，用 `multica github-app setup-link`（可加 `--org`）拿到一个链接。人用已登录 GitHub 的浏览器打开这个链接，完成那一次密码确认。链接只能打开一次、10 分钟内有效，过期或重复打开会显示错误页，重新生成即可。桌面 App 里点设置页的「先创建 GitHub App」也是用系统浏览器打开同一种链接（桌面窗口不允许直接跳到 GitHub）。两条命令都支持 `--output json`。
 
 ### 没有界面时
 

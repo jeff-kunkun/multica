@@ -1262,6 +1262,7 @@
     "github_app_creating": "Ouverture de GitHub",
     "github_app_error_expired": "La confirmation GitHub a expiré. Recommencez.",
     "github_app_error_failed": "La création de l'app GitHub n'a pas abouti.",
+    "github_app_opened_in_browser": "GitHub s'est ouvert dans votre navigateur. Terminez la création de l'app, puis revenez ici et actualisez.",
     "github_app_error_duplicate": "Une app GitHub est déjà configurée.",
     "github_app_error_taken": "Cette installation GitHub est déjà rattachée à un autre espace.",
     "github_app_connected": "GitHub est connecté.",

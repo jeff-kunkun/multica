@@ -60,20 +60,8 @@ func TestGitHubAppGuards(t *testing.T) {
 	if rec := begin("member"); rec.Code != http.StatusForbidden {
 		t.Fatalf("non-owner begin = %d, want 403", rec.Code)
 	}
-	rec := begin("owner")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("owner begin = %d body %s", rec.Code, rec.Body.String())
-	}
-	var setup githubAppSetupResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &setup); err != nil {
-		t.Fatal(err)
-	}
-	if setup.ActionURL != "https://github.com/organizations/acme/settings/apps/new" {
-		t.Fatalf("action = %s", setup.ActionURL)
-	}
-	if !strings.Contains(setup.LaunchURL, "/api/github/app/launch?state=") {
-		t.Fatalf("launch = %s", setup.LaunchURL)
-	}
+	// The owner's success path mints a stored launch token; it is covered by
+	// TestGitHubAppLaunchLinkIsSingleUse against a real database.
 
 	t.Setenv("GITHUB_APP_SLUG", "from-env")
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "env-hook")
@@ -321,5 +309,129 @@ func TestGitHubAppCallbackAndInstallationTaken(t *testing.T) {
 	}
 	if !seen["personal"] || !seen["acme-org"] {
 		t.Fatalf("installations = %#v", listed.Installations)
+	}
+}
+
+func TestGitHubAppLaunchLinkIsSingleUse(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("no database")
+	}
+	clearGitHubAppEnv(t)
+	ctx := context.Background()
+	box, err := githubapp.NewSecretBox("github-app-test-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prevBox := testHandler.GitHubAppSecrets
+	prevPublic := testHandler.cfg.PublicURL
+	prevApp := testHandler.cfg.AppURL
+	testHandler.GitHubAppSecrets = box
+	testHandler.cfg.PublicURL = "https://api.example.test"
+	testHandler.cfg.AppURL = "https://app.example.test"
+	t.Cleanup(func() {
+		testHandler.GitHubAppSecrets = prevBox
+		testHandler.cfg.PublicURL = prevPublic
+		testHandler.cfg.AppURL = prevApp
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM github_app_launch_token`)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id IN (SELECT id FROM "user" WHERE email = 'gh-launch-member@multica.ai')`)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE email = 'gh-launch-member@multica.ai'`)
+	})
+	if _, err := testPool.Exec(ctx, `DELETE FROM github_app_credential`); err != nil {
+		t.Fatal(err)
+	}
+
+	begin := func(role, userID string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/github/app", strings.NewReader(`{"org":"acme"}`))
+		req = withGitHubRole(req, role, testWorkspaceID, userID)
+		req = withURLParam(req, "id", testWorkspaceID)
+		rec := httptest.NewRecorder()
+		testHandler.BeginGitHubApp(rec, req)
+		return rec
+	}
+	launchURL := func(rec *httptest.ResponseRecorder) string {
+		t.Helper()
+		if rec.Code != http.StatusOK {
+			t.Fatalf("begin = %d body %s", rec.Code, rec.Body.String())
+		}
+		var setup githubAppSetupResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &setup); err != nil {
+			t.Fatal(err)
+		}
+		if setup.ActionURL != "https://github.com/organizations/acme/settings/apps/new" {
+			t.Fatalf("action = %s", setup.ActionURL)
+		}
+		if !strings.HasPrefix(setup.LaunchURL, "https://api.example.test/api/github/app/launch?token=") {
+			t.Fatalf("launch = %s", setup.LaunchURL)
+		}
+		if strings.Contains(setup.LaunchURL, "state=") {
+			t.Fatalf("launch link must not carry the signed state: %s", setup.LaunchURL)
+		}
+		return setup.LaunchURL
+	}
+	open := func(link string) *httptest.ResponseRecorder {
+		t.Helper()
+		u, err := url.Parse(link)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodGet, u.RequestURI(), nil)
+		rec := httptest.NewRecorder()
+		testHandler.LaunchGitHubApp(rec, req)
+		return rec
+	}
+
+	link := launchURL(begin("owner", testUserID))
+	first := open(link)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first open = %d body %s", first.Code, first.Body.String())
+	}
+	if !strings.Contains(first.Body.String(), `action="https://github.com/organizations/acme/settings/apps/new"`) {
+		t.Fatalf("first open page = %s", first.Body.String())
+	}
+	second := open(link)
+	if second.Code != http.StatusGone || !strings.Contains(second.Body.String(), "不能重复使用") {
+		t.Fatalf("reuse = %d body %s", second.Code, second.Body.String())
+	}
+	if ct := second.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("reuse content type = %s", ct)
+	}
+
+	expired := launchURL(begin("owner", testUserID))
+	token := strings.TrimPrefix(expired, "https://api.example.test/api/github/app/launch?token=")
+	if _, err := testPool.Exec(ctx, `UPDATE github_app_launch_token SET expires_at = now() - interval '1 minute' WHERE token_hash = $1`, githubAppLaunchTokenHash(token)); err != nil {
+		t.Fatal(err)
+	}
+	if rec := open(expired); rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), "已过期") {
+		t.Fatalf("expired = %d body %s", rec.Code, rec.Body.String())
+	}
+	if rec := open("https://api.example.test/api/github/app/launch?token=nope"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "无效") {
+		t.Fatalf("unknown = %d body %s", rec.Code, rec.Body.String())
+	}
+
+	// A state minted for someone who is not the owner (owner demoted after
+	// minting, for example) is refused when the link is opened.
+	var memberUser string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('Launch Member', 'gh-launch-member@multica.ai') RETURNING id
+	`).Scan(&memberUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, memberUser); err != nil {
+		t.Fatal(err)
+	}
+	if rec := begin("member", memberUser); rec.Code != http.StatusForbidden {
+		t.Fatalf("member begin = %d, want 403", rec.Code)
+	}
+	state, err := githubapp.SignState("github-app-test-secret", testWorkspaceID, memberUser, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberToken, err := testHandler.mintGitHubAppLaunchToken(ctx, state, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := open("https://api.example.test/api/github/app/launch?token=" + memberToken); rec.Code != http.StatusForbidden {
+		t.Fatalf("member launch = %d body %s", rec.Code, rec.Body.String())
 	}
 }
