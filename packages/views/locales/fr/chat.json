@@ -284,7 +284,9 @@
     "row_actions_aria": "Actions de discussion",
     "edit_access": "Modifier l'accès",
     "private_tag": "Privé",
-    "extra_tag": "Personnes en plus"
+    "extra_tag": "Personnes en plus",
+    "show_more": "Afficher plus ({{count}})",
+    "show_fewer": "Afficher moins"
   },
   "header": {
     "view_profile": "Voir le profil de l'agent",

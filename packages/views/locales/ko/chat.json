@@ -279,7 +279,9 @@
     "row_actions_aria": "채팅 작업",
     "edit_access": "권한 편집",
     "private_tag": "비공개",
-    "extra_tag": "추가 멤버"
+    "extra_tag": "추가 멤버",
+    "show_more": "더 보기 ({{count}})",
+    "show_fewer": "접기"
   },
   "header": {
     "view_profile": "Agent 프로필 보기",

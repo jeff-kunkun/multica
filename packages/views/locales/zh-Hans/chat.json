@@ -279,7 +279,9 @@
     "row_actions_aria": "聊天操作",
     "edit_access": "编辑权限",
     "private_tag": "私密",
-    "extra_tag": "额外成员"
+    "extra_tag": "额外成员",
+    "show_more": "显示更多（{{count}}）",
+    "show_fewer": "收起"
   },
   "header": {
     "view_profile": "查看智能体资料",
