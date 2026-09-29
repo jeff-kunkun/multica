@@ -10,10 +10,12 @@ import { Badge } from "@multica/ui/components/ui/badge";
 import { api } from "@multica/core/api";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useCurrentMember } from "@multica/core/permissions";
+import { runtimeListOptions } from "@multica/core/runtimes";
 import {
   routingHealthOptions,
   workspaceKeys,
   workspaceListOptions,
+  memberListOptions,
 } from "@multica/core/workspace/queries";
 import {
   roleHealth,
@@ -44,6 +46,9 @@ import {
 } from "./settings-layout";
 import { useAutoSave } from "./use-auto-save";
 import { RoutingSeatsTable } from "./routing-seats-table";
+import { RuntimePicker } from "../../agents/components/runtime-picker";
+import { ModelDropdown } from "../../agents/components/model-dropdown";
+import { ThinkingSettingField } from "../../agents/components/inspector/thinking-prop-row";
 
 /**
  * The routing section — the ONLY screen this feature adds.
@@ -87,8 +92,13 @@ export function RoutingTab() {
   const workspace = useCurrentWorkspace();
   // Definitions are owner/admin work, like every other workspace-level
   // setting. Members see the section and its state but cannot change it.
-  const { role } = useCurrentMember(workspace?.id ?? "");
+  const { role, userId } = useCurrentMember(workspace?.id ?? "");
   const canManage = role === "owner" || role === "admin";
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
+    runtimeListOptions(workspace?.id ?? ""),
+  );
+  const { data: members = [] } = useQuery(memberListOptions(workspace?.id ?? ""));
+  const analysisRuntime = runtimes.find((runtime) => runtime.id === analysisRuntimeId) ?? null;
 
   const saved = useMemo(
     () => parseRoutingSettings(workspace?.settings),
@@ -369,7 +379,7 @@ export function RoutingTab() {
 
       <SettingsSection title={t(($) => $.routing.section_title)}>
         <SettingsCard>
-          {analysisSource === "api_gateway" ? <SettingsRow
+          <SettingsRow
             label={t(($) => $.routing.enabled_label)}
             description={t(($) => $.routing.enabled_description)}
           >
@@ -379,7 +389,7 @@ export function RoutingTab() {
               onCheckedChange={setEnabled}
               aria-label={t(($) => $.routing.enabled_label)}
             />
-          </SettingsRow> : null}
+          </SettingsRow>
 
           <SettingsRow
             label={t(($) => $.routing.threshold_label)}
@@ -479,31 +489,23 @@ export function RoutingTab() {
               aria-label={t(($) => $.routing.analysis_model_label)}
             />
           </SettingsRow> : null}
-          <SettingsRow label={t(($) => $.routing.analysis_title)} description={t(($) => $.routing.analysis_description)} size="text">
+          <SettingsRow label={t(($) => $.routing.analysis_source_label)} description={t(($) => $.routing.analysis_source_description)} size="text">
             <select
               className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
               value={analysisSource}
               disabled={!canManage || !analysisEnabled}
               onChange={(e) => setAnalysisSource(e.target.value as typeof analysisSource)}
-              aria-label={t(($) => $.routing.analysis_model_label)}
+              aria-label={t(($) => $.routing.analysis_source_label)}
             >
-              <option value="api_gateway">{t(($) => $.routing.analysis_url_label)}</option>
-              <option value="runtime_subscription">{t(($) => $.routing.analysis_title)}</option>
+              <option value="api_gateway">{t(($) => $.routing.analysis_source_api_gateway)}</option>
+              <option value="runtime_subscription">{t(($) => $.routing.analysis_source_runtime)}</option>
             </select>
           </SettingsRow>
           {analysisSource === "runtime_subscription" ? (
             <>
-              <SettingsRow label={t(($) => $.routing.analysis_model_label)} description={t(($) => $.routing.analysis_description)} size="text">
-                <Input value={analysisRuntimeId} disabled={!canManage || !analysisEnabled} placeholder={t(($) => $.routing.model_placeholder)} onChange={(e) => setAnalysisRuntimeId(e.target.value)} aria-label={t(($) => $.routing.analysis_model_label)} />
-              </SettingsRow>
-              <SettingsRow label={t(($) => $.routing.analysis_model_label)} size="text">
-                <Input value={analysisModel} disabled={!canManage || !analysisEnabled} placeholder={t(($) => $.routing.model_placeholder)} onChange={(e) => setAnalysisModel(e.target.value)} aria-label={t(($) => $.routing.analysis_model_label)} />
-              </SettingsRow>
-              <SettingsRow label={t(($) => $.routing.analysis_description)} size="text">
-                <select className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm" value={analysisThinkingLevel} disabled={!canManage || !analysisEnabled} onChange={(e) => setAnalysisThinkingLevel(e.target.value)} aria-label={t(($) => $.routing.analysis_description)}>
-                  <option value="low">{t(($) => $.routing.analysis_url_label)}</option><option value="medium">{t(($) => $.routing.analysis_model_label)}</option><option value="high">{t(($) => $.routing.analysis_title)}</option>
-                </select>
-              </SettingsRow>
+              <RuntimePicker runtimes={runtimes} runtimesLoading={runtimesLoading} members={members} currentUserId={userId} selectedRuntimeId={analysisRuntimeId} onSelect={setAnalysisRuntimeId} disabled={!canManage || !analysisEnabled} />
+              <ModelDropdown runtimeId={analysisRuntime?.id ?? null} runtimeOnline={analysisRuntime?.status === "online"} value={analysisModel} onChange={setAnalysisModel} disabled={!canManage || !analysisEnabled || !analysisRuntime} />
+              <ThinkingSettingField label={t(($) => $.routing.analysis_thinking_label)} runtimeId={analysisRuntime?.id ?? null} runtimeOnline={analysisRuntime?.status === "online"} provider={analysisRuntime?.provider ?? ""} model={analysisModel} value={analysisThinkingLevel} canEdit={canManage && analysisEnabled && !!analysisRuntime} onChange={setAnalysisThinkingLevel} />
             </>
           ) : null}
           {analysisSource === "api_gateway" ? <EndpointRows

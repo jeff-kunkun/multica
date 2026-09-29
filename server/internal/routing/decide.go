@@ -108,15 +108,24 @@ func (r *Router) analysis(ctx context.Context, workspaceID string, settings Sett
 		return nil, false, ErrJudgeUnavailable
 	}
 	failureKey := workspaceID + ":" + issue.ID + ":" + issue.ContentHash + ":" + model
-	if at, ok := r.analysisFailures.Load(failureKey); ok && time.Since(at.(time.Time)) < 20*time.Second {
-		return nil, false, ErrJudgeUnavailable
+	// A gateway failure keeps its historical behaviour: the next routing pass
+	// may try it again.  The short suppression window is only for a runtime
+	// probe, where an offline/empty-quota daemon would otherwise be hammered by
+	// every status hook while its late result is still in flight.
+	if settings.AnalysisTarget().UsesRuntime() {
+		if at, ok := r.analysisFailures.Load(failureKey); ok && time.Since(at.(time.Time)) < 20*time.Second {
+			return nil, false, ErrJudgeUnavailable
+		}
 	}
-	rec, err := r.Analyst.Analyze(ctx, settings.AnalysisTarget(), AnalysisState{
+	requestCtx := WithAnalysisRequest(ctx, workspaceID, issue.ID, issue.ContentHash)
+	rec, err := r.Analyst.Analyze(requestCtx, settings.AnalysisTarget(), AnalysisState{
 		JudgeState:  state,
 		Description: issue.Description,
 	})
 	if err != nil {
-		r.analysisFailures.Store(failureKey, time.Now())
+		if settings.AnalysisTarget().UsesRuntime() {
+			r.analysisFailures.Store(failureKey, time.Now())
+		}
 		return nil, false, err
 	}
 	r.analysisFailures.Delete(failureKey)

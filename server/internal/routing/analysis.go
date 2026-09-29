@@ -182,6 +182,23 @@ type RuntimePromptRunner interface {
 	Run(ctx context.Context, target Target, prompt string) (string, error)
 }
 
+type analysisRequestContextKey struct{}
+
+// WithAnalysisRequest carries the ticket identity alongside a runtime probe.
+// The daemon may finish after the routing waiter timed out, so the handler
+// needs this identity to persist a late result safely.
+func WithAnalysisRequest(ctx context.Context, workspaceID, issueID, contentHash string) context.Context {
+	return context.WithValue(ctx, analysisRequestContextKey{}, [3]string{workspaceID, issueID, contentHash})
+}
+
+func AnalysisRequestFromContext(ctx context.Context) (workspaceID, issueID, contentHash string, ok bool) {
+	v, ok := ctx.Value(analysisRequestContextKey{}).([3]string)
+	if !ok {
+		return "", "", "", false
+	}
+	return v[0], v[1], v[2], true
+}
+
 const analyzeSystemPrompt = `You read a work ticket and reduce it to facts, then route it to a seat on a fixed ladder of AI agents.
 
 Facts — choose exactly one value for each:
@@ -260,10 +277,18 @@ func (a LLMAnalyst) Analyze(ctx context.Context, target Target, st AnalysisState
 	// that transport detail at the boundary so the rest of routing consumes the
 	// same facts object for both sources.
 	raw = unwrapRuntimeAnalysis(raw)
+	return ParseAnalysisResult(raw, target.Model)
+}
+
+// ParseAnalysisResult validates a runtime or gateway response at the common
+// routing boundary. It is also used by the daemon callback to persist a result
+// that arrives after the original routing waiter has timed out.
+func ParseAnalysisResult(raw, model string) (AnalysisRecord, error) {
 	var reply struct {
 		Facts
 		Verdict
 	}
+	raw = unwrapRuntimeAnalysis(raw)
 	if err := json.Unmarshal([]byte(raw), &reply); err != nil {
 		return AnalysisRecord{}, fmt.Errorf("%w: analysis was not JSON: %v", ErrJudgeUnavailable, err)
 	}
@@ -278,7 +303,7 @@ func (a LLMAnalyst) Analyze(ctx context.Context, target Target, st AnalysisState
 	default:
 		return AnalysisRecord{}, fmt.Errorf("%w: unknown reviewer branch %q", ErrJudgeUnavailable, v.Reviewer)
 	}
-	return AnalysisRecord{Facts: facts, Verdict: &v, Source: FactsFromAnalysis, Model: target.Model}, nil
+	return AnalysisRecord{Facts: facts, Verdict: &v, Source: FactsFromAnalysis, Model: model}, nil
 }
 
 // unwrapRuntimeAnalysis extracts the model message from the common CLI

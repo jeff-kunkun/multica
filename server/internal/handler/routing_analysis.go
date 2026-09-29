@@ -17,6 +17,7 @@ const routingAnalysisTimeout = 20 * time.Second
 
 type routingAnalysisRequest struct {
 	id, runtimeID, model, thinking, prompt string
+	workspaceID, issueID, contentHash      string
 	status                                 string
 	result                                 string
 	err                                    string
@@ -75,6 +76,11 @@ func (s *RoutingAnalysisStore) Fail(id, message string) {
 
 func (s *RoutingAnalysisStore) run(ctx context.Context, h *Handler, target routing.Target, prompt string) (string, error) {
 	r := s.Create(ctx, target, prompt)
+	if wsID, issueID, hash, ok := routing.AnalysisRequestFromContext(ctx); ok {
+		s.mu.Lock()
+		r.workspaceID, r.issueID, r.contentHash = wsID, issueID, hash
+		s.mu.Unlock()
+	}
 	h.requestDaemonPendingWork(target.RuntimeID, protocol.PendingWorkKindRoutingAnalysis)
 	deadline := time.NewTimer(routingAnalysisTimeout)
 	defer deadline.Stop()
@@ -140,5 +146,28 @@ func (h *Handler) ReportRoutingAnalysisResult(w http.ResponseWriter, r *http.Req
 		req.status, req.err = "failed", body.Error
 	}
 	h.RoutingAnalysisStore.mu.Unlock()
+	if body.Status == "completed" {
+		// Persist even when the original 20s waiter has already returned. The
+		// next dispatch can then reuse the late result instead of re-running it.
+		h.persistLateRoutingAnalysis(req, body.Result)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) persistLateRoutingAnalysis(req *routingAnalysisRequest, raw string) {
+	if req.workspaceID == "" || req.issueID == "" || req.contentHash == "" || h.Routing == nil {
+		return
+	}
+	rec, err := routing.ParseAnalysisResult(raw, req.model)
+	if err != nil {
+		return
+	}
+	issue, err := h.Routing.Store.Issue(context.Background(), req.workspaceID, req.issueID)
+	if err != nil || issue.ContentHash != req.contentHash {
+		return
+	}
+	rec.Hash = req.contentHash
+	if cache, ok := h.Routing.Store.(routing.AnalysisCache); ok {
+		_ = cache.SaveAnalysis(context.Background(), req.workspaceID, req.issueID, rec)
+	}
 }
