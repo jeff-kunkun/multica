@@ -459,3 +459,20 @@ WHERE iss.workspace_id = $1 AND iss.status = 'done'
   AND iss.updated_at < sqlc.arg('day_end')::timestamptz
 ORDER BY iss.updated_at DESC
 LIMIT 400;
+
+-- name: ListInboxBoardTodoIssues :many
+-- The inbox board's "to do" lane (DENE-975): issues in todo assigned to the
+-- viewer, newest first. Visibility is checked by the handler, which keeps
+-- the first 100 visible rows.
+SELECT iss.id, iss.number, iss.title, iss.status, iss.parent_issue_id, iss.updated_at,
+       COALESCE(iss.visibility, 'workspace')::text AS visibility,
+       COALESCE(iss.creator_type, '')::text AS creator_type,
+       iss.creator_id,
+       iss.project_id,
+       COALESCE(iss.assignee_type, '')::text AS assignee_type,
+       iss.assignee_id
+FROM issue iss
+WHERE iss.workspace_id = $1 AND iss.status = 'todo'
+  AND iss.assignee_type = 'member' AND iss.assignee_id = sqlc.arg('user_id')::uuid
+ORDER BY iss.updated_at DESC
+LIMIT 400;

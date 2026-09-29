@@ -270,7 +270,7 @@ func TestFoldChildrenLeavesChildWhoseParentIsElsewhere(t *testing.T) {
 
 func TestEmptyLanesMarshalAsArrays(t *testing.T) {
 	b := Build(Input{})
-	for name, lane := range map[string][]*Row{"waiting": b.Waiting, "stalled": b.Stalled, "running": b.Running, "fresh": b.Fresh, "done": b.Done} {
+	for name, lane := range map[string][]*Row{"waiting": b.Waiting, "stalled": b.Stalled, "running": b.Running, "todo": b.Todo, "fresh": b.Fresh, "done": b.Done} {
 		if lane == nil {
 			t.Fatalf("%s lane is nil, would marshal as null", name)
 		}
@@ -286,4 +286,59 @@ func TestNameOwnersNamesNestedRows(t *testing.T) {
 	eq(t, b.Stalled[0].NextName, "agent/agent-1")
 	eq(t, b.Stalled[0].Children[0].NextName, "member/m-1")
 	eq(t, b.Done[0].NextName, "")
+}
+
+func todoIssue(id string, edit func(*Issue)) Issue {
+	return issue(id, func(i *Issue) {
+		i.Status = "todo"
+		i.AssigneeType = "member"
+		i.AssigneeID = me
+		if edit != nil {
+			edit(i)
+		}
+	})
+}
+
+func TestTodoLaneTakesViewersTodoIssues(t *testing.T) {
+	b := Build(Input{UserID: me, TodoIssues: []Issue{
+		todoIssue("old", func(i *Issue) { i.UpdatedAt = at("2026-09-26T07:00:00Z") }),
+		todoIssue("new", nil),
+		todoIssue("c", func(i *Issue) { i.ParentIssueID = "new" }),
+	}})
+	eq(t, ids(b.Todo), []string{"new", "old"})
+	eq(t, ids(b.Todo[0].Children), []string{"c"})
+	eq(t, b.Todo[0].Lane, LaneTodo)
+	eq(t, *b.Todo[0].Next, Owner{Type: "member", ID: me})
+}
+
+func TestTodoLaneSkipsOthersWorkAndOtherStatuses(t *testing.T) {
+	b := Build(Input{UserID: me, TodoIssues: []Issue{
+		todoIssue("mine", nil),
+		todoIssue("theirs", func(i *Issue) { i.AssigneeID = "someone-else" }),
+		todoIssue("agent", func(i *Issue) { i.AssigneeType = "agent"; i.AssigneeID = me }),
+		todoIssue("backlog", func(i *Issue) { i.Status = "backlog" }),
+		todoIssue("doing", func(i *Issue) { i.Status = "in_progress" }),
+	}})
+	eq(t, ids(b.Todo), []string{"mine"})
+	// Nobody to compare against: no todo lane at all.
+	eq(t, ids(Build(Input{TodoIssues: []Issue{todoIssue("mine", nil)}}).Todo), []string{})
+}
+
+func TestTodoLaneLeavesEarlierLanesAlone(t *testing.T) {
+	b := Build(Input{
+		UserID:        me,
+		Summons:       []Summon{summon("w", nil)},
+		Parking:       []Parking{record("s", nil)},
+		Tasks:         []Task{task("r", nil)},
+		RunningIssues: []Issue{todoIssue("r", nil)},
+		TodoIssues:    []Issue{todoIssue("w", nil), todoIssue("s", nil), todoIssue("r", nil), todoIssue("t", nil)},
+		Unread:        []Unread{unread("t", func(u *Unread) { u.UnreadCount = 2 })},
+	})
+	eq(t, ids(b.Waiting), []string{"w"})
+	eq(t, ids(b.Stalled), []string{"s"})
+	eq(t, ids(b.Running), []string{"r"})
+	eq(t, ids(b.Todo), []string{"t"})
+	eq(t, b.Todo[0].Unread, int64(2))
+	// An unread todo ticket sits in todo, not again in fresh.
+	eq(t, ids(b.Fresh), []string{})
 }

@@ -25,9 +25,10 @@ const inboxBoardErrNoPerson = "inbox_board_no_person"
 const (
 	inboxBoardParkingLimit = 500
 	inboxBoardDoneLimit    = 100
+	inboxBoardTodoLimit    = 100
 )
 
-// InboxBoardResponse is the inbox in its five lanes (DENE-975).
+// InboxBoardResponse is the inbox in its six lanes (DENE-975).
 type InboxBoardResponse struct {
 	inboxboard.Board
 	// ViewerID is the person whose inbox this is: the caller, or for an
@@ -44,8 +45,8 @@ type InboxBoardResponse struct {
 	UnreadMarkable int64 `json:"unread_markable"`
 }
 
-// GetInboxBoard — GET /api/inbox/board — one person's inbox in five lanes:
-// waiting / stalled / running / fresh / done today. The lane rules live in
+// GetInboxBoard — GET /api/inbox/board — one person's inbox in six lanes:
+// waiting / stalled / running / todo / fresh / done today. The lane rules live in
 // internal/inboxboard; this only gathers their inputs.
 //
 //   - tz: IANA zone "done today" is counted in (default UTC).
@@ -287,6 +288,32 @@ func (h *Handler) gatherInboxBoard(
 			Title:         row.Title,
 			Status:        row.Status,
 			ParentIssueID: uuidToString(row.ParentIssueID),
+			UpdatedAt:     row.UpdatedAt.Time,
+		})
+	}
+
+	todo, err := h.Queries.ListInboxBoardTodoIssues(ctx, db.ListInboxBoardTodoIssuesParams{
+		WorkspaceID: wsUUID, UserID: userUUID,
+	})
+	if err != nil {
+		return in, 0, fmt.Errorf("failed to list todo issues")
+	}
+	for _, row := range todo {
+		if len(in.TodoIssues) >= inboxBoardTodoLimit {
+			break
+		}
+		if !viewer.canSeeIssueFields(row.ID, row.Visibility, row.CreatorType, row.CreatorID,
+			row.ProjectID, row.AssigneeType, row.AssigneeID) {
+			continue
+		}
+		in.TodoIssues = append(in.TodoIssues, inboxboard.Issue{
+			ID:            uuidToString(row.ID),
+			Identifier:    issueIdentifier(prefix, row.Number),
+			Title:         row.Title,
+			Status:        row.Status,
+			ParentIssueID: uuidToString(row.ParentIssueID),
+			AssigneeType:  row.AssigneeType,
+			AssigneeID:    uuidToString(row.AssigneeID),
 			UpdatedAt:     row.UpdatedAt.Time,
 		})
 	}

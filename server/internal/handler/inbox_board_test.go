@@ -44,7 +44,7 @@ func boardRow(b InboxBoardResponse, issueID string) *inboxboard.Row {
 		}
 		return nil
 	}
-	for _, lane := range [][]*inboxboard.Row{b.Waiting, b.Stalled, b.Running, b.Fresh, b.Done} {
+	for _, lane := range [][]*inboxboard.Row{b.Waiting, b.Stalled, b.Running, b.Todo, b.Fresh, b.Done} {
 		if r := walk(lane); r != nil {
 			return r
 		}
@@ -128,6 +128,36 @@ func TestInboxBoard_AgentReadsTheInboxOfWhoStartedTheRun(t *testing.T) {
 	// Visibility is the originator's, not the agent's bypass.
 	if r := boardRow(board, hidden.ID); r != nil {
 		t.Fatalf("a ticket the originator cannot see is on their board: %+v", r)
+	}
+}
+
+func TestInboxBoard_TodoLaneIsWhoStartedTheRun(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	f := newBoardAgentFixture(t, "direct_human")
+	theirs := createIssueHTTP(t, "board: originator's todo", "todo")
+	owners := createIssueHTTP(t, "board: runtime owner's todo", "todo")
+	started := createIssueHTTP(t, "board: originator's work already started", "in_progress")
+	boardCleanup(t, theirs.ID, owners.ID, started.ID)
+	ctx := context.Background()
+	testPool.Exec(ctx, `UPDATE issue SET visibility = 'workspace', assignee_type = 'member', assignee_id = $2
+		WHERE id = ANY($1::uuid[])`, []string{theirs.ID, started.ID}, f.originator)
+	testPool.Exec(ctx, `UPDATE issue SET visibility = 'workspace', assignee_type = 'member', assignee_id = $2
+		WHERE id = $1`, owners.ID, testUserID)
+
+	w, board := getInboxBoard(t, f.request(t))
+	if w.Code != http.StatusOK {
+		t.Fatalf("board: %d %s", w.Code, w.Body.String())
+	}
+	if r := boardRow(board, theirs.ID); r == nil || r.Lane != inboxboard.LaneTodo {
+		t.Fatalf("originator's todo ticket should be in the todo lane: %+v", r)
+	}
+	if r := boardRow(board, owners.ID); r != nil {
+		t.Fatalf("runtime owner's todo leaked onto the originator's board: %+v", r)
+	}
+	if r := boardRow(board, started.ID); r != nil && r.Lane == inboxboard.LaneTodo {
+		t.Fatalf("an in-progress ticket is in the todo lane: %+v", r)
 	}
 }
 

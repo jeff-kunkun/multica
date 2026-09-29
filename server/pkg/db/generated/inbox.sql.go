@@ -787,6 +787,77 @@ func (q *Queries) ListInboxBoardIssuesByIDs(ctx context.Context, arg ListInboxBo
 	return items, nil
 }
 
+const listInboxBoardTodoIssues = `-- name: ListInboxBoardTodoIssues :many
+SELECT iss.id, iss.number, iss.title, iss.status, iss.parent_issue_id, iss.updated_at,
+       COALESCE(iss.visibility, 'workspace')::text AS visibility,
+       COALESCE(iss.creator_type, '')::text AS creator_type,
+       iss.creator_id,
+       iss.project_id,
+       COALESCE(iss.assignee_type, '')::text AS assignee_type,
+       iss.assignee_id
+FROM issue iss
+WHERE iss.workspace_id = $1 AND iss.status = 'todo'
+  AND iss.assignee_type = 'member' AND iss.assignee_id = $2::uuid
+ORDER BY iss.updated_at DESC
+LIMIT 400
+`
+
+type ListInboxBoardTodoIssuesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+type ListInboxBoardTodoIssuesRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	Number        int32              `json:"number"`
+	Title         string             `json:"title"`
+	Status        string             `json:"status"`
+	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	Visibility    string             `json:"visibility"`
+	CreatorType   string             `json:"creator_type"`
+	CreatorID     pgtype.UUID        `json:"creator_id"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+	AssigneeType  string             `json:"assignee_type"`
+	AssigneeID    pgtype.UUID        `json:"assignee_id"`
+}
+
+// The inbox board's "to do" lane (DENE-975): issues in todo assigned to the
+// viewer, newest first. Visibility is checked by the handler, which keeps
+// the first 100 visible rows.
+func (q *Queries) ListInboxBoardTodoIssues(ctx context.Context, arg ListInboxBoardTodoIssuesParams) ([]ListInboxBoardTodoIssuesRow, error) {
+	rows, err := q.db.Query(ctx, listInboxBoardTodoIssues, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListInboxBoardTodoIssuesRow{}
+	for rows.Next() {
+		var i ListInboxBoardTodoIssuesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Number,
+			&i.Title,
+			&i.Status,
+			&i.ParentIssueID,
+			&i.UpdatedAt,
+			&i.Visibility,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ProjectID,
+			&i.AssigneeType,
+			&i.AssigneeID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listInboxItems = `-- name: ListInboxItems :many
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.read_at,
        iss.status AS issue_status,

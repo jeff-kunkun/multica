@@ -1,4 +1,4 @@
-// Package inboxboard sorts one person's inbox into its five lanes (DENE-882,
+// Package inboxboard sorts one person's inbox into its six lanes (DENE-882,
 // moved server-side in DENE-975 so the web page, the CLI and an agent reading
 // the inbox for its user all get the same answer).
 //
@@ -8,6 +8,7 @@
 //	          issue's parking record names the viewer as the next owner;
 //	stalled — the parking record says it stopped without explaining why;
 //	running — an agent is on it right now;
+//	todo    — it is assigned to the viewer and in todo (DENE-975);
 //	done    — it was finished today;
 //	fresh   — it has unread inbox rows for the viewer but none of the lanes
 //	          above takes it (DENE-901).
@@ -33,6 +34,7 @@ const (
 	LaneWaiting Lane = "waiting"
 	LaneStalled Lane = "stalled"
 	LaneRunning Lane = "running"
+	LaneTodo    Lane = "todo"
 	LaneFresh   Lane = "fresh"
 	LaneDone    Lane = "done"
 )
@@ -75,11 +77,12 @@ type Row struct {
 	Children []*Row `json:"children"`
 }
 
-// Board is the five lanes, each newest first.
+// Board is the six lanes, each newest first.
 type Board struct {
 	Waiting []*Row `json:"waiting"`
 	Stalled []*Row `json:"stalled"`
 	Running []*Row `json:"running"`
+	Todo    []*Row `json:"todo"`
 	Fresh   []*Row `json:"fresh"`
 	Done    []*Row `json:"done"`
 }
@@ -136,13 +139,15 @@ func (t Task) began() time.Time {
 	return t.CreatedAt
 }
 
-// Issue is the little of an issue the running and done lanes need.
+// Issue is the little of an issue the running, todo and done lanes need.
 type Issue struct {
 	ID            string
 	Identifier    string
 	Title         string
 	Status        string
 	ParentIssueID string
+	AssigneeType  string
+	AssigneeID    string
 	UpdatedAt     time.Time
 }
 
@@ -164,6 +169,9 @@ type Input struct {
 	// RunningIssues are the issues the running tasks point at, for titles
 	// and parents.
 	RunningIssues []Issue
+	// TodoIssues are candidates for the todo lane; only the ones in todo and
+	// assigned to the viewer land there.
+	TodoIssues []Issue
 	// DoneIssues are the issues finished today.
 	DoneIssues []Issue
 	Unread     []Unread
@@ -382,6 +390,29 @@ func Build(in Input) Board {
 		running = append(running, row)
 	}
 
+	// --- todo: the viewer's assigned work nobody has picked up yet.
+	todo := []*Row{}
+	for _, issue := range in.TodoIssues {
+		if placed[issue.ID] || issue.Status != "todo" || in.UserID == "" {
+			continue
+		}
+		if issue.AssigneeType != "member" || issue.AssigneeID != in.UserID {
+			continue
+		}
+		placed[issue.ID] = true
+		todo = append(todo, &Row{
+			IssueID:       issue.ID,
+			Identifier:    issue.Identifier,
+			Title:         issue.Title,
+			ParentIssueID: optional(issue.ParentIssueID),
+			Lane:          LaneTodo,
+			Kind:          "todo",
+			Next:          owner("member", in.UserID),
+			At:            issue.UpdatedAt,
+			Timeline:      emptyTimeline,
+		})
+	}
+
 	// --- done today.
 	done := []*Row{}
 	for _, issue := range in.DoneIssues {
@@ -443,6 +474,7 @@ func Build(in Input) Board {
 		Waiting: FoldChildren(mark(waiting)),
 		Stalled: FoldChildren(mark(stalled)),
 		Running: FoldChildren(mark(running)),
+		Todo:    FoldChildren(mark(todo)),
 		// A ticket per row: a child here is new on its own account, not part
 		// of its parent's story.
 		Fresh: mark(fresh),
@@ -462,7 +494,7 @@ func (b *Board) NameOwners(name func(Owner) string) {
 			walk(row.Children)
 		}
 	}
-	for _, lane := range [][]*Row{b.Waiting, b.Stalled, b.Running, b.Fresh, b.Done} {
+	for _, lane := range [][]*Row{b.Waiting, b.Stalled, b.Running, b.Todo, b.Fresh, b.Done} {
 		walk(lane)
 	}
 }

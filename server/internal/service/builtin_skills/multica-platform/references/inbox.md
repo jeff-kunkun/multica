@@ -17,8 +17,8 @@ the inbox page uses, so your answer matches what the user sees there.
 
 This call is read-only. It never marks anything read, so the page still shows
 the user what is new. `--tz <IANA zone>` sets the zone that "done today" is
-counted in; the default is the machine's zone. The JSON has five lanes:
-`waiting`, `stalled`, `running`, `fresh` and `done`. Every issue appears in
+counted in; the default is the machine's zone. The JSON has six lanes:
+`waiting`, `stalled`, `running`, `todo`, `fresh` and `done`. Every issue appears in
 exactly one lane. A child can nest under its parent in `children`; `fresh`
 never nests.
 
@@ -45,7 +45,7 @@ happens, say so. Do not fall back to another person's inbox.
 
 ## Answer in this shape
 
-Use these four parts, in this order, in the user's language. Leave out a part
+Use these five parts, in this order, in the user's language. Leave out a part
 whose lanes are empty rather than writing "none".
 
 1. **要你对齐** (`waiting`): one line per ticket, giving the identifier and
@@ -54,7 +54,9 @@ whose lanes are empty rather than writing "none".
 2. **卡住了** (`stalled`): one line per ticket, giving where it stopped
    (`before`, else `kind`) and who holds the next move (`next_name`).
 3. **正在进行** (`running`): a count and the ticket numbers only.
-4. **其他新动态和今日完成** (`fresh` + `done`): one line in total, with counts
+4. **待做** (`todo`): a count and the ticket numbers only. These are tickets
+   assigned to the user and still in todo.
+5. **其他新动态和今日完成** (`fresh` + `done`): one line in total, with counts
    and ticket numbers.
 
 Keep it short. The user reads this to decide where to look first; the details
