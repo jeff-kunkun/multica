@@ -585,6 +585,15 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// a second gate.
 				"close.knowledge_audit",
 				"--knowledge-none",
+				// DENE-1002: closing back to backlog / todo / in_progress is
+				// part of the protocol now, and the in_progress path must
+				// say who continues.
+				"--outcome backlog",
+				"--outcome in_progress",
+				"`deferred`",
+				"`continuing`",
+				"who continues",
+				"`clock`",
 			},
 			notWant: []string{
 				// The MUL-6966 / MUL-5442 bans on teaching the generic KV bag

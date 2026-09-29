@@ -4,6 +4,7 @@ import {
   issueBehavesAs,
   issueBehavesAsAny,
   issueStatusCategory,
+  readCloseProtocol,
 } from "@multica/core/issues";
 import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
@@ -91,6 +92,7 @@ import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { SubIssueCloseStrip } from "./sub-issue-close-strip";
+import { IssueCloseRecordSection } from "./issue-close-record";
 import { SubIssueBlockerBadge, SubIssueBlockerSummary, blockerBadgeState, useSubIssueBlockerData } from "./sub-issue-blocker-summary";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
@@ -1519,6 +1521,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return next;
   }, [commentTasks, timeline]);
 
+  // DENE-1002: the close record names the comment its reason lives in. Pull
+  // that body from the loaded timeline so the sidebar shows the conclusion and
+  // its reason together instead of making the reader hunt for the comment.
+  const closeEvidenceBody = useMemo(() => {
+    const evidenceId = readCloseProtocol(issue?.metadata, issue?.status ?? "").evidenceCommentId;
+    if (!evidenceId) return null;
+    return displayTimeline.find((entry) => entry.id === evidenceId)?.content ?? null;
+  }, [issue?.metadata, issue?.status, displayTimeline]);
+
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
   // expand Set is keyed only on commentId, not on resolution state). Without
@@ -2626,6 +2637,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           time rather than by a silently shorter list. */}
       <QuickActionsSection issueId={issue.id} />
       <PluginPanelSection issueId={issue.id} />
+
+      {/* Close record (DENE-1002) — which conclusion closed this ticket, the
+          status it wrote, who continues and why. Renders nothing until the
+          `close.*` record is complete. */}
+      <IssueCloseRecordSection issue={issue} evidenceBody={closeEvidenceBody} />
 
       {/* Parent issue — standalone section, only when the issue has a
           parent. Setting a parent is reachable via the issue actions menu;

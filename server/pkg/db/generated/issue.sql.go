@@ -1209,7 +1209,7 @@ func (q *Queries) GetIssueTriageState(ctx context.Context, id pgtype.UUID) (pgty
 
 const listBlockPatrolCandidates = `-- name: ListBlockPatrolCandidates :many
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility FROM issue
-WHERE status IN ('blocked', 'in_review')
+WHERE status IN ('blocked', 'in_review', 'in_progress')
   AND COALESCE(metadata->>'block.watched', '') = '1'
   AND NOT EXISTS (
     SELECT 1 FROM agent_task_queue t
@@ -1248,6 +1248,9 @@ type ListBlockPatrolCandidatesParams struct {
 
 // DENE-850 patrol. Only rows stamped block.watched after this feature began
 // watching them, so a deploy does not walk tickets already sitting in review.
+// DENE-1002 adds in_progress: a deliberate `issue close --outcome in_progress`
+// stamps watched alongside its clock wait, and the patrol wakes the executor
+// when that clock comes due. Ordinary in_progress rows are never stamped.
 // Clocks are compared as UTC text. The writer uses RFC3339 with a Z suffix.
 // Casting to timestamptz would abort every workspace's sweep on one bad value.
 func (q *Queries) ListBlockPatrolCandidates(ctx context.Context, arg ListBlockPatrolCandidatesParams) ([]Issue, error) {

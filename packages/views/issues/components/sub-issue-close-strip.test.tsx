@@ -104,7 +104,7 @@ describe("SubIssueCloseStrip", () => {
     const strip = screen.getByTestId("sub-issue-close-strip");
     expect(strip).toHaveAttribute("data-close-state", "ok");
     expect(chip("stage")).toHaveTextContent("Stage 2");
-    expect(chip("close.conclusion")).toHaveTextContent("delivered");
+    expect(chip("close.conclusion")).toHaveTextContent("Delivered");
     expect(chip("close.next_owner")).toHaveTextContent("Next: none");
     expect(queryChip("close.waiting_on")).not.toBeInTheDocument();
     expect(chip("last_activity_at")).toHaveTextContent("1h ago");
@@ -168,7 +168,7 @@ describe("SubIssueCloseStrip", () => {
       "close.status ≠ done",
     );
     expect(chip("close.conclusion")).toHaveTextContent(
-      "awaiting_review",
+      "Awaiting review",
     );
   });
 

@@ -142,10 +142,13 @@ WHERE workspace_id = sqlc.arg('workspace_id')
 -- name: ListBlockPatrolCandidates :many
 -- DENE-850 patrol. Only rows stamped block.watched after this feature began
 -- watching them, so a deploy does not walk tickets already sitting in review.
+-- DENE-1002 adds in_progress: a deliberate `issue close --outcome in_progress`
+-- stamps watched alongside its clock wait, and the patrol wakes the executor
+-- when that clock comes due. Ordinary in_progress rows are never stamped.
 -- Clocks are compared as UTC text. The writer uses RFC3339 with a Z suffix.
 -- Casting to timestamptz would abort every workspace's sweep on one bad value.
 SELECT * FROM issue
-WHERE status IN ('blocked', 'in_review')
+WHERE status IN ('blocked', 'in_review', 'in_progress')
   AND COALESCE(metadata->>'block.watched', '') = '1'
   AND NOT EXISTS (
     SELECT 1 FROM agent_task_queue t

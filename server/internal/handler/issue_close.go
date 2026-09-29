@@ -76,7 +76,20 @@ type CloseIssueResponse struct {
 	Summoned bool `json:"summoned,omitempty"`
 }
 
-var closeOutcomes = []string{issuestatus.Done, issuestatus.InReview, issuestatus.Blocked, issuestatus.Cancelled}
+// closeOutcomes is the full vocabulary `issue close --outcome` accepts. The
+// first four are the original terminal/awaiting conclusions; backlog, todo and
+// in_progress (DENE-1002) are deliberate non-terminal stops that still leave
+// an evidence comment and a close.* record.
+var closeOutcomes = []string{
+	issuestatus.Done, issuestatus.InReview, issuestatus.Blocked, issuestatus.Cancelled,
+	issuestatus.Backlog, issuestatus.Todo, issuestatus.InProgress,
+}
+
+// closeOutcomeHelp is the one-line "what each outcome needs" list shared by
+// the empty-outcome and unknown-outcome rejections.
+const closeOutcomeHelp = "done（做完，要交付证据）、in_review（等验收，要 PR 或 --no-code）、" +
+	"blocked（卡住，要写等什么）、cancelled（取消）、backlog（放回待规划，写一句为什么）、" +
+	"todo（放回待办，写一句为什么）、in_progress（这轮先停、下一轮继续，要写谁继续）"
 
 // closeRecord is the close.* metadata derived from the request plus the
 // blockwait record. It is validated by closeprotocol.Validate before any
@@ -109,11 +122,11 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 
 	outcome := strings.ToLower(strings.TrimSpace(req.Outcome))
 	if outcome == "" {
-		writeError(w, http.StatusBadRequest, "缺 --outcome：done（做完）、in_review（等验收）、blocked（卡住）、cancelled（取消）四选一")
+		writeError(w, http.StatusBadRequest, "缺 --outcome："+closeOutcomeHelp)
 		return
 	}
 	if !closeOutcomeAllowed(outcome) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("--outcome %q 不是收口结论；只能是 %s", outcome, strings.Join(closeOutcomes, " / ")))
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("--outcome %q 不是收口结论；只能是 %s。%s", outcome, strings.Join(closeOutcomes, " / "), closeOutcomeHelp))
 		return
 	}
 	evidence := strings.TrimSpace(sanitizeNullBytes(req.Evidence))
@@ -347,10 +360,18 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	if outcome == issuestatus.Blocked {
 		h.persistBlockRecord(ctx, updated, rec.block)
 	}
+	// A deliberate in_progress pause writes the same block.* wait record and
+	// stamps the ticket watched, so the block-wait patrol wakes the executor
+	// when the clock comes due (DENE-1002). The close record itself already
+	// landed in the transaction.
+	if outcome == issuestatus.InProgress && rec.block.Structured() {
+		h.persistBlockRecord(ctx, updated, rec.block)
+		h.setIssueMetaString(ctx, updated, blockwait.KeyWatched, blockwait.WatchedYes)
+	}
 	// --needs-human names a person; the summon entry is what makes them hear
 	// it (inbox, subscription, a visible @). Before the evidence comment's own
 	// triggers run, so an @ of the same person there dedupes against this call.
-	if updated.Status == issuestatus.Blocked || updated.Status == issuestatus.InReview {
+	if updated.Status == issuestatus.Blocked || updated.Status == issuestatus.InReview || updated.Status == issuestatus.InProgress {
 		if rec.meta[closeprotocol.KeyNextOwnerType] == closeprotocol.OwnerMember && strings.TrimSpace(deref(req.NeedsHuman)) != "" {
 			h.summonNeedsHuman(ctx, updated, rec.meta[closeprotocol.KeyNextOwnerID], actorType, actorID, closeSummonReason(summary, evidence))
 			resp.Summoned = true
@@ -593,6 +614,49 @@ func (h *Handler) deriveCloseRecord(r *http.Request, issue db.Issue, req CloseIs
 		if human := strings.TrimSpace(block.NeedsHuman); human != "" {
 			meta[closeprotocol.KeyNextOwnerType] = closeprotocol.OwnerMember
 			meta[closeprotocol.KeyNextOwnerID] = human
+		}
+	case issuestatus.Backlog, issuestatus.Todo:
+		// Returned to planning / the ready list on purpose. The evidence says
+		// why; nothing is delivered and no PR gate runs. Neither status is a
+		// stage terminal, so no stage_done wake.
+		meta[closeprotocol.KeyConclusion] = closeprotocol.ConclusionDeferred
+	case issuestatus.InProgress:
+		// "This turn stops, the next one continues." The who/when is the same
+		// four wait fields blocked uses (DENE-850) — no new parameters
+		// (DENE-1002). A close that names no continuation is refused: without
+		// it the inbox reads the stop as "stopped without saying why".
+		block, _, rejection := h.gateBlockedStatus(r, issue, UpdateIssueRequest{
+			BlockedBy:     req.BlockedBy,
+			WakeAt:        req.WakeAt,
+			WaitCondition: req.WaitCondition,
+			WaitProbe:     req.WaitProbe,
+			WaitTimeout:   req.WaitTimeout,
+			NeedsHuman:    req.NeedsHuman,
+		}, actorType)
+		if rejection != "" {
+			return rec, rejection
+		}
+		if !block.Structured() {
+			return rec, "放回进行中必须写明「接下来谁继续」，至少一种：--wake-at <RFC3339>（到点继续）、" +
+				"--wait-condition \"...\" 配 --wait-timeout <RFC3339>（条件到了继续）、--blocked-by <票>（等这张票）、" +
+				"--needs-human <member>（交给这个人）。只有一句原因、没人接着做的票请改用 --outcome backlog 或 --outcome todo。"
+		}
+		rec.block = block
+		meta[closeprotocol.KeyConclusion] = closeprotocol.ConclusionContinuing
+		if len(block.BlockedBy) > 0 {
+			meta[closeprotocol.KeyWaitingOn] = block.BlockedBy[0]
+		}
+		if human := strings.TrimSpace(block.NeedsHuman); human != "" {
+			meta[closeprotocol.KeyNextOwnerType] = closeprotocol.OwnerMember
+			meta[closeprotocol.KeyNextOwnerID] = human
+		} else if issue.AssigneeType.Valid && issue.AssigneeID.Valid && issue.AssigneeType.String != "none" {
+			// The ticket keeps its assignee: that is who the next round
+			// continues with unless the close named someone else.
+			meta[closeprotocol.KeyNextOwnerType] = issue.AssigneeType.String
+			meta[closeprotocol.KeyNextOwnerID] = uuidToString(issue.AssigneeID)
+		}
+		if block.HasWakeAt || block.HasWaitTimeout {
+			meta[closeprotocol.KeyWakeAction] = closeprotocol.WakeClock
 		}
 	}
 	return rec, ""
@@ -845,6 +909,34 @@ func describeCloseWake(issue db.Issue, rec closeRecord, prefix string, waiters i
 		default:
 			out = append(out, "没有指定 reviewer：路由按验收席属性挑人；挑不到会写成 blocked 等人拍板（wake_action=route）")
 		}
+	case issuestatus.Backlog, issuestatus.Todo:
+		label := "待办"
+		if issue.Status == issuestatus.Backlog {
+			label = "待规划"
+		}
+		out = append(out, "放回"+label+"：这轮就此停下，没有排 run；要再开始时按状态重新进入列表（close.conclusion=deferred）")
+	case issuestatus.InProgress:
+		block := rec.block
+		if len(block.BlockedBy) > 0 {
+			out = append(out, "等 "+strings.Join(block.BlockedBy, "、")+" 进入终态时叫醒执行人接着做")
+		}
+		if block.HasWakeAt {
+			out = append(out, "到 "+block.WakeAt.UTC().Format(time.RFC3339)+" 巡检叫醒执行人接着做（wake_action=clock）")
+		}
+		if strings.TrimSpace(block.WaitCondition) != "" {
+			if block.HasWaitTimeout {
+				out = append(out, "等待条件到期（"+block.WaitTimeout.UTC().Format(time.RFC3339)+"）巡检叫醒执行人（wake_action=clock）")
+			} else {
+				out = append(out, "等待条件没有 --wait-timeout，只在人来解除时叫醒")
+			}
+		}
+		if strings.TrimSpace(block.NeedsHuman) != "" {
+			out = append(out, "等成员 "+strings.TrimSpace(block.NeedsHuman)+" 处理后继续：只留言不排 run")
+		}
+		if len(out) == 0 {
+			owner := rec.meta[closeprotocol.KeyNextOwnerType]
+			out = append(out, "票留在进行中，下一轮由 "+owner+"/"+rec.meta[closeprotocol.KeyNextOwnerID]+" 继续（close.conclusion=continuing）")
+		}
 	case issuestatus.Blocked:
 		block := rec.block
 		if len(block.BlockedBy) > 0 {
@@ -888,6 +980,12 @@ func closeRejection(err error) string {
 		hint = "；卡住至少带一种：--blocked-by <票> / --wake-at <RFC3339> / --wait-condition 配 --wait-timeout / --needs-human <member-id>，动作说明可用 --summary（80 字内）"
 	case "waiting_on":
 		hint = "；done 不能同时还在等别的票，先解除再收口"
+	case "continuing":
+		hint = "；放回进行中要写清谁继续：给票指定执行人，或带 --wake-at / --wait-condition 配 --wait-timeout / --blocked-by / --needs-human"
+	case "deferred":
+		hint = "；backlog / todo 只对应 close.status=backlog 或 todo"
+	case "clock":
+		hint = "；wake_action=clock 只在 --outcome in_progress 上出现"
 	}
 	return "收口记录不合规（" + ce.Rule + "）：" + ce.Msg + hint
 }

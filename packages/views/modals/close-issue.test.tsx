@@ -91,6 +91,75 @@ describe("CloseIssueDialog", () => {
     ).toHaveTextContent("缺知识审计：用 --knowledge-none");
   });
 
+  it("offers all seven outcomes and shows what the picked one needs (DENE-1002)", () => {
+    renderDialog();
+    const select = screen.getByRole("combobox");
+    expect(Array.from(select.querySelectorAll("option")).map((o) => o.value)).toEqual([
+      "done",
+      "in_review",
+      "blocked",
+      "cancelled",
+      "backlog",
+      "todo",
+      "in_progress",
+    ]);
+    expect(screen.getByText(/Needs the delivery evidence/)).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: "in_progress" } });
+    expect(screen.getByText(/who continues/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("2026-01-01T09:00:00Z")).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: "backlog" } });
+    expect(screen.getByText(/why it goes back to planning/)).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("2026-01-01T09:00:00Z"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("sends a deferred close with no wake fields", async () => {
+    renderDialog();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "todo" } });
+    fireEvent.change(screen.getByPlaceholderText("What this close rests on"), {
+      target: { value: "需求还没定，先放回待办" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close out" }));
+
+    await waitFor(() =>
+      expect(mockClose).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "issue-1",
+          outcome: "todo",
+          evidence: "需求还没定，先放回待办",
+          blocked_by: undefined,
+          wake_at: undefined,
+        }),
+      ),
+    );
+  });
+
+  it("sends who continues on an in_progress close", async () => {
+    renderDialog();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "in_progress" } });
+    fireEvent.change(screen.getByPlaceholderText("What this close rests on"), {
+      target: { value: "网关改造做到一半，等扩容窗口" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("2026-01-01T09:00:00Z"), {
+      target: { value: "2026-01-01T09:00:00Z" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close out" }));
+
+    await waitFor(() =>
+      expect(mockClose).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "issue-1",
+          outcome: "in_progress",
+          evidence: "网关改造做到一半，等扩容窗口",
+          wake_at: "2026-01-01T09:00:00Z",
+        }),
+      ),
+    );
+  });
+
   it("submits the checklist location the person checked", async () => {
     renderDialog();
     fireEvent.change(screen.getByPlaceholderText("What this close rests on"), {

@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { clientErrorMessage } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCloseIssue } from "@multica/core/issues/mutations";
-import type { KnowledgeAudit } from "@multica/core/types";
+import type { CloseOutcome, KnowledgeAudit } from "@multica/core/types";
 import { projectMemoryLocationsOptions } from "@multica/core/projects/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -18,8 +18,15 @@ import {
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useT } from "../i18n";
 
-const OUTCOMES = ["done", "in_review", "blocked", "cancelled"] as const;
-type CloseOutcome = (typeof OUTCOMES)[number];
+const OUTCOMES: readonly CloseOutcome[] = [
+  "done",
+  "in_review",
+  "blocked",
+  "cancelled",
+  "backlog",
+  "todo",
+  "in_progress",
+];
 
 const fieldClass =
   "w-full rounded-md border border-border bg-background px-2 py-1.5 text-body";
@@ -42,6 +49,7 @@ export function CloseIssueDialog({
   const [summary, setSummary] = useState("");
   const [noCode, setNoCode] = useState("");
   const [blockedBy, setBlockedBy] = useState("");
+  const [wakeAt, setWakeAt] = useState("");
   const [mode, setMode] = useState<"none" | "changes" | null>(null);
   const [drafts, setDrafts] = useState<Record<string, { on: boolean; summary: string }>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -57,6 +65,33 @@ export function CloseIssueDialog({
         return t(($) => $.close_issue.outcome_blocked);
       case "cancelled":
         return t(($) => $.close_issue.outcome_cancelled);
+      case "backlog":
+        return t(($) => $.close_issue.outcome_backlog);
+      case "todo":
+        return t(($) => $.close_issue.outcome_todo);
+      case "in_progress":
+        return t(($) => $.close_issue.outcome_in_progress);
+    }
+  };
+
+  // What the picked conclusion needs, so the picker itself teaches the rule
+  // (DENE-1002). The server still enforces it; this only saves a round trip.
+  const outcomeRequirement = (key: CloseOutcome) => {
+    switch (key) {
+      case "done":
+        return t(($) => $.close_issue.requires_done);
+      case "in_review":
+        return t(($) => $.close_issue.requires_in_review);
+      case "blocked":
+        return t(($) => $.close_issue.requires_blocked);
+      case "cancelled":
+        return t(($) => $.close_issue.requires_cancelled);
+      case "backlog":
+        return t(($) => $.close_issue.requires_backlog);
+      case "todo":
+        return t(($) => $.close_issue.requires_todo);
+      case "in_progress":
+        return t(($) => $.close_issue.requires_in_progress);
     }
   };
 
@@ -84,7 +119,11 @@ export function CloseIssueDialog({
         summary: summary.trim() || undefined,
         no_code_reason:
           outcome === "done" || outcome === "in_review" ? noCode.trim() || undefined : undefined,
-        blocked_by: outcome === "blocked" ? blockedBy.trim() || undefined : undefined,
+        blocked_by:
+          outcome === "blocked" || outcome === "in_progress"
+            ? blockedBy.trim() || undefined
+            : undefined,
+        wake_at: outcome === "in_progress" ? wakeAt.trim() || undefined : undefined,
         knowledge_audit: audit(),
       });
       onClose();
@@ -120,6 +159,9 @@ export function CloseIssueDialog({
                 </option>
               ))}
             </select>
+            <span className="text-caption text-muted-foreground">
+              {outcomeRequirement(outcome)}
+            </span>
           </label>
           <label className="flex flex-col gap-1 text-body">
             {t(($) => $.close_issue.evidence)}
@@ -154,6 +196,28 @@ export function CloseIssueDialog({
                 onChange={(event) => setBlockedBy(event.target.value)}
               />
             </label>
+          )}
+          {outcome === "in_progress" && (
+            <>
+              <label className="flex flex-col gap-1 text-body">
+                {t(($) => $.close_issue.wake_at)}
+                <input
+                  className={fieldClass}
+                  value={wakeAt}
+                  placeholder={t(($) => $.close_issue.wake_at_placeholder)}
+                  onChange={(event) => setWakeAt(event.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-body">
+                {t(($) => $.close_issue.continues_with)}
+                <input
+                  className={fieldClass}
+                  value={blockedBy}
+                  placeholder={t(($) => $.close_issue.blocked_by_placeholder)}
+                  onChange={(event) => setBlockedBy(event.target.value)}
+                />
+              </label>
+            </>
           )}
           <fieldset className="flex flex-col gap-2">
             <legend className="text-body">{t(($) => $.close_issue.knowledge)}</legend>

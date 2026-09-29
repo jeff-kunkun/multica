@@ -258,6 +258,15 @@ func issueCloseLong() string {
 		"  --outcome blocked     needs one wait: --blocked-by / --wake-at /\n" +
 		"                        --wait-condition with --wait-timeout / --needs-human\n" +
 		"  --outcome cancelled   dropped on purpose; say why in --evidence\n" +
+		"  --outcome backlog     back to planning on purpose; say why in --evidence,\n" +
+		"                        no PR needed, nobody is woken\n" +
+		"  --outcome todo        back to the ready list on purpose; say why in --evidence,\n" +
+		"                        no PR needed, nobody is woken\n" +
+		"  --outcome in_progress this round stops and the next one continues; --evidence\n" +
+		"                        says why, and one of --wake-at / --wait-condition with\n" +
+		"                        --wait-timeout / --blocked-by / --needs-human says who\n" +
+		"                        continues. The clock wait is patrolled, so the ticket\n" +
+		"                        comes back without anyone @-ing it\n" +
 		"  --verdict pass        acceptance seat only, with --outcome done: the platform\n" +
 		"                        merges the open PR and sets done, or blocks with the reason\n\n" +
 		"--evidence is mandatory (PR link, test conclusion). Agent-authored bodies should\n" +
@@ -1910,19 +1919,19 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 // registerIssueCloseFlags wires `issue close`; shared with its tests so they
 // exercise the flag set that ships.
 func registerIssueCloseFlags(cmd *cobra.Command) {
-	cmd.Flags().String("outcome", "", "Close outcome: done, in_review, blocked, or cancelled (required)")
+	cmd.Flags().String("outcome", "", "Close outcome: done, in_review, blocked, cancelled, backlog, todo, or in_progress (required; see --help for what each one needs)")
 	cmd.Flags().String("evidence", "", "Evidence body: PR link, test conclusion (decodes \\n; prefer --evidence-file for multi-line)")
 	cmd.Flags().Bool("evidence-stdin", false, "Read the evidence body from stdin")
 	cmd.Flags().String("evidence-file", "", "Read the evidence body from a UTF-8 file inside the working directory")
 	cmd.Flags().Bool("allow-external-file", false, "Allow --evidence-file to read a path outside the current working directory")
 	cmd.Flags().String("summary", "", "One-line conclusion placed above the evidence; for blocked it is the close.block_action (80 chars max)")
 	cmd.Flags().String("parent", "", "Comment ID to reply under; a comment-triggered run defaults to its trigger comment")
-	cmd.Flags().String("blocked-by", "", "Comma-separated issue identifiers this blocked issue is waiting on")
-	cmd.Flags().String("wake-at", "", "RFC3339 time to wake a blocked issue for another look")
-	cmd.Flags().String("wait-condition", "", "External condition a blocked issue is waiting on")
+	cmd.Flags().String("blocked-by", "", "Comma-separated issue identifiers this blocked issue is waiting on; on --outcome in_progress it says who continues")
+	cmd.Flags().String("wake-at", "", "RFC3339 time to wake a blocked issue for another look; on --outcome in_progress the patrol wakes the executor then")
+	cmd.Flags().String("wait-condition", "", "External condition a blocked issue is waiting on; on --outcome in_progress it is the condition for the next round")
 	cmd.Flags().String("wait-probe", "", "How to check the wait condition")
 	cmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
-	cmd.Flags().String("needs-human", "", "Member UUID whose decision or acceptance the issue waits on")
+	cmd.Flags().String("needs-human", "", "Member UUID whose decision or acceptance the issue waits on; on --outcome in_progress this person continues it")
 	cmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent's --outcome in_review without a linked open/merged PR is refused unless this is given")
 	cmd.Flags().String("verdict", "", "Acceptance verdict, reviewer only: pass (merges and closes)")
 	cmd.Flags().String("pr", "", "Pull or merge request URL to register with this close. A verified link is stored; an unverifiable link still closes and is marked 未核实")
@@ -1937,16 +1946,39 @@ func registerIssueHandoffFlags(cmd *cobra.Command) {
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }
 
-var validCloseOutcomes = []string{"done", "in_review", "blocked", "cancelled"}
+var validCloseOutcomes = []string{"done", "in_review", "blocked", "cancelled", "backlog", "todo", "in_progress"}
+
+// closeOutcomeNeeds is the one-line "what each outcome requires" contract the
+// help and the bad-outcome errors quote, so a caller never has to guess.
+const closeOutcomeNeeds = "done needs delivery evidence; in_review needs a linked PR (or --no-code); " +
+	"blocked needs one wait (--blocked-by / --wake-at / --wait-condition with --wait-timeout / --needs-human); " +
+	"cancelled needs --evidence; backlog and todo need --evidence and wake nobody; " +
+	"in_progress needs --evidence plus who continues (--wake-at / --wait-condition with --wait-timeout / --blocked-by / --needs-human)"
+
+// closeContinuationPresent mirrors the server's blockwait.Structured test: a
+// clock, a wait with a deadline, another ticket, or a named person.
+func closeContinuationPresent(cmd *cobra.Command) bool {
+	get := func(name string) string {
+		v, _ := cmd.Flags().GetString(name)
+		return strings.TrimSpace(v)
+	}
+	if get("blocked-by") != "" || get("wake-at") != "" || get("needs-human") != "" {
+		return true
+	}
+	return get("wait-condition") != "" && get("wait-timeout") != ""
+}
 
 func runIssueClose(cmd *cobra.Command, args []string) error {
 	outcome, _ := cmd.Flags().GetString("outcome")
 	outcome = strings.ToLower(strings.TrimSpace(outcome))
 	if outcome == "" {
-		return fmt.Errorf("--outcome is required: one of %s", strings.Join(validCloseOutcomes, ", "))
+		return fmt.Errorf("--outcome is required: one of %s. %s", strings.Join(validCloseOutcomes, ", "), closeOutcomeNeeds)
 	}
 	if !slices.Contains(validCloseOutcomes, outcome) {
-		return fmt.Errorf("--outcome %q is not a close outcome; use one of %s", outcome, strings.Join(validCloseOutcomes, ", "))
+		return fmt.Errorf("--outcome %q is not a close outcome; use one of %s. %s", outcome, strings.Join(validCloseOutcomes, ", "), closeOutcomeNeeds)
+	}
+	if outcome == "in_progress" && !closeContinuationPresent(cmd) {
+		return fmt.Errorf("--outcome in_progress must say who continues: give one of --wake-at <RFC3339>, --wait-condition \"...\" with --wait-timeout <RFC3339>, --blocked-by <issue>, or --needs-human <member>. To just put the ticket back without a continuation, use --outcome backlog or --outcome todo")
 	}
 	evidence, hasEvidence, err := resolveTextFlag(cmd, "evidence")
 	if err != nil {

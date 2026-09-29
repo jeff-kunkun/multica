@@ -1,6 +1,6 @@
 export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssigneeType, IssueReviewerType, IssueMetadata, IssueMetadataValue, IssueAgentGuardResponse, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext } from "./issue";
 export type { IssueDraft, IssueDraftStatus, IssueDraftPayload, IssueDraftChild, IssueDraftProjectProposal, IssueDraftProjectChoice, IssueDraftCreatedIssue, IssueDraftAssignmentWarning, IssueDraftPolicy, IssueDraftCapabilities, IssueDraftSession, IssueDraftSummary, IssueDraftFinalizeResult, IssueDraftRuntimeSwitch } from "./issue-draft";
-export type { CloseIssueRequest, CloseIssueResponse, KnowledgeAudit, KnowledgeAuditChange } from "./close";
+export type { CloseIssueRequest, CloseIssueResponse, CloseOutcome, KnowledgeAudit, KnowledgeAuditChange } from "./close";
 export type {
   IssueStatusCategory,
   IssueStatusEntry,
