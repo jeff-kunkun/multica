@@ -1151,10 +1151,33 @@ func formatLead(project map[string]any, actors actorDisplayLookup) string {
 	return actors.actor(lType, lID)
 }
 
-var projectRepoCmd = &cobra.Command{Use: "repo", Short: "Manage repositories attached to a project"}
-var projectRepoListCmd = &cobra.Command{Use: "list <project-id>", Args: exactArgs(1), RunE: runProjectRepoList}
-var projectRepoAddCmd = &cobra.Command{Use: "add <project-id>", Args: exactArgs(1), RunE: runProjectRepoAdd}
-var projectRepoRemoveCmd = &cobra.Command{Use: "remove <project-id> <repo-id>", Args: exactArgs(2), RunE: runProjectRepoRemove}
+var projectRepoCmd = &cobra.Command{
+	Use:   "repo",
+	Short: "Attach repositories to a project",
+	Long: `Registers a Git repository on the workspace and attaches it to one project.
+
+add is idempotent: the same repository URL returns the existing attachment.
+remove detaches that project only; the workspace registry keeps the repository.
+--output json includes repo.mode and repo.next_action.`,
+}
+var projectRepoListCmd = &cobra.Command{
+	Use:   "list <project-id>",
+	Short: "List repositories attached to a project",
+	Args:  exactArgs(1),
+	RunE:  runProjectRepoList,
+}
+var projectRepoAddCmd = &cobra.Command{
+	Use:   "add <project-id>",
+	Short: "Attach a repository to a project",
+	Args:  exactArgs(1),
+	RunE:  runProjectRepoAdd,
+}
+var projectRepoRemoveCmd = &cobra.Command{
+	Use:   "remove <project-id> <repo-id>",
+	Short: "Detach a repository from a project",
+	Args:  exactArgs(2),
+	RunE:  runProjectRepoRemove,
+}
 
 func init() {
 	projectCmd.AddCommand(projectRepoCmd)
@@ -1192,7 +1215,7 @@ func runProjectRepoList(cmd *cobra.Command, args []string) error {
 	if out, _ := cmd.Flags().GetString("output"); out == "json" {
 		return cli.PrintJSON(os.Stdout, result["repos"])
 	}
-	cli.PrintTable(os.Stdout, []string{"ID", "URL"}, projectRepoRows(result["repos"]))
+	cli.PrintTable(os.Stdout, []string{"ID", "URL", "MODE", "NEXT"}, projectRepoRows(result["repos"]))
 	return nil
 }
 func runProjectRepoAdd(cmd *cobra.Command, args []string) error {
@@ -1205,7 +1228,7 @@ func runProjectRepoAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer cancel()
-	body := map[string]any{"url": strings.TrimSpace(u)}
+	body := map[string]any{"repo_url": strings.TrimSpace(u)}
 	if v, _ := cmd.Flags().GetString("default-branch-hint"); v != "" {
 		body["default_branch_hint"] = v
 	}
@@ -1217,7 +1240,7 @@ func runProjectRepoAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("add project repository: %w", err)
 	}
 	if out, _ := cmd.Flags().GetString("output"); out == "table" {
-		cli.PrintTable(os.Stdout, []string{"ID", "URL"}, projectRepoRows([]any{result}))
+		cli.PrintTable(os.Stdout, []string{"ID", "URL", "MODE", "NEXT"}, projectRepoRows([]any{result}))
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
@@ -1238,8 +1261,14 @@ func projectRepoRows(raw any) [][]string {
 	rows := make([][]string, 0, len(arr))
 	for _, item := range arr {
 		m, _ := item.(map[string]any)
-		ref, _ := m["resource_ref"].(map[string]any)
-		rows = append(rows, []string{strVal(m, "id"), strVal(ref, "url")})
+		resource, _ := m["resource"].(map[string]any)
+		if resource == nil {
+			resource = m
+		}
+		ref, _ := resource["resource_ref"].(map[string]any)
+		repo, _ := m["repo"].(map[string]any)
+		action, _ := repo["next_action"].(map[string]any)
+		rows = append(rows, []string{strVal(resource, "id"), strVal(ref, "url"), strVal(repo, "mode"), strVal(action, "kind")})
 	}
 	return rows
 }

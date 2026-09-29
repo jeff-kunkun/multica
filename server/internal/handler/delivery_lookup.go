@@ -182,8 +182,13 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 			continue
 		}
 		conn := matchConnection(conns, key, host)
-		appReach := provider == "github" && h.appCoversRepo(ctx, issue.WorkspaceID, key)
-		reach := DecideRepoReach(provider, false, appReach, false)
+		// Coverage is this repository's owner, not "any installation in the workspace".
+		reach := DecideRepoReach(reachFacts{
+			Provider:     provider,
+			HasToken:     conn != nil,
+			AppCovers:    provider == "github" && h.appCoversRepo(ctx, issue.WorkspaceID, key),
+			CanConfigure: true,
+		})
 		if reach.Mode == "app" {
 			connected = true
 		}

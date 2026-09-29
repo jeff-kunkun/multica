@@ -311,4 +311,4 @@ multica project repo list <project-id> --output json
 multica project repo remove <project-id> <repo-resource-id> --output json
 ```
 
-Attaching the same normalized URL twice is idempotent and returns the existing resource.
+Attaching the same normalized URL twice is idempotent (`created` and `registered` come back false). `--output json` includes `repo.mode` and `repo.next_action` (`install_app`, `create_app`, `add_token`, `replace_token`, or `ask_owner`). `remove` detaches that project only; the workspace registry keeps the repository.
