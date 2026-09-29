@@ -167,6 +167,11 @@
         "hint": "Just a marker, no noise",
         "empty": "No agent is running right now"
       },
+      "todo": {
+        "title": "To do",
+        "hint": "Assigned to you and not started yet.",
+        "empty": "Nothing to do yet"
+      },
       "fresh": {
         "title": "New activity",
         "hint": "Other issues with news since your last visit, shown this visit only.",
@@ -192,6 +197,7 @@
       "stalled_unclosed": "Done, not closed",
       "stalled_reply_unclosed": "Replied, not closed",
       "running": "Running",
+      "todo": "To do",
       "fresh": "New",
       "done": "Done"
     },

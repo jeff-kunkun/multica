@@ -115,7 +115,7 @@ export interface InboxBoardRowPayload {
   identifier: string;
   title: string;
   parent_issue_id: string | null;
-  lane: "waiting" | "stalled" | "running" | "fresh" | "done";
+  lane: "waiting" | "stalled" | "running" | "todo" | "fresh" | "done";
   kind: string;
   stuck_kind: string;
   reason: string;
@@ -139,6 +139,7 @@ export interface InboxBoardResponse {
   waiting: InboxBoardRowPayload[];
   stalled: InboxBoardRowPayload[];
   running: InboxBoardRowPayload[];
+  todo: InboxBoardRowPayload[];
   fresh: InboxBoardRowPayload[];
   done: InboxBoardRowPayload[];
   viewer_id: string;

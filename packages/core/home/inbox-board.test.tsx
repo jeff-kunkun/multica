@@ -16,6 +16,7 @@ function response(over: Partial<InboxBoardResponse> = {}): InboxBoardResponse {
     waiting: [],
     stalled: [],
     running: [],
+    todo: [],
     fresh: [
       {
         issue_id: "i-1",

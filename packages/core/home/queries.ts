@@ -44,7 +44,7 @@ export interface InboxBoardResult {
   isError: boolean;
 }
 
-const EMPTY_BOARD: InboxBoard = { waiting: [], stalled: [], running: [], fresh: [], done: [] };
+const EMPTY_BOARD: InboxBoard = { waiting: [], stalled: [], running: [], todo: [], fresh: [], done: [] };
 
 /**
  * The inbox lanes for this visit. Opening the board reads everything

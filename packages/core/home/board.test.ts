@@ -33,6 +33,7 @@ describe("boardFromResponse", () => {
       waiting: [payload({ issue_id: "w", lane: "waiting", from: { type: "agent", id: "a" }, from_name: "悟空" })],
       stalled: [payload({ issue_id: "s", unread: 2, children: [payload({ issue_id: "c", parent_issue_id: "s" })] })],
       running: [],
+      todo: [payload({ issue_id: "t", lane: "todo", kind: "todo" })],
       fresh: [],
       done: null as unknown as InboxBoardRowPayload[],
       viewer_id: "me",
@@ -49,6 +50,7 @@ describe("boardFromResponse", () => {
     expect(s.children.map((c) => c.issueId)).toEqual(["c"]);
     expect(s.children[0]!.parentIssueId).toBe("s");
     expect(s.children[0]!.children).toEqual([]);
+    expect(board.todo[0]).toMatchObject({ issueId: "t", lane: "todo" });
     expect(board.done).toEqual([]);
   });
 });

@@ -29,6 +29,7 @@ const LANE_TAG_CLASS: Record<BoardLane, string> = {
   waiting: "bg-destructive/10 text-destructive",
   stalled: "bg-warning/15 text-warning-foreground dark:text-warning",
   running: "bg-success/10 text-success",
+  todo: "bg-primary/10 text-primary",
   fresh: "bg-info/10 text-info",
   done: "bg-muted text-muted-foreground",
 };
@@ -37,6 +38,7 @@ const LANE_PILL_CLASS: Record<BoardLane, string> = {
   waiting: "border-destructive/30 text-destructive",
   stalled: "border-warning/40 text-warning-foreground dark:text-warning",
   running: "border-success/30 text-success",
+  todo: "border-primary/30 text-primary",
   fresh: "border-info/30 text-info",
   done: "text-muted-foreground",
 };
@@ -52,6 +54,7 @@ function useBoardCopy() {
       if (row.lane === "waiting") return tags[row.kind] ?? t(($) => $.board.tag.waiting_default);
       if (row.lane === "stalled") return tags[row.kind] ?? t(($) => $.board.stuck.default);
       if (row.lane === "fresh") return t(($) => $.board.tag.fresh);
+      if (row.lane === "todo") return t(($) => $.board.tag.todo);
       return row.lane === "running" ? t(($) => $.board.tag.running) : t(($) => $.board.tag.done);
     };
     const reason = (row: BoardRow): string => {
@@ -343,10 +346,11 @@ export function HomePage() {
     waiting: board.waiting.length,
     stalled: board.stalled.length,
     running: board.running.length,
+    todo: board.todo.length,
     fresh: board.fresh.length,
     done: board.done.length,
   };
-  const lanes: BoardLane[] = ["waiting", "stalled", "running", "fresh", "done"];
+  const lanes: BoardLane[] = ["waiting", "stalled", "running", "todo", "fresh", "done"];
 
   const seenFooter =
     done.seen.length > 0 ? (
@@ -422,6 +426,7 @@ export function HomePage() {
               <LaneSection lane="waiting" rows={board.waiting} copy={copy} />
               <LaneSection lane="stalled" rows={board.stalled} copy={copy} />
               <LaneSection lane="running" rows={board.running} copy={copy} />
+              <LaneSection lane="todo" rows={board.todo} copy={copy} />
               {board.fresh.length > 0 && <LaneSection lane="fresh" rows={board.fresh} copy={copy} />}
               <LaneSection lane="done" rows={done.fresh} copy={copy} footer={seenFooter} />
             </>

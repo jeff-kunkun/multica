@@ -109,6 +109,7 @@ beforeEach(() => {
       }),
     ],
     running: [row({ issueId: "882", lane: "running", next: { type: "agent", id: "a-2" } })],
+    todo: [row({ issueId: "890", lane: "todo", kind: "todo" })],
     fresh: [],
     done: [
       row({ issueId: "880", lane: "done", at: "2026-09-26T10:00:00Z" }),
@@ -118,9 +119,9 @@ beforeEach(() => {
 });
 
 describe("HomePage", () => {
-  it("shows one row per issue in the four lanes", () => {
+  it("shows one row per issue in the five lanes", () => {
     renderWithI18n(<HomePage />);
-    for (const lane of ["waiting", "stalled", "running", "done"]) {
+    for (const lane of ["waiting", "stalled", "running", "todo", "done"]) {
       expect(screen.getByTestId(`board-lane-${lane}`)).toBeInTheDocument();
     }
     const waiting = screen.getByTestId("board-lane-waiting");
@@ -135,6 +136,11 @@ describe("HomePage", () => {
     expect(within(stalled).getByText("Next: name:a-1")).toBeInTheDocument();
 
     expect(within(screen.getByTestId("board-lane-running")).getByText("name:a-2")).toBeInTheDocument();
+
+    // DENE-975: the viewer's todo work sits right after running.
+    expect(within(screen.getByTestId("board-lane-todo")).getByText("title 890")).toBeInTheDocument();
+    const lanes = screen.getAllByTestId(/^board-lane-/).map((el) => el.dataset.testid);
+    expect(lanes.indexOf("board-lane-todo")).toBe(lanes.indexOf("board-lane-running") + 1);
   });
 
   it("reads the board on arrival and marks what was unread (DENE-901)", () => {

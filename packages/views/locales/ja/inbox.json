@@ -164,6 +164,11 @@
         "hint": "Just a marker, no noise",
         "empty": "No agent is running right now"
       },
+      "todo": {
+        "title": "未着手",
+        "hint": "あなたに割り当てられ、まだ始まっていないタスク。",
+        "empty": "未着手のタスクはありません"
+      },
       "fresh": {
         "title": "新着あり",
         "hint": "前回の訪問以降に新着がある他のタスクで、今回のみ表示されます。",
@@ -189,6 +194,7 @@
       "stalled_unclosed": "Done, not closed",
       "stalled_reply_unclosed": "Replied, not closed",
       "running": "Running",
+      "todo": "未着手",
       "fresh": "新着",
       "done": "Done"
     },

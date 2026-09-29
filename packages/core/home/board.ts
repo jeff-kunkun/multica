@@ -8,6 +8,7 @@ import type { InboxBoardResponse, InboxBoardRowPayload, ParkingEvent } from "../
  *             issue's parking record names the viewer as the next owner;
  *   stalled — the parking record says it stopped without explaining why;
  *   running — an agent is on it right now;
+ *   todo    — it is assigned to the viewer and still in todo (DENE-975);
  *   fresh   — it has unread inbox rows for the viewer but none of the
  *             lanes above or below takes it (DENE-901);
  *   done    — it was finished today.
@@ -19,7 +20,7 @@ import type { InboxBoardResponse, InboxBoardRowPayload, ParkingEvent } from "../
  * page, the CLI and an agent reading the inbox for its person all see the
  * same board. Here it is only reshaped for the page.
  */
-export type BoardLane = "waiting" | "stalled" | "running" | "fresh" | "done";
+export type BoardLane = "waiting" | "stalled" | "running" | "todo" | "fresh" | "done";
 
 export interface BoardOwner {
   type: string;
@@ -62,6 +63,7 @@ export interface InboxBoard {
   waiting: BoardRow[];
   stalled: BoardRow[];
   running: BoardRow[];
+  todo: BoardRow[];
   fresh: BoardRow[];
   done: BoardRow[];
 }
@@ -94,6 +96,7 @@ export function boardFromResponse(res: InboxBoardResponse): InboxBoard {
     waiting: (res.waiting ?? []).map(row),
     stalled: (res.stalled ?? []).map(row),
     running: (res.running ?? []).map(row),
+    todo: (res.todo ?? []).map(row),
     fresh: (res.fresh ?? []).map(row),
     done: (res.done ?? []).map(row),
   };

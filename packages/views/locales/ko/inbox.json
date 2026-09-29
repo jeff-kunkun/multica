@@ -164,6 +164,11 @@
         "hint": "Just a marker, no noise",
         "empty": "No agent is running right now"
       },
+      "todo": {
+        "title": "할 일",
+        "hint": "나에게 배정되었고 아직 시작하지 않은 작업.",
+        "empty": "할 일이 없습니다"
+      },
       "fresh": {
         "title": "새 소식",
         "hint": "지난 방문 이후 새 소식이 있는 다른 태스크로, 이번 방문에만 표시됩니다.",
@@ -189,6 +194,7 @@
       "stalled_unclosed": "Done, not closed",
       "stalled_reply_unclosed": "Replied, not closed",
       "running": "Running",
+      "todo": "할 일",
       "fresh": "새 소식",
       "done": "Done"
     },
