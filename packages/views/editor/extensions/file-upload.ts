@@ -201,7 +201,7 @@ export async function uploadAndInsertFile(
 
   editor: any,
   file: File,
-  handler: (file: File, uploadId: string) => Promise<UploadResult | null>,
+  handler: (file: File, uploadId: string, onProgress?: (uploadedBytes: number, totalBytes: number) => void) => Promise<UploadResult | null>,
   pos?: number,
 ) {
   const isImage = file.type.startsWith("image/");
@@ -226,7 +226,11 @@ export async function uploadAndInsertFile(
     void applyImageDimensions(editor, file, blobUrl);
 
     try {
-      const result = await handler(file, uploadId);
+      const result = await handler(file, uploadId, (uploadedBytes, totalBytes) => {
+        const hit = findUploadNode(editor, uploadId);
+        if (!hit) return;
+        editor.view.dispatch(editor.state.tr.setNodeMarkup(hit.pos, undefined, { ...hit.node.attrs, uploadProgress: Math.round((uploadedBytes / totalBytes) * 100) }));
+      });
       // The upload outlives the mount (coordinator-owned, MUL-5181): by the
       // time it settles this editor may be destroyed. Dispatching against a
       // destroyed EditorView throws, and the catch would dispatch again —
@@ -250,7 +254,11 @@ export async function uploadAndInsertFile(
     }
 
     try {
-      const result = await handler(file, uploadId);
+      const result = await handler(file, uploadId, (uploadedBytes, totalBytes) => {
+        const hit = findUploadNode(editor, uploadId);
+        if (!hit) return;
+        editor.view.dispatch(editor.state.tr.setNodeMarkup(hit.pos, undefined, { ...hit.node.attrs, uploadProgress: Math.round((uploadedBytes / totalBytes) * 100) }));
+      });
       // See the image branch: a settle after this editor's destroy must not
       // dispatch against the dead EditorView.
       if (editor.isDestroyed) return;

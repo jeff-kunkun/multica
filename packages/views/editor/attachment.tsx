@@ -68,6 +68,7 @@ export type AttachmentInput =
       contentType?: string;
       /** Editor in-flight state. Renders a loader placeholder. */
       uploading?: boolean;
+      uploadProgress?: number;
       /**
        * Intrinsic pixel dimensions. Rendered as `<img width height>` so the
        * browser reserves the box before the image decodes — prevents the
@@ -105,6 +106,7 @@ interface Normalized {
   attachmentId?: string;
   record?: AttachmentRecord;
   uploading: boolean;
+  uploadProgress?: number;
   width?: number;
   height?: number;
 }
@@ -158,6 +160,7 @@ function normalize(
     attachmentId: record?.id,
     record,
     uploading: !!input.uploading,
+    uploadProgress: input.uploadProgress,
     width: input.width,
     height: input.height,
   };
@@ -401,6 +404,7 @@ export function Attachment({
           linkUrl={shareUrl}
           alt={state.filename}
           uploading={state.uploading}
+          uploadProgress={state.uploadProgress}
           width={state.width}
           height={state.height}
           editable={editable}
@@ -438,6 +442,7 @@ export function Attachment({
         attachmentId={state.attachmentId}
         href={shareUrl || undefined}
         uploading={state.uploading}
+        uploadProgress={state.uploadProgress}
         onPreview={openPreview}
         onDownload={handleDownload}
         onDelete={editable ? onDelete : undefined}

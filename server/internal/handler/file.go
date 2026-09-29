@@ -42,6 +42,7 @@ var extContentTypes = map[string]string{
 
 const maxUploadSize = 100 << 20 // 100 MB
 const uploadChunkSize = 2 << 20
+const maxChunkUploadSessions = 256
 
 type chunkUpload struct {
 	mu                                sync.Mutex
@@ -424,6 +425,11 @@ func (h *Handler) StartChunkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chunkUploads.Lock()
+	if len(chunkUploads.m) >= maxChunkUploadSessions {
+		chunkUploads.Unlock()
+		writeError(w, http.StatusTooManyRequests, "too many uploads in progress")
+		return
+	}
 	chunkUploads.m[id.String()] = &chunkUpload{userID: userID, filename: in.Filename, contentType: in.ContentType, size: in.Size, issueID: in.IssueID, commentID: in.CommentID, chatSessionID: in.ChatSessionID, taskID: in.TaskID, chunks: make(map[int][]byte)}
 	chunkUploads.Unlock()
 	writeJSON(w, http.StatusCreated, map[string]any{"upload_id": id.String(), "chunk_size": uploadChunkSize, "total_chunks": (in.Size + uploadChunkSize - 1) / uploadChunkSize})
@@ -451,9 +457,18 @@ func (h *Handler) UploadChunk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "upload belongs to another user")
 		return
 	}
+	totalChunks := (u.size + uploadChunkSize - 1) / uploadChunkSize
+	if int64(idx) >= totalChunks {
+		writeError(w, http.StatusBadRequest, "chunk index out of range")
+		return
+	}
 	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, uploadChunkSize))
 	if err != nil || len(b) > uploadChunkSize {
 		writeError(w, 400, "chunk too large")
+		return
+	}
+	if int64(len(b)) != uploadChunkSize && int64(idx) != totalChunks-1 {
+		writeError(w, http.StatusBadRequest, "short non-final chunk")
 		return
 	}
 	u.mu.Lock()
@@ -514,6 +529,11 @@ func (h *Handler) CompleteChunkUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		data = append(data, c...)
 	}
+	if int64(len(data)) != u.size {
+		u.mu.Unlock()
+		writeError(w, http.StatusConflict, "uploaded bytes do not match declared size")
+		return
+	}
 	u.mu.Unlock()
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
@@ -536,12 +556,30 @@ func (h *Handler) CompleteChunkUpload(w http.ResponseWriter, r *http.Request) {
 	req.ContentLength = int64(body.Len())
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	// UploadFile performs the normal attachment write and emits the response.
-	h.UploadFile(w, req)
-	if w.Header().Get("Content-Type") != "" {
+	rw := &chunkResponseWriter{ResponseWriter: w, status: http.StatusOK}
+	h.UploadFile(rw, req)
+	if rw.status >= 200 && rw.status < 300 {
 		chunkUploads.Lock()
 		delete(chunkUploads.m, id)
 		chunkUploads.Unlock()
 	}
+}
+
+type chunkResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *chunkResponseWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *chunkResponseWriter) Write(p []byte) (int, error) {
+	if w.status == http.StatusOK {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(p)
 }
 
 func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {

@@ -287,6 +287,8 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import { compressImageForUpload } from "../attachments/compress-image";
+import { defaultStorage } from "../platform/storage";
 import {
   parseRoutingHealth,
   type RoutingHealth,
@@ -4307,34 +4309,51 @@ export class ApiClient {
     // failure via `signal.aborted` / `err.name === "AbortError"`.
     signal?: AbortSignal,
   ): Promise<Attachment> {
+    const body = await compressImageForUpload(file);
     // Cloudflare limits a single request to roughly 100s. Send larger files
     // as independently retryable 2 MiB chunks; the server's completion step
     // returns the same attachment shape as the legacy endpoint.
-    if (file.size > 2 * 1024 * 1024) {
-      const meta = { filename: file.name, size: file.size, content_type: file.type, issue_id: opts?.issueId, comment_id: opts?.commentId, chat_session_id: opts?.chatSessionId };
-      const started = await fetch(`${this.baseUrl}/api/upload-file/chunked`, { method: "POST", headers: { ...this.authHeaders(), "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(meta), signal });
+    if (body.size > 2 * 1024 * 1024) {
+      const resumeKey = `multica:upload:${body.name}:${body.size}:${body.lastModified}:${opts?.issueId ?? ""}:${opts?.commentId ?? ""}:${opts?.chatSessionId ?? ""}`;
+      let uploadId = defaultStorage.getItem(resumeKey);
+      let session: { upload_id: string; chunk_size: number } | undefined;
+      if (uploadId) {
+        const status = await fetch(`${this.baseUrl}/api/upload-file/chunked/${encodeURIComponent(uploadId)}`, { headers: this.authHeaders(), credentials: "include", signal });
+        if (status.ok) session = (await status.json()) as typeof session;
+        else defaultStorage.removeItem(resumeKey);
+      }
+      if (!session) {
+        const meta = { filename: body.name, size: body.size, content_type: body.type, issue_id: opts?.issueId, comment_id: opts?.commentId, chat_session_id: opts?.chatSessionId };
+        const started = await fetch(`${this.baseUrl}/api/upload-file/chunked`, { method: "POST", headers: { ...this.authHeaders(), "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(meta), signal });
       if (!started.ok) throw new Error(await this.parseErrorMessage(started, `Upload failed: ${started.status}`));
-      const session = (await started.json()) as { upload_id: string; chunk_size: number };
+        session = (await started.json()) as { upload_id: string; chunk_size: number };
+        uploadId = session.upload_id;
+        defaultStorage.setItem(resumeKey, uploadId);
+      }
       const chunkSize = session.chunk_size || 2 * 1024 * 1024;
-      for (let index = 0, offset = 0; offset < file.size; index++, offset += chunkSize) {
-      const chunk = file.slice(offset, Math.min(file.size, offset + chunkSize));
+      const status = await fetch(`${this.baseUrl}/api/upload-file/chunked/${encodeURIComponent(uploadId!)}`, { headers: this.authHeaders(), credentials: "include", signal });
+      const uploaded = status.ok ? new Set<number>(((await status.json()) as { chunks?: number[] }).chunks ?? []) : new Set<number>();
+      for (let index = 0, offset = 0; offset < body.size; index++, offset += chunkSize) {
+        const chunk = body.slice(offset, Math.min(body.size, offset + chunkSize));
+        if (uploaded.has(index)) { opts?.onProgress?.(Math.min(body.size, offset + chunk.size), body.size); continue; }
         let lastError: unknown;
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
-            const res = await fetch(`${this.baseUrl}/api/upload-file/chunked/${session.upload_id}/chunk?index=${index}`, { method: "PUT", headers: this.authHeaders(), credentials: "include", body: chunk, signal });
+            const res = await fetch(`${this.baseUrl}/api/upload-file/chunked/${uploadId}/chunk?index=${index}`, { method: "PUT", headers: this.authHeaders(), credentials: "include", body: chunk, signal });
             if (!res.ok) throw new Error(await this.parseErrorMessage(res, `Chunk upload failed: ${res.status}`));
             lastError = undefined; break;
           } catch (err) { lastError = err; if (signal?.aborted) throw err; }
         }
         if (lastError) throw lastError;
-        opts?.onProgress?.(Math.min(file.size, offset + chunk.size), file.size);
+        opts?.onProgress?.(Math.min(body.size, offset + chunk.size), body.size);
       }
-      const done = await fetch(`${this.baseUrl}/api/upload-file/chunked/${session.upload_id}/complete`, { method: "POST", headers: this.authHeaders(), credentials: "include", signal });
+      const done = await fetch(`${this.baseUrl}/api/upload-file/chunked/${uploadId}/complete`, { method: "POST", headers: this.authHeaders(), credentials: "include", signal });
       if (!done.ok) throw new Error(await this.parseErrorMessage(done, `Upload failed: ${done.status}`));
+      defaultStorage.removeItem(resumeKey);
       return parseWithFallback(await done.json(), AttachmentResponseSchema, EMPTY_ATTACHMENT, { endpoint: "POST /api/upload-file/chunked/complete" });
     }
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", body);
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
     if (opts?.chatSessionId) formData.append("chat_session_id", opts.chatSessionId);

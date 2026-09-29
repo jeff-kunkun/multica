@@ -89,6 +89,21 @@ export function startUpload({
         logger.info("upload aborted", { clientUploadId });
         return;
       }
+      // Mobile Safari commonly rejects the request when the tab is
+      // backgrounded. Keep the same client id and file, then restart as soon
+      // as the page is visible so ApiClient can resume the server session.
+      if (typeof document !== "undefined" && document.hidden) {
+        await new Promise<void>((resolve) => {
+          const resume = () => {
+            if (document.hidden) return;
+            document.removeEventListener("visibilitychange", resume);
+            resolve();
+          };
+          document.addEventListener("visibilitychange", resume);
+        });
+        startUpload({ clientUploadId, file, api, ctx, onSettled });
+        return;
+      }
       onSettled({
         clientUploadId,
         status: "failed",
