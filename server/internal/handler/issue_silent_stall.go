@@ -294,9 +294,11 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 		tr.refuse = "这张票已经关联了 PR，不能用 `--no-code` 跳过合入门禁。"
 		return tr
 	}
-	// Without a GitHub App the server can neither read an open PR's checks nor
-	// merge it, so any block here waits on nothing. The closing agent has gh.
-	if actorType == "agent" && hasOpenPull(prs) && !h.canMergePulls() {
+	// Without a GitHub App the server cannot merge. A gh snapshot that already
+	// says the PR is dirty or red still blocks here, with that reason (DENE-906).
+	// A clean green PR, or one whose merge state was never reported, is refused
+	// back to the closing agent: it has gh and a block would wait on nothing.
+	if actorType == "agent" && hasOpenPull(prs) && !h.canMergePulls() && !openPullSnapshotBlocks(prs) {
 		tr.refuse = fmt.Sprintf("这台服务没有合并权限，合不了 %s。确认检查通过后用 `gh pr merge --squash` 自己合，再重跑这条 close；要别人验收就改用 `--outcome in_review`。", mergeTarget(prs))
 		return tr
 	}
@@ -358,6 +360,27 @@ func (h *Handler) mergeOpenPulls(ctx context.Context, prs []db.ListPullRequestsB
 		return errPullNotMergeable
 	}
 	return nil
+}
+
+// openPullSnapshotBlocks is true when an open PR's gh snapshot is already a
+// reason to block: conflict, branch protection, or checks that are red or
+// still running. Empty and unknown merge state stay out, so a report that
+// never carried a snapshot still goes back to the agent instead of parking.
+func openPullSnapshotBlocks(prs []db.ListPullRequestsByIssueRow) bool {
+	for _, pr := range prs {
+		if !strings.EqualFold(pr.State, "open") {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(pr.MergeableState.String)) {
+		case "dirty", "behind", "blocked", "unstable":
+			return true
+		}
+		switch strings.ToLower(strings.TrimSpace(pr.ChecksRollupState.String)) {
+		case "failure", "error", "failing", "cancelled", "pending", "expected", "queued", "in_progress":
+			return true
+		}
+	}
+	return false
 }
 
 func hasOpenPull(prs []db.ListPullRequestsByIssueRow) bool {
