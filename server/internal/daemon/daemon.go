@@ -8512,6 +8512,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentSkills:                      convertSkillsForEnv(skills),
 		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
 		Repos:                            convertReposForEnv(task.Repos),
+		ProjectRepos:                     convertReposForEnv(task.ProjectRepos),
+		WorkspaceRepoCount:               task.WorkspaceRepoCount,
+		OtherWorkspaceRepoCount:          task.OtherWorkspaceRepoCount,
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
@@ -11048,6 +11051,14 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
 		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, Ref: r.Ref}
+		if r.Reach != nil {
+			result[i].Reach = &execenv.RepoReachForEnv{
+				State: r.Reach.State, Mode: r.Reach.Mode, Hint: r.Reach.Hint,
+			}
+			if a := r.Reach.NextAction; a != nil {
+				result[i].Reach.NextAction = &execenv.RepoNextActionForEnv{Kind: a.Kind, For: a.For, URL: a.URL, Command: a.Command, Optional: a.Optional}
+			}
+		}
 	}
 	return result
 }
