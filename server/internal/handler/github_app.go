@@ -276,6 +276,25 @@ func writeGitHubAppLaunchPage(w http.ResponseWriter, status int, body string) {
 </body></html>`))
 }
 
+// githubAppLaunchSubmitScript posts the manifest form as soon as the page
+// loads. The site-wide CSP blocks inline scripts and cross-origin form posts,
+// so the success page swaps in a policy that allows exactly this script (by
+// hash) and exactly this manifest's GitHub address.
+const githubAppLaunchSubmitScript = `document.getElementById("gh").submit()`
+
+var githubAppLaunchSubmitScriptHash = func() string {
+	sum := sha256.Sum256([]byte(githubAppLaunchSubmitScript))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}()
+
+func githubAppLaunchCSP(actionURL string) string {
+	return "default-src 'none'; " +
+		"script-src " + githubAppLaunchSubmitScriptHash + "; " +
+		"frame-ancestors 'none'; " +
+		"base-uri 'none'; " +
+		"form-action " + actionURL
+}
+
 func writeGitHubAppLaunchError(w http.ResponseWriter, status int, msg string) {
 	writeGitHubAppLaunchPage(w, status, "<p>"+html.EscapeString(msg)+"</p>")
 }
@@ -312,12 +331,19 @@ func (h *Handler) LaunchGitHubApp(w http.ResponseWriter, r *http.Request) {
 		writeGitHubAppLaunchError(w, http.StatusInternalServerError, "生成 GitHub App 配置失败，请稍后再试。")
 		return
 	}
+	action, err := url.Parse(manifest.ActionURL)
+	if err != nil || action.Scheme != "https" || action.Host == "" {
+		writeGitHubAppLaunchError(w, http.StatusInternalServerError, "生成 GitHub App 配置失败，请稍后再试。")
+		return
+	}
+	action.RawQuery, action.Fragment = "", ""
+	w.Header().Set("Content-Security-Policy", githubAppLaunchCSP(action.String()))
 	writeGitHubAppLaunchPage(w, http.StatusOK, `<p>正在前往 GitHub。若浏览器没有跳转，点下面的按钮，然后在 GitHub 上输入一次密码并创建。</p>
 <form id="gh" method="post" action="`+html.EscapeString(manifest.ActionURL)+`">
 <input type="hidden" name="manifest" value="`+html.EscapeString(string(raw))+`">
 <button type="submit">前往 GitHub</button>
 </form>
-<script>document.getElementById("gh").submit()</script>`)
+<script>`+githubAppLaunchSubmitScript+`</script>`)
 }
 
 // GitHubAppCallback (GET /api/github/app/callback) exchanges GitHub's code,

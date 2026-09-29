@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -377,7 +379,8 @@ func TestGitHubAppLaunchLinkIsSingleUse(t *testing.T) {
 		}
 		req := httptest.NewRequest(http.MethodGet, u.RequestURI(), nil)
 		rec := httptest.NewRecorder()
-		testHandler.LaunchGitHubApp(rec, req)
+		// Through the site-wide CSP middleware, as the router mounts it.
+		middleware.ContentSecurityPolicy(http.HandlerFunc(testHandler.LaunchGitHubApp)).ServeHTTP(rec, req)
 		return rec
 	}
 
@@ -389,12 +392,40 @@ func TestGitHubAppLaunchLinkIsSingleUse(t *testing.T) {
 	if !strings.Contains(first.Body.String(), `action="https://github.com/organizations/acme/settings/apps/new"`) {
 		t.Fatalf("first open page = %s", first.Body.String())
 	}
+	// The success page replaces the site-wide CSP: one header, allowing the
+	// auto-submit script by hash and the form post to this manifest's URL only.
+	csp := first.Header().Values("Content-Security-Policy")
+	if len(csp) != 1 {
+		t.Fatalf("csp headers = %q", csp)
+	}
+	directives := map[string]string{}
+	for _, d := range strings.Split(csp[0], ";") {
+		name, value, _ := strings.Cut(strings.TrimSpace(d), " ")
+		directives[name] = value
+	}
+	if got := directives["form-action"]; got != "https://github.com/organizations/acme/settings/apps/new" {
+		t.Fatalf("form-action = %q (csp %s)", got, csp[0])
+	}
+	sum := sha256.Sum256([]byte(githubAppLaunchSubmitScript))
+	scriptHash := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	if got := directives["script-src"]; got != scriptHash {
+		t.Fatalf("script-src = %q, want %s", got, scriptHash)
+	}
+	if !strings.Contains(first.Body.String(), "<script>"+githubAppLaunchSubmitScript+"</script>") {
+		t.Fatalf("page script does not match the allowed hash: %s", first.Body.String())
+	}
+	if strings.Contains(csp[0], "unsafe-inline") {
+		t.Fatalf("csp must not allow unsafe-inline: %s", csp[0])
+	}
 	second := open(link)
 	if second.Code != http.StatusGone || !strings.Contains(second.Body.String(), "不能重复使用") {
 		t.Fatalf("reuse = %d body %s", second.Code, second.Body.String())
 	}
 	if ct := second.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Fatalf("reuse content type = %s", ct)
+	}
+	if got := second.Header().Get("Content-Security-Policy"); !strings.Contains(got, "form-action 'self'") {
+		t.Fatalf("error page must keep the site-wide csp: %s", got)
 	}
 
 	expired := launchURL(begin("owner", testUserID))
