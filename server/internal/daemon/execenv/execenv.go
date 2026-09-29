@@ -44,6 +44,9 @@ type ProjectContextForEnv struct {
 	Title       string
 	Description string
 	Resources   []ProjectResourceForEnv
+	// MemoryLine is the single project-memory sentence from the claim.
+	// Empty leaves the brief byte-identical to a server that does not send it.
+	MemoryLine string
 }
 
 // CodeSourceForEnv describes where a task's code lives and why. Populated by

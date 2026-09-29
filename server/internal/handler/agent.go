@@ -704,6 +704,10 @@ type TaskProjectContextData struct {
 	Title       string                `json:"title"`
 	Description string                `json:"description,omitempty"`
 	Resources   []ProjectResourceData `json:"resources,omitempty"`
+	// MemoryLine is one brief line: the project-memory map path and the
+	// missing checklist. Empty on a server that has not observed the project.
+	// File bodies stay out of this payload. Mirror field: daemon ProjectContextData.
+	MemoryLine string `json:"memory_line,omitempty"`
 }
 
 // ConnectedAppData keeps the daemon-claim wire field local to handler types

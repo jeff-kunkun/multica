@@ -556,6 +556,7 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 			b.WriteString(desc)
 			b.WriteString("\n\n")
 		}
+		writeProjectMemoryLine(b, project.MemoryLine)
 		writeProjectResourceList(b, ctx, project.Resources)
 		return
 	}
@@ -571,9 +572,24 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 			b.WriteString(desc)
 			b.WriteString("\n\n")
 		}
+		writeProjectMemoryLine(b, project.MemoryLine)
 		writeProjectResourceList(b, ctx, project.Resources)
 	}
 	b.WriteString("When a deliverable must be attributed to one project — creating an issue, for example — infer the target from the request and the project descriptions above. If it is still ambiguous, ask the user which project to use instead of guessing.\n\n")
+}
+
+// writeProjectMemoryLine emits the one project-memory sentence. A blank line
+// adds nothing, so a claim without the field keeps the previous brief.
+func writeProjectMemoryLine(b *strings.Builder, line string) {
+	if i := strings.IndexAny(line, "\r\n"); i >= 0 {
+		line = line[:i]
+	}
+	line = strings.Join(strings.Fields(line), " ")
+	if line == "" {
+		return
+	}
+	b.WriteString(line)
+	b.WriteString("\n\n")
 }
 
 // writeProjectResourceList emits one project's resource list, or the
