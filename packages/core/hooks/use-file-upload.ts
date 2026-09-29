@@ -128,8 +128,9 @@ function waitForUploadRecovery(delayMs: number): Promise<void> {
     window.addEventListener("online", resume);
     if (!document.hidden && navigator.onLine !== false) {
       timer = setTimeout(finish, delayMs);
+    } else {
+      resume();
     }
-    resume();
   });
 }
 

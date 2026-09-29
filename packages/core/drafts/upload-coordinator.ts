@@ -110,8 +110,9 @@ function waitForRecovery(controller: AbortController, delayMs: number): Promise<
     controller.signal.addEventListener("abort", aborted, { once: true });
     if (!document.hidden && navigator.onLine !== false) {
       timer = setTimeout(() => finish(true), delayMs);
+    } else {
+      resume();
     }
-    resume();
   });
 }
 
