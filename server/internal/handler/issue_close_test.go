@@ -562,9 +562,9 @@ func TestCloseChildWithSeatDoneByExecutor(t *testing.T) {
 	}
 }
 
-// DENE-943: code merged through an intranet GitLab MR leaves a delivery branch
-// the platform can never match to a PR. --no-code with the MR link is the exit;
-// once a PR is linked, --no-code still cannot skip the merge gate.
+// DENE-943: a delivery branch with no visible PR is refused with the delivery
+// lookup's reason and next step. An explicit --no-code still closes it; once a
+// PR is linked, --no-code cannot skip the merge gate.
 func TestCloseDoneWithBranchButNoVisiblePull(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -580,8 +580,9 @@ func TestCloseDoneWithBranchButNoVisiblePull(t *testing.T) {
 	}
 
 	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"outcome": "done", "evidence": "MR 已合"})
-	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "--no-code") {
-		t.Fatalf("no reason: %d: %s", w.Code, w.Body.String())
+	body := w.Body.String()
+	if w.Code != http.StatusConflict || !strings.Contains(body, "这个仓库还没接上") || !strings.Contains(body, "下一步：") || !strings.Contains(body, "保存令牌") || !strings.Contains(body, "--pr") {
+		t.Fatalf("not connected: %d: %s", w.Code, body)
 	}
 	w = closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"outcome": "done", "evidence": "MR 已合", "no_code_reason": "GitLab MR !200 已合 dev"})
 	if w.Code != http.StatusOK {
