@@ -40,7 +40,8 @@ type repoConnectionRequest struct {
 	Provider    string `json:"provider"`
 	InstanceURL string `json:"instance_url"`
 	AccessToken string `json:"access_token"`
-	// AgentYes limits the save to repositories the task initiator registered.
+	// AgentYes is a client hint. Authorization ignores it: an agent caller is
+	// always limited to repositories the task initiator registered.
 	AgentYes bool `json:"agent_yes"`
 }
 
@@ -106,7 +107,7 @@ func (h *Handler) writeRepoConnection(w http.ResponseWriter, r *http.Request, sa
 		return
 	}
 	var connectedBy pgtype.UUID
-	if req.AgentYes {
+	if h.callerIsAgent(r, wsUUID) {
 		initiator, okInit := h.agentTaskInitiator(r, wsUUID)
 		if !okInit {
 			writeError(w, http.StatusBadRequest, "智能体登记连接需要这条任务的发起人")
@@ -280,6 +281,18 @@ func webhookMode(provider, mode string, conn *db.VcsConnection) string {
 	default:
 		return "unknown"
 	}
+}
+
+// callerIsAgent reports whether this request is an agent task. The decision
+// comes from resolveActor (the task token, or the agent/task pair tests
+// stamp), never from a flag in the body.
+func (h *Handler) callerIsAgent(r *http.Request, ws pgtype.UUID) bool {
+	userID := requestUserID(r)
+	if member, ok := middleware.MemberFromContext(r.Context()); ok && member.UserID.Valid {
+		userID = uuidToString(member.UserID)
+	}
+	actorType, _ := h.resolveActor(r, userID, uuidToString(ws))
+	return actorType == "agent"
 }
 
 func (h *Handler) callerCanConfigureRepo(r *http.Request, repo workspaceRepoRef) bool {

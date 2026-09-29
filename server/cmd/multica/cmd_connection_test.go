@@ -162,6 +162,76 @@ func TestConnectionAddHelperFailureOmitsToken(t *testing.T) {
 	}
 }
 
+func TestConnectionAddAgentPostsOnlyInitiatorRepo(t *testing.T) {
+	restore := chdirConnectionTest(t)
+	defer restore()
+	resetConnectionAddFlags(t)
+
+	origCmd := connectionTokenCommand
+	t.Cleanup(func() { connectionTokenCommand = origCmd })
+	connectionTokenCommand = func(name string, args ...string) ([]byte, error) {
+		if name != "gh" || strings.Join(args, " ") != "auth token" {
+			t.Fatalf("argv = %s %v", name, args)
+		}
+		return []byte(connectionTestToken + "\n"), nil
+	}
+	var posted []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"repos":[
+				{"url":"https://github.com/acme/app-private","provider":"github","mode":"none","can_configure":true,"agent_eligible":false},
+				{"url":"https://github.com/acme/app","provider":"github","mode":"none","can_configure":true,"agent_eligible":true}
+			]}`))
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		posted = append(posted, body)
+		_, _ = w.Write([]byte(`{"repo":{"url":"https://github.com/acme/app","account_login":"octocat"}}`))
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_AGENT_ID", "agent-1")
+
+	mustSetFlag(t, "from-gh", "true")
+	mustSetFlag(t, "yes", "false")
+	var stdout, stderr bytes.Buffer
+	connectionAddCmd.SetOut(&stdout)
+	connectionAddCmd.SetErr(&stderr)
+	connectionAddCmd.SetIn(strings.NewReader("y\n"))
+	if err := runConnectionAdd(connectionAddCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(posted) != 1 || posted[0]["repo_url"] != "https://github.com/acme/app" {
+		t.Fatalf("posted = %#v", posted)
+	}
+	blob := stdout.String() + stderr.String()
+	if strings.Contains(blob, connectionTestToken) || strings.Contains(blob, "app-private") {
+		t.Fatalf("output leaked a token or the other repo:\n%s", blob)
+	}
+}
+
+func TestConnectionRepoWantedMatchesExactly(t *testing.T) {
+	card := "https://github.com/acme/app-private"
+	if connectionRepoWanted(card, "acme/app") {
+		t.Fatal("owner/name matched a longer repository name")
+	}
+	if connectionRepoWanted(card, "https://github.com/acme/app") {
+		t.Fatal("full URL matched a longer repository name")
+	}
+	own := "https://github.com/acme/app.git"
+	for _, want := range []string{"acme/app", "https://github.com/acme/app", "https://github.com/acme/app.git"} {
+		if !connectionRepoWanted(own, want) {
+			t.Fatalf("want %q to match %s", want, own)
+		}
+	}
+}
+
 func chdirConnectionTest(t *testing.T) func() {
 	t.Helper()
 	wd, err := os.Getwd()

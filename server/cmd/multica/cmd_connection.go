@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/repoident"
 	"github.com/spf13/cobra"
 )
 
@@ -27,9 +28,10 @@ It is never accepted as a command-line flag.
   multica connection add --provider gitlab --token-file ./token.txt --repo https://gitlab.example/group/app
 
 --from-gh and --from-glab register the login on repositories this person added.
-An agent may pass --yes; the server then only writes repositories the task
-initiator registered. Without --repo, a GitLab or Forgejo token is saved as an
-admin-owned connection for the whole instance.`,
+Inside an agent task the server only accepts repositories the task initiator
+registered, with or without --yes. --yes only skips the confirmation prompt.
+Without --repo, a GitLab or Forgejo token is saved as an admin-owned connection
+for the whole instance.`,
 	Args: cobra.NoArgs,
 	RunE: runConnectionAdd,
 }
@@ -211,12 +213,11 @@ func runConnectionAdd(cmd *cobra.Command, _ []string) error {
 	}
 	workspaceWide, _ := cmd.Flags().GetBool("workspace")
 	repoFlag, _ := cmd.Flags().GetString("repo")
-	agentYes := false
-	if yes, _ := cmd.Flags().GetBool("yes"); yes && strings.TrimSpace(os.Getenv("MULTICA_AGENT_ID")) != "" {
-		agentYes = true
-	}
-	if agentYes && workspaceWide {
-		return fmt.Errorf("--workspace cannot be combined with an agent --yes")
+	// An agent task is recognized by the process environment. --yes only
+	// skips the prompt; the server still refuses any other repository.
+	agentTask := strings.TrimSpace(os.Getenv("MULTICA_AGENT_ID")) != ""
+	if agentTask && workspaceWide {
+		return fmt.Errorf("--workspace cannot be used from an agent task")
 	}
 	personal := !workspaceWide && (gh || glab || repoFlag != "")
 	if provider == "github" && !personal {
@@ -227,7 +228,7 @@ func runConnectionAdd(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 	var targets []connectionRepoCard
 	if personal {
-		targets, err = connectionRepoTargets(ctx, c, ws, provider, repoFlag, agentYes)
+		targets, err = connectionRepoTargets(ctx, c, ws, provider, repoFlag, agentTask)
 		if err != nil {
 			return err
 		}
@@ -259,7 +260,7 @@ func runConnectionAdd(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if personal {
-		return postRepoConnections(cmd, ctx, c, ws, provider, instance, token, targets, agentYes)
+		return postRepoConnections(cmd, ctx, c, ws, provider, instance, token, targets, agentTask)
 	}
 	body := map[string]any{
 		"provider":     provider,
@@ -278,7 +279,7 @@ func runConnectionAdd(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func connectionRepoTargets(ctx context.Context, c *cli.APIClient, ws, provider, repoFlag string, agentYes bool) ([]connectionRepoCard, error) {
+func connectionRepoTargets(ctx context.Context, c *cli.APIClient, ws, provider, repoFlag string, agentOnly bool) ([]connectionRepoCard, error) {
 	var out map[string]any
 	if err := c.GetJSON(ctx, "/api/workspaces/"+ws+"/repos/connections", &out); err != nil {
 		return nil, fmt.Errorf("list repositories: %w", err)
@@ -300,13 +301,13 @@ func connectionRepoTargets(ctx context.Context, c *cli.APIClient, ws, provider, 
 				continue
 			}
 		}
-		if want != "" && !strings.EqualFold(strings.TrimRight(card.URL, "/"), want) && !strings.Contains(card.URL, want) {
+		if !connectionRepoWanted(card.URL, want) {
 			continue
 		}
 		if want == "" && (card.Mode == "token" || card.Mode == "app") {
 			continue
 		}
-		if agentYes {
+		if agentOnly {
 			if !card.AgentEligible {
 				continue
 			}
@@ -316,6 +317,34 @@ func connectionRepoTargets(ctx context.Context, c *cli.APIClient, ws, provider, 
 		targets = append(targets, card)
 	}
 	return targets, nil
+}
+
+// connectionRepoWanted matches --repo to one card. A full URL compares as the
+// same repository; owner/name compares those two segments exactly, so
+// "acme/app" does not select "acme/app-private".
+func connectionRepoWanted(cardURL, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return true
+	}
+	cardTrim := strings.TrimRight(strings.TrimSpace(cardURL), "/")
+	wantTrim := strings.TrimRight(want, "/")
+	if strings.EqualFold(cardTrim, wantTrim) {
+		return true
+	}
+	cardKey := string(repoident.NormalizeURL(cardURL))
+	wantKey := string(repoident.NormalizeURL(want))
+	if cardKey != "" && wantKey != "" && strings.EqualFold(cardKey, wantKey) {
+		return true
+	}
+	wantPath := strings.ToLower(strings.Trim(strings.TrimSuffix(wantTrim, ".git"), "/"))
+	if cardKey != "" && !strings.Contains(want, "://") && strings.Count(wantPath, "/") == 1 {
+		parts := strings.Split(cardKey, "/")
+		if len(parts) >= 3 {
+			return parts[len(parts)-2]+"/"+parts[len(parts)-1] == wantPath
+		}
+	}
+	return false
 }
 
 func postRepoConnections(cmd *cobra.Command, ctx context.Context, c *cli.APIClient, ws, provider, instance, token string, targets []connectionRepoCard, agentYes bool) error {
