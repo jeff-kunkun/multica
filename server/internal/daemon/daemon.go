@@ -11083,6 +11083,7 @@ func convertProjectsForEnv(projects []ProjectContextData) []execenv.ProjectConte
 			Title:       p.Title,
 			Description: p.Description,
 			Resources:   convertProjectResourcesForEnv(p.Resources),
+			MemoryLine:  p.MemoryLine,
 		}
 	}
 	return result
