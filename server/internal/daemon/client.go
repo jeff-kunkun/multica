@@ -673,6 +673,7 @@ type (
 	PendingUpdate           = protocol.DaemonHeartbeatPendingUpdate
 	PendingAgentCLI         = protocol.DaemonHeartbeatPendingAgentCLI
 	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
+	PendingRoutingAnalysis  = protocol.DaemonHeartbeatPendingRoutingAnalysis
 	PendingProviderConfig   = protocol.DaemonHeartbeatPendingProviderConfig
 	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
@@ -718,6 +719,13 @@ func (c *Client) RefreshModelCatalog(ctx context.Context, runtimeID string) erro
 // ReportModelListResult sends the model-discovery result back to the server.
 func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)
+}
+
+// ReportRoutingAnalysisResult sends a no-tools runtime analysis response back
+// to the server. It uses a dedicated endpoint so task reports and analysis
+// cannot contend for the same request lifecycle.
+func (c *Client) ReportRoutingAnalysisResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/routing-analysis/%s/result", runtimeID, requestID), result, nil)
 }
 
 // ReportProviderConfigResult sends the provider-preset result back to the

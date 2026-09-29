@@ -1487,6 +1487,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if ack.PendingModelList != nil {
 		resp["pending_model_list"] = ack.PendingModelList
 	}
+	if ack.PendingRoutingAnalysis != nil {
+		resp["pending_routing_analysis"] = ack.PendingRoutingAnalysis
+	}
 	if ack.PendingProviderConfig != nil {
 		resp["pending_provider_config"] = ack.PendingProviderConfig
 	}
@@ -1844,6 +1847,14 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 			slog.Warn("model list HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeModelMs)
 		} else {
 			slog.Warn("model list HasPending failed", "error", probeModelErr, "runtime_id", runtimeID)
+		}
+	}
+
+	// Routing analysis is a separate lightweight queue. Claiming it here keeps
+	// it off the task/concurrency path while preserving the heartbeat transport.
+	if h.RoutingAnalysisStore != nil {
+		if pending := h.RoutingAnalysisStore.PopPending(ctx, runtimeID); pending != nil {
+			ack.PendingRoutingAnalysis = pending
 		}
 	}
 
