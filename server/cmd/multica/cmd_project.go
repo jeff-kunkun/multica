@@ -79,6 +79,35 @@ var projectMemoryStatusCmd = &cobra.Command{
 	RunE:  runProjectMemoryStatus,
 }
 
+var projectMemorySeatCmd = &cobra.Command{
+	Use:   "seat",
+	Short: "View or configure the workspace memory sediment agent seat",
+}
+
+var projectMemorySeatGetCmd = &cobra.Command{
+	Use:   "get",
+	Short: "Show the configured memory sediment agent for the current workspace",
+	Args:  cobra.NoArgs,
+	RunE:  runProjectMemorySeatGet,
+}
+
+var projectMemorySeatSetCmd = &cobra.Command{
+	Use:   "set [<agent>]",
+	Short: "Set or clear the memory sediment agent seat",
+	Long:  "Sets the agent assigned to automatic sediment tickets when project memory is missing. Accepts an agent UUID or name. Pass --clear to unset.",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runProjectMemorySeatSet,
+}
+
+var projectMemorySeatClearCmd = &cobra.Command{
+	Use:   "clear",
+	Short: "Clear the memory sediment agent seat",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return runProjectMemorySeatSetAgent(cmd, "", true)
+	},
+}
+
 var projectResourceCmd = &cobra.Command{
 	Use:   "resource",
 	Short: "Manage resources attached to a project",
@@ -138,6 +167,10 @@ func init() {
 	projectCmd.AddCommand(projectMemoryCmd)
 	projectMemoryCmd.AddCommand(projectMemoryCheckCmd)
 	projectMemoryCmd.AddCommand(projectMemoryStatusCmd)
+	projectMemoryCmd.AddCommand(projectMemorySeatCmd)
+	projectMemorySeatCmd.AddCommand(projectMemorySeatGetCmd)
+	projectMemorySeatCmd.AddCommand(projectMemorySeatSetCmd)
+	projectMemorySeatCmd.AddCommand(projectMemorySeatClearCmd)
 	projectCmd.AddCommand(projectResourceCmd)
 
 	projectResourceCmd.AddCommand(projectResourceListCmd)
@@ -220,6 +253,10 @@ func init() {
 	projectMemoryCheckCmd.Flags().String("path", "", "Local project root to stat (omit to show the latest daemon check)")
 	projectMemoryCheckCmd.Flags().String("output", "json", "Output format: table or json")
 	projectMemoryStatusCmd.Flags().String("output", "json", "Output format: table or json")
+	projectMemorySeatGetCmd.Flags().String("output", "table", "Output format: table or json")
+	projectMemorySeatSetCmd.Flags().Bool("clear", false, "Clear the memory sediment agent")
+	projectMemorySeatSetCmd.Flags().String("output", "table", "Output format: table or json")
+	projectMemorySeatClearCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -609,6 +646,152 @@ func runProjectMemoryRequest(cmd *cobra.Command, ref string, check bool) error {
 		rows = append(rows, []string{strVal(location, "key"), strVal(location, "path"), state, strVal(location, "modified_at")})
 	}
 	cli.PrintTable(os.Stdout, []string{"KEY", "PATH", "STATE", "MODIFIED"}, rows)
+	return nil
+}
+
+func runProjectMemorySeatGet(cmd *cobra.Command, _ []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	if client.WorkspaceID == "" {
+		return fmt.Errorf("workspace ID is required; use --workspace-id or set MULTICA_WORKSPACE_ID")
+	}
+
+	var ws map[string]any
+	if err := client.GetJSON(ctx, "/api/workspaces/"+url.PathEscape(client.WorkspaceID), &ws); err != nil {
+		return fmt.Errorf("get workspace: %w", err)
+	}
+
+	settings, _ := ws["settings"].(map[string]any)
+	memory, _ := settings["memory"].(map[string]any)
+	agentID := strings.TrimSpace(strVal(memory, "sediment_agent"))
+
+	result := map[string]any{
+		"workspace_id": client.WorkspaceID,
+		"configured":   agentID != "",
+	}
+
+	if agentID != "" {
+		result["sediment_agent_id"] = agentID
+		var agent map[string]any
+		if err := client.GetJSON(ctx, "/api/agents/"+url.PathEscape(agentID), &agent); err == nil {
+			result["sediment_agent_name"] = strVal(agent, "name")
+			result["status"] = strVal(agent, "status")
+			result["work_enabled"] = boolField(agent, "work_enabled")
+			result["runtime_id"] = strVal(agent, "runtime_id")
+		}
+	} else {
+		result["sediment_agent_id"] = nil
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	if agentID == "" {
+		fmt.Fprintf(os.Stdout, "No memory sediment agent configured for workspace %s\n", client.WorkspaceID)
+		return nil
+	}
+	name := strVal(result, "sediment_agent_name")
+	status := strVal(result, "status")
+	cli.PrintTable(os.Stdout, []string{"WORKSPACE ID", "SEDIMENT AGENT ID", "NAME", "STATUS"}, [][]string{
+		{client.WorkspaceID, agentID, name, status},
+	})
+	return nil
+}
+
+func runProjectMemorySeatSet(cmd *cobra.Command, args []string) error {
+	clearFlag, _ := cmd.Flags().GetBool("clear")
+	agentArg := ""
+	if len(args) > 0 {
+		agentArg = strings.TrimSpace(args[0])
+	}
+	if agentArg == "" || agentArg == "none" || agentArg == `""` {
+		clearFlag = true
+	}
+	return runProjectMemorySeatSetAgent(cmd, agentArg, clearFlag)
+}
+
+func runProjectMemorySeatSetAgent(cmd *cobra.Command, agentArg string, clear bool) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	if client.WorkspaceID == "" {
+		return fmt.Errorf("workspace ID is required; use --workspace-id or set MULTICA_WORKSPACE_ID")
+	}
+
+	var targetAgentID string
+	var targetAgentName string
+	if !clear && agentArg != "" {
+		resolvedID, err := resolveAgent(ctx, client, agentArg)
+		if err != nil {
+			return err
+		}
+		targetAgentID = resolvedID
+		var agent map[string]any
+		if err := client.GetJSON(ctx, "/api/agents/"+url.PathEscape(targetAgentID), &agent); err == nil {
+			targetAgentName = strVal(agent, "name")
+		}
+	}
+
+	var ws map[string]any
+	if err := client.GetJSON(ctx, "/api/workspaces/"+url.PathEscape(client.WorkspaceID), &ws); err != nil {
+		return fmt.Errorf("get workspace: %w", err)
+	}
+	settings, _ := ws["settings"].(map[string]any)
+	if settings == nil {
+		settings = make(map[string]any)
+	}
+	memory, _ := settings["memory"].(map[string]any)
+	if memory == nil {
+		memory = make(map[string]any)
+	}
+	if clear {
+		memory["sediment_agent"] = ""
+	} else {
+		memory["sediment_agent"] = targetAgentID
+	}
+	settings["memory"] = memory
+
+	var updatedWS map[string]any
+	if err := client.PatchJSON(ctx, "/api/workspaces/"+url.PathEscape(client.WorkspaceID), map[string]any{
+		"settings": settings,
+	}, &updatedWS); err != nil {
+		return fmt.Errorf("update sediment agent: %w", err)
+	}
+
+	result := map[string]any{
+		"workspace_id": client.WorkspaceID,
+		"configured":   !clear && targetAgentID != "",
+	}
+	if clear {
+		result["sediment_agent_id"] = nil
+	} else {
+		result["sediment_agent_id"] = targetAgentID
+		if targetAgentName != "" {
+			result["sediment_agent_name"] = targetAgentName
+		}
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	if clear {
+		fmt.Fprintf(os.Stdout, "Cleared memory sediment agent for workspace %s\n", client.WorkspaceID)
+		return nil
+	}
+	fmt.Fprintf(os.Stdout, "Configured memory sediment agent %s (%s) for workspace %s\n", targetAgentName, targetAgentID, client.WorkspaceID)
 	return nil
 }
 

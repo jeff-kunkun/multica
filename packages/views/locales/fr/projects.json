@@ -81,6 +81,8 @@
     "memory_missing": "Manquant",
     "memory_ticket": "Ticket de sédimentation {{id}}",
     "memory_last_sediment": "Dernière sédimentation : {{time}}",
+    "memory_unconfigured_error": "L'agent de sédimentation n'est pas configuré ; les tickets ne seront pas créés automatiquement en cas d'emplacements manquants.",
+    "memory_configure_link": "Configurer dans les paramètres de l'espace de travail",
     "empty_issues_title": "Aucune tâche liée",
     "empty_issues_hint": "Vous pouvez aussi ajouter des tâches existantes à ce projet.",
     "empty_issues_new_button": "Nouvelle tâche",

@@ -80,6 +80,8 @@
     "memory_missing": "누락",
     "memory_ticket": "정리 티켓 {{id}}",
     "memory_last_sediment": "최근 정리: {{time}}",
+    "memory_unconfigured_error": "정착석이 구성되지 않아 메모리 위치 누락 시 티켓이 자동 생성되지 않습니다.",
+    "memory_configure_link": "워크스페이스 설정으로 이동",
     "empty_issues_title": "연결된 태스크가 없습니다",
     "empty_issues_hint": "기존 태스크를 이 프로젝트에 추가할 수도 있습니다.",
     "empty_issues_new_button": "새 태스크",
