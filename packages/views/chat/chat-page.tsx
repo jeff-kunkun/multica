@@ -529,6 +529,7 @@ export function ChatPage() {
         onSelectSession={handleSelect}
         onArchive={handleArchive}
         search={searchSnippets ? { query, snippets: searchSnippets } : undefined}
+        collapseHistory={projectFilter.type === "all"}
         emptyLabel={
           searchSnippets
             ? t(($) => $.page.search_empty)
