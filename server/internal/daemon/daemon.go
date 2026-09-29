@@ -5235,18 +5235,26 @@ func (d *Daemon) handleRoutingAnalysis(ctx context.Context, rt Runtime, pending 
 	args := append([]string{}, prefix...)
 	switch rt.Provider {
 	case "claude":
+		// Claude Code uses --effort for the thinking selector. Empty tools
+		// keeps this probe read-only and outside the task tool surface.
 		args = append(args, "-p", pending.Prompt, "--output-format", "json", "--tools", "", "--model", pending.Model)
+		if pending.ThinkingLevel != "" {
+			args = append(args, "--effort", pending.ThinkingLevel)
+		}
 	case "codex":
-		args = append(args, "exec", "--json", "--sandbox", "read-only", "--model", pending.Model, pending.Prompt)
+		// Codex carries effort in model_reasoning_effort config; it has no
+		// --thinking flag. Keep the execution sandbox read-only.
+		args = append(args, "exec", "--json", "--sandbox", "read-only", "--model", pending.Model)
+		if pending.ThinkingLevel != "" {
+			args = append(args, "--config", "model_reasoning_effort="+pending.ThinkingLevel)
+		}
+		args = append(args, pending.Prompt)
 	default:
 		args = append(args, pending.Prompt)
 	}
-	if pending.ThinkingLevel != "" {
-		args = append(args, "--thinking", pending.ThinkingLevel)
-	}
 	runCtx, cancel := context.WithTimeout(ctx, routingAnalysisTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(runCtx, execPath, args...).CombinedOutput()
+	out, err := exec.CommandContext(runCtx, execPath, args...).Output()
 	if err != nil {
 		d.reportRoutingAnalysisResult(ctx, rt, pending.ID, map[string]any{"status": "failed", "error": string(out)})
 		return

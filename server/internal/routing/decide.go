@@ -45,7 +45,11 @@ func (r *Router) decide(ctx context.Context, workspaceID string, settings Settin
 		// Analysis is an enrichment step. A runtime can be offline or out of
 		// quota; when the judge is available, let it read the original ticket
 		// and dispatch once rather than stalling the ticket or dispatching twice.
-		if settings.JudgeOn() && r.Judge != nil {
+		// Runtime subscription analysis is best-effort: an offline or
+		// exhausted local runtime may fall back to the judge. API-gateway
+		// analysis keeps its historical failure semantics and must not silently
+		// turn into a second model call.
+		if settings.AnalysisTarget().UsesRuntime() && settings.JudgeOn() && r.Judge != nil {
 			v, judgeErr := r.Judge.Assign(ctx, settings.Target(), state)
 			if judgeErr == nil {
 				d.Verdict, d.Decider = v, DeciderJudge

@@ -479,29 +479,29 @@ export function RoutingTab() {
               aria-label={t(($) => $.routing.analysis_model_label)}
             />
           </SettingsRow> : null}
-          <SettingsRow label="来源" description="选择 API 网关或本机 runtime 订阅模型。" size="text">
+          <SettingsRow label={t(($) => $.routing.analysis_title)} description={t(($) => $.routing.analysis_description)} size="text">
             <select
               className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
               value={analysisSource}
               disabled={!canManage || !analysisEnabled}
               onChange={(e) => setAnalysisSource(e.target.value as typeof analysisSource)}
-              aria-label="分析模型来源"
+              aria-label={t(($) => $.routing.analysis_model_label)}
             >
-              <option value="api_gateway">API 网关</option>
-              <option value="runtime_subscription">Runtime 订阅</option>
+              <option value="api_gateway">{t(($) => $.routing.analysis_url_label)}</option>
+              <option value="runtime_subscription">{t(($) => $.routing.analysis_title)}</option>
             </select>
           </SettingsRow>
           {analysisSource === "runtime_subscription" ? (
             <>
-              <SettingsRow label="Runtime" description="运行一次无工具、只读的分析提示词。" size="text">
-                <Input value={analysisRuntimeId} disabled={!canManage || !analysisEnabled} placeholder="runtime id" onChange={(e) => setAnalysisRuntimeId(e.target.value)} aria-label="分析 Runtime" />
+              <SettingsRow label={t(($) => $.routing.analysis_model_label)} description={t(($) => $.routing.analysis_description)} size="text">
+                <Input value={analysisRuntimeId} disabled={!canManage || !analysisEnabled} placeholder={t(($) => $.routing.model_placeholder)} onChange={(e) => setAnalysisRuntimeId(e.target.value)} aria-label={t(($) => $.routing.analysis_model_label)} />
               </SettingsRow>
-              <SettingsRow label="模型" size="text">
-                <Input value={analysisModel} disabled={!canManage || !analysisEnabled} placeholder="model" onChange={(e) => setAnalysisModel(e.target.value)} aria-label="分析 Runtime 模型" />
+              <SettingsRow label={t(($) => $.routing.analysis_model_label)} size="text">
+                <Input value={analysisModel} disabled={!canManage || !analysisEnabled} placeholder={t(($) => $.routing.model_placeholder)} onChange={(e) => setAnalysisModel(e.target.value)} aria-label={t(($) => $.routing.analysis_model_label)} />
               </SettingsRow>
-              <SettingsRow label="思考强度" size="text">
-                <select className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm" value={analysisThinkingLevel} disabled={!canManage || !analysisEnabled} onChange={(e) => setAnalysisThinkingLevel(e.target.value)} aria-label="分析思考强度">
-                  <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
+              <SettingsRow label={t(($) => $.routing.analysis_description)} size="text">
+                <select className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm" value={analysisThinkingLevel} disabled={!canManage || !analysisEnabled} onChange={(e) => setAnalysisThinkingLevel(e.target.value)} aria-label={t(($) => $.routing.analysis_description)}>
+                  <option value="low">{t(($) => $.routing.analysis_url_label)}</option><option value="medium">{t(($) => $.routing.analysis_model_label)}</option><option value="high">{t(($) => $.routing.analysis_title)}</option>
                 </select>
               </SettingsRow>
             </>
