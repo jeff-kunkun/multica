@@ -6,7 +6,9 @@
     "search_placeholder": "チャットのタイトルや内容を検索…",
     "search_clear": "検索をクリア",
     "search_empty": "一致するチャットはありません",
-    "back": "戻る"
+    "back": "戻る",
+    "new_chat_in_project": "新しいチャットは「{{title}}」に残ります",
+    "new_chat_unbound": "新しいチャットはプロジェクトに紐づきません"
   },
   "project_bar": {
     "all": "すべて",
@@ -23,7 +25,10 @@
     "unpin": "ピン留めを外す",
     "drag": "ドラッグして並べ替え",
     "empty": "このプロジェクトにはまだチャットがありません",
-    "unread": "未読"
+    "unread": "未読",
+    "switch": "プロジェクトを切り替え",
+    "switch_search": "プロジェクトを検索…",
+    "switch_empty": "一致するプロジェクトはありません"
   },
   "project_nudge": {
     "bind": "プロジェクトに紐づける",
