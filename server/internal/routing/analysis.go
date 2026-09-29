@@ -255,6 +255,11 @@ func (a LLMAnalyst) Analyze(ctx context.Context, target Target, st AnalysisState
 	if err != nil {
 		return AnalysisRecord{}, err
 	}
+	// Runtime CLIs wrap the model's JSON differently from the API gateway:
+	// Claude returns a result envelope and Codex may emit JSONL events. Keep
+	// that transport detail at the boundary so the rest of routing consumes the
+	// same facts object for both sources.
+	raw = unwrapRuntimeAnalysis(raw)
 	var reply struct {
 		Facts
 		Verdict
@@ -274,6 +279,71 @@ func (a LLMAnalyst) Analyze(ctx context.Context, target Target, st AnalysisState
 		return AnalysisRecord{}, fmt.Errorf("%w: unknown reviewer branch %q", ErrJudgeUnavailable, v.Reviewer)
 	}
 	return AnalysisRecord{Facts: facts, Verdict: &v, Source: FactsFromAnalysis, Model: target.Model}, nil
+}
+
+// unwrapRuntimeAnalysis extracts the model message from the common CLI
+// envelopes. It intentionally returns the input unchanged when it is already
+// the facts object, preserving the historical API-gateway behaviour.
+func unwrapRuntimeAnalysis(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+	if strings.HasPrefix(raw, "```") {
+		lines := strings.Split(raw, "\n")
+		if len(lines) >= 2 {
+			lines = lines[1:]
+			if last := len(lines) - 1; strings.HasPrefix(strings.TrimSpace(lines[last]), "```") {
+				lines = lines[:last]
+			}
+			raw = strings.TrimSpace(strings.Join(lines, "\n"))
+		}
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &obj) == nil {
+		// Claude's --output-format json envelope.
+		if result, ok := obj["result"]; ok {
+			var text string
+			if json.Unmarshal(result, &text) == nil && strings.TrimSpace(text) != "" {
+				return unwrapRuntimeAnalysis(text)
+			}
+		}
+		// A few runtimes expose the final assistant message under item.text.
+		if item, ok := obj["item"]; ok {
+			var itemObj map[string]json.RawMessage
+			if json.Unmarshal(item, &itemObj) == nil {
+				if text, ok := itemObj["text"]; ok {
+					var s string
+					if json.Unmarshal(text, &s) == nil && strings.TrimSpace(s) != "" {
+						return unwrapRuntimeAnalysis(s)
+					}
+				}
+			}
+		}
+		// Already a plain facts object (or an unknown object): let the normal
+		// validation produce the useful error message.
+		return raw
+	}
+	if !strings.Contains(raw, "\n") {
+		return raw
+	}
+	// Codex --json and similar modes can emit one JSON object per line. Use the
+	// last line that contains a textual assistant result; progress events are
+	// ignored.
+	var candidate string
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if unwrapped := unwrapRuntimeAnalysis(line); unwrapped != line {
+			candidate = unwrapped
+		}
+	}
+	if candidate != "" {
+		return candidate
+	}
+	return raw
 }
 
 // Stuck asks the blocked-row question with the stuck summary.
