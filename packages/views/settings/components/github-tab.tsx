@@ -3,7 +3,14 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, GitCommitHorizontal, Link2, PanelRight } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  GitCommitHorizontal,
+  Link2,
+  PanelRight,
+} from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Label } from "@multica/ui/components/ui/label";
@@ -24,10 +31,11 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import {
   deriveGitHubSettings,
+  githubCoverageOptions,
   githubInstallationsOptions,
 } from "@multica/core/github";
 import { api } from "@multica/core/api";
-import type { Workspace } from "@multica/core/types";
+import type { GitHubCoverageResponse, Workspace } from "@multica/core/types";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
@@ -63,7 +71,22 @@ export function GitHubTab() {
   const configured = installationData?.configured ?? false;
   const canManage = installationData?.can_manage === true;
   const connected = installations.length > 0;
-  const primaryInstallation = installations[0] ?? null;
+  // Owners/admins who can connect, named so a member knows whom to ask
+  // (DENE-959) instead of a generic "ask an admin".
+  const managerNames = members
+    .filter((m) => m.role === "owner" || m.role === "admin")
+    .map((m) => m.name)
+    .filter(Boolean)
+    .join(", ");
+
+  const { data: coverage } = useQuery({
+    ...githubCoverageOptions(wsId),
+    enabled:
+      !!wsId &&
+      canManage &&
+      connected &&
+      installationData?.repository_browse_configured === true,
+  });
 
   const flags = deriveGitHubSettings(workspace);
   const [savingKey, setSavingKey] = useState<SettingsKey | null>(null);
@@ -171,60 +194,74 @@ export function GitHubTab() {
                 <GitHubMark className="h-6 w-6 mt-0.5 shrink-0" />
                 <div className="space-y-1">
                   <p className="text-body font-medium">{t(($) => $.github.connection_title)}</p>
-                  {connected ? (
-                    <>
-                      <p className="text-caption text-muted-foreground">
-                        {t(($) => $.github.connected_to, {
-                          login: installations.map((i) => i.account_login).join(", "),
-                        })}
-                      </p>
-                      {primaryInstallation?.connected_by && (
-                        <p className="text-caption text-muted-foreground">
-                          {t(($) => $.github.connected_by, {
-                            name: primaryInstallation.connected_by!,
-                          })}
-                        </p>
-                      )}
-                    </>
-                  ) : !canManage ? (
+                  {!connected && !canManage && (
                     <p className="text-caption text-muted-foreground">
-                      {t(($) => $.github.contact_admin_to_connect)}
+                      {managerNames
+                        ? t(($) => $.github.contact_named_admin_to_connect, { names: managerNames })
+                        : t(($) => $.github.contact_admin_to_connect)}
                     </p>
-                  ) : null}
+                  )}
+                  {canManage && configured && (
+                    <p className="text-caption text-muted-foreground">
+                      {t(($) => $.github.multi_account_hint)}
+                    </p>
+                  )}
                 </div>
               </div>
               {canManage && (
-                <div className="flex items-center gap-2">
-                  {connected && primaryInstallation ? (
-                    // Disconnect must stay reachable even when the master switch
-                    // is off — disconnect is a separate intent (revoke the App
-                    // grant) from hiding the feature.
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setDisconnectTarget(primaryInstallation.id)}
-                    >
-                      {t(($) => $.github.disconnect)}
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      onClick={handleConnect}
-                      disabled={connecting || !configured}
-                      title={
-                        !configured
-                          ? t(($) => $.github.connect_disabled_tooltip)
-                          : undefined
-                      }
-                    >
-                      {connecting
-                        ? t(($) => $.github.connect_opening)
-                        : t(($) => $.github.connect_github)}
-                    </Button>
-                  )}
-                </div>
+                <Button
+                  size="sm"
+                  variant={connected ? "outline" : "default"}
+                  onClick={handleConnect}
+                  disabled={connecting || !configured}
+                  title={
+                    !configured
+                      ? t(($) => $.github.connect_disabled_tooltip)
+                      : undefined
+                  }
+                >
+                  {connecting
+                    ? t(($) => $.github.connect_opening)
+                    : connected
+                      ? t(($) => $.github.connect_another)
+                      : t(($) => $.github.connect_github)}
+                </Button>
               )}
             </div>
+
+            {connected && (
+              <ul className="divide-y divide-surface-border rounded-md border">
+                {installations.map((inst) => (
+                  <li
+                    key={inst.id}
+                    className="flex items-center justify-between gap-4 px-3 py-2.5"
+                  >
+                    <div className="space-y-0.5">
+                      <p className="text-body">
+                        {t(($) => $.github.connected_to, { login: inst.account_login })}
+                      </p>
+                      {inst.connected_by && (
+                        <p className="text-caption text-muted-foreground">
+                          {t(($) => $.github.connected_by, { name: inst.connected_by })}
+                        </p>
+                      )}
+                    </div>
+                    {canManage && (
+                      // Disconnect must stay reachable even when the master switch
+                      // is off — disconnect is a separate intent (revoke the App
+                      // grant) from hiding the feature.
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDisconnectTarget(inst.id)}
+                      >
+                        {t(($) => $.github.disconnect)}
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
 
             {canManage && !configured && (
               <p className="text-caption text-muted-foreground">
@@ -238,11 +275,15 @@ export function GitHubTab() {
             {!canManage && connected && (
               <p className="text-caption text-muted-foreground">
                 {t(($) => $.github.read_only_hint)}
+                {managerNames &&
+                  ` ${t(($) => $.github.who_can_connect, { names: managerNames })}`}
               </p>
             )}
           </CardContent>
         </Card>
       </section>
+
+      {coverage?.available && <CoverageSection coverage={coverage} />}
 
       <section className="space-y-3">
         <h2 className="text-body font-semibold">{t(($) => $.github.section_features)}</h2>
@@ -390,5 +431,86 @@ function FeatureRow({
         onCheckedChange={onCheckedChange}
       />
     </div>
+  );
+}
+
+// How many installation-covered-but-unregistered repos to list before
+// collapsing the rest into a count; a whole-account install can cover dozens.
+const UNREGISTERED_PREVIEW = 8;
+
+function CoverageSection({ coverage }: { coverage: GitHubCoverageResponse }) {
+  const { t } = useT("settings");
+  const uncovered = coverage.registered.filter((r) => r.covered_by.length === 0);
+  const extra = coverage.unregistered.length - UNREGISTERED_PREVIEW;
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-body font-semibold">{t(($) => $.github.section_coverage)}</h2>
+      <Card>
+        <CardContent className="space-y-4">
+          {uncovered.length > 0 ? (
+            <div className="space-y-2">
+              <p className="flex items-center gap-2 text-body font-medium text-warning">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                {t(($) => $.github.coverage_uncovered_title, { count: uncovered.length })}
+              </p>
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.github.coverage_uncovered_hint)}
+              </p>
+              <ul className="space-y-1">
+                {uncovered.map((r) => (
+                  <li key={r.full_name}>
+                    <code className="rounded-xs bg-muted px-1 py-0.5 text-caption">
+                      {r.full_name}
+                    </code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : coverage.registered.length > 0 ? (
+            <p className="flex items-center gap-2 text-body text-muted-foreground">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+              {t(($) => $.github.coverage_all_covered, { count: coverage.registered.length })}
+            </p>
+          ) : (
+            <p className="text-body text-muted-foreground">
+              {t(($) => $.github.coverage_none_registered)}
+            </p>
+          )}
+
+          {coverage.failed_accounts.length > 0 && (
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.github.coverage_failed, {
+                accounts: coverage.failed_accounts.join(", "),
+              })}
+            </p>
+          )}
+
+          {coverage.unregistered.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.github.coverage_unregistered_hint, {
+                  count: coverage.unregistered.length,
+                })}
+              </p>
+              <ul className="flex flex-wrap gap-1.5">
+                {coverage.unregistered.slice(0, UNREGISTERED_PREVIEW).map((r) => (
+                  <li key={r.full_name}>
+                    <code className="rounded-xs bg-muted px-1 py-0.5 text-caption">
+                      {r.full_name}
+                    </code>
+                  </li>
+                ))}
+                {extra > 0 && (
+                  <li className="text-caption text-muted-foreground">
+                    {t(($) => $.github.coverage_more, { count: extra })}
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </section>
   );
 }
