@@ -4300,13 +4300,39 @@ export class ApiClient {
   // File Upload & Attachments
   async uploadFile(
     file: File,
-    opts?: { issueId?: string; commentId?: string; chatSessionId?: string },
+    opts?: { issueId?: string; commentId?: string; chatSessionId?: string; onProgress?: (uploadedBytes: number, totalBytes: number) => void },
     // Optional abort signal so a module-level upload coordinator (MUL-5181)
     // can cancel an in-flight upload on logout. When aborted, `fetch` rejects
     // with an AbortError, which the coordinator distinguishes from a real
     // failure via `signal.aborted` / `err.name === "AbortError"`.
     signal?: AbortSignal,
   ): Promise<Attachment> {
+    // Cloudflare limits a single request to roughly 100s. Send larger files
+    // as independently retryable 2 MiB chunks; the server's completion step
+    // returns the same attachment shape as the legacy endpoint.
+    if (file.size > 2 * 1024 * 1024) {
+      const meta = { filename: file.name, size: file.size, content_type: file.type, issue_id: opts?.issueId, comment_id: opts?.commentId, chat_session_id: opts?.chatSessionId };
+      const started = await fetch(`${this.baseUrl}/api/upload-file/chunked`, { method: "POST", headers: { ...this.authHeaders(), "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(meta), signal });
+      if (!started.ok) throw new Error(await this.parseErrorMessage(started, `Upload failed: ${started.status}`));
+      const session = (await started.json()) as { upload_id: string; chunk_size: number };
+      const chunkSize = session.chunk_size || 2 * 1024 * 1024;
+      for (let index = 0, offset = 0; offset < file.size; index++, offset += chunkSize) {
+      const chunk = file.slice(offset, Math.min(file.size, offset + chunkSize));
+        let lastError: unknown;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const res = await fetch(`${this.baseUrl}/api/upload-file/chunked/${session.upload_id}/chunk?index=${index}`, { method: "PUT", headers: this.authHeaders(), credentials: "include", body: chunk, signal });
+            if (!res.ok) throw new Error(await this.parseErrorMessage(res, `Chunk upload failed: ${res.status}`));
+            lastError = undefined; break;
+          } catch (err) { lastError = err; if (signal?.aborted) throw err; }
+        }
+        if (lastError) throw lastError;
+        opts?.onProgress?.(Math.min(file.size, offset + chunk.size), file.size);
+      }
+      const done = await fetch(`${this.baseUrl}/api/upload-file/chunked/${session.upload_id}/complete`, { method: "POST", headers: this.authHeaders(), credentials: "include", signal });
+      if (!done.ok) throw new Error(await this.parseErrorMessage(done, `Upload failed: ${done.status}`));
+      return parseWithFallback(await done.json(), AttachmentResponseSchema, EMPTY_ATTACHMENT, { endpoint: "POST /api/upload-file/chunked/complete" });
+    }
     const formData = new FormData();
     formData.append("file", file);
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
