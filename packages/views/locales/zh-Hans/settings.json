@@ -227,6 +227,14 @@
         "label": "显示或隐藏聊天窗",
         "description": "打开或关闭悬浮聊天窗，打开时自动聚焦输入框。"
       },
+      "newChat": {
+        "label": "新建对话",
+        "description": "另起一条对话，留在正在看的项目里。"
+      },
+      "switchChatProject": {
+        "label": "切换聊天项目",
+        "description": "打开可搜索的项目切换面板。"
+      },
       "findInIssue": {
         "label": "在任务中查找",
         "description": "搜索当前打开的任务详情。"

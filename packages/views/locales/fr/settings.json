@@ -227,6 +227,14 @@
         "label": "Afficher ou masquer la fenêtre de discussion",
         "description": "Ouvrir ou fermer la fenêtre de discussion flottante. À l'ouverture, le champ de message reçoit le focus."
       },
+      "newChat": {
+        "label": "Nouvelle discussion",
+        "description": "Démarrer une discussion dans le projet affiché."
+      },
+      "switchChatProject": {
+        "label": "Changer de projet de discussion",
+        "description": "Ouvrir le sélecteur de projet."
+      },
       "findInIssue": {
         "label": "Rechercher dans la tâche",
         "description": "Rechercher dans la tâche ouverte."

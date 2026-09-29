@@ -227,6 +227,14 @@
         "label": "채팅 창 전환",
         "description": "플로팅 채팅 창을 열거나 닫습니다. 열면 메시지 입력란에 포커스합니다."
       },
+      "newChat": {
+        "label": "새 대화",
+        "description": "보고 있는 프로젝트 안에서 새 대화를 시작합니다."
+      },
+      "switchChatProject": {
+        "label": "채팅 프로젝트 전환",
+        "description": "검색할 수 있는 프로젝트 전환 패널을 엽니다."
+      },
       "findInIssue": {
         "label": "태스크에서 찾기",
         "description": "열린 태스크 상세 내용에서 검색합니다."
