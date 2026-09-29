@@ -56,6 +56,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"chat_pinned_agent":                  workspaceDelete,
 	"chat_session":                       workspaceDelete,
 	"chat_session_project":               workspaceDelete,
+	"chat_session_link_read_audit":       workspaceDelete,
 	"chat_session_read":                  workspaceDelete,
 	"chat_visibility_notice":             workspaceDelete,
 	"client_usage_daily":                 workspaceDeleteDetach,

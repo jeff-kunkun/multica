@@ -1662,6 +1662,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// Read an issue by its link, workspace resolved from the URL, GET only
 		// (DENE-897). Gates run inside against the link's workspace.
 		h.MountLinkReadRoutes(r)
+		r.Get("/api/chat/links/{workspaceSlug}/sessions/{sessionId}/handoff", h.GetChatSessionLinkRead)
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
