@@ -307,11 +307,16 @@ export function withRoutingSettings(
     enabled: next.analysis.enabled,
     model: next.analysis.model.trim(),
     base_url: next.analysis.base_url.trim(),
+    // Persist the selected transport on every save. Keeping the previously
+    // stored runtime value when the form switches back to the gateway makes
+    // a refresh silently re-enable runtime analysis.
   };
   if (next.analysis.source === "runtime_subscription") {
     analysis.source = "runtime_subscription";
     analysis.runtime_id = (next.analysis.runtime_id ?? "").trim();
     analysis.thinking_level = (next.analysis.thinking_level ?? "low").trim() || "low";
+  } else if (next.analysis.source === "api_gateway") {
+    analysis.source = "api_gateway";
   }
   if (analysisApiKey !== undefined) {
     analysis[ROUTING_API_KEY_FIELD] = analysisApiKey.trim();

@@ -5188,7 +5188,10 @@ func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending
 // Overridable for tests to avoid real sleeps.
 var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
 
-const routingAnalysisTimeout = 20 * time.Second
+// The server's routing waiter gives up after 20s so dispatch is never held up
+// by a slow subscription model. The daemon keeps the CLI alive longer so a
+// successful late result can still be returned and cached for the next pass.
+const routingAnalysisTimeout = 2 * time.Minute
 
 // reportLocalSkillListResult delivers a list-report to the server with retry
 // on transient failures. See reportRuntimeResultWithRetry for semantics.
