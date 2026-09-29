@@ -248,5 +248,27 @@
     "back": "返回",
     "submit": "创建并选中",
     "failed": "没能建好这个项目。"
+  },
+  "code": {
+    "title": "代码",
+    "add": "添加仓库",
+    "empty": "还没有仓库。",
+    "remove": "移除",
+    "load_failed": "仓库加载失败。",
+    "toast_added": "仓库已添加",
+    "toast_add_failed": "添加仓库失败",
+    "toast_remove_failed": "移除仓库失败",
+    "dialog_title": "添加仓库",
+    "tab_link": "链接",
+    "tab_pick": "选择",
+    "url_placeholder": "https://github.com/owner/repo",
+    "search_placeholder": "搜索仓库",
+    "search_empty": "没有找到仓库。",
+    "pick_added": "已添加",
+    "pick_select": "选择",
+    "submit": "添加",
+    "cancel": "取消",
+    "loading": "加载中…",
+    "load_more": "加载更多"
   }
 }

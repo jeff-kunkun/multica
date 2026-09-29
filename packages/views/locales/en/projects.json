@@ -250,5 +250,27 @@
     "back": "Back",
     "submit": "Create and select",
     "failed": "The project could not be created."
+  },
+  "code": {
+    "title": "Code",
+    "add": "Add repository",
+    "empty": "No repositories yet.",
+    "remove": "Remove",
+    "load_failed": "Couldn't load repositories.",
+    "toast_added": "Repository added",
+    "toast_add_failed": "Failed to add repository",
+    "toast_remove_failed": "Failed to remove repository",
+    "dialog_title": "Add repository",
+    "tab_link": "Link",
+    "tab_pick": "Pick",
+    "url_placeholder": "https://github.com/owner/repo",
+    "search_placeholder": "Search repositories",
+    "search_empty": "No repositories found.",
+    "pick_added": "Added",
+    "pick_select": "Select",
+    "submit": "Add",
+    "cancel": "Cancel",
+    "loading": "Loading…",
+    "load_more": "Load more"
   }
 }

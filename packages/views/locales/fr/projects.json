@@ -250,5 +250,27 @@
     "back": "Retour",
     "submit": "Créer et sélectionner",
     "failed": "Le projet n'a pas pu être créé."
+  },
+  "code": {
+    "title": "Code",
+    "add": "Ajouter un dépôt",
+    "empty": "Aucun dépôt pour l'instant.",
+    "remove": "Retirer",
+    "load_failed": "Impossible de charger les dépôts.",
+    "toast_added": "Dépôt ajouté",
+    "toast_add_failed": "Échec de l'ajout du dépôt",
+    "toast_remove_failed": "Échec du retrait du dépôt",
+    "dialog_title": "Ajouter un dépôt",
+    "tab_link": "Lien",
+    "tab_pick": "Choisir",
+    "url_placeholder": "https://github.com/owner/repo",
+    "search_placeholder": "Rechercher des dépôts",
+    "search_empty": "Aucun dépôt trouvé.",
+    "pick_added": "Ajouté",
+    "pick_select": "Choisir",
+    "submit": "Ajouter",
+    "cancel": "Annuler",
+    "loading": "Chargement…",
+    "load_more": "Voir plus"
   }
 }

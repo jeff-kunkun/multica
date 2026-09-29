@@ -1914,5 +1914,24 @@
     "preview_loading": "プレビューを読み込み中… 準備ができるまで変更は適用できません。",
     "save_failed": "共有範囲を変更できませんでした。もう一度お試しください。",
     "preview_failed": "プレビューを読み込めませんでした。変更を適用する前にもう一度お試しください。"
+  },
+  "repo_reach": {
+    "status_app": "GitHub App · {{account}}",
+    "status_app_plain": "GitHub App",
+    "status_token": "トークン",
+    "status_token_named": "トークン · {{account}}",
+    "status_token_broken": "トークン失効",
+    "status_cli": "ローカル CLI のみ",
+    "status_install_app": "GitHub App 未インストール",
+    "status_none": "未接続",
+    "ask_owner": "{{status}} · {{name}} に依頼",
+    "ask_owner_generic": "{{status}} · 管理者に依頼",
+    "action_install_app": "GitHub App をインストール",
+    "action_create_app": "GitHub App を作成",
+    "action_add_token": "トークンを追加",
+    "action_replace_token": "トークンを交換",
+    "column_projects": "プロジェクト",
+    "projects_none": "—",
+    "accounts_projects": "プロジェクト"
   }
 }

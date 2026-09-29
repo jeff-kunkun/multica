@@ -1914,5 +1914,24 @@
     "preview_loading": "正在加载预览…预览准备好之前不能确认。",
     "save_failed": "共享范围没改成功，请重试。",
     "preview_failed": "预览加载失败，请重试后再确认。"
+  },
+  "repo_reach": {
+    "status_app": "GitHub App · {{account}}",
+    "status_app_plain": "GitHub App",
+    "status_token": "令牌",
+    "status_token_named": "令牌 · {{account}}",
+    "status_token_broken": "令牌失效",
+    "status_cli": "仅本机 CLI",
+    "status_install_app": "未安装 GitHub App",
+    "status_none": "未接通",
+    "ask_owner": "{{status}} · 请联系 {{name}}",
+    "ask_owner_generic": "{{status}} · 请联系管理员",
+    "action_install_app": "安装 GitHub App",
+    "action_create_app": "创建 GitHub App",
+    "action_add_token": "添加令牌",
+    "action_replace_token": "替换令牌",
+    "column_projects": "项目",
+    "projects_none": "—",
+    "accounts_projects": "项目"
   }
 }

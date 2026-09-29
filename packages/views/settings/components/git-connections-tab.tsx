@@ -33,6 +33,8 @@ import { useT } from "../../i18n";
 import { GitHubAppCreateFields, GitHubAppPanel, postGitHubAppManifest } from "./github-app-panel";
 import { SettingsTab } from "./settings-layout";
 import { useRepoCatalog } from "./use-repo-catalog";
+import { repoConnectionsOptions } from "@multica/core/repo-reach";
+import type { RepoConnectionCard } from "@multica/core/types";
 import {
   RepoStatusText,
   outcomeText,
@@ -67,6 +69,7 @@ export function GitConnectionsTab() {
   const [webhook, setWebhook] = useState<{ url: string; secret: string } | null>(null);
   const [org, setOrg] = useState("");
   const appQuery = useQuery(githubAppStatusOptions(wsId));
+  const { data: connectionCards = [] } = useQuery(repoConnectionsOptions(wsId));
   const appStatus = appQuery.data;
 
   const canAdd = catalog.canAddPersonal || catalog.canAddWorkspace;
@@ -360,6 +363,7 @@ export function GitConnectionsTab() {
             title={t(($) => $.repo_links.workspace_group)}
             links={workspaceLinks}
             empty={null}
+            cards={connectionCards}
             testingId={testingId}
             onTest={handleTest}
             onRemove={setRemoveTarget}
@@ -368,6 +372,7 @@ export function GitConnectionsTab() {
             title={t(($) => $.repo_links.personal_group)}
             links={personalLinks}
             empty={t(($) => $.repo_links.personal_empty)}
+            cards={connectionCards}
             testingId={testingId}
             onTest={handleTest}
             onRemove={setRemoveTarget}
@@ -538,6 +543,7 @@ function LinkGroup({
   title,
   links,
   empty,
+  cards,
   testingId,
   onTest,
   onRemove,
@@ -545,6 +551,7 @@ function LinkGroup({
   title: string;
   links: RepoLink[];
   empty: string | null;
+  cards: RepoConnectionCard[];
   testingId: string | null;
   onTest: (link: RepoLink) => void;
   onRemove: (link: RepoLink) => void;
@@ -572,6 +579,7 @@ function LinkGroup({
                 <p className="truncate font-mono text-caption text-muted-foreground">
                   {repoLinkScope(link)}
                 </p>
+                <LinkProjects link={link} cards={cards} />
               </div>
               <RepoStatusText tone={toneForHealth(link.health)}>
                 {labels.health(link.health)}
@@ -604,6 +612,35 @@ function LinkGroup({
         })}
       </div>
     </section>
+  );
+}
+
+/** Whether the server says this connection is what reaches the repository. */
+function cardUsesLink(card: RepoConnectionCard, link: RepoLink): boolean {
+  const { reach } = card;
+  if (reach.link_id && (link.id === reach.link_id || link.id === `vcs:${reach.link_id}`)) {
+    return true;
+  }
+  return (
+    link.kind === "github_app" &&
+    reach.mode === "app" &&
+    reach.account_login.toLowerCase() === (link.account_login ?? link.owner).toLowerCase()
+  );
+}
+
+function LinkProjects({ link, cards }: { link: RepoLink; cards: RepoConnectionCard[] }) {
+  const { t } = useT("settings");
+  const titles = new Set<string>();
+  for (const card of cards) {
+    if (!cardUsesLink(card, link)) continue;
+    for (const project of card.projects) titles.add(project.title);
+  }
+  if (titles.size === 0) return null;
+  const line = [...titles].join(" · ");
+  return (
+    <p className="truncate text-caption text-muted-foreground" title={line}>
+      {t(($) => $.repo_reach.accounts_projects)}: {line}
+    </p>
   );
 }
 
