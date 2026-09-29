@@ -164,6 +164,9 @@ import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useInPageFind } from "../hooks/use-in-page-find";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
+import { ScrollToBottomButton } from "../../common/scroll-to-bottom-button";
+import { useUnseenCount } from "../../common/use-unseen-count";
+import { useScrolledAwayFromBottom } from "../../common/use-scroll-away-from-bottom";
 import { FindBar } from "./find-bar";
 import {
   AnimatedRightSidebar,
@@ -1710,6 +1713,45 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso instance — minimap jumps drive the scroll container directly.
   const isFlatTimeline = !!highlightCommentId || find.open;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  // Jump-to-latest: the reader mostly wants the newest report, which sits at
+  // the far end of a long timeline. The badge counts comments other people
+  // (or agents) posted while the reader was scrolled up.
+  const awayFromBottom = useScrolledAwayFromBottom(scrollContainerEl, items.length);
+  const incomingCommentIds = useMemo(
+    () =>
+      timeline
+        .filter(
+          (e) =>
+            e.type === "comment" && !(e.actor_type === "member" && e.actor_id === user?.id),
+        )
+        .map((e) => e.id),
+    [timeline, user?.id],
+  );
+  const newCommentsSinceAway = useUnseenCount(incomingCommentIds, awayFromBottom);
+  // The pinned composer covers the end of the scroller, so the button rides
+  // above it; unpinned, it clears the chat launcher's corner instead.
+  const [composerHeight, setComposerHeight] = useState(0);
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el || !stickyComposer) return;
+    const observer = new ResizeObserver(() => setComposerHeight(el.getBoundingClientRect().height));
+    observer.observe(el);
+    setComposerHeight(el.getBoundingClientRect().height);
+    return () => observer.disconnect();
+  }, [stickyComposer, issue?.id]);
+  const scrollToLatestComment = useCallback(() => {
+    if (!isFlatTimeline && items.length > 0) {
+      virtuosoRef.current?.scrollToIndex({
+        index: items.length - 1,
+        align: "end",
+        behavior: "smooth",
+        offset: stickyComposer ? composerRef.current?.getBoundingClientRect().height ?? 0 : 0,
+      });
+      return;
+    }
+    scrollContainerEl?.scrollTo({ top: scrollContainerEl.scrollHeight, behavior: "smooth" });
+  }, [isFlatTimeline, items.length, stickyComposer, scrollContainerEl]);
   // Scroll a freshly posted comment into view, aligned so its bottom sits just
   // above the sticky composer (never behind it). A reply lives inside its root
   // CommentCard, so the containing top-level row is the scroll target. Flat and
@@ -3662,6 +3704,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             the resize handle's 4px drag strip at the panel edge. Hover
             previews a thread, click jumps to it. Hidden on mobile: no
             hover, and the gutter is too tight. */}
+        <ScrollToBottomButton
+          visible={awayFromBottom && items.length > 0}
+          newCount={newCommentsSinceAway}
+          unit="comments"
+          onClick={scrollToLatestComment}
+          className={cn(
+            // Beside the thread rail on wide layouts, above the composer when
+            // it is pinned, above the chat launcher when it is not.
+            "right-3 md:right-10",
+            !stickyComposer && "above-chat-launcher",
+          )}
+          style={
+            stickyComposer
+              ? { bottom: `calc(${composerHeight}px + 1.25rem)` }
+              : undefined
+          }
+        />
         {!isMobile && (
           <ThreadMinimap
             threads={minimapThreads}
