@@ -76,14 +76,26 @@ func (d *Daemon) tryEnterClaimFor(runtimeIDs []string) (agentCLIClaim, bool) {
 	return claim, true
 }
 
+// exitClaimFor releases a claim. When it was the last claim of a provider
+// whose upgrade is waiting and no task of that provider came out of it, the
+// provider is idle now, so the updater is woken rather than left to its
+// next tick while the provider's claims stay held.
 func (d *Daemon) exitClaimFor(claim agentCLIClaim) {
+	kick := false
 	d.claimMu.Lock()
-	defer d.claimMu.Unlock()
 	d.claimsInFlight--
 	for _, p := range claim.providers {
 		if d.cliGate.claims[p]--; d.cliGate.claims[p] <= 0 {
 			delete(d.cliGate.claims, p)
+			_, held := d.cliGate.held[p]
+			if d.cliGate.tasks[p] == 0 && (held || d.cliGate.waiting[p]) {
+				kick = true
+			}
 		}
+	}
+	d.claimMu.Unlock()
+	if kick {
+		d.kickAgentCLIUpdate()
 	}
 }
 
@@ -166,18 +178,20 @@ func (d *Daemon) releaseAgentCLIHold(provider string) {
 
 // tryBeginAgentCLIUpgrade takes the provider for an upgrade when none of its
 // tasks is running or being claimed, and holds its claims until
-// endAgentCLIUpgrade. Otherwise it reports how many tasks are in the way
-// (0 with ok=false means the daemon's own update holds the machine).
-func (d *Daemon) tryBeginAgentCLIUpgrade(provider string, now time.Time) (ok bool, running int) {
+// endAgentCLIUpgrade. Otherwise it reports how many tasks are in the way and
+// whether the daemon's own update is what holds the machine; with neither,
+// a claim of this provider is still in flight and its exit wakes the updater.
+func (d *Daemon) tryBeginAgentCLIUpgrade(provider string, now time.Time) (ok bool, running int, selfUpdate bool) {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
 	if d.cliGate.waiting == nil {
 		d.cliGate.waiting = map[string]bool{}
 	}
 	running = d.cliGate.tasks[provider]
-	if d.pauseClaims || d.updating.Load() || running > 0 || d.cliGate.claims[provider] > 0 {
+	selfUpdate = d.pauseClaims || d.updating.Load()
+	if selfUpdate || running > 0 || d.cliGate.claims[provider] > 0 {
 		d.cliGate.waiting[provider] = true
-		return false, running
+		return false, running, selfUpdate
 	}
 	delete(d.cliGate.waiting, provider)
 	if d.cliGate.held == nil {
@@ -190,7 +204,7 @@ func (d *Daemon) tryBeginAgentCLIUpgrade(provider string, now time.Time) (ok boo
 	h.upgrading = true
 	d.cliGate.held[provider] = h
 	d.cliGate.upgrading++
-	return true, 0
+	return true, 0, false
 }
 
 // endAgentCLIUpgrade releases what tryBeginAgentCLIUpgrade took, whether

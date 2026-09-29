@@ -248,15 +248,15 @@ func TestAgentCLIUpgradeWaitsForAnInFlightClaim(t *testing.T) {
 	if !ok {
 		t.Fatal("claim refused")
 	}
-	if ok, _ := d.tryBeginAgentCLIUpgrade("codex", time.Now()); ok {
+	if ok, _, _ := d.tryBeginAgentCLIUpgrade("codex", time.Now()); ok {
 		t.Fatal("upgrade began while a codex claim was in flight")
 	}
-	if ok, _ := d.tryBeginAgentCLIUpgrade("claude", time.Now()); !ok {
+	if ok, _, _ := d.tryBeginAgentCLIUpgrade("claude", time.Now()); !ok {
 		t.Fatal("a codex claim blocked the claude upgrade")
 	}
 	d.endAgentCLIUpgrade("claude")
 	d.exitClaimFor(claim)
-	if ok, _ := d.tryBeginAgentCLIUpgrade("codex", time.Now()); !ok {
+	if ok, _, _ := d.tryBeginAgentCLIUpgrade("codex", time.Now()); !ok {
 		t.Fatal("upgrade still refused after the claim finished")
 	}
 	d.endAgentCLIUpgrade("codex")
@@ -264,7 +264,7 @@ func TestAgentCLIUpgradeWaitsForAnInFlightClaim(t *testing.T) {
 
 func TestAgentCLIUpgradeAndSelfUpdateExcludeEachOther(t *testing.T) {
 	d, _, _ := newAgentCLIGateDaemon(t)
-	if ok, _ := d.tryBeginAgentCLIUpgrade("codex", time.Now()); !ok {
+	if ok, _, _ := d.tryBeginAgentCLIUpgrade("codex", time.Now()); !ok {
 		t.Fatal("idle upgrade refused")
 	}
 	if d.trySetClaimBarrier() {
@@ -278,8 +278,46 @@ func TestAgentCLIUpgradeAndSelfUpdateExcludeEachOther(t *testing.T) {
 	if !d.trySetClaimBarrier() {
 		t.Fatal("self-update barrier refused on an idle machine")
 	}
-	if ok, running := d.tryBeginAgentCLIUpgrade("codex", time.Now()); ok || running != 0 {
-		t.Fatalf("CLI upgrade began under the self-update barrier (%v/%d)", ok, running)
+	if ok, running, self := d.tryBeginAgentCLIUpgrade("codex", time.Now()); ok || running != 0 || !self {
+		t.Fatalf("CLI upgrade began under the self-update barrier (%v/%d/%v)", ok, running, self)
 	}
 	d.releaseClaimBarrier()
+}
+
+// An "update now" that lands while a claim is in flight, and that claim
+// brings back no codex task, must start the upgrade as soon as the claim
+// ends instead of holding codex until the next periodic check.
+func TestAgentCLIEmptyClaimExitStartsWaitingUpgrade(t *testing.T) {
+	d, last, ran := newAgentCLIGateDaemon(t)
+	claim, ok := d.tryEnterClaimFor([]string{"rt-codex", "rt-claude"})
+	if !ok {
+		t.Fatal("claim refused")
+	}
+
+	requestCodexUpdate(d)
+	d.reconcileAgentCLIs(context.Background())
+	if len(*ran) != 0 {
+		t.Fatalf("upgraded while a codex claim was in flight: %v", *ran)
+	}
+	st := last()
+	if st.Phase != agentCLIPhaseWaiting || st.WaitReason == agentCLIWaitDaemonUpdate || !st.ClaimsPaused || st.Error != "" {
+		t.Fatalf("status = %#v", st)
+	}
+	if got := claimable(t, d); !slices.Equal(got, []string{"rt-claude"}) {
+		t.Fatalf("claimable = %v, want only rt-claude until the upgrade", got)
+	}
+
+	d.exitClaimFor(claim)
+	select {
+	case <-d.agentCLIUpdateKick:
+	default:
+		t.Fatal("empty claim exit did not wake the updater")
+	}
+	d.reconcileAgentCLIs(context.Background())
+	if len(*ran) != 1 {
+		t.Fatalf("ran = %v, want the codex upgrade", *ran)
+	}
+	if got := claimable(t, d); len(got) != 3 {
+		t.Fatalf("claimable after upgrade = %v", got)
+	}
 }

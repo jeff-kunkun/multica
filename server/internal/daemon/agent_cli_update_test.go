@@ -224,7 +224,7 @@ func TestFinishActiveTaskKicksADeferredUpgrade(t *testing.T) {
 	d.activeTasks.Store(2)
 	codex := d.beginProviderTask("rt-codex")
 	claude := d.beginProviderTask("rt-claude")
-	if ok, running := d.tryBeginAgentCLIUpgrade("codex", time.Now()); ok || running != 1 {
+	if ok, running, _ := d.tryBeginAgentCLIUpgrade("codex", time.Now()); ok || running != 1 {
 		t.Fatalf("begin = %v/%d, want waiting on 1", ok, running)
 	}
 	// Another CLI going idle is not this upgrade's moment.

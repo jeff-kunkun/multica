@@ -251,18 +251,22 @@ func (d *Daemon) reconcileOneAgentCLI(ctx context.Context, spec agentCLIRelease,
 			holding = false
 		}
 	}
-	started, running := d.tryBeginAgentCLIUpgrade(spec.Provider, now)
+	started, running, selfUpdate := d.tryBeginAgentCLIUpgrade(spec.Provider, now)
 	if !started {
 		status.Phase = agentCLIPhaseWaiting
 		status.WaitingTasks = running
 		status.ClaimsPaused = holding
 		switch {
-		case running == 0:
+		case selfUpdate:
 			status.WaitReason = agentCLIWaitDaemonUpdate
 			status.Note = "Waiting for the Multica daemon update on this machine to finish"
 		case manual.HoldExpired:
 			status.WaitReason = agentCLIWaitHoldExpired
 			status.Note = fmt.Sprintf("Held new %s tasks for %s but %d still running; taking tasks again and updating once none is running", spec.Provider, agentCLIHoldLimit, running)
+		case running == 0:
+			// Only a claim is in flight; its exit wakes the updater.
+			status.WaitReason = agentCLIWaitTasks
+			status.Note = fmt.Sprintf("Waiting for a %s task claim to finish", spec.Provider)
 		default:
 			status.WaitReason = agentCLIWaitTasks
 			if holding {
