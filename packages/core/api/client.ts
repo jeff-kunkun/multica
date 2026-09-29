@@ -4325,7 +4325,13 @@ export class ApiClient {
       if (!session) {
         const meta = { filename: body.name, size: body.size, content_type: body.type, issue_id: opts?.issueId, comment_id: opts?.commentId, chat_session_id: opts?.chatSessionId };
         const started = await fetch(`${this.baseUrl}/api/upload-file/chunked`, { method: "POST", headers: { ...this.authHeaders(), "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(meta), signal });
-      if (!started.ok) throw new Error(await this.parseErrorMessage(started, `Upload failed: ${started.status}`));
+      if (!started.ok) {
+        throw new ApiError(
+          await this.parseErrorMessage(started, `Upload failed: ${started.status}`),
+          started.status,
+          started.statusText,
+        );
+      }
         session = (await started.json()) as { upload_id: string; chunk_size: number };
         uploadId = session.upload_id;
         defaultStorage.setItem(resumeKey, uploadId);
@@ -4340,7 +4346,13 @@ export class ApiClient {
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
             const res = await fetch(`${this.baseUrl}/api/upload-file/chunked/${uploadId}/chunk?index=${index}`, { method: "PUT", headers: this.authHeaders(), credentials: "include", body: chunk, signal });
-            if (!res.ok) throw new Error(await this.parseErrorMessage(res, `Chunk upload failed: ${res.status}`));
+            if (!res.ok) {
+              throw new ApiError(
+                await this.parseErrorMessage(res, `Chunk upload failed: ${res.status}`),
+                res.status,
+                res.statusText,
+              );
+            }
             lastError = undefined; break;
           } catch (err) { lastError = err; if (signal?.aborted) throw err; }
         }
@@ -4348,7 +4360,13 @@ export class ApiClient {
         opts?.onProgress?.(Math.min(body.size, offset + chunk.size), body.size);
       }
       const done = await fetch(`${this.baseUrl}/api/upload-file/chunked/${uploadId}/complete`, { method: "POST", headers: this.authHeaders(), credentials: "include", signal });
-      if (!done.ok) throw new Error(await this.parseErrorMessage(done, `Upload failed: ${done.status}`));
+      if (!done.ok) {
+        throw new ApiError(
+          await this.parseErrorMessage(done, `Upload failed: ${done.status}`),
+          done.status,
+          done.statusText,
+        );
+      }
       defaultStorage.removeItem(resumeKey);
       return parseWithFallback(await done.json(), AttachmentResponseSchema, EMPTY_ATTACHMENT, { endpoint: "POST /api/upload-file/chunked/complete" });
     }
@@ -4375,7 +4393,7 @@ export class ApiClient {
       if (res.status === 401) this.handleUnauthorized(credentialUsed);
       const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new Error(message);
+      throw new ApiError(message, res.status, res.statusText);
     }
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });

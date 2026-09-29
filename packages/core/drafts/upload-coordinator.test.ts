@@ -104,7 +104,12 @@ describe("upload coordinator", () => {
     });
     expect(api.uploadFile).toHaveBeenCalledWith(
       expect.any(File),
-      { issueId: undefined, commentId: "cmt-9", chatSessionId: "sess-3" },
+      {
+        issueId: undefined,
+        commentId: "cmt-9",
+        chatSessionId: "sess-3",
+        onProgress: undefined,
+      },
       expect.any(AbortSignal),
     );
   });
