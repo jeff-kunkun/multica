@@ -89,6 +89,50 @@ export function toUploadResult(att: Attachment): UploadResult {
   return { ...att, link: att.url, markdownLink: pickMarkdownLink(att) };
 }
 
+const UPLOAD_RETRY_DELAYS_MS = [250, 750, 1500] as const;
+
+function isRetryableUploadError(error: unknown): boolean {
+  if (!(error instanceof Error) || error.name === "AbortError") return false;
+  const candidate = error as Error & { retryable?: boolean; status?: number };
+  if (candidate.retryable === false) return false;
+  if (candidate.retryable === true) return true;
+  if (typeof candidate.status === "number") {
+    return candidate.status === 408 || candidate.status === 425 || candidate.status === 429 || candidate.status >= 500;
+  }
+  return /network|fetch|timeout|offline|connection|temporarily unavailable/i.test(error.message) || error.name === "TypeError";
+}
+
+function waitForUploadRecovery(delayMs: number): Promise<void> {
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    return new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    const cleanup = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("online", resume);
+    };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const resume = () => {
+      if (document.hidden || navigator.onLine === false) return;
+      finish();
+    };
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("online", resume);
+    if (!document.hidden && navigator.onLine !== false) {
+      timer = setTimeout(finish, delayMs);
+    }
+    resume();
+  });
+}
+
 export function useFileUpload(
   api: ApiClient,
   // Receives the failing `file` alongside the error so hosts can name it in
@@ -114,19 +158,33 @@ export function useFileUpload(
   const uploading = inFlight > 0;
 
   const upload = useCallback(
-    async (file: File, ctx?: UploadContext): Promise<UploadResult | null> => {
+    async (
+      file: File,
+      ctx?: UploadContext,
+      onProgress?: (uploadedBytes: number, totalBytes: number) => void,
+    ): Promise<UploadResult | null> => {
       if (file.size > MAX_FILE_SIZE) {
         throw new Error("File exceeds 100 MB limit");
       }
 
       setInFlight((n) => n + 1);
       try {
-        const att: Attachment = await api.uploadFile(file, {
-          issueId: ctx?.issueId,
-          commentId: ctx?.commentId,
-          chatSessionId: ctx?.chatSessionId,
-        });
-        return toUploadResult(att);
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            const att: Attachment = await api.uploadFile(file, {
+              issueId: ctx?.issueId,
+              commentId: ctx?.commentId,
+              chatSessionId: ctx?.chatSessionId,
+              onProgress,
+            });
+            return toUploadResult(att);
+          } catch (error) {
+            if (!isRetryableUploadError(error) || attempt >= UPLOAD_RETRY_DELAYS_MS.length) {
+              throw error;
+            }
+            await waitForUploadRecovery(UPLOAD_RETRY_DELAYS_MS[attempt]!);
+          }
+        }
       } finally {
         setInFlight((n) => n - 1);
       }
@@ -135,9 +193,13 @@ export function useFileUpload(
   );
 
   const uploadWithToast = useCallback(
-    async (file: File, ctx?: UploadContext): Promise<UploadResult | null> => {
+    async (
+      file: File,
+      ctx?: UploadContext,
+      onProgress?: (uploadedBytes: number, totalBytes: number) => void,
+    ): Promise<UploadResult | null> => {
       try {
-        return await upload(file, ctx);
+        return await upload(file, ctx, onProgress);
       } catch (err) {
         onError?.(err instanceof Error ? err : new Error("Upload failed"), file);
         return null;

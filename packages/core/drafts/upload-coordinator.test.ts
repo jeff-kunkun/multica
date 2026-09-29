@@ -123,6 +123,26 @@ describe("upload coordinator", () => {
     expect(__trackedUploadCountForTest()).toBe(0);
   });
 
+  it("retries a transient network failure with the same upload identity", async () => {
+    const settled: UploadOutcome[] = [];
+    let calls = 0;
+    const api = {
+      uploadFile: vi.fn(() => {
+        calls += 1;
+        return calls === 1
+          ? Promise.reject(new TypeError("Failed to fetch"))
+          : Promise.resolve(makeAttachment("att-retried"));
+      }),
+    } as unknown as Pick<ApiClient, "uploadFile">;
+
+    startUpload({ clientUploadId: "c-retry", file: file(), api, onSettled: (o) => settled.push(o) });
+    await new Promise((resolve) => setTimeout(resolve, 325));
+
+    expect(calls).toBe(2);
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({ clientUploadId: "c-retry", status: "uploaded" });
+  });
+
   it("does NOT call onSettled when aborted", async () => {
     const { api } = abortableApi();
     const settled: UploadOutcome[] = [];

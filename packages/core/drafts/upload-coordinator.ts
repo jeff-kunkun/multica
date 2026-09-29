@@ -53,6 +53,67 @@ export interface StartUploadArgs {
 }
 
 const controllers = new Map<string, AbortController>();
+const MAX_RECOVERY_RETRIES = 3;
+const RECOVERY_DELAYS_MS = [250, 750, 1500] as const;
+
+function isRetryableUploadError(error: unknown): boolean {
+  if (!(error instanceof Error) || error.name === "AbortError") return false;
+  const candidate = error as Error & { retryable?: boolean; status?: number };
+  if (candidate.retryable === false) return false;
+  if (candidate.retryable === true) return true;
+  if (typeof candidate.status === "number") {
+    return candidate.status === 408 || candidate.status === 425 || candidate.status === 429 || candidate.status >= 500;
+  }
+  return /network|fetch|timeout|offline|connection|temporarily unavailable/i.test(error.message) || error.name === "TypeError";
+}
+
+/**
+ * Wait for a short retry window while also listening for the two browser
+ * signals that commonly explain an interrupted mobile upload. The timer is
+ * intentionally used while the page reports visible/online: Safari can keep
+ * `navigator.onLine === true` after the radio has dropped, so a retry timer is
+ * still needed even when no `online` event will fire.
+ */
+function waitForRecovery(controller: AbortController, delayMs: number): Promise<boolean> {
+  if (controller.signal.aborted) return Promise.resolve(false);
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(!controller.signal.aborted), delayMs);
+      controller.signal.addEventListener("abort", () => {
+        clearTimeout(timer);
+        resolve(false);
+      }, { once: true });
+    });
+  }
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    const cleanup = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("online", resume);
+      controller.signal.removeEventListener("abort", aborted);
+    };
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(ok);
+    };
+    const resume = () => {
+      if (document.hidden || navigator.onLine === false) return;
+      finish(true);
+    };
+    const aborted = () => finish(false);
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("online", resume);
+    controller.signal.addEventListener("abort", aborted, { once: true });
+    if (!document.hidden && navigator.onLine !== false) {
+      timer = setTimeout(() => finish(true), delayMs);
+    }
+    resume();
+  });
+}
 
 /**
  * Start an upload owned by this module. Returns immediately; the outcome is
@@ -72,60 +133,42 @@ export function startUpload({
   controllers.set(clientUploadId, controller);
 
   void (async () => {
+    let recoveryRetries = 0;
     try {
-      const attachment = await api.uploadFile(
-        file,
-        {
-          issueId: ctx?.issueId,
-          commentId: ctx?.commentId,
-          chatSessionId: ctx?.chatSessionId,
-          onProgress,
-        },
-        controller.signal,
-      );
-      onSettled({ clientUploadId, status: "uploaded", attachment });
-    } catch (err) {
-      // An abort is not a failure: leave the placeholder untouched. It stays
-      // `uploading` for the rest of the session and is dropped on the next
-      // load. Every other error surfaces.
-      if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
-        logger.info("upload aborted", { clientUploadId });
-        return;
-      }
-      // Mobile Safari commonly rejects requests when the tab is backgrounded,
-      // and a disconnected foreground tab reports a failed fetch. Keep the
-      // same client id and file, then restart after visibility/network
-      // recovery; the API client queries the persisted server session and
-      // skips chunks that already arrived.
-      const hidden = typeof document !== "undefined" && document.hidden;
-      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-      if (hidden || offline) {
-        await new Promise<void>((resolve) => {
-          if (typeof document === "undefined" || typeof window === "undefined") {
-            resolve();
+      while (true) {
+        try {
+          const attachment = await api.uploadFile(
+            file,
+            {
+              issueId: ctx?.issueId,
+              commentId: ctx?.commentId,
+              chatSessionId: ctx?.chatSessionId,
+              onProgress,
+            },
+            controller.signal,
+          );
+          onSettled({ clientUploadId, status: "uploaded", attachment });
+          return;
+        } catch (err) {
+          // An abort is not a failure: leave the placeholder untouched. It
+          // stays uploading until the caller clears it during logout.
+          if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
+            logger.info("upload aborted", { clientUploadId });
             return;
           }
-          const resume = () => {
-            const visible = typeof document === "undefined" || !document.hidden;
-            const online = typeof navigator === "undefined" || navigator.onLine !== false;
-            if (!visible || !online) return;
-            document.removeEventListener("visibilitychange", resume);
-            window.removeEventListener("online", resume);
-            resolve();
-          };
-          document.addEventListener("visibilitychange", resume);
-          window.addEventListener("online", resume);
-          resume();
-        });
-        if (controller.signal.aborted) return;
-        startUpload({ clientUploadId, file, api, ctx, onProgress, onSettled });
-        return;
+          if (!isRetryableUploadError(err) || recoveryRetries >= MAX_RECOVERY_RETRIES) {
+            onSettled({
+              clientUploadId,
+              status: "failed",
+              error: err instanceof Error ? err : new Error("Upload failed"),
+            });
+            return;
+          }
+          const delay = RECOVERY_DELAYS_MS[Math.min(recoveryRetries, RECOVERY_DELAYS_MS.length - 1)]!;
+          recoveryRetries += 1;
+          if (!(await waitForRecovery(controller, delay))) return;
+        }
       }
-      onSettled({
-        clientUploadId,
-        status: "failed",
-        error: err instanceof Error ? err : new Error("Upload failed"),
-      });
     } finally {
       // Only drop the entry if it is still ours — a racing re-start under the
       // same id must not have its controller evicted by our finally.
