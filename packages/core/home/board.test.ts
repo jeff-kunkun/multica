@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { InboxBoardResponse, InboxBoardRowPayload } from "../types/home";
-import { boardFromResponse, splitSeenDone, type BoardRow } from "./board";
+import { boardFromResponse, boardLaneByIssue, splitSeenDone, type BoardRow } from "./board";
 
 // The lane rules live server-side since DENE-975 (server/internal/inboxboard,
 // whose tests carry the cases that used to be here). The page only reshapes.
@@ -76,5 +76,17 @@ describe("splitSeenDone", () => {
     const { fresh, seen } = splitSeenDone(rows, "2026-09-26T09:00:00Z");
     expect(fresh.map((r) => r.issueId)).toEqual(["a"]);
     expect(seen.map((r) => r.issueId)).toEqual(["b"]);
+  });
+});
+
+describe("boardLaneByIssue", () => {
+  it("files every issue under the lane it shows in, sub-issues under their parent's", () => {
+    const board = boardFromResponse({
+      waiting: [payload({ issue_id: "w", lane: "waiting" })],
+      stalled: [payload({ issue_id: "s", children: [payload({ issue_id: "c", lane: "running", parent_issue_id: "s" })] })],
+      done: [payload({ issue_id: "d", lane: "done" })],
+    } as InboxBoardResponse);
+    const lanes = boardLaneByIssue(board);
+    expect(Object.fromEntries(lanes)).toEqual({ w: "waiting", s: "stalled", c: "stalled", d: "done" });
   });
 });
