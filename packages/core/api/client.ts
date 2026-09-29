@@ -186,7 +186,6 @@ import type {
   PluginConfigRequest,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
-  GitHubCoverageResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
   ListVCSConnectionsResponse,
@@ -515,8 +514,6 @@ import {
   EMPTY_RESOURCE_LABELS_RESPONSE,
   GitHubConnectResponseSchema,
   ListGitHubInstallationsResponseSchema,
-  GitHubCoverageResponseSchema,
-  EMPTY_GITHUB_COVERAGE_RESPONSE,
   ListGitHubRepositoriesResponseSchema,
   ListRepoLinksResponseSchema,
   CreateRepoLinkResponseSchema,
@@ -5760,16 +5757,6 @@ export class ApiClient {
       ListGitHubRepositoriesResponseSchema,
       EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
       { endpoint: "GET /api/workspaces/:id/github/installations/:installationId/repositories" },
-    );
-  }
-
-  async getGitHubCoverage(workspaceId: string): Promise<GitHubCoverageResponse> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/github/coverage`);
-    return parseWithFallback(
-      raw,
-      GitHubCoverageResponseSchema,
-      EMPTY_GITHUB_COVERAGE_RESPONSE,
-      { endpoint: "GET /api/workspaces/:id/github/coverage" },
     );
   }
 

@@ -25,22 +25,7 @@ const workspaceRef = vi.hoisted(() => ({
 }));
 type MemberRole = "owner" | "admin" | "member" | "guest";
 const membersRef = vi.hoisted(() => ({
-  current: [{ user_id: "user-1", role: "owner" as MemberRole }] as {
-    user_id: string;
-    role: MemberRole;
-    name?: string;
-  }[],
-}));
-const coverageRef = vi.hoisted(() => ({
-  current: undefined as
-    | {
-        available: boolean;
-        registered: { full_name: string; url: string; covered_by: string[] }[];
-        unregistered: { full_name: string; html_url: string; account_login: string }[];
-        failed_accounts: string[];
-        truncated: boolean;
-      }
-    | undefined,
+  current: [{ user_id: "user-1", role: "owner" as MemberRole }],
 }));
 const installationsRef = vi.hoisted(() => ({
   current: {
@@ -52,7 +37,6 @@ const installationsRef = vi.hoisted(() => ({
     }[],
     configured: true,
     can_manage: true as boolean,
-    repository_browse_configured: true as boolean,
   },
 }));
 
@@ -60,7 +44,6 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: (opts: { queryKey: unknown[] }) => {
     const key = JSON.stringify(opts.queryKey);
     if (key.includes("members")) return { data: membersRef.current };
-    if (key.includes("coverage")) return { data: coverageRef.current };
     if (key.includes("installations")) return { data: installationsRef.current };
     return { data: undefined };
   },
@@ -91,10 +74,6 @@ vi.mock("@multica/core/github", async () => {
     ...actual,
     githubInstallationsOptions: () => ({
       queryKey: ["github", "installations"],
-      queryFn: vi.fn(),
-    }),
-    githubCoverageOptions: () => ({
-      queryKey: ["github", "coverage"],
       queryFn: vi.fn(),
     }),
   };
@@ -159,13 +138,7 @@ function resetFixtures() {
     repos: [{ url: "https://github.com/acme/api" }],
   };
   membersRef.current = [{ user_id: "user-1", role: "owner" }];
-  installationsRef.current = {
-    installations: [],
-    configured: true,
-    can_manage: true,
-    repository_browse_configured: true,
-  };
-  coverageRef.current = undefined;
+  installationsRef.current = { installations: [], configured: true, can_manage: true };
 }
 
 describe("GitHubTab", () => {
@@ -242,7 +215,6 @@ describe("GitHubTab", () => {
     installationsRef.current = {
       configured: true,
       can_manage: true,
-      repository_browse_configured: true,
       installations: [{ id: "inst-42", account_login: "acme", installation_id: 42 }],
     };
     mockDeleteInstallation.mockResolvedValue(undefined);
@@ -268,7 +240,6 @@ describe("GitHubTab", () => {
     installationsRef.current = {
       configured: true,
       can_manage: true,
-      repository_browse_configured: true,
       installations: [{ id: "inst-1", account_login: "acme", installation_id: 1 }],
     };
     render(<GitHubTab />, { wrapper: I18nWrapper });
@@ -280,7 +251,6 @@ describe("GitHubTab", () => {
     installationsRef.current = {
       configured: true,
       can_manage: false,
-      repository_browse_configured: true,
       installations: [{ id: "inst-1", account_login: "acme" }],
     };
     render(<GitHubTab />, { wrapper: I18nWrapper });
@@ -296,7 +266,6 @@ describe("GitHubTab", () => {
     installationsRef.current = {
       configured: true,
       can_manage: false,
-      repository_browse_configured: true,
       installations: [],
     };
     render(<GitHubTab />, { wrapper: I18nWrapper });
@@ -309,7 +278,6 @@ describe("GitHubTab", () => {
     installationsRef.current = {
       configured: true,
       can_manage: true,
-      repository_browse_configured: true,
       installations: [
         {
           id: "inst-7",
@@ -321,73 +289,6 @@ describe("GitHubTab", () => {
     };
     render(<GitHubTab />, { wrapper: I18nWrapper });
     expect(screen.getByText(/Connected by Jiayuan/)).toBeTruthy();
-  });
-
-  it("lists every connected account with its own Disconnect and offers another connect", async () => {
-    const user = userEvent.setup();
-    installationsRef.current.installations = [
-      { id: "inst-a", account_login: "kkunkunya", installation_id: 1 },
-      { id: "inst-b", account_login: "jeff-kunkun", installation_id: 2 },
-    ];
-    mockDeleteInstallation.mockResolvedValue(undefined);
-    render(<GitHubTab />, { wrapper: I18nWrapper });
-
-    expect(screen.getByText("Connected to kkunkunya")).toBeTruthy();
-    expect(screen.getByText("Connected to jeff-kunkun")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^Connect another account$/ })).toBeEnabled();
-
-    const second = screen.getByText("Connected to jeff-kunkun").closest("li")!;
-    await user.click(within(second).getByRole("button", { name: /^Disconnect$/ }));
-    const dialogConfirm = screen
-      .getAllByRole("button", { name: /^Disconnect$/ })
-      .find((b) => b.getAttribute("data-slot")?.includes("alert-dialog"));
-    await user.click(dialogConfirm!);
-    await waitFor(() => {
-      expect(mockDeleteInstallation).toHaveBeenCalledWith("workspace-1", "inst-b");
-    });
-  });
-
-  it("non-admin without a connection is told which admins can connect", () => {
-    membersRef.current = [
-      { user_id: "user-1", role: "member", name: "Me" },
-      { user_id: "user-2", role: "owner", name: "Kun" },
-      { user_id: "user-3", role: "admin", name: "Jeff" },
-    ];
-    installationsRef.current = {
-      configured: true,
-      can_manage: false,
-      repository_browse_configured: true,
-      installations: [],
-    };
-    render(<GitHubTab />, { wrapper: I18nWrapper });
-    expect(screen.getByText(/Ask Kun, Jeff \(workspace owner or admin\)/)).toBeTruthy();
-  });
-
-  it("flags registered repositories no installation covers", () => {
-    installationsRef.current.installations = [
-      { id: "inst-a", account_login: "kkunkunya", installation_id: 1 },
-    ];
-    coverageRef.current = {
-      available: true,
-      registered: [
-        { full_name: "kkunkunya/online-tarot", url: "u1", covered_by: ["kkunkunya"] },
-        { full_name: "jeff-kunkun/ai100", url: "u2", covered_by: [] },
-      ],
-      unregistered: [
-        { full_name: "kkunkunya/other", html_url: "h", account_login: "kkunkunya" },
-      ],
-      failed_accounts: [],
-      truncated: false,
-    };
-    render(<GitHubTab />, { wrapper: I18nWrapper });
-
-    expect(
-      screen.getByText(/1 registered repository is not covered by any connected GitHub account/),
-    ).toBeTruthy();
-    expect(screen.getByText("jeff-kunkun/ai100")).toBeTruthy();
-    expect(screen.queryByText("kkunkunya/online-tarot")).toBeNull();
-    expect(screen.getByText(/1 repository is covered but not registered/)).toBeTruthy();
-    expect(screen.getByText("kkunkunya/other")).toBeTruthy();
   });
 
   it("repositories shortcut navigates to the repositories tab", async () => {
