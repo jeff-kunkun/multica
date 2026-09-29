@@ -49,6 +49,7 @@ vi.mock("./components/chat-empty-state", () => ({
 }));
 vi.mock("./components/new-chat-button", () => ({
   NewChatButton: () => <div>new-chat-button</div>,
+  DirectNewChatButton: () => <div>direct-new-chat-button</div>,
 }));
 vi.mock("./components/offline-banner", () => ({
   OfflineBanner: () => null,
@@ -266,7 +267,7 @@ describe("ChatPage ?agent= deep link", () => {
   it("starts a new chat with the linked agent and strips the param", () => {
     const { replace } = renderPage("agent=agent-1");
     expect(mockStartNewChat).toHaveBeenCalledTimes(1);
-    expect(mockStartNewChat).toHaveBeenCalledWith(agent);
+    expect(mockStartNewChat).toHaveBeenCalledWith(agent, []);
     expect(replace).toHaveBeenCalledWith("/acme/chat");
     // composingNew opened the conversation pane instead of the neutral prompt.
     expect(screen.getByText("chat-input")).toBeInTheDocument();
@@ -300,7 +301,7 @@ describe("ChatPage ?agent= deep link", () => {
     availableAgentsRef.current = [agent];
     agentsSettledRef.current = true;
     rerender();
-    expect(mockStartNewChat).toHaveBeenCalledWith(agent);
+    expect(mockStartNewChat).toHaveBeenCalledWith(agent, []);
     expect(replace).toHaveBeenCalledWith("/acme/chat");
   });
 
