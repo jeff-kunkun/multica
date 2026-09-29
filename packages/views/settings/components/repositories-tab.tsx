@@ -200,7 +200,9 @@ export function RepositoriesTab() {
       return;
     }
 
-    if (githubError) {
+    if (githubError === "installation_taken") {
+      toast.error(t(($) => $.repositories.github_installation_taken));
+    } else if (githubError) {
       toast.error(t(($) => $.repositories.github_connect_failed));
     } else if (githubInstallations.length > 0 && githubBrowseConfigured) {
       setSelectedInstallationID(githubInstallations[0]!.id);

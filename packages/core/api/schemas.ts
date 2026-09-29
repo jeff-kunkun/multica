@@ -62,6 +62,7 @@ import type {
   RedeemTelegramBindingTokenResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
+  GitHubAppStatus,
   GitHubPullRequest,
   InboxItem,
   InboxWorkspaceUnread,
@@ -390,6 +391,31 @@ export const GitHubConnectResponseSchema = z.object({
 export const EMPTY_GITHUB_CONNECT_RESPONSE: GitHubConnectResponse = {
   configured: false,
 };
+
+export const GitHubAppStatusSchema = z.object({
+  source: z.string().optional().default("none"),
+  configured: z.boolean().optional().default(false),
+  read_only: z.boolean().optional().default(false),
+  can_create: z.boolean().optional().default(false),
+  block_reason: z.string().optional(),
+  app_name: z.string().optional(),
+  slug: z.string().optional(),
+  html_url: z.string().optional(),
+  manage_url: z.string().optional(),
+}).loose();
+
+export const EMPTY_GITHUB_APP_STATUS: GitHubAppStatus = {
+  source: "none",
+  configured: false,
+  read_only: false,
+  can_create: false,
+};
+
+export const GitHubAppSetupSchema = z.object({
+  action_url: z.string(),
+  manifest: z.record(z.string(), z.unknown()),
+  launch_url: z.string(),
+}).loose();
 
 export const GitHubRepositorySchema = z.object({
   id: z.number(),
