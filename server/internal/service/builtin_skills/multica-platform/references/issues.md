@@ -141,6 +141,27 @@ Returns `{"pull_requests": [...]}`. Each element exposes:
 So "is it merged?" is `state == "merged"` (or `merged_at != null`); "is it still
 a draft?" is `state == "draft"`; coarse CI status is `checks_conclusion`.
 
+The response may also include `gap` when nothing linked is merged or open
+(DENE-961). `gap.reason` is `no_connection` (no token and no GitHub App the
+server can query for that repository), `not_found` (a connection exists, but
+no pull or merge request title contains the ticket), or `not_merged` (one was
+found and it is still open or a draft). `gap.message` says which, and
+`gap.next_command` is the command to run. The server fills this by reading
+linked rows first and, when there are none, querying the repository
+connection with the ticket key.
+
+Do not block the ticket on “等待平台关联 PR” or any equivalent. That wait is
+rejected. Declare the link on the close instead:
+
+```bash
+multica issue close <id> --outcome done --pr <pull-or-mr-url> --evidence-file ./close.md
+```
+
+The server checks the URL once. When the check succeeds it registers the pull
+request and continues the normal gate. When the check cannot be done, the
+close still proceeds and the ticket records `close.pr_unverified` (未核实).
+An unverified link is not merged.
+
 If the command returns no linked PRs after a PR was opened, check the syntax
 first: the scanner needs a routable issue key in the PR title or branch, or one
 right after a closing keyword in the body — a bare body mention does not count

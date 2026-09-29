@@ -131,6 +131,7 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
 - `--outcome blocked` 必须带 DENE-850 的等待字段之一：`--blocked-by`、`--wake-at`、`--wait-condition` + `--wait-timeout`、`--needs-human`。不带即拒绝。
 - `--outcome in_review` 只给顶层票；子票用它会被拒绝（做完 `done`，卡住 `blocked`）。它走和 `issue status in_review` 同一道送审门禁（DENE-869）：智能体送审必须有关联的 open/draft/merged PR，纯文档或调研票用 `--no-code <原因>` 说明，否则被拒。带 `--needs-human <member>` 记成 `awaiting_human`；不带则是 `awaiting_review` + `wake_action=route`，由路由填验收席，不要求评论里 @ 谁。
 - `--verdict pass` 只配 `--outcome done`，且票必须已在 `in_review`、调用者是验收席：平台先合并 PR 再写 `done`；合不进去（PR 脏、检查红、host 拒绝）回 `blocked` + `block_kind=external`，把原因写进评论。验收不通过不是收口：`multica issue comment add <id> --verdict hold --content-file ./review.md` 叫醒执行人。
+- `--pr <PR 或 MR 链接>`（DENE-961）：平台还没把交付关联上时，用它申报。服务端按仓库连接核实，核实成功就登记，再走原来的关单闸门。核不到也放行，票上记下 `close.pr_unverified`（未核实），这条链接不会被拿去合并。不要用「等平台关联 PR」卡住，这种等待会被拒绝。`multica issue pull-requests` 会给出同样的缺口和下一条命令。
 - 返回值如实报：实际写入的状态、PR 有没有合并、叫醒了谁。评论里照抄，不要凭记忆复述。
 
 不收口、只叫醒下一棒时用 `multica issue handoff`（DENE-863，`POST /api/issues/{id}/handoff`），不要手写 @：服务端负责路由和查重，回复以实际落库为准（`target_name`、`run_created`、`duplicate`）。
