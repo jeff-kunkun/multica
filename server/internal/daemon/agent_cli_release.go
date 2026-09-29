@@ -24,8 +24,11 @@ import (
 type agentCLIRelease struct {
 	Provider   string
 	NativeArgs []string // argv after the resolved binary, e.g. {"update"} for `claude update`
-	NPMPackage string
-	GitHubRepo string // owner/repo
+	// NativeOnlyUnder limits NativeArgs to a binary whose resolved path
+	// contains this segment. Empty means any copy may run NativeArgs.
+	NativeOnlyUnder string
+	NPMPackage      string
+	GitHubRepo      string // owner/repo
 }
 
 // agentCLIReleases is the CLIs this daemon knows how to follow. A provider
@@ -38,9 +41,14 @@ var agentCLIReleases = []agentCLIRelease{
 		GitHubRepo: "anthropics/claude-code",
 	},
 	{
-		Provider:   "codex",
-		NPMPackage: "@openai/codex",
-		GitHubRepo: "openai/codex",
+		// `codex update` re-runs the official installer for the standalone
+		// copy. On an npm copy it would pick its own npm prefix, so that
+		// path keeps the prefix-pinned npm step below.
+		Provider:        "codex",
+		NativeArgs:      []string{"update"},
+		NativeOnlyUnder: filepath.Join(".codex", "packages", "standalone"),
+		NPMPackage:      "@openai/codex",
+		GitHubRepo:      "openai/codex",
 	},
 	{
 		Provider:   "opencode",
@@ -127,16 +135,34 @@ func npmPackageDir(pkg string) string {
 	return filepath.Join("node_modules", filepath.FromSlash(pkg))
 }
 
+// resolvedCLIPath follows symlinks so a launcher such as
+// ~/.local/bin/codex is judged by the copy it points at.
+func resolvedCLIPath(binaryPath string) string {
+	if eval, err := filepath.EvalSymlinks(binaryPath); err == nil && eval != "" {
+		return eval
+	}
+	return binaryPath
+}
+
+// nativeUpdaterApplies reports whether spec's own update command owns the
+// copy at binaryPath.
+func nativeUpdaterApplies(spec agentCLIRelease, binaryPath string) bool {
+	if len(spec.NativeArgs) == 0 || binaryPath == "" {
+		return false
+	}
+	if spec.NativeOnlyUnder == "" {
+		return true
+	}
+	return strings.Contains(resolvedCLIPath(binaryPath), spec.NativeOnlyUnder)
+}
+
 // npmInstallOf reports whether binaryPath (after symlink resolution) is the
 // npm package pkg, and the npm prefix that owns that copy.
 func npmInstallOf(binaryPath, pkg string) (prefix string, owned bool) {
 	if binaryPath == "" || pkg == "" {
 		return "", false
 	}
-	resolved := binaryPath
-	if eval, err := filepath.EvalSymlinks(binaryPath); err == nil && eval != "" {
-		resolved = eval
-	}
+	resolved := resolvedCLIPath(binaryPath)
 	needle := npmPackageDir(pkg)
 	idx := strings.Index(resolved, needle)
 	if idx < 0 {
@@ -161,7 +187,7 @@ type agentCLIUpgradeStep struct {
 // global `npm install -g` cannot retarget a different copy.
 func planAgentCLIUpgrade(spec agentCLIRelease, binaryPath string) ([]agentCLIUpgradeStep, string) {
 	var steps []agentCLIUpgradeStep
-	if len(spec.NativeArgs) > 0 && binaryPath != "" {
+	if nativeUpdaterApplies(spec, binaryPath) {
 		argv := make([]string, 0, 1+len(spec.NativeArgs))
 		argv = append(argv, binaryPath)
 		argv = append(argv, spec.NativeArgs...)

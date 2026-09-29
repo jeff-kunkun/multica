@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import type { AgentRuntime } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { Button } from "@multica/ui/components/ui/button";
@@ -110,13 +110,87 @@ export function AgentCLIUpdateControls({
     }
   };
 
+  const updateTitle = canManage
+    ? (reported.binaryPath ?? undefined)
+    : t(($) => $.agent_cli.read_only);
+  const badgeClass =
+    phase === "current"
+      ? "text-caption text-success"
+      : phase === "failed" || phase === "check_failed"
+        ? "text-caption text-destructive"
+        : "text-caption text-foreground";
+
+  if (compact) {
+    // The runtimes list row is a fixed h-12 track, so the compact cell must
+    // stay two text lines tall: version over status on the left, the
+    // controls on the right. The binary path, the waiting note and the
+    // error move into tooltips; the detail page shows them in full.
+    const hover = [
+      reported.binaryPath,
+      phase === "waiting" ? t(($) => $.agent_cli.waiting) : null,
+      detail,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return (
+      <div
+        className="flex w-full min-w-0 items-center gap-2"
+        {...rowLinkInteractiveProps}
+      >
+        <div className="flex min-w-0 flex-1 flex-col" title={hover || undefined}>
+          <span className="truncate font-mono text-caption text-muted-foreground">
+            {versions || "—"}
+          </span>
+          {(badge || detail) && (
+            <span className="flex min-w-0 items-center gap-1">
+              {detail && (
+                <AlertTriangle
+                  aria-label={detail}
+                  className="h-3 w-3 shrink-0 text-destructive"
+                />
+              )}
+              <span className={`truncate ${detail ? "text-caption text-destructive" : badgeClass}`}>
+                {badge ?? detail}
+              </span>
+            </span>
+          )}
+        </div>
+        {phase !== "unsupported" && (
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Switch
+              size="sm"
+              checked={follow}
+              disabled={!canManage || busy === "follow"}
+              onCheckedChange={(checked) => {
+                void onFollow(checked);
+              }}
+              aria-label={t(($) => $.agent_cli.follow)}
+              title={t(($) => $.agent_cli.follow)}
+            />
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              disabled={disabled || busy === "update"}
+              title={updateTitle}
+              onClick={() => {
+                void onUpdate();
+              }}
+            >
+              {updating && <Loader2 className="h-3 w-3 animate-spin" />}
+              {updating
+                ? t(($) => $.agent_cli.updating)
+                : t(($) => $.agent_cli.update_now)}
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
-      className={
-        compact
-          ? "flex min-w-0 flex-col gap-1"
-          : "space-y-3 rounded-xl border bg-card p-4"
-      }
+      className="space-y-3 rounded-xl border bg-card p-4"
       {...rowLinkInteractiveProps}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -126,15 +200,7 @@ export function AgentCLIUpdateControls({
           </span>
         )}
         {badge && (
-          <span
-            className={
-              phase === "current"
-                ? "text-caption text-success"
-                : phase === "failed" || phase === "check_failed"
-                  ? "text-caption text-destructive"
-                  : "text-caption text-foreground"
-            }
-          >
+          <span className={badgeClass}>
             {badge}
           </span>
         )}
@@ -148,20 +214,15 @@ export function AgentCLIUpdateControls({
             onCheckedChange={(checked) => {
               void onFollow(checked);
             }}
-            aria-label={compact ? t(($) => $.agent_cli.follow) : undefined}
           />
-          {!compact && t(($) => $.agent_cli.follow)}
+          {t(($) => $.agent_cli.follow)}
         </label>
         <Button
           type="button"
           size="sm"
           variant="outline"
           disabled={disabled || busy === "update"}
-          title={
-            canManage
-              ? (reported.binaryPath ?? undefined)
-              : t(($) => $.agent_cli.read_only)
-          }
+          title={updateTitle}
           onClick={() => {
             void onUpdate();
           }}
@@ -172,11 +233,6 @@ export function AgentCLIUpdateControls({
             : t(($) => $.agent_cli.update_now)}
         </Button>
       </div>
-      {compact && (
-        <span className="text-caption text-muted-foreground">
-          {t(($) => $.agent_cli.follow)}
-        </span>
-      )}
       {phase === "waiting" && (
         <p className="text-caption text-muted-foreground">
           {t(($) => $.agent_cli.waiting)}
@@ -187,9 +243,7 @@ export function AgentCLIUpdateControls({
           className="truncate font-mono text-caption text-muted-foreground"
           title={reported.binaryPath}
         >
-          {compact
-            ? reported.binaryPath
-            : t(($) => $.agent_cli.binary, { path: reported.binaryPath })}
+          {t(($) => $.agent_cli.binary, { path: reported.binaryPath })}
         </p>
       )}
       {detail && (

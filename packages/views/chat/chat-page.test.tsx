@@ -49,6 +49,7 @@ vi.mock("./components/chat-empty-state", () => ({
 }));
 vi.mock("./components/new-chat-button", () => ({
   NewChatButton: () => <div>new-chat-button</div>,
+  DirectNewChatButton: () => <div>direct-new-chat-button</div>,
 }));
 vi.mock("./components/offline-banner", () => ({
   OfflineBanner: () => null,
@@ -176,7 +177,8 @@ vi.mock("./components/use-chat-controller", async () => {
       handleUploadFile: vi.fn(),
       handleNewChat: vi.fn(),
       handleStartNewChat: mockStartNewChat,
-      handleSelectSession: vi.fn(),
+      handleSelectSession: (session: { id: string }) =>
+        mockSetActiveSession(session.id),
       advanceSelectionAfterArchive: vi.fn(),
       archiveSession: vi.fn(),
       setActiveSession: mockSetActiveSession,
@@ -214,12 +216,18 @@ const agent: Agent = {
 
 const NO_ACCESS_MSG = "You don't have access to chat with this agent.";
 
-function renderPage(search: string, { strict = false } = {}) {
+function renderPage(
+  search: string,
+  { strict = false, canGoBack }: { strict?: boolean; canGoBack?: () => boolean } = {},
+) {
   const replace = vi.fn();
+  const push = vi.fn();
+  const back = vi.fn();
   const navigation: NavigationAdapter = {
-    push: vi.fn(),
+    push,
     replace,
-    back: vi.fn(),
+    back,
+    canGoBack,
     pathname: "/acme/chat",
     searchParams: new URLSearchParams(search),
     hash: "",
@@ -243,7 +251,7 @@ function renderPage(search: string, { strict = false } = {}) {
     return strict ? <StrictMode>{page}</StrictMode> : page;
   };
   const view = render(makeUi());
-  return { replace, rerender: () => view.rerender(makeUi()) };
+  return { replace, push, back, rerender: () => view.rerender(makeUi()) };
 }
 
 beforeEach(() => {
@@ -259,7 +267,7 @@ describe("ChatPage ?agent= deep link", () => {
   it("starts a new chat with the linked agent and strips the param", () => {
     const { replace } = renderPage("agent=agent-1");
     expect(mockStartNewChat).toHaveBeenCalledTimes(1);
-    expect(mockStartNewChat).toHaveBeenCalledWith(agent);
+    expect(mockStartNewChat).toHaveBeenCalledWith(agent, []);
     expect(replace).toHaveBeenCalledWith("/acme/chat");
     // composingNew opened the conversation pane instead of the neutral prompt.
     expect(screen.getByText("chat-input")).toBeInTheDocument();
@@ -293,7 +301,7 @@ describe("ChatPage ?agent= deep link", () => {
     availableAgentsRef.current = [agent];
     agentsSettledRef.current = true;
     rerender();
-    expect(mockStartNewChat).toHaveBeenCalledWith(agent);
+    expect(mockStartNewChat).toHaveBeenCalledWith(agent, []);
     expect(replace).toHaveBeenCalledWith("/acme/chat");
   });
 
@@ -323,7 +331,9 @@ describe("ChatPage ?agent= deep link", () => {
     rerender();
     expect(mockStartNewChat).not.toHaveBeenCalled();
     expect(mockToastError).not.toHaveBeenCalled();
-    expect(replace).not.toHaveBeenCalled();
+    // The pick itself moves the URL onto the thread; the stale intent must not
+    // strip it back to the bare chat route.
+    expect(replace).not.toHaveBeenCalledWith("/acme/chat");
   });
 
   it("opens the compose pane under StrictMode with a persisted previous session", () => {
@@ -383,5 +393,42 @@ describe("ChatPage responsive layout", () => {
       screen.getByRole("button", { name: "select-thread" }),
     ).toBeInTheDocument();
     expect(screen.getByText("chat-input")).toBeInTheDocument();
+  });
+});
+
+describe("ChatPage compact back navigation", () => {
+  it("gives a thread picked from the list its own history step", () => {
+    // The phone's back gesture has to land on the list, so opening a thread
+    // from it pushes; the back button then steps back through that entry.
+    layout.width = FOLD_INNER;
+    const { push, back } = renderPage("");
+
+    fireEvent.click(screen.getByRole("button", { name: "select-thread" }));
+    expect(push).toHaveBeenCalledWith("/acme/chat/session-9");
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(mockSetActiveSession).not.toHaveBeenCalledWith(null);
+  });
+
+  it("returns a chat opened from another page to that page", () => {
+    layout.width = FOLD_INNER;
+    storeRef.current = { activeSessionId: "session-1" };
+    const { back } = renderPage("session=session-1", { canGoBack: () => true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the chat list when a cold link has nothing behind it", () => {
+    layout.width = FOLD_INNER;
+    storeRef.current = { activeSessionId: "session-1" };
+    const { back, replace } = renderPage("session=session-1", {
+      canGoBack: () => false,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+    expect(back).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenLastCalledWith("/acme/chat");
   });
 });

@@ -162,6 +162,33 @@ describe("agent CLI update controls", () => {
     expect(api.setAgentCLIFollow).toHaveBeenCalledWith("rt-1", false);
   });
 
+  it("keeps the compact list cell to two lines and moves the rest into a tooltip", () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <AgentCLIUpdateControls
+          runtime={runtime({
+            cli_update: {
+              ...snapshot.cli_update,
+              phase: "unsupported",
+              error: "no updater for the copy at /usr/local/bin/claude",
+            },
+          })}
+          canManage
+          compact
+        />
+      </I18nProvider>,
+    );
+    // No stacked path/error paragraphs that would overflow the h-12 row.
+    expect(container.querySelectorAll("p")).toHaveLength(0);
+    // An unsupported CLI shows why, not a disabled switch and button.
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.getByText("2.1.5 / 2.1.9").closest("[title]")).toHaveAttribute(
+      "title",
+      "/usr/local/bin/claude\nno updater for the copy at /usr/local/bin/claude",
+    );
+  });
+
   it("does not invent a snapshot the daemon has not reported", () => {
     expect(readAgentCLIUpdate({ version: "2.1.5" })).toBeNull();
   });
