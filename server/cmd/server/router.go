@@ -1686,6 +1686,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// for the same reason as GitHub installations; connect /
 					// disconnect are admin-gated in the group below.
 					r.Get("/vcs/connections", h.ListVCSConnections)
+					r.Post("/vcs/connections/{connectionId}/test", h.TestStoredConnection)
+					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
 					r.Get("/repos/connections", h.ListRepoConnections)
 					r.Post("/repos/connections", h.UpsertRepoConnection)
 					r.Post("/repos/connections/test", h.TestRepoConnection)
@@ -1794,10 +1796,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Get("/github/installations/{installationId}/repositories", h.ListGitHubInstallationRepositories)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
-					// VCS connect / disconnect / webhook regeneration (admin-only).
+					// Instance-wide GitLab/Forgejo tokens stay admin-only. A repository
+					// token is saved through /repos/connections, which the
+					// person who added the repository can call.
 					r.Post("/vcs/connections", h.ConnectVCS)
 					r.Post("/vcs/connections/{connectionId}/rotate-webhook", h.RotateVCSConnectionWebhook)
-					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
 				})
 
 				// Lark integration. Every endpoint here only requires

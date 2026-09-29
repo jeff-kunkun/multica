@@ -29,6 +29,10 @@ type repoConnectionCard struct {
 	LastLookupError string `json:"last_lookup_error,omitempty"`
 	ConnectionID    string `json:"connection_id,omitempty"`
 	CanConfigure    bool   `json:"can_configure"`
+	CreatedBy       string `json:"created_by,omitempty"`
+	// AgentEligible is true when this request is an agent task and the
+	// repository was registered by that task's initiator.
+	AgentEligible bool `json:"agent_eligible,omitempty"`
 }
 
 type repoConnectionRequest struct {
@@ -36,6 +40,9 @@ type repoConnectionRequest struct {
 	Provider    string `json:"provider"`
 	InstanceURL string `json:"instance_url"`
 	AccessToken string `json:"access_token"`
+	// AgentYes is a client hint. Authorization ignores it: an agent caller is
+	// always limited to repositories the task initiator registered.
+	AgentYes bool `json:"agent_yes"`
 }
 
 // ListRepoConnections (GET /workspaces/{id}/repos/connections) lists each
@@ -51,9 +58,14 @@ func (h *Handler) ListRepoConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hasApp := h.workspaceHasGitHubApp(r.Context(), wsUUID)
+	initiator, _ := h.agentTaskInitiator(r, wsUUID)
 	cards := make([]repoConnectionCard, 0)
 	for _, repo := range h.visibleWorkspaceRepos(r, ws) {
-		cards = append(cards, h.repoCard(r, wsUUID, repo, conns, hasApp))
+		card := h.repoCard(r, wsUUID, repo, conns, hasApp)
+		if initiator.Valid && repo.CreatedBy != "" && repo.CreatedBy == uuidToString(initiator) {
+			card.AgentEligible = true
+		}
+		cards = append(cards, card)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"repos": cards})
 }
@@ -94,9 +106,23 @@ func (h *Handler) writeRepoConnection(w http.ResponseWriter, r *http.Request, sa
 		writeError(w, http.StatusNotFound, "这个仓库还没加到工作区")
 		return
 	}
-	if !h.callerCanConfigureRepo(r, repo) {
+	var connectedBy pgtype.UUID
+	if h.callerIsAgent(r, wsUUID) {
+		initiator, okInit := h.agentTaskInitiator(r, wsUUID)
+		if !okInit {
+			writeError(w, http.StatusBadRequest, "智能体登记连接需要这条任务的发起人")
+			return
+		}
+		if repo.CreatedBy == "" || repo.CreatedBy != uuidToString(initiator) {
+			writeError(w, http.StatusForbidden, "智能体只能给任务发起人自己添加的仓库登记连接")
+			return
+		}
+		connectedBy = initiator
+	} else if !h.callerCanConfigureRepo(r, repo) {
 		writeError(w, http.StatusForbidden, "只有仓库的添加人或工作区管理员能配置令牌")
 		return
+	} else if member, ok := middleware.MemberFromContext(r.Context()); ok {
+		connectedBy = member.UserID
 	}
 	key := string(repoident.NormalizeURL(repo.URL))
 	host, owner, name, okKey := splitRepoKey(key)
@@ -150,10 +176,6 @@ func (h *Handler) writeRepoConnection(w http.ResponseWriter, r *http.Request, sa
 		writeError(w, http.StatusInternalServerError, "failed to encrypt webhook secret")
 		return
 	}
-	var connectedBy pgtype.UUID
-	if member, ok := middleware.MemberFromContext(r.Context()); ok {
-		connectedBy = member.UserID
-	}
 	conn, err := h.Queries.UpsertVCSConnection(r.Context(), db.UpsertVCSConnectionParams{
 		WorkspaceID:            wsUUID,
 		Provider:               provider,
@@ -168,6 +190,7 @@ func (h *Handler) writeRepoConnection(w http.ResponseWriter, r *http.Request, sa
 		writeError(w, http.StatusInternalServerError, "failed to save connection")
 		return
 	}
+	h.clearCoveredNudges(r.Context(), conn)
 	h.publish(protocol.EventVCSConnectionCreated, uuidToString(wsUUID), "system", "", map[string]any{"id": uuidToString(conn.ID), "repo_url": repo.URL})
 	card := h.repoCard(r, wsUUID, repo, []db.VcsConnection{conn}, h.workspaceHasGitHubApp(r.Context(), wsUUID))
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -228,6 +251,7 @@ func (h *Handler) repoCard(r *http.Request, ws pgtype.UUID, repo workspaceRepoRe
 		Mode:         mode,
 		Webhook:      webhookMode(provider, mode, conn),
 		CanConfigure: h.callerCanConfigureRepo(r, repo),
+		CreatedBy:    repo.CreatedBy,
 	}
 	if conn != nil {
 		card.AccountLogin = conn.AccountLogin
@@ -257,6 +281,18 @@ func webhookMode(provider, mode string, conn *db.VcsConnection) string {
 	default:
 		return "unknown"
 	}
+}
+
+// callerIsAgent reports whether this request is an agent task. The decision
+// comes from resolveActor (the task token, or the agent/task pair tests
+// stamp), never from a flag in the body.
+func (h *Handler) callerIsAgent(r *http.Request, ws pgtype.UUID) bool {
+	userID := requestUserID(r)
+	if member, ok := middleware.MemberFromContext(r.Context()); ok && member.UserID.Valid {
+		userID = uuidToString(member.UserID)
+	}
+	actorType, _ := h.resolveActor(r, userID, uuidToString(ws))
+	return actorType == "agent"
 }
 
 func (h *Handler) callerCanConfigureRepo(r *http.Request, repo workspaceRepoRef) bool {
