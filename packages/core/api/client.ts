@@ -197,6 +197,10 @@ import type {
   ConnectVCSRequest,
   ConnectVCSResponse,
   ListRepoLinksResponse,
+  ListProjectReposResponse,
+  AttachProjectRepoRequest,
+  AttachProjectRepoResponse,
+  ListRepoConnectionsResponse,
   CreateRepoLinkRequest,
   CreateRepoLinkResponse,
   TestRepoLinkResponse,
@@ -4309,39 +4313,65 @@ export class ApiClient {
     // failure via `signal.aborted` / `err.name === "AbortError"`.
     signal?: AbortSignal,
   ): Promise<Attachment> {
+    // Large phone photos are downscaled first: on a slow uplink the original
+    // often cannot finish inside the proxy timeout (see compress-image.ts).
     const body = await compressImageForUpload(file);
     // Cloudflare limits a single request to roughly 100s. Send larger files
-    // as independently retryable 2 MiB chunks; the server's completion step
-    // returns the same attachment shape as the legacy endpoint.
+    // as independently retryable 2 MiB chunks. Keep the server session id in
+    // durable browser storage so a failed request can query the server and
+    // continue with only the missing chunks.
     if (body.size > 2 * 1024 * 1024) {
-      const resumeKey = `multica:upload:${body.name}:${body.size}:${body.lastModified}:${opts?.issueId ?? ""}:${opts?.commentId ?? ""}:${opts?.chatSessionId ?? ""}`;
-      let uploadId = defaultStorage.getItem(resumeKey);
-      let session: { upload_id: string; chunk_size: number } | undefined;
+      const resumeKey = `multica:upload:${this.baseUrl}:${body.name}:${body.size}:${body.lastModified}:${opts?.issueId ?? ""}:${opts?.commentId ?? ""}:${opts?.chatSessionId ?? ""}`;
+      let uploadId: string | null = null;
+      try { uploadId = defaultStorage.getItem(resumeKey); } catch { /* private mode storage is best effort */ }
+      let session: { upload_id: string; chunk_size: number } | null = null;
       if (uploadId) {
-        const status = await fetch(`${this.baseUrl}/api/upload-file/chunked/${encodeURIComponent(uploadId)}`, { headers: this.authHeaders(), credentials: "include", signal });
-        if (status.ok) session = (await status.json()) as typeof session;
-        else defaultStorage.removeItem(resumeKey);
+        const resumed = await fetch(`${this.baseUrl}/api/upload-file/chunked/${encodeURIComponent(uploadId)}`, {
+          headers: this.authHeaders(), credentials: "include", signal,
+        });
+        if (resumed.ok) session = (await resumed.json()) as { upload_id: string; chunk_size: number };
+        else if (resumed.status === 404) {
+          try { defaultStorage.removeItem(resumeKey); } catch { /* best effort */ }
+          uploadId = null;
+        } else {
+          throw new ApiError(
+            await this.parseErrorMessage(resumed, `Upload resume failed: ${resumed.status}`),
+            resumed.status,
+            resumed.statusText,
+          );
+        }
       }
       if (!session) {
         const meta = { filename: body.name, size: body.size, content_type: body.type, issue_id: opts?.issueId, comment_id: opts?.commentId, chat_session_id: opts?.chatSessionId };
         const started = await fetch(`${this.baseUrl}/api/upload-file/chunked`, { method: "POST", headers: { ...this.authHeaders(), "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(meta), signal });
-      if (!started.ok) {
-        throw new ApiError(
-          await this.parseErrorMessage(started, `Upload failed: ${started.status}`),
-          started.status,
-          started.statusText,
-        );
-      }
+        if (!started.ok) {
+          throw new ApiError(
+            await this.parseErrorMessage(started, `Upload failed: ${started.status}`),
+            started.status,
+            started.statusText,
+          );
+        }
         session = (await started.json()) as { upload_id: string; chunk_size: number };
         uploadId = session.upload_id;
-        defaultStorage.setItem(resumeKey, uploadId);
+        try { defaultStorage.setItem(resumeKey, session.upload_id); } catch { /* best effort */ }
       }
-      const chunkSize = session.chunk_size || 2 * 1024 * 1024;
+      if (!session || !uploadId) throw new Error("Upload session is missing an id");
       const status = await fetch(`${this.baseUrl}/api/upload-file/chunked/${encodeURIComponent(uploadId!)}`, { headers: this.authHeaders(), credentials: "include", signal });
-      const uploaded = status.ok ? new Set<number>(((await status.json()) as { chunks?: number[] }).chunks ?? []) : new Set<number>();
+      if (!status.ok) {
+        throw new ApiError(
+          await this.parseErrorMessage(status, `Upload status failed: ${status.status}`),
+          status.status,
+          status.statusText,
+        );
+      }
+      const uploaded = new Set<number>(((await status.json()) as { chunks?: number[] }).chunks ?? []);
+      const chunkSize = session.chunk_size || 2 * 1024 * 1024;
       for (let index = 0, offset = 0; offset < body.size; index++, offset += chunkSize) {
         const chunk = body.slice(offset, Math.min(body.size, offset + chunkSize));
-        if (uploaded.has(index)) { opts?.onProgress?.(Math.min(body.size, offset + chunk.size), body.size); continue; }
+        if (uploaded.has(index)) {
+          opts?.onProgress?.(Math.min(body.size, offset + chunk.size), body.size);
+          continue;
+        }
         let lastError: unknown;
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
@@ -4367,7 +4397,7 @@ export class ApiClient {
           done.statusText,
         );
       }
-      defaultStorage.removeItem(resumeKey);
+      try { defaultStorage.removeItem(resumeKey); } catch { /* best effort */ }
       return parseWithFallback(await done.json(), AttachmentResponseSchema, EMPTY_ATTACHMENT, { endpoint: "POST /api/upload-file/chunked/complete" });
     }
     const formData = new FormData();
@@ -5920,6 +5950,39 @@ export class ApiClient {
       `/api/workspaces/${workspaceId}/vcs/connections/${connectionId}/rotate-webhook`,
       { method: "POST" },
     );
+  }
+
+  // Server-computed reach for every repository (DENE-985). Pages render it
+  // as it arrives; they do not derive a connection state themselves.
+  async listProjectRepos(projectId: string): Promise<ListProjectReposResponse> {
+    const raw = await this.fetch<Partial<ListProjectReposResponse>>(
+      `/api/projects/${projectId}/repos`,
+    );
+    const repos = Array.isArray(raw?.repos) ? raw.repos : [];
+    return { repos, total: raw?.total ?? repos.length };
+  }
+
+  async attachProjectRepo(
+    projectId: string,
+    data: AttachProjectRepoRequest,
+  ): Promise<AttachProjectRepoResponse> {
+    return this.fetch(`/api/projects/${projectId}/repos`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeProjectRepo(projectId: string, resourceId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/repos/${resourceId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listRepoConnections(workspaceId: string): Promise<ListRepoConnectionsResponse> {
+    const raw = await this.fetch<Partial<ListRepoConnectionsResponse>>(
+      `/api/workspaces/${workspaceId}/repos/connections`,
+    );
+    return { repos: Array.isArray(raw?.repos) ? raw.repos : [] };
   }
 
   // Repository connection catalog (GitHub App / token, GitLab, Forgejo, Gitea).

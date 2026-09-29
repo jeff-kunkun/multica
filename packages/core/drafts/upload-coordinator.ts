@@ -1,6 +1,7 @@
 import type { ApiClient } from "../api/client";
 import type { Attachment } from "../types";
 import { createLogger } from "../logger";
+import { retryUpload } from "../attachments/upload-retry";
 
 /**
  * Module-level file-upload coordinator (MUL-5181, L2).
@@ -95,6 +96,7 @@ export interface StartUploadArgs {
   /** Injected so the coordinator is framework-agnostic and unit-testable. */
   api: Pick<ApiClient, "uploadFile">;
   ctx?: UploadCoordinatorContext;
+  onProgress?: (uploadedBytes: number, totalBytes: number) => void;
   /**
    * Settled outcome. NOT called on abort — an aborted upload leaves its
    * placeholder in `uploading`, which the store drops on the next load (aborts
@@ -117,6 +119,7 @@ export function startUpload({
   file,
   api,
   ctx,
+  onProgress,
   onSettled,
 }: StartUploadArgs): void {
   const controller = new AbortController();
@@ -125,46 +128,27 @@ export function startUpload({
   void (async () => {
     let retryAttempt = 0;
     try {
-      while (!controller.signal.aborted) {
-        try {
-          const attachment = await api.uploadFile(
+      const attachment = await retryUpload(
+        (trackProgress) =>
+          api.uploadFile(
             file,
             {
               issueId: ctx?.issueId,
               commentId: ctx?.commentId,
               chatSessionId: ctx?.chatSessionId,
-              onProgress: ctx?.onProgress,
+              onProgress: trackProgress,
             },
             controller.signal,
-          );
-          onSettled({ clientUploadId, status: "uploaded", attachment });
-          return;
-        } catch (err) {
-          if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
-            logger.info("upload aborted", { clientUploadId });
-            return;
-          }
-          if (!isRetryableUploadError(err)) {
-            onSettled({
-              clientUploadId,
-              status: "failed",
-              error: err instanceof Error ? err : new Error("Upload failed"),
-            });
-            return;
-          }
-
-          const delayMs =
-            RETRY_DELAYS_MS[Math.min(retryAttempt, RETRY_DELAYS_MS.length - 1)] ?? 2000;
-          retryAttempt += 1;
-          logger.info("retrying upload after transient failure", {
-            clientUploadId,
-            delayMs,
-            attempt: retryAttempt,
-          });
-          // Visibility resumes are handled here too, so a backgrounded mobile
-          // page retries the same file/session when it returns to the front.
-          await waitForUploadRetry(controller, delayMs);
-        }
+          ),
+        { signal: controller.signal, onProgress },
+      );
+      onSettled({ clientUploadId, status: "uploaded", attachment });
+    } catch (err) {
+      // An abort is not a failure: leave the placeholder untouched. It stays
+      // uploading until the caller clears it during logout.
+      if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
+        logger.info("upload aborted", { clientUploadId });
+        return;
       }
     } finally {
       // Only drop the entry if it is still ours — a racing re-start under the

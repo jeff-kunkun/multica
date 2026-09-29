@@ -54,6 +54,11 @@ function AttachmentCardChrome({
             : filename}
         </p>
       </div>
+      {uploading && uploadProgress != null && (
+        <span className="shrink-0 text-caption text-muted-foreground" aria-label={`${uploadProgress}%`}>
+          {uploadProgress}%
+        </span>
+      )}
       {!uploading && canPreview && (
         <button
           type="button"
@@ -118,6 +123,7 @@ export interface AttachmentCardProps {
   href?: string;
   /** True while a synchronous upload is in flight (file-card NodeView only). */
   uploading?: boolean;
+  /** Integer percentage for an in-flight editor upload. */
   uploadProgress?: number;
   /** Pressed when the Eye button is clicked. */
   onPreview: () => void;

@@ -68,6 +68,7 @@ export type AttachmentInput =
       contentType?: string;
       /** Editor in-flight state. Renders a loader placeholder. */
       uploading?: boolean;
+      /** Integer percentage for an in-flight editor upload. */
       uploadProgress?: number;
       /**
        * Intrinsic pixel dimensions. Rendered as `<img width height>` so the

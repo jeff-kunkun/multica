@@ -2227,6 +2227,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/visibility/preview", h.PreviewProjectVisibility)
 					r.Put("/visibility", h.SetProjectVisibility)
 					r.Get("/resources", h.ListProjectResources)
+					// Compact repository-only surface used by the CLI and agents.
+					r.Get("/repos", h.ListProjectRepos)
+					r.Post("/repos", h.AttachProjectRepo)
+					r.Delete("/repos/{repoId}", h.RemoveProjectRepo)
 					// Where a new task on this machine would run, computed by
 					// the same function the claim path uses. The project page
 					// displays it; it does not derive a directory of its own.

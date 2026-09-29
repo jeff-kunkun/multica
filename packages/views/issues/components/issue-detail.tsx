@@ -2179,8 +2179,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [issue?.description, descEditorAttachments, items, timelineView.threadReplies]);
 
   const handleDescriptionUpload = useCallback(
-    async (file: File) => {
-      const result = await uploadWithToast(file);
+    async (
+      file: File,
+      _uploadId: string,
+      onProgress: (uploadedBytes: number, totalBytes: number) => void,
+    ) => {
+      const result = await uploadWithToast(file, undefined, onProgress);
       if (result) {
         descPendingAttachmentsRef.current = [
           ...descPendingAttachmentsRef.current,
