@@ -30,7 +30,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
-import { GitHubAppCreateFields, GitHubAppPanel, postGitHubAppManifest } from "./github-app-panel";
+import { GitHubAppCreateFields, GitHubAppPanel, launchGitHubAppSetup } from "./github-app-panel";
 import { SettingsTab } from "./settings-layout";
 import { useRepoCatalog } from "./use-repo-catalog";
 import { repoConnectionsOptions } from "@multica/core/repo-reach";
@@ -137,7 +137,9 @@ export function GitConnectionsTab() {
         toast.error(t(($) => $.repo_links.github_app_error_failed));
         return;
       }
-      postGitHubAppManifest(setup.action_url, setup.manifest);
+      if (launchGitHubAppSetup(setup) === "browser") {
+        toast.info(t(($) => $.repo_links.github_app_opened_in_browser), { duration: 10000 });
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : t(($) => $.repo_links.github_app_error_failed),

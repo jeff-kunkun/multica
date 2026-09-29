@@ -997,6 +997,7 @@
     "github_app_creating": "GitHub로 이동 중",
     "github_app_error_expired": "GitHub 확인이 만료되었습니다. 다시 만드세요.",
     "github_app_error_failed": "GitHub App을 만들지 못했습니다.",
+    "github_app_opened_in_browser": "브라우저에서 GitHub를 열었습니다. 생성을 마친 뒤 여기로 돌아와 새로고침하세요.",
     "github_app_error_duplicate": "GitHub App이 이미 설정되어 있습니다.",
     "github_app_error_taken": "이 GitHub 설치는 이미 다른 워크스페이스에 연결되어 있습니다.",
     "github_app_connected": "GitHub에 연결했습니다.",

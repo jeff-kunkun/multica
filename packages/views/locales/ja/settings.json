@@ -1259,6 +1259,7 @@
     "github_app_creating": "GitHub を開いています",
     "github_app_error_expired": "GitHub の確認が期限切れです。最初からやり直してください。",
     "github_app_error_failed": "GitHub App を作成できませんでした。",
+    "github_app_opened_in_browser": "ブラウザで GitHub を開きました。作成を終えたらここに戻って再読み込みしてください。",
     "github_app_error_duplicate": "GitHub App はすでに設定されています。",
     "github_app_error_taken": "この GitHub インストールは別のワークスペースに接続済みです。",
     "github_app_connected": "GitHub を接続しました。",

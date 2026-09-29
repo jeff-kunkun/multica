@@ -11,7 +11,7 @@ multica github-app setup-link [--org <login>] [--output json|table]
 
 `status` reports `source` (`none`, `env`, or `database`), `configured`, `read_only`, `can_create`, and when present the App name and GitHub management URL. No secrets.
 
-`setup-link` is only for a workspace owner, and only while `source` is `none`. It returns `launch_url`. A person who is signed into GitHub opens that URL, confirms with their password, and creates the App. The CLI cannot enter that password. `--org` creates the App under that organization; omit it to create the App on the signed-in user.
+`setup-link` is only for a workspace owner, and only while `source` is `none`. It returns `launch_url`. A person who is signed into GitHub opens that URL, confirms with their password, and creates the App. The CLI cannot enter that password. The link works once and expires after 10 minutes; a reused or expired link shows an error page, so mint a new one instead of resending the old one. The desktop app's Settings button opens this same link in the system browser. `--org` creates the App under that organization; omit it to create the App on the signed-in user.
 
 `--output json` is the default. Warnings stay on stderr.
 

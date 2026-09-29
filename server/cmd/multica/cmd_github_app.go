@@ -17,7 +17,8 @@ var githubAppCmd = &cobra.Command{
 	Long: `Show whether this server has a GitHub App, and mint a link a workspace
 owner opens to create one.
 
-The link opens a page that posts GitHub's manifest form. Creating the App
+The link opens a page that posts GitHub's manifest form. It works once and
+expires after 10 minutes; mint a new one rather than resending an old one. Creating the App
 asks for the GitHub password once; the CLI cannot do that step. When the
 server already has the App in environment variables, that configuration
 wins and this command will not replace it.`,
@@ -106,7 +107,7 @@ func runGitHubAppSetupLink(cmd *cobra.Command, _ []string) error {
 	if format == "json" {
 		return cli.PrintJSON(os.Stdout, setup)
 	}
-	fmt.Printf("Open this link in a browser signed into GitHub, then confirm with your password:\n%s\n", setup.LaunchURL)
+	fmt.Printf("Open this link in a browser signed into GitHub, then confirm with your password (single use, expires in 10 minutes):\n%s\n", setup.LaunchURL)
 	return nil
 }
 

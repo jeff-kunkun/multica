@@ -11,6 +11,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const consumeGitHubAppLaunchToken = `-- name: ConsumeGitHubAppLaunchToken :one
+UPDATE github_app_launch_token
+SET used_at = now()
+WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2
+RETURNING state
+`
+
+type ConsumeGitHubAppLaunchTokenParams struct {
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+// Spend the token: only an unused, unexpired row yields its state.
+func (q *Queries) ConsumeGitHubAppLaunchToken(ctx context.Context, arg ConsumeGitHubAppLaunchTokenParams) (string, error) {
+	row := q.db.QueryRow(ctx, consumeGitHubAppLaunchToken, arg.TokenHash, arg.ExpiresAt)
+	var state string
+	err := row.Scan(&state)
+	return state, err
+}
+
+const deleteStaleGitHubAppLaunchTokens = `-- name: DeleteStaleGitHubAppLaunchTokens :exec
+DELETE FROM github_app_launch_token WHERE expires_at < $1
+`
+
+func (q *Queries) DeleteStaleGitHubAppLaunchTokens(ctx context.Context, expiresAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteStaleGitHubAppLaunchTokens, expiresAt)
+	return err
+}
+
 const getGitHubAppCredential = `-- name: GetGitHubAppCredential :one
 
 SELECT id, app_id, slug, name, html_url, manage_url, client_id, private_key, webhook_secret, client_secret, created_by, workspace_id, created_at, updated_at FROM github_app_credential WHERE id = TRUE
@@ -35,6 +64,23 @@ func (q *Queries) GetGitHubAppCredential(ctx context.Context) (GithubAppCredenti
 		&i.WorkspaceID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getGitHubAppLaunchToken = `-- name: GetGitHubAppLaunchToken :one
+SELECT token_hash, state, expires_at, used_at, created_at FROM github_app_launch_token WHERE token_hash = $1
+`
+
+func (q *Queries) GetGitHubAppLaunchToken(ctx context.Context, tokenHash string) (GithubAppLaunchToken, error) {
+	row := q.db.QueryRow(ctx, getGitHubAppLaunchToken, tokenHash)
+	var i GithubAppLaunchToken
+	err := row.Scan(
+		&i.TokenHash,
+		&i.State,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -95,4 +141,20 @@ func (q *Queries) InsertGitHubAppCredential(ctx context.Context, arg InsertGitHu
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const insertGitHubAppLaunchToken = `-- name: InsertGitHubAppLaunchToken :exec
+INSERT INTO github_app_launch_token (token_hash, state, expires_at)
+VALUES ($1, $2, $3)
+`
+
+type InsertGitHubAppLaunchTokenParams struct {
+	TokenHash string             `json:"token_hash"`
+	State     string             `json:"state"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) InsertGitHubAppLaunchToken(ctx context.Context, arg InsertGitHubAppLaunchTokenParams) error {
+	_, err := q.db.Exec(ctx, insertGitHubAppLaunchToken, arg.TokenHash, arg.State, arg.ExpiresAt)
+	return err
 }

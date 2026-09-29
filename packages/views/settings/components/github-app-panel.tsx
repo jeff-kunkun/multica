@@ -1,10 +1,11 @@
 "use client";
 
-import type { GitHubAppStatus } from "@multica/core/types";
+import type { GitHubAppSetup, GitHubAppStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
+import { isDesktopShell, openExternal } from "../../platform";
 
 export function postGitHubAppManifest(
   actionURL: string,
@@ -20,6 +21,21 @@ export function postGitHubAppManifest(
   form.appendChild(input);
   document.body.appendChild(form);
   form.submit();
+}
+
+/**
+ * Send the owner to GitHub's "create App" page. Web posts the manifest form
+ * in this tab. The desktop window's navigation guard blocks form posts to
+ * other sites, so desktop hands the server's single-use launch link to the
+ * system browser instead; "browser" tells the caller to say so.
+ */
+export function launchGitHubAppSetup(setup: GitHubAppSetup): "browser" | "form" {
+  if (isDesktopShell() && setup.launch_url) {
+    openExternal(setup.launch_url);
+    return "browser";
+  }
+  postGitHubAppManifest(setup.action_url, setup.manifest);
+  return "form";
 }
 
 export function GitHubAppPanel({
