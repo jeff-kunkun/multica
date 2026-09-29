@@ -250,5 +250,27 @@
     "back": "뒤로",
     "submit": "만들고 선택",
     "failed": "프로젝트를 만들지 못했습니다."
+  },
+  "code": {
+    "title": "코드",
+    "add": "저장소 추가",
+    "empty": "아직 저장소가 없습니다.",
+    "remove": "제거",
+    "load_failed": "저장소를 불러오지 못했습니다.",
+    "toast_added": "저장소를 추가했습니다",
+    "toast_add_failed": "저장소 추가에 실패했습니다",
+    "toast_remove_failed": "저장소 제거에 실패했습니다",
+    "dialog_title": "저장소 추가",
+    "tab_link": "링크",
+    "tab_pick": "선택",
+    "url_placeholder": "https://github.com/owner/repo",
+    "search_placeholder": "저장소 검색",
+    "search_empty": "저장소를 찾을 수 없습니다.",
+    "pick_added": "추가됨",
+    "pick_select": "선택",
+    "submit": "추가",
+    "cancel": "취소",
+    "loading": "불러오는 중…",
+    "load_more": "더 보기"
   }
 }
