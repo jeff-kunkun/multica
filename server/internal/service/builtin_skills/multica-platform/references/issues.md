@@ -13,6 +13,10 @@ Product contracts the runtime brief does not fully encode.
 
 Closing is its own contract; read `references/close-protocol.md` for its `close.*` keys, decision tables, and dispatcher promotion rules.
 
+## Sub-issues: todo starts work now, backlog parks it
+
+The steps are in `references/sub-issues.md`. `--status backlog` parks a child instead of starting it. `` `--stage <N>` `` groups children into a stage, and the parent is woken when a whole stage finishes. Promote one parked child with `multica issue status <child-id> todo`.
+
 ## Editing comments without overwriting concurrent work
 
 Read the comment's current `revision`, then supply it when updating. Agent

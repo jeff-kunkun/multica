@@ -83,6 +83,8 @@ vi.mock("@multica/core/chat", () => ({
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     projects: () => "/test-workspace/projects",
+    settings: () => "/test-workspace/settings",
+    issueDetail: (id: string) => `/test-workspace/issues/${id}`,
   }),
 }));
 
@@ -110,6 +112,7 @@ vi.mock("react-resizable-panels", () => ({
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => false,
+  useIsCompact: () => false,
 }));
 
 vi.mock("@multica/ui/components/common/emoji-picker", () => ({

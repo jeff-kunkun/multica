@@ -191,6 +191,8 @@ import type {
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
+  GitHubAppStatus,
+  GitHubAppSetup,
   ListVCSConnectionsResponse,
   ConnectVCSRequest,
   ConnectVCSResponse,
@@ -285,6 +287,7 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import { compressImageForUpload } from "../attachments/compress-image";
 import {
   parseRoutingHealth,
   type RoutingHealth,
@@ -516,6 +519,9 @@ import {
   EMPTY_ISSUE_STATUS_ENTRY,
   EMPTY_RESOURCE_LABELS_RESPONSE,
   GitHubConnectResponseSchema,
+  GitHubAppStatusSchema,
+  GitHubAppSetupSchema,
+  EMPTY_GITHUB_APP_STATUS,
   ListGitHubInstallationsResponseSchema,
   ListGitHubRepositoriesResponseSchema,
   ListRepoLinksResponseSchema,
@@ -4302,8 +4308,11 @@ export class ApiClient {
     // failure via `signal.aborted` / `err.name === "AbortError"`.
     signal?: AbortSignal,
   ): Promise<Attachment> {
+    // Large phone photos are downscaled first: on a slow uplink the original
+    // often cannot finish inside the proxy timeout (see compress-image.ts).
+    const body = await compressImageForUpload(file);
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", body);
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
     if (opts?.chatSessionId) formData.append("chat_session_id", opts.chatSessionId);
@@ -5749,6 +5758,29 @@ export class ApiClient {
       GitHubConnectResponseSchema,
       EMPTY_GITHUB_CONNECT_RESPONSE,
       { endpoint: "GET /api/workspaces/:id/github/connect" },
+    );
+  }
+
+  async getGitHubApp(workspaceId: string): Promise<GitHubAppStatus> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/github/app`);
+    return parseWithFallback(
+      raw,
+      GitHubAppStatusSchema,
+      EMPTY_GITHUB_APP_STATUS,
+      { endpoint: "GET /api/workspaces/:id/github/app" },
+    );
+  }
+
+  async beginGitHubApp(workspaceId: string, org?: string): Promise<GitHubAppSetup> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/github/app`, {
+      method: "POST",
+      body: JSON.stringify({ org: org ?? "" }),
+    });
+    return parseWithFallback(
+      raw,
+      GitHubAppSetupSchema,
+      { action_url: "", manifest: {}, launch_url: "" },
+      { endpoint: "POST /api/workspaces/:id/github/app" },
     );
   }
 

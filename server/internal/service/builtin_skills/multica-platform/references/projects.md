@@ -8,6 +8,7 @@ display metadata; it is context later injected into task briefs and
 - [CLI](#cli)
 - [local_directory execution modes](#local_directory-execution-modes)
 - [Referring to a project in a comment](#referring-to-a-project-in-a-comment)
+- [Project memory and sediment agent](#project-memory-and-sediment-agent)
 - [When to add a resource](#when-to-add-a-resource)
 - [Debugging wrong context](#debugging-wrong-context)
 - [Side effects](#side-effects)
@@ -102,6 +103,11 @@ multica project resource update <project-id> <resource-id> --execution-mode shar
 multica project resource update <project-id> <resource-id> --url <new-github-url> --output json
 multica project resource update <project-id> <resource-id> --ref <branch-or-sha> --output json
 multica project resource remove <project-id> <resource-id> --output json
+multica project memory status <project-id> --output json
+multica project memory check <project-id> --output json
+multica project memory seat get --output json
+multica project memory seat set <agent-name-or-uuid> --output json
+multica project memory seat clear --output json
 ```
 
 For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default
@@ -275,6 +281,66 @@ Two consequences worth knowing before debugging:
   path and can only match by repository name, which is enough to ask and not
   enough to act.
 
+## Project memory and sediment agent
+
+Projects track durable repository knowledge across five canonical memory
+locations:
+
+- `AGENTS.md` — project instructions and operational conventions;
+- `docs/kun/CONTEXT.md` — domain model and business ubiquitous language;
+- `DESIGN.md` — system architecture rules and design system contracts;
+- `INTERACTION.md` — user interaction flows and UX traversal state;
+- `docs/kun/audit.md` — knowledge gap audit and reconciliation log.
+
+### Checking status
+
+Use `multica project memory status <project-id> [--output json]` to inspect the
+presence and state of these five memory files without side effects:
+
+```bash
+multica project memory status <project-id> --output json
+```
+
+### Checking and ensuring memory rounds
+
+`multica project memory check <project-id> [--output json]` evaluates project
+memory. When any memory file is missing or out of date:
+
+- If the workspace has a configured sediment agent (`settings.memory.sediment_agent`),
+  the platform creates or ensures an active sediment ticket assigned to that agent.
+- If no sediment agent is configured, the command returns an explicit notice
+  explaining that the sediment agent is unconfigured and ticketing is disabled.
+
+```bash
+multica project memory check <project-id> --output json
+```
+
+### Configuring the sediment agent seat
+
+The sediment agent seat determines which agent in the workspace handles
+automatic memory sediment tickets. It can be viewed and configured via CLI or
+in the workspace settings page:
+
+```bash
+# View the current sediment agent seat
+multica project memory seat get --output json
+
+# Configure the sediment agent seat by name or UUID
+multica project memory seat set "18号" --output json
+
+# Clear the sediment agent seat (disables automatic ticketing)
+multica project memory seat clear --output json
+```
+
+The server validates that the assigned agent:
+- exists within the current workspace;
+- is not archived;
+- has work enabled (`work_enabled !== false`);
+- has a bound runtime.
+
+Agents that are currently offline are accepted (they will process sediment
+tickets when their runtime reconnects).
+
 ## When to add a resource
 
 Add/update a project resource when the user asks for durable project context:
@@ -300,3 +366,15 @@ is task-local checkout state.
 Project create/update/delete/status and project resource add/update/remove
 mutate durable workspace state and affect future tasks. Ask before changing
 `local_directory` unless the user explicitly requested that exact local path.
+
+### Project repository commands
+
+Use the dedicated repository surface when attaching GitHub code to a project:
+
+```sh
+multica project repo add <project-id> --url <github-url> --output json
+multica project repo list <project-id> --output json
+multica project repo remove <project-id> <repo-resource-id> --output json
+```
+
+Attaching the same normalized URL twice is idempotent (`created` and `registered` come back false). `--output json` includes `repo.mode` and `repo.next_action` (`install_app`, `create_app`, `add_token`, `replace_token`, or `ask_owner`). `remove` detaches that project only; the workspace registry keeps the repository.

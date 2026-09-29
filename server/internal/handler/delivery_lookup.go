@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/delivery"
+	"github.com/multica-ai/multica/server/internal/gitconn"
 	"github.com/multica-ai/multica/server/internal/repoident"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -83,6 +84,9 @@ type issueDeliveries struct {
 	GitHub []db.ListPullRequestsByIssueRow
 	VCS    []db.ListVCSPullRequestsByIssueRow
 	Gap    *delivery.Gap
+	// Denied is set when a stored token was rejected (401/403). The registrant
+	// has already been asked once. Callers must not park the issue on a wait.
+	Denied bool
 }
 
 // GateRows is the GitHub list plus VCS rows wearing the same shape. A VCS
@@ -150,9 +154,19 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 		return finishDeliveries(ident, nil, nil, false, hasApp, hasApp, ""), nil
 	}
 
+	var project *db.Project
+	if issue.ProjectID.Valid {
+		if p, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+			ID: issue.ProjectID, WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			project = &p
+		}
+	}
 	queried := false
 	connected := false
 	sawToken := false
+	denied := false
+	deniedHost := ""
 	lookupErr := ""
 	for i, repo := range decodeWorkspaceRepos(ws.Repos) {
 		if i >= 12 || ctx.Err() != nil {
@@ -168,7 +182,14 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 			continue
 		}
 		conn := matchConnection(conns, key, host)
-		if provider == "github" && hasApp {
+		// Coverage is this repository's owner, not "any installation in the workspace".
+		reach := DecideRepoReach(reachFacts{
+			Provider:     provider,
+			HasToken:     conn != nil,
+			AppCovers:    provider == "github" && h.appCoversRepo(ctx, issue.WorkspaceID, key),
+			CanConfigure: true,
+		})
+		if reach.Mode == "app" {
 			connected = true
 		}
 		if conn == nil || !canToken {
@@ -185,6 +206,17 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 		pulls, err := delivery.Search(ctx, h.deliveryClient(), provider, delivery.APIBase(provider, conn.InstanceUrl, ""), token, owner, name, ident)
 		if err != nil {
 			h.recordLookup(ctx, *conn, false, clipErr(err))
+			if delivery.Unauthorized(err) {
+				denied = true
+				if deniedHost == "" {
+					deniedHost = host
+				}
+				reg := repo.CreatedBy
+				if reg == "" {
+					reg = h.lookupRepoRegistrant(ctx, issue.WorkspaceID, key)
+				}
+				h.askForConnection(ctx, issue.WorkspaceID, gitconn.Repo{Key: key, URL: repo.URL, Registrant: reg}, project, &issue)
+			}
 			if lookupErr == "" {
 				lookupErr = clipErr(err)
 			}
@@ -205,8 +237,17 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 	if err != nil {
 		return issueDeliveries{Ident: ident}, err
 	}
-	appOnly := hasApp && !sawToken && len(gh)+len(vcsRows) == 0
-	return finishDeliveries(ident, gh, vcsRows, queried, connected, appOnly, lookupErr), nil
+	appOnly := hasApp && !sawToken && connected && len(gh)+len(vcsRows) == 0
+	view := finishDeliveries(ident, gh, vcsRows, queried, connected, appOnly, lookupErr)
+	view.Denied = denied && len(view.GitHub)+len(view.VCS) == 0
+	if view.Denied {
+		if view.Gap == nil {
+			view.Gap = &delivery.Gap{Kind: delivery.GapNoConnection}
+		}
+		view.Gap.Message = "没权限：保存的令牌读不了这个仓库。平台已经叫仓库登记人来接上。"
+		view.Gap.NextCommand = gitconn.AddCommand(deniedHost) + " --yes"
+	}
+	return view, nil
 }
 
 func finishDeliveries(ident string, gh []db.ListPullRequestsByIssueRow, vcsRows []db.ListVCSPullRequestsByIssueRow, queried, connected, appOnly bool, lookupErr string) issueDeliveries {

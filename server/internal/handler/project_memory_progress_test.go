@@ -532,3 +532,70 @@ func TestProjectMemoryBriefLineIsPointerOnly(t *testing.T) {
 		t.Fatalf("claim memory line = %#v, want %q", resp.Projects, line)
 	}
 }
+
+func TestProjectMemoryCheck_SedimentSeatLifecycle(t *testing.T) {
+	memoryProgressReady(t)
+	projectID := dbfx.Project(t, "memory check seat lifecycle project")
+	forgetSediment(t, projectID)
+
+	// 1. Initial state: seat not configured
+	pinSedimentSeat(t, "")
+
+	callCheck := func() ProjectMemoryResponse {
+		req := withURLParam(newRequest(http.MethodPost, "/api/projects/"+projectID+"/memory/check", map[string]any{
+			"locations": []map[string]any{
+				{"key": "agents", "path": "AGENTS.md", "exists": false},
+			},
+		}), "id", projectID)
+		rec := httptest.NewRecorder()
+		testHandler.PostProjectMemoryCheck(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("check code = %d, want 200, body: %s", rec.Code, rec.Body.String())
+		}
+		var resp ProjectMemoryResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal resp: %v", err)
+		}
+		return resp
+	}
+
+	resp := callCheck()
+	if resp.SedimentAgentConfigured {
+		t.Fatalf("want SedimentAgentConfigured=false, got true")
+	}
+	if resp.SedimentError == nil || *resp.SedimentError != "memory.sediment_agent is not configured" {
+		t.Fatalf("want 'memory.sediment_agent is not configured', got %q", *resp.SedimentError)
+	}
+	if n := countSediment(t, projectID); n != 0 {
+		t.Fatalf("expected 0 sediment tickets without seat, got %d", n)
+	}
+
+	// 2. Configure sediment seat to an agent
+	agentID := createHandlerTestAgent(t, "sediment-checker-"+t.Name(), []byte("[]"))
+	pinSedimentSeat(t, agentID)
+
+	resp = callCheck()
+	if !resp.SedimentAgentConfigured {
+		t.Fatalf("want SedimentAgentConfigured=true, got false")
+	}
+	if resp.SedimentIssue == nil {
+		t.Fatalf("expected sediment issue to be created, got nil (sediment error: %v)", resp.SedimentError)
+	}
+	if n := countSediment(t, projectID); n != 1 {
+		t.Fatalf("expected 1 sediment ticket after check, got %d", n)
+	}
+	issue := loadTestIssue(t, resp.SedimentIssue.ID)
+	if issue.AssigneeID.String() != agentID {
+		t.Fatalf("expected issue assignee to be %s, got %s", agentID, issue.AssigneeID.String())
+	}
+
+	// 3. Clear sediment seat again
+	pinSedimentSeat(t, "")
+	resp = callCheck()
+	if resp.SedimentAgentConfigured {
+		t.Fatalf("want SedimentAgentConfigured=false after clear, got true")
+	}
+	if resp.SedimentError == nil || *resp.SedimentError != "memory.sediment_agent is not configured" {
+		t.Fatalf("want 'memory.sediment_agent is not configured' after clear, got %v", resp.SedimentError)
+	}
+}

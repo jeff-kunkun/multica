@@ -696,6 +696,14 @@ type CommentReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ConnectionNudge struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RepoKey     string             `json:"repo_key"`
+	RecipientID pgtype.UUID        `json:"recipient_id"`
+	InboxItemID pgtype.UUID        `json:"inbox_item_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type ContactSalesInquiry struct {
 	ID              pgtype.UUID        `json:"id"`
 	FirstName       string             `json:"first_name"`
@@ -775,6 +783,23 @@ type Feedback struct {
 	Message     string             `json:"message"`
 	Metadata    []byte             `json:"metadata"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type GithubAppCredential struct {
+	ID            bool               `json:"id"`
+	AppID         int64              `json:"app_id"`
+	Slug          string             `json:"slug"`
+	Name          string             `json:"name"`
+	HtmlUrl       string             `json:"html_url"`
+	ManageUrl     string             `json:"manage_url"`
+	ClientID      string             `json:"client_id"`
+	PrivateKey    []byte             `json:"private_key"`
+	WebhookSecret []byte             `json:"webhook_secret"`
+	ClientSecret  []byte             `json:"client_secret"`
+	CreatedBy     pgtype.UUID        `json:"created_by"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type GithubInstallation struct {

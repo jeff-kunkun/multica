@@ -750,6 +750,12 @@
     "issue_prefix_hint": "{{example}} のようなタスク番号に使用されます。",
     "prefix_confirm_title": "タスク接頭辞を変更しますか？",
     "prefix_confirm_description": "すべてのタスク番号が {{oldPrefix}}-N から {{newPrefix}}-N に振り直されます。Pull request のタイトル、ブランチ名、ドキュメントやチャットのリンクなど、{{oldPrefix}}-N を使用している外部参照は解決されなくなります。",
+    "sediment_agent_label": "プロジェクトメモリ沈殿席",
+    "sediment_agent_description": "プロジェクトメモリ位置が不足している際に自動作成されるチケットの担当エージェント。",
+    "sediment_agent_none": "未設定（自動チケット無効）",
+    "sediment_agent_offline": "オフライン",
+    "sediment_agent_offline_hint": "現在オフラインです。オンライン復帰後にタスクを受け付けます。",
+    "sediment_agent_clear": "沈殿席をクリア",
     "save": "保存",
     "saving": "保存中...",
     "manage_hint": "ワークスペース設定を更新できるのは admin と owner のみです。",
@@ -1238,7 +1244,25 @@
     "scope_invalid": "範囲はドメイン/アカウントで書いてください。例: github.com/acme。",
     "token_required": "トークンが必要です。",
     "token_unavailable": "このサーバーはまだ GitHub トークンを保存できません。",
-    "test_unavailable": "このサーバーはまだこの接続をテストできません。"
+    "test_unavailable": "このサーバーはまだこの接続をテストできません。",
+    "github_app_status": "GitHub App",
+    "github_app_create": "GitHub App を作成",
+    "github_app_org": "組織名（任意）",
+    "github_app_org_placeholder": "空欄なら自分のアカウントに作成します",
+    "github_app_need_owner": "ワークスペースのオーナーが有効にする必要があります。",
+    "github_app_env": "サーバー側の設定です。読み取り専用。",
+    "github_app_ready": "設定画面から作成済みです。",
+    "github_app_manage": "GitHub の管理ページ",
+    "github_app_unconfigured": "このサーバーにはまだ GitHub App がありません。",
+    "github_app_unavailable": "このサーバーはまだ GitHub App を保存できません。",
+    "github_app_public_url": "このサーバーに公開アドレスがないため、GitHub から戻れません。",
+    "github_app_creating": "GitHub を開いています",
+    "github_app_error_expired": "GitHub の確認が期限切れです。最初からやり直してください。",
+    "github_app_error_failed": "GitHub App を作成できませんでした。",
+    "github_app_error_duplicate": "GitHub App はすでに設定されています。",
+    "github_app_error_taken": "この GitHub インストールは別のワークスペースに接続済みです。",
+    "github_app_connected": "GitHub を接続しました。",
+    "github_app_not_owner_error": "GitHub App を作成できるのはワークスペースのオーナーだけです。"
   },
   "repositories": {
     "section_title": "リポジトリ",
@@ -1281,7 +1305,8 @@
     "delete_confirm_action": "リポジトリを削除",
     "manage_hint": "リポジトリを管理できるのは admin と owner のみです。",
     "toast_saved": "リポジトリを保存しました",
-    "toast_save_failed": "リポジトリを保存できませんでした"
+    "toast_save_failed": "リポジトリを保存できませんでした",
+    "github_installation_taken": "この GitHub インストールは別のワークスペースに接続済みです。"
   },
   "desktop": {
     "tabs": {

@@ -255,6 +255,8 @@ export type {
   GitHubRepository,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
+  GitHubAppStatus,
+  GitHubAppSetup,
 } from "./github";
 export type {
   VCSProvider,

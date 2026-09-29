@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Finish a GitHub App created through GitHub's manifest flow and wire it into
-# the self-hosted instance (DENE-959). Steps:
+# No-UI fallback for a GitHub App manifest (DENE-959 / DENE-981).
+# The primary path is Settings → Connections: a workspace owner creates the
+# App there, and the server stores it encrypted without a restart. Use this
+# script only when there is no UI. The manifest redirect_url must land on
+# /{workspace}/settings?tab=git-connections so the one-hour code is in the
+# address bar. Credentials written here go into .env and override the
+# Settings row until the variables are removed.
+# Steps:
 #   1. exchange the one-hour manifest `code` for the App credentials,
 #   2. write GITHUB_APP_SLUG / GITHUB_WEBHOOK_SECRET / GITHUB_APP_ID /
 #      GITHUB_APP_PRIVATE_KEY into the server's .env (backup kept alongside),

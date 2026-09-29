@@ -746,6 +746,12 @@
     "issue_prefix_hint": "Utilisé dans les numéros de tâches, par exemple {{example}}.",
     "prefix_confirm_title": "Changer le préfixe des tâches ?",
     "prefix_confirm_description": "Toutes les tâches seront renumérotées de {{oldPrefix}}-N vers {{newPrefix}}-N. Les références externes — titres de pull requests, noms de branches, liens dans la documentation et les discussions — qui utilisent {{oldPrefix}}-N cesseront de fonctionner.",
+    "sediment_agent_label": "Agent de sédimentation de mémoire",
+    "sediment_agent_description": "Agent assigné aux tickets créés automatiquement lorsque des emplacements de mémoire du projet manquent.",
+    "sediment_agent_none": "Non configuré (tickets automatiques désactivés)",
+    "sediment_agent_offline": "hors ligne",
+    "sediment_agent_offline_hint": "L'agent est actuellement hors ligne et acceptera des tâches lorsqu'il sera de nouveau en ligne.",
+    "sediment_agent_clear": "Effacer l'agent de sédimentation",
     "save": "Enregistrer",
     "saving": "Enregistrement...",
     "manage_hint": "Seuls les administrateurs et les propriétaires peuvent modifier les paramètres de l'espace de travail.",
@@ -1241,7 +1247,25 @@
     "scope_invalid": "Écrire la portée comme domaine/compte, par exemple github.com/acme.",
     "token_required": "Un jeton est requis.",
     "token_unavailable": "Ce serveur ne peut pas encore enregistrer un jeton GitHub.",
-    "test_unavailable": "Ce serveur ne peut pas encore tester cette connexion."
+    "test_unavailable": "Ce serveur ne peut pas encore tester cette connexion.",
+    "github_app_status": "GitHub App",
+    "github_app_create": "Créer l'app GitHub",
+    "github_app_org": "Organisation (facultatif)",
+    "github_app_org_placeholder": "Vide : créée sur votre compte",
+    "github_app_need_owner": "Le propriétaire de l'espace doit l'activer.",
+    "github_app_env": "Configurée sur le serveur, lecture seule.",
+    "github_app_ready": "Créée depuis les réglages.",
+    "github_app_manage": "Page GitHub",
+    "github_app_unconfigured": "Ce serveur n'a pas encore d'app GitHub.",
+    "github_app_unavailable": "Ce serveur ne peut pas encore enregistrer d'app GitHub.",
+    "github_app_public_url": "Ce serveur n'a pas d'adresse publique : GitHub ne peut pas revenir.",
+    "github_app_creating": "Ouverture de GitHub",
+    "github_app_error_expired": "La confirmation GitHub a expiré. Recommencez.",
+    "github_app_error_failed": "La création de l'app GitHub n'a pas abouti.",
+    "github_app_error_duplicate": "Une app GitHub est déjà configurée.",
+    "github_app_error_taken": "Cette installation GitHub est déjà rattachée à un autre espace.",
+    "github_app_connected": "GitHub est connecté.",
+    "github_app_not_owner_error": "Seul le propriétaire de l'espace peut créer l'app GitHub."
   },
   "repositories": {
     "section_title": "Dépôts",
@@ -1284,7 +1308,8 @@
     "delete_confirm_action": "Supprimer le dépôt",
     "manage_hint": "Seuls les administrateurs et les propriétaires peuvent gérer les dépôts.",
     "toast_saved": "Dépôts enregistrés",
-    "toast_save_failed": "Échec de l'enregistrement des dépôts"
+    "toast_save_failed": "Échec de l'enregistrement des dépôts",
+    "github_installation_taken": "Cette installation GitHub est déjà rattachée à un autre espace."
   },
   "desktop": {
     "tabs": {
