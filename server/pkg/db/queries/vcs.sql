@@ -37,11 +37,10 @@ INSERT INTO vcs_connection (
 )
 ON CONFLICT (workspace_id, instance_url, repo_url) DO UPDATE SET
     provider                 = EXCLUDED.provider,
+    account_login            = EXCLUDED.account_login,
     access_token_encrypted   = EXCLUDED.access_token_encrypted,
     webhook_secret_encrypted = EXCLUDED.webhook_secret_encrypted,
     connected_by_id          = EXCLUDED.connected_by_id,
-    covers                   = EXCLUDED.covers,
-    personal                 = EXCLUDED.personal,
     updated_at               = now()
 RETURNING *;
 

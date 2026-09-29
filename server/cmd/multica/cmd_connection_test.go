@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,32 +20,23 @@ func TestConnectionAddFromGHDoesNotLeakToken(t *testing.T) {
 
 	var argv []string
 	origCmd := connectionTokenCommand
-	origScope := discoverConnectionScope
-	t.Cleanup(func() {
-		connectionTokenCommand = origCmd
-		discoverConnectionScope = origScope
-	})
+	t.Cleanup(func() { connectionTokenCommand = origCmd })
 	connectionTokenCommand = func(name string, args ...string) ([]byte, error) {
 		argv = append([]string{name}, args...)
 		return []byte(connectionTestToken + "\n"), nil
 	}
-	discoverConnectionScope = func(ctx context.Context, provider, instance, token string) ([]string, error) {
-		if token != connectionTestToken {
-			t.Fatalf("scope probe received a different token")
-		}
-		if strings.Contains(provider+instance, connectionTestToken) {
-			t.Fatalf("token leaked into scope probe address")
-		}
-		return []string{"github.com/octocat"}, nil
-	}
 
 	var posted map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"repos":[{"url":"https://github.com/octocat/hello","provider":"github","mode":"none","can_configure":true}]}`))
+			return
+		}
 		if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"c1","account_login":"octocat","covers":["octocat"],"webhook_secret":"whsec"}`))
+		_, _ = w.Write([]byte(`{"repo":{"url":"https://github.com/octocat/hello","account_login":"octocat"},"webhook_secret":"whsec"}`))
 	}))
 	defer srv.Close()
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
@@ -67,14 +58,20 @@ func TestConnectionAddFromGHDoesNotLeakToken(t *testing.T) {
 	if strings.Join(argv, " ") != "gh auth token" {
 		t.Fatalf("argv = %q", argv)
 	}
-	if posted["personal"] != true {
-		t.Fatalf("personal = %#v", posted["personal"])
+	if posted["repo_url"] != "https://github.com/octocat/hello" {
+		t.Fatalf("repo_url = %#v", posted["repo_url"])
+	}
+	if posted["agent_yes"] != false {
+		t.Fatalf("agent_yes = %#v", posted["agent_yes"])
+	}
+	if posted["access_token"] != connectionTestToken {
+		t.Fatal("token was not posted to the server")
 	}
 	blob := stdout.String() + stderr.String()
 	if strings.Contains(blob, connectionTestToken) {
 		t.Fatalf("token leaked into output:\n%s", blob)
 	}
-	if !strings.Contains(stderr.String(), "github.com/octocat") {
+	if !strings.Contains(stderr.String(), "https://github.com/octocat/hello") {
 		t.Fatalf("scope was not printed: %s", stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "octocat") {
@@ -88,24 +85,23 @@ func TestConnectionAddFromGlabCancelSkipsPost(t *testing.T) {
 	resetConnectionAddFlags(t)
 
 	origCmd := connectionTokenCommand
-	origScope := discoverConnectionScope
-	t.Cleanup(func() {
-		connectionTokenCommand = origCmd
-		discoverConnectionScope = origScope
-	})
+	t.Cleanup(func() { connectionTokenCommand = origCmd })
 	connectionTokenCommand = func(name string, args ...string) ([]byte, error) {
 		if name != "glab" || strings.Join(args, " ") != "auth token" {
 			t.Fatalf("argv = %s %v", name, args)
 		}
 		return []byte(connectionTestToken), nil
 	}
-	discoverConnectionScope = func(context.Context, string, string, string) ([]string, error) {
-		return []string{"gitlab.com/octocat"}, nil
-	}
 	posted := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		posted = true
-		w.WriteHeader(http.StatusCreated)
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			posted = true
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		_, _ = w.Write([]byte(`{"repos":[{"url":"https://gitlab.com/octocat/app","provider":"gitlab","mode":"none","can_configure":true}]}`))
 	}))
 	defer srv.Close()
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
@@ -130,7 +126,7 @@ func TestConnectionAddFromGlabCancelSkipsPost(t *testing.T) {
 	if strings.Contains(blob, connectionTestToken) {
 		t.Fatalf("token leaked: %s", blob)
 	}
-	if !strings.Contains(stderr.String(), "gitlab.com/octocat") {
+	if !strings.Contains(stderr.String(), "https://gitlab.com/octocat/app") {
 		t.Fatalf("scope missing: %s", stderr.String())
 	}
 }
@@ -144,10 +140,16 @@ func TestConnectionAddHelperFailureOmitsToken(t *testing.T) {
 	connectionTokenCommand = func(string, ...string) ([]byte, error) {
 		return []byte(connectionTestToken), os.ErrPermission
 	}
-	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:1")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"repos":[{"url":"https://github.com/octocat/hello","provider":"github","mode":"none","can_configure":true}]}`))
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
 	t.Setenv("MULTICA_TOKEN", "user-token")
 	mustSetFlag(t, "from-gh", "true")
+	mustSetFlag(t, "yes", "true")
 	var stderr bytes.Buffer
 	connectionAddCmd.SetOut(&stderr)
 	connectionAddCmd.SetErr(&stderr)
@@ -182,6 +184,7 @@ func resetConnectionAddFlags(t *testing.T) {
 		{"token-file", ""},
 		{"provider", ""},
 		{"instance-url", ""},
+		{"repo", ""},
 		{"output", "table"},
 	} {
 		mustSetFlag(t, pair[0], pair[1])

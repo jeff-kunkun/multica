@@ -526,11 +526,10 @@ INSERT INTO vcs_connection (
 )
 ON CONFLICT (workspace_id, instance_url, repo_url) DO UPDATE SET
     provider                 = EXCLUDED.provider,
+    account_login            = EXCLUDED.account_login,
     access_token_encrypted   = EXCLUDED.access_token_encrypted,
     webhook_secret_encrypted = EXCLUDED.webhook_secret_encrypted,
     connected_by_id          = EXCLUDED.connected_by_id,
-    covers                   = EXCLUDED.covers,
-    personal                 = EXCLUDED.personal,
     updated_at               = now()
 RETURNING id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, repo_url, last_lookup_at, last_lookup_ok, last_lookup_error, last_webhook_at
 `
@@ -543,9 +542,6 @@ type UpsertVCSConnectionParams struct {
 	AccountLogin           string      `json:"account_login"`
 	AccessTokenEncrypted   string      `json:"access_token_encrypted"`
 	WebhookSecretEncrypted string      `json:"webhook_secret_encrypted"`
-	Covers                 []string    `json:"covers"`
-	Personal               bool        `json:"personal"`
-	OwnerKey               pgtype.UUID `json:"owner_key"`
 	ConnectedByID          pgtype.UUID `json:"connected_by_id"`
 }
 
@@ -562,9 +558,6 @@ func (q *Queries) UpsertVCSConnection(ctx context.Context, arg UpsertVCSConnecti
 		arg.AccountLogin,
 		arg.AccessTokenEncrypted,
 		arg.WebhookSecretEncrypted,
-		arg.Covers,
-		arg.Personal,
-		arg.OwnerKey,
 		arg.ConnectedByID,
 	)
 	var i VcsConnection

@@ -222,49 +222,7 @@ func (p forgejoProvider) ValidateToken(ctx context.Context, instanceURL, token s
 	if login == "" {
 		return Account{}, errors.New("forgejo: user response missing login")
 	}
-	return Account{Login: login, Covers: forgejoCovers(ctx, instanceURL, token, login)}, nil
-}
-
-// forgejoCovers lists the user and their orgs. A failed org list still covers
-// the user. A full page of 100 is the whole instance, so a truncated org list
-// is not stored as a partial cover set.
-func forgejoCovers(ctx context.Context, instanceURL, token, login string) []string {
-	endpoint := NormalizeInstanceURL(instanceURL) + "/api/v1/user/orgs?limit=100"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return []string{login}
-	}
-	req.Header.Set("Authorization", "token "+token)
-	req.Header.Set("Accept", "application/json")
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return []string{login}
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return []string{login}
-	}
-	var orgs []struct {
-		Login    string `json:"login"`
-		UserName string `json:"username"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&orgs); err != nil {
-		return []string{login}
-	}
-	if len(orgs) >= 100 {
-		return nil
-	}
-	covers := []string{login}
-	seen := map[string]bool{strings.ToLower(login): true}
-	for _, org := range orgs {
-		name := coalesce(org.Login, org.UserName)
-		if name == "" || seen[strings.ToLower(name)] {
-			continue
-		}
-		seen[strings.ToLower(name)] = true
-		covers = append(covers, name)
-	}
-	return covers
+	return Account{Login: login}, nil
 }
 
 // ── shared helpers ──────────────────────────────────────────────────────────

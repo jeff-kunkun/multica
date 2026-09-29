@@ -112,15 +112,11 @@ func AddCommand(host string) string {
 	return "multica connection add --from-gh"
 }
 
-// SettingsURL is the settings page opened on the connection tab. GitHub opens
-// the GitHub tab; a GitLab host opens the self-hosted Git tab.
+// SettingsURL opens the settings page on the connection tab.
 func SettingsURL(publicBase, slug, host string) string {
-	tab := "github"
-	if strings.Contains(strings.ToLower(host), "gitlab") {
-		tab = "vcs"
-	}
+	_ = host
 	base := strings.TrimRight(strings.TrimSpace(publicBase), "/")
-	path := "/" + strings.Trim(slug, "/") + "/settings?tab=" + tab
+	path := "/" + strings.Trim(slug, "/") + "/settings?tab=git-connections"
 	if base == "" {
 		return path
 	}

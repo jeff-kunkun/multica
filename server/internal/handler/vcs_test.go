@@ -120,8 +120,8 @@ func TestConnectVCSHonorsDeploymentSwitch(t *testing.T) {
 	if w := connect(); w.Code != http.StatusOK {
 		t.Fatalf("enabled ConnectVCS: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if got := validationCalls.Load(); got != 2 {
-		t.Fatalf("enabled ConnectVCS: expected user validation plus org lookup, got %d", got)
+	if got := validationCalls.Load(); got != 1 {
+		t.Fatalf("enabled ConnectVCS: expected one provider validation, got %d", got)
 	}
 	if got := countConnections(); got != 1 {
 		t.Fatalf("enabled ConnectVCS: expected one stored connection, got %d", got)

@@ -52,7 +52,7 @@ func (h *Handler) ReportDaemonPullRequests(w http.ResponseWriter, r *http.Reques
 	if !h.requireDaemonWorkspaceAccess(w, r, req.WorkspaceID) {
 		return
 	}
-	if err := h.persistReportedPullRequests(r.Context(), parseUUID(req.WorkspaceID), req.PullRequests, "", ""); err != nil {
+	if err := h.persistReportedPullRequests(r.Context(), parseUUID(req.WorkspaceID), req.PullRequests, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, "persist PR failed")
 		return
 	}
@@ -74,7 +74,7 @@ func (h *Handler) ReportIssuePullRequests(w http.ResponseWriter, r *http.Request
 		return
 	}
 	ident := issueIdentifier(h.getIssuePrefix(r.Context(), issue.WorkspaceID), issue.Number)
-	if err := h.persistReportedPullRequests(r.Context(), issue.WorkspaceID, req.PullRequests, ident, ""); err != nil {
+	if err := h.persistReportedPullRequests(r.Context(), issue.WorkspaceID, req.PullRequests, ident); err != nil {
 		writeError(w, http.StatusInternalServerError, "persist PR failed")
 		return
 	}
@@ -84,10 +84,7 @@ func (h *Handler) ReportIssuePullRequests(w http.ResponseWriter, r *http.Request
 // persistReportedPullRequests upserts the reported PRs (source=daemon) and
 // links each to the issues its title/branch names. onlyIdent, when set,
 // skips PRs that do not name that identifier at all.
-func (h *Handler) persistReportedPullRequests(ctx context.Context, ws pgtype.UUID, prs []DaemonPullRequest, onlyIdent, source string) error {
-	if source == "" {
-		source = "daemon"
-	}
+func (h *Handler) persistReportedPullRequests(ctx context.Context, ws pgtype.UUID, prs []DaemonPullRequest, onlyIdent string) error {
 	prefix := h.getIssuePrefix(ctx, ws)
 	for _, p := range prs {
 		if p.Owner == "" || p.Repo == "" || p.Number == 0 {
@@ -119,7 +116,7 @@ func (h *Handler) persistReportedPullRequests(ctx context.Context, ws pgtype.UUI
 			State: state, HtmlUrl: p.URL, Branch: pgtype.Text{String: p.Branch, Valid: p.Branch != ""}, HeadSha: p.SHA,
 			PrCreatedAt: now, PrUpdatedAt: now, MergedAt: timestamptzPtr(p.MergedAt),
 			MergeableState: reportedMergeable(p.MergeableState),
-			Source:         pgtype.Text{String: source, Valid: true},
+			Source:         pgtype.Text{String: "daemon", Valid: true},
 		})
 		if err != nil {
 			_ = tx.Rollback(ctx)

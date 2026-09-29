@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/gitconn"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/repoident"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -130,35 +133,32 @@ func (h *Handler) connectionRecipient(ctx context.Context, ws pgtype.UUID, repo 
 	return pgtype.UUID{}
 }
 
+// connectionCoversKey reports whether a stored token reaches this repository.
+// A row with a repo URL covers that repository. An empty repo URL is the
+// instance-wide GitLab/Forgejo connection and covers every repo on that host.
+func connectionCoversKey(conn db.VcsConnection, repoKey string) bool {
+	if strings.HasPrefix(conn.InstanceUrl, "cli://") {
+		return false
+	}
+	if conn.RepoUrl != "" {
+		return strings.EqualFold(conn.RepoUrl, repoKey)
+	}
+	host, _, _, ok := gitconn.Parts(repoKey)
+	return ok && connectionHost(conn.InstanceUrl) == host
+}
+
 func (h *Handler) clearCoveredNudges(ctx context.Context, conn db.VcsConnection) {
 	nudges, err := h.Queries.ListConnectionNudgesByWorkspace(ctx, conn.WorkspaceID)
 	if err != nil {
 		return
 	}
-	view := vcsConnView(conn)
 	for _, nudge := range nudges {
-		repo := gitconn.Repo{Key: nudge.RepoKey, Registrant: uuidToString(nudge.RecipientID)}
-		if !gitconn.Matches(view, repo) {
+		if !connectionCoversKey(conn, nudge.RepoKey) {
 			continue
 		}
 		_ = h.Queries.DeleteConnectionNudge(ctx, db.DeleteConnectionNudgeParams{
 			WorkspaceID: conn.WorkspaceID, RepoKey: nudge.RepoKey,
 		})
-	}
-}
-
-func vcsConnView(c db.VcsConnection) gitconn.Conn {
-	covers := c.Covers
-	if covers == nil {
-		covers = []string{}
-	}
-	owner := ""
-	if c.Personal && c.OwnerKey.Valid {
-		owner = uuidToString(c.OwnerKey)
-	}
-	return gitconn.Conn{
-		ID: uuidToString(c.ID), Provider: c.Provider, InstanceURL: c.InstanceUrl,
-		AccountLogin: c.AccountLogin, Covers: covers, Personal: c.Personal, OwnerID: owner,
 	}
 }
 
@@ -171,11 +171,35 @@ func (h *Handler) repoCovered(ctx context.Context, ws pgtype.UUID, repo gitconn.
 		return false
 	}
 	for _, row := range rows {
-		if gitconn.Matches(vcsConnView(row), repo) {
+		if connectionCoversKey(row, repo.Key) {
 			return true
 		}
 	}
 	return false
+}
+
+// agentTaskInitiator is the person who started the agent run calling this
+// request. ok is false when the caller is not an agent task, or the task has
+// no member initiator. It writes the error when w is non-nil and the caller
+// claimed to be an agent but the task cannot be used.
+func (h *Handler) agentTaskInitiator(r *http.Request, ws pgtype.UUID) (pgtype.UUID, bool) {
+	member, ok := middleware.MemberFromContext(r.Context())
+	if !ok {
+		return pgtype.UUID{}, false
+	}
+	actorType, _ := h.resolveActor(r, uuidToString(member.UserID), uuidToString(ws))
+	if actorType != "agent" {
+		return pgtype.UUID{}, false
+	}
+	taskID, err := util.ParseUUID(r.Header.Get("X-Task-ID"))
+	if err != nil {
+		return pgtype.UUID{}, false
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskID)
+	if err != nil || !task.InitiatorUserID.Valid {
+		return pgtype.UUID{}, false
+	}
+	return task.InitiatorUserID, true
 }
 
 func (h *Handler) appCoversRepo(ctx context.Context, ws pgtype.UUID, repoKey string) bool {

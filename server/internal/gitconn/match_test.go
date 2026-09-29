@@ -31,8 +31,8 @@ func TestEmptyCoversMatchTheWholeInstance(t *testing.T) {
 }
 
 func TestAskMessageCarriesLinkAndCommand(t *testing.T) {
-	got := AskMessage("github.com/acme/app", "https://multica.example/acme/settings?tab=github", AddCommand("github.com"))
-	for _, want := range []string{"github.com/acme/app", "https://multica.example/acme/settings?tab=github", "multica connection add --from-gh"} {
+	got := AskMessage("github.com/acme/app", SettingsURL("https://multica.example", "acme", "github.com"), AddCommand("github.com"))
+	for _, want := range []string{"github.com/acme/app", "https://multica.example/acme/settings?tab=git-connections", "multica connection add --from-gh"} {
 		if !stringsContains(got, want) {
 			t.Fatalf("message %q missing %q", got, want)
 		}

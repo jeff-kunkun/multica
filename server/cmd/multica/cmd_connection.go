@@ -6,13 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/cli"
-	"github.com/multica-ai/multica/server/internal/integrations/vcs"
 	"github.com/spf13/cobra"
 )
 
@@ -26,12 +24,12 @@ var connectionAddCmd = &cobra.Command{
 It is never accepted as a command-line flag.
 
   multica connection add --from-gh --yes
-  multica connection add --provider gitlab --token-file ./token.txt
+  multica connection add --provider gitlab --token-file ./token.txt --repo https://gitlab.example/group/app
 
---from-gh and --from-glab register a personal connection for the current member.
-An agent may pass --yes; the server then binds the connection to the task initiator
-and it only covers repositories that person registered. --workspace registers an
-admin-owned connection for the whole instance account instead.`,
+--from-gh and --from-glab register the login on repositories this person added.
+An agent may pass --yes; the server then only writes repositories the task
+initiator registered. Without --repo, a GitLab or Forgejo token is saved as an
+admin-owned connection for the whole instance.`,
 	Args: cobra.NoArgs,
 	RunE: runConnectionAdd,
 }
@@ -40,37 +38,9 @@ var connectionRemoveCmd = &cobra.Command{Use: "remove <connection-id>", Args: ex
 var connectionRepoStatusCmd = &cobra.Command{Use: "status", Args: cobra.NoArgs, RunE: runConnectionRepoStatus}
 
 // connectionTokenCommand runs a local credential helper. Tests replace it.
-// The arguments are exactly `auth token`; the secret stays on stdout.
+// The arguments never include the secret; it stays on stdout.
 var connectionTokenCommand = func(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).Output()
-}
-
-// discoverConnectionScope asks the provider which accounts the token covers.
-// Tests replace it so the suite never calls the network.
-var discoverConnectionScope = func(ctx context.Context, provider, instance, token string) ([]string, error) {
-	p, ok := vcs.For(provider)
-	if !ok {
-		return nil, fmt.Errorf("unsupported provider")
-	}
-	account, err := p.ValidateToken(ctx, instance, token)
-	if err != nil {
-		return nil, err
-	}
-	host := instanceHost(instance)
-	if len(account.Covers) == 0 {
-		return []string{host + "/*"}, nil
-	}
-	lines := make([]string, 0, len(account.Covers))
-	for _, cover := range account.Covers {
-		if cover == "" {
-			continue
-		}
-		lines = append(lines, host+"/"+cover)
-	}
-	if len(lines) == 0 {
-		return []string{host + "/*"}, nil
-	}
-	return lines, nil
 }
 
 func init() {
@@ -79,11 +49,12 @@ func init() {
 	}
 	connectionAddCmd.Flags().String("provider", "", "Provider: github or gitlab")
 	connectionAddCmd.Flags().String("instance-url", "", "Provider instance URL (default is the public host)")
+	connectionAddCmd.Flags().String("repo", "", "Repository URL. Required for a GitHub token that is not --from-gh")
 	connectionAddCmd.Flags().String("token-file", "", "Read the token from a file, or '-' for stdin. Never pass the token as a flag")
-	connectionAddCmd.Flags().Bool("from-gh", false, "Read the token from `gh auth token` and register a personal GitHub connection")
-	connectionAddCmd.Flags().Bool("from-glab", false, "Read the token from `glab auth token` and register a personal GitLab connection")
-	connectionAddCmd.Flags().Bool("yes", false, "Skip the confirmation prompt. For an agent this binds the task initiator's personal connection")
-	connectionAddCmd.Flags().Bool("workspace", false, "Register a workspace connection (admin) instead of a personal one")
+	connectionAddCmd.Flags().Bool("from-gh", false, "Read the token from `gh auth token` and register it on your GitHub repositories")
+	connectionAddCmd.Flags().Bool("from-glab", false, "Read the token from `glab auth token` and register it on your GitLab repositories")
+	connectionAddCmd.Flags().Bool("yes", false, "Skip the confirmation prompt. For an agent this only covers the task initiator's repositories")
+	connectionAddCmd.Flags().Bool("workspace", false, "Register an admin-owned connection for the whole instance instead of one repository")
 	connectionCmd.AddCommand(connectionListCmd, connectionAddCmd, connectionTestCmd, connectionRemoveCmd, connectionRepoCmd)
 	connectionRepoCmd.AddCommand(connectionRepoStatusCmd)
 	rootCmd.AddCommand(connectionCmd)
@@ -128,17 +99,9 @@ func runConnectionList(cmd *cobra.Command, _ []string) error {
 	}
 	for _, raw := range rows {
 		row, _ := raw.(map[string]any)
-		personal := ""
-		if row["personal"] == true {
-			personal = " personal"
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %s%s\n", row["provider"], row["account_login"], row["instance_url"], personal)
-		if covers, ok := row["covers"].([]any); ok && len(covers) > 0 {
-			parts := make([]string, 0, len(covers))
-			for _, cover := range covers {
-				parts = append(parts, fmt.Sprint(cover))
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "  covers: %s\n", strings.Join(parts, ", "))
+		fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %s\n", row["provider"], row["account_login"], row["instance_url"])
+		if repo := strings.TrimSpace(fmt.Sprint(row["repo_url"])); repo != "" && repo != "<nil>" {
+			fmt.Fprintf(cmd.OutOrStdout(), "  covers: %s\n", repo)
 		} else {
 			fmt.Fprintln(cmd.OutOrStdout(), "  covers: whole instance")
 		}
@@ -219,6 +182,14 @@ func confirmConnection(cmd *cobra.Command, scope []string, personal bool) error 
 	return nil
 }
 
+type connectionRepoCard struct {
+	URL           string
+	Provider      string
+	Mode          string
+	CanConfigure  bool
+	AgentEligible bool
+}
+
 func runConnectionAdd(cmd *cobra.Command, _ []string) error {
 	c, ws, err := connectionClient(cmd)
 	if err != nil {
@@ -238,42 +209,62 @@ func runConnectionAdd(cmd *cobra.Command, _ []string) error {
 	if provider == "" {
 		return fmt.Errorf("--provider is required")
 	}
-	token, err := readConnectionToken(cmd)
-	if err != nil {
-		return err
-	}
-	instance, _ := cmd.Flags().GetString("instance-url")
-	if instance == "" {
-		if provider == "gitlab" || glab {
-			instance = "https://gitlab.com"
-		} else {
-			instance = "https://github.com"
-		}
-	}
 	workspaceWide, _ := cmd.Flags().GetBool("workspace")
+	repoFlag, _ := cmd.Flags().GetString("repo")
 	agentYes := false
 	if yes, _ := cmd.Flags().GetBool("yes"); yes && strings.TrimSpace(os.Getenv("MULTICA_AGENT_ID")) != "" {
 		agentYes = true
 	}
 	if agentYes && workspaceWide {
-		return redactToken(fmt.Errorf("--workspace cannot be combined with an agent --yes"), token)
+		return fmt.Errorf("--workspace cannot be combined with an agent --yes")
 	}
+	personal := !workspaceWide && (gh || glab || repoFlag != "")
+	if provider == "github" && !personal {
+		return fmt.Errorf("a GitHub token is saved per repository; pass --from-gh or --repo")
+	}
+
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
-	scope, err := discoverConnectionScope(ctx, provider, instance, token)
-	if err != nil {
-		return redactToken(fmt.Errorf("could not read which accounts this login covers: %w", err), token)
+	var targets []connectionRepoCard
+	if personal {
+		targets, err = connectionRepoTargets(ctx, c, ws, provider, repoFlag, agentYes)
+		if err != nil {
+			return err
+		}
+		if len(targets) == 0 {
+			return fmt.Errorf("没有可以接上的仓库")
+		}
 	}
-	personal := !workspaceWide
+
+	token, err := readConnectionToken(cmd)
+	if err != nil {
+		return err
+	}
+	scope := make([]string, 0, len(targets))
+	for _, target := range targets {
+		scope = append(scope, target.URL)
+	}
+	instance, _ := cmd.Flags().GetString("instance-url")
+	if !personal {
+		if instance == "" {
+			if provider == "gitlab" {
+				instance = "https://gitlab.com"
+			} else {
+				return fmt.Errorf("--instance-url is required")
+			}
+		}
+		scope = []string{instance + " 整个实例"}
+	}
 	if err = confirmConnection(cmd, scope, personal); err != nil {
 		return err
+	}
+	if personal {
+		return postRepoConnections(cmd, ctx, c, ws, provider, instance, token, targets, agentYes)
 	}
 	body := map[string]any{
 		"provider":     provider,
 		"instance_url": instance,
 		"access_token": token,
-		"personal":     personal,
-		"agent_yes":    agentYes,
 	}
 	var out map[string]any
 	if err = c.PostJSON(ctx, "/api/workspaces/"+ws+"/vcs/connections", body, &out); err != nil {
@@ -284,6 +275,72 @@ func runConnectionAdd(cmd *cobra.Command, _ []string) error {
 		return cli.PrintJSON(cmd.OutOrStdout(), out)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "connected %s (%s)\n", out["account_login"], out["id"])
+	return nil
+}
+
+func connectionRepoTargets(ctx context.Context, c *cli.APIClient, ws, provider, repoFlag string, agentYes bool) ([]connectionRepoCard, error) {
+	var out map[string]any
+	if err := c.GetJSON(ctx, "/api/workspaces/"+ws+"/repos/connections", &out); err != nil {
+		return nil, fmt.Errorf("list repositories: %w", err)
+	}
+	rows, _ := out["repos"].([]any)
+	want := strings.TrimSpace(strings.TrimRight(repoFlag, "/"))
+	var targets []connectionRepoCard
+	for _, raw := range rows {
+		row, _ := raw.(map[string]any)
+		card := connectionRepoCard{
+			URL:           fmt.Sprint(row["url"]),
+			Provider:      fmt.Sprint(row["provider"]),
+			Mode:          fmt.Sprint(row["mode"]),
+			CanConfigure:  row["can_configure"] == true,
+			AgentEligible: row["agent_eligible"] == true,
+		}
+		if card.Provider != provider && card.Provider != "" && provider != "" {
+			if !(provider == "github" && strings.Contains(card.URL, "github.com")) && !(provider == "gitlab" && strings.Contains(card.URL, "gitlab")) {
+				continue
+			}
+		}
+		if want != "" && !strings.EqualFold(strings.TrimRight(card.URL, "/"), want) && !strings.Contains(card.URL, want) {
+			continue
+		}
+		if want == "" && (card.Mode == "token" || card.Mode == "app") {
+			continue
+		}
+		if agentYes {
+			if !card.AgentEligible {
+				continue
+			}
+		} else if !card.CanConfigure {
+			continue
+		}
+		targets = append(targets, card)
+	}
+	return targets, nil
+}
+
+func postRepoConnections(cmd *cobra.Command, ctx context.Context, c *cli.APIClient, ws, provider, instance, token string, targets []connectionRepoCard, agentYes bool) error {
+	saved := make([]any, 0, len(targets))
+	for _, target := range targets {
+		body := map[string]any{
+			"repo_url":     target.URL,
+			"provider":     provider,
+			"access_token": token,
+			"agent_yes":    agentYes,
+		}
+		if instance != "" {
+			body["instance_url"] = instance
+		}
+		var out map[string]any
+		if err := c.PostJSON(ctx, "/api/workspaces/"+ws+"/repos/connections", body, &out); err != nil {
+			return redactToken(fmt.Errorf("add connection: %w", err), token)
+		}
+		redactConnectionPayload(out)
+		saved = append(saved, out)
+	}
+	if connectionWantsJSON(cmd) {
+		return cli.PrintJSON(cmd.OutOrStdout(), map[string]any{"repos": saved})
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "connected %d repositories\n", len(saved))
 	return nil
 }
 
@@ -335,7 +392,7 @@ func runConnectionRepoStatus(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 	var out map[string]any
-	if err = c.GetJSON(ctx, "/api/workspaces/"+ws+"/vcs/connections/repo-status", &out); err != nil {
+	if err = c.GetJSON(ctx, "/api/workspaces/"+ws+"/repos/connections", &out); err != nil {
 		return fmt.Errorf("repo status: %w", err)
 	}
 	if connectionWantsJSON(cmd) {
@@ -348,17 +405,9 @@ func runConnectionRepoStatus(cmd *cobra.Command, _ []string) error {
 	}
 	for _, raw := range rows {
 		row, _ := raw.(map[string]any)
-		fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %s  %s\n", row["repo_key"], row["status"], row["matched_by"], row["account_login"])
+		fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %s  %s\n", row["url"], row["mode"], row["account_login"], row["connection_id"])
 	}
 	return nil
-}
-
-func instanceHost(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Hostname() == "" {
-		return strings.TrimPrefix(strings.TrimPrefix(raw, "https://"), "http://")
-	}
-	return u.Hostname()
 }
 
 func redactToken(err error, token string) error {

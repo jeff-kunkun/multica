@@ -21,11 +21,7 @@ A workspace owner or admin can complete the connection:
 4. In GitHub, pick the account or organization and authorize all repositories or a chosen subset.
 5. Return to Multica after the installation completes.
 
-The connection status shows on the same page. Regular members can view the status and which owners or admins to ask, but can't connect, disconnect, or change the switches.
-
-A workspace can connect several GitHub accounts or organizations. Each one is a separate installation with its own **Disconnect** button, and once one is connected the button reads **Connect another account**. When the repositories live under someone else's GitHub account, send them the install link that opens and let them finish the install on their own GitHub account.
-
-With `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` configured, owners and admins also get a **Repository coverage** section listing two kinds of mismatch. The first is repositories registered under **Repositories** that no connected installation covers, whose PRs will not link to issues. The second is repositories an installation covers that are not registered.
+The connection status shows on the same page. Regular members can view the status but can't connect, disconnect, or change the switches.
 
 <Callout type="info">
 The **GitHub connection** decides which repositories Multica receives PR events from; the **code repositories** setting decides which repositories agents can pick when starting runs. They serve different purposes and are configured separately.

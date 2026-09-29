@@ -162,15 +162,8 @@ func (h *Handler) refuseReviewWithoutDelivery(ctx context.Context, issue db.Issu
 			return ""
 		}
 	}
-	if h.ensureTokenDelivery(ctx, issue) {
-		return "这个仓库的连接没有权限，平台已经叫仓库登记人来接上。不要自己设等待条件。"
-	}
-	if again, againErr := h.Queries.ListPullRequestsByIssue(ctx, issue.ID); againErr == nil {
-		for _, pr := range again {
-			if reviewDeliveryStates[strings.ToLower(pr.State)] {
-				return ""
-			}
-		}
+	if view.Denied {
+		return "没权限：保存的令牌读不了这个仓库。平台已经叫仓库登记人来接上。本机有发起人的登录时先跑 `multica connection add --from-gh --yes`；试不了就不要自己设等待条件。"
 	}
 	key := issueIdentifier(h.getIssuePrefix(ctx, issue.WorkspaceID), issue.Number)
 	return fmt.Sprintf("进不了待验收：%s 没有关联的 PR，验收人没有东西可看。没有 GitHub App 时，请用票号重跑 `multica issue close %s`，并检查 PR 标题或分支里包含 %s；纯文档或调研类没有代码交付的票，用 `--no-code <原因>` 说明。也可以 `multica issue close %s --pr <链接>`。", key, key, key, key)
@@ -310,23 +303,18 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 			tr.note = "执行人声明这张票没有平台可见的 PR：" + reason + "。"
 			return tr
 		}
-		if h.ensureTokenDelivery(ctx, issue) {
-			tr.refuse = "这个仓库的连接没有权限，平台已经叫仓库登记人来接上。不要自己设等待条件。"
+		if view.Denied {
+			tr.refuse = "没权限：保存的令牌读不了这个仓库。平台已经叫仓库登记人来接上。本机有发起人的登录时先跑 `multica connection add --from-gh --yes`；试不了就不要自己设等待条件。"
 			return tr
 		}
-		if again, againErr := h.Queries.ListPullRequestsByIssue(ctx, issue.ID); againErr == nil {
-			prs = again
-		}
-		if len(prs) == 0 {
-			// No PR yet is something the closing agent can fix in this run.
-			// Parking it as blocked waited on an event nobody produces (DENE-899).
-			if deliveryBranchCount > 0 {
-				tr.refuse = "这张票有交付分支，但平台查不到它的 PR。先用 `gh pr create` 开 PR（标题带票号，打向主线），再重跑这条 close；close 会用本机 gh 把 PR 报给平台。代码不在 GitHub（比如内网 GitLab MR）就用 `--no-code <MR 链接和合入状态>` 说明。"
-				return tr
-			}
-			tr.refuse = "这张票没有 PR 或交付分支，执行人关单必须带 `--no-code <原因>`。"
+		// No PR yet is something the closing agent can fix in this run.
+		// Parking it as blocked waited on an event nobody produces (DENE-899).
+		if deliveryBranchCount > 0 {
+			tr.refuse = "这张票有交付分支，但平台查不到它的 PR。先用 `gh pr create` 开 PR（标题带票号，打向主线），再重跑这条 close；close 会用本机 gh 把 PR 报给平台。代码不在 GitHub（比如内网 GitLab MR）就用 `--no-code <MR 链接和合入状态>` 说明。"
 			return tr
 		}
+		tr.refuse = "这张票没有 PR 或交付分支，执行人关单必须带 `--no-code <原因>`。"
+		return tr
 	}
 	if actorType == "agent" && strings.TrimSpace(noCodeReason) != "" {
 		tr.refuse = "这张票已经关联了 PR，不能用 `--no-code` 跳过合入门禁。"
