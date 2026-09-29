@@ -131,6 +131,43 @@ describe("readCloseProtocol", () => {
     );
   });
 
+  it("reads a knowledge audit without counting it among the eight keys", () => {
+    const view = readCloseProtocol(
+      {
+        ...DENE_231_METADATA,
+        "close.knowledge_audit": JSON.stringify({ none: true }),
+      },
+      "done",
+    );
+    expect(view.complete).toBe(true);
+    expect(view.missingKeys).toEqual([]);
+    expect(view.knowledgeAudit).toEqual({ none: true });
+
+    const changed = readCloseProtocol(
+      {
+        ...DENE_231_METADATA,
+        "close.knowledge_audit": JSON.stringify({
+          changes: [{ location: "agents", summary: "补了开张种子" }],
+        }),
+      },
+      "done",
+    );
+    expect(changed.knowledgeAudit).toEqual({
+      none: false,
+      changes: [{ location: "agents", summary: "补了开张种子" }],
+    });
+  });
+
+  it("leaves the audit empty when the key is missing or unreadable", () => {
+    expect(readCloseProtocol(DENE_231_METADATA, "done").knowledgeAudit).toBeNull();
+    const bad = readCloseProtocol(
+      { ...DENE_231_METADATA, "close.knowledge_audit": "not-json" },
+      "done",
+    );
+    expect(bad.complete).toBe(true);
+    expect(bad.knowledgeAudit).toBeNull();
+  });
+
   it("treats a missing metadata object like an empty bag", () => {
     const view = readCloseProtocol(undefined, "in_progress");
     expect(view.complete).toBe(false);

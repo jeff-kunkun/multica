@@ -137,7 +137,9 @@
     "next_owner": "다음: {{name}}",
     "next_owner_none": "다음: 없음",
     "waiting_on": "{{id}} 대기",
-    "last_activity_missing": "활동 시각 없음"
+    "last_activity_missing": "활동 시각 없음",
+    "knowledge_none": "해당하는 지식 없음",
+    "knowledge_change": "지식: {{locations}}"
   },
   "blocker_summary": {
     "title": "차단됨 · 근본 원인 {{count}}개",
@@ -819,6 +821,7 @@
     "remove_parent_issue": "상위 태스크 제거",
     "remove_parent_issue_success": "상위 태스크를 제거했습니다",
     "add_sub_issue": "하위 태스크 추가...",
+    "close_issue": "마감",
     "delete_issue": "태스크 삭제",
     "pin_to_sidebar": "사이드바에 고정",
     "unpin_from_sidebar": "사이드바 고정 해제"

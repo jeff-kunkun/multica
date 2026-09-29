@@ -22,6 +22,8 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/closeprotocol"
+	"github.com/multica-ai/multica/server/internal/projectmemory"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -238,7 +240,13 @@ var issueStatusCmd = &cobra.Command{
 var issueCloseCmd = &cobra.Command{
 	Use:   "close <id>",
 	Short: "Close out an issue in one call: evidence comment, status, close record",
-	Long: "One command for the close protocol. The server posts the evidence comment,\n" +
+	Long:  issueCloseLong(),
+	Args:  exactArgs(1),
+	RunE:  runIssueClose,
+}
+
+func issueCloseLong() string {
+	return "One command for the close protocol. The server posts the evidence comment,\n" +
 		"writes the status and the close.* record in one transaction, and validates\n" +
 		"the record first — a close that is missing something is refused with the\n" +
 		"missing item named, and nothing is written.\n\n" +
@@ -257,9 +265,11 @@ var issueCloseCmd = &cobra.Command{
 		"pull or merge request with the close; an unverifiable link still closes and is\n" +
 		"marked 未核实. The response says what\n" +
 		"was actually written: the status, whether a PR merged, and who gets woken.\n" +
-		"The old path (`issue status` + `comment add`) keeps working.",
-	Args: exactArgs(1),
-	RunE: runIssueClose,
+		"The old path (`issue status` + `comment add`) keeps working.\n\n" +
+		"Every close records a knowledge audit in that same transaction, including a\n" +
+		"ticket with no pull request. --knowledge-none declares that nothing qualified\n" +
+		"for project memory. Repeat --knowledge <key>=<summary> for each checklist slot\n" +
+		"this close wrote. Keys: " + strings.Join(projectmemory.LocationKeys(), ", ") + "."
 }
 
 var issueHandoffCmd = &cobra.Command{
@@ -1916,6 +1926,8 @@ func registerIssueCloseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent's --outcome in_review without a linked open/merged PR is refused unless this is given")
 	cmd.Flags().String("verdict", "", "Acceptance verdict, reviewer only: pass (merges and closes)")
 	cmd.Flags().String("pr", "", "Pull or merge request URL to register with this close. A verified link is stored; an unverifiable link still closes and is marked 未核实")
+	cmd.Flags().Bool("knowledge-none", false, "Declare this close wrote no qualified project memory")
+	cmd.Flags().StringArray("knowledge", nil, "Project-memory change as <key>=<summary>; repeat for each checklist location")
 	cmd.Flags().String("output", "json", "Output format: table or json")
 }
 
@@ -1952,6 +1964,10 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 	if verdict != "" && verdict != "pass" {
 		return fmt.Errorf("--verdict only accepts pass; a failed acceptance is not a close — post it with `multica issue comment add <id> --verdict hold --content-file <path>`")
 	}
+	audit, err := knowledgeAuditFromFlags(cmd)
+	if err != nil {
+		return err
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1965,7 +1981,7 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 
-	body := map[string]any{"outcome": outcome, "evidence": evidence}
+	body := map[string]any{"outcome": outcome, "evidence": evidence, "knowledge_audit": audit}
 	for _, pair := range []struct{ flag, key string }{
 		{"summary", "summary"},
 		{"parent", "parent_id"},
@@ -2014,6 +2030,30 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// knowledgeAuditFromFlags builds the close body's knowledge_audit. The
+// sentences are the server's, so a local refusal and a 400 say the same thing.
+func knowledgeAuditFromFlags(cmd *cobra.Command) (closeprotocol.KnowledgeAudit, error) {
+	none, _ := cmd.Flags().GetBool("knowledge-none")
+	items, _ := cmd.Flags().GetStringArray("knowledge")
+	audit := closeprotocol.KnowledgeAudit{None: none}
+	for _, item := range items {
+		location, summary, ok := strings.Cut(item, "=")
+		if !ok {
+			location = item
+			summary = ""
+		}
+		audit.Changes = append(audit.Changes, closeprotocol.KnowledgeChange{
+			Location: location,
+			Summary:  summary,
+		})
+	}
+	parsed, _, err := closeprotocol.CanonicalKnowledgeAudit(audit)
+	if err != nil {
+		return closeprotocol.KnowledgeAudit{}, err
+	}
+	return parsed, nil
 }
 
 // ---------------------------------------------------------------------------
