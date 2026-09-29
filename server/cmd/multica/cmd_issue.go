@@ -1905,6 +1905,7 @@ func registerIssueCloseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("needs-human", "", "Member UUID whose decision or acceptance the issue waits on")
 	cmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent's --outcome in_review without a linked open/merged PR is refused unless this is given")
 	cmd.Flags().String("verdict", "", "Acceptance verdict, reviewer only: pass (merges and closes)")
+	cmd.Flags().String("pr", "", "PR or MR URL to verify and use as close evidence")
 	cmd.Flags().String("output", "json", "Output format: table or json")
 }
 
@@ -1928,6 +1929,11 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 	evidence, hasEvidence, err := resolveTextFlag(cmd, "evidence")
 	if err != nil {
 		return err
+	}
+	prURL, _ := cmd.Flags().GetString("pr")
+	if !hasEvidence && strings.TrimSpace(prURL) != "" {
+		evidence = strings.TrimSpace(prURL)
+		hasEvidence = true
 	}
 	if !hasEvidence || strings.TrimSpace(evidence) == "" {
 		return fmt.Errorf("--evidence, --evidence-stdin, or --evidence-file is required: a close needs the PR link or test conclusion it rests on")
@@ -1955,6 +1961,9 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"outcome": outcome, "evidence": evidence}
+	if strings.TrimSpace(prURL) != "" {
+		body["pr_url"] = strings.TrimSpace(prURL)
+	}
 	for _, pair := range []struct{ flag, key string }{
 		{"summary", "summary"},
 		{"parent", "parent_id"},

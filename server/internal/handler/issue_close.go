@@ -49,6 +49,7 @@ type CloseIssueRequest struct {
 	// unless the ticket says why it carries no code (docs, research).
 	NoCodeReason string `json:"no_code_reason,omitempty"`
 	Verdict      string `json:"verdict,omitempty"`
+	PRURL        string `json:"pr_url,omitempty"`
 }
 
 // CloseIssueResponse reports what actually happened, not what was asked for:
@@ -110,6 +111,9 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	evidence := strings.TrimSpace(sanitizeNullBytes(req.Evidence))
+	if evidence == "" && strings.TrimSpace(req.PRURL) != "" {
+		evidence = strings.TrimSpace(req.PRURL)
+	}
 	if evidence == "" {
 		writeError(w, http.StatusBadRequest, "缺 --evidence：收口必须留证据（PR 链接、测试结论、或说明为什么"+outcome+"），一句话也行")
 		return
