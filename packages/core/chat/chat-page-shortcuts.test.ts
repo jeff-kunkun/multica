@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { chatPageShortcutAction, newChatShortcut, projectSwitchShortcut } from "./chat-page-shortcuts";
-import { createShortcutChord } from "../shortcuts";
+import { afterEach, describe, expect, it } from "vitest";
+import { chatPageShortcutAction } from "./chat-page-shortcuts";
+import { createShortcutChord, configureShortcutRuntime, useShortcutStore } from "../shortcuts";
 
 function keyEvent(
   key: string,
@@ -18,54 +18,72 @@ function keyEvent(
 
 const open = { inForeignEditable: false, inPortal: false };
 
-describe("newChatShortcut", () => {
-  it("uses Mod+N on desktop and Mod+Alt+N on the web", () => {
-    expect(newChatShortcut("desktop")).toEqual(createShortcutChord("N", { primary: true }));
-    expect(newChatShortcut("web")).toEqual(
-      createShortcutChord("N", { primary: true, alt: true }),
-    );
-  });
+afterEach(() => {
+  useShortcutStore.getState().resetAll();
+  configureShortcutRuntime(null);
 });
 
 describe("chatPageShortcutAction", () => {
-  it("starts a chat on desktop Mod+N and ignores the browser's Mod+N", () => {
+  it("starts a chat on the runtime default and ignores the other runtime's chord", () => {
+    configureShortcutRuntime("desktop");
     const macN = keyEvent("n", { metaKey: true });
-    expect(chatPageShortcutAction(macN, "desktop", open, "macos")).toBe("new-chat");
-    expect(chatPageShortcutAction(macN, "web", open, "macos")).toBeNull();
-
+    expect(chatPageShortcutAction(macN, open, "macos")).toBe("new-chat");
     const winN = keyEvent("n", { ctrlKey: true });
-    expect(chatPageShortcutAction(winN, "desktop", open, "windows")).toBe("new-chat");
-    expect(chatPageShortcutAction(winN, "web", open, "windows")).toBeNull();
+    expect(chatPageShortcutAction(winN, open, "windows")).toBe("new-chat");
+
+    configureShortcutRuntime("web");
+    expect(chatPageShortcutAction(macN, open, "macos")).toBeNull();
+    expect(chatPageShortcutAction(winN, open, "windows")).toBeNull();
+    const macE = keyEvent("e", { metaKey: true, shiftKey: true });
+    const winE = keyEvent("e", { ctrlKey: true, shiftKey: true });
+    expect(chatPageShortcutAction(macE, open, "macos")).toBe("new-chat");
+    expect(chatPageShortcutAction(winE, open, "windows")).toBe("new-chat");
   });
 
-  it("uses Mod+Alt+N on the web, and that chord does not fire on desktop", () => {
-    const mac = keyEvent("n", { metaKey: true, altKey: true });
-    expect(chatPageShortcutAction(mac, "web", open, "macos")).toBe("new-chat");
-    expect(chatPageShortcutAction(mac, "desktop", open, "macos")).toBeNull();
-
-    const win = keyEvent("n", { ctrlKey: true, altKey: true });
-    expect(chatPageShortcutAction(win, "web", open, "windows")).toBe("new-chat");
-    expect(chatPageShortcutAction(win, "desktop", open, "windows")).toBeNull();
-  });
-
-  it("opens the project switcher on Mod+Alt+P on either runtime", () => {
-    expect(projectSwitchShortcut()).toEqual(
-      createShortcutChord("P", { primary: true, alt: true }),
+  it("follows a saved binding instead of the runtime default", () => {
+    configureShortcutRuntime("web");
+    useShortcutStore.getState().setShortcut(
+      "newChat",
+      createShortcutChord("G", { primary: true }),
     );
-    const mac = keyEvent("p", { metaKey: true, altKey: true });
-    expect(chatPageShortcutAction(mac, "web", open, "macos")).toBe("switch-project");
-    expect(chatPageShortcutAction(mac, "desktop", open, "macos")).toBe("switch-project");
-    const win = keyEvent("p", { ctrlKey: true, altKey: true });
-    expect(chatPageShortcutAction(win, "web", open, "windows")).toBe("switch-project");
+    expect(chatPageShortcutAction(keyEvent("g", { metaKey: true }), open, "macos")).toBe("new-chat");
+    expect(
+      chatPageShortcutAction(keyEvent("e", { metaKey: true, shiftKey: true }), open, "macos"),
+    ).toBeNull();
+
+    useShortcutStore.getState().setShortcut("newChat", null);
+    expect(chatPageShortcutAction(keyEvent("g", { metaKey: true }), open, "macos")).toBeNull();
+  });
+
+  it("opens the project switcher on Mod+\\ unless the person rebound it", () => {
+    configureShortcutRuntime("desktop");
+    const mac = keyEvent("\\", { metaKey: true });
+    const win = keyEvent("\\", { ctrlKey: true });
+    expect(chatPageShortcutAction(mac, open, "macos")).toBe("switch-project");
+    expect(chatPageShortcutAction(win, open, "windows")).toBe("switch-project");
+    // The old hardcoded chord is no longer the binding.
+    expect(
+      chatPageShortcutAction(keyEvent("p", { metaKey: true, altKey: true }), open, "macos"),
+    ).toBeNull();
+
+    useShortcutStore.getState().setShortcut(
+      "switchChatProject",
+      createShortcutChord("G", { primary: true, shift: true }),
+    );
+    expect(
+      chatPageShortcutAction(keyEvent("g", { metaKey: true, shiftKey: true }), open, "macos"),
+    ).toBe("switch-project");
+    expect(chatPageShortcutAction(mac, open, "macos")).toBeNull();
   });
 
   it("stays quiet inside a popup or a text field that is not the composer", () => {
+    configureShortcutRuntime("desktop");
     const macN = keyEvent("n", { metaKey: true });
     expect(
-      chatPageShortcutAction(macN, "desktop", { inForeignEditable: true, inPortal: false }, "macos"),
+      chatPageShortcutAction(macN, { inForeignEditable: true, inPortal: false }, "macos"),
     ).toBeNull();
     expect(
-      chatPageShortcutAction(macN, "desktop", { inForeignEditable: false, inPortal: true }, "macos"),
+      chatPageShortcutAction(macN, { inForeignEditable: false, inPortal: true }, "macos"),
     ).toBeNull();
   });
 });

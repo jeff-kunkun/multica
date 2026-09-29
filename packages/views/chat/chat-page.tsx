@@ -26,14 +26,11 @@ import {
   sessionToLandOn,
 } from "@multica/core/chat/project-switch";
 import { useChatProjectOpenStore } from "@multica/core/chat/project-open-store";
+import { chatPageShortcutAction } from "@multica/core/chat/chat-page-shortcuts";
 import {
-  chatPageShortcutAction,
-  newChatShortcut,
-} from "@multica/core/chat/chat-page-shortcuts";
-import {
-  getShortcutRuntime,
   isEditableShortcutTarget,
   isPortalLayerShortcutTarget,
+  useShortcut,
 } from "@multica/core/shortcuts";
 import { isAgentRuntimeBound } from "@multica/core/agents";
 import { isImeComposing } from "@multica/core/utils";
@@ -387,7 +384,6 @@ export function ChatPage() {
       if (event.repeat || isImeComposing(event)) return;
       const action = chatPageShortcutAction(
         event,
-        getShortcutRuntime(),
         chatShortcutGates(event.target),
       );
       if (!action) return;
@@ -439,7 +435,7 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume when the URL param or the resolving agent list changes
   }, [urlAgent, c.availableAgents, c.agentsSettled]);
 
-  const newChatChord = newChatShortcut(getShortcutRuntime());
+  const newChatChord = useShortcut("newChat");
   const newChatButton = (
     <NewChatButton
       agents={c.availableAgents}

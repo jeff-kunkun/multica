@@ -11,7 +11,7 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
-import { projectSwitchShortcut } from "@multica/core/chat/chat-page-shortcuts";
+import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { chatSessionProjectIds } from "@multica/core/chat/project-context";
 import {
@@ -54,6 +54,7 @@ export function ChatProjectBar({
   onOpenSwitcher?: () => void;
 }) {
   const { t } = useT("chat");
+  const projectSwitchChord = useShortcut("switchChatProject");
   const pinnedIds = useChatProjectBarStore(selectPinnedProjectIds(userId));
   const pin = useChatProjectBarStore((s) => s.pin);
   const unpin = useChatProjectBarStore((s) => s.unpin);
@@ -240,7 +241,7 @@ export function ChatProjectBar({
           <TooltipContent side="bottom">
             <span className="inline-flex items-center gap-1.5">
               {t(($) => $.project_bar.switch)}
-              <ShortcutKeycaps shortcut={projectSwitchShortcut()} />
+              {projectSwitchChord ? <ShortcutKeycaps shortcut={projectSwitchChord} /> : null}
             </span>
           </TooltipContent>
         </Tooltip>

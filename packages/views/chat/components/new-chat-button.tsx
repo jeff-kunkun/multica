@@ -251,7 +251,7 @@ export function DirectNewChatButton({
   side = "bottom",
 }: {
   onClick: () => void;
-  shortcut: ShortcutChord;
+  shortcut: ShortcutChord | null;
   side?: "top" | "bottom";
 }) {
   const { t } = useT("chat");
