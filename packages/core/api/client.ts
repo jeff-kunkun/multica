@@ -1,6 +1,6 @@
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
-import type { ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
+import type { InboxBoardResponse, ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
 import { configStore } from "../config";
 import type {
@@ -3414,6 +3414,16 @@ export class ApiClient {
   // The board takes this as its snapshot before it marks everything read.
   async listUnreadInboxIssues(): Promise<UnreadInboxIssue[]> {
     return this.fetch("/api/inbox/unread-issues");
+  }
+
+  // The inbox lanes, built server-side (DENE-975). `unread_since` replays the
+  // unread markers of a visit that has since marked everything read.
+  async getInboxBoard(params: { tz?: string; unread_since?: string } = {}): Promise<InboxBoardResponse> {
+    const search = new URLSearchParams();
+    if (params.tz) search.set("tz", params.tz);
+    if (params.unread_since) search.set("unread_since", params.unread_since);
+    const query = search.toString();
+    return this.fetch(`/api/inbox/board${query ? `?${query}` : ""}`);
   }
 
   // Read one issue's inbox rows, except the ones an open call hangs on.

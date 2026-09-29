@@ -57,6 +57,7 @@ func init() {
 	skillCmd.GroupID = groupCore
 	squadCmd.GroupID = groupCore
 	chatCmd.GroupID = groupCore
+	inboxCmd.GroupID = groupCore
 	transferCmd.GroupID = groupAdditional
 	logsCmd.GroupID = groupCore
 
@@ -86,6 +87,7 @@ func init() {
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(chatCmd)
+	rootCmd.AddCommand(inboxCmd)
 	rootCmd.AddCommand(transferCmd)
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(daemonCmd)

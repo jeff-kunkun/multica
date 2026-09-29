@@ -1,16 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, History } from "lucide-react";
+import { ChevronDown, ChevronRight, History, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCreateComment } from "@multica/core/issues/mutations";
 import {
   splitSeenDone,
-  useBoardUnreadSnapshot,
   useDoneSeenStore,
   useInboxBoard,
   type BoardLane,
@@ -31,6 +29,7 @@ const LANE_TAG_CLASS: Record<BoardLane, string> = {
   waiting: "bg-destructive/10 text-destructive",
   stalled: "bg-warning/15 text-warning-foreground dark:text-warning",
   running: "bg-success/10 text-success",
+  todo: "bg-primary/10 text-primary",
   fresh: "bg-info/10 text-info",
   done: "bg-muted text-muted-foreground",
 };
@@ -39,6 +38,7 @@ const LANE_PILL_CLASS: Record<BoardLane, string> = {
   waiting: "border-destructive/30 text-destructive",
   stalled: "border-warning/40 text-warning-foreground dark:text-warning",
   running: "border-success/30 text-success",
+  todo: "border-primary/30 text-primary",
   fresh: "border-info/30 text-info",
   done: "text-muted-foreground",
 };
@@ -54,6 +54,7 @@ function useBoardCopy() {
       if (row.lane === "waiting") return tags[row.kind] ?? t(($) => $.board.tag.waiting_default);
       if (row.lane === "stalled") return tags[row.kind] ?? t(($) => $.board.stuck.default);
       if (row.lane === "fresh") return t(($) => $.board.tag.fresh);
+      if (row.lane === "todo") return t(($) => $.board.tag.todo);
       return row.lane === "running" ? t(($) => $.board.tag.running) : t(($) => $.board.tag.done);
     };
     const reason = (row: BoardRow): string => {
@@ -325,10 +326,9 @@ function LaneSection({
 export function HomePage() {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
-  const userId = useAuthStore((s) => s.user?.id ?? null);
   const copy = useBoardCopy();
-  const unread = useBoardUnreadSnapshot(wsId);
-  const { board, isLoading, isError } = useInboxBoard(wsId, userId, undefined, unread);
+  const { t: tChat } = useT("chat");
+  const { board, isLoading, isError } = useInboxBoard(wsId);
 
   // "Done today" shows once. Read the mark left by the previous visit, then
   // move it to now — on arrival and again on leaving, so rows that finish
@@ -346,10 +346,11 @@ export function HomePage() {
     waiting: board.waiting.length,
     stalled: board.stalled.length,
     running: board.running.length,
+    todo: board.todo.length,
     fresh: board.fresh.length,
     done: board.done.length,
   };
-  const lanes: BoardLane[] = ["waiting", "stalled", "running", "fresh", "done"];
+  const lanes: BoardLane[] = ["waiting", "stalled", "running", "todo", "fresh", "done"];
 
   const seenFooter =
     done.seen.length > 0 ? (
@@ -372,6 +373,22 @@ export function HomePage() {
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader>
         <h1 className="flex-1 text-body font-semibold">{copy.t(($) => $.board.title)}</h1>
+        {/* DENE-975: the chat agent reads this same board (`multica inbox board`) and tells it back. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground"
+          nativeButton={false}
+          render={
+            <AppLink
+              href={wsPaths.chatWithPrompt(tChat(($) => $.conversation_starters.inbox.prompt))}
+              data-testid="board-ask-ai"
+            />
+          }
+        >
+          <Sparkles className="size-4" />
+          {copy.t(($) => $.board.ask_ai)}
+        </Button>
         <Button
           variant="ghost"
           size="sm"
@@ -409,6 +426,7 @@ export function HomePage() {
               <LaneSection lane="waiting" rows={board.waiting} copy={copy} />
               <LaneSection lane="stalled" rows={board.stalled} copy={copy} />
               <LaneSection lane="running" rows={board.running} copy={copy} />
+              <LaneSection lane="todo" rows={board.todo} copy={copy} />
               {board.fresh.length > 0 && <LaneSection lane="fresh" rows={board.fresh} copy={copy} />}
               <LaneSection lane="done" rows={done.fresh} copy={copy} footer={seenFooter} />
             </>
