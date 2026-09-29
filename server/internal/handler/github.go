@@ -967,6 +967,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	view, _ := h.ensureIssueDeliveries(r.Context(), issue)
 	rows, err := h.Queries.ListPullRequestsByIssue(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
@@ -1002,7 +1003,11 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].PRCreatedAt > out[j].PRCreatedAt
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
+	payload := map[string]any{"pull_requests": out}
+	if view.Gap != nil {
+		payload["gap"] = view.Gap
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // broadcastPRSnapshotApplied is the ghsnapshot pipeline's onApplied callback:

@@ -49,6 +49,9 @@ type CloseIssueRequest struct {
 	// unless the ticket says why it carries no code (docs, research).
 	NoCodeReason string `json:"no_code_reason,omitempty"`
 	Verdict      string `json:"verdict,omitempty"`
+	// PRURL is `issue close --pr`. A verified link is registered; an
+	// unverifiable one still closes and is marked 未核实.
+	PRURL string `json:"pr_url,omitempty"`
 }
 
 // CloseIssueResponse reports what actually happened, not what was asked for:
@@ -132,6 +135,23 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	parentID, parentComment, ok := h.resolveCloseParent(w, r, issue, req.ParentID, actorType)
 	if !ok {
 		return
+	}
+
+	ctx = withDeliveryBag(ctx)
+	r = r.WithContext(ctx)
+	if pr := strings.TrimSpace(req.PRURL); pr != "" && (outcome == issuestatus.Done || outcome == issuestatus.InReview || verdict == "pass") {
+		declared, err := h.resolveDeclaredPull(ctx, issue, pr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "--pr 不是 PR 或 MR 链接："+err.Error())
+			return
+		}
+		if declared.Unverified && !strings.Contains(evidence, "未核实") {
+			evidence += "\n\n未核实：" + declared.URL
+			body = evidence
+			if summary != "" {
+				body = summary + "\n\n" + evidence
+			}
+		}
 	}
 
 	if verdict == "pass" {
@@ -354,6 +374,10 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	if resp.Summoned {
 		resp.Woken = append(resp.Woken, "已替你叫 --needs-human 的人：收件箱、关注、票上 @ 都已送到；他回复后平台叫醒执行智能体")
 	}
+	if d := declaredFrom(ctx); d.Unverified {
+		h.setIssueMetaString(ctx, updated, "close.pr_unverified", d.URL)
+		resp.Warnings = append(resp.Warnings, "申报的链接没能核实，已按未核实放行："+d.URL)
+	}
 
 	reloaded, err := h.Queries.GetIssue(ctx, issue.ID)
 	if err == nil {
@@ -440,6 +464,10 @@ func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, is
 	resp.StatusChanged = updated.Status != issue.Status
 	if !out.Released {
 		resp.Warnings = append(resp.Warnings, "这段 in_review 已经放行过一次（block.released=pass），本次 pass 只留了言，没有再合并或改状态")
+	}
+	if d := declaredFrom(ctx); d.Unverified {
+		h.setIssueMetaString(ctx, updated, "close.pr_unverified", d.URL)
+		resp.Warnings = append(resp.Warnings, "申报的链接没能核实，已按未核实放行："+d.URL)
 	}
 	rec := closeRecordAfterRelease(updated, parseIssueMetadata(updated.Metadata), uuidToString(comment.ID))
 	if rec != nil {
