@@ -115,6 +115,7 @@ import type {
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
+  ProjectMemoryStatus,
   ProjectMember,
   ResourceShare,
   CreateProjectRequest,
@@ -191,6 +192,14 @@ import type {
   ListVCSConnectionsResponse,
   ConnectVCSRequest,
   ConnectVCSResponse,
+  ListRepoLinksResponse,
+  CreateRepoLinkRequest,
+  CreateRepoLinkResponse,
+  TestRepoLinkResponse,
+  PinRepoBindingRequest,
+  RepoBinding,
+  TestRepoBindingRequest,
+  TestRepoBindingResponse,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
@@ -509,6 +518,16 @@ import {
   GitHubCoverageResponseSchema,
   EMPTY_GITHUB_COVERAGE_RESPONSE,
   ListGitHubRepositoriesResponseSchema,
+  ListRepoLinksResponseSchema,
+  CreateRepoLinkResponseSchema,
+  TestRepoLinkResponseSchema,
+  RepoBindingSchema,
+  TestRepoBindingResponseSchema,
+  EMPTY_LIST_REPO_LINKS_RESPONSE,
+  EMPTY_CREATE_REPO_LINK_RESPONSE,
+  EMPTY_TEST_REPO_LINK_RESPONSE,
+  EMPTY_REPO_BINDING,
+  EMPTY_TEST_REPO_BINDING_RESPONSE,
   EMPTY_GITHUB_CONNECT_RESPONSE,
   EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
@@ -4875,6 +4894,20 @@ export class ApiClient {
     return this.fetch(`/api/projects/${id}`);
   }
 
+  async getProjectMemory(id: string): Promise<ProjectMemoryStatus> {
+    return this.fetch(`/api/projects/${id}/memory/status`);
+  }
+
+  async checkProjectMemory(
+    id: string,
+    locations: unknown[],
+  ): Promise<ProjectMemoryStatus> {
+    return this.fetch(`/api/projects/${id}/memory/check`, {
+      method: "POST",
+      body: JSON.stringify({ locations }),
+    });
+  }
+
   async createProject(data: CreateProjectRequest): Promise<Project> {
     return this.fetch("/api/projects", {
       method: "POST",
@@ -5784,6 +5817,84 @@ export class ApiClient {
     return this.fetch(
       `/api/workspaces/${workspaceId}/vcs/connections/${connectionId}/rotate-webhook`,
       { method: "POST" },
+    );
+  }
+
+  // Repository connection catalog (GitHub App / token, GitLab, Forgejo, Gitea).
+  async listRepoLinks(workspaceId: string): Promise<ListRepoLinksResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/repo-links`);
+    return parseWithFallback(
+      raw,
+      ListRepoLinksResponseSchema,
+      EMPTY_LIST_REPO_LINKS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/repo-links" },
+    );
+  }
+
+  async createRepoLink(
+    workspaceId: string,
+    body: CreateRepoLinkRequest,
+  ): Promise<CreateRepoLinkResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/repo-links`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return parseWithFallback(
+      raw,
+      CreateRepoLinkResponseSchema,
+      EMPTY_CREATE_REPO_LINK_RESPONSE,
+      { endpoint: "POST /api/workspaces/:id/repo-links" },
+    );
+  }
+
+  async deleteRepoLink(workspaceId: string, linkId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/repo-links/${linkId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testRepoLink(
+    workspaceId: string,
+    linkId: string,
+  ): Promise<TestRepoLinkResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/repo-links/${linkId}/test`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      TestRepoLinkResponseSchema,
+      EMPTY_TEST_REPO_LINK_RESPONSE,
+      { endpoint: "POST /api/workspaces/:id/repo-links/:linkId/test" },
+    );
+  }
+
+  async pinRepoBinding(
+    workspaceId: string,
+    body: PinRepoBindingRequest,
+  ): Promise<RepoBinding> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/repo-bindings`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    return parseWithFallback(raw, RepoBindingSchema, EMPTY_REPO_BINDING, {
+      endpoint: "PUT /api/workspaces/:id/repo-bindings",
+    });
+  }
+
+  async testRepoBinding(
+    workspaceId: string,
+    body: TestRepoBindingRequest,
+  ): Promise<TestRepoBindingResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/repo-bindings/test`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    return parseWithFallback(
+      raw,
+      TestRepoBindingResponseSchema,
+      EMPTY_TEST_REPO_BINDING_RESPONSE,
+      { endpoint: "POST /api/workspaces/:id/repo-bindings/test" },
     );
   }
 

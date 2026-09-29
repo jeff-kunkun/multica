@@ -611,6 +611,17 @@ type ChatSession struct {
 	Visibility              string             `json:"visibility"`
 }
 
+type ChatSessionLinkReadAudit struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	ReaderWorkspaceID pgtype.UUID        `json:"reader_workspace_id"`
+	ReaderUserID      pgtype.UUID        `json:"reader_user_id"`
+	ReaderAgentID     pgtype.UUID        `json:"reader_agent_id"`
+	ReaderTaskID      pgtype.UUID        `json:"reader_task_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChatSessionProject struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -1413,6 +1424,18 @@ type ProjectMember struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ProjectMemoryStatus struct {
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	LocationKey  string             `json:"location_key"`
+	Path         string             `json:"path"`
+	ExistsOnDisk bool               `json:"exists_on_disk"`
+	IsDirectory  bool               `json:"is_directory"`
+	ModifiedAt   pgtype.Timestamptz `json:"modified_at"`
+	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
+	Error        pgtype.Text        `json:"error"`
+}
+
 type ProjectResource struct {
 	ID           pgtype.UUID        `json:"id"`
 	ProjectID    pgtype.UUID        `json:"project_id"`
@@ -1758,32 +1781,39 @@ type VcsConnection struct {
 	ConnectedByID          pgtype.UUID        `json:"connected_by_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	RepoUrl                string             `json:"repo_url"`
+	LastLookupAt           pgtype.Timestamptz `json:"last_lookup_at"`
+	LastLookupOk           pgtype.Bool        `json:"last_lookup_ok"`
+	LastLookupError        string             `json:"last_lookup_error"`
+	LastWebhookAt          pgtype.Timestamptz `json:"last_webhook_at"`
 }
 
 type VcsPullRequest struct {
-	ID              pgtype.UUID        `json:"id"`
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	ConnectionID    pgtype.UUID        `json:"connection_id"`
-	Provider        string             `json:"provider"`
-	RepoOwner       string             `json:"repo_owner"`
-	RepoName        string             `json:"repo_name"`
-	PrNumber        int32              `json:"pr_number"`
-	Title           string             `json:"title"`
-	State           string             `json:"state"`
-	HtmlUrl         string             `json:"html_url"`
-	Branch          pgtype.Text        `json:"branch"`
-	HeadSha         string             `json:"head_sha"`
-	AuthorLogin     pgtype.Text        `json:"author_login"`
-	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
-	MergedAt        pgtype.Timestamptz `json:"merged_at"`
-	ClosedAt        pgtype.Timestamptz `json:"closed_at"`
-	PrCreatedAt     pgtype.Timestamptz `json:"pr_created_at"`
-	PrUpdatedAt     pgtype.Timestamptz `json:"pr_updated_at"`
-	Additions       int32              `json:"additions"`
-	Deletions       int32              `json:"deletions"`
-	ChangedFiles    int32              `json:"changed_files"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ConnectionID      pgtype.UUID        `json:"connection_id"`
+	Provider          string             `json:"provider"`
+	RepoOwner         string             `json:"repo_owner"`
+	RepoName          string             `json:"repo_name"`
+	PrNumber          int32              `json:"pr_number"`
+	Title             string             `json:"title"`
+	State             string             `json:"state"`
+	HtmlUrl           string             `json:"html_url"`
+	Branch            pgtype.Text        `json:"branch"`
+	HeadSha           string             `json:"head_sha"`
+	AuthorLogin       pgtype.Text        `json:"author_login"`
+	AuthorAvatarUrl   pgtype.Text        `json:"author_avatar_url"`
+	MergedAt          pgtype.Timestamptz `json:"merged_at"`
+	ClosedAt          pgtype.Timestamptz `json:"closed_at"`
+	PrCreatedAt       pgtype.Timestamptz `json:"pr_created_at"`
+	PrUpdatedAt       pgtype.Timestamptz `json:"pr_updated_at"`
+	Additions         int32              `json:"additions"`
+	Deletions         int32              `json:"deletions"`
+	ChangedFiles      int32              `json:"changed_files"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	MergeableState    pgtype.Text        `json:"mergeable_state"`
+	ChecksRollupState pgtype.Text        `json:"checks_rollup_state"`
 }
 
 type VerificationCode struct {

@@ -467,10 +467,11 @@ func absoluteHostHomeDir(path string) string {
 }
 
 type daemonWorkspaceReposResponse struct {
-	WorkspaceID  string          `json:"workspace_id"`
-	Repos        []RepoData      `json:"repos"`
-	ReposVersion string          `json:"repos_version"`
-	Settings     json.RawMessage `json:"settings,omitempty"`
+	WorkspaceID   string               `json:"workspace_id"`
+	Repos         []RepoData           `json:"repos"`
+	ReposVersion  string               `json:"repos_version"`
+	Settings      json.RawMessage      `json:"settings,omitempty"`
+	MemoryTargets []daemonMemoryTarget `json:"memory_targets,omitempty"`
 }
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
@@ -974,12 +975,16 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	})
 
 	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings)
+	if targets, targetErr := h.listDaemonMemoryTargets(r.Context(), wsUUID); targetErr == nil {
+		repoResp.MemoryTargets = targets
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"runtimes":      resp,
-		"repos":         repoResp.Repos,
-		"repos_version": repoResp.ReposVersion,
-		"settings":      repoResp.Settings,
+		"runtimes":       resp,
+		"repos":          repoResp.Repos,
+		"repos_version":  repoResp.ReposVersion,
+		"settings":       repoResp.Settings,
+		"memory_targets": repoResp.MemoryTargets,
 	})
 }
 
@@ -1157,7 +1162,11 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings))
+	response := workspaceReposResponse(workspaceID, ws.Repos, ws.Settings)
+	if targets, targetErr := h.listDaemonMemoryTargets(r.Context(), parseUUID(workspaceID)); targetErr == nil {
+		response.MemoryTargets = targets
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // setRuntimeOffline flips a runtime offline, recording the daemon's reason when
