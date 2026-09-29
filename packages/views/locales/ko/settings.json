@@ -754,6 +754,12 @@
     "issue_prefix_hint": "{{example}} 같은 태스크 번호에 사용됩니다.",
     "prefix_confirm_title": "태스크 접두사를 변경할까요?",
     "prefix_confirm_description": "모든 태스크 번호가 {{oldPrefix}}-N에서 {{newPrefix}}-N으로 다시 매겨집니다. Pull request 제목, 브랜치 이름, 문서와 채팅의 링크처럼 {{oldPrefix}}-N을 사용하는 외부 참조는 더 이상 연결되지 않습니다.",
+    "sediment_agent_label": "프로젝트 메모리 정착 에이전트",
+    "sediment_agent_description": "프로젝트 메모리 위치가 누락되었을 때 자동으로 생성되는 티켓의 담당 에이전트입니다.",
+    "sediment_agent_none": "미설정 (자동 티켓 생성 비활성화)",
+    "sediment_agent_offline": "오프라인",
+    "sediment_agent_offline_hint": "현재 오프라인 상태이며 온라인 복구 시 작업을 수락합니다.",
+    "sediment_agent_clear": "정착석 비우기",
     "save": "저장",
     "saving": "저장하는 중...",
     "manage_hint": "관리자와 소유자만 워크스페이스 설정을 업데이트할 수 있습니다.",
@@ -1914,5 +1920,24 @@
     "preview_loading": "미리보기를 불러오는 중… 준비될 때까지 변경 사항을 적용할 수 없습니다.",
     "save_failed": "공유 범위를 변경하지 못했습니다. 다시 시도하세요.",
     "preview_failed": "미리보기를 불러오지 못했습니다. 변경 사항을 적용하기 전에 다시 시도하세요."
+  },
+  "repo_reach": {
+    "status_app": "GitHub App · {{account}}",
+    "status_app_plain": "GitHub App",
+    "status_token": "토큰",
+    "status_token_named": "토큰 · {{account}}",
+    "status_token_broken": "토큰 만료",
+    "status_cli": "로컬 CLI만",
+    "status_install_app": "GitHub App 미설치",
+    "status_none": "연결 안 됨",
+    "ask_owner": "{{status}} · {{name}}에게 요청",
+    "ask_owner_generic": "{{status}} · 관리자에게 요청",
+    "action_install_app": "GitHub App 설치",
+    "action_create_app": "GitHub App 만들기",
+    "action_add_token": "토큰 추가",
+    "action_replace_token": "토큰 교체",
+    "column_projects": "프로젝트",
+    "projects_none": "—",
+    "accounts_projects": "프로젝트"
   }
 }

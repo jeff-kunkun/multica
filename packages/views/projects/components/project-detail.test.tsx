@@ -83,6 +83,8 @@ vi.mock("@multica/core/chat", () => ({
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     projects: () => "/test-workspace/projects",
+    settings: () => "/test-workspace/settings",
+    issueDetail: (id: string) => `/test-workspace/issues/${id}`,
   }),
 }));
 
@@ -222,6 +224,10 @@ vi.mock("../../common/actor-avatar", () => ({
 
 vi.mock("../../issues/components/priority-icon", () => ({
   PriorityIcon: () => null,
+}));
+
+vi.mock("./project-code-section", () => ({
+  ProjectCodeSection: () => null,
 }));
 
 vi.mock("./project-resources-section", () => ({

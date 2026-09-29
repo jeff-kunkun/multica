@@ -241,6 +241,20 @@
     "seen_other": "已看过的 {{count}} 条",
     "hide_seen": "收起看过的",
     "load_error": "有一部分数据没加载出来，稍后会自动重试",
-    "ask_ai": "让 AI 讲给我听"
+    "ask_ai": "让 AI 讲给我听",
+    "lane_filter_hint": "点组名，左边只亮这一组的通知",
+    "panel_title": "看板",
+    "panel_hint": "按状态分组",
+    "back_to_panel": "回看板",
+    "filter_bar": "只亮「{{lane}}」这一组的通知",
+    "filter_clear": "清除",
+    "short": {
+      "waiting": "等你",
+      "stalled": "停了没交代",
+      "running": "在跑",
+      "todo": "待做",
+      "fresh": "新动态",
+      "done": "做完"
+    }
   }
 }

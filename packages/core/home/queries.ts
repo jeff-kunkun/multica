@@ -57,8 +57,16 @@ const EMPTY_BOARD: InboxBoard = { waiting: [], stalled: [], running: [], todo: [
  * The mark is the server's clock, not this device's, so a skewed clock cannot
  * drop or double the markers. The ref keeps StrictMode's double effect from
  * reading twice.
+ *
+ * `autoRead: false` skips the arrival read and keeps asking for the live
+ * board: the merged inbox (DENE-1004) shows the notification list beside the
+ * board, and reading everything on arrival would wipe that list's unread
+ * badges before the viewer could see them.
  */
-export function useInboxBoard(wsId: string): InboxBoardResult {
+export function useInboxBoard(
+  wsId: string,
+  { autoRead = true }: { autoRead?: boolean } = {},
+): InboxBoardResult {
   const qc = useQueryClient();
   const tz = useMemo(browserTimeZone, []);
   const [visit, setVisit] = useState<{ wsId: string; since: string } | null>(null);
@@ -74,7 +82,7 @@ export function useInboxBoard(wsId: string): InboxBoardResult {
   });
 
   const marked = useRef<string | null>(null);
-  const arrival = since === null && query.isFetchedAfterMount && !query.isFetching && !query.isPlaceholderData
+  const arrival = autoRead && since === null && query.isFetchedAfterMount && !query.isFetching && !query.isPlaceholderData
     ? query.data
     : undefined;
   useEffect(() => {

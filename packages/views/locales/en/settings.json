@@ -756,6 +756,12 @@
     "issue_prefix_hint": "Used in issue numbers like {{example}}.",
     "prefix_confirm_title": "Change issue prefix?",
     "prefix_confirm_description": "All issues will be renumbered from {{oldPrefix}}-N to {{newPrefix}}-N. External references — pull request titles, branch names, links in docs and chat — that use {{oldPrefix}}-N will stop resolving.",
+    "sediment_agent_label": "Memory Sediment Agent",
+    "sediment_agent_description": "Agent assigned to automatically created tickets when project memory locations are missing.",
+    "sediment_agent_none": "None (automatic ticketing disabled)",
+    "sediment_agent_offline": "offline",
+    "sediment_agent_offline_hint": "Agent is currently offline and will accept tasks when back online.",
+    "sediment_agent_clear": "Clear sediment agent",
     "save": "Save",
     "saving": "Saving...",
     "manage_hint": "Only admins and owners can update workspace settings.",
@@ -1921,5 +1927,24 @@
     "preview_loading": "Loading the preview… You cannot apply changes until it is ready.",
     "save_failed": "Could not change the sharing scope. Try again.",
     "preview_failed": "The preview could not be loaded. Try again before applying changes."
+  },
+  "repo_reach": {
+    "status_app": "GitHub App · {{account}}",
+    "status_app_plain": "GitHub App",
+    "status_token": "Token",
+    "status_token_named": "Token · {{account}}",
+    "status_token_broken": "Token expired",
+    "status_cli": "Local CLI only",
+    "status_install_app": "GitHub App not installed",
+    "status_none": "Not connected",
+    "ask_owner": "{{status}} · ask {{name}}",
+    "ask_owner_generic": "{{status}} · ask an owner",
+    "action_install_app": "Install GitHub App",
+    "action_create_app": "Create GitHub App",
+    "action_add_token": "Add token",
+    "action_replace_token": "Replace token",
+    "column_projects": "Projects",
+    "projects_none": "—",
+    "accounts_projects": "Projects"
   }
 }

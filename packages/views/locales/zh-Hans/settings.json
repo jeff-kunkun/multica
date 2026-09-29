@@ -754,6 +754,12 @@
     "issue_prefix_hint": "用于任务编号，例如 {{example}}。",
     "prefix_confirm_title": "确认修改任务前缀？",
     "prefix_confirm_description": "所有任务将从 {{oldPrefix}}-N 重命名为 {{newPrefix}}-N。任何使用旧编号的外部引用——PR 标题、分支名、文档与聊天中的链接——都会失效。",
+    "sediment_agent_label": "项目记忆沉淀席",
+    "sediment_agent_description": "缺少项目记忆位置时自动建票派发的目标智能体席位。",
+    "sediment_agent_none": "未配置（不自动派单）",
+    "sediment_agent_offline": "离线",
+    "sediment_agent_offline_hint": "当前智能体处于离线状态，上线后可继续接活。",
+    "sediment_agent_clear": "清空沉淀席",
     "save": "保存",
     "saving": "保存中...",
     "manage_hint": "只有管理员和所有者可以修改工作区设置。",
@@ -1914,5 +1920,24 @@
     "preview_loading": "正在加载预览…预览准备好之前不能确认。",
     "save_failed": "共享范围没改成功，请重试。",
     "preview_failed": "预览加载失败，请重试后再确认。"
+  },
+  "repo_reach": {
+    "status_app": "GitHub App · {{account}}",
+    "status_app_plain": "GitHub App",
+    "status_token": "令牌",
+    "status_token_named": "令牌 · {{account}}",
+    "status_token_broken": "令牌失效",
+    "status_cli": "仅本机 CLI",
+    "status_install_app": "未安装 GitHub App",
+    "status_none": "未接通",
+    "ask_owner": "{{status}} · 请联系 {{name}}",
+    "ask_owner_generic": "{{status}} · 请联系管理员",
+    "action_install_app": "安装 GitHub App",
+    "action_create_app": "创建 GitHub App",
+    "action_add_token": "添加令牌",
+    "action_replace_token": "替换令牌",
+    "column_projects": "项目",
+    "projects_none": "—",
+    "accounts_projects": "项目"
   }
 }

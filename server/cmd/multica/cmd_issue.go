@@ -1457,7 +1457,7 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	timeout := cli.APITimeout()
 	attachments, _ := cmd.Flags().GetStringSlice("attachment")
 	if len(attachments) > 0 {
-		timeout = cli.AtLeastAPITimeout(60 * time.Second)
+		timeout = cli.AtLeastAPITimeout(10 * time.Minute)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -2583,7 +2583,7 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	timeout := cli.APITimeout()
 	attachments, _ := cmd.Flags().GetStringSlice("attachment")
 	if len(attachments) > 0 {
-		timeout = cli.AtLeastAPITimeout(60 * time.Second)
+		timeout = cli.AtLeastAPITimeout(10 * time.Minute)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

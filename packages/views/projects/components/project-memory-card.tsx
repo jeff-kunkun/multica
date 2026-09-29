@@ -52,11 +52,21 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
       )}
       {data?.sediment_issue ? (
         <AppLink
-          href={workspacePaths.issueDetail(data.sediment_issue.id)}
+          href={workspacePaths.issueDetail ? workspacePaths.issueDetail(data.sediment_issue.id) : `#`}
           className="mt-3 inline-flex text-caption text-primary hover:underline"
         >
           {t(($) => $.detail.memory_ticket, { id: data.sediment_issue.identifier })}
         </AppLink>
+      ) : !data?.sediment_agent_configured ? (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-caption text-amber-700">
+          <span>{data?.sediment_error ? `${data.sediment_error}。` : t(($) => $.detail.memory_unconfigured_error)}</span>
+          <AppLink
+            href={workspacePaths.settings ? workspacePaths.settings() : "#"}
+            className="text-primary hover:underline font-medium"
+          >
+            {t(($) => $.detail.memory_configure_link)}
+          </AppLink>
+        </div>
       ) : data?.sediment_error ? (
         <p className="mt-3 text-caption text-amber-700">{data.sediment_error}</p>
       ) : null}

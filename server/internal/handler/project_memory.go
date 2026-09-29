@@ -90,7 +90,7 @@ func memoryText(t pgtype.Text) *string {
 }
 
 func sedimentAgentAvailable(agent db.Agent) bool {
-	return !agent.ArchivedAt.Valid && agent.Status != "offline" && agent.WorkEnabled && agent.RuntimeID.Valid
+	return !agent.ArchivedAt.Valid && agent.WorkEnabled && agent.RuntimeID.Valid
 }
 
 func memoryProjectID(id string) (pgtype.UUID, error) {
