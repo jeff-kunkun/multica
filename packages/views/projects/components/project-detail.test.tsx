@@ -110,6 +110,7 @@ vi.mock("react-resizable-panels", () => ({
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => false,
+  useIsCompact: () => false,
 }));
 
 vi.mock("@multica/ui/components/common/emoji-picker", () => ({

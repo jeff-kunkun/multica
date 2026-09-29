@@ -18,7 +18,7 @@ import enLayout from "../../locales/en/layout.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues, layout: enLayout } };
 
-const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+const mockViewport = vi.hoisted(() => ({ isMobile: false, isCompact: false }));
 
 // Counts MockContentEditor mounts. This pins the description to exactly one
 // eager editor per issue and catches stale editor reuse across issue switches.
@@ -31,6 +31,8 @@ const emptyDraftAttachments = vi.hoisted(() => [] as unknown[]);
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
+  // A phone is always below the compact breakpoint too.
+  useIsCompact: () => mockViewport.isMobile || mockViewport.isCompact,
 }));
 
 // useWorkspaceId() derives from useCurrentWorkspace (relative import inside
@@ -702,6 +704,7 @@ describe("IssueDetail (shared)", () => {
     contentEditorMounts.count = 0;
     descriptionSelectionAction.current = undefined;
     mockViewport.isMobile = false;
+    mockViewport.isCompact = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
     // /timeline returns the entries flat in chronological order (oldest first).
@@ -1146,6 +1149,23 @@ describe("IssueDetail (shared)", () => {
 
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
     expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+  });
+
+  it("folds the properties panel into a drawer on a portrait tablet", async () => {
+    // 768–1023px: the app nav is already a drawer here; a 320px properties
+    // panel beside the content would leave the description ~500px wide.
+    mockViewport.isCompact = true;
+
+    const { container } = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
+    expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+    // Still a tablet, not a phone: the composer stays pinned.
+    expect(container.querySelector(".sticky.bottom-0")).not.toBeNull();
   });
 
   it("pins the comment composer to the scroll viewport on a wide screen", async () => {

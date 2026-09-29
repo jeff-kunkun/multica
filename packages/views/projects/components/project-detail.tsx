@@ -36,7 +36,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
-import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -150,7 +150,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
   const descEditorRef = useRef<ContentEditorRef>(null);
-  const isMobile = useIsMobile();
+  // Below `lg` the properties panel is a drawer, like the app nav: a 320px
+  // panel beside the board leaves a portrait tablet about one column.
+  const isCompact = useIsCompact();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
@@ -181,16 +183,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     handleResize: handleDesktopSidebarResize,
   } = useAnimatedRightSidebarState(desktopSidebarInitialOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
+  const sidebarOpen = isCompact ? mobileSidebarOpen : desktopSidebarOpen;
 
   useEffect(() => {
-    if (isMobile) {
+    if (isCompact) {
       setMobileSidebarOpen(false);
     }
-  }, [isMobile]);
+  }, [isCompact]);
 
   const handleToggleSidebar = useCallback(() => {
-    if (isMobile) {
+    if (isCompact) {
       setMobileSidebarOpen((open) => !open);
       return;
     }
@@ -203,7 +205,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       if (nextOpen) panel.expand();
       else panel.collapse();
     });
-  }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
+  }, [beginDesktopSidebarToggle, isCompact, sidebarRef]);
 
   useRightSidebarShortcut(rightSidebarShortcutTargetRef, handleToggleSidebar);
 
@@ -597,8 +599,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           />
           </div>
         </ResizablePanel>
-        {!isMobile && <ResizableHandle />}
-        {!isMobile && (
+        {!isCompact && <ResizableHandle />}
+        {!isCompact && (
         <ResizablePanel
           id="sidebar"
           {...rightSidebarPanelMotionProps}
@@ -616,9 +618,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </AnimatedRightSidebar>
         </ResizablePanel>
         )}
-        {isMobile && (
+        {isCompact && (
           <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-            <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
+            <SheetContent side="right" showCloseButton={false} className="w-[min(320px,85vw)] overflow-y-auto p-4">
               {sidebarContent}
             </SheetContent>
           </Sheet>

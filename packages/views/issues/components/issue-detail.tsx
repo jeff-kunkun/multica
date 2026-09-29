@@ -43,7 +43,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
-import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { useIsCompact, useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, ImageSequenceProvider } from "../../editor";
 import { collectImageSequence, type ImageSequenceBlock } from "@multica/core/attachments/image-sequence";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -1199,6 +1199,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   });
   const sidebarRef = usePanelRef();
   const isMobile = useIsMobile();
+  // The properties panel folds into a drawer below the same breakpoint the
+  // app nav does: on a portrait tablet a 320px panel beside the content
+  // leaves the description under 500px of reading width.
+  const isCompact = useIsCompact();
   const desktopSidebarInitialOpen = getAnimatedRightSidebarInitialOpen(
     defaultSidebarOpen,
     defaultLayout,
@@ -1213,11 +1217,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
-    if (isMobile) {
+    if (isCompact) {
       setMobileSidebarOpen(false);
     }
-  }, [isMobile]);
-  const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
+  }, [isCompact]);
+  const sidebarOpen = isCompact ? mobileSidebarOpen : desktopSidebarOpen;
   // Section folds are a personal layout preference shared by every issue, so
   // they outlive this component (and a phone browser's tab reload).
   const sectionsOpen = useIssueDetailSectionsStore((s) => s.open);
@@ -2265,7 +2269,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [autoOpenCustomProp]);
 
   const handleToggleSidebar = useCallback(() => {
-    if (isMobile) {
+    if (isCompact) {
       setMobileSidebarOpen((open) => !open);
       return;
     }
@@ -2278,7 +2282,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       if (nextOpen) panel.expand();
       else panel.collapse();
     });
-  }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
+  }, [beginDesktopSidebarToggle, isCompact, sidebarRef]);
 
   useRightSidebarShortcut(rightSidebarShortcutTargetRef, handleToggleSidebar);
 
@@ -3705,12 +3709,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     </CurrentIssueRenderContextProvider>
   );
 
-  if (isMobile) {
+  if (isCompact) {
     return (
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
+          <SheetContent side="right" showCloseButton={false} className="w-[min(320px,85vw)] overflow-y-auto p-4">
             {sidebarContent}
           </SheetContent>
         </Sheet>
