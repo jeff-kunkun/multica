@@ -41,6 +41,16 @@ func (r *Router) decide(ctx context.Context, workspaceID string, settings Settin
 
 	rec, cached, err := r.analysis(ctx, workspaceID, settings, issue, state)
 	if err != nil {
+		// Analysis is an enrichment step. A runtime can be offline or out of
+		// quota; when the judge is available, let it read the original ticket
+		// and dispatch once rather than stalling the ticket or dispatching twice.
+		if settings.JudgeOn() && r.Judge != nil {
+			v, judgeErr := r.Judge.Assign(ctx, settings.Target(), state)
+			if judgeErr == nil {
+				d.Verdict, d.Decider = v, DeciderJudge
+				return d, nil
+			}
+		}
 		return d, err
 	}
 	if rec != nil {

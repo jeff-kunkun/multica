@@ -101,6 +101,9 @@ export function RoutingTab() {
   const [analysisEnabled, setAnalysisEnabled] = useState(saved.analysis.enabled);
   const [analysisModel, setAnalysisModel] = useState(saved.analysis.model);
   const [analysisBaseUrl, setAnalysisBaseUrl] = useState(saved.analysis.base_url);
+  const [analysisSource, setAnalysisSource] = useState(saved.analysis.source ?? "api_gateway");
+  const [analysisRuntimeId, setAnalysisRuntimeId] = useState(saved.analysis.runtime_id ?? "");
+  const [analysisThinkingLevel, setAnalysisThinkingLevel] = useState(saved.analysis.thinking_level ?? "low");
   const [threshold, setThreshold] = useState(String(saved.confidence_threshold));
   const [staleHours, setStaleHours] = useState(String(saved.stale_review_hours));
   const [baseUrl, setBaseUrl] = useState(saved.base_url);
@@ -127,6 +130,9 @@ export function RoutingTab() {
     setAnalysisEnabled(next.analysis.enabled);
     setAnalysisModel(next.analysis.model);
     setAnalysisBaseUrl(next.analysis.base_url);
+    setAnalysisSource(next.analysis.source ?? "api_gateway");
+    setAnalysisRuntimeId(next.analysis.runtime_id ?? "");
+    setAnalysisThinkingLevel(next.analysis.thinking_level ?? "low");
     setThreshold(String(next.confidence_threshold));
     setStaleHours(String(next.stale_review_hours));
     setBaseUrl(next.base_url);
@@ -150,6 +156,9 @@ export function RoutingTab() {
         enabled: analysisEnabled,
         model: analysisModel,
         base_url: analysisBaseUrl,
+        source: analysisSource,
+        runtime_id: analysisRuntimeId,
+        thinking_level: analysisThinkingLevel,
       },
       confidence_threshold: normalizeThreshold(Number(threshold)),
       stale_review_hours: normalizeStaleReviewHours(Number(staleHours)),
@@ -165,6 +174,9 @@ export function RoutingTab() {
       analysisEnabled,
       analysisModel,
       analysisBaseUrl,
+      analysisSource,
+      analysisRuntimeId,
+      analysisThinkingLevel,
       threshold,
       staleHours,
       baseUrl,
@@ -226,6 +238,9 @@ export function RoutingTab() {
       a.analysis.enabled === b.analysis.enabled &&
       a.analysis.model.trim() === b.analysis.model.trim() &&
       a.analysis.base_url.trim() === b.analysis.base_url.trim() &&
+      a.analysis.source === b.analysis.source &&
+      (a.analysis.runtime_id ?? "").trim() === (b.analysis.runtime_id ?? "").trim() &&
+      (a.analysis.thinking_level ?? "low") === (b.analysis.thinking_level ?? "low") &&
       a.confidence_threshold === b.confidence_threshold &&
       a.stale_review_hours === b.stale_review_hours &&
       a.base_url.trim() === b.base_url.trim() &&
@@ -354,7 +369,7 @@ export function RoutingTab() {
 
       <SettingsSection title={t(($) => $.routing.section_title)}>
         <SettingsCard>
-          <SettingsRow
+          {analysisSource === "api_gateway" ? <SettingsRow
             label={t(($) => $.routing.enabled_label)}
             description={t(($) => $.routing.enabled_description)}
           >
@@ -364,7 +379,7 @@ export function RoutingTab() {
               onCheckedChange={setEnabled}
               aria-label={t(($) => $.routing.enabled_label)}
             />
-          </SettingsRow>
+          </SettingsRow> : null}
 
           <SettingsRow
             label={t(($) => $.routing.threshold_label)}
@@ -451,7 +466,7 @@ export function RoutingTab() {
               aria-label={t(($) => $.routing.analysis_enabled_label)}
             />
           </SettingsRow>
-          <SettingsRow
+          {analysisSource === "api_gateway" ? <SettingsRow
             label={t(($) => $.routing.analysis_model_label)}
             description={t(($) => $.routing.analysis_model_description)}
             size="text"
@@ -463,8 +478,35 @@ export function RoutingTab() {
               onChange={(e) => setAnalysisModel(e.target.value)}
               aria-label={t(($) => $.routing.analysis_model_label)}
             />
+          </SettingsRow> : null}
+          <SettingsRow label="来源" description="选择 API 网关或本机 runtime 订阅模型。" size="text">
+            <select
+              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+              value={analysisSource}
+              disabled={!canManage || !analysisEnabled}
+              onChange={(e) => setAnalysisSource(e.target.value as typeof analysisSource)}
+              aria-label="分析模型来源"
+            >
+              <option value="api_gateway">API 网关</option>
+              <option value="runtime_subscription">Runtime 订阅</option>
+            </select>
           </SettingsRow>
-          <EndpointRows
+          {analysisSource === "runtime_subscription" ? (
+            <>
+              <SettingsRow label="Runtime" description="运行一次无工具、只读的分析提示词。" size="text">
+                <Input value={analysisRuntimeId} disabled={!canManage || !analysisEnabled} placeholder="runtime id" onChange={(e) => setAnalysisRuntimeId(e.target.value)} aria-label="分析 Runtime" />
+              </SettingsRow>
+              <SettingsRow label="模型" size="text">
+                <Input value={analysisModel} disabled={!canManage || !analysisEnabled} placeholder="model" onChange={(e) => setAnalysisModel(e.target.value)} aria-label="分析 Runtime 模型" />
+              </SettingsRow>
+              <SettingsRow label="思考强度" size="text">
+                <select className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm" value={analysisThinkingLevel} disabled={!canManage || !analysisEnabled} onChange={(e) => setAnalysisThinkingLevel(e.target.value)} aria-label="分析思考强度">
+                  <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
+                </select>
+              </SettingsRow>
+            </>
+          ) : null}
+          {analysisSource === "api_gateway" ? <EndpointRows
             urlLabel={t(($) => $.routing.analysis_url_label)}
             keyLabel={t(($) => $.routing.analysis_key_label)}
             baseUrl={analysisBaseUrl}
@@ -476,7 +518,7 @@ export function RoutingTab() {
             canManage={canManage}
             saving={saveKey.isPending}
             onSaveKey={(key) => saveKey.mutate({ role: "analysis", key })}
-          />
+          /> : null}
         </SettingsCard>
         <RoleEndpointNote health={health.data} role={analysisHealth} />
         <GatewayPairNote

@@ -1487,6 +1487,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if ack.PendingModelList != nil {
 		resp["pending_model_list"] = ack.PendingModelList
 	}
+	if ack.PendingRoutingAnalysis != nil {
+		resp["pending_routing_analysis"] = ack.PendingRoutingAnalysis
+	}
 	if ack.PendingProviderConfig != nil {
 		resp["pending_provider_config"] = ack.PendingProviderConfig
 	}
