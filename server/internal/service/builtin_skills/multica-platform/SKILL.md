@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Use for Multica platform actions the runtime brief does not fully cover: issue and PR contracts, automatic routing, close protocol, mentions, agents and base-role specialisations, squads, autopilots, projects, runtimes, skill import, workspace transfer. Not for the product code you are working on."
+description: "Use for Multica platform actions the runtime brief does not fully cover: issue and PR contracts, automatic routing, close protocol, mentions, agents and base-role specialisations, squads, autopilots, projects, runtimes, skill import, workspace transfer, and long-tail settings via `multica settings get/set`. Not for the product code you are working on."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -59,6 +59,8 @@ you debugging access when the real problem was the id.
 **`--output json` writes to stdout; warnings and confirmations go to stderr.**
 Do not merge them (`2>&1`) into anything that parses the output — that makes a
 write which SUCCEEDED look like it failed, and invites a duplicate retry.
+
+**Long-tail settings:** `multica settings get <key>` and `multica settings set <key> --value-json '<json>'` (secrets via `--value-file` or `--value-stdin`); `repo.shares` revokes with `{"url","member_id","revoke":true}`. The key table is `docs/kun/settings-cli-coverage.md`.
 
 **Writes are real.** Creating, updating, deleting, assigning, commenting,
 mentioning, triggering and status changes mutate durable workspace state or
