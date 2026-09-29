@@ -234,6 +234,7 @@
     "open_issue": "去任务",
     "seen_other": "已看过的 {{count}} 条",
     "hide_seen": "收起看过的",
-    "load_error": "有一部分数据没加载出来，稍后会自动重试"
+    "load_error": "有一部分数据没加载出来，稍后会自动重试",
+    "ask_ai": "让 AI 讲给我听"
   }
 }

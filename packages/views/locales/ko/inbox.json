@@ -234,6 +234,7 @@
     "open_issue": "Open issue",
     "seen_other": "{{count}} already seen",
     "hide_seen": "Hide seen",
-    "load_error": "Some of this did not load; it will retry shortly"
+    "load_error": "Some of this did not load; it will retry shortly",
+    "ask_ai": "AI에게 설명 듣기"
   }
 }

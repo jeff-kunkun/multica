@@ -9,7 +9,7 @@ let searchParams = new URLSearchParams();
 let board: InboxBoard;
 let seenAt: string | null = null;
 const markSeen = vi.fn();
-const takeSnapshot = vi.fn();
+const readBoard = vi.fn();
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/auth", () => ({
@@ -18,6 +18,7 @@ vi.mock("@multica/core/auth", () => ({
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
+    chatWithPrompt: (prompt: string) => `/acme/chat?prompt=${encodeURIComponent(prompt)}`,
     issueDetail: (id: string) => `/acme/issues/${id}`,
   }),
 }));
@@ -36,10 +37,9 @@ vi.mock("@multica/core/home", async (importOriginal) => {
   );
   return {
     ...actual,
-    useInboxBoard: () => ({ board, isLoading: false, isError: false }),
-    useBoardUnreadSnapshot: (wsId: string) => {
-      takeSnapshot(wsId);
-      return undefined;
+    useInboxBoard: (wsId: string) => {
+      readBoard(wsId);
+      return { board, isLoading: false, isError: false };
     },
     useDoneSeenStore: store,
   };
@@ -71,6 +71,7 @@ function row(over: Partial<BoardRow> & { issueId: string; lane: BoardRow["lane"]
     from: null,
     fromName: "",
     next: null,
+    nextName: "",
     at: "2026-09-26T08:00:00Z",
     timeline: [],
     unread: 0,
@@ -83,7 +84,7 @@ beforeEach(() => {
   push.mockReset();
   mutate.mockReset();
   markSeen.mockReset();
-  takeSnapshot.mockReset();
+  readBoard.mockReset();
   searchParams = new URLSearchParams();
   seenAt = null;
   board = {
@@ -140,7 +141,7 @@ describe("HomePage", () => {
     board.running[0] = { ...board.running[0]!, unread: 2 };
     board.fresh = [row({ issueId: "900", lane: "fresh", unread: 1 })];
     renderWithI18n(<HomePage />);
-    expect(takeSnapshot).toHaveBeenCalledWith("ws-1");
+    expect(readBoard).toHaveBeenCalledWith("ws-1");
     expect(within(screen.getByTestId("board-lane-running")).getByText("2 new")).toBeInTheDocument();
     const fresh = screen.getByTestId("board-lane-fresh");
     expect(within(fresh).getByText("title 900")).toBeInTheDocument();

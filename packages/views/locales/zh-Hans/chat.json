@@ -199,7 +199,11 @@
       "label": "推荐一个操作",
       "prompt": "根据你对我的工作区的了解，推荐一个有用的初始操作。"
     },
-    "customize": "自定义开场建议"
+    "customize": "自定义开场建议",
+    "inbox": {
+      "label": "帮我过一遍收件箱",
+      "prompt": "帮我过一遍收件箱"
+    }
   },
   "onboarding_cards": {
     "aria_label": "开始方式",

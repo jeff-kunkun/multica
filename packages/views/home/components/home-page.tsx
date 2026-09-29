@@ -1,16 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, History } from "lucide-react";
+import { ChevronDown, ChevronRight, History, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCreateComment } from "@multica/core/issues/mutations";
 import {
   splitSeenDone,
-  useBoardUnreadSnapshot,
   useDoneSeenStore,
   useInboxBoard,
   type BoardLane,
@@ -325,10 +323,9 @@ function LaneSection({
 export function HomePage() {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
-  const userId = useAuthStore((s) => s.user?.id ?? null);
   const copy = useBoardCopy();
-  const unread = useBoardUnreadSnapshot(wsId);
-  const { board, isLoading, isError } = useInboxBoard(wsId, userId, undefined, unread);
+  const { t: tChat } = useT("chat");
+  const { board, isLoading, isError } = useInboxBoard(wsId);
 
   // "Done today" shows once. Read the mark left by the previous visit, then
   // move it to now — on arrival and again on leaving, so rows that finish
@@ -372,6 +369,22 @@ export function HomePage() {
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader>
         <h1 className="flex-1 text-body font-semibold">{copy.t(($) => $.board.title)}</h1>
+        {/* DENE-975: the chat agent reads this same board (`multica inbox board`) and tells it back. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground"
+          nativeButton={false}
+          render={
+            <AppLink
+              href={wsPaths.chatWithPrompt(tChat(($) => $.conversation_starters.inbox.prompt))}
+              data-testid="board-ask-ai"
+            />
+          }
+        >
+          <Sparkles className="size-4" />
+          {copy.t(($) => $.board.ask_ai)}
+        </Button>
         <Button
           variant="ghost"
           size="sm"
