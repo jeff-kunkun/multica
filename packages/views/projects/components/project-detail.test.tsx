@@ -83,6 +83,8 @@ vi.mock("@multica/core/chat", () => ({
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     projects: () => "/test-workspace/projects",
+    settings: () => "/test-workspace/settings",
+    issueDetail: (id: string) => `/test-workspace/issues/${id}`,
   }),
 }));
 

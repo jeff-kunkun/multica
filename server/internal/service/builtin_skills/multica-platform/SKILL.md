@@ -28,7 +28,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/specialisations.md` | Base roles and specialisations: what a child inherits, the two-level cap, runtime following, solidify, the archive guard |
 | `references/squads.md` | Squads: leader routing, roster, recording leader activity, why a squad did or did not run |
 | `references/autopilots.md` | Autopilots: schedule / webhook / manual triggers, `create_issue` vs `run_only`, why one did not fire |
-| `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`, worktree mode) |
+| `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`, worktree mode), and project memory (`check`, `status`, `seat`) |
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
 | `references/inbox.md` | The user asks about their inbox or what is stuck: `multica inbox board` and the fixed five-part answer |
 | `references/transfer.md` | `multica transfer export` / `import` / `bind-runtimes`, and the kun `/transfer/*` endpoints |
