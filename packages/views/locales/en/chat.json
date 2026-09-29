@@ -204,7 +204,11 @@
       "label": "Recommend an action",
       "prompt": "Review what you know about my workspace and recommend a useful first action."
     },
-    "customize": "Customize starters"
+    "customize": "Customize starters",
+    "inbox": {
+      "label": "Walk me through my inbox",
+      "prompt": "Walk me through my inbox"
+    }
   },
   "onboarding_cards": {
     "aria_label": "Ways to start",

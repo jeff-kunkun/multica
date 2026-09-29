@@ -2590,6 +2590,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// The board's unread snapshot and the ticket-level read
 				// (DENE-901).
 				r.Get("/unread-issues", h.ListUnreadInboxIssues)
+				// The inbox in five lanes, for the page, the CLI and agents
+				// reading it for their user (DENE-975).
+				r.Get("/board", h.GetInboxBoard)
 				r.Post("/issues/{issueId}/read", h.MarkIssueInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)

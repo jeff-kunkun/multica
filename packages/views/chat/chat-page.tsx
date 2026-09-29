@@ -435,6 +435,43 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume when the URL param or the resolving agent list changes
   }, [urlAgent, c.availableAgents, c.agentsSettled]);
 
+  // URL → new chat that sends: `?prompt=<text>` (DENE-975, the inbox page's
+  // "walk me through it") opens a fresh chat with the agent already in play
+  // and sends the text once that agent resolves. When it cannot be sent (no
+  // agent, no runtime, a refused send) the text is left in the composer
+  // instead. The ref keeps StrictMode's double effect from sending twice.
+  const urlPrompt = searchParams.get("prompt") || null;
+  const consumedPrompt = useRef<string | null>(null);
+  const [queuedPrompt, setQueuedPrompt] = useState<{ id: number; text: string } | null>(null);
+  const sentPrompt = useRef<number | null>(null);
+  useEffect(() => {
+    if (!urlPrompt) {
+      consumedPrompt.current = null;
+      return;
+    }
+    if (consumedPrompt.current === urlPrompt) return;
+    consumedPrompt.current = urlPrompt;
+    startNewChat(null);
+    setQueuedPrompt({ id: Date.now(), text: urlPrompt });
+    replace(wsPaths.chat());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to the URL only
+  }, [urlPrompt]);
+  useEffect(() => {
+    if (!queuedPrompt || sentPrompt.current === queuedPrompt.id || c.activeSessionId) return;
+    if (!c.agentsSettled && !c.activeAgent) return;
+    sentPrompt.current = queuedPrompt.id;
+    const { text } = queuedPrompt;
+    setQueuedPrompt(null);
+    if (!c.activeAgent || !c.isAgentRuntimeBound) {
+      c.prefillConversationStarter(text);
+      return;
+    }
+    void c.handleSend(text).then((sent) => {
+      if (!sent) c.prefillConversationStarter(text);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- send once the new chat and its agent are in place
+  }, [queuedPrompt, c.activeSessionId, c.activeAgent, c.agentsSettled, c.isAgentRuntimeBound]);
+
   const newChatChord = useShortcut("newChat");
   const newChatButton = (
     <NewChatButton
