@@ -89,7 +89,20 @@ type agentCLIStatus struct {
 	Note           string `json:"note,omitempty"`
 	BinaryPath     string `json:"binary_path,omitempty"`
 	CheckedAt      string `json:"checked_at,omitempty"`
+	// While waiting: how many of this CLI's tasks are still running, whether
+	// new ones are held back (only after "update now"), and why it waits.
+	WaitingTasks int    `json:"waiting_tasks,omitempty"`
+	ClaimsPaused bool   `json:"claims_paused,omitempty"`
+	WaitReason   string `json:"wait_reason,omitempty"`
+	// UpdatedAt is set on the report right after a successful upgrade.
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
+
+const (
+	agentCLIWaitTasks        = "tasks"
+	agentCLIWaitHoldExpired  = "hold_expired"
+	agentCLIWaitDaemonUpdate = "daemon_update"
+)
 
 // cliVersionPattern pulls the first x.y.z out of strings like
 // "2.1.5 (Claude Code)" or "codex-cli 0.118.0".
