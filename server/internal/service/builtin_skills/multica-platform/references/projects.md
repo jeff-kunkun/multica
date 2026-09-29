@@ -283,37 +283,44 @@ Two consequences worth knowing before debugging:
 
 ## Project memory and sediment agent
 
-Projects track durable repository knowledge across five canonical memory
-locations:
+Project memory is a fixed checklist of locations defined once on the server.
+Do not hand-copy the list: the authoritative set is the `locations` array returned by
+`multica project memory check|status <project-id> --output json`. At the time
+of writing it is `AGENTS.md`, `CONTEXT.md`, `docs/adr/`, `docs/README.md` and
+`docs/evidence/INDEX.md`.
 
-- `AGENTS.md` — project instructions and operational conventions;
-- `docs/kun/CONTEXT.md` — domain model and business ubiquitous language;
-- `DESIGN.md` — system architecture rules and design system contracts;
-- `INTERACTION.md` — user interaction flows and UX traversal state;
-- `docs/kun/audit.md` — knowledge gap audit and reconciliation log.
+The check is presence only (file or directory exists). There is no staleness
+rule: an existing but old file never opens a ticket. The daemon only stats the
+directory; it never writes these files — the sediment ticket's executor does.
 
-### Checking status
+### Reading status (no side effects)
 
-Use `multica project memory status <project-id> [--output json]` to inspect the
-presence and state of these five memory files without side effects:
+Both of these read the latest stored report and never open a ticket:
 
 ```bash
 multica project memory status <project-id> --output json
+multica project memory check <project-id> --output json   # no --path
 ```
 
-### Checking and ensuring memory rounds
+### Reporting a check (may open a sediment ticket)
 
-`multica project memory check <project-id> [--output json]` evaluates project
-memory. When any memory file is missing or out of date:
-
-- If the workspace has a configured sediment agent (`settings.memory.sediment_agent`),
-  the platform creates or ensures an active sediment ticket assigned to that agent.
-- If no sediment agent is configured, the command returns an explicit notice
-  explaining that the sediment agent is unconfigured and ticketing is disabled.
+A new report is what can trigger a memory round. Reports come from the daemon
+(when it stats a project's local directory) or from the CLI with `--path`:
 
 ```bash
-multica project memory check <project-id> --output json
+multica project memory check <project-id> --path <project-root> --output json
 ```
+
+When the reported locations include a missing one, the server calls
+`EnsureMemoryRound`: an open sediment ticket for the project gets a reason
+comment, otherwise a new one is created and assigned to the workspace sediment
+agent (`settings.memory.sediment_agent`). With no seat configured, no ticket is
+created and the response carries `sediment_error` explaining why.
+
+Other triggers of the same round (server-side, no command needed): a stage
+advancing, a parent's sub-issues all reaching a terminal status, and the
+project being set to `completed`. Closing an ordinary issue does not trigger
+one.
 
 ### Configuring the sediment agent seat
 
