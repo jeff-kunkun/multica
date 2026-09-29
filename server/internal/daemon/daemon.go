@@ -4812,11 +4812,12 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingProviderConfig != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingRoutingAnalysis != nil || resp.PendingProviderConfig != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
+			"routing_analysis", resp.PendingRoutingAnalysis != nil,
 			"provider_config", resp.PendingProviderConfig != nil,
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
@@ -4834,6 +4835,11 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 			// win over the machine config. It is not logged.
 			listCtx := agent.WithModelEnvOverlay(ctx, resp.PendingModelList.EnvOverlay)
 			go d.handleModelList(listCtx, *rt, resp.PendingModelList.ID)
+		}
+	}
+	if resp.PendingRoutingAnalysis != nil {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			go d.handleRoutingAnalysis(ctx, *rt, *resp.PendingRoutingAnalysis)
 		}
 	}
 	if resp.PendingProviderConfig != nil {
@@ -5182,6 +5188,8 @@ func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending
 // Overridable for tests to avoid real sleeps.
 var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
 
+const routingAnalysisTimeout = 20 * time.Second
+
 // reportLocalSkillListResult delivers a list-report to the server with retry
 // on transient failures. See reportRuntimeResultWithRetry for semantics.
 func (d *Daemon) reportLocalSkillListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
@@ -5205,6 +5213,50 @@ func (d *Daemon) reportLocalSkillImportResult(ctx context.Context, rt Runtime, r
 func (d *Daemon) reportModelListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
 	d.reportRuntimeResultWithRetry(ctx, "model_list", rt.ID, requestID, func(ctx context.Context) error {
 		return d.client.ReportModelListResult(ctx, rt.ID, requestID, payload)
+	})
+}
+
+// handleRoutingAnalysis executes one bounded, read-only prompt outside the
+// task worker pool. Runtime CLIs differ, so keep the invocation deliberately
+// small and provider-specific; the server validates the returned JSON.
+func (d *Daemon) handleRoutingAnalysis(ctx context.Context, rt Runtime, pending PendingRoutingAnalysis) {
+	var execPath string
+	var prefix []string
+	if spec, ok := d.customProfileLaunchForRuntime(rt.ID); ok {
+		execPath, prefix = spec.path, agent.FilterLaunchPrefix(rt.Provider, spec.fixedArgs, d.logger)
+	} else if entry, ok := d.agents()[rt.Provider]; ok {
+		entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
+		execPath = entry.Path
+	}
+	if execPath == "" {
+		d.reportRoutingAnalysisResult(ctx, rt, pending.ID, map[string]any{"status": "failed", "error": "runtime executable unavailable"})
+		return
+	}
+	args := append([]string{}, prefix...)
+	switch rt.Provider {
+	case "claude":
+		args = append(args, "-p", pending.Prompt, "--output-format", "json", "--tools", "", "--model", pending.Model)
+	case "codex":
+		args = append(args, "exec", "--json", "--sandbox", "read-only", "--model", pending.Model, pending.Prompt)
+	default:
+		args = append(args, pending.Prompt)
+	}
+	if pending.ThinkingLevel != "" {
+		args = append(args, "--thinking", pending.ThinkingLevel)
+	}
+	runCtx, cancel := context.WithTimeout(ctx, routingAnalysisTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(runCtx, execPath, args...).CombinedOutput()
+	if err != nil {
+		d.reportRoutingAnalysisResult(ctx, rt, pending.ID, map[string]any{"status": "failed", "error": string(out)})
+		return
+	}
+	d.reportRoutingAnalysisResult(ctx, rt, pending.ID, map[string]any{"status": "completed", "result": string(out)})
+}
+
+func (d *Daemon) reportRoutingAnalysisResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
+	d.reportRuntimeResultWithRetry(ctx, "routing_analysis", rt.ID, requestID, func(ctx context.Context) error {
+		return d.client.ReportRoutingAnalysisResult(ctx, rt.ID, requestID, payload)
 	})
 }
 

@@ -174,6 +174,14 @@ type Analyst interface {
 	Stuck(ctx context.Context, target Target, st AnalysisState) (Advice, error)
 }
 
+// RuntimePromptRunner is the daemon-backed transport used by analysis when
+// the workspace selected a subscribed runtime. The runner returns the raw JSON
+// produced by the CLI; parsing and validation stay in this package so both
+// transports have identical semantics.
+type RuntimePromptRunner interface {
+	Run(ctx context.Context, target Target, prompt string) (string, error)
+}
+
 const analyzeSystemPrompt = `You read a work ticket and reduce it to facts, then route it to a seat on a fixed ladder of AI agents.
 
 Facts — choose exactly one value for each:
@@ -204,8 +212,9 @@ You are not changing anything on the ticket. Respond with a JSON object with key
 // LLMAnalyst runs the analysis role on an OpenAI-compatible chat endpoint:
 // the deployment gateway, or the workspace's own when both halves are set.
 type LLMAnalyst struct {
-	Gen  TextGenerator
-	Dial func(baseURL, apiKey string) TextGenerator
+	Gen     TextGenerator
+	Dial    func(baseURL, apiKey string) TextGenerator
+	Runtime RuntimePromptRunner
 }
 
 func (a LLMAnalyst) generator(t Target) TextGenerator {
@@ -218,13 +227,19 @@ func (a LLMAnalyst) Available(t Target) bool {
 }
 
 func (a LLMAnalyst) ask(ctx context.Context, target Target, system string, st any, maxTokens int64) (string, error) {
-	gen := a.generator(target)
-	if gen == nil {
-		return "", ErrJudgeUnavailable
-	}
 	payload, err := json.Marshal(st)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrJudgeUnavailable, err)
+	}
+	if target.UsesRuntime() {
+		if a.Runtime == nil {
+			return "", ErrJudgeUnavailable
+		}
+		return a.Runtime.Run(ctx, target, system+"\n\n"+string(payload))
+	}
+	gen := a.generator(target)
+	if gen == nil {
+		return "", ErrJudgeUnavailable
 	}
 	raw, err := gen.GenerateJSON(ctx, target.Model, system, string(payload), 0, maxTokens)
 	if err != nil {

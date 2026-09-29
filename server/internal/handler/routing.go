@@ -73,6 +73,11 @@ func (h *Handler) routeIssueDetached(attrs []any, workspaceID, issueID string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), routeTimeout)
 		defer cancel()
+		// Warm analysis before the routing state machine. This also covers
+		// backlog tickets, whose route is intentionally a no-op until promoted.
+		if err := h.Routing.PreAnalyze(ctx, workspaceID, issueID); err != nil {
+			slog.Debug("routing pre-analysis unavailable", "workspace_id", workspaceID, "issue_id", issueID, "error", err)
+		}
 		outcome, err := h.Routing.Route(ctx, workspaceID, issueID)
 		if err != nil {
 			slog.Warn("routing pass failed",

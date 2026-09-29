@@ -1850,6 +1850,14 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 		}
 	}
 
+	// Routing analysis is a separate lightweight queue. Claiming it here keeps
+	// it off the task/concurrency path while preserving the heartbeat transport.
+	if h.RoutingAnalysisStore != nil {
+		if pending := h.RoutingAnalysisStore.PopPending(ctx, runtimeID); pending != nil {
+			ack.PendingRoutingAnalysis = pending
+		}
+	}
+
 	// Probe then claim the provider-preset queue. The claimed record is the
 	// one carrier allowed to hold an api_key: it goes straight into the ack
 	// below, and the store has already persisted the same request without it.
