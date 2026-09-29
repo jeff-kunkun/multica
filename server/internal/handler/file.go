@@ -42,6 +42,8 @@ var extContentTypes = map[string]string{
 
 const maxUploadSize = 100 << 20 // 100 MB
 const uploadChunkSize = 2 << 20
+const maxChunkUploadSessions = 256
+const chunkUploadIdleTTL = 30 * time.Minute
 
 type chunkUpload struct {
 	mu                                sync.Mutex
@@ -50,12 +52,24 @@ type chunkUpload struct {
 	issueID, commentID, chatSessionID string
 	taskID                            string
 	chunks                            map[int][]byte
+	lastActivity                      time.Time
 }
 
 var chunkUploads = struct {
 	sync.Mutex
 	m map[string]*chunkUpload
 }{m: make(map[string]*chunkUpload)}
+
+func pruneChunkUploadsLocked(now time.Time) {
+	for id, upload := range chunkUploads.m {
+		upload.mu.Lock()
+		expired := now.Sub(upload.lastActivity) > chunkUploadIdleTTL
+		upload.mu.Unlock()
+		if expired {
+			delete(chunkUploads.m, id)
+		}
+	}
+}
 
 const defaultAttachmentDownloadURLTTL = 30 * time.Minute
 
@@ -424,7 +438,13 @@ func (h *Handler) StartChunkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chunkUploads.Lock()
-	chunkUploads.m[id.String()] = &chunkUpload{userID: userID, filename: in.Filename, contentType: in.ContentType, size: in.Size, issueID: in.IssueID, commentID: in.CommentID, chatSessionID: in.ChatSessionID, taskID: in.TaskID, chunks: make(map[int][]byte)}
+	pruneChunkUploadsLocked(time.Now())
+	if len(chunkUploads.m) >= maxChunkUploadSessions {
+		chunkUploads.Unlock()
+		writeError(w, http.StatusTooManyRequests, "too many uploads in progress")
+		return
+	}
+	chunkUploads.m[id.String()] = &chunkUpload{userID: userID, filename: in.Filename, contentType: in.ContentType, size: in.Size, issueID: in.IssueID, commentID: in.CommentID, chatSessionID: in.ChatSessionID, taskID: in.TaskID, chunks: make(map[int][]byte), lastActivity: time.Now()}
 	chunkUploads.Unlock()
 	writeJSON(w, http.StatusCreated, map[string]any{"upload_id": id.String(), "chunk_size": uploadChunkSize, "total_chunks": (in.Size + uploadChunkSize - 1) / uploadChunkSize})
 }
@@ -441,6 +461,7 @@ func (h *Handler) UploadChunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chunkUploads.Lock()
+	pruneChunkUploadsLocked(time.Now())
 	u := chunkUploads.m[id]
 	chunkUploads.Unlock()
 	if u == nil {
@@ -451,12 +472,18 @@ func (h *Handler) UploadChunk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "upload belongs to another user")
 		return
 	}
+	totalChunks := (u.size + uploadChunkSize - 1) / uploadChunkSize
+	if totalChunks == 0 || int64(idx) >= totalChunks {
+		writeError(w, http.StatusBadRequest, "chunk index out of range")
+		return
+	}
 	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, uploadChunkSize))
 	if err != nil || len(b) > uploadChunkSize {
 		writeError(w, 400, "chunk too large")
 		return
 	}
 	u.mu.Lock()
+	u.lastActivity = time.Now()
 	u.chunks[idx] = b
 	received := int64(0)
 	for _, c := range u.chunks {
@@ -473,6 +500,7 @@ func (h *Handler) ChunkUploadStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "uploadID")
 	chunkUploads.Lock()
+	pruneChunkUploadsLocked(time.Now())
 	u := chunkUploads.m[id]
 	chunkUploads.Unlock()
 	if u == nil || u.userID != userID {
@@ -481,6 +509,7 @@ func (h *Handler) ChunkUploadStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	u.lastActivity = time.Now()
 	indices := make([]int, 0, len(u.chunks))
 	received := int64(0)
 	for i, c := range u.chunks {
@@ -497,6 +526,7 @@ func (h *Handler) CompleteChunkUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "uploadID")
 	chunkUploads.Lock()
+	pruneChunkUploadsLocked(time.Now())
 	u := chunkUploads.m[id]
 	chunkUploads.Unlock()
 	if u == nil || u.userID != userID {
@@ -504,6 +534,7 @@ func (h *Handler) CompleteChunkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u.mu.Lock()
+	u.lastActivity = time.Now()
 	data := make([]byte, 0, u.size)
 	for off := int64(0); off < u.size; off += uploadChunkSize {
 		c, exists := u.chunks[int(off/uploadChunkSize)]
@@ -513,6 +544,11 @@ func (h *Handler) CompleteChunkUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data = append(data, c...)
+	}
+	if int64(len(data)) != u.size {
+		u.mu.Unlock()
+		writeError(w, http.StatusConflict, "uploaded bytes do not match declared size")
+		return
 	}
 	u.mu.Unlock()
 	var body bytes.Buffer
@@ -536,12 +572,30 @@ func (h *Handler) CompleteChunkUpload(w http.ResponseWriter, r *http.Request) {
 	req.ContentLength = int64(body.Len())
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	// UploadFile performs the normal attachment write and emits the response.
-	h.UploadFile(w, req)
-	if w.Header().Get("Content-Type") != "" {
+	rw := &chunkResponseWriter{ResponseWriter: w, status: http.StatusOK}
+	h.UploadFile(rw, req)
+	if rw.status >= 200 && rw.status < 300 {
 		chunkUploads.Lock()
 		delete(chunkUploads.m, id)
 		chunkUploads.Unlock()
 	}
+}
+
+type chunkResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *chunkResponseWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *chunkResponseWriter) Write(p []byte) (int, error) {
+	if w.status == http.StatusOK {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(p)
 }
 
 func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {

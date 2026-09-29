@@ -42,6 +42,7 @@ export interface StartUploadArgs {
   /** Injected so the coordinator is framework-agnostic and unit-testable. */
   api: Pick<ApiClient, "uploadFile">;
   ctx?: UploadCoordinatorContext;
+  onProgress?: (uploadedBytes: number, totalBytes: number) => void;
   /**
    * Settled outcome. NOT called on abort — an aborted upload leaves its
    * placeholder in `uploading`, which the store drops on the next load (aborts
@@ -64,6 +65,7 @@ export function startUpload({
   file,
   api,
   ctx,
+  onProgress,
   onSettled,
 }: StartUploadArgs): void {
   const controller = new AbortController();
@@ -77,6 +79,7 @@ export function startUpload({
           issueId: ctx?.issueId,
           commentId: ctx?.commentId,
           chatSessionId: ctx?.chatSessionId,
+          onProgress,
         },
         controller.signal,
       );
@@ -87,6 +90,35 @@ export function startUpload({
       // load. Every other error surfaces.
       if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
         logger.info("upload aborted", { clientUploadId });
+        return;
+      }
+      // Mobile Safari commonly rejects requests when the tab is backgrounded,
+      // and a disconnected foreground tab reports a failed fetch. Keep the
+      // same client id and file, then restart after visibility/network
+      // recovery; the API client queries the persisted server session and
+      // skips chunks that already arrived.
+      const hidden = typeof document !== "undefined" && document.hidden;
+      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+      if (hidden || offline) {
+        await new Promise<void>((resolve) => {
+          if (typeof document === "undefined" || typeof window === "undefined") {
+            resolve();
+            return;
+          }
+          const resume = () => {
+            const visible = typeof document === "undefined" || !document.hidden;
+            const online = typeof navigator === "undefined" || navigator.onLine !== false;
+            if (!visible || !online) return;
+            document.removeEventListener("visibilitychange", resume);
+            window.removeEventListener("online", resume);
+            resolve();
+          };
+          document.addEventListener("visibilitychange", resume);
+          window.addEventListener("online", resume);
+          resume();
+        });
+        if (controller.signal.aborted) return;
+        startUpload({ clientUploadId, file, api, ctx, onProgress, onSettled });
         return;
       }
       onSettled({

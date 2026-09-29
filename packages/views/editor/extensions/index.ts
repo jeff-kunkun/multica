@@ -150,7 +150,7 @@ export interface EditorExtensionsOptions {
   queryClient?: import("@tanstack/react-query").QueryClient;
   onSubmitRef?: RefObject<(() => void) | undefined>;
   onUploadFileRef?: RefObject<
-    ((file: File, uploadId: string) => Promise<UploadResult | null>) | undefined
+    ((file: File, uploadId: string, onProgress: (uploadedBytes: number, totalBytes: number) => void) => Promise<UploadResult | null>) | undefined
   >;
   /**
    * Character count above which a plain-text paste becomes a .txt attachment
