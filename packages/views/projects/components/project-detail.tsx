@@ -26,6 +26,7 @@ import { currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, ReadonlyContent, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
+import { ProjectMemoryCard } from "./project-memory-card";
 import { ProjectMembersSection } from "./project-members-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
@@ -490,6 +491,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </div>
 
       {/* Resources */}
+      <ProjectMemoryCard projectId={projectId} />
       <ProjectResourcesSection projectId={projectId} />
 
       <div id="project-members-section">

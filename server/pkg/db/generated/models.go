@@ -1413,6 +1413,18 @@ type ProjectMember struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ProjectMemoryStatus struct {
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	LocationKey  string             `json:"location_key"`
+	Path         string             `json:"path"`
+	ExistsOnDisk bool               `json:"exists_on_disk"`
+	IsDirectory  bool               `json:"is_directory"`
+	ModifiedAt   pgtype.Timestamptz `json:"modified_at"`
+	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
+	Error        pgtype.Text        `json:"error"`
+}
+
 type ProjectResource struct {
 	ID           pgtype.UUID        `json:"id"`
 	ProjectID    pgtype.UUID        `json:"project_id"`
