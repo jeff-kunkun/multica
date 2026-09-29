@@ -559,9 +559,102 @@ type AttachmentResponse struct {
 	CreatedAt   string `json:"created_at"`
 }
 
+func (c *APIClient) uploadChunked(ctx context.Context, data []byte, filename string, fields map[string]string) (AttachmentResponse, error) {
+	if len(data) <= 2<<20 {
+		return AttachmentResponse{}, fmt.Errorf("chunked upload requires a large payload")
+	}
+	meta := map[string]any{"filename": filepath.Base(filename), "size": len(data)}
+	for k, v := range fields {
+		if v != "" {
+			meta[k] = v
+		}
+	}
+	b, _ := json.Marshal(meta)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/upload-file/chunked", bytes.NewReader(b))
+	if err != nil {
+		return AttachmentResponse{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.setHeaders(req)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return AttachmentResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return AttachmentResponse{}, newHTTPError(http.MethodPost, "/api/upload-file/chunked", resp)
+	}
+	var s struct {
+		UploadID  string `json:"upload_id"`
+		ChunkSize int    `json:"chunk_size"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		return AttachmentResponse{}, err
+	}
+	if s.UploadID == "" {
+		return AttachmentResponse{}, fmt.Errorf("missing upload id")
+	}
+	if s.ChunkSize <= 0 {
+		s.ChunkSize = 2 << 20
+	}
+	for i, off := 0, 0; off < len(data); i, off = i+1, off+s.ChunkSize {
+		end := off + s.ChunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		path := fmt.Sprintf("%s/api/upload-file/chunked/%s/chunk?index=%d", c.BaseURL, s.UploadID, i)
+		var last error
+		for attempt := 0; attempt < 3; attempt++ {
+			rq, e := http.NewRequestWithContext(ctx, http.MethodPut, path, bytes.NewReader(data[off:end]))
+			if e != nil {
+				last = e
+				continue
+			}
+			c.setHeaders(rq)
+			rr, e := c.HTTPClient.Do(rq)
+			if e == nil && rr.StatusCode < 400 {
+				rr.Body.Close()
+				last = nil
+				break
+			}
+			if e != nil {
+				last = e
+			} else {
+				last = newHTTPError(http.MethodPut, "/api/upload-file/chunked", rr)
+				rr.Body.Close()
+			}
+		}
+		if last != nil {
+			return AttachmentResponse{}, last
+		}
+	}
+	fin, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/upload-file/chunked/%s/complete", c.BaseURL, s.UploadID), nil)
+	if err != nil {
+		return AttachmentResponse{}, err
+	}
+	c.setHeaders(fin)
+	rr, err := c.HTTPClient.Do(fin)
+	if err != nil {
+		return AttachmentResponse{}, err
+	}
+	defer rr.Body.Close()
+	if rr.StatusCode >= 400 {
+		return AttachmentResponse{}, newHTTPError(http.MethodPost, "/api/upload-file/chunked/complete", rr)
+	}
+	var out AttachmentResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		return AttachmentResponse{}, err
+	}
+	return out, nil
+}
+
 // UploadFile uploads a file via multipart form to /api/upload-file.
 // It returns the attachment ID from the server response.
 func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename string, issueID string) (string, error) {
+	if len(fileData) > 2<<20 {
+		out, err := c.uploadChunked(ctx, fileData, filename, map[string]string{"issue_id": issueID})
+		return out.ID, err
+	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
@@ -618,6 +711,9 @@ func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename st
 // reply that task produces on completion. Returns the full AttachmentResponse
 // (id + markdown_url) so the agent can embed the image inline in its reply.
 func (c *APIClient) UploadChatAttachment(ctx context.Context, fileData []byte, filename, taskID string) (AttachmentResponse, error) {
+	if len(fileData) > 2<<20 {
+		return c.uploadChunked(ctx, fileData, filename, map[string]string{"task_id": taskID})
+	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
@@ -680,6 +776,10 @@ func (c *APIClient) UploadChatAttachment(ctx context.Context, fileData []byte, f
 // without associating it with an issue or comment. It decodes the full
 // AttachmentResponse and returns the attachment ID and URL.
 func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, filename string) (string, string, error) {
+	if len(fileData) > 2<<20 {
+		out, err := c.uploadChunked(ctx, fileData, filename, nil)
+		return out.ID, out.URL, err
+	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
