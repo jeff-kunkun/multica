@@ -343,11 +343,7 @@ describe("paste-as-file", () => {
   const THRESHOLD = 20;
 
   function makePasteEditor(opts: {
-    handler?: (
-      file: File,
-      uploadId: string,
-      onProgress?: (uploadedBytes: number, totalBytes: number) => void,
-    ) => Promise<UploadResult | null>;
+    handler?: (file: File) => Promise<UploadResult | null>;
     threshold?: number;
   }) {
     const onUploadFileRef = { current: opts.handler };
@@ -363,7 +359,7 @@ describe("paste-as-file", () => {
         Markdown.configure({ indentation: { style: "space", size: 3 } }),
         createFileUploadExtension(
           onUploadFileRef as React.RefObject<
-            ((file: File, uploadId: string, onProgress?: (uploadedBytes: number, totalBytes: number) => void) => Promise<UploadResult | null>) | undefined
+            ((file: File) => Promise<UploadResult | null>) | undefined
           >,
           thresholdRef as React.RefObject<number | undefined>,
         ),
@@ -498,7 +494,7 @@ describe("paste-as-file", () => {
       element,
       extensions: createEditorExtensions({
         onUploadFileRef: onUploadFileRef as React.RefObject<
-          ((file: File, uploadId: string, onProgress?: (uploadedBytes: number, totalBytes: number) => void) => Promise<UploadResult | null>) | undefined
+          ((file: File) => Promise<UploadResult | null>) | undefined
         >,
         pasteAsFileThresholdRef: thresholdRef as React.RefObject<number | undefined>,
         disableMentions: true,

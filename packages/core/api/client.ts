@@ -4423,7 +4423,7 @@ export class ApiClient {
       if (res.status === 401) this.handleUnauthorized(credentialUsed);
       const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new ApiError(message, res.status, res.statusText);
+      throw new Error(message);
     }
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });

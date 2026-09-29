@@ -50,7 +50,7 @@ function AttachmentCardChrome({
       <div className="min-w-0 flex-1">
         <p className="truncate text-body">
           {uploading
-            ? `${t(($) => $.file_card.uploading, { filename })}${uploadProgress == null ? "" : ` (${uploadProgress}%)`}`
+            ? t(($) => $.file_card.uploading, { filename })
             : filename}
         </p>
       </div>
