@@ -39,6 +39,7 @@ import {
 } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { vcsConnectionsOptions } from "@multica/core/vcs";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import {
@@ -112,6 +113,8 @@ export function RepositoriesTab() {
   const queryClient = useQueryClient();
   const navigation = useNavigation();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: vcsData } = useQuery(vcsConnectionsOptions(wsId));
+  const vcsConnections = vcsData?.connections ?? [];
   const [repositories, setRepositories] = useState<WorkspaceRepo[]>(
     workspace?.repos ?? EMPTY_REPOSITORIES,
   );
@@ -390,22 +393,27 @@ export function RepositoriesTab() {
               key={index}
               className="grid gap-2 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_auto] sm:items-center"
             >
-              <Input
-                type="text"
-                name={`repository-${index}-url`}
-                autoComplete="off"
-                spellCheck={false}
-                aria-label={t(($) => $.repositories.url_placeholder)}
-                value={repository.url}
-                onChange={(event) =>
-                  updateRepository(index, "url", event.target.value)
-                }
-                onBlur={autoSave.flush}
-                disabled={!canManageWorkspace}
-                aria-invalid={!repository.url.trim()}
-                placeholder={t(($) => $.repositories.url_placeholder)}
-                className="font-mono text-caption"
-              />
+              <div className="min-w-0">
+                <Input
+                  type="text"
+                  name={`repository-${index}-url`}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label={t(($) => $.repositories.url_placeholder)}
+                  value={repository.url}
+                  onChange={(event) =>
+                    updateRepository(index, "url", event.target.value)
+                  }
+                  onBlur={autoSave.flush}
+                  disabled={!canManageWorkspace}
+                  aria-invalid={!repository.url.trim()}
+                  placeholder={t(($) => $.repositories.url_placeholder)}
+                  className="font-mono text-caption"
+                />
+                {repository.description ? (
+                  <p className="mt-1 truncate text-micro text-muted-foreground">{repository.description}</p>
+                ) : null}
+              </div>
               <Input
                 type="text"
                 name={`repository-${index}-description`}
@@ -419,6 +427,19 @@ export function RepositoriesTab() {
                 disabled={!canManageWorkspace}
                 placeholder={t(($) => $.repositories.description_placeholder)}
               />
+              <div className="flex items-center gap-2 text-caption text-muted-foreground" aria-label="Repository connection status">
+                <span className="size-2 rounded-full bg-emerald-500" aria-hidden="true" />
+                <span className="truncate">
+                  {(() => {
+                    const host = repositoryIdentity(repository.url)?.split("/")[0]?.toLowerCase();
+                    const match = vcsConnections.find((connection) => {
+                      const connectionHost = (() => { try { return new URL(connection.instance_url).hostname.toLowerCase(); } catch { return connection.instance_url.toLowerCase(); } })();
+                      return connectionHost === host;
+                    });
+                    return match ? `${match.provider} · ${match.account_login}` : (host === "github.com" ? "本机上报" : "未接通");
+                  })()}
+                </span>
+              </div>
               {canManageWorkspace ? (
                 <div className="flex items-center justify-self-end gap-1">
                   <ShareScopeTrigger

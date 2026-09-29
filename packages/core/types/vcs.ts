@@ -6,7 +6,7 @@
  * with the matching `provider`.
  */
 
-export type VCSProvider = "forgejo" | "gitea" | "gitlab";
+export type VCSProvider = "github" | "forgejo" | "gitea" | "gitlab";
 
 export interface VCSConnection {
   id: string;
