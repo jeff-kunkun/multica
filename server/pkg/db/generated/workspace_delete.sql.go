@@ -315,6 +315,9 @@ deleted_attachments AS (
 deleted_visibility_audits AS (
     DELETE FROM visibility_audit WHERE workspace_id = $1
 ),
+deleted_chat_session_link_read_audits AS (
+    DELETE FROM chat_session_link_read_audit WHERE workspace_id = $1
+),
 deleted_module_visibility AS (
     DELETE FROM workspace_module_visibility WHERE workspace_id = $1
 ),
@@ -542,6 +545,8 @@ WHERE channel_media_pending_object.workspace_id = $1
 // them, so the teardown keeps sweeping whatever a pre-removal build left behind.
 // Sharing-scope history (DENE-698) is workspace-keyed and has no foreign key,
 // so the audit rows outlive every resource they describe unless swept here.
+// Cross-workspace chat link reads are workspace-owned audit rows. Delete them
+// explicitly so teardown does not depend on the workspace FK cascade.
 // Module-level sharing (DENE-699) is workspace-keyed with no foreign key.
 // Quota breakers and the one relay per failed task (DENE-771) are
 // workspace-keyed and have no foreign key, so they outlive the seat
