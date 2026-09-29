@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ApiError, api } from "@multica/core/api";
+import { githubAppStatusOptions, githubKeys } from "@multica/core/github";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { repoLinkKeys, parseRepoLocator, repoLinkScope, repoLinkTitle } from "@multica/core/repo-links";
 import type { RepoLink, RepoLinkKind, RepoLinkVisibility } from "@multica/core/types";
@@ -29,6 +30,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { GitHubAppCreateFields, GitHubAppPanel, postGitHubAppManifest } from "./github-app-panel";
 import { SettingsTab } from "./settings-layout";
 import { useRepoCatalog } from "./use-repo-catalog";
 import {
@@ -63,6 +65,9 @@ export function GitConnectionsTab() {
   const [removeTarget, setRemoveTarget] = useState<RepoLink | null>(null);
   const [removing, setRemoving] = useState(false);
   const [webhook, setWebhook] = useState<{ url: string; secret: string } | null>(null);
+  const [org, setOrg] = useState("");
+  const appQuery = useQuery(githubAppStatusOptions(wsId));
+  const appStatus = appQuery.data;
 
   const canAdd = catalog.canAddPersonal || catalog.canAddWorkspace;
 
@@ -72,6 +77,7 @@ export function GitConnectionsTab() {
     setKind(locator && locator.host !== "github.com" ? "gitlab_token" : "github_token");
     setToken("");
     setWebhook(null);
+    setOrg("");
     setVisibility(
       catalog.canAddPersonal
         ? "personal"
@@ -95,12 +101,63 @@ export function GitConnectionsTab() {
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: repoLinkKeys.all(wsId) });
-    await queryClient.invalidateQueries({ queryKey: ["github", wsId] });
+    await queryClient.invalidateQueries({ queryKey: githubKeys.all(wsId) });
     await queryClient.invalidateQueries({ queryKey: ["vcs", wsId] });
+  }
+
+  useEffect(() => {
+    const appError = navigation.searchParams.get("github_app_error");
+    const githubError = navigation.searchParams.get("github_error");
+    const connected = navigation.searchParams.get("github_connected") === "1";
+    if (!appError && !githubError && !connected) return;
+    if (appError === "expired") toast.error(t(($) => $.repo_links.github_app_error_expired));
+    else if (appError === "duplicate") toast.error(t(($) => $.repo_links.github_app_error_duplicate));
+    else if (appError === "not_owner") toast.error(t(($) => $.repo_links.github_app_not_owner_error));
+    else if (appError) toast.error(t(($) => $.repo_links.github_app_error_failed));
+    else if (githubError === "installation_taken") toast.error(t(($) => $.repo_links.github_app_error_taken));
+    else if (githubError) toast.error(t(($) => $.repositories.github_connect_failed));
+    else toast.success(t(($) => $.repo_links.github_app_connected));
+    const next = new URLSearchParams(navigation.searchParams);
+    next.delete("github_app_error");
+    next.delete("github_error");
+    next.delete("github_connected");
+    const search = next.toString();
+    navigation.replace(`${navigation.pathname}${search ? `?${search}` : ""}`);
+  }, [navigation, t]);
+
+  async function startGitHubApp() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const setup = await api.beginGitHubApp(wsId, org.trim());
+      if (!setup.action_url) {
+        toast.error(t(($) => $.repo_links.github_app_error_failed));
+        return;
+      }
+      postGitHubAppManifest(setup.action_url, setup.manifest);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t(($) => $.repo_links.github_app_error_failed),
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleSave() {
     if (saving) return;
+    if (kind === "github_app" && appStatus?.source === "none") {
+      if (!appStatus.can_create) {
+        toast.error(
+          appStatus.block_reason === "not_owner"
+            ? t(($) => $.repo_links.github_app_need_owner)
+            : t(($) => $.repo_links.github_app_unavailable),
+        );
+        return;
+      }
+      await startGitHubApp();
+      return;
+    }
     const locator = parseRepoLocator(scope);
     if (!locator) {
       toast.error(t(($) => $.repo_links.scope_invalid));
@@ -275,6 +332,14 @@ export function GitConnectionsTab() {
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.git_connections)}>
+      <GitHubAppPanel
+        status={appStatus}
+        org={org}
+        onOrg={setOrg}
+        creating={saving}
+        onCreate={() => void startGitHubApp()}
+      />
+
       <div className="flex items-center justify-end">
         {canAdd ? (
           <Button size="sm" onClick={() => openDialog()}>
@@ -331,6 +396,24 @@ export function GitConnectionsTab() {
                 value={webhook.secret}
               />
             </div>
+          ) : kind === "github_app" && appStatus?.source === "none" ? (
+            <GitHubAppCreateFields
+              inputId="github-app-org-dialog"
+              org={org}
+              onOrg={setOrg}
+              creating={saving}
+              onCreate={() => void startGitHubApp()}
+              showButton={false}
+              blocked={
+                appStatus.can_create
+                  ? null
+                  : appStatus.block_reason === "not_owner"
+                    ? t(($) => $.repo_links.github_app_need_owner)
+                    : appStatus.block_reason === "public_url_missing"
+                      ? t(($) => $.repo_links.github_app_public_url)
+                      : t(($) => $.repo_links.github_app_unavailable)
+              }
+            />
           ) : (
             <div className="space-y-4">
               <Field label={t(($) => $.repo_links.field_kind)}>
@@ -397,10 +480,22 @@ export function GitConnectionsTab() {
               {t(($) => $.repo_links.cancel)}
             </Button>
             {webhook ? null : (
-              <Button onClick={() => void handleSave()} disabled={saving || !canAdd}>
+              <Button
+                onClick={() => void handleSave()}
+                disabled={
+                  saving ||
+                  (kind === "github_app" && appStatus?.source === "none"
+                    ? !appStatus.can_create
+                    : !canAdd)
+                }
+              >
                 {saving
-                  ? t(($) => $.repo_links.saving)
-                  : t(($) => $.repo_links.save_and_test)}
+                  ? kind === "github_app" && appStatus?.source === "none"
+                    ? t(($) => $.repo_links.github_app_creating)
+                    : t(($) => $.repo_links.saving)
+                  : kind === "github_app" && appStatus?.source === "none"
+                    ? t(($) => $.repo_links.github_app_create)
+                    : t(($) => $.repo_links.save_and_test)}
               </Button>
             )}
           </DialogFooter>

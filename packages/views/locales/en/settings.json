@@ -1241,7 +1241,25 @@
     "scope_invalid": "Write the scope as host/account, for example github.com/acme.",
     "token_required": "A token is required.",
     "token_unavailable": "This server cannot store a GitHub token yet.",
-    "test_unavailable": "This server cannot test this connection yet."
+    "test_unavailable": "This server cannot test this connection yet.",
+    "github_app_status": "GitHub App",
+    "github_app_create": "Create the GitHub App",
+    "github_app_org": "Organization (optional)",
+    "github_app_org_placeholder": "Leave empty to create it on your user",
+    "github_app_need_owner": "A workspace owner has to turn this on.",
+    "github_app_env": "Configured on the server, read-only.",
+    "github_app_ready": "Created from Settings.",
+    "github_app_manage": "GitHub settings",
+    "github_app_unconfigured": "This server has no GitHub App yet.",
+    "github_app_unavailable": "This server cannot store a GitHub App yet.",
+    "github_app_public_url": "This server has no public address, so GitHub cannot call back.",
+    "github_app_creating": "Opening GitHub",
+    "github_app_error_expired": "That GitHub confirmation expired. Start again.",
+    "github_app_error_failed": "GitHub App setup did not finish.",
+    "github_app_error_duplicate": "A GitHub App is already configured.",
+    "github_app_error_taken": "This GitHub installation is already attached to another workspace.",
+    "github_app_connected": "GitHub connected.",
+    "github_app_not_owner_error": "Only a workspace owner can create the GitHub App."
   },
   "repositories": {
     "section_title": "Repositories",
@@ -1284,7 +1302,8 @@
     "delete_confirm_action": "Delete repository",
     "manage_hint": "Only admins and owners can manage repositories.",
     "toast_saved": "Repositories saved",
-    "toast_save_failed": "Failed to save repositories"
+    "toast_save_failed": "Failed to save repositories",
+    "github_installation_taken": "This GitHub installation is already attached to another workspace."
   },
   "desktop": {
     "tabs": {

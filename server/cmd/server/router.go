@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/githubapp"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -1212,6 +1213,31 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("vcs integration disabled (MULTICA_VCS_SECRET_KEY not set)")
 	}
 
+	// GitHub App credentials created from Settings. A dedicated key wins;
+	// otherwise the box is derived from JWT_SECRET so an owner can create
+	// the App without an extra env var. The row is loaded now and replaced
+	// in memory when the manifest callback stores a new one.
+	if ghKey, err := secretbox.LoadKey("MULTICA_GITHUB_APP_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(ghKey)
+		if err != nil {
+			slog.Error("github app: secretbox.New failed; Settings cannot store an App", "error", err)
+		} else {
+			h.GitHubAppSecrets = box
+		}
+	} else if jwtSecret := strings.TrimSpace(os.Getenv("JWT_SECRET")); jwtSecret != "" {
+		box, err := githubapp.NewSecretBox(jwtSecret)
+		if err != nil {
+			slog.Error("github app: derived secretbox failed; Settings cannot store an App", "error", err)
+		} else {
+			h.GitHubAppSecrets = box
+		}
+	} else {
+		slog.Info("GitHub App Settings storage disabled (no MULTICA_GITHUB_APP_SECRET_KEY and no JWT_SECRET)")
+	}
+	if err := h.LoadGitHubAppCredential(context.Background()); err != nil {
+		slog.Error("github app: failed to load stored credential", "error", err)
+	}
+
 	// Plugin secrets use a dedicated deployment key. Keeping this separate from
 	// VCS and channel secrets gives operators an isolated rotation and blast
 	// radius; without it, saving a `secret` config field fails closed rather
@@ -1479,6 +1505,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)
+	// Manifest callback and the CLI launch page. The signed state is the
+	// credential: GitHub redirects a browser that has no Multica session.
+	r.Get("/api/github/app/launch", h.LaunchGitHubApp)
+	r.Get("/api/github/app/callback", h.GitHubAppCallback)
 	// Slack OAuth callback (no Multica auth in the path — it is hit by Slack's
 	// browser redirect; the workspace/agent/initiator are recovered from the
 	// sealed state). It exchanges the code, upserts the install, then bounces
@@ -1682,6 +1712,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the handler strips the management handle and adds a
 					// can_manage hint so the UI can gate connect/disconnect.
 					r.Get("/github/installations", h.ListGitHubInstallations)
+					r.Get("/github/app", h.GetGitHubApp)
+					r.Post("/github/app", h.BeginGitHubApp)
 					// VCS connections (Forgejo / Gitea / GitLab) — member-visible
 					// for the same reason as GitHub installations; connect /
 					// disconnect are admin-gated in the group below.

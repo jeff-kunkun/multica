@@ -191,6 +191,8 @@ import type {
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
+  GitHubAppStatus,
+  GitHubAppSetup,
   ListVCSConnectionsResponse,
   ConnectVCSRequest,
   ConnectVCSResponse,
@@ -516,6 +518,9 @@ import {
   EMPTY_ISSUE_STATUS_ENTRY,
   EMPTY_RESOURCE_LABELS_RESPONSE,
   GitHubConnectResponseSchema,
+  GitHubAppStatusSchema,
+  GitHubAppSetupSchema,
+  EMPTY_GITHUB_APP_STATUS,
   ListGitHubInstallationsResponseSchema,
   ListGitHubRepositoriesResponseSchema,
   ListRepoLinksResponseSchema,
@@ -5749,6 +5754,29 @@ export class ApiClient {
       GitHubConnectResponseSchema,
       EMPTY_GITHUB_CONNECT_RESPONSE,
       { endpoint: "GET /api/workspaces/:id/github/connect" },
+    );
+  }
+
+  async getGitHubApp(workspaceId: string): Promise<GitHubAppStatus> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/github/app`);
+    return parseWithFallback(
+      raw,
+      GitHubAppStatusSchema,
+      EMPTY_GITHUB_APP_STATUS,
+      { endpoint: "GET /api/workspaces/:id/github/app" },
+    );
+  }
+
+  async beginGitHubApp(workspaceId: string, org?: string): Promise<GitHubAppSetup> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/github/app`, {
+      method: "POST",
+      body: JSON.stringify({ org: org ?? "" }),
+    });
+    return parseWithFallback(
+      raw,
+      GitHubAppSetupSchema,
+      { action_url: "", manifest: {}, launch_url: "" },
+      { endpoint: "POST /api/workspaces/:id/github/app" },
     );
   }
 

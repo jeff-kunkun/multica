@@ -33,6 +33,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/inbox.md` | The user asks about their inbox or what is stuck: `multica inbox board` and the fixed five-part answer |
 | `references/transfer.md` | `multica transfer export` / `import` / `bind-runtimes`, and the kun `/transfer/*` endpoints |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
+| `references/github-app.md` | GitHub App identity for this deployment: status, and a setup link a person opens to create the App |
 
 Open what the task needs. A single-domain task usually needs one; a task that
 crosses domains needs each domain it touches — creating a squad, assigning it an

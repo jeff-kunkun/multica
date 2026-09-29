@@ -99,6 +99,8 @@ func init() {
 	rootCmd.AddCommand(attachmentCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(settingsCmd)
+	githubAppCmd.GroupID = groupCore
+	rootCmd.AddCommand(githubAppCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(versionCmd)
 

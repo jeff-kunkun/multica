@@ -976,7 +976,25 @@
     "scope_invalid": "범위는 도메인/계정으로 적으세요. 예: github.com/acme.",
     "token_required": "토큰이 필요합니다.",
     "token_unavailable": "이 서버는 아직 GitHub 토큰을 저장할 수 없습니다.",
-    "test_unavailable": "이 서버는 아직 이 연결을 테스트할 수 없습니다."
+    "test_unavailable": "이 서버는 아직 이 연결을 테스트할 수 없습니다.",
+    "github_app_status": "GitHub App",
+    "github_app_create": "GitHub App 만들기",
+    "github_app_org": "조직 이름 (선택)",
+    "github_app_org_placeholder": "비워 두면 개인 계정에 만듭니다",
+    "github_app_need_owner": "워크스페이스 소유자가 켜야 합니다.",
+    "github_app_env": "서버에 설정되어 있습니다. 읽기 전용.",
+    "github_app_ready": "설정 화면에서 만들었습니다.",
+    "github_app_manage": "GitHub 관리 페이지",
+    "github_app_unconfigured": "이 서버에는 아직 GitHub App이 없습니다.",
+    "github_app_unavailable": "이 서버는 아직 GitHub App을 저장할 수 없습니다.",
+    "github_app_public_url": "이 서버에 공개 주소가 없어 GitHub가 돌아올 수 없습니다.",
+    "github_app_creating": "GitHub로 이동 중",
+    "github_app_error_expired": "GitHub 확인이 만료되었습니다. 다시 만드세요.",
+    "github_app_error_failed": "GitHub App을 만들지 못했습니다.",
+    "github_app_error_duplicate": "GitHub App이 이미 설정되어 있습니다.",
+    "github_app_error_taken": "이 GitHub 설치는 이미 다른 워크스페이스에 연결되어 있습니다.",
+    "github_app_connected": "GitHub에 연결했습니다.",
+    "github_app_not_owner_error": "GitHub App은 워크스페이스 소유자만 만들 수 있습니다."
   },
   "repositories": {
     "section_title": "저장소",
@@ -1019,7 +1037,8 @@
     "delete_confirm_action": "저장소 삭제",
     "manage_hint": "관리자와 소유자만 저장소를 관리할 수 있습니다.",
     "toast_saved": "저장소를 저장했습니다",
-    "toast_save_failed": "저장소를 저장하지 못했습니다"
+    "toast_save_failed": "저장소를 저장하지 못했습니다",
+    "github_installation_taken": "이 GitHub 설치는 이미 다른 워크스페이스에 연결되어 있습니다."
   },
   "desktop": {
     "tabs": {
