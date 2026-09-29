@@ -27,6 +27,7 @@ import {
   useSetChatSessionPinned,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { useChatListViewStore } from "@multica/core/chat/list-view-store";
 import { useAuthStore } from "@multica/core/auth";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { ChatAccessDialog } from "./chat-access-dialog";
@@ -95,6 +96,7 @@ export function ChatThreadList({
   onArchive,
   emptyLabel,
   search,
+  sessionsLoaded = true,
   collapseHistory = true,
 }: {
   sessions: ChatSession[];
@@ -112,6 +114,9 @@ export function ChatThreadList({
    *  set (archived included, listed last and tagged), rows highlight the
    *  query, and a content hit's snippet replaces the last-message preview. */
   search?: { query: string; snippets: ReadonlyMap<string, string> };
+  /** False while the sessions query is still loading, so an empty `sessions`
+   *  is not mistaken for a drained archive. */
+  sessionsLoaded?: boolean;
   /** Cap the history view at the recent few unpinned chats behind a "Show
    *  more" row. The parent turns it off while a project filter is active so a
    *  filtered result is never truncated. Search and the archived view never
@@ -147,16 +152,25 @@ export function ChatThreadList({
     [sessions],
   );
 
-  // Which view is showing. Falls back to history when the archived list drains
-  // (last chat unarchived / deleted) so we never strand the user on an empty
-  // archive.
-  const [view, setView] = useState<"history" | "archived">("history");
+  // Which view is showing. Kept in the session-scoped list store so an open
+  // archive survives opening a chat and coming back. Falls back to history
+  // when the archived list drains (last chat unarchived / deleted) so we never
+  // strand the user on an empty archive — but only once the list has loaded:
+  // a restored archive view would otherwise be thrown away while the sessions
+  // are still in flight.
+  const view = useChatListViewStore((s) => s.view);
+  const setView = useChatListViewStore((s) => s.setView);
   useEffect(() => {
-    if (view === "archived" && archivedSessions.length === 0) setView("history");
-  }, [view, archivedSessions.length]);
+    if (sessionsLoaded && view === "archived" && archivedSessions.length === 0) {
+      setView("history");
+    }
+  }, [sessionsLoaded, view, archivedSessions.length, setView]);
 
   // Session-local on purpose: a fresh page load goes back to the short list.
-  const [historyExpanded, setHistoryExpanded] = useState(false);
+  // Session-scoped with the view above: coming back to an expanded list whose
+  // scroll offset is restored needs the rows that were showing.
+  const historyExpanded = useChatListViewStore((s) => s.historyExpanded);
+  const setHistoryExpanded = useChatListViewStore((s) => s.setHistoryExpanded);
 
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [confirmingStopId, setConfirmingStopId] = useState<string | null>(null);
@@ -682,7 +696,7 @@ export function ChatThreadList({
         <button
           type="button"
           aria-expanded={historyExpanded}
-          onClick={() => setHistoryExpanded((v) => !v)}
+          onClick={() => setHistoryExpanded(!historyExpanded)}
           className="mt-0.5 flex h-8 w-full items-center rounded-md px-2 text-left text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
         >
           {historyExpanded

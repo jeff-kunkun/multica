@@ -43,7 +43,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
-import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { useIsCompact, useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, ImageSequenceProvider } from "../../editor";
 import { collectImageSequence, type ImageSequenceBlock } from "@multica/core/attachments/image-sequence";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -135,6 +135,7 @@ import {
   useResolvedExpandStore,
   useSubIssuesCollapseStore,
   useSubIssueDisplayStore,
+  useIssueDetailSectionsStore,
   SUB_ISSUE_ROW_PROPERTY_KEYS,
   type SubIssueRowProperties,
   type SubIssueRowPropertyKey,
@@ -1198,6 +1199,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   });
   const sidebarRef = usePanelRef();
   const isMobile = useIsMobile();
+  // The properties panel folds into a drawer below the same breakpoint the
+  // app nav does: on a portrait tablet a 320px panel beside the content
+  // leaves the description under 500px of reading width.
+  const isCompact = useIsCompact();
   const desktopSidebarInitialOpen = getAnimatedRightSidebarInitialOpen(
     defaultSidebarOpen,
     defaultLayout,
@@ -1212,15 +1217,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
-    if (isMobile) {
+    if (isCompact) {
       setMobileSidebarOpen(false);
     }
-  }, [isMobile]);
-  const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
-  const [propertiesOpen, setPropertiesOpen] = useState(true);
-  const [detailsOpen, setDetailsOpen] = useState(true);
-  const [parentIssueOpen, setParentIssueOpen] = useState(true);
-  const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
+  }, [isCompact]);
+  const sidebarOpen = isCompact ? mobileSidebarOpen : desktopSidebarOpen;
+  // Section folds are a personal layout preference shared by every issue, so
+  // they outlive this component (and a phone browser's tab reload).
+  const sectionsOpen = useIssueDetailSectionsStore((s) => s.open);
+  const toggleSection = useIssueDetailSectionsStore((s) => s.toggle);
+  const {
+    properties: propertiesOpen,
+    details: detailsOpen,
+    parentIssue: parentIssueOpen,
+    pullRequests: pullRequestsOpen,
+  } = sectionsOpen;
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [shareScopeOpen, setShareScopeOpen] = useState(false);
   const [shareAudienceSize, setShareAudienceSize] = useState<number | undefined>();
@@ -1257,9 +1268,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const composerRef = useRef<HTMLDivElement | null>(null);
   // Pull-based scroll restoration (MUL-4741): the platform serves the offset
   // captured when this route was last left. The ref-attach assignment covers
-  // the flat render modes (real heights at commit); the virtualized browsing
-  // mode feeds the offset into Virtuoso's initialScrollTop below so the
-  // list's first render already materializes the rows around it.
+  // the flat render modes (real heights at commit); useIssueDetailScrollRestore
+  // below retries it until async content reaches the captured height. The
+  // timeline Virtuoso is NOT fed the offset — see its initialScrollTop.
   //
   // The container key carries the issue id: on the issue route that is
   // redundant with the route scoping, but in the inbox the selection lives
@@ -2258,7 +2269,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [autoOpenCustomProp]);
 
   const handleToggleSidebar = useCallback(() => {
-    if (isMobile) {
+    if (isCompact) {
       setMobileSidebarOpen((open) => !open);
       return;
     }
@@ -2271,7 +2282,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       if (nextOpen) panel.expand();
       else panel.collapse();
     });
-  }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
+  }, [beginDesktopSidebarToggle, isCompact, sidebarRef]);
 
   useRightSidebarShortcut(rightSidebarShortcutTargetRef, handleToggleSidebar);
 
@@ -2364,7 +2375,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <button
           type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setPropertiesOpen(!propertiesOpen)}
+          onClick={() => toggleSection("properties")}
         >
           {t(($) => $.detail.section_properties)}
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
@@ -2579,7 +2590,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <button
             type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-            onClick={() => setParentIssueOpen(!parentIssueOpen)}
+            onClick={() => toggleSection("parentIssue")}
           >
             {t(($) => $.detail.section_parent_issue)}
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
@@ -2622,7 +2633,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <button
             type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-            onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
+            onClick={() => toggleSection("pullRequests")}
           >
             {t(($) => $.detail.section_pull_requests)}
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${pullRequestsOpen ? "rotate-90" : ""}`} />
@@ -2645,7 +2656,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <button
           type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setDetailsOpen(!detailsOpen)}
+          onClick={() => toggleSection("details")}
         >
           {t(($) => $.detail.section_details)}
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
@@ -3580,7 +3591,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
-                      initialScrollTop={restoredScrollTop}
+                      // Always 0 (DENE-978). The restore is owned by
+                      // useIssueDetailScrollRestore on the scroll container;
+                      // Virtuoso reads initialScrollTop as list-relative and
+                      // adds the description above it, landing a return
+                      // visit that far below where it was left. And never
+                      // undefined: Virtuoso only skips its initial scroll for
+                      // 0, so an undefined prop snaps the person's first
+                      // real scroll back to the top.
+                      initialScrollTop={0}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
                       skipAnimationFrameInResizeObserver
@@ -3690,12 +3709,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     </CurrentIssueRenderContextProvider>
   );
 
-  if (isMobile) {
+  if (isCompact) {
     return (
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
+          <SheetContent side="right" showCloseButton={false} className="w-[min(320px,85vw)] overflow-y-auto p-4">
             {sidebarContent}
           </SheetContent>
         </Sheet>

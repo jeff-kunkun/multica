@@ -26,6 +26,7 @@ import {
   sessionToLandOn,
 } from "@multica/core/chat/project-switch";
 import { useChatProjectOpenStore } from "@multica/core/chat/project-open-store";
+import { useChatListViewStore } from "@multica/core/chat/list-view-store";
 import { chatPageShortcutAction } from "@multica/core/chat/chat-page-shortcuts";
 import {
   isEditableShortcutTarget,
@@ -73,6 +74,7 @@ import { WorkThreadPanel } from "../common/work-thread-panel";
 import { PageSearchInput } from "../common/page-search-input";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { useDebouncedValue } from "../common/use-debounced-value";
+import { useRestoredScrollRef } from "../platform";
 
 /**
  * Title half of the chat page search: every word in the title, or the whole
@@ -135,6 +137,7 @@ export function ChatPage() {
   const isCompact = useIsCompact();
 
   const c = useChatController({ isActive: true });
+  const restoreListScroll = useRestoredScrollRef("chat-list");
   const { data: quickActionsPending = null } = useQuery(
     chatQuickActionsPendingOptions(c.activeSessionId ?? ""),
   );
@@ -152,13 +155,17 @@ export function ChatPage() {
   // conversation pane is always mounted so it only needs to reset itself once a
   // real session takes over.
   const [composingNew, setComposingNew] = useState(false);
-  const [projectFilter, setProjectFilter] = useState<ChatProjectFilter>({ type: "all" });
+  // Project, search and archive view survive the list unmounting (a phone
+  // opens a chat by replacing the list) and a discarded tab's reload.
+  const projectFilter = useChatListViewStore((s) => s.projectFilter);
+  const setProjectFilter = useChatListViewStore((s) => s.setProjectFilter);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const startDirectRef = useRef<() => void>(() => {});
   const dismissProjectNudge = useDismissChatProjectNudge();
   // In-page search: titles match locally on the keystroke; what was said in a
   // chat comes from the server once typing settles. Archived chats match too.
-  const [search, setSearch] = useState("");
+  const search = useChatListViewStore((s) => s.search);
+  const setSearch = useChatListViewStore((s) => s.setSearch);
   const query = search.trim().toLowerCase();
   const debouncedQuery = useDebouncedValue(query, 250);
   const { data: contentHits } = useQuery(chatMessageSearchOptions(c.wsId, debouncedQuery));
@@ -172,6 +179,14 @@ export function ChatPage() {
     }
     return snippets;
   }, [contentHits, debouncedQuery, query]);
+  // A restored project filter can name a project deleted since it was saved;
+  // once the project list is known, fall back to the full list instead of
+  // showing an empty, unexplained view.
+  useEffect(() => {
+    if (!c.projectsLoaded || projectFilter.type !== "project") return;
+    if (c.projects.some((project) => project.id === projectFilter.id)) return;
+    setProjectFilter({ type: "all" });
+  }, [c.projectsLoaded, c.projects, projectFilter, setProjectFilter]);
   const visibleSessions = useMemo(() => {
     const inProject = c.sessions.filter((session) =>
       sessionMatchesChatProjectFilter(chatSessionProjectIds(session), projectFilter),
@@ -561,6 +576,7 @@ export function ChatPage() {
     <div className="px-2 py-1">
       <ChatThreadList
         sessions={visibleSessions}
+        sessionsLoaded={c.sessionsLoaded}
         agents={c.agents}
         activeSessionId={c.activeSessionId}
         onSelectSession={handleSelect}
@@ -775,7 +791,13 @@ export function ChatPage() {
         {listHeader}
         {searchBox}
         {projectBar}
-        <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
+        <div
+          ref={restoreListScroll}
+          data-tab-scroll-root="chat-list"
+          className="flex-1 min-h-0 overflow-y-auto"
+        >
+          {listBody}
+        </div>
         {projectSwitcher}
       </div>
     );
@@ -805,7 +827,13 @@ export function ChatPage() {
           {listHeader}
           {searchBox}
           {projectBar}
-          <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
+          <div
+          ref={restoreListScroll}
+          data-tab-scroll-root="chat-list"
+          className="flex-1 min-h-0 overflow-y-auto"
+        >
+          {listBody}
+        </div>
         </div>
       </ResizablePanel>
       <ResizableHandle />
