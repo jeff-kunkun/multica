@@ -119,18 +119,19 @@ DENE-213 的任务说明要求「去 DENE-196 发一条评论，mention 验收�
 CLI（DENE-859 起）：一条命令做完整个收口。
 
 ```bash
-multica issue close <id> --outcome done      --evidence-file ./close.md                     # 交付：子票、或没有验收门的顶层票；关联 PR 还开着就先合并，合不进去落成 blocked 并在回复里说明
+multica issue close <id> --outcome done      --evidence-file ./close.md --knowledge-none   # 交付：子票、或没有验收门的顶层票；关联 PR 还开着就先合并，合不进去落成 blocked 并在回复里说明。没有够格的项目记忆就加 --knowledge-none
 multica issue close <id> --outcome in_review --evidence-file ./close.md                     # 顶层票交付，等验收；要有关联 PR（纯文档票用 --no-code <原因>）；验收席为空则同一次调用补异族席位，再由路由交棒
 multica issue close <id> --outcome blocked   --evidence-file ./close.md --blocked-by DENE-196   # 或 --wake-at / --wait-condition + --wait-timeout / --needs-human
 multica issue close <id> --outcome done --verdict pass --evidence-file ./close.md           # 验收席放行：平台合并 PR，再写 done
 ```
 
-服务端（`POST /api/issues/{id}/close`）在**一个事务**里做三件事：建证据评论、改 `issue.status`、写全部 `close.*` 键；落库前先过 `closeprotocol.Validate`，不合规就整体拒绝，并在错误里点名缺的那一项（缺证据、缺等待、子票不进 `in_review`、`awaiting_human` 缺责任人……）。事务外只剩叫醒（父票屏障、`waiting_on` 等待方、路由）——这些照原有路径跑，失败不回滚已落库的收口。
+服务端（`POST /api/issues/{id}/close`）在**一个事务**里做三件事：建证据评论、改 `issue.status`、写全部 `close.*` 键（含这次的知识审计）；落库前先过 `closeprotocol.Validate`，不合规就整体拒绝，并在错误里点名缺的那一项（缺证据、缺等待、缺知识审计、子票不进 `in_review`、`awaiting_human` 缺责任人……）。事务外只剩叫醒（父票屏障、`waiting_on` 等待方、路由）——这些照原有路径跑，失败不回滚已落库的收口。
 
 - `--evidence`（或 `--evidence-file` / `--evidence-stdin`）必填，`--summary` 放在证据上方。本回合有 triggering comment 时带同一 `--parent`；评论触发的 run 在同一张票上默认回那条线程。
 - `--outcome blocked` 必须带 DENE-850 的等待字段之一：`--blocked-by`、`--wake-at`、`--wait-condition` + `--wait-timeout`、`--needs-human`。不带即拒绝。
 - `--outcome in_review` 只给顶层票；子票用它会被拒绝（做完 `done`，卡住 `blocked`）。它走和 `issue status in_review` 同一道送审门禁（DENE-869）：智能体送审必须有关联的 open/draft/merged PR，纯文档或调研票用 `--no-code <原因>` 说明，否则被拒。带 `--needs-human <member>` 记成 `awaiting_human`；不带则是 `awaiting_review` + `wake_action=route`，由路由填验收席，不要求评论里 @ 谁。
 - `--verdict pass` 只配 `--outcome done`，且票必须已在 `in_review`、调用者是验收席：平台先合并 PR 再写 `done`；合不进去（PR 脏、检查红、host 拒绝）回 `blocked` + `block_kind=external`，把原因写进评论。验收不通过不是收口：`multica issue comment add <id> --verdict hold --content-file ./review.md` 叫醒执行人。
+- `--pr <PR 或 MR 链接>`（DENE-961）：平台还没把交付关联上时，用它申报。服务端按仓库连接核实，核实成功就登记，再走原来的关单闸门。核不到也放行，票上记下 `close.pr_unverified`（未核实），这条链接不会被拿去合并。不要用「等平台关联 PR」卡住，这种等待会被拒绝。`multica issue pull-requests` 会给出同样的缺口和下一条命令。
 - 返回值如实报：实际写入的状态、PR 有没有合并、叫醒了谁。评论里照抄，不要凭记忆复述。
 
 不收口、只叫醒下一棒时用 `multica issue handoff`（DENE-863，`POST /api/issues/{id}/handoff`），不要手写 @：服务端负责路由和查重，回复以实际落库为准（`target_name`、`run_created`、`duplicate`）。
@@ -364,6 +365,9 @@ Stage 2 只做三件事：把 2.3 决策表写进 Builder/Reviewer/Operator/Disp
 | `close.at` | RFC3339 UTC | 同上 | 最后一键 |
 | `close.block_kind` | `decision` `permission` `external` `dependency` `capacity`；仅 blocked 收口必填 | 收尾 agent | 与 blocked 收口一并写入 |
 | `close.block_action` | 非空，最多 80 个字符；仅 blocked 收口必填 | 收尾 agent | 与 blocked 收口一并写入 |
+| `close.knowledge_audit` | `{"none":true}`，或 `{"changes":[{"location","summary"}]}` | 同一次 `issue close` | 每次新收口必填，和证据、状态同一事务。不是原来的八个键：旧收口没有它也仍然可读 |
+
+`close.knowledge_audit` 的位置只允许项目记忆清单：`agents`、`context`、`adr`、`docs_index`、`evidence_index`。CLI 用 `--knowledge-none` 声明无够格知识，或重复 `--knowledge <位置>=<摘要>`。缺审计、位置不在清单、摘要为空、同一位置写两次、两种写法一起用，都拒绝，评论和 `close.*` 都不落。无 PR 的票同样要带。声明无够格知识可以收口。PR 正文里的知识审计段不再是第二道关单门。
 
 阻塞扩展校验：`conclusion=blocked` 的新记录必须同时提供上述两个字段；旧记录缺少两字段时保持可读兼容。`block_kind=dependency` 必须有非空 `close.waiting_on`，且 `decision` / `permission` 必须指定具体的 `member`、`agent` 或 `squad` 责任人。非 blocked 收口的两个字段必须为空或不存在，避免解除阻塞后残留旧原因。人类审核逾期阈值按产品决策为 24 小时；`capacity` 阻塞不计入“需要你”摘要。
 

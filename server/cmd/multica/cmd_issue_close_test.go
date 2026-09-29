@@ -10,7 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/ghpr"
+	"github.com/multica-ai/multica/server/internal/projectmemory"
 )
 
 // newIssueCloseTestCmd mirrors the shipped flag set so runIssueClose can be
@@ -34,6 +36,8 @@ func TestIssueCloseCommandRegistration(t *testing.T) {
 		"--evidence",
 		"--verdict pass",
 		"one transaction",
+		"--knowledge-none",
+		projectmemory.LocationKeys()[0],
 	} {
 		if !strings.Contains(cmd.Long, anchor) {
 			t.Fatalf("long help should carry the close contract (missing %q), got %q", anchor, cmd.Long)
@@ -42,7 +46,7 @@ func TestIssueCloseCommandRegistration(t *testing.T) {
 	for _, name := range []string{
 		"outcome", "evidence", "evidence-stdin", "evidence-file", "allow-external-file",
 		"summary", "parent", "blocked-by", "wake-at", "wait-condition", "wait-probe",
-		"wait-timeout", "needs-human", "no-code", "verdict", "output",
+		"wait-timeout", "needs-human", "no-code", "verdict", "pr", "knowledge-none", "knowledge", "output",
 	} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("issue close missing --%s", name)
@@ -66,6 +70,8 @@ func TestRunIssueCloseRejectsBadFlagsBeforeAnyRequest(t *testing.T) {
 		{"unknown outcome", map[string]string{"outcome": "finished", "evidence": "PR #1"}, "not a close outcome"},
 		{"missing evidence", map[string]string{"outcome": "done"}, "--evidence"},
 		{"verdict hold", map[string]string{"outcome": "done", "evidence": "PR #1", "verdict": "hold"}, "--verdict only accepts pass"},
+		{"missing audit", map[string]string{"outcome": "done", "evidence": "PR #1"}, closeprotocol.KnowledgeAuditRequiredMsg},
+		{"unknown location", map[string]string{"outcome": "done", "evidence": "PR #1", "knowledge": "DESIGN.md=nope"}, "不在项目记忆清单里"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -114,6 +120,7 @@ func TestRunIssueCloseSendsExpectedRequest(t *testing.T) {
 	_ = cmd.Flags().Set("evidence", "PR #1 open; waiting on DENE-1")
 	_ = cmd.Flags().Set("summary", "卡在依赖")
 	_ = cmd.Flags().Set("blocked-by", "DENE-1")
+	_ = cmd.Flags().Set("knowledge-none", "true")
 	_ = cmd.Flags().Set("output", "table")
 	stderr := captureStderr(t)
 	defer stderr.restore()
@@ -135,6 +142,11 @@ func TestRunIssueCloseSendsExpectedRequest(t *testing.T) {
 		"summary":    "卡在依赖",
 		"blocked_by": "DENE-1",
 	}
+	audit, _ := body["knowledge_audit"].(map[string]any)
+	if audit["none"] != true {
+		t.Fatalf("knowledge_audit = %#v", body["knowledge_audit"])
+	}
+	delete(body, "knowledge_audit")
 	if len(body) != len(want) {
 		t.Fatalf("body = %#v, want exactly %#v", body, want)
 	}
@@ -182,6 +194,7 @@ func TestRunIssueCloseVerdictPassReportsMerge(t *testing.T) {
 	_ = cmd.Flags().Set("outcome", "done")
 	_ = cmd.Flags().Set("evidence", "checks green")
 	_ = cmd.Flags().Set("verdict", "PASS")
+	_ = cmd.Flags().Set("knowledge", "agents=记录了收口要带知识审计")
 	stderr := captureStderr(t)
 	defer stderr.restore()
 	out, err := captureStdout(t, func() error {

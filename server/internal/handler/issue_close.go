@@ -49,23 +49,29 @@ type CloseIssueRequest struct {
 	// unless the ticket says why it carries no code (docs, research).
 	NoCodeReason string `json:"no_code_reason,omitempty"`
 	Verdict      string `json:"verdict,omitempty"`
-	PRURL        string `json:"pr_url,omitempty"`
+	// PRURL is `issue close --pr`. A verified link is registered; an
+	// unverifiable one still closes and is marked 未核实.
+	PRURL string `json:"pr_url,omitempty"`
+	// KnowledgeAudit is required. None declares 无够格知识; Changes names the
+	// project-memory locations this close wrote. The two cannot be combined.
+	KnowledgeAudit *closeprotocol.KnowledgeAudit `json:"knowledge_audit,omitempty"`
 }
 
 // CloseIssueResponse reports what actually happened, not what was asked for:
 // the status written, whether a PR merged, and who gets woken.
 type CloseIssueResponse struct {
-	Issue         IssueResponse           `json:"issue"`
-	Comment       CommentResponse         `json:"comment"`
-	Status        string                  `json:"status"`
-	PrevStatus    string                  `json:"prev_status"`
-	StatusChanged bool                    `json:"status_changed"`
-	Close         map[string]string       `json:"close,omitempty"`
-	Merged        bool                    `json:"merged"`
-	PRURL         string                  `json:"pr_url,omitempty"`
-	Woken         []string                `json:"woken"`
-	Triggers      []CommentTriggerOutcome `json:"trigger_outcomes,omitempty"`
-	Warnings      []string                `json:"warnings,omitempty"`
+	Issue          IssueResponse                 `json:"issue"`
+	Comment        CommentResponse               `json:"comment"`
+	Status         string                        `json:"status"`
+	PrevStatus     string                        `json:"prev_status"`
+	StatusChanged  bool                          `json:"status_changed"`
+	Close          map[string]string             `json:"close,omitempty"`
+	KnowledgeAudit *closeprotocol.KnowledgeAudit `json:"knowledge_audit,omitempty"`
+	Merged         bool                          `json:"merged"`
+	PRURL          string                        `json:"pr_url,omitempty"`
+	Woken          []string                      `json:"woken"`
+	Triggers       []CommentTriggerOutcome       `json:"trigger_outcomes,omitempty"`
+	Warnings       []string                      `json:"warnings,omitempty"`
 	// Summoned is true when --needs-human went through the summon entry.
 	Summoned bool `json:"summoned,omitempty"`
 }
@@ -111,9 +117,6 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	evidence := strings.TrimSpace(sanitizeNullBytes(req.Evidence))
-	if evidence == "" && strings.TrimSpace(req.PRURL) != "" {
-		evidence = strings.TrimSpace(req.PRURL)
-	}
 	if evidence == "" {
 		writeError(w, http.StatusBadRequest, "缺 --evidence：收口必须留证据（PR 链接、测试结论、或说明为什么"+outcome+"），一句话也行")
 		return
@@ -138,8 +141,25 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx = withDeliveryBag(ctx)
+	r = r.WithContext(ctx)
+	if pr := strings.TrimSpace(req.PRURL); pr != "" && (outcome == issuestatus.Done || outcome == issuestatus.InReview || verdict == "pass") {
+		declared, err := h.resolveDeclaredPull(ctx, issue, pr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "--pr 不是 PR 或 MR 链接："+err.Error())
+			return
+		}
+		if declared.Unverified && !strings.Contains(evidence, "未核实") {
+			evidence += "\n\n未核实：" + declared.URL
+			body = evidence
+			if summary != "" {
+				body = summary + "\n\n" + evidence
+			}
+		}
+	}
+
 	if verdict == "pass" {
-		h.closeIssueByVerdict(w, r, issue, outcome, body, parentID, parentComment, actorType, actorID)
+		h.closeIssueByVerdict(w, r, issue, outcome, body, parentID, parentComment, actorType, actorID, req.KnowledgeAudit)
 		return
 	}
 
@@ -163,6 +183,12 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, closeRejection(err))
 		return
 	}
+	parsedAudit, canonicalAudit, auditRejection := requireKnowledgeAudit(req.KnowledgeAudit)
+	if auditRejection != "" {
+		writeError(w, http.StatusBadRequest, auditRejection)
+		return
+	}
+	rec.meta[closeprotocol.KeyKnowledgeAudit] = canonicalAudit
 	// The same gate `issue status` runs (DENE-857 / DENE-869): a done with
 	// an open linked PR merges it first or is rewritten as a structured
 	// block; an agent's in_review needs a linked PR or a --no-code reason,
@@ -178,7 +204,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		if tr.status != "" && tr.status != statusKey {
 			statusKey = tr.status
 			outcome = tr.status
-			rec = closeRecordFromGate(statusKey, tr)
+			rec = closeRecordFromGate(statusKey, tr, canonicalAudit)
 			if err := closeprotocol.Validate(closeProbe(rec.meta), statusKey, body); err != nil {
 				writeError(w, http.StatusBadRequest, closeRejection(err))
 				return
@@ -250,6 +276,9 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		rec.meta[closeprotocol.KeyEvidenceCommentID] = uuidToString(created.ID)
 		rec.meta[closeprotocol.KeyAt] = time.Now().UTC().Format(time.RFC3339)
+		if _, err := closeprotocol.ParseStoredKnowledgeAudit(rec.meta[closeprotocol.KeyKnowledgeAudit]); err != nil {
+			return err
+		}
 		if err := closeprotocol.Validate(rec.meta, updated.Status, body); err != nil {
 			return err
 		}
@@ -289,10 +318,11 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 
 	comment := created.Comment()
 	resp := CloseIssueResponse{
-		Status:        updated.Status,
-		PrevStatus:    prev.Status,
-		StatusChanged: prev.Status != updated.Status,
-		Close:         rec.meta,
+		Status:         updated.Status,
+		PrevStatus:     prev.Status,
+		StatusChanged:  prev.Status != updated.Status,
+		Close:          rec.meta,
+		KnowledgeAudit: &parsedAudit,
 	}
 	resp.Comment = commentToResponse(comment, nil, nil)
 	resp.Comment.IssueRevision = created.IssueRevision
@@ -358,6 +388,10 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	if resp.Summoned {
 		resp.Woken = append(resp.Woken, "已替你叫 --needs-human 的人：收件箱、关注、票上 @ 都已送到；他回复后平台叫醒执行智能体")
 	}
+	if d := declaredFrom(ctx); d.Unverified {
+		h.setIssueMetaString(ctx, updated, "close.pr_unverified", d.URL)
+		resp.Warnings = append(resp.Warnings, "申报的链接没能核实，已按未核实放行："+d.URL)
+	}
 
 	reloaded, err := h.Queries.GetIssue(ctx, issue.ID)
 	if err == nil {
@@ -373,7 +407,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 // as a comment and the DENE-850 release chain decides whether the ticket
 // ends as done (merged or nothing to merge) or blocked (merge failed). The
 // close.* record is written from the state the chain actually produced.
-func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, issue db.Issue, outcome, body string, parentID pgtype.UUID, parentComment *db.Comment, actorType, actorID string) {
+func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, issue db.Issue, outcome, body string, parentID pgtype.UUID, parentComment *db.Comment, actorType, actorID string, audit *closeprotocol.KnowledgeAudit) {
 	ctx := r.Context()
 	if outcome != issuestatus.Done {
 		writeError(w, http.StatusBadRequest, "--verdict pass 的收口结论只能是 --outcome done：验收通过就由平台合并并关票")
@@ -386,6 +420,11 @@ func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, is
 	probe := db.Comment{AuthorType: actorType, AuthorID: parseUUID(actorID)}
 	if !h.authorIsReviewer(issue, probe) {
 		writeError(w, http.StatusForbidden, "--verdict pass 只有这张票的验收席能给；你不是它的 reviewer。执行人交付用 --outcome in_review，不带 --verdict")
+		return
+	}
+	parsedAudit, canonicalAudit, auditRejection := requireKnowledgeAudit(audit)
+	if auditRejection != "" {
+		writeError(w, http.StatusBadRequest, auditRejection)
 		return
 	}
 	body, err := blockwait.AppendVerdict(body, "pass")
@@ -445,19 +484,21 @@ func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, is
 	if !out.Released {
 		resp.Warnings = append(resp.Warnings, "这段 in_review 已经放行过一次（block.released=pass），本次 pass 只留了言，没有再合并或改状态")
 	}
-	rec := closeRecordAfterRelease(updated, parseIssueMetadata(updated.Metadata), uuidToString(comment.ID))
+	if d := declaredFrom(ctx); d.Unverified {
+		h.setIssueMetaString(ctx, updated, "close.pr_unverified", d.URL)
+		resp.Warnings = append(resp.Warnings, "申报的链接没能核实，已按未核实放行："+d.URL)
+	}
+	rec := closeRecordAfterRelease(updated, parseIssueMetadata(updated.Metadata), uuidToString(comment.ID), canonicalAudit)
 	if rec != nil {
 		if err := closeprotocol.Validate(rec, updated.Status, body); err != nil {
 			resp.Warnings = append(resp.Warnings, "收口记录没写："+closeRejection(err))
+		} else if _, err := closeprotocol.ParseStoredKnowledgeAudit(rec[closeprotocol.KeyKnowledgeAudit]); err != nil {
+			resp.Warnings = append(resp.Warnings, "收口记录没写："+err.Error())
+		} else if err := h.writeCloseKeysTx(ctx, updated, rec); err != nil {
+			resp.Warnings = append(resp.Warnings, "收口记录没写上，事务已回滚："+err.Error())
 		} else {
-			for key, value := range rec {
-				h.setIssueMetaString(ctx, updated, key, value)
-			}
-			if updated.Status != issuestatus.Blocked {
-				h.deleteIssueMeta(ctx, updated, closeprotocol.KeyBlockKind)
-				h.deleteIssueMeta(ctx, updated, closeprotocol.KeyBlockAction)
-			}
 			resp.Close = rec
+			resp.KnowledgeAudit = &parsedAudit
 		}
 	}
 	switch {
@@ -569,7 +610,7 @@ func closeProbe(meta map[string]string) map[string]string {
 // closeRecordFromGate is the record for a close the DENE-857 gate rewrote:
 // the caller asked for done, the linked PR did not merge, and the ticket is
 // blocked on the gate's wait record instead.
-func closeRecordFromGate(statusKey string, tr statusTransition) closeRecord {
+func closeRecordFromGate(statusKey string, tr statusTransition, knowledgeAudit string) closeRecord {
 	kind, action := blockKindFor(tr.block, "")
 	meta := map[string]string{
 		closeprotocol.KeyStatus:        statusKey,
@@ -580,6 +621,9 @@ func closeRecordFromGate(statusKey string, tr statusTransition) closeRecord {
 		closeprotocol.KeyWakeAction:    closeprotocol.WakeNone,
 		closeprotocol.KeyBlockKind:     kind,
 		closeprotocol.KeyBlockAction:   action,
+	}
+	if knowledgeAudit != "" {
+		meta[closeprotocol.KeyKnowledgeAudit] = knowledgeAudit
 	}
 	if len(tr.block.BlockedBy) > 0 {
 		meta[closeprotocol.KeyWaitingOn] = tr.block.BlockedBy[0]
@@ -616,7 +660,7 @@ func blockKindFor(block blockwait.Record, summary string) (kind, action string) 
 // closeRecordAfterRelease derives the close.* record from what the merge
 // chain left behind. A ticket the chain could not move stays as it is; the
 // reviewer's pass is then only a comment and no record is written.
-func closeRecordAfterRelease(issue db.Issue, meta map[string]any, evidenceID string) map[string]string {
+func closeRecordAfterRelease(issue db.Issue, meta map[string]any, evidenceID, knowledgeAudit string) map[string]string {
 	rec := map[string]string{
 		closeprotocol.KeyStatus:            issue.Status,
 		closeprotocol.KeyEvidenceCommentID: evidenceID,
@@ -625,6 +669,9 @@ func closeRecordAfterRelease(issue db.Issue, meta map[string]any, evidenceID str
 		closeprotocol.KeyWakeAction:        closeprotocol.WakeNone,
 		closeprotocol.KeyWaitingOn:         "",
 		closeprotocol.KeyAt:                time.Now().UTC().Format(time.RFC3339),
+	}
+	if knowledgeAudit != "" {
+		rec[closeprotocol.KeyKnowledgeAudit] = knowledgeAudit
 	}
 	switch issue.Status {
 	case issuestatus.Done:
@@ -698,6 +745,45 @@ func parseUUIDStrict(s string) (pgtype.UUID, error) {
 		return pgtype.UUID{}, err
 	}
 	return id, nil
+}
+
+// requireKnowledgeAudit is the pre-write check shared by the normal close and
+// the verdict close. A non-empty rejection is the 400 body; nothing is written.
+func requireKnowledgeAudit(raw *closeprotocol.KnowledgeAudit) (closeprotocol.KnowledgeAudit, string, string) {
+	if raw == nil {
+		return closeprotocol.KnowledgeAudit{}, "", closeprotocol.KnowledgeAuditRequiredMsg
+	}
+	parsed, canonical, err := closeprotocol.CanonicalKnowledgeAudit(*raw)
+	if err != nil {
+		return closeprotocol.KnowledgeAudit{}, "", err.Error()
+	}
+	return parsed, canonical, ""
+}
+
+// writeCloseKeysTx writes a finished close record in one transaction. The
+// verdict path posts its comment before the merge chain, so the record itself
+// still has to land all-or-nothing: a failure rolls back and the caller warns
+// instead of leaving a subset of the keys.
+func (h *Handler) writeCloseKeysTx(ctx context.Context, issue db.Issue, rec map[string]string) error {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	for key, value := range rec {
+		if err := setIssueMetaStringTx(ctx, qtx, issue, key, value); err != nil {
+			return err
+		}
+	}
+	if issue.Status != issuestatus.Blocked {
+		for _, key := range []string{closeprotocol.KeyBlockKind, closeprotocol.KeyBlockAction} {
+			if _, err := qtx.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func setIssueMetaStringTx(ctx context.Context, q *db.Queries, issue db.Issue, key, value string) error {

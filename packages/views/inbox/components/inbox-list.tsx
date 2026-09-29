@@ -251,7 +251,7 @@ export function InboxList({
             data={items}
             endReached={loadMore}
             computeItemKey={computeItemKey}
-            initialScrollTop={restoredScrollTop}
+            initialScrollTop={restoredScrollTop ?? 0}
             initialItemCount={Math.min(items.length, VIRTUOSO_SEED_COUNT)}
             defaultItemHeight={INBOX_ROW_ESTIMATED_HEIGHT}
             increaseViewportBy={{ top: 400, bottom: 400 }}

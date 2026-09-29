@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/githubapp"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
@@ -402,6 +403,13 @@ type Handler struct {
 	// error rather than silently storing plaintext. Wired in
 	// cmd/server/router.go after New.
 	VCSSecretBox *secretbox.Box
+	// GitHubAppSecrets seals the App private key, webhook secret, and client
+	// secret created from Settings. Nil means this process cannot store them.
+	// Environment variables still configure the App without this box.
+	GitHubAppSecrets *secretbox.Box
+	// deliveryHTTP overrides the provider client used by the delivery lookup.
+	// Nil uses delivery.HTTP. Tests point it at an httptest server.
+	deliveryHTTP *http.Client
 	// PluginSurfaceTokens seal short-lived launch claims. Nil disables surface
 	// launches; wired from a domain-separated MULTICA_PLUGIN_SECRET_KEY at boot.
 	PluginSurfaceTokens *secretbox.Box
@@ -587,12 +595,14 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	// unconditionally but inert (every trigger no-ops) when the App private key
 	// is unconfigured, so the feature degrades cleanly. main.go calls
 	// h.PRRefresh.Start(ctx) to launch its worker pool + TTL sweeper.
-	ghClient, err := ghsnapshot.NewClientFromEnv()
-	if err != nil {
-		// Malformed key is operator-actionable; the pipeline stays disabled.
-		slog.Warn("github: PR snapshot pipeline disabled (invalid App private key)", "err", err)
-	}
-	h.PRRefresh = ghsnapshot.NewManager(ghClient, queries, txStarter, h.broadcastPRSnapshotApplied)
+	// Always a refreshing client: credentials may arrive later from Settings,
+	// and the workers are started even while the App is still unconfigured.
+	h.PRRefresh = ghsnapshot.NewManager(
+		ghsnapshot.NewRefreshingClient(githubapp.SnapshotIdentity),
+		queries,
+		txStarter,
+		h.broadcastPRSnapshotApplied,
+	)
 
 	// Realtime delivery asks the same visibility question the HTTP reads do
 	// (DENE-717). Wiring it here means a hub constructed for tests gets the

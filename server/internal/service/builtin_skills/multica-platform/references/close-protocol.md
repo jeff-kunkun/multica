@@ -42,6 +42,25 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
   with the reason and `block_kind=external`. A failed acceptance is not a
   close: `multica issue comment add <id> --verdict hold --content-file
   ./review.md` wakes the executor.
+- `--pr <pull-or-mr-url>` declares the delivery when the platform has not
+  linked one yet (DENE-961). The server checks that URL against the
+  repository connection, registers it when the check succeeds, then runs the
+  normal gate. If it cannot verify the URL, the close still proceeds and the
+  ticket records `close.pr_unverified` (未核实); that link is not merged.
+  Do not block on “等待平台关联 PR” or any equivalent — that wait is rejected.
+  Use `--pr` instead. `multica issue pull-requests` reports the same gap.
+- Knowledge audit is required on every close, including a ticket with no pull
+  request. `--knowledge-none` declares that nothing qualified for project
+  memory. Repeat `--knowledge <key>=<summary>` for each checklist slot this
+  close wrote. The keys are the project-memory checklist (`agents`, `context`,
+  `adr`, `docs_index`, `evidence_index`); do not invent another list. The
+  server stores `close.knowledge_audit` in the same transaction as the
+  evidence comment, the status, and the other `close.*` keys. A missing
+  audit, an unknown location, an empty summary, a duplicate location, or both
+  forms at once is rejected and nothing is written. Declaring no qualified
+  knowledge is a valid close. This key is not one of the original eight:
+  older closes stay readable without it. A heading in a pull-request body is
+  not a second gate.
 - The reply reports the status actually written, whether the PR merged, and
   who is woken. Quote it; do not restate it from memory.
 
@@ -103,6 +122,7 @@ Staged child = has a parent and (own `stage` or any staged sibling).
 | `awaiting_review` | top-level parent acceptance is an agent Reviewer | `in_review` | that Reviewer, or `none` and let routing fill the seat | `route` (what `issue close --outcome in_review` writes) or `mention` — **not** `done`; child barrier is already closed |
 | `awaiting_human` | top-level parent acceptance is a human | `in_review` | that member | `none`. Optional dispatcher: `mention` that agent and name the human in `waiting_on` or the evidence |
 | `blocked` | missing auth / human decision / external dep | `blocked` | who can unblock | `mention` if agent/squad, else `none` |
+| (no close) | 交付查询报没权限 | do not change status | 仓库登记人（服务端 summon） | 先 `multica connection add --from-gh --yes`（本机有发起人的 gh 登录）；不行就交给服务端叫人，不要自己设等待条件 |
 | (no close) | this turn did not deliver this issue's ask | do not change status | — | do not write `close.*` |
 Four closing scenes:
 

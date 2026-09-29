@@ -203,4 +203,50 @@ describe("SubIssueCloseStrip", () => {
     );
     expect(chip("last_activity_at")).toHaveTextContent("4h ago");
   });
+
+  it("shows a knowledge audit only when the close recorded one", () => {
+    const { rerender } = renderWithI18n(
+      <SubIssueCloseStrip
+        issue={issue({
+          status: "done",
+          metadata: {
+            ...{
+              "close.conclusion": "delivered",
+              "close.status": "done",
+              "close.evidence_comment_id": "comment-1",
+              "close.next_owner_type": "none",
+              "close.next_owner_id": "",
+              "close.wake_action": "none",
+              "close.waiting_on": "",
+              "close.at": "2026-09-15T12:00:00Z",
+            },
+            "close.knowledge_audit": JSON.stringify({ none: true }),
+          },
+        })}
+      />,
+    );
+    expect(chip("close.knowledge_audit")).toHaveTextContent("No qualified knowledge");
+
+    rerender(
+      <SubIssueCloseStrip
+        issue={issue({
+          status: "done",
+          metadata: {
+            "close.conclusion": "delivered",
+            "close.status": "done",
+            "close.evidence_comment_id": "comment-1",
+            "close.next_owner_type": "none",
+            "close.next_owner_id": "",
+            "close.wake_action": "none",
+            "close.waiting_on": "",
+            "close.at": "2026-09-15T12:00:00Z",
+            "close.knowledge_audit": JSON.stringify({
+              changes: [{ location: "agents", summary: "seed" }],
+            }),
+          },
+        })}
+      />,
+    );
+    expect(chip("close.knowledge_audit")).toHaveTextContent("Knowledge: agents");
+  });
 });

@@ -364,6 +364,7 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/runtimes.md":        "runtime",
 		"references/skill-import.md":    "skill import",
 		"references/transfer.md":        "transfer",
+		"references/inbox.md":           "inbox",
 	}
 
 	skill, ok := findSkill(t, PlatformSkillName)
@@ -577,6 +578,11 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Reviewer pass, owned checks green, no explicit human hold",
 				"A pass does not stop at `in_review`",
 				"--blocked-by",
+				// DENE-972: the audit rides the same close. It is not an
+				// eighth historical key, and a pull-request heading is not
+				// a second gate.
+				"close.knowledge_audit",
+				"--knowledge-none",
 			},
 			notWant: []string{
 				// The MUL-6966 / MUL-5442 bans on teaching the generic KV bag

@@ -1,6 +1,6 @@
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
-import type { ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
+import type { InboxBoardResponse, ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
 import { configStore } from "../config";
 import type {
@@ -115,6 +115,10 @@ import type {
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
+  ProjectMemoryStatus,
+  ProjectMemoryChecklistItem,
+  CloseIssueRequest,
+  CloseIssueResponse,
   ProjectMember,
   ResourceShare,
   CreateProjectRequest,
@@ -187,9 +191,19 @@ import type {
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
+  GitHubAppStatus,
+  GitHubAppSetup,
   ListVCSConnectionsResponse,
   ConnectVCSRequest,
   ConnectVCSResponse,
+  ListRepoLinksResponse,
+  CreateRepoLinkRequest,
+  CreateRepoLinkResponse,
+  TestRepoLinkResponse,
+  PinRepoBindingRequest,
+  RepoBinding,
+  TestRepoBindingRequest,
+  TestRepoBindingResponse,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
@@ -273,6 +287,7 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import { compressImageForUpload } from "../attachments/compress-image";
 import {
   parseRoutingHealth,
   type RoutingHealth,
@@ -504,8 +519,21 @@ import {
   EMPTY_ISSUE_STATUS_ENTRY,
   EMPTY_RESOURCE_LABELS_RESPONSE,
   GitHubConnectResponseSchema,
+  GitHubAppStatusSchema,
+  GitHubAppSetupSchema,
+  EMPTY_GITHUB_APP_STATUS,
   ListGitHubInstallationsResponseSchema,
   ListGitHubRepositoriesResponseSchema,
+  ListRepoLinksResponseSchema,
+  CreateRepoLinkResponseSchema,
+  TestRepoLinkResponseSchema,
+  RepoBindingSchema,
+  TestRepoBindingResponseSchema,
+  EMPTY_LIST_REPO_LINKS_RESPONSE,
+  EMPTY_CREATE_REPO_LINK_RESPONSE,
+  EMPTY_TEST_REPO_LINK_RESPONSE,
+  EMPTY_REPO_BINDING,
+  EMPTY_TEST_REPO_BINDING_RESPONSE,
   EMPTY_GITHUB_CONNECT_RESPONSE,
   EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
@@ -1548,6 +1576,13 @@ export class ApiClient {
 
   async upsertClientUsage(data: ClientUsageRequest): Promise<void> {
     await this.fetch("/api/client-usage", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async closeIssue(id: string, data: CloseIssueRequest): Promise<CloseIssueResponse> {
+    return this.fetch(`/api/issues/${id}/close`, {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -3387,6 +3422,16 @@ export class ApiClient {
     return this.fetch("/api/inbox/unread-issues");
   }
 
+  // The inbox lanes, built server-side (DENE-975). `unread_since` replays the
+  // unread markers of a visit that has since marked everything read.
+  async getInboxBoard(params: { tz?: string; unread_since?: string } = {}): Promise<InboxBoardResponse> {
+    const search = new URLSearchParams();
+    if (params.tz) search.set("tz", params.tz);
+    if (params.unread_since) search.set("unread_since", params.unread_since);
+    const query = search.toString();
+    return this.fetch(`/api/inbox/board${query ? `?${query}` : ""}`);
+  }
+
   // Read one issue's inbox rows, except the ones an open call hangs on.
   async markIssueInboxRead(issueId: string): Promise<{ count: number }> {
     return this.fetch(`/api/inbox/issues/${issueId}/read`, { method: "POST" });
@@ -4263,8 +4308,11 @@ export class ApiClient {
     // failure via `signal.aborted` / `err.name === "AbortError"`.
     signal?: AbortSignal,
   ): Promise<Attachment> {
+    // Large phone photos are downscaled first: on a slow uplink the original
+    // often cannot finish inside the proxy timeout (see compress-image.ts).
+    const body = await compressImageForUpload(file);
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", body);
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
     if (opts?.chatSessionId) formData.append("chat_session_id", opts.chatSessionId);
@@ -4870,6 +4918,24 @@ export class ApiClient {
 
   async getProject(id: string): Promise<Project> {
     return this.fetch(`/api/projects/${id}`);
+  }
+
+  async listProjectMemoryLocations(): Promise<{ locations: ProjectMemoryChecklistItem[] }> {
+    return this.fetch("/api/project-memory/locations");
+  }
+
+  async getProjectMemory(id: string): Promise<ProjectMemoryStatus> {
+    return this.fetch(`/api/projects/${id}/memory/status`);
+  }
+
+  async checkProjectMemory(
+    id: string,
+    locations: unknown[],
+  ): Promise<ProjectMemoryStatus> {
+    return this.fetch(`/api/projects/${id}/memory/check`, {
+      method: "POST",
+      body: JSON.stringify({ locations }),
+    });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
@@ -5695,6 +5761,29 @@ export class ApiClient {
     );
   }
 
+  async getGitHubApp(workspaceId: string): Promise<GitHubAppStatus> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/github/app`);
+    return parseWithFallback(
+      raw,
+      GitHubAppStatusSchema,
+      EMPTY_GITHUB_APP_STATUS,
+      { endpoint: "GET /api/workspaces/:id/github/app" },
+    );
+  }
+
+  async beginGitHubApp(workspaceId: string, org?: string): Promise<GitHubAppSetup> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/github/app`, {
+      method: "POST",
+      body: JSON.stringify({ org: org ?? "" }),
+    });
+    return parseWithFallback(
+      raw,
+      GitHubAppSetupSchema,
+      { action_url: "", manifest: {}, launch_url: "" },
+      { endpoint: "POST /api/workspaces/:id/github/app" },
+    );
+  }
+
   async listGitHubInstallations(workspaceId: string): Promise<ListGitHubInstallationsResponse> {
     const raw = await this.fetch<unknown>(
       `/api/workspaces/${workspaceId}/github/installations`,
@@ -5771,6 +5860,84 @@ export class ApiClient {
     return this.fetch(
       `/api/workspaces/${workspaceId}/vcs/connections/${connectionId}/rotate-webhook`,
       { method: "POST" },
+    );
+  }
+
+  // Repository connection catalog (GitHub App / token, GitLab, Forgejo, Gitea).
+  async listRepoLinks(workspaceId: string): Promise<ListRepoLinksResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/repo-links`);
+    return parseWithFallback(
+      raw,
+      ListRepoLinksResponseSchema,
+      EMPTY_LIST_REPO_LINKS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/repo-links" },
+    );
+  }
+
+  async createRepoLink(
+    workspaceId: string,
+    body: CreateRepoLinkRequest,
+  ): Promise<CreateRepoLinkResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/repo-links`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return parseWithFallback(
+      raw,
+      CreateRepoLinkResponseSchema,
+      EMPTY_CREATE_REPO_LINK_RESPONSE,
+      { endpoint: "POST /api/workspaces/:id/repo-links" },
+    );
+  }
+
+  async deleteRepoLink(workspaceId: string, linkId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/repo-links/${linkId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testRepoLink(
+    workspaceId: string,
+    linkId: string,
+  ): Promise<TestRepoLinkResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/repo-links/${linkId}/test`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      TestRepoLinkResponseSchema,
+      EMPTY_TEST_REPO_LINK_RESPONSE,
+      { endpoint: "POST /api/workspaces/:id/repo-links/:linkId/test" },
+    );
+  }
+
+  async pinRepoBinding(
+    workspaceId: string,
+    body: PinRepoBindingRequest,
+  ): Promise<RepoBinding> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/repo-bindings`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    return parseWithFallback(raw, RepoBindingSchema, EMPTY_REPO_BINDING, {
+      endpoint: "PUT /api/workspaces/:id/repo-bindings",
+    });
+  }
+
+  async testRepoBinding(
+    workspaceId: string,
+    body: TestRepoBindingRequest,
+  ): Promise<TestRepoBindingResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/repo-bindings/test`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    return parseWithFallback(
+      raw,
+      TestRepoBindingResponseSchema,
+      EMPTY_TEST_REPO_BINDING_RESPONSE,
+      { endpoint: "POST /api/workspaces/:id/repo-bindings/test" },
     );
   }
 

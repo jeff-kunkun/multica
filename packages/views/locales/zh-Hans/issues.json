@@ -137,7 +137,9 @@
     "next_owner": "下一责任人：{{name}}",
     "next_owner_none": "下一责任人：无",
     "waiting_on": "等待 {{id}}",
-    "last_activity_missing": "无活动时间"
+    "last_activity_missing": "无活动时间",
+    "knowledge_none": "无够格知识",
+    "knowledge_change": "知识：{{locations}}"
   },
   "blocker_summary": {
     "title": "已阻塞 · {{count}} 个根因",
@@ -819,6 +821,7 @@
     "remove_parent_issue": "移除父任务",
     "remove_parent_issue_success": "已移除父任务",
     "add_sub_issue": "添加子任务...",
+    "close_issue": "收口",
     "delete_issue": "删除任务",
     "pin_to_sidebar": "固定到侧边栏",
     "unpin_from_sidebar": "从侧边栏取消固定"
