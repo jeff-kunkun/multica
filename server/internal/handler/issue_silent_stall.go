@@ -307,13 +307,19 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 			tr.refuse = "没权限：保存的令牌读不了这个仓库。平台已经叫仓库登记人来接上。本机有发起人的登录时先跑 `multica connection add --from-gh --yes`；试不了就不要自己设等待条件。"
 			return tr
 		}
-		// No PR yet is something the closing agent can fix in this run.
-		// Parking it as blocked waited on an event nobody produces (DENE-899).
-		if deliveryBranchCount > 0 {
-			tr.refuse = "这张票有交付分支，但平台查不到它的 PR。先用 `gh pr create` 开 PR（标题带票号，打向主线），再重跑这条 close；close 会用本机 gh 把 PR 报给平台。代码不在 GitHub（比如内网 GitLab MR）就用 `--no-code <MR 链接和合入状态>` 说明。"
+		// The delivery lookup has already classified the missing delivery and
+		// supplied the next command. Keep that single source of truth here so a
+		// close refusal cannot fall back to the old generic PR wording.
+		if view.Gap != nil {
+			tr.refuse = view.Gap.Message + " 下一步：" + view.Gap.NextCommand
 			return tr
 		}
-		tr.refuse = "这张票没有 PR 或交付分支，执行人关单必须带 `--no-code <原因>`。"
+		// This is only a defensive fallback for an unexpected empty lookup.
+		if deliveryBranchCount > 0 {
+			tr.refuse = "交付查询没有返回 PR 或 MR。下一步：multica issue close " + view.Ident + " --pr <链接>"
+			return tr
+		}
+		tr.refuse = "交付查询没有返回 PR 或 MR。下一步：multica issue close " + view.Ident + " --no-code <原因>"
 		return tr
 	}
 	if actorType == "agent" && strings.TrimSpace(noCodeReason) != "" {

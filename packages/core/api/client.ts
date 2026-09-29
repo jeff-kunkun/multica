@@ -197,6 +197,10 @@ import type {
   ConnectVCSRequest,
   ConnectVCSResponse,
   ListRepoLinksResponse,
+  ListProjectReposResponse,
+  AttachProjectRepoRequest,
+  AttachProjectRepoResponse,
+  ListRepoConnectionsResponse,
   CreateRepoLinkRequest,
   CreateRepoLinkResponse,
   TestRepoLinkResponse,
@@ -5946,6 +5950,39 @@ export class ApiClient {
       `/api/workspaces/${workspaceId}/vcs/connections/${connectionId}/rotate-webhook`,
       { method: "POST" },
     );
+  }
+
+  // Server-computed reach for every repository (DENE-985). Pages render it
+  // as it arrives; they do not derive a connection state themselves.
+  async listProjectRepos(projectId: string): Promise<ListProjectReposResponse> {
+    const raw = await this.fetch<Partial<ListProjectReposResponse>>(
+      `/api/projects/${projectId}/repos`,
+    );
+    const repos = Array.isArray(raw?.repos) ? raw.repos : [];
+    return { repos, total: raw?.total ?? repos.length };
+  }
+
+  async attachProjectRepo(
+    projectId: string,
+    data: AttachProjectRepoRequest,
+  ): Promise<AttachProjectRepoResponse> {
+    return this.fetch(`/api/projects/${projectId}/repos`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeProjectRepo(projectId: string, resourceId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/repos/${resourceId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listRepoConnections(workspaceId: string): Promise<ListRepoConnectionsResponse> {
+    const raw = await this.fetch<Partial<ListRepoConnectionsResponse>>(
+      `/api/workspaces/${workspaceId}/repos/connections`,
+    );
+    return { repos: Array.isArray(raw?.repos) ? raw.repos : [] };
   }
 
   // Repository connection catalog (GitHub App / token, GitLab, Forgejo, Gitea).

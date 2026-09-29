@@ -46,6 +46,7 @@ import {
   githubInstallationsOptions,
 } from "@multica/core/github";
 import { ApiError, api } from "@multica/core/api";
+import { repoConnectionsOptions } from "@multica/core/repo-reach";
 import {
   parseRepoLocator,
   repoLinkKeys,
@@ -75,6 +76,7 @@ import {
 } from "./repository-connection";
 import { outcomeText, useRepoLinkLabels } from "./repo-link-present";
 import { useRepoCatalog } from "./use-repo-catalog";
+import { RepoReachControls } from "./repo-reach-view";
 
 const EMPTY_REPOSITORIES: WorkspaceRepo[] = [];
 
@@ -118,6 +120,17 @@ export function RepositoriesTab() {
   const [shareAudienceSizes, setShareAudienceSizes] = useState<Record<string, number>>({});
   const [testingUrl, setTestingUrl] = useState<string | null>(null);
   const catalog = useRepoCatalog(wsId);
+  const { data: connectionCards } = useQuery(repoConnectionsOptions(wsId));
+  const reachOf = (url: string) => {
+    const identity = repositoryIdentity(url)?.toLowerCase();
+    return (connectionCards ?? []).find(
+      (card) =>
+        card.url === url ||
+        (identity !== undefined &&
+          repositoryIdentity(card.url)?.toLowerCase() === identity),
+    )?.reach;
+  };
+  const showReach = (connectionCards?.length ?? 0) > 0;
   const showLinks = catalog.source === "catalog" || catalog.source === "legacy";
 
   const currentMember = members.find((member) => member.user_id === user?.id) ?? null;
@@ -434,7 +447,11 @@ export function RepositoriesTab() {
           {showLinks && repositories.length > 0 ? (
             <div className="hidden gap-2 px-4 pt-3 text-caption text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)_auto_auto]">
               <span>{t(($) => $.repo_links.column_repo)}</span>
-              <span>{t(($) => $.repo_links.column_connection)}</span>
+              <span>
+                {showReach
+                  ? t(($) => $.repo_reach.column_projects)
+                  : t(($) => $.repo_links.column_connection)}
+              </span>
               <span>{t(($) => $.repo_links.column_status)}</span>
               <span />
             </div>
@@ -520,6 +537,7 @@ export function RepositoriesTab() {
                 </Button>
               </div>
             ) : null;
+            const reach = showReach ? reachOf(repository.url) : undefined;
             return (
               <div
                 key={index}
@@ -530,7 +548,9 @@ export function RepositoriesTab() {
                 }
               >
                 {showLinks ? <div className="min-w-0 space-y-1.5">{fields}</div> : fields}
-                {showLinks ? (
+                {reach ? (
+                  <RepoReachControls reach={reach} trailing={actions} />
+                ) : showLinks ? (
                   <RepositoryConnectionControls
                     repoUrl={repository.url}
                     catalog={catalog}

@@ -282,6 +282,20 @@ export type {
   TestRepoBindingResponse,
 } from "./repo-link";
 export type {
+  RepoReachMode,
+  RepoReachNextActionKind,
+  RepoReachContact,
+  RepoReachNextAction,
+  RepoReachProject,
+  RepoReach,
+  ProjectRepoItem,
+  ListProjectReposResponse,
+  AttachProjectRepoRequest,
+  AttachProjectRepoResponse,
+  RepoConnectionCard,
+  ListRepoConnectionsResponse,
+} from "./repo-reach";
+export type {
   LarkInstallation,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
