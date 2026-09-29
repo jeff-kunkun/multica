@@ -275,7 +275,9 @@
     "row_actions_aria": "チャットの操作",
     "edit_access": "権限を編集",
     "private_tag": "非公開",
-    "extra_tag": "追加メンバー"
+    "extra_tag": "追加メンバー",
+    "show_more": "さらに表示（{{count}}）",
+    "show_fewer": "表示を減らす"
   },
   "header": {
     "view_profile": "Agent のプロフィール",

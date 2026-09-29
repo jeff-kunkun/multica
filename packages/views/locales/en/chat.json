@@ -280,7 +280,9 @@
     "row_actions_aria": "Chat actions",
     "edit_access": "Edit access",
     "private_tag": "Private",
-    "extra_tag": "Extra people"
+    "extra_tag": "Extra people",
+    "show_more": "Show more ({{count}})",
+    "show_fewer": "Show fewer"
   },
   "header": {
     "view_profile": "View agent profile",

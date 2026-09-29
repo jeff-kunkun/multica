@@ -42,6 +42,13 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
   with the reason and `block_kind=external`. A failed acceptance is not a
   close: `multica issue comment add <id> --verdict hold --content-file
   ./review.md` wakes the executor.
+- `--pr <pull-or-mr-url>` declares the delivery when the platform has not
+  linked one yet (DENE-961). The server checks that URL against the
+  repository connection, registers it when the check succeeds, then runs the
+  normal gate. If it cannot verify the URL, the close still proceeds and the
+  ticket records `close.pr_unverified` (未核实); that link is not merged.
+  Do not block on “等待平台关联 PR” or any equivalent — that wait is rejected.
+  Use `--pr` instead. `multica issue pull-requests` reports the same gap.
 - The reply reports the status actually written, whether the PR merged, and
   who is woken. Quote it; do not restate it from memory.
 

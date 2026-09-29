@@ -1517,6 +1517,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces", h.ListDaemonWorkspaces)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
+		r.Get("/workspaces/{workspaceId}/memory", h.GetDaemonProjectMemoryTargets)
+		r.Post("/workspaces/{workspaceId}/memory/check", h.ReportDaemonProjectMemoryCheck)
 		r.Get("/workspaces/{workspaceId}/runtime-profiles", h.DaemonListRuntimeProfiles)
 
 		// Agent-triggered plugin hooks. The daemon's local MCP server calls
@@ -1684,13 +1686,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// for the same reason as GitHub installations; connect /
 					// disconnect are admin-gated in the group below.
 					r.Get("/vcs/connections", h.ListVCSConnections)
-					// Adding a personal connection is member-visible. A workspace
-					// connection stays admin-only inside ConnectVCS. Test and
-					// delete allow the personal owner as well as an admin.
-					r.Get("/vcs/connections/repo-status", h.GetVCSRepoStatus)
-					r.Post("/vcs/connections", h.ConnectVCS)
-					r.Post("/vcs/connections/{connectionId}/test", h.TestVCSConnection)
-					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
+					r.Get("/repos/connections", h.ListRepoConnections)
+					r.Post("/repos/connections", h.UpsertRepoConnection)
+					r.Post("/repos/connections/test", h.TestRepoConnection)
 					// Custom runtime profiles — listing/reading is member-visible
 					// (the Runtime page renders for everyone; create/edit/delete
 					// are admin-gated below).
@@ -2173,6 +2171,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
+				r.Get("/memory", h.GetProjectMemory)
+				r.Get("/memory/check", h.GetProjectMemory)
+				r.Get("/memory/status", h.GetProjectMemory)
+					r.Post("/memory/check", h.PostProjectMemoryCheck)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
 					// A project's scope change sweeps every resource it

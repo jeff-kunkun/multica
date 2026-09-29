@@ -218,6 +218,9 @@ export type {
 export type { StorageAdapter } from "./storage";
 export type {
   Project,
+  ProjectMemoryLocation,
+  ProjectMemoryIssue,
+  ProjectMemoryStatus,
   ProjectStatus,
   ProjectPriority,
   CreateProjectRequest,
@@ -261,6 +264,22 @@ export type {
   ConnectVCSRequest,
   ConnectVCSResponse,
 } from "./vcs";
+export type {
+  RepoLinkKind,
+  RepoLinkVisibility,
+  RepoLinkHealth,
+  RepoConnectionState,
+  RepoLink,
+  RepoSourceProject,
+  RepoBinding,
+  ListRepoLinksResponse,
+  CreateRepoLinkRequest,
+  CreateRepoLinkResponse,
+  TestRepoLinkResponse,
+  PinRepoBindingRequest,
+  TestRepoBindingRequest,
+  TestRepoBindingResponse,
+} from "./repo-link";
 export type {
   LarkInstallation,
   ListLarkInstallationsResponse,

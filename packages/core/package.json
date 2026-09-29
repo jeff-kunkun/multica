@@ -144,6 +144,7 @@
     "./github/queries": "./github/queries.ts",
     "./vcs": "./vcs/index.ts",
     "./vcs/queries": "./vcs/queries.ts",
+    "./repo-links": "./repo-links/index.ts",
     "./lark": "./lark/index.ts",
     "./lark/queries": "./lark/queries.ts",
     "./composio": "./composio/index.ts",
