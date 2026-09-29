@@ -182,7 +182,9 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 			continue
 		}
 		conn := matchConnection(conns, key, host)
-		if provider == "github" && hasApp {
+		appReach := provider == "github" && h.appCoversRepo(ctx, issue.WorkspaceID, key)
+		reach := DecideRepoReach(provider, false, appReach, false)
+		if reach.Mode == "app" {
 			connected = true
 		}
 		if conn == nil || !canToken {
@@ -230,7 +232,7 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 	if err != nil {
 		return issueDeliveries{Ident: ident}, err
 	}
-	appOnly := hasApp && !sawToken && len(gh)+len(vcsRows) == 0
+	appOnly := hasApp && !sawToken && connected && len(gh)+len(vcsRows) == 0
 	view := finishDeliveries(ident, gh, vcsRows, queried, connected, appOnly, lookupErr)
 	view.Denied = denied && len(view.GitHub)+len(view.VCS) == 0
 	if view.Denied {

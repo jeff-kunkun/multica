@@ -300,3 +300,15 @@ is task-local checkout state.
 Project create/update/delete/status and project resource add/update/remove
 mutate durable workspace state and affect future tasks. Ask before changing
 `local_directory` unless the user explicitly requested that exact local path.
+
+### Project repository commands
+
+Use the dedicated repository surface when attaching GitHub code to a project:
+
+```sh
+multica project repo add <project-id> --url <github-url> --output json
+multica project repo list <project-id> --output json
+multica project repo remove <project-id> <repo-resource-id> --output json
+```
+
+Attaching the same normalized URL twice is idempotent and returns the existing resource.

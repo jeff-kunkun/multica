@@ -22,6 +22,7 @@ type repoConnectionCard struct {
 	URL             string `json:"url"`
 	Provider        string `json:"provider"`
 	Mode            string `json:"mode"`
+	NextAction      string `json:"next_action,omitempty"`
 	AccountLogin    string `json:"account_login,omitempty"`
 	Webhook         string `json:"webhook"`
 	LastLookupOK    *bool  `json:"last_lookup_ok"`
@@ -230,26 +231,19 @@ func (h *Handler) repoCard(r *http.Request, ws pgtype.UUID, repo workspaceRepoRe
 			cli = true
 		}
 	}
-	mode := "none"
-	switch {
-	case conn != nil:
-		mode = "token"
-		if provider == "" {
-			provider = conn.Provider
-		}
-	case provider == "github" && hasApp:
-		mode = "app"
-	case cli:
-		mode = "cli"
-	}
 	if provider == "" {
 		provider = guessProvider(host, nil)
 	}
+	// hasApp is retained by the caller for compatibility; coverage is checked
+	// against this repository so one installed account cannot cover another.
+	app := hasApp && h.appCoversRepo(r.Context(), ws, key)
+	reach := DecideRepoReach(provider, conn != nil, app, cli)
 	card := repoConnectionCard{
 		URL:          repo.URL,
 		Provider:     provider,
-		Mode:         mode,
-		Webhook:      webhookMode(provider, mode, conn),
+		Mode:         reach.Mode,
+		NextAction:   reach.NextAction,
+		Webhook:      webhookMode(provider, reach.Mode, conn),
 		CanConfigure: h.callerCanConfigureRepo(r, repo),
 		CreatedBy:    repo.CreatedBy,
 	}
