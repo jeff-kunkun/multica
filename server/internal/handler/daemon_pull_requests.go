@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,6 +31,12 @@ type DaemonPullRequest struct {
 	Branch   string     `json:"branch"`
 	SHA      string     `json:"sha"`
 	MergedAt *time.Time `json:"merged_at,omitempty"`
+	// Snapshot fields from the caller's gh (DENE-906). Nil means the reporter
+	// did not read them; an empty checks rollup means there are no checks.
+	MergeableState   *string  `json:"mergeable_state,omitempty"`
+	ChecksRollup     *string  `json:"checks_rollup,omitempty"`
+	FailedCheckNames []string `json:"failed_check_names,omitempty"`
+	ChecksRunning    int      `json:"checks_running,omitempty"`
 }
 
 func (h *Handler) ReportDaemonPullRequests(w http.ResponseWriter, r *http.Request) {
@@ -88,12 +95,24 @@ func (h *Handler) persistReportedPullRequests(ctx context.Context, ws pgtype.UUI
 			state = "open"
 		}
 		now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
-		row, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
+		tx, err := h.TxStarter.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		qtx := h.Queries.WithTx(tx)
+		row, err := qtx.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
 			WorkspaceID: ws, RepoOwner: p.Owner, RepoName: p.Repo, PrNumber: p.Number, Title: p.Title,
 			State: state, HtmlUrl: p.URL, Branch: pgtype.Text{String: p.Branch, Valid: p.Branch != ""}, HeadSha: p.SHA,
-			PrCreatedAt: now, PrUpdatedAt: now, MergedAt: timestamptzPtr(p.MergedAt), Source: pgtype.Text{String: "daemon", Valid: true},
+			PrCreatedAt: now, PrUpdatedAt: now, MergedAt: timestamptzPtr(p.MergedAt),
+			MergeableState: reportedMergeable(p.MergeableState),
+			Source:         pgtype.Text{String: "daemon", Valid: true},
 		})
 		if err != nil {
+			_ = tx.Rollback(ctx)
+			return err
+		}
+		if err := writeReportedCheckSnapshot(ctx, qtx, row.ID, p); err != nil {
+			_ = tx.Rollback(ctx)
 			return err
 		}
 		for _, ident := range idents {
@@ -105,14 +124,106 @@ func (h *Handler) persistReportedPullRequests(ctx context.Context, ws pgtype.UUI
 			if err != nil {
 				continue
 			}
-			issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{WorkspaceID: ws, Number: int32(n)})
+			issue, err := qtx.GetIssueByNumber(ctx, db.GetIssueByNumberParams{WorkspaceID: ws, Number: int32(n)})
 			if err != nil {
 				continue
 			}
-			_ = h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{IssueID: issue.ID, PullRequestID: row.ID, CloseIntent: true})
+			_ = qtx.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{IssueID: issue.ID, PullRequestID: row.ID, CloseIntent: true})
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func reportedMergeable(state *string) pgtype.Text {
+	if state == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: strings.ToLower(strings.TrimSpace(*state)), Valid: true}
+}
+
+// writeReportedCheckSnapshot stores the gh check rollup where the close gate
+// reads it: checks_rollup_state on the PR row, and one check-run row per
+// failed or still-running check so the aggregate query fills
+// failed_check_names and checks_running. A nil rollup leaves the previous
+// snapshot alone. An empty head SHA cannot be joined back to the rollup, so
+// the per-check rows are skipped.
+func writeReportedCheckSnapshot(ctx context.Context, q *db.Queries, prID pgtype.UUID, p DaemonPullRequest) error {
+	if p.ChecksRollup == nil || strings.TrimSpace(p.SHA) == "" {
+		return nil
+	}
+	rollup := strings.ToLower(strings.TrimSpace(*p.ChecksRollup))
+	var rollupText pgtype.Text
+	if rollup != "" {
+		rollupText = pgtype.Text{String: rollup, Valid: true}
+	}
+	state := ""
+	if p.MergeableState != nil {
+		state = strings.ToLower(strings.TrimSpace(*p.MergeableState))
+	}
+	n, err := q.UpdateGitHubPRSnapshot(ctx, db.UpdateGitHubPRSnapshotParams{
+		ApiMergeable:        reportedAPIMergeable(state),
+		ApiMergeStateStatus: reportedAPIState(state),
+		ChecksRollupState:   rollupText,
+		HeadSha:             p.SHA,
+		FetchedAt:           pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		PrID:                prID,
+	})
+	if err != nil || n == 0 {
+		return err
+	}
+	if err := q.DeleteGitHubPRCheckRuns(ctx, prID); err != nil {
+		return err
+	}
+	ordinal := int32(0)
+	for _, name := range p.FailedCheckNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if err := q.InsertGitHubPRCheckRun(ctx, db.InsertGitHubPRCheckRunParams{
+			PrID: prID, HeadSha: p.SHA, Ordinal: ordinal, Name: name, Status: "completed",
+			Conclusion: pgtype.Text{String: "failure", Valid: true},
+		}); err != nil {
+			return err
+		}
+		ordinal++
+	}
+	running := p.ChecksRunning
+	if running > 100 {
+		running = 100
+	}
+	for i := 0; i < running; i++ {
+		if err := q.InsertGitHubPRCheckRun(ctx, db.InsertGitHubPRCheckRunParams{
+			PrID: prID, HeadSha: p.SHA, Ordinal: ordinal, Name: fmt.Sprintf("running-%d", i+1), Status: "in_progress",
+		}); err != nil {
+			return err
+		}
+		ordinal++
+	}
+	return nil
+}
+
+func reportedAPIMergeable(state string) pgtype.Text {
+	switch state {
+	case "":
+		return pgtype.Text{}
+	case "dirty":
+		return pgtype.Text{String: "CONFLICTING", Valid: true}
+	case "unknown":
+		return pgtype.Text{String: "UNKNOWN", Valid: true}
+	default:
+		return pgtype.Text{String: "MERGEABLE", Valid: true}
+	}
+}
+
+func reportedAPIState(state string) pgtype.Text {
+	if state == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: strings.ToUpper(state), Valid: true}
 }
 
 func containsFold(list []string, want string) bool {

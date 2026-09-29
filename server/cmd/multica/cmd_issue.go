@@ -242,7 +242,9 @@ var issueCloseCmd = &cobra.Command{
 		"writes the status and the close.* record in one transaction, and validates\n" +
 		"the record first — a close that is missing something is refused with the\n" +
 		"missing item named, and nothing is written.\n\n" +
-		"  --outcome done        delivered; a sub-issue's parent stage is notified\n" +
+		"  --outcome done        delivered; without a GitHub App, gh squash-merges an open\n" +
+		"                        PR first when it is clean and checks are green. A sub-issue's\n" +
+		"                        parent stage is notified\n" +
 		"  --outcome in_review   delivered, awaiting acceptance (top-level issues only;\n" +
 		"                        routing hands the ticket to the acceptance seat, do not @ it)\n" +
 		"  --outcome blocked     needs one wait: --blocked-by / --wake-at /\n" +
@@ -1868,7 +1870,7 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if status == "in_review" || status == "done" {
-		refreshIssuePullRequests(ctx, client, issueRef.ID, issueRef.Display, false)
+		refreshIssuePullRequests(ctx, client, issueRef.ID, issueRef.Display, false, false)
 	}
 
 	var result map[string]any
@@ -1972,7 +1974,7 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 		body["verdict"] = verdict
 	}
 	if outcome == "done" || outcome == "in_review" {
-		refreshIssuePullRequests(ctx, client, issueRef.ID, issueRef.Display, outcome == "done" && verdict == "pass")
+		refreshIssuePullRequests(ctx, client, issueRef.ID, issueRef.Display, outcome == "done" && verdict == "pass", outcome == "done" && verdict == "")
 	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/close", body, &result); err != nil {
