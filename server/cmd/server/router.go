@@ -1572,6 +1572,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/agent-cli/status", h.ReportAgentCLIStatus)
 		r.Post("/runtimes/{runtimeId}/model-catalog/refresh", h.RefreshRuntimeModelCatalog)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
+		r.Post("/runtimes/{runtimeId}/routing-analysis/{requestId}/result", h.ReportRoutingAnalysisResult)
 		r.Post("/runtimes/{runtimeId}/provider-presets/{requestId}/result", h.ReportProviderPresetResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/{requestId}/result", h.ReportLocalSkillListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/import/{requestId}/result", h.ReportLocalSkillImportResult)

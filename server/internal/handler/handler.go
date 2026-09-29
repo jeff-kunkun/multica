@@ -225,6 +225,7 @@ type Handler struct {
 	UpdateStore           UpdateStore
 	AgentCLICommands      AgentCLICommandStore
 	ModelListStore        ModelListStore
+	RoutingAnalysisStore  *RoutingAnalysisStore
 	ProviderPresetStore   ProviderPresetStore
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
@@ -535,6 +536,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		UpdateStore:                  NewInMemoryUpdateStore(),
 		AgentCLICommands:             NewInMemoryAgentCLICommandStore(),
 		ModelListStore:               NewInMemoryModelListStore(),
+		RoutingAnalysisStore:         NewRoutingAnalysisStore(),
 		ProviderPresetStore:          NewInMemoryProviderPresetStore(),
 		ModelCatalogCache:            NewInMemoryModelCatalogCache(),
 		LocalSkillListStore:          NewInMemoryLocalSkillListStore(),
@@ -580,7 +582,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	})
 	// The analysis role reads the whole ticket and reduces it to facts
 	// (DENE-923). It is always a general chat model.
-	h.Routing.Analyst = routing.LLMAnalyst{Gen: llmClient, Dial: dialRouting}
+	h.Routing.Analyst = routing.LLMAnalyst{Gen: llmClient, Dial: dialRouting, Runtime: runtimeRoutingPromptRunner{h: h}}
 	// The parking record's one sentence comes from the same routing model,
 	// under the same switch and breaker (DENE-881).
 	taskSvc.ParkingSummarizer = h.Routing
