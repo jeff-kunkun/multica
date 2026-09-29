@@ -137,7 +137,9 @@
     "next_owner": "次: {{name}}",
     "next_owner_none": "次: なし",
     "waiting_on": "{{id}} を待機",
-    "last_activity_missing": "活動時刻なし"
+    "last_activity_missing": "活動時刻なし",
+    "knowledge_none": "該当する知識なし",
+    "knowledge_change": "知識: {{locations}}"
   },
   "blocker_summary": {
     "title": "ブロック中 · 根因 {{count}} 件",
@@ -819,6 +821,7 @@
     "remove_parent_issue": "親タスクを解除",
     "remove_parent_issue_success": "親タスクを解除しました",
     "add_sub_issue": "サブタスクを追加...",
+    "close_issue": "クローズ",
     "delete_issue": "タスクを削除",
     "pin_to_sidebar": "サイドバーにピン留め",
     "unpin_from_sidebar": "サイドバーのピン留めを解除"

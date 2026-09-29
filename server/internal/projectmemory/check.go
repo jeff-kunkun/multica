@@ -40,6 +40,26 @@ func Locations() []Location {
 	return result
 }
 
+// LocationKeys is the stable key list. Close audits and CLI help read this
+// instead of keeping a second copy of the checklist.
+func LocationKeys() []string {
+	keys := make([]string, len(locations))
+	for i, location := range locations {
+		keys[i] = location.Key
+	}
+	return keys
+}
+
+// KnownLocation reports whether key is one of the checklist slots.
+func KnownLocation(key string) bool {
+	for _, location := range locations {
+		if location.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
 // LocationResult is the daemon's read-only observation of one checklist slot.
 type LocationResult struct {
 	Location

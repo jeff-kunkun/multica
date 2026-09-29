@@ -1997,6 +1997,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
+			// Project-memory checklist (DENE-972). Not under /api/projects: that
+			// tree is behind the projects module, and a close must be able to
+			// read the same list the server validates against.
+			r.Get("/api/project-memory/locations", h.ListProjectMemoryLocations)
+
 			// Module-level sharing (DENE-699). These endpoints are themselves
 			// not behind RequireModule: the caller needs them to learn which
 			// areas they may enter, and only owner/admin can write.
