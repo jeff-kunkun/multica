@@ -61,6 +61,8 @@ you debugging access when the real problem was the id.
 Do not merge them (`2>&1`) into anything that parses the output — that makes a
 write which SUCCEEDED look like it failed, and invites a duplicate retry.
 
+**Long-tail settings:** `multica settings get <key>` and `multica settings set <key> --value-json '<json>'` (secrets via `--value-file` or `--value-stdin`); `repo.shares` revokes with `{"url","member_id","revoke":true}`. The key table is `docs/kun/settings-cli-coverage.md`.
+
 **Writes are real.** Creating, updating, deleting, assigning, commenting,
 mentioning, triggering and status changes mutate durable workspace state or
 start agent runs that cost real budget. Never run one to see what happens. When
