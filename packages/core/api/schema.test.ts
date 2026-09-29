@@ -63,6 +63,17 @@ describe("ApiClient schema fallback", () => {
       });
     });
 
+    it("degrades a malformed repository-link catalog to an empty list", async () => {
+      stubFetchJson({ links: { id: "not-a-list" } });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listRepoLinks("ws-1")).resolves.toEqual({
+        links: [],
+        bindings: [],
+        can_add_workspace: false,
+        can_add_personal: false,
+      });
+    });
+
     it("adds the allowlisted repository return target to the connect request", async () => {
       stubFetchJson({
         configured: true,

@@ -22,6 +22,7 @@ vi.mock("@multica/ui/lib/clipboard", () => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
+  queryOptions: <T,>(options: T) => options,
   useQuery: (options: { queryKey?: readonly unknown[] }) => {
     switch (options.queryKey?.[0]) {
       case "project-detail":
@@ -42,6 +43,9 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@multica/core/projects/queries", () => ({
   projectDetailOptions: () => ({ queryKey: ["project-detail"] }),
+  projectKeys: {
+    detail: (wsId: string, id: string) => ["projects", wsId, "detail", id],
+  },
 }));
 
 vi.mock("@multica/core/projects/mutations", () => ({

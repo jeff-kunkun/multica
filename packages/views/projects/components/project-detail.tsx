@@ -26,6 +26,7 @@ import { currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, ReadonlyContent, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
+import { ProjectRepoLinkNotice } from "./project-repo-link-notice";
 import { ProjectMembersSection } from "./project-members-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
@@ -585,6 +586,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </>
             }
           />
+
+          <ProjectRepoLinkNotice projectId={projectId} />
 
           <IssueSurface
             scope={issueScope}
