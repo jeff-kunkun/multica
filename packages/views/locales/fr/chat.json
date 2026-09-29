@@ -204,7 +204,11 @@
       "label": "Recommander une action",
       "prompt": "Examinez ce que vous savez de mon espace de travail et recommandez une première action utile."
     },
-    "customize": "Personnaliser les amorces"
+    "customize": "Personnaliser les amorces",
+    "inbox": {
+      "label": "Résume ma boîte de réception",
+      "prompt": "Résume-moi ma boîte de réception"
+    }
   },
   "onboarding_cards": {
     "aria_label": "Façons de démarrer",

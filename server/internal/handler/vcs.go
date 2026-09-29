@@ -29,6 +29,7 @@ type VCSConnectionResponse struct {
 	Provider     string `json:"provider"`
 	InstanceURL  string `json:"instance_url"`
 	AccountLogin string `json:"account_login"`
+	RepoURL      string `json:"repo_url,omitempty"`
 	WebhookURL   string `json:"webhook_url"`
 	WebhookPath  string `json:"webhook_path"`
 	CreatedAt    string `json:"created_at"`
@@ -71,6 +72,7 @@ func (h *Handler) vcsConnectionToResponse(c db.VcsConnection) VCSConnectionRespo
 		Provider:     c.Provider,
 		InstanceURL:  c.InstanceUrl,
 		AccountLogin: c.AccountLogin,
+		RepoURL:      c.RepoUrl,
 		WebhookURL:   h.vcsWebhookURL(id),
 		WebhookPath:  h.vcsWebhookPath(id),
 		CreatedAt:    timestampToString(c.CreatedAt),
@@ -239,6 +241,7 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to save connection")
 		return
 	}
+	h.clearCoveredNudges(r.Context(), conn)
 
 	resp := h.vcsConnectionToResponse(conn)
 	h.publish(protocol.EventVCSConnectionCreated, workspaceID, "system", "", map[string]any{"id": resp.ID})
@@ -255,12 +258,12 @@ func (h *Handler) DeleteVCSConnection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	idUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "connectionId"), "connection id")
+	_, conn, ok := h.loadWorkspaceConnection(w, r)
 	if !ok {
 		return
 	}
 	if err := h.Queries.DeleteVCSConnection(r.Context(), db.DeleteVCSConnectionParams{
-		ID:          idUUID,
+		ID:          conn.ID,
 		WorkspaceID: wsUUID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to remove connection")

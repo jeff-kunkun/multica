@@ -744,6 +744,7 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 	}
 
 	resp := projectResourceToResponse(resource)
+	h.noteUnconnectedProjectRepo(r.Context(), project, resource.ResourceType, resource.ResourceRef, creator)
 	h.publish(
 		protocol.EventProjectResourceCreated,
 		uuidToString(project.WorkspaceID),
@@ -1156,6 +1157,7 @@ type claimProject struct {
 	Description string
 	Resources   []ProjectResourceData
 	Repos       []RepoData
+	MemoryLine  string
 }
 
 // applyTo copies the resolved context onto a claim response. Callers assign the
@@ -1174,6 +1176,7 @@ func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
 				Title:       p.Title,
 				Description: p.Description,
 				Resources:   p.Resources,
+				MemoryLine:  p.MemoryLine,
 			})
 		}
 		primary := c.Projects[0]
@@ -1296,6 +1299,7 @@ func (h *Handler) resolveClaimProjectContexts(ctx context.Context, projectIDs []
 				Description: project.Description.String,
 				Resources:   resources,
 				Repos:       repos,
+				MemoryLine:  h.projectMemoryBriefLine(ctx, project),
 			})
 		}
 	}

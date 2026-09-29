@@ -122,6 +122,7 @@ Staged child = has a parent and (own `stage` or any staged sibling).
 | `awaiting_review` | top-level parent acceptance is an agent Reviewer | `in_review` | that Reviewer, or `none` and let routing fill the seat | `route` (what `issue close --outcome in_review` writes) or `mention` — **not** `done`; child barrier is already closed |
 | `awaiting_human` | top-level parent acceptance is a human | `in_review` | that member | `none`. Optional dispatcher: `mention` that agent and name the human in `waiting_on` or the evidence |
 | `blocked` | missing auth / human decision / external dep | `blocked` | who can unblock | `mention` if agent/squad, else `none` |
+| (no close) | 交付查询报没权限 | do not change status | 仓库登记人（服务端 summon） | 先 `multica connection add --from-gh --yes`（本机有发起人的 gh 登录）；不行就交给服务端叫人，不要自己设等待条件 |
 | (no close) | this turn did not deliver this issue's ask | do not change status | — | do not write `close.*` |
 Four closing scenes:
 

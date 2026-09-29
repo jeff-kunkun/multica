@@ -696,6 +696,14 @@ type CommentReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ConnectionNudge struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RepoKey     string             `json:"repo_key"`
+	RecipientID pgtype.UUID        `json:"recipient_id"`
+	InboxItemID pgtype.UUID        `json:"inbox_item_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type ContactSalesInquiry struct {
 	ID              pgtype.UUID        `json:"id"`
 	FirstName       string             `json:"first_name"`
@@ -899,6 +907,7 @@ type InboxItem struct {
 	ActorType     pgtype.Text        `json:"actor_type"`
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
+	ReadAt        pgtype.Timestamptz `json:"read_at"`
 }
 
 type InstanceTelemetryState struct {

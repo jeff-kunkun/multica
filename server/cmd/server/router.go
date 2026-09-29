@@ -1718,6 +1718,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// for the same reason as GitHub installations; connect /
 					// disconnect are admin-gated in the group below.
 					r.Get("/vcs/connections", h.ListVCSConnections)
+					r.Post("/vcs/connections/{connectionId}/test", h.TestStoredConnection)
+					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
 					r.Get("/repos/connections", h.ListRepoConnections)
 					r.Post("/repos/connections", h.UpsertRepoConnection)
 					r.Post("/repos/connections/test", h.TestRepoConnection)
@@ -1826,10 +1828,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Get("/github/installations/{installationId}/repositories", h.ListGitHubInstallationRepositories)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
-					// VCS connect / disconnect / webhook regeneration (admin-only).
+					// Instance-wide GitLab/Forgejo tokens stay admin-only. A repository
+					// token is saved through /repos/connections, which the
+					// person who added the repository can call.
 					r.Post("/vcs/connections", h.ConnectVCS)
 					r.Post("/vcs/connections/{connectionId}/rotate-webhook", h.RotateVCSConnectionWebhook)
-					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
 				})
 
 				// Lark integration. Every endpoint here only requires
@@ -2622,6 +2625,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// The board's unread snapshot and the ticket-level read
 				// (DENE-901).
 				r.Get("/unread-issues", h.ListUnreadInboxIssues)
+				// The inbox in five lanes, for the page, the CLI and agents
+				// reading it for their user (DENE-975).
+				r.Get("/board", h.GetInboxBoard)
 				r.Post("/issues/{issueId}/read", h.MarkIssueInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
