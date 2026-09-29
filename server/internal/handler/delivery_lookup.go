@@ -147,11 +147,10 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 	}
 
 	conns, _ := h.Queries.ListVCSConnectionsByWorkspace(ctx, issue.WorkspaceID)
-	hasApp := h.workspaceHasGitHubApp(ctx, issue.WorkspaceID)
 	canToken := h.isVCSAvailable() && h.isVCSConfigured()
 	ws, wsErr := h.Queries.GetWorkspace(ctx, issue.WorkspaceID)
 	if wsErr != nil {
-		return finishDeliveries(ident, nil, nil, false, hasApp, hasApp, ""), nil
+		return finishDeliveries(ident, nil, nil, false, false, false, ""), nil
 	}
 
 	var project *db.Project
@@ -162,13 +161,18 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 			project = &p
 		}
 	}
+	repos := h.deliveryRepos(ctx, ws, project)
 	queried := false
 	connected := false
 	sawToken := false
+	allApp := len(repos) > 0
+	reachCount := 0
+	var unconnectedRepo workspaceRepoRef
+	var unconnectedReach RepoReach
 	denied := false
 	deniedHost := ""
 	lookupErr := ""
-	for i, repo := range decodeWorkspaceRepos(ws.Repos) {
+	for i, repo := range repos {
 		if i >= 12 || ctx.Err() != nil {
 			break
 		}
@@ -183,12 +187,15 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 		}
 		conn := matchConnection(conns, key, host)
 		// Coverage is this repository's owner, not "any installation in the workspace".
-		reach := DecideRepoReach(reachFacts{
-			Provider:     provider,
-			HasToken:     conn != nil,
-			AppCovers:    provider == "github" && h.appCoversRepo(ctx, issue.WorkspaceID, key),
-			CanConfigure: true,
-		})
+		reach := h.deliveryRepoReach(ctx, ws, issue.WorkspaceID, repo, provider, key, conn)
+		reachCount++
+		if reach.Mode != "app" {
+			allApp = false
+			if unconnectedReach.NextAction == nil {
+				unconnectedRepo = repo
+				unconnectedReach = reach
+			}
+		}
 		if reach.Mode == "app" {
 			connected = true
 		}
@@ -237,8 +244,11 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 	if err != nil {
 		return issueDeliveries{Ident: ident}, err
 	}
-	appOnly := hasApp && !sawToken && connected && len(gh)+len(vcsRows) == 0
+	appOnly := allApp && reachCount > 0 && !sawToken && connected && len(gh)+len(vcsRows) == 0
 	view := finishDeliveries(ident, gh, vcsRows, queried, connected, appOnly, lookupErr)
+	if unconnectedReach.NextAction != nil && len(view.GitHub)+len(view.VCS) == 0 {
+		applyRepoReachGap(view.Gap, unconnectedRepo.URL, unconnectedReach.NextAction)
+	}
 	view.Denied = denied && len(view.GitHub)+len(view.VCS) == 0
 	if view.Denied {
 		if view.Gap == nil {
@@ -248,6 +258,113 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 		view.Gap.NextCommand = gitconn.AddCommand(deniedHost) + " --yes"
 	}
 	return view, nil
+}
+
+// deliveryRepos narrows a delivery lookup to the issue's project repositories
+// when that project has any github_repo resources. Projects without attached
+// repositories intentionally fall back to the workspace registry.
+func (h *Handler) deliveryRepos(ctx context.Context, ws db.Workspace, project *db.Project) []workspaceRepoRef {
+	workspaceRepos := decodeWorkspaceRepos(ws.Repos)
+	if project == nil {
+		return workspaceRepos
+	}
+	rows, err := h.Queries.ListProjectResources(ctx, project.ID)
+	if err != nil {
+		return workspaceRepos
+	}
+	return selectDeliveryRepos(workspaceRepos, rows)
+}
+
+func selectDeliveryRepos(workspaceRepos []workspaceRepoRef, rows []db.ProjectResource) []workspaceRepoRef {
+	byKey := make(map[string]workspaceRepoRef, len(workspaceRepos))
+	for _, repo := range workspaceRepos {
+		byKey[string(repoident.NormalizeURL(repo.URL))] = repo
+	}
+	projectRepos := make([]workspaceRepoRef, 0, len(rows))
+	for _, row := range rows {
+		if row.ResourceType != "github_repo" {
+			continue
+		}
+		repo, ok := gitconn.FromResource(row.ResourceType, row.ResourceRef)
+		if !ok || repo.URL == "" {
+			continue
+		}
+		ref := byKey[string(repoident.NormalizeURL(repo.URL))]
+		ref.URL = repo.URL
+		if ref.CreatedBy == "" && row.CreatedBy.Valid {
+			ref.CreatedBy = uuidToString(row.CreatedBy)
+		}
+		projectRepos = append(projectRepos, ref)
+	}
+	if len(projectRepos) > 0 {
+		return projectRepos
+	}
+	return workspaceRepos
+}
+
+// deliveryRepoReach shares the RepoReach decision with settings and project
+// surfaces while supplying the URLs that are useful in a close-gate gap.
+func (h *Handler) deliveryRepoReach(ctx context.Context, ws db.Workspace, workspaceID pgtype.UUID, repo workspaceRepoRef, provider, key string, conn *db.VcsConnection) RepoReach {
+	host, owner, _, _ := splitRepoKey(key)
+	facts := reachFacts{
+		Provider:     provider,
+		Owner:        owner,
+		HasToken:     conn != nil,
+		AppCovers:    provider == "github" && h.appCoversRepo(ctx, workspaceID, key),
+		AppReady:     isGitHubConfigured(),
+		CanConfigure: true,
+		Command:      gitconn.AddCommand(host),
+	}
+	if conn != nil {
+		facts.TokenBroken = conn.LastLookupOk.Valid && !conn.LastLookupOk.Bool
+	}
+	if provider == "github" && facts.AppReady {
+		if state, err := signState(uuidToString(workspaceID)); err == nil {
+			facts.InstallURL = "https://github.com/apps/" + url.PathEscape(githubAppSlug()) + "/installations/new?state=" + url.QueryEscape(state)
+		}
+	}
+	if provider == "github" {
+		facts.CreateURL = gitconn.SettingsURL(h.cfg.PublicURL, ws.Slug, strings.TrimSpace(key))
+	}
+	reach := DecideRepoReach(facts)
+	reach.RepoURL = repo.URL
+	reach.Key = key
+	return reach
+}
+
+func applyRepoReachGap(gap *delivery.Gap, repoURL string, action *RepoNextAction) {
+	if gap == nil || action == nil {
+		return
+	}
+	gap.Kind = delivery.GapNoConnection
+	switch action.Kind {
+	case "install_app":
+		gap.Message = "这个仓库还没接上，平台需要把 GitHub App 安装到它的账号上。"
+		gap.NextCommand = "给 " + repoURL + " 安装 GitHub App"
+		if action.URL != "" {
+			gap.NextCommand += "：" + action.URL
+		}
+	case "ask_owner":
+		gap.Message = "这个仓库还没接上，需要仓库登记人完成连接。"
+		gap.NextCommand = "请仓库登记人完成 " + action.For
+		if action.URL != "" {
+			gap.NextCommand += "：" + action.URL
+		} else if action.Command != "" {
+			gap.NextCommand += "：" + action.Command
+		}
+	case "create_app":
+		gap.Message = "这个仓库还没接上，平台还没有 GitHub App。"
+		gap.NextCommand = "先创建 GitHub App"
+		if action.URL != "" {
+			gap.NextCommand += "：" + action.URL
+		}
+	case "add_token":
+		gap.Message = "这个仓库还没接上，平台没有可用令牌。"
+		gap.NextCommand = action.Command
+	default:
+		gap.Message = "这个仓库还没接上。"
+		gap.NextCommand = action.Command
+	}
 }
 
 func finishDeliveries(ident string, gh []db.ListPullRequestsByIssueRow, vcsRows []db.ListVCSPullRequestsByIssueRow, queried, connected, appOnly bool, lookupErr string) issueDeliveries {
@@ -272,11 +389,6 @@ func (h *Handler) loadDeliveryRows(ctx context.Context, issueID pgtype.UUID) ([]
 		return nil, nil, err
 	}
 	return gh, vcsRows, nil
-}
-
-func (h *Handler) workspaceHasGitHubApp(ctx context.Context, ws pgtype.UUID) bool {
-	rows, err := h.Queries.ListGitHubInstallationsByWorkspace(ctx, ws)
-	return err == nil && len(rows) > 0
 }
 
 func (h *Handler) recordLookup(ctx context.Context, conn db.VcsConnection, ok bool, reason string) {
