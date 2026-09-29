@@ -467,6 +467,7 @@ interface ImageAttachmentViewProps {
   linkUrl: string;
   alt: string;
   uploading: boolean;
+  uploadProgress?: number;
   width?: number;
   height?: number;
   editable?: boolean;
@@ -482,6 +483,7 @@ function ImageAttachmentView({
   linkUrl,
   alt,
   uploading,
+  uploadProgress,
   width,
   height,
   editable,
@@ -532,6 +534,11 @@ function ImageAttachmentView({
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
         />
+        {uploading && uploadProgress != null && (
+          <span className="absolute inset-x-0 bottom-1 text-center text-xs text-white drop-shadow">
+            {uploadProgress}%
+          </span>
+        )}
         {!uploading && src && (
           <span
             className="image-toolbar"
