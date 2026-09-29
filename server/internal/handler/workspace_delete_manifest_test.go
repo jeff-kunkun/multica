@@ -72,7 +72,10 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"feedback":                        workspaceDeleteDetach,
 	// One App for the whole deployment. The workspace link is ON DELETE SET NULL,
 	// so tearing down a workspace detaches the row and keeps the private key.
-	"github_app_credential":              workspaceDeleteDetach,
+	"github_app_credential": workspaceDeleteDetach,
+	// Single-use browser links for the App manifest page. No workspace column
+	// and a 10-minute expiry; a leftover link fails the owner check on open.
+	"github_app_launch_token":            workspaceDeleteKeep,
 	"github_installation":                workspaceDelete,
 	"github_pending_check_suite":         workspaceDelete,
 	"github_pending_installation":        workspaceDeleteKeep,
