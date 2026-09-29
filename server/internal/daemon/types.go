@@ -66,6 +66,8 @@ type ProjectContextData struct {
 	Title       string                `json:"title"`
 	Description string                `json:"description,omitempty"`
 	Resources   []ProjectResourceData `json:"resources,omitempty"`
+	// MemoryLine mirrors handler.TaskProjectContextData.MemoryLine.
+	MemoryLine string `json:"memory_line,omitempty"`
 }
 
 // ConnectedAppData keeps the claim-response field local to daemon types while

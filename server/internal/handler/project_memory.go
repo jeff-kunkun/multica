@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -354,7 +355,9 @@ func (h *Handler) EnsureMemoryRound(ctx context.Context, project db.Project, rea
 	if _, err := h.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
 		ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: "sediment_project",
 		Value: []byte(fmt.Sprintf("%q", uuidToString(project.ID))),
-	}); err != nil {
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// ErrNoRows means the key is already this project. A concurrent
+		// caller won the write; the round still belongs to one ticket.
 		return MemoryRoundResult{}, err
 	}
 	if _, err := h.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
@@ -372,6 +375,143 @@ func (h *Handler) EnsureMemoryRound(ctx context.Context, project db.Project, rea
 		}
 	}
 	return MemoryRoundResult{Issue: &issue, Created: created.DuplicateIssue == nil}, nil
+}
+
+// noteMemoryProgress opens or extends the project's sediment round. A missing
+// seat, a bad setting, or a write failure is logged and returned as text. It
+// never fails the business event that noticed the progress.
+func (h *Handler) noteMemoryProgress(ctx context.Context, workspaceID, projectID pgtype.UUID, reason string) string {
+	reason = strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(reason))
+	if !projectID.Valid || reason == "" || h.Queries == nil {
+		return ""
+	}
+	project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+		ID: projectID, WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		slog.Warn("memory round: sediment failed", "error", err, "project_id", uuidToString(projectID), "reason", reason)
+		return "project memory sediment failed"
+	}
+	result, err := h.EnsureMemoryRound(ctx, project, reason)
+	if err != nil {
+		slog.Warn("memory round: sediment failed", "error", err, "project_id", uuidToString(projectID), "reason", reason)
+		return "project memory sediment failed"
+	}
+	if result.Error != "" {
+		slog.Warn("memory round: sediment skipped", "error", result.Error, "project_id", uuidToString(projectID), "reason", reason)
+		return result.Error
+	}
+	return ""
+}
+
+// sedimentClosedBarrier records one objective milestone when a child
+// completion closes a stage barrier. An intermediate stage passes a stage
+// reason; the same call passes the parent reason only once every child the
+// state machine counts is terminal. A replay appends to the open round
+// instead of opening a second ticket.
+func (h *Handler) sedimentClosedBarrier(ctx context.Context, parent, completed db.Issue, children []db.Issue, isTerminal func(db.Issue) bool) {
+	if !parent.ProjectID.Valid || isTerminal == nil {
+		return
+	}
+	label := issueIdentifier(h.getIssuePrefix(ctx, parent.WorkspaceID), parent.Number)
+	var reason string
+	if siblingsAreStaged(children) {
+		if !completed.Stage.Valid {
+			return
+		}
+		if next := nextOpenStage(children, completed.Stage.Int32, isTerminal); next > 0 {
+			reason = fmt.Sprintf("阶段推进：%s 的第 %d 阶段已终态，下一阶段是 %d", label, completed.Stage.Int32, next)
+		} else if stagedChildrenAllTerminal(children, isTerminal) {
+			reason = fmt.Sprintf("父票子票全部终态：%s", label)
+		} else {
+			return
+		}
+	} else if childrenAllTerminal(children, isTerminal) {
+		reason = fmt.Sprintf("父票子票全部终态：%s", label)
+	} else {
+		return
+	}
+	h.noteMemoryProgress(ctx, parent.WorkspaceID, parent.ProjectID, reason)
+}
+
+func nextOpenStage(children []db.Issue, closedStage int32, isTerminal func(db.Issue) bool) int32 {
+	var next int32
+	for _, child := range children {
+		if !child.Stage.Valid || child.Stage.Int32 <= closedStage || isTerminal(child) {
+			continue
+		}
+		if next == 0 || child.Stage.Int32 < next {
+			next = child.Stage.Int32
+		}
+	}
+	return next
+}
+
+func stagedChildrenAllTerminal(children []db.Issue, isTerminal func(db.Issue) bool) bool {
+	sawStaged := false
+	for _, child := range children {
+		if !child.Stage.Valid {
+			continue
+		}
+		sawStaged = true
+		if !isTerminal(child) {
+			return false
+		}
+	}
+	return sawStaged
+}
+
+func childrenAllTerminal(children []db.Issue, isTerminal func(db.Issue) bool) bool {
+	if len(children) == 0 {
+		return false
+	}
+	for _, child := range children {
+		if !isTerminal(child) {
+			return false
+		}
+	}
+	return true
+}
+
+// projectMemoryBriefLine is the one line a task brief may carry about project
+// memory: where the map is, and which checklist paths are missing. It never
+// reads file bodies. A status read failure returns an empty line so claim
+// still succeeds.
+func (h *Handler) projectMemoryBriefLine(ctx context.Context, project db.Project) string {
+	if h.Queries == nil {
+		return ""
+	}
+	rows, err := h.Queries.ListProjectMemoryStatus(ctx, db.ListProjectMemoryStatusParams{
+		ProjectID: project.ID, WorkspaceID: project.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("memory round: brief line skipped", "error", err, "project_id", uuidToString(project.ID))
+		return ""
+	}
+	byKey := make(map[string]db.ProjectMemoryStatus, len(rows))
+	for _, row := range rows {
+		byKey[row.LocationKey] = row
+	}
+	mapPath := "AGENTS.md"
+	missing := make([]string, 0, len(projectmemory.Locations()))
+	for _, location := range projectmemory.Locations() {
+		if location.Key == projectmemory.LocationAgents {
+			mapPath = location.Path
+		}
+		row, ok := byKey[location.Key]
+		if !ok || !row.ExistsOnDisk {
+			missing = append(missing, location.Path)
+		}
+	}
+	missingText := "none"
+	if len(missing) > 0 {
+		quoted := make([]string, len(missing))
+		for i, path := range missing {
+			quoted[i] = "`" + path + "`"
+		}
+		missingText = strings.Join(quoted, ", ")
+	}
+	return fmt.Sprintf("Project memory: map is `%s`; missing: %s. Open a listed file only when this task needs it.", mapPath, missingText)
 }
 
 // GetDaemonProjectMemoryTargets gives a daemon the local-directory resources
