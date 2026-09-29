@@ -174,6 +174,10 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(req.Provider), "github") {
+		writeError(w, http.StatusBadRequest, "GitHub 令牌按仓库保存，请到设置里的代码仓库页配置")
+		return
+	}
 	provider, ok := vcs.For(req.Provider)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "unsupported provider")

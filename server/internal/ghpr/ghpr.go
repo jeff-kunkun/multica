@@ -21,6 +21,8 @@ import (
 // (an older gh, or a parse failure) and the server keeps the previous values.
 // A non-nil empty ChecksRollup means gh reported no checks.
 type PR struct {
+	// Provider is empty for a GitHub pull request. "gitlab" is a glab report.
+	Provider         string     `json:"provider,omitempty"`
 	Owner            string     `json:"owner"`
 	Repo             string     `json:"repo"`
 	Number           int32      `json:"number"`

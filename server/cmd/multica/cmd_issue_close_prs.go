@@ -11,12 +11,14 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/ghpr"
+	"github.com/multica-ai/multica/server/internal/glabmr"
 )
 
 // Swappable for tests; production shells out to gh in the working directory.
 var (
-	ghListPRs = ghpr.List
-	ghMergePR = ghpr.Merge
+	ghListPRs   = ghpr.List
+	ghMergePR   = ghpr.Merge
+	glabListMRs = glabmr.List
 )
 
 var closeIdentRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*-\d+$`)
@@ -51,6 +53,14 @@ func refreshIssuePullRequests(ctx context.Context, client *cli.APIClient, issueI
 		return namingIssue(prs, ident), nil
 	}
 	prs, err := list()
+	if err != nil || len(prs) == 0 {
+		if mrs, gerr := glabListMRs(ctx, dir); gerr == nil {
+			if named := namingIssue(mrs, ident); len(named) > 0 {
+				prs = named
+				err = nil
+			}
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  ! could not read PR state with gh (%v); the close gate uses what the server already knows\n", err)
 		return
@@ -59,12 +69,15 @@ func refreshIssuePullRequests(ctx context.Context, client *cli.APIClient, issueI
 		fmt.Fprintf(os.Stderr, "  ! gh found no PR matching %s in the title or current branch; check the PR title or branch contains the issue key\n", ident)
 		return
 	}
-	if !merge && mergeReady && openNonDraftReady(prs) && linkedPullsAreDaemonOnly(ctx, client, issueID) {
+	if !merge && mergeReady && !reportsGitLab(prs) && openNonDraftReady(prs) && linkedPullsAreDaemonOnly(ctx, client, issueID) {
 		merge = true
 	}
 	if merge {
 		mergedAny := false
 		for _, pr := range prs {
+			if pr.Provider == "gitlab" || pr.Provider == "forgejo" || pr.Provider == "gitea" {
+				continue
+			}
 			if pr.State != "open" || pr.IsDraft {
 				continue
 			}
@@ -163,6 +176,16 @@ func linkedPullsAreDaemonOnly(ctx context.Context, client *cli.APIClient, issueI
 		}
 	}
 	return true
+}
+
+func reportsGitLab(prs []ghpr.PR) bool {
+	for _, pr := range prs {
+		switch pr.Provider {
+		case "gitlab", "forgejo", "gitea":
+			return true
+		}
+	}
+	return false
 }
 
 func currentGitBranch(dir string) string {
