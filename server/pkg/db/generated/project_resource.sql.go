@@ -155,6 +155,46 @@ func (q *Queries) GetProjectResourceInWorkspace(ctx context.Context, arg GetProj
 	return i, err
 }
 
+const listGitProjectResourcesByWorkspace = `-- name: ListGitProjectResourcesByWorkspace :many
+SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
+WHERE workspace_id = $1
+  AND resource_type IN ('github_repo', 'local_directory')
+ORDER BY created_at ASC
+LIMIT 200
+`
+
+// Repositories a project has bound, across the workspace, for connection
+// matching. Capped so a status read cannot walk an unbounded resource list.
+func (q *Queries) ListGitProjectResourcesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ProjectResource, error) {
+	rows, err := q.db.Query(ctx, listGitProjectResourcesByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectResource{}
+	for rows.Next() {
+		var i ProjectResource
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.WorkspaceID,
+			&i.ResourceType,
+			&i.ResourceRef,
+			&i.Label,
+			&i.Position,
+			&i.CreatedAt,
+			&i.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjectIDsForRepoURL = `-- name: ListProjectIDsForRepoURL :many
 SELECT DISTINCT project_id
 FROM project_resource

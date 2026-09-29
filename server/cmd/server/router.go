@@ -1684,6 +1684,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// for the same reason as GitHub installations; connect /
 					// disconnect are admin-gated in the group below.
 					r.Get("/vcs/connections", h.ListVCSConnections)
+					// Adding a personal connection is member-visible. A workspace
+					// connection stays admin-only inside ConnectVCS. Test and
+					// delete allow the personal owner as well as an admin.
+					r.Get("/vcs/connections/repo-status", h.GetVCSRepoStatus)
+					r.Post("/vcs/connections", h.ConnectVCS)
+					r.Post("/vcs/connections/{connectionId}/test", h.TestVCSConnection)
+					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
 					// Custom runtime profiles — listing/reading is member-visible
 					// (the Runtime page renders for everyone; create/edit/delete
 					// are admin-gated below).
@@ -1788,12 +1795,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Get("/github/installations/{installationId}/repositories", h.ListGitHubInstallationRepositories)
-					r.Get("/github/coverage", h.GetGitHubCoverage)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
-					// VCS connect / disconnect / webhook regeneration (admin-only).
-					r.Post("/vcs/connections", h.ConnectVCS)
+					// Webhook rotation stays admin-only. Connect and delete moved to
+					// the member group so a person can manage their own token.
 					r.Post("/vcs/connections/{connectionId}/rotate-webhook", h.RotateVCSConnectionWebhook)
-					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
 				})
 
 				// Lark integration. Every endpoint here only requires

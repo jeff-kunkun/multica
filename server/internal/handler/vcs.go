@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/vcs"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -24,14 +23,16 @@ import (
 // Secrets are never included; the webhook secret is returned exactly once at
 // create time via VCSConnectResponse.
 type VCSConnectionResponse struct {
-	ID           string `json:"id"`
-	WorkspaceID  string `json:"workspace_id"`
-	Provider     string `json:"provider"`
-	InstanceURL  string `json:"instance_url"`
-	AccountLogin string `json:"account_login"`
-	WebhookURL   string `json:"webhook_url"`
-	WebhookPath  string `json:"webhook_path"`
-	CreatedAt    string `json:"created_at"`
+	ID           string   `json:"id"`
+	WorkspaceID  string   `json:"workspace_id"`
+	Provider     string   `json:"provider"`
+	InstanceURL  string   `json:"instance_url"`
+	AccountLogin string   `json:"account_login"`
+	Covers       []string `json:"covers"`
+	Personal     bool     `json:"personal"`
+	WebhookURL   string   `json:"webhook_url"`
+	WebhookPath  string   `json:"webhook_path"`
+	CreatedAt    string   `json:"created_at"`
 }
 
 // VCSConnectResponse embeds the stored connection plus the one-time plaintext
@@ -65,12 +66,18 @@ func (h *Handler) vcsWebhookURL(connID string) string {
 
 func (h *Handler) vcsConnectionToResponse(c db.VcsConnection) VCSConnectionResponse {
 	id := uuidToString(c.ID)
+	covers := c.Covers
+	if covers == nil {
+		covers = []string{}
+	}
 	return VCSConnectionResponse{
 		ID:           id,
 		WorkspaceID:  uuidToString(c.WorkspaceID),
 		Provider:     c.Provider,
 		InstanceURL:  c.InstanceUrl,
 		AccountLogin: c.AccountLogin,
+		Covers:       covers,
+		Personal:     c.Personal,
 		WebhookURL:   h.vcsWebhookURL(id),
 		WebhookPath:  h.vcsWebhookPath(id),
 		CreatedAt:    timestampToString(c.CreatedAt),
@@ -148,6 +155,12 @@ type connectVCSRequest struct {
 	Provider    string `json:"provider"`
 	InstanceURL string `json:"instance_url"`
 	AccessToken string `json:"access_token"`
+	// Personal registers the connection for the signed-in member. Workspace
+	// connections (personal=false) stay admin-only.
+	Personal bool `json:"personal"`
+	// AgentYes is set by an agent passing --yes. The connection is personal
+	// and owned by the task initiator, not by the agent.
+	AgentYes bool `json:"agent_yes"`
 }
 
 // ConnectVCS (POST /workspaces/{id}/vcs/connections) validates the supplied
@@ -217,9 +230,17 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var connectedBy pgtype.UUID
-	if member, ok := middleware.MemberFromContext(r.Context()); ok {
-		connectedBy = member.UserID
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	personal, ownerKey, ok := h.connectionOwner(w, r, wsUUID, member, req)
+	if !ok {
+		return
+	}
+	covers := account.Covers
+	if covers == nil {
+		covers = []string{}
 	}
 
 	conn, err := h.Queries.UpsertVCSConnection(r.Context(), db.UpsertVCSConnectionParams{
@@ -229,12 +250,16 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 		AccountLogin:           account.Login,
 		AccessTokenEncrypted:   tokenEnc,
 		WebhookSecretEncrypted: secretEnc,
-		ConnectedByID:          connectedBy,
+		Covers:                 covers,
+		Personal:               personal,
+		OwnerKey:               ownerKey,
+		ConnectedByID:          member.UserID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save connection")
 		return
 	}
+	h.clearCoveredNudges(r.Context(), conn)
 
 	resp := h.vcsConnectionToResponse(conn)
 	h.publish(protocol.EventVCSConnectionCreated, workspaceID, "system", "", map[string]any{"id": resp.ID})
@@ -251,12 +276,12 @@ func (h *Handler) DeleteVCSConnection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	idUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "connectionId"), "connection id")
+	_, conn, ok := h.loadManagedConnection(w, r)
 	if !ok {
 		return
 	}
 	if err := h.Queries.DeleteVCSConnection(r.Context(), db.DeleteVCSConnectionParams{
-		ID:          idUUID,
+		ID:          conn.ID,
 		WorkspaceID: wsUUID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to remove connection")

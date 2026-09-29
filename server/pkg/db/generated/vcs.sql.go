@@ -87,7 +87,7 @@ func (q *Queries) GetIssueCombinedPullRequestCloseAggregate(ctx context.Context,
 }
 
 const getVCSConnectionByID = `-- name: GetVCSConnectionByID :one
-SELECT id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at FROM vcs_connection
+SELECT id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, covers, personal, owner_key FROM vcs_connection
 WHERE id = $1
 `
 
@@ -105,6 +105,9 @@ func (q *Queries) GetVCSConnectionByID(ctx context.Context, id pgtype.UUID) (Vcs
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Covers,
+		&i.Personal,
+		&i.OwnerKey,
 	)
 	return i, err
 }
@@ -185,7 +188,7 @@ func (q *Queries) ListIssueIDsForVCSPRHead(ctx context.Context, arg ListIssueIDs
 
 const listVCSConnectionsByWorkspace = `-- name: ListVCSConnectionsByWorkspace :many
 
-SELECT id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at FROM vcs_connection
+SELECT id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, covers, personal, owner_key FROM vcs_connection
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -213,6 +216,9 @@ func (q *Queries) ListVCSConnectionsByWorkspace(ctx context.Context, workspaceID
 			&i.ConnectedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Covers,
+			&i.Personal,
+			&i.OwnerKey,
 		); err != nil {
 			return nil, err
 		}
@@ -342,7 +348,7 @@ UPDATE vcs_connection
 SET webhook_secret_encrypted = $3,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at
+RETURNING id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, covers, personal, owner_key
 `
 
 type RotateVCSConnectionWebhookSecretParams struct {
@@ -365,6 +371,9 @@ func (q *Queries) RotateVCSConnectionWebhookSecret(ctx context.Context, arg Rota
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Covers,
+		&i.Personal,
+		&i.OwnerKey,
 	)
 	return i, err
 }
@@ -439,18 +448,21 @@ func (q *Queries) UpsertVCSCommitStatus(ctx context.Context, arg UpsertVCSCommit
 const upsertVCSConnection = `-- name: UpsertVCSConnection :one
 INSERT INTO vcs_connection (
     workspace_id, provider, instance_url, account_login,
-    access_token_encrypted, webhook_secret_encrypted, connected_by_id
+    access_token_encrypted, webhook_secret_encrypted, connected_by_id,
+    covers, personal, owner_key
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $10,
+    $7, $8, $9
 )
-ON CONFLICT (workspace_id, instance_url) DO UPDATE SET
+ON CONFLICT (workspace_id, instance_url, account_login, owner_key) DO UPDATE SET
     provider                 = EXCLUDED.provider,
-    account_login            = EXCLUDED.account_login,
     access_token_encrypted   = EXCLUDED.access_token_encrypted,
     webhook_secret_encrypted = EXCLUDED.webhook_secret_encrypted,
     connected_by_id          = EXCLUDED.connected_by_id,
+    covers                   = EXCLUDED.covers,
+    personal                 = EXCLUDED.personal,
     updated_at               = now()
-RETURNING id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at
+RETURNING id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, covers, personal, owner_key
 `
 
 type UpsertVCSConnectionParams struct {
@@ -460,11 +472,16 @@ type UpsertVCSConnectionParams struct {
 	AccountLogin           string      `json:"account_login"`
 	AccessTokenEncrypted   string      `json:"access_token_encrypted"`
 	WebhookSecretEncrypted string      `json:"webhook_secret_encrypted"`
+	Covers                 []string    `json:"covers"`
+	Personal               bool        `json:"personal"`
+	OwnerKey               pgtype.UUID `json:"owner_key"`
 	ConnectedByID          pgtype.UUID `json:"connected_by_id"`
 }
 
-// Reconnecting the same instance rotates the stored token/secret, provider,
-// and identity in place rather than creating a duplicate row.
+// Reconnecting the same account on the same instance rotates the stored
+// token. A personal connection is keyed by owner_key (the member); a workspace
+// connection uses the zero UUID. covers lists account and org logins the token
+// can see. Empty covers means the whole instance (legacy GitLab/Forgejo rows).
 func (q *Queries) UpsertVCSConnection(ctx context.Context, arg UpsertVCSConnectionParams) (VcsConnection, error) {
 	row := q.db.QueryRow(ctx, upsertVCSConnection,
 		arg.WorkspaceID,
@@ -473,6 +490,9 @@ func (q *Queries) UpsertVCSConnection(ctx context.Context, arg UpsertVCSConnecti
 		arg.AccountLogin,
 		arg.AccessTokenEncrypted,
 		arg.WebhookSecretEncrypted,
+		arg.Covers,
+		arg.Personal,
+		arg.OwnerKey,
 		arg.ConnectedByID,
 	)
 	var i VcsConnection
@@ -487,6 +507,9 @@ func (q *Queries) UpsertVCSConnection(ctx context.Context, arg UpsertVCSConnecti
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Covers,
+		&i.Personal,
+		&i.OwnerKey,
 	)
 	return i, err
 }

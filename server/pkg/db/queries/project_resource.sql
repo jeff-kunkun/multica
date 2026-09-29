@@ -11,6 +11,15 @@ SELECT * FROM project_resource
 WHERE project_id = $1 AND workspace_id = $2
 ORDER BY position ASC, created_at ASC;
 
+-- name: ListGitProjectResourcesByWorkspace :many
+-- Repositories a project has bound, across the workspace, for connection
+-- matching. Capped so a status read cannot walk an unbounded resource list.
+SELECT * FROM project_resource
+WHERE workspace_id = $1
+  AND resource_type IN ('github_repo', 'local_directory')
+ORDER BY created_at ASC
+LIMIT 200;
+
 -- name: ListProjectResourcesForProjects :many
 SELECT * FROM project_resource
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])

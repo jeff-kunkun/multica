@@ -12,20 +12,25 @@ SELECT * FROM vcs_connection
 WHERE id = $1;
 
 -- name: UpsertVCSConnection :one
--- Reconnecting the same instance rotates the stored token/secret, provider,
--- and identity in place rather than creating a duplicate row.
+-- Reconnecting the same account on the same instance rotates the stored
+-- token. A personal connection is keyed by owner_key (the member); a workspace
+-- connection uses the zero UUID. covers lists account and org logins the token
+-- can see. Empty covers means the whole instance (legacy GitLab/Forgejo rows).
 INSERT INTO vcs_connection (
     workspace_id, provider, instance_url, account_login,
-    access_token_encrypted, webhook_secret_encrypted, connected_by_id
+    access_token_encrypted, webhook_secret_encrypted, connected_by_id,
+    covers, personal, owner_key
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, sqlc.narg('connected_by_id')
+    $1, $2, $3, $4, $5, $6, sqlc.narg('connected_by_id'),
+    $7, $8, $9
 )
-ON CONFLICT (workspace_id, instance_url) DO UPDATE SET
+ON CONFLICT (workspace_id, instance_url, account_login, owner_key) DO UPDATE SET
     provider                 = EXCLUDED.provider,
-    account_login            = EXCLUDED.account_login,
     access_token_encrypted   = EXCLUDED.access_token_encrypted,
     webhook_secret_encrypted = EXCLUDED.webhook_secret_encrypted,
     connected_by_id          = EXCLUDED.connected_by_id,
+    covers                   = EXCLUDED.covers,
+    personal                 = EXCLUDED.personal,
     updated_at               = now()
 RETURNING *;
 

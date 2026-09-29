@@ -196,6 +196,10 @@ func TestValidateToken(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.kind, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v4/groups" || r.URL.Path == "/api/v1/user/orgs" {
+					_, _ = w.Write([]byte(`[]`))
+					return
+				}
 				if r.URL.Path != c.path {
 					t.Errorf("path = %q, want %q", r.URL.Path, c.path)
 				}

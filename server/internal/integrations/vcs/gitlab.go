@@ -233,7 +233,52 @@ func (gitlabProvider) ValidateToken(ctx context.Context, instanceURL, token stri
 	if u.Username == "" {
 		return Account{}, errors.New("gitlab: user response missing username")
 	}
-	return Account{Login: u.Username}, nil
+	return Account{Login: u.Username, Covers: gitlabCovers(ctx, instanceURL, token, u.Username)}, nil
+}
+
+// gitlabCovers lists the user and their top-level groups. A full page of 100
+// is treated as the whole instance: a truncated list would mark real groups
+// as not connected. A failed group list still covers the user.
+func gitlabCovers(ctx context.Context, instanceURL, token, username string) []string {
+	endpoint := NormalizeInstanceURL(instanceURL) + "/api/v4/groups?min_access_level=10&per_page=100&top_level_only=true"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return []string{username}
+	}
+	req.Header.Set("PRIVATE-TOKEN", token)
+	req.Header.Set("Accept", "application/json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return []string{username}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return []string{username}
+	}
+	var groups []struct {
+		Path     string `json:"path"`
+		FullPath string `json:"full_path"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&groups); err != nil {
+		return []string{username}
+	}
+	if len(groups) >= 100 {
+		return nil
+	}
+	covers := []string{username}
+	seen := map[string]bool{strings.ToLower(username): true}
+	for _, g := range groups {
+		name := g.Path
+		if g.FullPath != "" {
+			name = strings.Split(g.FullPath, "/")[0]
+		}
+		if name == "" || seen[strings.ToLower(name)] {
+			continue
+		}
+		seen[strings.ToLower(name)] = true
+		covers = append(covers, name)
+	}
+	return covers
 }
 
 // splitNamespace splits a GitLab path_with_namespace ("group/subgroup/repo")

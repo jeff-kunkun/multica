@@ -744,6 +744,7 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 	}
 
 	resp := projectResourceToResponse(resource)
+	h.noteUnconnectedProjectRepo(r.Context(), project, resource.ResourceType, resource.ResourceRef, creator)
 	h.publish(
 		protocol.EventProjectResourceCreated,
 		uuidToString(project.WorkspaceID),

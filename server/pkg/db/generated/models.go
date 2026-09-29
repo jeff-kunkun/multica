@@ -696,6 +696,14 @@ type CommentReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ConnectionNudge struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RepoKey     string             `json:"repo_key"`
+	RecipientID pgtype.UUID        `json:"recipient_id"`
+	InboxItemID pgtype.UUID        `json:"inbox_item_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type ContactSalesInquiry struct {
 	ID              pgtype.UUID        `json:"id"`
 	FirstName       string             `json:"first_name"`
@@ -1769,6 +1777,9 @@ type VcsConnection struct {
 	ConnectedByID          pgtype.UUID        `json:"connected_by_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Covers                 []string           `json:"covers"`
+	Personal               bool               `json:"personal"`
+	OwnerKey               pgtype.UUID        `json:"owner_key"`
 }
 
 type VcsPullRequest struct {

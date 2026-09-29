@@ -54,6 +54,9 @@ func seedVCSConnection(t *testing.T, ctx context.Context, box *secretbox.Box, pr
 		AccountLogin:           "acme",
 		AccessTokenEncrypted:   base64.StdEncoding.EncodeToString(tokenSealed),
 		WebhookSecretEncrypted: base64.StdEncoding.EncodeToString(sealed),
+		Covers:                 []string{},
+		Personal:               false,
+		OwnerKey:               pgtype.UUID{Valid: true},
 		ConnectedByID:          pgtype.UUID{},
 	})
 	if err != nil {
