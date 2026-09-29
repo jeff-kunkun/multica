@@ -95,8 +95,8 @@ func TestAgentCloseWithBranchButNoPullIsRefused(t *testing.T) {
 		t.Fatalf("seed delivery branch: %v", err)
 	}
 	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"outcome": "done", "evidence": "推上去了"})
-	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "gh pr create") {
-		t.Fatalf("close = %d: %s, want 409 naming gh pr create", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "下一步：") || !strings.Contains(w.Body.String(), "--pr") {
+		t.Fatalf("close = %d: %s, want 409 naming the delivery lookup reason and next command", w.Code, w.Body.String())
 	}
 	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
 		t.Fatalf("status = %s, want unchanged", got)
