@@ -116,6 +116,9 @@ import type {
   CancelTaskResponse,
   Project,
   ProjectMemoryStatus,
+  ProjectMemoryChecklistItem,
+  CloseIssueRequest,
+  CloseIssueResponse,
   ProjectMember,
   ResourceShare,
   CreateProjectRequest,
@@ -1549,6 +1552,13 @@ export class ApiClient {
 
   async upsertClientUsage(data: ClientUsageRequest): Promise<void> {
     await this.fetch("/api/client-usage", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async closeIssue(id: string, data: CloseIssueRequest): Promise<CloseIssueResponse> {
+    return this.fetch(`/api/issues/${id}/close`, {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -4871,6 +4881,10 @@ export class ApiClient {
 
   async getProject(id: string): Promise<Project> {
     return this.fetch(`/api/projects/${id}`);
+  }
+
+  async listProjectMemoryLocations(): Promise<{ locations: ProjectMemoryChecklistItem[] }> {
+    return this.fetch("/api/project-memory/locations");
   }
 
   async getProjectMemory(id: string): Promise<ProjectMemoryStatus> {

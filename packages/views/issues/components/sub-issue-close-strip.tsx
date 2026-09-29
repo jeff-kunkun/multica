@@ -38,6 +38,7 @@ export function SubIssueCloseStrip({
     close.nextOwnerType,
     close.nextOwnerId,
   );
+  const knowledge = close.knowledgeAudit;
 
   const needsCloseRecord =
     (issue.status === "done" || issue.status === "cancelled") &&
@@ -110,6 +111,18 @@ export function SubIssueCloseStrip({
       {waitingOn !== null && (
         <Chip kind="close.waiting_on" tone={stuck && state === "ok" ? "stuck" : "muted"}>
           {t(($) => $.close_protocol.waiting_on, { id: waitingOn })}
+        </Chip>
+      )}
+      {knowledge?.none === true && (
+        <Chip kind="close.knowledge_audit" tone="muted">
+          {t(($) => $.close_protocol.knowledge_none)}
+        </Chip>
+      )}
+      {knowledge && knowledge.none === false && (
+        <Chip kind="close.knowledge_audit" tone="muted">
+          {t(($) => $.close_protocol.knowledge_change, {
+            locations: knowledge.changes.map((change) => change.location).join(", "),
+          })}
         </Chip>
       )}
       <Chip kind="last_activity_at" tone="muted">
