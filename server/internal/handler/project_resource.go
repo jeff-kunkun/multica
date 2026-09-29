@@ -1147,6 +1147,12 @@ func parseUUIDLoose(s string) (pgtype.UUID, error) {
 type claimProjectContext struct {
 	Projects []claimProject
 	Repos    []RepoData
+	// ProjectRepos is the project-only view used by the daemon brief. Repos
+	// remains the checkout list for compatibility with older daemons, which
+	// fall back to workspace repositories when a project has no repo resource.
+	ProjectRepos            []RepoData
+	WorkspaceRepoCount      int
+	OtherWorkspaceRepoCount int
 }
 
 // claimProject is one attached project: the identity the brief names, the
@@ -1188,6 +1194,50 @@ func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
 		}
 	}
 	resp.Repos = c.Repos
+	resp.ProjectRepos = c.ProjectRepos
+	resp.WorkspaceRepoCount = c.WorkspaceRepoCount
+	resp.OtherWorkspaceRepoCount = c.OtherWorkspaceRepoCount
+}
+
+// resolveClaimProjectContextForRequest adds the RepoReach decision to the
+// project repository list used by a daemon claim. The context-only resolver is
+// kept for non-claim callers (preview/tests) that do not have an HTTP actor.
+func (h *Handler) resolveClaimProjectContextForRequest(r *http.Request, projectID, workspaceID pgtype.UUID) (claimProjectContext, error) {
+	out, err := h.resolveClaimProjectContext(r.Context(), projectID, workspaceID)
+	if err != nil {
+		return claimProjectContext{}, err
+	}
+	return h.hydrateClaimProjectRepoReach(r, out, workspaceID), nil
+}
+
+func (h *Handler) resolveClaimChatProjectContextForRequest(r *http.Request, session db.ChatSession) (claimProjectContext, error) {
+	out, err := h.resolveClaimChatProjectContext(r.Context(), session)
+	if err != nil {
+		return claimProjectContext{}, err
+	}
+	return h.hydrateClaimProjectRepoReach(r, out, session.WorkspaceID), nil
+}
+
+// hydrateClaimProjectRepoReach mirrors GET /projects/{id}/repos for the
+// daemon claim without making a second network hop. Reach is additive: a
+// transient reach lookup leaves the repository usable and simply omits the
+// optional status from the brief.
+func (h *Handler) hydrateClaimProjectRepoReach(r *http.Request, out claimProjectContext, workspaceID pgtype.UUID) claimProjectContext {
+	ws, wsErr := h.Queries.GetWorkspace(r.Context(), workspaceID)
+	if wsErr != nil {
+		return out
+	}
+	conns, _ := h.Queries.ListVCSConnectionsByWorkspace(r.Context(), workspaceID)
+	for i := range out.Projects {
+		for j := range out.Projects[i].Repos {
+			repo := &out.Projects[i].Repos[j]
+			row := db.ProjectResource{ResourceRef: json.RawMessage(fmt.Sprintf(`{"url":%q}`, repo.URL))}
+			reach := h.reachForResource(r, workspaceID, ws, row, conns, nil)
+			repo.Reach = &reach
+		}
+	}
+	out.ProjectRepos = out.unionRepos()
+	return out
 }
 
 // resolveClaimProjectContext loads the project context for one daemon claim
@@ -1304,14 +1354,29 @@ func (h *Handler) resolveClaimProjectContexts(ctx context.Context, projectIDs []
 		}
 	}
 
-	if out.hasRepos() {
-		out.Repos = out.unionRepos()
-		return out, nil
-	}
-
 	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		return claimProjectContext{}, fmt.Errorf("get workspace: %w", err)
+	}
+	out.WorkspaceRepoCount = len(decodeWorkspaceRepos(ws.Repos))
+	if len(out.Projects) > 0 {
+		// Keep the historical checkout fallback in Repos, but expose a separate
+		// project-only list for the runtime brief. This lets older daemons keep
+		// working while new daemons avoid listing unrelated workspace repos.
+		out.ProjectRepos = out.unionRepos()
+		projectURLs := make(map[string]struct{}, len(out.ProjectRepos))
+		for _, repo := range out.ProjectRepos {
+			projectURLs[string(repoident.NormalizeURL(repo.URL))] = struct{}{}
+		}
+		for _, repo := range decodeWorkspaceRepos(ws.Repos) {
+			if _, ok := projectURLs[string(repoident.NormalizeURL(repo.URL))]; !ok {
+				out.OtherWorkspaceRepoCount++
+			}
+		}
+		if out.hasRepos() {
+			out.Repos = out.ProjectRepos
+		}
+		return out, nil
 	}
 	if ws.Repos != nil {
 		var repos []RepoData
