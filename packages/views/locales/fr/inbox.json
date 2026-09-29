@@ -247,6 +247,20 @@
     "seen_other": "{{count}} already seen",
     "hide_seen": "Hide seen",
     "load_error": "Some of this did not load; it will retry shortly",
-    "ask_ai": "Me le résumer"
+    "ask_ai": "Me le résumer",
+    "lane_filter_hint": "Cliquez pour mettre en avant les notifications de ce groupe à gauche",
+    "panel_title": "Tableau",
+    "panel_hint": "Par statut",
+    "back_to_panel": "Retour au tableau",
+    "filter_bar": "Notifications « {{lane}} » mises en avant",
+    "filter_clear": "Effacer",
+    "short": {
+      "waiting": "En attente",
+      "stalled": "Arrêté",
+      "running": "En cours",
+      "todo": "À faire",
+      "fresh": "Nouveau",
+      "done": "Terminé"
+    }
   }
 }

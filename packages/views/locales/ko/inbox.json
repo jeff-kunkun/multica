@@ -241,6 +241,20 @@
     "seen_other": "{{count}} already seen",
     "hide_seen": "Hide seen",
     "load_error": "Some of this did not load; it will retry shortly",
-    "ask_ai": "AI에게 설명 듣기"
+    "ask_ai": "AI에게 설명 듣기",
+    "lane_filter_hint": "클릭하면 왼쪽에서 이 그룹의 알림만 강조합니다",
+    "panel_title": "보드",
+    "panel_hint": "상태별 그룹",
+    "back_to_panel": "보드로 돌아가기",
+    "filter_bar": "“{{lane}}” 그룹 알림만 강조 중",
+    "filter_clear": "지우기",
+    "short": {
+      "waiting": "대기",
+      "stalled": "멈춤",
+      "running": "실행 중",
+      "todo": "할 일",
+      "fresh": "새 소식",
+      "done": "완료"
+    }
   }
 }

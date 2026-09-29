@@ -118,3 +118,20 @@ export function splitSeenDone(
   for (const row of rows) (row.unread > 0 || Date.parse(row.at) > mark ? fresh : seen).push(row);
   return { fresh, seen };
 }
+
+export const BOARD_LANES: readonly BoardLane[] = ["waiting", "stalled", "running", "todo", "fresh", "done"];
+
+/**
+ * Which lane each issue sits in on the board, sub-issues filed under the lane
+ * their parent row shows in. The merged inbox (DENE-1004) tags and filters
+ * its notification list with this.
+ */
+export function boardLaneByIssue(board: InboxBoard): Map<string, BoardLane> {
+  const lanes = new Map<string, BoardLane>();
+  const file = (r: BoardRow, lane: BoardLane) => {
+    if (!lanes.has(r.issueId)) lanes.set(r.issueId, lane);
+    for (const child of r.children) file(child, lane);
+  };
+  for (const lane of BOARD_LANES) for (const r of board[lane]) file(r, lane);
+  return lanes;
+}

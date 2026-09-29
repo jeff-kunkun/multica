@@ -432,23 +432,58 @@ func writeCommentFormatting(b *strings.Builder) {
 // is configured. The closing paragraph from the legacy version is dropped
 // (it re-stated the opening); intro is tightened into one line.
 func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
-	if len(ctx.Repos) == 0 {
+	projectScoped := len(ctx.projectContexts()) > 0
+	repos := ctx.Repos
+	if projectScoped {
+		repos = ctx.ProjectRepos
+		// A pre-DENE-987 server has no project_repos or workspace count. Keep
+		// that daemon/server pairing byte-compatible instead of hiding all repos.
+		if repos == nil && ctx.WorkspaceRepoCount == 0 && ctx.OtherWorkspaceRepoCount == 0 {
+			repos = ctx.Repos
+		}
+	}
+	if len(repos) == 0 && (!projectScoped || ctx.OtherWorkspaceRepoCount == 0) {
 		return
 	}
 	b.WriteString("## Repositories\n\n")
-	if ctx.CodeSource.UsesLocalDirectory() {
+	if len(repos) == 0 {
+		b.WriteString("This project has no repositories attached.\n\n")
+	} else if ctx.CodeSource.UsesLocalDirectory() {
 		// Pointing at Code Source rather than repeating the checkout
 		// instruction is the whole point: this list is what an agent read
 		// before cloning a repository the machine already had.
 		b.WriteString("Available in this workspace. This project is pinned to a local directory on this machine — read `## Code Source` below before checking anything out.\n\n")
 	} else {
-		b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
-	}
-	for _, repo := range ctx.Repos {
-		if repo.Description != "" {
-			fmt.Fprintf(b, "- %s — %s\n", repo.URL, repo.Description)
+		if projectScoped {
+			b.WriteString("Attached to this project — use `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
 		} else {
-			fmt.Fprintf(b, "- %s\n", repo.URL)
+			b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
+		}
+	}
+	for _, repo := range repos {
+		if repo.Description != "" {
+			fmt.Fprintf(b, "- %s — %s", repo.URL, repo.Description)
+		} else {
+			fmt.Fprintf(b, "- %s", repo.URL)
+		}
+		if repo.Reach != nil {
+			fmt.Fprintf(b, " — RepoReach: %s", repo.Reach.State)
+			if repo.Reach.NextAction != nil {
+				action := repo.Reach.NextAction
+				fmt.Fprintf(b, "; next_action: %s", action.Kind)
+				if action.URL != "" {
+					fmt.Fprintf(b, " (%s)", action.URL)
+				} else if action.Command != "" {
+					fmt.Fprintf(b, " (%s)", action.Command)
+				}
+			}
+		}
+		b.WriteByte('\n')
+	}
+	if projectScoped {
+		other := ctx.OtherWorkspaceRepoCount
+		if other > 0 {
+			fmt.Fprintf(b, "\nThere are %d other workspace repositories; use `multica repo list` when needed.\n", other)
 		}
 	}
 	b.WriteString("\n")

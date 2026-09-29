@@ -1259,6 +1259,7 @@
     "github_app_creating": "正在前往 GitHub",
     "github_app_error_expired": "GitHub 的确认已过期，请重新创建。",
     "github_app_error_failed": "GitHub App 没有创建成功。",
+    "github_app_opened_in_browser": "已在浏览器中打开 GitHub，完成创建后回到这里刷新。",
     "github_app_error_duplicate": "GitHub App 已经配置过了。",
     "github_app_error_taken": "这个 GitHub 安装已经挂在另一个工作区，不能同时挂到这里。",
     "github_app_connected": "GitHub 已连接。",

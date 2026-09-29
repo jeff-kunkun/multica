@@ -17,6 +17,14 @@ export interface AgentCLIUpdateView {
   error: string | null;
   note: string | null;
   binaryPath: string | null;
+  checkedAt: string | null;
+  /** While waiting: this CLI's tasks still running (0 when not reported). */
+  waitingTasks: number;
+  /** True while new tasks of this CLI are held back for an "update now". */
+  claimsPaused: boolean;
+  waitReason: string | null;
+  /** Set on the report right after a successful upgrade. */
+  updatedAt: string | null;
 }
 
 export function readAgentCLIUpdate(
@@ -35,8 +43,31 @@ export function readAgentCLIUpdate(
     error: text("error"),
     note: text("note"),
     binaryPath: text("binary_path"),
+    checkedAt: text("checked_at"),
+    waitingTasks:
+      typeof doc.waiting_tasks === "number" && doc.waiting_tasks > 0
+        ? doc.waiting_tasks
+        : 0,
+    claimsPaused: doc.claims_paused === true,
+    waitReason: text("wait_reason"),
+    updatedAt: text("updated_at"),
   };
 }
+
+function cliLabel(provider: string): string {
+  switch (provider) {
+    case "claude":
+      return "Claude";
+    case "codex":
+      return "Codex";
+    case "opencode":
+      return "OpenCode";
+    default:
+      return provider;
+  }
+}
+
+type StatusTone = "muted" | "default" | "success" | "error";
 
 export function AgentCLIUpdateControls({
   runtime,
@@ -54,14 +85,27 @@ export function AgentCLIUpdateControls({
   const [followOverride, setFollowOverride] = useState<boolean | null>(null);
   const [busy, setBusy] = useState<"follow" | "update" | null>(null);
   const [localError, setLocalError] = useState("");
+  // The report the page had when "update now" was accepted. Until the
+  // daemon sends a different one, the click is shown as queued rather than
+  // falling back to "update available".
+  const [requestedAgainst, setRequestedAgainst] = useState<{
+    checkedAt: string | null;
+    phase: string;
+  } | null>(null);
 
   if (!reported || runtime.runtime_mode !== "local" || runtime.profile_id) {
     return null;
   }
 
   const follow = followOverride ?? reported.autoFollow;
-  const phase = busy === "update" ? "updating" : reported.phase;
+  const phase = reported.phase;
+  const requested =
+    busy === "update" ||
+    (requestedAgainst !== null &&
+      requestedAgainst.checkedAt === reported.checkedAt &&
+      requestedAgainst.phase === reported.phase);
   const updating = phase === "updating";
+  const cli = cliLabel(runtime.provider);
   const versions =
     reported.current && reported.latest
       ? t(($) => $.agent_cli.versions, {
@@ -69,18 +113,82 @@ export function AgentCLIUpdateControls({
           latest: reported.latest,
         })
       : (reported.current ?? reported.latest ?? "");
-  const badge =
-    phase === "available" || phase === "waiting" || phase === "updating"
-      ? t(($) => $.agent_cli.update_available)
-      : phase === "current" && reported.latest
-        ? t(($) => $.agent_cli.up_to_date)
-        : phase === "unsupported"
-          ? t(($) => $.agent_cli.unsupported)
-          : phase === "check_failed"
-            ? t(($) => $.agent_cli.check_failed)
-            : null;
-  const detail = localError || reported.error;
-  const disabled = !canManage || updating || phase === "unsupported";
+  // Waiting is not an error. An older daemon still put its waiting note in
+  // `error`; that one is not shown in red.
+  const detail =
+    localError || (phase === "waiting" ? null : reported.error);
+  const queuedText =
+    reported.waitReason === "daemon_update"
+      ? t(($) => $.agent_cli.queued_daemon)
+      : reported.waitReason === "hold_expired"
+        ? t(($) => $.agent_cli.queued_hold_expired, {
+            cli,
+            count: reported.waitingTasks,
+          })
+        : reported.waitingTasks > 0
+          ? t(($) => $.agent_cli.queued_tasks, {
+              cli,
+              count: reported.waitingTasks,
+            })
+          : t(($) => $.agent_cli.waiting);
+  const pausedText = reported.claimsPaused
+    ? t(($) => $.agent_cli.queued_paused, { cli })
+    : null;
+  const status: { text: string; tone: StatusTone; spinning: boolean } | null =
+    updating
+      ? { text: t(($) => $.agent_cli.updating), tone: "default", spinning: true }
+      : requested && !localError
+        ? {
+            text: t(($) => $.agent_cli.queued_request),
+            tone: "muted",
+            spinning: true,
+          }
+        : phase === "waiting"
+          ? { text: queuedText, tone: "muted", spinning: false }
+          : phase === "failed"
+            ? {
+                text: detail || t(($) => $.agent_cli.update_failed),
+                tone: "error",
+                spinning: false,
+              }
+            : phase === "check_failed"
+              ? {
+                  text: t(($) => $.agent_cli.check_failed),
+                  tone: "error",
+                  spinning: false,
+                }
+              : phase === "current" && reported.updatedAt && reported.current
+                ? {
+                    text: t(($) => $.agent_cli.updated_to, {
+                      version: reported.current,
+                    }),
+                    tone: "success",
+                    spinning: false,
+                  }
+                : phase === "current" && reported.latest
+                  ? {
+                      text: t(($) => $.agent_cli.up_to_date),
+                      tone: "success",
+                      spinning: false,
+                    }
+                  : phase === "available"
+                    ? {
+                        text: t(($) => $.agent_cli.update_available),
+                        tone: "default",
+                        spinning: false,
+                      }
+                    : phase === "unsupported"
+                      ? {
+                          text: t(($) => $.agent_cli.unsupported),
+                          tone: "muted",
+                          spinning: false,
+                        }
+                      : null;
+  // A failure's reason is the status line itself; any other detail
+  // (a local request error, an unsupported copy) is shown under it.
+  const extraDetail = status?.tone === "error" && phase === "failed" ? null : detail;
+  const disabled =
+    !canManage || updating || requested || phase === "unsupported";
 
   const onFollow = async (next: boolean) => {
     setFollowOverride(next);
@@ -101,11 +209,16 @@ export function AgentCLIUpdateControls({
     setBusy("update");
     try {
       await api.requestAgentCLIUpdate(runtime.id);
+      // Queueing the upgrade is not the upgrade. Waiting, updating,
+      // failure, and "already current" arrive on the daemon's next report;
+      // until then the cell says the request is queued.
+      setRequestedAgainst({
+        checkedAt: reported.checkedAt,
+        phase: reported.phase,
+      });
     } catch {
       setLocalError(t(($) => $.agent_cli.update_request_failed));
     } finally {
-      // Queueing the upgrade is not the upgrade. Waiting, failure, and
-      // "already current" arrive on the daemon's next report.
       setBusy(null);
     }
   };
@@ -113,25 +226,46 @@ export function AgentCLIUpdateControls({
   const updateTitle = canManage
     ? (reported.binaryPath ?? undefined)
     : t(($) => $.agent_cli.read_only);
-  const badgeClass =
-    phase === "current"
-      ? "text-caption text-success"
-      : phase === "failed" || phase === "check_failed"
-        ? "text-caption text-destructive"
-        : "text-caption text-foreground";
+  const toneClass: Record<StatusTone, string> = {
+    muted: "text-caption text-muted-foreground",
+    default: "text-caption text-foreground",
+    success: "text-caption text-success",
+    error: "text-caption text-destructive",
+  };
+  const statusBody = status && (
+    <>
+      {status.spinning && (
+        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+      )}
+      {status.tone === "error" && (
+        <AlertTriangle className="h-3 w-3 shrink-0 text-destructive" />
+      )}
+      <span className={`truncate ${toneClass[status.tone]}`}>{status.text}</span>
+    </>
+  );
+  const updateLabel =
+    updating || requested
+      ? t(($) => $.agent_cli.updating)
+      : t(($) => $.agent_cli.update_now);
 
   if (compact) {
     // The runtimes list row is a fixed h-12 track, so the compact cell must
     // stay two text lines tall: version over status on the left, the
-    // controls on the right. The binary path, the waiting note and the
-    // error move into tooltips; the detail page shows them in full.
+    // controls on the right. The status line itself says what is happening
+    // (queued, updating, updated, or the failure reason); the binary path
+    // and longer notes also go into the tooltip.
     const hover = [
       reported.binaryPath,
-      phase === "waiting" ? t(($) => $.agent_cli.waiting) : null,
-      detail,
+      phase === "waiting" ? queuedText : null,
+      pausedText,
+      status?.tone === "error" ? status.text : null,
+      extraDetail,
     ]
       .filter(Boolean)
       .join("\n");
+    const line = status ?? (extraDetail
+      ? { text: extraDetail, tone: "error" as const, spinning: false }
+      : null);
     return (
       <div
         className="flex w-full min-w-0 items-center gap-2"
@@ -141,17 +275,18 @@ export function AgentCLIUpdateControls({
           <span className="truncate font-mono text-caption text-muted-foreground">
             {versions || "—"}
           </span>
-          {(badge || detail) && (
+          {line && (
             <span className="flex min-w-0 items-center gap-1">
-              {detail && (
-                <AlertTriangle
-                  aria-label={detail}
-                  className="h-3 w-3 shrink-0 text-destructive"
-                />
+              {status ? (
+                statusBody
+              ) : (
+                <>
+                  <AlertTriangle className="h-3 w-3 shrink-0 text-destructive" />
+                  <span className="truncate text-caption text-destructive">
+                    {line.text}
+                  </span>
+                </>
               )}
-              <span className={`truncate ${detail ? "text-caption text-destructive" : badgeClass}`}>
-                {badge ?? detail}
-              </span>
             </span>
           )}
         </div>
@@ -171,16 +306,13 @@ export function AgentCLIUpdateControls({
               type="button"
               size="xs"
               variant="outline"
-              disabled={disabled || busy === "update"}
+              disabled={disabled}
               title={updateTitle}
               onClick={() => {
                 void onUpdate();
               }}
             >
-              {updating && <Loader2 className="h-3 w-3 animate-spin" />}
-              {updating
-                ? t(($) => $.agent_cli.updating)
-                : t(($) => $.agent_cli.update_now)}
+              {updateLabel}
             </Button>
           </div>
         )}
@@ -199,9 +331,9 @@ export function AgentCLIUpdateControls({
             {versions}
           </span>
         )}
-        {badge && (
-          <span className={badgeClass}>
-            {badge}
+        {status && (
+          <span className="inline-flex min-w-0 items-center gap-1">
+            {statusBody}
           </span>
         )}
       </div>
@@ -221,22 +353,17 @@ export function AgentCLIUpdateControls({
           type="button"
           size="sm"
           variant="outline"
-          disabled={disabled || busy === "update"}
+          disabled={disabled}
           title={updateTitle}
           onClick={() => {
             void onUpdate();
           }}
         >
-          {updating && <Loader2 className="h-3 w-3 animate-spin" />}
-          {updating
-            ? t(($) => $.agent_cli.updating)
-            : t(($) => $.agent_cli.update_now)}
+          {updateLabel}
         </Button>
       </div>
-      {phase === "waiting" && (
-        <p className="text-caption text-muted-foreground">
-          {t(($) => $.agent_cli.waiting)}
-        </p>
+      {pausedText && phase === "waiting" && (
+        <p className="text-caption text-muted-foreground">{pausedText}</p>
       )}
       {reported.binaryPath && (
         <p
@@ -246,9 +373,9 @@ export function AgentCLIUpdateControls({
           {t(($) => $.agent_cli.binary, { path: reported.binaryPath })}
         </p>
       )}
-      {detail && (
-        <p className="text-caption text-destructive" title={detail}>
-          {detail}
+      {extraDetail && (
+        <p className="text-caption text-destructive" title={extraDetail}>
+          {extraDetail}
         </p>
       )}
     </div>

@@ -1,12 +1,18 @@
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { GitHubAppStatus } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
-import { GitHubAppPanel } from "./github-app-panel";
+import { GitHubAppPanel, launchGitHubAppSetup } from "./github-app-panel";
+
+const platform = vi.hoisted(() => ({
+  isDesktopShell: vi.fn(() => false),
+  openExternal: vi.fn(),
+}));
+vi.mock("../../platform", () => platform);
 
 const resources = { en: { common: enCommon, settings: enSettings } };
 
@@ -115,5 +121,39 @@ describe("GitHub App status", () => {
     expect(
       screen.getByText("This server has no public address, so GitHub cannot call back."),
     ).toBeInTheDocument();
+  });
+});
+
+describe("launchGitHubAppSetup", () => {
+  const setup = {
+    action_url: "https://github.com/settings/apps/new",
+    manifest: { name: "Multica" },
+    launch_url: "https://api.example.test/api/github/app/launch?token=abc",
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    platform.isDesktopShell.mockReset().mockReturnValue(false);
+    platform.openExternal.mockReset();
+    document.body.innerHTML = "";
+  });
+
+  it("posts the manifest form in this tab on web", () => {
+    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => {});
+    expect(launchGitHubAppSetup(setup)).toBe("form");
+    expect(submit).toHaveBeenCalledOnce();
+    const form = document.querySelector("form");
+    expect(form?.getAttribute("action")).toBe(setup.action_url);
+    expect(form?.getAttribute("method")).toBe("post");
+    expect(platform.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("opens the single-use launch link in the system browser on desktop", () => {
+    platform.isDesktopShell.mockReturnValue(true);
+    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => {});
+    expect(launchGitHubAppSetup(setup)).toBe("browser");
+    expect(platform.openExternal).toHaveBeenCalledWith(setup.launch_url);
+    expect(submit).not.toHaveBeenCalled();
+    expect(document.querySelector("form")).toBeNull();
   });
 });

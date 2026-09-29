@@ -2,6 +2,10 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"html"
@@ -22,6 +26,11 @@ import (
 
 // githubAppHTTP is the client that exchanges a manifest code. Tests replace it.
 var githubAppHTTP = http.DefaultClient
+
+// githubAppLaunchTTL bounds the single-use browser link. The signed state
+// inside it lives longer so GitHub's callback still verifies after the
+// person spends a while on GitHub's form.
+const githubAppLaunchTTL = 10 * time.Minute
 
 type githubAppStatusResponse struct {
 	Source      string `json:"source"`
@@ -170,7 +179,13 @@ func (h *Handler) BeginGitHubApp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "server public url is not configured")
 		return
 	}
-	launch := strings.TrimRight(h.cfg.PublicURL, "/") + "/api/github/app/launch?state=" + url.QueryEscape(state)
+	token, err := h.mintGitHubAppLaunchToken(r.Context(), state, time.Now())
+	if err != nil {
+		slog.Error("github app: mint launch token failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to create github app setup link")
+		return
+	}
+	launch := strings.TrimRight(h.cfg.PublicURL, "/") + "/api/github/app/launch?token=" + url.QueryEscape(token)
 	writeJSON(w, http.StatusOK, githubAppSetupResponse{
 		ActionURL: manifest.ActionURL,
 		Manifest:  manifest.Fields,
@@ -189,45 +204,146 @@ func githubAppBlockMessage(reason string) string {
 	}
 }
 
-// LaunchGitHubApp (GET /api/github/app/launch) is the page a person opens
-// from the CLI. It posts the manifest to GitHub in that browser.
-func (h *Handler) LaunchGitHubApp(w http.ResponseWriter, r *http.Request) {
-	st, err := githubapp.VerifyState(h.deploymentSecret(), r.URL.Query().Get("state"), time.Now())
+// mintGitHubAppLaunchToken stores state behind a random single-use token.
+// Only the token's hash is kept, so the table alone cannot open the page.
+func (h *Handler) mintGitHubAppLaunchToken(ctx context.Context, state string, now time.Time) (string, error) {
+	if h.Queries == nil {
+		return "", errors.New("database unavailable")
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	if err := h.Queries.DeleteStaleGitHubAppLaunchTokens(ctx, pgtype.Timestamptz{Time: now.Add(-24 * time.Hour), Valid: true}); err != nil {
+		slog.Warn("github app: prune launch tokens failed", "err", err)
+	}
+	err := h.Queries.InsertGitHubAppLaunchToken(ctx, db.InsertGitHubAppLaunchTokenParams{
+		TokenHash: githubAppLaunchTokenHash(token),
+		State:     state,
+		ExpiresAt: pgtype.Timestamptz{Time: now.Add(githubAppLaunchTTL), Valid: true},
+	})
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "github app setup link is invalid or expired")
+		return "", err
+	}
+	return token, nil
+}
+
+func githubAppLaunchTokenHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// consumeGitHubAppLaunchToken spends the token once. The error message is
+// what the person sees, so it says why and what to do next.
+func (h *Handler) consumeGitHubAppLaunchToken(ctx context.Context, token string, now time.Time) (string, int, string) {
+	const retry = "回到 Multica 设置页，重新点「先创建 GitHub App」获取新链接。"
+	token = strings.TrimSpace(token)
+	if token == "" || h.Queries == nil {
+		return "", http.StatusBadRequest, "这个链接无效。" + retry
+	}
+	hash := githubAppLaunchTokenHash(token)
+	state, err := h.Queries.ConsumeGitHubAppLaunchToken(ctx, db.ConsumeGitHubAppLaunchTokenParams{
+		TokenHash: hash,
+		ExpiresAt: pgtype.Timestamptz{Time: now, Valid: true},
+	})
+	if err == nil {
+		return state, http.StatusOK, ""
+	}
+	if !isNotFound(err) {
+		slog.Error("github app: consume launch token failed", "err", err)
+		return "", http.StatusInternalServerError, "暂时无法打开这个链接，请稍后再试。"
+	}
+	row, err := h.Queries.GetGitHubAppLaunchToken(ctx, hash)
+	switch {
+	case err != nil:
+		return "", http.StatusNotFound, "这个链接无效。" + retry
+	case row.UsedAt.Valid:
+		return "", http.StatusGone, "这个链接已经打开过一次，不能重复使用。" + retry
+	default:
+		return "", http.StatusGone, "这个链接已过期（有效期 10 分钟）。" + retry
+	}
+}
+
+func writeGitHubAppLaunchPage(w http.ResponseWriter, status int, body string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(`<!DOCTYPE html>
+<html lang="zh-Hans"><head><meta charset="utf-8"><title>创建 GitHub App</title></head>
+<body>
+` + body + `
+</body></html>`))
+}
+
+// githubAppLaunchSubmitScript posts the manifest form as soon as the page
+// loads. The site-wide CSP blocks inline scripts and cross-origin form posts,
+// so the success page swaps in a policy that allows exactly this script (by
+// hash) and exactly this manifest's GitHub address.
+const githubAppLaunchSubmitScript = `document.getElementById("gh").submit()`
+
+var githubAppLaunchSubmitScriptHash = func() string {
+	sum := sha256.Sum256([]byte(githubAppLaunchSubmitScript))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}()
+
+func githubAppLaunchCSP(actionURL string) string {
+	return "default-src 'none'; " +
+		"script-src " + githubAppLaunchSubmitScriptHash + "; " +
+		"frame-ancestors 'none'; " +
+		"base-uri 'none'; " +
+		"form-action " + actionURL
+}
+
+func writeGitHubAppLaunchError(w http.ResponseWriter, status int, msg string) {
+	writeGitHubAppLaunchPage(w, status, "<p>"+html.EscapeString(msg)+"</p>")
+}
+
+// LaunchGitHubApp (GET /api/github/app/launch?token=) is the page the system
+// browser opens, from the desktop app or a CLI link. The token works once and
+// for githubAppLaunchTTL; the page posts the manifest to GitHub.
+func (h *Handler) LaunchGitHubApp(w http.ResponseWriter, r *http.Request) {
+	state, status, msg := h.consumeGitHubAppLaunchToken(r.Context(), r.URL.Query().Get("token"), time.Now())
+	if msg != "" {
+		writeGitHubAppLaunchError(w, status, msg)
+		return
+	}
+	st, err := githubapp.VerifyState(h.deploymentSecret(), state, time.Now())
+	if err != nil {
+		writeGitHubAppLaunchError(w, http.StatusGone, "这个链接已过期。回到 Multica 设置页，重新点「先创建 GitHub App」获取新链接。")
 		return
 	}
 	if !h.userIsWorkspaceOwner(r.Context(), st.WorkspaceID, st.UserID) {
-		writeError(w, http.StatusForbidden, "only the workspace owner can create the GitHub App")
+		writeGitHubAppLaunchError(w, http.StatusForbidden, "只有工作区所有者可以创建 GitHub App。")
 		return
 	}
 	if githubapp.Current().Source != githubapp.SourceNone {
 		http.Redirect(w, r, h.githubAppSettingsURL(r.Context(), st.WorkspaceID, "duplicate"), http.StatusFound)
 		return
 	}
-	manifest, err := githubapp.Build(h.cfg.PublicURL, h.appOrigin(), r.URL.Query().Get("state"), st.Org)
+	manifest, err := githubapp.Build(h.cfg.PublicURL, h.appOrigin(), state, st.Org)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "server public url is not configured")
+		writeGitHubAppLaunchError(w, http.StatusServiceUnavailable, "服务器没有配置公网地址，暂时不能创建 GitHub App。")
 		return
 	}
 	raw, err := json.Marshal(manifest.Fields)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to encode manifest")
+		writeGitHubAppLaunchError(w, http.StatusInternalServerError, "生成 GitHub App 配置失败，请稍后再试。")
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	page := `<!DOCTYPE html>
-<html lang="zh-Hans"><head><meta charset="utf-8"><title>创建 GitHub App</title></head>
-<body>
-<p>正在前往 GitHub。若浏览器没有跳转，点下面的按钮，然后在 GitHub 上输入一次密码并创建。</p>
-<form id="gh" method="post" action="` + html.EscapeString(manifest.ActionURL) + `">
-<input type="hidden" name="manifest" value="` + html.EscapeString(string(raw)) + `">
+	action, err := url.Parse(manifest.ActionURL)
+	if err != nil || action.Scheme != "https" || action.Host == "" {
+		writeGitHubAppLaunchError(w, http.StatusInternalServerError, "生成 GitHub App 配置失败，请稍后再试。")
+		return
+	}
+	action.RawQuery, action.Fragment = "", ""
+	w.Header().Set("Content-Security-Policy", githubAppLaunchCSP(action.String()))
+	writeGitHubAppLaunchPage(w, http.StatusOK, `<p>正在前往 GitHub。若浏览器没有跳转，点下面的按钮，然后在 GitHub 上输入一次密码并创建。</p>
+<form id="gh" method="post" action="`+html.EscapeString(manifest.ActionURL)+`">
+<input type="hidden" name="manifest" value="`+html.EscapeString(string(raw))+`">
 <button type="submit">前往 GitHub</button>
 </form>
-<script>document.getElementById("gh").submit()</script>
-</body></html>`
-	_, _ = w.Write([]byte(page))
+<script>`+githubAppLaunchSubmitScript+`</script>`)
 }
 
 // GitHubAppCallback (GET /api/github/app/callback) exchanges GitHub's code,

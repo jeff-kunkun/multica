@@ -802,6 +802,14 @@ type GithubAppCredential struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type GithubAppLaunchToken struct {
+	TokenHash string             `json:"token_hash"`
+	State     string             `json:"state"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type GithubInstallation struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`

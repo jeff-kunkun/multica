@@ -1262,6 +1262,7 @@
     "github_app_creating": "Opening GitHub",
     "github_app_error_expired": "That GitHub confirmation expired. Start again.",
     "github_app_error_failed": "GitHub App setup did not finish.",
+    "github_app_opened_in_browser": "GitHub opened in your browser. Finish creating the App there, then come back and refresh.",
     "github_app_error_duplicate": "A GitHub App is already configured.",
     "github_app_error_taken": "This GitHub installation is already attached to another workspace.",
     "github_app_connected": "GitHub connected.",
