@@ -227,6 +227,14 @@
         "label": "Toggle chat window",
         "description": "Open or close the floating chat window. Opening it focuses the message input."
       },
+      "newChat": {
+        "label": "New chat",
+        "description": "Start a new conversation in the project you are viewing."
+      },
+      "switchChatProject": {
+        "label": "Switch chat project",
+        "description": "Open the searchable project switcher."
+      },
       "findInIssue": {
         "label": "Find in issue",
         "description": "Search within the open issue detail."

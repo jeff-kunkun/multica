@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { GripVertical, Pin } from "lucide-react";
+import { ChevronsUpDown, GripVertical, Pin } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -10,6 +10,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { chatSessionProjectIds } from "@multica/core/chat/project-context";
 import {
   rankChatProjects,
@@ -61,14 +64,18 @@ export function ChatProjectBar({
   userId,
   filter,
   onFilterChange,
+  onOpenSwitcher,
 }: {
   projects: Project[];
   sessions: ChatSession[];
   userId: string | null;
   filter: ChatProjectFilter;
   onFilterChange: (filter: ChatProjectFilter) => void;
+  /** Opens the searchable jump list. Omitted on surfaces that don't switch. */
+  onOpenSwitcher?: () => void;
 }) {
   const { t } = useT("chat");
+  const projectSwitchChord = useShortcut("switchChatProject");
   const pinnedIds = useChatProjectBarStore(selectPinnedProjectIds(userId));
   const pin = useChatProjectBarStore((s) => s.pin);
   const unpin = useChatProjectBarStore((s) => s.unpin);
@@ -231,6 +238,31 @@ export function ChatProjectBar({
           </span>
         ))}
       </div>
+
+      {onOpenSwitcher && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className="size-7 shrink-0 rounded-full"
+                aria-label={t(($) => $.project_bar.switch)}
+                onClick={onOpenSwitcher}
+              />
+            }
+          >
+            <ChevronsUpDown className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <span className="inline-flex items-center gap-1.5">
+              {t(($) => $.project_bar.switch)}
+              {projectSwitchChord ? <ShortcutKeycaps shortcut={projectSwitchChord} /> : null}
+            </span>
+          </TooltipContent>
+        </Tooltip>
+      )}
 
       <Popover
         open={menuOpen}
