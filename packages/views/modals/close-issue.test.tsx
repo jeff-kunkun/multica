@@ -182,4 +182,94 @@ describe("CloseIssueDialog", () => {
       ),
     );
   });
+
+  // The one who-continues field reads "issue or member id". A member id sent
+  // as blocked_by closed the ticket with a non-issue UUID in close.waiting_on
+  // and nobody summoned (DENE-1002 review); these lock the routing.
+  const MEMBER_ID = "d1591cab-9534-4ffc-89ab-b1d60940cf8f";
+
+  it("sends a member id typed as who-continues as needs_human", async () => {
+    renderDialog();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "in_progress" } });
+    fireEvent.change(screen.getByPlaceholderText("What this close rests on"), {
+      target: { value: "人手不够，下轮交给接手人" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("DENE-1"), {
+      target: { value: MEMBER_ID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close out" }));
+
+    await waitFor(() =>
+      expect(mockClose).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "issue-1",
+          outcome: "in_progress",
+          needs_human: MEMBER_ID,
+          blocked_by: undefined,
+        }),
+      ),
+    );
+  });
+
+  it("sends an issue id typed as who-continues as blocked_by", async () => {
+    renderDialog();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "in_progress" } });
+    fireEvent.change(screen.getByPlaceholderText("What this close rests on"), {
+      target: { value: "等前置票完成" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("DENE-1"), {
+      target: { value: "DENE-806" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close out" }));
+
+    await waitFor(() =>
+      expect(mockClose).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "issue-1",
+          outcome: "in_progress",
+          blocked_by: "DENE-806",
+          needs_human: undefined,
+        }),
+      ),
+    );
+  });
+
+  it("sends a member id in the blocked wait field as needs_human", async () => {
+    renderDialog();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "blocked" } });
+    fireEvent.change(screen.getByPlaceholderText("What this close rests on"), {
+      target: { value: "等人拍板" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("DENE-1"), {
+      target: { value: MEMBER_ID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close out" }));
+
+    await waitFor(() =>
+      expect(mockClose).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "issue-1",
+          outcome: "blocked",
+          needs_human: MEMBER_ID,
+          blocked_by: undefined,
+        }),
+      ),
+    );
+  });
+
+  it("spells out how the wait target will be read", () => {
+    renderDialog();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "in_progress" } });
+    expect(screen.getByText(/An issue id \(DENE-1\) waits on that ticket/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("DENE-1"), {
+      target: { value: MEMBER_ID },
+    });
+    expect(screen.getByText(/Read as a member: this person is called/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("DENE-1"), {
+      target: { value: "DENE-806" },
+    });
+    expect(screen.getByText(/Read as an issue: this ticket waits on it/)).toBeInTheDocument();
+  });
 });
