@@ -24,11 +24,13 @@ describe("useChatListViewStore", () => {
     store.setProjectFilter({ type: "project", id: "proj-1" });
     store.setSearch("release");
     store.setView("archived");
+    store.setHistoryExpanded(true);
 
     expect(saved("ws-a")).toEqual({
       projectFilter: { type: "project", id: "proj-1" },
       search: "release",
       view: "archived",
+      historyExpanded: true,
     });
     // Session state, not a preference: nothing lands in localStorage.
     expect(Object.keys(localStorage).filter((k) => k.startsWith(KEY))).toEqual([]);
@@ -53,7 +55,7 @@ describe("useChatListViewStore", () => {
     sessionStorage.setItem(
       `${KEY}:ws-a`,
       JSON.stringify({
-        state: { projectFilter: { type: "project" }, search: 42, view: "trash" },
+        state: { projectFilter: { type: "project" }, search: 42, view: "trash", historyExpanded: "yes" },
         version: 0,
       }),
     );
@@ -63,5 +65,6 @@ describe("useChatListViewStore", () => {
     expect(state.projectFilter).toEqual({ type: "all" });
     expect(state.search).toBe("");
     expect(state.view).toBe("history");
+    expect(state.historyExpanded).toBe(false);
   });
 });

@@ -19,7 +19,8 @@ Read the invariants below, then open the reference(s) your task actually needs
 
 | Open | When the task is about |
 |---|---|
-| `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, sub-issues and stages, who else is running |
+| `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, who else is running |
+| `references/sub-issues.md` | Sub-issues: todo vs backlog at create time, stages as barrier groups, promoting parked children |
 | `references/routing.md` | Automatic routing: which slots it fills at which status, the 验收席 field, what an `issue route` result means, why dispatch stopped |
 | `references/close-protocol.md` | Closing an issue: the eight `close.*` keys, conclusion / status / next owner / wake decision tables, blocked-close fields, dispatcher stage promotion |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing |
@@ -59,6 +60,8 @@ you debugging access when the real problem was the id.
 **`--output json` writes to stdout; warnings and confirmations go to stderr.**
 Do not merge them (`2>&1`) into anything that parses the output — that makes a
 write which SUCCEEDED look like it failed, and invites a duplicate retry.
+
+**Long-tail settings:** `multica settings get <key>` and `multica settings set <key> --value-json '<json>'` (secrets via `--value-file` or `--value-stdin`); `repo.shares` revokes with `{"url","member_id","revoke":true}`. The key table is `docs/kun/settings-cli-coverage.md`.
 
 **Writes are real.** Creating, updating, deleting, assigning, commenting,
 mentioning, triggering and status changes mutate durable workspace state or

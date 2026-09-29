@@ -26,6 +26,13 @@ export interface Project {
   visibility?: "private" | "project" | "workspace";
 }
 
+/** Checklist slot, without a daemon observation. Close dialogs read this. */
+export interface ProjectMemoryChecklistItem {
+  key: string;
+  path: string;
+  kind: "file" | "directory";
+}
+
 export interface ProjectMemoryLocation {
   key: string;
   path: string;

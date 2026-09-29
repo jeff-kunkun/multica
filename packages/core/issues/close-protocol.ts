@@ -44,7 +44,18 @@ export type CloseProtocolView = {
   /** Optional blocker attribution written when conclusion=blocked. */
   blockKind: string | null;
   blockAction: string | null;
+  /**
+   * Present only when this close wrote `close.knowledge_audit`. Missing on
+   * older closes; not one of the eight keys that decide `complete`.
+   */
+  knowledgeAudit: CloseKnowledgeAudit | null;
 };
+
+export type CloseKnowledgeChange = { location: string; summary: string };
+
+export type CloseKnowledgeAudit =
+  | { none: true }
+  | { none: false; changes: CloseKnowledgeChange[] };
 
 function metaString(
   metadata: IssueMetadata | null | undefined,
@@ -57,6 +68,28 @@ function metaString(
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return null;
+}
+
+function readKnowledgeAudit(raw: string | null): CloseKnowledgeAudit | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { none?: unknown; changes?: unknown };
+    if (parsed.none === true) return { none: true };
+    if (!Array.isArray(parsed.changes)) return null;
+    const changes: CloseKnowledgeChange[] = [];
+    for (const item of parsed.changes) {
+      if (!item || typeof item !== "object") continue;
+      const location = (item as { location?: unknown }).location;
+      const summary = (item as { summary?: unknown }).summary;
+      if (typeof location !== "string" || typeof summary !== "string") continue;
+      if (location.trim() === "" || summary.trim() === "") continue;
+      changes.push({ location, summary });
+    }
+    if (changes.length === 0) return null;
+    return { none: false, changes };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -87,6 +120,7 @@ export function readCloseProtocol(
     at: metaString(metadata, "close.at"),
     blockKind: metaString(metadata, "close.block_kind"),
     blockAction: metaString(metadata, "close.block_action"),
+    knowledgeAudit: readKnowledgeAudit(metaString(metadata, "close.knowledge_audit")),
   };
 }
 

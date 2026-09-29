@@ -800,6 +800,7 @@
     "remove_parent_issue": "Retirer la tâche parente",
     "remove_parent_issue_success": "Tâche parente retirée",
     "add_sub_issue": "Ajouter une sous-tâche...",
+    "close_issue": "Clôturer",
     "delete_issue": "Supprimer la tâche",
     "pin": "Épingler",
     "unpin": "Détacher",
@@ -984,7 +985,9 @@
     "next_owner": "Suivant : {{name}}",
     "next_owner_none": "Suivant : aucun",
     "waiting_on": "En attente de {{id}}",
-    "last_activity_missing": "Aucune heure d'activité"
+    "last_activity_missing": "Aucune heure d'activité",
+    "knowledge_none": "Aucune connaissance qualifiée",
+    "knowledge_change": "Connaissance : {{locations}}"
   },
   "blocker_summary": {
     "title": "Bloqué · {{count}} cause(s) racine(s)",
