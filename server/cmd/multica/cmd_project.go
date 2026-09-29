@@ -1333,3 +1333,125 @@ func formatLead(project map[string]any, actors actorDisplayLookup) string {
 	}
 	return actors.actor(lType, lID)
 }
+
+var projectRepoCmd = &cobra.Command{
+	Use:   "repo",
+	Short: "Attach repositories to a project",
+	Long: `Registers a Git repository on the workspace and attaches it to one project.
+
+add is idempotent: the same repository URL returns the existing attachment.
+remove detaches that project only; the workspace registry keeps the repository.
+--output json includes repo.mode and repo.next_action.`,
+}
+var projectRepoListCmd = &cobra.Command{
+	Use:   "list <project-id>",
+	Short: "List repositories attached to a project",
+	Args:  exactArgs(1),
+	RunE:  runProjectRepoList,
+}
+var projectRepoAddCmd = &cobra.Command{
+	Use:   "add <project-id>",
+	Short: "Attach a repository to a project",
+	Args:  exactArgs(1),
+	RunE:  runProjectRepoAdd,
+}
+var projectRepoRemoveCmd = &cobra.Command{
+	Use:   "remove <project-id> <repo-id>",
+	Short: "Detach a repository from a project",
+	Args:  exactArgs(2),
+	RunE:  runProjectRepoRemove,
+}
+
+func init() {
+	projectCmd.AddCommand(projectRepoCmd)
+	projectRepoCmd.AddCommand(projectRepoListCmd, projectRepoAddCmd, projectRepoRemoveCmd)
+	for _, c := range []*cobra.Command{projectRepoListCmd, projectRepoAddCmd, projectRepoRemoveCmd} {
+		c.Flags().String("output", "json", "Output format: table or json")
+	}
+	projectRepoAddCmd.Flags().String("url", "", "Git repository URL (required)")
+	projectRepoAddCmd.Flags().String("default-branch-hint", "", "Optional default branch")
+	projectRepoAddCmd.Flags().String("ref", "", "Optional checkout ref")
+}
+func projectRepoProject(cmd *cobra.Command, arg string) (context.Context, *cli.APIClient, string, context.CancelFunc, error) {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	p, err := resolveProjectID(ctx, client, arg)
+	if err != nil {
+		cancel()
+		return nil, nil, "", nil, fmt.Errorf("resolve project: %w", err)
+	}
+	return ctx, client, p.ID, cancel, nil
+}
+func runProjectRepoList(cmd *cobra.Command, args []string) error {
+	ctx, c, id, cancel, err := projectRepoProject(cmd, args[0])
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	var result map[string]any
+	if err := c.GetJSON(ctx, "/api/projects/"+id+"/repos", &result); err != nil {
+		return fmt.Errorf("list project repositories: %w", err)
+	}
+	if out, _ := cmd.Flags().GetString("output"); out == "json" {
+		return cli.PrintJSON(os.Stdout, result["repos"])
+	}
+	cli.PrintTable(os.Stdout, []string{"ID", "URL", "MODE", "NEXT"}, projectRepoRows(result["repos"]))
+	return nil
+}
+func runProjectRepoAdd(cmd *cobra.Command, args []string) error {
+	u, _ := cmd.Flags().GetString("url")
+	if strings.TrimSpace(u) == "" {
+		return fmt.Errorf("--url is required")
+	}
+	ctx, c, id, cancel, err := projectRepoProject(cmd, args[0])
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	body := map[string]any{"repo_url": strings.TrimSpace(u)}
+	if v, _ := cmd.Flags().GetString("default-branch-hint"); v != "" {
+		body["default_branch_hint"] = v
+	}
+	if v, _ := cmd.Flags().GetString("ref"); v != "" {
+		body["ref"] = v
+	}
+	var result map[string]any
+	if err := c.PostJSON(ctx, "/api/projects/"+id+"/repos", body, &result); err != nil {
+		return fmt.Errorf("add project repository: %w", err)
+	}
+	if out, _ := cmd.Flags().GetString("output"); out == "table" {
+		cli.PrintTable(os.Stdout, []string{"ID", "URL", "MODE", "NEXT"}, projectRepoRows([]any{result}))
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+func runProjectRepoRemove(cmd *cobra.Command, args []string) error {
+	ctx, c, id, cancel, err := projectRepoProject(cmd, args[0])
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	if err := c.DeleteJSON(ctx, "/api/projects/"+id+"/repos/"+url.PathEscape(args[1])); err != nil {
+		return fmt.Errorf("remove project repository: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, map[string]any{"id": args[1], "removed": true})
+}
+func projectRepoRows(raw any) [][]string {
+	arr, _ := raw.([]any)
+	rows := make([][]string, 0, len(arr))
+	for _, item := range arr {
+		m, _ := item.(map[string]any)
+		resource, _ := m["resource"].(map[string]any)
+		if resource == nil {
+			resource = m
+		}
+		ref, _ := resource["resource_ref"].(map[string]any)
+		repo, _ := m["repo"].(map[string]any)
+		action, _ := repo["next_action"].(map[string]any)
+		rows = append(rows, []string{strVal(resource, "id"), strVal(ref, "url"), strVal(repo, "mode"), strVal(action, "kind")})
+	}
+	return rows
+}
