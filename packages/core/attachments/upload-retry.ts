@@ -10,6 +10,10 @@
  * long as the upload keeps making progress, and only give up after
  * `stallTimeoutMs` of failures with no new bytes arriving. Coming back online
  * or returning to the foreground skips the remaining backoff.
+ *
+ * The stall window only counts time the person actually spends on the page:
+ * a locked phone or a backgrounded tab must not burn it, otherwise coming back
+ * after a long break would drop the placeholder on the first failed retry.
  */
 
 export type UploadProgress = (uploadedBytes: number, totalBytes: number) => void;
@@ -66,6 +70,39 @@ export function waitForUploadRecovery(delayMs: number, signal?: AbortSignal): Pr
   });
 }
 
+// A gap between two foreground-clock samples longer than this means the page
+// was suspended (locked phone, sleeping laptop) rather than sitting visible.
+const FOREGROUND_TICK_MS = 1000;
+const FOREGROUND_MAX_GAP_MS = 5000;
+
+/**
+ * Milliseconds the page has spent visible since the clock started. Hidden
+ * time, and any gap where timers were frozen, is left out — including the
+ * case where a failure surfaces right after returning, before the
+ * `visibilitychange` event has been handled.
+ */
+function startForegroundClock(now: () => number) {
+  const hasDom = typeof document !== "undefined";
+  let elapsed = 0;
+  let last = now();
+  const sample = () => {
+    const t = now();
+    const gap = t - last;
+    last = t;
+    if (gap > 0 && gap <= FOREGROUND_MAX_GAP_MS && !(hasDom && document.hidden)) elapsed += gap;
+    return elapsed;
+  };
+  const timer = setInterval(sample, FOREGROUND_TICK_MS);
+  if (hasDom) document.addEventListener("visibilitychange", sample);
+  return {
+    read: sample,
+    stop: () => {
+      clearInterval(timer);
+      if (hasDom) document.removeEventListener("visibilitychange", sample);
+    },
+  };
+}
+
 export interface RetryUploadOptions {
   signal?: AbortSignal;
   onProgress?: UploadProgress;
@@ -88,29 +125,34 @@ export async function retryUpload<T>(
     now = Date.now,
   }: RetryUploadOptions = {},
 ): Promise<T> {
+  const clock = startForegroundClock(now);
   let bestUploaded = -1;
-  let lastProgressAt = now();
+  let lastProgressAt = clock.read();
   let retries = 0;
   const track: UploadProgress = (uploaded, total) => {
     if (uploaded > bestUploaded) {
       bestUploaded = uploaded;
-      lastProgressAt = now();
+      lastProgressAt = clock.read();
       // New bytes landed: a later failure starts its backoff from the top.
       retries = 0;
     }
     onProgress?.(uploaded, total);
   };
-  for (;;) {
-    try {
-      return await attempt(track);
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      if (!isRetryableUploadError(error) || now() - lastProgressAt >= stallTimeoutMs) throw error;
-      const delay = delaysMs[Math.min(retries, delaysMs.length - 1)]!;
-      retries += 1;
-      if (!(await waitForUploadRecovery(delay, signal))) {
-        throw Object.assign(new Error("Upload aborted"), { name: "AbortError" });
+  try {
+    for (;;) {
+      try {
+        return await attempt(track);
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        if (!isRetryableUploadError(error) || clock.read() - lastProgressAt >= stallTimeoutMs) throw error;
+        const delay = delaysMs[Math.min(retries, delaysMs.length - 1)]!;
+        retries += 1;
+        if (!(await waitForUploadRecovery(delay, signal))) {
+          throw Object.assign(new Error("Upload aborted"), { name: "AbortError" });
+        }
       }
     }
+  } finally {
+    clock.stop();
   }
 }

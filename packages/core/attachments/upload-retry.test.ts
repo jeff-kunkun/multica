@@ -99,4 +99,73 @@ describe("retryUpload", () => {
     await vi.advanceTimersByTimeAsync(0);
     await expect(result).resolves.toBe("ok");
   });
+
+  describe("time away from the page", () => {
+    let hidden = false;
+    const setHidden = (value: boolean) => {
+      hidden = value;
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    beforeEach(() => {
+      hidden = false;
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+    });
+    afterEach(() => {
+      delete (document as { hidden?: boolean }).hidden;
+    });
+
+    it("does not count a 15-minute background stint toward the stall window", async () => {
+      let offline = true;
+      const attempt = vi.fn(async () => {
+        if (offline) throw new TypeError("Failed to fetch");
+        return "ok";
+      });
+      const result = retryUpload(attempt);
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      setHidden(true);
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      // Back in the foreground: the immediate retry still fails (network not
+      // back yet) and must keep the upload alive.
+      setHidden(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      offline = false;
+      await vi.advanceTimersByTimeAsync(20_000);
+      await expect(result).resolves.toBe("ok");
+    });
+
+    it("ignores a suspension whose failure surfaces before visibilitychange", async () => {
+      // A locked phone freezes timers; the pending request only fails once the
+      // page wakes up, possibly before the visibility event is handled.
+      let rejectPending: ((error: Error) => void) | undefined;
+      let calls = 0;
+      const attempt = vi.fn(() => {
+        calls += 1;
+        if (calls === 1) return new Promise<string>((_, reject) => { rejectPending = reject; });
+        return Promise.resolve("ok");
+      });
+      const result = retryUpload(attempt, { stallTimeoutMs: 10 * 60_000 });
+      await vi.advanceTimersByTimeAsync(1_000);
+      vi.setSystemTime(Date.now() + 20 * 60_000);
+      rejectPending!(new TypeError("Failed to fetch"));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(result).resolves.toBe("ok");
+    });
+
+    it("still gives up after 10 foreground minutes with no new bytes", async () => {
+      const attempt = vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      });
+      const result = retryUpload(attempt);
+      const settled = expect(result).rejects.toThrow("Failed to fetch");
+      setHidden(true);
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      setHidden(false);
+      await vi.advanceTimersByTimeAsync(9 * 60_000);
+      const before = attempt.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await settled;
+      expect(attempt.mock.calls.length).toBeGreaterThan(before);
+    });
+  });
 });
