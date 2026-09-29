@@ -12,6 +12,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/localdir"
+	"github.com/multica-ai/multica/server/internal/projectmemory"
 )
 
 var projectCmd = &cobra.Command{
@@ -57,6 +58,25 @@ var projectStatusCmd = &cobra.Command{
 	Short: "Change project status",
 	Args:  exactArgs(2),
 	RunE:  runProjectStatus,
+}
+
+var projectMemoryCmd = &cobra.Command{
+	Use:   "memory",
+	Short: "Check project memory locations",
+}
+
+var projectMemoryCheckCmd = &cobra.Command{
+	Use:   "check <id>",
+	Short: "Stat a local project directory and report its memory status",
+	Args:  exactArgs(1),
+	RunE:  runProjectMemoryCheck,
+}
+
+var projectMemoryStatusCmd = &cobra.Command{
+	Use:   "status <id>",
+	Short: "Show the latest project memory status",
+	Args:  exactArgs(1),
+	RunE:  runProjectMemoryStatus,
 }
 
 var projectResourceCmd = &cobra.Command{
@@ -115,6 +135,9 @@ func init() {
 	projectCmd.AddCommand(projectUpdateCmd)
 	projectCmd.AddCommand(projectDeleteCmd)
 	projectCmd.AddCommand(projectStatusCmd)
+	projectCmd.AddCommand(projectMemoryCmd)
+	projectMemoryCmd.AddCommand(projectMemoryCheckCmd)
+	projectMemoryCmd.AddCommand(projectMemoryStatusCmd)
 	projectCmd.AddCommand(projectResourceCmd)
 
 	projectResourceCmd.AddCommand(projectResourceListCmd)
@@ -192,6 +215,11 @@ func init() {
 
 	// project status
 	projectStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// project memory
+	projectMemoryCheckCmd.Flags().String("path", "", "Local project root to stat (omit to show the latest daemon check)")
+	projectMemoryCheckCmd.Flags().String("output", "json", "Output format: table or json")
+	projectMemoryStatusCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -520,6 +548,67 @@ func runProjectStatus(cmd *cobra.Command, args []string) error {
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
 	}
+	return nil
+}
+
+func runProjectMemoryStatus(cmd *cobra.Command, args []string) error {
+	return runProjectMemoryRequest(cmd, args[0], false)
+}
+
+func runProjectMemoryCheck(cmd *cobra.Command, args []string) error {
+	return runProjectMemoryRequest(cmd, args[0], true)
+}
+
+func runProjectMemoryRequest(cmd *cobra.Command, ref string, check bool) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	projectRef, err := resolveProjectID(ctx, client, ref)
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	var result map[string]any
+	if check {
+		path, _ := cmd.Flags().GetString("path")
+		path = strings.TrimSpace(path)
+		if path == "" {
+			if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID+"/memory/check", &result); err != nil {
+				return fmt.Errorf("check project memory: %w", err)
+			}
+		} else {
+			if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/memory/check", map[string]any{
+				"locations": projectmemory.Check(path),
+			}, &result); err != nil {
+				return fmt.Errorf("report project memory: %w", err)
+			}
+		}
+	} else if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID+"/memory/status", &result); err != nil {
+		return fmt.Errorf("get project memory status: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output != "table" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	locations, _ := result["locations"].([]any)
+	rows := make([][]string, 0, len(locations))
+	for _, raw := range locations {
+		location, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		exists, _ := location["exists"].(bool)
+		state := "missing"
+		if exists {
+			state = "present"
+		}
+		rows = append(rows, []string{strVal(location, "key"), strVal(location, "path"), state, strVal(location, "modified_at")})
+	}
+	cli.PrintTable(os.Stdout, []string{"KEY", "PATH", "STATE", "MODIFIED"}, rows)
 	return nil
 }
 

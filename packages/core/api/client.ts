@@ -115,6 +115,7 @@ import type {
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
+  ProjectMemoryStatus,
   ProjectMember,
   ResourceShare,
   CreateProjectRequest,
@@ -4870,6 +4871,20 @@ export class ApiClient {
 
   async getProject(id: string): Promise<Project> {
     return this.fetch(`/api/projects/${id}`);
+  }
+
+  async getProjectMemory(id: string): Promise<ProjectMemoryStatus> {
+    return this.fetch(`/api/projects/${id}/memory/status`);
+  }
+
+  async checkProjectMemory(
+    id: string,
+    locations: unknown[],
+  ): Promise<ProjectMemoryStatus> {
+    return this.fetch(`/api/projects/${id}/memory/check`, {
+      method: "POST",
+      body: JSON.stringify({ locations }),
+    });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {

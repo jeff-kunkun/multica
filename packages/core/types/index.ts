@@ -218,6 +218,9 @@ export type {
 export type { StorageAdapter } from "./storage";
 export type {
   Project,
+  ProjectMemoryLocation,
+  ProjectMemoryIssue,
+  ProjectMemoryStatus,
   ProjectStatus,
   ProjectPriority,
   CreateProjectRequest,

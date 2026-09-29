@@ -6,6 +6,8 @@ export const projectKeys = {
   list: (wsId: string) => [...projectKeys.all(wsId), "list"] as const,
   detail: (wsId: string, id: string) =>
     [...projectKeys.all(wsId), "detail", id] as const,
+  memory: (wsId: string, id: string) =>
+    [...projectKeys.all(wsId), "memory", id] as const,
 };
 
 export function projectListOptions(wsId: string) {
@@ -20,5 +22,12 @@ export function projectDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: projectKeys.detail(wsId, id),
     queryFn: () => api.getProject(id),
+  });
+}
+
+export function projectMemoryOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: projectKeys.memory(wsId, id),
+    queryFn: () => api.getProjectMemory(id),
   });
 }
