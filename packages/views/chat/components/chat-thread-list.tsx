@@ -27,6 +27,7 @@ import {
   useSetChatSessionPinned,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { useChatListViewStore } from "@multica/core/chat/list-view-store";
 import { useAuthStore } from "@multica/core/auth";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { ChatAccessDialog } from "./chat-access-dialog";
@@ -91,6 +92,7 @@ export function ChatThreadList({
   onArchive,
   emptyLabel,
   search,
+  sessionsLoaded = true,
 }: {
   sessions: ChatSession[];
   agents: Agent[];
@@ -107,6 +109,9 @@ export function ChatThreadList({
    *  set (archived included, listed last and tagged), rows highlight the
    *  query, and a content hit's snippet replaces the last-message preview. */
   search?: { query: string; snippets: ReadonlyMap<string, string> };
+  /** False while the sessions query is still loading, so an empty `sessions`
+   *  is not mistaken for a drained archive. */
+  sessionsLoaded?: boolean;
 }) {
   const { t } = useT("chat");
   const locale = useLocale();
@@ -137,13 +142,19 @@ export function ChatThreadList({
     [sessions],
   );
 
-  // Which view is showing. Falls back to history when the archived list drains
-  // (last chat unarchived / deleted) so we never strand the user on an empty
-  // archive.
-  const [view, setView] = useState<"history" | "archived">("history");
+  // Which view is showing. Kept in the session-scoped list store so an open
+  // archive survives opening a chat and coming back. Falls back to history
+  // when the archived list drains (last chat unarchived / deleted) so we never
+  // strand the user on an empty archive — but only once the list has loaded:
+  // a restored archive view would otherwise be thrown away while the sessions
+  // are still in flight.
+  const view = useChatListViewStore((s) => s.view);
+  const setView = useChatListViewStore((s) => s.setView);
   useEffect(() => {
-    if (view === "archived" && archivedSessions.length === 0) setView("history");
-  }, [view, archivedSessions.length]);
+    if (sessionsLoaded && view === "archived" && archivedSessions.length === 0) {
+      setView("history");
+    }
+  }, [sessionsLoaded, view, archivedSessions.length, setView]);
 
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [confirmingStopId, setConfirmingStopId] = useState<string | null>(null);

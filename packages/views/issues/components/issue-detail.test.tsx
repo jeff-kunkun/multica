@@ -372,6 +372,10 @@ vi.mock("@multica/core/issues/stores", async () => ({
   ...(await vi.importActual<
     typeof import("@multica/core/issues/stores/sub-issues-collapse-store")
   >("@multica/core/issues/stores/sub-issues-collapse-store")),
+  // Real store: the sidebar section folds are read and toggled through it.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/issue-detail-sections-store")
+  >("@multica/core/issues/stores/issue-detail-sections-store")),
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
@@ -455,12 +459,19 @@ vi.mock("@multica/core/issues/stores", async () => ({
 // layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 const scrollToIndexSpy = vi.hoisted(() => vi.fn());
+// Every initialScrollTop the timeline Virtuoso was rendered with.
+const virtuosoInitialScrollTops = vi.hoisted(() => [] as unknown[]);
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
-    { data, itemContent }: { data: unknown[]; itemContent: (i: number, item: unknown) => unknown },
+    {
+      data,
+      itemContent,
+      initialScrollTop,
+    }: { data: unknown[]; itemContent: (i: number, item: unknown) => unknown; initialScrollTop?: number },
     ref: any,
   ) {
+    virtuosoInitialScrollTops.push(initialScrollTop);
     useImperativeHandle(ref, () => ({
       // Real Virtuoso ref methods are not exercised by tests in this file
       // since the deep-link cold-path drives the container's scrollTop on the
@@ -807,6 +818,18 @@ describe("IssueDetail (shared)", () => {
     expect(skeletonGutters).toEqual(
       horizontalGutters(container.querySelector(".max-w-4xl")),
     );
+  });
+
+  it("never lets the timeline Virtuoso scroll the page on its own", async () => {
+    // Virtuoso skips its initial scroll only for 0. An undefined prop snaps
+    // the person's first real scroll back to the top, and a restored offset
+    // is read list-relative, overshooting by the description's height
+    // (DENE-978). The container-level restore owns the offset.
+    virtuosoInitialScrollTops.length = 0;
+    renderIssueDetail();
+    await screen.findByTestId("virtuoso-mock");
+    expect(virtuosoInitialScrollTops.length).toBeGreaterThan(0);
+    expect(virtuosoInitialScrollTops.every((v) => v === 0)).toBe(true);
   });
 
   it("does not offer an acceptance slot on a sub-issue", async () => {

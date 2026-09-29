@@ -74,6 +74,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 });
 
 import { ChatThreadList } from "./chat-thread-list";
+import { useChatListViewStore } from "@multica/core/chat/list-view-store";
 
 const TEST_RESOURCES = { en: { chat: enChat, issues: enIssues } };
 
@@ -131,6 +132,7 @@ const ARCHIVE_LABEL = enChat.list.archive;
 
 beforeEach(() => {
   authState.userId = "user-1";
+  useChatListViewStore.setState({ view: "history" });
 });
 
 describe("ChatThreadList archive delegation", () => {
@@ -410,5 +412,55 @@ describe("ChatThreadList search results", () => {
       </I18nProvider>,
     );
     expect(screen.getByText(enChat.page.search_empty)).toBeTruthy();
+  });
+});
+
+describe("ChatThreadList restored archive view (DENE-978)", () => {
+  // The view lives in the session-scoped list store, so an open archive
+  // survives opening a chat and coming back. The drained-archive fallback must
+  // wait for the sessions to load, or a restored archive is dropped while the
+  // list is still in flight.
+  beforeEach(() => {
+    useChatListViewStore.setState({ view: "archived" });
+  });
+
+  function renderEmpty(sessionsLoaded: boolean) {
+    return render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatThreadList
+          sessions={[]}
+          agents={[agent]}
+          activeSessionId={null}
+          onSelectSession={vi.fn()}
+          onArchive={vi.fn()}
+          sessionsLoaded={sessionsLoaded}
+        />
+      </I18nProvider>,
+    );
+  }
+
+  it("keeps a restored archive view while the sessions are still loading", () => {
+    renderEmpty(false);
+    expect(useChatListViewStore.getState().view).toBe("archived");
+  });
+
+  it("falls back to history once the loaded archive is empty", () => {
+    renderEmpty(true);
+    expect(useChatListViewStore.getState().view).toBe("history");
+  });
+
+  it("keeps the archive open when it still has chats", () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatThreadList
+          sessions={[makeSession({ id: "gone", status: "archived" })]}
+          agents={[agent]}
+          activeSessionId={null}
+          onSelectSession={vi.fn()}
+          onArchive={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+    expect(useChatListViewStore.getState().view).toBe("archived");
   });
 });
