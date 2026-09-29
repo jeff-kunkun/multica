@@ -111,6 +111,11 @@ func (h *Handler) syncBlockWait(ctx context.Context, prev, next db.Issue) {
 		for _, key := range blockwait.WaitKeys() {
 			h.deleteIssueMeta(ctx, next, key)
 		}
+		// block.watched is not a wait key, but a row that left blocked must
+		// stop being a patrol candidate: DENE-1002 added in_progress to the
+		// sweep, and a plain blocked -> in_progress move would otherwise stay
+		// watched forever with nothing to wake for.
+		h.deleteIssueMeta(ctx, next, blockwait.KeyWatched)
 	}
 	if prev.Status == "in_review" && next.Status != "in_review" {
 		h.deleteIssueMeta(ctx, next, blockwait.KeyReleased)
@@ -544,6 +549,7 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 		ReviewNudged:   blockwait.MetaString(meta, blockwait.KeyReviewNudged) == "1",
 		ReviewerHuman:  issue.ReviewerType.Valid && issue.ReviewerType.String == "member",
 		ReviewerEmpty:  reviewerSlotEmpty(issue),
+		Watched:        blockwait.MetaString(meta, blockwait.KeyWatched) == blockwait.WatchedYes,
 	})
 	switch decision.Action {
 	case blockwait.ActionRelease, blockwait.ActionWake, blockwait.ActionSeat:

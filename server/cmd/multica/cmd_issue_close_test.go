@@ -52,6 +52,19 @@ func TestIssueCloseCommandRegistration(t *testing.T) {
 			t.Errorf("issue close missing --%s", name)
 		}
 	}
+	// DENE-1002: the help must list all seven outcomes, and each requirement
+	// must be discoverable without reading the server.
+	for _, outcome := range validCloseOutcomes {
+		if !strings.Contains(cmd.Long, "--outcome "+outcome) {
+			t.Errorf("long help does not document --outcome %s", outcome)
+		}
+	}
+	outcomeUsage := cmd.Flags().Lookup("outcome").Usage
+	for _, outcome := range validCloseOutcomes {
+		if !strings.Contains(outcomeUsage, outcome) {
+			t.Errorf("--outcome usage does not list %s: %q", outcome, outcomeUsage)
+		}
+	}
 }
 
 func TestRunIssueCloseRejectsBadFlagsBeforeAnyRequest(t *testing.T) {
@@ -70,6 +83,8 @@ func TestRunIssueCloseRejectsBadFlagsBeforeAnyRequest(t *testing.T) {
 		{"unknown outcome", map[string]string{"outcome": "finished", "evidence": "PR #1"}, "not a close outcome"},
 		{"missing evidence", map[string]string{"outcome": "done"}, "--evidence"},
 		{"verdict hold", map[string]string{"outcome": "done", "evidence": "PR #1", "verdict": "hold"}, "--verdict only accepts pass"},
+		{"in_progress without a continuation", map[string]string{"outcome": "in_progress", "evidence": "先停一下"}, "must say who continues"},
+		{"in_progress with only a wait condition", map[string]string{"outcome": "in_progress", "evidence": "先停一下", "wait-condition": "等窗口"}, "must say who continues"},
 		{"missing audit", map[string]string{"outcome": "done", "evidence": "PR #1"}, closeprotocol.KnowledgeAuditRequiredMsg},
 		{"unknown location", map[string]string{"outcome": "done", "evidence": "PR #1", "knowledge": "DESIGN.md=nope"}, "不在项目记忆清单里"},
 	}

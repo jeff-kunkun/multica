@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 )
@@ -783,4 +784,178 @@ func TestCloseVerdictWithoutKnowledgeAuditWritesNoComment(t *testing.T) {
 		t.Fatalf("rejection = %s", got)
 	}
 	assertCloseRejectedClean(t, issue.ID, "in_review")
+}
+
+// DENE-1002 (2B): `--outcome backlog` and `--outcome todo` put the ticket back
+// on purpose. Each one writes the evidence comment and a `deferred` close
+// record, needs no PR, and wakes nobody.
+func TestCloseBacklogAndTodoReturnWithACloseRecord(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID := handlerTestAgentID(t)
+	for _, outcome := range []string{"backlog", "todo"} {
+		t.Run(outcome, func(t *testing.T) {
+			issue := createIssueHTTP(t, "close "+outcome, "in_progress")
+			taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+
+			w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
+				"outcome":  outcome,
+				"evidence": "这轮先不动，需求还没定；等排期再拉起来。",
+			})
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+			}
+			var resp CloseIssueResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if resp.Status != outcome {
+				t.Fatalf("status = %s, want %s", resp.Status, outcome)
+			}
+			if got := issueStatusDirect(t, issue.ID); got != outcome {
+				t.Fatalf("issue status = %s, want %s", got, outcome)
+			}
+			if got := issueMetaString(t, issue.ID, closeprotocol.KeyConclusion); got != closeprotocol.ConclusionDeferred {
+				t.Fatalf("close.conclusion = %q, want deferred", got)
+			}
+			if got := issueMetaString(t, issue.ID, closeprotocol.KeyStatus); got != outcome {
+				t.Fatalf("close.status = %q, want %s", got, outcome)
+			}
+			if got := issueMetaString(t, issue.ID, closeprotocol.KeyEvidenceCommentID); got == "" {
+				t.Fatal("the evidence comment must be recorded")
+			}
+			if got := issueMetaString(t, issue.ID, closeprotocol.KeyWakeAction); got != closeprotocol.WakeNone {
+				t.Fatalf("close.wake_action = %q, want none", got)
+			}
+			var n int
+			if err := testPool.QueryRow(context.Background(),
+				`SELECT count(*) FROM comment WHERE issue_id = $1`, issue.ID).Scan(&n); err != nil {
+				t.Fatalf("count comments: %v", err)
+			}
+			if n != 1 {
+				t.Fatalf("comments = %d, want the one evidence comment", n)
+			}
+			woken := strings.Join(resp.Woken, "\n")
+			if !strings.Contains(woken, "放回") {
+				t.Fatalf("the reply should explain the deliberate return, got %v", resp.Woken)
+			}
+		})
+	}
+}
+
+// DENE-1002: `--outcome in_progress` keeps the ticket in progress, records
+// who continues, and arms the block-wait patrol on the clock.
+func TestCloseInProgressRecordsWhoContinues(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	issue := createIssueHTTP(t, "close in_progress clock", "in_progress")
+	agentID := handlerTestAgentID(t)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+	if _, err := testPool.Exec(ctx,
+		`UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issue.ID, agentID); err != nil {
+		t.Fatalf("assign issue: %v", err)
+	}
+	wakeAt := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second).Format(time.RFC3339)
+
+	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
+		"outcome":  "in_progress",
+		"evidence": "网关改造做到一半，先停；等扩容窗口到点继续。",
+		"wake_at":  wakeAt,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var resp CloseIssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "in_progress" {
+		t.Fatalf("status = %s, want in_progress", resp.Status)
+	}
+	if resp.StatusChanged {
+		t.Fatal("the ticket was already in_progress; no status change is expected")
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
+		t.Fatalf("issue status = %s", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyConclusion); got != closeprotocol.ConclusionContinuing {
+		t.Fatalf("close.conclusion = %q, want continuing", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyWakeAction); got != closeprotocol.WakeClock {
+		t.Fatalf("close.wake_action = %q, want clock", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyNextOwnerType); got != closeprotocol.OwnerAgent {
+		t.Fatalf("close.next_owner_type = %q, want agent", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyNextOwnerID); got != agentID {
+		t.Fatalf("close.next_owner_id = %q, want %q", got, agentID)
+	}
+	if got := issueMetaString(t, issue.ID, "block.wake_at"); got == "" {
+		t.Fatal("the clock must be written to the block-wait record")
+	}
+	if got := issueMetaString(t, issue.ID, "block.watched"); got != "1" {
+		t.Fatalf("block.watched = %q, want 1 so the patrol wakes it", got)
+	}
+	if woken := strings.Join(resp.Woken, "\n"); !strings.Contains(woken, "叫醒") {
+		t.Fatalf("the reply should say who is woken when, got %v", resp.Woken)
+	}
+}
+
+// DENE-1002: an in_progress close with no continuation is refused with the
+// list of ways to say "who continues", and nothing is written.
+func TestCloseInProgressWithoutContinuationIsRejected(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "close in_progress bare", "in_progress")
+	agentID := handlerTestAgentID(t)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+
+	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
+		"outcome":  "in_progress",
+		"evidence": "先停一下，回头再说。",
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, want := range []string{"--wake-at", "--wait-condition", "--blocked-by", "--needs-human"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rejection should list %s, got %s", want, body)
+		}
+	}
+	assertCloseRejectedClean(t, issue.ID, "in_progress")
+}
+
+// DENE-1002: --needs-human on an in_progress close names the person who
+// continues instead of the assignee.
+func TestCloseInProgressNeedsHumanNamesThePerson(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "close in_progress human", "in_progress")
+	agentID := handlerTestAgentID(t)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+	memberID := testUserID
+
+	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
+		"outcome":     "in_progress",
+		"evidence":    "方案要你拍板后再继续。",
+		"needs_human": memberID,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyNextOwnerType); got != closeprotocol.OwnerMember {
+		t.Fatalf("close.next_owner_type = %q, want member", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyNextOwnerID); got != memberID {
+		t.Fatalf("close.next_owner_id = %q, want %q", got, memberID)
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
+		t.Fatalf("status = %s, want in_progress", got)
+	}
 }

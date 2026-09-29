@@ -31,6 +31,7 @@ export type ParkingCategory =
   | "waiting_person"
   | "delegated"
   | "idle"
+  | "deferred"
   | "stalled_delivery"
   | "stalled_unclosed"
   | "stalled_reply_unclosed";

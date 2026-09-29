@@ -139,7 +139,18 @@
     "waiting_on": "等待 {{id}}",
     "last_activity_missing": "无活动时间",
     "knowledge_none": "无够格知识",
-    "knowledge_change": "知识：{{locations}}"
+    "knowledge_change": "知识：{{locations}}",
+    "section_title": "收口记录",
+    "conclusion": "结论",
+    "status": "状态",
+    "evidence": "原因",
+    "evidence_missing": "原因评论还没加载出来。",
+    "conclusion_delivered": "已交付",
+    "conclusion_blocked": "卡住",
+    "conclusion_awaiting_review": "待验收",
+    "conclusion_awaiting_human": "等人验收",
+    "conclusion_deferred": "放回待规划 / 待办",
+    "conclusion_continuing": "本轮暂停，下轮继续"
   },
   "blocker_summary": {
     "title": "已阻塞 · {{count}} 个根因",

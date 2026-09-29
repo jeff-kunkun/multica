@@ -12,8 +12,20 @@ export interface KnowledgeAudit {
   changes?: KnowledgeAuditChange[];
 }
 
+// Outcome is the status the close writes. done / in_review / blocked /
+// cancelled are the original four; backlog, todo and in_progress (DENE-1002)
+// deliberately leave the ticket open while still recording why.
+export type CloseOutcome =
+  | "done"
+  | "in_review"
+  | "blocked"
+  | "cancelled"
+  | "backlog"
+  | "todo"
+  | "in_progress";
+
 export interface CloseIssueRequest {
-  outcome: "done" | "in_review" | "blocked" | "cancelled";
+  outcome: CloseOutcome;
   evidence: string;
   summary?: string;
   parent_id?: string;

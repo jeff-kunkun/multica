@@ -2736,7 +2736,7 @@ describe("IssueDetail (shared)", () => {
 
       await screen.findByText("Stage 1 child");
       expect(screen.getByText("No close record")).toBeInTheDocument();
-      expect(screen.getByText("delivered")).toBeInTheDocument();
+      expect(screen.getByText("Delivered")).toBeInTheDocument();
       expect(screen.getByText("Next: none")).toBeInTheDocument();
       const strips = screen.getAllByTestId("sub-issue-close-strip");
       expect(strips[0]).toHaveAttribute("data-close-state", "missing");

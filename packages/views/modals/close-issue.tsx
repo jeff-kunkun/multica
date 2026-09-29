@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { clientErrorMessage } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCloseIssue } from "@multica/core/issues/mutations";
-import type { KnowledgeAudit } from "@multica/core/types";
+import type { CloseOutcome, KnowledgeAudit } from "@multica/core/types";
 import { projectMemoryLocationsOptions } from "@multica/core/projects/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -18,11 +18,36 @@ import {
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useT } from "../i18n";
 
-const OUTCOMES = ["done", "in_review", "blocked", "cancelled"] as const;
-type CloseOutcome = (typeof OUTCOMES)[number];
+const OUTCOMES: readonly CloseOutcome[] = [
+  "done",
+  "in_review",
+  "blocked",
+  "cancelled",
+  "backlog",
+  "todo",
+  "in_progress",
+];
 
 const fieldClass =
   "w-full rounded-md border border-border bg-background px-2 py-1.5 text-body";
+
+// The one "waiting on / continues with" field takes either an issue reference
+// or a person. The server keeps those apart: an issue goes to `blocked_by`, a
+// person to `needs_human` — and `needs_human` is also what summons them. A
+// member id sent as `blocked_by` closed the ticket with a non-issue UUID in
+// `close.waiting_on` and nobody woken (DENE-1002 review), so route on the
+// token's shape before submitting.
+const MEMBER_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// waitTarget splits the single field value into the two request fields the
+// server actually reads. Empty means "nothing written", which the server
+// treats as no continuation.
+function waitTarget(value: string): { blocked_by?: string; needs_human?: string } {
+  const token = value.trim();
+  if (token === "") return {};
+  return MEMBER_ID_RE.test(token) ? { needs_human: token } : { blocked_by: token };
+}
 
 export function CloseIssueDialog({
   onClose,
@@ -41,7 +66,9 @@ export function CloseIssueDialog({
   const [evidence, setEvidence] = useState("");
   const [summary, setSummary] = useState("");
   const [noCode, setNoCode] = useState("");
-  const [blockedBy, setBlockedBy] = useState("");
+  const [waitingOn, setWaitingOn] = useState("");
+  const [continuesWith, setContinuesWith] = useState("");
+  const [wakeAt, setWakeAt] = useState("");
   const [mode, setMode] = useState<"none" | "changes" | null>(null);
   const [drafts, setDrafts] = useState<Record<string, { on: boolean; summary: string }>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -57,7 +84,43 @@ export function CloseIssueDialog({
         return t(($) => $.close_issue.outcome_blocked);
       case "cancelled":
         return t(($) => $.close_issue.outcome_cancelled);
+      case "backlog":
+        return t(($) => $.close_issue.outcome_backlog);
+      case "todo":
+        return t(($) => $.close_issue.outcome_todo);
+      case "in_progress":
+        return t(($) => $.close_issue.outcome_in_progress);
     }
+  };
+
+  // What the picked conclusion needs, so the picker itself teaches the rule
+  // (DENE-1002). The server still enforces it; this only saves a round trip.
+  const outcomeRequirement = (key: CloseOutcome) => {
+    switch (key) {
+      case "done":
+        return t(($) => $.close_issue.requires_done);
+      case "in_review":
+        return t(($) => $.close_issue.requires_in_review);
+      case "blocked":
+        return t(($) => $.close_issue.requires_blocked);
+      case "cancelled":
+        return t(($) => $.close_issue.requires_cancelled);
+      case "backlog":
+        return t(($) => $.close_issue.requires_backlog);
+      case "todo":
+        return t(($) => $.close_issue.requires_todo);
+      case "in_progress":
+        return t(($) => $.close_issue.requires_in_progress);
+    }
+  };
+
+  // Say out loud how the token will be read, so the field is not a black box.
+  const waitTargetHint = (value: string) => {
+    const token = value.trim();
+    if (token === "") return t(($) => $.close_issue.wait_target_hint);
+    return MEMBER_ID_RE.test(token)
+      ? t(($) => $.close_issue.wait_target_person)
+      : t(($) => $.close_issue.wait_target_issue);
   };
 
   const audit = (): KnowledgeAudit | undefined => {
@@ -76,6 +139,15 @@ export function CloseIssueDialog({
     if (!issueId || submitting) return;
     setSubmitting(true);
     setError(null);
+    // The who-continues field is shared between blocked and in_progress, and
+    // either may name a ticket or a person; waitTarget routes it to the field
+    // the server reads.
+    const target =
+      outcome === "blocked"
+        ? waitTarget(waitingOn)
+        : outcome === "in_progress"
+          ? waitTarget(continuesWith)
+          : {};
     try {
       await closeIssue.mutateAsync({
         id: issueId,
@@ -84,7 +156,9 @@ export function CloseIssueDialog({
         summary: summary.trim() || undefined,
         no_code_reason:
           outcome === "done" || outcome === "in_review" ? noCode.trim() || undefined : undefined,
-        blocked_by: outcome === "blocked" ? blockedBy.trim() || undefined : undefined,
+        blocked_by: target.blocked_by,
+        needs_human: target.needs_human,
+        wake_at: outcome === "in_progress" ? wakeAt.trim() || undefined : undefined,
         knowledge_audit: audit(),
       });
       onClose();
@@ -120,6 +194,9 @@ export function CloseIssueDialog({
                 </option>
               ))}
             </select>
+            <span className="text-caption text-muted-foreground">
+              {outcomeRequirement(outcome)}
+            </span>
           </label>
           <label className="flex flex-col gap-1 text-body">
             {t(($) => $.close_issue.evidence)}
@@ -149,11 +226,39 @@ export function CloseIssueDialog({
               {t(($) => $.close_issue.blocked_by)}
               <input
                 className={fieldClass}
-                value={blockedBy}
+                value={waitingOn}
                 placeholder={t(($) => $.close_issue.blocked_by_placeholder)}
-                onChange={(event) => setBlockedBy(event.target.value)}
+                onChange={(event) => setWaitingOn(event.target.value)}
               />
+              <span className="text-caption text-muted-foreground">
+                {waitTargetHint(waitingOn)}
+              </span>
             </label>
+          )}
+          {outcome === "in_progress" && (
+            <>
+              <label className="flex flex-col gap-1 text-body">
+                {t(($) => $.close_issue.wake_at)}
+                <input
+                  className={fieldClass}
+                  value={wakeAt}
+                  placeholder={t(($) => $.close_issue.wake_at_placeholder)}
+                  onChange={(event) => setWakeAt(event.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-body">
+                {t(($) => $.close_issue.continues_with)}
+                <input
+                  className={fieldClass}
+                  value={continuesWith}
+                  placeholder={t(($) => $.close_issue.blocked_by_placeholder)}
+                  onChange={(event) => setContinuesWith(event.target.value)}
+                />
+                <span className="text-caption text-muted-foreground">
+                  {waitTargetHint(continuesWith)}
+                </span>
+              </label>
+            </>
           )}
           <fieldset className="flex flex-col gap-2">
             <legend className="text-body">{t(($) => $.close_issue.knowledge)}</legend>
