@@ -1686,6 +1686,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// for the same reason as GitHub installations; connect /
 					// disconnect are admin-gated in the group below.
 					r.Get("/vcs/connections", h.ListVCSConnections)
+					r.Get("/repos/connections", h.ListRepoConnections)
+					r.Post("/repos/connections", h.UpsertRepoConnection)
+					r.Post("/repos/connections/test", h.TestRepoConnection)
 					// Custom runtime profiles — listing/reading is member-visible
 					// (the Runtime page renders for everyone; create/edit/delete
 					// are admin-gated below).

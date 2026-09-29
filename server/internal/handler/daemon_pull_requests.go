@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/delivery"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -22,6 +24,8 @@ type DaemonPullRequestReport struct {
 	PullRequests []DaemonPullRequest `json:"pull_requests"`
 }
 type DaemonPullRequest struct {
+	// Provider is empty for GitHub. gitlab/forgejo/gitea land in vcs_pull_request.
+	Provider string     `json:"provider,omitempty"`
 	Owner    string     `json:"owner"`
 	Repo     string     `json:"repo"`
 	Number   int32      `json:"number"`
@@ -90,8 +94,15 @@ func (h *Handler) persistReportedPullRequests(ctx context.Context, ws pgtype.UUI
 		if onlyIdent != "" && !containsFold(idents, onlyIdent) {
 			continue
 		}
+		if provider := strings.ToLower(strings.TrimSpace(p.Provider)); provider != "" && provider != "github" {
+			if err := h.persistReportedVCSPull(ctx, ws, p, idents, prefix); err != nil {
+				return err
+			}
+			continue
+		}
 		state := strings.ToLower(p.State)
-		if state == "" {
+		switch state {
+		case "", "opened":
 			state = "open"
 		}
 		now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
@@ -224,6 +235,119 @@ func reportedAPIState(state string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: strings.ToUpper(state), Valid: true}
+}
+
+// persistReportedVCSPull stores a glab (or other local) report. A real token
+// connection for that repository wins; otherwise a synthetic cli:// row keeps
+// connection_id satisfied so the MR stays queryable.
+func (h *Handler) persistReportedVCSPull(ctx context.Context, ws pgtype.UUID, p DaemonPullRequest, idents []string, prefix string) error {
+	ref, err := delivery.ParsePullURL(p.URL)
+	provider := strings.ToLower(strings.TrimSpace(p.Provider))
+	if err == nil && provider == "" {
+		provider = ref.Provider
+	}
+	if provider == "" || provider == "github" {
+		return nil
+	}
+	if err != nil {
+		ref = delivery.Ref{Provider: provider, Owner: p.Owner, Repo: p.Repo, Number: p.Number, URL: p.URL}
+	}
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	qtx := h.Queries.WithTx(tx)
+	conn, err := h.reportConnection(ctx, qtx, ws, provider, ref)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		if !h.isVCSConfigured() {
+			slog.Warn("vcs report skipped: encryption key unset", "url", p.URL)
+			return nil
+		}
+		return err
+	}
+	state := strings.ToLower(p.State)
+	switch state {
+	case "", "opened":
+		state = "open"
+	}
+	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	row, err := qtx.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
+		WorkspaceID: ws, ConnectionID: conn.ID, Provider: provider,
+		RepoOwner: nonempty(ref.Owner, p.Owner), RepoName: nonempty(ref.Repo, p.Repo), PrNumber: p.Number,
+		Title: p.Title, State: state, HtmlUrl: nonempty(p.URL, ref.URL),
+		PrCreatedAt: now, PrUpdatedAt: now, HeadSha: p.SHA,
+		Branch:   pgtype.Text{String: p.Branch, Valid: p.Branch != ""},
+		MergedAt: timestamptzPtr(p.MergedAt),
+	})
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return err
+	}
+	if p.MergeableState != nil || p.ChecksRollup != nil {
+		mergeable, checks := "", ""
+		if p.MergeableState != nil {
+			mergeable = strings.ToLower(strings.TrimSpace(*p.MergeableState))
+		}
+		if p.ChecksRollup != nil {
+			checks = gateChecks(*p.ChecksRollup)
+		}
+		if err := qtx.UpdateVCSPullRequestGate(ctx, db.UpdateVCSPullRequestGateParams{
+			MergeableState: mergeable, ChecksRollupState: checks, ID: row.ID,
+		}); err != nil {
+			_ = tx.Rollback(ctx)
+			return err
+		}
+	}
+	for _, ident := range idents {
+		pfx, num, ok := strings.Cut(ident, "-")
+		if !ok || !strings.EqualFold(pfx, prefix) {
+			continue
+		}
+		n, err := strconv.Atoi(num)
+		if err != nil {
+			continue
+		}
+		issue, err := qtx.GetIssueByNumber(ctx, db.GetIssueByNumberParams{WorkspaceID: ws, Number: int32(n)})
+		if err != nil {
+			continue
+		}
+		_ = qtx.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
+			IssueID: issue.ID, PullRequestID: row.ID, CloseIntent: true,
+		})
+	}
+	return tx.Commit(ctx)
+}
+
+func (h *Handler) reportConnection(ctx context.Context, q *db.Queries, ws pgtype.UUID, provider string, ref delivery.Ref) (db.VcsConnection, error) {
+	conns, err := q.ListVCSConnectionsByWorkspace(ctx, ws)
+	if err != nil {
+		return db.VcsConnection{}, err
+	}
+	if conn := matchConnection(conns, ref.Key, ref.Host); conn != nil {
+		return *conn, nil
+	}
+	instance := "cli://" + provider
+	for _, conn := range conns {
+		if conn.InstanceUrl == instance && conn.RepoUrl == "" {
+			return conn, nil
+		}
+	}
+	if !h.isVCSConfigured() {
+		return db.VcsConnection{}, fmt.Errorf("vcs encryption key unset")
+	}
+	token, err := h.sealVCSSecret("local")
+	if err != nil {
+		return db.VcsConnection{}, err
+	}
+	secret, err := h.sealVCSSecret("local")
+	if err != nil {
+		return db.VcsConnection{}, err
+	}
+	return q.UpsertVCSConnection(ctx, db.UpsertVCSConnectionParams{
+		WorkspaceID: ws, Provider: provider, InstanceUrl: instance, RepoUrl: "",
+		AccountLogin: "local-cli", AccessTokenEncrypted: token, WebhookSecretEncrypted: secret,
+	})
 }
 
 func containsFold(list []string, want string) bool {

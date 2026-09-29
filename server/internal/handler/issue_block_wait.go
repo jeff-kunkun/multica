@@ -300,7 +300,15 @@ func (h *Handler) authorIsReviewer(issue db.Issue, comment db.Comment) bool {
 }
 
 func (h *Handler) releaseAcceptedIssue(ctx context.Context, issue db.Issue, seed blockwait.Decision) releaseOutcome {
-	prs, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID)
+	view, ensureErr := h.ensureIssueDeliveries(ctx, issue)
+	var prs []db.ListPullRequestsByIssueRow
+	var err error
+	if ensureErr != nil {
+		slog.Warn("block wait: delivery lookup failed", "error", ensureErr, "issue_id", uuidToString(issue.ID))
+		prs, err = h.Queries.ListPullRequestsByIssue(ctx, issue.ID)
+	} else {
+		prs = view.GateRows()
+	}
 	if err != nil {
 		slog.Warn("block wait: list pull requests failed", "error", err, "issue_id", uuidToString(issue.ID))
 		return releaseOutcome{Status: issue.Status}
@@ -411,7 +419,7 @@ func (h *Handler) mergeAcceptedIssue(ctx context.Context, issue db.Issue, prs []
 	if open == nil {
 		return h.finishAcceptedIssue(ctx, issue, decision.Reason)
 	}
-	err := h.mergePullRequest(ctx, open.InstallationID, open.RepoOwner, open.RepoName, int(open.PrNumber))
+	err := h.mergeGatePull(ctx, issue.WorkspaceID, *open)
 	if err == nil {
 		out := h.finishAcceptedIssue(ctx, issue, decision.Reason+" PR 已合并。")
 		out.Merged = true
