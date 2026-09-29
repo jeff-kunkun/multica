@@ -1375,8 +1375,8 @@ func (h *Handler) resolveClaimProjectContexts(ctx context.Context, projectIDs []
 		}
 		if out.hasRepos() {
 			out.Repos = out.ProjectRepos
+			return out, nil
 		}
-		return out, nil
 	}
 	if ws.Repos != nil {
 		var repos []RepoData
