@@ -1228,6 +1228,7 @@
     "save_and_test": "Enregistrer et tester",
     "saving": "Enregistrement",
     "toast_ok": "La connexion fonctionne",
+    "toast_app_ok": "La connexion fonctionne. L’App voit {{count}} dépôts.",
     "toast_saved": "Connexion enregistrée",
     "toast_failed": "Connexion impossible",
     "toast_removed": "Connexion retirée",
