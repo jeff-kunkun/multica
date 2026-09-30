@@ -1228,6 +1228,7 @@
     "save_and_test": "Save and test",
     "saving": "Saving",
     "toast_ok": "Connection works",
+    "toast_app_ok": "Connection works. The App can see {{count}} repositories.",
     "toast_saved": "Connection saved",
     "toast_failed": "Could not reach the connection",
     "toast_removed": "Connection removed",

@@ -1225,6 +1225,7 @@
     "save_and_test": "保存并测试",
     "saving": "保存中",
     "toast_ok": "连接可用",
+    "toast_app_ok": "连接可用，App 能看到 {{count}} 个仓库。",
     "toast_saved": "已保存连接",
     "toast_failed": "连接失败",
     "toast_removed": "已移除连接",

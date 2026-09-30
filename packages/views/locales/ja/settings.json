@@ -1225,6 +1225,7 @@
     "save_and_test": "保存してテスト",
     "saving": "保存中",
     "toast_ok": "接続できました",
+    "toast_app_ok": "接続できました。App から {{count}} 件のリポジトリが見えます。",
     "toast_saved": "接続を保存しました",
     "toast_failed": "接続できませんでした",
     "toast_removed": "接続を削除しました",
