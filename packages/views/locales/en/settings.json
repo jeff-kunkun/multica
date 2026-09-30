@@ -1615,6 +1615,8 @@
     "role_impact_lost": "Loses: {{items}}",
     "role_impact_none": "Nothing else changes.",
     "members_loading": "Loading members…",
+    "owner_only_title": "Only the workspace owner can manage members",
+    "owner_only_description": "Member emails, roles, invitations and invite links are visible to the owner only. Ask an owner to promote you if you need access.",
     "empty_title": "No members yet",
     "empty_description": "Invite a teammate to share this workspace.",
     "empty_action": "Invite a member",

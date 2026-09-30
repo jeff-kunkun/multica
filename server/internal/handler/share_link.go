@@ -437,7 +437,7 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 
 	memberResp := h.memberWithUserResponse(member, user)
 	h.publish(protocol.EventMemberAdded, wsID, "member", userID, map[string]any{
-		"member": memberResp,
+		"member": memberResp.redactedForRoster(),
 	})
 	if settledInvitationID.Valid {
 		// Same signal the accept path sends: workspace admins refresh their
