@@ -1185,7 +1185,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // (mirrors backend `comment.go:507-512`). Computed here so per-comment
   // rendering doesn't have to re-derive it for every row.
   const currentUserRole =
-    members.find((m) => m.user_id === user?.id)?.role ?? null;
+    members.find((m) => m.user_id === user?.id)?.role || null;
   const canModerateComments =
     currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));

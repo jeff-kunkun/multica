@@ -218,7 +218,8 @@ multica issue property unset <issue-id> --name Environment
 
 - A validation error lists the legal options — fix the value and retry.
 - `actor` / `multi_actor` properties (Reviewer, Escalation contact, ...) hold
-  workspace members only. `--value` takes a member name, email, UUID, short id,
+  workspace members only. `--value` takes a member name, email (email only resolves when the caller is a
+  workspace owner), UUID, short id,
   or an explicit `member:<uuid>`; `multi_actor` takes a comma-separated list
   (duplicates dropped, order kept, max 20).
 - Definitions may include an optional catalog icon for visual identification;

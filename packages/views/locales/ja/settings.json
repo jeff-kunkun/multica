@@ -1608,6 +1608,8 @@
     "role_impact_lost": "削除：{{items}}",
     "role_impact_none": "ほかに変わるものはありません。",
     "members_loading": "メンバーを読み込み中…",
+    "owner_only_title": "メンバー管理はオーナーのみ",
+    "owner_only_description": "メンバーのメールアドレス、ロール、招待、招待リンクはオーナーだけが閲覧・管理できます。必要な場合はオーナーに昇格を依頼してください。",
     "empty_title": "メンバーがいません",
     "empty_description": "このワークスペースに同僚を招待しましょう。",
     "empty_action": "メンバーを招待",

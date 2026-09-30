@@ -1608,6 +1608,8 @@
     "role_impact_lost": "失去：{{items}}",
     "role_impact_none": "其余不受影响。",
     "members_loading": "正在加载成员…",
+    "owner_only_title": "只有所有者可以管理成员",
+    "owner_only_description": "成员的邮箱、档位、邀请和邀请链接只有所有者能看、能管。需要的话请让所有者把你提为所有者。",
     "empty_title": "还没有成员",
     "empty_description": "邀请同事一起使用这个工作区。",
     "empty_action": "邀请成员",

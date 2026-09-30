@@ -1615,6 +1615,8 @@
     "role_impact_lost": "Perd : {{items}}",
     "role_impact_none": "Rien d'autre ne change.",
     "members_loading": "Chargement des membres…",
+    "owner_only_title": "Seul le propriétaire peut gérer les membres",
+    "owner_only_description": "Les e-mails, rôles, invitations et liens d’invitation des membres ne sont visibles que par le propriétaire. Demandez-lui de vous promouvoir si vous avez besoin d’y accéder.",
     "empty_title": "Aucun membre pour l'instant",
     "empty_description": "Invitez un coéquipier à partager cet espace de travail.",
     "empty_action": "Inviter un membre",
