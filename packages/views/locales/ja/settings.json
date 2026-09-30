@@ -1881,6 +1881,8 @@
     "seats_bulk_usage": "使用量…",
     "seats_bulk_clear": "キャンセル",
     "seats_save_error": "保存できませんでした。もう一度お試しください。",
+    "seats_follows": "{{name}} に従う",
+    "seats_follows_base": "親ロールに従う",
     "judge_title": "判定モデル",
     "judge_description": "ティア（弱 / 中 / 強 / 最強）を確率付きで選びます。分析モデルがオンのときは、整理された事実だけを見ます。",
     "judge_enabled_label": "判定モデルを使う",

@@ -1888,6 +1888,8 @@
     "seats_bulk_usage": "Usage…",
     "seats_bulk_clear": "Cancel",
     "seats_save_error": "Not saved. Try again.",
+    "seats_follows": "Follows {{name}}",
+    "seats_follows_base": "Follows its base role",
     "judge_title": "Judge model",
     "judge_description": "Picks the tier (weak / medium / strong / strongest) with a probability. With the analysis model on, it sees only the facts.",
     "judge_enabled_label": "Use the judge model",
