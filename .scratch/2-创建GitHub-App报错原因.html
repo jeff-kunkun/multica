@@ -1,0 +1,56 @@
+<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><title>redirect_url must be a valid URL</title><style>
+body{font-family:-apple-system,"PingFang SC",sans-serif;max-width:860px;margin:40px auto;padding:0 20px;color:#1f2328;line-height:1.7;background:#fafaf7}
+h1{font-size:26px;margin-bottom:4px}.sub{color:#666;margin-top:0}
+h2{font-size:19px;margin-top:36px;border-bottom:1px solid #ddd;padding-bottom:6px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.card{background:#fff;border:1px solid #ddd;border-radius:10px;padding:16px 18px}
+.card h3{margin:0 0 8px;font-size:17px}
+.app{border-top:4px solid #2f6feb}.tok{border-top:4px solid #d4a72c}.bad{border-top:4px solid #cf222e}.ok{border-top:4px solid #1a7f37}
+table{border-collapse:collapse;width:100%;background:#fff}td,th{border:1px solid #ddd;padding:8px 10px;text-align:left;vertical-align:top}th{background:#f3f3ee}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0}
+.step{background:#fff;border:1px solid #ccc;border-radius:8px;padding:8px 12px;font-size:14px}
+.step.x{border-color:#cf222e;background:#fff0f0;color:#cf222e;font-weight:600}
+.arrow{color:#999}
+code{background:#eee;padding:1px 5px;border-radius:4px;font-size:13px;word-break:break-all}
+.note{background:#fff8e1;border-left:4px solid #d4a72c;padding:10px 14px;border-radius:4px}
+</style></head><body>
+<h1>「redirect_url must be a valid URL」是什么问题</h1>
+<p class="sub">结论：是我们代码的问题，不是你的操作，也不是服务器地址配错。</p>
+
+<h2>创建 GitHub App 的流程</h2>
+<div class="flow">
+<span class="step">点「创建 GitHub App」</span><span class="arrow">→</span>
+<span class="step">服务器生成一份「App 申请表」</span><span class="arrow">→</span>
+<span class="step">浏览器把申请表交给 GitHub</span><span class="arrow">→</span>
+<span class="step x">GitHub 检查申请表 ✗ 卡在这里</span><span class="arrow">→</span>
+<span class="step">你输密码确认</span><span class="arrow">→</span>
+<span class="step">GitHub 按 redirect_url 跳回 ai.ferryway.cc</span><span class="arrow">→</span>
+<span class="step">服务器保存 App，完成</span>
+</div>
+<p>申请表里有一项 <code>redirect_url</code>：GitHub 创建完 App 后要把你送回哪个地址。GitHub 认为这个地址不合法，直接拒收了整张表。</p>
+
+<h2>我实际查到的申请表内容</h2>
+<table>
+<tr><th>字段</th><th>值</th><th>判断</th></tr>
+<tr><td>服务器地址</td><td><code>https://ai.ferryway.cc</code></td><td>✅ 正确</td></tr>
+<tr><td>webhook 地址</td><td><code>https://ai.ferryway.cc/api/webhooks/github</code></td><td>✅ 正确</td></tr>
+<tr><td>redirect_url</td><td><code>https://ai.ferryway.cc/api/github/app/callback?state=djF8MTcy…（一长串，共 269 个字符）</code></td><td>❌ 问题在这</td></tr>
+</table>
+
+<h2>为什么这个地址不行</h2>
+<div class="grid">
+<div class="card bad"><h3>现在的做法</h3>
+我们把一张「防伪凭证」（state，里面含工作区 ID、你的用户 ID、过期时间和签名）直接<b>塞进了 redirect_url 的问号后面</b>。<br>结果地址又长又带参数，GitHub 的校验不收。</div>
+<div class="card ok"><h3>GitHub 官方要求的做法</h3>
+redirect_url 只写干净的地址 <code>…/api/github/app/callback</code>；<br>凭证放在「提交给 GitHub 的那个网址」上（<code>github.com/settings/apps/new?state=…</code>），GitHub 跳回来时会<b>自动把 state 原样带回</b>。<br>服务器接收那一端不用改。</div>
+</div>
+
+<h2>影响范围</h2>
+<ul>
+<li>自建实例上<b>任何人</b>都建不成 GitHub App（网页端、桌面端、CLI 的 setup-link 用的是同一份申请表）。</li>
+<li>这个功能是 DENE-981（设置页一键创建）、DENE-998（桌面端跳浏览器）刚加的，上线后大概率没真跑到 GitHub 这一步。</li>
+<li>智能体推代码、开 PR 不受影响；受影响的是服务器看 PR 状态这一侧。</li>
+</ul>
+
+<div class="note"><b>修法（小改动）：</b>服务端生成申请表时，把 state 从 redirect_url 挪到 GitHub 提交地址上。改完要真的点一次，让 GitHub 走完创建流程才算验收，只跑单测不够。</div>
+</body></html>
