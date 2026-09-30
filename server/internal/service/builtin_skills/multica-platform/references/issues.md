@@ -350,6 +350,11 @@ Routing fills the assignee and 验收席 slots on creation and on status changes
 and never writes a status. Its rules, the 验收席 field, and what a `route`
 result means are in `references/routing.md`.
 
+Do not name another agent as executor on your own: with routing on the server
+ignores it. Only the words of the person you are talking to, passed as
+`--per-quote "<原话>"`, carry a pick through; ask for a stronger seat with
+`multica issue escalate <id> --reason "..."`. See `references/routing.md`.
+
 ## Claim ownership without duplicating a run
 
 Assigning an active issue to an agent normally starts a run. When the work is
