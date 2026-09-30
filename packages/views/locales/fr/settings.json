@@ -1888,6 +1888,8 @@
     "seats_bulk_usage": "Usage…",
     "seats_bulk_clear": "Annuler",
     "seats_save_error": "Non enregistré. Réessayez.",
+    "seats_follows": "Suit {{name}}",
+    "seats_follows_base": "Suit son rôle de base",
     "judge_title": "Modèle de jugement",
     "judge_description": "Choisit le niveau (faible / moyen / fort / le plus fort) avec une probabilité. Quand le modèle d’analyse est actif, il ne voit que les faits.",
     "judge_enabled_label": "Utiliser le modèle de jugement",
