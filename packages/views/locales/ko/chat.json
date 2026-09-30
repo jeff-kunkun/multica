@@ -202,7 +202,8 @@
     "customize": "시작 예시 편집",
     "inbox": {
       "label": "받은편지함 훑어 주기",
-      "prompt": "받은편지함을 훑어 줘"
+      "prompt": "받은편지함을 훑어 줘",
+      "prompt_project": "받은편지함을 훑어 줘. 단 \"{{name}}\" 프로젝트만. `multica inbox board --project {{id}}`로 보드를 읽고 그 프로젝트의 티켓만 알려 줘."
     }
   },
   "onboarding_cards": {
