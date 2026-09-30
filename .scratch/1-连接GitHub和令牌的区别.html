@@ -1,0 +1,56 @@
+<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><title>连接 GitHub vs 添加令牌</title><style>
+body{font-family:-apple-system,"PingFang SC",sans-serif;max-width:860px;margin:40px auto;padding:0 20px;color:#1f2328;line-height:1.7;background:#fafaf7}
+h1{font-size:26px;margin-bottom:4px}.sub{color:#666;margin-top:0}
+h2{font-size:19px;margin-top:36px;border-bottom:1px solid #ddd;padding-bottom:6px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.card{background:#fff;border:1px solid #ddd;border-radius:10px;padding:16px 18px}
+.card h3{margin:0 0 8px;font-size:17px}
+.app{border-top:4px solid #2f6feb}.tok{border-top:4px solid #d4a72c}.bad{border-top:4px solid #cf222e}.ok{border-top:4px solid #1a7f37}
+table{border-collapse:collapse;width:100%;background:#fff}td,th{border:1px solid #ddd;padding:8px 10px;text-align:left;vertical-align:top}th{background:#f3f3ee}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0}
+.step{background:#fff;border:1px solid #ccc;border-radius:8px;padding:8px 12px;font-size:14px}
+.step.x{border-color:#cf222e;background:#fff0f0;color:#cf222e;font-weight:600}
+.arrow{color:#999}
+code{background:#eee;padding:1px 5px;border-radius:4px;font-size:13px;word-break:break-all}
+.note{background:#fff8e1;border-left:4px solid #d4a72c;padding:10px 14px;border-radius:4px}
+</style></head><body>
+<h1>「连接 GitHub」和「添加令牌」有什么区别</h1>
+<p class="sub">一句话：两者都是让 <b>Multica 服务器</b>能看到 GitHub 上的 PR。App 是 GitHub 主动通知我们，令牌是我们拿钥匙自己去查。</p>
+
+<h2>先分清：谁需要 GitHub 权限</h2>
+<div class="grid">
+<div class="card"><h3>智能体（你本机的 daemon）</h3>推分支、开 PR，用的是<b>你本机的 git / gh 登录</b>。<br>这一块和下面两个按钮<b>都没关系</b>，现在就能正常工作（界面上显示为「仅本机 CLI」）。</div>
+<div class="card"><h3>Multica 服务器（ai.ferryway.cc）</h3>要知道「这张票对应的 PR 合没合、CI 绿没绿」，关单闸门、PR 状态展示都靠它。<br><b>这两个按钮解决的就是服务器这一侧。</b></div>
+</div>
+
+<h2>两条路</h2>
+<div class="grid">
+<div class="card app"><h3>① GitHub App（「连接 GitHub」/「创建 GitHub App」）</h3>
+<ul><li>在 GitHub 上注册一个属于这台服务器的「应用」，再装到你的账号/组织上。</li>
+<li>PR、CI 一有变化，<b>GitHub 主动推送</b>（webhook）给服务器，票上实时更新。</li>
+<li>可以「从 GitHub 选择」仓库，不用手敲地址。</li>
+<li>权限是只读：metadata、代码、PR、checks、状态。</li>
+<li>一次开通，整台服务器所有工作区共用；只有工作区所有者能开通。</li></ul></div>
+<div class="card tok"><h3>② 令牌（「添加令牌」）</h3>
+<ul><li>你在 GitHub 生成一个个人访问令牌（PAT），贴给服务器，按范围生效（例如 <code>github.com/jeff-kunkun</code>）。</li>
+<li>服务器<b>需要时自己拿令牌去问</b> GitHub，没有实时推送。</li>
+<li>简单，几分钟搞定，不用在 GitHub 注册应用。</li>
+<li>缺点：令牌会过期（界面显示「令牌失效」）；权限跟你个人账号绑定。</li>
+<li>GitLab / Forgejo / Gitea 只有这一条路。</li></ul></div>
+</div>
+
+<h2>对照表</h2>
+<table>
+<tr><th></th><th>GitHub App</th><th>令牌</th></tr>
+<tr><td>PR 状态怎么到服务器</td><td>GitHub 主动推（实时）</td><td>服务器按需去查</td></tr>
+<tr><td>从 GitHub 选仓库</td><td>✅</td><td>❌</td></tr>
+<tr><td>开通难度</td><td>要跳 GitHub 创建 + 安装，要输一次 GitHub 密码</td><td>生成一个 token 贴进来</td></tr>
+<tr><td>会不会过期</td><td>不会</td><td>会，到期要「替换令牌」</td></tr>
+<tr><td>现在能不能用</td><td>❌ 创建时报错（见另一张图）</td><td>✅ 可以用</td></tr>
+</table>
+
+<h2>截图里那个灰色「连接 GitHub」</h2>
+<p>「代码仓库」区域的灰色按钮，意思是<b>这台服务器还没有 GitHub App</b>（鼠标移上去会提示「服务端未配置 GitHub App」）。App 建好之后它才会变亮。所以它灰着是正常的，根子在 App 没建成功。</p>
+
+<div class="note"><b>建议：</b>App 是长期正确的路（实时、不过期）。报错修好之前，想先让关单查得到 PR，可以临时「添加令牌」顶上；App 建好后令牌可以留着，也可以删掉。</div>
+</body></html>
