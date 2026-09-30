@@ -207,7 +207,8 @@
     "customize": "Customize starters",
     "inbox": {
       "label": "Walk me through my inbox",
-      "prompt": "Walk me through my inbox"
+      "prompt": "Walk me through my inbox",
+      "prompt_project": "Walk me through my inbox, but only the project \"{{name}}\". Read the board with `multica inbox board --project {{id}}` and tell only that project's tickets."
     }
   },
   "onboarding_cards": {

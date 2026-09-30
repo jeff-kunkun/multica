@@ -202,7 +202,8 @@
     "customize": "自定义开场建议",
     "inbox": {
       "label": "帮我过一遍收件箱",
-      "prompt": "帮我过一遍收件箱"
+      "prompt": "帮我过一遍收件箱",
+      "prompt_project": "帮我过一遍收件箱，只讲「{{name}}」这个项目。用 `multica inbox board --project {{id}}` 读看板，只讲这个项目的票。"
     }
   },
   "onboarding_cards": {

@@ -202,7 +202,8 @@
     "customize": "開始例をカスタマイズ",
     "inbox": {
       "label": "受信トレイをざっと説明して",
-      "prompt": "受信トレイをざっと説明して"
+      "prompt": "受信トレイをざっと説明して",
+      "prompt_project": "受信トレイをざっと説明して。ただし「{{name}}」プロジェクトだけ。`multica inbox board --project {{id}}` でボードを読み、そのプロジェクトのチケットだけ説明して。"
     }
   },
   "onboarding_cards": {
