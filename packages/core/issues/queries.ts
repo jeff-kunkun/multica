@@ -130,6 +130,10 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "project-picker", projectId, limit] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
+  /** Progress line history (DENE-1037). Under `all(wsId)`, so reconnect
+   *  recovery covers it. */
+  progress: (wsId: string, id: string) =>
+    [...issueKeys.all(wsId), "progress", id] as const,
   /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
   identifier: (wsId: string, identifier: string) =>
     [...issueKeys.all(wsId), "identifier", identifier] as const,
@@ -630,6 +634,15 @@ export function issueTimelineOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.timeline(issueId),
     queryFn: () => api.listTimeline(issueId),
+  });
+}
+
+/** Progress line history, fetched only when the detail view expands it.
+ *  issue:updated with progress_changed invalidates it. */
+export function issueProgressHistoryOptions(wsId: string, issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.progress(wsId, issueId),
+    queryFn: () => api.listIssueProgress(issueId),
   });
 }
 

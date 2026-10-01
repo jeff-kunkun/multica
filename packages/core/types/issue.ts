@@ -1,6 +1,7 @@
 import type { CapacityRetry } from "./agent";
 import type { Label } from "./label";
 import type { IssuePropertyValues } from "./property";
+import type { Progress } from "./progress";
 
 /** Four lifecycle classifications. User-facing columns group by status key. */
 export type IssueStatusCategory =
@@ -187,6 +188,7 @@ export interface Issue {
   number: number;
   identifier: string;
   title: string;
+  progress?: Progress | null;
   description: string | null;
   status: IssueStatus;
   /**

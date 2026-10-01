@@ -445,6 +445,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		ServerVersion:            normalizeServerVersion(version),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	// Chat goal title + progress subtitle refresh after each agent reply
+	// (DENE-1037).
+	h.RegisterChatRecap(bus)
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
@@ -2135,6 +2138,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// status and close.* keys in one transaction, checked by
 					// closeprotocol.Validate — `multica issue close`.
 					r.Post("/close", h.CloseIssue)
+					r.Post("/progress", h.WriteIssueProgress)
+					r.Get("/progress", h.ListIssueProgress)
 					// PR state from the caller's gh, refreshed by `issue
 					// close` so the done gate sees merges without a GitHub App.
 					r.Post("/pull-requests/report", h.ReportIssuePullRequests)
@@ -2613,6 +2618,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/archive", h.SetChatSessionArchived)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
+					r.Post("/progress", h.WriteChatProgress)
+					r.Get("/progress", h.ListChatProgress)
 					r.Post("/onboarding", h.StartMikaOnboarding)
 					// Explicit "refresh" of a turn's quick actions: re-runs the
 					// daemon suggestion pass for the latest assistant reply (MUL-5149).

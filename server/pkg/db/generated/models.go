@@ -624,6 +624,13 @@ type ChatSession struct {
 	ExplicitlyCreatedAt     pgtype.Timestamptz `json:"explicitly_created_at"`
 	ProjectNudgeDismissedAt pgtype.Timestamptz `json:"project_nudge_dismissed_at"`
 	Visibility              string             `json:"visibility"`
+	TitleLocked             bool               `json:"title_locked"`
+	ProgressText            string             `json:"progress_text"`
+	ProgressSource          string             `json:"progress_source"`
+	ProgressTone            string             `json:"progress_tone"`
+	ProgressAuthorType      string             `json:"progress_author_type"`
+	ProgressAuthorID        pgtype.UUID        `json:"progress_author_id"`
+	ProgressUpdatedAt       pgtype.Timestamptz `json:"progress_updated_at"`
 }
 
 type ChatSessionLinkReadAudit struct {
@@ -635,6 +642,18 @@ type ChatSessionLinkReadAudit struct {
 	ReaderAgentID     pgtype.UUID        `json:"reader_agent_id"`
 	ReaderTaskID      pgtype.UUID        `json:"reader_task_id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChatSessionProgress struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Text          string             `json:"text"`
+	Source        string             `json:"source"`
+	Tone          string             `json:"tone"`
+	AuthorType    string             `json:"author_type"`
+	AuthorID      pgtype.UUID        `json:"author_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type ChatSessionProject struct {
@@ -980,6 +999,12 @@ type Issue struct {
 	AssigneeSource       pgtype.Text        `json:"assignee_source"`
 	AssigneeSourceUserID pgtype.UUID        `json:"assignee_source_user_id"`
 	AssigneeQuote        pgtype.Text        `json:"assignee_quote"`
+	ProgressText         string             `json:"progress_text"`
+	ProgressSource       string             `json:"progress_source"`
+	ProgressTone         string             `json:"progress_tone"`
+	ProgressAuthorType   string             `json:"progress_author_type"`
+	ProgressAuthorID     pgtype.UUID        `json:"progress_author_id"`
+	ProgressUpdatedAt    pgtype.Timestamptz `json:"progress_updated_at"`
 }
 
 type IssueDeliveryBranch struct {
@@ -1086,6 +1111,18 @@ type IssueParkingRecord struct {
 	TaskID        pgtype.UUID        `json:"task_id"`
 	Timeline      []byte             `json:"timeline"`
 	EvaluatedAt   pgtype.Timestamptz `json:"evaluated_at"`
+}
+
+type IssueProgress struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Text        string             `json:"text"`
+	Source      string             `json:"source"`
+	Tone        string             `json:"tone"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type IssueProperty struct {

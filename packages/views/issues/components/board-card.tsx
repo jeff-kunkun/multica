@@ -35,7 +35,9 @@ import {
   BoardCardSubIssueToggle,
 } from "./board-card-sub-issues";
 import { ParentIssueBadge } from "./parent-issue-badge";
+import { IssueProgressLine, useIssueHasProgressLine } from "./issue-progress-line";
 import { BlockWaitProbeBadge } from "./block-wait-probe-badge";
+
 function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
@@ -110,7 +112,8 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   const hasAssignee = !!issue.assignee_type && !!issue.assignee_id;
   const showPriority = storeProperties.priority && issue.priority !== "none";
-  const showDescription = storeProperties.description && issue.description;
+  const hasProgressLine = useIssueHasProgressLine(issue);
+  const showDescription = storeProperties.description && issue.description && !hasProgressLine;
   const showAssigneeSection =
     storeProperties.assignee && cardGrouping !== "assignee" && hasAssignee;
   const showStartDate = storeProperties.startDate && issue.start_date;
@@ -222,6 +225,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       <p className="mt-1 text-body font-medium leading-snug line-clamp-2">
         {issue.title}
       </p>
+      <IssueProgressLine issue={issue} className="mt-1" />
 
       {showDescription && (() => {
         const preview = descriptionPreview(issue.description!);

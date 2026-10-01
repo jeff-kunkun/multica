@@ -76,6 +76,23 @@ to pass.`,
 	RunE: runChatThread,
 }
 
+var chatProgressCmd = &cobra.Command{
+	Use:   "progress [text]",
+	Short: "Report or read the progress line under a chat's title",
+	Long: `Report where this chat stands — the second line under its title in the
+chat list and header. Your own line wins over the automatic summary the
+platform writes after each reply.
+
+  multica chat progress "Fixed the redirect; waiting for you to retest"
+  multica chat progress "Need the API key to continue" --tone waiting
+  multica chat progress --history
+
+--tone sets the dot colour: working (blue, default), waiting (yellow),
+stuck (red), done (green). --history lists earlier lines, newest first.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runChatProgress,
+}
+
 func init() {
 	for _, c := range []*cobra.Command{chatListCmd, chatSearchCmd} {
 		c.Flags().String("project", "", "Filter to a project id (defaults to the current project)")
@@ -93,6 +110,69 @@ func init() {
 	}
 	chatCmd.AddCommand(chatHistoryCmd)
 	chatCmd.AddCommand(chatThreadCmd)
+	chatCmd.AddCommand(chatProgressCmd)
+	chatProgressCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
+	chatProgressCmd.Flags().String("output", "json", "Output format: table or json")
+	chatProgressCmd.Flags().String("tone", "", "Dot colour: working, waiting, stuck, or done (default working)")
+	chatProgressCmd.Flags().Bool("history", false, "List earlier progress lines instead of reporting one")
+}
+
+func runChatProgress(cmd *cobra.Command, args []string) error {
+	session, _ := cmd.Flags().GetString("session")
+	if strings.TrimSpace(session) == "" {
+		session = os.Getenv("MULTICA_CHAT_SESSION_ID")
+	}
+	ref, err := parseChatSessionLinkRef(session)
+	if err != nil {
+		return fmt.Errorf("chat progress: --session is required (or set MULTICA_CHAT_SESSION_ID): %w", err)
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	return reportOrListProgress(ctx, cmd, client, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/progress", args, "chat")
+}
+
+// reportOrListProgress is shared by `multica chat progress` and `multica
+// issue progress`: POST a line, or GET the history with --history.
+func reportOrListProgress(ctx context.Context, cmd *cobra.Command, client *cli.APIClient, path string, args []string, noun string) error {
+	output, _ := cmd.Flags().GetString("output")
+	if history, _ := cmd.Flags().GetBool("history"); history {
+		if len(args) > 0 {
+			return fmt.Errorf("%s progress: --history takes no text", noun)
+		}
+		var out struct {
+			Progress []map[string]any `json:"progress"`
+		}
+		if err := client.GetJSON(ctx, path, &out); err != nil {
+			return fmt.Errorf("list %s progress: %w", noun, err)
+		}
+		if output == "table" {
+			for _, p := range out.Progress {
+				fmt.Printf("%v  %-7v %-7v %v\n", p["updated_at"], p["tone"], p["source"], p["text"])
+			}
+			return nil
+		}
+		return cli.PrintJSON(os.Stdout, out)
+	}
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		return fmt.Errorf("%s progress: text is required (or pass --history to read)", noun)
+	}
+	body := map[string]any{"text": args[0]}
+	if tone, _ := cmd.Flags().GetString("tone"); tone != "" {
+		body["tone"] = tone
+	}
+	var out map[string]any
+	if err := client.PostJSON(ctx, path, body, &out); err != nil {
+		return fmt.Errorf("report %s progress: %w", noun, err)
+	}
+	if output == "table" {
+		fmt.Printf("Progress: %v\n", out["progress"])
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, out)
 }
 
 func runChatDirectoryList(cmd *cobra.Command, _ []string) error {

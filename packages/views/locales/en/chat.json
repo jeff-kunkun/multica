@@ -348,5 +348,6 @@
     "body": "You have {{count}} chats that project members can now see.",
     "make_private": "Make selected private",
     "dismiss": "Got it"
-  }
+  },
+  "title_locked": "Title locked — the agent will not rename it"
 }

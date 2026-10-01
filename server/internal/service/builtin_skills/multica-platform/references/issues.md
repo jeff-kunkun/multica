@@ -463,3 +463,8 @@ with `--wait-timeout`. Exit code `0` means ready, `10` means pending, and
 `gh pr checks` exit code `8` is also pending; any other exit code is failed.
 For GitLab, `glab ci status` can be used directly when it returns non-zero while
 the pipeline is pending, or wrap its pending code as `10`.
+
+
+### Report progress
+
+`multica issue progress <issue-id> "<progress>" [--tone working|waiting|stuck|done] --output json` sets the line under the issue's title; `--history` reads earlier lines. Who wins between your line, a close summary and the stall patrol: `references/progress.md`.

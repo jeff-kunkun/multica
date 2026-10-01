@@ -9,7 +9,8 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.reviewer_type, i.reviewer_id,
        i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision, i.visibility
+       i.revision, i.visibility,
+       i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at
 FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -539,7 +540,8 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.reviewer_type, i.reviewer_id,
        i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision, i.visibility
+       i.revision, i.visibility,
+       i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at
 FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains visible.

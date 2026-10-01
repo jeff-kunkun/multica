@@ -8693,6 +8693,7 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"number":       issue.Number,
 		"identifier":   IssueIdentifier(issuePrefix, issue.Number),
 		"title":        issue.Title,
+		"progress":     issueProgressMap(issue),
 		"description":  util.TextToPtr(issue.Description),
 		"status":       issue.Status,
 		// Mirrors handler.IssueResponse.StatusCategory. Built-ins map to a
@@ -8748,6 +8749,20 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		m["origin_id"] = util.UUIDToString(issue.OriginID)
 	}
 	return m
+}
+
+func issueProgressMap(issue db.Issue) any {
+	if issue.ProgressText == "" {
+		return nil
+	}
+	return map[string]any{
+		"text":        issue.ProgressText,
+		"source":      issue.ProgressSource,
+		"tone":        issue.ProgressTone,
+		"author_type": issue.ProgressAuthorType,
+		"author_id":   util.UUIDToString(issue.ProgressAuthorID),
+		"updated_at":  util.TimestampToString(issue.ProgressUpdatedAt),
+	}
 }
 
 // IssueIdentifier renders the human-facing issue key ("MUL-42"). Callers that
