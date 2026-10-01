@@ -1149,6 +1149,8 @@
     "entry_placeholder": "说说你要完成什么",
     "entry_runtime": "运行位置",
     "entry_submit": "开始",
+    "entry_create_start": "创建并开始",
+    "goal_toggle": "做到达标为止",
     "entry_submitting": "正在开始…",
     "entry_cancel": "取消",
     "entry_no_runtime": "没有可用的在线运行时，对齐智能体无法运行。",

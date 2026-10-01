@@ -1181,6 +1181,8 @@
     "entry_placeholder": "What do you want done?",
     "entry_runtime": "Where it runs",
     "entry_submit": "Start aligning",
+    "entry_create_start": "Create and start",
+    "goal_toggle": "Keep going until it meets the finish line",
     "entry_submitting": "Starting…",
     "entry_cancel": "Cancel",
     "entry_no_runtime": "No online runtime is available, so the alignment agent cannot run.",

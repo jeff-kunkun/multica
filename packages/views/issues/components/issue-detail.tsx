@@ -3365,15 +3365,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {!isGuest && !issueGoal && (
             <div className="mt-5 flex items-center justify-between gap-3 rounded-lg border border-dashed px-3 py-2.5">
               <div className="min-w-0">
-                <p className="text-caption font-medium">{t(($) => $.goal.set_as_goal)}</p>
-                <p className="text-micro text-muted-foreground">{t(($) => $.goal.set_as_goal_hint)}</p>
+                <p className="text-caption font-medium">{t(($) => $.detail.goal.set_as_goal)}</p>
+                <p className="text-micro text-muted-foreground">{t(($) => $.detail.goal.set_as_goal_hint)}</p>
               </div>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => openGoalCompletion({ issueId: issue.id, title: issue.title })}
               >
-                {t(($) => $.goal.set_as_goal)}
+                {t(($) => $.detail.goal.set_as_goal)}
               </Button>
             </div>
           )}

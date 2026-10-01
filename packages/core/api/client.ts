@@ -3317,7 +3317,7 @@ export class ApiClient {
     });
     return parseWithFallback(raw, IssueGoalSchema, null, {
       endpoint: "POST /api/issues/:id/goal",
-    }) as IssueGoal;
+    }) as unknown as IssueGoal;
   }
 
   async confirmIssueGoal(issueId: string): Promise<IssueGoal> {
@@ -3326,7 +3326,7 @@ export class ApiClient {
     });
     return parseWithFallback(raw, IssueGoalSchema, null, {
       endpoint: "POST /api/issues/:id/goal/confirm",
-    }) as IssueGoal;
+    }) as unknown as IssueGoal;
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {

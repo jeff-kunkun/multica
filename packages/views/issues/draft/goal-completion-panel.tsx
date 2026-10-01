@@ -57,10 +57,10 @@ export function GoalCompletionPanel({
         </span>
         <div className="min-w-0">
           <h2 id="goal-completion-title" className="text-title-sm font-semibold">
-            {t(($) => $.goal.completion_title)}
+            {t(($) => $.detail.goal.completion_title)}
           </h2>
           <p className="mt-1 text-caption leading-5 text-muted-foreground">
-            {title ? `${title} · ` : ""}{t(($) => $.goal.completion_hint)}
+            {title ? `${title} · ` : ""}{t(($) => $.detail.goal.completion_hint)}
           </p>
         </div>
       </div>
@@ -69,15 +69,15 @@ export function GoalCompletionPanel({
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-caption font-medium">
             <CircleHelp className="size-4 text-primary" aria-hidden="true" />
-            {t(($) => $.goal.question_label)}
+            {t(($) => $.detail.goal.question_label)}
           </div>
           {checks.length > 1 && (
-            <div className="flex items-center gap-1" aria-label={t(($) => $.goal.question_tabs)}>
+            <div className="flex items-center gap-1" aria-label={t(($) => $.detail.goal.question_tabs)}>
               {checks.map((_, index) => (
                 <button
                   key={index}
                   type="button"
-                  aria-label={t(($) => $.goal.question_number, { n: index + 1 })}
+                  aria-label={t(($) => $.detail.goal.question_number, { n: index + 1 })}
                   aria-current={index === active ? "step" : undefined}
                   onClick={() => setActive(index)}
                   className={cn(
@@ -91,10 +91,10 @@ export function GoalCompletionPanel({
             </div>
           )}
         </div>
-        <p className="mt-3 text-body font-medium">{t(($) => $.goal.question_prompt)}</p>
+        <p className="mt-3 text-body font-medium">{t(($) => $.detail.goal.question_prompt)}</p>
         <div className="mt-3 space-y-2">
           <Input value={checks[active] ?? ""} onChange={(event) => updateCheck(event.target.value)} />
-          <p className="text-caption text-muted-foreground">{t(($) => $.goal.other_option)}</p>
+          <p className="text-caption text-muted-foreground">{t(($) => $.detail.goal.other_option)}</p>
         </div>
         <button
           type="button"
@@ -105,16 +105,16 @@ export function GoalCompletionPanel({
           }}
         >
           <Plus className="size-3.5" aria-hidden="true" />
-          {t(($) => $.goal.add_question)}
+          {t(($) => $.detail.goal.add_question)}
         </button>
       </div>
 
       <div className="rounded-lg bg-muted/40 px-3 py-2 text-caption text-muted-foreground">
         <Check className="mr-1 inline size-3.5 text-success" aria-hidden="true" />
-        {t(($) => $.goal.lock_hint)}
+        {t(($) => $.detail.goal.lock_hint)}
       </div>
       <Button className="w-full" onClick={() => void confirm()} disabled={!canConfirm || openGoal.isPending}>
-        {openGoal.isPending ? t(($) => $.goal.confirming) : t(($) => $.goal.confirm)}
+        {openGoal.isPending ? t(($) => $.detail.goal.confirming) : t(($) => $.detail.goal.confirm)}
       </Button>
     </section>
   );
