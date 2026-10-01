@@ -480,6 +480,8 @@
       "tokens": "トークン",
       "runs": "実行回数",
       "duration": "時間",
+      "budget_warning": "この目標は予算の 80% 以上を使用しています。上限に達すると一時停止し、次の対応を確認します。",
+      "stopped_hint": "この目標は一時停止中です。受信トレイの選択式質問に回答して、予算の追加、達成ラインの変更、終了を選択してください。",
       "evidence_item": "証拠",
       "open_evidence": "証拠を開く",
       "status": { "draft": "確認待ち", "locked": "進行中", "active": "進行中", "stopped": "停止", "achieved": "達成" }
