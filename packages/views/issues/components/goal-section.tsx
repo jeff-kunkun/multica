@@ -93,7 +93,7 @@ function CheckRow({ check, t }: { check: IssueGoalCheck; t: ReturnType<typeof us
         <Check className="size-3" strokeWidth={3} />
       </span>
       <span className={cn("min-w-0 flex-1 text-body", passed && "text-muted-foreground line-through decoration-muted-foreground/50")}>{check.title ?? check.description}</span>
-      {check.method && <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{check.method}</span>}
+      {check.method && <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{check.method}</span>}
       {hasDetail && <ChevronDown className="mt-0.5 size-4 shrink-0 text-muted-foreground" />}
     </>
   );

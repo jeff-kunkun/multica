@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Use for Multica platform actions the runtime brief omits: inbox, issue and PR contracts, routing, close protocol, mentions, agents, specialisations, squads, autopilots, projects, runtimes, skill import, workspace transfer, sub-issues, GitHub App. Not for the product code you are working on."
+description: "Use for Multica platform actions the runtime brief omits: inbox, issue and PR contracts, goals, routing, close protocol, mentions, agents, specialisations, squads, autopilots, projects, runtimes, skill import, workspace transfer, sub-issues, GitHub App. Not for the product code you are working on."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
