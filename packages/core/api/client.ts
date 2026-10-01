@@ -3,6 +3,7 @@ import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import type { InboxBoardResponse, ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
 import { configStore } from "../config";
+import { IssueGoalSchema } from "../types";
 import type {
   Issue,
   IssuePriority,
@@ -80,6 +81,7 @@ import type {
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  IssueGoal,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -3284,6 +3286,20 @@ export class ApiClient {
       total_cache_write_tokens: 0,
       task_count: 0,
     }, { endpoint: "GET /api/issues/:id/usage" });
+  }
+
+  async getIssueGoal(issueId: string): Promise<IssueGoal | null> {
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/goal`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
+    if (raw == null) return null;
+    return parseWithFallback<IssueGoal | null>(raw, IssueGoalSchema.nullable(), null, {
+      endpoint: "GET /api/issues/:id/goal",
+    });
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {

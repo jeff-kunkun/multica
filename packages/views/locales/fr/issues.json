@@ -432,6 +432,17 @@
     "prop_created": "Création",
     "prop_updated": "Mise à jour",
     "activity_section": "Activité",
+    "goal": {
+      "title": "Objectif",
+      "progress": "{{completed}} contrôles sur {{total}} terminés",
+      "round": "Tour",
+      "tokens": "Jetons",
+      "runs": "Exécutions",
+      "duration": "Durée",
+      "evidence_item": "Preuve",
+      "open_evidence": "Ouvrir la preuve",
+      "status": { "draft": "À confirmer", "locked": "En cours", "active": "En cours", "stopped": "Arrêté", "achieved": "Atteint" }
+    },
     "subscribe": "S'abonner",
     "unsubscribe": "Se désabonner",
     "delegated_subscription_badge": "Suivi via un agent",

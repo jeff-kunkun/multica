@@ -473,6 +473,17 @@
     "prop_created": "创建时间",
     "prop_updated": "更新时间",
     "activity_section": "动态",
+    "goal": {
+      "title": "目标",
+      "progress": "已完成 {{completed}} / {{total}} 条达标",
+      "round": "轮次",
+      "tokens": "Token",
+      "runs": "运行次数",
+      "duration": "时长",
+      "evidence_item": "证据",
+      "open_evidence": "打开证据",
+      "status": { "draft": "待确认", "locked": "推进中", "active": "推进中", "stopped": "已停下", "achieved": "已达标" }
+    },
     "subscribe": "订阅",
     "unsubscribe": "取消订阅",
     "delegated_subscription_badge": "由智能体代你关注",

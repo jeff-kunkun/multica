@@ -161,6 +161,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
 import { WorkThreadPanel } from "../../common/work-thread-panel";
+import { GoalSection } from "./goal-section";
 
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -3357,6 +3358,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
             {descDragOver && <FileDropOverlay />}
           </div>
+
+          <GoalSection wsId={wsId} issueId={issue.id} />
 
           {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (
