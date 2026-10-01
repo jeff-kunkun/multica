@@ -180,6 +180,22 @@ ORDER BY
   COALESCE(last_activity_at, updated_at)
 LIMIT sqlc.arg('row_limit')::int;
 
+-- name: ListDaemonBlockWaits :many
+-- A daemon only needs blocked issues carrying an executable probe. Do not
+-- return a ticket while another task is active: the probe would race the
+-- executor and could wake a second run.
+SELECT * FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND status = 'blocked'
+  AND NULLIF(trim(COALESCE(metadata->>'block.wait_probe', '')), '') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_task_queue t
+    WHERE t.issue_id = issue.id
+      AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  )
+ORDER BY COALESCE(last_activity_at, updated_at), id
+LIMIT 100;
+
 -- name: LockIssueForChannelMediaBind :one
 -- Channel media resolves after /issue creation. Hold a key-share lock while
 -- the attachment row is written so a concurrent issue delete cannot land

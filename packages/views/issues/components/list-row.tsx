@@ -28,6 +28,7 @@ import { useIssueSurfaceSelection } from "../surface/selection-context";
 import { useIssuePinnedIds } from "../surface/pinned-context";
 import { ParentIssueBadge } from "./parent-issue-badge";
 import { PinnedRowBadge } from "./pinned-row-badge";
+import { BlockWaitProbeBadge } from "./block-wait-probe-badge";
 import { useLocale } from "../../i18n";
 import { useT } from "../../i18n";
 import { ProgressLine } from "../../common/progress-line";
@@ -143,6 +144,7 @@ function ListRowContent({
             <span className="flex min-w-0 flex-col"><span className="truncate">{issue.title}</span><ProgressLine progress={issue.progress} /></span>
             {/* Keep custom names visible when this row appears outside a status section. */}
             <CustomStatusChip status={issue.status} className="shrink-0" />
+            <BlockWaitProbeBadge issue={issue} />
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
                 <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />

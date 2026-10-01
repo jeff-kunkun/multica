@@ -1550,6 +1550,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/workspaces/{workspaceId}/memory", h.GetDaemonProjectMemoryTargets)
 		r.Post("/workspaces/{workspaceId}/memory/check", h.ReportDaemonProjectMemoryCheck)
 		r.Get("/workspaces/{workspaceId}/runtime-profiles", h.DaemonListRuntimeProfiles)
+		r.Get("/workspaces/{workspaceId}/block-waits", h.ListDaemonBlockWaits)
+		r.Post("/issues/{issueId}/wait-probe", h.ReportDaemonBlockWait)
 
 		// Agent-triggered plugin hooks. The daemon's local MCP server calls
 		// this when an agent picks one of its tools; the server makes the
