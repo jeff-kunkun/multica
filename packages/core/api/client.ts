@@ -2,6 +2,7 @@ import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import type { InboxBoardResponse, ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
+import type { Ask, CreateAskRequest, AnswerAskRequest } from "../types/ask";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -6400,4 +6401,28 @@ export class ApiClient {
       { endpoint: "POST /api/telegram/binding/redeem" },
     );
   }
+
+  async createAsk(body: CreateAskRequest): Promise<Ask> {
+    return this.fetch<Ask>("/api/asks", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  async listAsks(status = "open", issueId?: string): Promise<{ asks: Ask[] }> {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (issueId) params.set("issue_id", issueId);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.fetch<{ asks: Ask[] }>(`/api/asks${query}`);
+  }
+
+  async getAsk(id: string): Promise<Ask> {
+    return this.fetch<Ask>(`/api/asks/${encodeURIComponent(id)}`);
+  }
+
+  async answerAsk(id: string, body: AnswerAskRequest): Promise<Pick<Ask, "id" | "status" | "answers">> {
+    return this.fetch<Pick<Ask, "id" | "status" | "answers">>(`/api/asks/${encodeURIComponent(id)}/answer`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
 }

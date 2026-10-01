@@ -2080,6 +2080,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
+					r.Get("/asks", func(w http.ResponseWriter, req *http.Request) {
+						q := req.URL.Query()
+						q.Set("issue_id", chi.URLParam(req, "id"))
+						req.URL.RawQuery = q.Encode()
+						h.ListAsks(w, req)
+					})
+					r.Post("/asks", h.CreateAsk)
 					r.Get("/work-thread", h.GetIssueWorkThread)
 					r.Post("/work-thread/action", h.WorkThreadAction)
 					r.Put("/", h.UpdateIssue)
@@ -2152,6 +2159,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/delivery/canonical", h.SetIssueDeliveryCanonical)
 					r.Post("/delivery/classify", h.ClassifyIssueDeliveryBranch)
 					r.Post("/delivery/cleanup", h.RecordIssueDeliveryCleanup)
+				})
+			})
+
+			// Generic agent questions. The same contract is used by the CLI and
+			// every UI surface (issue activity, chat and inbox).
+			r.Route("/api/asks", func(r chi.Router) {
+				r.Get("/", h.ListAsks)
+				r.Post("/", h.CreateAsk)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetAsk)
+					r.Post("/answer", h.AnswerAsk)
 				})
 			})
 
