@@ -1023,25 +1023,29 @@ type IssueDraft struct {
 }
 
 type IssueGoal struct {
-	ID                  pgtype.UUID        `json:"id"`
-	IssueID             pgtype.UUID        `json:"issue_id"`
-	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
-	Status              string             `json:"status"`
-	Round               int32              `json:"round"`
-	TokenLimit          int64              `json:"token_limit"`
-	RunLimit            int32              `json:"run_limit"`
-	DurationSeconds     int64              `json:"duration_seconds"`
-	TokensUsed          int64              `json:"tokens_used"`
-	RunsUsed            int32              `json:"runs_used"`
-	DurationSecondsUsed int64              `json:"duration_seconds_used"`
-	Evidence            []byte             `json:"evidence"`
-	CreatedByType       string             `json:"created_by_type"`
-	CreatedByID         pgtype.UUID        `json:"created_by_id"`
-	LockedAt            pgtype.Timestamptz `json:"locked_at"`
-	StoppedAt           pgtype.Timestamptz `json:"stopped_at"`
-	AchievedAt          pgtype.Timestamptz `json:"achieved_at"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                     pgtype.UUID        `json:"id"`
+	IssueID                pgtype.UUID        `json:"issue_id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	Status                 string             `json:"status"`
+	Round                  int32              `json:"round"`
+	TokenLimit             int64              `json:"token_limit"`
+	RunLimit               int32              `json:"run_limit"`
+	DurationSeconds        int64              `json:"duration_seconds"`
+	TokensUsed             int64              `json:"tokens_used"`
+	RunsUsed               int32              `json:"runs_used"`
+	DurationSecondsUsed    int64              `json:"duration_seconds_used"`
+	Evidence               []byte             `json:"evidence"`
+	CreatedByType          string             `json:"created_by_type"`
+	CreatedByID            pgtype.UUID        `json:"created_by_id"`
+	LockedAt               pgtype.Timestamptz `json:"locked_at"`
+	StoppedAt              pgtype.Timestamptz `json:"stopped_at"`
+	AchievedAt             pgtype.Timestamptz `json:"achieved_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	NoProgressRounds       int32              `json:"no_progress_rounds"`
+	MaxNoProgressRounds    int32              `json:"max_no_progress_rounds"`
+	BudgetWarningAt        pgtype.Timestamptz `json:"budget_warning_at"`
+	LastContinuationTaskID pgtype.UUID        `json:"last_continuation_task_id"`
 }
 
 type IssueGoalCheck struct {

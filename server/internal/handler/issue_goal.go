@@ -3,26 +3,35 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // GoalResponse is the stable API representation consumed by CLI and clients.
 type GoalResponse struct {
-	ID       string              `json:"id"`
-	IssueID  string              `json:"issue_id"`
-	Status   string              `json:"status"`
-	Round    int32               `json:"round"`
-	Checks   []GoalCheckResponse `json:"checks"`
-	Budget   GoalBudgetResponse  `json:"budget"`
-	Usage    GoalUsageResponse   `json:"usage"`
-	Evidence []any               `json:"evidence"`
+	ID                     string              `json:"id"`
+	IssueID                string              `json:"issue_id"`
+	Status                 string              `json:"status"`
+	Round                  int32               `json:"round"`
+	Checks                 []GoalCheckResponse `json:"checks"`
+	Budget                 GoalBudgetResponse  `json:"budget"`
+	Usage                  GoalUsageResponse   `json:"usage"`
+	Evidence               []any               `json:"evidence"`
+	NoProgressRounds       int32               `json:"no_progress_rounds"`
+	MaxNoProgressRounds    int32               `json:"max_no_progress_rounds"`
+	BudgetWarningAt        *string             `json:"budget_warning_at,omitempty"`
+	LastContinuationTaskID *string             `json:"last_continuation_task_id,omitempty"`
+	NextAction             string              `json:"next_action"`
 }
 type GoalCheckResponse struct {
 	ID          string `json:"id"`
@@ -79,6 +88,32 @@ func goalJSON(raw []byte) []any {
 func goalUUID(v pgtype.UUID) string { return uuidToString(v) }
 
 func makeGoalResponse(goal db.IssueGoal, checks []db.IssueGoalCheck) GoalResponse {
+	var warning *string
+	if goal.BudgetWarningAt.Valid {
+		v := goal.BudgetWarningAt.Time.UTC().Format(time.RFC3339)
+		warning = &v
+	}
+	var continuation *string
+	if goal.LastContinuationTaskID.Valid {
+		v := goalUUID(goal.LastContinuationTaskID)
+		continuation = &v
+	}
+	nextAction := "continue"
+	if goal.Status == "draft" {
+		nextAction = "confirm"
+	} else if goal.Status == "achieved" {
+		nextAction = "done"
+	} else if goal.Status != "active" {
+		nextAction = "blocked"
+	} else if len(checks) > 0 {
+		nextAction = "review"
+		for _, check := range checks {
+			if check.Status != "passed" {
+				nextAction = "continue"
+				break
+			}
+		}
+	}
 	out := GoalResponse{
 		ID: goalUUID(goal.ID), IssueID: goalUUID(goal.IssueID), Status: goal.Status, Round: goal.Round,
 		Budget: GoalBudgetResponse{TokenLimit: goal.TokenLimit, RunLimit: goal.RunLimit, DurationSeconds: goal.DurationSeconds},
@@ -87,11 +122,75 @@ func makeGoalResponse(goal db.IssueGoal, checks []db.IssueGoalCheck) GoalRespons
 			Tokens: goal.TokensUsed, Runs: goal.RunsUsed, DurationSeconds: goal.DurationSecondsUsed,
 		},
 		Evidence: goalJSON(goal.Evidence), Checks: make([]GoalCheckResponse, 0, len(checks)),
+		NoProgressRounds: goal.NoProgressRounds, MaxNoProgressRounds: goal.MaxNoProgressRounds, BudgetWarningAt: warning,
+		LastContinuationTaskID: continuation, NextAction: nextAction,
 	}
 	for _, c := range checks {
 		out.Checks = append(out.Checks, GoalCheckResponse{ID: goalUUID(c.ID), Position: c.Position, Description: c.Description, Method: c.Method, Status: c.Status, Passed: c.Status == "passed", Evidence: goalJSON(c.Evidence)})
 	}
 	return out
+}
+
+type updateGoalCheckRequest struct {
+	Status   string `json:"status"`
+	Evidence []any  `json:"evidence,omitempty"`
+}
+
+// UpdateIssueGoalCheck records execution evidence for one locked completion
+// line item. It never changes the line itself; only the check result moves.
+func (h *Handler) UpdateIssueGoalCheck(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	goal, checks, err := h.loadIssueGoal(r, issue)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "goal not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load goal")
+		return
+	}
+	if goal.Status != "active" {
+		writeError(w, http.StatusConflict, "goal is not active")
+		return
+	}
+	target := chi.URLParam(r, "check")
+	var check db.IssueGoalCheck
+	for _, c := range checks {
+		if goalUUID(c.ID) == target || fmt.Sprintf("%d", c.Position) == target || fmt.Sprintf("%d", c.Position+1) == target {
+			check = c
+			break
+		}
+	}
+	if !check.ID.Valid {
+		writeError(w, http.StatusNotFound, "goal check not found")
+		return
+	}
+	var req updateGoalCheckRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Status = strings.ToLower(strings.TrimSpace(req.Status))
+	if req.Status != "pending" && req.Status != "passed" && req.Status != "failed" {
+		writeError(w, http.StatusBadRequest, "status must be pending, passed, or failed")
+		return
+	}
+	evidence, _ := json.Marshal(req.Evidence)
+	updated, err := h.Queries.UpdateIssueGoalCheck(r.Context(), db.UpdateIssueGoalCheckParams{ID: check.ID, GoalID: goal.ID, Status: req.Status, Column4: evidence})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update goal check")
+		return
+	}
+	checksOut, err := h.Queries.ListIssueGoalChecks(r.Context(), goal.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load goal checks")
+		return
+	}
+	_ = updated
+	writeJSON(w, http.StatusOK, makeGoalResponse(goal, checksOut))
 }
 
 func (h *Handler) loadIssueGoal(r *http.Request, issue db.Issue) (db.IssueGoal, []db.IssueGoalCheck, error) {
@@ -265,6 +364,7 @@ func (h *Handler) AppendIssueGoalBudget(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to load goal")
 		return
 	}
+	wasStopped := goal.Status == "stopped"
 	if goal.Status != "draft" && !h.requireHumanGoalActor(w, r, issue, goal) {
 		return
 	}
@@ -284,6 +384,20 @@ func (h *Handler) AppendIssueGoalBudget(w http.ResponseWriter, r *http.Request) 
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to append budget")
 		return
+	}
+	if wasStopped {
+		updated, updateErr := h.Queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{ID: issue.ID, Status: issuestatus.InProgress, WorkspaceID: issue.WorkspaceID})
+		if updateErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resume goal issue")
+			return
+		}
+		h.publish(protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), "system", "", RoutingIssueUpdatedPayload(issue, updated))
+		if h.TaskService != nil {
+			if _, enqueueErr := h.TaskService.EnqueueTaskForIssueWithHandoff(r.Context(), issue, "已追加目标预算，自动继续处理尚未通过的完成线检查项。", pgtype.UUID{}); enqueueErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to resume goal")
+				return
+			}
+		}
 	}
 	checks, err := h.Queries.ListIssueGoalChecks(r.Context(), goal.ID)
 	if err != nil {

@@ -17,3 +17,9 @@ multica ask answer <ask-id> --answers-file ./answers.json --output json
 "id": string, "label": string, "recommended": boolean }] }` objects. The
 answer file maps question indexes (`"0"`, `"1"`, …) to option ids or the text
 entered through the explicit “other” choice.
+
+When a goal reaches its budget or no-progress brake, the server creates the
+same `needs_you` ask on the issue with `extend_budget`, `change_goal`, and
+`stop` options. Answer it through the normal ask surface; use `multica goal
+budget` to append the new limits, which resumes the stopped goal and queues its
+next round.

@@ -4648,6 +4648,10 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	s.captureTaskCompleted(ctx, task)
 	s.postDeliveryNotice(ctx, task, deliveryNotice)
 	s.remindSummonAnswerClose(ctx, task)
+	// Goal continuation is server-owned. Run it after the terminal task
+	// transaction commits so a queued successor can never be rolled back with
+	// the completed row and the same budget is shared across relay seats.
+	s.reconcileGoalAfterCompletion(ctx, task, result)
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run

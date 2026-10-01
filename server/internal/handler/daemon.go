@@ -4873,6 +4873,10 @@ type TaskCompleteRequest struct {
 	// session because the prior one could not be resumed. Older daemons
 	// omit it.
 	SessionRestartReason string `json:"session_restart_reason,omitempty"`
+	// GoalChecks lets newer daemons report which locked completion-line checks
+	// they verified during this run. Older daemons omit it; the server keeps the
+	// existing check state and still owns continuation decisions.
+	GoalChecks []map[string]any `json:"goal_checks,omitempty"`
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every

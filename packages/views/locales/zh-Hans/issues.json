@@ -480,6 +480,8 @@
       "tokens": "Token",
       "runs": "运行次数",
       "duration": "时长",
+      "budget_warning": "这个目标已用掉至少 80% 的预算。到达上限后目标会暂停，并在提问卡片里问下一步。",
+      "stopped_hint": "这个目标已暂停。请在收件箱的选项提问里选择再给预算、调整完成线或结束目标。",
       "evidence_item": "证据",
       "open_evidence": "打开证据",
       "status": { "draft": "待确认", "locked": "推进中", "active": "推进中", "stopped": "已停下", "achieved": "已达标" }

@@ -57,8 +57,16 @@ var goalFinishCmd = &cobra.Command{
 	RunE:  runGoalFinish,
 }
 
+var goalCheckCmd = &cobra.Command{
+	Use:   "check <issue> <check>",
+	Short: "Record evidence for a completion-line check",
+	Long:  "Record a check by id or position. The server still owns the continuation and review decision.",
+	Args:  exactArgs(2),
+	RunE:  runGoalCheck,
+}
+
 func init() {
-	for _, c := range []*cobra.Command{goalDraftCmd, goalGetCmd, goalConfirmCmd, goalBudgetCmd, goalFinishCmd} {
+	for _, c := range []*cobra.Command{goalDraftCmd, goalGetCmd, goalConfirmCmd, goalBudgetCmd, goalFinishCmd, goalCheckCmd} {
 		c.Flags().String("output", "table", "Output format: table or json")
 	}
 	goalDraftCmd.Flags().StringSlice("check", nil, "Completion criterion (repeatable; required)")
@@ -70,8 +78,10 @@ func init() {
 	goalBudgetCmd.Flags().Int64("runs", 0, "Additional run budget")
 	goalBudgetCmd.Flags().Int64("duration", 0, "Additional duration budget in seconds")
 	goalFinishCmd.Flags().String("status", "achieved", "End state: achieved or stopped")
+	goalCheckCmd.Flags().String("status", "passed", "Check state: pending, passed, or failed")
+	goalCheckCmd.Flags().String("evidence", "", "Evidence detail to attach")
 
-	goalCmd.AddCommand(goalDraftCmd, goalGetCmd, goalConfirmCmd, goalBudgetCmd, goalFinishCmd)
+	goalCmd.AddCommand(goalDraftCmd, goalGetCmd, goalConfirmCmd, goalBudgetCmd, goalFinishCmd, goalCheckCmd)
 	rootCmd.AddCommand(goalCmd)
 }
 
@@ -177,6 +187,29 @@ func runGoalFinish(cmd *cobra.Command, args []string) error {
 	return runGoalAction(cmd, args[0], "finish", map[string]any{"status": status})
 }
 
+func runGoalCheck(cmd *cobra.Command, args []string) error {
+	status, _ := cmd.Flags().GetString("status")
+	if status != "pending" && status != "passed" && status != "failed" {
+		return fmt.Errorf("--status must be pending, passed, or failed")
+	}
+	evidence, _ := cmd.Flags().GetString("evidence")
+	client, ctx, id, cancel, err := goalClient(cmd, args[0])
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	body := map[string]any{"status": status}
+	if strings.TrimSpace(evidence) != "" {
+		body["evidence"] = []any{map[string]any{"kind": "cli", "detail": evidence}}
+	}
+	var out map[string]any
+	checkID := url.PathEscape(args[1])
+	if err := client.PostJSON(ctx, "/api/issues/"+id+"/goal/check/"+checkID, body, &out); err != nil {
+		return fmt.Errorf("update goal check: %w", err)
+	}
+	return goalOutput(cmd, out, printGoal)
+}
+
 func runGoalAction(cmd *cobra.Command, arg, action string, body any) error {
 	client, ctx, id, cancel, err := goalClient(cmd, arg)
 	if err != nil {
@@ -197,6 +230,9 @@ func printGoal(raw any) {
 		return
 	}
 	fmt.Printf("Goal: %v\n", out["status"])
+	if next, ok := out["next_action"]; ok {
+		fmt.Printf("Next: %v\n", next)
+	}
 	if round, ok := out["round"]; ok {
 		fmt.Printf("Round: %v\n", round)
 	}
@@ -220,5 +256,8 @@ func printGoal(raw any) {
 	}
 	if usage, ok := out["usage"].(map[string]any); ok {
 		fmt.Printf("Used: tokens %v, runs %v, duration %v seconds\n", usage["tokens"], usage["runs"], usage["duration_seconds"])
+	}
+	if rounds, ok := out["no_progress_rounds"]; ok {
+		fmt.Printf("No progress rounds: %v/%v\n", rounds, out["max_no_progress_rounds"])
 	}
 }
