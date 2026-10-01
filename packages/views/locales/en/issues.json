@@ -1082,6 +1082,10 @@
   },
   "alignment": {
     "title": "Align a new issue",
+    "goal_flow_aria": "Goal flow",
+    "goal_flow_chat": "Chat",
+    "goal_flow_align": "Align",
+    "goal_flow_issue": "Issue",
     "subtitle": "Nothing is created until you confirm.",
     "back": "Back to issues",
     "stage_aligning": "Aligning",

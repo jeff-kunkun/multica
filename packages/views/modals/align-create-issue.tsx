@@ -40,6 +40,7 @@ import {
 } from "../editor";
 import { useT } from "../i18n";
 import { UnfinishedIssueDraftsBanner } from "../issues/draft/unfinished-issue-drafts";
+import { GoalFlowSteps } from "../issues/draft/goal-flow-steps";
 import { AlignmentConfigPicker } from "../issues/draft/alignment-config-picker";
 import { ClearablePillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
@@ -331,6 +332,8 @@ export function AlignCreatePanel({
   return (
     <>
       <DialogTitle className="sr-only">{t(($) => $.alignment.entry_title)}</DialogTitle>
+
+      <GoalFlowSteps active="align" className="px-6 pt-3" />
 
       {/* `min-h-[140px] flex-1 overflow-y-auto` is the agent panel's proven
           shape (MUL-6236): the region absorbs the delta against the card's

@@ -10,6 +10,10 @@
     "new_chat_in_project": "新对话会留在「{{title}}」",
     "new_chat_unbound": "新对话不绑定项目"
   },
+  "goal_flow": {
+    "hint": "先聊清楚，再创建任务。",
+    "action": "先对齐需求"
+  },
   "project_bar": {
     "all": "全部",
     "more": "⋯ 更多 ({{count}})",

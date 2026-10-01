@@ -5,6 +5,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
 import { UnfinishedIssueDraftsBanner } from "../issues/draft/unfinished-issue-drafts";
+import { GoalFlowSteps } from "../issues/draft/goal-flow-steps";
 import {
   AlertTriangle,
   ArrowDown,
@@ -991,6 +992,8 @@ export function ManualCreatePanel({
                 </Tooltip>
               </div>
             </div>
+
+            <GoalFlowSteps active="issue" className="px-5 pb-1" />
 
             {unfinishedDrafts.length > 0 && (
               <div className="px-5 shrink-0">
