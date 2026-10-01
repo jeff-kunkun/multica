@@ -4,7 +4,7 @@ import type { InboxBoardResponse, ParkingRecordsResponse, UnreadInboxIssue, Wait
 import type { WorkThreadSnapshot } from "../types/work_thread";
 import type { Ask, CreateAskRequest, AnswerAskRequest } from "../types/ask";
 import { configStore } from "../config";
-import { IssueGoalSchema } from "../types";
+import { IssueGoalSchema, type CreateIssueGoalInput } from "../types";
 import type {
   Issue,
   IssuePriority,
@@ -3301,6 +3301,32 @@ export class ApiClient {
     return parseWithFallback<IssueGoal | null>(raw, IssueGoalSchema.nullable(), null, {
       endpoint: "GET /api/issues/:id/goal",
     });
+  }
+
+  async createIssueGoal(issueId: string, data: CreateIssueGoalInput): Promise<IssueGoal> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/goal`, {
+      method: "POST",
+      body: JSON.stringify({
+        checks: data.checks,
+        budget: {
+          token_limit: data.budget?.token_limit ?? 0,
+          run_limit: data.budget?.run_limit ?? 0,
+          duration_seconds: data.budget?.duration_seconds ?? 0,
+        },
+      }),
+    });
+    return parseWithFallback(raw, IssueGoalSchema, null, {
+      endpoint: "POST /api/issues/:id/goal",
+    }) as IssueGoal;
+  }
+
+  async confirmIssueGoal(issueId: string): Promise<IssueGoal> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/goal/confirm`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, IssueGoalSchema, null, {
+      endpoint: "POST /api/issues/:id/goal/confirm",
+    }) as IssueGoal;
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
