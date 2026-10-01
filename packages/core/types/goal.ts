@@ -42,6 +42,20 @@ export interface IssueGoal {
   [key: string]: unknown;
 }
 
+export interface IssueGoalCheckInput {
+  description: string;
+  method?: "command" | "test" | "screenshot" | "acceptance";
+}
+
+export interface CreateIssueGoalInput {
+  checks: IssueGoalCheckInput[];
+  budget?: {
+    token_limit?: number;
+    run_limit?: number;
+    duration_seconds?: number;
+  };
+}
+
 /** A tolerant response schema keeps old servers (which may return null) readable. */
 export const IssueGoalSchema = z.object({
   id: z.string(),
