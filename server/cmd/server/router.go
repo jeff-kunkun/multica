@@ -2592,6 +2592,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			r.Get("/api/chat/visibility-notice", h.GetChatVisibilityNotice)
 			r.Post("/api/chat/visibility-notice/dismiss", h.DismissChatVisibilityNotice)
+			r.Get("/api/chat/directory", h.ListChatDirectory)
 			r.Route("/api/chat/sessions", func(r chi.Router) {
 				r.Post("/", h.CreateChatSession)
 				r.Get("/", h.ListChatSessions)

@@ -23,6 +23,7 @@ import type {
   BillingTransactionsPage,
   CancelTaskResponse,
   ChatMessage,
+  ChatDirectoryItem,
   ChatDraftRestoresResponse,
   ChatPendingTask,
   ChatSession,
@@ -2410,6 +2411,24 @@ export const ChatMessageSearchHitListSchema = z
   .transform((hits) => hits.filter((hit): hit is ChatMessageSearchHit => hit !== null))
   .default([]);
 export const EMPTY_CHAT_MESSAGE_SEARCH_HITS: ChatMessageSearchHit[] = [];
+
+export const ChatDirectoryItemSchema: z.ZodType<ChatDirectoryItem> = z.object({
+  id: z.string(),
+  title: z.string().catch(""),
+  project_id: z.string().optional(),
+  project_title: z.string().optional(),
+  agent_id: z.string(),
+  agent_name: z.string().optional(),
+  originator_id: z.string(),
+  originator: z.string().optional(),
+  status: z.string().catch("active"),
+  visibility: z.string().catch("private"),
+  last_active_at: z.string().catch(""),
+  message_count: z.number().int().nonnegative().catch(0),
+  summary: z.string().optional(),
+}).loose();
+export const ChatDirectoryListSchema = z.array(ChatDirectoryItemSchema).default([]);
+export const EMPTY_CHAT_DIRECTORY: ChatDirectoryItem[] = [];
 
 // Deferred-cancellation draft restores
 // (`GET /api/chat/sessions/{id}/draft-restores`, #5219) feed the composer

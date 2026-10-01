@@ -134,6 +134,23 @@ export interface ChatSession {
   updated_at: string;
 }
 
+/** Compact read-only chat directory row used by project pages and agents. */
+export interface ChatDirectoryItem {
+  id: string;
+  title: string;
+  project_id?: string;
+  project_title?: string;
+  agent_id: string;
+  agent_name?: string;
+  originator_id: string;
+  originator?: string;
+  status: string;
+  visibility: string;
+  last_active_at: string;
+  message_count: number;
+  summary?: string;
+}
+
 export interface PendingChatTaskItem {
   task_id: string;
   status: string;

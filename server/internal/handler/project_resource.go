@@ -1164,6 +1164,7 @@ type claimProject struct {
 	Resources   []ProjectResourceData
 	Repos       []RepoData
 	MemoryLine  string
+	ChatCount   int
 }
 
 // applyTo copies the resolved context onto a claim response. Callers assign the
@@ -1183,6 +1184,7 @@ func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
 				Description: p.Description,
 				Resources:   p.Resources,
 				MemoryLine:  p.MemoryLine,
+				ChatCount:   p.ChatCount,
 			})
 		}
 		primary := c.Projects[0]
@@ -1273,7 +1275,27 @@ func (h *Handler) resolveClaimChatProjectContext(ctx context.Context, session db
 	if len(projectIDs) == 0 && session.ProjectID.Valid {
 		projectIDs = append(projectIDs, session.ProjectID)
 	}
-	return h.resolveClaimProjectContexts(ctx, projectIDs, session.WorkspaceID)
+	out, err := h.resolveClaimProjectContexts(ctx, projectIDs, session.WorkspaceID)
+	if err != nil {
+		return claimProjectContext{}, err
+	}
+	viewerProjects, err := h.chatProjectIDs(ctx, uuidToString(session.WorkspaceID), uuidToString(session.CreatorID))
+	if err != nil {
+		return claimProjectContext{}, fmt.Errorf("resolve chat directory visibility: %w", err)
+	}
+	for i := range out.Projects {
+		rows, err := h.Queries.ListChatDirectory(ctx, db.ListChatDirectoryParams{
+			WorkspaceID: session.WorkspaceID,
+			ViewerID:    session.CreatorID,
+			ProjectIds:  viewerProjects,
+			ProjectID:   parseUUID(out.Projects[i].ID),
+		})
+		if err != nil {
+			return claimProjectContext{}, fmt.Errorf("count project chats: %w", err)
+		}
+		out.Projects[i].ChatCount = len(rows)
+	}
+	return out, nil
 }
 
 // resolveClaimProjectContexts loads the project context for one daemon claim
