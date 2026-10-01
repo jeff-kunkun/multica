@@ -734,6 +734,7 @@
     "halt_failed": "Échec de l'arrêt des exécutions",
     "resume_failed": "Échec de la reprise des exécutions",
     "status_deferred": "Nouvelle tentative",
+    "status_capacity_retry": "Modèle saturé · tentative {{retry}}, prochaine à {{time}}",
     "usage_label": "Coût en tokens"
   },
   "usage_detail": {

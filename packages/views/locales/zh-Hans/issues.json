@@ -755,6 +755,7 @@
     },
     "usage_total_tooltip": "这个任务的 token 用量——点击查看每次运行的明细",
     "status_deferred": "重试中",
+    "status_capacity_retry": "模型满载，第 {{retry}} 次重试，下次 {{time}}",
     "usage_label": "Token 成本"
   },
   "usage_detail": {
