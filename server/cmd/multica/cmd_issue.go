@@ -190,6 +190,13 @@ var issueGetCmd = &cobra.Command{
 	RunE: runIssueGet,
 }
 
+var issueWaitCmd = &cobra.Command{
+	Use:   "wait <id|url>",
+	Short: "Show what a blocked issue is waiting on and its last probe",
+	Args:  exactArgs(1),
+	RunE:  runIssueWait,
+}
+
 var issuePullRequestsCmd = &cobra.Command{
 	Use:     "pull-requests <id>",
 	Aliases: []string{"prs"},
@@ -587,6 +594,7 @@ func validateIssueEnum(field, value string, allowed []string) error {
 func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
+	issueCmd.AddCommand(issueWaitCmd)
 	issueCmd.AddCommand(issuePullRequestsCmd)
 	issueCmd.AddCommand(issueChildrenCmd)
 	issueCmd.AddCommand(issueCreateCmd)
@@ -638,6 +646,7 @@ func init() {
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
 	issueGetCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
+	issueWaitCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
@@ -1212,6 +1221,44 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return cli.PrintJSON(os.Stdout, issue)
+}
+
+func runIssueWait(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	var issue map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), &issue); err != nil {
+		return fmt.Errorf("get issue: %w", err)
+	}
+	meta, _ := issue["metadata"].(map[string]any)
+	result := map[string]any{
+		"issue_id":       issueRef.ID,
+		"identifier":     issueDisplayKey(issue),
+		"status":         strVal(issue, "status"),
+		"wait_condition": strVal(meta, blockwait.KeyWaitCondition),
+		"wait_probe":     strVal(meta, blockwait.KeyWaitProbe),
+		"wait_timeout":   strVal(meta, blockwait.KeyWaitTimeout),
+		"probe_status":   strVal(meta, blockwait.KeyProbeStatus),
+		"probe_at":       strVal(meta, blockwait.KeyProbeAt),
+		"probe_output":   strVal(meta, blockwait.KeyProbeOutput),
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	cli.PrintTable(os.Stdout, []string{"KEY", "STATUS", "WAITING FOR", "LAST PROBE", "CHECKED AT", "OUTPUT"}, [][]string{{
+		strVal(result, "identifier"), strVal(result, "status"), strVal(result, "wait_condition"),
+		strVal(result, "probe_status"), strVal(result, "probe_at"), strVal(result, "probe_output"),
+	}})
+	return nil
 }
 
 // childStage extracts the integer stage from a child issue response map.
