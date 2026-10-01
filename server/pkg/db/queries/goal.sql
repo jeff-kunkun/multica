@@ -22,11 +22,13 @@ RETURNING *;
 
 -- name: AppendIssueGoalBudget :one
 UPDATE issue_goal
-SET token_limit = token_limit + $3,
+SET status = CASE WHEN status = 'stopped' THEN 'active' ELSE status END,
+    stopped_at = CASE WHEN status = 'stopped' THEN NULL ELSE stopped_at END,
+    token_limit = token_limit + $3,
     run_limit = run_limit + $4,
     duration_seconds = duration_seconds + $5,
     updated_at = now()
-WHERE issue_id = $1 AND workspace_id = $2 AND status IN ('draft', 'active')
+WHERE issue_id = $1 AND workspace_id = $2 AND status IN ('draft', 'active', 'stopped')
 RETURNING *;
 
 -- name: FinishIssueGoal :one
@@ -47,3 +49,37 @@ SET tokens_used = tokens_used + $3,
     updated_at = now()
 WHERE issue_id = $1 AND workspace_id = $2
 RETURNING *;
+
+-- name: UpdateIssueGoalCheck :one
+UPDATE issue_goal_check
+SET status = $3,
+    evidence = COALESCE($4::jsonb, evidence),
+    updated_at = now()
+WHERE id = $1 AND goal_id = $2
+RETURNING *;
+
+-- name: MarkIssueGoalBudgetWarning :one
+UPDATE issue_goal
+SET budget_warning_at = COALESCE(budget_warning_at, now()), updated_at = now()
+WHERE issue_id = $1 AND workspace_id = $2 AND status = 'active'
+RETURNING *;
+
+-- name: StopIssueGoalForBudget :one
+UPDATE issue_goal
+SET status = 'stopped', stopped_at = COALESCE(stopped_at, now()), updated_at = now()
+WHERE issue_id = $1 AND workspace_id = $2 AND status = 'active'
+RETURNING *;
+
+-- name: UpdateIssueGoalProgress :one
+UPDATE issue_goal
+SET no_progress_rounds = $3,
+    round = GREATEST(round, $4),
+    last_continuation_task_id = COALESCE($5::uuid, last_continuation_task_id),
+    updated_at = now()
+WHERE issue_id = $1 AND workspace_id = $2 AND status = 'active'
+RETURNING *;
+
+-- name: CreateGoalBudgetAsk :one
+INSERT INTO agent_ask (workspace_id, issue_id, asker_type, asker_id, title, questions, mode)
+VALUES ($1, $2, 'agent', $3, $4, $5, 'needs_you')
+RETURNING id;

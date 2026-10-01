@@ -151,6 +151,17 @@ export function GoalSection({ wsId, issueId }: GoalSectionProps) {
         <div className="rounded-lg bg-muted/50 px-3 py-2"><div className="text-micro text-muted-foreground">{goalLabel(t, "goal.duration")}</div><div className="mt-0.5 text-body font-medium tabular-nums">{formatDuration(durationUsage)}{durationBudget != null ? ` / ${formatDuration(durationBudget)}` : ""}</div></div>
       </div>
 
+      {Boolean(goal.budget_warning_at) && (
+        <div role="status" className="mt-3 rounded-lg border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-caption text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100">
+          {goalLabel(t, "goal.budget_warning")}
+        </div>
+      )}
+      {goal.status === "stopped" && (
+        <div role="status" className="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-caption text-muted-foreground">
+          {goalLabel(t, "goal.stopped_hint")}
+        </div>
+      )}
+
       <div className="mt-4 divide-y divide-border/60 border-t border-border/60">
         {checks.map((check) => <CheckRow key={check.id} check={check} t={t} />)}
       </div>

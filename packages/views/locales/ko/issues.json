@@ -493,6 +493,8 @@
       "tokens": "토큰",
       "runs": "실행 횟수",
       "duration": "시간",
+      "budget_warning": "이 목표는 예산의 80% 이상을 사용했습니다. 한도에 도달하면 일시 중지되고 다음 작업을 묻습니다.",
+      "stopped_hint": "이 목표는 일시 중지되었습니다. 받은 편지함의 선택 질문에 답해 예산 추가, 완료 기준 변경 또는 종료를 선택하세요.",
       "evidence_item": "증거",
       "open_evidence": "증거 열기",
       "status": { "draft": "확인 필요", "locked": "진행 중", "active": "진행 중", "stopped": "중지됨", "achieved": "달성" }

@@ -2116,6 +2116,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/goal/confirm", h.ConfirmIssueGoal)
 					r.Post("/goal/budget", h.AppendIssueGoalBudget)
 					r.Post("/goal/finish", h.FinishIssueGoal)
+					r.Post("/goal/check/{check}", h.UpdateIssueGoalCheck)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/halt", h.HaltIssue)
 					r.Post("/resume", h.ResumeIssue)
