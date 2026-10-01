@@ -3331,6 +3331,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				message: "failed to load project context",
 			}
 		}
+		h.applyClaimChatCounts(r.Context(), &projectCtx, task, issue.WorkspaceID)
 		projectCtx.applyTo(&resp)
 
 		// Load every planned input as one chronological, de-duplicated set.
@@ -3713,6 +3714,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				message: "failed to load project context",
 			}
 		}
+		h.applyClaimChatCounts(r.Context(), &projectCtx, task, cs.WorkspaceID)
 		projectCtx.applyTo(&resp)
 		if !task.ForceFreshSession && !task.ChannelContextRevision.Valid {
 			// Resume chat sessions only when the stored pointer was produced
@@ -3965,6 +3967,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				message: "failed to load project context",
 			}
 		}
+		h.applyClaimChatCounts(r.Context(), &projectCtx, task, ap.WorkspaceID)
 		projectCtx.applyTo(&resp)
 	}
 
@@ -4037,6 +4040,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					message: "failed to load project context",
 				}
 			}
+			h.applyClaimChatCounts(r.Context(), &projectCtx, task, parseUUID(qc.WorkspaceID))
 			projectCtx.applyTo(&resp)
 
 			// Parent-issue resolution for quick-create tasks opened from
