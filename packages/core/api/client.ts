@@ -106,6 +106,7 @@ import type {
   TaskMessagePayload,
   Attachment,
   ChatSession,
+  ChatDirectoryItem,
   ChatPinnedAgent,
   ChatMessage,
   ChatMessagesPage,
@@ -326,6 +327,8 @@ import {
   ChatMessagesPageSchema,
   ChatPendingTaskSchema,
   ChatSessionListSchema,
+  ChatDirectoryListSchema,
+  EMPTY_CHAT_DIRECTORY,
   ChatMessageSearchHitListSchema,
   EMPTY_CHAT_MESSAGE_SEARCH_HITS,
   type ChatMessageSearchHit,
@@ -4622,6 +4625,24 @@ export class ApiClient {
     );
     return parseWithFallback(raw, ChatMessageSearchHitListSchema, EMPTY_CHAT_MESSAGE_SEARCH_HITS, {
       endpoint: "GET /api/chat/sessions/search",
+    });
+  }
+
+  async listChatDirectory(params?: {
+    project?: string;
+    allProjects?: boolean;
+    since?: string;
+    query?: string;
+  }, signal?: AbortSignal): Promise<ChatDirectoryItem[]> {
+    const query = new URLSearchParams();
+    if (params?.project) query.set("project", params.project);
+    if (params?.allProjects) query.set("all_projects", "true");
+    if (params?.since) query.set("since", params.since);
+    if (params?.query) query.set("q", params.query);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const raw: unknown = await this.fetch(`/api/chat/directory${suffix}`, signal ? { signal } : undefined);
+    return parseWithFallback(raw, ChatDirectoryListSchema, EMPTY_CHAT_DIRECTORY, {
+      endpoint: "GET /api/chat/directory",
     });
   }
 

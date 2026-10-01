@@ -81,6 +81,19 @@ suppressing the assignment alone does not suppress a later status update.
 Custom statuses do not inherit built-in automation behavior. For status side
 effects and API field meanings, read `references/issues.md`.
 
+## Chats
+
+Use the read-only chat directory before opening a transcript:
+
+- `multica chat list [--project <id>] [--all-projects] [--since <RFC3339>] [--output json|table]`
+- `multica chat search <词> [--project <id>] [--all-projects] [--since <RFC3339>] [--output json|table]`
+
+Task-scoped commands default to the current project. Use `--all-projects` to
+opt in to a workspace-wide directory. Visibility follows the person who
+started the task, so another member's private chats stay hidden. Listing and
+reading chats never changes unread state. Use `multica chat history` for a
+bounded transcript after choosing a session.
+
 **Comment reads stay bounded.** Scan the threads cheaply
 (`--roots-only --summary --compact`), then expand only what matters
 (`--thread <thread-id> --tail 30`). Never one unbounded pull — a wide read on a

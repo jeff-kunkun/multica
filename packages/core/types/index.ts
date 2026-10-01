@@ -195,6 +195,7 @@ export {
 } from "./attachment-url";
 export type {
   ChatSession,
+  ChatDirectoryItem,
   ChatLastMessage,
   ChatShareGrant,
   ChatAccessSettings,

@@ -724,6 +724,7 @@ type TaskProjectContextData struct {
 	// missing checklist. Empty on a server that has not observed the project.
 	// File bodies stay out of this payload. Mirror field: daemon ProjectContextData.
 	MemoryLine string `json:"memory_line,omitempty"`
+	ChatCount  int    `json:"chat_count,omitempty"`
 }
 
 // ConnectedAppData keeps the daemon-claim wire field local to handler types
