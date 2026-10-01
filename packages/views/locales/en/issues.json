@@ -1274,5 +1274,20 @@
   },
   "row": {
     "pinned_label": "Pinned"
+  },
+  "progress_line": {
+    "label": "Progress",
+    "live_running": "Agent is working",
+    "live_queued": "Waiting for an agent",
+    "live_failed": "Last run failed",
+    "history_show": "History",
+    "history_hide": "Hide history",
+    "history_empty": "No earlier updates",
+    "history_loading": "Loading…",
+    "source_agent": "reported",
+    "source_close": "close summary",
+    "source_parking": "stall patrol",
+    "source_model": "summary",
+    "source_reply": "from reply"
   }
 }

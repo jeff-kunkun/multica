@@ -451,7 +451,7 @@ export function ChatThreadList({
               />
             )}
             <span className={cn("min-w-0 flex-1 truncate text-body", unread > 0 ? "font-semibold text-foreground" : "font-medium")}>
-              {search ? <HighlightText text={titleText} query={search.query} /> : titleText}{session.title_locked && <span aria-label="Title locked" className="ml-1 text-micro text-muted-foreground">🔒</span>}
+              {search ? <HighlightText text={titleText} query={search.query} /> : titleText}{session.title_locked && <span aria-label={t(($) => $.title_locked)} title={t(($) => $.title_locked)} className="ml-1 text-micro text-muted-foreground">🔒</span>}
             </span>
             {search && session.status === "archived" && (
               <span className="inline-flex shrink-0 items-center rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground">

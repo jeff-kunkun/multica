@@ -120,6 +120,7 @@ import type {
   ChatPendingTask,
   ChatMessagesPage,
   ChatSession,
+  Progress,
   ChatSessionCreatedPayload,
   InvitationCreatedPayload,
   DaemonHeartbeatPayload,
@@ -358,7 +359,7 @@ type ChatSessionUpdatedPayload = {
   chat_session_id: string;
   title?: string;
   title_locked?: boolean;
-  progress?: import("@multica/core/types").Progress | null;
+  progress?: Progress | null;
   project_id?: string | null;
   /** The session's full project set, sent on the same events that carry
    *  `project_id` (DENE-522). Absent on rename/pin/archive. */
@@ -1122,6 +1123,9 @@ export function useRealtimeSync(
         }
         if (payload.status_changed) {
           qc.invalidateQueries({ queryKey: homeKeys.all(wsId) });
+        }
+        if (payload.progress_changed) {
+          qc.invalidateQueries({ queryKey: issueKeys.progress(wsId, issue.id) });
         }
       }
     });

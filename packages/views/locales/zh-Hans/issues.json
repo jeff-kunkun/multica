@@ -1238,5 +1238,20 @@
   },
   "row": {
     "pinned_label": "已置顶"
+  },
+  "progress_line": {
+    "label": "进度",
+    "live_running": "智能体正在处理",
+    "live_queued": "等待智能体",
+    "live_failed": "上次运行失败",
+    "history_show": "历史",
+    "history_hide": "收起历史",
+    "history_empty": "没有更早的进度",
+    "history_loading": "加载中…",
+    "source_agent": "汇报",
+    "source_close": "收口总结",
+    "source_parking": "巡检摘要",
+    "source_model": "自动总结",
+    "source_reply": "摘自回复"
   }
 }

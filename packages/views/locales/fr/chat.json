@@ -348,5 +348,6 @@
     "body": "Vous avez {{count}} discussions que les membres du projet peuvent maintenant voir.",
     "make_private": "Rendre la sélection privée",
     "dismiss": "Compris"
-  }
+  },
+  "title_locked": "Titre verrouillé — l’agent ne le renommera pas"
 }

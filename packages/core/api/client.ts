@@ -102,6 +102,7 @@ import type {
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
   TimelineEntry,
+  Progress,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
@@ -440,6 +441,7 @@ import {
   SubscribersListSchema,
   TaskMessageListSchema,
   TimelineEntriesSchema,
+  ProgressHistorySchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
   BillingBalanceSchema,
@@ -1747,6 +1749,16 @@ export class ApiClient {
     return parseWithFallback(raw, IssueTriggerPreviewSchema, { triggers: [], total_count: 0 }, {
       endpoint: "POST /api/issues/preview-trigger",
     });
+  }
+
+  /** Progress line history, newest first (DENE-1037). */
+  async listIssueProgress(issueId: string): Promise<Progress[]> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${encodeURIComponent(issueId)}/progress`,
+    );
+    return parseWithFallback(raw, ProgressHistorySchema, { progress: [] }, {
+      endpoint: "GET /api/issues/:id/progress",
+    }).progress as Progress[];
   }
 
   async listTimeline(issueId: string): Promise<TimelineEntry[]> {
