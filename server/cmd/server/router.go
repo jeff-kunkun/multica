@@ -2102,6 +2102,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
 					r.Post("/unsubscribe/subtree", h.UnsubscribeFromIssueSubtree)
 					r.Get("/active-task", h.GetActiveTaskForIssue)
+					// DENE-1051 goal completion line. One issue owns one goal;
+					// confirmation locks the checks and budget for agent actors.
+					r.Get("/goal", h.GetIssueGoal)
+					r.Post("/goal", h.CreateIssueGoal)
+					r.Post("/goal/confirm", h.ConfirmIssueGoal)
+					r.Post("/goal/budget", h.AppendIssueGoalBudget)
+					r.Post("/goal/finish", h.FinishIssueGoal)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/halt", h.HaltIssue)
 					r.Post("/resume", h.ResumeIssue)

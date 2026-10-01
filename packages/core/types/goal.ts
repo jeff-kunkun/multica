@@ -1,0 +1,63 @@
+import { z } from "zod";
+
+/** Lifecycle state for the completion line attached to an issue. */
+export type IssueGoalStatus = "draft" | "active" | "locked" | "stopped" | "achieved" | (string & {});
+
+export interface IssueGoalEvidence {
+  id?: string;
+  label?: string;
+  kind?: string;
+  url?: string;
+  detail?: string;
+  [key: string]: unknown;
+}
+
+export interface IssueGoalCheck {
+  id: string;
+  title?: string;
+  description?: string | null;
+  method?: string | null;
+  status?: string | null;
+  passed?: boolean;
+  evidence?: IssueGoalEvidence[];
+}
+
+export interface IssueGoalBudget {
+  tokens?: number | null;
+  runs?: number | null;
+  duration_seconds?: number | null;
+  duration_ms?: number | null;
+  [key: string]: unknown;
+}
+
+export interface IssueGoal {
+  id: string;
+  issue_id: string;
+  status: IssueGoalStatus;
+  checks: IssueGoalCheck[];
+  budget?: IssueGoalBudget | null;
+  usage?: IssueGoalBudget | null;
+  round?: number | null;
+  evidence?: IssueGoalEvidence[];
+  [key: string]: unknown;
+}
+
+/** A tolerant response schema keeps old servers (which may return null) readable. */
+export const IssueGoalSchema = z.object({
+  id: z.string(),
+  issue_id: z.string(),
+  status: z.string(),
+  checks: z.array(z.object({
+    id: z.string(),
+    title: z.string().optional(),
+    description: z.string().nullable().optional(),
+    method: z.string().nullable().optional(),
+    status: z.string().nullable().optional(),
+    passed: z.boolean().optional(),
+    evidence: z.array(z.record(z.string(), z.unknown())).optional(),
+  }).passthrough()),
+  budget: z.record(z.string(), z.unknown()).nullable().optional(),
+  usage: z.record(z.string(), z.unknown()).nullable().optional(),
+  round: z.number().nullable().optional(),
+  evidence: z.array(z.record(z.string(), z.unknown())).optional(),
+}).passthrough() satisfies z.ZodType<IssueGoal>;

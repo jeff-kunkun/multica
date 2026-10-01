@@ -473,6 +473,17 @@
     "prop_created": "생성일",
     "prop_updated": "수정일",
     "activity_section": "활동",
+    "goal": {
+      "title": "목표",
+      "progress": "{{total}}개 중 {{completed}}개 확인 완료",
+      "round": "라운드",
+      "tokens": "토큰",
+      "runs": "실행 횟수",
+      "duration": "시간",
+      "evidence_item": "증거",
+      "open_evidence": "증거 열기",
+      "status": { "draft": "확인 필요", "locked": "진행 중", "active": "진행 중", "stopped": "중지됨", "achieved": "달성" }
+    },
     "subscribe": "구독",
     "unsubscribe": "구독 해제",
     "delegated_subscription_badge": "에이전트를 통해 구독 중",
