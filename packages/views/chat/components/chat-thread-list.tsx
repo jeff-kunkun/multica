@@ -271,10 +271,16 @@ export function ChatThreadList({
       ? formatChatTime(last.created_at, locale)
       : formatChatTime(session.updated_at, locale);
 
-    // The second line: live status → durable progress → search/last-message preview.
+    // The second line: search snippet → live status → durable progress → last-message preview.
     const snippet = search?.snippets.get(session.id);
     let previewNode: React.ReactNode;
-    if (isRunning && agentOffline) {
+    if (search && snippet) {
+      previewNode = (
+        <span className="block truncate text-muted-foreground">
+          <HighlightText text={snippet} query={search.query} />
+        </span>
+      );
+    } else if (isRunning && agentOffline) {
       previewNode = <span className="flex min-w-0 items-center gap-1.5 text-amber-500"><Clock className="size-3 shrink-0" /><span className="truncate">{t(($) => $.list.waiting)}</span></span>;
     } else if (isRunning) {
       previewNode = <span className="flex min-w-0 items-center gap-1.5 text-blue-500"><Loader2 className="size-3 shrink-0 animate-spin" /><span className="truncate">{t(($) => $.list.typing)}</span></span>;
@@ -282,12 +288,6 @@ export function ChatThreadList({
       previewNode = <span className="block truncate text-destructive">{t(($) => $.list.failed)}</span>;
     } else if (session.progress) {
       previewNode = <ProgressLine progress={session.progress} />;
-    } else if (search && snippet) {
-      previewNode = (
-        <span className="block truncate text-muted-foreground">
-          <HighlightText text={snippet} query={search.query} />
-        </span>
-      );
     } else if (last?.message_kind === "no_response") {
       // A no_response turn stores a non-empty English fallback as its content,
       // so the preview is never blank even on older clients; new clients show a
