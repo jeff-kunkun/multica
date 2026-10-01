@@ -62,6 +62,13 @@ to pass.`,
 	RunE: runChatThread,
 }
 
+var chatProgressCmd = &cobra.Command{
+	Use:   "progress <text>",
+	Short: "Report the current progress of a chat",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runChatProgress,
+}
+
 func init() {
 	for _, c := range []*cobra.Command{chatHistoryCmd, chatThreadCmd} {
 		c.Flags().Int("limit", 0, "Maximum number of messages to return (the server clamps the range)")
@@ -71,6 +78,35 @@ func init() {
 	}
 	chatCmd.AddCommand(chatHistoryCmd)
 	chatCmd.AddCommand(chatThreadCmd)
+	chatCmd.AddCommand(chatProgressCmd)
+	chatProgressCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
+	chatProgressCmd.Flags().String("output", "json", "Output format: table or json")
+}
+
+func runChatProgress(cmd *cobra.Command, args []string) error {
+	session, _ := cmd.Flags().GetString("session")
+	if strings.TrimSpace(session) == "" {
+		session = os.Getenv("MULTICA_CHAT_SESSION_ID")
+	}
+	ref, err := parseChatSessionLinkRef(session)
+	if err != nil {
+		return fmt.Errorf("chat progress: --session is required (or set MULTICA_CHAT_SESSION_ID): %w", err)
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var out map[string]any
+	if err := client.PostJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/progress", map[string]any{"text": args[0]}, &out); err != nil {
+		return fmt.Errorf("report chat progress: %w", err)
+	}
+	if output, _ := cmd.Flags().GetString("output"); output == "table" {
+		fmt.Printf("Progress: %v\n", out["progress"])
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, out)
 }
 
 func runChatHistory(cmd *cobra.Command, _ []string) error {

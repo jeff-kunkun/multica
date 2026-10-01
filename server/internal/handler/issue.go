@@ -38,13 +38,14 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	Number      int32   `json:"number"`
-	Identifier  string  `json:"identifier"`
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	Status      string  `json:"status"`
+	ID          string            `json:"id"`
+	WorkspaceID string            `json:"workspace_id"`
+	Number      int32             `json:"number"`
+	Identifier  string            `json:"identifier"`
+	Title       string            `json:"title"`
+	Progress    *ProgressResponse `json:"progress"`
+	Description *string           `json:"description"`
+	Status      string            `json:"status"`
 	// StatusCategory encodes lifecycle using the legacy seven-value wire enum. It is
 	// omitted when an endpoint cannot resolve a custom status, so consumers must
 	// fall back to their catalog rather than treat a blank as "no category".
@@ -383,6 +384,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		Number:         i.Number,
 		Identifier:     identifier,
 		Title:          i.Title,
+		Progress:       progressResponse(i.ProgressText, i.ProgressSource, i.ProgressAuthorType, i.ProgressAuthorID, i.ProgressUpdatedAt),
 		Description:    textToPtr(i.Description),
 		Status:         i.Status,
 		StatusCategory: statusCategory,
@@ -429,6 +431,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		Number:         i.Number,
 		Identifier:     identifier,
 		Title:          i.Title,
+		Progress:       progressResponse(i.ProgressText, i.ProgressSource, i.ProgressAuthorType, i.ProgressAuthorID, i.ProgressUpdatedAt),
 		Description:    textToPtr(i.Description),
 		Status:         i.Status,
 		StatusCategory: statusCategory,
@@ -501,6 +504,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		Number:         i.Number,
 		Identifier:     identifier,
 		Title:          i.Title,
+		Progress:       progressResponse(i.ProgressText, i.ProgressSource, i.ProgressAuthorType, i.ProgressAuthorID, i.ProgressUpdatedAt),
 		Description:    textToPtr(i.Description),
 		Status:         i.Status,
 		StatusCategory: statusCategory,

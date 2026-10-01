@@ -79,6 +79,20 @@ func (s *TaskService) RecordParking(ctx context.Context, issueID pgtype.UUID, ta
 		slog.Warn("parking: write record failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
 		return rec, false
 	}
+	// Keep the issue's goal/progress subtitle in sync with the existing parking
+	// summary fallback. Explicit agent or close summaries always win.
+	if issue.ProgressText == "" || (issue.ProgressSource != "agent" && issue.ProgressSource != "close") {
+		if updated, err := s.Queries.UpdateIssueProgress(ctx, db.UpdateIssueProgressParams{
+			ID: issue.ID, WorkspaceID: issue.WorkspaceID, Text: summary, Source: source,
+			AuthorType: "system", AuthorID: task.AgentID,
+		}); err == nil {
+			issue = updated
+			_ = s.Queries.CreateIssueProgress(ctx, db.CreateIssueProgressParams{
+				WorkspaceID: issue.WorkspaceID, IssueID: issue.ID, Text: summary, Source: source,
+				AuthorType: "system", AuthorID: task.AgentID,
+			})
+		}
+	}
 
 	if rec.Unexplained && !(hadPrev && prev.Unexplained && prev.Category == rec.Category) {
 		s.notifyParkingUnexplained(ctx, issue, rec, summary, task)

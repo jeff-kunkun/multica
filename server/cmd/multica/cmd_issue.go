@@ -245,6 +245,13 @@ var issueCloseCmd = &cobra.Command{
 	RunE:  runIssueClose,
 }
 
+var issueProgressCmd = &cobra.Command{
+	Use:   "progress <id> <text>",
+	Short: "Report the current progress of an issue",
+	Args:  exactArgs(2),
+	RunE:  runIssueProgress,
+}
+
 func issueCloseLong() string {
 	return "One command for the close protocol. The server posts the evidence comment,\n" +
 		"writes the status and the close.* record in one transaction, and validates\n" +
@@ -594,6 +601,7 @@ func init() {
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
 	issueCmd.AddCommand(issueCloseCmd)
+	issueCmd.AddCommand(issueProgressCmd)
 	issueCmd.AddCommand(issueHandoffCmd)
 	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
@@ -620,6 +628,7 @@ func init() {
 
 	// issue list
 	issueListCmd.Flags().String("output", "table", "Output format: table or json")
+	issueProgressCmd.Flags().String("output", "json", "Output format: table or json")
 	issueListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	issueListCmd.Flags().String("status", "", "Filter by status")
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
@@ -2075,6 +2084,28 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runIssueProgress(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	ref, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	var out map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(ref.ID)+"/progress", map[string]any{"text": args[1]}, &out); err != nil {
+		return fmt.Errorf("report issue progress: %w", err)
+	}
+	if output, _ := cmd.Flags().GetString("output"); output == "table" {
+		fmt.Printf("Progress: %v\n", out["progress"])
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, out)
 }
 
 // knowledgeAuditFromFlags builds the close body's knowledge_audit. The

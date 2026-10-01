@@ -30,6 +30,7 @@ import { ParentIssueBadge } from "./parent-issue-badge";
 import { PinnedRowBadge } from "./pinned-row-badge";
 import { useLocale } from "../../i18n";
 import { useT } from "../../i18n";
+import { ProgressLine } from "../../common/progress-line";
 
 export interface ChildProgress {
   done: number;
@@ -139,7 +140,7 @@ function ListRowContent({
               density="row"
               className="hidden sm:inline-flex"
             />
-            <span className="truncate">{issue.title}</span>
+            <span className="flex min-w-0 flex-col"><span className="truncate">{issue.title}</span><ProgressLine progress={issue.progress} /></span>
             {/* Keep custom names visible when this row appears outside a status section. */}
             <CustomStatusChip status={issue.status} className="shrink-0" />
             {showChildProgress && (

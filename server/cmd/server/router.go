@@ -2133,6 +2133,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// status and close.* keys in one transaction, checked by
 					// closeprotocol.Validate — `multica issue close`.
 					r.Post("/close", h.CloseIssue)
+					r.Post("/progress", h.writeIssueProgress)
+					r.Get("/progress", h.listIssueProgress)
 					// PR state from the caller's gh, refreshed by `issue
 					// close` so the done gate sees merges without a GitHub App.
 					r.Post("/pull-requests/report", h.ReportIssuePullRequests)
@@ -2610,6 +2612,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/archive", h.SetChatSessionArchived)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
+					r.Post("/progress", h.writeChatProgress)
+					r.Get("/progress", h.listChatProgress)
 					r.Post("/onboarding", h.StartMikaOnboarding)
 					// Explicit "refresh" of a turn's quick actions: re-runs the
 					// daemon suggestion pass for the latest assistant reply (MUL-5149).

@@ -353,6 +353,11 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	// Each is best-effort on its own; the close itself is already durable.
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	identifier := issueToResponse(updated, prefix).Identifier
+	if summary != "" && updated.ProgressSource != "agent" {
+		if progressed, err := h.recordIssueProgress(ctx, updated, summary, "close", actorType, actorID); err == nil {
+			updated = progressed
+		}
+	}
 	if resp.StatusChanged {
 		h.publishCloseStatus(r, prev, updated, prefix, actorType, actorID)
 		h.syncBlockWait(ctx, prev, updated)

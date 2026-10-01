@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Use for Multica platform actions outside runtime brief: ask/answer option questions, goals, inbox, issue/PR contracts, routing, close protocol, mentions, agents, specialisations, squads, autopilots, projects, runtimes, skill import, workspace transfer, sub-issues, GitHub App. Not product code."
+description: "Use for Multica platform actions: asks, goals, inbox, issues, sub-issues, routing, close protocol, mentions, agents, specialisations, squads, autopilots, projects, runtimes, progress, skill import, transfers, GitHub App. Not product code."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -100,3 +100,8 @@ the user, say so and propose a scoped change.
 Do not silently alter routing, briefing, or trigger behavior to make a complaint
 go away. Those are product contracts, and changing one without confirmation
 moves the surprise to somebody else.
+
+
+## Progress
+
+Use `multica issue progress` and `multica chat progress` to report a concise current update. See `references/progress.md`.

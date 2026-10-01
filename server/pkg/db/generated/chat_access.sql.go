@@ -290,7 +290,7 @@ const setChatSessionVisibility = `-- name: SetChatSessionVisibility :one
 UPDATE chat_session
 SET visibility = $1, updated_at = now()
 WHERE id = $2
-RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at, project_nudge_dismissed_at, visibility
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at, project_nudge_dismissed_at, visibility, title_locked, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at
 `
 
 type SetChatSessionVisibilityParams struct {
@@ -324,6 +324,12 @@ func (q *Queries) SetChatSessionVisibility(ctx context.Context, arg SetChatSessi
 		&i.ExplicitlyCreatedAt,
 		&i.ProjectNudgeDismissedAt,
 		&i.Visibility,
+		&i.TitleLocked,
+		&i.ProgressText,
+		&i.ProgressSource,
+		&i.ProgressAuthorType,
+		&i.ProgressAuthorID,
+		&i.ProgressUpdatedAt,
 	)
 	return i, err
 }

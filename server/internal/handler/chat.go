@@ -238,7 +238,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
-			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID))
+			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt))
 		}
 	} else {
 		rows, err := h.Queries.ListChatSessionsByCreator(r.Context(), db.ListChatSessionsByCreatorParams{
@@ -257,7 +257,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
-			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID))
+			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt))
 		}
 	}
 	if err := h.hydrateChatSessionChannelMetadata(r.Context(), resp); err != nil {
@@ -503,6 +503,7 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	payload := protocol.ChatSessionUpdatedPayload{
 		ChatSessionID: resolvedSessionID,
 		Title:         updated.Title,
+		TitleLocked:   boolPointer(updated.TitleLocked),
 		UpdatedAt:     timestampToString(updated.UpdatedAt),
 	}
 	if projectIDChanged {
@@ -2177,9 +2178,11 @@ type ChatSessionResponse struct {
 	// ProjectIDs is the session's full project set in selection order
 	// (DENE-523); ProjectID above mirrors its first entry for older clients.
 	// Always an array — empty when the session carries no project context.
-	ProjectIDs []string `json:"project_ids"`
-	Title      string   `json:"title"`
-	Status     string   `json:"status"`
+	ProjectIDs  []string          `json:"project_ids"`
+	Title       string            `json:"title"`
+	TitleLocked bool              `json:"title_locked"`
+	Progress    *ProgressResponse `json:"progress,omitempty"`
+	Status      string            `json:"status"`
 	// Only populated by list endpoints — single-session fetches return 0/false/nil.
 	// HasUnread is kept as a convenience (== UnreadCount > 0) for existing consumers.
 	HasUnread   bool             `json:"has_unread"`
@@ -2210,6 +2213,23 @@ type ChatSessionResponse struct {
 	CreatedAt             string                            `json:"created_at"`
 	UpdatedAt             string                            `json:"updated_at"`
 }
+
+type ProgressResponse struct {
+	Text       string `json:"text"`
+	Source     string `json:"source"`
+	AuthorType string `json:"author_type"`
+	AuthorID   string `json:"author_id,omitempty"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+func progressResponse(text, source, authorType string, authorID pgtype.UUID, updatedAt pgtype.Timestamptz) *ProgressResponse {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	return &ProgressResponse{Text: text, Source: source, AuthorType: authorType, AuthorID: uuidToString(authorID), UpdatedAt: timestampToString(updatedAt)}
+}
+
+func boolPointer(value bool) *bool { return &value }
 
 type ChatSessionChannelSourceResponse struct {
 	ChannelType    string `json:"channel_type"`
@@ -2421,6 +2441,7 @@ func chatSessionListResponse(
 	unreadCount, extraCount int32,
 	agentRuntimeBound, agentArchived bool,
 	lastAt pgtype.Timestamptz, lastContent, lastRole string, lastFailure pgtype.Text, lastKind string, lastSender pgtype.UUID,
+	titleLocked bool, progressText, progressSource, progressAuthorType string, progressAuthorID pgtype.UUID, progressUpdatedAt pgtype.Timestamptz,
 ) ChatSessionResponse {
 	return ChatSessionResponse{
 		ID:                    uuidToString(id),
@@ -2429,6 +2450,8 @@ func chatSessionListResponse(
 		CreatorID:             uuidToString(creatorID),
 		ProjectID:             uuidToPtr(projectID),
 		Title:                 title,
+		TitleLocked:           titleLocked,
+		Progress:              progressResponse(progressText, progressSource, progressAuthorType, progressAuthorID, progressUpdatedAt),
 		Status:                status,
 		HasUnread:             unreadCount > 0,
 		UnreadCount:           int(unreadCount),
@@ -2494,13 +2517,15 @@ type ChatMessageResponse struct {
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 	return ChatSessionResponse{
-		ID:                    uuidToString(s.ID),
-		WorkspaceID:           uuidToString(s.WorkspaceID),
-		AgentID:               uuidToString(s.AgentID),
-		CreatorID:             uuidToString(s.CreatorID),
-		ProjectID:             uuidToPtr(s.ProjectID),
-		Title:                 s.Title,
-		Status:                s.Status,
+		ID:          uuidToString(s.ID),
+		WorkspaceID: uuidToString(s.WorkspaceID),
+		AgentID:     uuidToString(s.AgentID),
+		CreatorID:   uuidToString(s.CreatorID),
+		ProjectID:   uuidToPtr(s.ProjectID),
+		Title:       s.Title,
+		TitleLocked: s.TitleLocked,
+		Progress:    progressResponse(s.ProgressText, s.ProgressSource, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt),
+		Status:      s.Status,
 		// Pinned is per viewer (DENE-866); decorateChatSession fills it in.
 		Visibility:            s.Visibility,
 		ProjectNudgeDismissed: s.ProjectNudgeDismissedAt.Valid,

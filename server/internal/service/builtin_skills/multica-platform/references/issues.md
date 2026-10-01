@@ -450,3 +450,8 @@ MUL-123: fix login redirect        # correct — links the PR
 
 Sub-issues, stages and their incorrect-to-correct examples live in
 `sub-issues.md`.
+
+
+### Report progress
+
+`multica issue progress <issue-id> "<progress>" --output json` reports the current progress without opening the browser.

@@ -357,6 +357,8 @@ export async function applyChatQuickActionsToCache(
 type ChatSessionUpdatedPayload = {
   chat_session_id: string;
   title?: string;
+  title_locked?: boolean;
+  progress?: import("@multica/core/types").Progress | null;
   project_id?: string | null;
   /** The session's full project set, sent on the same events that carry
    *  `project_id` (DENE-522). Absent on rename/pin/archive. */
@@ -397,6 +399,8 @@ export function applyChatSessionUpdatedToCache(
         ? {
             ...s,
             title: payload.title ?? s.title,
+            title_locked: payload.title_locked ?? s.title_locked,
+            ...("progress" in payload ? { progress: payload.progress } : {}),
             ...("project_id" in payload ? { project_id: payload.project_id } : {}),
             // Same `in` rule as project_id: an explicit empty array clears the
             // set, while an absent field leaves this tab's set alone. A server

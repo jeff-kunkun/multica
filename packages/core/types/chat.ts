@@ -1,4 +1,5 @@
 import type { AgentTask } from "./agent";
+import type { Progress } from "./progress";
 
 /** A user's pinned "quick agent" for the Chat list top bar. */
 export interface ChatPinnedAgent {
@@ -100,6 +101,8 @@ export interface ChatSession {
    *  normalises that back to the single `project_id`. */
   project_ids?: string[];
   title: string;
+  title_locked?: boolean;
+  progress?: Progress | null;
   status: "active" | "archived";
   /** True when the session has any unread assistant replies. List-only.
    *  Convenience for `unread_count > 0`. */
