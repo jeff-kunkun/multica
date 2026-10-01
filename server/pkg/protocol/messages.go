@@ -440,9 +440,11 @@ type ChatSessionUpdatedPayload struct {
 	UpdatedAt             string `json:"updated_at"`
 }
 
+// ProgressPayload mirrors handler.ProgressResponse on the wire (DENE-1037).
 type ProgressPayload struct {
 	Text       string `json:"text"`
 	Source     string `json:"source"`
+	Tone       string `json:"tone"`
 	AuthorType string `json:"author_type"`
 	AuthorID   string `json:"author_id,omitempty"`
 	UpdatedAt  string `json:"updated_at"`

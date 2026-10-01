@@ -627,6 +627,7 @@ type ChatSession struct {
 	TitleLocked             bool               `json:"title_locked"`
 	ProgressText            string             `json:"progress_text"`
 	ProgressSource          string             `json:"progress_source"`
+	ProgressTone            string             `json:"progress_tone"`
 	ProgressAuthorType      string             `json:"progress_author_type"`
 	ProgressAuthorID        pgtype.UUID        `json:"progress_author_id"`
 	ProgressUpdatedAt       pgtype.Timestamptz `json:"progress_updated_at"`
@@ -649,6 +650,7 @@ type ChatSessionProgress struct {
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
 	Text          string             `json:"text"`
 	Source        string             `json:"source"`
+	Tone          string             `json:"tone"`
 	AuthorType    string             `json:"author_type"`
 	AuthorID      pgtype.UUID        `json:"author_id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
@@ -999,6 +1001,7 @@ type Issue struct {
 	AssigneeQuote        pgtype.Text        `json:"assignee_quote"`
 	ProgressText         string             `json:"progress_text"`
 	ProgressSource       string             `json:"progress_source"`
+	ProgressTone         string             `json:"progress_tone"`
 	ProgressAuthorType   string             `json:"progress_author_type"`
 	ProgressAuthorID     pgtype.UUID        `json:"progress_author_id"`
 	ProgressUpdatedAt    pgtype.Timestamptz `json:"progress_updated_at"`
@@ -1116,6 +1119,7 @@ type IssueProgress struct {
 	IssueID     pgtype.UUID        `json:"issue_id"`
 	Text        string             `json:"text"`
 	Source      string             `json:"source"`
+	Tone        string             `json:"tone"`
 	AuthorType  string             `json:"author_type"`
 	AuthorID    pgtype.UUID        `json:"author_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`

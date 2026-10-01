@@ -238,7 +238,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
-			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt))
+			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt))
 		}
 	} else {
 		rows, err := h.Queries.ListChatSessionsByCreator(r.Context(), db.ListChatSessionsByCreatorParams{
@@ -257,7 +257,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
-			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt))
+			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt))
 		}
 	}
 	if err := h.hydrateChatSessionChannelMetadata(r.Context(), resp); err != nil {
@@ -1129,29 +1129,6 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detect whether this is the very first human message in the session,
-	// BEFORE we insert the new row. This scopes LLM auto-titling (MUL-4295) to
-	// the opening turn: we upgrade the default/original title exactly once, off
-	// the first user message, and never re-run it on every subsequent send. A
-	// query error here is treated as "not first" so we simply skip generation
-	// (best-effort — never block the send).
-	hadUserMessage := true
-	if existed, err := h.Queries.ChatSessionHasPublicUserMessage(r.Context(), session.ID); err == nil {
-		hadUserMessage = existed
-	}
-	channelBacked := false
-	channelSourceKnown := true
-	if !hadUserMessage {
-		if _, err := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), session.ID); err == nil {
-			channelBacked = true
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			// Title generation is optional. If source authority is unavailable,
-			// skip it rather than risk treating a channel manual rename as an
-			// auto-generated fallback and overwriting it.
-			channelSourceKnown = false
-		}
-	}
-
 	// Persist the whole turn atomically (MUL-4351): the owning task, the user
 	// message bound to that task (so it belongs to the task's immutable input
 	// batch the instant it exists), attachment bindings, and the session touch
@@ -1187,9 +1164,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		msg.SenderUserID = parseUUID(userID)
 	}
-	currentTitle := session.Title
 	if sent.InitialTitle != "" {
-		currentTitle = sent.InitialTitle
 		h.ChannelChatTitleInitialized(session.WorkspaceID, session.CreatorID, session.ID, sent.InitialTitle)
 	}
 
@@ -1228,16 +1203,9 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		SenderUserID:  uuidToString(msg.SenderUserID),
 	})
 
-	// First user message → kick off best-effort LLM auto-titling (MUL-4295).
-	// Fire-and-forget and non-blocking: the response below is written whether
-	// or not a title is ever generated, and a disabled/failing LLM layer
-	// silently keeps the original first-message-derived title. session.Title
-	// is the default/original title observed here and drives the CAS so a
-	// manual rename mid-generation is never clobbered.
-	shouldGenerateTitle := shouldGenerateFirstMessageTitle(hadUserMessage, currentTitle, sent.InitialTitle, channelBacked, channelSourceKnown)
-	if shouldGenerateTitle {
-		h.maybeGenerateChatTitleAsync(workspaceID, userID, session.ID, currentTitle, req.Content)
-	}
+	// Naming waits for the agent's first reply: the chat:done recap
+	// (chat_recap.go) titles the chat from the opening plus the reply
+	// (DENE-1037). Until then the first-message title stands.
 
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
 		MessageID:     uuidToString(msg.ID),
@@ -1247,19 +1215,6 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:     timestampToString(task.CreatedAt),
 		AttachmentIDs: boundAttachmentIDs,
 	})
-}
-
-func shouldGenerateFirstMessageTitle(hadUserMessage bool, currentTitle, initializedTitle string, channelBacked, channelSourceKnown bool) bool {
-	if hadUserMessage || currentTitle == "" || !channelSourceKnown {
-		return false
-	}
-	if channelBacked {
-		// For an explicitly empty /new Chat, a pre-existing non-empty title is
-		// a manual rename. Only a title initialized by this send is eligible for
-		// the best-effort LLM replacement; otherwise manual naming always wins.
-		return initializedTitle != ""
-	}
-	return true
 }
 
 type ChatMessagesCursorResponse struct {
@@ -2214,19 +2169,22 @@ type ChatSessionResponse struct {
 	UpdatedAt             string                            `json:"updated_at"`
 }
 
+// ProgressResponse is one goal/progress subtitle line (DENE-1037): what was
+// said, who said it (source + author) and the tone its dot is drawn in.
 type ProgressResponse struct {
 	Text       string `json:"text"`
 	Source     string `json:"source"`
+	Tone       string `json:"tone"`
 	AuthorType string `json:"author_type"`
 	AuthorID   string `json:"author_id,omitempty"`
 	UpdatedAt  string `json:"updated_at"`
 }
 
-func progressResponse(text, source, authorType string, authorID pgtype.UUID, updatedAt pgtype.Timestamptz) *ProgressResponse {
+func progressResponse(text, source, tone, authorType string, authorID pgtype.UUID, updatedAt pgtype.Timestamptz) *ProgressResponse {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	return &ProgressResponse{Text: text, Source: source, AuthorType: authorType, AuthorID: uuidToString(authorID), UpdatedAt: timestampToString(updatedAt)}
+	return &ProgressResponse{Text: text, Source: source, Tone: tone, AuthorType: authorType, AuthorID: uuidToString(authorID), UpdatedAt: timestampToString(updatedAt)}
 }
 
 func boolPointer(value bool) *bool { return &value }
@@ -2441,7 +2399,7 @@ func chatSessionListResponse(
 	unreadCount, extraCount int32,
 	agentRuntimeBound, agentArchived bool,
 	lastAt pgtype.Timestamptz, lastContent, lastRole string, lastFailure pgtype.Text, lastKind string, lastSender pgtype.UUID,
-	titleLocked bool, progressText, progressSource, progressAuthorType string, progressAuthorID pgtype.UUID, progressUpdatedAt pgtype.Timestamptz,
+	titleLocked bool, progressText, progressSource, progressTone, progressAuthorType string, progressAuthorID pgtype.UUID, progressUpdatedAt pgtype.Timestamptz,
 ) ChatSessionResponse {
 	return ChatSessionResponse{
 		ID:                    uuidToString(id),
@@ -2451,7 +2409,7 @@ func chatSessionListResponse(
 		ProjectID:             uuidToPtr(projectID),
 		Title:                 title,
 		TitleLocked:           titleLocked,
-		Progress:              progressResponse(progressText, progressSource, progressAuthorType, progressAuthorID, progressUpdatedAt),
+		Progress:              progressResponse(progressText, progressSource, progressTone, progressAuthorType, progressAuthorID, progressUpdatedAt),
 		Status:                status,
 		HasUnread:             unreadCount > 0,
 		UnreadCount:           int(unreadCount),
@@ -2524,7 +2482,7 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		ProjectID:   uuidToPtr(s.ProjectID),
 		Title:       s.Title,
 		TitleLocked: s.TitleLocked,
-		Progress:    progressResponse(s.ProgressText, s.ProgressSource, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt),
+		Progress:    progressResponse(s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt),
 		Status:      s.Status,
 		// Pinned is per viewer (DENE-866); decorateChatSession fills it in.
 		Visibility:            s.Visibility,

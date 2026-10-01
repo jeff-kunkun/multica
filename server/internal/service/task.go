@@ -8661,11 +8661,12 @@ func issueProgressMap(issue db.Issue) any {
 		return nil
 	}
 	return map[string]any{
-		"text": issue.ProgressText,
-		"source": issue.ProgressSource,
+		"text":        issue.ProgressText,
+		"source":      issue.ProgressSource,
+		"tone":        issue.ProgressTone,
 		"author_type": issue.ProgressAuthorType,
-		"author_id": util.UUIDToString(issue.ProgressAuthorID),
-		"updated_at": util.TimestampToString(issue.ProgressUpdatedAt),
+		"author_id":   util.UUIDToString(issue.ProgressAuthorID),
+		"updated_at":  util.TimestampToString(issue.ProgressUpdatedAt),
 	}
 }
 

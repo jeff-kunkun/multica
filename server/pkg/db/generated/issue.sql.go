@@ -336,7 +336,7 @@ INSERT INTO issue (
     -- Zero trust by default. A create that lands in a project passes the
     -- project's current scope here instead (DENE-698).
     COALESCE($20::text, 'private')
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at
 `
 
 type CreateIssueParams struct {
@@ -424,6 +424,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -441,7 +442,7 @@ INSERT INTO issue (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18, now(), COALESCE($19::uuid, gen_random_uuid()),
     COALESCE($20::text, 'private')
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at
 `
 
 type CreateIssueWithOriginParams struct {
@@ -529,6 +530,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -642,7 +644,7 @@ SET parent_issue_id = NULL,
 WHERE workspace_id = $1
   AND parent_issue_id = $2
   AND NOT COALESCE(id = ANY($3::uuid[]), false)
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at
 `
 
 type DetachDirectChildIssuesParams struct {
@@ -698,6 +700,7 @@ func (q *Queries) DetachDirectChildIssues(ctx context.Context, arg DetachDirectC
 			&i.AssigneeQuote,
 			&i.ProgressText,
 			&i.ProgressSource,
+			&i.ProgressTone,
 			&i.ProgressAuthorType,
 			&i.ProgressAuthorID,
 			&i.ProgressUpdatedAt,
@@ -713,7 +716,7 @@ func (q *Queries) DetachDirectChildIssues(ctx context.Context, arg DetachDirectC
 }
 
 const findActiveDuplicateIssue = `-- name: FindActiveDuplicateIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains active.
   AND NOT (status = ANY($2::text[]))
@@ -783,6 +786,7 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -791,7 +795,7 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 }
 
 const findLatestSedimentIssue = `-- name: FindLatestSedimentIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE workspace_id = $1
   AND metadata @> jsonb_build_object('sediment_project', $2::text)
 ORDER BY updated_at DESC, id DESC
@@ -844,6 +848,7 @@ func (q *Queries) FindLatestSedimentIssue(ctx context.Context, arg FindLatestSed
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -852,7 +857,7 @@ func (q *Queries) FindLatestSedimentIssue(ctx context.Context, arg FindLatestSed
 }
 
 const findOpenSedimentIssue = `-- name: FindOpenSedimentIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE workspace_id = $1
   AND metadata @> jsonb_build_object('sediment_project', $2::text)
   AND status NOT IN ('done', 'cancelled')
@@ -906,6 +911,7 @@ func (q *Queries) FindOpenSedimentIssue(ctx context.Context, arg FindOpenSedimen
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -914,7 +920,7 @@ func (q *Queries) FindOpenSedimentIssue(ctx context.Context, arg FindOpenSedimen
 }
 
 const findRecentAutopilotDuplicateIssue = `-- name: FindRecentAutopilotDuplicateIssue :one
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_author_type, i.progress_author_id, i.progress_updated_at FROM issue i
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains active.
   AND NOT (i.status = ANY($3::text[]))
@@ -995,6 +1001,7 @@ func (q *Queries) FindRecentAutopilotDuplicateIssue(ctx context.Context, arg Fin
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -1003,7 +1010,7 @@ func (q *Queries) FindRecentAutopilotDuplicateIssue(ctx context.Context, arg Fin
 }
 
 const getIssue = `-- name: GetIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE id = $1
 `
 
@@ -1048,6 +1055,7 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -1056,7 +1064,7 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 }
 
 const getIssueByNumber = `-- name: GetIssueByNumber :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE workspace_id = $1 AND number = $2
 `
 
@@ -1106,6 +1114,7 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -1114,7 +1123,7 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 }
 
 const getIssueByOrigin = `-- name: GetIssueByOrigin :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE workspace_id = $1
   AND origin_type = $2
   AND origin_id = $3
@@ -1173,6 +1182,7 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -1200,7 +1210,7 @@ func (q *Queries) GetIssueGCStatus(ctx context.Context, id pgtype.UUID) (GetIssu
 }
 
 const getIssueInWorkspace = `-- name: GetIssueInWorkspace :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -1250,6 +1260,7 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -1296,7 +1307,7 @@ func (q *Queries) GetIssueTriageState(ctx context.Context, id pgtype.UUID) (pgty
 }
 
 const listBlockPatrolCandidates = `-- name: ListBlockPatrolCandidates :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE status IN ('blocked', 'in_review', 'in_progress')
   AND COALESCE(metadata->>'block.watched', '') = '1'
   AND NOT EXISTS (
@@ -1388,6 +1399,7 @@ func (q *Queries) ListBlockPatrolCandidates(ctx context.Context, arg ListBlockPa
 			&i.AssigneeQuote,
 			&i.ProgressText,
 			&i.ProgressSource,
+			&i.ProgressTone,
 			&i.ProgressAuthorType,
 			&i.ProgressAuthorID,
 			&i.ProgressUpdatedAt,
@@ -1403,7 +1415,7 @@ func (q *Queries) ListBlockPatrolCandidates(ctx context.Context, arg ListBlockPa
 }
 
 const listChildIssues = `-- name: ListChildIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE parent_issue_id = $1
 ORDER BY number ASC
 `
@@ -1461,6 +1473,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 			&i.AssigneeQuote,
 			&i.ProgressText,
 			&i.ProgressSource,
+			&i.ProgressTone,
 			&i.ProgressAuthorType,
 			&i.ProgressAuthorID,
 			&i.ProgressUpdatedAt,
@@ -1476,7 +1489,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 }
 
 const listChildrenByParents = `-- name: ListChildrenByParents :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id = ANY($2::uuid[])
 ORDER BY parent_issue_id, number ASC
@@ -1541,6 +1554,7 @@ func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByP
 			&i.AssigneeQuote,
 			&i.ProgressText,
 			&i.ProgressSource,
+			&i.ProgressTone,
 			&i.ProgressAuthorType,
 			&i.ProgressAuthorID,
 			&i.ProgressUpdatedAt,
@@ -1556,7 +1570,7 @@ func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByP
 }
 
 const listDaemonBlockWaits = `-- name: ListDaemonBlockWaits :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE workspace_id = $1::uuid
   AND status = 'blocked'
   AND NULLIF(trim(COALESCE(metadata->>'block.wait_probe', '')), '') IS NOT NULL
@@ -1617,6 +1631,12 @@ func (q *Queries) ListDaemonBlockWaits(ctx context.Context, workspaceID pgtype.U
 			&i.AssigneeSource,
 			&i.AssigneeSourceUserID,
 			&i.AssigneeQuote,
+			&i.ProgressText,
+			&i.ProgressSource,
+			&i.ProgressTone,
+			&i.ProgressAuthorType,
+			&i.ProgressAuthorID,
+			&i.ProgressUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1672,7 +1692,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
        i.revision, i.visibility,
-       i.progress_text, i.progress_source, i.progress_author_type, i.progress_author_id, i.progress_updated_at
+       i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at
 FROM issue i
 WHERE i.workspace_id = $1
   AND ($4::text IS NULL OR i.status = $4)
@@ -1771,6 +1791,7 @@ type ListIssuesRow struct {
 	Visibility         string             `json:"visibility"`
 	ProgressText       string             `json:"progress_text"`
 	ProgressSource     string             `json:"progress_source"`
+	ProgressTone       string             `json:"progress_tone"`
 	ProgressAuthorType string             `json:"progress_author_type"`
 	ProgressAuthorID   pgtype.UUID        `json:"progress_author_id"`
 	ProgressUpdatedAt  pgtype.Timestamptz `json:"progress_updated_at"`
@@ -1833,6 +1854,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 			&i.Visibility,
 			&i.ProgressText,
 			&i.ProgressSource,
+			&i.ProgressTone,
 			&i.ProgressAuthorType,
 			&i.ProgressAuthorID,
 			&i.ProgressUpdatedAt,
@@ -1848,7 +1870,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 }
 
 const listIssuesBlockedByToken = `-- name: ListIssuesBlockedByToken :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE workspace_id = $1
   AND (
     ',' || replace(COALESCE(metadata->>'block.blocked_by', ''), ' ', '') || ','
@@ -1910,6 +1932,7 @@ func (q *Queries) ListIssuesBlockedByToken(ctx context.Context, arg ListIssuesBl
 			&i.AssigneeQuote,
 			&i.ProgressText,
 			&i.ProgressSource,
+			&i.ProgressTone,
 			&i.ProgressAuthorType,
 			&i.ProgressAuthorID,
 			&i.ProgressUpdatedAt,
@@ -1925,7 +1948,7 @@ func (q *Queries) ListIssuesBlockedByToken(ctx context.Context, arg ListIssuesBl
 }
 
 const listIssuesByOrigins = `-- name: ListIssuesByOrigins :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE workspace_id = $1
   AND origin_type = $2
   AND origin_id = ANY($3::uuid[])
@@ -1990,6 +2013,7 @@ func (q *Queries) ListIssuesByOrigins(ctx context.Context, arg ListIssuesByOrigi
 			&i.AssigneeQuote,
 			&i.ProgressText,
 			&i.ProgressSource,
+			&i.ProgressTone,
 			&i.ProgressAuthorType,
 			&i.ProgressAuthorID,
 			&i.ProgressUpdatedAt,
@@ -2005,7 +2029,7 @@ func (q *Queries) ListIssuesByOrigins(ctx context.Context, arg ListIssuesByOrigi
 }
 
 const listIssuesWaitingOn = `-- name: ListIssuesWaitingOn :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE workspace_id = $1
   AND (
     metadata @> $2::jsonb
@@ -2070,6 +2094,7 @@ func (q *Queries) ListIssuesWaitingOn(ctx context.Context, arg ListIssuesWaiting
 			&i.AssigneeQuote,
 			&i.ProgressText,
 			&i.ProgressSource,
+			&i.ProgressTone,
 			&i.ProgressAuthorType,
 			&i.ProgressAuthorID,
 			&i.ProgressUpdatedAt,
@@ -2090,7 +2115,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
        i.revision, i.visibility,
-       i.progress_text, i.progress_source, i.progress_author_type, i.progress_author_id, i.progress_updated_at
+       i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at
 FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains visible.
@@ -2235,6 +2260,7 @@ type ListOpenIssuesRow struct {
 	Visibility         string             `json:"visibility"`
 	ProgressText       string             `json:"progress_text"`
 	ProgressSource     string             `json:"progress_source"`
+	ProgressTone       string             `json:"progress_tone"`
 	ProgressAuthorType string             `json:"progress_author_type"`
 	ProgressAuthorID   pgtype.UUID        `json:"progress_author_id"`
 	ProgressUpdatedAt  pgtype.Timestamptz `json:"progress_updated_at"`
@@ -2291,6 +2317,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 			&i.Visibility,
 			&i.ProgressText,
 			&i.ProgressSource,
+			&i.ProgressTone,
 			&i.ProgressAuthorType,
 			&i.ProgressAuthorID,
 			&i.ProgressUpdatedAt,
@@ -2387,7 +2414,7 @@ func (q *Queries) LockIssueForDelete(ctx context.Context, arg LockIssueForDelete
 }
 
 const lockIssueForDescriptionUpdate = `-- name: LockIssueForDescriptionUpdate :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE
 `
@@ -2442,6 +2469,7 @@ func (q *Queries) LockIssueForDescriptionUpdate(ctx context.Context, arg LockIss
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -2494,7 +2522,7 @@ SET description = CASE
     updated_at = now()
 WHERE id = $4
   AND workspace_id = $5
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at
 `
 
 type MaterializeIssueChannelMediaMarkdownParams struct {
@@ -2559,6 +2587,7 @@ func (q *Queries) MaterializeIssueChannelMediaMarkdown(ctx context.Context, arg 
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -2579,7 +2608,7 @@ UPDATE issue AS i SET
     last_activity_at = GREATEST(COALESCE(i.last_activity_at, i.updated_at), now()),
     updated_at = now()
 WHERE i.id = $1 AND i.workspace_id = $2 AND i.status = 'backlog'
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at
 `
 
 type PromoteBacklogIssueToTodoParams struct {
@@ -2631,6 +2660,7 @@ func (q *Queries) PromoteBacklogIssueToTodo(ctx context.Context, arg PromoteBack
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -2692,7 +2722,7 @@ UPDATE issue SET
     visibility = $3,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at
 `
 
 type SetIssueVisibilityParams struct {
@@ -2747,6 +2777,7 @@ func (q *Queries) SetIssueVisibility(ctx context.Context, arg SetIssueVisibility
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -2757,7 +2788,7 @@ func (q *Queries) SetIssueVisibility(ctx context.Context, arg SetIssueVisibility
 const updateIssue = `-- name: UpdateIssue :one
 WITH candidate AS (
     SELECT
-        i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_author_type, i.progress_author_id, i.progress_updated_at,
+        i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at,
         COALESCE($3::text, i.title) AS next_title,
         COALESCE($4::text, i.description) AS next_description,
         COALESCE($5::text, i.status) AS next_status,
@@ -2820,7 +2851,7 @@ WITH candidate AS (
       AND ($2::bigint IS NULL OR i.revision = $2::bigint)
 ), changed AS (
     SELECT
-        candidate.id, candidate.workspace_id, candidate.title, candidate.description, candidate.status, candidate.priority, candidate.assignee_type, candidate.assignee_id, candidate.creator_type, candidate.creator_id, candidate.parent_issue_id, candidate.acceptance_criteria, candidate.context_refs, candidate.position, candidate.due_date, candidate.created_at, candidate.updated_at, candidate.number, candidate.project_id, candidate.origin_type, candidate.origin_id, candidate.first_executed_at, candidate.start_date, candidate.metadata, candidate.stage, candidate.properties, candidate.revision, candidate.last_activity_at, candidate.triage_state, candidate.reviewer_type, candidate.reviewer_id, candidate.visibility, candidate.assignee_source, candidate.assignee_source_user_id, candidate.assignee_quote, candidate.progress_text, candidate.progress_source, candidate.progress_author_type, candidate.progress_author_id, candidate.progress_updated_at, candidate.next_title, candidate.next_description, candidate.next_status, candidate.next_priority, candidate.next_assignee_type, candidate.next_assignee_id, candidate.next_reviewer_type, candidate.next_reviewer_id, candidate.next_position, candidate.next_start_date, candidate.next_due_date, candidate.next_parent_issue_id, candidate.next_project_id, candidate.next_stage, candidate.next_visibility,
+        candidate.id, candidate.workspace_id, candidate.title, candidate.description, candidate.status, candidate.priority, candidate.assignee_type, candidate.assignee_id, candidate.creator_type, candidate.creator_id, candidate.parent_issue_id, candidate.acceptance_criteria, candidate.context_refs, candidate.position, candidate.due_date, candidate.created_at, candidate.updated_at, candidate.number, candidate.project_id, candidate.origin_type, candidate.origin_id, candidate.first_executed_at, candidate.start_date, candidate.metadata, candidate.stage, candidate.properties, candidate.revision, candidate.last_activity_at, candidate.triage_state, candidate.reviewer_type, candidate.reviewer_id, candidate.visibility, candidate.assignee_source, candidate.assignee_source_user_id, candidate.assignee_quote, candidate.progress_text, candidate.progress_source, candidate.progress_tone, candidate.progress_author_type, candidate.progress_author_id, candidate.progress_updated_at, candidate.next_title, candidate.next_description, candidate.next_status, candidate.next_priority, candidate.next_assignee_type, candidate.next_assignee_id, candidate.next_reviewer_type, candidate.next_reviewer_id, candidate.next_position, candidate.next_start_date, candidate.next_due_date, candidate.next_parent_issue_id, candidate.next_project_id, candidate.next_stage, candidate.next_visibility,
         ROW(
             title, description, status, priority, assignee_type, assignee_id,
             reviewer_type, reviewer_id,
@@ -2874,7 +2905,7 @@ WHERE i.id = changed.id
   -- from the same snapshot; EvalPlanQual re-evaluates this target-row predicate
   -- after waiting for the first writer, leaving the stale writer with 0 rows.
   AND ($2::bigint IS NULL OR i.revision = $2::bigint)
-RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_author_type, i.progress_author_id, i.progress_updated_at
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at
 `
 
 type UpdateIssueParams struct {
@@ -2956,6 +2987,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
@@ -2979,7 +3011,7 @@ UPDATE issue AS i SET
     END,
     updated_at = now()
 WHERE i.id = $1 AND i.workspace_id = $3
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_author_type, progress_author_id, progress_updated_at
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at
 `
 
 type UpdateIssueStatusParams struct {
@@ -3034,6 +3066,7 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 		&i.AssigneeQuote,
 		&i.ProgressText,
 		&i.ProgressSource,
+		&i.ProgressTone,
 		&i.ProgressAuthorType,
 		&i.ProgressAuthorID,
 		&i.ProgressUpdatedAt,
