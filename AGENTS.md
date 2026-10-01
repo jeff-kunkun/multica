@@ -70,3 +70,5 @@ Root frontend commands and `make check` do not verify mobile. Docs-only changes 
 魔改功能只要需要 Agent 做超过一步，就收成一条由服务端校验的命令（例：收口 `multica issue close`、交棒 `multica issue handoff`、建计划 `multica plan apply`、推进阶段 `multica issue stage advance`，见 DENE-858）。简报只写动词和决策表，不让 Agent 背多步仪式。
 
 魔改功能按「三面齐」交付：服务端能力、Web/Desktop 界面、`multica` CLI 三处都能用，且都走同一个服务端接口和校验，不在某一面另写一份规则。界面要让人看得到、改得了，权限不足或被禁用时要说明原因；CLI 要让 Agent 不开浏览器就能查和改，`--help` 能查到用法，`--output json` 能拿到结果。Agent 需要主动调用的命令，要同步写进 `multica-platform` skill，改法见 `/multica`。某一面确实不该有（例如纯内部调度），在 PR 描述里写明缺哪一面、为什么缺；以后要补的，开票跟进，不默默省略。
+
+通用带选项提问是跨三面的共享契约：服务端 `/api/asks` 负责校验和回答状态，Web/Desktop 的任务动态、聊天、收件箱与 CLI `multica ask` 复用同一对象和接口；新增提问入口要同步更新 `server/internal/service/builtin_skills/multica-platform/references/asks.md`。
