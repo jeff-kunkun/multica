@@ -59,6 +59,7 @@ export type {
   UpdateAgentEnvRequest,
   Skill,
   SkillSummary,
+  CapacityRetry,
   AgentSkillSummary,
   DisabledRuntimeSkill,
   SetAgentRuntimeSkillEnabledRequest,

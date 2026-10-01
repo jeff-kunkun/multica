@@ -1,3 +1,4 @@
+import type { CapacityRetry } from "./agent";
 import type { Label } from "./label";
 import type { IssuePropertyValues } from "./property";
 import type { Progress } from "./progress";
@@ -254,6 +255,8 @@ export interface Issue {
   last_activity_at?: string | null;
   /** Present only on issue detail responses for issues created from a comment. */
   source_context?: IssueSourceContext;
+  /** Detail only: the in-place retry waiting out a full model (DENE-1093). */
+  capacity_retry?: CapacityRetry;
   /**
    * Where this issue came from, for platform-internal flows: an autopilot run,
    * a quick-create task, or a requirement alignment (`issue_draft`, with

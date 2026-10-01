@@ -755,6 +755,7 @@
     },
     "usage_total_tooltip": "이 태스크의 토큰 사용량 — 클릭하면 실행별 내역",
     "status_deferred": "재시도 중",
+    "status_capacity_retry": "모델 포화 · {{retry}}번째 재시도, 다음 {{time}}",
     "usage_label": "토큰 비용"
   },
   "usage_detail": {

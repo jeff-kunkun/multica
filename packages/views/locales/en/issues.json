@@ -779,6 +779,7 @@
     },
     "usage_total_tooltip": "Token usage for this issue — click for the per-run breakdown",
     "status_deferred": "Retrying",
+    "status_capacity_retry": "Model at capacity · retry {{retry}}, next at {{time}}",
     "usage_label": "Token cost"
   },
   "usage_detail": {

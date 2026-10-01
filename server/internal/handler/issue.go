@@ -138,6 +138,9 @@ type IssueResponse struct {
 	// SourceContext is detail-only. List, board, search, and children responses
 	// deliberately omit the potentially large immutable snapshot.
 	SourceContext *sourceContextDetailResponse `json:"source_context,omitempty"`
+	// CapacityRetry is detail-only: the waiting in-place retry after a full
+	// model (DENE-1093), absent when nothing is waiting.
+	CapacityRetry *CapacityRetryResponse `json:"capacity_retry,omitempty"`
 }
 
 // validIssuePriorities mirrors the CHECK constraint on the issue table. Write
@@ -2479,6 +2482,12 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		// would let agents run with silently incomplete instructions.
 		writeError(w, http.StatusInternalServerError, "failed to load issue source context")
 		return
+	}
+
+	// Display metadata: a failed read leaves the line off rather than failing
+	// the detail response.
+	if row, err := h.Queries.GetIssueCapacityRetry(r.Context(), issue.ID); err == nil {
+		resp.CapacityRetry = capacityRetryResponse(row.ID, row.Attempt, row.FireAt)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

@@ -755,6 +755,7 @@
     },
     "usage_total_tooltip": "このタスクのトークン使用量 — クリックで実行ごとの内訳",
     "status_deferred": "再試行中",
+    "status_capacity_retry": "モデル混雑中・{{retry}} 回目の再試行、次回 {{time}}",
     "usage_label": "トークン費用"
   },
   "usage_detail": {
