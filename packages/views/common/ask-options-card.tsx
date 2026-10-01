@@ -1,4 +1,7 @@
 "use client";
+/* The shared card is also used by the HTML preview and ships its compact
+ * copy with the protocol until the product-wide locale bundle adds ask keys. */
+/* eslint-disable i18next/no-literal-string */
 
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@multica/ui/components/ui/card";
