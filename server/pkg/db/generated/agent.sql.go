@@ -7226,7 +7226,7 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntimes(ctx context.Context, runti
 }
 
 const listStrandedAgentIssues = `-- name: ListStrandedAgentIssues :many
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote FROM issue i
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at FROM issue i
 WHERE i.assignee_type = 'agent'
   AND i.assignee_id = $1
   AND i.status IN ('todo', 'in_progress')
@@ -7290,6 +7290,12 @@ func (q *Queries) ListStrandedAgentIssues(ctx context.Context, assigneeID pgtype
 			&i.AssigneeSource,
 			&i.AssigneeSourceUserID,
 			&i.AssigneeQuote,
+			&i.ProgressText,
+			&i.ProgressSource,
+			&i.ProgressTone,
+			&i.ProgressAuthorType,
+			&i.ProgressAuthorID,
+			&i.ProgressUpdatedAt,
 		); err != nil {
 			return nil, err
 		}

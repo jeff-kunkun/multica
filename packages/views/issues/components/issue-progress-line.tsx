@@ -68,7 +68,7 @@ function ProgressMeta({ entry }: { entry: Progress }) {
     ? t(($) => $.progress_line[`source_${sourceKey}` as "source_agent"])
     : entry.source;
   return (
-    <span className="shrink-0 text-micro text-muted-foreground/80">
+    <span className="shrink-0 text-micro text-muted-foreground">
       {[author, source, timeAgo(entry.updated_at)].filter(Boolean).join(" · ")}
     </span>
   );

@@ -47,7 +47,7 @@ export function ProgressLine({
     <span className={cn("flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground", className)} title={full}>
       <ProgressDotMark dot={colour} />
       <span className="truncate">
-        {status && <span className={cn("font-medium", colour === "stuck" ? "text-destructive" : "text-foreground/80")}>{status}</span>}
+        {status && <span className={cn("font-medium", colour === "stuck" ? "text-destructive" : "text-foreground")}>{status}</span>}
         {status && text && " · "}
         {text}
       </span>
