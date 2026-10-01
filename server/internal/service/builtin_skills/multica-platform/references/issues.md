@@ -467,5 +467,4 @@ the pipeline is pending, or wrap its pending code as `10`.
 
 ### Report progress
 
-`multica issue progress <issue-id> "<progress>" --output json` reports the current progress without opening the browser.
-
+`multica issue progress <issue-id> "<progress>" [--tone working|waiting|stuck|done] --output json` sets the line under the issue's title; `--history` reads earlier lines. Who wins between your line, a close summary and the stall patrol: `references/progress.md`.

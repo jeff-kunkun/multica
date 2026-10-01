@@ -253,10 +253,23 @@ var issueCloseCmd = &cobra.Command{
 }
 
 var issueProgressCmd = &cobra.Command{
-	Use:   "progress <id> <text>",
-	Short: "Report the current progress of an issue",
-	Args:  exactArgs(2),
-	RunE:  runIssueProgress,
+	Use:   "progress <id> [text]",
+	Short: "Report or read the progress line under an issue's title",
+	Long: `Report where this issue stands — the second line under its title on the
+board, in the list and on the detail page. Report when the state changes,
+not on every step. A close summary also writes this line; between yours and
+a close, the latest wins. The stall patrol's summary only fills in while
+neither exists.
+
+  multica issue progress DENE-12 "API done, wiring the settings page"
+  multica issue progress DENE-12 "Waiting on the design review" --tone waiting
+  multica issue progress DENE-12 --history --output table
+
+--tone sets the dot colour: working (blue), waiting (yellow), stuck (red),
+done (green). Omitted, it follows the issue status. --history lists earlier
+lines with their author and source, newest first.`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: runIssueProgress,
 }
 
 func issueCloseLong() string {
@@ -544,7 +557,7 @@ var validIssueFields = []string{
 	"creator_id", "parent_issue_id",
 	"project_id", "position", "stage", "start_date", "due_date", "created_at",
 	"updated_at", "revision", "last_activity_at", "metadata", "properties",
-	"labels",
+	"labels", "progress",
 }
 
 // directionalIssueSortColumns are the sort keys for which --direction is
@@ -637,6 +650,8 @@ func init() {
 	// issue list
 	issueListCmd.Flags().String("output", "table", "Output format: table or json")
 	issueProgressCmd.Flags().String("output", "json", "Output format: table or json")
+	issueProgressCmd.Flags().String("tone", "", "Dot colour: working, waiting, stuck, or done (default: follows the issue status)")
+	issueProgressCmd.Flags().Bool("history", false, "List earlier progress lines instead of reporting one")
 	issueListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	issueListCmd.Flags().String("status", "", "Filter by status")
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
@@ -2144,15 +2159,7 @@ func runIssueProgress(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
-	var out map[string]any
-	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(ref.ID)+"/progress", map[string]any{"text": args[1]}, &out); err != nil {
-		return fmt.Errorf("report issue progress: %w", err)
-	}
-	if output, _ := cmd.Flags().GetString("output"); output == "table" {
-		fmt.Printf("Progress: %v\n", out["progress"])
-		return nil
-	}
-	return cli.PrintJSON(os.Stdout, out)
+	return reportOrListProgress(ctx, cmd, client, "/api/issues/"+url.PathEscape(ref.ID)+"/progress", args[1:], "issue")
 }
 
 // knowledgeAuditFromFlags builds the close body's knowledge_audit. The
