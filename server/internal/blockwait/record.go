@@ -76,6 +76,9 @@ func WaitKeys() []string {
 const (
 	ProbeReadyExitCode   = 0
 	ProbePendingExitCode = 10
+	// gh pr checks uses 8 for checks that are still pending. Treat it as
+	// pending here so the documented one-line probe can be used directly.
+	ProbePendingGitHubExitCode = 8
 )
 
 type ProbeStatus string
@@ -90,7 +93,7 @@ func ProbeStatusForExitCode(code int) ProbeStatus {
 	switch code {
 	case ProbeReadyExitCode:
 		return ProbeReady
-	case ProbePendingExitCode:
+	case ProbePendingExitCode, ProbePendingGitHubExitCode:
 		return ProbePending
 	default:
 		return ProbeFailed

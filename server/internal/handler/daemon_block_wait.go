@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/blockwait"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 const maxProbeOutput = 2048
@@ -38,6 +39,7 @@ func (h *Handler) ListDaemonBlockWaits(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	runtimeID := strings.TrimSpace(r.URL.Query().Get("runtime_id"))
 	rows, err := h.Queries.ListDaemonBlockWaits(r.Context(), parsedWorkspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list block waits")
@@ -46,6 +48,15 @@ func (h *Handler) ListDaemonBlockWaits(w http.ResponseWriter, r *http.Request) {
 	prefix := h.getIssuePrefix(r.Context(), parsedWorkspaceID)
 	items := make([]DaemonBlockWait, 0, len(rows))
 	for _, issue := range rows {
+		var selectedTask *db.AgentTaskQueue
+		if tasks, taskErr := h.Queries.ListTasksByIssue(r.Context(), issue.ID); taskErr == nil {
+			if len(tasks) > 0 && (runtimeID == "" || (tasks[0].RuntimeID.Valid && uuidToString(tasks[0].RuntimeID) == runtimeID)) {
+				selectedTask = &tasks[0]
+			}
+		}
+		if runtimeID != "" && selectedTask == nil {
+			continue
+		}
 		meta := parseIssueMetadata(issue.Metadata)
 		item := DaemonBlockWait{
 			ID:            uuidToString(issue.ID),
@@ -57,19 +68,13 @@ func (h *Handler) ListDaemonBlockWaits(w http.ResponseWriter, r *http.Request) {
 			ProbeOutput:   blockwait.MetaString(meta, blockwait.KeyProbeOutput),
 		}
 		item.WaitTimeout = blockwait.MetaString(meta, blockwait.KeyWaitTimeout)
-		// The latest task owns the reusable work directory. A missing directory
-		// is valid: the daemon falls back to its workspace root and still makes
-		// progress for probes such as `test -f /path/to/marker`.
-		if tasks, taskErr := h.Queries.ListTasksByIssue(r.Context(), issue.ID); taskErr == nil {
-			for _, task := range tasks {
-				if task.DurableWorkDir.Valid && strings.TrimSpace(task.DurableWorkDir.String) != "" {
-					item.WorkDir = task.DurableWorkDir.String
-					break
-				}
-				if task.WorkDir.Valid && strings.TrimSpace(task.WorkDir.String) != "" {
-					item.WorkDir = task.WorkDir.String
-					break
-				}
+		// The matching task owns the reusable work directory.
+		if selectedTask != nil {
+			task := selectedTask
+			if task.DurableWorkDir.Valid && strings.TrimSpace(task.DurableWorkDir.String) != "" {
+				item.WorkDir = task.DurableWorkDir.String
+			} else if task.WorkDir.Valid && strings.TrimSpace(task.WorkDir.String) != "" {
+				item.WorkDir = task.WorkDir.String
 			}
 		}
 		items = append(items, item)

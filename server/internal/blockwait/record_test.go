@@ -35,6 +35,7 @@ func TestProbeStatusForExitCode(t *testing.T) {
 	}{
 		{ProbeReadyExitCode, ProbeReady},
 		{ProbePendingExitCode, ProbePending},
+		{ProbePendingGitHubExitCode, ProbePending},
 		{1, ProbeFailed},
 		{124, ProbeFailed},
 	} {

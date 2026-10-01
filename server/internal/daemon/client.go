@@ -716,11 +716,15 @@ type BlockWaitProbe struct {
 	ProbeOutput   string `json:"probe_output,omitempty"`
 }
 
-func (c *Client) ListBlockWaitProbes(ctx context.Context, workspaceID string) ([]BlockWaitProbe, error) {
+func (c *Client) ListBlockWaitProbes(ctx context.Context, workspaceID, runtimeID string) ([]BlockWaitProbe, error) {
 	var resp struct {
 		Waits []BlockWaitProbe `json:"waits"`
 	}
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/block-waits", url.PathEscape(workspaceID)), &resp); err != nil {
+	path := fmt.Sprintf("/api/daemon/workspaces/%s/block-waits", url.PathEscape(workspaceID))
+	if runtimeID != "" {
+		path += "?runtime_id=" + url.QueryEscape(runtimeID)
+	}
+	if err := c.getJSON(ctx, path, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Waits, nil

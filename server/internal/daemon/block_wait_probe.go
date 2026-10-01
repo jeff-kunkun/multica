@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -74,14 +73,14 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 
-func (d *Daemon) blockWaitWorkspaceIDs() []string {
+func (d *Daemon) blockWaitWorkspaces() map[string][]string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	ids := make([]string, 0, len(d.workspaces))
-	for id := range d.workspaces {
-		ids = append(ids, id)
+	workspaces := make(map[string][]string, len(d.workspaces))
+	for id, state := range d.workspaces {
+		workspaces[id] = append([]string(nil), state.runtimeIDs...)
 	}
-	return ids
+	return workspaces
 }
 
 func (d *Daemon) blockWaitProbeLoop(ctx context.Context) {
@@ -99,25 +98,29 @@ func (d *Daemon) blockWaitProbeLoop(ctx context.Context) {
 }
 
 func (d *Daemon) blockWaitProbeTick(ctx context.Context) {
-	for _, workspaceID := range d.blockWaitWorkspaceIDs() {
-		probes, err := d.client.ListBlockWaitProbes(ctx, workspaceID)
-		if err != nil {
-			d.logger.Warn("block wait probe list failed", "workspace_id", workspaceID, "error", err)
-			continue
-		}
-		for _, probe := range probes {
-			probeCtx, cancel := context.WithTimeout(ctx, blockWaitProbeTimeout)
-			dir := probe.WorkDir
-			if dir == "" {
-				dir = d.cfg.WorkspacesRoot
+	for workspaceID, runtimeIDs := range d.blockWaitWorkspaces() {
+		for _, runtimeID := range runtimeIDs {
+			probes, err := d.client.ListBlockWaitProbes(ctx, workspaceID, runtimeID)
+			if err != nil {
+				d.logger.Warn("block wait probe list failed", "workspace_id", workspaceID, "runtime_id", runtimeID, "error", err)
+				continue
 			}
-			if stat, statErr := os.Stat(dir); statErr != nil || !stat.IsDir() {
-				dir = filepath.Clean(d.cfg.WorkspacesRoot)
-			}
-			exitCode, output := waitProbeShell(probeCtx, probe.WaitProbe, dir)
-			cancel()
-			if _, err := d.client.ReportBlockWaitProbe(ctx, probe.ID, exitCode, output); err != nil {
-				d.logger.Warn("block wait probe report failed", "issue_id", probe.ID, "error", err)
+			for _, probe := range probes {
+				probeCtx, cancel := context.WithTimeout(ctx, blockWaitProbeTimeout)
+				dir := probe.WorkDir
+				if dir == "" {
+					cancel()
+					continue
+				}
+				if stat, statErr := os.Stat(dir); statErr != nil || !stat.IsDir() {
+					cancel()
+					continue
+				}
+				exitCode, output := waitProbeShell(probeCtx, probe.WaitProbe, dir)
+				cancel()
+				if _, err := d.client.ReportBlockWaitProbe(ctx, probe.ID, exitCode, output); err != nil {
+					d.logger.Warn("block wait probe report failed", "issue_id", probe.ID, "error", err)
+				}
 			}
 		}
 	}

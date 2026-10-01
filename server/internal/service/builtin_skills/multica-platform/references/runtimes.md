@@ -139,8 +139,9 @@ that command in the same `multica issue close ... --outcome blocked` (or
 `issue status ... blocked`) call with `--wait-condition`, `--wait-probe`, and
 `--wait-timeout`. The daemon runs the probe in the ticket's last known workdir
 every few minutes and reports only its result to the server. Exit code `0`
-means ready, exit code `10` means still pending, and every other exit code means
-failed; probe output is truncated and shown to the executor. A pending result is
+means ready, exit code `10` (or GitHub CLI's `gh pr checks` exit code `8`) means
+still pending, and every other exit code means failed; probe output is truncated
+and shown to the executor. A pending result is
 silent until the deadline, after which the server escalates once. Use
 `multica issue wait <id> --output json` to see the condition, the last result,
 the check time, and its output. Use `--wake-at` instead when no one-line probe
