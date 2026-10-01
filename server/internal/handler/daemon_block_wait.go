@@ -34,12 +34,16 @@ func (h *Handler) ListDaemonBlockWaits(w http.ResponseWriter, r *http.Request) {
 	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
 		return
 	}
-	rows, err := h.Queries.ListDaemonBlockWaits(r.Context(), parseUUID(workspaceID))
+	parsedWorkspaceID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListDaemonBlockWaits(r.Context(), parsedWorkspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list block waits")
 		return
 	}
-	prefix := h.getIssuePrefix(r.Context(), parseUUID(workspaceID))
+	prefix := h.getIssuePrefix(r.Context(), parsedWorkspaceID)
 	items := make([]DaemonBlockWait, 0, len(rows))
 	for _, issue := range rows {
 		meta := parseIssueMetadata(issue.Metadata)
@@ -111,12 +115,13 @@ func (h *Handler) ReportDaemonBlockWait(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	previous := blockwait.MetaString(meta, blockwait.KeyProbeStatus)
+	lastNotified := blockwait.MetaString(meta, blockwait.KeyProbeNotified)
 	now := time.Now().UTC().Format(time.RFC3339)
 	h.setIssueMetaString(r.Context(), issue, blockwait.KeyProbeStatus, string(status))
 	h.setIssueMetaString(r.Context(), issue, blockwait.KeyProbeAt, now)
 	h.setIssueMetaString(r.Context(), issue, blockwait.KeyProbeOutput, output)
 
-	notified := previous != string(status) && status != blockwait.ProbePending
+	notified := previous != string(status) && lastNotified != string(status) && status != blockwait.ProbePending
 	if notified {
 		h.setIssueMetaString(r.Context(), issue, blockwait.KeyProbeNotified, string(status))
 		reason := "等待的条件已经就绪，接着把原来那一步做完。"

@@ -14,8 +14,8 @@ import (
 
 const (
 	defaultBlockWaitProbeInterval = 3 * time.Minute
-	blockWaitProbeTimeout          = 30 * time.Second
-	blockWaitProbeOutputLimit      = 2048
+	blockWaitProbeTimeout         = 30 * time.Second
+	blockWaitProbeOutputLimit     = 2048
 )
 
 // waitProbeShell runs the user-authored one-line probe in the same shell a
@@ -42,17 +42,25 @@ func waitProbeShell(ctx context.Context, command, dir string) (int, string) {
 	if err == nil {
 		return 0, output.String()
 	}
+	if ctx.Err() != nil {
+		return 124, strings.TrimSpace(output.String() + " probe timed out")
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode(), output.String()
 	}
-	if ctx.Err() != nil {
-		return 124, strings.TrimSpace(output.String()+" probe timed out")
-	}
-	return 1, strings.TrimSpace(output.String()+" "+err.Error())
+	return 1, strings.TrimSpace(output.String() + " " + err.Error())
 }
 
 type cappedBuffer struct{ bytes.Buffer }
+
+func (b *cappedBuffer) String() string {
+	data := b.Buffer.Bytes()
+	if len(data) > blockWaitProbeOutputLimit {
+		data = data[:blockWaitProbeOutputLimit]
+	}
+	return string(data)
+}
 
 func (b *cappedBuffer) Write(p []byte) (int, error) {
 	remaining := blockWaitProbeOutputLimit - b.Len()

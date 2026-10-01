@@ -13,6 +13,13 @@ Product contracts the runtime brief does not fully encode.
 
 Closing is its own contract; read `references/close-protocol.md` for its `close.*` keys, decision tables, and dispatcher promotion rules.
 
+`multica issue wait <id> --output json` is the read-only status view for a
+blocked issue's wait. It reports the wait condition, optional `wait_probe`,
+deadline, last probe status (`ready`, `pending`, or `failed`), check timestamp,
+and bounded output. A probe uses exit code `0` for ready, `10` for pending, and
+any other code for failed. Do not add a follow-up stage-advance command after a
+close; the server advances stages as part of its close protocol.
+
 ## Sub-issues: todo starts work now, backlog parks it
 
 The steps are in `references/sub-issues.md`. `--status backlog` parks a child instead of starting it. `` `--stage <N>` `` groups children into a stage, and the parent is woken when a whole stage finishes. Promote one parked child with `multica issue status <child-id> todo`.

@@ -81,9 +81,9 @@ const (
 type ProbeStatus string
 
 const (
-	ProbeReady  ProbeStatus = "ready"
+	ProbeReady   ProbeStatus = "ready"
 	ProbePending ProbeStatus = "pending"
-	ProbeFailed ProbeStatus = "failed"
+	ProbeFailed  ProbeStatus = "failed"
 )
 
 func ProbeStatusForExitCode(code int) ProbeStatus {
