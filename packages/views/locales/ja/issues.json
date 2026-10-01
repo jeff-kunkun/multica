@@ -473,6 +473,17 @@
     "prop_created": "作成日",
     "prop_updated": "更新日",
     "activity_section": "アクティビティ",
+    "goal": {
+      "title": "目標",
+      "progress": "{{completed}} / {{total}} 件のチェックが完了",
+      "round": "ラウンド",
+      "tokens": "トークン",
+      "runs": "実行回数",
+      "duration": "時間",
+      "evidence_item": "証拠",
+      "open_evidence": "証拠を開く",
+      "status": { "draft": "確認待ち", "locked": "進行中", "active": "進行中", "stopped": "停止", "achieved": "達成" }
+    },
     "subscribe": "購読",
     "unsubscribe": "購読解除",
     "delegated_subscription_badge": "エージェント経由で購読中",

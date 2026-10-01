@@ -190,6 +190,8 @@ export const issueKeys = {
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
+  goalsAll: (wsId: string) => ["issues", wsId, "goals"] as const,
+  goal: (wsId: string, issueId: string) => [...issueKeys.goalsAll(wsId), issueId] as const,
   sourceContextPreview: (wsId: string, anchorCommentId: string) =>
     ["source-context", "preview", wsId, anchorCommentId] as const,
 };
@@ -652,6 +654,15 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+export function issueGoalOptions(wsId: string, issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.goal(wsId, issueId),
+    queryFn: () => api.getIssueGoal(issueId),
+    enabled: !!wsId && !!issueId,
+    staleTime: 30_000,
   });
 }
 

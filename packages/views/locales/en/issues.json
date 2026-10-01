@@ -478,6 +478,17 @@
     "prop_created": "Created",
     "prop_updated": "Updated",
     "activity_section": "Activity",
+    "goal": {
+      "title": "Goal",
+      "progress": "{{completed}} of {{total}} checks complete",
+      "round": "Round",
+      "tokens": "Tokens",
+      "runs": "Runs",
+      "duration": "Time",
+      "evidence_item": "Evidence",
+      "open_evidence": "Open evidence",
+      "status": { "draft": "Needs confirmation", "locked": "In progress", "active": "In progress", "stopped": "Stopped", "achieved": "Achieved" }
+    },
     "subscribe": "Subscribe",
     "unsubscribe": "Unsubscribe",
     "delegated_subscription_badge": "Watching via agent",
