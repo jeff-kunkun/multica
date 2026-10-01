@@ -90,6 +90,7 @@
     "chat_empty": "这个项目还没有可见聊天。",
     "chat_unnamed": "未命名聊天",
     "chat_no_summary": "暂无摘要。",
+    "chat_unknown_agent": "智能体",
     "toast_link_copied": "已复制链接",
     "toast_project_deleted": "已删除项目",
     "toast_move_issue_failed": "移动任务失败"

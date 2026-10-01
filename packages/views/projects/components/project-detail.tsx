@@ -629,7 +629,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                       <div className="flex items-center gap-2">
                         <MessageSquare className="size-4 text-muted-foreground" />
                         <span className="truncate text-body font-medium">{chat.title || t(($) => $.detail.chat_unnamed)}</span>
-                        <span className="ml-auto shrink-0 text-caption text-muted-foreground">{chat.agent_name || "智能体"}</span>
+                        <span className="ml-auto shrink-0 text-caption text-muted-foreground">{chat.agent_name || t(($) => $.detail.chat_unknown_agent)}</span>
                       </div>
                       <div className="mt-1 line-clamp-2 text-caption text-muted-foreground">{chat.summary || t(($) => $.detail.chat_no_summary)}</div>
                     </button>

@@ -41,6 +41,11 @@ func (h *Handler) ListChatDirectory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if viewerID == "" {
+		// A task with no human originator has no visibility principal.
+		writeJSON(w, http.StatusOK, []ChatDirectoryItem{})
+		return
+	}
 
 	allProjects := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("all_projects")), "true") || r.URL.Query().Get("all_projects") == "1"
 	projectRef := strings.TrimSpace(r.URL.Query().Get("project"))
@@ -74,14 +79,10 @@ func (h *Handler) ListChatDirectory(w http.ResponseWriter, r *http.Request) {
 		keyword = pgtype.Text{String: raw, Valid: true}
 	}
 
-	projectIDs := []pgtype.UUID{}
-	if viewerID != "" {
-		ids, err := h.chatProjectIDs(r.Context(), workspaceID, viewerID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to resolve project access")
-			return
-		}
-		projectIDs = ids
+	projectIDs, err := h.chatProjectIDs(r.Context(), workspaceID, viewerID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return
 	}
 	rows, err := h.Queries.ListChatDirectory(r.Context(), db.ListChatDirectoryParams{
 		WorkspaceID: parseUUID(workspaceID),
