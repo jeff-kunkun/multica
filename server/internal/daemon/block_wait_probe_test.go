@@ -4,13 +4,18 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestWaitProbeShellUsesWorkingDirectoryAndExitCode(t *testing.T) {
-	code, output := waitProbeShell(context.Background(), "test -f marker && printf ready", t.TempDir())
+	probe := "test -f marker && printf ready"
+	if runtime.GOOS == "windows" {
+		probe = "if exist marker (echo ready) else (exit /b 1)"
+	}
+	code, output := waitProbeShell(context.Background(), probe, t.TempDir())
 	if code != 1 {
 		t.Fatalf("missing marker exit code = %d, want 1", code)
 	}
@@ -22,9 +27,13 @@ func TestWaitProbeShellUsesWorkingDirectoryAndExitCode(t *testing.T) {
 	if err := writeTestFile(dir, "marker", ""); err != nil {
 		t.Fatal(err)
 	}
-	code, output = waitProbeShell(context.Background(), "test -f marker && printf ready", dir)
-	if code != 0 || output != "ready" {
-		t.Fatalf("ready probe = (%d, %q), want (0, ready)", code, output)
+	code, output = waitProbeShell(context.Background(), probe, dir)
+	wantOutput := "ready"
+	if runtime.GOOS == "windows" {
+		wantOutput = "ready\r\n"
+	}
+	if code != 0 || strings.TrimSpace(output) != strings.TrimSpace(wantOutput) {
+		t.Fatalf("ready probe = (%d, %q), want (0, %s)", code, output, wantOutput)
 	}
 }
 
@@ -43,7 +52,11 @@ func TestWaitProbeShellPreservesPendingExitCodeAndCapsOutput(t *testing.T) {
 func TestWaitProbeShellReportsTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	code, output := waitProbeShell(ctx, "sleep 1", "")
+	command := "sleep 1"
+	if runtime.GOOS == "windows" {
+		command = "ping -n 3 127.0.0.1 >NUL"
+	}
+	code, output := waitProbeShell(ctx, command, "")
 	if code != 124 || !strings.Contains(output, "timed out") {
 		t.Fatalf("timeout probe = (%d, %q), want 124 and timeout text", code, output)
 	}
