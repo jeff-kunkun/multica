@@ -358,11 +358,6 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		h.syncBlockWait(ctx, prev, updated)
 	}
 	if outcome == issuestatus.Blocked {
-		// A new blocked wait starts a fresh probe lifecycle. Do not let a
-		// previous notification suppress this one.
-		for _, key := range []string{blockwait.KeyProbeStatus, blockwait.KeyProbeAt, blockwait.KeyProbeOutput, blockwait.KeyProbeNotified} {
-			h.deleteIssueMeta(ctx, updated, key)
-		}
 		h.persistBlockRecord(ctx, updated, rec.block)
 	}
 	// A deliberate in_progress pause writes the same block.* wait record and
