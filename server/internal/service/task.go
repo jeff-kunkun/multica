@@ -5025,16 +5025,16 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 				slog.Warn("fail task auto-retry: load agent failed; skipping retry",
 					"task_id", util.UUIDToString(taskID),
 					"agent_id", util.UUIDToString(parent.AgentID), "error", aerr)
-			} else if retryEligible(failureReason, parent, agent) {
+			} else if s.autoRetryEligible(ctx, failureReason, parent, agent) {
 				wantRetry = true
 				// Persist the reason-aware effective budget into the child so the
 				// retry chain self-describes (e.g. provider_network → max_attempts=3),
 				// rather than leaking a contradictory attempt=N/max_attempts=2 row.
-				retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
+				retryMaxAttempts = pgtype.Int4{Int32: retryChildMaxAttempts(failureReason, parent), Valid: true}
 				// Defer this attempt when the reason's schedule calls for a backoff
-				// (provider_network's final attempt waits ~5s; capacity always waits
-				// 30s); a zero delay leaves fire_at NULL so the child is created
-				// immediately-claimable.
+				// (provider_network's final attempt waits ~5s; capacity waits
+				// 30s/1m/2m/5m…); a zero delay leaves fire_at NULL so the child is
+				// created immediately-claimable.
 				if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
 					retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
 				}
@@ -5361,12 +5361,12 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		}
 	}
 
-	// Capacity that will not be retried in place takes the relay path the
-	// sweeper already uses. A hold means the issue was reassigned or blocked
-	// on purpose, so the provider's English sentence is not the last word.
+	// A quota exhaustion takes the relay path the sweeper already uses. A
+	// hold means the issue was reassigned or blocked on purpose, so the
+	// provider's English sentence is not the last word.
 	capacityHeld := false
 	if retried == nil && task.IssueID.Valid {
-		capacityHeld = s.relayCapacityIfRetriesSpent(ctx, task, failureReason, errMsg)
+		capacityHeld = s.relayQuotaExhaustion(ctx, task, failureReason, errMsg)
 	}
 
 	// A platform interrupt (daemon shutdown while the server still considered
@@ -5840,11 +5840,12 @@ func serverInterruptNotice(agentName string, task db.AgentTaskQueue, retried *db
 // A blip that survives the immediate retry gets a short cooldown before the
 // final attempt instead of firing back-to-back.
 //
-// Provider capacity / rate-limit (DENE-210) also raises the ceiling to 3
-// (first run + two retries) but every retry is deferred. A capacity miss does
-// not recover in milliseconds; an immediate resend almost always collides with
-// the same limit. 30s is a conservative cooldown that still fits inside a
-// typical issue-run wait without waiting out a full provider quota window.
+// Provider capacity / rate-limit (DENE-210, DENE-1093) defers every retry on
+// providerCapacityRetrySchedule: 30s, 1m, 2m, then 5m forever. An issue run
+// whose agent is still the assignee has no attempt ceiling at all (see
+// capacityChainFor): a full model usually clears in minutes, and the issue
+// stays on the same seat and session instead of shutting the seat and moving
+// the work. Chat and non-assignee runs keep the old three-attempt ceiling.
 //
 // Provider server error (DENE-596) raises the ceiling to 3 the same way, and
 // also defers every retry. A provider that just answered 5xx — or refused a
@@ -5859,10 +5860,31 @@ const (
 	providerNetworkMaxAttempts     = 3
 	providerNetworkFinalRetryWait  = 5 * time.Second
 	providerCapacityMaxAttempts    = 3
-	providerCapacityRetryWait      = 30 * time.Second
 	providerServerErrorMaxAttempts = 3
 	providerServerErrorRetryWait   = 30 * time.Second
 )
+
+// providerCapacityRetrySchedule is the wait before each capacity retry: the
+// first retry waits 30s, the fourth and every later one 5m (DENE-1093).
+var providerCapacityRetrySchedule = []time.Duration{
+	30 * time.Second,
+	time.Minute,
+	2 * time.Minute,
+	5 * time.Minute,
+}
+
+// providerCapacityRetryWait is the wait after a capacity failure at
+// failedAttempt (1-based).
+func providerCapacityRetryWait(failedAttempt int32) time.Duration {
+	i := int(failedAttempt) - 1
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(providerCapacityRetrySchedule) {
+		i = len(providerCapacityRetrySchedule) - 1
+	}
+	return providerCapacityRetrySchedule[i]
+}
 
 // retryAttemptCeiling reports how many attempts the auto-retry path allows for
 // a failure reason. It only ever WIDENS the task's generic max_attempts, and
@@ -5910,7 +5932,7 @@ func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
 		return runtimeOfflineRetryDeferral
 	}
 	if reason == string(taskfailure.ReasonAgentProviderCapacityOrRateLimit) {
-		return providerCapacityRetryWait
+		return providerCapacityRetryWait(failedAttempt)
 	}
 	if reason == string(taskfailure.ReasonAgentProviderServerError) {
 		return providerServerErrorRetryWait
@@ -6017,12 +6039,84 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 // a human may have edited in the meantime, so replaying the failed attempt is
 // never what the workspace wants.
 func retryEligible(failureReason string, t db.AgentTaskQueue, agent db.Agent) bool {
+	return t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
+		retryGatesOpen(failureReason, t, agent)
+}
+
+// retryGatesOpen is retryEligible without the attempt ceiling.
+func retryGatesOpen(failureReason string, t db.AgentTaskQueue, agent db.Agent) bool {
 	return retryableReasons[failureReason] &&
-		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
+		t.MaxAttempts > 1 &&
 		!t.AutopilotRunID.Valid &&
 		!IsTriageTask(t) &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid || isSourceContextQuickCreateTask(t)) &&
 		agent.AutoRetryEnabled
+}
+
+// capacityChain is how far a provider-capacity retry chain may run.
+type capacityChain int
+
+const (
+	// capacityChainBounded keeps the three-attempt ceiling: chat runs, and
+	// issue runs by an agent that is not (or no longer) the assignee.
+	capacityChainBounded capacityChain = iota
+	// capacityChainOpen has no ceiling: the assignee keeps the issue and
+	// resumes its session until the model has room again (DENE-1093).
+	capacityChainOpen
+	// capacityChainStopped retries nothing: the issue is closed or halted.
+	capacityChainStopped
+)
+
+// capacityChainFor reads the issue as it stands now. An unbounded chain is
+// only safe while somebody still wants this agent on this issue; a close,
+// halt, or reassignment ends it. A read failure keeps the old bounded rule.
+func (s *TaskService) capacityChainFor(ctx context.Context, t db.AgentTaskQueue) capacityChain {
+	if !t.IssueID.Valid {
+		return capacityChainBounded
+	}
+	issue, err := s.Queries.GetIssue(ctx, t.IssueID)
+	if err != nil {
+		return capacityChainBounded
+	}
+	switch issue.Status {
+	case issuestatus.Done, issuestatus.Cancelled:
+		return capacityChainStopped
+	}
+	if halted, ok := util.JSONObjectOrEmpty(issue.Metadata)[agentHaltedMetadataKey].(bool); ok && halted {
+		return capacityChainStopped
+	}
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" &&
+		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(t.AgentID) {
+		return capacityChainOpen
+	}
+	return capacityChainBounded
+}
+
+// autoRetryEligible is retryEligible plus the capacity chain rule. Both
+// auto-retry paths (FailTask and MaybeRetryFailedTask) go through it.
+func (s *TaskService) autoRetryEligible(ctx context.Context, reason string, t db.AgentTaskQueue, agent db.Agent) bool {
+	if reason != string(taskfailure.ReasonAgentProviderCapacityOrRateLimit) {
+		return retryEligible(reason, t, agent)
+	}
+	switch s.capacityChainFor(ctx, t) {
+	case capacityChainStopped:
+		return false
+	case capacityChainOpen:
+		return retryGatesOpen(reason, t, agent)
+	default:
+		return retryEligible(reason, t, agent)
+	}
+}
+
+// retryChildMaxAttempts is the max_attempts written into a retry child. An
+// unbounded capacity chain runs past the ceiling, so the child records its
+// own attempt as the ceiling instead of a contradictory attempt > max.
+func retryChildMaxAttempts(reason string, parent db.AgentTaskQueue) int32 {
+	ceiling := retryAttemptCeiling(reason, parent.MaxAttempts)
+	if next := parent.Attempt + 1; next > ceiling {
+		return next
+	}
+	return ceiling
 }
 
 func isSourceContextQuickCreateTask(task db.AgentTaskQueue) bool {
@@ -6101,7 +6195,8 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// allowed its deferred 3rd attempt (retryAttemptCeiling raises the ceiling
 	// to 3). Kept in sync with retryEligible below, which applies the same
 	// ceiling to the primary FailTask path.
-	if parent.Attempt >= retryAttemptCeiling(reason, parent.MaxAttempts) {
+	if parent.Attempt >= retryAttemptCeiling(reason, parent.MaxAttempts) &&
+		!(reason == string(taskfailure.ReasonAgentProviderCapacityOrRateLimit) && s.capacityChainFor(ctx, parent) == capacityChainOpen) {
 		slog.Info("task auto-retry skipped: budget exhausted",
 			"task_id", util.UUIDToString(parent.ID),
 			"attempt", parent.Attempt,
@@ -6114,7 +6209,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// with no issue/chat link has nowhere to report its retry, and the
 	// per-agent switch may have turned auto-retry off — retryEligible covers
 	// all three, keeping this sweeper path in sync with FailTask's in-tx retry.
-	if !retryEligible(reason, parent, agent) {
+	if !s.autoRetryEligible(ctx, reason, parent, agent) {
 		return nil, nil
 	}
 
@@ -6164,7 +6259,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		NewTaskID:            dbid.NewV7(),
 		ID:                   parent.ID,
 		FireAt:               retryFireAt,
-		MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
+		MaxAttempts:          pgtype.Int4{Int32: retryChildMaxAttempts(reason, parent), Valid: true},
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 	})
