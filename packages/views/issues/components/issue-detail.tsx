@@ -158,6 +158,7 @@ import {
   useViewStateWriter,
 } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
+import { AskPromptList } from "../../common/ask-prompt";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
 import { WorkThreadPanel } from "../../common/work-thread-panel";
@@ -3607,6 +3608,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
 
             <LocalDirectoryHint projectId={issue?.project_id} />
+
+            <AskPromptList issueId={id} className="mt-4" />
 
             {/* The "agent is working" live signal now lives in the header
                 (IssueAgentHeaderChip) so it stays in one fixed place and

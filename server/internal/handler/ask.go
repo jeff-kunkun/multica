@@ -10,7 +10,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type AskOption struct {
@@ -146,6 +150,28 @@ func (h *Handler) CreateAsk(w http.ResponseWriter, r *http.Request) {
 	if storedIssue.Valid {
 		s := storedIssue.String()
 		out.IssueID = &s
+	}
+	// A needs_you ask is actionable for the member who initiated the run.
+	// Keep the ask itself as the source of truth and store only its id in the
+	// inbox row so all surfaces render the same card through GET /api/asks.
+	if req.Mode == "needs_you" {
+		recipientID, recipientErr := util.ParseUUID(userID)
+		if recipientErr != nil {
+			writeError(w, 400, "invalid recipient")
+			return
+		}
+		var inboxIssue pgtype.UUID
+		inboxIssue = storedIssue
+		details, _ := json.Marshal(map[string]string{"ask_id": id.String()})
+		item, inboxErr := h.Queries.CreateInboxItem(r.Context(), db.CreateInboxItemParams{
+			ID: dbid.NewV7(), WorkspaceID: ws, RecipientType: "member", RecipientID: recipientID,
+			Type: service.InboxTypeNeedsYou, Severity: "action_required", IssueID: inboxIssue,
+			Title: strings.TrimSpace(req.Title), Body: pgtype.Text{String: "需要回答提问", Valid: true},
+			ActorType: pgtype.Text{String: actorType, Valid: true}, ActorID: askerID, Details: details,
+		})
+		if inboxErr == nil {
+			h.publish(protocol.EventInboxNew, workspaceID, actorType, actorID, map[string]any{"item": inboxToResponse(item)})
+		}
 	}
 	writeJSON(w, http.StatusCreated, out)
 }
@@ -320,7 +346,18 @@ func (h *Handler) AnswerAsk(w http.ResponseWriter, r *http.Request) {
 	}
 	// Inbox delivery is the durable wake signal consumed by the agent/desktop surfaces.
 	if mode == "needs_you" {
-		_, _ = h.DB.Exec(r.Context(), `INSERT INTO inbox_item(workspace_id,recipient_type,recipient_id,type,severity,issue_id,title,details) VALUES($1,'agent',$2,'ask_answered','action_required',$3,$4,$5)`, ws, askerID, issueID, "Your question was answered", raw)
+		answererID, parseErr := util.ParseUUID(userID)
+		if parseErr == nil {
+			item, inboxErr := h.Queries.CreateInboxItem(r.Context(), db.CreateInboxItemParams{
+				ID: dbid.NewV7(), WorkspaceID: ws, RecipientType: "agent", RecipientID: askerID,
+				Type: "ask_answered", Severity: "action_required", IssueID: issueID,
+				Title: "提问已回答", Body: pgtype.Text{String: string(raw), Valid: true},
+				ActorType: pgtype.Text{String: "member", Valid: true}, ActorID: answererID, Details: raw,
+			})
+			if inboxErr == nil {
+				h.publish(protocol.EventInboxNew, workspaceID, "member", userID, map[string]any{"item": inboxToResponse(item)})
+			}
+		}
 	}
 	writeJSON(w, 200, map[string]any{"id": id.String(), "status": status, "answers": req.Answers})
 }

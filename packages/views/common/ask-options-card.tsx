@@ -22,16 +22,35 @@ export type AskOptionsCardProps = {
 export function AskOptionsCard({ title, questions, mode = "needs_you", disabled, onSubmit }: AskOptionsCardProps) {
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [other, setOther] = useState("");
+  const [otherValues, setOtherValues] = useState<Record<string, string>>({});
+  const [otherSelected, setOtherSelected] = useState<Set<string>>(() => new Set());
   const [submitting, setSubmitting] = useState(false);
   const question = questions[current];
-  const selected = answers[String(current)] ?? "";
-  const canSubmit = questions.every((_, index) => Boolean(answers[String(index)]));
+  const currentKey = String(current);
+  const selected = otherSelected.has(currentKey) ? "other" : answers[currentKey] ?? "";
+  const canSubmit = questions.every((questionItem, index) => {
+    const key = String(index);
+    return Boolean(answers[key]) || (!otherSelected.has(key) && questionItem.options.length > 0);
+  });
   const recommended = useMemo(() => question?.options.find((option) => option.recommended), [question]);
   if (!question) return null;
 
   const choose = (value: string) => {
-    setAnswers((prev) => ({ ...prev, [String(current)]: value }));
+    if (value === "other") {
+      setOtherSelected((prev) => new Set(prev).add(currentKey));
+      setAnswers((prev) => {
+        const next = { ...prev };
+        delete next[currentKey];
+        return next;
+      });
+    } else {
+      setOtherSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(currentKey);
+        return next;
+      });
+      setAnswers((prev) => ({ ...prev, [currentKey]: value }));
+    }
     if (current < questions.length - 1) setTimeout(() => setCurrent((value) => value + 1), 120);
   };
   const submit = async () => {
@@ -55,7 +74,7 @@ export function AskOptionsCard({ title, questions, mode = "needs_you", disabled,
         <div className="grid gap-2" role="radiogroup" aria-label={question.text}>
           {question.options.map((option) => <button key={option.id} type="button" role="radio" aria-checked={selected === option.id} onClick={() => choose(option.id)} className={`flex items-center justify-between rounded-lg border px-3 py-2.5 text-left text-body transition-colors ${selected === option.id ? "border-brand bg-brand/10" : "border-surface-border hover:bg-surface-hover"}`}><span>{option.label}</span>{option.recommended && <span className="text-caption text-muted-foreground">推荐</span>}</button>)}
           <button type="button" role="radio" aria-checked={selected === "other"} onClick={() => choose("other")} className={`rounded-lg border px-3 py-2.5 text-left text-body ${selected === "other" ? "border-brand bg-brand/10" : "border-surface-border hover:bg-surface-hover"}`}>其他，我自己说</button>
-          {selected === "other" && <Textarea value={other} onChange={(event) => { setOther(event.target.value); setAnswers((prev) => ({ ...prev, [String(current)]: event.target.value })); }} placeholder="输入你的答案" autoFocus />}
+          {selected === "other" && <Textarea value={otherValues[currentKey] ?? ""} onChange={(event) => { const value = event.target.value; setOtherValues((prev) => ({ ...prev, [currentKey]: value })); setAnswers((prev) => ({ ...prev, [currentKey]: value })); }} placeholder="输入你的答案" autoFocus />}
         </div>
       </CardContent>
       <CardFooter className="justify-between gap-2"><Button type="button" variant="ghost" size="sm" disabled={current === 0} onClick={() => setCurrent((value) => value - 1)}>上一题</Button><Button type="button" size="sm" disabled={disabled || !canSubmit || submitting} onClick={submit}>{submitting ? "提交中…" : "提交回答"}</Button></CardFooter>
