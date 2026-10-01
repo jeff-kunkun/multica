@@ -35,6 +35,7 @@ import {
   BoardCardSubIssueToggle,
 } from "./board-card-sub-issues";
 import { ParentIssueBadge } from "./parent-issue-badge";
+import { BlockWaitProbeBadge } from "./block-wait-probe-badge";
 function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
@@ -238,6 +239,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       {(showCustomStatus || showProject || showLabels || cardCustomProperties.length > 0) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           <CustomStatusChip status={issue.status} />
+          <BlockWaitProbeBadge issue={issue} />
           {showProject && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground max-w-[160px]">
               <ProjectIcon project={project} size="sm" />
