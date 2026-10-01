@@ -42,6 +42,22 @@ func (h *Handler) GetChatSessionHandoff(w http.ResponseWriter, r *http.Request) 
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
+	// A task token is an agent credential, not the visibility principal. The
+	// directory already resolves it to the direct human who started the task;
+	// history must use the same principal or an agent could list a chat it then
+	// could not open (or open the runtime owner's private chat by id).
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		taskID, valid := parseUUIDOrBadRequest(w, r.Header.Get("X-Task-ID"), "task id")
+		if !valid {
+			return
+		}
+		task, err := h.Queries.GetAgentTask(r.Context(), taskID)
+		if err != nil || !task.OriginatorUserID.Valid {
+			writeError(w, http.StatusNotFound, "chat session not found")
+			return
+		}
+		userID = uuidToString(task.OriginatorUserID)
+	}
 	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
