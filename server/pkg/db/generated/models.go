@@ -92,6 +92,21 @@ type AgentAccessRequest struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type AgentAsk struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	AskerType   string             `json:"asker_type"`
+	AskerID     pgtype.UUID        `json:"asker_id"`
+	Title       string             `json:"title"`
+	Questions   []byte             `json:"questions"`
+	Answers     []byte             `json:"answers"`
+	Mode        string             `json:"mode"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	AnsweredAt  pgtype.Timestamptz `json:"answered_at"`
+}
+
 type AgentBuilderDraft struct {
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

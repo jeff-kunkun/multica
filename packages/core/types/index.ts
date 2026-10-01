@@ -422,3 +422,4 @@ export type {
 } from "./billing";
 
 export type { WorkThreadSnapshot, WorkThreadTurn, WorkThreadInput } from "./work_thread";
+export type { Ask, AskOption, AskQuestion, CreateAskRequest, AnswerAskRequest } from "./ask";

@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Use for Multica platform actions the runtime brief omits: inbox, issue and PR contracts, goals, routing, close protocol, mentions, agents, specialisations, squads, autopilots, projects, runtimes, skill import, workspace transfer, sub-issues, GitHub App. Not for the product code you are working on."
+description: "Use for Multica platform actions outside runtime brief: ask/answer option questions, goals, inbox, issue/PR contracts, routing, close protocol, mentions, agents, specialisations, squads, autopilots, projects, runtimes, skill import, workspace transfer, sub-issues, GitHub App. Not product code."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -26,6 +26,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/close-protocol.md` | Closing an issue: the eight `close.*` keys, conclusion / status / next owner / wake decision tables, blocked-close fields, dispatcher stage promotion |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config, skill binding |
+| `references/asks.md` | Option questions raised and answered by agents |
 | `references/specialisations.md` | Base roles and specialisations: what a child inherits, the two-level cap, runtime following, solidify, the archive guard |
 | `references/squads.md` | Squads: leader routing, roster, recording leader activity, why a squad did or did not run |
 | `references/autopilots.md` | Autopilots: schedule / webhook / manual triggers, `create_issue` vs `run_only`, why one did not fire |
