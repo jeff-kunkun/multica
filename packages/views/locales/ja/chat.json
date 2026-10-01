@@ -10,6 +10,10 @@
     "new_chat_in_project": "新しいチャットは「{{title}}」に残ります",
     "new_chat_unbound": "新しいチャットはプロジェクトに紐づきません"
   },
+  "goal_flow": {
+    "hint": "タスクを作成する前に整理しましょう。",
+    "action": "先にすり合わせる"
+  },
   "project_bar": {
     "all": "すべて",
     "more": "⋯ その他 ({{count}})",

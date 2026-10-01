@@ -10,6 +10,10 @@
     "new_chat_in_project": "새 채팅은 「{{title}}」에 남습니다",
     "new_chat_unbound": "새 채팅은 프로젝트에 묶이지 않습니다"
   },
+  "goal_flow": {
+    "hint": "이슈를 만들기 전에 먼저 정리하세요.",
+    "action": "먼저 정렬하기"
+  },
   "project_bar": {
     "all": "전체",
     "more": "⋯ 더보기 ({{count}})",
