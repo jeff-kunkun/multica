@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,11 +23,23 @@ func List(ctx context.Context, dir string) ([]ghpr.PR, error) {
 	return run(ctx, dir, []string{"mr", "list", "--all", "--output", "json", "-P", "20"})
 }
 
-// View reads one merge request by its URL. Passing the URL is important for
-// self-hosted GitLab: the caller's current directory may belong to another
-// repository, while the issue already knows the exact linked MR.
+// View reads one merge request by its URL. glab still resolves a bare URL
+// against the current checkout, so split the URL and pass an explicit project
+// with -R; the caller's directory may belong to another repository entirely.
 func View(ctx context.Context, dir, rawURL string) (ghpr.PR, error) {
-	rows, err := run(ctx, dir, []string{"mr", "view", rawURL, "--output", "json"})
+	ref, err := delivery.ParsePullURL(rawURL)
+	if err != nil || ref.Provider != "gitlab" {
+		if err == nil {
+			err = fmt.Errorf("URL is not a GitLab merge request")
+		}
+		return ghpr.PR{}, err
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ghpr.PR{}, err
+	}
+	projectURL := parsed.Scheme + "://" + parsed.Host + "/" + strings.Trim(ref.ProjectPath(), "/")
+	rows, err := run(ctx, dir, []string{"mr", "view", strconv.Itoa(int(ref.Number)), "-R", projectURL, "--output", "json"})
 	if err != nil {
 		return ghpr.PR{}, err
 	}
