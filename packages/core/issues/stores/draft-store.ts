@@ -39,7 +39,7 @@ export interface IssueCreateShared {
   priority: IssuePriority;
   dueDate: string | null;
   /** Keep target mode in the shared slot so manual and agent faces agree. */
-  goalMode: boolean;
+  goalMode?: boolean;
   /** Uploads for the dialog (placeholders + completed), referenced by the
    *  manual description OR the agent prompt markdown. A single pool so an
    *  image survives a mode switch from either side; each submit path sends

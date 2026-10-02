@@ -38,15 +38,15 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID          string            `json:"id"`
-	WorkspaceID string            `json:"workspace_id"`
-	Number      int32             `json:"number"`
-	Identifier  string            `json:"identifier"`
-	Title       string            `json:"title"`
-	Progress    *ProgressResponse `json:"progress"`
+	ID           string                `json:"id"`
+	WorkspaceID  string                `json:"workspace_id"`
+	Number       int32                 `json:"number"`
+	Identifier   string                `json:"identifier"`
+	Title        string                `json:"title"`
+	Progress     *ProgressResponse     `json:"progress"`
 	GoalProgress *GoalProgressResponse `json:"goal_progress,omitempty"`
-	Description *string           `json:"description"`
-	Status      string            `json:"status"`
+	Description  *string               `json:"description"`
+	Status       string                `json:"status"`
 	// StatusCategory encodes lifecycle using the legacy seven-value wire enum. It is
 	// omitted when an endpoint cannot resolve a custom status, so consumers must
 	// fall back to their catalog rather than treat a blank as "no category".
@@ -2955,7 +2955,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		projectUUID = parentProject
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTaskChoosingProject(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs, projectExplicitNone)
+	task, err := h.TaskService.EnqueueQuickCreateTaskChoosingProjectWithGoal(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs, projectExplicitNone, req.GoalMode)
 	if err != nil {
 		if writeIssueLimitReached(w, err) {
 			return
@@ -3419,6 +3419,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		AttachmentIDs:  attachmentIDs,
 		LabelIDs:       labelIDs,
 		AllowDuplicate: req.AllowDuplicate,
+		GoalMode:       req.GoalMode,
 
 		AssigneeSource:       ruling.Source,
 		AssigneeSourceUserID: ruling.SourceUser,

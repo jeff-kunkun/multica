@@ -1709,6 +1709,7 @@ type QuickCreateContext struct {
 	// sub-issue. The prompt then requires `--project ""` so create does not
 	// treat the omitted flag as "inherit the parent".
 	ProjectExplicitNone bool `json:"project_explicit_none,omitempty"`
+	GoalMode            bool `json:"goal_mode,omitempty"`
 	// SourceContextID identifies the immutable pending capture that must attach
 	// to the one issue this quick-create chain produces.
 	SourceContextID string `json:"source_context_id,omitempty"`
@@ -1747,6 +1748,10 @@ func (s *TaskService) EnqueueQuickCreateTaskChoosingProject(ctx context.Context,
 	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, projectExplicitNone, nil)
 }
 
+func (s *TaskService) EnqueueQuickCreateTaskChoosingProjectWithGoal(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone, goalMode bool) (db.AgentTaskQueue, error) {
+	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, projectExplicitNone, nil, goalMode)
+}
+
 func (s *TaskService) EnqueueQuickCreateTaskWithSourceContext(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, capture SourceContextCapture) (db.AgentTaskQueue, error) {
 	return s.EnqueueQuickCreateTaskWithSourceContextChoosingProject(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, false, capture)
 }
@@ -1755,7 +1760,7 @@ func (s *TaskService) EnqueueQuickCreateTaskWithSourceContextChoosingProject(ctx
 	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, projectExplicitNone, &capture)
 }
 
-func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone bool, capture *SourceContextCapture) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone bool, capture *SourceContextCapture, goalMode ...bool) (db.AgentTaskQueue, error) {
 	if err := CheckIssueCreateCapacity(ctx, s.Queries, s.Entitlements, workspaceID); err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("preflight quick-create issue capacity: %w", err)
 	}
@@ -1791,6 +1796,9 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		payload.ParentIssueID = util.UUIDToString(parentIssueID)
 	}
 	payload.ProjectExplicitNone = projectExplicitNone
+	if len(goalMode) > 0 {
+		payload.GoalMode = goalMode[0]
+	}
 	if capture != nil {
 		payload.SourceContextID = util.UUIDToString(capture.ID)
 	}

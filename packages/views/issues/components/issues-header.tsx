@@ -1534,15 +1534,15 @@ export function IssuesHeader({
             agents={workingAgents}
           />
           {onNewGoal && (
-            <Button
-              variant="default"
-              size="sm"
-              className="hidden gap-1 bg-brand text-brand-foreground hover:bg-brand/90 sm:inline-flex"
-              onClick={onNewGoal}
-            >
-              <Target className="size-3.5" aria-hidden="true" />
-              New goal
-            </Button>
+            <>
+              <Button variant="default" size="sm" className="hidden gap-1 bg-brand text-brand-foreground hover:bg-brand/90 sm:inline-flex" onClick={onNewGoal}>
+                <Target className="size-3.5" aria-hidden="true" />
+                New goal
+              </Button>
+              <Button variant="default" size="icon-sm" className="bg-brand text-brand-foreground hover:bg-brand/90 sm:hidden" onClick={onNewGoal} aria-label="New goal">
+                <Target className="size-3.5" aria-hidden="true" />
+              </Button>
+            </>
           )}
           <IssueDisplayControls
             scopedIssues={scopedIssues}

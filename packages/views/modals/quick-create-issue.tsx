@@ -767,7 +767,7 @@ export function AgentCreatePanel({
               onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
             />
           )}
-          <GoalToggle checked={draft.shared.goalMode} onCheckedChange={(value) => setShared({ goalMode: value })} disabled={submitting} />
+          <GoalToggle checked={!!draft.shared.goalMode} onCheckedChange={(value) => setShared({ goalMode: value })} disabled={submitting} />
           {(visibleFields.includes("priority") ||
             priority !== "none" ||
             fieldPickerOpen === "priority") && (

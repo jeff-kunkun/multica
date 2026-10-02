@@ -431,6 +431,7 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 		AssigneeType: pgtype.Text{String: "agent", Valid: true}, AssigneeID: session.AgentID,
 		CreatorType: "member", CreatorID: creatorID,
 		ProjectID: session.ProjectID, ProjectPinned: session.ProjectID.Valid,
+		GoalMode: true,
 	}, service.IssueCreateOpts{ActorID: userID, AnalyticsAgentID: uuidToString(session.AgentID), Platform: "web"})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create goal issue")
@@ -443,8 +444,8 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 	// truth; this message is only the chat-side link record.
 	if _, messageErr := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
 		ChatSessionID: session.ID,
-		Role:          "system",
-		Content:       fmt.Sprintf("已转成目标任务 %s", resp.Identifier),
+		Role:          "assistant",
+		Content:       fmt.Sprintf("已转成目标任务 [%s](issue://%s)", resp.Identifier, resp.ID),
 		MessageKind:   pgtype.Text{String: "goal_link", Valid: true},
 	}); messageErr != nil {
 		slog.Warn("chat goal conversion link message failed", "session_id", uuidToString(session.ID), "issue_id", resp.ID, "error", messageErr)

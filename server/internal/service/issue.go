@@ -88,6 +88,7 @@ type IssueCreateParams struct {
 	// ErrIssueLabelNotFound rather than being silently dropped.
 	LabelIDs       []pgtype.UUID
 	AllowDuplicate bool
+	GoalMode       bool
 	// AssigneeSource & co record whose decision the executor is (DENE-1033;
 	// routing.Source*). Written in the create transaction, so the executor is
 	// never visible unlabelled. Empty leaves the record unset. SourceAgent with
@@ -507,6 +508,18 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 	}
 	if err != nil {
 		return issueCreateTxOutcome{}, fmt.Errorf("create issue: %w", err)
+	}
+	if p.GoalMode {
+		goal, goalErr := qtx.CreateIssueGoal(ctx, db.CreateIssueGoalParams{IssueID: issue.ID, WorkspaceID: p.WorkspaceID, CreatedByType: p.CreatorType, CreatedByID: p.CreatorID})
+		if goalErr != nil {
+			return issueCreateTxOutcome{}, fmt.Errorf("create goal draft: %w", goalErr)
+		}
+		starters := []string{fmt.Sprintf("完成并交付：%s", p.Title), "验证结果满足任务描述中的要求", "提供可复核的证据并说明完成情况"}
+		for i, description := range starters {
+			if _, goalErr = qtx.CreateIssueGoalCheck(ctx, db.CreateIssueGoalCheckParams{GoalID: goal.ID, Position: int32(i), Description: description, Method: "acceptance"}); goalErr != nil {
+				return issueCreateTxOutcome{}, fmt.Errorf("create goal starter check: %w", goalErr)
+			}
+		}
 	}
 	if p.AssigneeSource != "" {
 		issue, err = qtx.SetIssueAssigneeSource(ctx, db.SetIssueAssigneeSourceParams{
