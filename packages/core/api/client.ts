@@ -1601,6 +1601,18 @@ export class ApiClient {
     });
   }
 
+  async keepIssueStall(id: string): Promise<{ action: string; issue_id: string }> {
+    return this.fetch(`/api/issues/${id}/stall/keep`, { method: "POST", body: JSON.stringify({}) });
+  }
+
+  async undoIssueStall(id: string): Promise<{ action: string; status: string; issue_id: string }> {
+    return this.fetch(`/api/issues/${id}/stall/undo`, { method: "POST", body: JSON.stringify({}) });
+  }
+
+  async listIssueStallActions(): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.fetch("/api/issues/stall-actions");
+  }
+
   async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {
     return this.fetch(`/api/issues/${id}`, {
       method: "PUT",

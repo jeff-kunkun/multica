@@ -816,6 +816,9 @@ func main() {
 			slog.Warn("scheduler: failed to register routing_stale_review job", "error", err)
 		}
 	}
+	if err := schedulerMgr.Register(scheduler.IssueStallActionsJob(h)); err != nil {
+		slog.Warn("scheduler: failed to register issue_stall_actions job", "error", err)
+	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)
 	}()

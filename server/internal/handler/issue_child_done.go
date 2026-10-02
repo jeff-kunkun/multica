@@ -9,8 +9,11 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/blockwait"
+	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -151,6 +154,10 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 		return
 	}
 	terminal := h.realChildTerminalPredicate(ctx, statuses)
+	if allChildrenTerminal(children, terminal) && !closeprotocol.ExplainedPause(blockwait.MetaString(util.JSONObjectOrEmpty(parent.Metadata), closeprotocol.KeyConclusion)) {
+		h.autoCompleteParent(ctx, parent, issue)
+		return
+	}
 	if !stageBarrierClosed(children, issue, terminal) {
 		return
 	}
@@ -250,6 +257,10 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		terminal := h.realChildTerminalPredicate(ctx, statuses)
 		memberParent := parent.AssigneeType.Valid && parent.AssigneeType.String == "member"
 		batch := len(g.children) > 1
+		if allChildrenTerminal(children, terminal) && !closeprotocol.ExplainedPause(blockwait.MetaString(util.JSONObjectOrEmpty(parent.Metadata), closeprotocol.KeyConclusion)) {
+			h.autoCompleteParent(ctx, parent, g.children[len(g.children)-1])
+			continue
+		}
 		if !siblingsAreStaged(children) {
 			// Unstaged: one implicit stage. Fire once iff every child is terminal
 			// in the final state. stageBarrierClosed ignores `completed` on the
