@@ -66,6 +66,13 @@ func allChildrenTerminal(children []db.Issue, terminal func(db.Issue) bool) bool
 	return true
 }
 
+func parentAutoCompletionEligible(status string, paused, activeRun, hasPullRequest bool, childCount int, childrenTerminal bool) bool {
+	if status == "done" || status == "cancelled" || status == "backlog" || paused || activeRun || hasPullRequest {
+		return false
+	}
+	return childCount > 0 && childrenTerminal
+}
+
 func stallMeta(issue db.Issue) map[string]any { return util.JSONObjectOrEmpty(issue.Metadata) }
 
 func stallString(meta map[string]any, key string) string {
@@ -90,14 +97,21 @@ func (h *Handler) setStallMetadata(ctx context.Context, issue db.Issue, values m
 	return nil
 }
 
-func (h *Handler) stallComment(ctx context.Context, issue db.Issue, body string) {
+func (h *Handler) clearCloseMetadata(ctx context.Context, issue db.Issue) {
+	for _, key := range closeprotocol.Keys {
+		_, _ = h.Queries.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key})
+	}
+}
+
+func (h *Handler) stallComment(ctx context.Context, issue db.Issue, body string) pgtype.UUID {
+	commentID := dbid.NewV7()
 	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
-		ID: dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		ID: commentID, IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
 		AuthorType: "system", AuthorID: pgtype.UUID{Valid: true}, Content: body,
 		Type: "system", ParentID: pgtype.UUID{Valid: false},
 	})
 	if err != nil {
-		return
+		return pgtype.UUID{}
 	}
 	if h.Bus != nil {
 		h.Bus.Publish(events.Event{Type: protocol.EventCommentCreated, WorkspaceID: util.UUIDToString(issue.WorkspaceID), ActorType: "system", Payload: map[string]any{
@@ -105,24 +119,42 @@ func (h *Handler) stallComment(ctx context.Context, issue db.Issue, body string)
 			"issue_status": issue.Status, "issue_revision": created.IssueRevision,
 		}})
 	}
+	return commentID
 }
 
 func (h *Handler) notifyStallInbox(ctx context.Context, issue db.Issue, title, body string) {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "member" || !issue.AssigneeID.Valid {
-		return
+	// The summary belongs to the workspace owner/admins even when the ticket is
+	// assigned to an agent. Keep the assigned member as an additional recipient.
+	recipients := make(map[string]pgtype.UUID)
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "member" && issue.AssigneeID.Valid {
+		recipients[util.UUIDToString(issue.AssigneeID)] = issue.AssigneeID
 	}
-	// Keep the inbox quiet: comments remain one-per-action, while the inbox
-	// gets at most one stall summary for each member per UTC day.
-	var existing pgtype.UUID
-	if err := h.DB.QueryRow(ctx, `SELECT id FROM inbox_item WHERE workspace_id=$1 AND recipient_type='member' AND recipient_id=$2 AND type='issue_stall_action' AND created_at >= date_trunc('day', now()) LIMIT 1`, issue.WorkspaceID, issue.AssigneeID).Scan(&existing); err == nil && existing.Valid {
-		return
+	rows, err := h.DB.Query(ctx, `SELECT user_id FROM member WHERE workspace_id=$1 AND role IN ('owner','admin')`, issue.WorkspaceID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id pgtype.UUID
+			if rows.Scan(&id) == nil && id.Valid {
+				recipients[util.UUIDToString(id)] = id
+			}
+		}
 	}
-	_, _ = h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-		ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, RecipientType: "member", RecipientID: issue.AssigneeID,
-		Type: "issue_stall_action", Severity: "attention", IssueID: pgtype.UUID{}, Title: "停滞处理每日汇总",
-		Body: pgtype.Text{String: fmt.Sprintf("%s：票 #%d（%s）\n%s", title, issue.Number, issue.Title, body), Valid: true}, ActorType: pgtype.Text{String: "system", Valid: true},
-		ActorID: pgtype.UUID{Valid: true}, Details: []byte(fmt.Sprintf(`{"kind":"stall_action","issue_id":"%s"}`, util.UUIDToString(issue.ID))),
-	})
+	entry := fmt.Sprintf("%s：票 #%d（%s）\n%s", title, issue.Number, issue.Title, body)
+	for _, recipient := range recipients {
+		var existingID pgtype.UUID
+		var existingBody pgtype.Text
+		err := h.DB.QueryRow(ctx, `SELECT id, body FROM inbox_item WHERE workspace_id=$1 AND recipient_type='member' AND recipient_id=$2 AND type='issue_stall_action' AND created_at >= date_trunc('day', now()) ORDER BY created_at LIMIT 1`, issue.WorkspaceID, recipient).Scan(&existingID, &existingBody)
+		if err == nil && existingID.Valid {
+			_, _ = h.DB.Exec(ctx, `UPDATE inbox_item SET body=$2 WHERE id=$1`, existingID, strings.TrimSpace(existingBody.String+"\n\n"+entry))
+			continue
+		}
+		_, _ = h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, RecipientType: "member", RecipientID: recipient,
+			Type: "issue_stall_action", Severity: "attention", IssueID: issue.ID, Title: "停滞处理每日汇总",
+			Body: pgtype.Text{String: entry, Valid: true}, ActorType: pgtype.Text{String: "system", Valid: true},
+			ActorID: pgtype.UUID{Valid: true}, Details: []byte(fmt.Sprintf(`{"kind":"stall_action","issue_id":"%s","actions":["keep","undo"]}`, util.UUIDToString(issue.ID))),
+		})
+	}
 }
 
 func (h *Handler) stallArtifactCheck(ctx context.Context, issue db.Issue) string {
@@ -131,30 +163,48 @@ func (h *Handler) stallArtifactCheck(ctx context.Context, issue db.Issue) string
 	return fmt.Sprintf("已核对关联 PR（%d 个）、附件（%d 个）与其他交付产物", len(prs), len(attachments))
 }
 
-// autoCompleteParent is called after the last child status commits.  The
-// update is deliberately deterministic: no routing model, PR gate, or agent
-// decision is involved.  A close record / explicit pause keeps the parent
-// untouched, and the old status plus a seven-day expiry makes the action
-// reversible from all clients.
-func (h *Handler) autoCompleteParent(ctx context.Context, parent, child db.Issue) {
+// autoCompleteParent is called by the periodic stall patrol after the last
+// child status has been quiet for long enough. The update is deterministic: no
+// routing model, PR gate, or agent decision is involved. A close record /
+// explicit pause keeps the parent contract visible, and the old status plus a
+// seven-day expiry makes the action reversible from all clients.
+func (h *Handler) autoCompleteParent(ctx context.Context, parent, child db.Issue) error {
 	if parent.Status == "done" || parent.Status == "cancelled" {
-		return
+		return nil
 	}
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: parent.ID, Status: "done", WorkspaceID: parent.WorkspaceID})
 	if err != nil {
-		return
+		return err
 	}
 	now := time.Now().UTC()
-	_ = h.setStallMetadata(ctx, updated, map[string]string{
+	body := fmt.Sprintf("所有子任务均已完成（最后完成：%s）。系统按停滞规则将父票从 `%s` 自动收口为 `done`。7 天内可用“撤销停滞处理”恢复。", child.Title, parent.Status)
+	commentID := h.stallComment(ctx, updated, body)
+	if !commentID.Valid {
+		return fmt.Errorf("create auto-close evidence comment")
+	}
+	if err := h.setStallMetadata(ctx, updated, map[string]string{
 		stallActionKey: stallActionParent, stallPreviousKey: parent.Status,
 		stallAnnouncedAtKey: now.Format(time.RFC3339), stallRevertUntilKey: now.Add(stallRevertFor).Format(time.RFC3339),
 		stallReasonKey: "所有子任务均已完成，系统按规则自动收口；可在 7 天内撤销。",
-	})
-	h.stallComment(ctx, updated, fmt.Sprintf("所有子任务均已完成（最后完成：%s）。系统按规则将父票从 `%s` 自动收口为 `done`。7 天内可用“撤销停滞处理”恢复。", child.Title, parent.Status))
+	}); err != nil {
+		return err
+	}
+	// Automatic closure still records the same close.* contract as a normal
+	// delivered close, so the parent review barrier can distinguish an actual
+	// close from a bare status mutation.
+	rec := closeRecordAfterRelease(updated, stallMeta(updated), util.UUIDToString(commentID), "")
+	if rec != nil && h.TxStarter != nil {
+		if err := closeprotocol.Validate(rec, updated.Status, body); err == nil {
+			if err := h.writeCloseKeysTx(ctx, updated, rec); err != nil {
+				return err
+			}
+		}
+	}
 	h.notifyStallInbox(ctx, updated, "父票已自动收口", "所有子任务已完成，父票已标记 done；7 天内可撤销。")
 	if fresh, err := h.Queries.GetIssue(ctx, updated.ID); err == nil {
 		h.publish(protocol.EventIssueUpdated, util.UUIDToString(fresh.WorkspaceID), "system", "", map[string]any{"issue": service.IssueToMapResolved(ctx, h.Queries, fresh, h.getIssuePrefix(ctx, fresh.WorkspaceID))})
 	}
+	return nil
 }
 
 // KeepStallAction prevents an announced candidate from being cancelled.
@@ -207,6 +257,7 @@ func (h *Handler) UndoStallAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "failed to restore issue status")
 		return
 	}
+	h.clearCloseMetadata(r.Context(), updated)
 	_ = h.setStallMetadata(r.Context(), updated, map[string]string{stallActionKey: stallActionRevoked, stallReasonKey: "自动停滞处理已撤销。"})
 	h.stallComment(r.Context(), updated, fmt.Sprintf("已撤销系统自动停滞处理，票状态恢复为 `%s`。", previous))
 	h.notifyStallInbox(r.Context(), updated, "停滞处理已撤销", "自动收口/取消已撤销，票状态已恢复。")
@@ -279,12 +330,42 @@ func (h *Handler) ListStallActions(w http.ResponseWriter, r *http.Request) {
 // are marked by the AI review handoff; this job only owns the clock and the
 // deterministic expiry/cancel transition.
 func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
-	rows, err := h.DB.Query(ctx, `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status NOT IN ('done','cancelled') AND (last_activity_at IS NULL OR last_activity_at < now() - interval '36 hours') AND ((metadata->>'stall.candidate')='true' OR metadata->>'stall.action' IN ('announced','candidate')) LIMIT 500`)
+	var affected int64
+	parentRows, err := h.DB.Query(ctx, `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status IN ('todo','in_progress','blocked') AND metadata->>'stall.action' IS DISTINCT FROM 'revoked' AND last_activity_at < now() - interval '36 hours' AND EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) LIMIT 500`)
 	if err != nil {
 		return 0, err
 	}
+	for parentRows.Next() {
+		var x stallIssueRow
+		if parentRows.Scan(&x.ID, &x.WorkspaceID, &x.Number, &x.Title, &x.Status, &x.Metadata, &x.LastActive) != nil {
+			continue
+		}
+		issue, err := h.Queries.GetIssue(ctx, x.ID)
+		if err != nil {
+			continue
+		}
+		meta := stallMeta(issue)
+		if closeprotocol.ExplainedPause(blockwait.MetaString(meta, closeprotocol.KeyConclusion)) {
+			continue
+		}
+		if h.parentReadyForAutoCompletion(ctx, issue) {
+			children, _ := h.Queries.ListChildIssues(ctx, issue.ID)
+			if len(children) > 0 {
+				if err := h.autoCompleteParent(ctx, issue, children[len(children)-1]); err == nil {
+					affected++
+				}
+			}
+		}
+	}
+	parentRows.Close()
+
+	// The announcement clock is independent from issue activity: posting the
+	// public notice itself must not restart the 24-hour window.
+	rows, err := h.DB.Query(ctx, `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status NOT IN ('done','cancelled') AND metadata->>'stall.action'='announced' LIMIT 500`)
+	if err != nil {
+		return affected, err
+	}
 	defer rows.Close()
-	var affected int64
 	for rows.Next() {
 		var x stallIssueRow
 		if rows.Scan(&x.ID, &x.WorkspaceID, &x.Number, &x.Title, &x.Status, &x.Metadata, &x.LastActive) != nil {
@@ -299,11 +380,6 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 			continue
 		}
 		action := stallString(meta, stallActionKey)
-		if action == "" && stallBool(meta, stallCandidateKey) {
-			_ = h.ReviewStallActionInternal(ctx, issue, "AI 判断这张票可能重复或无效。")
-			affected++
-			continue
-		}
 		if action == stallActionAnnounced {
 			until, err := time.Parse(time.RFC3339, stallString(meta, stallReviewUntilKey))
 			if err == nil && !time.Now().UTC().Before(until) {
@@ -314,6 +390,33 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 		}
 	}
 	return affected, nil
+}
+
+// parentReadyForAutoCompletion is the quiet-parent rule. Child completion
+// notifications remain synchronous and only wake the parent; this check is
+// intentionally owned by the periodic stall patrol so an active run or any
+// linked delivery can finish the parent before the rule fires.
+func (h *Handler) parentReadyForAutoCompletion(ctx context.Context, parent db.Issue) bool {
+	meta := stallMeta(parent)
+	paused := closeprotocol.ExplainedPause(blockwait.MetaString(meta, closeprotocol.KeyConclusion))
+	active, err := h.Queries.HasActiveTaskForIssue(ctx, parent.ID)
+	if err != nil {
+		return false
+	}
+	prs, err := h.Queries.ListPullRequestsByIssue(ctx, parent.ID)
+	if err != nil {
+		return false
+	}
+	children, err := h.Queries.ListChildIssues(ctx, parent.ID)
+	if err != nil || len(children) == 0 {
+		return false
+	}
+	effective := h.childStatusResolver(ctx)
+	statuses, err := resolveChildStatuses(children, effective)
+	if err != nil {
+		return false
+	}
+	return parentAutoCompletionEligible(parent.Status, paused, active, len(prs) > 0, len(children), allChildrenTerminal(children, h.realChildTerminalPredicate(ctx, statuses)))
 }
 
 func (h *Handler) ReviewStallActionInternal(ctx context.Context, issue db.Issue, reason string) error {

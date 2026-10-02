@@ -30,3 +30,22 @@ func TestStallStringAndBoolReadOnlyMetadata(t *testing.T) {
 		t.Fatal("candidate metadata was not read")
 	}
 }
+
+func TestParentAutoCompletionEligibilityRequiresQuietSafeParent(t *testing.T) {
+	base := func() bool { return parentAutoCompletionEligible("in_progress", false, false, false, 2, true) }
+	if !base() {
+		t.Fatal("a quiet parent with terminal children should be eligible")
+	}
+	for name, got := range map[string]bool{
+		"paused":      parentAutoCompletionEligible("in_progress", true, false, false, 2, true),
+		"active run":  parentAutoCompletionEligible("in_progress", false, true, false, 2, true),
+		"linked PR":   parentAutoCompletionEligible("in_progress", false, false, true, 2, true),
+		"open child":  parentAutoCompletionEligible("in_progress", false, false, false, 2, false),
+		"no children": parentAutoCompletionEligible("in_progress", false, false, false, 0, true),
+		"backlog":     parentAutoCompletionEligible("backlog", false, false, false, 2, true),
+	} {
+		if got {
+			t.Fatalf("%s parent must not be auto-completed", name)
+		}
+	}
+}
