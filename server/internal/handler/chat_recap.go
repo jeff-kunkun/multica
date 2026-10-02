@@ -238,7 +238,17 @@ func openingTitleSource(opening string) string {
 var markdownEmbedOnly = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
 
 func ruleCleanChatTitle(opening string) string {
-	s := chattitle.Derive(openingTitleSource(opening))
+	// Derive caps at 30 runes, so drop the trailing sentence punctuation of the
+	// line it will keep first; otherwise a question one "？" over the cap gets
+	// truncated with "…" instead of fitting.
+	source := openingTitleSource(opening)
+	for _, line := range strings.Split(source, "\n") {
+		if strings.TrimSpace(line) != "" {
+			source = strings.TrimRight(strings.TrimSpace(line), ".。!！?？,，;；:：、 ")
+			break
+		}
+	}
+	s := chattitle.Derive(source)
 	for {
 		before := s
 		for _, prefix := range []string{"嗯", "呃", "额", "请"} {
