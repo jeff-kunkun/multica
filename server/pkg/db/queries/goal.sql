@@ -24,6 +24,12 @@ INSERT INTO issue_goal_check (goal_id, position, description, method)
 VALUES ($1, $2, $3, $4)
 RETURNING *;
 
+-- name: DeleteDraftIssueGoalChecks :exec
+-- Only a draft line may be rewritten; once locked the checks are fixed.
+DELETE FROM issue_goal_check c
+USING issue_goal g
+WHERE c.goal_id = g.id AND g.id = $1 AND g.status = 'draft';
+
 -- name: ConfirmIssueGoal :one
 UPDATE issue_goal
 SET status = 'active', locked_at = COALESCE(locked_at, now()), updated_at = now(), round = GREATEST(round, 1)

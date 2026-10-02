@@ -34,6 +34,7 @@ import {
   useRegenerateChatQuickActions,
 } from "@multica/core/chat/mutations";
 import {
+  chatKeys,
   chatMessageSearchOptions,
   chatMessagesOptions,
   chatQuickActionsPendingOptions,
@@ -839,6 +840,9 @@ export function ChatPage() {
         focusRequest={c.focusInputRequest}
         onConvertToGoal={c.activeSessionId ? async () => {
           const result = await api.convertChatSessionToGoal(c.activeSessionId!);
+          // The server appends a link message to this chat; refetch to show it.
+          void queryClient.invalidateQueries({ queryKey: chatKeys.messages(c.activeSessionId!) });
+          void queryClient.invalidateQueries({ queryKey: chatKeys.messagesPage(c.activeSessionId!) });
           openGoalCompletion({ issueId: result.issue.id, title: result.issue.title });
         } : undefined}
       />

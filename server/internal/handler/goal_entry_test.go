@@ -148,3 +148,65 @@ func TestCreateIssueGoalModeAndListFilter(t *testing.T) {
 		t.Fatalf("goal issue %s missing from goal-only list", created.ID)
 	}
 }
+
+// The shared completion panel submits create-then-confirm. For issues an entry
+// point already drafted, that submit must rewrite the draft, not 409.
+func TestCreateIssueGoal_HumanRedraftsDraftThenLocks(t *testing.T) {
+	createReq := newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":     "Goal redraft entry",
+		"status":    "todo",
+		"priority":  "none",
+		"goal_mode": true,
+	})
+	createW := httptest.NewRecorder()
+	testHandler.CreateIssue(createW, createReq)
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("goal issue create status = %d: %s", createW.Code, createW.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(createW.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("decode created issue: %v body=%s", err, createW.Body.String())
+	}
+
+	submit := func() *httptest.ResponseRecorder {
+		req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+created.ID+"/goal", map[string]any{
+			"checks": []map[string]any{{"description": "Entry is visible", "method": "screenshot"}},
+		}), "id", created.ID)
+		w := httptest.NewRecorder()
+		testHandler.CreateIssueGoal(w, req)
+		return w
+	}
+	if w := submit(); w.Code != http.StatusCreated {
+		t.Fatalf("redraft status = %d: %s", w.Code, w.Body.String())
+	}
+	var descriptions []string
+	rows, err := testPool.Query(context.Background(), `
+		SELECT c.description FROM issue_goal_check c JOIN issue_goal g ON g.id = c.goal_id
+		WHERE g.issue_id = $1 ORDER BY c.position`, created.ID)
+	if err != nil {
+		t.Fatalf("read checks: %v", err)
+	}
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			t.Fatalf("scan check: %v", err)
+		}
+		descriptions = append(descriptions, d)
+	}
+	rows.Close()
+	if len(descriptions) != 1 || descriptions[0] != "Entry is visible" {
+		t.Fatalf("checks after redraft = %v, want only the submitted check", descriptions)
+	}
+
+	confirmReq := withURLParam(newRequest(http.MethodPost, "/api/issues/"+created.ID+"/goal/confirm", nil), "id", created.ID)
+	confirmW := httptest.NewRecorder()
+	testHandler.ConfirmIssueGoal(confirmW, confirmReq)
+	if confirmW.Code != http.StatusOK {
+		t.Fatalf("confirm status = %d: %s", confirmW.Code, confirmW.Body.String())
+	}
+	if w := submit(); w.Code != http.StatusConflict {
+		t.Fatalf("submit after lock status = %d, want 409", w.Code)
+	}
+}

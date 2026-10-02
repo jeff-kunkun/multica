@@ -1092,6 +1092,9 @@ export function ChatWindow() {
         onStop={handleStop}
         onConvertToGoal={activeSessionId ? async () => {
           const result = await api.convertChatSessionToGoal(activeSessionId);
+          // The server appends a link message to this chat; refetch to show it.
+          void qc.invalidateQueries({ queryKey: chatKeys.messages(activeSessionId) });
+          void qc.invalidateQueries({ queryKey: chatKeys.messagesPage(activeSessionId) });
           setConvertedGoal({ issueId: result.issue.id, title: result.issue.title });
           openGoalCompletion({ issueId: result.issue.id, title: result.issue.title });
         } : undefined}

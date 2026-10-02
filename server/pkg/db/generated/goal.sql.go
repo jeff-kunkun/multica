@@ -228,6 +228,18 @@ func (q *Queries) CreateIssueGoalCheck(ctx context.Context, arg CreateIssueGoalC
 	return i, err
 }
 
+const deleteDraftIssueGoalChecks = `-- name: DeleteDraftIssueGoalChecks :exec
+DELETE FROM issue_goal_check c
+USING issue_goal g
+WHERE c.goal_id = g.id AND g.id = $1 AND g.status = 'draft'
+`
+
+// Only a draft line may be rewritten; once locked the checks are fixed.
+func (q *Queries) DeleteDraftIssueGoalChecks(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDraftIssueGoalChecks, id)
+	return err
+}
+
 const finishIssueGoal = `-- name: FinishIssueGoal :one
 UPDATE issue_goal
 SET status = $3,
