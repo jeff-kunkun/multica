@@ -534,6 +534,17 @@ func TestTaskScopedAuthToken(t *testing.T) {
 	}
 }
 
+func TestTaskMulticaEnvironmentExportsChatSession(t *testing.T) {
+	t.Parallel()
+	env := taskMulticaEnvironment(Task{ID: "t", ChatSessionID: "chat-1"}, "a", "mat_x", "/r", "/w", "https://x", 1, 0, "/tmp")
+	if got := env["MULTICA_CHAT_SESSION_ID"]; got != "chat-1" {
+		t.Fatalf("MULTICA_CHAT_SESSION_ID = %q, want chat-1", got)
+	}
+	if _, ok := taskMulticaEnvironment(Task{ID: "t"}, "a", "mat_x", "/r", "/w", "https://x", 1, 0, "/tmp")["MULTICA_CHAT_SESSION_ID"]; ok {
+		t.Fatal("issue tasks must not carry MULTICA_CHAT_SESSION_ID")
+	}
+}
+
 func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 	t.Parallel()
 

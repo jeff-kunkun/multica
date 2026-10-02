@@ -196,6 +196,11 @@ func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesR
 	if paths := strings.TrimSpace(task.CheckoutPaths); paths != "" {
 		env[sparsecheckout.EnvVar] = paths
 	}
+	// `multica chat title|progress|to-goal` default their --session to this;
+	// without it a chat run cannot name or update its own chat.
+	if task.ChatSessionID != "" {
+		env["MULTICA_CHAT_SESSION_ID"] = task.ChatSessionID
+	}
 	return env
 }
 
