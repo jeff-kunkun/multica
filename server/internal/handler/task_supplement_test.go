@@ -593,6 +593,9 @@ func TestTaskSupplementPermissionAndTenantIsolation(t *testing.T) {
 	fixture := newSupplementFixture(t, "codex", "running", true)
 	otherUser := dbfx.Insert(t, "user", testutil.Cols{"name": "No Invoke", "email": "no-invoke-supplement@example.test"})
 	dbfx.Member(t, testWorkspaceID, otherUser, "member")
+	// The fork hides private issues from members as "not found" (DENE-698);
+	// share it so the request reaches the invoke-permission check.
+	dbfx.Exec(t, "UPDATE issue SET visibility='workspace' WHERE id=$1", fixture.issueID)
 	req := newRequestAs(otherUser, http.MethodPost, "/supplements", map[string]any{
 		"client_request_id": "0199a4e8-22ce-7b01-bba5-555555555555", "content": "not allowed",
 	})

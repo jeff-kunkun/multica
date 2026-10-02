@@ -2139,6 +2139,7 @@ func TestGitHubInstallationBroadcastRedaction(t *testing.T) {
 // issue and verifies the parent gets exactly one platform-generated system
 // comment with the child's real workspace identifier.
 func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
+	enableChildDoneRule(t)
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
