@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,7 +61,13 @@ func (s stallTestStore) Settings(context.Context, string) (routing.Settings, err
 	return s.settings, nil
 }
 
-func (s stallTestStore) Issue(context.Context, string, string) (routing.Issue, error) {
+// Issue only answers for the ticket under test: the sweep scans every
+// workspace, so quiet tickets left by other tests in the package must not
+// reach the counting judge.
+func (s stallTestStore) Issue(_ context.Context, _ string, issueID string) (routing.Issue, error) {
+	if issueID != s.issue.ID {
+		return routing.Issue{}, fmt.Errorf("issue %s is outside this test", issueID)
+	}
 	return s.issue, nil
 }
 
@@ -226,11 +233,11 @@ func TestSweepStallActionsDoesNotTouchIntentionallyPausedTickets(t *testing.T) {
 		t.Fatalf("sweep: %v", err)
 	}
 	var status, action string
-	dbfx.QueryRow(t, `SELECT status, metadata->>'stall.action' FROM issue WHERE id = $1`, pausedParent).Scan(&status, &action)
+	dbfx.QueryRow(t, `SELECT status, COALESCE(metadata->>'stall.action','') FROM issue WHERE id = $1`, pausedParent).Scan(&status, &action)
 	if status != "in_progress" || action != "" {
 		t.Fatalf("paused parent status/action = %q/%q, want in_progress/empty", status, action)
 	}
-	dbfx.QueryRow(t, `SELECT status, metadata->>'stall.action' FROM issue WHERE id = $1`, pausedCandidate).Scan(&status, &action)
+	dbfx.QueryRow(t, `SELECT status, COALESCE(metadata->>'stall.action','') FROM issue WHERE id = $1`, pausedCandidate).Scan(&status, &action)
 	if status != "in_progress" || action != "" {
 		t.Fatalf("paused candidate status/action = %q/%q, want in_progress/empty", status, action)
 	}
