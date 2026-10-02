@@ -2054,7 +2054,19 @@ func runIssueStatusBatch(cmd *cobra.Command, args []string) error {
 	if err := client.PostJSON(ctx, "/api/issues/batch-update", body, &result); err != nil {
 		return fmt.Errorf("batch update status: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "%d issue(s) status changed to %s.\n", len(ids), status)
+	updated := len(ids)
+	if value, ok := result["updated"].(float64); ok {
+		updated = int(value)
+	}
+	rejected := 0
+	if values, ok := result["rejected"].([]any); ok {
+		rejected = len(values)
+	}
+	fmt.Fprintf(os.Stderr, "%d issue(s) status changed to %s", updated, status)
+	if rejected > 0 {
+		fmt.Fprintf(os.Stderr, "; %d rejected by issue status guards", rejected)
+	}
+	fmt.Fprintln(os.Stderr, ".")
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, map[string]any{

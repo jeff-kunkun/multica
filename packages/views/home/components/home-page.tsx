@@ -532,11 +532,28 @@ export function InboxBoardLanes({
       ids.forEach((id) => next.delete(id));
       return next;
     });
-    const write = ids.length === 1
+    const isBatch = ids.length > 1;
+    const write = !isBatch
       ? updateIssue.mutateAsync({ id: ids[0]!, status })
       : batchUpdate.mutateAsync({ ids, updates: { status } });
-    void write.then(() => {
+    void write.then((result) => {
       void queryClient.invalidateQueries({ queryKey: homeKeys.all(wsId) });
+
+      const rejected = isBatch && "rejected" in result ? result.rejected : [];
+      const rejectedIds = new Set(rejected.map(({ issue_id }) => issue_id));
+      const successfulIds = ids.filter((id) => !rejectedIds.has(id));
+      if (rejected.length > 0) {
+        setHiddenIds((current) => {
+          const next = new Set(current);
+          rejectedIds.forEach((id) => next.delete(id));
+          return next;
+        });
+        const reason = rejected[0]?.reason;
+        toast.error(reason || copy.t(($) => $.board.errors.status_failed));
+      }
+      if (successfulIds.length === 0) return;
+
+      const successfulPrevious = previous.filter(({ id }) => successfulIds.includes(id));
       toast.success(
         status === "cancelled"
           ? copy.t(($) => $.board.toasts.cancelled)
@@ -545,12 +562,12 @@ export function InboxBoardLanes({
           action: {
             label: copy.t(($) => $.board.actions.undo),
             onClick: () => {
-              const restore = previous.map(({ id, status: oldStatus }) =>
+              const restore = successfulPrevious.map(({ id, status: oldStatus }) =>
                 oldStatus ? updateIssue.mutateAsync({ id, status: oldStatus }) : Promise.resolve(),
               );
               setHiddenIds((current) => {
                 const next = new Set(current);
-                ids.forEach((id) => next.delete(id));
+                successfulIds.forEach((id) => next.delete(id));
                 return next;
               });
               void Promise.all(restore).then(
