@@ -244,6 +244,21 @@ var issueStatusCmd = &cobra.Command{
 	RunE: runIssueStatus,
 }
 
+var issueStatusBatchCmd = &cobra.Command{
+	Use:     "status-batch <status> <id> [<id>...]",
+	Aliases: []string{"batch-status"},
+	Short:   "Change the status of multiple issues",
+	Long: "Change several issues to one status through the same batch API used by the web and desktop clients.\n" +
+		"The first argument is a status KEY, followed by one or more issue keys or UUIDs.",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) < 2 {
+			return fmt.Errorf("requires a status and at least one issue id")
+		}
+		return nil
+	},
+	RunE: runIssueStatusBatch,
+}
+
 var issueCloseCmd = &cobra.Command{
 	Use:   "close <id>",
 	Short: "Close out an issue in one call: evidence comment, status, close record",
@@ -621,6 +636,7 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueStatusBatchCmd)
 	issueCmd.AddCommand(issueCloseCmd)
 	issueCmd.AddCommand(issueProgressCmd)
 	issueCmd.AddCommand(issueHandoffCmd)
@@ -734,6 +750,8 @@ func init() {
 	registerIssueCloseFlags(issueCloseCmd)
 	registerIssueHandoffFlags(issueHandoffCmd)
 	issueStatusCmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
+	issueStatusBatchCmd.Flags().Bool("no-start", false, "Change status without starting agent runs")
+	issueStatusBatchCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
@@ -1996,6 +2014,54 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
+	}
+	return nil
+}
+
+func runIssueStatusBatch(cmd *cobra.Command, args []string) error {
+	status := args[0]
+	if err := validateIssueStatus(status); err != nil {
+		return err
+	}
+	noStart, _ := cmd.Flags().GetBool("no-start")
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	ids := make([]string, 0, len(args)-1)
+	seen := make(map[string]struct{}, len(args)-1)
+	for _, raw := range args[1:] {
+		ref, err := resolveIssueRef(ctx, client, raw)
+		if err != nil {
+			return fmt.Errorf("resolve issue %s: %w", raw, err)
+		}
+		if _, ok := seen[ref.ID]; ok {
+			continue
+		}
+		seen[ref.ID] = struct{}{}
+		ids = append(ids, ref.ID)
+	}
+
+	updates := map[string]any{"status": status}
+	if noStart {
+		updates["suppress_run"] = true
+	}
+	body := map[string]any{"issue_ids": ids, "updates": updates}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/batch-update", body, &result); err != nil {
+		return fmt.Errorf("batch update status: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "%d issue(s) status changed to %s.\n", len(ids), status)
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{
+			"status":    status,
+			"issue_ids": ids,
+			"result":    result,
+		})
 	}
 	return nil
 }

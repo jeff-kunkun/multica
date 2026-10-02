@@ -21,6 +21,19 @@ and bounded output. A probe uses exit code `0` for ready, `10` (or GitHub CLI's
 any other code for failed. Do not add a follow-up stage-advance command after a
 close; the server advances stages as part of its close protocol.
 
+To move several issues to one lifecycle status at once, use the same batch
+endpoint as the web and desktop inbox actions:
+
+```bash
+multica issue status-batch done DENE-12 DENE-13 --output json
+multica issue status-batch todo DENE-12 --no-start
+```
+
+The first argument is the status key and the remaining arguments are issue keys
+or UUIDs. `--no-start` adds the same `suppress_run` control as single-issue
+status changes. `--output json` returns the resolved issue IDs and server batch
+result. `batch-status` is accepted as an alias.
+
 ## Sub-issues: todo starts work now, backlog parks it
 
 The steps are in `references/sub-issues.md`. `--status backlog` parks a child instead of starting it. `` `--stage <N>` `` groups children into a stage, and the parent is woken when a whole stage finishes. Promote one parked child with `multica issue status <child-id> todo`.

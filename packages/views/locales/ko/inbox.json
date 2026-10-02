@@ -260,6 +260,26 @@
       "todo": "할 일",
       "fresh": "새 소식",
       "done": "완료"
+    },
+    "actions": {
+      "backlog": "나중에 하기",
+      "done": "완료",
+      "cancelled": "하지 않기",
+      "return_to_do": "할 일로 돌려보내기",
+      "return_to_agent": "할 일로 돌려보내기 ({{name}} 깨우기)",
+      "more": "추가 작업",
+      "select": "{{title}} 선택",
+      "selected": "{{count}}개 선택됨",
+      "clear_selection": "선택 해제",
+      "undo": "실행 취소"
+    },
+    "toasts": {
+      "status_changed": "상태가 업데이트되었습니다",
+      "cancelled": "하지 않기로 표시했습니다. 실행 중인 작업은 계속됩니다"
+    },
+    "errors": {
+      "status_failed": "상태를 업데이트하지 못했습니다",
+      "undo_failed": "상태 변경을 되돌리지 못했습니다"
     }
   }
 }

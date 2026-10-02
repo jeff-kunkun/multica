@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -3241,6 +3242,13 @@ func newIssueStatusTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newIssueStatusBatchTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "status-batch"}
+	cmd.Flags().Bool("no-start", false, "")
+	cmd.Flags().String("output", "table", "")
+	return cmd
+}
+
 func newIssueListTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "list"}
 	cmd.Flags().String("output", "table", "")
@@ -3363,6 +3371,42 @@ func TestRunIssueStatusNoStartSendsSuppressRun(t *testing.T) {
 	}
 	if got := body["suppress_run"]; got != true {
 		t.Fatalf("suppress_run = %#v, want true", got)
+	}
+}
+
+func TestRunIssueStatusBatchUsesBatchEndpoint(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "in_review"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-2":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-2", "identifier": "MUL-2", "status": "in_review"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/batch-update":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"updated": 2})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueStatusBatchTestCmd()
+	_ = cmd.Flags().Set("no-start", "true")
+	if err := runIssueStatusBatch(cmd, []string{"done", "MUL-1", "MUL-2"}); err != nil {
+		t.Fatalf("runIssueStatusBatch: %v", err)
+	}
+	if got := body["issue_ids"]; !reflect.DeepEqual(got, []any{"issue-1", "issue-2"}) {
+		t.Fatalf("issue_ids = %#v, want both resolved UUIDs", got)
+	}
+	updates, ok := body["updates"].(map[string]any)
+	if !ok || updates["status"] != "done" || updates["suppress_run"] != true {
+		t.Fatalf("updates = %#v, want done + suppress_run", body["updates"])
 	}
 }
 
