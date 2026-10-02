@@ -1610,6 +1610,10 @@ export class ApiClient {
     });
   }
 
+  async deleteIssueMetadata(id: string, key: string): Promise<{ metadata: Record<string, unknown>; issue_revision: number }> {
+    return this.fetch(`/api/issues/${id}/metadata/${encodeURIComponent(key)}`, { method: "DELETE" });
+  }
+
   async setIssueVisibility(id: string, visibility: "private" | "project" | "workspace") {
     return this.fetch<{ id: string; visibility: "private" | "project" | "workspace"; audience_size?: number }>(
       `/api/issues/${id}/visibility`,
@@ -3566,6 +3570,17 @@ export class ApiClient {
 
   async getWorkspace(id: string): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`);
+  }
+
+  async getWorkspaceNaming(workspaceId: string): Promise<import("../types").WorkspaceNaming> {
+    return this.fetch(`/api/workspaces/${workspaceId}/naming`);
+  }
+
+  async updateWorkspaceNaming(workspaceId: string, source: "server_llm" | "runtime" | "rules"): Promise<import("../types").WorkspaceNaming> {
+    return this.fetch(`/api/workspaces/${workspaceId}/naming`, {
+      method: "PUT",
+      body: JSON.stringify({ source }),
+    });
   }
 
   async listModuleVisibility(): Promise<ModuleVisibility[]> {

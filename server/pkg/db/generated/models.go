@@ -595,6 +595,15 @@ type ChatMessage struct {
 	SenderUserID                  pgtype.UUID        `json:"sender_user_id"`
 }
 
+type ChatNamingEvent struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Source        string             `json:"source"`
+	Status        string             `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChatPinnedAgent struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
