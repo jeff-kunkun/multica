@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/routing"
+	"github.com/multica-ai/multica/server/internal/stallaction"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -27,27 +28,6 @@ func TestAllChildrenTerminalRequiresChildrenAndEveryChildTerminal(t *testing.T) 
 	children[1].Status = "cancelled"
 	if !allChildrenTerminal(children, terminal) {
 		t.Fatal("all terminal children should close the barrier")
-	}
-}
-
-func TestStallStringAndBoolReadOnlyMetadata(t *testing.T) {
-	meta := map[string]any{stallActionKey: "announced", stallCandidateKey: true}
-	if stallString(meta, stallActionKey) != stallActionAnnounced {
-		t.Fatal("action metadata was not read")
-	}
-	if !stallBool(meta, stallCandidateKey) {
-		t.Fatal("candidate metadata was not read")
-	}
-}
-
-func TestStallCandidateJudgementMarkerSkipsUnchangedActivity(t *testing.T) {
-	activityAt := time.Date(2026, 10, 2, 12, 0, 0, 123456000, time.UTC)
-	meta := map[string]any{stallJudgedAtKey: activityAt.Format(time.RFC3339Nano)}
-	if !stallCandidateJudgedForActivity(meta, activityAt) {
-		t.Fatal("a model decision for the current activity should be reused")
-	}
-	if stallCandidateJudgedForActivity(meta, activityAt.Add(time.Second)) {
-		t.Fatal("new activity must make the ticket eligible for a fresh judgment")
 	}
 }
 
@@ -183,7 +163,7 @@ func TestSweepStallActionsAnnouncementKeepAndExpiry(t *testing.T) {
 	}
 	var action string
 	dbfx.QueryRow(t, `SELECT metadata->>'stall.action' FROM issue WHERE id = $1`, kept).Scan(&action)
-	if action != stallActionAnnounced {
+	if action != stallaction.ActionAnnounced {
 		t.Fatalf("candidate action = %q, want announced", action)
 	}
 
@@ -194,7 +174,7 @@ func TestSweepStallActionsAnnouncementKeepAndExpiry(t *testing.T) {
 		t.Fatalf("keep status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 	dbfx.QueryRow(t, `SELECT metadata->>'stall.action' FROM issue WHERE id = $1`, kept).Scan(&action)
-	if action != stallActionKept {
+	if action != stallaction.ActionKept {
 		t.Fatalf("kept action = %q, want kept", action)
 	}
 
@@ -288,7 +268,7 @@ func TestSweepStallActionsKeepsAnnouncementWhenWorkResumes(t *testing.T) {
 	}
 	var status, action string
 	dbfx.QueryRow(t, `SELECT status, metadata->>'stall.action' FROM issue WHERE id = $1`, issueID).Scan(&status, &action)
-	if status != "in_progress" || action != stallActionKept {
+	if status != "in_progress" || action != stallaction.ActionKept {
 		t.Fatalf("resumed ticket status/action = %q/%q, want in_progress/kept", status, action)
 	}
 }
