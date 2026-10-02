@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -143,6 +144,16 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 		return issueDeliveries{Ident: ident}, err
 	}
 	if len(gh)+len(vcsRows) > 0 {
+		// Webhooks are the normal update path, but a self-hosted GitLab MR can
+		// be merged without the webhook reaching this server. Refresh linked VCS
+		// rows through the configured provider before the close gate decides.
+		if len(vcsRows) > 0 {
+			h.refreshLinkedVCSPulls(ctx, issue, vcsRows)
+			gh, vcsRows, err = h.loadDeliveryRows(ctx, issue.ID)
+			if err != nil {
+				return issueDeliveries{Ident: ident}, err
+			}
+		}
 		return finishDeliveries(ident, gh, vcsRows, false, true, false, ""), nil
 	}
 
@@ -258,6 +269,48 @@ func (h *Handler) computeIssueDeliveries(ctx context.Context, issue db.Issue) (i
 		view.Gap.NextCommand = gitconn.AddCommand(deniedHost) + " --yes"
 	}
 	return view, nil
+}
+
+// refreshLinkedVCSPulls asks each configured self-hosted provider for the
+// current state of an already-linked MR. This closes the stale-open window
+// where a GitLab MR was merged after its last webhook but before issue close.
+// A missing token or a failed read is deliberately best-effort: the stored
+// snapshot remains the conservative fallback.
+func (h *Handler) refreshLinkedVCSPulls(ctx context.Context, issue db.Issue, rows []db.ListVCSPullRequestsByIssueRow) {
+	if !h.isVCSAvailable() || !h.isVCSConfigured() {
+		return
+	}
+	conns, err := h.Queries.ListVCSConnectionsByWorkspace(ctx, issue.WorkspaceID)
+	if err != nil {
+		return
+	}
+	for _, row := range rows {
+		ref, err := delivery.ParsePullURL(row.HtmlUrl)
+		if err != nil {
+			continue
+		}
+		conn := matchConnection(conns, ref.Key, ref.Host)
+		if conn == nil {
+			continue
+		}
+		token, err := h.openVCSSecret(conn.AccessTokenEncrypted)
+		if err != nil || token == "" || token == "local" {
+			continue
+		}
+		pull, err := delivery.Fetch(ctx, h.deliveryClient(), ref.Provider, delivery.APIBase(ref.Provider, conn.InstanceUrl, ""), token, ref)
+		if err != nil || pull.Number == 0 {
+			continue
+		}
+		if pull.URL == "" {
+			pull.URL = ref.URL
+		}
+		if pull.Provider == "" {
+			pull.Provider = ref.Provider
+		}
+		if err := h.persistDeliveryPull(ctx, issue, conn, pull); err != nil {
+			slog.Warn("delivery: refresh linked pull failed", "issue_id", uuidToString(issue.ID), "url", ref.URL, "error", err)
+		}
+	}
 }
 
 // deliveryRepos narrows a delivery lookup to the issue's project repositories
@@ -428,6 +481,31 @@ func (h *Handler) resolveDeclaredPull(ctx context.Context, issue db.Issue, raw s
 	}
 	h.rememberDeclared(ctx, d)
 	return d, nil
+}
+
+var pullURLToken = regexp.MustCompile(`https?://[^\s<>"']+`)
+
+// findPullURL accepts the first pull/MR link in the submitted evidence or the
+// recent issue timeline. Agents commonly put the link in the initial review
+// handoff and omit --pr on the later done close.
+func (h *Handler) findPullURL(ctx context.Context, issue db.Issue, evidence string) string {
+	texts := []string{evidence}
+	if comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, Limit: 30,
+	}); err == nil {
+		for _, comment := range comments {
+			texts = append(texts, comment.Content)
+		}
+	}
+	for _, text := range texts {
+		for _, raw := range pullURLToken.FindAllString(text, -1) {
+			raw = strings.TrimRight(raw, ".,;:!?，。；：！？)]}>")
+			if _, err := delivery.ParsePullURL(raw); err == nil {
+				return raw
+			}
+		}
+	}
+	return ""
 }
 
 func (h *Handler) fetchAndLinkDeclared(ctx context.Context, issue db.Issue, ref delivery.Ref) bool {

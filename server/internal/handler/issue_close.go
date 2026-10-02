@@ -157,8 +157,12 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 
 	ctx = withDeliveryBag(ctx)
 	r = r.WithContext(ctx)
-	if pr := strings.TrimSpace(req.PRURL); pr != "" && (outcome == issuestatus.Done || outcome == issuestatus.InReview || verdict == "pass") {
-		declared, err := h.resolveDeclaredPull(ctx, issue, pr)
+	prURL := strings.TrimSpace(req.PRURL)
+	if prURL == "" && (outcome == issuestatus.Done || outcome == issuestatus.InReview || verdict == "pass") {
+		prURL = h.findPullURL(ctx, issue, body)
+	}
+	if prURL != "" && (outcome == issuestatus.Done || outcome == issuestatus.InReview || verdict == "pass") {
+		declared, err := h.resolveDeclaredPull(ctx, issue, prURL)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "--pr 不是 PR 或 MR 链接："+err.Error())
 			return
@@ -391,6 +395,10 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	if updated.Status == issuestatus.Blocked || updated.Status == issuestatus.InReview || updated.Status == issuestatus.InProgress {
 		if rec.meta[closeprotocol.KeyNextOwnerType] == closeprotocol.OwnerMember && strings.TrimSpace(deref(req.NeedsHuman)) != "" {
 			h.summonNeedsHuman(ctx, updated, rec.meta[closeprotocol.KeyNextOwnerID], actorType, actorID, closeSummonReason(summary, evidence))
+			resp.Summoned = true
+		}
+		if tr.persistBlock && tr.block.NeedsHuman != "" {
+			h.summonNeedsHuman(ctx, updated, tr.block.NeedsHuman, actorType, actorID, tr.note)
 			resp.Summoned = true
 		}
 	}
