@@ -37,6 +37,7 @@ func codeartsTerminateGrace() time.Duration {
 // overridden by user-configured custom_args.
 var codeartsBlockedArgs = map[string]blockedArgMode{
 	"--format":                       blockedWithValue,  // JSON output format for daemon communication
+	"--session":                      blockedWithValue,  // managed via ExecOptions.ResumeSessionID
 	"--auto":                         blockedStandalone, // daemon-owned non-interactive permission mode
 	"--sandbox":                      blockedStandalone, // daemon-owned sandbox policy
 	"--dir":                          blockedWithValue,  // unsupported; cmd.Dir owns the workdir
