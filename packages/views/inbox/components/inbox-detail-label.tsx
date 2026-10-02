@@ -43,6 +43,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     agent_access_approved: t(($) => $.types.agent_access_approved),
     agent_access_declined: t(($) => $.types.agent_access_declined),
     parking_unexplained: t(($) => $.types.parking_unexplained),
+    issue_stall_action: t(($) => $.types.issue_stall_action),
   };
 }
 

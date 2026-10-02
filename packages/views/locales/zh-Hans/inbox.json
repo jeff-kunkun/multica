@@ -70,7 +70,11 @@
     "access_request_expires": "{{until}} 过期",
     "access_status_approved": "已批准",
     "access_status_declined": "已拒绝",
-    "access_status_expired": "已过期：没人及时处理"
+    "access_status_expired": "已过期：没人及时处理",
+    "stall_review_title": "这张票正在进行 24 小时停滞公示",
+    "stall_processed_title": "这张票由系统自动处理",
+    "stall_keep": "保留",
+    "stall_undo": "撤销处理"
   },
   "types": {
     "needs_you": "需要你处理",
@@ -99,7 +103,8 @@
     "agent_access_request": "智能体借用申请",
     "agent_access_approved": "智能体借用已批准",
     "agent_access_declined": "智能体借用已拒绝",
-    "parking_unexplained": "停了没交代"
+    "parking_unexplained": "停了没交代",
+    "issue_stall_action": "停滞处理"
   },
   "labels": {
     "set_status_to": "状态设为",

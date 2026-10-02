@@ -2074,6 +2074,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/children", h.ListChildrenByParents)
 				r.Get("/grouped", h.ListGroupedIssues)
 				r.Get("/", h.ListIssues)
+				r.Get("/stall-actions", h.ListStallActions)
 				// POST twin of GET /api/issues for oversized filter sets
 				// (agents-working ids facet) — see QueryIssues.
 				r.Post("/query", h.QueryIssues)
@@ -2140,6 +2141,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// status and close.* keys in one transaction, checked by
 					// closeprotocol.Validate — `multica issue close`.
 					r.Post("/close", h.CloseIssue)
+					r.Post("/stall/review", h.ReviewStallAction)
+					r.Post("/stall/keep", h.KeepStallAction)
+					r.Post("/stall/undo", h.UndoStallAction)
 					r.Post("/progress", h.WriteIssueProgress)
 					r.Get("/progress", h.ListIssueProgress)
 					// PR state from the caller's gh, refreshed by `issue

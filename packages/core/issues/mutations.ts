@@ -1258,3 +1258,29 @@ export function useRetryIssueRun(issueId: string) {
     onSuccess: () => client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
   });
 }
+
+export function useKeepIssueStall() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (issueId: string) => api.keepIssueStall(issueId),
+    onSettled: (_data, _error, issueId) => {
+      void qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+      void qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      void qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+    },
+  });
+}
+
+export function useUndoIssueStall() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (issueId: string) => api.undoIssueStall(issueId),
+    onSettled: (_data, _error, issueId) => {
+      void qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+      void qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      void qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+    },
+  });
+}
