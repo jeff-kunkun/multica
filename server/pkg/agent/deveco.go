@@ -60,6 +60,7 @@ func devecoTerminateGrace() time.Duration {
 // the same daemon-managed flags as OpenCode's.
 var devecoBlockedArgs = map[string]blockedArgMode{
 	"--format":                       blockedWithValue,  // json output format for daemon communication
+	"--session":                      blockedWithValue,  // managed via ExecOptions.ResumeSessionID
 	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
 	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
 	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts
