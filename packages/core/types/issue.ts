@@ -189,6 +189,8 @@ export interface Issue {
   identifier: string;
   title: string;
   progress?: Progress | null;
+  /** List/board projection of the attached goal; avoids one request per row. */
+  goal_progress?: { done: number; total: number } | null;
   description: string | null;
   status: IssueStatus;
   /**

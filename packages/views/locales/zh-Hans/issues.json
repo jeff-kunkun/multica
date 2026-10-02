@@ -474,6 +474,7 @@
     "prop_updated": "更新时间",
     "activity_section": "动态",
     "goal": {
+      "badge_aria": "目标 {{done}}/{{total}}",
       "title": "目标",
       "completion_title": "补全完成线",
       "completion_hint": "选出这张任务必须通过的检查项，确认后再开始推进。",
@@ -497,7 +498,16 @@
       "stopped_hint": "这个目标已暂停。请在收件箱的选项提问里选择再给预算、调整完成线或结束目标。",
       "evidence_item": "证据",
       "open_evidence": "打开证据",
-      "status": { "draft": "待确认", "locked": "推进中", "active": "推进中", "stopped": "已停下", "achieved": "已达标" }
+      "status": {
+        "draft": "待确认",
+        "locked": "推进中",
+        "active": "推进中",
+        "stopped": "已停下",
+        "achieved": "已达标"
+      },
+      "goal_toggle": "做到达标为止",
+      "progress_word": "达标",
+      "unset": "未设"
     },
     "subscribe": "订阅",
     "unsubscribe": "取消订阅",
@@ -1160,6 +1170,7 @@
     "entry_submit": "开始",
     "entry_create_start": "创建并开始",
     "goal_toggle": "做到达标为止",
+    "goal_prompt": "对齐时会追问怎么算做完，并把结论带进完成线。",
     "entry_submitting": "正在开始…",
     "entry_cancel": "取消",
     "entry_no_runtime": "没有可用的在线运行时，对齐智能体无法运行。",

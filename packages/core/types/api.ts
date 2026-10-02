@@ -19,6 +19,8 @@ export interface CreateIssueRequest {
   start_date?: string;
   due_date?: string;
   attachment_ids?: string[];
+  /** Open the shared completion-line flow after creation. */
+  goal_mode?: boolean;
   /** Issue-scoped label IDs to attach in the same transaction as the create.
    *  Unknown or non-issue ids are rejected by the server with 400. */
   label_ids?: string[];
@@ -164,6 +166,8 @@ export interface ListIssuesParams {
   label_ids?: string[];
   /** Restrict the window to root issues instead of filtering loaded pages. */
   top_level_only?: boolean;
+  /** Restrict the window to issues with an attached completion-line goal. */
+  goal_only?: boolean;
   /**
    * Hard restriction of the window to the given issue ids (the table's
    * agents-working facet sends the live running-issue set). An EMPTY array is
@@ -319,6 +323,8 @@ export interface IssueTableFilters {
   /** Drop issues that are finished THROUGH — terminal status AND no unfinished
    *  sub-issue. A terminal parent with open children is kept. (DENE-444) */
   hide_completed_parents?: boolean;
+  /** Restrict the window to issues with an attached completion-line goal. */
+  goal_only?: boolean;
 }
 
 export type IssueTableSortField =

@@ -867,11 +867,17 @@ func trySend(ch chan<- Message, msg Message) bool {
 // overridden by user-configured custom_args. Overriding these would break
 // the daemon↔Claude communication protocol.
 var claudeBlockedArgs = map[string]blockedArgMode{
-	"-p":                blockedStandalone, // non-interactive mode
-	"--output-format":   blockedWithValue,  // stream-json protocol
-	"--input-format":    blockedWithValue,  // stream-json protocol
-	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
-	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
+	"-p":                blockedStandalone,    // non-interactive mode
+	"-c":                blockedOptionalValue, // Claude's --continue; Codex uses -c for config
+	"--continue":        blockedStandalone,    // session continuation is daemon-owned
+	"-r":                blockedWithValue,     // resume is daemon-owned
+	"--resume":          blockedWithValue,     // resume is daemon-owned
+	"--session-id":      blockedWithValue,     // session identity is daemon-owned
+	"--fork-session":    blockedStandalone,    // session fork is daemon-owned
+	"--output-format":   blockedWithValue,     // stream-json protocol
+	"--input-format":    blockedWithValue,     // stream-json protocol
+	"--permission-mode": blockedWithValue,     // bypassPermissions for autonomous operation
+	"--mcp-config":      blockedWithValue,     // set by daemon from agent.mcp_config
 	// `--effort` is owned by the per-agent thinking_level picker so a
 	// user-supplied custom_arg cannot silently outvote it. The daemon
 	// injects --effort only when opts.ThinkingLevel is set; if a user
@@ -1174,6 +1180,13 @@ const (
 // only block args that would break the communication protocol, not every
 // possible dangerous flag. Workspace members are trusted to configure agents
 // sensibly, same as with custom_env.
+//
+// One exception to "narrow": every flag that picks which session a run attaches
+// to (continue-latest, resume, session id/path/dir, fork) must be blocked on
+// every backend. The daemon owns session identity; a "continue the latest
+// session" flag attaches a cold start to whatever last ran in the same cwd,
+// which in shared mode is another chat (DENE-1160). A new backend adds its
+// CLI's session flags here, and TestSessionContinuationArgsAreBlocked lists it.
 //
 // Shell quoting is stripped from each arg before processing: users commonly
 // type custom_args in config fields using shell syntax (e.g.

@@ -81,7 +81,8 @@
     "remove_all_project_context": "Remove all project context",
     "no_projects": "No projects yet",
     "switch_project": "Switch to another project…",
-    "project_context_unsupported": "Project description won't apply — this agent's daemon needs an upgrade"
+    "project_context_unsupported": "Project description won't apply — this agent's daemon needs an upgrade",
+    "to_goal": "Turn into a goal task"
   },
   "queue": {
     "title_one": "{{count}} queued message",
@@ -225,6 +226,11 @@
       "label": "Walk me through my inbox",
       "prompt": "Walk me through my inbox",
       "prompt_project": "Walk me through my inbox, but only the project \"{{name}}\". Read the board with `multica inbox board --project {{id}}` and tell only that project's tickets."
+    },
+    "project_board": {
+      "prompt": "Give me the full open-ticket panorama for the workspace. Read `multica project board --output json` first. Group the report into blocked, can move forward, and can be cleared; ask for my confirmation before changing status or closing anything.",
+      "prompt_project": "Give me the full open-ticket panorama for the project \"{{name}}\". Read `multica project board {{id}} --output json` first. Group the report into blocked, can move forward, and can be cleared; ask for my confirmation before changing status or closing anything.",
+      "prompt_projects": "Give me the full open-ticket panorama for these projects: {{names}}. Read `multica project board {{ids}} --output json` first. Group the report into blocked, can move forward, and can be cleared; ask for my confirmation before changing status or closing anything."
     }
   },
   "onboarding_cards": {

@@ -79,7 +79,8 @@
     "remove_all_project_context": "すべてのプロジェクトコンテキストを削除",
     "no_projects": "プロジェクトがまだありません",
     "switch_project": "他のプロジェクトに切り替え…",
-    "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です"
+    "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です",
+    "to_goal": "转成目标任务"
   },
   "queue": {
     "title_other": "キュー内のメッセージ {{count}} 件",
@@ -220,6 +221,11 @@
       "label": "受信トレイをざっと説明して",
       "prompt": "受信トレイをざっと説明して",
       "prompt_project": "受信トレイをざっと説明して。ただし「{{name}}」プロジェクトだけ。`multica inbox board --project {{id}}` でボードを読み、そのプロジェクトのチケットだけ説明して。"
+    },
+    "project_board": {
+      "prompt": "`multica project board --output json` でワークスペースの未完了チケット全体を読み、詰まっているもの、進められるもの、片付けられるものに分けて説明して。変更前に確認して。",
+      "prompt_project": "「{{name}}」プロジェクトの未完了チケット全体を `multica project board {{id}} --output json` で読み、変更前に確認して。",
+      "prompt_projects": "次のプロジェクトの未完了チケット全体を読んで：{{names}}。`multica project board {{ids}} --output json` を使い、変更前に確認して。"
     }
   },
   "onboarding_cards": {

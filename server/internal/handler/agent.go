@@ -950,6 +950,7 @@ type AgentTaskResponse struct {
 	QuickCreatePrompt        string                `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
 	QuickCreatePriority      string                `json:"quick_create_priority,omitempty"`       // explicit priority selected in quick-create
 	QuickCreateDueDate       string                `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
+	QuickCreateGoalMode      bool                  `json:"quick_create_goal_mode,omitempty"`
 	QuickCreateAttachmentIDs []string              `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
 	QuickCreateSourceContext json.RawMessage       `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
 	HandoffNote              string                `json:"handoff_note,omitempty"`                // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
@@ -2205,6 +2206,14 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.CustomEnv == nil {
 		ce = []byte("{}")
 	}
+	customArgsProvider := runtime.Provider
+	if inheritRuntime {
+		customArgsProvider = inheritedRuntimeProvider
+	}
+	if err := agent.ValidateCustomArgsForProvider(customArgsProvider, req.CustomArgs); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	ca, _ := json.Marshal(req.CustomArgs)
 	if req.CustomArgs == nil {
@@ -2916,6 +2925,21 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
+	}
+	if req.CustomArgs != nil {
+		provider := targetProvider
+		if provider == "" && targetRuntimeID.Valid {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for custom_args validation")
+				return
+			}
+		}
+		if err := agent.ValidateCustomArgsForProvider(provider, *req.CustomArgs); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides

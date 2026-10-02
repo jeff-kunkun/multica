@@ -39,7 +39,7 @@ var grokBlockedArgs = map[string]blockedArgMode{
 	"--effort":                 blockedWithValue,
 	"-r":                       blockedWithValue,
 	"--resume":                 blockedWithValue,
-	"-c":                       blockedStandalone,
+	"-c":                       blockedOptionalValue,
 	"--continue":               blockedStandalone,
 	"-s":                       blockedWithValue,
 	"--session-id":             blockedWithValue,
