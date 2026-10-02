@@ -713,7 +713,7 @@ func init() {
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
-	issueCreateCmd.Flags().String("per-quote", "", "Only when you are an agent: the words the person talking to you said naming this assignee, copied exactly from the message that started this run. The server checks them; without a verified quote your pick is ignored and routing chooses")
+	issueCreateCmd.Flags().String("per-quote", "", "Only when you are an agent: the person's exact words naming this assignee. The server checks earlier messages in the direct chat or issue thread; an unverifiable quote stays unassigned and is not rerouted")
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
@@ -735,7 +735,7 @@ func init() {
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
-	issueUpdateCmd.Flags().String("per-quote", "", "Only when you are an agent: the words the person talking to you said naming this assignee, copied exactly from the message that started this run. The server checks them; without a verified quote your pick is ignored and routing chooses")
+	issueUpdateCmd.Flags().String("per-quote", "", "Only when you are an agent: the person's exact words naming this assignee. The server checks earlier messages in the direct chat or issue thread; an unverifiable quote stays unassigned and is not rerouted")
 	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueUpdateCmd.Flags().String("reviewer", "", "验收席 — who accepts this issue: a member or agent name, \"none\" for no acceptance pass, or \"\" to clear the slot")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
@@ -770,7 +770,7 @@ func init() {
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
-	issueAssignCmd.Flags().String("per-quote", "", "Only when you are an agent: the words the person talking to you said naming this assignee, copied exactly from the message that started this run. The server checks them; without a verified quote your pick is ignored and routing chooses")
+	issueAssignCmd.Flags().String("per-quote", "", "Only when you are an agent: the person's exact words naming this assignee. The server checks earlier messages in the direct chat or issue thread; an unverifiable quote stays unassigned and is not rerouted")
 	issueAssignCmd.Flags().Bool("no-start", false, "Assign ownership without starting an agent run")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -3984,8 +3984,11 @@ func noteIgnoredAssignee(result map[string]any) bool {
 	if ignored, _ := result["assignee_ignored"].(bool); !ignored {
 		return false
 	}
-	fmt.Fprintf(os.Stderr, "Issue %s: the assignee you named was NOT applied. Routing will choose the executor. "+
-		"Only pass --per-quote when the person talking to you named the agent in the message that started this run.\n",
-		issueDisplayKey(result))
+	reason, _ := result["assignee_ignored_reason"].(string)
+	if reason == "" {
+		reason = "the person did not provide a verifiable quote"
+	}
+	fmt.Fprintf(os.Stderr, "Issue %s: the assignee you named was NOT applied; the issue remains unassigned. %s.\n",
+		issueDisplayKey(result), reason)
 	return true
 }

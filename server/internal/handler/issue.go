@@ -68,7 +68,7 @@ type IssueResponse struct {
 	AssigneeType *string `json:"assignee_type"`
 	AssigneeID   *string `json:"assignee_id"`
 	// AssigneeSource is whose decision the executor is: human / automation /
-	// quote / agent / router (DENE-1033). Omitted for a ticket that predates
+	// quote / agent / quote_rejected / router (DENE-1033). Omitted for a ticket that predates
 	// the record and by the list endpoints, which do not select it, so a
 	// client merging a list row keeps what the detail read told it.
 	// AssigneeSourceUserID is the person behind "quote" and AssigneeQuote the
@@ -80,6 +80,9 @@ type IssueResponse struct {
 	// named an executor the server did not apply, so the caller sees it now
 	// instead of finding the slot empty later.
 	AssigneeIgnored bool `json:"assignee_ignored,omitempty"`
+	// AssigneeIgnoredReason explains a rejected per-quote proof so an agent can
+	// ask the person for an actual quote instead of guessing again.
+	AssigneeIgnoredReason string `json:"assignee_ignored_reason,omitempty"`
 	// ReviewerType / ReviewerID are the acceptance slot, shaped exactly like
 	// the assignee pair: a REFERENCE to an agent or a member, not a copy of a
 	// name, so renaming or archiving the target cannot leave stale text behind.
@@ -3333,12 +3336,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// routing will judge an unverified one is dropped so routing decides.
 	var ruling assignmentRuling
 	assigneeIgnored := false
+	assigneeIgnoredReason := ""
 	if assigneeType.Valid {
 		ruling = h.rulePick(r, workspaceID, creatorType, actualCreatorID, assigneeType, assigneeID, deref(req.AssigneeQuote), status)
 		if !ruling.Apply {
 			assigneeType, assigneeID = pgtype.Text{}, pgtype.UUID{}
 			assigneeIgnored = true
-			ruling.Source = routing.SourceAgent
+			assigneeIgnoredReason = ruling.Reason
+			if ruling.Source == "" {
+				ruling.Source = routing.SourceAgent
+			}
 		}
 	}
 
@@ -3470,6 +3477,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	resp := issueToResponse(issue, prefix)
 	resp.AssigneeIgnored = assigneeIgnored
+	resp.AssigneeIgnoredReason = assigneeIgnoredReason
 	fillCreated(&resp)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
 	// Echo the authoritative labels attached in the create transaction. Always
@@ -4071,8 +4079,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Whose pick is the executor (DENE-1033): see rulePick. A dropped pick
 	// leaves the slot as it was; the caller is told through assignee_ignored.
 	var (
-		stampRuling    *assignmentRuling
-		assigneeIgnore bool
+		stampRuling          *assignmentRuling
+		assigneeIgnore       bool
+		assigneeIgnoreReason string
 	)
 	if touchedType || touchedID {
 		if params.AssigneeType.Valid && params.AssigneeID.Valid {
@@ -4086,12 +4095,16 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				stampRuling = &ruling
 			} else {
 				assigneeIgnore = true
+				assigneeIgnoreReason = ruling.Reason
 				params.AssigneeType, params.AssigneeID = prevIssue.AssigneeType, prevIssue.AssigneeID
 				touchedType, touchedID = false, false
 				if !prevIssue.AssigneeType.Valid {
 					// Nothing holds the slot: remember that an agent tried, so
 					// routing can say so in its one comment.
-					stampRuling = &assignmentRuling{Source: routing.SourceAgent}
+					stampRuling = &assignmentRuling{Source: ruling.Source}
+					if stampRuling.Source == "" {
+						stampRuling.Source = routing.SourceAgent
+					}
 				}
 			}
 		} else if !params.AssigneeID.Valid {
@@ -4204,6 +4217,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
 	resp.AssigneeIgnored = assigneeIgnore
+	resp.AssigneeIgnoredReason = assigneeIgnoreReason
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
 	h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
@@ -5041,7 +5055,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					params.AssigneeType, params.AssigneeID = prevIssue.AssigneeType, prevIssue.AssigneeID
 					batchTouchedType, batchTouchedID = false, false
 					if !prevIssue.AssigneeType.Valid {
-						batchStamp = &assignmentRuling{Source: routing.SourceAgent}
+						batchStamp = &assignmentRuling{Source: ruling.Source}
+						if batchStamp.Source == "" {
+							batchStamp.Source = routing.SourceAgent
+						}
 					}
 				}
 			} else if !params.AssigneeID.Valid {
