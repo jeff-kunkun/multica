@@ -92,7 +92,7 @@ describe("useChatController workspace rehydration", () => {
     const values = new Map<string, string>([
       ["multica:chat:activeSessionId:source", sourceSession.id],
       ["multica:chat:activeSessionId:target", targetSession.id],
-      ["multica:chat:selectedProjectId:target", targetProject.id],
+      ["multica:chat:selectedProjectIds:target", JSON.stringify([targetProject.id])],
     ]);
     storage = {
       getItem: (key) => values.get(key) ?? null,
@@ -113,8 +113,8 @@ describe("useChatController workspace rehydration", () => {
   function expectTargetSelection() {
     expect(store.getState().activeSessionId).toBe(targetSession.id);
     expect(storage.getItem("multica:chat:activeSessionId:target")).toBe(targetSession.id);
-    expect(store.getState().selectedProjectId).toBe(targetProject.id);
-    expect(storage.getItem("multica:chat:selectedProjectId:target")).toBe(targetProject.id);
+    expect(store.getState().selectedProjectIds).toEqual([targetProject.id]);
+    expect(storage.getItem("multica:chat:selectedProjectIds:target")).toBe(JSON.stringify([targetProject.id]));
     expect(storage.getItem("multica:chat:activeSessionId:source")).toBe(sourceSession.id);
   }
 
@@ -159,9 +159,9 @@ describe("useChatController workspace rehydration", () => {
     rerender();
 
     expect(store.getState().activeSessionId).toBeNull();
-    expect(store.getState().selectedProjectId).toBeNull();
+    expect(store.getState().selectedProjectIds).toEqual([]);
     expect(storage.getItem("multica:chat:activeSessionId:target")).toBeNull();
-    expect(storage.getItem("multica:chat:selectedProjectId:target")).toBeNull();
+    expect(storage.getItem("multica:chat:selectedProjectIds:target")).toBeNull();
     expect(storage.getItem("multica:chat:activeSessionId:source")).toBe(sourceSession.id);
   });
 });

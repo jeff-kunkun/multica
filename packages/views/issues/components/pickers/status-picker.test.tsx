@@ -4,7 +4,6 @@ import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
 import type { IssueStatusEntry } from "@multica/core/types";
-import { fireEvent, screen } from "@testing-library/react";
 import { renderWithI18n } from "../../../test/i18n";
 import { GuestReadOnlyScope } from "../../../layout/guest-readonly";
 import { StatusPicker } from "./status-picker";

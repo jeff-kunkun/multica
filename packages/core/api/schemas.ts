@@ -64,7 +64,6 @@ import type {
   GroupedIssuesResponse,
   GitHubConnectResponse,
   GitHubAppStatus,
-  GitHubPullRequest,
   IssuePullRequestsResponse,
   InboxItem,
   InboxWorkspaceUnread,

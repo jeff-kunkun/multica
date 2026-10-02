@@ -349,7 +349,6 @@ export function ExecutionLogSection({ issueId, workspaceId, identifier, issueTit
         open={usageOpen}
         onOpenChange={handleUsageOpenChange}
         identifier={identifier ?? ""}
-        issueTitle={issueTitle}
         tasks={tasks}
         isPending={tasksPending}
         // A failed background refetch keeps the cached runs; only a load that

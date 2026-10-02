@@ -3130,7 +3130,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           issueId={id}
           identifier={issue.identifier}
           open={pullRequestsOpen}
-          onOpenChange={setPullRequestsOpen}
+          onOpenChange={(next) => {
+            if (next !== pullRequestsOpen) toggleSection("pullRequests");
+          }}
         />
       )}
 

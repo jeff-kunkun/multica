@@ -579,7 +579,7 @@ describe("IssueRunsTotal pricing", () => {
   });
 });
 
-describe("IssueUsageTotal with nothing metered", () => {
+describe("IssueRunsTotal with nothing metered", () => {
   it("still offers the Token cost entry so the empty state is reachable", () => {
     // Regression for DENE-670: this used to render null when no run reported
     // usage, which removed the only door to the breakdown at exactly the
@@ -587,7 +587,7 @@ describe("IssueUsageTotal with nothing metered", () => {
     // or no run yet. The door stays; the numbers do not appear.
     const onOpen = vi.fn();
     renderWithI18n(
-      <IssueUsageTotal tasks={[makeTask({ status: "completed" })]} alone onOpen={onOpen} />,
+      <IssueRunsTotal tasks={[makeTask({ status: "completed" })]} alone onOpen={onOpen} />,
     );
 
     const entry = screen.getByRole("button", { name: "Token cost" });
