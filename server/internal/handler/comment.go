@@ -2652,31 +2652,19 @@ func logCommentEnqueueFailure(msg string, err error, attrs ...any) {
 // enqueue error (nil on success) so the caller can surface a
 // trigger_outcome (MUL-4525 §2).
 func (h *Handler) enqueueIssueCommentTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	if trigger.ForceFreshSession {
-		return h.TaskService.EnqueueTaskForIssueFresh(ctx, issue, commentID)
-	}
-	return h.TaskService.EnqueueTaskForIssue(ctx, issue, commentID)
+	return h.TaskService.EnqueueCommentRun(ctx, service.CommentRunRequest{Issue: issue, TriggerCommentID: commentID, FreshSession: trigger.ForceFreshSession})
 }
 
 func (h *Handler) enqueueMentionCommentTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID, origin service.RunOrigin) (db.AgentTaskQueue, error) {
-	if trigger.ForceFreshSession {
-		return h.TaskService.EnqueueTaskForMentionFresh(ctx, issue, trigger.Agent.ID, commentID, origin)
-	}
-	return h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, commentID, origin)
+	return h.TaskService.EnqueueCommentRun(ctx, service.CommentRunRequest{Issue: issue, TriggerCommentID: commentID, FreshSession: trigger.ForceFreshSession, AgentID: trigger.Agent.ID, Origin: origin})
 }
 
 func (h *Handler) enqueueThreadParentCommentTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	if trigger.ForceFreshSession {
-		return h.TaskService.EnqueueTaskForThreadParentFresh(ctx, issue, trigger.Agent.ID, commentID)
-	}
-	return h.TaskService.EnqueueTaskForThreadParent(ctx, issue, trigger.Agent.ID, commentID)
+	return h.TaskService.EnqueueCommentRun(ctx, service.CommentRunRequest{Issue: issue, TriggerCommentID: commentID, FreshSession: trigger.ForceFreshSession, AgentID: trigger.Agent.ID, Origin: service.OriginNamed})
 }
 
 func (h *Handler) enqueueSquadLeaderCommentTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID, origin service.RunOrigin) (db.AgentTaskQueue, error) {
-	if trigger.ForceFreshSession {
-		return h.TaskService.EnqueueTaskForSquadLeaderFresh(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, commentID, origin)
-	}
-	return h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, commentID, origin)
+	return h.TaskService.EnqueueCommentRun(ctx, service.CommentRunRequest{Issue: issue, TriggerCommentID: commentID, FreshSession: trigger.ForceFreshSession, AgentID: trigger.Agent.ID, Leader: true, SquadID: trigger.Squad.ID, Origin: origin})
 }
 
 func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, trigger commentAgentTrigger) error {
