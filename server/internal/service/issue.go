@@ -510,15 +510,8 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 		return issueCreateTxOutcome{}, fmt.Errorf("create issue: %w", err)
 	}
 	if p.GoalMode {
-		goal, goalErr := qtx.CreateIssueGoal(ctx, db.CreateIssueGoalParams{IssueID: issue.ID, WorkspaceID: p.WorkspaceID, CreatedByType: p.CreatorType, CreatedByID: p.CreatorID})
-		if goalErr != nil {
+		if _, goalErr := qtx.CreateIssueGoal(ctx, db.CreateIssueGoalParams{IssueID: issue.ID, WorkspaceID: p.WorkspaceID, CreatedByType: p.CreatorType, CreatedByID: p.CreatorID}); goalErr != nil {
 			return issueCreateTxOutcome{}, fmt.Errorf("create goal draft: %w", goalErr)
-		}
-		starters := []string{fmt.Sprintf("完成并交付：%s", p.Title), "验证结果满足任务描述中的要求", "提供可复核的证据并说明完成情况"}
-		for i, description := range starters {
-			if _, goalErr = qtx.CreateIssueGoalCheck(ctx, db.CreateIssueGoalCheckParams{GoalID: goal.ID, Position: int32(i), Description: description, Method: "acceptance"}); goalErr != nil {
-				return issueCreateTxOutcome{}, fmt.Errorf("create goal starter check: %w", goalErr)
-			}
 		}
 	}
 	if p.AssigneeSource != "" {

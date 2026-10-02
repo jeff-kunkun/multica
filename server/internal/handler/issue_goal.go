@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -346,6 +348,14 @@ func (h *Handler) ConfirmIssueGoal(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load goal checks")
 		return
+	}
+	// Goal confirmation is the single transition that releases the execution
+	// gate. Creation and assignment paths deliberately skip draft goals, so a
+	// pre-assigned agent gets its first run only after the human locks the line.
+	if h.TaskService != nil && issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
+		if _, enqueueErr := h.TaskService.EnqueueTaskForIssue(r.Context(), issue); enqueueErr != nil && !errors.Is(enqueueErr, service.ErrDuplicatePendingTask) {
+			slog.Warn("confirmed goal could not enqueue assigned agent", "issue_id", uuidToString(issue.ID), "error", enqueueErr)
+		}
 	}
 	writeJSON(w, http.StatusOK, makeGoalResponse(goal, checks))
 }

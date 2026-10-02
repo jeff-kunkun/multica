@@ -445,7 +445,7 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 	if _, messageErr := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
 		ChatSessionID: session.ID,
 		Role:          "assistant",
-		Content:       fmt.Sprintf("已转成目标任务 [%s](issue://%s)", resp.Identifier, resp.ID),
+		Content:       fmt.Sprintf("已转成目标任务 [%s](mention://issue/%s)", resp.Identifier, resp.ID),
 		MessageKind:   pgtype.Text{String: "goal_link", Valid: true},
 	}); messageErr != nil {
 		slog.Warn("chat goal conversion link message failed", "session_id", uuidToString(session.ID), "issue_id", resp.ID, "error", messageErr)

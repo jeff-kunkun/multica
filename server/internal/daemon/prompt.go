@@ -605,7 +605,7 @@ func buildQuickCreatePrompt(task Task) string {
 		fmt.Fprintf(&b, "- **due-date**: required for this run. Pass `--due-date %s`; the quick-create selection is authoritative.\n\n", task.QuickCreateDueDate)
 	}
 	if task.QuickCreateGoalMode {
-		b.WriteString("- **goal**: required for this run. Pass `--goal` so the server creates a draft completion line with starter checks; the human will edit and confirm it in the shared completion-line panel before execution starts.\n\n")
+		b.WriteString("- **goal**: required for this run. Pass `--goal` so the server creates one editable draft goal. Do not invent generic completion checks: the human must write and confirm the completion line in the shared panel before execution starts.\n\n")
 	}
 
 	// project — pinned by the modal when the user picked one, otherwise
