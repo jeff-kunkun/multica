@@ -128,6 +128,9 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if parentStatus == "backlog" {
 		return
 	}
+	if h.childDoneRuleOwnsParent(ctx, parent.ID) {
+		return
+	}
 
 	// Stage barrier (MUL-3508 / discussion #4320). The notification + assignee
 	// wake fire only when this completion *closes a stage* — i.e. every sibling
@@ -234,6 +237,9 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		if parentStatus == "backlog" {
 			continue
 		}
+		if h.childDoneRuleOwnsParent(ctx, parent.ID) {
+			continue
+		}
 
 		children, err := h.Queries.ListChildIssues(ctx, parent.ID)
 		if err != nil {
@@ -291,6 +297,18 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 // before selection. A stage S is closed iff no non-terminal staged sibling has
 // stage <= S, so finding the earliest open stage once reduces selection from
 // O(N*K) to O(N+K).
+// childDoneRuleOwnsParent reports whether the upstream child_done system
+// rule is switched on for this parent. That rule and this handler path wake
+// the same assignee for the same fact, so only one may run: the handler path
+// by default, the rule only where a workspace or issue opted in (DENE-1184).
+func (h *Handler) childDoneRuleOwnsParent(ctx context.Context, parentID pgtype.UUID) bool {
+	rule, err := h.Queries.GetSystemWakeup(ctx, db.GetSystemWakeupParams{
+		IssueID:    parentID,
+		SystemRule: pgtype.Text{String: service.SystemRuleChildDone, Valid: true},
+	})
+	return err == nil && rule.Enabled
+}
+
 func highestClosedBatchStage(children, completed []db.Issue, isTerminal func(db.Issue) bool) (db.Issue, bool) {
 	var lowestCompleted pgtype.Int4
 	for _, c := range completed {

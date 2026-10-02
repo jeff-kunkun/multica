@@ -29,6 +29,11 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
 }));
 
+vi.mock("@multica/core/issue-views/mutations", () => ({
+  useCreateIssueView: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateIssueView: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 vi.mock("./issues-header", () => ({
   IssueFilterMenu: ({ trigger }: { trigger: React.ReactNode }) => trigger,
 }));
@@ -143,5 +148,40 @@ describe("SaveViewDialog visibility", () => {
         scope_id: "proj-1",
       }),
     );
+  });
+});
+
+describe("SaveViewDialog draft lifecycle", () => {
+  const liveStore = createStore<IssueViewState>()(viewStoreSlice);
+  // Hosts build `scope` inline, so every host render passes a new object.
+  const dialog = (open: boolean) => (
+    <ViewStoreProvider store={liveStore}>
+      <SaveViewDialog
+        open={open}
+        onOpenChange={() => {}}
+        scope={{ kind: "my", variant: "assigned" }}
+      />
+    </ViewStoreProvider>
+  );
+
+  it("keeps a half-typed name when the host re-renders", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithI18n(dialog(true));
+
+    await user.type(screen.getByLabelText("Name"), "Ongoing");
+    rerender(dialog(true));
+
+    expect(screen.getByLabelText("Name")).toHaveValue("Ongoing");
+  });
+
+  it("starts from a blank name on the next open", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithI18n(dialog(true));
+
+    await user.type(screen.getByLabelText("Name"), "Ongoing");
+    rerender(dialog(false));
+    rerender(dialog(true));
+
+    expect(screen.getByLabelText("Name")).toHaveValue("");
   });
 });

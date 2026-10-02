@@ -356,7 +356,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		"issue_status":        updated.Status,
 		"issue_revision":      created.IssueRevision,
 	})
-	h.TaskService.AutoUnresolveThreadOnReply(ctx, parentComment, uuidToString(issue.WorkspaceID), actorType, actorID)
+	h.TaskService.AutoUnresolveThreadOnReply(ctx, parentComment, uuidToString(issue.WorkspaceID), actorType, actorID, h.wakeupSourceTaskID(r))
 
 	// Post-commit hooks, in the order UpdateIssue and CreateComment run them.
 	// Each is best-effort on its own; the close itself is already durable.
@@ -410,7 +410,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	resp.Merged = tr.merged
 	resp.PRURL = tr.prURL
 	originator := h.invokeOriginatorFromRequest(r, actorType, actorID)
-	resp.Triggers = h.triggerTasksForComment(ctx, updated, comment, parentComment, actorType, actorID, originator, nil)
+	resp.Triggers = h.triggerTasksForComment(ctx, updated, comment, parentComment, actorType, actorID, originator, nil, nil)
 	if resp.StatusChanged {
 		waiters := h.listBlockWaiters(ctx, updated, identifier)
 		h.notifyParentOfChildDone(ctx, prev, updated)
@@ -514,9 +514,9 @@ func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, is
 		"issue_status":        issue.Status,
 		"issue_revision":      created.IssueRevision,
 	})
-	h.TaskService.AutoUnresolveThreadOnReply(ctx, parentComment, uuidToString(issue.WorkspaceID), actorType, actorID)
+	h.TaskService.AutoUnresolveThreadOnReply(ctx, parentComment, uuidToString(issue.WorkspaceID), actorType, actorID, h.wakeupSourceTaskID(r))
 	originator := h.invokeOriginatorFromRequest(r, actorType, actorID)
-	resp.Triggers = h.triggerTasksForComment(ctx, issue, comment, parentComment, actorType, actorID, originator, nil)
+	resp.Triggers = h.triggerTasksForComment(ctx, issue, comment, parentComment, actorType, actorID, originator, nil, nil)
 
 	// Same chain as `comment add --verdict pass`: once per in_review stay.
 	out := h.releaseOnAcceptance(ctx, issue)
@@ -830,14 +830,6 @@ func closeSourceTask(r *http.Request, actorType string) pgtype.UUID {
 		}
 	}
 	return pgtype.UUID{}
-}
-
-func parseUUIDStrict(s string) (pgtype.UUID, error) {
-	var id pgtype.UUID
-	if err := id.Scan(s); err != nil {
-		return pgtype.UUID{}, err
-	}
-	return id, nil
 }
 
 // requireKnowledgeAudit is the pre-write check shared by the normal close and
