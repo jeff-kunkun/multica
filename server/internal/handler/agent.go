@@ -2205,6 +2205,14 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.CustomEnv == nil {
 		ce = []byte("{}")
 	}
+	customArgsProvider := runtime.Provider
+	if inheritRuntime {
+		customArgsProvider = inheritedRuntimeProvider
+	}
+	if err := agent.ValidateCustomArgsForProvider(customArgsProvider, req.CustomArgs); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	ca, _ := json.Marshal(req.CustomArgs)
 	if req.CustomArgs == nil {
@@ -2916,6 +2924,21 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
+	}
+	if req.CustomArgs != nil {
+		provider := targetProvider
+		if provider == "" && targetRuntimeID.Valid {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for custom_args validation")
+				return
+			}
+		}
+		if err := agent.ValidateCustomArgsForProvider(provider, *req.CustomArgs); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides

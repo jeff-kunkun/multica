@@ -714,8 +714,12 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 	"--prompt":                       blockedWithValue,
 	"-i":                             blockedStandalone, // interactive mode requires a TTY and cannot run under the daemon
 	"--prompt-interactive":           blockedStandalone,
-	"-c":                             blockedStandalone, // resume via --conversation, not --continue
+	"-c":                             blockedOptionalValue, // resume via --conversation, not --continue
 	"--continue":                     blockedStandalone,
+	"-r":                             blockedWithValue,
+	"--resume":                       blockedWithValue,
+	"--session-id":                   blockedWithValue,
+	"--fork-session":                 blockedStandalone,
 	"--conversation":                 blockedWithValue, // managed via ExecOptions.ResumeSessionID
 	"--model":                        blockedWithValue, // managed via ExecOptions.Model / agent.model
 	"--output-format":                blockedWithValue, // stream-json is required for token accounting
