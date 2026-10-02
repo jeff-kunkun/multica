@@ -378,8 +378,11 @@ describe("execution log header geometry", () => {
     ]);
     expect(screen.getByText("Retrying now")).toBeInTheDocument();
     expect(screen.getByText("Retrying")).toBeInTheDocument();
-    expect(screen.queryByText("Finished earlier")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Show past runs \(1\)/ })).toBeInTheDocument();
+    // The retry sits in the active rows, above the latest finished runs.
+    expect(
+      screen.getByText("Retrying now").compareDocumentPosition(screen.getByText("Finished earlier")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("shows the running task before pending tasks in queue order", () => {
@@ -590,7 +593,9 @@ describe("IssueRunsTotal with nothing metered", () => {
       <IssueRunsTotal tasks={[makeTask({ status: "completed" })]} alone onOpen={onOpen} />,
     );
 
-    const entry = screen.getByRole("button", { name: "Token cost" });
+    // Upstream's run-count total is the door now (it never hides on runs
+    // that reported no usage), labelled by the count instead of "Token cost".
+    const entry = screen.getByRole("button", { name: "1 run" });
     expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
 
     fireEvent.click(entry);
@@ -680,7 +685,7 @@ describe("Token cost deep link", () => {
     // instead of the figures — the same door DENE-670 kept open.
     renderSection("", [makeTask({ status: "completed" })]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Token cost" }));
+    fireEvent.click(screen.getByRole("button", { name: "1 run" }));
 
     expect(screen.getByText("Usage breakdown")).toBeInTheDocument();
     expect(replace).toHaveBeenCalledWith("/acme/issues/MUL-1?usage=1");
@@ -701,7 +706,7 @@ describe("Token cost deep link", () => {
   it("keeps the comment fragment when the dialog writes the param", () => {
     renderSection("", [makeTask({ status: "completed" })], "#comment-7");
 
-    fireEvent.click(screen.getByRole("button", { name: "Token cost" }));
+    fireEvent.click(screen.getByRole("button", { name: "1 run" }));
 
     expect(replace).toHaveBeenCalledWith("/acme/issues/MUL-1?usage=1#comment-7");
   });

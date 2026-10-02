@@ -385,7 +385,9 @@ describe("orderTimelineWithRuns", () => {
     const retry = task("retry", { status: "deferred", created_at: "2026-09-07T10:00:00Z" });
     expect(isActiveCommentRun(retry)).toBe(true);
     const posted = comment("posted", { created_at: "2026-09-07T10:45:00Z" });
-    expect(order([posted], [{ task: retry, hasReply: false }])).toEqual(["posted", "retry"]);
+    // Live runs keep their enqueue-time slot (MUL-7632); a finished empty run
+    // would carry no live status at all.
+    expect(order([posted], [{ task: retry, hasReply: false }])).toEqual(["retry", "posted"]);
   });
 
   it("settles a run that ended without a reply at the time it ended", () => {
