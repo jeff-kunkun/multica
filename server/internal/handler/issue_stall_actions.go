@@ -288,6 +288,17 @@ func (h *Handler) UndoStallAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "撤销期限已过")
 		return
 	}
+	// Undo restores the status the system replaced, so it only applies while
+	// the ticket still carries the system's own status. A person who already
+	// moved the ticket on must not have that change silently overwritten.
+	applied := "done"
+	if action == stallActionCancelled {
+		applied = "cancelled"
+	}
+	if issue.Status != applied {
+		writeError(w, http.StatusConflict, fmt.Sprintf("票状态已被改为 `%s`，不再撤销自动停滞处理", issue.Status))
+		return
+	}
 	previous := stallString(meta, stallPreviousKey)
 	if previous == "" {
 		writeError(w, http.StatusConflict, "缺少自动处理前的状态，无法安全撤销")
@@ -498,6 +509,12 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 		if action == stallActionAnnounced {
 			until, err := time.Parse(time.RFC3339, stallString(meta, stallReviewUntilKey))
 			if err == nil && !time.Now().UTC().Before(until) {
+				if why := h.stallAnnouncementInterception(ctx, issue, meta); why != "" {
+					if err := h.keepInterceptedStall(ctx, issue, why); err == nil {
+						affected++
+					}
+					continue
+				}
 				if err := h.cancelStallIssue(ctx, issue); err == nil {
 					affected++
 				}
@@ -555,6 +572,46 @@ func (h *Handler) ReviewStallActionInternal(ctx context.Context, issue db.Issue,
 	}
 	h.stallComment(ctx, issue, "AI 停滞巡检公示："+reason+"\n公示 24 小时内可选择“保留”；无人拦截将自动取消。")
 	h.notifyStallInbox(ctx, issue, "停滞票进入 24 小时公示", reason, "keep")
+	return nil
+}
+
+// stallAnnouncementInterception explains why an expired announcement must
+// not cancel the ticket. Work resuming during the notice window is itself an
+// interception: nobody should have to press "keep" on a ticket they are
+// visibly working on. The announcement's own system comment does not count.
+func (h *Handler) stallAnnouncementInterception(ctx context.Context, issue db.Issue, meta map[string]any) string {
+	if issue.Status == "backlog" {
+		return "公示期内票被放回待规划"
+	}
+	if prs, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID); err != nil {
+		return "无法核对关联 PR"
+	} else if len(prs) > 0 {
+		return "公示期内关联了 PR"
+	}
+	if active, err := h.Queries.HasActiveTaskForIssue(ctx, issue.ID); err != nil {
+		return "无法核对进行中的运行"
+	} else if active {
+		return "公示期内有运行在跑"
+	}
+	announcedAt, err := time.Parse(time.RFC3339, stallString(meta, stallAnnouncedAtKey))
+	if err != nil {
+		return ""
+	}
+	var resumed bool
+	if err := h.DB.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM comment WHERE issue_id=$1 AND workspace_id=$2 AND author_type <> 'system' AND created_at >= $3)`, issue.ID, issue.WorkspaceID, announcedAt).Scan(&resumed); err != nil {
+		return "无法核对公示期内的评论"
+	}
+	if resumed {
+		return "公示期内有人或智能体继续推进"
+	}
+	return ""
+}
+
+func (h *Handler) keepInterceptedStall(ctx context.Context, issue db.Issue, why string) error {
+	if err := h.setStallMetadata(ctx, issue, map[string]string{stallActionKey: stallActionKept, stallReasonKey: why + "，系统不会自动取消。"}); err != nil {
+		return err
+	}
+	h.stallComment(ctx, issue, "停滞公示到期，但"+why+"，这张票继续保留，系统不会自动取消。")
 	return nil
 }
 

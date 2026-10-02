@@ -467,7 +467,7 @@ func (h *Handler) resolveDeclaredPull(ctx context.Context, issue db.Issue, raw s
 		h.rememberDeclared(ctx, d)
 		return d, nil
 	}
-	if h.fetchAndLinkDeclared(ctx, issue, ref) {
+	if h.fetchAndLinkDeclared(ctx, issue, ref, "") {
 		invalidateDelivery(ctx)
 		d.Verified = true
 		h.rememberDeclared(ctx, d)
@@ -485,30 +485,84 @@ func (h *Handler) resolveDeclaredPull(ctx context.Context, issue db.Issue, raw s
 
 var pullURLToken = regexp.MustCompile(`https?://[^\s<>"']+`)
 
-// findPullURL accepts the first pull/MR link in the submitted evidence or the
-// recent issue timeline. Agents commonly put the link in the initial review
-// handoff and omit --pr on the later done close.
-func (h *Handler) findPullURL(ctx context.Context, issue db.Issue, evidence string) string {
+// findPullURLs collects pull/MR links from the submitted evidence, then from
+// the recent issue timeline newest first. Agents commonly put the link in the
+// initial review handoff and omit --pr on the later done close.
+func (h *Handler) findPullURLs(ctx context.Context, issue db.Issue, evidence string) []string {
 	texts := []string{evidence}
 	if comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
 		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, Limit: 30,
 	}); err == nil {
-		for _, comment := range comments {
-			texts = append(texts, comment.Content)
+		for i := len(comments) - 1; i >= 0; i-- {
+			texts = append(texts, comments[i].Content)
 		}
 	}
+	var urls []string
+	seen := map[string]bool{}
 	for _, text := range texts {
 		for _, raw := range pullURLToken.FindAllString(text, -1) {
 			raw = strings.TrimRight(raw, ".,;:!?，。；：！？)]}>")
-			if _, err := delivery.ParsePullURL(raw); err == nil {
-				return raw
+			if _, err := delivery.ParsePullURL(raw); err == nil && !seen[raw] {
+				seen[raw] = true
+				urls = append(urls, raw)
 			}
 		}
 	}
-	return ""
+	return urls
 }
 
-func (h *Handler) fetchAndLinkDeclared(ctx context.Context, issue db.Issue, ref delivery.Ref) bool {
+// resolveInferredPull adopts the first found link that provably belongs to
+// this issue: already linked, found by the issue's own delivery lookup, or a
+// PR whose title or branch names the issue identifier. Any other link — a
+// related PR cited in review, an upstream reference — is ignored rather than
+// linked, because a linked open PR is what the done gate merges.
+func (h *Handler) resolveInferredPull(ctx context.Context, issue db.Issue, urls []string) (closeDeclare, bool) {
+	if len(urls) == 0 {
+		return closeDeclare{}, false
+	}
+	ident := issueIdentifier(h.getIssuePrefix(ctx, issue.WorkspaceID), issue.Number)
+	var view issueDeliveries
+	viewLoaded := false
+	for _, raw := range urls {
+		ref, err := delivery.ParsePullURL(raw)
+		if err != nil {
+			continue
+		}
+		d := closeDeclare{URL: ref.URL, Verified: true}
+		if h.urlAlreadyLinked(ctx, issue.ID, ref.URL) {
+			h.rememberDeclared(ctx, d)
+			return d, true
+		}
+		if h.fetchAndLinkDeclared(ctx, issue, ref, ident) {
+			invalidateDelivery(ctx)
+			h.rememberDeclared(ctx, d)
+			return d, true
+		}
+		if !viewLoaded {
+			view, _ = h.ensureIssueDeliveries(ctx, issue)
+			viewLoaded = true
+		}
+		if deliveriesContainURL(view, ref.URL) {
+			h.rememberDeclared(ctx, d)
+			return d, true
+		}
+	}
+	return closeDeclare{}, false
+}
+
+// pullNamesIssue reports whether a PR title or branch carries the issue
+// identifier as a whole token: DENE-11 does not match DENE-1156.
+func pullNamesIssue(pull delivery.Pull, ident string) bool {
+	if ident == "" {
+		return false
+	}
+	re := regexp.MustCompile(`(?i)(^|[^A-Za-z0-9])` + regexp.QuoteMeta(ident) + `($|[^0-9])`)
+	return re.MatchString(pull.Title) || re.MatchString(pull.Branch)
+}
+
+// fetchAndLinkDeclared reads the pull from its provider and links it to the
+// issue. A non-empty mustName refuses to link a pull that does not name it.
+func (h *Handler) fetchAndLinkDeclared(ctx context.Context, issue db.Issue, ref delivery.Ref, mustName string) bool {
 	if !h.isVCSAvailable() || !h.isVCSConfigured() {
 		return false
 	}
@@ -526,6 +580,9 @@ func (h *Handler) fetchAndLinkDeclared(ctx context.Context, issue db.Issue, ref 
 	}
 	pull, err := delivery.Fetch(ctx, h.deliveryClient(), ref.Provider, delivery.APIBase(ref.Provider, conn.InstanceUrl, ""), token, ref)
 	if err != nil || pull.Number == 0 {
+		return false
+	}
+	if mustName != "" && !pullNamesIssue(pull, mustName) {
 		return false
 	}
 	if pull.URL == "" {

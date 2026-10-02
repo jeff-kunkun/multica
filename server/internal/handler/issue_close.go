@@ -158,10 +158,14 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	ctx = withDeliveryBag(ctx)
 	r = r.WithContext(ctx)
 	prURL := strings.TrimSpace(req.PRURL)
-	if prURL == "" && (outcome == issuestatus.Done || outcome == issuestatus.InReview || verdict == "pass") {
-		prURL = h.findPullURL(ctx, issue, body)
-	}
-	if prURL != "" && (outcome == issuestatus.Done || outcome == issuestatus.InReview || verdict == "pass") {
+	closing := outcome == issuestatus.Done || outcome == issuestatus.InReview || verdict == "pass"
+	if prURL == "" && closing {
+		// A link the closer never passed as --pr is only a hint: it is adopted
+		// when it already belongs to this issue or the PR names the issue.
+		if inferred, ok := h.resolveInferredPull(ctx, issue, h.findPullURLs(ctx, issue, body)); ok {
+			prURL = inferred.URL
+		}
+	} else if prURL != "" && closing {
 		declared, err := h.resolveDeclaredPull(ctx, issue, prURL)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "--pr 不是 PR 或 MR 链接："+err.Error())
