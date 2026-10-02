@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -153,19 +152,6 @@ func seedPublicToAgent(t *testing.T, pool *pgxpool.Pool) (agentID, senderID pgty
 
 func invokeGateTestDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
-	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Skipf("no database: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("database not reachable: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
+	return dbfx.OpenTestDatabase(ctx, t)
 }

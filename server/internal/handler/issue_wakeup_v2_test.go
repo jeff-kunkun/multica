@@ -17,6 +17,7 @@ import (
 // in its own transaction; the sweep turns it into the parent's wake exactly
 // once.
 func TestChildDoneRecordedByAnyWriterAndSweptOnce(t *testing.T) {
+	enableChildDoneRule(t)
 	fx := newChildDoneFixture(t, "in_progress")
 	sweep := func() {
 		t.Helper()
@@ -51,6 +52,7 @@ func TestChildDoneRecordedByAnyWriterAndSweptOnce(t *testing.T) {
 
 // The request path processes its own change; a later sweep finds nothing.
 func TestChildDoneRequestPathLeavesNothingToSweep(t *testing.T) {
+	enableChildDoneRule(t)
 	fx := newChildDoneFixture(t, "in_progress")
 	updateChildStatus(t, fx.child.ID, "done")
 	dbfx.Exec(t, "UPDATE issue_child_event SET created_at=created_at-interval '1 hour',claimed_at=claimed_at-interval '1 hour' WHERE parent_id=$1", fx.parent.ID)
@@ -131,6 +133,7 @@ func listWorkspaceWakeupRows(t *testing.T, query string) ([]workspaceWakeupRow, 
 }
 
 func TestWorkspaceWakeupsListSourcesSystemRulesAndPaused(t *testing.T) {
+	enableChildDoneRule(t)
 	fx := newChildDoneFixture(t, "in_progress")
 	createStagedChild(t, fx.parent.ID, 1, "done")
 	createStagedChild(t, fx.parent.ID, 1, "todo")

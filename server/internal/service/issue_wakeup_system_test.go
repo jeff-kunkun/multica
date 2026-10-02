@@ -84,7 +84,9 @@ func TestChildDoneInstructionPrecedence(t *testing.T) {
 	if got := ChildDoneInstruction("", []byte(`{}`)); got != ChildDoneDefaultInstruction {
 		t.Fatalf("built-in instruction = %q", got)
 	}
-	if enabled, _ := SystemWakeupDefault([]byte(`not json`)); !enabled {
-		t.Fatal("unreadable settings must keep the rule on")
+	// The fork keeps the rule opt-in (DENE-1184): the handler's child-done
+	// path is the default, so unreadable settings leave the rule off.
+	if enabled, _ := SystemWakeupDefault([]byte(`not json`)); enabled {
+		t.Fatal("unreadable settings must keep the rule off")
 	}
 }

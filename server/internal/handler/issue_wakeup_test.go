@@ -103,7 +103,7 @@ func TestIssueWakeupAPIAndTrustedOrigin(t *testing.T) {
 }
 
 func TestWorkspaceWakeupSummariesScopeAndBounds(t *testing.T) {
-	issue := dbfx.Issue(t, "wakeup summary")
+	issue := dbfx.Issue(t, "wakeup summary", testutil.Cols{"visibility": "workspace"})
 	agent := dbfx.Agent(t, "summary target", testRuntimeID)
 	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
 	dbfx.Cleanup(t, "DELETE FROM issue_wakeup WHERE issue_id=$1", issue)
@@ -155,6 +155,12 @@ func TestWorkspaceWakeupSummariesScopeAndBounds(t *testing.T) {
 	if got := read(req, 200); len(got) != 3 || got[0].ActiveCount != 5 {
 		t.Fatal("shared issue rules disappeared from summary")
 	}
+	// The fork's sharing scope (DENE-698): no summary for a private issue.
+	dbfx.Exec(t, "UPDATE issue SET visibility='private' WHERE id=$1", issue)
+	if got := read(req, 200); len(got) != 0 {
+		t.Fatal("rules of a private issue leaked into a member's summary")
+	}
+	dbfx.Exec(t, "UPDATE issue SET visibility='workspace' WHERE id=$1", issue)
 	// Rule visibility follows the shared issue; all read surfaces consistently
 	// redact private source-agent and source-run references.
 	sourceRun := dbfx.Task(t, agent, testutil.Cols{"issue_id": issue, "runtime_id": testRuntimeID, "status": "completed"})
@@ -298,7 +304,7 @@ func TestIssueWakeupCapacityReturnsActionableError(t *testing.T) {
 }
 
 func TestIssueWakeupActorFilterAPIAndProjection(t *testing.T) {
-	issue := dbfx.Issue(t, "actor filter API")
+	issue := dbfx.Issue(t, "actor filter API", testutil.Cols{"visibility": "workspace"})
 	target := dbfx.Agent(t, "actor filter target", testRuntimeID)
 	source := dbfx.Agent(t, "hidden actor name", testRuntimeID)
 	person := dbfx.User(t, "Monitored Person", "actor-projection@multica.test")

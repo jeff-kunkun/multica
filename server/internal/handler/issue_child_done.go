@@ -2,12 +2,14 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -128,7 +130,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if parentStatus == "backlog" {
 		return
 	}
-	if h.childDoneRuleOwnsParent(ctx, parent.ID) {
+	if h.childDoneRuleOwnsParent(ctx, parent) {
 		return
 	}
 
@@ -237,7 +239,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		if parentStatus == "backlog" {
 			continue
 		}
-		if h.childDoneRuleOwnsParent(ctx, parent.ID) {
+		if h.childDoneRuleOwnsParent(ctx, parent) {
 			continue
 		}
 
@@ -291,24 +293,38 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 	}
 }
 
+// childDoneRuleOwnsParent reports whether the upstream child_done system
+// rule is switched on for this parent. That rule and this handler path wake
+// the same assignee for the same fact, so only one may run: the handler path
+// by default, the rule only where a workspace or issue opted in (DENE-1184).
+// The rule row is created lazily when the parent's first sub-issue change is
+// processed, which happens after this path runs, so a parent without one
+// follows the workspace default the row will be created with.
+func (h *Handler) childDoneRuleOwnsParent(ctx context.Context, parent db.Issue) bool {
+	rule, err := h.Queries.GetSystemWakeup(ctx, db.GetSystemWakeupParams{
+		IssueID:    parent.ID,
+		SystemRule: pgtype.Text{String: service.SystemRuleChildDone, Valid: true},
+	})
+	if err == nil {
+		return rule.Enabled
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return false
+	}
+	ws, err := h.Queries.GetWorkspace(ctx, parent.WorkspaceID)
+	if err != nil {
+		return false
+	}
+	enabled, _ := service.SystemWakeupDefault(ws.Settings)
+	return enabled
+}
+
 // highestClosedBatchStage selects the first completed child in the highest
 // closed stage of a staged sibling set. The terminal predicate must come from
 // a pre-resolved child-status snapshot: all required statuses must be known
 // before selection. A stage S is closed iff no non-terminal staged sibling has
 // stage <= S, so finding the earliest open stage once reduces selection from
 // O(N*K) to O(N+K).
-// childDoneRuleOwnsParent reports whether the upstream child_done system
-// rule is switched on for this parent. That rule and this handler path wake
-// the same assignee for the same fact, so only one may run: the handler path
-// by default, the rule only where a workspace or issue opted in (DENE-1184).
-func (h *Handler) childDoneRuleOwnsParent(ctx context.Context, parentID pgtype.UUID) bool {
-	rule, err := h.Queries.GetSystemWakeup(ctx, db.GetSystemWakeupParams{
-		IssueID:    parentID,
-		SystemRule: pgtype.Text{String: service.SystemRuleChildDone, Valid: true},
-	})
-	return err == nil && rule.Enabled
-}
-
 func highestClosedBatchStage(children, completed []db.Issue, isTerminal func(db.Issue) bool) (db.Issue, bool) {
 	var lowestCompleted pgtype.Int4
 	for _, c := range completed {

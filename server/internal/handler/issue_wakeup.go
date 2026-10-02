@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -90,8 +91,12 @@ func (h *Handler) ListWorkspaceWakeups(w http.ResponseWriter, r *http.Request) {
 			isAdmin = roleAllowed(manager.Role, "owner", "admin")
 		}
 	}
+	visible, ok := h.visibleWakeupIssueIDs(w, r, parseUUID(workspaceID))
+	if !ok {
+		return
+	}
 	result, err := h.Queries.ListWorkspaceWakeups(r.Context(), db.ListWorkspaceWakeupsParams{
-		WorkspaceID: parseUUID(workspaceID), AgentIds: ids, MemberID: managerID, IsAdmin: isAdmin,
+		WorkspaceID: parseUUID(workspaceID), AgentIds: ids, MemberID: managerID, IsAdmin: isAdmin, VisibleIssueIds: visible,
 		Scope: scope, Kind: kind, Source: source, AgentID: agentID, Search: search, PageLimit: int32(limit), PageOffset: int32(page),
 	})
 	if err != nil {
@@ -99,6 +104,43 @@ func (h *Handler) ListWorkspaceWakeups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, json.RawMessage(result))
+}
+
+// visibleWakeupIssueIDs is the caller's sharing scope for the workspace-wide
+// wakeup reads: the issues with rules that the caller may see (DENE-698). The
+// rules of an issue the caller cannot see stay out of the list, its counts
+// and its summary, as the issue's own wakeup tab already does. nil means the
+// caller is not scoped.
+func (h *Handler) visibleWakeupIssueIDs(w http.ResponseWriter, r *http.Request, wsUUID pgtype.UUID) ([]pgtype.UUID, bool) {
+	viewer, err := h.visibilityViewerFor(r, wsUUID)
+	if err != nil {
+		writeError(w, 500, "failed to resolve sharing scope")
+		return nil, false
+	}
+	if viewer.bypasses() {
+		return nil, true
+	}
+	args := []any{wsUUID}
+	addArg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	rows, err := h.DB.Query(r.Context(), `SELECT DISTINCT i.id FROM issue i
+		JOIN issue_wakeup w ON w.issue_id = i.id AND w.workspace_id = i.workspace_id
+		WHERE i.workspace_id = $1 AND `+viewer.issueVisibilitySQL("i", addArg), args...)
+	if err != nil {
+		writeError(w, 500, "failed to resolve sharing scope")
+		return nil, false
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[pgtype.UUID])
+	if err != nil {
+		writeError(w, 500, "failed to resolve sharing scope")
+		return nil, false
+	}
+	if ids == nil {
+		ids = []pgtype.UUID{}
+	}
+	return ids, true
 }
 
 func wakeupError(w http.ResponseWriter, err error) {
@@ -172,7 +214,11 @@ func (h *Handler) ListWorkspaceWakeupSummaries(w http.ResponseWriter, r *http.Re
 	for id := range allowed {
 		ids = append(ids, parseUUID(id))
 	}
-	rows, err := h.Queries.ListWorkspaceWakeupSummaryRows(r.Context(), db.ListWorkspaceWakeupSummaryRowsParams{WorkspaceID: parseUUID(workspaceID), AgentIds: ids})
+	visible, ok := h.visibleWakeupIssueIDs(w, r, parseUUID(workspaceID))
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListWorkspaceWakeupSummaryRows(r.Context(), db.ListWorkspaceWakeupSummaryRowsParams{WorkspaceID: parseUUID(workspaceID), AgentIds: ids, VisibleIssueIds: visible})
 	if err != nil {
 		wakeupError(w, err)
 		return

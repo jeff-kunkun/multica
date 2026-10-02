@@ -1666,8 +1666,9 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		}
 	}
 
+	// The fork keeps --no-start in the core brief (wanted above); upstream
+	// moved it behind --help.
 	for _, banned := range []string{
-		"--no-start",
 		"multica issue list [--status",
 		"multica issue label list",
 		"multica issue subscriber list",

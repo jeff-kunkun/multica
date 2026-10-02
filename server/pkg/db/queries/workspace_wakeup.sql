@@ -1,5 +1,6 @@
 -- name: ListWorkspaceWakeups :one
 -- Counts, filter choices, and page share one snapshot and the same access scope.
+-- visible_issue_ids is the caller's sharing scope (DENE-698); NULL means unscoped.
 WITH base AS MATERIALIZED (
  SELECT w.id,w.issue_id,i.title AS issue_title,ws.issue_prefix||'-'||i.number AS issue_identifier,
   w.agent_id,a.name AS agent_name,w.kind,w.mode,w.event_types,w.filter_actor_type,
@@ -37,6 +38,7 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
    AND t.status IN ('queued','deferred','dispatched','running','waiting_local_directory')
  ) r ON true
  WHERE w.workspace_id= @workspace_id AND w.system_rule IS NULL
+  AND (sqlc.narg('visible_issue_ids')::uuid[] IS NULL OR w.issue_id = ANY(sqlc.narg('visible_issue_ids')::uuid[]))
  UNION ALL
  -- The child-done system rule of each open parent that still waits for a
  -- sub-issue: every child when unstaged, else its lowest unfinished stage.
@@ -75,6 +77,7 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
    AND t.status IN ('queued','deferred','dispatched','running','waiting_local_directory')
  ) sr ON true
  WHERE w.workspace_id= @workspace_id AND w.system_rule IS NOT NULL AND agg.open_count>0
+  AND (sqlc.narg('visible_issue_ids')::uuid[] IS NULL OR w.issue_id = ANY(sqlc.narg('visible_issue_ids')::uuid[]))
   AND p.status NOT IN ('done','cancelled')
   AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=p.workspace_id AND s.key=p.status AND s.category IN ('done','closed'))
 ), classified AS (

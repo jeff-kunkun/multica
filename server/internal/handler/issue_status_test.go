@@ -1055,6 +1055,7 @@ func mustCreateIssue(t *testing.T, title, status string) pgtype.UUID {
 // last child onto a CUSTOM done status must close the parent's barrier like
 // the built-in done status.
 func TestBatchCustomTerminalStatusEntersStageBarrier(t *testing.T) {
+	enableChildDoneRule(t)
 	ctx := context.Background()
 	createTestCustomStatus(t, "batch_done_s", issuestatus.Done)
 

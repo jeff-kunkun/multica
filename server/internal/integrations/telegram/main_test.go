@@ -2,11 +2,11 @@ package telegram
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // testPool backs every test that exercises reply-delivery ownership.
@@ -24,18 +24,9 @@ var testPool *pgxpool.Pool
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
-	}
-	pool, err := pgxpool.New(ctx, dbURL)
+	pool, err := testutil.ConnectTestDatabase(ctx)
 	if err != nil {
-		fmt.Printf("Skipping telegram delivery tests: could not connect: %v\n", err)
-		os.Exit(m.Run())
-	}
-	if err := pool.Ping(ctx); err != nil {
-		fmt.Printf("Skipping telegram delivery tests: database not reachable: %v\n", err)
-		pool.Close()
+		testutil.ExitIfDatabaseRequired(err)
 		os.Exit(m.Run())
 	}
 	testPool = pool

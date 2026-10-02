@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // A database that installed channel_reply_delivery before attempt_depth
@@ -22,10 +23,7 @@ import (
 // upgrade the way a deployment does: the old table shape, then the migration.
 func TestChannelReplyDeliveryAttemptDepthUpgradesAnInstalledTable(t *testing.T) {
 	t.Parallel()
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("integration test requires Postgres at DATABASE_URL")
-	}
+	dbURL := testutil.MustTestDatabaseURL(t)
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)

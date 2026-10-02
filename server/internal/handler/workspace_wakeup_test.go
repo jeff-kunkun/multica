@@ -16,7 +16,7 @@ import (
 )
 
 func TestWorkspaceWakeupsInventory(t *testing.T) {
-	issue := dbfx.Issue(t, "wakeup inventory")
+	issue := dbfx.Issue(t, "wakeup inventory", testutil.Cols{"visibility": "workspace"})
 	agent := dbfx.Agent(t, "inventory target", testRuntimeID)
 	dbfx.Cleanup(t, "DELETE FROM issue_wakeup WHERE issue_id=$1", issue)
 	dbfx.Cleanup(t, "DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE issue_id=$1)", issue)
@@ -128,6 +128,13 @@ func TestWorkspaceWakeupsInventory(t *testing.T) {
 	if p.Total != 5 || len(p.Agents) != 1 || p.Counts["all"] != 5 {
 		t.Fatal("shared issue rules disappeared from inventory")
 	}
+	// The fork's sharing scope (DENE-698): a member does not see the rules of
+	// an issue that was not shared with them, in the page or in the counts.
+	dbfx.Exec(t, "UPDATE issue SET visibility='private' WHERE id=$1", issue)
+	if hidden := read(req, 200); hidden.Total != 0 || len(hidden.Items) != 0 || hidden.Counts["all"] != 0 {
+		t.Fatal("rules of a private issue leaked into a member's inventory")
+	}
+	dbfx.Exec(t, "UPDATE issue SET visibility='workspace' WHERE id=$1", issue)
 	for _, r := range p.Items {
 		if r.CanManage || r.FilterAgentID != nil || r.FilterAgentName != nil || r.FilterTaskID != nil {
 			t.Fatal("shared inventory granted management or private source access")

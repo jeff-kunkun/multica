@@ -26,7 +26,13 @@ func actAsRun(req *http.Request, agentID, taskID string) *http.Request {
 func setStatusAsRun(t *testing.T, issueID, status, agentID, taskID string) {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req := withURLParam(newRequest("PUT", "/api/issues/"+issueID, map[string]any{"status": status}), "id", issueID)
+	body := map[string]any{"status": status}
+	if agentID != "" {
+		// The fork's close gate wants a linked PR from an agent; these tests
+		// are about who the rule wakes, so the run declares no code.
+		body["no_code_reason"] = "test"
+	}
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issueID, body), "id", issueID)
 	if agentID != "" {
 		req = actAsRun(req, agentID, taskID)
 	}
@@ -114,6 +120,7 @@ func createRule(t *testing.T, issueID, agentID string, source pgtype.UUID, in se
 // queuing a second run; once that run has ended, or when someone else closes
 // the stage, the agent is woken as before.
 func TestChildDoneDoesNotWakeTheRunThatClosedTheStage(t *testing.T) {
+	enableChildDoneRule(t)
 	cases := []struct {
 		name      string
 		runStatus string

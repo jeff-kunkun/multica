@@ -2,19 +2,16 @@ package migrations
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 const commentAgentDeliveryRollbackTestSchema = "comment_agent_delivery_rollback_test"
 
 func TestCommentAgentDeliveryRollbackMigrationRemovesRevertedSchema(t *testing.T) {
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("integration test requires Postgres at DATABASE_URL")
-	}
+	dbURL := testutil.MustTestDatabaseURL(t)
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)

@@ -28,6 +28,7 @@ WHERE w.workspace_id= @workspace_id AND w.issue_id= @issue_id ORDER BY w.created
 
 -- name: ListWorkspaceWakeupSummaryRows :many
 -- No prompts/history; at most three previews per issue plus exact counts.
+-- visible_issue_ids is the caller's sharing scope (DENE-698); NULL means unscoped.
 WITH ranked AS (
  SELECT w.issue_id,w.id,w.agent_id,a.name AS agent_name,w.kind,w.mode,w.event_types,w.filter_actor_type,
  (CASE WHEN actor_agent.id IS NOT NULL OR actor_member.user_id IS NOT NULL THEN w.filter_actor_id END)::uuid AS filter_actor_id,
@@ -46,6 +47,7 @@ LEFT JOIN member actor_member ON w.filter_actor_type='member' AND actor_member.u
 LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
 LEFT JOIN agent source ON source.id=w.filter_agent_id AND source.workspace_id=w.workspace_id AND source.id=ANY(@agent_ids::uuid[])
  WHERE w.workspace_id= @workspace_id AND w.enabled
+  AND (sqlc.narg('visible_issue_ids')::uuid[] IS NULL OR w.issue_id = ANY(sqlc.narg('visible_issue_ids')::uuid[]))
   AND i.status NOT IN ('done','cancelled')
   AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=i.workspace_id AND s.key=i.status AND s.category IN ('done','closed'))
 )

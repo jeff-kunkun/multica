@@ -58,6 +58,7 @@ func putChildDoneRule(t *testing.T, issueID string, body map[string]any, headers
 }
 
 func TestSystemWakeupDescribesUnstagedWait(t *testing.T) {
+	enableChildDoneRule(t)
 	fx := newChildDoneFixture(t, "in_progress")
 	rules := listSystemWakeupsFor(t, fx.parent.ID)
 	if len(rules) != 1 {
@@ -104,6 +105,7 @@ func TestSystemWakeupDescribesLowestOpenStage(t *testing.T) {
 // Turning the rule off for one issue stops it there; an instruction set on the
 // issue replaces the default in the run the assignee reads.
 func TestSystemWakeupOverrideControlsChildDone(t *testing.T) {
+	enableChildDoneRule(t)
 	t.Run("disabled", func(t *testing.T) {
 		fx := newChildDoneFixture(t, "in_progress")
 		if w := putChildDoneRule(t, fx.parent.ID, map[string]any{"enabled": false, "instruction": ""}); w.Code != http.StatusOK {

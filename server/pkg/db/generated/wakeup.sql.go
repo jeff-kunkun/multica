@@ -1222,6 +1222,7 @@ LEFT JOIN member actor_member ON w.filter_actor_type='member' AND actor_member.u
 LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
 LEFT JOIN agent source ON source.id=w.filter_agent_id AND source.workspace_id=w.workspace_id AND source.id=ANY($1::uuid[])
  WHERE w.workspace_id= $2 AND w.enabled
+  AND ($3::uuid[] IS NULL OR w.issue_id = ANY($3::uuid[]))
   AND i.status NOT IN ('done','cancelled')
   AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=i.workspace_id AND s.key=i.status AND s.category IN ('done','closed'))
 )
@@ -1230,8 +1231,9 @@ FROM ranked WHERE rank<=3 ORDER BY issue_id,rank
 `
 
 type ListWorkspaceWakeupSummaryRowsParams struct {
-	AgentIds    []pgtype.UUID `json:"agent_ids"`
-	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	AgentIds        []pgtype.UUID `json:"agent_ids"`
+	WorkspaceID     pgtype.UUID   `json:"workspace_id"`
+	VisibleIssueIds []pgtype.UUID `json:"visible_issue_ids"`
 }
 
 type ListWorkspaceWakeupSummaryRowsRow struct {
@@ -1257,8 +1259,9 @@ type ListWorkspaceWakeupSummaryRowsRow struct {
 }
 
 // No prompts/history; at most three previews per issue plus exact counts.
+// visible_issue_ids is the caller's sharing scope (DENE-698); NULL means unscoped.
 func (q *Queries) ListWorkspaceWakeupSummaryRows(ctx context.Context, arg ListWorkspaceWakeupSummaryRowsParams) ([]ListWorkspaceWakeupSummaryRowsRow, error) {
-	rows, err := q.db.Query(ctx, listWorkspaceWakeupSummaryRows, arg.AgentIds, arg.WorkspaceID)
+	rows, err := q.db.Query(ctx, listWorkspaceWakeupSummaryRows, arg.AgentIds, arg.WorkspaceID, arg.VisibleIssueIds)
 	if err != nil {
 		return nil, err
 	}

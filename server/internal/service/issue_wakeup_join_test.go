@@ -127,10 +127,19 @@ func TestTurnedOffWakeupHandsNothingOver(t *testing.T) {
 
 // The sub-issue rule turned off on the issue or for the workspace between a
 // claim that did not go through and the next one no longer reaches the run.
+// enableChildDoneRule turns the child_done system rule on for the fixture's
+// workspace. The fork keeps the rule opt-in (DENE-1184), so its tests opt in.
+func enableChildDoneRule(t *testing.T, f *testutil.Fixture) {
+	t.Helper()
+	f.Exec(t, `UPDATE workspace SET settings = COALESCE(settings, '{}'::jsonb) || '{"system_wakeup_child_done": true}'::jsonb WHERE id = $1`, f.WorkspaceID)
+	f.Cleanup(t, `UPDATE workspace SET settings = settings - 'system_wakeup_child_done' WHERE id = $1`, f.WorkspaceID)
+}
+
 func TestTurnedOffChildDoneRuleLeavesARequeuedRun(t *testing.T) {
 	for _, scope := range []string{"issue", "workspace"} {
 		t.Run(scope, func(t *testing.T) {
 			f, s, issue, agent := conditionFixture(t)
+			enableChildDoneRule(t, f.Fixture)
 			ctx := context.Background()
 			f.Exec(t, "UPDATE issue SET status='in_progress',assignee_type='agent',assignee_id=$2 WHERE id=$1", issue, agent)
 			child := f.Issue(t, "child", testutil.Cols{"parent_issue_id": issue, "status": "in_progress"})
@@ -273,6 +282,7 @@ func TestWakeupKeepsItsInputWhenTheWaitingRunDoesNotTakeIt(t *testing.T) {
 // assignee.
 func TestChildDoneBackfillKeepsAPendingClose(t *testing.T) {
 	f, s, issue, agent := conditionFixture(t)
+	enableChildDoneRule(t, f.Fixture)
 	ctx := context.Background()
 	f.Exec(t, "UPDATE issue SET status='in_progress',assignee_type='agent',assignee_id=$2 WHERE id=$1", issue, agent)
 	child := f.Issue(t, "child", testutil.Cols{"parent_issue_id": issue, "status": "in_progress"})

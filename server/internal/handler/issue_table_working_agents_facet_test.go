@@ -99,7 +99,7 @@ func TestIssueTableWorkingAgentsFacetCountsOnlyEligibleRuns(t *testing.T) {
 func TestIssueTableWorkingAgentsFacetVisibility(t *testing.T) {
 	memberID := dbfx.User(t, "working facet member", "working-facet-member@multica.test")
 	dbfx.Member(t, testWorkspaceID, memberID, "member")
-	issueID := dbfx.Issue(t, "working facet visibility")
+	issueID := dbfx.Issue(t, "working facet visibility", testutil.Cols{"visibility": "workspace"})
 	privateID := dbfx.Agent(t, "working facet private", "")
 	ownedID := dbfx.Agent(t, "working facet member-owned", "", testutil.Cols{"owner_id": memberID})
 	workspaceID := dbfx.Agent(t, "working facet workspace", "", testutil.Cols{"permission_mode": "public_to"})
