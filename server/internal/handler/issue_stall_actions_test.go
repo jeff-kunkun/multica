@@ -275,3 +275,35 @@ func TestNotifyStallInboxKeepsActionsBoundToTheirIssue(t *testing.T) {
 }
 
 func rawJSON(value string) any { return testutil.Raw("'" + value + "'::jsonb") }
+
+func TestSweepStallActionsKeepsAnnouncementWhenWorkResumes(t *testing.T) {
+	issueID := dbfx.Issue(t, "announced then resumed", testutil.Cols{"status": "in_progress", "last_activity_at": time.Now().UTC().Add(-37 * time.Hour), "metadata": rawJSON(`{"stall.candidate":"true"}`)})
+	if _, err := testHandler.SweepStallActions(t.Context()); err != nil {
+		t.Fatalf("candidate sweep: %v", err)
+	}
+	dbfx.Comment(t, issueID, "我接着做")
+	dbfx.Exec(t, `UPDATE issue SET metadata = jsonb_set(metadata, ARRAY['stall.review_until'], to_jsonb($2::text), true) WHERE id = $1`, issueID, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339))
+	if _, err := testHandler.SweepStallActions(t.Context()); err != nil {
+		t.Fatalf("expiry sweep: %v", err)
+	}
+	var status, action string
+	dbfx.QueryRow(t, `SELECT status, metadata->>'stall.action' FROM issue WHERE id = $1`, issueID).Scan(&status, &action)
+	if status != "in_progress" || action != stallActionKept {
+		t.Fatalf("resumed ticket status/action = %q/%q, want in_progress/kept", status, action)
+	}
+}
+
+func TestUndoStallActionRefusesAfterManualStatusChange(t *testing.T) {
+	issueID := dbfx.Issue(t, "cancelled then reopened", testutil.Cols{"status": "todo", "metadata": rawJSON(fmt.Sprintf(`{"stall.action":"cancelled","stall.previous_status":"in_progress","stall.revert_until":%q}`, time.Now().UTC().Add(time.Hour).Format(time.RFC3339)))})
+	req := withURLParam(inboxRequest(http.MethodPost, "/api/issues/"+issueID+"/stall/undo", testWorkspaceID), "id", issueID)
+	rr := httptest.NewRecorder()
+	inboxWorkspaceHandler(testHandler.UndoStallAction).ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("undo status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	var status string
+	dbfx.QueryRow(t, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status)
+	if status != "todo" {
+		t.Fatalf("status = %q, want the manual todo kept", status)
+	}
+}

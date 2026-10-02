@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/delivery"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1088,5 +1089,60 @@ func TestCloseDoneAcceptsMergedGitLabMRFromLocalCLIReport(t *testing.T) {
 	}
 	if got := issueStatusDirect(t, issue.ID); got != "done" {
 		t.Fatalf("status = %s, want done", got)
+	}
+}
+
+// A PR link found only in the timeline is a hint, not a declaration. A related
+// open MR cited in review must not be linked to this issue, because a linked
+// open PR is what the done gate goes on to merge.
+func TestCloseDoneIgnoresCitedPullThatDoesNotNameTheIssue(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	var api *httptest.Server
+	api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"iid":491,"title":"Unrelated refactor","state":"opened","web_url":%q,"sha":"abc","source_branch":"agent/other"}`, api.URL+"/acme/game/-/merge_requests/491")
+	}))
+	defer api.Close()
+	box := withVCSBox(t)
+	prevHTTP := testHandler.deliveryHTTP
+	testHandler.deliveryHTTP = api.Client()
+	t.Cleanup(func() { testHandler.deliveryHTTP = prevHTTP })
+	seedVCSConnection(t, ctx, box, "gitlab", api.URL)
+	issue := newVCSIssue(t, "close citing another MR")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	closeIssueHTTP(t, issue.ID, "", "", map[string]any{
+		"outcome":  "done",
+		"evidence": "做完了，思路参考 " + api.URL + "/acme/game/-/merge_requests/491",
+	})
+	var linked int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`, issue.ID).Scan(&linked); err != nil {
+		t.Fatalf("count links: %v", err)
+	}
+	if linked != 0 {
+		t.Fatalf("cited MR was linked to the issue (%d rows)", linked)
+	}
+}
+
+func TestPullNamesIssueMatchesWholeIdentifier(t *testing.T) {
+	for _, tc := range []struct {
+		title, branch string
+		want          bool
+	}{
+		{"DENE-1156: fix close", "", true},
+		{"", "agent/dene-1156", true},
+		{"DENE-11560 other", "", false},
+		{"fix", "agent/xdene-1156", false},
+		{"unrelated", "agent/other", false},
+	} {
+		if got := pullNamesIssue(delivery.Pull{Title: tc.title, Branch: tc.branch}, "DENE-1156"); got != tc.want {
+			t.Errorf("pullNamesIssue(%q,%q) = %v, want %v", tc.title, tc.branch, got, tc.want)
+		}
+	}
+	if pullNamesIssue(delivery.Pull{Title: "DENE-1156"}, "DENE-11") {
+		t.Error("DENE-11 must not match DENE-1156")
 	}
 }
