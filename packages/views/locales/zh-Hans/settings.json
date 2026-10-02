@@ -781,7 +781,15 @@
     "deleting": "删除中...",
     "toast_delete_failed": "删除工作区失败",
     "confirm_cancel": "取消",
-    "confirm_action": "确认"
+    "confirm_action": "确认",
+    "naming_title": "聊天起名",
+    "naming_description": "选择新聊天标题的生成方式。",
+    "naming_source_label": "起名来源",
+    "naming_manage_hint": "只有工作区所有者和管理员可以修改。",
+    "naming_recommended_hint": "服务端没有模型 key 时，推荐使用聊天智能体运行时。",
+    "naming_source_saved": "聊天起名来源已保存",
+    "naming_source_save_failed": "保存聊天起名来源失败",
+    "naming_stats": "最近 24 小时：已起名 {{titled}} · 运行时 {{runtime}} · 规则兜底 {{rules}} · 失败 {{failed}"
   },
   "delete_workspace_dialog": {
     "title": "删除工作区",

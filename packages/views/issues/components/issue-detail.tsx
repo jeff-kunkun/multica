@@ -2249,18 +2249,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         title_base: issue.title,
       });
       await clearTitleSuggestion.mutateAsync();
-      toast.success("Title updated");
+      toast.success(t(($) => $.detail.title_suggestion_updated));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to apply title suggestion");
+      toast.error(error instanceof Error ? error.message : t(($) => $.detail.title_suggestion_apply_failed));
     }
-  }, [issue, titleSuggestion, issueUpdate, clearTitleSuggestion]);
+  }, [issue, titleSuggestion, issueUpdate, clearTitleSuggestion, t]);
   const dismissTitleSuggestion = useCallback(async () => {
     try {
       await clearTitleSuggestion.mutateAsync();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to dismiss title suggestion");
+      toast.error(error instanceof Error ? error.message : t(($) => $.detail.title_suggestion_dismiss_failed));
     }
-  }, [clearTitleSuggestion]);
+  }, [clearTitleSuggestion, t]);
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -3164,17 +3164,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {titleSuggestion && issue.creator_type === "member" ? (
             <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-2 text-sm">
               <div className="min-w-0">
-                <div className="text-caption text-muted-foreground">Suggested title</div>
+                <div className="text-caption text-muted-foreground">{t(($) => $.detail.title_suggestion_label)}</div>
                 <div className="truncate font-medium">{titleSuggestion}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 <Button type="button" size="sm" onClick={acceptTitleSuggestion} disabled={issueUpdate.isPending || clearTitleSuggestion.isPending}>
                   <CircleCheck className="mr-1.5 size-4" />
-                  Apply
+                  {t(($) => $.detail.title_suggestion_apply)}
                 </Button>
                 <Button type="button" variant="ghost" size="sm" onClick={dismissTitleSuggestion} disabled={clearTitleSuggestion.isPending}>
                   <X className="mr-1.5 size-4" />
-                  Dismiss
+                  {t(($) => $.detail.title_suggestion_dismiss)}
                 </Button>
               </div>
             </div>

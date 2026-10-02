@@ -545,7 +545,13 @@
     "alignment_origin": "이 이슈를 만든 정렬 보기",
     "alignment_start": "이 이슈로 정렬 시작",
     "alignment_started_by_another": "이 작업에는 이미 정렬이 진행 중입니다.",
-    "pull_requests_empty": "아직 연결된 Pull request가 없습니다. PR 제목에 이 태스크 식별자를 넣으면 연결됩니다."
+    "pull_requests_empty": "아직 연결된 Pull request가 없습니다. PR 제목에 이 태스크 식별자를 넣으면 연결됩니다.",
+    "title_suggestion_label": "Suggested title",
+    "title_suggestion_apply": "Apply",
+    "title_suggestion_dismiss": "Dismiss",
+    "title_suggestion_updated": "Title updated",
+    "title_suggestion_apply_failed": "Failed to apply title suggestion",
+    "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion"
   },
   "timeline": {
     "loading": "불러오는 중..."

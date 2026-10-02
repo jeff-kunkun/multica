@@ -550,7 +550,13 @@
     "alignment_origin": "View the alignment that created this",
     "alignment_start": "Align on this issue",
     "alignment_started_by_another": "An alignment is already running for this work.",
-    "pull_requests_empty": "No linked pull requests yet. Put this issue's identifier in a PR title to link it."
+    "pull_requests_empty": "No linked pull requests yet. Put this issue's identifier in a PR title to link it.",
+    "title_suggestion_label": "Suggested title",
+    "title_suggestion_apply": "Apply",
+    "title_suggestion_dismiss": "Dismiss",
+    "title_suggestion_updated": "Title updated",
+    "title_suggestion_apply_failed": "Failed to apply title suggestion",
+    "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion"
   },
   "timeline": {
     "loading": "Loading..."

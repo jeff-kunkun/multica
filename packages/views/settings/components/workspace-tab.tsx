@@ -258,9 +258,9 @@ export function WorkspaceTab() {
     try {
       const updated = await api.updateWorkspaceNaming(workspace.id, nextValue as "server_llm" | "runtime" | "rules");
       qc.setQueryData(workspaceKeys.naming(workspace.id), updated);
-      toast.success("Chat naming source saved", { id: "settings-auto-save" });
+      toast.success(t(($) => $.workspace.naming_source_saved), { id: "settings-auto-save" });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save chat naming source");
+      toast.error(error instanceof Error ? error.message : t(($) => $.workspace.naming_source_save_failed));
     }
   };
 
@@ -655,13 +655,13 @@ export function WorkspaceTab() {
       </SettingsSection>
 
       <SettingsSection
-        title="Chat naming"
-        description="Choose how new chat titles are created."
+        title={t(($) => $.workspace.naming_title)}
+        description={t(($) => $.workspace.naming_description)}
       >
         <SettingsCard>
           <SettingsRow
-            label="Naming source"
-            description={!canManageWorkspace ? "Only workspace owners and admins can change this." : "Runtime is recommended when the server has no model key."}
+            label={t(($) => $.workspace.naming_source_label)}
+            description={!canManageWorkspace ? t(($) => $.workspace.naming_manage_hint) : t(($) => $.workspace.naming_recommended_hint)}
             size="select-wide"
           >
             <Select
@@ -673,7 +673,7 @@ export function WorkspaceTab() {
               onValueChange={handleNamingChange}
               disabled={!canManageWorkspace || !naming}
             >
-              <SelectTrigger size="sm" className="w-full" aria-label="Chat naming source">
+              <SelectTrigger size="sm" className="w-full" aria-label={t(($) => $.workspace.naming_source_label)}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent align="end">
@@ -692,7 +692,12 @@ export function WorkspaceTab() {
           ) : null}
           {naming?.stats ? (
             <div className="px-4 py-3 text-caption text-muted-foreground">
-              Last 24 hours: {naming.stats.titled} titled · {naming.stats.runtime} runtime · {naming.stats.rules} rules fallback · {naming.stats.failed} failed
+              {t(($) => $.workspace.naming_stats, {
+                titled: naming.stats.titled,
+                runtime: naming.stats.runtime,
+                rules: naming.stats.rules,
+                failed: naming.stats.failed,
+              })}
             </div>
           ) : null}
         </SettingsCard>

@@ -505,7 +505,13 @@
     "alignment_origin": "Voir l'alignement à l'origine de cette tâche",
     "alignment_start": "Aligner cette tâche",
     "alignment_started_by_another": "Un alignement est déjà en cours pour cette tâche.",
-    "pull_requests_empty": "Aucune pull request liée pour l'instant. Indiquez l'identifiant de cette tâche dans le titre d'une PR pour la lier."
+    "pull_requests_empty": "Aucune pull request liée pour l'instant. Indiquez l'identifiant de cette tâche dans le titre d'une PR pour la lier.",
+    "title_suggestion_label": "Suggested title",
+    "title_suggestion_apply": "Apply",
+    "title_suggestion_dismiss": "Dismiss",
+    "title_suggestion_updated": "Title updated",
+    "title_suggestion_apply_failed": "Failed to apply title suggestion",
+    "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion"
   },
   "timeline": {
     "loading": "Chargement..."

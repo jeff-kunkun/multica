@@ -123,6 +123,31 @@ func TestChatRecap_FirstReplyNamesChat(t *testing.T) {
 	}
 }
 
+// A runtime title is authoritative for the opening turn. Recap's lexical
+// fallback must observe the successful report and leave it untouched.
+func TestChatRecap_PreservesRuntimeReportedTitle(t *testing.T) {
+	requireDB(t)
+	session := newChatTitleTestSession(t, "um so the invoices")
+	addChatTurns(t, session.ID, "um so the invoices, please", "I will handle the invoices.")
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO chat_naming_event (workspace_id, chat_session_id, source, status)
+		VALUES ($1, $2, 'runtime', 'success')
+	`, uuidToString(session.WorkspaceID), uuidToString(session.ID)); err != nil {
+		t.Fatalf("record runtime title: %v", err)
+	}
+	if _, err := testHandler.Queries.UpdateChatSessionTitle(context.Background(), db.UpdateChatSessionTitleParams{
+		ID: session.ID, Title: "Multica · invoice retry",
+	}); err != nil {
+		t.Fatalf("write runtime title: %v", err)
+	}
+	if _, err := testHandler.recapChatSession(context.Background(), testWorkspaceID, session.ID); err != nil {
+		t.Fatalf("recap: %v", err)
+	}
+	if got := loadRecapSession(t, session.ID).Title; got != "Multica · invoice retry" {
+		t.Fatalf("runtime title overwritten: %q", got)
+	}
+}
+
 // A title the user renamed is locked; the recap must never overwrite it.
 func TestChatRecap_LockedTitleIsNotRenamed(t *testing.T) {
 	requireDB(t)

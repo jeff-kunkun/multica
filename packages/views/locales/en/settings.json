@@ -783,7 +783,15 @@
     "deleting": "Deleting...",
     "toast_delete_failed": "Failed to delete workspace",
     "confirm_cancel": "Cancel",
-    "confirm_action": "Confirm"
+    "confirm_action": "Confirm",
+    "naming_title": "Chat naming",
+    "naming_description": "Choose how new chat titles are created.",
+    "naming_source_label": "Naming source",
+    "naming_manage_hint": "Only workspace owners and admins can change this.",
+    "naming_recommended_hint": "Runtime is recommended when the server has no model key.",
+    "naming_source_saved": "Chat naming source saved",
+    "naming_source_save_failed": "Failed to save chat naming source",
+    "naming_stats": "Last 24 hours: {{titled}} titled · {{runtime}} runtime · {{rules}} rules fallback · {{failed}} failed"
   },
   "delete_workspace_dialog": {
     "title": "Delete workspace",
