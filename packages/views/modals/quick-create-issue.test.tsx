@@ -1262,7 +1262,7 @@ describe("AgentCreatePanel", () => {
       // footer control explicitly rather than relying on a unique role.
       const checkboxes = screen.getAllByRole("checkbox");
       expect(checkboxes).toHaveLength(2);
-      const keepOpen = checkboxes[1];
+      const keepOpen = checkboxes[1]!;
       const attach = screen.getByRole("button", { name: "Upload file" });
 
       const footer = switchToManual.parentElement;
