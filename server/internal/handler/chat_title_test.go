@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -164,6 +165,33 @@ func TestSanitizeChatTitle(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := sanitizeChatTitle(tc.in); got != tc.want {
 				t.Fatalf("sanitizeChatTitle(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeRuntimeChatTitle(t *testing.T) {
+	long := strings.Repeat("a", chatSessionTitleMaxLen+1)
+	for _, tc := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "normalizes project separator", input: "  Billing   ·   retry invoices ", want: "Billing · retry invoices"},
+		{name: "rejects missing topic", input: "Billing", want: ""},
+		{name: "rejects missing project", input: " · retry invoices", want: ""},
+		{name: "rejects overlong title", input: "Billing · " + long, want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeRuntimeChatTitle(tc.input)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("normalizeRuntimeChatTitle(%q) = %q, want an error", tc.input, got)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("normalizeRuntimeChatTitle(%q) = %q, %v; want %q", tc.input, got, err, tc.want)
 			}
 		})
 	}

@@ -248,7 +248,14 @@ func stripEnglishChatLead(s string) string {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			continue
 		}
-		return strings.TrimSpace(rest)
+		// Conversational leads are often followed by a comma ("So, fix …").
+		// Remove that separator as part of the lead, while keeping punctuation
+		// inside a real word (for example "so-called") intact.
+		trimmed := strings.TrimSpace(rest)
+		if trimmed != "" && strings.ContainsRune(",;:!?", []rune(trimmed)[0]) {
+			return strings.TrimSpace(trimmed[1:])
+		}
+		return trimmed
 	}
 	return s
 }
