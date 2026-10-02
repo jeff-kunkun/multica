@@ -1,0 +1,26 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>项目栏「更多」修复前后</title>
+<style>body{font:14px -apple-system,sans-serif;background:#f4f4f5;display:flex;gap:32px;padding:32px}
+.card{background:#fff;border-radius:12px;width:300px;box-shadow:0 2px 12px #0002;overflow:hidden}
+h2{font-size:15px;margin:0;padding:14px 16px;border-bottom:1px solid #eee}.cap{padding:8px 16px;color:#888;font-size:12px}
+.row{display:flex;align-items:center;gap:8px;padding:7px 16px}.row .t{flex:1}.row .n{color:#888;font-size:12px}
+.pin{color:#bbb}.pin.on{color:#555}.g{width:14px;color:#aaa}.hl{background:#fff7d6}
+.lbl{font-weight:600;margin-bottom:8px}</style>
+<div><div class="lbl">修复前：更多 (6) 却只列 3 个</div><div class="card"><h2>项目栏</h2>
+<div class="cap">收起的项目</div>
+<div class="row"><span class="g"></span><span class="t">tarot</span><span class="n">16 个聊天</span><span class="pin">📌</span></div>
+<div class="row"><span class="g"></span><span class="t">game</span><span class="n">48 个聊天</span><span class="pin">📌</span></div>
+<div class="row"><span class="g"></span><span class="t">自媒体</span><span class="n">4 个聊天</span><span class="pin">📌</span></div>
+<div class="cap">置顶（拖动调整顺序）</div>
+<div class="row"><span class="g">⋮⋮</span><span class="t">Agent mono仓库管理</span><span class="n">13 个聊天</span><span class="pin on">📌</span></div>
+<div class="row"><span class="g">⋮⋮</span><span class="t">Multica 魔改</span><span class="n">83 个聊天</span><span class="pin on">📌</span></div>
+<div class="cap">……侧栏后 3 个置顶要往下滚才看得到</div></div></div>
+<div><div class="lbl">修复后：更多里的 6 个全列出，置顶的排前面</div><div class="card"><h2>项目栏</h2>
+<div class="cap">收起的项目</div>
+<div class="row hl"><span class="g"></span><span class="t">game-multica</span><span class="n">— 个聊天</span><span class="pin on">📌</span></div>
+<div class="row hl"><span class="g"></span><span class="t">bnb contract</span><span class="n">— 个聊天</span><span class="pin on">📌</span></div>
+<div class="row hl"><span class="g"></span><span class="t">game-relay</span><span class="n">— 个聊天</span><span class="pin on">📌</span></div>
+<div class="row"><span class="g"></span><span class="t">tarot</span><span class="n">16 个聊天</span><span class="pin">📌</span></div>
+<div class="row"><span class="g"></span><span class="t">game</span><span class="n">48 个聊天</span><span class="pin">📌</span></div>
+<div class="row"><span class="g"></span><span class="t">自媒体</span><span class="n">4 个聊天</span><span class="pin">📌</span></div>
+<div class="cap">置顶（拖动调整顺序）— 仍是侧栏完整的 10 个</div></div></div>
+</html>
