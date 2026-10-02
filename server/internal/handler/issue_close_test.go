@@ -1203,3 +1203,46 @@ func TestCloseCheckAgreesWithCloseAndWritesNothing(t *testing.T) {
 		t.Fatalf("check wrote a close record: %s", got)
 	}
 }
+
+// DENE-1183: the delivery lookup uses the same whole-identifier rule as an
+// inferred link. A search for DENE-11 also returns DENE-110's MR (substring
+// match on the provider side); it must not be linked to DENE-11, because a
+// linked open PR is what the done gate merges.
+func TestDeliveryLookupLinksOnlyPullsNamingTheWholeIdentifier(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	issue := newVCSIssue(t, "lookup whole identifier")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+	var api *httptest.Server
+	api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `[{"iid":71,"title":"Fix %s0 elsewhere","state":"opened","web_url":%q,"sha":"a","source_branch":"agent/other"},`+
+			`{"iid":72,"title":"Fix %s","state":"opened","web_url":%q,"sha":"b","source_branch":"agent/mine"}]`,
+			issue.Identifier, api.URL+"/acme/game/-/merge_requests/71", issue.Identifier, api.URL+"/acme/game/-/merge_requests/72")
+	}))
+	defer api.Close()
+	box := withVCSBox(t)
+	prevHTTP := testHandler.deliveryHTTP
+	testHandler.deliveryHTTP = api.Client()
+	t.Cleanup(func() { testHandler.deliveryHTTP = prevHTTP })
+	seedVCSConnection(t, ctx, box, "gitlab", api.URL)
+	setHandlerTestWorkspaceRepos(t, []map[string]string{{"url": api.URL + "/acme/game"}})
+
+	dbIssue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	view, err := testHandler.ensureIssueDeliveries(ctx, dbIssue)
+	if err != nil {
+		t.Fatalf("ensureIssueDeliveries: %v", err)
+	}
+	var urls []string
+	for _, row := range view.VCS {
+		urls = append(urls, row.HtmlUrl)
+	}
+	if len(urls) != 1 || !strings.HasSuffix(urls[0], "/merge_requests/72") {
+		t.Fatalf("linked = %v, want only MR 72 (MR 71 names %s0)", urls, issue.Identifier)
+	}
+}
