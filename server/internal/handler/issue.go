@@ -4734,6 +4734,11 @@ type BatchUpdateIssuesRequest struct {
 	Updates  UpdateIssueRequest `json:"updates"`
 }
 
+type BatchUpdateIssueRejection struct {
+	IssueID string `json:"issue_id"`
+	Reason  string `json:"reason"`
+}
+
 func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -4787,7 +4792,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !hasMutation {
-		writeJSON(w, http.StatusOK, map[string]any{"updated": 0})
+		writeJSON(w, http.StatusOK, map[string]any{"updated": 0, "rejected": []BatchUpdateIssueRejection{}})
 		return
 	}
 	if req.Updates.Priority != nil {
@@ -4838,6 +4843,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updated := 0
+	rejected := make([]BatchUpdateIssueRejection, 0)
+	reject := func(issueID, reason string) {
+		rejected = append(rejected, BatchUpdateIssueRejection{IssueID: issueID, Reason: reason})
+	}
+	batchActorType, batchActorID := h.resolveActor(r, userID, workspaceID)
 	// One Resolver for the whole batch — a per-issue filler would query the
 	// catalog once per custom-status row. (MUL-6243)
 	fillBatch := h.newStatusCategoryFiller(r.Context(), wsUUID)
@@ -4849,6 +4859,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
+			reject(issueID, "invalid issue id")
 			continue
 		}
 		prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
@@ -4856,6 +4867,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: wsUUID,
 		})
 		if err != nil {
+			reject(issueID, "issue not found in this workspace")
 			continue
 		}
 
@@ -4898,6 +4910,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if req.Updates.AssigneeID != nil {
 				assigneeUUID, err := util.ParseUUID(*req.Updates.AssigneeID)
 				if err != nil {
+					reject(issueID, "invalid assignee_id")
 					continue
 				}
 				params.AssigneeID = assigneeUUID
@@ -4909,6 +4922,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if req.Updates.StartDate != nil && *req.Updates.StartDate != "" {
 				d, err := util.ParseCalendarDate(*req.Updates.StartDate)
 				if err != nil {
+					reject(issueID, "invalid start_date format, expected YYYY-MM-DD")
 					continue
 				}
 				params.StartDate = d
@@ -4920,6 +4934,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if req.Updates.DueDate != nil && *req.Updates.DueDate != "" {
 				d, err := util.ParseCalendarDate(*req.Updates.DueDate)
 				if err != nil {
+					reject(issueID, "invalid due_date format, expected YYYY-MM-DD")
 					continue
 				}
 				params.DueDate = d
@@ -4932,10 +4947,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if req.Updates.ParentIssueID != nil {
 				newParentID, err := util.ParseUUID(*req.Updates.ParentIssueID)
 				if err != nil {
+					reject(issueID, "invalid parent_issue_id")
 					continue
 				}
 				// Cannot set self as parent.
 				if newParentID == prevIssue.ID {
+					reject(issueID, "an issue cannot be its own parent")
 					continue
 				}
 				// Validate parent exists in the same workspace.
@@ -4943,6 +4960,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					ID:          newParentID,
 					WorkspaceID: prevIssue.WorkspaceID,
 				}); err != nil {
+					reject(issueID, "parent issue not found in this workspace")
 					continue
 				}
 				// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
@@ -4960,6 +4978,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					cursor = ancestor.ParentIssueID
 				}
 				if cycleDetected {
+					reject(issueID, "circular parent relationship detected")
 					continue
 				}
 				params.ParentIssueID = newParentID
@@ -4977,6 +4996,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if _, ok := rawUpdates["stage"]; ok {
 			if req.Updates.Stage != nil {
 				if *req.Updates.Stage < 1 {
+					reject(issueID, "stage must be >= 1")
 					continue
 				}
 				params.Stage = pgtype.Int4{Int32: *req.Updates.Stage, Valid: true}
@@ -4995,7 +5015,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Validate the resulting assignee pair when this batch update touches
-		// either assignee field. Skip the issue silently on failure.
+		// either assignee field. Keep a per-issue reason when validation rejects it.
 		//
 		// Scoped PER ISSUE (prevIssue is this iteration's row), so one bound
 		// issue in the batch can never lend its authority to the others: an
@@ -5029,18 +5049,30 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if batchTouchedType || batchTouchedID {
-			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
+			if status, reason := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
+				reject(issueID, reason)
 				continue
 			}
 		}
-		batchActorType, _ := h.resolveActor(r, userID, workspaceID)
-		_, batchActorID := h.resolveActor(r, userID, workspaceID)
-		batchTransition := h.guardSilentStall(r.Context(), prevIssue, batchStatusKey, batchActorType, batchActorID, "", params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, false)
+		var batchBlock blockwait.Record
+		batchPersistBlock := false
+		if batchStatusKey == issuestatus.Blocked && prevIssue.Status != issuestatus.Blocked {
+			var rejection string
+			batchBlock, batchPersistBlock, rejection = h.gateBlockedStatus(r, prevIssue, req.Updates, batchActorType)
+			if rejection != "" {
+				reject(issueID, rejection)
+				continue
+			}
+		}
+		batchTransition := h.guardSilentStall(r.Context(), prevIssue, batchStatusKey, batchActorType, batchActorID, deref(req.Updates.NoCodeReason), params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, false)
 		if batchTransition.refuse != "" {
+			reject(issueID, batchTransition.refuse)
 			continue
 		}
+		statusKeyForWrite := batchStatusKey
 		if batchTransition.status != "" {
 			params.Status = pgtype.Text{String: batchTransition.status, Valid: true}
+			statusKeyForWrite = batchTransition.status
 		}
 		if batchTransition.setReviewer {
 			params.ReviewerType = batchTransition.reviewerType
@@ -5054,13 +5086,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
 			issue, lockedPrev, _, err = h.updateIssueAtomically(
-				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey,
+				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, statusKeyForWrite,
 			)
 			if err == nil {
 				prevIssue = lockedPrev
 			}
 		} else {
-			err = h.runWithIssueStatusGuard(r.Context(), wsUUID, batchStatusKey, func(q *db.Queries) error {
+			err = h.runWithIssueStatusGuard(r.Context(), wsUUID, statusKeyForWrite, func(q *db.Queries) error {
 				if innerErr := inheritUnsetProjectFromNewParent(r.Context(), q, &params, prevIssue, rawUpdates); innerErr != nil {
 					return innerErr
 				}
@@ -5077,9 +5109,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
+			reject(issueID, "failed to update issue")
 			continue
 		}
 		issue = h.finishStatusTransition(r.Context(), issue, batchTransition)
+		if batchPersistBlock {
+			h.persistBlockRecord(r.Context(), issue, batchBlock)
+		}
 		if batchTransition.persistBlock {
 			h.persistBlockRecord(r.Context(), issue, batchTransition.block)
 		}
@@ -5171,7 +5207,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	h.notifyWaitersOfIssuesDone(r.Context(), waitingOnCompleted)
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
-	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
+	writeJSON(w, http.StatusOK, map[string]any{"updated": updated, "rejected": rejected})
 }
 
 type BatchDeleteIssuesRequest struct {

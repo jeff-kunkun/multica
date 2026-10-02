@@ -124,6 +124,42 @@ func TestBatchUpdateValidUpdatesPersistAndCount(t *testing.T) {
 	}
 }
 
+func TestBatchUpdateReportsStatusGuardRejection(t *testing.T) {
+	issueID := createTestIssue(t, "BU-guarded status", "in_progress", "low")
+	t.Cleanup(func() { deleteTestIssue(t, issueID) })
+	agentID := handlerTestAgentID(t)
+	setIssueAssigneeDirect(t, issueID, "agent", agentID)
+	taskID := insertIssueTaskWithStatus(t, agentID, issueID, "running")
+
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{issueID},
+		"updates":   map[string]any{"status": "blocked"},
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	w := httptest.NewRecorder()
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 with per-issue rejection, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Updated  int                         `json:"updated"`
+		Rejected []BatchUpdateIssueRejection `json:"rejected"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Updated != 0 || len(resp.Rejected) != 1 {
+		t.Fatalf("response = %+v, want one rejected issue and no updates", resp)
+	}
+	if resp.Rejected[0].IssueID != issueID || !strings.Contains(resp.Rejected[0].Reason, "--blocked-by") {
+		t.Fatalf("rejection = %+v, want issue id and blocked guidance", resp.Rejected[0])
+	}
+	if got := issueStatusDirect(t, issueID); got != "in_progress" {
+		t.Fatalf("status changed despite guard rejection: %s", got)
+	}
+}
+
 // TestBatchUpdateStageOnly — regression for the stage barrier feature: a
 // batch update whose only field is `stage` must count as a mutation (hasMutation
 // includes "stage") and actually persist, not silently return {"updated": 0}.
