@@ -168,20 +168,32 @@ func (h *Handler) notifyStallInbox(ctx context.Context, issue db.Issue, title, b
 		}
 	}
 	entry := fmt.Sprintf("%s：票 #%d（%s）\n%s", title, issue.Number, issue.Title, body)
-	details, _ := json.Marshal(map[string]any{"kind": "stall_action", "issue_id": util.UUIDToString(issue.ID), "actions": actions})
+	summaryDetails, _ := json.Marshal(map[string]any{"kind": "stall_action_summary"})
+	actionDetails, _ := json.Marshal(map[string]any{"kind": "stall_action", "issue_id": util.UUIDToString(issue.ID), "actions": actions})
 	for _, recipient := range recipients {
+		// Keep the daily digest issue-less and read-only. Actionable rows are
+		// per issue so a later event cannot retarget an earlier ticket's button.
 		var existingID pgtype.UUID
 		var existingBody pgtype.Text
-		err := h.DB.QueryRow(ctx, `SELECT id, body FROM inbox_item WHERE workspace_id=$1 AND recipient_type='member' AND recipient_id=$2 AND type='issue_stall_action' AND created_at >= date_trunc('day', now()) ORDER BY created_at LIMIT 1`, issue.WorkspaceID, recipient).Scan(&existingID, &existingBody)
+		err := h.DB.QueryRow(ctx, `SELECT id, body FROM inbox_item WHERE workspace_id=$1 AND recipient_type='member' AND recipient_id=$2 AND type='issue_stall_action' AND issue_id IS NULL AND created_at >= date_trunc('day', now()) ORDER BY created_at LIMIT 1`, issue.WorkspaceID, recipient).Scan(&existingID, &existingBody)
 		if err == nil && existingID.Valid {
-			_, _ = h.DB.Exec(ctx, `UPDATE inbox_item SET body=$2, details=$3 WHERE id=$1`, existingID, strings.TrimSpace(existingBody.String+"\n\n"+entry), details)
+			_, _ = h.DB.Exec(ctx, `UPDATE inbox_item SET body=$2, details=$3 WHERE id=$1`, existingID, strings.TrimSpace(existingBody.String+"\n\n"+entry), summaryDetails)
+		} else {
+			_, _ = h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+				ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, RecipientType: "member", RecipientID: recipient,
+				Type: "issue_stall_action", Severity: "attention", IssueID: pgtype.UUID{Valid: false}, Title: "停滞处理每日汇总",
+				Body: pgtype.Text{String: entry, Valid: true}, ActorType: pgtype.Text{String: "system", Valid: true},
+				ActorID: pgtype.UUID{Valid: true}, Details: summaryDetails,
+			})
+		}
+		if len(actions) == 0 {
 			continue
 		}
 		_, _ = h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 			ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, RecipientType: "member", RecipientID: recipient,
-			Type: "issue_stall_action", Severity: "attention", IssueID: issue.ID, Title: "停滞处理每日汇总",
-			Body: pgtype.Text{String: entry, Valid: true}, ActorType: pgtype.Text{String: "system", Valid: true},
-			ActorID: pgtype.UUID{Valid: true}, Details: details,
+			Type: "issue_stall_action", Severity: "attention", IssueID: issue.ID, Title: title,
+			Body: pgtype.Text{String: body, Valid: true}, ActorType: pgtype.Text{String: "system", Valid: true},
+			ActorID: pgtype.UUID{Valid: true}, Details: actionDetails,
 		})
 	}
 }

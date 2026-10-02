@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -202,6 +203,67 @@ func TestSweepStallActionsAnnouncementKeepAndExpiry(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT status FROM issue WHERE id = $1`, expired).Scan(&status)
 	if status != "cancelled" {
 		t.Fatalf("expired status = %q, want cancelled", status)
+	}
+	var reason string
+	dbfx.QueryRow(t, `SELECT metadata->>'stall.reason' FROM issue WHERE id = $1`, expired).Scan(&reason)
+	if !strings.Contains(reason, "已核对关联 PR") {
+		t.Fatalf("expired reason = %q, want artifact check", reason)
+	}
+}
+
+func TestSweepStallActionsDoesNotTouchIntentionallyPausedTickets(t *testing.T) {
+	pausedParent := dbfx.Issue(t, "paused parent", testutil.Cols{
+		"status": "in_progress", "last_activity_at": time.Now().UTC().Add(-37 * time.Hour),
+		"metadata": rawJSON(`{"close.conclusion":"continuing"}`),
+	})
+	dbfx.Issue(t, "paused child", testutil.Cols{"status": "done", "parent_issue_id": pausedParent})
+	pausedCandidate := dbfx.Issue(t, "paused candidate", testutil.Cols{
+		"status": "in_progress", "last_activity_at": time.Now().UTC().Add(-37 * time.Hour),
+		"metadata": rawJSON(`{"close.conclusion":"deferred","stall.candidate":"true"}`),
+	})
+
+	if _, err := testHandler.SweepStallActions(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	var status, action string
+	dbfx.QueryRow(t, `SELECT status, metadata->>'stall.action' FROM issue WHERE id = $1`, pausedParent).Scan(&status, &action)
+	if status != "in_progress" || action != "" {
+		t.Fatalf("paused parent status/action = %q/%q, want in_progress/empty", status, action)
+	}
+	dbfx.QueryRow(t, `SELECT status, metadata->>'stall.action' FROM issue WHERE id = $1`, pausedCandidate).Scan(&status, &action)
+	if status != "in_progress" || action != "" {
+		t.Fatalf("paused candidate status/action = %q/%q, want in_progress/empty", status, action)
+	}
+}
+
+func TestNotifyStallInboxKeepsActionsBoundToTheirIssue(t *testing.T) {
+	first := dbfx.Issue(t, "stall inbox first", testutil.Cols{
+		"status": "in_progress", "last_activity_at": time.Now().UTC().Add(-37 * time.Hour),
+		"metadata": rawJSON(`{"stall.candidate":"true"}`),
+	})
+	second := dbfx.Issue(t, "stall inbox second", testutil.Cols{
+		"status": "in_progress", "last_activity_at": time.Now().UTC().Add(-37 * time.Hour),
+		"metadata": rawJSON(`{"stall.candidate":"true"}`),
+	})
+
+	if _, err := testHandler.SweepStallActions(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	for _, issueID := range []string{first, second} {
+		var detailIssueID string
+		if err := testPool.QueryRow(t.Context(), `SELECT details->>'issue_id' FROM inbox_item WHERE issue_id=$1 AND type='issue_stall_action' ORDER BY created_at DESC LIMIT 1`, issueID).Scan(&detailIssueID); err != nil {
+			t.Fatalf("action inbox row for %s: %v", issueID, err)
+		}
+		if detailIssueID != issueID {
+			t.Fatalf("action inbox details issue_id = %q, want %q", detailIssueID, issueID)
+		}
+	}
+	var summary string
+	if err := testPool.QueryRow(t.Context(), `SELECT body FROM inbox_item WHERE workspace_id=$1 AND recipient_type='member' AND type='issue_stall_action' AND issue_id IS NULL AND body LIKE '%stall inbox first%' ORDER BY created_at DESC LIMIT 1`, testWorkspaceID).Scan(&summary); err != nil {
+		t.Fatalf("daily summary: %v", err)
+	}
+	if !strings.Contains(summary, "stall inbox second") {
+		t.Fatalf("daily summary omitted second ticket: %q", summary)
 	}
 }
 
