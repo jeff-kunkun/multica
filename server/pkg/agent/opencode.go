@@ -35,6 +35,7 @@ func opencodeTerminateGrace() time.Duration {
 // overridden by user-configured custom_args.
 var opencodeBlockedArgs = map[string]blockedArgMode{
 	"--format":                       blockedWithValue,  // json output format for daemon communication
+	"--session":                      blockedWithValue,  // managed via ExecOptions.ResumeSessionID
 	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
 	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
 	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts

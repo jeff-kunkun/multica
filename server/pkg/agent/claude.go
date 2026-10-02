@@ -867,11 +867,17 @@ func trySend(ch chan<- Message, msg Message) bool {
 // overridden by user-configured custom_args. Overriding these would break
 // the daemon↔Claude communication protocol.
 var claudeBlockedArgs = map[string]blockedArgMode{
-	"-p":                blockedStandalone, // non-interactive mode
-	"--output-format":   blockedWithValue,  // stream-json protocol
-	"--input-format":    blockedWithValue,  // stream-json protocol
-	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
-	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
+	"-p":                blockedStandalone,    // non-interactive mode
+	"-c":                blockedOptionalValue, // Claude's --continue; Codex uses -c for config
+	"--continue":        blockedStandalone,    // session continuation is daemon-owned
+	"-r":                blockedWithValue,     // resume is daemon-owned
+	"--resume":          blockedWithValue,     // resume is daemon-owned
+	"--session-id":      blockedWithValue,     // session identity is daemon-owned
+	"--fork-session":    blockedStandalone,    // session fork is daemon-owned
+	"--output-format":   blockedWithValue,     // stream-json protocol
+	"--input-format":    blockedWithValue,     // stream-json protocol
+	"--permission-mode": blockedWithValue,     // bypassPermissions for autonomous operation
+	"--mcp-config":      blockedWithValue,     // set by daemon from agent.mcp_config
 	// `--effort` is owned by the per-agent thinking_level picker so a
 	// user-supplied custom_arg cannot silently outvote it. The daemon
 	// injects --effort only when opts.ThinkingLevel is set; if a user

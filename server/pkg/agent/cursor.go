@@ -1010,6 +1010,7 @@ var cursorBlockedArgs = map[string]blockedArgMode{
 	"-p":              blockedStandalone, // non-interactive print mode
 	"--output-format": blockedWithValue,  // stream-json protocol
 	"--yolo":          blockedStandalone, // auto-approval for autonomous operation
+	"--resume":        blockedWithValue,  // managed via ExecOptions.ResumeSessionID
 }
 
 // buildCursorArgs assembles the argv for a one-shot cursor-agent invocation.
