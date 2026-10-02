@@ -203,6 +203,18 @@ describe("HomePage", () => {
     await waitFor(() => expect(screen.queryByTestId("waiting-selection-toolbar")).toBeNull());
   });
 
+  it("returns selected waiting rows to to-do", () => {
+    board.waiting = [
+      ...board.waiting,
+      row({ issueId: "823", lane: "waiting", kind: "needs_human" }),
+    ];
+    renderWithI18n(<InboxBoardLanes board={board} isLoading={false} isError={false} />);
+    fireEvent.click(screen.getAllByTestId("waiting-row-checkbox")[0]!);
+    fireEvent.click(screen.getAllByTestId("waiting-row-checkbox")[1]!);
+    fireEvent.click(within(screen.getByTestId("waiting-selection-toolbar")).getByRole("button", { name: "Return to to-do" }));
+    expect(batchUpdateIssues).toHaveBeenCalledWith({ ids: ["822", "823"], updates: { status: "todo" } });
+  });
+
   it("names the agent that will be woken when returning work to to-do", () => {
     board.waiting[0] = {
       ...board.waiting[0]!,

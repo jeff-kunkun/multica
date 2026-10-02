@@ -230,22 +230,22 @@ function WaitingRowControls({ row, copy }: { row: BoardRow; copy: BoardCopy }) {
         onChange={() => actions.toggleSelected(row.issueId)}
         aria-label={copy.t(($) => $.board.actions.select, { title: row.title })}
         data-testid="waiting-row-checkbox"
-        className="size-4 rounded border-muted-foreground/50 accent-primary"
+        className="size-4 rounded-sm border-muted-foreground/50 accent-primary"
       />
       <div className="hidden items-center gap-0.5 [@media(hover:hover)]:group-hover:flex [@media(hover:hover)]:group-focus-within:flex">
-        <button type="button" title={copy.t(($) => $.board.actions.backlog)} aria-label={copy.t(($) => $.board.actions.backlog)} onClick={() => setStatus("backlog")} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+        <button type="button" title={copy.t(($) => $.board.actions.backlog)} aria-label={copy.t(($) => $.board.actions.backlog)} onClick={() => setStatus("backlog")} className="rounded-sm p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
           <RotateCcw className="size-3.5" />
         </button>
-        <button type="button" title={copy.t(($) => $.board.actions.done)} aria-label={copy.t(($) => $.board.actions.done)} onClick={() => setStatus("done")} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+        <button type="button" title={copy.t(($) => $.board.actions.done)} aria-label={copy.t(($) => $.board.actions.done)} onClick={() => setStatus("done")} className="rounded-sm p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
           <Check className="size-3.5" />
         </button>
-        <button type="button" title={copy.t(($) => $.board.actions.cancelled)} aria-label={copy.t(($) => $.board.actions.cancelled)} onClick={() => setStatus("cancelled")} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive">
+        <button type="button" title={copy.t(($) => $.board.actions.cancelled)} aria-label={copy.t(($) => $.board.actions.cancelled)} onClick={() => setStatus("cancelled")} className="rounded-sm p-1 text-muted-foreground hover:bg-accent hover:text-destructive">
           <X className="size-3.5" />
         </button>
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger
-          render={<button type="button" aria-label={copy.t(($) => $.board.actions.more)} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground" />}
+          render={<button type="button" aria-label={copy.t(($) => $.board.actions.more)} className="rounded-sm p-1 text-muted-foreground hover:bg-accent hover:text-foreground" />}
         >
           <MoreHorizontal className="size-3.5" />
         </DropdownMenuTrigger>
@@ -472,6 +472,7 @@ function WaitingSelectionToolbar({ copy }: { copy: BoardCopy }) {
         <Button size="sm" variant="ghost" onClick={() => actions.applyStatus(ids, "backlog")}>{copy.t(($) => $.board.actions.backlog)}</Button>
         <Button size="sm" variant="ghost" onClick={() => actions.applyStatus(ids, "done")}>{copy.t(($) => $.board.actions.done)}</Button>
         <Button size="sm" variant="ghost" onClick={() => actions.applyStatus(ids, "cancelled")}>{copy.t(($) => $.board.actions.cancelled)}</Button>
+        <Button size="sm" variant="ghost" onClick={() => actions.applyStatus(ids, "todo")}>{copy.t(($) => $.board.actions.return_to_do)}</Button>
         <Button size="sm" variant="ghost" onClick={() => ids.forEach((id) => actions.toggleSelected(id))}>{copy.t(($) => $.board.actions.clear_selection)}</Button>
       </div>
     </div>
