@@ -117,6 +117,11 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: mockToastError },
 }));
 
+vi.mock("@multica/core/hooks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/hooks")>()),
+  useWorkspaceId: () => "ws-1",
+}));
+
 vi.mock("@multica/core/chat/mutations", () => ({
   useDismissChatProjectNudge: () => ({ mutate: vi.fn(), isPending: false }),
   useRegenerateChatQuickActions: () => ({ mutateAsync: vi.fn() }),

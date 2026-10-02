@@ -781,7 +781,15 @@
     "deleting": "삭제하는 중...",
     "toast_delete_failed": "워크스페이스를 삭제하지 못했습니다",
     "confirm_cancel": "취소",
-    "confirm_action": "확인"
+    "confirm_action": "확인",
+    "naming_title": "Chat naming",
+    "naming_description": "Choose how new chat titles are created.",
+    "naming_source_label": "Naming source",
+    "naming_manage_hint": "Only workspace owners and admins can change this.",
+    "naming_recommended_hint": "Runtime is recommended when the server has no model key.",
+    "naming_source_saved": "Chat naming source saved",
+    "naming_source_save_failed": "Failed to save chat naming source",
+    "naming_stats": "Last 24 hours: {{titled}} titled · {{runtime}} runtime · {{rules}} rules fallback · {{failed}} failed"
   },
   "delete_workspace_dialog": {
     "title": "워크스페이스 삭제",

@@ -4,8 +4,8 @@
  * The bar is: pinned projects in the person's own order, then every other
  * project that already has a chat, most recently chatted first. Projects
  * with no chats stay out of the bar (they still appear in "more"). Pin
- * order is a list of project ids supplied by the caller — that list is a
- * per-user preference, not a workspace setting.
+ * order is a list of project ids supplied by the caller from the server's
+ * per-user sidebar pin list.
  */
 
 export interface ChatProjectBarSession {

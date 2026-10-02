@@ -123,4 +123,4 @@ moves the surprise to somebody else.
 
 ## Progress
 
-Use `multica issue progress` and `multica chat progress` to report a concise current update. See `references/progress.md`.
+Use `multica issue progress` and `multica chat progress` to report a concise current update. At the beginning of a chat run, report a title with `multica chat title "Project · topic"`; a manual member rename is locked and the command returns a reason. For a human-created issue, suggest a clearer first-pass title with `multica issue title <id> --suggest "<title>"`; it never applies the change. See `references/progress.md`.

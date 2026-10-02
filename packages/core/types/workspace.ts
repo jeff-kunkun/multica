@@ -43,6 +43,20 @@ export interface Workspace {
   updated_at: string;
 }
 
+export interface WorkspaceNamingOption {
+  id: "server_llm" | "runtime" | "rules";
+  label: string;
+  available: boolean;
+  recommended?: boolean;
+  reason?: string;
+}
+
+export interface WorkspaceNaming {
+  source: "server_llm" | "runtime" | "rules";
+  options: WorkspaceNamingOption[];
+  stats: { titled: number; runtime: number; rules: number; failed: number };
+}
+
 /**
  * One MCP server in the workspace's library.
  *

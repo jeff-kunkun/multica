@@ -554,7 +554,13 @@
     "alignment_origin": "この課題を作ったすり合わせを見る",
     "alignment_start": "この課題からすり合わせる",
     "alignment_started_by_another": "この作業にはすでにすり合わせがあります。",
-    "pull_requests_empty": "リンクされた Pull request はまだありません。PR のタイトルにこのタスクの識別子を入れるとリンクされます。"
+    "pull_requests_empty": "リンクされた Pull request はまだありません。PR のタイトルにこのタスクの識別子を入れるとリンクされます。",
+    "title_suggestion_label": "Suggested title",
+    "title_suggestion_apply": "Apply",
+    "title_suggestion_dismiss": "Dismiss",
+    "title_suggestion_updated": "Title updated",
+    "title_suggestion_apply_failed": "Failed to apply title suggestion",
+    "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion"
   },
   "timeline": {
     "loading": "読み込み中..."

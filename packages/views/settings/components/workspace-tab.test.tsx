@@ -27,11 +27,25 @@ const membersRef = vi.hoisted(() => ({
 const agentsRef = vi.hoisted(() => ({
   current: [] as Array<Record<string, unknown>>,
 }));
+const namingRef = vi.hoisted(() => ({
+  current: {
+    source: "runtime",
+    options: [
+      { id: "server_llm", label: "Server model", available: false, reason: "No model key configured" },
+      { id: "runtime", label: "Chat agent runtime", available: true, recommended: true },
+      { id: "rules", label: "Rules only", available: true },
+    ],
+    stats: { titled: 0, runtime: 0, rules: 0, failed: 0 },
+  },
+}));
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey?: readonly unknown[] }) => {
     if (options?.queryKey?.[0] === "agents") {
       return { data: agentsRef.current, isFetched: true };
+    }
+    if (options?.queryKey?.[2] === "naming") {
+      return { data: namingRef.current, isFetched: true };
     }
     return { data: membersRef.current, isFetched: true };
   },
@@ -55,8 +69,12 @@ vi.mock("@multica/core/platform", () => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"], queryFn: vi.fn() }),
   agentListOptions: () => ({ queryKey: ["agents"], queryFn: vi.fn() }),
+  workspaceNamingOptions: () => ({ queryKey: ["workspaces", "workspace-1", "naming"], queryFn: vi.fn() }),
   workspaceListOptions: () => ({ queryKey: ["workspaces"], queryFn: vi.fn() }),
-  workspaceKeys: { list: () => ["workspaces"] },
+  workspaceKeys: {
+    list: () => ["workspaces"],
+    naming: () => ["workspaces", "workspace-1", "naming"],
+  },
 }));
 
 vi.mock("@multica/core/issues/queries", () => ({
@@ -71,6 +89,7 @@ vi.mock("@multica/core/workspace/mutations", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     updateWorkspace: mockUpdateWorkspace,
+    updateWorkspaceNaming: vi.fn(async (_id: string, source: string) => ({ ...namingRef.current, source })),
     getBaseUrl: () => "http://127.0.0.1:8080",
   },
 }));
@@ -294,5 +313,22 @@ describe("WorkspaceTab — automatic updates", () => {
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
 
     expect(screen.getByText(/Agent is currently offline/i)).toBeTruthy();
+  });
+
+  it("shows the naming source card and explains an unavailable server key", () => {
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByText("Chat naming")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Naming source" })).toBeEnabled();
+    expect(screen.getByText("No model key configured")).toBeTruthy();
+    expect(screen.getByText(/Last 24 hours: 0 titled/)).toBeTruthy();
+  });
+
+  it("keeps naming source read-only for regular members with an explanation", () => {
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByRole("combobox", { name: "Naming source" })).toBeDisabled();
+    expect(screen.getByText("Only workspace owners and admins can change this.")).toBeTruthy();
   });
 });
