@@ -132,6 +132,13 @@ services:
       # its newlines survive into the container.
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      # Encrypts App credentials created from Settings (DENE-981). Unset
+      # falls back to a key derived from JWT_SECRET.
+      MULTICA_GITHUB_APP_SECRET_KEY: ${MULTICA_GITHUB_APP_SECRET_KEY:-}
+      # Optional dedicated keys for workspace routing and log-export credentials.
+      # Unset falls back to a key derived from JWT_SECRET.
+      MULTICA_ROUTING_SECRET_KEY: ${MULTICA_ROUTING_SECRET_KEY:-}
+      MULTICA_LOG_EXPORT_SECRET_KEY: ${MULTICA_LOG_EXPORT_SECRET_KEY:-}
       # Public URL the API is reachable at from the open internet, no
       # trailing slash. Used to mint absolute webhook URLs for autopilot
       # webhook triggers. Leave unset behind a same-origin reverse proxy
