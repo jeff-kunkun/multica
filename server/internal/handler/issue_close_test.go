@@ -1146,3 +1146,60 @@ func TestPullNamesIssueMatchesWholeIdentifier(t *testing.T) {
 		t.Error("DENE-11 must not match DENE-1156")
 	}
 }
+
+// DENE-1183: /close/check is the close endpoint's shape gate with no writes.
+// Every refusal it gives is the one /close gives for the same body, so the
+// CLI can relay it before a local merge.
+func TestCloseCheckAgreesWithCloseAndWritesNothing(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "close check parity", "in_progress")
+	check := func(body map[string]any) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest("POST", "/api/issues/"+issue.ID+"/close/check", body), "id", issue.ID)
+		testHandler.CheckCloseIssue(w, req)
+		return w
+	}
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{"missing outcome", map[string]any{"evidence": "x"}},
+		{"unknown outcome", map[string]any{"outcome": "finished", "evidence": "x"}},
+		{"missing evidence", map[string]any{"outcome": "done"}},
+		{"verdict hold", map[string]any{"outcome": "done", "evidence": "x", "verdict": "hold"}},
+		{"in_progress without continuation", map[string]any{"outcome": "in_progress", "evidence": "x"}},
+		{"missing audit", map[string]any{"outcome": "cancelled", "evidence": "x", "omit_knowledge_audit": true}},
+	} {
+		closeBody := map[string]any{}
+		checkBody := map[string]any{}
+		for k, v := range tc.body {
+			closeBody[k] = v
+			if k != "omit_knowledge_audit" {
+				checkBody[k] = v
+			}
+		}
+		if _, omit := tc.body["omit_knowledge_audit"]; !omit {
+			checkBody["knowledge_audit"] = map[string]any{"none": true}
+		}
+		got := check(checkBody)
+		want := closeIssueHTTP(t, issue.ID, "", "", closeBody)
+		if got.Code != http.StatusBadRequest || want.Code != http.StatusBadRequest {
+			t.Fatalf("%s: check=%d close=%d, want both 400: %s / %s", tc.name, got.Code, want.Code, got.Body.String(), want.Body.String())
+		}
+		if got.Body.String() != want.Body.String() {
+			t.Fatalf("%s: check says %s, close says %s", tc.name, got.Body.String(), want.Body.String())
+		}
+	}
+	ok := check(map[string]any{"outcome": "done", "evidence": "PR #1", "knowledge_audit": map[string]any{"none": true}})
+	if ok.Code != http.StatusOK {
+		t.Fatalf("acceptable shape: %d %s", ok.Code, ok.Body.String())
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
+		t.Fatalf("check changed status to %s", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyConclusion); got != "" {
+		t.Fatalf("check wrote a close record: %s", got)
+	}
+}
