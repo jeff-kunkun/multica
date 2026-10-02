@@ -42,15 +42,16 @@ function IssuesSurfaceHeader({
         </RefreshablePageIcon>
         <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb_title)}</h1>
       </PageHeader>
-      <IssuesHeader
+          <IssuesHeader
         scopedIssues={issues}
         workingAgents={workingAgents}
         dateFilter={dateFilter}
         onDateFilterChange={setDateFilter}
         facetCountsExact={facetCountsExact}
         tableFacetCounts={tableFacetCounts}
-        onTableFacetChange={onTableFacetChange}
-      />
+            onTableFacetChange={onTableFacetChange}
+            onNewGoal={() => controller.openCreateIssue({ goal_mode: true })}
+          />
     </>
   );
 }

@@ -44,6 +44,7 @@ type IssueResponse struct {
 	Identifier  string            `json:"identifier"`
 	Title       string            `json:"title"`
 	Progress    *ProgressResponse `json:"progress"`
+	GoalProgress *GoalProgressResponse `json:"goal_progress,omitempty"`
 	Description *string           `json:"description"`
 	Status      string            `json:"status"`
 	// StatusCategory encodes lifecycle using the legacy seven-value wire enum. It is
@@ -141,6 +142,11 @@ type IssueResponse struct {
 	// CapacityRetry is detail-only: the waiting in-place retry after a full
 	// model (DENE-1093), absent when nothing is waiting.
 	CapacityRetry *CapacityRetryResponse `json:"capacity_retry,omitempty"`
+}
+
+type GoalProgressResponse struct {
+	Done  int64 `json:"done"`
+	Total int64 `json:"total"`
 }
 
 // validIssuePriorities mirrors the CHECK constraint on the issue table. Write
@@ -1780,8 +1786,21 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
 	resp := make([]IssueResponse, len(issues))
+	goalProgress := map[string]GoalProgressResponse{}
+	if len(ids) > 0 {
+		if rows, err := h.Queries.ListIssueGoalProgress(ctx, db.ListIssueGoalProgressParams{WorkspaceID: wsUUID, Column2: ids}); err == nil {
+			for _, row := range rows {
+				goalProgress[uuidToString(row.IssueID)] = GoalProgressResponse{Done: row.Passed, Total: row.Total}
+			}
+		} else {
+			slog.Warn("ListIssues goal progress query failed", "error", err)
+		}
+	}
 	for i, issue := range issues {
 		resp[i] = issueListRowToResponse(issue, prefix)
+		if progress, ok := goalProgress[resp[i].ID]; ok {
+			resp[i].GoalProgress = &progress
+		}
 		labels := labelsMap[resp[i].ID]
 		if labels == nil {
 			labels = []LabelResponse{}

@@ -282,7 +282,10 @@ export function AlignCreatePanel({
 
   const submit = async () => {
     if (!canSubmit || !selectedRuntime || gate.isBlocked() || capabilitiesLoading) return;
-    const request = editorRef.current?.getMarkdown()?.trim() ?? "";
+    const rawRequest = editorRef.current?.getMarkdown()?.trim() ?? "";
+    const request = goalMode
+      ? `${rawRequest}\n\n[目标模式] 对齐时请追问“怎么算做完”，并把最终结论整理成 2–3 条可核验完成线。`
+      : rawRequest;
     if (!request) return;
     // Only the ids whose markdown link the request still references: a file
     // uploaded on the manual face and then removed from the align body must
@@ -353,8 +356,15 @@ export function AlignCreatePanel({
         <h2 className="mt-4 text-title-sm font-semibold">
           {t(($) => $.alignment.entry_title)}
         </h2>
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-brand/20 bg-brand/5 px-3 py-2">
+          <GoalFlowSteps active="align" />
+          <label className="flex shrink-0 items-center gap-2 text-caption text-muted-foreground">
+            <Switch checked={goalMode} onCheckedChange={setGoalMode} disabled={start.isPending} />
+            <span>做到达标为止</span>
+          </label>
+        </div>
         <p className="mt-2 text-body leading-6 text-muted-foreground">
-          {t(($) => $.alignment.entry_description)}
+          {t(($) => $.alignment.entry_description)}{goalMode ? " · 对齐时请明确怎么算做完，最后会写入完成线。" : ""}
         </p>
 
         <div
@@ -483,10 +493,6 @@ export function AlignCreatePanel({
           <ArrowLeftRight className="size-3.5" />
           {tModals(($) => $.create_issue.switch_from_align)}
         </button>
-        <label className="mr-auto flex items-center gap-2 text-caption text-muted-foreground">
-          <Switch checked={goalMode} onCheckedChange={setGoalMode} disabled={start.isPending} />
-          <span>{t(($) => $.alignment.goal_toggle)}</span>
-        </label>
         <Button variant="ghost" size="sm" onClick={onClose} disabled={start.isPending}>
           {t(($) => $.alignment.entry_cancel)}
         </Button>
