@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/blockwait"
 )
 
 func audit() *KnowledgeAudit { return &KnowledgeAudit{None: true} }
@@ -75,6 +77,37 @@ func TestOutcomeTableMatchesWrittenCopies(t *testing.T) {
 			if !seen[name] {
 				t.Errorf("%s: never documents --outcome %s", rel, name)
 			}
+		}
+	}
+}
+
+// Continuation.Present is the raw-field shape check the close gate runs
+// before anything is parsed; blockwait.Record.Structured is the same rule on
+// the stored record the block-wait gate builds. For every combination of
+// well-formed fields the two must agree (DENE-1183).
+func TestContinuationPresentMatchesBlockWaitStructured(t *testing.T) {
+	values := []struct{ key, value string }{
+		{blockwait.KeyBlockedBy, "DENE-1"},
+		{blockwait.KeyWakeAt, "2026-10-04T00:00:00Z"},
+		{blockwait.KeyWaitCondition, "CI green"},
+		{blockwait.KeyWaitTimeout, "2026-10-05T00:00:00Z"},
+		{blockwait.KeyNeedsHuman, "kun"},
+	}
+	for mask := 0; mask < 1<<len(values); mask++ {
+		meta := map[string]any{}
+		for i, v := range values {
+			if mask&(1<<i) != 0 {
+				meta[v.key] = v.value
+			}
+		}
+		get := func(key string) string { s, _ := meta[key].(string); return s }
+		c := Continuation{
+			BlockedBy: get(blockwait.KeyBlockedBy), WakeAt: get(blockwait.KeyWakeAt),
+			WaitCondition: get(blockwait.KeyWaitCondition), WaitTimeout: get(blockwait.KeyWaitTimeout),
+			NeedsHuman: get(blockwait.KeyNeedsHuman),
+		}
+		if got, want := c.Present(), blockwait.ParseMetadata(meta).Structured(); got != want {
+			t.Fatalf("fields %v: Continuation.Present=%v, blockwait Structured=%v", meta, got, want)
 		}
 	}
 }

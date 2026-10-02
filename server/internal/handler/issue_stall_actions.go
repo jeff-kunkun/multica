@@ -344,7 +344,7 @@ func (h *Handler) ListStallActions(w http.ResponseWriter, r *http.Request) {
 // deterministic expiry/cancel transition.
 func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 	var affected int64
-	parentRows, err := h.DB.Query(ctx, `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status IN ('todo','in_progress','blocked') AND metadata->>'stall.action' IS DISTINCT FROM 'revoked' AND last_activity_at < now() - interval '36 hours' AND EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) AND NOT EXISTS (SELECT 1 FROM issue child_open WHERE child_open.parent_issue_id=issue.id AND child_open.status NOT IN ('done','cancelled')) ORDER BY last_activity_at ASC LIMIT 500`)
+	parentRows, err := h.DB.Query(ctx, `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE `+stallaction.PatrolStatusSQL()+` AND metadata->>'stall.action' IS DISTINCT FROM 'revoked' AND `+stallaction.QuietSQL()+` AND EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) AND NOT EXISTS (SELECT 1 FROM issue child_open WHERE child_open.parent_issue_id=issue.id AND child_open.status NOT IN ('done','cancelled')) ORDER BY last_activity_at ASC LIMIT 500`)
 	if err != nil {
 		return 0, err
 	}
@@ -371,11 +371,14 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 	}
 	parentRows.Close()
 
+	// Which tickets the patrol may look at is stallaction's Eligibility; the
+	// query and the per-row re-check are both built from it.
+	//
 	// Quiet top-level tickets are sent through the configured routing model for
 	// the duplicate/invalid decision. Self-hosted deployments without that
 	// model can still honor an explicit candidate marker written by a trusted
 	// agent, while never guessing from age alone.
-	candidateQuery := `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status IN ('todo','in_progress','blocked') AND metadata->>'stall.action' IS NULL AND last_activity_at < now() - interval '36 hours' AND NOT EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) AND (COALESCE(metadata->>'stall.judged_at','') = '' OR CASE WHEN metadata->>'stall.judged_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$' THEN last_activity_at > (metadata->>'stall.judged_at')::timestamptz ELSE TRUE END) AND COALESCE(metadata->>'close.conclusion','') NOT IN ('deferred','continuing') AND COALESCE(metadata->>'block.blocked_by','') = '' AND COALESCE(metadata->>'block.wait_condition','') = ''`
+	candidateQuery := `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE ` + stallaction.PatrolStatusSQL() + ` AND metadata->>'stall.action' IS NULL AND ` + stallaction.QuietSQL() + ` AND NOT EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) AND (COALESCE(metadata->>'stall.judged_at','') = '' OR CASE WHEN metadata->>'stall.judged_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$' THEN last_activity_at > (metadata->>'stall.judged_at')::timestamptz ELSE TRUE END) AND ` + stallaction.NotWaitingSQL()
 	if h.Routing == nil {
 		candidateQuery += ` AND metadata->>'stall.candidate'='true'`
 	}
@@ -399,7 +402,8 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 		if st.JudgedFor(x.LastActive.Time) {
 			continue
 		}
-		if ticket.Paused() {
+		// The same rule the query filtered on, re-read from the live row.
+		if !ticket.PatrolEligible() {
 			continue
 		}
 		if prs, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID); err != nil || len(prs) > 0 {

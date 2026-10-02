@@ -110,7 +110,8 @@ type Continuation struct {
 	NeedsHuman    string
 }
 
-// Present mirrors blockwait.Record.Structured on the raw fields: a clock, a
+// Present is blockwait.Record.Structured on the raw fields (pinned by
+// TestContinuationPresentMatchesBlockWaitStructured): a clock, a
 // wait with a deadline, another ticket, or a named person.
 func (c Continuation) Present() bool {
 	if strings.TrimSpace(c.BlockedBy) != "" || strings.TrimSpace(c.WakeAt) != "" || strings.TrimSpace(c.NeedsHuman) != "" {

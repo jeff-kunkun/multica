@@ -287,3 +287,59 @@ func TestUndoStallActionRefusesAfterManualStatusChange(t *testing.T) {
 		t.Fatalf("status = %q, want the manual todo kept", status)
 	}
 }
+
+// The patrol filters in SQL and re-checks each row in Go. Both are built from
+// stallaction's Eligibility (DENE-1183); this pins them to the same answer
+// on a matrix of status, close.* and block.* values.
+func TestStallPatrolEligibilitySQLMatchesGo(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cases := []struct {
+		status string
+		meta   string
+	}{
+		{"todo", `{}`},
+		{"in_progress", `{}`},
+		{"blocked", `{}`},
+		{"backlog", `{}`},
+		{"done", `{}`},
+		{"cancelled", `{}`},
+		{"todo", `{"close.conclusion":"deferred"}`},
+		{"in_progress", `{"close.conclusion":"continuing"}`},
+		{"in_progress", `{"close.conclusion":"delivered"}`},
+		{"blocked", `{"close.conclusion":"blocked"}`},
+		{"in_progress", `{"close.conclusion":"awaiting_human"}`},
+		{"blocked", `{"block.blocked_by":"DENE-1"}`},
+		{"blocked", `{"block.wait_condition":"CI green"}`},
+		{"blocked", `{"block.wake_at":"2026-10-04T00:00:00Z"}`},
+		{"todo", `{"block.blocked_by":""}`},
+		{"todo", `{"close.waiting_on":"DENE-2"}`},
+	}
+	ids := make([]string, len(cases))
+	for i, tc := range cases {
+		ids[i] = dbfx.Issue(t, fmt.Sprintf("eligibility %d", i), testutil.Cols{"status": tc.status, "metadata": rawJSON(tc.meta)})
+	}
+	rows, err := testPool.Query(t.Context(), `SELECT id::text FROM issue WHERE id = ANY($1::uuid[]) AND `+stallaction.PatrolStatusSQL()+` AND `+stallaction.NotWaitingSQL(), ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inSQL := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		inSQL[id] = true
+	}
+	rows.Close()
+	for i, id := range ids {
+		issue, err := testHandler.Queries.GetIssue(t.Context(), parseUUID(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stallTicket(issue).PatrolEligible(); got != inSQL[id] {
+			t.Fatalf("case %d %s %s: Go eligible=%v, SQL selected=%v", i, cases[i].status, cases[i].meta, got, inSQL[id])
+		}
+	}
+}
