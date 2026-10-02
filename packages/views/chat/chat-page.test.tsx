@@ -222,7 +222,11 @@ const NO_ACCESS_MSG = "You don't have access to chat with this agent.";
 
 function renderPage(
   search: string,
-  { strict = false, canGoBack }: { strict?: boolean; canGoBack?: () => boolean } = {},
+  {
+    strict = false,
+    canGoBack,
+    pathname = "/acme/chat",
+  }: { strict?: boolean; canGoBack?: () => boolean; pathname?: string } = {},
 ) {
   const replace = vi.fn();
   const push = vi.fn();
@@ -232,7 +236,7 @@ function renderPage(
     replace,
     back,
     canGoBack,
-    pathname: "/acme/chat",
+    pathname,
     searchParams: new URLSearchParams(search),
     hash: "",
     getShareableUrl: (path) => path,
@@ -288,7 +292,7 @@ describe("ChatPage URL synchronization", () => {
   it.each(["/globex/issues", "/acme/issues"])(
     "does not redirect back to chat when the retained page observes %s",
     (pathname) => {
-      const { replace, rerender } = renderPage("session=session-1");
+      const { replace, rerender } = renderPage("", { pathname: "/acme/chat/session-1" });
       expect(storeRef.current.activeSessionId).toBe("session-1");
       mockSetActiveSession.mockClear();
 
@@ -304,7 +308,7 @@ describe("ChatPage URL synchronization", () => {
   it.each([null, "session-3"])(
     "does not write the rehydrated session %s into the outgoing workspace's URL",
     (sessionId) => {
-      const { replace, rerender } = renderPage("session=session-1");
+      const { replace, rerender } = renderPage("", { pathname: "/acme/chat/session-1" });
       rerender({ pathname: "/globex/issues" });
       mockSetActiveSession.mockClear();
       replace.mockClear();
@@ -322,7 +326,7 @@ describe("ChatPage URL synchronization", () => {
   it.each([null, "session-3"])(
     "ignores rehydration to %s before the destination pathname commits",
     (sessionId) => {
-      const { replace } = renderPage("session=session-1");
+      const { replace } = renderPage("", { pathname: "/acme/chat/session-1" });
       mockSetActiveSession.mockClear();
 
       // The incoming layout can rehydrate the shared store while the
@@ -339,15 +343,15 @@ describe("ChatPage URL synchronization", () => {
   );
 
   it("resumes synchronization when returning to the same chat URL", () => {
-    const { replace, rerender } = renderPage("session=session-1");
-    rerender({ pathname: "/globex/issues", search: "session=session-1" });
+    const { replace, rerender } = renderPage("", { pathname: "/acme/chat/session-1" });
+    rerender({ pathname: "/globex/issues" });
     act(() => {
       mockSetActiveSession("session-2");
     });
     replace.mockClear();
     mockSetActiveSession.mockClear();
 
-    rerender({ pathname: "/acme/chat" });
+    rerender({ pathname: "/acme/chat/session-1" });
 
     expect(mockSetActiveSession).toHaveBeenCalledWith("session-1");
     expect(storeRef.current.activeSessionId).toBe("session-1");
@@ -355,12 +359,12 @@ describe("ChatPage URL synchronization", () => {
   });
 
   it("mirrors thread selection and clearing while the chat route is current", () => {
-    const { replace } = renderPage("session=session-1");
+    const { replace } = renderPage("", { pathname: "/acme/chat/session-1" });
 
     act(() => {
       mockSetActiveSession("session-2");
     });
-    expect(replace).toHaveBeenLastCalledWith("/acme/chat?session=session-2");
+    expect(replace).toHaveBeenLastCalledWith("/acme/chat/session-2");
 
     act(() => {
       mockSetActiveSession(null);

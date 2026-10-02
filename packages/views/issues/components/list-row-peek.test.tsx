@@ -36,6 +36,7 @@ vi.mock("@multica/core/issues/stores/view-store-context", () => ({
 vi.mock("../../i18n", () => ({
   useLocale: () => "en",
   useT: () => ({ t: () => "Translated" }),
+  useTimeAgo: () => () => "now",
 }));
 
 vi.mock("../actions", () => ({

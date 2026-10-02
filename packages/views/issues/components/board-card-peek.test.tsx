@@ -38,6 +38,8 @@ vi.mock("@multica/core/issues/stores/view-store-context", () => ({
       swimlaneGrouping: "assignee",
       cardProperties: {},
       cardPropertyIds: [],
+      boardExpandedParents: [],
+      toggleBoardParentExpanded: () => {},
     }),
 }));
 
