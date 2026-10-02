@@ -18,7 +18,6 @@
     "all": "Tout",
     "more": "⋯ Plus ({{count}})",
     "menu_title": "Projets",
-    "collapsed": "Projets masqués",
     "done": "Terminé",
     "search": "Rechercher un projet…",
     "pinned": "Épinglés — glisser pour réordonner",
@@ -34,7 +33,18 @@
     "unread": "Non lu",
     "switch": "Changer de projet",
     "switch_search": "Rechercher un projet…",
-    "switch_empty": "Aucun projet ne correspond"
+    "switch_empty": "Aucun projet ne correspond",
+    "filter_label": "Afficher",
+    "filter_all": "Tous",
+    "filter_pinned": "Épinglés",
+    "filter_unpinned": "Non épinglés",
+    "filter_unread": "Non lus",
+    "group_label": "Grouper",
+    "group_pin": "Par épingle",
+    "group_status": "Par statut",
+    "group_none": "Aucun",
+    "collapsed_badge": "Dans Plus",
+    "menu_empty": "Aucun projet correspondant"
   },
   "list_resize": {
     "label": "Redimensionner la liste des discussions",

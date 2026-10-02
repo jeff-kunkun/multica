@@ -16,10 +16,13 @@ import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { chatSessionProjectIds } from "@multica/core/chat/project-context";
 import {
   CHAT_PROJECT_BAR_ROWS,
+  chatProjectMenuGroups,
   narrowestWidthFittingAll,
   rankChatProjects,
   visibleBarProjectIds,
   type ChatProjectFilter,
+  type ChatProjectMenuFilter,
+  type ChatProjectMenuGrouping,
 } from "@multica/core/chat/project-bar";
 import type { ChatSession, Project } from "@multica/core/types";
 import { useMeasuredRow } from "../../common/single-row-fit";
@@ -69,8 +72,9 @@ const PAINTED_SLOT_STYLE: CSSProperties = { ...CHIP_SLOT_STYLE, maxWidth: "100%"
  * Above the chat list, on up to two rows: All, then the person's pinned
  * projects, then projects they have chatted in recently. The second row only
  * appears when the first is full. Whatever still does not fit goes into More,
- * which lists those collapsed projects first and is also where every project
- * can be searched, pinned, and — for pins — reordered.
+ * the one place every project is listed once: searched, filtered, grouped,
+ * pinned or unpinned, and — for pins — reordered. Rows that are behind More
+ * rather than on the bar are marked.
  */
 export function ChatProjectBar({
   projects,
@@ -101,10 +105,13 @@ export function ChatProjectBar({
   onFitWidthChange?: (width: number | null) => void;
 }) {
   const { t } = useT("chat");
+  const { t: tProjects } = useT("projects");
   const projectSwitchChord = useShortcut("switchChatProject");
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [menuFilter, setMenuFilter] = useState<ChatProjectMenuFilter>("all");
+  const [grouping, setGrouping] = useState<ChatProjectMenuGrouping>("pin");
   const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   const titleById = useMemo(
@@ -219,18 +226,38 @@ export function ChatProjectBar({
     matchesPinyin(label, queryText);
 
   const noneLabel = t(($) => $.project_bar.none);
-  // Bar projects that did not fit, pins first, so this section accounts for
-  // every project behind More. Collapsed pins also stay under Pinned, the
-  // full sidebar pin list where they are reordered.
+  // Bar projects that did not fit: what the More count stands for.
   const collapsedIds = new Set(orderedIds.filter((id) => !visibleIds.includes(id)));
-  const collapsedRows = ranked.bar.filter(
-    (row) => collapsedIds.has(row.id) && matches(titleById.get(row.id) ?? ""),
+  const statusById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.status as string])),
+    [projects],
   );
-  const pinnedRows = ranked.pinned.filter((row) => matches(titleById.get(row.id) ?? ""));
-  const restRows = ranked.rest.filter(
-    (row) => !collapsedIds.has(row.id) && matches(titleById.get(row.id) ?? ""),
-  );
-  const showNone = matches(noneLabel);
+  const menuGroups = chatProjectMenuGroups({
+    pinned: ranked.pinned,
+    rest: ranked.rest,
+    statusById,
+    filter: menuFilter,
+    grouping,
+    matches: (id) => matches(titleById.get(id) ?? ""),
+  });
+  const showNone = menuFilter === "all" && matches(noneLabel);
+  const groupLabel = (key: string) => {
+    if (key === "pinned") return t(($) => $.project_bar.pinned);
+    if (key === "unpinned") return t(($) => $.project_bar.other);
+    if (key === "all" || key === "") return null;
+    return tProjects(($) => $.status[key as Project["status"]]);
+  };
+  const menuFilters: { value: ChatProjectMenuFilter; label: string }[] = [
+    { value: "all", label: t(($) => $.project_bar.filter_all) },
+    { value: "pinned", label: t(($) => $.project_bar.filter_pinned) },
+    { value: "unpinned", label: t(($) => $.project_bar.filter_unpinned) },
+    { value: "unread", label: t(($) => $.project_bar.filter_unread) },
+  ];
+  const groupings: { value: ChatProjectMenuGrouping; label: string }[] = [
+    { value: "pin", label: t(($) => $.project_bar.group_pin) },
+    { value: "status", label: t(($) => $.project_bar.group_status) },
+    { value: "none", label: t(($) => $.project_bar.group_none) },
+  ];
 
   const chipClass = (active: boolean) =>
     cn(
@@ -341,7 +368,10 @@ export function ChatProjectBar({
         open={menuOpen}
         onOpenChange={(open) => {
           setMenuOpen(open);
-          if (open) setQuery("");
+          if (open) {
+            setQuery("");
+            setMenuFilter("all");
+          }
         }}
       >
         <PopoverTrigger
@@ -365,7 +395,7 @@ export function ChatProjectBar({
         <PopoverContent
           align="end"
           side="bottom"
-          className="max-h-[min(28rem,var(--available-height,28rem))] w-72 gap-0 overflow-hidden p-0"
+          className="max-h-[min(32rem,var(--available-height,32rem))] w-80 gap-0 overflow-hidden p-0"
         >
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="text-body font-medium">{t(($) => $.project_bar.menu_title)}</span>
@@ -387,77 +417,77 @@ export function ChatProjectBar({
               aria-label={t(($) => $.project_bar.search)}
             />
           </div>
+          <div className="flex flex-col gap-1.5 border-b px-3 pb-2">
+            <Segmented
+              label={t(($) => $.project_bar.filter_label)}
+              options={menuFilters}
+              value={menuFilter}
+              onChange={setMenuFilter}
+            />
+            <Segmented
+              label={t(($) => $.project_bar.group_label)}
+              options={groupings}
+              value={grouping}
+              onChange={setGrouping}
+            />
+          </div>
           <div className="max-h-80 overflow-y-auto pb-2">
-            {collapsedRows.length > 0 && (
-              <div role="group" aria-label={t(($) => $.project_bar.collapsed)}>
-                <SectionLabel>{t(($) => $.project_bar.collapsed)}</SectionLabel>
-                {collapsedRows.map((row) => (
-                  <ProjectRow
-                    key={row.id}
-                    title={titleById.get(row.id) ?? ""}
-                    countLabel={t(($) => $.project_bar.chat_count, { count: row.chatCount })}
-                    pinned={pinnedIds.includes(row.id)}
-                    draggable={false}
-                    pinLabel={
-                      pinnedIds.includes(row.id)
-                        ? t(($) => $.project_bar.unpin)
-                        : t(($) => $.project_bar.pin)
-                    }
-                    onSelect={() => select({ type: "project", id: row.id })}
-                    onTogglePin={() => togglePin(row.id)}
-                  />
-                ))}
-              </div>
-            )}
-
-            <SectionLabel>{t(($) => $.project_bar.pinned)}</SectionLabel>
-            {pinnedRows.length === 0 ? (
-              <p className="px-3 py-1.5 text-caption text-muted-foreground">
-                {t(($) => $.project_bar.pinned_empty)}
+            {menuGroups.length === 0 && !showNone && (
+              <p className="px-3 py-3 text-caption text-muted-foreground">
+                {menuFilter === "pinned" && !queryText
+                  ? t(($) => $.project_bar.pinned_empty)
+                  : t(($) => $.project_bar.menu_empty)}
               </p>
-            ) : (
-              pinnedRows.map((row) => (
-                <ProjectRow
-                  key={row.id}
-                  title={titleById.get(row.id) ?? ""}
-                  countLabel={t(($) => $.project_bar.chat_count, { count: row.chatCount })}
-                  pinned
-                  dragOver={dragOverId === row.id}
-                  pinLabel={t(($) => $.project_bar.unpin)}
-                  dragLabel={t(($) => $.project_bar.drag)}
-                  onSelect={() => select({ type: "project", id: row.id })}
-                  onTogglePin={() => togglePin(row.id)}
-                  onDragStart={(event) => {
-                    event.dataTransfer.setData("text/plain", row.id);
-                    event.dataTransfer.effectAllowed = "move";
-                  }}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    setDragOverId(row.id);
-                  }}
-                  onDragLeave={() => setDragOverId((current) => (current === row.id ? null : current))}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    setDragOverId(null);
-                    const from = event.dataTransfer.getData("text/plain");
-                    if (from) onMovePin(from, row.id);
-                  }}
-                />
-              ))
             )}
-
-            <SectionLabel>{t(($) => $.project_bar.other)}</SectionLabel>
-            {restRows.map((row) => (
-              <ProjectRow
-                key={row.id}
-                title={titleById.get(row.id) ?? ""}
-                countLabel={t(($) => $.project_bar.chat_count, { count: row.chatCount })}
-                pinned={false}
-                pinLabel={t(($) => $.project_bar.pin)}
-                onSelect={() => select({ type: "project", id: row.id })}
-                onTogglePin={() => togglePin(row.id)}
-              />
-            ))}
+            {menuGroups.map((group) => {
+              const label = groupLabel(group.key);
+              return (
+                <div key={group.key} role="group" aria-label={label ?? undefined}>
+                  {label && <SectionLabel>{label}</SectionLabel>}
+                  {group.rows.map((row) => {
+                    const pinned = pinnedIds.includes(row.id);
+                    const reorderable = group.reorderable && pinned;
+                    return (
+                      <ProjectRow
+                        key={row.id}
+                        title={titleById.get(row.id) ?? ""}
+                        countLabel={t(($) => $.project_bar.chat_count, { count: row.chatCount })}
+                        pinned={pinned}
+                        draggable={reorderable}
+                        unread={row.hasUnread}
+                        unreadLabel={t(($) => $.project_bar.unread)}
+                        collapsedLabel={
+                          collapsedIds.has(row.id) ? t(($) => $.project_bar.collapsed_badge) : undefined
+                        }
+                        dragOver={reorderable && dragOverId === row.id}
+                        pinLabel={pinned ? t(($) => $.project_bar.unpin) : t(($) => $.project_bar.pin)}
+                        dragLabel={t(($) => $.project_bar.drag)}
+                        onSelect={() => select({ type: "project", id: row.id })}
+                        onTogglePin={() => togglePin(row.id)}
+                        {...(reorderable && {
+                          onDragStart: (event: React.DragEvent<HTMLDivElement>) => {
+                            event.dataTransfer.setData("text/plain", row.id);
+                            event.dataTransfer.effectAllowed = "move";
+                          },
+                          onDragOver: (event: React.DragEvent<HTMLDivElement>) => {
+                            event.preventDefault();
+                            setDragOverId(row.id);
+                          },
+                          onDragLeave: () =>
+                            setDragOverId((current) => (current === row.id ? null : current)),
+                          onDrop: (event: React.DragEvent<HTMLDivElement>) => {
+                            event.preventDefault();
+                            setDragOverId(null);
+                            const from = event.dataTransfer.getData("text/plain");
+                            if (from) onMovePin(from, row.id);
+                          },
+                        })}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })}
 
             {showNone && (
               <>
@@ -508,6 +538,41 @@ export function ChatProjectBar({
   );
 }
 
+function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex items-center gap-1">
+      <span className="w-8 shrink-0 text-micro text-muted-foreground">{label}</span>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          onClick={() => onChange(option.value)}
+          className={cn(
+            "h-6 rounded-full px-2 text-caption outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            value === option.value
+              ? "bg-foreground text-background"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground",
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="px-3 pt-2 pb-1 text-micro text-muted-foreground">{children}</div>
@@ -520,6 +585,9 @@ function ProjectRow({
   pinned,
   draggable = pinned,
   hidePin,
+  unread,
+  unreadLabel,
+  collapsedLabel,
   pinLabel,
   dragLabel,
   dragOver,
@@ -536,6 +604,10 @@ function ProjectRow({
   /** Pins are dragged to reorder; defaults to `pinned`. */
   draggable?: boolean;
   hidePin?: boolean;
+  unread?: boolean;
+  unreadLabel?: string;
+  /** Set when the project is behind More instead of on the bar. */
+  collapsedLabel?: string;
   pinLabel?: string;
   dragLabel?: string;
   dragOver?: boolean;
@@ -571,7 +643,15 @@ function ProjectRow({
         onClick={onSelect}
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
       >
+        {unread && (
+          <span aria-label={unreadLabel} className="size-1.5 shrink-0 rounded-full bg-brand" />
+        )}
         <span className="min-w-0 flex-1 truncate text-body">{title}</span>
+        {collapsedLabel && (
+          <span className="shrink-0 rounded-sm border px-1 text-micro text-muted-foreground">
+            {collapsedLabel}
+          </span>
+        )}
         <span className="shrink-0 text-caption text-muted-foreground">{countLabel}</span>
       </button>
       {!hidePin && (
